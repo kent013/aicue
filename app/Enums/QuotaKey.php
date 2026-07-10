@@ -15,6 +15,7 @@ enum QuotaKey: string
 {
     case MaxProjects = 'max_projects';
     case MaxMembers = 'max_members';
+    case MaxStorageBytes = 'max_storage_bytes';
 
     /** 上限超過エラー等でユーザーに見せる表示名 */
     public function label(): string
@@ -22,6 +23,7 @@ enum QuotaKey: string
         return match ($this) {
             self::MaxProjects => 'プロジェクト数',
             self::MaxMembers => 'メンバー数',
+            self::MaxStorageBytes => '保存容量',
         };
     }
 

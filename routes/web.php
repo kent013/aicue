@@ -5,6 +5,10 @@ declare(strict_types=1);
 use App\Http\Controllers\Auth\ConfirmRecentAuthController;
 use App\Http\Controllers\Auth\SocialAuthController;
 use App\Http\Controllers\Billing\BillingController;
+use App\Http\Controllers\Capture\CaptureManualController;
+use App\Http\Controllers\Capture\CaptureSyncController;
+use App\Http\Controllers\Capture\CaptureTakeController;
+use App\Http\Controllers\Capture\TakeUploadUrlController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\DebugLoginController;
 use App\Http\Controllers\HomeController;
@@ -38,6 +42,7 @@ use App\Models\User;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
+use Illuminate\Http\Response;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
@@ -387,6 +392,48 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         Route::delete('/projects/{project}/members/{user}', [ProjectMemberController::class, 'destroy'])
             ->name('projects.members.destroy');
     });
+
+    /*
+    | 撮影 PWA (/app/*。doc/10 §10.8-3 ルート分離)。web ガード + セッション + CSRF。
+    | データ API も /api/v1 (機械用) に混ぜずここに置く。GET は Inertia、書き込みは XHR JSON。
+    | {project} guard は業務 group と同じ 2 層 (middleware + inline)。
+    | {manual}∈{project}, {cut}∈{manual}, {take}∈{cut} は scopeBindings
+    | (Project::manuals / VideoManual::cuts / Cut::takes。relation 名は route param の
+    |  推論名と一致させる既存規約 = VideoManual.php の manuals() 命名理由と同じ)。
+    | ★二重防御: scopeBindings の relation 推論に単独依存しない。全書き込み Service は
+    | tx 内で $project->manuals()->…->cuts()->…->takes() の連鎖再解決 (firstOrFail) を必須とし、
+    | 推論が外れても cross-parent は 404 に落ちる。挙動担保は各エンドポイントの
+    | cross-org/project/manual/cut 404 Feature テスト。
+    */
+    Route::middleware(['require-active-subscription', 'project.in-current-org'])
+        ->prefix('app')->as('capture.')->group(function (): void {
+            // PWA エントリ (manifest start_url)。current org の先頭 project へ redirect
+            Route::get('/', [CaptureManualController::class, 'home'])->name('home');
+            // CSRF cookie 再発行 (419 リトライ用の軽量 GET。web group を通るだけで
+            // XSRF-TOKEN cookie が更新される。204 = 仕様固定 endpoint、body なし)
+            Route::get('/csrf-cookie', fn (): Response => response()->noContent())
+                ->name('csrf-cookie');
+            Route::get('/projects/{project}/manuals', [CaptureManualController::class, 'index'])
+                ->name('manuals.index');
+            Route::scopeBindings()->group(function (): void {
+                Route::get('/projects/{project}/manuals/{manual}', [CaptureManualController::class, 'show'])
+                    ->name('manuals.show');
+                Route::post('/projects/{project}/manuals/{manual}/sync', [CaptureSyncController::class, 'store'])
+                    ->name('manuals.sync');
+                Route::post('/projects/{project}/manuals/{manual}/cuts/{cut}/takes/upload-url', [TakeUploadUrlController::class, 'store'])
+                    ->name('takes.upload-url');
+                Route::post('/projects/{project}/manuals/{manual}/cuts/{cut}/takes', [CaptureTakeController::class, 'store'])
+                    ->name('takes.store');
+                Route::patch('/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take}', [CaptureTakeController::class, 'update'])
+                    ->name('takes.update');
+                Route::delete('/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take}', [CaptureTakeController::class, 'destroy'])
+                    ->name('takes.destroy');
+                Route::post('/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take}/adopt', [CaptureTakeController::class, 'adopt'])
+                    ->name('takes.adopt');
+                Route::post('/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take}/downloaded', [CaptureTakeController::class, 'markDownloaded'])
+                    ->name('takes.downloaded');
+            });
+        });
 });
 
 /*

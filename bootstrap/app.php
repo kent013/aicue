@@ -21,6 +21,7 @@ use App\Http\Middleware\SecurityHeaders;
 use App\Http\Middleware\VerifyMcpOrigin;
 use App\Http\Middleware\VerifySnsSignature;
 use App\Http\Resources\Billing\InsufficientTicketsResource;
+use App\Http\Resources\Billing\QuotaExceededResource;
 use App\Support\Http\AdminPanelPath;
 use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
 use Illuminate\Foundation\Application;
@@ -145,7 +146,17 @@ return Application::configure(basePath: dirname(__DIR__))
         // 課金系のドメイン例外は web では back + error flash に変換する
         // (API 経路では null を返して下の ApiExceptionRenderer に委ねる)
         $exceptions->render(function (QuotaExceededException $exception, Request $request) {
-            return $request->is('api/*') ? null : back()->with('error', $exception->getMessage());
+            if ($request->is('api/*')) {
+                return null; // ApiExceptionRenderer に委譲
+            }
+            if ($request->expectsJson()) {
+                // 撮影 PWA の XHR (upload-url 等) は 422 + JsonResource (back() の 302 を返さない)
+                return QuotaExceededResource::make($exception)
+                    ->response($request)
+                    ->setStatusCode(422);
+            }
+
+            return back()->with('error', $exception->getMessage()); // 既存の web 挙動を維持
         });
         $exceptions->render(function (InsufficientTicketsException $exception, Request $request) {
             if ($request->is('api/*')) {

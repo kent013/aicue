@@ -180,7 +180,14 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
    `video_manuals.status` を書き込む全経路は、対象 VideoManual 行を `lockForUpdate()` で
    取得した同一トランザクション内で反映する (準拠実装: `Manual/ScenarioService::save()` /
    `Manual/ScenarioService::materializeIntoLockedManual()` / `Manual/AnalysisJobService::trigger()` /
-   `Manual/AnalysisJobService::failJob()`。経路 inventory は **`ScenarioWritePathInventoryTest`
+   `Manual/AnalysisJobService::failJob()` / `Capture/CaptureTakeService::adopt()`・`delete()`
+   (cuts.adopted_take_id)。経路 inventory は **`ScenarioWritePathInventoryTest`
    (Architecture テスト) へ昇格済み** = 新しい書き込み経路は inventory 登録が必須。
-   後続の RenderJob 状態遷移 / テイク採用 API も同規約に従う。
+   テイク採用 API は検出 4 (`adopted_take_id` の deny-by-default 走査) で inventory 準拠済み。
+   後続の RenderJob 状態遷移も同規約に従う。
    詳細は `docs/architecture.md` §シナリオ整合の共有不変条件)
+2. **容量 Quota (max_storage_bytes) の予約規約**: presigned アップロードの容量判定は
+   `Billing/QuotaService::checkAddition` + `Capture/StorageUsageService::occupiedBytes`
+   (bytes_used + bytes_pending) 経由のみ。予約 (`take_upload_reservations`) の状態遷移は
+   pending→verifying (claim)→completed/released の CAS で行い、直接 UPDATE を書かない。
+   運用契約 (media queue worker / 孤児掃除 cron) は `docs/architecture.md` §撮影 PWA

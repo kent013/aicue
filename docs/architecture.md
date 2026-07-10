@@ -38,7 +38,8 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
 | `SourceDocument` | AI-CUE: SOP ファイル (追記型 immutable。差し替え = 新規行、解析は latest 勝ち。extracted_json は解析の write-only 監査スナップショット) | VideoManual 従属 |
 | `AnalysisJob` | AI-CUE: AI 解析ジョブ (status/step/progress。ticket_reservation_id = 予約の冪等キー。$fillable なし = Service の明示代入のみ) | VideoManual 従属 |
 | `Cut` | AI-CUE: シナリオカット (Tier B schema 先取り。自己参照 parent_cut_id / 循環 FK adopted_take_id は後付け migration) | VideoManual 従属 |
-| `Take` | AI-CUE: 撮影素材 (Tier B schema 先取り。(cut_id, client_take_id) UNIQUE = 同期冪等キー) | Cut 従属 |
+| `Take` | AI-CUE: 撮影素材 ((cut_id, client_take_id) UNIQUE = 同期冪等キー。downloaded_at = DL 済み ACK → 削除不可) | Cut 従属 |
+| `TakeUploadReservation` | AI-CUE: テイクアップロード予約 (容量 Quota の bytes_pending 真実源。pending→verifying→completed/released。organization_id は org 集計用の非正規化キー) | Cut 従属 (organization_id は集計用) |
 | `Role` / `Permission` | Laratrust のロール・権限 (seed 固定) | Team スコープ |
 | `OrganizationInvitation` | 組織招待 (token は hash 保存) | Organization 従属 |
 | `SocialAccount` | ソーシャルログイン連携 | User 従属 |
@@ -107,8 +108,10 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
   | `ScenarioService::materializeIntoLockedManual()` | cuts / scenario_version / status (analyzing→ready のみ。呼び出しは AnalysisPipeline::finalize の terminal tx に限定) |
   | `AnalysisJobService::trigger()` | status (draft·ready→analyzing のみ) |
   | `AnalysisJobService::failJob()` | status (analyzing→ready·draft のみ。cuts 有無で決定) |
+  | `Capture/CaptureTakeService::adopt()` / `delete()` | cuts.adopted_take_id (採用 / 採用テイク削除時の null 化。検出 4 の allowlist) |
 
-  後続フェーズの **RenderJob の状態遷移 / テイク採用 API** も本規約 + inventory 登録に従うこと
+  テイク採用 API は inventory 準拠へ昇格済み (検出 4 = `adopted_take_id` の token 走査 +
+  書き込み形検出)。後続フェーズの **RenderJob の状態遷移** も本規約 + inventory 登録に従うこと
 - 状態 guard (rendering/analyzing 中の保存は 409) は第一防衛、共有行ロックは
   「job 側の書き込みと保存が絶対に交差しない」ための構造的防衛 (二重防御)
 
@@ -123,6 +126,37 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
   は `AnalysisTimeBudgetInvariantTest` が CI 固定する
 - ローカル/テストの検証: パイプラインの同期実行は `AnalysisPipeline::run()` の直接呼び出し、
   dispatch の検証は `Queue::fake()` (sync ドライバの自動実行には依存しない)
+
+## 撮影 PWA (presigned アップロード + 容量 Quota) の運用契約
+
+doc/10 §10.3 / §10.8-4/-7 の実装 (T004)。routes は `/app/projects/{project}/...`
+(web ガード・セッション + CSRF。GET は Inertia、書き込みは XHR JSON)。
+
+- **presigned 直アップロード**: `Capture/TakeUploadService` が Organization 行ロック tx 内で
+  容量 Quota (`max_storage_bytes`。bytes_used + bytes_pending + 加算) を判定し
+  `take_upload_reservations` (pending) を予約 → `Capture/TakeObjectStorage` が
+  **ChecksumSHA256 を署名条件に含む** presigned PUT URL + Crypt 封緘の検証専用チケットを発行。
+  `Capture/TakeRegistrationService` がチケット検証 + 予約 claim (pending→verifying の原子的
+  UPDATE) + HeadObject 三点照合 (size/content_type/checksum) + `(cut_id, client_take_id)` 冪等
+  登録を行う (確定は verifying→completed の CAS = sweeper と競合しない)
+- **使用量の真実源は集計クエリ** (`Capture/StorageUsageService`。bytes_used = takes.size_bytes の
+  org 合計 / bytes_pending = pending 未失効 + verifying 全件。カウンタキャッシュは持たない)
+- **media queue**: S3 オブジェクト削除 (`Jobs/Capture/DeleteTakeObjectsJob`) は専用 connection
+  **`database-media`** (queue=media、retry_after=300) で流れる。**本番/ステージングの worker
+  プロセス定義・デプロイ手順・監視対象に `php artisan queue:work database-media` を必須項目
+  として登録する** (専用 worker が居ないと削除ジョブは滞留する)
+- **孤児掃除 cron**: `capture:release-stale-upload-reservations` (10 分毎・onOneServer) が
+  期限切れ pending / stale verifying (updated_at 15 分超過) を released 化して bytes_pending を
+  解放し、PUT 済み未登録の S3 オブジェクトを削除する (`Capture/StaleUploadReservationSweeper`。
+  fresh verifying には触れない = 登録処理の claim 契約と競合しない)。released/completed の
+  retention (30 日) 超過行は物理削除する
+- **DL 済み削除不可 (D6)**: 詳細 GET が採用テイクの署名 DL URL と同時に発行する ACK トークン
+  (Crypt 封緘・同 TTL) を `POST .../takes/{take}/downloaded` が検証して `takes.downloaded_at` を
+  打刻する。非 null のテイクは DELETE 422
+- **PWA フロント**: `pages/Capture/*` + `features/capture/*` + `lib/capture/*`
+  (即時アップロード優先・IndexedDB は失敗/オフライン時の一時バッファ・419 は csrf-cookie
+  再取得 1 回リトライ)。SW (`public/capture-sw.js`) は同一オリジン GET `/build/*` のみ
+  stale-while-revalidate (アプリ応答・S3 は素通し)
 
 ## 公開面
 

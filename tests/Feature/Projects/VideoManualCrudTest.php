@@ -4,9 +4,14 @@ declare(strict_types=1);
 
 use App\Enums\Manual\VideoManualStatus;
 use App\Enums\ProjectRole;
+use App\Jobs\Capture\DeleteTakeObjectsJob;
 use App\Models\Category;
+use App\Models\Cut;
 use App\Models\Project;
+use App\Models\SourceDocument;
+use App\Models\Take;
 use App\Models\VideoManual;
+use Illuminate\Support\Facades\Queue;
 use Inertia\Testing\AssertableInertia as Assert;
 
 /*
@@ -193,6 +198,43 @@ test('owner は動画マニュアルを削除できる (プロジェクト詳細
     $response->assertRedirect("/projects/{$project->id}");
     $response->assertSessionHas('success');
     expect(VideoManual::query()->whereKey($manual->id)->exists())->toBeFalse();
+});
+
+test('manual 削除で cascade 対象の takes / source_documents の S3 キーが DeleteTakeObjectsJob に渡る', function (): void {
+    Queue::fake();
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+    $manual = VideoManual::factory()->forProject($project)->create();
+    $cut = Cut::factory()->forManual($manual)->create();
+    $take = Take::factory()->forCut($cut)->create(['thumbnail_path' => 'takes/thumb.jpg']);
+    $document = SourceDocument::factory()->forManual($manual)->create();
+
+    $this->actingAs($owner)->delete("/projects/{$project->id}/manuals/{$manual->id}")
+        ->assertRedirect("/projects/{$project->id}");
+
+    expect(VideoManual::query()->whereKey($manual->id)->exists())->toBeFalse();
+    Queue::assertPushed(
+        DeleteTakeObjectsJob::class,
+        function (DeleteTakeObjectsJob $job) use ($take, $document): bool {
+            $paths = $job->paths;
+            sort($paths);
+            $expected = [$take->video_path, 'takes/thumb.jpg', $document->file_path];
+            sort($expected);
+
+            return $paths === $expected && $job->connection === 'database-media';
+        },
+    );
+});
+
+test('takes / source_documents の無い manual 削除では DeleteTakeObjectsJob を dispatch しない', function (): void {
+    Queue::fake();
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+    $manual = VideoManual::factory()->forProject($project)->create();
+
+    $this->actingAs($owner)->delete("/projects/{$project->id}/manuals/{$manual->id}");
+
+    Queue::assertNotPushed(DeleteTakeObjectsJob::class);
 });
 
 test('撮影者は update / destroy で 403', function (): void {
