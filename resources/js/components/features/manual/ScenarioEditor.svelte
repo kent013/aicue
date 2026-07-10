@@ -80,9 +80,15 @@
         );
     }
 
+    // 作業コピーは scenario prop から「マウント時に一度だけ」seed する (意図的)。
+    // prop 追随で編集中の内容を握り潰さないため。サーバ最新への置換は
+    // applySaved (保存成功) / reloadScenario (409 からの明示同意リロード) が reseed で行う。
+    // svelte-ignore state_referenced_locally
     let version = $state(scenario.scenario_version);
+    // svelte-ignore state_referenced_locally
     let steps = $state<DraftStep[]>(toDraftSteps(scenario.steps));
     /** 保存済みスナップショット (正規形の JSON 文字列。$state proxy と参照を共有しない) */
+    // svelte-ignore state_referenced_locally
     let snapshot = $state(serializeSteps(toDraftSteps(scenario.steps)));
     let saving = $state(false);
     let errors = $state<Record<string, string[]>>({});
@@ -90,6 +96,8 @@
     let genericError = $state<string | null>(null);
     let confirmingStepIndex = $state<number | null>(null);
     let confirmingReload = $state(false);
+    /** 明示同意済みの最新取得中フラグ (dirty 離脱確認を二重に出さない) */
+    let reloading = false;
 
     const dirty = $derived(serializeSteps(steps) !== snapshot);
 
@@ -214,11 +222,20 @@
         genericError = "保存に失敗しました。時間をおいて再度お試しください。";
     }
 
-    /** 成功応答の取り込み: 確定 id + version + スナップショット更新 + 成功トースト */
-    function applySaved(document: ScenarioDocument): void {
+    /**
+     * サーバ document で作業コピーを再 seed する (保存成功 / 明示リロードの共通処理)。
+     * version / steps / snapshot を最新へ置換し、旧作業コピー由来の行別エラーも消す。
+     */
+    function reseed(document: ScenarioDocument): void {
         version = document.scenario_version;
         steps = toDraftSteps(document.steps);
         snapshot = serializeSteps(steps);
+        errors = {};
+    }
+
+    /** 成功応答の取り込み: 確定 id + version + スナップショット更新 + 成功トースト */
+    function applySaved(document: ScenarioDocument): void {
+        reseed(document);
         addToast("success", "シナリオを保存しました");
     }
 
@@ -238,11 +255,31 @@
         return typeof doc.scenario_version === "number" && Array.isArray(doc.steps);
     }
 
-    /** 409 バナーからの明示同意リロード (編集内容の破棄を ConfirmDialog で確認済み) */
+    /**
+     * 409 バナーからの明示同意リロード (編集内容の破棄を ConfirmDialog で確認済み)。
+     * Inertia の部分リロードは preserveState のためコンポーネントを再マウントしない。
+     * scenario prop が差し替わっても $state の作業コピーは自動では追随しないので、
+     * onSuccess で最新 document を明示的に再 seed する (楽観ロック競合からの復帰)。
+     */
     function reloadScenario(): void {
         confirmingReload = false;
         conflict = null;
-        router.reload({ only: ["scenario", "manual"] });
+        reloading = true;
+        router.reload({
+            only: ["scenario", "manual"],
+            onSuccess: (visited) => {
+                const latest: unknown = (visited.props as Record<string, unknown>).scenario;
+                if (isScenarioDocument(latest)) {
+                    reseed(latest);
+                    return;
+                }
+                genericError =
+                    "最新シナリオの取得に失敗しました。画面を再読み込みしてください。";
+            },
+            onFinish: () => {
+                reloading = false;
+            },
+        });
     }
 
     // dirty 離脱警告: beforeunload + Inertia before イベント (dirty 時 confirm)
@@ -253,6 +290,7 @@
         window.addEventListener("beforeunload", onBeforeUnload);
         const offBefore = router.on("before", (event) => {
             if (
+                !reloading && // 明示同意済みリロードでは破棄確認を二重に出さない
                 dirty &&
                 !window.confirm("シナリオの変更が保存されていません。ページを離れますか?")
             ) {

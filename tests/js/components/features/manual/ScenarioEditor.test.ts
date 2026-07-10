@@ -5,6 +5,34 @@ import ScenarioEditor from "@/components/features/manual/ScenarioEditor.svelte";
 import { clearToasts, toasts } from "@/lib/stores/toast";
 import type { ScenarioDocument } from "@/types/manual";
 
+// router.reload (部分リロード) はテスト環境では実行できないためモックする。
+// onSuccess をテスト側から呼び、サーバ最新 document の再取り込みを検証する。
+const { routerReloadMock } = vi.hoisted(() => ({
+    routerReloadMock: vi.fn(),
+}));
+
+vi.mock("@inertiajs/svelte", () => ({
+    router: {
+        reload: routerReloadMock,
+        on: vi.fn(() => () => {}),
+    },
+}));
+
+/** routerReloadMock に渡された reload オプションを取り出す */
+function lastReloadOptions(): {
+    only: string[];
+    onSuccess: (page: { props: Record<string, unknown> }) => void;
+    onFinish: () => void;
+} {
+    const last = routerReloadMock.mock.calls[routerReloadMock.mock.calls.length - 1];
+    if (!last?.[0]) throw new Error("router.reload が呼ばれていません");
+    return last[0] as {
+        only: string[];
+        onSuccess: (page: { props: Record<string, unknown> }) => void;
+        onFinish: () => void;
+    };
+}
+
 /*
  * シナリオエディタ (document 一括保存)。
  * - 保存 payload に parent_cut_id / sort_order / type を含めない (サーバ導出)
@@ -80,6 +108,7 @@ const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promis
 
 beforeEach(() => {
     fetchMock.mockReset();
+    routerReloadMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
     clearToasts();
 });
@@ -258,6 +287,97 @@ describe("ScenarioEditor", () => {
         expect(screen.getByTestId("step-0-scene")).toHaveValue("手順シーンAX");
         // version_mismatch のみ「サーバの最新を取得」導線がある
         expect(screen.getByTestId("scenario-conflict-reload")).toBeInTheDocument();
+    });
+
+    it("409 後の「サーバの最新を取得」で作業コピーがサーバ最新 document に置換される", async () => {
+        fetchMock.mockResolvedValueOnce(
+            jsonResponse(409, {
+                code: "scenario_conflict",
+                conflict_type: "version_mismatch",
+                message: "他の編集と競合しました。",
+                current_version: 9,
+            }),
+        );
+
+        render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+        await typeInto("step-0-scene", "手順シーンAX");
+        await fireEvent.click(screen.getByTestId("scenario-submit"));
+        await waitFor(() => {
+            expect(screen.getByTestId("scenario-conflict-reload")).toBeInTheDocument();
+        });
+
+        // 明示同意 (ConfirmDialog) を経て部分リロードが発火する
+        await fireEvent.click(screen.getByTestId("scenario-conflict-reload"));
+        await waitFor(() => {
+            expect(
+                screen.getByRole("button", { name: "破棄して最新を取得" }),
+            ).toBeInTheDocument();
+        });
+        await fireEvent.click(screen.getByRole("button", { name: "破棄して最新を取得" }));
+
+        expect(routerReloadMock).toHaveBeenCalledTimes(1);
+        const options = lastReloadOptions();
+        expect(options.only).toEqual(["scenario", "manual"]);
+
+        // サーバ最新 (version 9・別内容) を返す部分リロード成功をシミュレート
+        const latest: ScenarioDocument = {
+            scenario_version: 9,
+            steps: [{ ...makeDocument().steps[0], scene: "サーバ最新シーン", points: [] }],
+        };
+        options.onSuccess({ props: { scenario: latest } });
+        options.onFinish();
+
+        // 作業コピーが最新で再 seed される (編集内容破棄・バナー消滅・dirty なし)
+        await waitFor(() => {
+            expect(screen.getByTestId("step-0-scene")).toHaveValue("サーバ最新シーン");
+        });
+        expect(screen.queryByTestId("scenario-conflict-banner")).not.toBeInTheDocument();
+        expect(screen.queryByTestId("scenario-dirty-indicator")).not.toBeInTheDocument();
+
+        // 以後の保存は最新 version を expected_version に使う (無限 409 ループに陥らない)
+        fetchMock.mockResolvedValueOnce(jsonResponse(200, { ...latest, scenario_version: 10 }));
+        await typeInto("step-0-scene", "再編集シーン");
+        await fireEvent.click(screen.getByTestId("scenario-submit"));
+        await waitFor(() => {
+            expect(lastPutPayload().expected_version).toBe(9);
+        });
+    });
+
+    it("最新取得の応答 shape が不正なら汎用エラーを表示し作業コピーを保持する", async () => {
+        fetchMock.mockResolvedValueOnce(
+            jsonResponse(409, {
+                code: "scenario_conflict",
+                conflict_type: "version_mismatch",
+                message: "他の編集と競合しました。",
+                current_version: 9,
+            }),
+        );
+
+        render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+        await typeInto("step-0-scene", "手順シーンAX");
+        await fireEvent.click(screen.getByTestId("scenario-submit"));
+        await waitFor(() => {
+            expect(screen.getByTestId("scenario-conflict-reload")).toBeInTheDocument();
+        });
+        await fireEvent.click(screen.getByTestId("scenario-conflict-reload"));
+        await waitFor(() => {
+            expect(
+                screen.getByRole("button", { name: "破棄して最新を取得" }),
+            ).toBeInTheDocument();
+        });
+        await fireEvent.click(screen.getByRole("button", { name: "破棄して最新を取得" }));
+
+        const options = lastReloadOptions();
+        options.onSuccess({ props: { scenario: { unexpected: true } } });
+        options.onFinish();
+
+        await waitFor(() => {
+            expect(screen.getByTestId("scenario-generic-error")).toHaveTextContent(
+                "最新シナリオの取得に失敗しました",
+            );
+        });
+        // 再 seed されず作業コピーは保持されたまま
+        expect(screen.getByTestId("step-0-scene")).toHaveValue("手順シーンAX");
     });
 
     it("409 (rendering) はリロード導線なしのバナーを表示する", async () => {
