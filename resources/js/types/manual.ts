@@ -43,3 +43,49 @@ export interface ManualFilters {
     status: string | null;
     q: string | null;
 }
+
+/**
+ * PHP: App\DataTransferObjects\Manual\ScenarioPointData と対。
+ * サーバ shape の id は常に number (確定 id)。未保存行 (id: null) は
+ * 編集中の作業コピー専用型 DraftPoint / DraftStep で表現し、型を分離する。
+ */
+export interface ScenarioPoint {
+    id: number;
+    scene: string;
+    shot_type: "hiki" | "yori";
+    shooting_point: string | null;
+    narration: string;
+    subtitle_primary: string | null;
+    subtitle_secondary: string;
+    material_type: "video" | "still" | null;
+    static_display_seconds: number | null;
+}
+
+/** PHP: ScenarioStepData と対 (step 行 + 配下の points) */
+export interface ScenarioStep extends ScenarioPoint {
+    points: ScenarioPoint[];
+}
+
+/** PHP: ScenarioDocumentData と対 (edit props / PUT 成功応答の共通 shape) */
+export interface ScenarioDocument {
+    scenario_version: number;
+    steps: ScenarioStep[];
+}
+
+/** 編集中の作業コピー (未保存行は id: null)。PUT payload の steps はこの型を直列化する */
+export type DraftPoint = Omit<ScenarioPoint, "id"> & { id: number | null };
+export type DraftStep = Omit<ScenarioStep, "id" | "points"> & {
+    id: number | null;
+    points: DraftPoint[];
+};
+
+/** PHP: App\Enums\Manual\ScenarioConflictType と対 (discriminated union) */
+export type ScenarioConflictType = "version_mismatch" | "rendering" | "analyzing";
+
+/** PHP: ScenarioConflictResource と対 (409 ボディ。code 厳格一致で自分宛て応答のみ処理する) */
+export interface ScenarioConflictBody {
+    code: "scenario_conflict";
+    conflict_type: ScenarioConflictType;
+    message: string;
+    current_version: number;
+}

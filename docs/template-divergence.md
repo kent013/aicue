@@ -123,3 +123,30 @@ DB ルール (categories.name の unique / category の exists) は、cross-org 
 ### 関連
 - 実装: `app/Http/Middleware/EnsureProjectBelongsToCurrentOrganization.php`, `routes/web.php`, `bootstrap/app.php`
 - テンプレート側の根拠: `docs/app-integration-guide.md` §2 (URL 整合 guard 行を 2 層構成に更新済み)
+
+## D5 ✅ Cut のシナリオ編集は per-row CRUD でなく document 単位保存 (PUT .../scenario)
+
+| 観点 | テンプレート | 本アプリ |
+|---|---|---|
+| 子リソースの書き込み | Item 見本の per-row CRUD (store/update/destroy を行単位で張る) | シナリオ (Cut 群) は `PUT /projects/{project}/manuals/{manual}/scenario` で document (steps→points ツリー) を一括保存し、サーバが 1 トランザクションで reconcile |
+
+### なぜ正当な差分か(logic-driven)
+シナリオ編集は「行追加/削除/並べ替え/手順削除で配下急所も削除」を伴う。per-row CRUD では
+(a) 親子カスケード + 並べ替えの原子性が壊れる、(b) 編集途中の中間状態がサーバに漏れる。
+document 保存 + 楽観ロック (`expected_version` / 409) が原子性と後勝ち破壊防止を両立する
+(doc/09 §9.4 / doc/10 §10.8-2)。
+
+### 揃えている不変条件(これは保証し続ける)
+> 「保護キー不信 / 認可前 404 / relation 経由 create を document 保存でも同じ機構で維持する」
+- 保護キー + サーバ導出キー (`parent_cut_id` / `adopted_take_id` / `sort_order` / `type`) は
+  ネスト行にも `missing` ルールを張り送出で 422 (`UpdateScenarioRequest::nestedProtectedKeyRules` は
+  `MassAssignmentProtectedKeys::all()` 由来で drift しない)
+- payload の cut id は照合専用。他 manual の id 混入は 404 (存在を漏らさない)、
+  階層/型変更 (step↔point) と id 重複は 422
+- `{manual}` ∈ `{project}` は scopeBindings、`{project}` ∈ current org は middleware + inline guard
+drift 防止テスト: `ScenarioUpdateTest` (保護キー 422 / 異物 id 404 / 409 系) と
+`NestedRouteIdorDefenseTest` (`projects.manuals.scenario.update` 登録)。
+
+### 関連
+- 実装: `app/Services/Manual/ScenarioService.php`, `app/Http/Requests/Projects/UpdateScenarioRequest.php`, `app/Http/Controllers/Projects/ManualScenarioController.php`
+- 設計: `devnotes/20260711-0007-scenario-editing/detailed-design.md`

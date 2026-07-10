@@ -46,4 +46,21 @@ class CutFactory extends Factory
     {
         return $this->state(fn () => ['video_manual_id' => $manual->id]);
     }
+
+    /** 指定手順カット配下の急所カットとして作る (親と同一 manual に揃える) */
+    public function asPointOf(Cut $step): static
+    {
+        return $this->state(fn () => [
+            'type' => CutType::Point->value,
+            'shot_type' => ShotType::Yori->value,
+            'parent_cut_id' => $step->id,
+            'video_manual_id' => $step->video_manual_id,
+        ]);
+    }
+
+    /** 並び順を指定する (親スコープ内 0 始まり) */
+    public function withSortOrder(int $sortOrder): static
+    {
+        return $this->state(fn () => ['sort_order' => $sortOrder]);
+    }
 }
