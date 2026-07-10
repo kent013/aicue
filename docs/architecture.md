@@ -67,6 +67,7 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
 | `Project/ProjectService` | プロジェクト CRUD |
 | `Manual/CategoryService` | AI-CUE: カテゴリ create/update/reorder/delete (Project 行ロックで直列化・sort_order 専有) |
 | `Manual/VideoManualService` | AI-CUE: 動画マニュアル create/updateMeta/delete (created_by サーバ導出・category 保存時再解決) |
+| `Manual/ScenarioService` | AI-CUE: シナリオ (Cut 群) の document 単位保存 (VideoManual 行ロック → rendering/analyzing・楽観ロック guard → 2 段階 reconcile → version+1)。§シナリオ整合の共有不変条件の最初の準拠実装 |
 | `Auth/SocialAccountService` | ソーシャルログイン連携 |
 | `Billing/BillingAccess` | 課金ゲート判定 (`subscription('default')` が active/trialing なら許可)。**課金による利用可否の判定は本クラス経由のみ** (アプリは本クラスの差し替えで gate 方針を変更する)。適用は `require-active-subscription` middleware (業務 route group。billing / webhook は構造的 allowlist) |
 | `Billing/QuotaService` | quota の消費・検証 |
@@ -82,6 +83,22 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
 | `Mcp/Auth/McpAuthorizationContext` | MCP tool の認可コンテキスト (token → user/org 解決 + permission runtime 再評価) |
 | `Security/SecurityEventRecorder` | セキュリティ監査イベント記録 |
 | `LlmCallLogWriter` / `FxRateService` | LLM コスト記録と為替換算 |
+
+## シナリオ整合の共有不変条件 (AI-CUE ドメイン規約)
+
+> **cuts / video_manuals.scenario_version / video_manuals.status を書き込む全経路は、
+> 対象 VideoManual 行を `lockForUpdate()` で取得した同一トランザクション内で反映する。**
+
+- 直列化点は VideoManual 行 (Project 行はロックしない。カテゴリ等 project 集合との整合は
+  シナリオ書き込みに無関係のため、直列化粒度を manual に意図的に絞る)。
+  親 relation 経由の再解決 (`$project->manuals()->whereKey(...)->lockForUpdate()`) で
+  「子は親に属する」も同時に担保する
+- 現在の準拠実装は `Manual/ScenarioService::save()` のみ。後続フェーズの
+  **AI 解析 job の Cut materialize / RenderJob の状態遷移 / テイク採用 API** も本規約に従うこと
+- 状態 guard (rendering/analyzing 中の保存は 409) は第一防衛、共有行ロックは
+  「job 側の書き込みと保存が絶対に交差しない」ための構造的防衛 (二重防御)
+- **書き込み経路が 2 つ以上になった時点で、経路 inventory を持つ Architecture テストへ昇格させる**
+  (現時点は経路が 1 つで機械検証対象がないためテスト化は見送り = 過剰設計回避)
 
 ## 公開面
 

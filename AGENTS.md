@@ -175,3 +175,10 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
 <!-- TEMPLATE-MARKER: アプリ固有の規約 (ドメインモデルの不変条件、外部 API、
      固有のテスト規約等) をここに追記していく。テンプレート共通部 (上記) は
      テンプレート更新の取り込みを容易にするため、できるだけ書き換えない。 -->
+
+1. **シナリオ整合の共有ロック規約**: `cuts` / `video_manuals.scenario_version` /
+   `video_manuals.status` を書き込む全経路は、対象 VideoManual 行を `lockForUpdate()` で
+   取得した同一トランザクション内で反映する (準拠実装: `Manual/ScenarioService::save()`。
+   後続の AI 解析 materialize / RenderJob 状態遷移 / テイク採用 API も同規約に従う。
+   書き込み経路が 2 つ以上になった時点で経路 inventory を持つ Architecture テストへ昇格する。
+   詳細は `docs/architecture.md` §シナリオ整合の共有不変条件)

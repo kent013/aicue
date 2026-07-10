@@ -6,6 +6,7 @@
     import Divider from "@/components/molecules/Divider.svelte";
     import FormField from "@/components/molecules/FormField.svelte";
     import Modal from "@/components/organisms/Modal.svelte";
+    import { csrfToken } from "@/lib/csrf";
     import type { AvailableReauthProvider } from "@/lib/recent-auth";
     import { providerLabel } from "@/lib/social";
 
@@ -46,12 +47,6 @@
             submitting = false;
         }
     });
-
-    /** Laravel が発行する XSRF-TOKEN cookie (encrypted cookie 対応の URL エンコード済み値) */
-    function csrfToken(): string {
-        const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]+)/);
-        return match ? decodeURIComponent(match[1]) : "";
-    }
 
     async function submitPassword(event: SubmitEvent): Promise<void> {
         event.preventDefault();

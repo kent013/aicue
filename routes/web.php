@@ -19,6 +19,7 @@ use App\Http\Controllers\Organizations\OrganizationOwnershipController;
 use App\Http\Controllers\Organizations\OrganizationSwitchController;
 use App\Http\Controllers\Projects\CategoryController;
 use App\Http\Controllers\Projects\ItemController;
+use App\Http\Controllers\Projects\ManualScenarioController;
 use App\Http\Controllers\Projects\ProjectController;
 use App\Http\Controllers\Projects\ProjectMemberController;
 use App\Http\Controllers\Projects\VideoManualController;
@@ -359,6 +360,11 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
                 ->name('projects.manuals.edit');
             Route::patch('/projects/{project}/manuals/{manual}', [VideoManualController::class, 'update'])
                 ->name('projects.manuals.update');
+            // シナリオ document 一括保存 (doc/09 §9.4 / doc/10 §10.3)。同一オリジン XHR (JSON 応答)。
+            // {manual} ∈ {project} は scopeBindings、{project} ∈ current org は
+            // project.in-current-org middleware + controller inline guard の 2 層 (既存 group が担保)
+            Route::put('/projects/{project}/manuals/{manual}/scenario', [ManualScenarioController::class, 'update'])
+                ->name('projects.manuals.scenario.update');
             Route::delete('/projects/{project}/manuals/{manual}', [VideoManualController::class, 'destroy'])
                 ->name('projects.manuals.destroy');
         });

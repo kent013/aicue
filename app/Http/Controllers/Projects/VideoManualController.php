@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Projects;
 
+use App\DataTransferObjects\Manual\ScenarioDocumentData;
 use App\Http\Concerns\ResolvesCurrentOrganization;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Projects\StoreVideoManualRequest;
@@ -109,7 +110,7 @@ class VideoManualController extends Controller
         ]);
     }
 
-    /** 編集フォーム (メタデータ = title / category) */
+    /** 編集フォーム (メタデータ = title / category + シナリオ document) */
     public function edit(Request $request, Project $project, VideoManual $manual): Response
     {
         $organization = $this->resolveCurrentOrganization($request);
@@ -126,8 +127,11 @@ class VideoManualController extends Controller
                 'id' => $manual->id,
                 'title' => $manual->title,
                 'category' => $manual->category_id,
+                'status' => $manual->status->value, // rendering / analyzing 中の警告表示用
             ],
             'categories' => $this->categoryOptions($project),
+            // シナリオ document (保存成功応答 ScenarioResource と同一 shape)
+            'scenario' => ScenarioDocumentData::fromManual($manual)->toArray(),
         ]);
     }
 
