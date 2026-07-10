@@ -4,14 +4,17 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Projects;
 
+use App\Enums\Manual\VideoManualStatus;
 use App\Http\Concerns\ResolvesCurrentOrganization;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Projects\StoreProjectRequest;
 use App\Http\Requests\Projects\UpdateProjectRequest;
+use App\Models\Category;
 use App\Models\Item;
 use App\Models\Organization;
 use App\Models\Project;
 use App\Models\User;
+use App\Models\VideoManual;
 use App\Services\Project\ProjectService;
 use App\Support\Seo\SeoManager;
 use Illuminate\Http\RedirectResponse;
@@ -106,6 +109,8 @@ class ProjectController extends Controller
             ->values()
             ->all();
 
+        $filters = $this->parseManualFilters($request);
+
         return Inertia::render('Projects/Show', [
             'project' => [
                 'id' => $project->id,
@@ -118,7 +123,107 @@ class ProjectController extends Controller
             // メンバー email 可視性の単一根拠 (can('update', $project))。members[].email の
             // 実値有無と常に一致する (ProjectShowEmailVisibilityTest が契約を固定)
             'canViewMemberEmails' => $canManage,
+            // 動画マニュアル一覧 (専用 index は持たず本画面に内包。GET クエリで絞り込み + paginate)
+            'manuals' => $this->manualRows($project, $filters),
+            'categories' => $this->categoryRows($project),
+            'manualFilters' => $filters,
         ]);
+    }
+
+    /**
+     * 動画マニュアル一覧の GET クエリ絞り込み条件。
+     * category は「数値 id 文字列 | 'uncategorized' (未分類 sentinel) | null」、
+     * status は VideoManualStatus の値のみ許容 (不正値は無視 = null)。
+     *
+     * @return array{category: string|null, status: string|null, q: string|null}
+     */
+    private function parseManualFilters(Request $request): array
+    {
+        $category = $request->query('category');
+        $category = is_string($category) && $category !== '' ? $category : null;
+        if ($category !== null && $category !== 'uncategorized' && ! ctype_digit($category)) {
+            $category = null;
+        }
+
+        $status = $request->query('status');
+        $status = is_string($status) && VideoManualStatus::tryFrom($status) !== null ? $status : null;
+
+        $q = $request->query('q');
+        $q = is_string($q) && trim($q) !== '' ? trim($q) : null;
+
+        return ['category' => $category, 'status' => $status, 'q' => $q];
+    }
+
+    /**
+     * 動画マニュアル一覧 rows (paginate + typed array で shape を固定)。
+     * 未分類は category => null (フロントは「未分類」を表示する)。
+     *
+     * @param  array{category: string|null, status: string|null, q: string|null}  $filters
+     * @return array{
+     *   data: list<array{id: int, title: string, status: string, category: array{id: int, name: string}|null, created_at: string}>,
+     *   meta: array{current_page: int, last_page: int, per_page: int, total: int}
+     * }
+     */
+    private function manualRows(Project $project, array $filters): array
+    {
+        $query = $project->manuals()->with('category')
+            ->orderByDesc('created_at')
+            ->orderByDesc('id');
+
+        if ($filters['category'] === 'uncategorized') {
+            $query->whereNull('category_id');
+        } elseif ($filters['category'] !== null) {
+            $query->where('category_id', (int) $filters['category']);
+        }
+        if ($filters['status'] !== null) {
+            $query->where('status', $filters['status']);
+        }
+        if ($filters['q'] !== null) {
+            // LIKE メタ文字 (%/_/\) はリテラル検索として扱う
+            $query->where('title', 'like', '%'.addcslashes($filters['q'], '%_\\').'%');
+        }
+
+        $paginated = $query->paginate(10)->withQueryString();
+
+        $data = [];
+        foreach ($paginated->items() as $manual) {
+            Assert::isInstanceOf($manual, VideoManual::class);
+            $category = $manual->category;
+            $data[] = [
+                'id' => $manual->id,
+                'title' => $manual->title,
+                'status' => $manual->status->value,
+                'category' => $category === null
+                    ? null
+                    : ['id' => $category->id, 'name' => $category->name],
+                'created_at' => $manual->created_at?->format('Y-m-d H:i') ?? '',
+            ];
+        }
+
+        return [
+            'data' => $data,
+            'meta' => [
+                'current_page' => $paginated->currentPage(),
+                'last_page' => $paginated->lastPage(),
+                'per_page' => $paginated->perPage(),
+                'total' => $paginated->total(),
+            ],
+        ];
+    }
+
+    /**
+     * カテゴリ一覧 (sort_order 順。フィルタ選択肢 + カテゴリ管理 UI の共通 props)。
+     *
+     * @return list<array{id: int, name: string}>
+     */
+    private function categoryRows(Project $project): array
+    {
+        return array_values($project->categories()->orderBy('sort_order')->get()
+            ->map(fn (Category $category): array => [
+                'id' => $category->id,
+                'name' => $category->name,
+            ])
+            ->all());
     }
 
     /**

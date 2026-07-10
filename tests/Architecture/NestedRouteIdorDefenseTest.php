@@ -43,6 +43,15 @@ function nestedRouteIdorInventory(): array
         // {item} は $project->items() 経由 ({project} ∈ current org は controller の inline guard)
         'projects.items.update' => $s,
         'projects.items.destroy' => $s,
+        // {category} は $project->categories() 経由 ({project} ∈ current org は controller の inline guard)
+        'projects.categories.update' => $s,
+        'projects.categories.destroy' => $s,
+        // {manual} は $project->manuals() 経由 (relation 名は route パラメータ {manual} の
+        // scopeBindings 推論と一致させた manuals()。{project} ∈ current org は inline guard)
+        'projects.manuals.show' => $s,
+        'projects.manuals.edit' => $s,
+        'projects.manuals.update' => $s,
+        'projects.manuals.destroy' => $s,
         // --- inline 親子整合 guard (authorize 前に 子∈親テナント を検査、不整合は 404) ---
         // OrganizationMemberController::resolveOrganizationMember (非 member は 404)
         'organizations.members.update' => $g,

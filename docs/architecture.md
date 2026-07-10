@@ -33,6 +33,11 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
 | `CustomTeam` | 組織内のチーム。各組織に Default Team がちょうど 1 つ | Organization 従属 |
 | `Project` | 作業単位。CustomTeam (通常は Default Team) 配下 | Organization → CustomTeam 従属 |
 | `Item` | **ドメインリソースの見本**。新規リソース追加はこれを複製して始める | Project 従属 |
+| `Category` | AI-CUE: 動画マニュアルの分類 (project 内で name ユニーク・sort_order は Service 専有) | Project 従属 |
+| `VideoManual` | AI-CUE: 動画マニュアル本体 (status enum・カテゴリ削除で未分類化) | Project 従属 |
+| `SourceDocument` | AI-CUE: SOP ファイル (Tier B schema 先取り。UI/route は後続フェーズ) | VideoManual 従属 |
+| `Cut` | AI-CUE: シナリオカット (Tier B schema 先取り。自己参照 parent_cut_id / 循環 FK adopted_take_id は後付け migration) | VideoManual 従属 |
+| `Take` | AI-CUE: 撮影素材 (Tier B schema 先取り。(cut_id, client_take_id) UNIQUE = 同期冪等キー) | Cut 従属 |
 | `Role` / `Permission` | Laratrust のロール・権限 (seed 固定) | Team スコープ |
 | `OrganizationInvitation` | 組織招待 (token は hash 保存) | Organization 従属 |
 | `SocialAccount` | ソーシャルログイン連携 | User 従属 |
@@ -60,6 +65,8 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
 | `Organization/OrganizationProvisioningService` | 組織作成 (Team + Default Team + Owner ロールまで一括) |
 | `Organization/OrganizationMembershipService` | メンバー追加・削除・ロール変更 |
 | `Project/ProjectService` | プロジェクト CRUD |
+| `Manual/CategoryService` | AI-CUE: カテゴリ create/update/reorder/delete (Project 行ロックで直列化・sort_order 専有) |
+| `Manual/VideoManualService` | AI-CUE: 動画マニュアル create/updateMeta/delete (created_by サーバ導出・category 保存時再解決) |
 | `Auth/SocialAccountService` | ソーシャルログイン連携 |
 | `Billing/BillingAccess` | 課金ゲート判定 (`subscription('default')` が active/trialing なら許可)。**課金による利用可否の判定は本クラス経由のみ** (アプリは本クラスの差し替えで gate 方針を変更する)。適用は `require-active-subscription` middleware (業務 route group。billing / webhook は構造的 allowlist) |
 | `Billing/QuotaService` | quota の消費・検証 |

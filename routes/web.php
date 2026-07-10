@@ -17,9 +17,11 @@ use App\Http\Controllers\Organizations\OrganizationOauthSessionController;
 use App\Http\Controllers\Organizations\OrganizationOnboardingController;
 use App\Http\Controllers\Organizations\OrganizationOwnershipController;
 use App\Http\Controllers\Organizations\OrganizationSwitchController;
+use App\Http\Controllers\Projects\CategoryController;
 use App\Http\Controllers\Projects\ItemController;
 use App\Http\Controllers\Projects\ProjectController;
 use App\Http\Controllers\Projects\ProjectMemberController;
+use App\Http\Controllers\Projects\VideoManualController;
 use App\Http\Controllers\Seo\AiTxtController;
 use App\Http\Controllers\Seo\LlmsTxtController;
 use App\Http\Controllers\Seo\RobotsController;
@@ -322,6 +324,39 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
                 ->name('projects.items.update');
             Route::delete('/projects/{project}/items/{item}', [ItemController::class, 'destroy'])
                 ->name('projects.items.destroy');
+        });
+
+        // Category (Project 配下の動画マニュアル分類・編集者のみ)。一覧は projects.show が内包する。
+        // reorder は {category} を取らない ({project} のみ = 1 param) ため IDOR inventory 対象外。
+        // {category} は scopeBindings で $project->categories() 経由の解決
+        // (子→親不整合は認可より前に 404。NestedRouteIdorDefenseTest 登録済み)
+        Route::post('/projects/{project}/categories', [CategoryController::class, 'store'])
+            ->name('projects.categories.store');
+        Route::patch('/projects/{project}/categories/reorder', [CategoryController::class, 'reorder'])
+            ->name('projects.categories.reorder');
+        Route::scopeBindings()->group(function (): void {
+            Route::patch('/projects/{project}/categories/{category}', [CategoryController::class, 'update'])
+                ->name('projects.categories.update');
+            Route::delete('/projects/{project}/categories/{category}', [CategoryController::class, 'destroy'])
+                ->name('projects.categories.destroy');
+        });
+
+        // VideoManual (Project 配下の動画マニュアル)。一覧は projects.show が内包する。
+        // {manual} は scopeBindings で $project->manuals() 経由の解決
+        // (子→親不整合は認可より前に 404。NestedRouteIdorDefenseTest 登録済み)
+        Route::get('/projects/{project}/manuals/create', [VideoManualController::class, 'create'])
+            ->name('projects.manuals.create');
+        Route::post('/projects/{project}/manuals', [VideoManualController::class, 'store'])
+            ->name('projects.manuals.store');
+        Route::scopeBindings()->group(function (): void {
+            Route::get('/projects/{project}/manuals/{manual}', [VideoManualController::class, 'show'])
+                ->name('projects.manuals.show');
+            Route::get('/projects/{project}/manuals/{manual}/edit', [VideoManualController::class, 'edit'])
+                ->name('projects.manuals.edit');
+            Route::patch('/projects/{project}/manuals/{manual}', [VideoManualController::class, 'update'])
+                ->name('projects.manuals.update');
+            Route::delete('/projects/{project}/manuals/{manual}', [VideoManualController::class, 'destroy'])
+                ->name('projects.manuals.destroy');
         });
 
         // プロジェクトメンバー管理 (追加は payload の user_id、削除は URL の {user})。

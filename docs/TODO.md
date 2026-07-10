@@ -21,6 +21,7 @@
 
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
+| T001 | AI-CUE ドメイン基盤 (Category/VideoManual + Tier B schema) | backend | フェーズ1: Enum/migration/Model/Factory + Category・VideoManual の CRUD (Item 見本トレース・IDOR 登録・権限 rename)。SourceDocument/Cut/Take は schema 先取り | High | standalone | [設計](../devnotes/20260710-2137-aicue-domain-foundation/) | 2026-07-10 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
