@@ -16,6 +16,7 @@ Open リストは [TODO.md](TODO.md) を参照。
 
 | ID | タイトル | テーマ | 完了日 |
 |---|---|---|---|
+| T001 | AI-CUE ドメイン基盤(Category/VideoManual)。Category/VideoManual CRUD + Tier B スキーマ先取り (Enum/migration/Model/Factory/Service/Policy/route/UI/テスト一式)。cross-org {project} の FormRequest DB ルール存在オラクルを project.in-current-org middleware で封じる修正込み | backend | 2026-07-10 23:46 |
 
 ## Obsoleted
 
