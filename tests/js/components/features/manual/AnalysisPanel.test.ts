@@ -221,6 +221,43 @@ describe("AnalysisPanel", () => {
         }
     });
 
+    it("ポーリングが 401 を受けたら停止し、セッション失効の案内を表示する", async () => {
+        vi.useFakeTimers();
+        fetchMock.mockImplementation(() =>
+            Promise.resolve(jsonResponse(401, { message: "Unauthenticated." })),
+        );
+
+        const { unmount } = render(AnalysisPanel, {
+            props: {
+                ...baseProps,
+                manualStatus: "analyzing" as const,
+                job: {
+                    id: 9,
+                    status: "running",
+                    step: "decompose",
+                    progress: 35,
+                    error: null,
+                    manual_status: "analyzing",
+                } satisfies AnalysisJobProps,
+            },
+        });
+
+        try {
+            await vi.advanceTimersByTimeAsync(0);
+            expect(fetchMock).toHaveBeenCalledTimes(1);
+            expect(screen.getByTestId("analysis-session-expired")).toHaveTextContent(
+                "セッションの有効期限が切れました",
+            );
+
+            // 停止後は interval が発火しても再ポーリングしない
+            await vi.advanceTimersByTimeAsync(10_000);
+            expect(fetchMock).toHaveBeenCalledTimes(1);
+        } finally {
+            unmount();
+            vi.useRealTimers();
+        }
+    });
+
     it("ready からの起動は確認ダイアログを挟む (既存シナリオ置換の警告)", async () => {
         render(AnalysisPanel, { props: { ...baseProps, manualStatus: "ready" as const } });
         await fireEvent.click(screen.getByTestId("analyze-button"));

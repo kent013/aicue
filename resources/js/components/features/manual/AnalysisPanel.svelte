@@ -35,6 +35,8 @@
     let status = $state<VideoManualStatus>(manualStatus);
     let starting = $state(false);
     let errorMessage = $state<string | null>(null);
+    // セッション失効 (401/419) の案内。解析中表示の中で出す (ポーリングは停止する)
+    let sessionExpiredMessage = $state<string | null>(null);
     let confirmingReanalyze = $state(false);
 
     const analyzing = $derived(
@@ -73,7 +75,15 @@
                         credentials: "same-origin",
                     },
                 );
-                if (!res.ok) return; // 一時失敗は次周期に任せる (401/419 も静かに再試行)
+                if (res.status === 401 || res.status === 419) {
+                    // セッション失効は再試行しても回復しない → 停止して再読み込みを案内
+                    // (解析はサーバ側で継続する。再読み込み後のログインで進捗表示に復帰できる)
+                    stop();
+                    sessionExpiredMessage =
+                        "セッションの有効期限が切れました。ページを再読み込みしてください (解析はサーバで継続しています)。";
+                    return;
+                }
+                if (!res.ok) return; // 一時失敗は次周期に任せる
                 const body = (await res.json().catch(() => null)) as AnalysisJobProps | null;
                 if (body === null || typeof body.status !== "string") return;
                 if (stopped) return;
@@ -121,6 +131,7 @@
         if (starting) return; // 多重送信ガード (disabled にはしない)
         starting = true;
         errorMessage = null;
+        sessionExpiredMessage = null;
         try {
             const res = await fetch(`/projects/${projectId}/manuals/${manualId}/analyze`, {
                 method: "POST",
@@ -201,6 +212,11 @@
             <p class="text-caption text-text-secondary">
                 AI が手順書からシナリオを生成しています。このページを開いたまましばらくお待ちください。
             </p>
+            {#if sessionExpiredMessage}
+                <div data-testid="analysis-session-expired">
+                    <Alert type="warning">{sessionExpiredMessage}</Alert>
+                </div>
+            {/if}
         </div>
     {:else}
         {#if failedJob?.error}

@@ -100,14 +100,16 @@ class AnalysisJobService
      * - terminal (succeeded/failed) 済みは no-op (terminal tx 勝ち・二重 fail を握る)
      * - manual は analyzing のときのみ復帰 (cuts があれば ready、無ければ draft)
      * - 予約は Reserved のみ release (並行 commit/release 済みは LogicException → 握って冪等)
+     *
+     * @return bool 実際に failed へ遷移させたか (terminal 済み no-op は false)
      */
-    public function failJob(AnalysisJob $job, string $error): void
+    public function failJob(AnalysisJob $job, string $error): bool
     {
-        DB::transaction(function () use ($job, $error): void {
+        return DB::transaction(function () use ($job, $error): bool {
             /** @var AnalysisJob $locked */
             $locked = AnalysisJob::query()->whereKey($job->getKey())->lockForUpdate()->firstOrFail();
             if ($locked->status->isTerminal()) {
-                return;
+                return false;
             }
 
             $locked->status = JobStatus::Failed;
@@ -132,6 +134,8 @@ class AnalysisJobService
                     // 並行 release/commit 済み
                 }
             }
+
+            return true;
         });
     }
 
@@ -139,7 +143,7 @@ class AnalysisJobService
      * stale ジョブの回復 (cron)。queued: dispatch 喪失、running: worker 異常終了。
      * failJob は行ロック + terminal guard で冪等 (TicketLedgerService::releaseStale と同型)。
      *
-     * @return int 回復した件数
+     * @return int 実際に回復 (failed 遷移) した件数 (走査中に terminal へ先着されたものは数えない)
      */
     public function recoverStale(): int
     {
@@ -164,9 +168,10 @@ class AnalysisJobService
             if ($job === null) {
                 continue;
             }
-            // failJob 内で行ロック + terminal guard 再検証するため、競合したジョブはそこで no-op
-            $this->failJob($job, '解析がタイムアウトしました。再実行してください。');
-            $recovered++;
+            // failJob 内で行ロック + terminal guard 再検証するため、競合したジョブはそこで no-op (false)
+            if ($this->failJob($job, '解析がタイムアウトしました。再実行してください。')) {
+                $recovered++;
+            }
         }
 
         return $recovered;

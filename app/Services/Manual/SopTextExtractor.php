@@ -87,7 +87,8 @@ class SopTextExtractor
         $path = tempnam(sys_get_temp_dir(), 'sop-xls-');
         Assert::string($path, '一時ファイルを作成できません');
         try {
-            file_put_contents($path, $contents);
+            // 書き込み失敗 (ディスクフル等) を IOFactory の後段例外に依存せず明示検出する
+            Assert::integer(file_put_contents($path, $contents), '一時ファイルへ書き込めません');
             $spreadsheet = IOFactory::load($path);
 
             $lines = [];
