@@ -7,30 +7,37 @@ import type { ScenarioDocument } from "@/types/manual";
 
 // router.reload (部分リロード) はテスト環境では実行できないためモックする。
 // onSuccess をテスト側から呼び、サーバ最新 document の再取り込みを検証する。
-const { routerReloadMock } = vi.hoisted(() => ({
+const { routerReloadMock, routerOnMock } = vi.hoisted(() => ({
     routerReloadMock: vi.fn(),
+    routerOnMock: vi.fn((..._args: unknown[]) => () => {}),
 }));
 
 vi.mock("@inertiajs/svelte", () => ({
     router: {
         reload: routerReloadMock,
-        on: vi.fn(() => () => {}),
+        on: routerOnMock,
     },
 }));
 
-/** routerReloadMock に渡された reload オプションを取り出す */
-function lastReloadOptions(): {
+interface ReloadOptions {
     only: string[];
     onSuccess: (page: { props: Record<string, unknown> }) => void;
+    onError: () => void;
     onFinish: () => void;
-} {
+}
+
+/** routerReloadMock に渡された reload オプションを取り出す */
+function lastReloadOptions(): ReloadOptions {
     const last = routerReloadMock.mock.calls[routerReloadMock.mock.calls.length - 1];
     if (!last?.[0]) throw new Error("router.reload が呼ばれていません");
-    return last[0] as {
-        only: string[];
-        onSuccess: (page: { props: Record<string, unknown> }) => void;
-        onFinish: () => void;
-    };
+    return last[0] as ReloadOptions;
+}
+
+/** router.on("before", ...) で登録された dirty 離脱ガードを取り出す */
+function beforeGuard(): (event: { preventDefault: () => void }) => void {
+    const call = routerOnMock.mock.calls.find(([name]) => name === "before");
+    if (!call?.[1]) throw new Error('router.on("before") が登録されていません');
+    return call[1] as (event: { preventDefault: () => void }) => void;
 }
 
 /*
@@ -109,6 +116,7 @@ const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promis
 beforeEach(() => {
     fetchMock.mockReset();
     routerReloadMock.mockReset();
+    routerOnMock.mockClear();
     vi.stubGlobal("fetch", fetchMock);
     clearToasts();
 });
@@ -378,6 +386,81 @@ describe("ScenarioEditor", () => {
         });
         // 再 seed されず作業コピーは保持されたまま
         expect(screen.getByTestId("step-0-scene")).toHaveValue("手順シーンAX");
+    });
+
+    it("最新取得の部分リロード自体が失敗 (onError) したら汎用エラーを表示する", async () => {
+        fetchMock.mockResolvedValueOnce(
+            jsonResponse(409, {
+                code: "scenario_conflict",
+                conflict_type: "version_mismatch",
+                message: "他の編集と競合しました。",
+                current_version: 9,
+            }),
+        );
+
+        render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+        await fireEvent.click(screen.getByTestId("scenario-submit"));
+        await waitFor(() => {
+            expect(screen.getByTestId("scenario-conflict-reload")).toBeInTheDocument();
+        });
+        await fireEvent.click(screen.getByTestId("scenario-conflict-reload"));
+        await waitFor(() => {
+            expect(
+                screen.getByRole("button", { name: "破棄して最新を取得" }),
+            ).toBeInTheDocument();
+        });
+        await fireEvent.click(screen.getByRole("button", { name: "破棄して最新を取得" }));
+
+        const options = lastReloadOptions();
+        options.onError();
+        options.onFinish();
+
+        await waitFor(() => {
+            expect(screen.getByTestId("scenario-generic-error")).toHaveTextContent(
+                "最新シナリオの取得に失敗しました",
+            );
+        });
+    });
+
+    it("明示同意済みリロード中は dirty 離脱確認 (before ガード) をスキップする", async () => {
+        fetchMock.mockResolvedValueOnce(
+            jsonResponse(409, {
+                code: "scenario_conflict",
+                conflict_type: "version_mismatch",
+                message: "他の編集と競合しました。",
+                current_version: 9,
+            }),
+        );
+        const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+        render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+        await typeInto("step-0-scene", "手順シーンAX");
+        await fireEvent.click(screen.getByTestId("scenario-submit"));
+        await waitFor(() => {
+            expect(screen.getByTestId("scenario-conflict-reload")).toBeInTheDocument();
+        });
+        await fireEvent.click(screen.getByTestId("scenario-conflict-reload"));
+        await waitFor(() => {
+            expect(
+                screen.getByRole("button", { name: "破棄して最新を取得" }),
+            ).toBeInTheDocument();
+        });
+        await fireEvent.click(screen.getByRole("button", { name: "破棄して最新を取得" }));
+
+        // リロード実行中 (onFinish 前): dirty でも confirm を出さず遷移も止めない
+        const guard = beforeGuard();
+        const preventDefault = vi.fn();
+        guard({ preventDefault });
+        expect(confirmSpy).not.toHaveBeenCalled();
+        expect(preventDefault).not.toHaveBeenCalled();
+
+        // リロード完了後: dirty のままなら通常どおり confirm で確認する
+        lastReloadOptions().onFinish();
+        guard({ preventDefault });
+        expect(confirmSpy).toHaveBeenCalledTimes(1);
+        expect(preventDefault).toHaveBeenCalledTimes(1);
+
+        confirmSpy.mockRestore();
     });
 
     it("409 (rendering) はリロード導線なしのバナーを表示する", async () => {

@@ -248,11 +248,29 @@
         );
     }
 
-    /** 成功応答 (scenario_version: number + steps 配列) の type guard */
+    /** step/point 行の最低限 shape (id: number, scene: string) の実行時検証 */
+    function isScenarioRow(value: unknown): boolean {
+        if (value === null || typeof value !== "object") return false;
+        const row = value as { id?: unknown; scene?: unknown };
+        return typeof row.id === "number" && typeof row.scene === "string";
+    }
+
+    /**
+     * サーバ document (scenario_version + steps ツリー) の type guard。
+     * reload 経路は外部応答依存のため、行 shape (id/scene/points) まで軽量に検証する。
+     */
     function isScenarioDocument(value: unknown): value is ScenarioDocument {
         if (value === null || typeof value !== "object") return false;
         const doc = value as { scenario_version?: unknown; steps?: unknown };
-        return typeof doc.scenario_version === "number" && Array.isArray(doc.steps);
+        return (
+            typeof doc.scenario_version === "number" &&
+            Array.isArray(doc.steps) &&
+            doc.steps.every((step: unknown) => {
+                if (!isScenarioRow(step)) return false;
+                const points = (step as { points?: unknown }).points;
+                return Array.isArray(points) && points.every(isScenarioRow);
+            })
+        );
     }
 
     /**
@@ -273,6 +291,11 @@
                     reseed(latest);
                     return;
                 }
+                genericError =
+                    "最新シナリオの取得に失敗しました。画面を再読み込みしてください。";
+            },
+            onError: () => {
+                // 部分リロード自体の失敗 (ネットワーク断等)。無反応に見せない
                 genericError =
                     "最新シナリオの取得に失敗しました。画面を再読み込みしてください。";
             },
