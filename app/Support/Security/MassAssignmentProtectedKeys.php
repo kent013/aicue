@@ -26,6 +26,7 @@ final class MassAssignmentProtectedKeys
             // actor (操作主体は Auth から導出する)
             'user_id',
             'created_by_user_id',
+            'created_by', // AI-CUE ドメイン (video_manuals) の actor キー (doc/10 §10.1 準拠の命名)
             'invited_by_user_id',
             // tenant / ownership (route・コンテキストから導出する)
             'organization_id',
@@ -34,6 +35,13 @@ final class MassAssignmentProtectedKeys
             'current_organization_id',
             'project_id',
             'api_key_id',
+            // AI-CUE ドメイン (Project ─< Category / VideoManual ─< SourceDocument / Cut ─< Take)
+            'category_id',
+            'video_manual_id',
+            'source_document_id',
+            'cut_id',
+            'parent_cut_id',
+            'adopted_take_id',
             // billing (Service / Seeder がサーバ側で導出する)
             'plan_id',
             'reservation_id',

@@ -6,7 +6,8 @@ namespace App\Enums;
 
 /**
  * プロジェクトロール (project_members pivot)。Q2 決定の正規名。
- * ドメイン的な名前 (tutor/trainee 等) が必要なアプリは label() を差し替える。
+ * AI-CUE のドメイン表示名 (doc/10 §10.5): project_admin=編集者 / project_member=撮影者。
+ * permission キー (value) はテンプレート既存のまま rename しない (表示名のみ差し替え)。
  */
 enum ProjectRole: string
 {
@@ -16,8 +17,8 @@ enum ProjectRole: string
     public function label(): string
     {
         return match ($this) {
-            self::Admin => 'プロジェクト管理者',
-            self::Member => 'プロジェクトメンバー',
+            self::Admin => '編集者',
+            self::Member => '撮影者',
         };
     }
 }

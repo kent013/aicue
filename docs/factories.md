@@ -20,6 +20,11 @@
 | `CustomTeamFactory` | CustomTeam | — |
 | `ProjectFactory` | Project | `forOrganization($org)` |
 | `ItemFactory` | Item | `forProject($project)` |
+| `CategoryFactory` | Category | `forProject($project)` |
+| `VideoManualFactory` | VideoManual | `forProject($project)`, `forCategory($category)`, `createdBy($user)` |
+| `SourceDocumentFactory` | SourceDocument | `forManual($manual)` |
+| `CutFactory` | Cut | `forManual($manual)` |
+| `TakeFactory` | Take | `forCut($cut)` |
 | `ApiKeyFactory` | ApiKey | `forOrganization($org)`, `revoked()`, `expired(?Carbon $expiresAt = null)` |
 | `OrganizationInvitationFactory` | OrganizationInvitation | `forOrganization($org)`, `expired()`, `accepted()`, `revoked()`, `asAdmin()`。加えて `createWithPlainToken(array): array` (invitation と平文 token を tuple で返す。URL 生成用。DB には sha256 hash のみ保存) |
 | `IdempotencyKeyFactory` | IdempotencyKey | `forApiKey($apiKey)`, `expired(?Carbon $expiresAt = null)` |
@@ -55,6 +60,8 @@ $key = ApiKey::factory()->revoked()->create();
 
 ```
 Item → Project → Organization (Default Team) → Team (laratrust)
+Category → Project → Organization (Default Team) → Team (laratrust)
+Take → Cut → VideoManual → Project (+ User) → Organization → Team (laratrust)
 IdempotencyKey → ApiKey → Organization
 OauthSession → User / Organization / Passport Client
 LlmCallLog → Organization

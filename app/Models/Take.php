@@ -1,0 +1,68 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Models;
+
+use App\Enums\Manual\TakeStatus;
+use Database\Factories\TakeFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Carbon;
+
+/**
+ * Take (Cut 配下の撮影素材)。Tier B: schema 先取り。
+ * route / Controller / UI は撮影 PWA フェーズで張る (それまで外部到達不可)。
+ *
+ * - cut_id は所有権キーのため $fillable 外 (relation 経由で代入)
+ * - (cut_id, client_take_id) UNIQUE は撮影端末からの同期冪等キー
+ * - sort_order はテイク登録 Service (後続) が採番するため $fillable 外
+ *
+ * @property int $id
+ * @property int $cut_id
+ * @property string $client_take_id
+ * @property string $video_path
+ * @property string|null $thumbnail_path
+ * @property int $size_bytes
+ * @property int|null $duration_ms
+ * @property TakeStatus $status
+ * @property string|null $comment
+ * @property Carbon|null $captured_at
+ * @property int $sort_order
+ */
+class Take extends Model
+{
+    /** @use HasFactory<TakeFactory> */
+    use HasFactory;
+
+    /** @var list<string> */
+    protected $fillable = [
+        'client_take_id',
+        'video_path',
+        'thumbnail_path',
+        'size_bytes',
+        'duration_ms',
+        'comment',
+        'captured_at',
+    ];
+
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'status' => TakeStatus::class,
+            'captured_at' => 'datetime',
+        ];
+    }
+
+    /**
+     * @return BelongsTo<Cut, $this>
+     */
+    public function cut(): BelongsTo
+    {
+        return $this->belongsTo(Cut::class);
+    }
+}

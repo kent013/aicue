@@ -62,6 +62,25 @@ class Project extends Model
     }
 
     /**
+     * @return HasMany<Category, $this>
+     */
+    public function categories(): HasMany
+    {
+        return $this->hasMany(Category::class);
+    }
+
+    /**
+     * 動画マニュアル。relation 名は route パラメータ {manual} の scopeBindings 推論
+     * ($project->manuals()) と一致させる (IDOR 防御の前提。videoManuals() は使わない)。
+     *
+     * @return HasMany<VideoManual, $this>
+     */
+    public function manuals(): HasMany
+    {
+        return $this->hasMany(VideoManual::class);
+    }
+
+    /**
      * @return BelongsToMany<User, $this>
      */
     public function members(): BelongsToMany

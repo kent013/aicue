@@ -7,6 +7,7 @@ use App\Http\Middleware\BlockTwoFactorDisableForEnforcedOrganizations;
 use App\Http\Middleware\BughuntCoverageMiddleware;
 use App\Http\Middleware\EnforceMcpTransport;
 use App\Http\Middleware\EnsureEmailIsVerifiedOrBack;
+use App\Http\Middleware\EnsureProjectBelongsToCurrentOrganization;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\IdempotentRequest;
 use App\Http\Middleware\McpConsentOrganizationBinder;
@@ -96,6 +97,10 @@ return Application::configure(basePath: dirname(__DIR__))
             // (context 別文言は EmailVerificationGateContext)。organizations.store /
             // organizations.invitations.store に withoutMiddleware('verified') とセットで付与。
             'verified.or-back' => EnsureEmailIsVerifiedOrBack::class,
+            // web の {project} route の URL 整合 guard。cross-org の {project} を
+            // FormRequest の DB ルール (unique/exists) より前に 404 へ落とす
+            // (存在オラクル防止。網羅性は ProjectRouteCurrentOrgGuardTest が固定)
+            'project.in-current-org' => EnsureProjectBelongsToCurrentOrganization::class,
             'resolve.api-actor' => ResolveApiActor::class,
             'api-key.ability' => RequireApiKeyAbility::class,
             'idempotent' => IdempotentRequest::class,
