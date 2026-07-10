@@ -43,6 +43,19 @@ function takeVideoClip(int $cutId = 1): RenderClipSpec
     );
 }
 
+function takeStillClip(int $cutId = 1, int $seconds = 4): RenderClipSpec
+{
+    return new RenderClipSpec(
+        cutId: $cutId,
+        label: '手順1',
+        source: RenderClipSource::TakeStill,
+        takeVideoPath: 'takes/src-still.mp4',
+        stillDisplaySeconds: $seconds,
+        subtitlePrimary: null,
+        subtitleSecondary: ATTACK_SUBTITLE,
+    );
+}
+
 function placeholderClip(int $cutId = 2): RenderClipSpec
 {
     return new RenderClipSpec(
@@ -176,6 +189,46 @@ test('音声トラックなしのテイクは anullsrc (第 2 入力) を map �
     );
     expect($encodeLine)->toContain('anullsrc=r=48000:cl=stereo');
     expect($encodeLine)->toContain('-map 0:v:0 -map 1:a:0');
+});
+
+test('静止画カット (TakeStill): 先頭フレーム抽出 → -loop 1 -t 秒ループ + anullsrc / 尺は stillDisplaySeconds×1000', function (): void {
+    $recorded = [];
+    fakeFfmpegProcesses($recorded);
+    $workDir = composerWorkDir();
+
+    app(FfmpegVideoComposer::class)->compose(
+        composerManifest(takeStillClip(cutId: 1, seconds: 4)),
+        [1 => "{$workDir}/src0.mp4"],
+        $workDir,
+        function (): void {},
+    );
+
+    // 1) 先頭フレーム抽出 (-frames:v 1 → 連番 frame ファイル)
+    $frameLine = collect($recorded)->first(
+        fn (string $line): bool => str_contains($line, '-frames:v'),
+    );
+    expect($frameLine)->not->toBeNull();
+    expect($frameLine)->toContain("-i {$workDir}/src0.mp4");
+    expect($frameLine)->toContain('-frames:v 1 frame0.png');
+
+    // 2) エンコードは静止画ループ (-loop 1 -t {sec}) + 無音声 anullsrc (第 2 入力) の map
+    $encodeLine = collect($recorded)->first(
+        fn (string $line): bool => str_contains($line, 'libx264'),
+    );
+    expect($encodeLine)->toContain('-loop 1 -t 4 -i frame0.png');
+    expect($encodeLine)->toContain('-f lavfi -t 4 -i anullsrc=r=48000:cl=stereo');
+    expect($encodeLine)->toContain('-map 0:v:0 -map 1:a:0');
+
+    // 3) 尺導出: ASS 字幕の End が stillDisplaySeconds×1000 (= 4 秒) で固定される
+    $ass = (string) file_get_contents("{$workDir}/clip0.ass");
+    expect($ass)->toContain(',0:00:04.00,');
+
+    // 4) 字幕本文はコマンド (filtergraph 含む) に一切現れない (.ass ファイル名のみ)
+    foreach ($recorded as $line) {
+        expect($line)->not->toContain('字幕本文');
+        expect($line)->not->toContain('{\\an8}');
+    }
+    expect((bool) preg_match('/subtitles=clip\d+\.ass[,\s]/', (string) $encodeLine))->toBeTrue();
 });
 
 test('ffmpeg 非 0 終了で RenderCompositionException', function (): void {

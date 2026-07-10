@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Enums\Manual\JobStatus;
+use App\Enums\Manual\MaterialType;
 use App\Enums\Manual\RenderKind;
 use App\Enums\Manual\TakeStatus;
 use App\Enums\Manual\VideoManualStatus;
@@ -177,6 +178,36 @@ test('尺上限超過は 422 (duration_ms 合計がソフトゲート超過)', f
     Queue::fake();
     config()->set('manual.render_max_total_source_ms', 4_000);
     [, $owner, $project, $manual] = renderTriggerContext(); // 採用テイクは 5,000ms
+
+    $this->actingAs($owner)->postJson(
+        "/projects/{$project->id}/manuals/{$manual->id}/render",
+    )->assertUnprocessable()->assertJsonValidationErrors(['takes']);
+    expect(RenderJob::query()->count())->toBe(0);
+});
+
+test('尺上限: Still カットは static_display_seconds×1000 で数える (テイク実尺 5,000ms は無視 → 201)', function (): void {
+    Queue::fake();
+    config()->set('manual.render_max_total_source_ms', 4_000);
+    [, $owner, $project, $manual, $cut] = renderTriggerContext(); // 採用テイクは 5,000ms
+    $cut->forceFill([
+        'material_type' => MaterialType::Still->value,
+        'static_display_seconds' => 3, // → 3,000ms として加算 (上限 4,000ms 内)
+    ])->save();
+
+    $this->actingAs($owner)->postJson(
+        "/projects/{$project->id}/manuals/{$manual->id}/render",
+    )->assertCreated();
+});
+
+test('尺上限: Still カットの static_display_seconds 合計が上限超過なら 422 (テイク実尺が小さくても)', function (): void {
+    Queue::fake();
+    config()->set('manual.render_max_total_source_ms', 4_000);
+    [, $owner, $project, $manual, $cut] = renderTriggerContext();
+    $cut->adoptedTake?->forceFill(['duration_ms' => 1_000])->save(); // 実尺は上限内
+    $cut->forceFill([
+        'material_type' => MaterialType::Still->value,
+        'static_display_seconds' => 5, // → 5,000ms として加算 (上限 4,000ms 超過)
+    ])->save();
 
     $this->actingAs($owner)->postJson(
         "/projects/{$project->id}/manuals/{$manual->id}/render",

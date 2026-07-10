@@ -7,6 +7,7 @@ use App\DataTransferObjects\Manual\Render\RenderClipSource;
 use App\DataTransferObjects\Manual\Render\RenderManifest;
 use App\Enums\Billing\TicketReservationStatus;
 use App\Enums\Manual\JobStatus;
+use App\Enums\Manual\MaterialType;
 use App\Enums\Manual\RenderErrorCode;
 use App\Enums\Manual\RenderKind;
 use App\Enums\Manual\VideoManualStatus;
@@ -178,6 +179,39 @@ test('preview: 採用テイク欠落 cut は Placeholder として合成され�
     expect($placeholder?->source)->toBe(RenderClipSource::Placeholder);
     // Placeholder cut にはローカル素材が供給されない
     expect($fake->lastSources)->not->toHaveKey($missing->id);
+});
+
+test('Still カット (material_type=still) は TakeStill としてマニフェストへ載る (秒指定 + 未指定 fallback)', function (): void {
+    config()->set('manual.preview_placeholder_seconds', 3);
+    [, , $project, $manual, $cut, , $fake] = renderPipelineContext(tickets: 0, trigger: false);
+    // 1 本目: 秒指定あり
+    $cut->forceFill([
+        'material_type' => MaterialType::Still->value,
+        'static_display_seconds' => 4,
+    ])->save();
+    // 2 本目: 秒未指定 (static_display_seconds null → config fallback)
+    $fallbackCut = Cut::factory()->forManual($manual)->withSortOrder(1)->create([
+        'material_type' => MaterialType::Still->value,
+        'static_display_seconds' => null,
+    ]);
+    $fallbackTake = Take::factory()->forCut($fallbackCut)->create();
+    $fallbackCut->forceFill(['adopted_take_id' => $fallbackTake->id])->save();
+    Storage::disk('s3')->put($fallbackTake->video_path, 'fake-take-video-2');
+    $previewJob = app(RenderJobService::class)->triggerPreview($project, $manual);
+
+    app(RenderPipeline::class)->run($previewJob->id);
+
+    expect($previewJob->refresh()->status)->toBe(JobStatus::Succeeded);
+    $clips = collect($fake->lastManifest?->clips ?? []);
+    $still = $clips->firstWhere('cutId', $cut->id);
+    expect($still?->source)->toBe(RenderClipSource::TakeStill);
+    expect($still?->stillDisplaySeconds)->toBe(4);
+    $fallback = $clips->firstWhere('cutId', $fallbackCut->id);
+    expect($fallback?->source)->toBe(RenderClipSource::TakeStill);
+    expect($fallback?->stillDisplaySeconds)->toBe(3); // config fallback
+    // Still でも採用テイク素材 (先頭フレーム抽出元) はローカル供給される
+    expect($fake->lastSources)->toHaveKey($cut->id);
+    expect($fake->lastSources)->toHaveKey($fallbackCut->id);
 });
 
 test('version 固定: preview トリガー後の編集は scenario_version_changed で fail (§10.8-6)', function (): void {
