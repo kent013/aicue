@@ -17,7 +17,7 @@ test('plan_code 未設定の組織には fallback_plan (free) の既定 limits �
 
     $limits = app(QuotaService::class)->limits($organization);
 
-    expect($limits)->toBe(['max_projects' => 1, 'max_members' => 3]);
+    expect($limits)->toBe(['max_projects' => 1, 'max_members' => 3, 'max_storage_bytes' => 1024 * 1024 * 1024]);
 });
 
 test('plan_code を持つ組織にはそのプランの limits が効く', function (): void {
@@ -27,7 +27,7 @@ test('plan_code を持つ組織にはそのプランの limits が効く', funct
 
     $limits = app(QuotaService::class)->limits($organization);
 
-    expect($limits)->toBe(['max_projects' => 10, 'max_members' => 10]);
+    expect($limits)->toBe(['max_projects' => 10, 'max_members' => 10, 'max_storage_bytes' => 50 * 1024 * 1024 * 1024]);
 });
 
 test('organization_quotas の override がプラン既定値より優先される (key 単位)', function (): void {
@@ -36,8 +36,8 @@ test('organization_quotas の override がプラン既定値より優先され�
 
     $limits = app(QuotaService::class)->limits($organization->fresh());
 
-    // max_projects は override、max_members はプラン既定値のまま
-    expect($limits)->toBe(['max_projects' => 5, 'max_members' => 3]);
+    // max_projects は override、max_members / max_storage_bytes はプラン既定値のまま
+    expect($limits)->toBe(['max_projects' => 5, 'max_members' => 3, 'max_storage_bytes' => 1024 * 1024 * 1024]);
 });
 
 test('max_projects 上限内ならプロジェクトを作成できる', function (): void {

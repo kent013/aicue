@@ -12,7 +12,12 @@
         <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
         <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-        <link rel="manifest" href="/site.webmanifest" />
+        {{-- 撮影 PWA (/app/*) はホーム画面追加用の専用 manifest (start_url=/app)。他は既存 site.webmanifest --}}
+        @if (request()->is('app') || request()->is('app/*'))
+            <link rel="manifest" href="/manifest.webmanifest" />
+        @else
+            <link rel="manifest" href="/site.webmanifest" />
+        @endif
         <meta name="theme-color" content="{{ config('seo.theme_color') }}" />
         @inertiaHead
         @vite(['resources/css/app.css', 'resources/js/app.ts'])

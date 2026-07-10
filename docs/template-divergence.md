@@ -160,3 +160,26 @@ drift 防止テスト: `ScenarioUpdateTest` (保護キー 422 / 異物 id 404 / 
 ### 関連
 - 実装: `app/Services/Manual/ScenarioService.php`, `app/Http/Requests/Projects/UpdateScenarioRequest.php`, `app/Http/Controllers/Projects/ManualScenarioController.php`
 - 設計: `devnotes/20260711-0007-scenario-editing/detailed-design.md`
+
+## D6 ✅ presigned PUT の署名対象は ChecksumSHA256 のみ (Content-Type/Length は HeadObject 照合が担う)
+
+| 観点 | 設計書 (T004 detailed-design) | 実装 |
+|---|---|---|
+| presign 署名対象 | ContentType / ContentLength / ChecksumSHA256 を署名対象に含める | **ChecksumSHA256 のみ** (query パラメータ + SignedHeaders)。ContentType / ContentLength はコマンドに渡すが署名には含まれない |
+
+### なぜ正当な差分か(logic-driven)
+AWS PHP SDK の `SignatureV4::presign` は presigned URL 生成時に Content-Type / Content-Length を
+署名対象ヘッダから除外する (SDK の仕様。ブラウザ・中継系がこれらを書き換えるため)。
+セキュリティ上の要点 (概念設計 D2b「この URL で置ける内容は申告ハッシュの 1 通りに固定」) は
+ChecksumSHA256 の署名だけで完全に成立する: 本文がハッシュと一致しない PUT は S3 が拒否し、
+本文が固定されればサイズも一意に固定される。Content-Type は課金・検証に影響しない表示属性で、
+登録時の HeadObject 三点照合 (size / content_type / checksum) が不一致を削除・拒否する。
+
+### 揃えている不変条件(これは保証し続ける)
+> 「presigned URL で登録済みオブジェクトを別内容に差し替えることはできない」
+`TakeObjectStorageTest` が実 SDK で `X-Amz-SignedHeaders=host;x-amz-checksum-sha256` と
+checksum query の存在を固定し、`TakeRegistrationTest` が三点照合の削除・拒否を固定する。
+
+### 関連
+- 実装: `app/Services/Capture/TakeObjectStorage.php`
+- 設計: `devnotes/20260711-0345-capture-pwa/detailed-design.md` 施策3

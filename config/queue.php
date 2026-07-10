@@ -57,6 +57,17 @@ return [
             'after_commit' => false,
         ],
 
+        // メディア掃除専用 (DeleteTakeObjectsJob)。運用契約: worker は
+        // `php artisan queue:work database-media` を必須登録 (docs/architecture.md)
+        'database-media' => [
+            'driver' => 'database',
+            'connection' => env('DB_QUEUE_CONNECTION'),
+            'table' => env('DB_QUEUE_TABLE', 'jobs'),
+            'queue' => 'media',
+            'retry_after' => 300,
+            'after_commit' => false,
+        ],
+
         'beanstalkd' => [
             'driver' => 'beanstalkd',
             'host' => env('BEANSTALKD_QUEUE_HOST', 'localhost'),

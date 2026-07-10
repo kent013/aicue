@@ -96,12 +96,23 @@ class Cut extends Model
     }
 
     /**
-     * 採用テイク (循環 FK。採用 API は後続フェーズで cut->takes() 経由解決を必須とする)。
+     * 採用テイク (循環 FK。採用 API は cut->takes() 経由解決を必須とする =
+     * CaptureTakeService::adopt。書き込み経路は ScenarioWritePathInventoryTest 検出 4)。
      *
      * @return BelongsTo<Take, $this>
      */
     public function adoptedTake(): BelongsTo
     {
         return $this->belongsTo(Take::class, 'adopted_take_id');
+    }
+
+    /**
+     * テイクアップロード予約 (概念設計 D2。予約行は本 relation 経由でのみ再解決する)。
+     *
+     * @return HasMany<TakeUploadReservation, $this>
+     */
+    public function uploadReservations(): HasMany
+    {
+        return $this->hasMany(TakeUploadReservation::class);
     }
 }

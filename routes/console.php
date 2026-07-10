@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Services\Billing\TicketLedgerService;
+use App\Services\Capture\StaleUploadReservationSweeper;
 use App\Services\Manual\AnalysisJobService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
@@ -57,3 +58,18 @@ Artisan::command('analysis:recover-stale-jobs', function (AnalysisJobService $jo
 })->purpose('滞留した解析ジョブ (queued/running が閾値超過) を失敗確定し予約を解放する');
 
 Schedule::command('analysis:recover-stale-jobs')->everyFiveMinutes();
+
+/*
+|--------------------------------------------------------------------------
+| 撮影 PWA cron (doc/10 §10.8-4 / 概念設計 D7)
+|--------------------------------------------------------------------------
+| 期限切れ pending / stale verifying のアップロード予約を released 化して
+| bytes_pending を解放し、PUT 済みだが未登録の S3 孤児オブジェクトを削除する。
+| fresh verifying (検証中) には触れない (登録処理の claim 契約と競合しない)。冪等。
+*/
+Artisan::command('capture:release-stale-upload-reservations', function (StaleUploadReservationSweeper $sweeper) {
+    $released = $sweeper->sweep();
+    $this->info("released {$released} stale upload reservation(s)");
+})->purpose('期限切れのテイクアップロード予約を解放し S3 孤児オブジェクトを削除する');
+
+Schedule::command('capture:release-stale-upload-reservations')->everyTenMinutes()->onOneServer()->withoutOverlapping();

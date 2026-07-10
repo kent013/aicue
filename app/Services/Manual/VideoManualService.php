@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace App\Services\Manual;
 
+use App\Jobs\Capture\DeleteTakeObjectsJob;
 use App\Models\Project;
+use App\Models\SourceDocument;
+use App\Models\Take;
 use App\Models\VideoManual;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -66,15 +69,36 @@ class VideoManualService
         });
     }
 
-    /** VideoManual 削除。 */
+    /**
+     * VideoManual 削除。cascade で消える takes / source_documents の S3 キーを収集し
+     * DeleteTakeObjectsJob (media queue) へ委譲する (概念設計 D7。孤児オブジェクト防止)。
+     */
     public function delete(Project $project, VideoManual $manual): void
     {
-        DB::transaction(function () use ($project, $manual): void {
+        $paths = DB::transaction(function () use ($project, $manual): array {
             $locked = Project::whereKey($project->id)->lockForUpdate()->firstOrFail();
             // 子は親に属する: ロック済み親 relation から再解決 (cross-project は 404)
             /** @var VideoManual $lockedManual */
             $lockedManual = $locked->manuals()->whereKey($manual->id)->firstOrFail();
-            $lockedManual->delete();
+            $takePaths = Take::query()
+                ->whereIn('cut_id', $lockedManual->cuts()->select('id'))
+                ->get(['video_path', 'thumbnail_path'])
+                ->flatMap(
+                    /** @return list<string> */
+                    static fn (Take $take): array => array_values(array_filter([$take->video_path, $take->thumbnail_path])),
+                )
+                ->all();
+            $documentPaths = $lockedManual->sourceDocuments()
+                ->get(['file_path'])
+                ->map(static fn (SourceDocument $document): string => $document->file_path)
+                ->all();
+            $lockedManual->delete(); // cuts / takes / source_documents は FK cascade
+
+            return array_values(array_unique([...$takePaths, ...$documentPaths]));
         });
+
+        if ($paths !== []) {
+            DeleteTakeObjectsJob::dispatch($paths); // tx 成功後に media queue へ (重複キーは除去済み)
+        }
     }
 }

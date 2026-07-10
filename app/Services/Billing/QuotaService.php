@@ -62,4 +62,27 @@ class QuotaService
             throw QuotaExceededException::forLimit($key, $limit);
         }
     }
+
+    /**
+     * 加算量つき上限チェック (容量セマンティクス。概念設計 D3)。
+     * check() の「件数が上限に達したら拒否 (current >= limit)」に対し、こちらは
+     * 「加算後合計が上限を超過するなら拒否 (current + addition > limit)」。
+     * limits に key が無ければ無制限。判定窓口の一元化規約 (docs 07 §4) を維持する。
+     */
+    public function checkAddition(Organization $organization, QuotaKey $key, int $current, int $addition): void
+    {
+        // 事前条件は無制限プラン (limit 無し) でも保証する (契約の明確化)
+        Assert::greaterThanEq($current, 0);
+        Assert::greaterThanEq($addition, 0);
+
+        $limit = $this->limits($organization)[$key->value] ?? null;
+        if ($limit === null) {
+            return;
+        }
+
+        // int overflow ガード: 加算が PHP_INT_MAX を跨ぐ場合は超過として扱う (意図を算術で明示)
+        if ($current > PHP_INT_MAX - $addition || $current + $addition > $limit) {
+            throw QuotaExceededException::forLimit($key, $limit);
+        }
+    }
 }

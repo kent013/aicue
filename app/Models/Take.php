@@ -17,7 +17,9 @@ use Illuminate\Support\Carbon;
  *
  * - cut_id は所有権キーのため $fillable 外 (relation 経由で代入)
  * - (cut_id, client_take_id) UNIQUE は撮影端末からの同期冪等キー
- * - sort_order はテイク登録 Service (後続) が採番するため $fillable 外
+ * - sort_order はテイク登録 Service が採番するため $fillable 外
+ * - downloaded_at はサーバ打刻 (POST .../downloaded の ACK トークン検証経由のみ) のため
+ *   $fillable 外。非 null は削除不可 (概念設計 D6)
  *
  * @property int $id
  * @property int $cut_id
@@ -30,6 +32,7 @@ use Illuminate\Support\Carbon;
  * @property string|null $comment
  * @property Carbon|null $captured_at
  * @property int $sort_order
+ * @property Carbon|null $downloaded_at
  */
 class Take extends Model
 {
@@ -55,6 +58,7 @@ class Take extends Model
         return [
             'status' => TakeStatus::class,
             'captured_at' => 'datetime',
+            'downloaded_at' => 'datetime',
         ];
     }
 

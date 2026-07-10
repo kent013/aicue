@@ -54,6 +54,24 @@ class ProjectPolicy
     }
 
     /**
+     * 撮影 (take の capture/upload/adopt): 管理権限者または project メンバー
+     * (doc/10 §10.5 撮影者)。TakePolicy が全 ability を本メソッドへ委譲する。
+     */
+    public function capture(User $user, Project $project): bool
+    {
+        if ($this->canManageProject($user, $project)) {
+            return true;
+        }
+
+        $organization = $project->organization;
+        if ($organization === null || $user->organizationRole($organization) === null) {
+            return false; // cross-org 不変条件
+        }
+
+        return $project->memberRole($user) !== null; // Admin / Member どちらも撮影可
+    }
+
+    /**
      * プロジェクト管理権限の判定。
      * 組織ロールは laratrust_team_id 明示 (organizationRole)、
      * プロジェクトロールは project_members pivot (memberRole) で判定する。

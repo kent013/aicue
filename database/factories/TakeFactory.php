@@ -42,4 +42,10 @@ class TakeFactory extends Factory
     {
         return $this->state(fn () => ['cut_id' => $cut->id]);
     }
+
+    /** DL 済み ACK 打刻済み (削除不可) の状態 (概念設計 D6) */
+    public function downloaded(): static
+    {
+        return $this->state(fn () => ['downloaded_at' => now()]);
+    }
 }

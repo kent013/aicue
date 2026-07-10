@@ -63,6 +63,17 @@ function nestedRouteIdorInventory(): array
         'projects.manuals.source-documents.store' => $s,
         'projects.manuals.analyze' => $s,
         'projects.manuals.jobs.show' => $s,
+        // 撮影 PWA (/app/*。doc/10 §10.8-3)。{manual}∈{project}, {cut}∈{manual}, {take}∈{cut} は
+        // scopeBindings + 各書き込み Service の tx 内連鎖再解決 (二重防御)。
+        // {project} ∈ current org は project.in-current-org middleware + inline guard の 2 層
+        'capture.manuals.show' => $s,
+        'capture.manuals.sync' => $s,
+        'capture.takes.upload-url' => $s,
+        'capture.takes.store' => $s,
+        'capture.takes.update' => $s,
+        'capture.takes.destroy' => $s,
+        'capture.takes.adopt' => $s,
+        'capture.takes.downloaded' => $s,
         // --- inline 親子整合 guard (authorize 前に 子∈親テナント を検査、不整合は 404) ---
         // OrganizationMemberController::resolveOrganizationMember (非 member は 404)
         'organizations.members.update' => $g,
