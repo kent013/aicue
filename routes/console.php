@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Services\Billing\TicketLedgerService;
 use App\Services\Capture\StaleUploadReservationSweeper;
 use App\Services\Manual\AnalysisJobService;
+use App\Services\Manual\RenderJobService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -58,6 +59,28 @@ Artisan::command('analysis:recover-stale-jobs', function (AnalysisJobService $jo
 })->purpose('滞留した解析ジョブ (queued/running が閾値超過) を失敗確定し予約を解放する');
 
 Schedule::command('analysis:recover-stale-jobs')->everyFiveMinutes();
+
+/*
+|--------------------------------------------------------------------------
+| レンダ cron
+|--------------------------------------------------------------------------
+| recover-stale-jobs: dispatch 喪失 (queued=10 分) と worker 異常終了 (running=30 分) の回復。
+| reconcile-outputs: 出力世代の収束 (世代交代済みの output_path を削除 job へ再投入。
+| stale 回復とは別責務のため command を分離する)。
+*/
+Artisan::command('render:recover-stale-jobs', function (RenderJobService $jobs) {
+    $recovered = $jobs->recoverStale();
+    $this->info("recovered {$recovered} stale render job(s)");
+})->purpose('滞留したレンダジョブ (queued/running が閾値超過) を失敗確定し予約を解放する');
+
+Schedule::command('render:recover-stale-jobs')->everyFiveMinutes();
+
+Artisan::command('render:reconcile-outputs', function (RenderJobService $jobs) {
+    $result = $jobs->reconcileOutputs();
+    $this->info("dispatched {$result['dispatched']} delete job(s), skipped {$result['skipped']}");
+})->purpose('世代交代済みのレンダ出力を走査し S3 削除ジョブを再投入する (最新 1 世代へ収束)');
+
+Schedule::command('render:reconcile-outputs')->everyFiveMinutes()->onOneServer()->withoutOverlapping();
 
 /*
 |--------------------------------------------------------------------------

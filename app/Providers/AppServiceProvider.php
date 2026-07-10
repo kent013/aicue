@@ -21,6 +21,8 @@ use App\Models\User;
 use App\Services\Billing\StripeWebhookProcessor;
 use App\Services\Mail\Sns\AwsSnsSignatureVerifier;
 use App\Services\Mail\Sns\SnsSignatureVerifier;
+use App\Services\Render\FfmpegVideoComposer;
+use App\Services\Render\VideoComposer;
 use App\Support\CriticalActionContext;
 use App\Support\EmailNormalizer;
 use App\Support\PasswordPolicy;
@@ -90,6 +92,9 @@ class AppServiceProvider extends ServiceProvider
         // Critical Action 実行中フラグ。scoped() で HTTP request scope に閉じる
         // (queue worker / artisan は別 container のため context は継承されない)
         $this->app->scoped(CriticalActionContext::class);
+
+        // 動画合成の抽象 (doc/09 §9.7)。v1 は ffmpeg 実装。テストは fake 実装へ swap する
+        $this->app->bind(VideoComposer::class, FfmpegVideoComposer::class);
     }
 
     public function boot(): void
@@ -174,6 +179,26 @@ class AppServiceProvider extends ServiceProvider
 
         $this->configureApiRateLimiters();
         $this->configureInquiryRateLimiter();
+        $this->configureRenderRateLimiter();
+    }
+
+    /**
+     * レンダ/プレビュートリガー (POST .../render, .../preview) の RateLimiter。
+     * preview はチケット非消費のため、この rate limit + org 同時 preview 上限
+     * (RenderJobService::triggerPreview) の 2 段が無料 ffmpeg 実行の負荷上限を構造的に決める
+     * (概念設計 §2 の abuse 耐性契約)。キーは user id + org id 単位。
+     */
+    private function configureRenderRateLimiter(): void
+    {
+        RateLimiter::for('render-trigger', function (Request $request): Limit {
+            $user = $request->user();
+            $userId = $user instanceof User ? (string) $user->id : 'guest';
+            $orgId = $user instanceof User && $user->current_organization_id !== null
+                ? (string) $user->current_organization_id
+                : 'none';
+
+            return Limit::perMinute(6)->by("render-trigger:{$userId}:{$orgId}");
+        });
     }
 
     /**

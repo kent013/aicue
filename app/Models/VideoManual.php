@@ -97,4 +97,14 @@ class VideoManual extends Model
     {
         return $this->hasMany(AnalysisJob::class);
     }
+
+    /**
+     * レンダジョブ (route param {renderJob} の scopeBindings 推論と一致する relation 名)。
+     *
+     * @return HasMany<RenderJob, $this>
+     */
+    public function renderJobs(): HasMany
+    {
+        return $this->hasMany(RenderJob::class);
+    }
 }

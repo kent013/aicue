@@ -74,6 +74,12 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
 | `Manual/AnalysisJobService` | AI-CUE: AI 解析の状態機械 (trigger = draft/ready→analyzing + in-flight 冪等 + 残高事前チェック / failJob = 行ロック + terminal guard の冪等失敗確定 / recoverStale = stale 回復 cron 本体) |
 | `Manual/AnalysisPipeline` | AI-CUE: 解析パイプライン本体 (extract→decompose→generate→terminal tx)。チケット 2 フェーズ (予約冪等キー = analysis_jobs.ticket_reservation_id、materialize + commit + succeeded を単一 tx で原子化)。LLM 出力の有界リトライ (JSON 検証失敗のみ最大 2 回) |
 | `Manual/SopTextExtractor` | AI-CUE: SOP テキスト抽出 (pdf = smalot/pdfparser / xlsx·xls = phpoffice/phpspreadsheet / txt)。UTF-8 strict 検証 + UTF-8 バイト上限 (token budget 導出。AnalysisTokenBudgetInvariantTest が算術を固定) |
+| `Manual/RenderJobService` | AI-CUE: レンダの状態機械 (trigger = ready→rendering + render 冪等 + 採用テイク/尺/残高 guard / triggerPreview = Organization 行ロックで org 同時 preview 上限を直列化 / failJob = 冪等失敗確定 / completeRenderIntoLockedManual = ロック済み前提メソッド / recoverStale・reconcileOutputs = cron 本体) |
+| `Manual/RenderPipeline` | AI-CUE: レンダパイプライン本体 (startJob→buildManifest→compose→upload→finalize)。チケット 2 フェーズ (予約冪等キー = render_jobs.ticket_reservation_id、complete + commit + succeeded を terminal tx で原子化)。version スナップショット固定 (§10.8-6) |
+| `Manual/CutSequencer` | AI-CUE: カット表示順 (step→配下 point) と表示ラベル (手順N/急所N-M) の導出 (読み取り専用) |
+| `Render/VideoComposer` (interface) + `Render/FfmpegVideoComposer` | AI-CUE: 動画合成の抽象 + ffmpeg v1 実装 (Process facade 経由・配列引数。filtergraph にはサーバ生成一時ファイル名と数値のみ = 字幕本文を直接埋めない) |
+| `Render/AssSubtitleWriter` | AI-CUE: ASS 字幕生成の安全境界 (唯一の字幕テキスト出力点。リテラル \N/override tag/制御文字/zero-width の正規化 + mb 安全な長さ上限) |
+| `Render/RenderObjectStorage` | AI-CUE: レンダ出力 S3 操作の集約点 (download/upload/署名 URL/削除/prefix。DL 用 Content-Disposition は RFC 5987 + ASCII fallback + ヘッダ注入不能) |
 | `Auth/SocialAccountService` | ソーシャルログイン連携 |
 | `Billing/BillingAccess` | 課金ゲート判定 (`subscription('default')` が active/trialing なら許可)。**課金による利用可否の判定は本クラス経由のみ** (アプリは本クラスの差し替えで gate 方針を変更する)。適用は `require-active-subscription` middleware (業務 route group。billing / webhook は構造的 allowlist) |
 | `Billing/QuotaService` | quota の消費・検証 |
@@ -109,9 +115,13 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
   | `AnalysisJobService::trigger()` | status (draft·ready→analyzing のみ) |
   | `AnalysisJobService::failJob()` | status (analyzing→ready·draft のみ。cuts 有無で決定) |
   | `Capture/CaptureTakeService::adopt()` / `delete()` | cuts.adopted_take_id (採用 / 採用テイク削除時の null 化。検出 4 の allowlist) |
+  | `RenderJobService::trigger()` | status (ready→rendering のみ。scenario_version はスナップショット読み) |
+  | `RenderJobService::failJob()` | status (rendering→ready のみ。kind=render に限る。preview は触らない) |
+  | `RenderJobService::completeRenderIntoLockedManual()` | cuts.cut_length_ms / total_length_ms / status (rendering→published のみ。呼び出しは RenderPipeline::finalize の terminal tx に限定 = 検出 5) |
 
   テイク採用 API は inventory 準拠へ昇格済み (検出 4 = `adopted_take_id` の token 走査 +
-  書き込み形検出)。後続フェーズの **RenderJob の状態遷移** も本規約 + inventory 登録に従うこと
+  書き込み形検出)。RenderJob の状態遷移も inventory 準拠済み (検出 5 =
+  `completeRenderIntoLockedManual` の宣言/呼び出し限定)
 - 状態 guard (rendering/analyzing 中の保存は 409) は第一防衛、共有行ロックは
   「job 側の書き込みと保存が絶対に交差しない」ための構造的防衛 (二重防御)
 
@@ -126,6 +136,51 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
   は `AnalysisTimeBudgetInvariantTest` が CI 固定する
 - ローカル/テストの検証: パイプラインの同期実行は `AnalysisPipeline::run()` の直接呼び出し、
   dispatch の検証は `Queue::fake()` (sync ドライバの自動実行には依存しない)
+
+### レンダジョブの運用契約
+
+- レンダジョブ (`RunManualRender`) は専用 queue connection **`database-render`**
+  (queue=render、retry_after=1680) で流れる。**本番/ステージングの worker プロセス定義・
+  デプロイ手順・監視対象に `php artisan queue:work database-render` を必須項目として登録する**
+  (専用 worker が居ないとジョブは滞留する。queued 滞留は `render:recover-stale-jobs` cron が
+  **10 分** (queued 短 SLA。enqueue 時点で編集を止めるため) / running 滞留は **30 分** で
+  failJob するため、滞留 = 監視で気づける)
+- **worker ホスト要件**: ffmpeg / ffprobe バイナリ (`RENDER_FFMPEG_BINARY` /
+  `RENDER_FFPROBE_BINARY`) と日本語対応フォント (`RENDER_SUBTITLE_FONT`。既定
+  Noto Sans CJK JP) のインストールが前提 (Docker image 要件)。テストは `Process::fake()` で
+  コマンド構造のみ検証するため、**実 ffmpeg でのフィルタ列・音声 map・字幕描画の実機検証は
+  staging worker で行う** (運用項目)
+- 時間 budget の連鎖 `job timeout (1,500s) < retry_after (1,680s) < 予約 TTL (1,800s) ≤ stale running 閾値 (1,800s)`
+  + `queued 閾値 (600s) < running 閾値 (1,800s)` は `RenderTimeBudgetInvariantTest` が CI 固定する。
+  `manual.render_max_total_source_ms` (尺上限ソフトゲート) を引き上げる際は timeout 1,500s に
+  実レンダが収まるかを実測で再確認すること (連動する運用値)
+- **出力保持は「非同期で最新 succeeded 1 世代へ収束」**: finalize が旧世代の
+  `Jobs/Manual/DeleteRenderOutputsJob` (media queue。payload は render job id のみ =
+  任意キー削除の権限を持たない。prefix 検証 + CAS NULL 化) を積み、取り残しは
+  `render:reconcile-outputs` cron (5 分毎・onOneServer) が再投入する (dispatched/skipped を
+  info 出力 = 削除が進まない異常を件数推移で検知)
+- **グローバルロック順 (単一真実源 = 本節。RenderPipeline docblock は参考転記であり乖離時は本節優先)**:
+
+  ```
+  render_jobs → video_manuals → ticket_reservations → organizations
+  ```
+
+  (analysis 系の既存順 `analysis_jobs → video_manuals → …` と同構造。analysis_jobs と
+  render_jobs を同一 tx でロックする経路は存在しないため両者の相対順は定義不要)。
+  全経路はグローバル順の部分列のみで構成する (逆順取得ゼロ = 循環待ちを構成できない)。
+  新経路追加時は本表 + RenderPipeline docblock を同時更新すること:
+
+  | 経路 | 取得列 (すべてグローバル順の部分列) |
+  |---|---|
+  | `RenderJobService::trigger` | video_manuals のみ (balance() はロックなし集計) |
+  | `RenderJobService::triggerPreview` | video_manuals → organizations |
+  | `RenderPipeline::startJob` | render_jobs → (render のみ reserve 内部: organizations) |
+  | `RenderPipeline::buildManifest` | video_manuals (読み取り一貫性の確定点) |
+  | `RenderPipeline::finalize` | render_jobs → video_manuals → (render のみ commit 内部: ticket_reservations → organizations) |
+  | `RenderJobService::failJob` | render_jobs → video_manuals → (release 内部: ticket_reservations → organizations) |
+  | `DeleteRenderOutputsJob::handle` | 行ロックなし (読み取り検証 → tx 外 S3 削除 → CAS update の 3 段) |
+- ローカル/テストの検証: パイプラインの同期実行は `RenderPipeline::run()` の直接呼び出し +
+  fake `VideoComposer` (container swap)、dispatch の検証は `Queue::fake()`
 
 ## 撮影 PWA (presigned アップロード + 容量 Quota) の運用契約
 

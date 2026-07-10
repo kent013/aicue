@@ -24,6 +24,8 @@ use App\Http\Controllers\Organizations\OrganizationSwitchController;
 use App\Http\Controllers\Projects\CategoryController;
 use App\Http\Controllers\Projects\ItemController;
 use App\Http\Controllers\Projects\ManualAnalysisController;
+use App\Http\Controllers\Projects\ManualDownloadController;
+use App\Http\Controllers\Projects\ManualRenderController;
 use App\Http\Controllers\Projects\ManualScenarioController;
 use App\Http\Controllers\Projects\ProjectController;
 use App\Http\Controllers\Projects\ProjectMemberController;
@@ -381,6 +383,23 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
             // job 状態ポーリング ({analysisJob} は $manual->analysisJobs() 経由 = cross-manual 404)
             Route::get('/projects/{project}/manuals/{manual}/jobs/{analysisJob}', [ManualAnalysisController::class, 'show'])
                 ->name('projects.manuals.jobs.show');
+            // レンダ / プレビュー (チケット消費は render のみ。同一オリジン XHR/JSON。§10.3, §10.8)
+            Route::post('/projects/{project}/manuals/{manual}/render', [ManualRenderController::class, 'store'])
+                ->middleware('throttle:render-trigger')
+                ->name('projects.manuals.render');
+            Route::post('/projects/{project}/manuals/{manual}/preview', [ManualRenderController::class, 'preview'])
+                ->middleware('throttle:render-trigger')
+                ->name('projects.manuals.preview');
+            // レンダ job ポーリング (進捗のみ。成果物 URL は含めない = 権限分離。
+            // {renderJob} は $manual->renderJobs() 経由 = cross-manual 404)
+            Route::get('/projects/{project}/manuals/{manual}/render-jobs/{renderJob}', [ManualRenderController::class, 'show'])
+                ->name('projects.manuals.render-jobs.show');
+            // preview 再生 (render ability。最新 succeeded preview のみ 302)
+            Route::get('/projects/{project}/manuals/{manual}/render-jobs/{renderJob}/playback', [ManualRenderController::class, 'playback'])
+                ->name('projects.manuals.render-jobs.playback');
+            // 完成 mp4 ダウンロード (download ability。published + 最新 succeeded render のみ)
+            Route::get('/projects/{project}/manuals/{manual}/download', [ManualDownloadController::class, 'show'])
+                ->name('projects.manuals.download');
             Route::delete('/projects/{project}/manuals/{manual}', [VideoManualController::class, 'destroy'])
                 ->name('projects.manuals.destroy');
         });

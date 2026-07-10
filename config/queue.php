@@ -57,6 +57,19 @@ return [
             'after_commit' => false,
         ],
 
+        // レンダ専用 (RunManualRender)。retry_after は job timeout (1,500s) より長く
+        // 予約 TTL (1,800s) より短い (RenderTimeBudgetInvariantTest が連鎖を固定)。
+        // 運用契約: worker は `php artisan queue:work database-render` を必須登録
+        // (docs/architecture.md。滞留は render:recover-stale-jobs cron が回収)
+        'database-render' => [
+            'driver' => 'database',
+            'connection' => env('DB_QUEUE_CONNECTION'),
+            'table' => env('DB_QUEUE_TABLE', 'jobs'),
+            'queue' => 'render',
+            'retry_after' => 1680,
+            'after_commit' => false,
+        ],
+
         // メディア掃除専用 (DeleteTakeObjectsJob)。運用契約: worker は
         // `php artisan queue:work database-media` を必須登録 (docs/architecture.md)
         'database-media' => [

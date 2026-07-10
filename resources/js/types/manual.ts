@@ -124,6 +124,57 @@ export interface InsufficientTicketsBody {
     message: string;
 }
 
+/** PHP: App\Enums\Manual\RenderKind と対 (値集合同期テストあり = ManualEnumTsSyncInvariantTest) */
+export type RenderKind = "render" | "preview";
+
+/** PHP: App\Enums\Manual\RenderStep と対 (値集合同期テストあり) */
+export type RenderStep = "compose" | "concat";
+
+/** PHP: App\Enums\Manual\RenderErrorCode と対 (値集合同期テストあり。CTA 分岐はこの code で行う) */
+export type RenderErrorCode = "scenario_version_changed" | "timeout" | "internal";
+
+/** RenderStep の表示ラベル (RenderPanel の進捗表示) */
+export const RENDER_STEP_LABELS: Record<RenderStep, string> = {
+    compose: "カットを合成中",
+    concat: "動画を連結中",
+};
+
+/** PHP: RenderJobData::toArray() と対 (show props / ポーリング / トリガー 201 の共通 shape) */
+export interface RenderJobProps {
+    id: number;
+    kind: RenderKind;
+    status: AnalysisJobStatus; // JobStatus 共用 (queued|running|succeeded|failed)
+    step: RenderStep | null;
+    progress: number | null;
+    error: string | null;
+    error_code: RenderErrorCode | null;
+    manual_status: VideoManualStatus;
+}
+
+/** PHP: App\Enums\Manual\RenderConflictType と対 (値集合同期テストあり) */
+export type RenderConflictType =
+    | "in_flight"
+    | "status_not_renderable"
+    | "status_not_previewable"
+    | "org_preview_limit";
+
+/** PHP: RenderConflictResource と対 (render/preview 409 ボディ。code 厳格一致) */
+export interface RenderConflictBody {
+    code: "render_conflict";
+    conflict_type: RenderConflictType;
+    message: string;
+}
+
+/** PHP: VideoManualController::show の render props と対 */
+export interface RenderProps {
+    /** 最新 kind=render の job (無ければ null) */
+    job: RenderJobProps | null;
+    /** 最新 kind=preview の job (無ければ null) */
+    previewJob: RenderJobProps | null;
+    /** 再生可能な最新 succeeded preview の job id (無ければ null) */
+    playbackJobId: number | null;
+}
+
 /** PHP: App\Enums\Manual\ScenarioConflictType と対 (discriminated union) */
 export type ScenarioConflictType = "version_mismatch" | "rendering" | "analyzing";
 

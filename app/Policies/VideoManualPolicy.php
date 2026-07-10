@@ -58,4 +58,20 @@ class VideoManualPolicy
 
         return $project !== null && $this->projectPolicy->update($user, $project);
     }
+
+    /** レンダ/プレビューの実行: プロジェクトを操作できる人 (編集者)。撮影者は不可 (§10.5) */
+    public function render(User $user, VideoManual $manual): bool
+    {
+        $project = $manual->project;
+
+        return $project !== null && $this->projectPolicy->update($user, $project);
+    }
+
+    /** 完成動画のダウンロード: 編集者のみ (§10.5。ポーリングは view = 撮影者も可) */
+    public function download(User $user, VideoManual $manual): bool
+    {
+        $project = $manual->project;
+
+        return $project !== null && $this->projectPolicy->update($user, $project);
+    }
 }

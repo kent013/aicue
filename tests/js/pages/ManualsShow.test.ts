@@ -13,6 +13,7 @@ const baseProps = {
         created_at: "2026-07-10 12:00",
     },
     analysis: { job: null, hasDocument: false },
+    render: { job: null, previewJob: null, playbackJobId: null },
     canManage: true,
 };
 
