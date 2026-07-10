@@ -1,0 +1,6412 @@
+# T003 AI解析 実装レビュー (最終 impl-review Round 1)
+
+## アプリの使命 (North Star)
+
+**AI-CUE** は、現場に既にある**作業手順書(SOP)を起点に**、AI が撮るべきカットを設計した**動画シナリオ**を生成し、そのシナリオを**スマホ(PWA)でナビゲーション撮影**することで、専門知識ゼロの現場作業者でも**標準化されたマニュアル動画**を作れるようにする。
+
+- 「思考ゼロ・編集ゼロ」— 台本作成・撮影判断・編集の 3 ハードルを AI とナビ撮影で肩代わりする。
+- 競合(OJT を撮って形式化する tebiki)と異なり、**標準作業を起点に AI が教材設計し撮影を指示する**（撮影者・教える人のスキルに品質を依存させない）。
+- 熟練者の暗黙知を動画マニュアルという形式知へ変換する装置（SECI）。
+
+> **v1 スコープ**: 字幕のみ(TTS 後回し) / 撮影は PWA(同一オリジン・セッション認証) / 動画合成は自前 ffmpeg / 単一 Default Project。
+
+## 禁止事項
+
+1. テストなしの実装完了報告(不変条件は対応する Architecture/Feature テストへの登録まで含めて「実装済み」)
+2. PHPStan エラーの widen(型を緩めて黙らせる)・baseline 化
+3. dev DB への破壊操作(`migrate:fresh` 等)をエージェント判断で実行すること
+4. `response()->json()` の直書き(DTO / JsonResource / Inertia を使う。仕様固定 endpoint のみ例外)
+5. LLM 呼び出しの Prism 直呼び(`app/Prompts/` の factory 経由のみ。PromptGuardrailTest が検出)
+6. prompt 文字列のコード直書き(`resources/prompts/*.yaml` に置く)
+7. 操作系 POST の応答での `redirect()->intended()`(ログイン直後フロー専用。招待送信等は `back()->with(...)` で完結させる)
+8. 必須条件未充足を理由にボタンを disabled にする UI(押下時にエラー表示する。DESIGN.md)
+
+## 思考原則 — 全議論に適用
+
+まず仮説を立てろ。何を検証したいのか、なぜそう考えるのか、どうなれば成功と判断するのかを明確にしてから手を動かせ。仮説なき改善はただの試行錯誤であり、結果から学ぶことができない。
+
+データに真摯に向き合え。成果だけでなく、多様性の変化、構造の揺らぎ、想定外のパターン — 全てが判断材料になる。数値を見て即座に閾値を弄るな。何が起きているのかを理解し、なぜそうなったのかを考え、どの方向に進むべきかを判断してから手を動かせ。
+
+先人の知恵を探せ。自分たちだけで登る必要はない。乗るべき巨人の肩があるなら乗れ。
+
+機能の名前に立ち返れ。名前はその機能が果たすべき役割を示している。現在の設計がその役割を果たしているか、常に問え。
+
+仕組みが機能していない段階で値を弄るな。閾値チューニングやフィールド追加は、設計の方向性が正しいと確認できてから行え。方向性が間違っているなら、値をいくら調整しても意味はない。設計そのものを見直せ。成果が出なければ早期に見切り、次の仮説へ進め。
+
+## ツール使用制限
+
+コマンド実行・ファイル書き込みは一切行わず、提供されたテキストの分析に集中すること。ファイル読み込みは許可。
+
+---
+
+## あなたの役割 (system)
+
+あなたはシニア Laravel 12 / Svelte 5 エンジニアとして、TODO T003「AI解析 (SOP→作業分解→シナリオ生成→Cut materialize)」の main マージ直前の最終実装レビューを行う。
+
+- 対象ブランチ: `todo/T003`(worktree: `/workspace/.claude/worktrees/tasks/T003`)
+- main との全差分: `/workspace/devnotes/20260711-0137-ai-analysis/codex-history/impl-review-diff-round-1.patch`(76 files, +5403/-116)
+- 実装ファイルの現物は worktree パス配下を直接読んでよい
+- 設計ドキュメント: `/workspace/devnotes/20260711-0137-ai-analysis/detailed-design.md`
+
+### 直前の 3 観点レビューで検出済み・修正済みの Warning(再確認対象)
+
+1. `AnalysisPanel.svelte` のポーリング $effect が `currentJob` を反応的に読み、running 応答毎に effect が破棄→再構築されてタイトループ化する問題 → `pollJobId` derived に依存を狭める修正 + フェイクタイマーの回帰 vitest を追加済み
+2. `docs/template-divergence.md` D1 が SourceDocument を「route/Controller/UI なし」と現在形で記述する陳腐化 → Cut/Take のみに限定し SourceDocument の卒業を明記する更新済み
+
+### レビュー観点
+
+1. **正確性・並行制御**: チケット 2 フェーズ(reserve→commit/release)、terminal トランザクションでの materialize+commit+succeeded の原子化、`lockForUpdate()` 共有ロック規約(AGENTS.md ドメイン固有規約 1)への準拠、analyze の冪等(in-flight 1 つ)、stale job 回復
+2. **セキュリティ不変条件**: nested route の認可前 404、tenant キー不信、UserInput 型経由の prompt 挿入、cross-org 遮断
+3. **テスト網羅**: 不変条件が Architecture/Feature テストに登録されているか
+4. **禁止事項違反の有無**(上記 8 項目)
+5. 上記 2 件の修正が妥当か(新たな問題を持ち込んでいないか)
+
+### 出力形式
+
+以下の形式で日本語で出力すること:
+
+```
+## Critical(マージ阻止。修正必須)
+- [C1] {ファイル}: {問題} / {根拠} / {修正案}
+(なければ「なし」)
+
+## Warning(マージ可だが対応推奨)
+- [W1] ...
+
+## Suggestion(任意)
+- [S1] ...
+
+## 総評
+{マージ可否の判断と根拠}
+```
+
+推測で断定しない。指摘には必ずファイルパスと根拠(実際に読んだコード)を付けること。
+
+---
+
+## データ (user) — 差分全文を以下に貼付する
+
+
+
+
+以下の unified diff (main..todo/T003 全文) を読み、最終レビューを実施せよ。ファイル読み込みが不可の場合もこの diff 全文のみで判定すること。
+
+```diff
+diff --git a/AGENTS.md b/AGENTS.md
+index 30a2ae3..604e1b7 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -178,7 +178,9 @@ ## ドメイン固有規約
+ 
+ 1. **シナリオ整合の共有ロック規約**: `cuts` / `video_manuals.scenario_version` /
+    `video_manuals.status` を書き込む全経路は、対象 VideoManual 行を `lockForUpdate()` で
+-   取得した同一トランザクション内で反映する (準拠実装: `Manual/ScenarioService::save()`。
+-   後続の AI 解析 materialize / RenderJob 状態遷移 / テイク採用 API も同規約に従う。
+-   書き込み経路が 2 つ以上になった時点で経路 inventory を持つ Architecture テストへ昇格する。
++   取得した同一トランザクション内で反映する (準拠実装: `Manual/ScenarioService::save()` /
++   `Manual/ScenarioService::materializeIntoLockedManual()` / `Manual/AnalysisJobService::trigger()` /
++   `Manual/AnalysisJobService::failJob()`。経路 inventory は **`ScenarioWritePathInventoryTest`
++   (Architecture テスト) へ昇格済み** = 新しい書き込み経路は inventory 登録が必須。
++   後続の RenderJob 状態遷移 / テイク採用 API も同規約に従う。
+    詳細は `docs/architecture.md` §シナリオ整合の共有不変条件)
+diff --git a/app/DataTransferObjects/Manual/Analysis/ExtractedSopData.php b/app/DataTransferObjects/Manual/Analysis/ExtractedSopData.php
+new file mode 100644
+index 0000000..0b0ba7a
+--- /dev/null
++++ b/app/DataTransferObjects/Manual/Analysis/ExtractedSopData.php
+@@ -0,0 +1,139 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\DataTransferObjects\Manual\Analysis;
++
++use App\Support\Manual\LlmJson;
++use App\Support\Manual\ScenarioLimits;
++
++/**
++ * sop-extract プロンプトの統一 JSON (doc/03 §3.4 unified スキーマ) の検証済み DTO。
++ * `{ header: object, sections: [{ title: string|null, steps: [{ no, work_process,
++ *   work_points[], safety_points[], quality_points[], pm_points[] }] }] }`
++ *
++ * 次段 (work-decomposition) へは toJsonString() で正規化 JSON を渡す。
++ * source_documents.extracted_json へは toArray() を write-only 保存する (監査スナップショット)。
++ */
++final readonly class ExtractedSopData
++{
++    /**
++     * @param  array<string, mixed>  $header
++     * @param  list<array{title: string|null, steps: list<array{no: int, work_process: string,
++     *   work_points: list<string>, safety_points: list<string>, quality_points: list<string>,
++     *   pm_points: list<string>}>}>  $sections
++     */
++    public function __construct(
++        public array $header,
++        public array $sections,
++    ) {}
++
++    public static function fromLlmText(string $text): self
++    {
++        $decoded = LlmJson::decode($text);
++
++        $header = $decoded['header'] ?? [];
++        if (! is_array($header)) {
++            throw LlmJson::schemaViolation('header は object でなければなりません');
++        }
++        /** @var array<string, mixed> $header */
++        $rawSections = $decoded['sections'] ?? null;
++        if (! is_array($rawSections) || ! array_is_list($rawSections)) {
++            throw LlmJson::schemaViolation('sections は配列でなければなりません');
++        }
++
++        $sections = [];
++        $totalSteps = 0;
++        foreach ($rawSections as $index => $rawSection) {
++            if (! is_array($rawSection)) {
++                throw LlmJson::schemaViolation("sections.{$index} は object でなければなりません");
++            }
++            $title = $rawSection['title'] ?? null;
++            if ($title !== null && ! is_string($title)) {
++                throw LlmJson::schemaViolation("sections.{$index}.title は文字列または null でなければなりません");
++            }
++            $rawSteps = $rawSection['steps'] ?? null;
++            if (! is_array($rawSteps) || ! array_is_list($rawSteps)) {
++                throw LlmJson::schemaViolation("sections.{$index}.steps は配列でなければなりません");
++            }
++
++            $steps = [];
++            foreach ($rawSteps as $stepIndex => $rawStep) {
++                $steps[] = self::validateStep($rawStep, "sections.{$index}.steps.{$stepIndex}");
++                $totalSteps++;
++            }
++            $sections[] = ['title' => $title, 'steps' => $steps];
++        }
++
++        if ($totalSteps < 1) {
++            throw LlmJson::schemaViolation('手順が 1 件も抽出されていません');
++        }
++        // 有界性: 後段の作業分解が有界でも入力段で暴走させない (steps 総数を上限で打ち切らず拒否)
++        if ($totalSteps > ScenarioLimits::MAX_STEPS * (1 + ScenarioLimits::MAX_POINTS_PER_STEP)) {
++            throw LlmJson::schemaViolation('抽出手順数が上限を超えています');
++        }
++
++        return new self($header, $sections);
++    }
++
++    /**
++     * @return array{no: int, work_process: string, work_points: list<string>,
++     *   safety_points: list<string>, quality_points: list<string>, pm_points: list<string>}
++     */
++    private static function validateStep(mixed $rawStep, string $path): array
++    {
++        if (! is_array($rawStep)) {
++            throw LlmJson::schemaViolation("{$path} は object でなければなりません");
++        }
++        $no = $rawStep['no'] ?? null;
++        if (! is_int($no)) {
++            throw LlmJson::schemaViolation("{$path}.no は整数でなければなりません");
++        }
++        $workProcess = $rawStep['work_process'] ?? null;
++        if (! is_string($workProcess) || trim($workProcess) === '') {
++            throw LlmJson::schemaViolation("{$path}.work_process は非空文字列でなければなりません");
++        }
++
++        $lists = [];
++        foreach (['work_points', 'safety_points', 'quality_points', 'pm_points'] as $key) {
++            $raw = $rawStep[$key] ?? [];
++            if (! is_array($raw) || ! array_is_list($raw)) {
++                throw LlmJson::schemaViolation("{$path}.{$key} は配列でなければなりません");
++            }
++            $items = [];
++            foreach ($raw as $item) {
++                if (! is_string($item)) {
++                    throw LlmJson::schemaViolation("{$path}.{$key} の要素は文字列でなければなりません");
++                }
++                $items[] = $item;
++            }
++            $lists[$key] = $items;
++        }
++
++        return [
++            'no' => $no,
++            'work_process' => $workProcess,
++            'work_points' => $lists['work_points'],
++            'safety_points' => $lists['safety_points'],
++            'quality_points' => $lists['quality_points'],
++            'pm_points' => $lists['pm_points'],
++        ];
++    }
++
++    /** 次段プロンプトへ渡す正規化 JSON */
++    public function toJsonString(): string
++    {
++        return json_encode($this->toArray(), JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
++    }
++
++    /**
++     * @return array<string, mixed> extracted_json 保存用
++     */
++    public function toArray(): array
++    {
++        return [
++            'header' => $this->header,
++            'sections' => $this->sections,
++        ];
++    }
++}
+diff --git a/app/DataTransferObjects/Manual/Analysis/ExtractedText.php b/app/DataTransferObjects/Manual/Analysis/ExtractedText.php
+new file mode 100644
+index 0000000..47630b5
+--- /dev/null
++++ b/app/DataTransferObjects/Manual/Analysis/ExtractedText.php
+@@ -0,0 +1,18 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\DataTransferObjects\Manual\Analysis;
++
++/**
++ * SOP からの抽出テキスト (SopTextExtractor の出力値オブジェクト)。
++ * byteLength は strlen (UTF-8 bytes) = token budget 判定値 (config manual.analysis_max_text_bytes)。
++ */
++final readonly class ExtractedText
++{
++    public function __construct(
++        public string $text,
++        public int $byteLength,
++        public string $sourceKind, // pdf | spreadsheet | plain (診断用)
++    ) {}
++}
+diff --git a/app/DataTransferObjects/Manual/Analysis/GeneratedScenarioData.php b/app/DataTransferObjects/Manual/Analysis/GeneratedScenarioData.php
+new file mode 100644
+index 0000000..74eb06a
+--- /dev/null
++++ b/app/DataTransferObjects/Manual/Analysis/GeneratedScenarioData.php
+@@ -0,0 +1,215 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\DataTransferObjects\Manual\Analysis;
++
++use App\DataTransferObjects\Manual\ScenarioPointInput;
++use App\DataTransferObjects\Manual\ScenarioStepInput;
++use App\Enums\Manual\ShotType;
++use App\Support\Manual\LlmJson;
++use App\Support\Manual\ScenarioLimits;
++
++/**
++ * scenario-generation プロンプトの出力 (`{ cuts: [...] }`) の検証済み DTO。
++ *
++ * cuts 行スキーマ: { no: int, type: "step"|"point", parent_no: int|null, scene: string,
++ *   shot_type: "hiki"|"yori", shooting_point: string|null, narration: string,
++ *   subtitle_primary: string|null, subtitle_secondary: string }
++ *
++ * 検証 (違反は LlmOutputInvalidException → 有界リトライ):
++ * - type=step は parent_no null / type=point は既出 step の no を参照 (無参照・前方参照は不正)
++ * - 文字数上限・steps/points 有界性は ScenarioLimits と同値 (手動保存と同じ有界性)
++ *
++ * toScenarioSteps() で手動保存と同じ入力型 (ScenarioStepInput / ScenarioPointInput、
++ * id=null の新規のみ) に変換して materialize へ渡す (生成物と手動編集の合流点)。
++ */
++final readonly class GeneratedScenarioData
++{
++    /** @param list<ScenarioStepInput> $steps */
++    public function __construct(public array $steps) {}
++
++    public static function fromLlmText(string $text): self
++    {
++        $decoded = LlmJson::decode($text);
++
++        $rawCuts = $decoded['cuts'] ?? null;
++        if (! is_array($rawCuts) || ! array_is_list($rawCuts)) {
++            throw LlmJson::schemaViolation('cuts は配列でなければなりません');
++        }
++        if (count($rawCuts) < 1) {
++            throw LlmJson::schemaViolation('cuts は 1 件以上でなければなりません');
++        }
++
++        /** @var array<int, array{step: ScenarioStepInput, points: list<ScenarioPointInput>}> $stepsByNo */
++        $stepsByNo = [];
++        /** @var list<int> $stepOrder */
++        $stepOrder = [];
++        foreach ($rawCuts as $index => $rawCut) {
++            if (! is_array($rawCut)) {
++                throw LlmJson::schemaViolation("cuts.{$index} は object でなければなりません");
++            }
++
++            $no = $rawCut['no'] ?? null;
++            if (! is_int($no)) {
++                throw LlmJson::schemaViolation("cuts.{$index}.no は整数でなければなりません");
++            }
++            $type = $rawCut['type'] ?? null;
++            if ($type !== 'step' && $type !== 'point') {
++                throw LlmJson::schemaViolation("cuts.{$index}.type は step または point でなければなりません");
++            }
++            $parentNo = $rawCut['parent_no'] ?? null;
++            if ($parentNo !== null && ! is_int($parentNo)) {
++                throw LlmJson::schemaViolation("cuts.{$index}.parent_no は整数または null でなければなりません");
++            }
++
++            $fields = self::validateCutFields($rawCut, "cuts.{$index}");
++
++            if ($type === 'step') {
++                if ($parentNo !== null) {
++                    throw LlmJson::schemaViolation("cuts.{$index}: step は parent_no を持てません");
++                }
++                if (isset($stepsByNo[$no])) {
++                    throw LlmJson::schemaViolation("cuts.{$index}: step no {$no} が重複しています");
++                }
++                if (count($stepOrder) >= ScenarioLimits::MAX_STEPS) {
++                    throw LlmJson::schemaViolation('steps が上限 ('.ScenarioLimits::MAX_STEPS.') を超えています');
++                }
++                $stepsByNo[$no] = [
++                    'step' => new ScenarioStepInput(
++                        id: null,
++                        scene: $fields['scene'],
++                        shotType: $fields['shotType'],
++                        shootingPoint: $fields['shootingPoint'],
++                        narration: $fields['narration'],
++                        subtitlePrimary: $fields['subtitlePrimary'],
++                        subtitleSecondary: $fields['subtitleSecondary'],
++                        materialType: null,
++                        staticDisplaySeconds: null,
++                        points: [],
++                    ),
++                    'points' => [],
++                ];
++                $stepOrder[] = $no;
++
++                continue;
++            }
++
++            // type=point: 既出 step の no を参照 (無参照・前方参照は不正)
++            if ($parentNo === null || ! isset($stepsByNo[$parentNo])) {
++                throw LlmJson::schemaViolation("cuts.{$index}: point の parent_no が既出 step を参照していません");
++            }
++            if (count($stepsByNo[$parentNo]['points']) >= ScenarioLimits::MAX_POINTS_PER_STEP) {
++                throw LlmJson::schemaViolation("cuts.{$index}: step {$parentNo} の points が上限 (".ScenarioLimits::MAX_POINTS_PER_STEP.') を超えています');
++            }
++            $stepsByNo[$parentNo]['points'][] = new ScenarioPointInput(
++                id: null,
++                scene: $fields['scene'],
++                shotType: $fields['shotType'],
++                shootingPoint: $fields['shootingPoint'],
++                narration: $fields['narration'],
++                subtitlePrimary: $fields['subtitlePrimary'],
++                subtitleSecondary: $fields['subtitleSecondary'],
++                materialType: null,
++                staticDisplaySeconds: null,
++            );
++        }
++
++        $steps = [];
++        foreach ($stepOrder as $no) {
++            $entry = $stepsByNo[$no];
++            $base = $entry['step'];
++            $steps[] = new ScenarioStepInput(
++                id: null,
++                scene: $base->scene,
++                shotType: $base->shotType,
++                shootingPoint: $base->shootingPoint,
++                narration: $base->narration,
++                subtitlePrimary: $base->subtitlePrimary,
++                subtitleSecondary: $base->subtitleSecondary,
++                materialType: null,
++                staticDisplaySeconds: null,
++                points: $entry['points'],
++            );
++        }
++
++        return new self($steps);
++    }
++
++    /**
++     * cut 1 行の本文フィールド検証 (step / point 共通)。null 許容の narration /
++     * subtitle_secondary は '' へ正規化する (DB NOT NULL。手動保存の正規化と同じ責務)。
++     *
++     * @param  array<array-key, mixed>  $rawCut
++     * @return array{scene: string, shotType: ShotType, shootingPoint: string|null,
++     *   narration: string, subtitlePrimary: string|null, subtitleSecondary: string}
++     */
++    private static function validateCutFields(array $rawCut, string $path): array
++    {
++        $scene = $rawCut['scene'] ?? null;
++        if (! is_string($scene) || trim($scene) === '') {
++            throw LlmJson::schemaViolation("{$path}.scene は非空文字列でなければなりません");
++        }
++        if (mb_strlen($scene) > ScenarioLimits::MAX_SCENE_CHARS) {
++            throw LlmJson::schemaViolation("{$path}.scene が文字数上限を超えています");
++        }
++
++        $shotType = $rawCut['shot_type'] ?? null;
++        if (! is_string($shotType) || ShotType::tryFrom($shotType) === null) {
++            throw LlmJson::schemaViolation("{$path}.shot_type は hiki または yori でなければなりません");
++        }
++
++        $shootingPoint = $rawCut['shooting_point'] ?? null;
++        if ($shootingPoint !== null && ! is_string($shootingPoint)) {
++            throw LlmJson::schemaViolation("{$path}.shooting_point は文字列または null でなければなりません");
++        }
++        if (is_string($shootingPoint) && mb_strlen($shootingPoint) > ScenarioLimits::MAX_SCENE_CHARS) {
++            throw LlmJson::schemaViolation("{$path}.shooting_point が文字数上限を超えています");
++        }
++
++        $narration = $rawCut['narration'] ?? null;
++        if ($narration !== null && ! is_string($narration)) {
++            throw LlmJson::schemaViolation("{$path}.narration は文字列または null でなければなりません");
++        }
++        $narration ??= '';
++        if (mb_strlen($narration) > ScenarioLimits::MAX_NARRATION_CHARS) {
++            throw LlmJson::schemaViolation("{$path}.narration が文字数上限を超えています");
++        }
++
++        $subtitlePrimary = $rawCut['subtitle_primary'] ?? null;
++        if ($subtitlePrimary !== null && ! is_string($subtitlePrimary)) {
++            throw LlmJson::schemaViolation("{$path}.subtitle_primary は文字列または null でなければなりません");
++        }
++        if (is_string($subtitlePrimary) && mb_strlen($subtitlePrimary) > ScenarioLimits::MAX_SUBTITLE_PRIMARY_CHARS) {
++            throw LlmJson::schemaViolation("{$path}.subtitle_primary が文字数上限を超えています");
++        }
++
++        $subtitleSecondary = $rawCut['subtitle_secondary'] ?? null;
++        if ($subtitleSecondary !== null && ! is_string($subtitleSecondary)) {
++            throw LlmJson::schemaViolation("{$path}.subtitle_secondary は文字列または null でなければなりません");
++        }
++        $subtitleSecondary ??= '';
++        if (mb_strlen($subtitleSecondary) > ScenarioLimits::MAX_SUBTITLE_SECONDARY_CHARS) {
++            throw LlmJson::schemaViolation("{$path}.subtitle_secondary が文字数上限を超えています");
++        }
++
++        return [
++            'scene' => $scene,
++            'shotType' => ShotType::from($shotType),
++            'shootingPoint' => $shootingPoint,
++            'narration' => $narration,
++            'subtitlePrimary' => $subtitlePrimary,
++            'subtitleSecondary' => $subtitleSecondary,
++        ];
++    }
++
++    /**
++     * materialize 入力 (id=null, materialType=null, staticDisplaySeconds=null の新規のみ)。
++     *
++     * @return list<ScenarioStepInput>
++     */
++    public function toScenarioSteps(): array
++    {
++        return $this->steps;
++    }
++}
+diff --git a/app/DataTransferObjects/Manual/Analysis/WorkDecompositionData.php b/app/DataTransferObjects/Manual/Analysis/WorkDecompositionData.php
+new file mode 100644
+index 0000000..d1a9e09
+--- /dev/null
++++ b/app/DataTransferObjects/Manual/Analysis/WorkDecompositionData.php
+@@ -0,0 +1,87 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\DataTransferObjects\Manual\Analysis;
++
++use App\Support\Manual\LlmJson;
++use App\Support\Manual\ScenarioLimits;
++
++/**
++ * work-decomposition プロンプトの出力 (`{ steps: [{ no, action, points[] }] }`) の検証済み DTO。
++ * 有界性 (steps 1..100 / points 0..20) は ScenarioLimits と同値 = 手動保存と同じ上限。
++ * analysis_jobs.result_json へは toArray() を write-only 保存する (監査スナップショット)。
++ */
++final readonly class WorkDecompositionData
++{
++    /** @param list<WorkDecompositionStepData> $steps */
++    public function __construct(public array $steps) {}
++
++    public static function fromLlmText(string $text): self
++    {
++        $decoded = LlmJson::decode($text);
++
++        $rawSteps = $decoded['steps'] ?? null;
++        if (! is_array($rawSteps) || ! array_is_list($rawSteps)) {
++            throw LlmJson::schemaViolation('steps は配列でなければなりません');
++        }
++        if (count($rawSteps) < 1) {
++            throw LlmJson::schemaViolation('steps は 1 件以上でなければなりません');
++        }
++        if (count($rawSteps) > ScenarioLimits::MAX_STEPS) {
++            throw LlmJson::schemaViolation('steps が上限 ('.ScenarioLimits::MAX_STEPS.') を超えています');
++        }
++
++        $steps = [];
++        foreach ($rawSteps as $index => $rawStep) {
++            if (! is_array($rawStep)) {
++                throw LlmJson::schemaViolation("steps.{$index} は object でなければなりません");
++            }
++            $no = $rawStep['no'] ?? null;
++            if (! is_int($no)) {
++                throw LlmJson::schemaViolation("steps.{$index}.no は整数でなければなりません");
++            }
++            $action = $rawStep['action'] ?? null;
++            if (! is_string($action) || trim($action) === '') {
++                throw LlmJson::schemaViolation("steps.{$index}.action は非空文字列でなければなりません");
++            }
++            $rawPoints = $rawStep['points'] ?? [];
++            if (! is_array($rawPoints) || ! array_is_list($rawPoints)) {
++                throw LlmJson::schemaViolation("steps.{$index}.points は配列でなければなりません");
++            }
++            if (count($rawPoints) > ScenarioLimits::MAX_POINTS_PER_STEP) {
++                throw LlmJson::schemaViolation("steps.{$index}.points が上限 (".ScenarioLimits::MAX_POINTS_PER_STEP.') を超えています');
++            }
++            $points = [];
++            foreach ($rawPoints as $pointIndex => $rawPoint) {
++                if (! is_string($rawPoint) || trim($rawPoint) === '') {
++                    throw LlmJson::schemaViolation("steps.{$index}.points.{$pointIndex} は非空文字列でなければなりません");
++                }
++                $points[] = $rawPoint;
++            }
++
++            $steps[] = new WorkDecompositionStepData($no, $action, $points);
++        }
++
++        return new self($steps);
++    }
++
++    /** 次段プロンプトへ渡す正規化 JSON */
++    public function toJsonString(): string
++    {
++        return json_encode($this->toArray(), JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
++    }
++
++    /**
++     * @return array{steps: list<array{no: int, action: string, points: list<string>}>} result_json 保存用
++     */
++    public function toArray(): array
++    {
++        return [
++            'steps' => array_map(
++                static fn (WorkDecompositionStepData $step): array => $step->toArray(),
++                $this->steps,
++            ),
++        ];
++    }
++}
+diff --git a/app/DataTransferObjects/Manual/Analysis/WorkDecompositionStepData.php b/app/DataTransferObjects/Manual/Analysis/WorkDecompositionStepData.php
+new file mode 100644
+index 0000000..56b7d44
+--- /dev/null
++++ b/app/DataTransferObjects/Manual/Analysis/WorkDecompositionStepData.php
+@@ -0,0 +1,30 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\DataTransferObjects\Manual\Analysis;
++
++/**
++ * 作業分解表の 1 行 (1 動作 1 No + 急所)。doc/03 §3.3。
++ */
++final readonly class WorkDecompositionStepData
++{
++    /** @param list<string> $points */
++    public function __construct(
++        public int $no,
++        public string $action,
++        public array $points,
++    ) {}
++
++    /**
++     * @return array{no: int, action: string, points: list<string>}
++     */
++    public function toArray(): array
++    {
++        return [
++            'no' => $this->no,
++            'action' => $this->action,
++            'points' => $this->points,
++        ];
++    }
++}
+diff --git a/app/DataTransferObjects/Manual/AnalysisJobData.php b/app/DataTransferObjects/Manual/AnalysisJobData.php
+new file mode 100644
+index 0000000..3207835
+--- /dev/null
++++ b/app/DataTransferObjects/Manual/AnalysisJobData.php
+@@ -0,0 +1,56 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\DataTransferObjects\Manual;
++
++use App\Enums\Manual\AnalysisStep;
++use App\Enums\Manual\JobStatus;
++use App\Enums\Manual\VideoManualStatus;
++use App\Models\AnalysisJob;
++use App\Models\VideoManual;
++
++/**
++ * AnalysisJob の表示 shape (show props / ポーリング応答 / analyze 応答の共通 DTO)。
++ * manual_status を含めることでフロントは succeeded 時に ready を確認してリロードできる。
++ * TS 側 types/manual.ts の AnalysisJobProps と対で保守する。
++ */
++final readonly class AnalysisJobData
++{
++    public function __construct(
++        public int $id,
++        public JobStatus $status,
++        public ?AnalysisStep $step,
++        public ?int $progress,
++        public ?string $error,
++        public VideoManualStatus $manualStatus,
++    ) {}
++
++    public static function fromJob(AnalysisJob $job, VideoManual $manual): self
++    {
++        return new self(
++            id: $job->id,
++            status: $job->status,
++            step: $job->step,
++            progress: $job->progress,
++            error: $job->error,
++            manualStatus: $manual->status,
++        );
++    }
++
++    /**
++     * @return array{id: int, status: string, step: string|null, progress: int|null,
++     *   error: string|null, manual_status: string}
++     */
++    public function toArray(): array
++    {
++        return [
++            'id' => $this->id,
++            'status' => $this->status->value,
++            'step' => $this->step?->value,
++            'progress' => $this->progress,
++            'error' => $this->error,
++            'manual_status' => $this->manualStatus->value,
++        ];
++    }
++}
+diff --git a/app/Enums/Manual/AnalysisConflictType.php b/app/Enums/Manual/AnalysisConflictType.php
+new file mode 100644
+index 0000000..240f928
+--- /dev/null
++++ b/app/Enums/Manual/AnalysisConflictType.php
+@@ -0,0 +1,27 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\Enums\Manual;
++
++/**
++ * AI 解析トリガーが 409 になる理由の判別子 (doc/10 §10.8-8)。
++ * TS 側 types/manual.ts の AnalysisConflictType union と対で保守する。
++ */
++enum AnalysisConflictType: string
++{
++    /** queued/running の job が既に存在 (in-flight は同一 manual あたり 1 つ) */
++    case InFlight = 'in_flight';
++
++    /** status が analyzing/rendering/published (draft/ready のみ解析可) */
++    case StatusNotAnalyzable = 'status_not_analyzable';
++
++    /** UI 向け説明文 (サーバ側で確定しクライアントの文言分岐を減らす) */
++    public function message(): string
++    {
++        return match ($this) {
++            self::InFlight => 'AI 解析は既に実行中です。完了までお待ちください。',
++            self::StatusNotAnalyzable => '現在の状態では AI 解析を実行できません。解析・書き出しの完了後にお試しください。',
++        };
++    }
++}
+diff --git a/app/Enums/Manual/AnalysisStep.php b/app/Enums/Manual/AnalysisStep.php
+new file mode 100644
+index 0000000..993068f
+--- /dev/null
++++ b/app/Enums/Manual/AnalysisStep.php
+@@ -0,0 +1,16 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\Enums\Manual;
++
++/**
++ * AI 解析パイプラインの段 (doc/10 §10.1 step 列)。
++ * TS 側 types/manual.ts の AnalysisStep union と値集合を一致させる。
++ */
++enum AnalysisStep: string
++{
++    case Extract = 'extract';
++    case Decompose = 'decompose';
++    case Generate = 'generate';
++}
+diff --git a/app/Enums/Manual/JobStatus.php b/app/Enums/Manual/JobStatus.php
+new file mode 100644
+index 0000000..d6557b8
+--- /dev/null
++++ b/app/Enums/Manual/JobStatus.php
+@@ -0,0 +1,23 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\Enums\Manual;
++
++/**
++ * 解析/レンダジョブの状態 (doc/10 §10.2)。
++ * v1 は AnalysisJob が使用する (RenderJob は後続フェーズ)。
++ */
++enum JobStatus: string
++{
++    case Queued = 'queued';
++    case Running = 'running';
++    case Succeeded = 'succeeded';
++    case Failed = 'failed';
++
++    /** terminal (成否確定) か。failJob / recoverStale の guard に使う */
++    public function isTerminal(): bool
++    {
++        return $this === self::Succeeded || $this === self::Failed;
++    }
++}
+diff --git a/app/Enums/Manual/LlmOutputInvalidReason.php b/app/Enums/Manual/LlmOutputInvalidReason.php
+new file mode 100644
+index 0000000..7710836
+--- /dev/null
++++ b/app/Enums/Manual/LlmOutputInvalidReason.php
+@@ -0,0 +1,17 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\Enums\Manual;
++
++/**
++ * LLM 出力 JSON の検証失敗分類 (report ログで機械集計する。文字列 drift を型で防止)。
++ */
++enum LlmOutputInvalidReason: string
++{
++    /** JSON としてパースできない (切り詰め・コードフェンス外の説明文混入等) */
++    case InvalidJson = 'invalid_json';
++
++    /** JSON だがスキーマ違反 (必須キー欠落・型不一致・有界性違反・parent_no 不整合) */
++    case SchemaViolation = 'schema_violation';
++}
+diff --git a/app/Exceptions/Manual/AnalysisConflictException.php b/app/Exceptions/Manual/AnalysisConflictException.php
+new file mode 100644
+index 0000000..b2a3e0b
+--- /dev/null
++++ b/app/Exceptions/Manual/AnalysisConflictException.php
+@@ -0,0 +1,32 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\Exceptions\Manual;
++
++use App\Enums\Manual\AnalysisConflictType;
++use App\Http\Resources\Manual\AnalysisConflictResource;
++use Exception;
++use Illuminate\Http\JsonResponse;
++use Illuminate\Http\Request;
++
++/**
++ * AI 解析トリガーの競合 (409)。AnalysisJobService::trigger が投げ、render() が
++ * JsonResource 応答を返す (`response()->json()` 直書き禁止の遵守。
++ * ScenarioConflictException と同じ「code 厳格一致」構造)。
++ */
++final class AnalysisConflictException extends Exception
++{
++    public function __construct(
++        public readonly AnalysisConflictType $type,
++    ) {
++        parent::__construct($type->message());
++    }
++
++    public function render(Request $request): JsonResponse
++    {
++        return AnalysisConflictResource::make($this)
++            ->response($request)
++            ->setStatusCode(409);
++    }
++}
+diff --git a/app/Exceptions/Manual/AnalysisFailedException.php b/app/Exceptions/Manual/AnalysisFailedException.php
+new file mode 100644
+index 0000000..eb8101a
+--- /dev/null
++++ b/app/Exceptions/Manual/AnalysisFailedException.php
+@@ -0,0 +1,26 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\Exceptions\Manual;
++
++use RuntimeException;
++
++/**
++ * AI 解析の失敗 (ユーザー向けメッセージ付き)。AnalysisPipeline が投げ、
++ * catch 経路の failJob がメッセージをそのまま error 列に保存する。
++ */
++final class AnalysisFailedException extends RuntimeException
++{
++    /** テキスト抽出不能 (画像/スキャン手順書・破損・実質空・バイナリ) */
++    public static function unextractable(): self
++    {
++        return new self('テキストを抽出できません。画像・スキャンの手順書は現在未対応です。');
++    }
++
++    /** LLM 入力上限 (UTF-8 バイト) 超過 */
++    public static function tooLarge(): self
++    {
++        return new self('手順書が大きすぎます。分割してアップロードしてください。');
++    }
++}
+diff --git a/app/Exceptions/Manual/LlmOutputInvalidException.php b/app/Exceptions/Manual/LlmOutputInvalidException.php
+new file mode 100644
+index 0000000..98dc96e
+--- /dev/null
++++ b/app/Exceptions/Manual/LlmOutputInvalidException.php
+@@ -0,0 +1,29 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\Exceptions\Manual;
++
++use App\Enums\Manual\LlmOutputInvalidReason;
++use RuntimeException;
++
++/**
++ * LLM 出力 JSON の検証失敗 (有界リトライのトリガー。§10.7-2)。
++ * AnalysisPipeline::withBoundedRetry がこの例外のみリトライし、
++ * 上限到達で failJob (ユーザー向け文言) へ落とす。
++ */
++final class LlmOutputInvalidException extends RuntimeException
++{
++    public function __construct(
++        public readonly LlmOutputInvalidReason $reason,
++        string $detail,
++    ) {
++        parent::__construct("AI の応答を解釈できませんでした。再実行してください。({$reason->value}: {$detail})");
++    }
++
++    /** ユーザー向け要約 (内部 detail を error 列へ漏らさない) */
++    public function userMessage(): string
++    {
++        return 'AI の応答を解釈できませんでした。再実行してください。';
++    }
++}
+diff --git a/app/Http/Controllers/Projects/ManualAnalysisController.php b/app/Http/Controllers/Projects/ManualAnalysisController.php
+new file mode 100644
+index 0000000..0e2163f
+--- /dev/null
++++ b/app/Http/Controllers/Projects/ManualAnalysisController.php
+@@ -0,0 +1,63 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\Http\Controllers\Projects;
++
++use App\DataTransferObjects\Manual\AnalysisJobData;
++use App\Http\Concerns\ResolvesCurrentOrganization;
++use App\Http\Controllers\Controller;
++use App\Http\Requests\Projects\AnalyzeManualRequest;
++use App\Http\Resources\Manual\AnalysisJobResource;
++use App\Models\AnalysisJob;
++use App\Models\Project;
++use App\Models\VideoManual;
++use App\Services\Manual\AnalysisJobService;
++use Illuminate\Http\JsonResponse;
++use Illuminate\Http\Request;
++use Illuminate\Support\Facades\Gate;
++
++/**
++ * AI 解析のトリガー (store) と job 状態ポーリング (show)。doc/10 §10.3。
++ * 同一オリジン XHR (JSON 応答)。409/402 契約のため Inertia でなく JsonResource を返す。
++ *
++ * nested route の URL 整合は ManualScenarioController と同じ 2 層 (認可より前に 404):
++ * 1. {project} ∈ current org (resolveOrganizationProject = inline guard)
++ * 2. {manual} ∈ {project}、{analysisJob} ∈ {manual} (routes 側の Route::scopeBindings())
++ */
++class ManualAnalysisController extends Controller
++{
++    use ResolvesCurrentOrganization;
++
++    /** AI 解析トリガー (201 + AnalysisJobResource)。編集者のみ。保護キー直送は 422 */
++    public function store(AnalyzeManualRequest $request, Project $project, VideoManual $manual, AnalysisJobService $analysis): JsonResponse
++    {
++        $organization = $this->resolveCurrentOrganization($request);
++        // URL 整合 guard: 認可より前に 404 ({manual} ∈ {project} は scopeBindings が担保済み)
++        $this->resolveOrganizationProject($organization, $project);
++        Gate::authorize('analyze', $manual);
++
++        $job = $analysis->trigger($project, $manual);
++        $manual->refresh(); // trigger で analyzing へ遷移済み
++
++        return AnalysisJobResource::make(AnalysisJobData::fromJob($job, $manual))
++            ->response($request)
++            ->setStatusCode(201);
++    }
++
++    /** job 状態ポーリング (撮影者も read 可) */
++    public function show(Request $request, Project $project, VideoManual $manual, AnalysisJob $analysisJob): AnalysisJobResource
++    {
++        $organization = $this->resolveCurrentOrganization($request);
++        // URL 整合 guard: 認可より前に 404
++        $this->resolveOrganizationProject($organization, $project);
++        // {analysisJob} ∈ {manual} は scopeBindings が担保済み。inline 再検査は二重防御
++        // (oauthSessions controller の organization_id 再検査と同じ位置づけ)
++        if ($analysisJob->video_manual_id !== $manual->id) {
++            abort(404);
++        }
++        Gate::authorize('view', $manual);
++
++        return AnalysisJobResource::make(AnalysisJobData::fromJob($analysisJob, $manual));
++    }
++}
+diff --git a/app/Http/Controllers/Projects/SourceDocumentController.php b/app/Http/Controllers/Projects/SourceDocumentController.php
+new file mode 100644
+index 0000000..8bc1314
+--- /dev/null
++++ b/app/Http/Controllers/Projects/SourceDocumentController.php
+@@ -0,0 +1,43 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\Http\Controllers\Projects;
++
++use App\Http\Concerns\ResolvesCurrentOrganization;
++use App\Http\Controllers\Controller;
++use App\Http\Requests\Projects\StoreSourceDocumentRequest;
++use App\Models\Project;
++use App\Models\VideoManual;
++use App\Services\Manual\SourceDocumentService;
++use Illuminate\Http\RedirectResponse;
++use Illuminate\Support\Facades\Gate;
++
++/**
++ * SOP (SourceDocument) の後付けアップロード。追記型 immutable (更新・削除 route を持たない)。
++ *
++ * nested route の URL 整合は VideoManualController と同じ 2 層 (認可より前に 404):
++ * 1. {project} ∈ current org (resolveOrganizationProject = inline guard)
++ * 2. {manual} ∈ {project} (routes 側の Route::scopeBindings() = $project->manuals() 経由)
++ */
++class SourceDocumentController extends Controller
++{
++    use ResolvesCurrentOrganization;
++
++    /** アップロード (Inertia form。back + flash)。編集者のみ */
++    public function store(
++        StoreSourceDocumentRequest $request,
++        Project $project,
++        VideoManual $manual,
++        SourceDocumentService $documents,
++    ): RedirectResponse {
++        $organization = $this->resolveCurrentOrganization($request);
++        // URL 整合 guard: 認可より前に 404 ({manual} ∈ {project} は scopeBindings が担保済み)
++        $this->resolveOrganizationProject($organization, $project);
++        Gate::authorize('update', $manual);
++
++        $documents->storeForManual($project, $manual, $request->validatedDocument());
++
++        return back()->with('success', '手順書をアップロードしました');
++    }
++}
+diff --git a/app/Http/Controllers/Projects/VideoManualController.php b/app/Http/Controllers/Projects/VideoManualController.php
+index 1574ea0..25ed424 100644
+--- a/app/Http/Controllers/Projects/VideoManualController.php
++++ b/app/Http/Controllers/Projects/VideoManualController.php
+@@ -4,6 +4,7 @@
+ 
+ namespace App\Http\Controllers\Projects;
+ 
++use App\DataTransferObjects\Manual\AnalysisJobData;
+ use App\DataTransferObjects\Manual\ScenarioDocumentData;
+ use App\Http\Concerns\ResolvesCurrentOrganization;
+ use App\Http\Controllers\Controller;
+@@ -16,6 +17,7 @@
+ use App\Services\Manual\VideoManualService;
+ use Illuminate\Http\RedirectResponse;
+ use Illuminate\Http\Request;
++use Illuminate\Http\UploadedFile;
+ use Illuminate\Support\Facades\Gate;
+ use Inertia\Inertia;
+ use Inertia\Response;
+@@ -71,8 +73,11 @@ public function store(StoreVideoManualRequest $request, Project $project, VideoM
+         // 入力名は category (保護キー category_id とは別名)。null = 未分類
+         $category = $request->validated('category');
+         Assert::nullOrIntegerish($category);
++        // SOP 同時アップロード (任意)
++        $document = $request->validated('document');
++        Assert::nullOrIsInstanceOf($document, UploadedFile::class);
+ 
+-        $manual = $manuals->create($project, $title, $category === null ? null : (int) $category, $user->id);
++        $manual = $manuals->create($project, $title, $category === null ? null : (int) $category, $user->id, $document);
+ 
+         return redirect()
+             ->route('projects.manuals.show', [$project, $manual])
+@@ -106,6 +111,13 @@ public function show(Request $request, Project $project, VideoManual $manual): R
+                     : ['id' => $category->id, 'name' => $category->name],
+                 'created_at' => $manual->created_at?->format('Y-m-d H:i') ?? '',
+             ],
++            // AI 解析パネル (最新 job + 手順書有無)。AnalysisJobData::toArray() と対
++            'analysis' => [
++                'job' => ($latest = $manual->analysisJobs()->latest('id')->first()) === null
++                    ? null
++                    : AnalysisJobData::fromJob($latest, $manual)->toArray(),
++                'hasDocument' => $manual->sourceDocuments()->exists(),
++            ],
+             'canManage' => $user->can('update', $manual),
+         ]);
+     }
+diff --git a/app/Http/Requests/Projects/AnalyzeManualRequest.php b/app/Http/Requests/Projects/AnalyzeManualRequest.php
+new file mode 100644
+index 0000000..e546919
+--- /dev/null
++++ b/app/Http/Requests/Projects/AnalyzeManualRequest.php
+@@ -0,0 +1,31 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\Http\Requests\Projects;
++
++use App\Http\Requests\Concerns\ProhibitsProtectedKeys;
++use Illuminate\Foundation\Http\FormRequest;
++
++/**
++ * AI 解析トリガー (POST .../analyze)。本 endpoint は入力を受けない
++ * (解析対象 SOP・チケット・org は全てサーバ導出) ため、
++ * 保護キーの missing rule のみ張る (ticket_reservation_id 等の直送は 422)。
++ */
++class AnalyzeManualRequest extends FormRequest
++{
++    use ProhibitsProtectedKeys;
++
++    public function authorize(): bool
++    {
++        return true;
++    }
++
++    /**
++     * @return array<string, list<mixed>>
++     */
++    public function rules(): array
++    {
++        return $this->protectedKeyMissingRules();
++    }
++}
+diff --git a/app/Http/Requests/Projects/StoreSourceDocumentRequest.php b/app/Http/Requests/Projects/StoreSourceDocumentRequest.php
+new file mode 100644
+index 0000000..a7534c1
+--- /dev/null
++++ b/app/Http/Requests/Projects/StoreSourceDocumentRequest.php
+@@ -0,0 +1,62 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\Http\Requests\Projects;
++
++use App\Http\Requests\Concerns\ProhibitsProtectedKeys;
++use Illuminate\Foundation\Http\FormRequest;
++use Illuminate\Http\UploadedFile;
++use Webmozart\Assert\Assert;
++
++/**
++ * SOP (SourceDocument) の後付けアップロード (POST .../manuals/{manual}/source-documents)。
++ * 追記型 immutable (差し替え = 新規行)。保護キー (video_manual_id 等) は missing で 422。
++ * mime rule は拡張子ベースの入口検証で、保存時に Service が内容 sniff で再判定する (二段構え)。
++ */
++class StoreSourceDocumentRequest extends FormRequest
++{
++    use ProhibitsProtectedKeys;
++
++    public function authorize(): bool
++    {
++        return true;
++    }
++
++    /**
++     * @return array<string, list<mixed>>
++     */
++    public function rules(): array
++    {
++        return array_merge([
++            'document' => [
++                'required',
++                'file',
++                'mimes:'.implode(',', $this->allowedExtensions()),
++                'max:'.intdiv(config()->integer('manual.source_document_max_bytes'), 1024), // KB 単位
++            ],
++        ], $this->protectedKeyMissingRules());
++    }
++
++    /**
++     * 許可拡張子 (config manual.source_document_mimes) を list<string> へ narrow する。
++     *
++     * @return list<string>
++     */
++    private function allowedExtensions(): array
++    {
++        $mimes = config()->array('manual.source_document_mimes');
++        Assert::allString($mimes);
++
++        return array_values($mimes);
++    }
++
++    /** validated('document') を UploadedFile へ narrow するヘルパ (mixed を返さない) */
++    public function validatedDocument(): UploadedFile
++    {
++        $file = $this->validated('document');
++        Assert::isInstanceOf($file, UploadedFile::class);
++
++        return $file;
++    }
++}
+diff --git a/app/Http/Requests/Projects/StoreVideoManualRequest.php b/app/Http/Requests/Projects/StoreVideoManualRequest.php
+index 9201f64..2972900 100644
+--- a/app/Http/Requests/Projects/StoreVideoManualRequest.php
++++ b/app/Http/Requests/Projects/StoreVideoManualRequest.php
+@@ -8,6 +8,7 @@
+ use App\Models\Project;
+ use Illuminate\Foundation\Http\FormRequest;
+ use Illuminate\Validation\Rule;
++use Webmozart\Assert\Assert;
+ 
+ /**
+  * VideoManual 作成。
+@@ -41,6 +42,26 @@ public function rules(): array
+                 'integer',
+                 Rule::exists('categories', 'id')->where('project_id', $projectId),
+             ],
++            // SOP 同時アップロード (任意。multipart)。保存時は Service が内容 sniff で再判定する
++            'document' => [
++                'nullable',
++                'file',
++                'mimes:'.implode(',', $this->allowedExtensions()),
++                'max:'.intdiv(config()->integer('manual.source_document_max_bytes'), 1024), // KB 単位
++            ],
+         ], $this->protectedKeyMissingRules());
+     }
++
++    /**
++     * 許可拡張子 (config manual.source_document_mimes) を list<string> へ narrow する。
++     *
++     * @return list<string>
++     */
++    private function allowedExtensions(): array
++    {
++        $mimes = config()->array('manual.source_document_mimes');
++        Assert::allString($mimes);
++
++        return array_values($mimes);
++    }
+ }
+diff --git a/app/Http/Requests/Projects/UpdateScenarioRequest.php b/app/Http/Requests/Projects/UpdateScenarioRequest.php
+index 7899278..d596352 100644
+--- a/app/Http/Requests/Projects/UpdateScenarioRequest.php
++++ b/app/Http/Requests/Projects/UpdateScenarioRequest.php
+@@ -10,6 +10,7 @@
+ use App\Enums\Manual\MaterialType;
+ use App\Enums\Manual\ShotType;
+ use App\Http\Requests\Concerns\ProhibitsProtectedKeys;
++use App\Support\Manual\ScenarioLimits;
+ use App\Support\Security\MassAssignmentProtectedKeys;
+ use Illuminate\Foundation\Http\FormRequest;
+ use Illuminate\Validation\Rule;
+@@ -29,11 +30,6 @@ class UpdateScenarioRequest extends FormRequest
+ {
+     use ProhibitsProtectedKeys;
+ 
+-    /** 有界入力 (DoS guard)。仕様確定までの暫定値 */
+-    private const int MAX_STEPS = 100;
+-
+-    private const int MAX_POINTS_PER_STEP = 20;
+-
+     public function authorize(): bool
+     {
+         return true;
+@@ -82,10 +78,10 @@ public function rules(): array
+         return array_merge(
+             [
+                 'expected_version' => ['required', 'integer', 'min:0'],
+-                'steps' => ['present', 'array', 'max:'.self::MAX_STEPS],
++                'steps' => ['present', 'array', 'max:'.ScenarioLimits::MAX_STEPS],
+                 // points キー欠落はクライアント直列化バグ。行単位で明示エラーにする
+                 'steps.*' => ['array', 'required_array_keys:points'],
+-                'steps.*.points' => ['present', 'array', 'max:'.self::MAX_POINTS_PER_STEP],
++                'steps.*.points' => ['present', 'array', 'max:'.ScenarioLimits::MAX_POINTS_PER_STEP],
+                 'steps.*.points.*' => ['array'],
+             ],
+             $this->cutRowRules('steps.*'),
+diff --git a/app/Http/Resources/Billing/InsufficientTicketsResource.php b/app/Http/Resources/Billing/InsufficientTicketsResource.php
+new file mode 100644
+index 0000000..3fe5e5b
+--- /dev/null
++++ b/app/Http/Resources/Billing/InsufficientTicketsResource.php
+@@ -0,0 +1,36 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\Http\Resources\Billing;
++
++use App\Exceptions\Billing\InsufficientTicketsException;
++use Illuminate\Http\Request;
++use Illuminate\Http\Resources\Json\JsonResource;
++
++/**
++ * チケット残高不足の 402 ボディ ({ code, message })。XHR (analyze 等) 専用契約。
++ * code 厳格一致でクライアントが自分宛て応答のみ処理する (analysis_conflict と同方式)。
++ * TS 側 types/manual.ts の InsufficientTicketsBody と対で保守する。
++ *
++ * @property-read InsufficientTicketsException $resource
++ */
++final class InsufficientTicketsResource extends JsonResource
++{
++    /** 402 契約の判別子 */
++    public const string CODE = 'insufficient_tickets';
++
++    /** @var string|null */
++    public static $wrap = null;
++
++    /**
++     * @return array{code: 'insufficient_tickets', message: string}
++     */
++    public function toArray(Request $request): array
++    {
++        return [
++            'code' => self::CODE,
++            'message' => $this->resource->getMessage(),
++        ];
++    }
++}
+diff --git a/app/Http/Resources/Manual/AnalysisConflictResource.php b/app/Http/Resources/Manual/AnalysisConflictResource.php
+new file mode 100644
+index 0000000..87756df
+--- /dev/null
++++ b/app/Http/Resources/Manual/AnalysisConflictResource.php
+@@ -0,0 +1,37 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\Http\Resources\Manual;
++
++use App\Exceptions\Manual\AnalysisConflictException;
++use Illuminate\Http\Request;
++use Illuminate\Http\Resources\Json\JsonResource;
++
++/**
++ * AI 解析トリガー競合の 409 ボディ ({ code, conflict_type, message })。
++ * code 厳格一致でクライアントが自分宛て応答のみ処理する (scenario_conflict と同方式)。
++ * TS 側 types/manual.ts の AnalysisConflictBody と対で保守する。
++ *
++ * @property-read AnalysisConflictException $resource
++ */
++final class AnalysisConflictResource extends JsonResource
++{
++    /** 409 契約の判別子 (他の 409 契約との誤食防止) */
++    public const string CODE = 'analysis_conflict';
++
++    /** @var string|null */
++    public static $wrap = null;
++
++    /**
++     * @return array{code: 'analysis_conflict', conflict_type: string, message: string}
++     */
++    public function toArray(Request $request): array
++    {
++        return [
++            'code' => self::CODE,
++            'conflict_type' => $this->resource->type->value,
++            'message' => $this->resource->getMessage(),
++        ];
++    }
++}
+diff --git a/app/Http/Resources/Manual/AnalysisJobResource.php b/app/Http/Resources/Manual/AnalysisJobResource.php
+new file mode 100644
+index 0000000..51283bb
+--- /dev/null
++++ b/app/Http/Resources/Manual/AnalysisJobResource.php
+@@ -0,0 +1,30 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\Http\Resources\Manual;
++
++use App\DataTransferObjects\Manual\AnalysisJobData;
++use Illuminate\Http\Request;
++use Illuminate\Http\Resources\Json\JsonResource;
++
++/**
++ * AnalysisJob の JSON 応答 (analyze 201 / ポーリング 200 の共通 shape)。
++ * ScenarioResource と同じく DTO を包む JsonResource ($wrap = null)。
++ *
++ * @property-read AnalysisJobData $resource
++ */
++final class AnalysisJobResource extends JsonResource
++{
++    /** @var string|null */
++    public static $wrap = null;
++
++    /**
++     * @return array{id: int, status: string, step: string|null, progress: int|null,
++     *   error: string|null, manual_status: string}
++     */
++    public function toArray(Request $request): array
++    {
++        return $this->resource->toArray();
++    }
++}
+diff --git a/app/Jobs/Manual/RunManualAnalysis.php b/app/Jobs/Manual/RunManualAnalysis.php
+new file mode 100644
+index 0000000..ad3b08c
+--- /dev/null
++++ b/app/Jobs/Manual/RunManualAnalysis.php
+@@ -0,0 +1,61 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\Jobs\Manual;
++
++use App\Models\AnalysisJob;
++use App\Services\Manual\AnalysisJobService;
++use App\Services\Manual\AnalysisPipeline;
++use Illuminate\Bus\Queueable;
++use Illuminate\Contracts\Queue\ShouldQueue;
++use Illuminate\Foundation\Bus\Dispatchable;
++use Illuminate\Queue\InteractsWithQueue;
++use Throwable;
++
++/**
++ * AI 解析の queue job (薄い殻。本体は AnalysisPipeline)。
++ *
++ * - payload は analysisJobId のみ (モデル/チケット/org 値を payload に持たない = payload 不信任)
++ * - 専用 connection database-analysis (retry_after=1560) で流す。運用契約:
++ *   本番/ステージングは `php artisan queue:work database-analysis` を worker 定義に必須登録
++ *   (docs/architecture.md。滞留は recoverStale cron が 30 分で failJob する)
++ */
++class RunManualAnalysis implements ShouldQueue
++{
++    use Dispatchable;
++    use InteractsWithQueue;
++    use Queueable;
++
++    /** 自動再試行しない (§10.8-1。再実行は analyze 再トリガーのみ) */
++    public int $tries = 1;
++
++    /**
++     * worst-case (LLM 3 段 × 3 試行 × client timeout 120s = 1,080s) + 抽出/解析余裕 180s + マージン。
++     * timeout (1,380) < retry_after (1,560) < 予約 TTL (1,800) の連鎖は
++     * AnalysisTimeBudgetInvariantTest が CI 固定する。
++     */
++    public int $timeout = 1380;
++
++    public function __construct(public readonly int $analysisJobId)
++    {
++        // retry_after を解析専用値にした connection (config/queue.php)。既定 database は 90s のため。
++        // Queueable trait が $connection プロパティを既に定義しているため、プロパティ再宣言でなく
++        // onConnection() で指定する (typed 再宣言は trait composition エラーになる)
++        $this->onConnection('database-analysis');
++    }
++
++    public function handle(AnalysisPipeline $pipeline): void
++    {
++        $pipeline->run($this->analysisJobId);
++    }
++
++    /** catch を通らない失敗 (timeout kill 等) の最終防衛線。failJob は冪等 */
++    public function failed(?Throwable $exception): void
++    {
++        $job = AnalysisJob::query()->find($this->analysisJobId);
++        if ($job !== null) {
++            app(AnalysisJobService::class)->failJob($job, '解析が中断されました。再実行してください。');
++        }
++    }
++}
+diff --git a/app/Models/AnalysisJob.php b/app/Models/AnalysisJob.php
+new file mode 100644
+index 0000000..b2cff5f
+--- /dev/null
++++ b/app/Models/AnalysisJob.php
+@@ -0,0 +1,76 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\Models;
++
++use App\Enums\Manual\AnalysisStep;
++use App\Enums\Manual\JobStatus;
++use App\Models\Billing\TicketReservation;
++use Database\Factories\AnalysisJobFactory;
++use Illuminate\Database\Eloquent\Factories\HasFactory;
++use Illuminate\Database\Eloquent\Model;
++use Illuminate\Database\Eloquent\Relations\BelongsTo;
++use Illuminate\Support\Carbon;
++
++/**
++ * AnalysisJob (VideoManual 配下の AI 解析ジョブ)。doc/10 §10.1。
++ *
++ * - video_manual_id / source_document_id / ticket_reservation_id は保護キーのため $fillable 外
++ * - status / step / progress / result_json / error は AnalysisJobService / AnalysisPipeline が
++ *   管理する状態のため $fillable を持たない (TicketReservation と同じ明示代入のみの規約)
++ *
++ * @property int $id
++ * @property int $video_manual_id
++ * @property int|null $source_document_id
++ * @property JobStatus $status
++ * @property AnalysisStep|null $step
++ * @property int|null $progress
++ * @property int|null $ticket_reservation_id
++ * @property array<array-key, mixed>|null $result_json
++ * @property string|null $error
++ * @property Carbon|null $created_at
++ * @property Carbon|null $updated_at
++ */
++class AnalysisJob extends Model
++{
++    /** @use HasFactory<AnalysisJobFactory> */
++    use HasFactory;
++
++    /**
++     * @return array<string, string>
++     */
++    protected function casts(): array
++    {
++        return [
++            'status' => JobStatus::class,
++            'step' => AnalysisStep::class,
++            'progress' => 'integer',
++            'result_json' => 'array',
++        ];
++    }
++
++    /**
++     * @return BelongsTo<VideoManual, $this>
++     */
++    public function videoManual(): BelongsTo
++    {
++        return $this->belongsTo(VideoManual::class);
++    }
++
++    /**
++     * @return BelongsTo<SourceDocument, $this>
++     */
++    public function sourceDocument(): BelongsTo
++    {
++        return $this->belongsTo(SourceDocument::class);
++    }
++
++    /**
++     * @return BelongsTo<TicketReservation, $this>
++     */
++    public function ticketReservation(): BelongsTo
++    {
++        return $this->belongsTo(TicketReservation::class);
++    }
++}
+diff --git a/app/Models/VideoManual.php b/app/Models/VideoManual.php
+index b79a9b3..5c11baf 100644
+--- a/app/Models/VideoManual.php
++++ b/app/Models/VideoManual.php
+@@ -87,4 +87,14 @@ public function cuts(): HasMany
+     {
+         return $this->hasMany(Cut::class);
+     }
++
++    /**
++     * AI 解析ジョブ (route param {analysisJob} の scopeBindings 推論と一致する relation 名)。
++     *
++     * @return HasMany<AnalysisJob, $this>
++     */
++    public function analysisJobs(): HasMany
++    {
++        return $this->hasMany(AnalysisJob::class);
++    }
+ }
+diff --git a/app/Policies/VideoManualPolicy.php b/app/Policies/VideoManualPolicy.php
+index 7b30d49..b1e4f63 100644
+--- a/app/Policies/VideoManualPolicy.php
++++ b/app/Policies/VideoManualPolicy.php
+@@ -50,4 +50,12 @@ public function delete(User $user, VideoManual $manual): bool
+ 
+         return $project !== null && $this->projectPolicy->update($user, $project);
+     }
++
++    /** AI 解析の実行: プロジェクトを操作できる人 (編集者)。撮影者は不可 */
++    public function analyze(User $user, VideoManual $manual): bool
++    {
++        $project = $manual->project;
++
++        return $project !== null && $this->projectPolicy->update($user, $project);
++    }
+ }
+diff --git a/app/Prompts/ScenarioGenerationPrompt.php b/app/Prompts/ScenarioGenerationPrompt.php
+new file mode 100644
+index 0000000..5810d34
+--- /dev/null
++++ b/app/Prompts/ScenarioGenerationPrompt.php
+@@ -0,0 +1,24 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\Prompts;
++
++use Kent013\PrismPrompt\Prompt;
++use Kent013\PrismPrompt\TextPrompt;
++use Kent013\PrismPrompt\Values\UserInput;
++
++/**
++ * シナリオ生成プロンプト (AI 解析 3 段目)。作業分解表 → カット群。
++ * 入力 JSON は untrusted な SOP 由来のため UserInput 経由で渡す。
++ * 出力は GeneratedScenarioData::fromLlmText() で検証する。
++ */
++final class ScenarioGenerationPrompt
++{
++    public static function make(string $untrustedDecompositionJson): TextPrompt
++    {
++        return Prompt::load('scenario-generation', [
++            'decomposition' => UserInput::from($untrustedDecompositionJson), // 不変条件 4: untrusted は UserInput
++        ]);
++    }
++}
+diff --git a/app/Prompts/SopExtractPrompt.php b/app/Prompts/SopExtractPrompt.php
+new file mode 100644
+index 0000000..540901d
+--- /dev/null
++++ b/app/Prompts/SopExtractPrompt.php
+@@ -0,0 +1,23 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\Prompts;
++
++use Kent013\PrismPrompt\Prompt;
++use Kent013\PrismPrompt\TextPrompt;
++use Kent013\PrismPrompt\Values\UserInput;
++
++/**
++ * SOP 抽出プロンプト (AI 解析 1 段目)。抽出テキスト → 統一 JSON。
++ * 出力は ExtractedSopData::fromLlmText() で検証する。
++ */
++final class SopExtractPrompt
++{
++    public static function make(string $untrustedSopText): TextPrompt
++    {
++        return Prompt::load('sop-extract', [
++            'text' => UserInput::from($untrustedSopText), // 不変条件 4: untrusted は UserInput
++        ]);
++    }
++}
+diff --git a/app/Prompts/WorkDecompositionPrompt.php b/app/Prompts/WorkDecompositionPrompt.php
+new file mode 100644
+index 0000000..cff6e64
+--- /dev/null
++++ b/app/Prompts/WorkDecompositionPrompt.php
+@@ -0,0 +1,24 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\Prompts;
++
++use Kent013\PrismPrompt\Prompt;
++use Kent013\PrismPrompt\TextPrompt;
++use Kent013\PrismPrompt\Values\UserInput;
++
++/**
++ * 作業分解プロンプト (AI 解析 2 段目)。統一 JSON → 作業分解表。
++ * 入力 JSON は untrusted な SOP 由来のため UserInput 経由で渡す。
++ * 出力は WorkDecompositionData::fromLlmText() で検証する。
++ */
++final class WorkDecompositionPrompt
++{
++    public static function make(string $untrustedExtractedJson): TextPrompt
++    {
++        return Prompt::load('work-decomposition', [
++            'extracted' => UserInput::from($untrustedExtractedJson), // 不変条件 4: untrusted は UserInput
++        ]);
++    }
++}
+diff --git a/app/Services/Manual/AnalysisJobService.php b/app/Services/Manual/AnalysisJobService.php
+new file mode 100644
+index 0000000..c49bbb0
+--- /dev/null
++++ b/app/Services/Manual/AnalysisJobService.php
+@@ -0,0 +1,185 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\Services\Manual;
++
++use App\Enums\Billing\TicketReservationStatus;
++use App\Enums\Manual\AnalysisConflictType;
++use App\Enums\Manual\JobStatus;
++use App\Enums\Manual\VideoManualStatus;
++use App\Exceptions\Billing\InsufficientTicketsException;
++use App\Exceptions\Manual\AnalysisConflictException;
++use App\Jobs\Manual\RunManualAnalysis;
++use App\Models\AnalysisJob;
++use App\Models\Organization;
++use App\Models\Project;
++use App\Models\VideoManual;
++use App\Services\Billing\TicketLedgerService;
++use Carbon\CarbonImmutable;
++use Illuminate\Contracts\Database\Query\Builder;
++use Illuminate\Support\Facades\DB;
++use Illuminate\Validation\ValidationException;
++use LogicException;
++use Webmozart\Assert\Assert;
++
++/**
++ * AI 解析ジョブの状態機械 (trigger / failJob / recoverStale)。doc/10 §10.8-8。
++ *
++ * VideoManualStatus 遷移表 (本サービスが関与する遷移。詳細は docs/architecture.md):
++ * - draft/ready → analyzing: trigger() (行ロック + from-state guard。violate → 409)
++ * - analyzing → ready/draft: failJob() (analyzing のときのみ復帰。cuts 有無で決定)
++ * (analyzing → ready の成功遷移は ScenarioService::materializeIntoLockedManual = terminal tx 内)
++ *
++ * 共有ロック規約: status を書く経路は必ず VideoManual 行を lockForUpdate() した
++ * 同一 tx 内で反映する (ScenarioWritePathInventoryTest が経路を deny-by-default で固定)。
++ */
++class AnalysisJobService
++{
++    public function __construct(
++        private readonly TicketLedgerService $tickets,
++    ) {}
++
++    /**
++     * AI 解析のトリガー (§10.8-8 冪等 + 残高事前チェック + enqueue)。
++     *
++     * - 実行可能状態: status ∈ {draft, ready} のみ (ready→analyzing = 再解析は正式遷移)
++     * - analyze 冪等: 同一 manual の in-flight (queued/running) は 1 つ → 409
++     * - 残高事前チェックは fail-fast の入口ゲート (真の残高保証は pipeline の reserve)
++     */
++    public function trigger(Project $project, VideoManual $manual): AnalysisJob
++    {
++        $job = DB::transaction(function () use ($project, $manual): AnalysisJob {
++            // 共有ロック規約: status を書くため VideoManual 行ロック (親 relation 経由 = 子∈親も担保)
++            /** @var VideoManual $locked */
++            $locked = $project->manuals()->whereKey($manual->id)->lockForUpdate()->firstOrFail();
++
++            // 実行可能状態 guard (ready→analyzing は再解析の正式遷移。doc/10 §10.2)
++            if (! in_array($locked->status, [VideoManualStatus::Draft, VideoManualStatus::Ready], true)) {
++                throw new AnalysisConflictException(AnalysisConflictType::StatusNotAnalyzable);
++            }
++            // analyze 冪等: 同一 manual の in-flight は 1 つ (§10.8-8)
++            $inFlight = $locked->analysisJobs()
++                ->whereIn('status', [JobStatus::Queued->value, JobStatus::Running->value])
++                ->exists();
++            if ($inFlight) {
++                throw new AnalysisConflictException(AnalysisConflictType::InFlight);
++            }
++            // 解析対象 SOP (追記型の最新。行ロック下で決定的に選択)
++            $document = $locked->sourceDocuments()->latest('id')->first();
++            if ($document === null) {
++                throw ValidationException::withMessages(['document' => ['手順書をアップロードしてください。']]);
++            }
++            // 残高事前チェック (reserve はジョブ開始時 = §10.5。ここは fail-fast の入口ゲート)
++            $organization = $this->resolveOrganization($project);
++            $cost = config()->integer('manual.analysis_ticket_cost');
++            $balance = $this->tickets->balance($organization);
++            if ($balance < $cost) {
++                throw InsufficientTicketsException::forReserve($cost, $balance);
++            }
++
++            $job = $locked->analysisJobs()->make();
++            $job->status = JobStatus::Queued;
++            $job->sourceDocument()->associate($document);
++            $job->save();
++
++            $locked->forceFill(['status' => VideoManualStatus::Analyzing])->save();
++
++            return $job;
++        });
++
++        // commit 後に dispatch (payload は job id のみ。dispatch 喪失は recoverStale が回収)
++        RunManualAnalysis::dispatch($job->id);
++
++        return $job;
++    }
++
++    /**
++     * ジョブの失敗確定 (冪等)。pipeline catch / Job::failed / recoverStale の合流点。
++     *
++     * - terminal (succeeded/failed) 済みは no-op (terminal tx 勝ち・二重 fail を握る)
++     * - manual は analyzing のときのみ復帰 (cuts があれば ready、無ければ draft)
++     * - 予約は Reserved のみ release (並行 commit/release 済みは LogicException → 握って冪等)
++     */
++    public function failJob(AnalysisJob $job, string $error): void
++    {
++        DB::transaction(function () use ($job, $error): void {
++            /** @var AnalysisJob $locked */
++            $locked = AnalysisJob::query()->whereKey($job->getKey())->lockForUpdate()->firstOrFail();
++            if ($locked->status->isTerminal()) {
++                return;
++            }
++
++            $locked->status = JobStatus::Failed;
++            $locked->error = $error;
++            $locked->save();
++
++            // manual 復帰 (analyzing のときのみ。cuts があれば ready、無ければ draft = 概念設計 §4)
++            /** @var VideoManual $manual */
++            $manual = VideoManual::query()->whereKey($locked->video_manual_id)->lockForUpdate()->firstOrFail();
++            if ($manual->status === VideoManualStatus::Analyzing) {
++                $manual->forceFill([
++                    'status' => $manual->cuts()->exists() ? VideoManualStatus::Ready : VideoManualStatus::Draft,
++                ])->save();
++            }
++
++            // 予約 release (Reserved のみ。並行 commit/release 済みは LogicException → 握って冪等)
++            $reservation = $locked->ticketReservation;
++            if ($reservation !== null && $reservation->status === TicketReservationStatus::Reserved) {
++                try {
++                    $this->tickets->release($reservation);
++                } catch (LogicException) {
++                    // 並行 release/commit 済み
++                }
++            }
++        });
++    }
++
++    /**
++     * stale ジョブの回復 (cron)。queued: dispatch 喪失、running: worker 異常終了。
++     * failJob は行ロック + terminal guard で冪等 (TicketLedgerService::releaseStale と同型)。
++     *
++     * @return int 回復した件数
++     */
++    public function recoverStale(): int
++    {
++        $threshold = CarbonImmutable::now()->subMinutes(config()->integer('manual.analysis_stale_after_minutes'));
++        $staleIds = AnalysisJob::query()
++            ->where(function (Builder $query) use ($threshold): void {
++                $query
++                    ->where(function (Builder $query) use ($threshold): void {
++                        $query->where('status', JobStatus::Queued->value)
++                            ->where('created_at', '<=', $threshold);
++                    })
++                    ->orWhere(function (Builder $query) use ($threshold): void {
++                        $query->where('status', JobStatus::Running->value)
++                            ->where('updated_at', '<=', $threshold);
++                    });
++            })
++            ->pluck('id');
++
++        $recovered = 0;
++        foreach ($staleIds as $id) {
++            $job = AnalysisJob::query()->whereKey($id)->first();
++            if ($job === null) {
++                continue;
++            }
++            // failJob 内で行ロック + terminal guard 再検証するため、競合したジョブはそこで no-op
++            $this->failJob($job, '解析がタイムアウトしました。再実行してください。');
++            $recovered++;
++        }
++
++        return $recovered;
++    }
++
++    /**
++     * project → organization の導出 (HasOneThrough)。payload のチケット/org 値は一切受けない。
++     */
++    private function resolveOrganization(Project $project): Organization
++    {
++        $organization = $project->organization;
++        Assert::isInstanceOf($organization, Organization::class, 'project は必ず組織に属する');
++
++        return $organization;
++    }
++}
+diff --git a/app/Services/Manual/AnalysisPipeline.php b/app/Services/Manual/AnalysisPipeline.php
+new file mode 100644
+index 0000000..26cfe9d
+--- /dev/null
++++ b/app/Services/Manual/AnalysisPipeline.php
+@@ -0,0 +1,279 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\Services\Manual;
++
++use App\DataTransferObjects\Manual\Analysis\ExtractedSopData;
++use App\DataTransferObjects\Manual\Analysis\ExtractedText;
++use App\DataTransferObjects\Manual\Analysis\GeneratedScenarioData;
++use App\DataTransferObjects\Manual\Analysis\WorkDecompositionData;
++use App\Enums\Billing\TicketReservationStatus;
++use App\Enums\Manual\AnalysisStep;
++use App\Enums\Manual\JobStatus;
++use App\Exceptions\Billing\InsufficientTicketsException;
++use App\Exceptions\Manual\AnalysisFailedException;
++use App\Exceptions\Manual\LlmOutputInvalidException;
++use App\Models\AnalysisJob;
++use App\Models\Organization;
++use App\Models\Project;
++use App\Models\SourceDocument;
++use App\Models\VideoManual;
++use App\Prompts\ScenarioGenerationPrompt;
++use App\Prompts\SopExtractPrompt;
++use App\Prompts\WorkDecompositionPrompt;
++use App\Services\Billing\TicketLedgerService;
++use Illuminate\Support\Facades\DB;
++use LogicException;
++use Throwable;
++use Webmozart\Assert\Assert;
++
++/**
++ * AI 解析パイプライン本体 (extract → decompose → generate → materialize)。概念設計 §4。
++ *
++ * - チケット 2 フェーズ: startJob で reserve (冪等キー = analysis_jobs.ticket_reservation_id)、
++ *   terminal tx (finalize) で materialize + commit + succeeded を原子化
++ *   (無課金 succeeded / 課金済み failed を構造的に排除)
++ * - LLM 出力の有界リトライ: JSON 検証失敗 (LlmOutputInvalidException) のみ最大
++ *   config manual.analysis_llm_max_retries 回再試行
++ * - 失敗は catch → AnalysisJobService::failJob (行ロック + terminal guard で冪等)
++ */
++class AnalysisPipeline
++{
++    public function __construct(
++        private readonly AnalysisJobService $jobs,
++        private readonly ScenarioService $scenarios,
++        private readonly SopTextExtractor $extractor,
++        private readonly TicketLedgerService $tickets,
++    ) {}
++
++    public function run(int $analysisJobId): void
++    {
++        $job = AnalysisJob::query()->findOrFail($analysisJobId);
++        try {
++            if (! $this->startJob($job)) {
++                return; // 重複配送 / stale 回復後の遅延配送 → no-op
++            }
++            $document = $job->sourceDocument;
++            Assert::notNull($document, 'trigger が必ず associate している');
++
++            $text = $this->extractor->extract($document);
++            $extracted = $this->runExtractStep($job, $document, $text);
++            $decomposition = $this->runDecomposeStep($job, $extracted);
++            $generated = $this->runGenerateStep($job, $decomposition);
++            $this->finalize($job, $generated);
++        } catch (Throwable $exception) {
++            report($exception);
++            $this->jobs->failJob($job, $this->userMessageFor($exception));
++        }
++    }
++
++    /** 開始 tx: queued guard + 予約の冪等確保 (§10.8-1) + running へ */
++    private function startJob(AnalysisJob $job): bool
++    {
++        return DB::transaction(function () use ($job): bool {
++            /** @var AnalysisJob $locked */
++            $locked = AnalysisJob::query()->whereKey($job->getKey())->lockForUpdate()->firstOrFail();
++            if ($locked->status !== JobStatus::Queued) {
++                return false; // 重複配送 guard
++            }
++
++            $organization = $this->resolveOrganization($locked);
++            $this->ensureReservation($locked, $organization); // 残高不足はここで throw → catch → failJob
++
++            $locked->status = JobStatus::Running;
++            $locked->step = AnalysisStep::Extract;
++            $locked->progress = 10;
++            $locked->save();
++            $job->refresh();
++
++            return true;
++        });
++    }
++
++    /**
++     * 予約の冪等確保: 有効な Reserved があれば再利用 (再試行で二重予約しない)。
++     * 失効済み Reserved は明示 release して付け替え、Released/Committed/なしは新規 reserve。
++     */
++    private function ensureReservation(AnalysisJob $locked, Organization $organization): void
++    {
++        $reservation = $locked->ticketReservation;
++        if ($reservation !== null
++            && $reservation->status === TicketReservationStatus::Reserved
++            && $reservation->expires_at->isFuture()) {
++            return; // 再利用 (再試行で二重予約しない)
++        }
++        if ($reservation !== null && $reservation->status === TicketReservationStatus::Reserved) {
++            // 失効済みだが cron 未回収の Reserved → 明示 release して付け替え (§10.8-1)
++            try {
++                $this->tickets->release($reservation);
++            } catch (LogicException) {
++                // 並行 release 済み
++            }
++        }
++        $cost = config()->integer('manual.analysis_ticket_cost');
++        $new = $this->tickets->reserve($organization, $cost); // 不足は InsufficientTicketsException
++        $locked->ticketReservation()->associate($new);
++        $locked->save();
++    }
++
++    /** extract 段: 統一 JSON 化 + extracted_json 保存 (write-only 監査スナップショット) */
++    private function runExtractStep(AnalysisJob $job, SourceDocument $document, ExtractedText $text): ExtractedSopData
++    {
++        $extracted = $this->withBoundedRetry(
++            fn (): ExtractedSopData => ExtractedSopData::fromLlmText(
++                SopExtractPrompt::make($text->text)->executeSync(),
++            ),
++        );
++
++        $document->extracted_json = $extracted->toArray();
++        $document->save();
++        $this->updateProgress($job, AnalysisStep::Decompose, 35);
++
++        return $extracted;
++    }
++
++    /** decompose 段: 作業分解表 + result_json 保存 (write-only 監査スナップショット) */
++    private function runDecomposeStep(AnalysisJob $job, ExtractedSopData $extracted): WorkDecompositionData
++    {
++        $decomposition = $this->withBoundedRetry(
++            fn (): WorkDecompositionData => WorkDecompositionData::fromLlmText(
++                WorkDecompositionPrompt::make($extracted->toJsonString())->executeSync(),
++            ),
++        );
++
++        $job->result_json = $decomposition->toArray();
++        $job->step = AnalysisStep::Generate;
++        $job->progress = 65;
++        $job->save();
++
++        return $decomposition;
++    }
++
++    /** generate 段: カット群生成 */
++    private function runGenerateStep(AnalysisJob $job, WorkDecompositionData $decomposition): GeneratedScenarioData
++    {
++        $generated = $this->withBoundedRetry(
++            fn (): GeneratedScenarioData => GeneratedScenarioData::fromLlmText(
++                ScenarioGenerationPrompt::make($decomposition->toJsonString())->executeSync(),
++            ),
++        );
++
++        $this->updateProgress($job, AnalysisStep::Generate, 90);
++
++        return $generated;
++    }
++
++    /**
++     * terminal tx: materialize + commit + succeeded を原子化 (概念設計 §4-5)。
++     * transaction / 行ロックは本メソッド (最外層) だけが張る。
++     *
++     * グローバルロック順 (全経路がこの順でのみ取得する。逆順取得ゼロ = デッドロックなし):
++     *   analysis_jobs → video_manuals → ticket_reservations → organizations
++     *
++     * TicketLedgerService 内部の実取得順 (実装から転記。内部変更はしない):
++     *   - reserve / grant:   organizations のみ (lockOrganizationRow)
++     *   - commit / release:  ticket_reservations (lockReservationRow) → organizations
++     * 各経路の取得列:
++     *   - trigger:      video_manuals のみ (balance() はロックなしの集計)
++     *   - startJob:     analysis_jobs → (reserve: organizations)
++     *   - finalize:     analysis_jobs → video_manuals → (commit: ticket_reservations → organizations)
++     *   - failJob:      analysis_jobs → video_manuals → (release: ticket_reservations → organizations)
++     *   - releaseStale (billing cron): ticket_reservations → organizations (前方リソースを保持しない)
++     *   - ScenarioService::save: video_manuals のみ
++     * いずれもグローバル順の部分列であり循環待ちは構成できない。
++     */
++    private function finalize(AnalysisJob $job, GeneratedScenarioData $generated): void
++    {
++        DB::transaction(function () use ($job, $generated): void {
++            // ロック 1: job 行 (stale 回復 cron との直列化点)
++            /** @var AnalysisJob $locked */
++            $locked = AnalysisJob::query()->whereKey($job->getKey())->lockForUpdate()->firstOrFail();
++            if ($locked->status !== JobStatus::Running) {
++                return; // stale 回復 cron が先勝ち → materialize も commit もしない (無課金 succeeded 排除)
++            }
++
++            // ロック 2: manual 行 (共有ロック規約。親 relation 経由再解決 = 子∈親も担保)
++            $project = $this->resolveProject($locked);
++            /** @var VideoManual $lockedManual */
++            $lockedManual = $project->manuals()
++                ->whereKey($locked->video_manual_id)->lockForUpdate()->firstOrFail();
++
++            // cuts + version + status(analyzing→ready) はロック済み manual 前提メソッドで反映
++            // (内側 transaction を張らない。analyzing guard 違反は LogicException → 全体 rollback)
++            $this->scenarios->materializeIntoLockedManual($lockedManual, $generated->toScenarioSteps());
++
++            // ロック 3: reservation/org 行 (TicketLedgerService::commit 内部。savepoint)
++            $reservation = $locked->ticketReservation;
++            Assert::notNull($reservation, 'startJob が必ず予約を付けている');
++            // 非 Reserved は LogicException → terminal tx 全体 rollback (materialize も巻き戻る) → failJob
++            $this->tickets->commit($reservation);
++
++            $locked->status = JobStatus::Succeeded;
++            $locked->progress = 100;
++            $locked->save();
++        });
++    }
++
++    /**
++     * LLM 段の共通有界リトライ (JSON 検証失敗のみ。長さ・provider 例外はリトライしない)。
++     *
++     * @template T
++     *
++     * @param  callable(): T  $attempt
++     * @return T
++     */
++    private function withBoundedRetry(callable $attempt): mixed
++    {
++        $maxRetries = config()->integer('manual.analysis_llm_max_retries');
++        for ($tryCount = 0; ; $tryCount++) {
++            try {
++                return $attempt();
++            } catch (LlmOutputInvalidException $exception) {
++                if ($tryCount >= $maxRetries) {
++                    throw $exception; // 計 (1 + maxRetries) 試行で打ち切り → failJob
++                }
++            }
++        }
++    }
++
++    /**
++     * step/progress の表示用更新 (tx 不要の単発 update。状態機械は status のみが真実源。
++     * updated_at の更新が stale 判定の「最終 step 更新時刻」を兼ねる)。
++     */
++    private function updateProgress(AnalysisJob $job, AnalysisStep $step, int $progress): void
++    {
++        $job->step = $step;
++        $job->progress = $progress;
++        $job->save();
++    }
++
++    /** job → manual → project の導出 (payload 不信任。DB から relation 経由で再解決) */
++    private function resolveProject(AnalysisJob $job): Project
++    {
++        $project = $job->videoManual?->project;
++        Assert::isInstanceOf($project, Project::class, 'analysis job は必ず project 配下の manual に属する');
++
++        return $project;
++    }
++
++    /** job → manual → project → organization の導出 */
++    private function resolveOrganization(AnalysisJob $job): Organization
++    {
++        $organization = $this->resolveProject($job)->organization;
++        Assert::isInstanceOf($organization, Organization::class, 'project は必ず組織に属する');
++
++        return $organization;
++    }
++
++    /** ユーザー向けエラー文言 (内部詳細を error 列に漏らさない) */
++    private function userMessageFor(Throwable $exception): string
++    {
++        return match (true) {
++            $exception instanceof AnalysisFailedException,
++            $exception instanceof InsufficientTicketsException => $exception->getMessage(),
++            $exception instanceof LlmOutputInvalidException => $exception->userMessage(),
++            default => '解析に失敗しました。時間をおいて再実行してください。',
++        };
++    }
++}
+diff --git a/app/Services/Manual/ScenarioService.php b/app/Services/Manual/ScenarioService.php
+index c326601..2f3d60e 100644
+--- a/app/Services/Manual/ScenarioService.php
++++ b/app/Services/Manual/ScenarioService.php
+@@ -19,6 +19,7 @@
+ use Illuminate\Support\Collection;
+ use Illuminate\Support\Facades\DB;
+ use Illuminate\Validation\ValidationException;
++use LogicException;
+ use Webmozart\Assert\Assert;
+ 
+ /**
+@@ -96,6 +97,51 @@ public function save(Project $project, VideoManual $manual, ScenarioSaveInput $i
+         });
+     }
+ 
++    /**
++     * AI 解析結果の materialize (共有ロック規約の第 2 の書き込み経路。概念設計 §5)。
++     *
++     * **ロック済み前提メソッド**: transaction / lockForUpdate は呼び出し側 (AnalysisPipeline::
++     * finalize の terminal tx) が最外層で張る。本メソッドは内側 transaction を張らない
++     * (transaction/lock の層を 1 箇所に統一しロック順逆転を構造的に防ぐ)。
++     * 前提の担保は 2 層 (PHPDoc 前提だけに依存しない):
++     *  1. 呼び出し経路の構造的限定: 呼び出し元は AnalysisPipeline のみ
++     *     (ScenarioWritePathInventoryTest が deny-by-default で機械検証する)
++     *  2. runtime 検査 (defensive): tx 外呼び出し / analyzing 以外は LogicException
++     *     (terminal tx ごと rollback → failJob)
++     *
++     * - 既存 cuts 全削除 → 生成ツリー挿入 (再解析は全置換)。sort_order/parent/type はサーバ導出
++     * - version+1 と status(analyzing→ready) を cuts と同一 tx で反映 (共有ロック規約)
++     *
++     * @param  list<ScenarioStepInput>  $steps
++     */
++    public function materializeIntoLockedManual(VideoManual $lockedManual, array $steps): void
++    {
++        if (DB::transactionLevel() === 0) {
++            throw new LogicException('materialize はロック済みトランザクション内からのみ呼び出せます');
++        }
++        if ($lockedManual->status !== VideoManualStatus::Analyzing) {
++            throw new LogicException('materialize は analyzing 中のみ実行できます');
++        }
++
++        // 全置換 (save() と同じ理由で bulk delete を避ける。配下 Take は FK cascade)
++        $lockedManual->cuts()->get()->each->delete();
++
++        $changed = true; // 生成は常に実変更 (upsertCut の isDirty 追跡は新規行で必ず true)
++        foreach ($steps as $stepIndex => $stepInput) {
++            /** @var Collection<int, Cut> $noExisting */
++            $noExisting = new Collection;
++            $step = $this->upsertCut($lockedManual, $noExisting, $stepInput, CutType::Step, null, $stepIndex, $changed);
++            foreach ($stepInput->points as $pointIndex => $pointInput) {
++                $this->upsertCut($lockedManual, $noExisting, $pointInput, CutType::Point, $step->id, $pointIndex, $changed);
++            }
++        }
++
++        $lockedManual->forceFill([
++            'scenario_version' => $lockedManual->scenario_version + 1,
++            'status' => VideoManualStatus::Ready,
++        ])->save();
++    }
++
+     /**
+      * 1 cut の update/create。本文は fill、parent/sort/type はサーバ導出値の forceFill 明示代入。
+      * 新規は relation 経由 make (video_manual_id を payload から受けない)。
+diff --git a/app/Services/Manual/SopTextExtractor.php b/app/Services/Manual/SopTextExtractor.php
+new file mode 100644
+index 0000000..82592e9
+--- /dev/null
++++ b/app/Services/Manual/SopTextExtractor.php
+@@ -0,0 +1,157 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\Services\Manual;
++
++use App\DataTransferObjects\Manual\Analysis\ExtractedText;
++use App\Exceptions\Manual\AnalysisFailedException;
++use App\Models\SourceDocument;
++use Illuminate\Support\Facades\Storage;
++use PhpOffice\PhpSpreadsheet\Cell\Cell;
++use PhpOffice\PhpSpreadsheet\IOFactory;
++use Smalot\PdfParser\Parser as PdfParser;
++use Throwable;
++use Webmozart\Assert\Assert;
++
++/**
++ * SOP (SourceDocument) からのテキスト抽出。doc/10 §10.7 (v1: テキスト抽出可能な手順書のみ)。
++ *
++ * - 分岐はアップロード時に内容 sniff 済みの mime を使う (クライアント拡張子は信頼しない)
++ * - 抽出不能/実質空/バイト上限超過は AnalysisFailedException (ユーザー向け文言)
++ * - byteLength (strlen = UTF-8 bytes) が token budget 判定値 (config manual.analysis_max_text_bytes)
++ */
++class SopTextExtractor
++{
++    public function extract(SourceDocument $document): ExtractedText
++    {
++        $contents = Storage::get($document->file_path);
++        Assert::string($contents, "SOP ファイルが見つかりません: {$document->file_path}");
++
++        $kind = $this->kindFor($document->mime);
++        try {
++            $text = match ($kind) {
++                'pdf' => $this->fromPdf($contents),
++                'spreadsheet' => $this->fromSpreadsheet($contents),
++                'plain' => $contents,
++            };
++        } catch (Throwable $exception) {
++            // parser の内部例外はユーザー向け文言へ正規化 (詳細は report で内部ログのみ)
++            report($exception);
++
++            throw AnalysisFailedException::unextractable();
++        }
++
++        $text = $this->ensureUtf8($text); // JSON 化・UserInput 生成を不正バイトで壊さない
++        $text = $this->normalize($text);
++
++        $bytes = strlen($text);
++        if ($bytes < config()->integer('manual.analysis_min_text_bytes')) {
++            throw AnalysisFailedException::unextractable(); // 画像/スキャン → v1 未対応の明示文言
++        }
++        if ($bytes > config()->integer('manual.analysis_max_text_bytes')) {
++            throw AnalysisFailedException::tooLarge();
++        }
++
++        return new ExtractedText($text, $bytes, $kind);
++    }
++
++    /**
++     * mime → 抽出方式。未知 mime はアップロード時 sniff で弾かれている前提だが、
++     * 防御的に unextractable で落とす (LLM に渡さない)。
++     *
++     * @return 'pdf'|'spreadsheet'|'plain'
++     */
++    private function kindFor(string $mime): string
++    {
++        return match ($mime) {
++            'application/pdf' => 'pdf',
++            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
++            'application/vnd.ms-excel' => 'spreadsheet',
++            'text/plain' => 'plain',
++            default => throw AnalysisFailedException::unextractable(),
++        };
++    }
++
++    private function fromPdf(string $contents): string
++    {
++        return (new PdfParser)->parseContent($contents)->getText();
++    }
++
++    /**
++     * PhpSpreadsheet はファイルパス入力のため一時ファイル経由で読み込む (finally で削除)。
++     * 全シートのセルをタブ/改行結合する。
++     */
++    private function fromSpreadsheet(string $contents): string
++    {
++        $path = tempnam(sys_get_temp_dir(), 'sop-xls-');
++        Assert::string($path, '一時ファイルを作成できません');
++        try {
++            file_put_contents($path, $contents);
++            $spreadsheet = IOFactory::load($path);
++
++            $lines = [];
++            foreach ($spreadsheet->getAllSheets() as $sheet) {
++                $title = $sheet->getTitle();
++                if ($title !== '') {
++                    $lines[] = $title;
++                }
++                foreach ($sheet->getRowIterator() as $row) {
++                    $cells = [];
++                    $cellIterator = $row->getCellIterator();
++                    $cellIterator->setIterateOnlyExistingCells(true);
++                    /** @var Cell $cell */
++                    foreach ($cellIterator as $cell) {
++                        $value = $cell->getFormattedValue();
++                        if (trim($value) !== '') {
++                            $cells[] = $value;
++                        }
++                    }
++                    if ($cells !== []) {
++                        $lines[] = implode("\t", $cells);
++                    }
++                }
++            }
++
++            return implode("\n", $lines);
++        } finally {
++            @unlink($path);
++        }
++    }
++
++    /**
++     * UTF-8 妥当性の担保 (旧 XLS の SJIS 系・PDF の壊れた埋め込み対策)。
++     * 推測変換で未知バイナリを「日本語らしき無意味文字列」へ化けさせない strict 手順:
++     *   1. mb_check_encoding OK → そのまま
++     *   2. NG → mb_detect_encoding (UTF-8/SJIS-win/EUC-JP、strict)。判定不能 → unextractable
++     *   3. 判定 encoding から mb_convert_encoding → 再検証。不合格 → unextractable
++     */
++    private function ensureUtf8(string $text): string
++    {
++        if (mb_check_encoding($text, 'UTF-8')) {
++            return $text;
++        }
++
++        $detected = mb_detect_encoding($text, ['UTF-8', 'SJIS-win', 'EUC-JP'], true);
++        if ($detected === false) {
++            throw AnalysisFailedException::unextractable(); // バイナリ扱い (救済変換しない)
++        }
++
++        $converted = mb_convert_encoding($text, 'UTF-8', $detected);
++        if (! is_string($converted) || ! mb_check_encoding($converted, 'UTF-8')) {
++            throw AnalysisFailedException::unextractable();
++        }
++
++        return $converted;
++    }
++
++    /** 連続空白の圧縮 + trim (LLM 入力バイト数を無駄にしない) */
++    private function normalize(string $text): string
++    {
++        // 行内の連続空白 (タブ含む) を 1 個へ、3 行以上の連続改行を 2 行へ圧縮する
++        $text = preg_replace('/[ \t]+/u', ' ', $text) ?? $text;
++        $text = preg_replace('/\n{3,}/u', "\n\n", str_replace("\r\n", "\n", $text)) ?? $text;
++
++        return trim($text);
++    }
++}
+diff --git a/app/Services/Manual/SourceDocumentService.php b/app/Services/Manual/SourceDocumentService.php
+new file mode 100644
+index 0000000..662da3d
+--- /dev/null
++++ b/app/Services/Manual/SourceDocumentService.php
+@@ -0,0 +1,107 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\Services\Manual;
++
++use App\Enums\Manual\VideoManualStatus;
++use App\Models\Project;
++use App\Models\SourceDocument;
++use App\Models\VideoManual;
++use Illuminate\Http\UploadedFile;
++use Illuminate\Support\Facades\DB;
++use Illuminate\Support\Facades\Storage;
++use Illuminate\Support\Str;
++use Illuminate\Validation\ValidationException;
++use Throwable;
++use Webmozart\Assert\Assert;
++
++/**
++ * SOP (SourceDocument) の保存。追記型 immutable (更新・削除 API を持たない。
++ * 差し替え = 新規行を追加。過去の analysis_jobs の参照と監査性を保つ。概念設計 §2)。
++ *
++ * - file_path はサーバ生成 (projects/{pid}/manuals/{mid}/source-documents/{ulid}.{ext})
++ * - 専用 route 経由 (storeForManual) は VideoManual 行ロック + 状態 guard
++ *   (analyze trigger と直列化)
++ */
++class SourceDocumentService
++{
++    /** 専用 route (POST .../source-documents)。draft/ready のみ許可 */
++    public function storeForManual(Project $project, VideoManual $manual, UploadedFile $file): SourceDocument
++    {
++        return DB::transaction(function () use ($project, $manual, $file): SourceDocument {
++            // 共有ロック規約: analyze trigger の「最新 document 選択」と直列化する
++            /** @var VideoManual $locked */
++            $locked = $project->manuals()->whereKey($manual->id)->lockForUpdate()->firstOrFail();
++            if (! in_array($locked->status, [VideoManualStatus::Draft, VideoManualStatus::Ready], true)) {
++                // Inertia form 経路のため 422 (ValidationException) で返す (409 JSON は XHR 専用契約)
++                throw ValidationException::withMessages([
++                    'document' => ['解析中・書き出し中・公開済みのマニュアルには手順書を追加できません。'],
++                ]);
++            }
++
++            return $this->appendDocument($locked, $file);
++        });
++    }
++
++    /**
++     * VideoManualService::create の tx 内から呼ぶ (新規 manual は競合なし・状態 guard 不要)。
++     *
++     * ファイル書き込みは行 insert より先。行 insert 失敗時は best-effort で即時削除し
++     * 孤児ファイルの常態化を防ぐ (tx rollback 経路の残渣はストレージ Quota フェーズの掃除対象)。
++     */
++    public function appendDocument(VideoManual $manual, UploadedFile $file): SourceDocument
++    {
++        // サーバ側 MIME 再判定 (polyglot 対策): クライアント拡張子でなく内容 sniff
++        // (getMimeType = finfo) が許可集合に含まれることを検証。不一致は 422
++        $sniffedMime = $file->getMimeType();
++        if ($sniffedMime === null || ! in_array($sniffedMime, self::allowedMimeTypes(), true)) {
++            throw ValidationException::withMessages([
++                'document' => ['対応していないファイル形式です (PDF / Excel / テキストのみ)。'],
++            ]);
++        }
++
++        $size = $file->getSize();
++        Assert::integer($size, 'アップロードファイルのサイズを取得できません');
++
++        $extension = strtolower($file->getClientOriginalExtension());
++        $path = sprintf(
++            'projects/%d/manuals/%d/source-documents/%s.%s',
++            $manual->project_id,
++            $manual->id,
++            (string) Str::ulid(),
++            $extension,
++        );
++        Storage::putFileAs(dirname($path), $file, basename($path));
++        try {
++            $document = $manual->sourceDocuments()->make([
++                'file_path' => $path,
++                'original_name' => $file->getClientOriginalName(),
++                'mime' => $sniffedMime,
++                'size_bytes' => $size,
++            ]);
++            $document->save();
++        } catch (Throwable $exception) {
++            Storage::delete($path); // best-effort (失敗しても rethrow を優先)
++
++            throw $exception;
++        }
++
++        return $document;
++    }
++
++    /**
++     * 許可 MIME (内容 sniff 値)。config manual.source_document_mimes の拡張子リストと対で保守。
++     *
++     * @return list<string>
++     */
++    private static function allowedMimeTypes(): array
++    {
++        return [
++            'application/pdf',
++            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // xlsx
++            'application/vnd.ms-excel',                                          // xls
++            'text/plain',
++        ];
++    }
++}
+diff --git a/app/Services/Manual/VideoManualService.php b/app/Services/Manual/VideoManualService.php
+index 281debe..46b495c 100644
+--- a/app/Services/Manual/VideoManualService.php
++++ b/app/Services/Manual/VideoManualService.php
+@@ -6,6 +6,7 @@
+ 
+ use App\Models\Project;
+ use App\Models\VideoManual;
++use Illuminate\Http\UploadedFile;
+ use Illuminate\Support\Facades\DB;
+ 
+ /**
+@@ -19,10 +20,14 @@
+  */
+ class VideoManualService
+ {
+-    /** VideoManual 作成 (status は DB default の draft)。 */
+-    public function create(Project $project, string $title, ?int $categoryId, int $userId): VideoManual
++    public function __construct(
++        private readonly SourceDocumentService $sourceDocuments,
++    ) {}
++
++    /** VideoManual 作成 (status は DB default の draft)。$document は任意の SOP 同時アップロード */
++    public function create(Project $project, string $title, ?int $categoryId, int $userId, ?UploadedFile $document = null): VideoManual
+     {
+-        return DB::transaction(function () use ($project, $title, $categoryId, $userId): VideoManual {
++        return DB::transaction(function () use ($project, $title, $categoryId, $userId, $document): VideoManual {
+             $locked = Project::whereKey($project->id)->lockForUpdate()->firstOrFail();
+             $manual = $locked->manuals()->make(['title' => $title]);
+             $manual->forceFill(['created_by' => $userId])->save();
+@@ -31,6 +36,10 @@ public function create(Project $project, string $title, ?int $categoryId, int $u
+                 $category = $locked->categories()->whereKey($categoryId)->firstOrFail();
+                 $manual->category()->associate($category)->save();
+             }
++            if ($document !== null) {
++                // 新規 manual は競合なし (状態 guard 不要) のため appendDocument 直呼び
++                $this->sourceDocuments->appendDocument($manual, $document);
++            }
+ 
+             return $manual;
+         });
+diff --git a/app/Support/Manual/LlmJson.php b/app/Support/Manual/LlmJson.php
+new file mode 100644
+index 0000000..16a41f9
+--- /dev/null
++++ b/app/Support/Manual/LlmJson.php
+@@ -0,0 +1,45 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\Support\Manual;
++
++use App\Enums\Manual\LlmOutputInvalidReason;
++use App\Exceptions\Manual\LlmOutputInvalidException;
++
++/**
++ * LLM 出力テキストの JSON デコード共通ヘルパ (コードフェンス除去 + json_decode + array 検証)。
++ * 不正は LlmOutputInvalidException (有界リトライのトリガー)。
++ */
++final class LlmJson
++{
++    /**
++     * @return array<array-key, mixed>
++     */
++    public static function decode(string $text): array
++    {
++        $trimmed = trim($text);
++        // コードフェンス (```json ... ``` / ``` ... ```) を除去する
++        if (str_starts_with($trimmed, '```')) {
++            $trimmed = preg_replace('/^```[a-zA-Z0-9]*\s*/', '', $trimmed) ?? $trimmed;
++            $trimmed = preg_replace('/\s*```$/', '', $trimmed) ?? $trimmed;
++            $trimmed = trim($trimmed);
++        }
++
++        $decoded = json_decode($trimmed, true);
++        if (! is_array($decoded)) {
++            throw new LlmOutputInvalidException(
++                LlmOutputInvalidReason::InvalidJson,
++                'JSON としてパースできません: '.json_last_error_msg(),
++            );
++        }
++
++        return $decoded;
++    }
++
++    /** スキーマ違反の例外を生成する (DTO 検証用の短縮形) */
++    public static function schemaViolation(string $detail): LlmOutputInvalidException
++    {
++        return new LlmOutputInvalidException(LlmOutputInvalidReason::SchemaViolation, $detail);
++    }
++}
+diff --git a/app/Support/Manual/ScenarioLimits.php b/app/Support/Manual/ScenarioLimits.php
+new file mode 100644
+index 0000000..1f9ef05
+--- /dev/null
++++ b/app/Support/Manual/ScenarioLimits.php
+@@ -0,0 +1,25 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\Support\Manual;
++
++/**
++ * シナリオの有界値 (DoS guard / DB 桁と一致)。
++ * 手動保存 (UpdateScenarioRequest) と AI 生成 DTO 検証 (GeneratedScenarioData 等) の共通定数。
++ */
++final class ScenarioLimits
++{
++    public const int MAX_STEPS = 100;
++
++    public const int MAX_POINTS_PER_STEP = 20;
++
++    public const int MAX_SCENE_CHARS = 1000;
++
++    public const int MAX_NARRATION_CHARS = 2000;
++
++    /** DB string(100) と一致 */
++    public const int MAX_SUBTITLE_PRIMARY_CHARS = 100;
++
++    public const int MAX_SUBTITLE_SECONDARY_CHARS = 2000;
++}
+diff --git a/app/Support/Security/MassAssignmentProtectedKeys.php b/app/Support/Security/MassAssignmentProtectedKeys.php
+index 2f2695a..8cac260 100644
+--- a/app/Support/Security/MassAssignmentProtectedKeys.php
++++ b/app/Support/Security/MassAssignmentProtectedKeys.php
+@@ -45,6 +45,7 @@ public static function all(): array
+             // billing (Service / Seeder がサーバ側で導出する)
+             'plan_id',
+             'reservation_id',
++            'ticket_reservation_id', // AI-CUE: analysis_jobs の予約冪等キー (doc/10 §10.1)
+             // secret (サーバ生成値)
+             'token_hash',
+             'key_hash',
+diff --git a/bootstrap/app.php b/bootstrap/app.php
+index 546b82a..915a0c1 100644
+--- a/bootstrap/app.php
++++ b/bootstrap/app.php
+@@ -20,6 +20,7 @@
+ use App\Http\Middleware\SecurityHeaders;
+ use App\Http\Middleware\VerifyMcpOrigin;
+ use App\Http\Middleware\VerifySnsSignature;
++use App\Http\Resources\Billing\InsufficientTicketsResource;
+ use App\Support\Http\AdminPanelPath;
+ use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
+ use Illuminate\Foundation\Application;
+@@ -147,7 +148,17 @@
+             return $request->is('api/*') ? null : back()->with('error', $exception->getMessage());
+         });
+         $exceptions->render(function (InsufficientTicketsException $exception, Request $request) {
+-            return $request->is('api/*') ? null : back()->with('error', $exception->getMessage());
++            if ($request->is('api/*')) {
++                return null; // ApiExceptionRenderer に委譲 (既存)
++            }
++            if ($request->expectsJson()) {
++                // XHR (analyze 等) は 402 + JsonResource (response()->json() 直書きはしない)
++                return InsufficientTicketsResource::make($exception)
++                    ->response($request)
++                    ->setStatusCode(402);
++            }
++
++            return back()->with('error', $exception->getMessage()); // 既存の web 挙動を維持
+         });
+ 
+         // REST API v1 の統一エラー envelope ({error: {code, message, status, details?}})。
+diff --git a/composer.json b/composer.json
+index 4c19fd6..92798ef 100644
+--- a/composer.json
++++ b/composer.json
+@@ -31,7 +31,9 @@
+         "laravel/socialite": "^5.27",
+         "laravel/tinker": "^3.0",
+         "owen-it/laravel-auditing": "^14.0",
++        "phpoffice/phpspreadsheet": "^5.8",
+         "santigarcor/laratrust": "^8.5",
++        "smalot/pdfparser": "^2.12",
+         "spatie/laravel-ciphersweet": "^1.7",
+         "webmozart/assert": "^2.4"
+     },
+diff --git a/composer.lock b/composer.lock
+index deb63f0..487ef4c 100644
+--- a/composer.lock
++++ b/composer.lock
+@@ -4,7 +4,7 @@
+         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
+         "This file is @generated automatically"
+     ],
+-    "content-hash": "f6ee9c23f971ca70612363f7c71a4595",
++    "content-hash": "220d2e57e3874bccec0392e2c8b62513",
+     "packages": [
+         {
+             "name": "aws/aws-crt-php",
+@@ -711,6 +711,82 @@
+             ],
+             "time": "2026-03-20T21:10:52+00:00"
+         },
++        {
++            "name": "composer/pcre",
++            "version": "3.4.0",
++            "source": {
++                "type": "git",
++                "url": "https://github.com/composer/pcre.git",
++                "reference": "d5a341b3fb61f3001970940afb1d332968a183ed"
++            },
++            "dist": {
++                "type": "zip",
++                "url": "https://api.github.com/repos/composer/pcre/zipball/d5a341b3fb61f3001970940afb1d332968a183ed",
++                "reference": "d5a341b3fb61f3001970940afb1d332968a183ed",
++                "shasum": ""
++            },
++            "require": {
++                "php": "^7.4 || ^8.0"
++            },
++            "conflict": {
++                "phpstan/phpstan": "<2.2.2"
++            },
++            "require-dev": {
++                "phpstan/phpstan": "^2",
++                "phpstan/phpstan-deprecation-rules": "^2",
++                "phpstan/phpstan-strict-rules": "^2",
++                "phpunit/phpunit": "^9"
++            },
++            "type": "library",
++            "extra": {
++                "phpstan": {
++                    "includes": [
++                        "extension.neon"
++                    ]
++                },
++                "branch-alias": {
++                    "dev-main": "3.x-dev"
++                }
++            },
++            "autoload": {
++                "psr-4": {
++                    "Composer\\Pcre\\": "src"
++                }
++            },
++            "notification-url": "https://packagist.org/downloads/",
++            "license": [
++                "MIT"
++            ],
++            "authors": [
++                {
++                    "name": "Jordi Boggiano",
++                    "email": "j.boggiano@seld.be",
++                    "homepage": "http://seld.be"
++                }
++            ],
++            "description": "PCRE wrapping library that offers type-safe preg_* replacements.",
++            "keywords": [
++                "PCRE",
++                "preg",
++                "regex",
++                "regular expression"
++            ],
++            "support": {
++                "issues": "https://github.com/composer/pcre/issues",
++                "source": "https://github.com/composer/pcre/tree/3.4.0"
++            },
++            "funding": [
++                {
++                    "url": "https://packagist.com",
++                    "type": "custom"
++                },
++                {
++                    "url": "https://github.com/composer",
++                    "type": "github"
++                }
++            ],
++            "time": "2026-06-07T11:47:49+00:00"
++        },
+         {
+             "name": "danharrin/date-format-converter",
+             "version": "v0.3.1",
+@@ -4895,6 +4971,191 @@
+             ],
+             "time": "2026-06-02T08:58:52+00:00"
+         },
++        {
++            "name": "maennchen/zipstream-php",
++            "version": "3.2.2",
++            "source": {
++                "type": "git",
++                "url": "https://github.com/maennchen/ZipStream-PHP.git",
++                "reference": "77bebeb4c6c340bb3c11c843b2cffd8bbfde4d5e"
++            },
++            "dist": {
++                "type": "zip",
++                "url": "https://api.github.com/repos/maennchen/ZipStream-PHP/zipball/77bebeb4c6c340bb3c11c843b2cffd8bbfde4d5e",
++                "reference": "77bebeb4c6c340bb3c11c843b2cffd8bbfde4d5e",
++                "shasum": ""
++            },
++            "require": {
++                "ext-mbstring": "*",
++                "ext-zlib": "*",
++                "php-64bit": "^8.3"
++            },
++            "require-dev": {
++                "brianium/paratest": "^7.7",
++                "ext-zip": "*",
++                "friendsofphp/php-cs-fixer": "^3.86",
++                "guzzlehttp/guzzle": "^7.5",
++                "mikey179/vfsstream": "^1.6",
++                "php-coveralls/php-coveralls": "^2.5",
++                "phpunit/phpunit": "^12.0",
++                "vimeo/psalm": "^6.0"
++            },
++            "suggest": {
++                "guzzlehttp/psr7": "^2.4",
++                "psr/http-message": "^2.0"
++            },
++            "type": "library",
++            "autoload": {
++                "psr-4": {
++                    "ZipStream\\": "src/"
++                }
++            },
++            "notification-url": "https://packagist.org/downloads/",
++            "license": [
++                "MIT"
++            ],
++            "authors": [
++                {
++                    "name": "Paul Duncan",
++                    "email": "pabs@pablotron.org"
++                },
++                {
++                    "name": "Jonatan Männchen",
++                    "email": "jonatan@maennchen.ch"
++                },
++                {
++                    "name": "Jesse Donat",
++                    "email": "donatj@gmail.com"
++                },
++                {
++                    "name": "András Kolesár",
++                    "email": "kolesar@kolesar.hu"
++                }
++            ],
++            "description": "ZipStream is a library for dynamically streaming dynamic zip files from PHP without writing to the disk at all on the server.",
++            "keywords": [
++                "stream",
++                "zip"
++            ],
++            "support": {
++                "issues": "https://github.com/maennchen/ZipStream-PHP/issues",
++                "source": "https://github.com/maennchen/ZipStream-PHP/tree/3.2.2"
++            },
++            "funding": [
++                {
++                    "url": "https://github.com/maennchen",
++                    "type": "github"
++                }
++            ],
++            "time": "2026-04-11T18:38:28+00:00"
++        },
++        {
++            "name": "markbaker/complex",
++            "version": "3.0.2",
++            "source": {
++                "type": "git",
++                "url": "https://github.com/MarkBaker/PHPComplex.git",
++                "reference": "95c56caa1cf5c766ad6d65b6344b807c1e8405b9"
++            },
++            "dist": {
++                "type": "zip",
++                "url": "https://api.github.com/repos/MarkBaker/PHPComplex/zipball/95c56caa1cf5c766ad6d65b6344b807c1e8405b9",
++                "reference": "95c56caa1cf5c766ad6d65b6344b807c1e8405b9",
++                "shasum": ""
++            },
++            "require": {
++                "php": "^7.2 || ^8.0"
++            },
++            "require-dev": {
++                "dealerdirect/phpcodesniffer-composer-installer": "dev-master",
++                "phpcompatibility/php-compatibility": "^9.3",
++                "phpunit/phpunit": "^7.0 || ^8.0 || ^9.0",
++                "squizlabs/php_codesniffer": "^3.7"
++            },
++            "type": "library",
++            "autoload": {
++                "psr-4": {
++                    "Complex\\": "classes/src/"
++                }
++            },
++            "notification-url": "https://packagist.org/downloads/",
++            "license": [
++                "MIT"
++            ],
++            "authors": [
++                {
++                    "name": "Mark Baker",
++                    "email": "mark@lange.demon.co.uk"
++                }
++            ],
++            "description": "PHP Class for working with complex numbers",
++            "homepage": "https://github.com/MarkBaker/PHPComplex",
++            "keywords": [
++                "complex",
++                "mathematics"
++            ],
++            "support": {
++                "issues": "https://github.com/MarkBaker/PHPComplex/issues",
++                "source": "https://github.com/MarkBaker/PHPComplex/tree/3.0.2"
++            },
++            "time": "2022-12-06T16:21:08+00:00"
++        },
++        {
++            "name": "markbaker/matrix",
++            "version": "3.0.1",
++            "source": {
++                "type": "git",
++                "url": "https://github.com/MarkBaker/PHPMatrix.git",
++                "reference": "728434227fe21be27ff6d86621a1b13107a2562c"
++            },
++            "dist": {
++                "type": "zip",
++                "url": "https://api.github.com/repos/MarkBaker/PHPMatrix/zipball/728434227fe21be27ff6d86621a1b13107a2562c",
++                "reference": "728434227fe21be27ff6d86621a1b13107a2562c",
++                "shasum": ""
++            },
++            "require": {
++                "php": "^7.1 || ^8.0"
++            },
++            "require-dev": {
++                "dealerdirect/phpcodesniffer-composer-installer": "dev-master",
++                "phpcompatibility/php-compatibility": "^9.3",
++                "phpdocumentor/phpdocumentor": "2.*",
++                "phploc/phploc": "^4.0",
++                "phpmd/phpmd": "2.*",
++                "phpunit/phpunit": "^7.0 || ^8.0 || ^9.0",
++                "sebastian/phpcpd": "^4.0",
++                "squizlabs/php_codesniffer": "^3.7"
++            },
++            "type": "library",
++            "autoload": {
++                "psr-4": {
++                    "Matrix\\": "classes/src/"
++                }
++            },
++            "notification-url": "https://packagist.org/downloads/",
++            "license": [
++                "MIT"
++            ],
++            "authors": [
++                {
++                    "name": "Mark Baker",
++                    "email": "mark@demon-angel.eu"
++                }
++            ],
++            "description": "PHP Class for working with matrices",
++            "homepage": "https://github.com/MarkBaker/PHPMatrix",
++            "keywords": [
++                "mathematics",
++                "matrix",
++                "vector"
++            ],
++            "support": {
++                "issues": "https://github.com/MarkBaker/PHPMatrix/issues",
++                "source": "https://github.com/MarkBaker/PHPMatrix/tree/3.0.1"
++            },
++            "time": "2022-12-02T22:17:43+00:00"
++        },
+         {
+             "name": "moneyphp/money",
+             "version": "v4.9.0",
+@@ -6346,6 +6607,115 @@
+             },
+             "time": "2026-01-06T21:53:42+00:00"
+         },
++        {
++            "name": "phpoffice/phpspreadsheet",
++            "version": "5.8.0",
++            "source": {
++                "type": "git",
++                "url": "https://github.com/PHPOffice/PhpSpreadsheet.git",
++                "reference": "01964d92536edf1a3a874b9580a52824bebf6fbb"
++            },
++            "dist": {
++                "type": "zip",
++                "url": "https://api.github.com/repos/PHPOffice/PhpSpreadsheet/zipball/01964d92536edf1a3a874b9580a52824bebf6fbb",
++                "reference": "01964d92536edf1a3a874b9580a52824bebf6fbb",
++                "shasum": ""
++            },
++            "require": {
++                "composer/pcre": "^1||^2||^3",
++                "ext-ctype": "*",
++                "ext-dom": "*",
++                "ext-fileinfo": "*",
++                "ext-filter": "*",
++                "ext-gd": "*",
++                "ext-iconv": "*",
++                "ext-libxml": "*",
++                "ext-mbstring": "*",
++                "ext-simplexml": "*",
++                "ext-xml": "*",
++                "ext-xmlreader": "*",
++                "ext-xmlwriter": "*",
++                "ext-zip": "*",
++                "ext-zlib": "*",
++                "maennchen/zipstream-php": "^2.1 || ^3.0",
++                "markbaker/complex": "^3.0",
++                "markbaker/matrix": "^3.0",
++                "php": "^8.1",
++                "psr/simple-cache": "^1.0 || ^2.0 || ^3.0"
++            },
++            "require-dev": {
++                "dealerdirect/phpcodesniffer-composer-installer": "dev-main",
++                "dompdf/dompdf": "^2.0 || ^3.0",
++                "ext-intl": "*",
++                "friendsofphp/php-cs-fixer": "^3.2",
++                "mitoteam/jpgraph": "^10.5",
++                "mpdf/mpdf": "^8.1.1",
++                "phpcompatibility/php-compatibility": "^9.3",
++                "phpstan/phpstan": "^1.1 || ^2.0",
++                "phpstan/phpstan-deprecation-rules": "^1.0 || ^2.0",
++                "phpstan/phpstan-phpunit": "^1.0 || ^2.0",
++                "phpunit/phpunit": "^10.5",
++                "squizlabs/php_codesniffer": "^3.7",
++                "tecnickcom/tcpdf": "^6.5"
++            },
++            "suggest": {
++                "dompdf/dompdf": "Option for rendering PDF with PDF Writer",
++                "ext-intl": "PHP Internationalization Functions, required for NumberFormat Wizard and StringHelper::setLocale()",
++                "mitoteam/jpgraph": "Option for rendering charts, or including charts with PDF or HTML Writers",
++                "mpdf/mpdf": "Option for rendering PDF with PDF Writer",
++                "tecnickcom/tcpdf": "Option for rendering PDF with PDF Writer"
++            },
++            "type": "library",
++            "autoload": {
++                "psr-4": {
++                    "PhpOffice\\PhpSpreadsheet\\": "src/PhpSpreadsheet"
++                }
++            },
++            "notification-url": "https://packagist.org/downloads/",
++            "license": [
++                "MIT"
++            ],
++            "authors": [
++                {
++                    "name": "Maarten Balliauw",
++                    "homepage": "https://blog.maartenballiauw.be"
++                },
++                {
++                    "name": "Mark Baker",
++                    "homepage": "https://markbakeruk.net"
++                },
++                {
++                    "name": "Franck Lefevre",
++                    "homepage": "https://rootslabs.net"
++                },
++                {
++                    "name": "Erik Tilt"
++                },
++                {
++                    "name": "Adrien Crivelli"
++                },
++                {
++                    "name": "Owen Leibman"
++                }
++            ],
++            "description": "PHPSpreadsheet - Read, Create and Write Spreadsheet documents in PHP - Spreadsheet engine",
++            "homepage": "https://github.com/PHPOffice/PhpSpreadsheet",
++            "keywords": [
++                "OpenXML",
++                "excel",
++                "gnumeric",
++                "ods",
++                "php",
++                "spreadsheet",
++                "xls",
++                "xlsx"
++            ],
++            "support": {
++                "issues": "https://github.com/PHPOffice/PhpSpreadsheet/issues",
++                "source": "https://github.com/PHPOffice/PhpSpreadsheet/tree/5.8.0"
++            },
++            "time": "2026-06-07T03:51:10+00:00"
++        },
+         {
+             "name": "phpoption/phpoption",
+             "version": "1.9.5",
+@@ -7951,6 +8321,57 @@
+             ],
+             "time": "2022-12-17T21:53:22+00:00"
+         },
++        {
++            "name": "smalot/pdfparser",
++            "version": "v2.12.5",
++            "source": {
++                "type": "git",
++                "url": "https://github.com/smalot/pdfparser.git",
++                "reference": "2cfa0d92bd557875c9f52a75fde0e8392302a354"
++            },
++            "dist": {
++                "type": "zip",
++                "url": "https://api.github.com/repos/smalot/pdfparser/zipball/2cfa0d92bd557875c9f52a75fde0e8392302a354",
++                "reference": "2cfa0d92bd557875c9f52a75fde0e8392302a354",
++                "shasum": ""
++            },
++            "require": {
++                "ext-iconv": "*",
++                "ext-zlib": "*",
++                "php": ">=7.1",
++                "symfony/polyfill-mbstring": "^1.18"
++            },
++            "type": "library",
++            "autoload": {
++                "psr-0": {
++                    "Smalot\\PdfParser\\": "src/"
++                }
++            },
++            "notification-url": "https://packagist.org/downloads/",
++            "license": [
++                "LGPL-3.0"
++            ],
++            "authors": [
++                {
++                    "name": "Sebastien MALOT",
++                    "email": "sebastien@malot.fr"
++                }
++            ],
++            "description": "Pdf parser library. Can read and extract information from pdf file.",
++            "homepage": "https://www.pdfparser.org",
++            "keywords": [
++                "extract",
++                "parse",
++                "parser",
++                "pdf",
++                "text"
++            ],
++            "support": {
++                "issues": "https://github.com/smalot/pdfparser/issues",
++                "source": "https://github.com/smalot/pdfparser/tree/v2.12.5"
++            },
++            "time": "2026-04-17T11:37:58+00:00"
++        },
+         {
+             "name": "spatie/invade",
+             "version": "2.1.0",
+@@ -13551,82 +13972,6 @@
+             ],
+             "time": "2026-03-29T15:46:14+00:00"
+         },
+-        {
+-            "name": "composer/pcre",
+-            "version": "3.4.0",
+-            "source": {
+-                "type": "git",
+-                "url": "https://github.com/composer/pcre.git",
+-                "reference": "d5a341b3fb61f3001970940afb1d332968a183ed"
+-            },
+-            "dist": {
+-                "type": "zip",
+-                "url": "https://api.github.com/repos/composer/pcre/zipball/d5a341b3fb61f3001970940afb1d332968a183ed",
+-                "reference": "d5a341b3fb61f3001970940afb1d332968a183ed",
+-                "shasum": ""
+-            },
+-            "require": {
+-                "php": "^7.4 || ^8.0"
+-            },
+-            "conflict": {
+-                "phpstan/phpstan": "<2.2.2"
+-            },
+-            "require-dev": {
+-                "phpstan/phpstan": "^2",
+-                "phpstan/phpstan-deprecation-rules": "^2",
+-                "phpstan/phpstan-strict-rules": "^2",
+-                "phpunit/phpunit": "^9"
+-            },
+-            "type": "library",
+-            "extra": {
+-                "phpstan": {
+-                    "includes": [
+-                        "extension.neon"
+-                    ]
+-                },
+-                "branch-alias": {
+-                    "dev-main": "3.x-dev"
+-                }
+-            },
+-            "autoload": {
+-                "psr-4": {
+-                    "Composer\\Pcre\\": "src"
+-                }
+-            },
+-            "notification-url": "https://packagist.org/downloads/",
+-            "license": [
+-                "MIT"
+-            ],
+-            "authors": [
+-                {
+-                    "name": "Jordi Boggiano",
+-                    "email": "j.boggiano@seld.be",
+-                    "homepage": "http://seld.be"
+-                }
+-            ],
+-            "description": "PCRE wrapping library that offers type-safe preg_* replacements.",
+-            "keywords": [
+-                "PCRE",
+-                "preg",
+-                "regex",
+-                "regular expression"
+-            ],
+-            "support": {
+-                "issues": "https://github.com/composer/pcre/issues",
+-                "source": "https://github.com/composer/pcre/tree/3.4.0"
+-            },
+-            "funding": [
+-                {
+-                    "url": "https://packagist.com",
+-                    "type": "custom"
+-                },
+-                {
+-                    "url": "https://github.com/composer",
+-                    "type": "github"
+-                }
+-            ],
+-            "time": "2026-06-07T11:47:49+00:00"
+-        },
+         {
+             "name": "composer/semver",
+             "version": "3.4.4",
+diff --git a/config/manual.php b/config/manual.php
+new file mode 100644
+index 0000000..c47619d
+--- /dev/null
++++ b/config/manual.php
+@@ -0,0 +1,32 @@
++<?php
++
++declare(strict_types=1);
++
++/*
++|--------------------------------------------------------------------------
++| 動画マニュアル / AI 解析の設定 (doc/10 §10.5 / §10.7 / §10.8)
++|--------------------------------------------------------------------------
++*/
++
++return [
++    // AI 解析 1 回のチケット消費 (doc/10 §10.5 COST_ANALYSIS)
++    'analysis_ticket_cost' => 1,
++
++    // LLM 出力 JSON の検証失敗時の有界リトライ回数 (§10.7-2。計 1+N 試行)
++    'analysis_llm_max_retries' => 2,
++
++    // LLM 入力上限 (UTF-8 bytes)。token budget 導出: context 200,000 - 出力予約 16,000
++    // - 固定プロンプト 4,000 = 180,000 token。byte-fallback BPE では token 数 <= バイト数が
++    // 安全側上界のため strlen で保証する (AnalysisTokenBudgetInvariantTest が算術を固定)
++    'analysis_max_text_bytes' => 150_000,
++
++    // 抽出テキストの実質空判定 (これ未満は「テキストを抽出できません」)
++    'analysis_min_text_bytes' => 100,
++
++    // stale ジョブ回復閾値 (分)。queued: dispatch 喪失、running: worker 異常終了
++    'analysis_stale_after_minutes' => 30,
++
++    // SOP アップロード上限 (bytes) と許可拡張子 (mime rule 用)
++    'source_document_max_bytes' => 20 * 1024 * 1024,
++    'source_document_mimes' => ['pdf', 'xlsx', 'xls', 'txt'],
++];
+diff --git a/config/queue.php b/config/queue.php
+index 79c2c0a..ec7640a 100644
+--- a/config/queue.php
++++ b/config/queue.php
+@@ -44,6 +44,19 @@
+             'after_commit' => false,
+         ],
+ 
++        // AI 解析専用 (RunManualAnalysis)。retry_after は job timeout (1,380s) より長く
++        // 予約 TTL (1,800s) より短い (AnalysisTimeBudgetInvariantTest が連鎖を固定)。
++        // 運用契約: worker は `php artisan queue:work database-analysis` を必須登録
++        // (docs/architecture.md。滞留は analysis:recover-stale-jobs cron が回収)
++        'database-analysis' => [
++            'driver' => 'database',
++            'connection' => env('DB_QUEUE_CONNECTION'),
++            'table' => env('DB_QUEUE_TABLE', 'jobs'),
++            'queue' => 'analysis',
++            'retry_after' => 1560,
++            'after_commit' => false,
++        ],
++
+         'beanstalkd' => [
+             'driver' => 'beanstalkd',
+             'host' => env('BEANSTALKD_QUEUE_HOST', 'localhost'),
+diff --git a/database/factories/AnalysisJobFactory.php b/database/factories/AnalysisJobFactory.php
+new file mode 100644
+index 0000000..b5e3079
+--- /dev/null
++++ b/database/factories/AnalysisJobFactory.php
+@@ -0,0 +1,77 @@
++<?php
++
++declare(strict_types=1);
++
++namespace Database\Factories;
++
++use App\Enums\Manual\AnalysisStep;
++use App\Enums\Manual\JobStatus;
++use App\Models\AnalysisJob;
++use App\Models\SourceDocument;
++use App\Models\VideoManual;
++use Illuminate\Database\Eloquent\Factories\Factory;
++
++/**
++ * @extends Factory<AnalysisJob>
++ */
++class AnalysisJobFactory extends Factory
++{
++    /**
++     * videoManual 未指定なら VideoManualFactory に連鎖する (親 Factory 連鎖の規約)。
++     *
++     * @return array<string, mixed>
++     */
++    public function definition(): array
++    {
++        return [
++            'video_manual_id' => VideoManual::factory(),
++            'source_document_id' => null,
++            'status' => JobStatus::Queued->value,
++            'step' => null,
++            'progress' => null,
++            'ticket_reservation_id' => null,
++            'result_json' => null,
++            'error' => null,
++        ];
++    }
++
++    /** 指定マニュアル配下に作る */
++    public function forManual(VideoManual $manual): static
++    {
++        return $this->state(fn () => ['video_manual_id' => $manual->id]);
++    }
++
++    /** 解析対象の SourceDocument を指定する (manual の一致は呼び出し側の責務) */
++    public function forDocument(SourceDocument $document): static
++    {
++        return $this->state(fn () => ['source_document_id' => $document->id]);
++    }
++
++    /** 実行中 (extract 段) の状態 */
++    public function running(): static
++    {
++        return $this->state(fn () => [
++            'status' => JobStatus::Running->value,
++            'step' => AnalysisStep::Extract->value,
++            'progress' => 10,
++        ]);
++    }
++
++    /** 失敗確定の状態 */
++    public function failed(string $error = '解析に失敗しました'): static
++    {
++        return $this->state(fn () => [
++            'status' => JobStatus::Failed->value,
++            'error' => $error,
++        ]);
++    }
++
++    /** 成功確定の状態 */
++    public function succeeded(): static
++    {
++        return $this->state(fn () => [
++            'status' => JobStatus::Succeeded->value,
++            'progress' => 100,
++        ]);
++    }
++}
+diff --git a/database/migrations/2026_07_11_000000_create_analysis_jobs_table.php b/database/migrations/2026_07_11_000000_create_analysis_jobs_table.php
+new file mode 100644
+index 0000000..90e9f2b
+--- /dev/null
++++ b/database/migrations/2026_07_11_000000_create_analysis_jobs_table.php
+@@ -0,0 +1,42 @@
++<?php
++
++declare(strict_types=1);
++
++use Illuminate\Database\Migrations\Migration;
++use Illuminate\Database\Schema\Blueprint;
++use Illuminate\Support\Facades\Schema;
++
++return new class extends Migration
++{
++    /**
++     * AnalysisJob: VideoManual 配下の AI 解析ジョブ (doc/10 §10.1)。
++     *
++     * - video_manual_id / source_document_id / ticket_reservation_id は保護キー
++     *   (payload から受けない。Service が明示代入)
++     * - status は string + アプリ層 cast (enum 追加に強い)
++     * - ticket_reservation_id は予約の冪等キー (§10.8-1。再試行で二重予約しない)
++     * - result_json は中間成果 (作業分解表) の write-only 監査スナップショット
++     */
++    public function up(): void
++    {
++        Schema::create('analysis_jobs', function (Blueprint $table): void {
++            $table->id();
++            $table->foreignId('video_manual_id')->constrained()->cascadeOnDelete();
++            $table->foreignId('source_document_id')->nullable()->constrained()->nullOnDelete();
++            $table->string('status')->default('queued');
++            $table->string('step')->nullable();
++            $table->unsignedSmallInteger('progress')->nullable();
++            $table->foreignId('ticket_reservation_id')->nullable()->constrained('ticket_reservations')->nullOnDelete();
++            $table->json('result_json')->nullable();
++            $table->text('error')->nullable();
++            $table->timestamps();
++            $table->index(['video_manual_id', 'status']); // in-flight 判定
++            $table->index(['status', 'updated_at']);      // stale 回復走査
++        });
++    }
++
++    public function down(): void
++    {
++        Schema::dropIfExists('analysis_jobs');
++    }
++};
+diff --git "a/doc/10_\345\256\237\350\243\205\344\273\225\346\247\230.md" "b/doc/10_\345\256\237\350\243\205\344\273\225\346\247\230.md"
+index dd956b0..b6ade51 100644
+--- "a/doc/10_\345\256\237\350\243\205\344\273\225\346\247\230.md"
++++ "b/doc/10_\345\256\237\350\243\205\344\273\225\346\247\230.md"
+@@ -123,7 +123,13 @@ ## 10.2 Enum と状態遷移
+   - published:  完成動画あり
+   - 編集で cut を変更したら published → ready へ戻す（完成動画は要再合成）
+   - draft → ready（シナリオ保存で cuts ≥ 1 になったとき。自作シナリオ経路）
+-  - 解析失敗は draft へ戻し AnalysisJob.error に理由
++  - ready → analyzing（**再解析**。SOP 差し替え後の明示トリガー。既存 cuts は
++    materialize で全置換されるためフロントは確認ダイアログを挟む）
++  - 解析失敗の復帰: cuts ≥ 1 なら ready、無ければ draft へ戻し AnalysisJob.error に理由
++    （「失敗は draft へ」は cuts 無しの初回解析ケースとして包含）
++  - 書き込み経路はメソッド粒度で固定（ScenarioService::save /
++    ScenarioService::materializeIntoLockedManual / AnalysisJobService::trigger /
++    AnalysisJobService::failJob。ScenarioWritePathInventoryTest が deny-by-default で強制）
+ 
+ CutType: step | point          ShotType: hiki | yori
+ JobStatus: queued → running → (succeeded | failed)
+@@ -239,7 +245,8 @@ ### resources/prompts/sop-extract.yaml（★オープン項目あり）
+ 
+ ## 10.5 課金・権限の確定値
+ 
+-- **チケット消費**（単一台帳・amount 可変）: `COST_ANALYSIS = 1`、`COST_RENDER = N`（尺/解像度係数、初期は固定 3 で開始）。プレビューは 0。予約はジョブ開始時（TTL=30 分対処）。
++- **チケット消費**（単一台帳・amount 可変）: `COST_ANALYSIS = 1`（`config/manual.php` の `analysis_ticket_cost`）、`COST_RENDER = N`（尺/解像度係数、初期は固定 3 で開始）。プレビューは 0。予約はジョブ開始時（TTL=30 分対処）。
++- **LLM 入力上限**（AI 解析）: 抽出テキストは **UTF-8 バイト数**で上限判定（`analysis_max_text_bytes = 150,000`）。根拠: モデル context 200,000 token − 出力予約 16,000（YAML max_tokens）− 固定プロンプト余裕 4,000 = 入力 budget 180,000 token。byte-fallback BPE 系 tokenizer では token 数 ≤ UTF-8 バイト数が安全側上界のため `strlen ≤ 150,000 ≤ 180,000` で context 超過を構造的に防ぐ（算術は `AnalysisTokenBudgetInvariantTest` が CI 固定。モデル/tokenizer 変更時は要再確認）。
+ - **Quota**: `max_manuals`（組織単位）、`max_storage_bytes`、`feature_multilang`(bool)。`config/quota.php` の各プラン + `QuotaKey` に追記。
+ - **ロール**: project_admin=編集者、project_member=撮影者（rename のみ）。permission は Policy で（編集者=manual CRUD/render/download、撮影者=take capture/upload/adopt + manual read）。
+ 
+diff --git a/docs/architecture.md b/docs/architecture.md
+index fd08c21..0ee1d09 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -35,7 +35,8 @@ ## ドメインモデル (テンプレート同梱)
+ | `Item` | **ドメインリソースの見本**。新規リソース追加はこれを複製して始める | Project 従属 |
+ | `Category` | AI-CUE: 動画マニュアルの分類 (project 内で name ユニーク・sort_order は Service 専有) | Project 従属 |
+ | `VideoManual` | AI-CUE: 動画マニュアル本体 (status enum・カテゴリ削除で未分類化) | Project 従属 |
+-| `SourceDocument` | AI-CUE: SOP ファイル (Tier B schema 先取り。UI/route は後続フェーズ) | VideoManual 従属 |
++| `SourceDocument` | AI-CUE: SOP ファイル (追記型 immutable。差し替え = 新規行、解析は latest 勝ち。extracted_json は解析の write-only 監査スナップショット) | VideoManual 従属 |
++| `AnalysisJob` | AI-CUE: AI 解析ジョブ (status/step/progress。ticket_reservation_id = 予約の冪等キー。$fillable なし = Service の明示代入のみ) | VideoManual 従属 |
+ | `Cut` | AI-CUE: シナリオカット (Tier B schema 先取り。自己参照 parent_cut_id / 循環 FK adopted_take_id は後付け migration) | VideoManual 従属 |
+ | `Take` | AI-CUE: 撮影素材 (Tier B schema 先取り。(cut_id, client_take_id) UNIQUE = 同期冪等キー) | Cut 従属 |
+ | `Role` / `Permission` | Laratrust のロール・権限 (seed 固定) | Team スコープ |
+@@ -67,7 +68,11 @@ ## 主要 Service (テンプレート同梱)
+ | `Project/ProjectService` | プロジェクト CRUD |
+ | `Manual/CategoryService` | AI-CUE: カテゴリ create/update/reorder/delete (Project 行ロックで直列化・sort_order 専有) |
+ | `Manual/VideoManualService` | AI-CUE: 動画マニュアル create/updateMeta/delete (created_by サーバ導出・category 保存時再解決) |
+-| `Manual/ScenarioService` | AI-CUE: シナリオ (Cut 群) の document 単位保存 (VideoManual 行ロック → rendering/analyzing・楽観ロック guard → 2 段階 reconcile → version+1)。§シナリオ整合の共有不変条件の最初の準拠実装 |
++| `Manual/ScenarioService` | AI-CUE: シナリオ (Cut 群) の document 単位保存 (VideoManual 行ロック → rendering/analyzing・楽観ロック guard → 2 段階 reconcile → version+1) + AI 解析結果の materialize (`materializeIntoLockedManual` = ロック済み前提メソッド)。§シナリオ整合の共有不変条件の準拠実装 |
++| `Manual/SourceDocumentService` | AI-CUE: SOP (SourceDocument) の保存。追記型 immutable (差し替え = 新規行)。専用 route 経路は VideoManual 行ロック + draft/ready guard、MIME は内容 sniff で再判定 (polyglot 対策) |
++| `Manual/AnalysisJobService` | AI-CUE: AI 解析の状態機械 (trigger = draft/ready→analyzing + in-flight 冪等 + 残高事前チェック / failJob = 行ロック + terminal guard の冪等失敗確定 / recoverStale = stale 回復 cron 本体) |
++| `Manual/AnalysisPipeline` | AI-CUE: 解析パイプライン本体 (extract→decompose→generate→terminal tx)。チケット 2 フェーズ (予約冪等キー = analysis_jobs.ticket_reservation_id、materialize + commit + succeeded を単一 tx で原子化)。LLM 出力の有界リトライ (JSON 検証失敗のみ最大 2 回) |
++| `Manual/SopTextExtractor` | AI-CUE: SOP テキスト抽出 (pdf = smalot/pdfparser / xlsx·xls = phpoffice/phpspreadsheet / txt)。UTF-8 strict 検証 + UTF-8 バイト上限 (token budget 導出。AnalysisTokenBudgetInvariantTest が算術を固定) |
+ | `Auth/SocialAccountService` | ソーシャルログイン連携 |
+ | `Billing/BillingAccess` | 課金ゲート判定 (`subscription('default')` が active/trialing なら許可)。**課金による利用可否の判定は本クラス経由のみ** (アプリは本クラスの差し替えで gate 方針を変更する)。適用は `require-active-subscription` middleware (業務 route group。billing / webhook は構造的 allowlist) |
+ | `Billing/QuotaService` | quota の消費・検証 |
+@@ -93,12 +98,31 @@ ## シナリオ整合の共有不変条件 (AI-CUE ドメイン規約)
+   シナリオ書き込みに無関係のため、直列化粒度を manual に意図的に絞る)。
+   親 relation 経由の再解決 (`$project->manuals()->whereKey(...)->lockForUpdate()`) で
+   「子は親に属する」も同時に担保する
+-- 現在の準拠実装は `Manual/ScenarioService::save()` のみ。後続フェーズの
+-  **AI 解析 job の Cut materialize / RenderJob の状態遷移 / テイク採用 API** も本規約に従うこと
++- 準拠実装 (メソッド粒度の経路 inventory。`ScenarioWritePathInventoryTest` が
++  deny-by-default の token 走査で機械検証する = **Architecture テストへ昇格済み**):
++
++  | 経路 | 書いてよいもの |
++  |---|---|
++  | `ScenarioService::save()` | cuts / scenario_version / status (rendering·analyzing guard 付き) |
++  | `ScenarioService::materializeIntoLockedManual()` | cuts / scenario_version / status (analyzing→ready のみ。呼び出しは AnalysisPipeline::finalize の terminal tx に限定) |
++  | `AnalysisJobService::trigger()` | status (draft·ready→analyzing のみ) |
++  | `AnalysisJobService::failJob()` | status (analyzing→ready·draft のみ。cuts 有無で決定) |
++
++  後続フェーズの **RenderJob の状態遷移 / テイク採用 API** も本規約 + inventory 登録に従うこと
+ - 状態 guard (rendering/analyzing 中の保存は 409) は第一防衛、共有行ロックは
+   「job 側の書き込みと保存が絶対に交差しない」ための構造的防衛 (二重防御)
+-- **書き込み経路が 2 つ以上になった時点で、経路 inventory を持つ Architecture テストへ昇格させる**
+-  (現時点は経路が 1 つで機械検証対象がないためテスト化は見送り = 過剰設計回避)
++
++### AI 解析ジョブの運用契約
++
++- 解析ジョブ (`RunManualAnalysis`) は専用 queue connection **`database-analysis`**
++  (queue=analysis、retry_after=1560) で流れる。**本番/ステージングの worker プロセス定義・
++  デプロイ手順・監視対象に `php artisan queue:work database-analysis` を必須項目として登録する**
++  (専用 worker が居ないとジョブは滞留する。queued 滞留は `analysis:recover-stale-jobs` cron が
++  30 分で failJob するため、滞留 = 監視で気づける)
++- 時間 budget の連鎖 `job timeout (1,380s) < retry_after (1,560s) < 予約 TTL (1,800s) ≤ stale 閾値 (1,800s)`
++  は `AnalysisTimeBudgetInvariantTest` が CI 固定する
++- ローカル/テストの検証: パイプラインの同期実行は `AnalysisPipeline::run()` の直接呼び出し、
++  dispatch の検証は `Queue::fake()` (sync ドライバの自動実行には依存しない)
+ 
+ ## 公開面
+ 
+diff --git a/docs/factories.md b/docs/factories.md
+index 727a266..cc0049f 100644
+--- a/docs/factories.md
++++ b/docs/factories.md
+@@ -24,6 +24,7 @@ ## Factory 一覧 (テンプレート同梱)
+ | `VideoManualFactory` | VideoManual | `forProject($project)`, `forCategory($category)`, `createdBy($user)` |
+ | `SourceDocumentFactory` | SourceDocument | `forManual($manual)` |
+ | `CutFactory` | Cut | `forManual($manual)` / `asPointOf($step)` / `withSortOrder($n)` |
++| `AnalysisJobFactory` | AnalysisJob | `forManual($manual)` / `forDocument($document)` / `running()` / `failed($error)` / `succeeded()` |
+ | `TakeFactory` | Take | `forCut($cut)` |
+ | `ApiKeyFactory` | ApiKey | `forOrganization($org)`, `revoked()`, `expired(?Carbon $expiresAt = null)` |
+ | `OrganizationInvitationFactory` | OrganizationInvitation | `forOrganization($org)`, `expired()`, `accepted()`, `revoked()`, `asAdmin()`。加えて `createWithPlainToken(array): array` (invitation と平文 token を tuple で返す。URL 生成用。DB には sha256 hash のみ保存) |
+diff --git a/docs/template-divergence.md b/docs/template-divergence.md
+index 22e0173..72b637d 100644
+--- a/docs/template-divergence.md
++++ b/docs/template-divergence.md
+@@ -34,11 +34,11 @@ ### 関連
+ 
+ ---
+ 
+-## D1 ✅ Tier B スキーマの先取り (SourceDocument / Cut / Take を振る舞い無しで先行作成)
++## D1 ✅ Tier B スキーマの先取り (Cut / Take を振る舞い無しで先行作成)
+ 
+ | 観点 | テンプレート | 本アプリ |
+ |---|---|---|
+-| リソース追加 | Item 見本の 15 点フルセット (route/Controller/UI まで) を同時に張る | SourceDocument / Cut / Take は migration + Model + Factory + 保護キーのみ (route/Controller/UI なし) |
++| リソース追加 | Item 見本の 15 点フルセット (route/Controller/UI まで) を同時に張る | Cut / Take は migration + Model + Factory + 保護キーのみ (route/Controller/UI なし)。SourceDocument は T003 (AI 解析) で route/Controller/UI を追加済みで本差分の対象外 |
+ 
+ ### なぜ正当な差分か(logic-driven)
+ AI-CUE の中核集約 (VideoManual ─< SourceDocument / Cut ─< Take) はフェーズ1で
+@@ -46,15 +46,25 @@ ### なぜ正当な差分か(logic-driven)
+ 振る舞いだけを足せるようにする (doc/10 §10.6 フェーズ1定義)。実 route 未確定のまま
+ IDOR inventory だけ先行させないため、route/UI は張らない。
+ 
++なお SourceDocument は T003 (AI 解析) で振る舞いが確定し、
++`SourceDocumentController` + `projects.manuals.source-documents.store` route +
++`SourceDocumentUpload.svelte` を追加して本差分から**卒業**した。残る先取りは Cut / Take のみ
++(Cut は書き込み経路のみ ScenarioService 経由で存在し、per-row route は張っていない。D5 参照)。
++
+ ### 揃えている不変条件(これは保証し続ける)
+ > 「route/UI を張るまで外部到達不可。張るときに NestedRouteIdorDefenseTest inventory 登録と
+ > relation 経由解決 + 404 テストを同時に行う」
+ NestedRouteIdorDefenseTest の deny-by-default (2+param route の未分類 fail) が、後続フェーズで
+ route を張った瞬間に分類登録を強制する。保護キー (video_manual_id/cut_id/parent_cut_id/
+ adopted_take_id) は MassAssignmentSafetyTest が $fillable 不含を自動走査する。
++SourceDocument の卒業時にはこの不変条件どおり、`projects.manuals.source-documents.store` の
++NestedRouteIdorDefenseTest inventory 登録と relation 経由解決 + 404 テスト
++(`tests/Feature/Projects/SourceDocumentUploadTest.php`) を route 追加と同時に行った。
+ 
+ ### 関連
+-- 実装: `database/migrations/2026_07_10_*`, `app/Models/{SourceDocument,Cut,Take}.php`
++- 実装: `database/migrations/2026_07_10_*`, `app/Models/{SourceDocument,Cut,Take}.php`,
++  卒業分: `app/Http/Controllers/Projects/SourceDocumentController.php`,
++  `resources/js/components/features/manual/SourceDocumentUpload.svelte`
+ - 設計: `devnotes/20260710-2137-aicue-domain-foundation/detailed-design.md` 施策2/4/5
+ 
+ ## D2 ✅ 循環 FK の 3 段階マイグレーション (cuts の parent_cut_id / adopted_take_id を後付け)
+diff --git a/resources/js/components/features/manual/AnalysisPanel.svelte b/resources/js/components/features/manual/AnalysisPanel.svelte
+new file mode 100644
+index 0000000..ee247dc
+--- /dev/null
++++ b/resources/js/components/features/manual/AnalysisPanel.svelte
+@@ -0,0 +1,237 @@
++<script lang="ts">
++    import { router } from "@inertiajs/svelte";
++    import { LoaderCircle, Sparkles } from "@lucide/svelte";
++    import Alert from "@/components/atoms/Alert.svelte";
++    import Button from "@/components/atoms/Button.svelte";
++    import Card from "@/components/atoms/Card.svelte";
++    import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
++    import { csrfToken } from "@/lib/csrf";
++    import type { AnalysisJobProps, VideoManualStatus } from "@/types/manual";
++    import { ANALYSIS_STEP_LABELS } from "@/types/manual";
++
++    /**
++     * AI 解析パネル (起動・進捗ポーリング・エラー表示)。doc/10 §10.3 / 概念設計 §8。
++     * - 起動は POST .../analyze (XHR)。402/409/422 は押下時にサーバのメッセージを表示
++     *   (必須未充足でもボタンは disabled にしない = DESIGN.md)
++     * - analyzing 中は GET .../jobs/{id} を 2.5 秒間隔でポーリング。
++     *   succeeded → router.reload() (ready 反映)、failed → エラー + 再実行導線
++     * - ready からの再解析は「既存シナリオが置き換えられます」確認ダイアログを挟む
++     */
++    interface Props {
++        projectId: number;
++        manualId: number;
++        manualStatus: VideoManualStatus;
++        job: AnalysisJobProps | null;
++        hasDocument: boolean;
++        canManage: boolean;
++    }
++
++    let { projectId, manualId, manualStatus, job, hasDocument, canManage }: Props = $props();
++
++    // 作業状態 (props から一度だけ seed し、以後は XHR 応答で更新する)
++    // svelte-ignore state_referenced_locally
++    let currentJob = $state<AnalysisJobProps | null>(job);
++    // svelte-ignore state_referenced_locally
++    let status = $state<VideoManualStatus>(manualStatus);
++    let starting = $state(false);
++    let errorMessage = $state<string | null>(null);
++    let confirmingReanalyze = $state(false);
++
++    const analyzing = $derived(
++        status === "analyzing" ||
++            currentJob?.status === "queued" ||
++            currentJob?.status === "running",
++    );
++    const failedJob = $derived(currentJob?.status === "failed" ? currentJob : null);
++    const stepLabel = $derived(
++        currentJob?.step ? ANALYSIS_STEP_LABELS[currentJob.step] : "解析を待機中",
++    );
++    // ポーリング対象の job id。effect の依存を id に狭めることで、running/queued の
++    // 各応答で currentJob を更新しても同一 id なら effect が再購読されず、
++    // setInterval の 2.5 秒間隔が保たれる (terminal 遷移で analyzing=false → null で停止)
++    const pollJobId = $derived(analyzing && currentJob !== null ? currentJob.id : null);
++
++    /* ---- ポーリング (analyzing 中のみ。cleanup で必ず破棄) ---- */
++    $effect(() => {
++        // この effect の反応的依存は pollJobId のみ (currentJob 本体は読まない)
++        const jobId = pollJobId;
++        if (jobId === null) return;
++
++        let stopped = false;
++        let interval: ReturnType<typeof setInterval> | null = null;
++
++        const poll = async (): Promise<void> => {
++            if (stopped || document.hidden) return;
++            try {
++                const res = await fetch(
++                    `/projects/${projectId}/manuals/${manualId}/jobs/${jobId}`,
++                    {
++                        headers: {
++                            Accept: "application/json",
++                            "X-Requested-With": "XMLHttpRequest",
++                        },
++                        credentials: "same-origin",
++                    },
++                );
++                if (!res.ok) return; // 一時失敗は次周期に任せる (401/419 も静かに再試行)
++                const body = (await res.json().catch(() => null)) as AnalysisJobProps | null;
++                if (body === null || typeof body.status !== "string") return;
++                if (stopped) return;
++                currentJob = body;
++                status = body.manual_status;
++                if (body.status === "succeeded") {
++                    stop();
++                    router.reload();
++                }
++            } catch {
++                // ネットワーク断は次周期に任せる
++            }
++        };
++
++        const stop = (): void => {
++            stopped = true;
++            if (interval !== null) clearInterval(interval);
++            interval = null;
++        };
++
++        // バックグラウンドタブの無駄打ちを避ける (再表示で即時 1 回 fetch)
++        const onVisibilityChange = (): void => {
++            if (!document.hidden) void poll();
++        };
++        document.addEventListener("visibilitychange", onVisibilityChange);
++        interval = setInterval(() => void poll(), 2500);
++        void poll();
++
++        return () => {
++            stop();
++            document.removeEventListener("visibilitychange", onVisibilityChange);
++        };
++    });
++
++    /* ---- 起動 ---- */
++    function requestAnalyze(): void {
++        if (status === "ready") {
++            confirmingReanalyze = true;
++            return;
++        }
++        void startAnalyze();
++    }
++
++    async function startAnalyze(): Promise<void> {
++        if (starting) return; // 多重送信ガード (disabled にはしない)
++        starting = true;
++        errorMessage = null;
++        try {
++            const res = await fetch(`/projects/${projectId}/manuals/${manualId}/analyze`, {
++                method: "POST",
++                headers: {
++                    Accept: "application/json",
++                    "X-XSRF-TOKEN": csrfToken(),
++                    "X-Requested-With": "XMLHttpRequest",
++                },
++                credentials: "same-origin",
++            });
++            await handleStartResponse(res);
++        } catch {
++            errorMessage = "通信に失敗しました。接続を確認して再度お試しください。";
++        } finally {
++            starting = false;
++            confirmingReanalyze = false;
++        }
++    }
++
++    async function handleStartResponse(res: Response): Promise<void> {
++        const body = (await res.json().catch(() => null)) as unknown;
++        if (res.status === 201 && body !== null && typeof body === "object") {
++            const jobBody = body as AnalysisJobProps;
++            currentJob = jobBody;
++            status = jobBody.manual_status;
++            return;
++        }
++        // 402 (残高不足) / 409 (競合) / 422 (手順書なし) はサーバのメッセージをそのまま表示
++        const message = extractMessage(body);
++        if (message !== null) {
++            errorMessage = message;
++            return;
++        }
++        errorMessage = "解析を開始できませんでした。時間をおいて再度お試しください。";
++    }
++
++    /** 402/409 の { message } と 422 の { message, errors } からユーザー向け文言を取り出す */
++    function extractMessage(body: unknown): string | null {
++        if (body === null || typeof body !== "object") return null;
++        const message = (body as { message?: unknown }).message;
++        return typeof message === "string" && message !== "" ? message : null;
++    }
++</script>
++
++<Card padding="lg">
++    <div class="flex items-center justify-between gap-3">
++        <h2 class="text-h3">シナリオ</h2>
++        {#if canManage && !analyzing}
++            <Button
++                onclick={requestAnalyze}
++                loading={starting}
++                testId="analyze-button"
++            >
++                <Sparkles class="size-4" />
++                AI 解析
++            </Button>
++        {/if}
++    </div>
++
++    {#if analyzing}
++        <div class="mt-4 flex flex-col gap-2" data-testid="analysis-progress">
++            <div class="flex items-center gap-2 text-body text-text-secondary">
++                <LoaderCircle class="size-4 animate-spin" />
++                <span data-testid="analysis-step-label">{stepLabel}</span>
++            </div>
++            <div
++                class="h-2 w-full overflow-hidden rounded-md bg-neutral"
++                role="progressbar"
++                aria-valuenow={currentJob?.progress ?? 0}
++                aria-valuemin={0}
++                aria-valuemax={100}
++            >
++                <div
++                    class="h-full rounded-md bg-primary transition-all"
++                    style={`width: ${currentJob?.progress ?? 0}%`}
++                ></div>
++            </div>
++            <p class="text-caption text-text-secondary">
++                AI が手順書からシナリオを生成しています。このページを開いたまましばらくお待ちください。
++            </p>
++        </div>
++    {:else}
++        {#if failedJob?.error}
++            <div class="mt-4" data-testid="analysis-error">
++                <Alert type="danger">{failedJob.error}</Alert>
++            </div>
++        {/if}
++        {#if errorMessage}
++            <div class="mt-4" data-testid="analysis-start-error">
++                <Alert type="danger">{errorMessage}</Alert>
++            </div>
++        {/if}
++        <p class="mt-2 text-body text-text-secondary">
++            {#if !hasDocument}
++                手順書 (SOP) をアップロードすると、AI が撮るべきカットを設計したシナリオを生成します。
++            {:else if status === "ready"}
++                手順書から生成したシナリオを編集画面で確認できます。再解析すると既存のシナリオは置き換えられます。
++            {:else}
++                アップロード済みの手順書から AI がシナリオを生成できます。
++            {/if}
++        </p>
++    {/if}
++</Card>
++
++<ConfirmDialog
++    bind:open={confirmingReanalyze}
++    title="AI 解析の再実行"
++    message="既存のシナリオは AI の生成結果で置き換えられます。再解析しますか？"
++    confirmLabel="再解析する"
++    confirmVariant="danger"
++    processing={starting}
++    onConfirm={() => void startAnalyze()}
++    testId="reanalyze-dialog"
++/>
+diff --git a/resources/js/components/features/manual/SourceDocumentUpload.svelte b/resources/js/components/features/manual/SourceDocumentUpload.svelte
+new file mode 100644
+index 0000000..369cbb4
+--- /dev/null
++++ b/resources/js/components/features/manual/SourceDocumentUpload.svelte
+@@ -0,0 +1,57 @@
++<script lang="ts">
++    import { useForm } from "@inertiajs/svelte";
++    import Button from "@/components/atoms/Button.svelte";
++    import FormField from "@/components/molecules/FormField.svelte";
++
++    /**
++     * SOP (手順書) の後付けアップロード (POST .../source-documents。Inertia multipart form)。
++     * 追記型 immutable: アップロードは常に新しい行を追加する (差し替え = 最新が解析対象)。
++     */
++    interface Props {
++        projectId: number;
++        manualId: number;
++        hasDocument: boolean;
++    }
++
++    let { projectId, manualId, hasDocument }: Props = $props();
++
++    const form = useForm<{ document: File | null }>({ document: null });
++
++    function onFileChange(event: Event): void {
++        const input = event.currentTarget as HTMLInputElement;
++        form.document = input.files?.[0] ?? null;
++    }
++
++    function submit(event: SubmitEvent): void {
++        event.preventDefault();
++        form.post(`/projects/${projectId}/manuals/${manualId}/source-documents`, {
++            onSuccess: () => form.reset(),
++        });
++    }
++</script>
++
++<form onsubmit={submit} class="flex flex-col gap-3" data-testid="source-document-upload">
++    <FormField
++        label={hasDocument ? "手順書を差し替える" : "手順書 (SOP) をアップロード"}
++        id="source-document"
++        error={form.errors.document}
++    >
++        {#snippet children({ id, describedBy, invalid })}
++            <input
++                {id}
++                type="file"
++                accept=".pdf,.xlsx,.xls,.txt"
++                onchange={onFileChange}
++                aria-describedby={describedBy}
++                aria-invalid={invalid}
++                class="block w-full text-body text-text file:mr-3 file:rounded-md file:border file:border-border file:bg-surface file:px-3 file:py-1.5 file:text-caption file:text-text"
++                data-testid="source-document-input"
++            />
++        {/snippet}
++    </FormField>
++    <div>
++        <Button type="submit" variant="secondary" loading={form.processing} testId="source-document-submit">
++            アップロード
++        </Button>
++    </div>
++</form>
+diff --git a/resources/js/pages/Manuals/Create.svelte b/resources/js/pages/Manuals/Create.svelte
+index dd4bcf6..503b580 100644
+--- a/resources/js/pages/Manuals/Create.svelte
++++ b/resources/js/pages/Manuals/Create.svelte
+@@ -10,9 +10,9 @@
+     import type { CategoryOption } from "@/types/manual";
+ 
+     /**
+-     * 動画マニュアル作成 (タイトル + カテゴリ)。
++     * 動画マニュアル作成 (タイトル + カテゴリ + 任意の手順書アップロード)。
+      * カテゴリの入力名は保護キー category_id と別名の `category` (id 値)。
+-     * 空選択 = 未分類 (null で送信)。
++     * 空選択 = 未分類 (null で送信)。document は multipart で任意送信。
+      */
+     interface Props {
+         project: { id: number; name: string };
+@@ -24,13 +24,23 @@
+     const shared = $derived(page.props as unknown as SharedProps);
+     const appName = $derived(shared.appName ?? "");
+ 
+-    const form = useForm({ title: "", category: "" });
++    const form = useForm<{ title: string; category: string; document: File | null }>({
++        title: "",
++        category: "",
++        document: null,
++    });
++
++    function onFileChange(event: Event): void {
++        const input = event.currentTarget as HTMLInputElement;
++        form.document = input.files?.[0] ?? null;
++    }
+ 
+     function submit(event: SubmitEvent): void {
+         event.preventDefault();
+         form.transform((data) => ({
+             title: data.title,
+             category: data.category === "" ? null : Number(data.category),
++            document: data.document,
+         })).post(`/projects/${project.id}/manuals`);
+     }
+ </script>
+@@ -71,6 +81,25 @@
+                         </Select>
+                     {/snippet}
+                 </FormField>
++                <FormField
++                    label="手順書 (SOP・任意)"
++                    id="manual-document"
++                    error={form.errors.document}
++                    help="PDF / Excel / テキスト。アップロードすると AI 解析でシナリオを生成できます。"
++                >
++                    {#snippet children({ id, describedBy, invalid })}
++                        <input
++                            {id}
++                            type="file"
++                            accept=".pdf,.xlsx,.xls,.txt"
++                            onchange={onFileChange}
++                            aria-describedby={describedBy}
++                            aria-invalid={invalid}
++                            class="block w-full text-body text-text file:mr-3 file:rounded-md file:border file:border-border file:bg-surface file:px-3 file:py-1.5 file:text-caption file:text-text"
++                            data-testid="manual-document-input"
++                        />
++                    {/snippet}
++                </FormField>
+                 <div class="flex items-center gap-2">
+                     <Button type="submit" loading={form.processing} testId="manual-submit">
+                         作成
+diff --git a/resources/js/pages/Manuals/Show.svelte b/resources/js/pages/Manuals/Show.svelte
+index a505bb2..a04f311 100644
+--- a/resources/js/pages/Manuals/Show.svelte
++++ b/resources/js/pages/Manuals/Show.svelte
+@@ -6,14 +6,16 @@
+     import TextLink from "@/components/atoms/TextLink.svelte";
+     import DangerZone from "@/components/molecules/DangerZone.svelte";
+     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
++    import AnalysisPanel from "@/components/features/manual/AnalysisPanel.svelte";
++    import SourceDocumentUpload from "@/components/features/manual/SourceDocumentUpload.svelte";
+     import AppLayout from "@/components/templates/AppLayout.svelte";
+     import type { SharedProps } from "@/lib/shared-props";
+-    import type { VideoManualStatus } from "@/types/manual";
++    import type { AnalysisProps, VideoManualStatus } from "@/types/manual";
+     import { VIDEO_MANUAL_STATUS_LABELS } from "@/types/manual";
+ 
+     /**
+-     * 動画マニュアル詳細 (メタデータ表示)。撮影者も閲覧可 (編集操作は canManage のみ)。
+-     * SOP アップロード・シナリオ・撮影は後続フェーズで本画面に載る。
++     * 動画マニュアル詳細 (メタデータ + AI 解析パネル)。撮影者も閲覧可
++     * (編集操作・解析起動は canManage のみ。撮影者には進捗表示のみ)。
+      */
+     interface Props {
+         project: { id: number; name: string };
+@@ -24,10 +26,11 @@
+             category: { id: number; name: string } | null;
+             created_at: string;
+         };
++        analysis: AnalysisProps;
+         canManage: boolean;
+     }
+ 
+-    let { project, manual, canManage }: Props = $props();
++    let { project, manual, analysis, canManage }: Props = $props();
+ 
+     const shared = $derived(page.props as unknown as SharedProps);
+     const appName = $derived(shared.appName ?? "");
+@@ -90,12 +93,30 @@
+     </div>
+ 
+     <div class="mt-6 flex max-w-2xl flex-col gap-10">
+-        <Card padding="lg">
+-            <h2 class="text-h3">シナリオ</h2>
+-            <p class="mt-2 text-body text-text-secondary">
+-                SOP をアップロードすると、AI が撮るべきカットを設計したシナリオを生成します (準備中)。
+-            </p>
+-        </Card>
++        <AnalysisPanel
++            projectId={project.id}
++            manualId={manual.id}
++            manualStatus={manual.status}
++            job={analysis.job}
++            hasDocument={analysis.hasDocument}
++            {canManage}
++        />
++
++        {#if canManage && (manual.status === "draft" || manual.status === "ready")}
++            <Card padding="lg">
++                <h2 class="text-h3">手順書 (SOP)</h2>
++                <p class="mt-2 text-caption text-text-secondary">
++                    PDF / Excel / テキストの手順書をアップロードできます。差し替えた場合は最新のファイルが解析対象になります。
++                </p>
++                <div class="mt-4">
++                    <SourceDocumentUpload
++                        projectId={project.id}
++                        manualId={manual.id}
++                        hasDocument={analysis.hasDocument}
++                    />
++                </div>
++            </Card>
++        {/if}
+ 
+         {#if canManage}
+             <DangerZone
+diff --git a/resources/js/types/manual.ts b/resources/js/types/manual.ts
+index b96ee6c..0bf7e72 100644
+--- a/resources/js/types/manual.ts
++++ b/resources/js/types/manual.ts
+@@ -79,6 +79,51 @@ export type DraftStep = Omit<ScenarioStep, "id" | "points"> & {
+     points: DraftPoint[];
+ };
+ 
++/** PHP: App\Enums\Manual\JobStatus と対 (値集合を一致させる) */
++export type AnalysisJobStatus = "queued" | "running" | "succeeded" | "failed";
++
++/** PHP: App\Enums\Manual\AnalysisStep と対 */
++export type AnalysisStep = "extract" | "decompose" | "generate";
++
++/** AnalysisStep の表示ラベル (AnalysisPanel の進捗表示) */
++export const ANALYSIS_STEP_LABELS: Record<AnalysisStep, string> = {
++    extract: "手順書を読み取り中",
++    decompose: "作業を分解中",
++    generate: "シナリオを生成中",
++};
++
++/** PHP: AnalysisJobData::toArray() と対 (show props / ポーリング / analyze 201 の共通 shape) */
++export interface AnalysisJobProps {
++    id: number;
++    status: AnalysisJobStatus;
++    step: AnalysisStep | null;
++    progress: number | null;
++    error: string | null;
++    manual_status: VideoManualStatus;
++}
++
++/** PHP: VideoManualController::show の analysis props と対 */
++export interface AnalysisProps {
++    job: AnalysisJobProps | null;
++    hasDocument: boolean;
++}
++
++/** PHP: App\Enums\Manual\AnalysisConflictType と対 */
++export type AnalysisConflictType = "in_flight" | "status_not_analyzable";
++
++/** PHP: AnalysisConflictResource と対 (analyze 409 ボディ。code 厳格一致) */
++export interface AnalysisConflictBody {
++    code: "analysis_conflict";
++    conflict_type: AnalysisConflictType;
++    message: string;
++}
++
++/** PHP: InsufficientTicketsResource と対 (analyze 402 ボディ。code 厳格一致) */
++export interface InsufficientTicketsBody {
++    code: "insufficient_tickets";
++    message: string;
++}
++
+ /** PHP: App\Enums\Manual\ScenarioConflictType と対 (discriminated union) */
+ export type ScenarioConflictType = "version_mismatch" | "rendering" | "analyzing";
+ 
+diff --git a/resources/prompts/scenario-generation.yaml b/resources/prompts/scenario-generation.yaml
+new file mode 100644
+index 0000000..783ae7d
+--- /dev/null
++++ b/resources/prompts/scenario-generation.yaml
+@@ -0,0 +1,52 @@
++# シナリオ生成プロンプト (AI 解析 3 段目。doc/10 §10.4 / doc/03)。
++# 作業分解表 (untrusted 由来。UserInput 経由) から撮影カット群を設計する。
++# max_tokens: 16000 は token budget の出力予約 (AnalysisTokenBudgetInvariantTest が固定)。
++# client_options.timeout: 120 は時間 budget の前提値 (AnalysisTimeBudgetInvariantTest が固定)。
++name: scenario-generation
++provider: anthropic
++model: claude-sonnet-4-5-20250929
++max_tokens: 16000
++client_options:
++  timeout: 120
++
++system_prompt: |
++  {{ \Kent013\PrismPrompt\Values\DefensiveInstructions::forUserInputJa() }}
++
++  あなたは現場教育向けマニュアル動画の演出家です。作業分解表から、
++  スマホで撮影する「カット」の一覧 (動画シナリオ) を設計します。
++  出力は JSON のみ (前後に説明文・コードフェンスを付けない)。
++
++prompt: |
++  次の作業分解表から動画シナリオ (カット一覧) を作成し、JSON で出力してください。
++
++  ルール:
++  - 手順 (type: "step") は引き (shot_type: "hiki") で全体の動きを写すのが原則
++  - 急所 (type: "point") は寄り (shot_type: "yori") で判断基準・手元を大きく写すのが原則
++  - point の parent_no は直前までに出力した step の no を参照する (前方参照は禁止)
++  - scene はそのカットで写す内容の説明 (非空・1000 文字以内)
++  - shooting_point は撮影者向けの指示 (任意。1000 文字以内)
++  - narration は「です・ます」調で語尾を統一する (2000 文字以内)
++  - subtitle_primary は画面に常時出す短い要点 (任意。100 文字以内)
++  - subtitle_secondary は補足説明の字幕 (2000 文字以内)
++  - 作業分解表にない情報を捏造しない
++  - step は 100 件以内、point は 1 step あたり 20 件以内
++
++  出力スキーマ:
++  {
++    "cuts": [
++      {
++        "no": int,
++        "type": "step"|"point",
++        "parent_no": int|null,
++        "scene": string,
++        "shot_type": "hiki"|"yori",
++        "shooting_point": string|null,
++        "narration": string,
++        "subtitle_primary": string|null,
++        "subtitle_secondary": string
++      }
++    ]
++  }
++
++  作業分解表:
++  {{ $decomposition }}
+diff --git a/resources/prompts/sop-extract.yaml b/resources/prompts/sop-extract.yaml
+new file mode 100644
+index 0000000..62df587
+--- /dev/null
++++ b/resources/prompts/sop-extract.yaml
+@@ -0,0 +1,51 @@
++# SOP 抽出プロンプト (AI 解析 1 段目。doc/10 §10.4 / doc/03 §3.4)。
++# 抽出済みテキスト (untrusted。UserInput 経由) を「統一 JSON」へ構造化する。
++# max_tokens: 16000 は token budget の出力予約 (AnalysisTokenBudgetInvariantTest が固定)。
++# client_options.timeout: 120 は時間 budget の前提値 (AnalysisTimeBudgetInvariantTest が固定)。
++name: sop-extract
++provider: anthropic
++model: claude-sonnet-4-5-20250929
++max_tokens: 16000
++client_options:
++  timeout: 120
++
++system_prompt: |
++  {{ \Kent013\PrismPrompt\Values\DefensiveInstructions::forUserInputJa() }}
++
++  あなたは製造現場の作業手順書 (SOP) を構造化するエキスパートです。
++  与えられた手順書テキストから、作業手順とその注意点を忠実に抽出します。
++  資料にない情報を捏造しないでください。
++  出力は JSON のみ (前後に説明文・コードフェンスを付けない)。
++
++prompt: |
++  次の手順書テキストを解析し、以下のスキーマの JSON で出力してください。
++
++  ルール:
++  - 資料の記載に忠実に抽出する (資料にない語を足さない)
++  - 手順は資料の記載順を保つ (no は 1 始まりの連番)
++  - 安全 (safety_points)・品質 (quality_points)・保全 (pm_points) の注記は
++    該当する分類へ、それ以外の作業上の注意は work_points へ入れる
++  - セクション見出しが無い資料は title を null にした単一セクションにまとめる
++
++  出力スキーマ:
++  {
++    "header": { "title": string|null, "department": string|null, "revision": string|null },
++    "sections": [
++      {
++        "title": string|null,
++        "steps": [
++          {
++            "no": int,
++            "work_process": string,
++            "work_points": [string],
++            "safety_points": [string],
++            "quality_points": [string],
++            "pm_points": [string]
++          }
++        ]
++      }
++    ]
++  }
++
++  手順書テキスト:
++  {{ $text }}
+diff --git a/resources/prompts/work-decomposition.yaml b/resources/prompts/work-decomposition.yaml
+new file mode 100644
+index 0000000..c97a220
+--- /dev/null
++++ b/resources/prompts/work-decomposition.yaml
+@@ -0,0 +1,33 @@
++# 作業分解プロンプト (AI 解析 2 段目。doc/10 §10.4 / doc/03 §3.3)。
++# 統一 JSON (untrusted 由来。UserInput 経由) から「作業分解表」を作る。
++# max_tokens: 16000 は token budget の出力予約 (AnalysisTokenBudgetInvariantTest が固定)。
++# client_options.timeout: 120 は時間 budget の前提値 (AnalysisTimeBudgetInvariantTest が固定)。
++name: work-decomposition
++provider: anthropic
++model: claude-sonnet-4-5-20250929
++max_tokens: 16000
++client_options:
++  timeout: 120
++
++system_prompt: |
++  {{ \Kent013\PrismPrompt\Values\DefensiveInstructions::forUserInputJa() }}
++
++  あなたは製造現場の作業標準化エキスパートです。資料を「読む」のではなく、
++  作業者の体の動き (動詞) ごとに「1 動作 1 行」で解体・再構築します。
++  出力は JSON のみ (前後に説明文・コードフェンスを付けない)。
++
++prompt: |
++  次の抽出済み手順書データから「作業分解表」を作成し、JSON で出力してください。
++
++  ルール:
++  - 一動作・一 No (1 文に複数動詞があれば行を分ける)
++  - 手順 (action) は物理的な動詞のみ (「〇〇の清掃」等の括りは禁止)
++  - 急所 (points) は判断基準・数値・良否境界・資料の注釈のみ。1 急所 1 要素
++  - 資料にない語を足さない (指差呼称含め忠実に)
++  - steps は 100 行以内、points は 1 行あたり 20 要素以内
++
++  出力スキーマ:
++  { "steps": [ { "no": int, "action": string, "points": [string] } ] }
++
++  抽出済み手順書データ:
++  {{ $extracted }}
+diff --git a/routes/console.php b/routes/console.php
+index 0ce9a19..333399a 100644
+--- a/routes/console.php
++++ b/routes/console.php
+@@ -3,6 +3,7 @@
+ declare(strict_types=1);
+ 
+ use App\Services\Billing\TicketLedgerService;
++use App\Services\Manual\AnalysisJobService;
+ use Illuminate\Foundation\Inspiring;
+ use Illuminate\Support\Facades\Artisan;
+ use Illuminate\Support\Facades\Schedule;
+@@ -42,3 +43,17 @@
+ | 手動運用 (dry-run / 本人削除要請) は docs/inquiry-deletion-runbook.md を参照。
+ */
+ Schedule::command('inquiry:purge --apply')->daily();
++
++/*
++|--------------------------------------------------------------------------
++| AI 解析 cron
++|--------------------------------------------------------------------------
++| dispatch 喪失 (queued 滞留) と worker 異常終了 (running 滞留) の回復。
++| failJob は行ロック + terminal guard で冪等 (billing:release-stale-reservations と同型)。
++*/
++Artisan::command('analysis:recover-stale-jobs', function (AnalysisJobService $jobs) {
++    $recovered = $jobs->recoverStale();
++    $this->info("recovered {$recovered} stale analysis job(s)");
++})->purpose('滞留した解析ジョブ (queued/running が閾値超過) を失敗確定し予約を解放する');
++
++Schedule::command('analysis:recover-stale-jobs')->everyFiveMinutes();
+diff --git a/routes/web.php b/routes/web.php
+index 33bc922..d83df58 100644
+--- a/routes/web.php
++++ b/routes/web.php
+@@ -19,9 +19,11 @@
+ use App\Http\Controllers\Organizations\OrganizationSwitchController;
+ use App\Http\Controllers\Projects\CategoryController;
+ use App\Http\Controllers\Projects\ItemController;
++use App\Http\Controllers\Projects\ManualAnalysisController;
+ use App\Http\Controllers\Projects\ManualScenarioController;
+ use App\Http\Controllers\Projects\ProjectController;
+ use App\Http\Controllers\Projects\ProjectMemberController;
++use App\Http\Controllers\Projects\SourceDocumentController;
+ use App\Http\Controllers\Projects\VideoManualController;
+ use App\Http\Controllers\Seo\AiTxtController;
+ use App\Http\Controllers\Seo\LlmsTxtController;
+@@ -365,6 +367,15 @@
+             // project.in-current-org middleware + controller inline guard の 2 層 (既存 group が担保)
+             Route::put('/projects/{project}/manuals/{manual}/scenario', [ManualScenarioController::class, 'update'])
+                 ->name('projects.manuals.scenario.update');
++            // SOP アップロード (追記型 immutable。差し替え = 新規行。doc/10 §10.3)
++            Route::post('/projects/{project}/manuals/{manual}/source-documents', [SourceDocumentController::class, 'store'])
++                ->name('projects.manuals.source-documents.store');
++            // AI 解析トリガー (残高事前チェック→job 投入。同一オリジン XHR/JSON。doc/10 §10.3, §10.8-8)
++            Route::post('/projects/{project}/manuals/{manual}/analyze', [ManualAnalysisController::class, 'store'])
++                ->name('projects.manuals.analyze');
++            // job 状態ポーリング ({analysisJob} は $manual->analysisJobs() 経由 = cross-manual 404)
++            Route::get('/projects/{project}/manuals/{manual}/jobs/{analysisJob}', [ManualAnalysisController::class, 'show'])
++                ->name('projects.manuals.jobs.show');
+             Route::delete('/projects/{project}/manuals/{manual}', [VideoManualController::class, 'destroy'])
+                 ->name('projects.manuals.destroy');
+         });
+diff --git a/tests/Architecture/AnalysisTimeBudgetInvariantTest.php b/tests/Architecture/AnalysisTimeBudgetInvariantTest.php
+new file mode 100644
+index 0000000..7df46fa
+--- /dev/null
++++ b/tests/Architecture/AnalysisTimeBudgetInvariantTest.php
+@@ -0,0 +1,60 @@
++<?php
++
++declare(strict_types=1);
++
++use App\Jobs\Manual\RunManualAnalysis;
++use App\Services\Billing\TicketLedgerService;
++use Carbon\CarbonImmutable;
++use Illuminate\Foundation\Testing\RefreshDatabase;
++
++// Architecture lane は既定で DB を使わないが、本テストは予約 TTL を台帳の公開 API で
++// 実測するため RefreshDatabase を明示適用する
++uses(RefreshDatabase::class);
++
++/*
++ * 解析ジョブの時間 budget 連鎖を CI で固定する (config/定数を弄って連鎖を壊せない)。
++ *
++ * | 項目 | 値 | 根拠 |
++ * |---|---|---|
++ * | LLM worst-case | 1,080 秒 | 3 段 × (1+リトライ2) 試行 × client timeout 120 秒 |
++ * | job $timeout | 1,380 秒 | 上記 + 抽出/解析余裕 180 秒 + マージン |
++ * | queue retry_after | 1,560 秒 | timeout < retry_after (Laravel 要件: 二重処理防止) |
++ * | 予約 TTL | 1,800 秒 | TicketLedgerService::RESERVATION_TTL_MINUTES (変更しない) |
++ * | stale 回復閾値 | 1,800 秒 | manual.analysis_stale_after_minutes |
++ */
++test('解析ジョブの時間 budget 連鎖 (timeout < retry_after < 予約TTL <= stale閾値)', function (): void {
++    $timeout = (new RunManualAnalysis(1))->timeout;
++    $retryAfter = config()->integer('queue.connections.database-analysis.retry_after');
++
++    // 予約 TTL は台帳の公開 API (reserve) で実測する: 固定時刻で reserve し
++    // expires_at − now を実 TTL とする (TicketLedgerService の private 定数を
++    // ハードコード複製しない = 台帳側の TTL 変更をこのテストが実際に検出できる)
++    $this->travelTo(CarbonImmutable::parse('2026-07-11 00:00:00'));
++    [$organization] = createOrganizationWithOwner();
++    $tickets = app(TicketLedgerService::class);
++    $tickets->grant($organization, 1, '時間 budget テスト用');
++    $reservation = $tickets->reserve($organization, 1);
++    $ttlSeconds = (int) CarbonImmutable::now()->diffInSeconds($reservation->expires_at);
++
++    $staleSeconds = config()->integer('manual.analysis_stale_after_minutes') * 60;
++    expect($timeout)->toBeLessThan($retryAfter);
++    expect($retryAfter)->toBeLessThan($ttlSeconds);
++    expect($ttlSeconds)->toBeLessThanOrEqual($staleSeconds);
++});
++
++test('解析ジョブの connection/queue 名が設定と drift しない', function (): void {
++    $job = new RunManualAnalysis(1);
++    expect($job->connection)->toBe('database-analysis'); // onConnection() が設定
++    expect(config()->string('queue.connections.database-analysis.queue'))->toBe('analysis');
++    expect(config()->string('queue.connections.database-analysis.driver'))->toBe('database');
++});
++
++test('LLM worst-case (3段×3試行×client timeout) が job timeout に収まる', function (): void {
++    $attempts = 1 + config()->integer('manual.analysis_llm_max_retries'); // 3
++    $clientTimeout = 120; // 各 YAML client_options.timeout と一致 (AnalysisTokenBudgetInvariantTest が YAML 側を固定)
++    expect(3 * $attempts * $clientTimeout + 180)->toBeLessThanOrEqual((new RunManualAnalysis(1))->timeout);
++});
++
++test('解析ジョブは自動再試行しない (tries=1。再実行は analyze 再トリガーのみ)', function (): void {
++    expect((new RunManualAnalysis(1))->tries)->toBe(1);
++});
+diff --git a/tests/Architecture/AnalysisTokenBudgetInvariantTest.php b/tests/Architecture/AnalysisTokenBudgetInvariantTest.php
+new file mode 100644
+index 0000000..7e405d0
+--- /dev/null
++++ b/tests/Architecture/AnalysisTokenBudgetInvariantTest.php
+@@ -0,0 +1,67 @@
++<?php
++
++declare(strict_types=1);
++
++use Symfony\Component\Yaml\Yaml;
++
++/**
++ * AI 解析の LLM 入力上限 (config manual.analysis_max_text_bytes) の token budget 算術を
++ * CI で固定する (値を弄って budget を壊せない)。
++ *
++ * 上界の根拠 (数学的・言語非依存): tokenizer は入力バイト列を「空でない区間」に分割する
++ * (partition) ため、いかなる入力でも token 数 <= バイト数。従って
++ * 「入力バイト数 <= 入力 token budget」なら context 超過は起きない。
++ * budget = context - 出力予約 - 固定プロンプト余裕 = 200,000 - 16,000 - 4,000 = 180,000。
++ * config 既定値 150,000 bytes は budget 180,000 に対するマージン込みの値。
++ *
++ * 運用条件: 「token 数 <= UTF-8 バイト数」は byte-fallback BPE 系 tokenizer の前提。
++ * 対象モデル・tokenizer 系を変更する際は本上限設計 (config 値 + 本テストの定数) を必ず再確認する。
++ */
++const MODEL_CONTEXT_TOKENS = 200_000;   // claude-sonnet-4-5 (prompts YAML の model と対)
++
++const OUTPUT_RESERVE_TOKENS = 16_000;   // 解析 3 YAML の max_tokens と一致させる
++
++const PROMPT_OVERHEAD_TOKENS = 4_000;   // 固定 system/prompt + UserInput タグの余裕
++
++const INPUT_BUDGET_TOKENS = MODEL_CONTEXT_TOKENS - OUTPUT_RESERVE_TOKENS - PROMPT_OVERHEAD_TOKENS; // 180,000
++
++/**
++ * 解析パイプラインの 3 プロンプト (施策 8)。
++ *
++ * @return list<string>
++ */
++function analysisPromptNames(): array
++{
++    return ['sop-extract', 'work-decomposition', 'scenario-generation'];
++}
++
++test('LLM 入力バイト上限が入力 token budget を超えない (分割上界: token数<=バイト数)', function (): void {
++    expect(config()->integer('manual.analysis_max_text_bytes'))
++        ->toBeLessThanOrEqual(INPUT_BUDGET_TOKENS);
++});
++
++test('解析プロンプト YAML の max_tokens は出力予約と一致する', function (): void {
++    foreach (analysisPromptNames() as $name) {
++        $path = resource_path("prompts/{$name}.yaml");
++        expect(file_exists($path))->toBeTrue("解析プロンプト {$name}.yaml が存在しません");
++        $yaml = Yaml::parseFile($path);
++        expect($yaml)->toBeArray();
++        expect($yaml['max_tokens'] ?? null)
++            ->toBe(OUTPUT_RESERVE_TOKENS, "{$name}.yaml の max_tokens が出力予約 (OUTPUT_RESERVE_TOKENS) と不一致");
++    }
++});
++
++test('解析プロンプト YAML の client timeout は時間 budget の前提値 (120 秒) と一致する', function (): void {
++    // AnalysisTimeBudgetInvariantTest の worst-case 計算 (3 段 × 試行 × 120s) と対
++    foreach (analysisPromptNames() as $name) {
++        $yaml = Yaml::parseFile(resource_path("prompts/{$name}.yaml"));
++        expect($yaml)->toBeArray();
++        expect($yaml['client_options']['timeout'] ?? null)
++            ->toBe(120, "{$name}.yaml の client_options.timeout が 120 と不一致");
++    }
++});
++
++test('最小テキスト閾値 < 最大バイト上限 (validation の縮退防止)', function (): void {
++    expect(config()->integer('manual.analysis_min_text_bytes'))
++        ->toBeLessThan(config()->integer('manual.analysis_max_text_bytes'));
++});
+diff --git a/tests/Architecture/NestedRouteIdorDefenseTest.php b/tests/Architecture/NestedRouteIdorDefenseTest.php
+index ed44a07..9a1686c 100644
+--- a/tests/Architecture/NestedRouteIdorDefenseTest.php
++++ b/tests/Architecture/NestedRouteIdorDefenseTest.php
+@@ -58,6 +58,11 @@ function nestedRouteIdorInventory(): array
+         // シナリオ document 保存 (PUT)。{manual} は $project->manuals() 経由 (scopeBindings)
+         'projects.manuals.scenario.update' => $s,
+         'projects.manuals.destroy' => $s,
++        // SOP アップロード / AI 解析 / job ポーリング ({manual} は $project->manuals()、
++        // {analysisJob} は $manual->analysisJobs() 経由。不整合は認可より前に 404)
++        'projects.manuals.source-documents.store' => $s,
++        'projects.manuals.analyze' => $s,
++        'projects.manuals.jobs.show' => $s,
+         // --- inline 親子整合 guard (authorize 前に 子∈親テナント を検査、不整合は 404) ---
+         // OrganizationMemberController::resolveOrganizationMember (非 member は 404)
+         'organizations.members.update' => $g,
+diff --git a/tests/Architecture/PromptUntrustedInputContractTest.php b/tests/Architecture/PromptUntrustedInputContractTest.php
+index 8b6b1ab..83a7715 100644
+--- a/tests/Architecture/PromptUntrustedInputContractTest.php
++++ b/tests/Architecture/PromptUntrustedInputContractTest.php
+@@ -3,6 +3,9 @@
+ declare(strict_types=1);
+ 
+ use App\Prompts\ExampleSummaryPrompt;
++use App\Prompts\ScenarioGenerationPrompt;
++use App\Prompts\SopExtractPrompt;
++use App\Prompts\WorkDecompositionPrompt;
+ use Kent013\PrismPrompt\Prompt;
+ use Kent013\PrismPrompt\Values\UserInput;
+ 
+@@ -33,6 +36,19 @@ function promptUntrustedInputInventory(): array
+             ['text'],
+             fn (): Prompt => ExampleSummaryPrompt::make('untrusted end-user text'),
+         ],
++        // AI 解析 3 段 (SOP 由来の untrusted テキスト/JSON は全段 UserInput 経由)
++        SopExtractPrompt::class => [
++            ['text'],
++            fn (): Prompt => SopExtractPrompt::make('untrusted sop text'),
++        ],
++        WorkDecompositionPrompt::class => [
++            ['extracted'],
++            fn (): Prompt => WorkDecompositionPrompt::make('{"sections":[]}'),
++        ],
++        ScenarioGenerationPrompt::class => [
++            ['decomposition'],
++            fn (): Prompt => ScenarioGenerationPrompt::make('{"steps":[]}'),
++        ],
+     ];
+ }
+ 
+diff --git a/tests/Architecture/ScenarioWritePathInventoryTest.php b/tests/Architecture/ScenarioWritePathInventoryTest.php
+new file mode 100644
+index 0000000..a1e4548
+--- /dev/null
++++ b/tests/Architecture/ScenarioWritePathInventoryTest.php
+@@ -0,0 +1,398 @@
++<?php
++
++declare(strict_types=1);
++
++/*
++ * シナリオ整合の共有ロック規約 (AGENTS.md ドメイン固有規約 1) の書き込み経路 inventory。
++ *
++ * 「cuts / video_manuals.scenario_version / video_manuals.status を書き込む全経路は、
++ *   対象 VideoManual 行を lockForUpdate() で取得した同一トランザクション内で反映する」
++ *
++ * 経路 (メソッド粒度。docs/architecture.md と対):
++ * | 経路 | 書いてよいもの |
++ * |---|---|
++ * | ScenarioService::save() | cuts / scenario_version / status (rendering·analyzing guard 付き) |
++ * | ScenarioService::materializeIntoLockedManual() | cuts / scenario_version / status (analyzing→ready のみ) |
++ * | AnalysisJobService::trigger() | status (draft·ready→analyzing のみ) |
++ * | AnalysisJobService::failJob() | status (analyzing→ready·draft のみ。cuts 有無で決定) |
++ *
++ * deny-by-default の token ベース静的走査 (PrismDirectDispatchScanner と同じ token_get_all 流儀。
++ * コメント/docblock/文字列リテラル**内容**中の出現は無視する)。走査対象: app/ 配下の .php。
++ *
++ * 検出 1: 識別子/配列キー 'scenario_version' の出現 → allowlist 外のファイルなら fail
++ * 検出 2: 書き込み形 `'status' => ... VideoManualStatus::...` / `->status = ... VideoManualStatus::...`
++ *         (`VideoManualStatus::class` = cast 宣言は書き込みでないため除外) → allowlist 外なら fail
++ * 検出 3: materializeIntoLockedManual の宣言は ScenarioService.php のみ、
++ *         呼び出しは AnalysisPipeline.php のみ (ScenarioService 自身の中の呼び出しも fail =
++ *         ファイル単位 allowlist の抜け穴を塞ぐ)
++ */
++final class ScenarioWritePathScanner
++{
++    /** 検出 1 の allowlist (app/ 相対パス)。ScenarioDocumentData は読み取り shape の直列化のみ */
++    private const SCENARIO_VERSION_ALLOWED = [
++        'Services/Manual/ScenarioService.php',
++        'DataTransferObjects/Manual/ScenarioDocumentData.php',
++    ];
++
++    /** 検出 2 の allowlist (app/ 相対パス) */
++    private const STATUS_WRITE_ALLOWED = [
++        'Services/Manual/ScenarioService.php',
++        'Services/Manual/AnalysisJobService.php',
++    ];
++
++    /**
++     * @return array<string, list<string>> 検出種別 => 違反ファイル (app/ 相対パス)
++     */
++    public static function findViolations(): array
++    {
++        $appDir = self::appDir();
++
++        $violations = [
++            'scenario_version' => [],
++            'status_write' => [],
++            'materialize_declaration' => [],
++            'materialize_call' => [],
++        ];
++
++        foreach (self::phpFiles($appDir) as $path) {
++            $relative = substr($path, strlen($appDir) + 1);
++            $source = file_get_contents($path);
++            if ($source === false) {
++                throw new RuntimeException("Failed to read PHP source: {$path}");
++            }
++
++            if (self::containsScenarioVersionToken($source)
++                && ! in_array($relative, self::SCENARIO_VERSION_ALLOWED, true)) {
++                $violations['scenario_version'][] = $relative;
++            }
++            if (self::containsStatusWrite($source)
++                && ! in_array($relative, self::STATUS_WRITE_ALLOWED, true)) {
++                $violations['status_write'][] = $relative;
++            }
++            if (self::containsMaterializeDeclaration($source)
++                && $relative !== 'Services/Manual/ScenarioService.php') {
++                $violations['materialize_declaration'][] = $relative;
++            }
++            if (self::containsMaterializeCall($source)
++                && $relative !== 'Services/Manual/AnalysisPipeline.php') {
++                $violations['materialize_call'][] = $relative;
++            }
++        }
++
++        foreach ($violations as $key => $files) {
++            sort($files);
++            $violations[$key] = $files;
++        }
++
++        return $violations;
++    }
++
++    /** 識別子 (->scenario_version) または配列キー ('scenario_version') の出現 */
++    public static function containsScenarioVersionToken(string $source): bool
++    {
++        foreach (token_get_all($source) as $token) {
++            if (! is_array($token)) {
++                continue;
++            }
++            [$id, $value] = $token;
++            if ($id === T_STRING && $value === 'scenario_version') {
++                return true;
++            }
++            if ($id === T_CONSTANT_ENCAPSED_STRING && self::stringLiteralEquals($value, 'scenario_version')) {
++                return true;
++            }
++        }
++
++        return false;
++    }
++
++    /**
++     * 書き込み形の検出:
++     * - `'status' => <式>` の式内 (depth 0 の `,`/`]`/`)` まで) に VideoManualStatus 識別子
++     * - `->status = <式>` の式内 (`;` まで) に VideoManualStatus 識別子
++     * `VideoManualStatus::class` (cast 宣言) は書き込みでないため除外する。
++     */
++    public static function containsStatusWrite(string $source): bool
++    {
++        $tokens = token_get_all($source);
++        $count = count($tokens);
++
++        for ($i = 0; $i < $count; $i++) {
++            $token = $tokens[$i];
++
++            // パターン A: 'status' => ...
++            if (is_array($token) && $token[0] === T_CONSTANT_ENCAPSED_STRING
++                && self::stringLiteralEquals($token[1], 'status')) {
++                $j = self::nextNonWhitespace($tokens, $i);
++                if ($j !== null && is_array($tokens[$j]) && $tokens[$j][0] === T_DOUBLE_ARROW
++                    && self::expressionUsesVideoManualStatus($tokens, $j, [',', ']', ')'])) {
++                    return true;
++                }
++            }
++
++            // パターン B: ->status = ...
++            if (is_array($token) && $token[0] === T_OBJECT_OPERATOR) {
++                $j = self::nextNonWhitespace($tokens, $i);
++                if ($j === null || ! is_array($tokens[$j]) || $tokens[$j][0] !== T_STRING || $tokens[$j][1] !== 'status') {
++                    continue;
++                }
++                $k = self::nextNonWhitespace($tokens, $j);
++                if ($k !== null && $tokens[$k] === '='
++                    && self::expressionUsesVideoManualStatus($tokens, $k, [';'])) {
++                    return true;
++                }
++            }
++        }
++
++        return false;
++    }
++
++    /** 宣言: `function materializeIntoLockedManual` */
++    public static function containsMaterializeDeclaration(string $source): bool
++    {
++        $tokens = token_get_all($source);
++        foreach ($tokens as $i => $token) {
++            if (! is_array($token) || $token[0] !== T_FUNCTION) {
++                continue;
++            }
++            $j = self::nextNonWhitespace($tokens, $i);
++            if ($j !== null && is_array($tokens[$j]) && $tokens[$j][0] === T_STRING
++                && $tokens[$j][1] === 'materializeIntoLockedManual') {
++                return true;
++            }
++        }
++
++        return false;
++    }
++
++    /** 呼び出し: `->materializeIntoLockedManual(` / `::materializeIntoLockedManual(` */
++    public static function containsMaterializeCall(string $source): bool
++    {
++        $tokens = token_get_all($source);
++        foreach ($tokens as $i => $token) {
++            if (! is_array($token)
++                || ! in_array($token[0], [T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR, T_DOUBLE_COLON], true)) {
++                continue;
++            }
++            $j = self::nextNonWhitespace($tokens, $i);
++            if ($j === null || ! is_array($tokens[$j]) || $tokens[$j][0] !== T_STRING
++                || $tokens[$j][1] !== 'materializeIntoLockedManual') {
++                continue;
++            }
++            $k = self::nextNonWhitespace($tokens, $j);
++            if ($k !== null && $tokens[$k] === '(') {
++                return true;
++            }
++        }
++
++        return false;
++    }
++
++    /**
++     * 開始 token の直後から式の終端 (depth 0 の $terminators) まで走査し、
++     * VideoManualStatus 識別子 (`::class` を除く) が使われていれば true。
++     *
++     * @param  array<int, array{0: int, 1: string, 2: int}|string>  $tokens
++     * @param  list<string>  $terminators
++     */
++    private static function expressionUsesVideoManualStatus(array $tokens, int $start, array $terminators): bool
++    {
++        $count = count($tokens);
++        $depth = 0;
++        for ($i = $start + 1; $i < $count; $i++) {
++            $token = $tokens[$i];
++            if (! is_array($token)) {
++                if ($token === '(' || $token === '[' || $token === '{') {
++                    $depth++;
++
++                    continue;
++                }
++                if ($token === ')' || $token === ']' || $token === '}') {
++                    if ($depth === 0 && in_array($token, $terminators, true)) {
++                        return false;
++                    }
++                    $depth--;
++
++                    continue;
++                }
++                if ($depth === 0 && in_array($token, $terminators, true)) {
++                    return false;
++                }
++
++                continue;
++            }
++
++            [$id, $value] = $token;
++            if (! in_array($id, [T_STRING, T_NAME_QUALIFIED, T_NAME_FULLY_QUALIFIED], true)) {
++                continue;
++            }
++            $segments = explode('\\', ltrim($value, '\\'));
++            if (end($segments) !== 'VideoManualStatus') {
++                continue;
++            }
++            // `VideoManualStatus::class` は casts() 宣言 (書き込みでない) → 除外
++            $j = self::nextNonWhitespace($tokens, $i);
++            if ($j !== null && is_array($tokens[$j]) && $tokens[$j][0] === T_DOUBLE_COLON) {
++                $k = self::nextNonWhitespace($tokens, $j);
++                if ($k !== null && is_array($tokens[$k]) && $tokens[$k][0] === T_CLASS) {
++                    continue;
++                }
++            }
++
++            return true;
++        }
++
++        return false;
++    }
++
++    private static function stringLiteralEquals(string $literal, string $expected): bool
++    {
++        return trim($literal, "'\"") === $expected;
++    }
++
++    public static function appDir(): string
++    {
++        $appDir = realpath(__DIR__.'/../../app');
++        if (! is_string($appDir)) {
++            throw new RuntimeException('app/ ディレクトリを解決できません');
++        }
++
++        return $appDir;
++    }
++
++    /**
++     * @return list<string>
++     */
++    public static function phpFiles(string $dir): array
++    {
++        $files = [];
++        $iterator = new RecursiveIteratorIterator(
++            new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
++        );
++        /** @var SplFileInfo $file */
++        foreach ($iterator as $file) {
++            if ($file->isFile() && $file->getExtension() === 'php') {
++                $files[] = $file->getPathname();
++            }
++        }
++        sort($files);
++
++        return $files;
++    }
++
++    /**
++     * @param  array<int, array{0: int, 1: string, 2: int}|string>  $tokens
++     */
++    private static function nextNonWhitespace(array $tokens, int $from): ?int
++    {
++        $count = count($tokens);
++        for ($i = $from + 1; $i < $count; $i++) {
++            $t = $tokens[$i];
++            if (is_array($t) && in_array($t[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) {
++                continue;
++            }
++
++            return $i;
++        }
++
++        return null;
++    }
++}
++
++test('scenario_version / status 書き込み / materialize の経路が inventory どおり (deny-by-default)', function (): void {
++    $violations = ScenarioWritePathScanner::findViolations();
++
++    expect($violations['scenario_version'])->toBe([],
++        'scenario_version に触れてよいのは ScenarioService (書き込み) と ScenarioDocumentData (読み取り shape) のみです: '
++        .implode(', ', $violations['scenario_version']));
++    expect($violations['status_write'])->toBe([],
++        'video_manuals.status の書き込みは ScenarioService / AnalysisJobService のロック済み経路のみです: '
++        .implode(', ', $violations['status_write']));
++    expect($violations['materialize_declaration'])->toBe([],
++        'materializeIntoLockedManual の宣言は ScenarioService.php のみです: '
++        .implode(', ', $violations['materialize_declaration']));
++    expect($violations['materialize_call'])->toBe([],
++        'materializeIntoLockedManual の呼び出しは AnalysisPipeline.php (terminal tx) のみです: '
++        .implode(', ', $violations['materialize_call']));
++});
++
++test('現行コードベースに宣言 1 箇所 + 呼び出し 1 箇所が実在する (degenerate PASS 防止)', function (): void {
++    $appDir = ScenarioWritePathScanner::appDir();
++    expect(ScenarioWritePathScanner::phpFiles($appDir))->not->toBeEmpty();
++
++    $scenarioService = (string) file_get_contents($appDir.'/Services/Manual/ScenarioService.php');
++    $pipeline = (string) file_get_contents($appDir.'/Services/Manual/AnalysisPipeline.php');
++    expect(ScenarioWritePathScanner::containsMaterializeDeclaration($scenarioService))->toBeTrue();
++    expect(ScenarioWritePathScanner::containsMaterializeCall($pipeline))->toBeTrue();
++});
++
++test('scanner 自己検証: コメント内の出現は無視する', function (): void {
++    $source = <<<'PHP'
++<?php
++// $this->materializeIntoLockedManual($m, $s) はコメント
++/** 'scenario_version' や 'status' => VideoManualStatus::Ready も docblock */
++class Example
++{
++    public function note(): string
++    {
++        return 'materializeIntoLockedManual( という文字列リテラル';
++    }
++}
++PHP;
++
++    expect(ScenarioWritePathScanner::containsMaterializeCall($source))->toBeFalse();
++    expect(ScenarioWritePathScanner::containsMaterializeDeclaration($source))->toBeFalse();
++    expect(ScenarioWritePathScanner::containsScenarioVersionToken($source))->toBeFalse();
++    expect(ScenarioWritePathScanner::containsStatusWrite($source))->toBeFalse();
++});
++
++test('scanner 自己検証: 呼び出し / 宣言 / 書き込み形を検出する', function (): void {
++    $call = <<<'PHP'
++<?php
++class A { public function go($m, $s): void { $this->materializeIntoLockedManual($m, $s); } }
++PHP;
++    $declaration = <<<'PHP'
++<?php
++class B { public function materializeIntoLockedManual($m, array $s): void {} }
++PHP;
++    $arrayWrite = <<<'PHP'
++<?php
++use App\Enums\Manual\VideoManualStatus;
++class C { public function go($m): void { $m->forceFill(['status' => VideoManualStatus::Ready])->save(); } }
++PHP;
++    $ternaryWrite = <<<'PHP'
++<?php
++use App\Enums\Manual\VideoManualStatus;
++class D { public function go($m): void { $m->forceFill(['status' => $m->ok ? VideoManualStatus::Ready : VideoManualStatus::Draft])->save(); } }
++PHP;
++    $propertyWrite = <<<'PHP'
++<?php
++class E { public function go($m): void { $m->status = \App\Enums\Manual\VideoManualStatus::Ready; } }
++PHP;
++    $versionKey = <<<'PHP'
++<?php
++class F { public function go($m): void { $m->forceFill(['scenario_version' => 1])->save(); } }
++PHP;
++
++    expect(ScenarioWritePathScanner::containsMaterializeCall($call))->toBeTrue();
++    expect(ScenarioWritePathScanner::containsMaterializeDeclaration($declaration))->toBeTrue();
++    expect(ScenarioWritePathScanner::containsStatusWrite($arrayWrite))->toBeTrue();
++    expect(ScenarioWritePathScanner::containsStatusWrite($ternaryWrite))->toBeTrue();
++    expect(ScenarioWritePathScanner::containsStatusWrite($propertyWrite))->toBeTrue();
++    expect(ScenarioWritePathScanner::containsScenarioVersionToken($versionKey))->toBeTrue();
++});
++
++test('scanner 自己検証: cast 宣言 (VideoManualStatus::class) と読み取りは検出しない', function (): void {
++    $cast = <<<'PHP'
++<?php
++use App\Enums\Manual\VideoManualStatus;
++class G { protected function casts(): array { return ['status' => VideoManualStatus::class]; } }
++PHP;
++    $read = <<<'PHP'
++<?php
++class H { public function go($m): array { return ['status' => $m->status->value]; } }
++PHP;
++
++    expect(ScenarioWritePathScanner::containsStatusWrite($cast))->toBeFalse();
++    expect(ScenarioWritePathScanner::containsStatusWrite($read))->toBeFalse();
++});
+diff --git a/tests/Feature/Projects/AnalysisJobPollingTest.php b/tests/Feature/Projects/AnalysisJobPollingTest.php
+new file mode 100644
+index 0000000..0886dd3
+--- /dev/null
++++ b/tests/Feature/Projects/AnalysisJobPollingTest.php
+@@ -0,0 +1,82 @@
++<?php
++
++declare(strict_types=1);
++
++use App\Models\AnalysisJob;
++use App\Models\Project;
++use App\Models\VideoManual;
++
++/*
++ * job 状態ポーリング (GET .../manuals/{manual}/jobs/{analysisJob}):
++ * - AnalysisJobResource の shape (id/status/step/progress/error/manual_status)
++ * - {analysisJob} ∈ {manual} は scopeBindings (cross-manual は 404)
++ * - 閲覧権限 (view) のみ (撮影者 200 は ManualAnalyzeTest で検証済み)
++ */
++
++test('200: AnalysisJobResource の shape を返す', function (): void {
++    [$organization, $owner] = createOrganizationWithOwner();
++    $project = Project::factory()->forOrganization($organization)->create();
++    $manual = VideoManual::factory()->forProject($project)->create(['status' => 'analyzing']);
++    $job = AnalysisJob::factory()->forManual($manual)->running()->create();
++
++    $this->actingAs($owner)->getJson(
++        "/projects/{$project->id}/manuals/{$manual->id}/jobs/{$job->id}",
++    )->assertOk()->assertExactJson([
++        'id' => $job->id,
++        'status' => 'running',
++        'step' => 'extract',
++        'progress' => 10,
++        'error' => null,
++        'manual_status' => 'analyzing',
++    ]);
++});
++
++test('failed job は error を返す', function (): void {
++    [$organization, $owner] = createOrganizationWithOwner();
++    $project = Project::factory()->forOrganization($organization)->create();
++    $manual = VideoManual::factory()->forProject($project)->create();
++    $job = AnalysisJob::factory()->forManual($manual)->failed('解析に失敗しました')->create();
++
++    $this->actingAs($owner)->getJson(
++        "/projects/{$project->id}/manuals/{$manual->id}/jobs/{$job->id}",
++    )->assertOk()->assertJson([
++        'status' => 'failed',
++        'error' => '解析に失敗しました',
++        'manual_status' => 'draft',
++    ]);
++});
++
++test('他 manual の job id は 404 (scopeBindings。存在を漏らさない)', function (): void {
++    [$organization, $owner] = createOrganizationWithOwner();
++    $project = Project::factory()->forOrganization($organization)->create();
++    $manual = VideoManual::factory()->forProject($project)->create();
++    $otherManual = VideoManual::factory()->forProject($project)->create();
++    $otherJob = AnalysisJob::factory()->forManual($otherManual)->create();
++
++    $this->actingAs($owner)->getJson(
++        "/projects/{$project->id}/manuals/{$manual->id}/jobs/{$otherJob->id}",
++    )->assertNotFound();
++});
++
++test('cross-org の job への GET は 404', function (): void {
++    [, $stranger] = createOrganizationWithOwner('別組織');
++    [$organization] = createOrganizationWithOwner();
++    $project = Project::factory()->forOrganization($organization)->create();
++    $manual = VideoManual::factory()->forProject($project)->create();
++    $job = AnalysisJob::factory()->forManual($manual)->create();
++
++    $this->actingAs($stranger)->getJson(
++        "/projects/{$project->id}/manuals/{$manual->id}/jobs/{$job->id}",
++    )->assertNotFound();
++});
++
++test('未ログインは 401 (JSON)', function (): void {
++    [$organization] = createOrganizationWithOwner();
++    $project = Project::factory()->forOrganization($organization)->create();
++    $manual = VideoManual::factory()->forProject($project)->create();
++    $job = AnalysisJob::factory()->forManual($manual)->create();
++
++    $this->getJson(
++        "/projects/{$project->id}/manuals/{$manual->id}/jobs/{$job->id}",
++    )->assertUnauthorized();
++});
+diff --git a/tests/Feature/Projects/AnalysisPipelineTest.php b/tests/Feature/Projects/AnalysisPipelineTest.php
+new file mode 100644
+index 0000000..54260be
+--- /dev/null
++++ b/tests/Feature/Projects/AnalysisPipelineTest.php
+@@ -0,0 +1,382 @@
++<?php
++
++declare(strict_types=1);
++
++use App\DataTransferObjects\Manual\Analysis\GeneratedScenarioData;
++use App\Enums\Billing\TicketReservationStatus;
++use App\Enums\Manual\CutType;
++use App\Enums\Manual\JobStatus;
++use App\Enums\Manual\VideoManualStatus;
++use App\Models\AnalysisJob;
++use App\Models\Billing\TicketReservation;
++use App\Models\Cut;
++use App\Models\Organization;
++use App\Models\Project;
++use App\Models\SourceDocument;
++use App\Models\User;
++use App\Models\VideoManual;
++use App\Services\Billing\TicketLedgerService;
++use App\Services\Manual\AnalysisJobService;
++use App\Services\Manual\AnalysisPipeline;
++use App\Services\Manual\ScenarioService;
++use Carbon\CarbonImmutable;
++use Illuminate\Support\Facades\DB;
++use Illuminate\Support\Facades\Http;
++use Illuminate\Support\Facades\Storage;
++use Kent013\PrismPrompt\Prompt;
++use Kent013\PrismPrompt\Testing\TextResponseFake;
++
++/*
++ * AI 解析パイプライン (AnalysisPipeline::run の直接呼び出し。§10.8-1 / 概念設計 §4-5):
++ * - 成功パス: materialize + commit + succeeded の原子化 (terminal tx)
++ * - 予約の冪等 (再利用 / TTL 切れ付け替え) と失敗時 release
++ * - 有界リトライ (JSON 検証失敗のみ・最大 2 回)
++ * - stale 回復 cron とのインターリーブ (「failed ∧ committed」「succeeded ∧ released」の非共存)
++ */
++
++beforeEach(function (): void {
++    // executeSync は fake 中も PromptExecutionCompleted を発火し、listener が FX 解決 (HTTP) を
++    // 試みるため stray request を防ぐ
++    Http::fake(['*' => Http::response(['base' => 'USD', 'rates' => ['JPY' => 150.0]])]);
++});
++
++/**
++ * queued job 一式 (analyzing manual + 保存済み txt SOP + チケット残高)。
++ *
++ * @return array{Organization, User, Project, VideoManual, SourceDocument, AnalysisJob}
++ */
++function pipelineContext(int $tickets = 1): array
++{
++    Storage::fake();
++    [$organization, $owner] = createOrganizationWithOwner();
++    $project = Project::factory()->forOrganization($organization)->create();
++    $manual = VideoManual::factory()->forProject($project)->create(['status' => 'analyzing']);
++    $path = "projects/{$project->id}/manuals/{$manual->id}/source-documents/sop.txt";
++    Storage::put($path, str_repeat("手順: 部品を取り付けてネジを締める。急所: トルクは 5Nm。\n", 5));
++    $document = SourceDocument::factory()->forManual($manual)->create([
++        'file_path' => $path,
++        'mime' => 'text/plain',
++    ]);
++    $job = AnalysisJob::factory()->forManual($manual)->forDocument($document)->create();
++    if ($tickets > 0) {
++        app(TicketLedgerService::class)->grant($organization, $tickets, 'テスト残高');
++    }
++
++    return [$organization, $owner, $project, $manual, $document, $job];
++}
++
++function extractFixture(): string
++{
++    return json_encode([
++        'header' => ['title' => 'ネジ締め SOP', 'department' => null, 'revision' => null],
++        'sections' => [[
++            'title' => null,
++            'steps' => [[
++                'no' => 1,
++                'work_process' => 'ネジを締める',
++                'work_points' => ['トルクレンチを使う'],
++                'safety_points' => [],
++                'quality_points' => ['トルク 5Nm'],
++                'pm_points' => [],
++            ]],
++        ]],
++    ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
++}
++
++function decompositionFixture(): string
++{
++    return json_encode([
++        'steps' => [
++            ['no' => 1, 'action' => 'ネジを締める', 'points' => ['トルクは 5Nm']],
++        ],
++    ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
++}
++
++function scenarioFixture(): string
++{
++    return json_encode([
++        'cuts' => [
++            [
++                'no' => 1, 'type' => 'step', 'parent_no' => null,
++                'scene' => 'ネジ締めの全体', 'shot_type' => 'hiki', 'shooting_point' => null,
++                'narration' => 'ネジを締めます', 'subtitle_primary' => null, 'subtitle_secondary' => 'ネジ締め',
++            ],
++            [
++                'no' => 2, 'type' => 'point', 'parent_no' => 1,
++                'scene' => 'トルクレンチの目盛り', 'shot_type' => 'yori', 'shooting_point' => '手元を大きく写す',
++                'narration' => 'トルクは 5Nm です', 'subtitle_primary' => '5Nm', 'subtitle_secondary' => '締め付けトルク',
++            ],
++        ],
++    ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
++}
++
++/** 成功 3 段の Prompt fake を張る */
++function fakeSuccessfulLlm(): void
++{
++    Prompt::fake([
++        TextResponseFake::make()->withText(extractFixture()),
++        TextResponseFake::make()->withText(decompositionFixture()),
++        TextResponseFake::make()->withText(scenarioFixture()),
++    ]);
++}
++
++test('成功パス: cuts materialize / ready / version+1 / succeeded / committed / スナップショット保存', function (): void {
++    [$organization, , , $manual, $document, $job] = pipelineContext();
++    fakeSuccessfulLlm();
++
++    app(AnalysisPipeline::class)->run($job->id);
++
++    // job: succeeded + progress 100
++    $job->refresh();
++    expect($job->status)->toBe(JobStatus::Succeeded);
++    expect($job->progress)->toBe(100);
++    expect($job->error)->toBeNull();
++
++    // manual: cuts ツリー (step + point) / ready / version+1
++    $manual->refresh();
++    expect($manual->status)->toBe(VideoManualStatus::Ready);
++    expect($manual->scenario_version)->toBe(1);
++    $cuts = $manual->cuts()->orderBy('sort_order')->get();
++    expect($cuts)->toHaveCount(2);
++    $step = $cuts->firstWhere('type', CutType::Step);
++    $point = $cuts->firstWhere('type', CutType::Point);
++    expect($step)->not->toBeNull();
++    expect($point)->not->toBeNull();
++    expect($point->parent_cut_id)->toBe($step->id);
++    expect($step->scene)->toBe('ネジ締めの全体');
++    expect($point->subtitle_primary)->toBe('5Nm');
++
++    // 課金: 予約 committed / 残高 0 (1 ジョブ 1 予約)
++    $reservation = $job->ticketReservation;
++    expect($reservation)->not->toBeNull();
++    expect($reservation->status)->toBe(TicketReservationStatus::Committed);
++    expect(app(TicketLedgerService::class)->balance($organization))->toBe(0);
++    expect(TicketReservation::query()->count())->toBe(1);
++
++    // 監査スナップショット
++    expect($document->refresh()->extracted_json)->toHaveKey('sections');
++    expect($job->result_json)->toHaveKey('steps');
++});
++
++test('再試行で二重予約しない (有効な Reserved は再利用) + queued guard の no-op', function (): void {
++    [$organization, , , , , $job] = pipelineContext();
++    // 事前に予約を付けた queued job (前回試行が dispatch 直後に死んだ状況)
++    $reservation = app(TicketLedgerService::class)->reserve($organization, 1);
++    $job->ticketReservation()->associate($reservation);
++    $job->save();
++
++    fakeSuccessfulLlm();
++    app(AnalysisPipeline::class)->run($job->id);
++
++    expect($job->refresh()->status)->toBe(JobStatus::Succeeded);
++    expect(TicketReservation::query()->count())->toBe(1); // reserve が増えない
++    expect($job->ticket_reservation_id)->toBe($reservation->id);
++
++    // succeeded 済み job の再配送は no-op (queued guard)
++    app(AnalysisPipeline::class)->run($job->id);
++    expect(TicketReservation::query()->count())->toBe(1);
++});
++
++test('TTL 切れ Reserved は release して付け替え、新予約で完走する', function (): void {
++    $this->travelTo(CarbonImmutable::parse('2026-07-11 00:00:00'));
++    [$organization, , , , , $job] = pipelineContext();
++    $stale = app(TicketLedgerService::class)->reserve($organization, 1);
++    $job->ticketReservation()->associate($stale);
++    $job->save();
++
++    // TTL (30 分) を超過させる (cron 未回収の失効 Reserved)
++    $this->travelTo(CarbonImmutable::parse('2026-07-11 00:31:00'));
++    fakeSuccessfulLlm();
++    app(AnalysisPipeline::class)->run($job->id);
++
++    $job->refresh();
++    expect($job->status)->toBe(JobStatus::Succeeded);
++    expect($job->ticket_reservation_id)->not->toBe($stale->id);
++    expect($stale->refresh()->status)->toBe(TicketReservationStatus::Released);
++    expect($job->ticketReservation?->status)->toBe(TicketReservationStatus::Committed);
++});
++
++test('LLM が 3 回不正 JSON → failed + manual 復帰 (cuts 無し = draft) + 予約 released', function (): void {
++    [, , , $manual, , $job] = pipelineContext();
++    Prompt::fake([
++        TextResponseFake::make()->withText('これは JSON ではありません'),
++        TextResponseFake::make()->withText('{"broken": '),
++        TextResponseFake::make()->withText('まだ不正'),
++    ]);
++
++    app(AnalysisPipeline::class)->run($job->id);
++
++    $job->refresh();
++    expect($job->status)->toBe(JobStatus::Failed);
++    expect($job->error)->toBe('AI の応答を解釈できませんでした。再実行してください。');
++    expect($manual->refresh()->status)->toBe(VideoManualStatus::Draft);
++    expect($job->ticketReservation?->status)->toBe(TicketReservationStatus::Released);
++    // 非共存: failed ∧ committed を作らない
++    expect(TicketReservation::query()->where('status', TicketReservationStatus::Committed)->count())->toBe(0);
++});
++
++test('有界リトライ: 不正 JSON ×2 → 3 回目成功で succeeded', function (): void {
++    [, , , , , $job] = pipelineContext();
++    Prompt::fake([
++        TextResponseFake::make()->withText('不正 1'),
++        TextResponseFake::make()->withText('不正 2'),
++        TextResponseFake::make()->withText(extractFixture()),   // 3 回目で成功
++        TextResponseFake::make()->withText(decompositionFixture()),
++        TextResponseFake::make()->withText(scenarioFixture()),
++    ]);
++
++    app(AnalysisPipeline::class)->run($job->id);
++
++    expect($job->refresh()->status)->toBe(JobStatus::Succeeded);
++});
++
++test('コードフェンス付き JSON も受理する (LlmJson::decode)', function (): void {
++    [, , , , , $job] = pipelineContext();
++    Prompt::fake([
++        TextResponseFake::make()->withText("```json\n".extractFixture()."\n```"),
++        TextResponseFake::make()->withText(decompositionFixture()),
++        TextResponseFake::make()->withText(scenarioFixture()),
++    ]);
++
++    app(AnalysisPipeline::class)->run($job->id);
++
++    expect($job->refresh()->status)->toBe(JobStatus::Succeeded);
++});
++
++test('残高不足で startJob が失敗 → failed (予約なし・LLM 呼び出しなし)', function (): void {
++    [, , , $manual, , $job] = pipelineContext(tickets: 0);
++
++    app(AnalysisPipeline::class)->run($job->id);
++
++    $job->refresh();
++    expect($job->status)->toBe(JobStatus::Failed);
++    expect($job->error)->toContain('チケット残高が不足しています');
++    expect($job->ticket_reservation_id)->toBeNull();
++    expect($manual->refresh()->status)->toBe(VideoManualStatus::Draft);
++});
++
++test('再解析の失敗は既存 cuts があれば ready へ復帰する', function (): void {
++    [, , , $manual, , $job] = pipelineContext();
++    Cut::factory()->forManual($manual)->create(); // 前回解析の cuts が残っている
++
++    Prompt::fake([
++        TextResponseFake::make()->withText('不正'),
++        TextResponseFake::make()->withText('不正'),
++        TextResponseFake::make()->withText('不正'),
++    ]);
++    app(AnalysisPipeline::class)->run($job->id);
++
++    expect($job->refresh()->status)->toBe(JobStatus::Failed);
++    expect($manual->refresh()->status)->toBe(VideoManualStatus::Ready);
++    expect($manual->cuts()->count())->toBe(1); // 既存 cuts は不変 (materialize 前に失敗)
++});
++
++test('インターリーブ (a): cron 先勝ち (failed) 後の finalize は no-op (無課金 succeeded 排除)', function (): void {
++    [$organization, , , $manual, , $job] = pipelineContext();
++    $reservation = app(TicketLedgerService::class)->reserve($organization, 1);
++    $job->ticketReservation()->associate($reservation);
++    $job->status = JobStatus::Running;
++    $job->save();
++
++    // stale 回復 cron が先勝ち: failed + released + manual 復帰
++    app(AnalysisJobService::class)->failJob($job, '解析がタイムアウトしました。再実行してください。');
++    expect($job->refresh()->status)->toBe(JobStatus::Failed);
++
++    // 遅れて完走した pipeline の terminal tx 相当を実行 → status guard で全て no-op
++    $generated = GeneratedScenarioData::fromLlmText(scenarioFixture());
++    $finalize = new ReflectionMethod(AnalysisPipeline::class, 'finalize');
++    $finalize->invoke(app(AnalysisPipeline::class), $job, $generated);
++
++    $job->refresh();
++    expect($job->status)->toBe(JobStatus::Failed);              // succeeded に上書きされない
++    expect($manual->refresh()->cuts()->count())->toBe(0);        // materialize されない
++    expect($reservation->refresh()->status)->toBe(TicketReservationStatus::Released); // commit されない
++});
++
++test('インターリーブ (b): pipeline 先勝ち (succeeded) 後の failJob は no-op', function (): void {
++    [, , , $manual, , $job] = pipelineContext();
++    fakeSuccessfulLlm();
++    app(AnalysisPipeline::class)->run($job->id);
++    expect($job->refresh()->status)->toBe(JobStatus::Succeeded);
++
++    // 後追いの cron / failed() フック相当
++    app(AnalysisJobService::class)->failJob($job, '解析がタイムアウトしました。再実行してください。');
++
++    $job->refresh();
++    expect($job->status)->toBe(JobStatus::Succeeded);
++    expect($manual->refresh()->status)->toBe(VideoManualStatus::Ready);
++    // 非共存: succeeded ∧ released を作らない
++    expect($job->ticketReservation?->status)->toBe(TicketReservationStatus::Committed);
++});
++
++test('インターリーブ (d): commit は Reserved のみ → terminal tx 全体 rollback (cuts 不変)', function (): void {
++    [$organization, , , $manual, , $job] = pipelineContext();
++    $reservation = app(TicketLedgerService::class)->reserve($organization, 1);
++    $job->ticketReservation()->associate($reservation);
++    $job->status = JobStatus::Running;
++    $job->save();
++    // finalize 直前に予約が Released になる競合を細工 (releaseStale cron 相当)
++    app(TicketLedgerService::class)->release($reservation);
++
++    $generated = GeneratedScenarioData::fromLlmText(scenarioFixture());
++    $finalize = new ReflectionMethod(AnalysisPipeline::class, 'finalize');
++    expect(fn () => $finalize->invoke(app(AnalysisPipeline::class), $job, $generated))
++        ->toThrow(LogicException::class);
++
++    // terminal tx 全体が rollback: materialize も succeeded も残らない
++    $job->refresh();
++    expect($job->status)->toBe(JobStatus::Running);
++    expect($manual->refresh()->cuts()->count())->toBe(0);
++    expect($manual->status)->toBe(VideoManualStatus::Analyzing);
++    // 非共存: 課金 (committed) は発生していない
++    expect(TicketReservation::query()->where('status', TicketReservationStatus::Committed)->count())->toBe(0);
++});
++
++test('materialize は analyzing 以外で呼ぶと LogicException (defensive 二層目)', function (): void {
++    // 注: tx 外呼び出しの guard (transactionLevel === 0) は RefreshDatabase が
++    // テスト全体を tx で包むためテストでは踏めない (静的走査 = ScenarioWritePathInventoryTest が
++    // 呼び出し経路を AnalysisPipeline::finalize に限定することで担保)
++    [, , , $manual] = pipelineContext();
++    $steps = GeneratedScenarioData::fromLlmText(scenarioFixture())->toScenarioSteps();
++    $scenarios = app(ScenarioService::class);
++
++    $manual->forceFill(['status' => VideoManualStatus::Draft])->save();
++    expect(fn () => DB::transaction(
++        fn () => $scenarios->materializeIntoLockedManual($manual, $steps),
++    ))->toThrow(LogicException::class, 'analyzing 中のみ');
++});
++
++test('再解析の materialize は既存 cuts を全置換する (旧 cut id が消える)', function (): void {
++    [, , , $manual, , $job] = pipelineContext();
++    $oldCut = Cut::factory()->forManual($manual)->create();
++
++    fakeSuccessfulLlm();
++    app(AnalysisPipeline::class)->run($job->id);
++
++    expect($job->refresh()->status)->toBe(JobStatus::Succeeded);
++    $manual->refresh();
++    expect($manual->cuts()->count())->toBe(2);
++    expect($manual->cuts()->whereKey($oldCut->id)->exists())->toBeFalse();
++});
++
++test('抽出不能 (実質空の SOP) は failed + ユーザー向け文言', function (): void {
++    [, , , , $document, $job] = pipelineContext();
++    Storage::put($document->file_path, '短すぎ'); // min_text_bytes (100) 未満
++
++    app(AnalysisPipeline::class)->run($job->id);
++
++    $job->refresh();
++    expect($job->status)->toBe(JobStatus::Failed);
++    expect($job->error)->toBe('テキストを抽出できません。画像・スキャンの手順書は現在未対応です。');
++});
++
++test('バイト上限超過の SOP は failed (分割を促す文言)', function (): void {
++    config()->set('manual.analysis_max_text_bytes', 200);
++    [, , , , $document, $job] = pipelineContext();
++
++    app(AnalysisPipeline::class)->run($job->id);
++
++    $job->refresh();
++    expect($job->status)->toBe(JobStatus::Failed);
++    expect($job->error)->toBe('手順書が大きすぎます。分割してアップロードしてください。');
++});
+diff --git a/tests/Feature/Projects/AnalysisRecoverStaleJobsTest.php b/tests/Feature/Projects/AnalysisRecoverStaleJobsTest.php
+new file mode 100644
+index 0000000..64c9263
+--- /dev/null
++++ b/tests/Feature/Projects/AnalysisRecoverStaleJobsTest.php
+@@ -0,0 +1,108 @@
++<?php
++
++declare(strict_types=1);
++
++use App\Enums\Billing\TicketReservationStatus;
++use App\Enums\Manual\JobStatus;
++use App\Enums\Manual\VideoManualStatus;
++use App\Models\AnalysisJob;
++use App\Models\Organization;
++use App\Models\Project;
++use App\Models\VideoManual;
++use App\Services\Billing\TicketLedgerService;
++use App\Services\Manual\AnalysisPipeline;
++use Carbon\CarbonImmutable;
++
++/*
++ * stale 回復 cron (analysis:recover-stale-jobs。概念設計 §4):
++ * - queued (dispatch 喪失) / running (worker 異常終了) の閾値超過 → failJob
++ * - 閾値内・terminal は対象外
++ * - 回収後の遅延配送は queued guard で no-op
++ */
++
++/**
++ * @return array{Organization, VideoManual, AnalysisJob}
++ */
++function staleJobContext(string $status = 'queued'): array
++{
++    [$organization] = createOrganizationWithOwner();
++    $project = Project::factory()->forOrganization($organization)->create();
++    $manual = VideoManual::factory()->forProject($project)->create(['status' => 'analyzing']);
++    $job = AnalysisJob::factory()->forManual($manual)->create(['status' => $status]);
++
++    return [$organization, $manual, $job];
++}
++
++test('queued が 31 分滞留 → failed + manual 復帰 + 予約 released', function (): void {
++    $this->travelTo(CarbonImmutable::parse('2026-07-11 00:00:00'));
++    [$organization, $manual, $job] = staleJobContext();
++    app(TicketLedgerService::class)->grant($organization, 1, 'テスト残高');
++    $reservation = app(TicketLedgerService::class)->reserve($organization, 1);
++    $job->ticketReservation()->associate($reservation);
++    $job->save();
++
++    $this->travelTo(CarbonImmutable::parse('2026-07-11 00:31:00'));
++    $this->artisan('analysis:recover-stale-jobs')
++        ->expectsOutputToContain('recovered 1 stale analysis job(s)')
++        ->assertSuccessful();
++
++    $job->refresh();
++    expect($job->status)->toBe(JobStatus::Failed);
++    expect($job->error)->toBe('解析がタイムアウトしました。再実行してください。');
++    expect($manual->refresh()->status)->toBe(VideoManualStatus::Draft);
++    expect($reservation->refresh()->status)->toBe(TicketReservationStatus::Released);
++});
++
++test('running の updated_at が 31 分古い → 回収される', function (): void {
++    $this->travelTo(CarbonImmutable::parse('2026-07-11 00:00:00'));
++    [, $manual, $job] = staleJobContext('running');
++
++    $this->travelTo(CarbonImmutable::parse('2026-07-11 00:31:00'));
++    $this->artisan('analysis:recover-stale-jobs')->assertSuccessful();
++
++    expect($job->refresh()->status)->toBe(JobStatus::Failed);
++    expect($manual->refresh()->status)->toBe(VideoManualStatus::Draft);
++});
++
++test('閾値内の queued / running は回収されない', function (): void {
++    $this->travelTo(CarbonImmutable::parse('2026-07-11 00:00:00'));
++    [, , $queued] = staleJobContext();
++    [, , $running] = staleJobContext('running');
++
++    $this->travelTo(CarbonImmutable::parse('2026-07-11 00:10:00'));
++    $this->artisan('analysis:recover-stale-jobs')
++        ->expectsOutputToContain('recovered 0 stale analysis job(s)')
++        ->assertSuccessful();
++
++    expect($queued->refresh()->status)->toBe(JobStatus::Queued);
++    expect($running->refresh()->status)->toBe(JobStatus::Running);
++});
++
++test('terminal (succeeded / failed) は対象外', function (): void {
++    $this->travelTo(CarbonImmutable::parse('2026-07-11 00:00:00'));
++    [, , $succeeded] = staleJobContext('succeeded');
++    [, , $failed] = staleJobContext('failed');
++
++    $this->travelTo(CarbonImmutable::parse('2026-07-11 01:00:00'));
++    $this->artisan('analysis:recover-stale-jobs')
++        ->expectsOutputToContain('recovered 0 stale analysis job(s)')
++        ->assertSuccessful();
++
++    expect($succeeded->refresh()->status)->toBe(JobStatus::Succeeded);
++    expect($failed->refresh()->status)->toBe(JobStatus::Failed);
++});
++
++test('回収後の遅延配送は queued guard で no-op (二重実行しない)', function (): void {
++    $this->travelTo(CarbonImmutable::parse('2026-07-11 00:00:00'));
++    [, $manual, $job] = staleJobContext();
++
++    $this->travelTo(CarbonImmutable::parse('2026-07-11 00:31:00'));
++    $this->artisan('analysis:recover-stale-jobs')->assertSuccessful();
++    expect($job->refresh()->status)->toBe(JobStatus::Failed);
++
++    // 遅延配送 (queue 詰まりが解けて後から届いた) → LLM 呼び出しなしで即 return
++    app(AnalysisPipeline::class)->run($job->id);
++
++    expect($job->refresh()->status)->toBe(JobStatus::Failed);
++    expect($manual->refresh()->cuts()->count())->toBe(0);
++});
+diff --git a/tests/Feature/Projects/ManualAnalyzeTest.php b/tests/Feature/Projects/ManualAnalyzeTest.php
+new file mode 100644
+index 0000000..14b8c9a
+--- /dev/null
++++ b/tests/Feature/Projects/ManualAnalyzeTest.php
+@@ -0,0 +1,224 @@
++<?php
++
++declare(strict_types=1);
++
++use App\Enums\Manual\JobStatus;
++use App\Enums\Manual\VideoManualStatus;
++use App\Enums\ProjectRole;
++use App\Jobs\Manual\RunManualAnalysis;
++use App\Models\AnalysisJob;
++use App\Models\Billing\TicketReservation;
++use App\Models\Organization;
++use App\Models\Project;
++use App\Models\SourceDocument;
++use App\Models\User;
++use App\Models\VideoManual;
++use App\Services\Billing\TicketLedgerService;
++use Illuminate\Support\Facades\Queue;
++
++/*
++ * AI 解析トリガー (POST .../manuals/{manual}/analyze。doc/10 §10.8-8):
++ * - draft/ready のみ実行可 (analyzing/rendering/published は 409)
++ * - in-flight (queued/running) は 1 つ → 409 (code=analysis_conflict)
++ * - document 無し 422 / 残高不足 402 (job を作らない・status 不変)
++ * - 撮影者 403 / cross-org・cross-project 404 / 保護キー直送 422 / 未ログイン 401
++ */
++
++/**
++ * 編集者 (owner) + document 付き manual + チケット残高 1 のセットアップ。
++ *
++ * @return array{Organization, User, Project, VideoManual}
++ */
++function analyzeTestContext(bool $withDocument = true, int $tickets = 1): array
++{
++    [$organization, $owner] = createOrganizationWithOwner();
++    $project = Project::factory()->forOrganization($organization)->create();
++    $manual = VideoManual::factory()->forProject($project)->create();
++    if ($withDocument) {
++        SourceDocument::factory()->forManual($manual)->create();
++    }
++    if ($tickets > 0) {
++        app(TicketLedgerService::class)->grant($organization, $tickets, 'テスト残高');
++    }
++
++    return [$organization, $owner, $project, $manual];
++}
++
++test('draft + document + 残高あり → 201 (job=queued / manual=analyzing / dispatch)', function (): void {
++    Queue::fake();
++    [, $owner, $project, $manual] = analyzeTestContext();
++
++    $response = $this->actingAs($owner)->postJson(
++        "/projects/{$project->id}/manuals/{$manual->id}/analyze",
++    );
++
++    $response->assertCreated()->assertJson([
++        'status' => 'queued',
++        'step' => null,
++        'error' => null,
++        'manual_status' => 'analyzing',
++    ]);
++
++    $job = AnalysisJob::query()->firstOrFail();
++    expect($job->status)->toBe(JobStatus::Queued);
++    expect($job->video_manual_id)->toBe($manual->id);
++    expect($job->source_document_id)->not->toBeNull();
++    expect($job->ticket_reservation_id)->toBeNull(); // 予約はジョブ開始時 (§10.5)
++    expect($manual->refresh()->status)->toBe(VideoManualStatus::Analyzing);
++
++    Queue::assertPushed(RunManualAnalysis::class, fn (RunManualAnalysis $pushed): bool => $pushed->analysisJobId === $job->id);
++});
++
++test('ready からの再解析も 201 (正式な遷移)', function (): void {
++    Queue::fake();
++    [, $owner, $project, $manual] = analyzeTestContext();
++    $manual->forceFill(['status' => VideoManualStatus::Ready])->save();
++
++    $this->actingAs($owner)->postJson(
++        "/projects/{$project->id}/manuals/{$manual->id}/analyze",
++    )->assertCreated();
++
++    expect($manual->refresh()->status)->toBe(VideoManualStatus::Analyzing);
++});
++
++test('in-flight (queued) があると 409 (type=in_flight・DB 不変)', function (): void {
++    Queue::fake();
++    [, $owner, $project, $manual] = analyzeTestContext();
++    // 直前のトリガー済み状態を再現 (manual は analyzing + queued job)
++    AnalysisJob::factory()->forManual($manual)->create();
++    $manual->forceFill(['status' => VideoManualStatus::Ready])->save();
++
++    $response = $this->actingAs($owner)->postJson(
++        "/projects/{$project->id}/manuals/{$manual->id}/analyze",
++    );
++
++    $response->assertConflict()->assertJson([
++        'code' => 'analysis_conflict',
++        'conflict_type' => 'in_flight',
++    ]);
++    expect(AnalysisJob::query()->count())->toBe(1);
++    Queue::assertNothingPushed();
++});
++
++test('analyzing 中の manual は 409 (type=status_not_analyzable)', function (): void {
++    Queue::fake();
++    [, $owner, $project, $manual] = analyzeTestContext();
++    $manual->forceFill(['status' => VideoManualStatus::Analyzing])->save();
++
++    $this->actingAs($owner)->postJson(
++        "/projects/{$project->id}/manuals/{$manual->id}/analyze",
++    )->assertConflict()->assertJson([
++        'code' => 'analysis_conflict',
++        'conflict_type' => 'status_not_analyzable',
++    ]);
++    Queue::assertNothingPushed();
++});
++
++test('rendering / published も 409 (type=status_not_analyzable)', function (VideoManualStatus $status): void {
++    Queue::fake();
++    [, $owner, $project, $manual] = analyzeTestContext();
++    $manual->forceFill(['status' => $status])->save();
++
++    $this->actingAs($owner)->postJson(
++        "/projects/{$project->id}/manuals/{$manual->id}/analyze",
++    )->assertConflict()->assertJson(['conflict_type' => 'status_not_analyzable']);
++})->with([
++    'rendering' => VideoManualStatus::Rendering,
++    'published' => VideoManualStatus::Published,
++]);
++
++test('直前 job が failed なら再トリガー 201 (冪等ルール: in-flight 不在)', function (): void {
++    Queue::fake();
++    [, $owner, $project, $manual] = analyzeTestContext();
++    AnalysisJob::factory()->forManual($manual)->failed()->create();
++
++    $this->actingAs($owner)->postJson(
++        "/projects/{$project->id}/manuals/{$manual->id}/analyze",
++    )->assertCreated();
++
++    expect(AnalysisJob::query()->count())->toBe(2);
++});
++
++test('document 無しは 422 (job を作らない・status 不変)', function (): void {
++    Queue::fake();
++    [, $owner, $project, $manual] = analyzeTestContext(withDocument: false);
++
++    $this->actingAs($owner)->postJson(
++        "/projects/{$project->id}/manuals/{$manual->id}/analyze",
++    )->assertUnprocessable()->assertJsonValidationErrors(['document']);
++
++    expect(AnalysisJob::query()->count())->toBe(0);
++    expect($manual->refresh()->status)->toBe(VideoManualStatus::Draft);
++    Queue::assertNothingPushed();
++});
++
++test('残高 0 は 402 (code=insufficient_tickets。job も予約も作らない・status 不変)', function (): void {
++    Queue::fake();
++    [, $owner, $project, $manual] = analyzeTestContext(tickets: 0);
++
++    $response = $this->actingAs($owner)->postJson(
++        "/projects/{$project->id}/manuals/{$manual->id}/analyze",
++    );
++
++    $response->assertPaymentRequired()->assertJson(['code' => 'insufficient_tickets']);
++    expect(AnalysisJob::query()->count())->toBe(0);
++    expect(TicketReservation::query()->count())->toBe(0);
++    expect($manual->refresh()->status)->toBe(VideoManualStatus::Draft);
++    Queue::assertNothingPushed();
++});
++
++test('撮影者 (project_member) は 403 / ポーリング GET は 200', function (): void {
++    Queue::fake();
++    [$organization, , $project, $manual] = analyzeTestContext();
++    $member = attachOrganizationMember($organization);
++    $member->forceFill(['current_organization_id' => $organization->id])->save();
++    attachProjectMember($project, $member, ProjectRole::Member);
++
++    $this->actingAs($member)->postJson(
++        "/projects/{$project->id}/manuals/{$manual->id}/analyze",
++    )->assertForbidden();
++
++    $job = AnalysisJob::factory()->forManual($manual)->create();
++    $this->actingAs($member)->getJson(
++        "/projects/{$project->id}/manuals/{$manual->id}/jobs/{$job->id}",
++    )->assertOk();
++});
++
++test('cross-org の manual への POST は 404 (存在オラクル封じ)', function (): void {
++    [, $stranger] = createOrganizationWithOwner('別組織');
++    [, , $project, $manual] = analyzeTestContext();
++
++    $this->actingAs($stranger)->postJson(
++        "/projects/{$project->id}/manuals/{$manual->id}/analyze",
++    )->assertNotFound();
++});
++
++test('cross-project の manual への POST は 404 (scopeBindings)', function (): void {
++    [$organization, $owner, , $manual] = analyzeTestContext();
++    $otherProject = Project::factory()->forOrganization($organization)->create();
++
++    $this->actingAs($owner)->postJson(
++        "/projects/{$otherProject->id}/manuals/{$manual->id}/analyze",
++    )->assertNotFound();
++});
++
++test('保護キー (ticket_reservation_id 等) の直送は 422', function (): void {
++    Queue::fake();
++    [, $owner, $project, $manual] = analyzeTestContext();
++
++    $this->actingAs($owner)->postJson(
++        "/projects/{$project->id}/manuals/{$manual->id}/analyze",
++        ['ticket_reservation_id' => 999, 'video_manual_id' => 999],
++    )->assertUnprocessable()->assertJsonValidationErrors(['ticket_reservation_id', 'video_manual_id']);
++
++    expect(AnalysisJob::query()->count())->toBe(0);
++    Queue::assertNothingPushed();
++});
++
++test('未ログインは 401 (JSON)', function (): void {
++    [, , $project, $manual] = analyzeTestContext();
++
++    $this->postJson(
++        "/projects/{$project->id}/manuals/{$manual->id}/analyze",
++    )->assertUnauthorized();
++});
+diff --git a/tests/Feature/Projects/SourceDocumentUploadTest.php b/tests/Feature/Projects/SourceDocumentUploadTest.php
+new file mode 100644
+index 0000000..bfcc5f6
+--- /dev/null
++++ b/tests/Feature/Projects/SourceDocumentUploadTest.php
+@@ -0,0 +1,201 @@
++<?php
++
++declare(strict_types=1);
++
++use App\Enums\Manual\VideoManualStatus;
++use App\Enums\ProjectRole;
++use App\Models\Organization;
++use App\Models\Project;
++use App\Models\SourceDocument;
++use App\Models\User;
++use App\Models\VideoManual;
++use App\Services\Manual\SourceDocumentService;
++use Illuminate\Http\UploadedFile;
++use Illuminate\Support\Facades\Storage;
++use Illuminate\Validation\ValidationException;
++
++/*
++ * SOP アップロード (作成時 multipart + 専用 route POST .../source-documents):
++ * - 追記型 immutable (差し替え = 新規行。既存行・ファイルは不変)
++ * - draft/ready のみ許可 (analyzing 等は 422)
++ * - サーバ側 MIME 内容 sniff (polyglot 対策) / サイズ上限 / 保護キー 422
++ * - 撮影者 403 / cross-org 404
++ */
++
++/**
++ * @return array{Organization, User, Project, VideoManual}
++ */
++function sourceDocumentTestContext(): array
++{
++    [$organization, $owner] = createOrganizationWithOwner();
++    $project = Project::factory()->forOrganization($organization)->create();
++    $manual = VideoManual::factory()->forProject($project)->create();
++
++    return [$organization, $owner, $project, $manual];
++}
++
++/** finfo が application/pdf と判定する最小 PDF バイト列 */
++function fakePdfFile(string $name = 'sop.pdf'): UploadedFile
++{
++    $body = "%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n";
++
++    return UploadedFile::fake()->createWithContent($name, $body);
++}
++
++/** text/plain 判定のテキスト SOP */
++function fakeTxtFile(string $name = 'sop.txt', string $body = "手順1 部品を取り付ける\n手順2 ネジを締める\n"): UploadedFile
++{
++    return UploadedFile::fake()->createWithContent($name, $body);
++}
++
++test('作成時アップロード: manual と同時に SourceDocument 行 + ファイルが作られる', function (): void {
++    Storage::fake();
++    [, $owner, $project] = sourceDocumentTestContext();
++
++    $this->actingAs($owner)->post("/projects/{$project->id}/manuals", [
++        'title' => '組立マニュアル',
++        'category' => null,
++        'document' => fakePdfFile(),
++    ])->assertRedirect();
++
++    $document = SourceDocument::query()->firstOrFail();
++    expect($document->original_name)->toBe('sop.pdf');
++    expect($document->mime)->toBe('application/pdf');
++    expect($document->file_path)->toContain("projects/{$project->id}/manuals/");
++    Storage::assertExists($document->file_path);
++});
++
++test('作成時アップロード: document 省略でも作成できる (任意フィールド)', function (): void {
++    Storage::fake();
++    [, $owner, $project] = sourceDocumentTestContext();
++
++    $this->actingAs($owner)->post("/projects/{$project->id}/manuals", [
++        'title' => '手順書なしマニュアル',
++        'category' => null,
++    ])->assertRedirect();
++
++    expect(SourceDocument::query()->count())->toBe(0);
++});
++
++test('専用 route: draft manual に追加でき、2 回目は行が増える (immutable 追記)', function (): void {
++    Storage::fake();
++    [, $owner, $project, $manual] = sourceDocumentTestContext();
++    $url = "/projects/{$project->id}/manuals/{$manual->id}/source-documents";
++
++    $this->actingAs($owner)->from("/projects/{$project->id}/manuals/{$manual->id}")
++        ->post($url, ['document' => fakeTxtFile('rev1.txt')])
++        ->assertRedirect()->assertSessionHas('success');
++    $first = SourceDocument::query()->firstOrFail();
++
++    $this->actingAs($owner)->post($url, ['document' => fakeTxtFile('rev2.txt')])
++        ->assertRedirect();
++
++    // 追記型: 既存行は不変のまま行が増える (解析は latest 勝ち)
++    expect(SourceDocument::query()->count())->toBe(2);
++    expect($first->refresh()->original_name)->toBe('rev1.txt');
++    Storage::assertExists($first->file_path);
++    expect($manual->sourceDocuments()->latest('id')->firstOrFail()->original_name)->toBe('rev2.txt');
++});
++
++test('analyzing 中の専用 route は 422 (行・ファイル不変)', function (): void {
++    Storage::fake();
++    [, $owner, $project, $manual] = sourceDocumentTestContext();
++    $manual->forceFill(['status' => VideoManualStatus::Analyzing])->save();
++
++    $this->actingAs($owner)->postJson(
++        "/projects/{$project->id}/manuals/{$manual->id}/source-documents",
++        ['document' => fakeTxtFile()],
++    )->assertUnprocessable()->assertJsonValidationErrors(['document']);
++
++    expect(SourceDocument::query()->count())->toBe(0);
++});
++
++test('許可外拡張子 (png) は 422', function (): void {
++    Storage::fake();
++    [, $owner, $project, $manual] = sourceDocumentTestContext();
++
++    $png = UploadedFile::fake()->createWithContent(
++        'image.png',
++        base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', true) ?: '',
++    );
++
++    $this->actingAs($owner)->postJson(
++        "/projects/{$project->id}/manuals/{$manual->id}/source-documents",
++        ['document' => $png],
++    )->assertUnprocessable()->assertJsonValidationErrors(['document']);
++});
++
++test('拡張子偽装 (.pdf だが内容が PNG) は 422 (polyglot 対策)', function (): void {
++    Storage::fake();
++    [, $owner, $project, $manual] = sourceDocumentTestContext();
++
++    // fake UploadedFile は getMimeType() が宣言 mime を返すため、「内容 sniff が
++    // image/png を検出した」状況を mime 指定で再現する (.pdf 拡張子 + PNG 内容)
++    $polyglot = UploadedFile::fake()->create('fake.pdf', 10, 'image/png');
++
++    $this->actingAs($owner)->postJson(
++        "/projects/{$project->id}/manuals/{$manual->id}/source-documents",
++        ['document' => $polyglot],
++    )->assertUnprocessable()->assertJsonValidationErrors(['document']);
++
++    expect(SourceDocument::query()->count())->toBe(0);
++});
++
++test('Service の内容 sniff 二層目: 許可外 mime は appendDocument が拒否する (行・ファイルなし)', function (): void {
++    Storage::fake();
++    [, , , $manual] = sourceDocumentTestContext();
++    $polyglot = UploadedFile::fake()->create('fake.pdf', 10, 'image/png');
++
++    expect(fn () => app(SourceDocumentService::class)->appendDocument($manual, $polyglot))
++        ->toThrow(ValidationException::class);
++
++    expect(SourceDocument::query()->count())->toBe(0);
++    expect(Storage::allFiles())->toBe([]);
++});
++
++test('サイズ超過は 422', function (): void {
++    Storage::fake();
++    config()->set('manual.source_document_max_bytes', 1024); // 1KB に絞って検証
++    [, $owner, $project, $manual] = sourceDocumentTestContext();
++
++    $big = fakeTxtFile('big.txt', str_repeat('あ', 2_000));
++
++    $this->actingAs($owner)->postJson(
++        "/projects/{$project->id}/manuals/{$manual->id}/source-documents",
++        ['document' => $big],
++    )->assertUnprocessable()->assertJsonValidationErrors(['document']);
++});
++
++test('保護キー (video_manual_id 等) の直送は 422', function (): void {
++    Storage::fake();
++    [, $owner, $project, $manual] = sourceDocumentTestContext();
++
++    $this->actingAs($owner)->postJson(
++        "/projects/{$project->id}/manuals/{$manual->id}/source-documents",
++        ['document' => fakeTxtFile(), 'video_manual_id' => 999],
++    )->assertUnprocessable()->assertJsonValidationErrors(['video_manual_id']);
++});
++
++test('撮影者 (project_member) は 403', function (): void {
++    Storage::fake();
++    [$organization, , $project, $manual] = sourceDocumentTestContext();
++    $member = attachOrganizationMember($organization);
++    $member->forceFill(['current_organization_id' => $organization->id])->save();
++    attachProjectMember($project, $member, ProjectRole::Member);
++
++    $this->actingAs($member)->postJson(
++        "/projects/{$project->id}/manuals/{$manual->id}/source-documents",
++        ['document' => fakeTxtFile()],
++    )->assertForbidden();
++});
++
++test('cross-org の manual への POST は 404', function (): void {
++    Storage::fake();
++    [, $stranger] = createOrganizationWithOwner('別組織');
++    [, , $project, $manual] = sourceDocumentTestContext();
++
++    $this->actingAs($stranger)->postJson(
++        "/projects/{$project->id}/manuals/{$manual->id}/source-documents",
++        ['document' => fakeTxtFile()],
++    )->assertNotFound();
++});
+diff --git a/tests/Unit/Manual/AnalysisDtoTest.php b/tests/Unit/Manual/AnalysisDtoTest.php
+new file mode 100644
+index 0000000..06d07b4
+--- /dev/null
++++ b/tests/Unit/Manual/AnalysisDtoTest.php
+@@ -0,0 +1,112 @@
++<?php
++
++declare(strict_types=1);
++
++use App\DataTransferObjects\Manual\Analysis\ExtractedSopData;
++use App\DataTransferObjects\Manual\Analysis\GeneratedScenarioData;
++use App\DataTransferObjects\Manual\Analysis\WorkDecompositionData;
++use App\Enums\Manual\LlmOutputInvalidReason;
++use App\Enums\Manual\ShotType;
++use App\Exceptions\Manual\LlmOutputInvalidException;
++use App\Support\Manual\LlmJson;
++use App\Support\Manual\ScenarioLimits;
++
++/*
++ * LLM 出力 DTO の fromLlmText 検証 (施策 8):
++ * - コードフェンス除去 / 不正 JSON / スキーマ違反 / 有界性 / parent_no 整合
++ * - 違反は LlmOutputInvalidException (有界リトライのトリガー)
++ */
++
++test('LlmJson::decode はコードフェンスを除去して JSON を返す', function (): void {
++    expect(LlmJson::decode("```json\n{\"a\": 1}\n```"))->toBe(['a' => 1]);
++    expect(LlmJson::decode('{"a": 1}'))->toBe(['a' => 1]);
++});
++
++test('LlmJson::decode は不正 JSON を InvalidJson で拒否する', function (): void {
++    try {
++        LlmJson::decode('これは JSON ではない');
++        $this->fail('LlmOutputInvalidException が投げられていない');
++    } catch (LlmOutputInvalidException $exception) {
++        expect($exception->reason)->toBe(LlmOutputInvalidReason::InvalidJson);
++    }
++});
++
++test('ExtractedSopData: 正常系 + 手順 0 件は SchemaViolation', function (): void {
++    $valid = ExtractedSopData::fromLlmText(json_encode([
++        'header' => ['title' => 'SOP'],
++        'sections' => [[
++            'title' => null,
++            'steps' => [[
++                'no' => 1, 'work_process' => '締める',
++                'work_points' => [], 'safety_points' => [], 'quality_points' => [], 'pm_points' => [],
++            ]],
++        ]],
++    ], JSON_THROW_ON_ERROR));
++    expect($valid->sections)->toHaveCount(1);
++    expect($valid->toJsonString())->toContain('締める');
++
++    expect(fn (): ExtractedSopData => ExtractedSopData::fromLlmText('{"header": {}, "sections": []}'))
++        ->toThrow(LlmOutputInvalidException::class);
++});
++
++test('WorkDecompositionData: steps 上限超過・非空 action を検証する', function (): void {
++    $steps = array_map(
++        static fn (int $no): array => ['no' => $no, 'action' => "動作 {$no}", 'points' => []],
++        range(1, ScenarioLimits::MAX_STEPS + 1),
++    );
++    expect(fn (): WorkDecompositionData => WorkDecompositionData::fromLlmText(
++        json_encode(['steps' => $steps], JSON_THROW_ON_ERROR),
++    ))->toThrow(LlmOutputInvalidException::class);
++
++    expect(fn (): WorkDecompositionData => WorkDecompositionData::fromLlmText(
++        '{"steps": [{"no": 1, "action": "", "points": []}]}',
++    ))->toThrow(LlmOutputInvalidException::class);
++});
++
++test('GeneratedScenarioData: steps ツリーへ変換される (id=null / shot_type enum)', function (): void {
++    $data = GeneratedScenarioData::fromLlmText(json_encode(['cuts' => [
++        ['no' => 1, 'type' => 'step', 'parent_no' => null, 'scene' => '全体', 'shot_type' => 'hiki',
++            'shooting_point' => null, 'narration' => 'やります', 'subtitle_primary' => null, 'subtitle_secondary' => '字幕'],
++        ['no' => 2, 'type' => 'point', 'parent_no' => 1, 'scene' => '手元', 'shot_type' => 'yori',
++            'shooting_point' => '寄る', 'narration' => null, 'subtitle_primary' => '要点', 'subtitle_secondary' => null],
++    ]], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
++
++    $steps = $data->toScenarioSteps();
++    expect($steps)->toHaveCount(1);
++    expect($steps[0]->id)->toBeNull();
++    expect($steps[0]->shotType)->toBe(ShotType::Hiki);
++    expect($steps[0]->points)->toHaveCount(1);
++    expect($steps[0]->points[0]->shotType)->toBe(ShotType::Yori);
++    // null 許容フィールドは '' へ正規化 (DB NOT NULL)
++    expect($steps[0]->points[0]->narration)->toBe('');
++    expect($steps[0]->points[0]->subtitleSecondary)->toBe('');
++});
++
++test('GeneratedScenarioData: parent_no の前方参照・無参照は SchemaViolation', function (): void {
++    // 前方参照 (point が後出の step を参照)
++    expect(fn (): GeneratedScenarioData => GeneratedScenarioData::fromLlmText(json_encode(['cuts' => [
++        ['no' => 1, 'type' => 'point', 'parent_no' => 2, 'scene' => '手元', 'shot_type' => 'yori',
++            'shooting_point' => null, 'narration' => '', 'subtitle_primary' => null, 'subtitle_secondary' => ''],
++        ['no' => 2, 'type' => 'step', 'parent_no' => null, 'scene' => '全体', 'shot_type' => 'hiki',
++            'shooting_point' => null, 'narration' => '', 'subtitle_primary' => null, 'subtitle_secondary' => ''],
++    ]], JSON_THROW_ON_ERROR)))->toThrow(LlmOutputInvalidException::class);
++
++    // step が parent_no を持つ
++    expect(fn (): GeneratedScenarioData => GeneratedScenarioData::fromLlmText(json_encode(['cuts' => [
++        ['no' => 1, 'type' => 'step', 'parent_no' => 5, 'scene' => '全体', 'shot_type' => 'hiki',
++            'shooting_point' => null, 'narration' => '', 'subtitle_primary' => null, 'subtitle_secondary' => ''],
++    ]], JSON_THROW_ON_ERROR)))->toThrow(LlmOutputInvalidException::class);
++});
++
++test('GeneratedScenarioData: 文字数上限・不正 shot_type は SchemaViolation', function (): void {
++    expect(fn (): GeneratedScenarioData => GeneratedScenarioData::fromLlmText(json_encode(['cuts' => [
++        ['no' => 1, 'type' => 'step', 'parent_no' => null,
++            'scene' => str_repeat('あ', ScenarioLimits::MAX_SCENE_CHARS + 1), 'shot_type' => 'hiki',
++            'shooting_point' => null, 'narration' => '', 'subtitle_primary' => null, 'subtitle_secondary' => ''],
++    ]], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)))->toThrow(LlmOutputInvalidException::class);
++
++    expect(fn (): GeneratedScenarioData => GeneratedScenarioData::fromLlmText(json_encode(['cuts' => [
++        ['no' => 1, 'type' => 'step', 'parent_no' => null, 'scene' => '全体', 'shot_type' => 'zoom',
++            'shooting_point' => null, 'narration' => '', 'subtitle_primary' => null, 'subtitle_secondary' => ''],
++    ]], JSON_THROW_ON_ERROR)))->toThrow(LlmOutputInvalidException::class);
++});
+diff --git a/tests/Unit/Manual/SopTextExtractorTest.php b/tests/Unit/Manual/SopTextExtractorTest.php
+new file mode 100644
+index 0000000..f468c70
+--- /dev/null
++++ b/tests/Unit/Manual/SopTextExtractorTest.php
+@@ -0,0 +1,108 @@
++<?php
++
++declare(strict_types=1);
++
++use App\Exceptions\Manual\AnalysisFailedException;
++use App\Models\SourceDocument;
++use App\Services\Manual\SopTextExtractor;
++use Illuminate\Support\Facades\Storage;
++use PhpOffice\PhpSpreadsheet\Spreadsheet;
++use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
++
++/*
++ * SOP テキスト抽出 (施策 7):
++ * - plain / xlsx の抽出、UTF-8 strict 検証 (SJIS 変換 / バイナリ拒否)
++ * - 実質空 (min_text_bytes 未満) / バイト上限超過の明示エラー
++ */
++
++/** 保存済み SourceDocument (Storage::fake 上) を作る */
++function storedDocument(string $contents, string $mime, string $ext): SourceDocument
++{
++    $path = "source-documents/test.{$ext}";
++    Storage::put($path, $contents);
++
++    return SourceDocument::factory()->create([
++        'file_path' => $path,
++        'mime' => $mime,
++    ]);
++}
++
++test('plain テキストをそのまま抽出する (byteLength = strlen)', function (): void {
++    Storage::fake();
++    $text = str_repeat("手順1 部品を取り付ける\n", 10);
++    $document = storedDocument($text, 'text/plain', 'txt');
++
++    $extracted = app(SopTextExtractor::class)->extract($document);
++
++    expect($extracted->sourceKind)->toBe('plain');
++    expect($extracted->text)->toContain('部品を取り付ける');
++    expect($extracted->byteLength)->toBe(strlen($extracted->text));
++});
++
++test('xlsx から全シートのセルを抽出する', function (): void {
++    Storage::fake();
++    $spreadsheet = new Spreadsheet;
++    $sheet = $spreadsheet->getActiveSheet();
++    $sheet->setCellValue('A1', '手順');
++    $sheet->setCellValue('B1', '急所');
++    $sheet->setCellValue('A2', 'ネジを締める作業を行い、工具を正しく持って対象物に当てて回す');
++    $sheet->setCellValue('B2', 'トルクは 5Nm を厳守すること (締めすぎるとネジ山が潰れる)');
++    $tmp = tempnam(sys_get_temp_dir(), 'sop-xlsx-');
++    (new Xlsx($spreadsheet))->save($tmp);
++    $document = storedDocument((string) file_get_contents($tmp), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'xlsx');
++    @unlink($tmp);
++
++    $extracted = app(SopTextExtractor::class)->extract($document);
++
++    expect($extracted->sourceKind)->toBe('spreadsheet');
++    expect($extracted->text)->toContain('ネジを締める作業');
++    expect($extracted->text)->toContain('5Nm');
++});
++
++test('SJIS-win テキストは strict 検出で UTF-8 へ変換される', function (): void {
++    Storage::fake();
++    $utf8 = str_repeat("手順: ネジを締める。急所: トルクは五ニュートンメートル。\n", 5);
++    $sjis = mb_convert_encoding($utf8, 'SJIS-win', 'UTF-8');
++    expect(is_string($sjis))->toBeTrue();
++    $document = storedDocument((string) $sjis, 'text/plain', 'txt');
++
++    $extracted = app(SopTextExtractor::class)->extract($document);
++
++    expect(mb_check_encoding($extracted->text, 'UTF-8'))->toBeTrue();
++    expect($extracted->text)->toContain('ネジを締める');
++});
++
++test('判定不能バイナリは unextractable (推測変換で LLM に渡さない)', function (): void {
++    Storage::fake();
++    // UTF-8 としても SJIS/EUC としても不正な連続バイト列
++    $binary = str_repeat("\xFF\xFE\x80\x81\xFD", 50);
++    $document = storedDocument($binary, 'text/plain', 'txt');
++
++    expect(fn () => app(SopTextExtractor::class)->extract($document))
++        ->toThrow(AnalysisFailedException::class, 'テキストを抽出できません');
++});
++
++test('実質空 (min_text_bytes 未満) は unextractable', function (): void {
++    Storage::fake();
++    $document = storedDocument('短い', 'text/plain', 'txt');
++
++    expect(fn () => app(SopTextExtractor::class)->extract($document))
++        ->toThrow(AnalysisFailedException::class, 'テキストを抽出できません');
++});
++
++test('max_text_bytes 超過は tooLarge (分割を促す)', function (): void {
++    Storage::fake();
++    config()->set('manual.analysis_max_text_bytes', 500);
++    $document = storedDocument(str_repeat('長い手順書テキスト。', 100), 'text/plain', 'txt');
++
++    expect(fn () => app(SopTextExtractor::class)->extract($document))
++        ->toThrow(AnalysisFailedException::class, '手順書が大きすぎます');
++});
++
++test('破損 PDF (パース不能) は unextractable に正規化される', function (): void {
++    Storage::fake();
++    $document = storedDocument(str_repeat('%PDF-1.4 broken content without objects', 10), 'application/pdf', 'pdf');
++
++    expect(fn () => app(SopTextExtractor::class)->extract($document))
++        ->toThrow(AnalysisFailedException::class);
++});
+diff --git a/tests/js/components/features/manual/AnalysisPanel.test.ts b/tests/js/components/features/manual/AnalysisPanel.test.ts
+new file mode 100644
+index 0000000..b2c2957
+--- /dev/null
++++ b/tests/js/components/features/manual/AnalysisPanel.test.ts
+@@ -0,0 +1,234 @@
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
++import AnalysisPanel from "@/components/features/manual/AnalysisPanel.svelte";
++import type { AnalysisJobProps } from "@/types/manual";
++
++// router.reload はテスト環境では実行できないためモックする
++const { routerReloadMock } = vi.hoisted(() => ({
++    routerReloadMock: vi.fn(),
++}));
++
++vi.mock("@inertiajs/svelte", () => ({
++    router: {
++        reload: routerReloadMock,
++    },
++}));
++
++/*
++ * AI 解析パネル:
++ * - draft + document で解析ボタン → POST /analyze (fetch)
++ * - 402/422 はサーバの message を表示 (ボタンは disabled にしない)
++ * - analyzing 中は進捗 + step ラベル
++ * - failed はエラー表示 + 再実行可能
++ */
++
++const fetchMock = vi.fn();
++
++const baseProps = {
++    projectId: 1,
++    manualId: 5,
++    manualStatus: "draft" as const,
++    job: null,
++    hasDocument: true,
++    canManage: true,
++};
++
++function jsonResponse(status: number, body: unknown): Response {
++    return new Response(JSON.stringify(body), {
++        status,
++        headers: { "Content-Type": "application/json" },
++    });
++}
++
++beforeEach(() => {
++    vi.stubGlobal("fetch", fetchMock);
++    document.cookie = "XSRF-TOKEN=test-token";
++});
++
++afterEach(() => {
++    cleanup();
++    fetchMock.mockReset();
++    routerReloadMock.mockReset();
++    vi.unstubAllGlobals();
++});
++
++describe("AnalysisPanel", () => {
++    it("draft + document で解析ボタンを表示し、押下で POST /analyze が飛ぶ", async () => {
++        const job: AnalysisJobProps = {
++            id: 9,
++            status: "queued",
++            step: null,
++            progress: null,
++            error: null,
++            manual_status: "analyzing",
++        };
++        fetchMock.mockResolvedValueOnce(jsonResponse(201, job));
++
++        render(AnalysisPanel, { props: baseProps });
++        await fireEvent.click(screen.getByTestId("analyze-button"));
++
++        await waitFor(() => {
++            expect(fetchMock).toHaveBeenCalled();
++        });
++        const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
++        expect(url).toBe("/projects/1/manuals/5/analyze");
++        expect(init.method).toBe("POST");
++        expect((init.headers as Record<string, string>)["X-XSRF-TOKEN"]).toBe("test-token");
++
++        // 201 応答で analyzing 表示へ切り替わる
++        await waitFor(() => {
++            expect(screen.getByTestId("analysis-progress")).toBeInTheDocument();
++        });
++    });
++
++    it("402 (残高不足) はサーバの message を表示し、ボタンは押せるまま", async () => {
++        fetchMock.mockResolvedValue(
++            jsonResponse(402, {
++                code: "insufficient_tickets",
++                message: "チケット残高が不足しています (必要: 1 / 残高: 0)。",
++            }),
++        );
++
++        render(AnalysisPanel, { props: baseProps });
++        await fireEvent.click(screen.getByTestId("analyze-button"));
++
++        await waitFor(() => {
++            expect(screen.getByTestId("analysis-start-error")).toHaveTextContent(
++                "チケット残高が不足しています",
++            );
++        });
++        expect(screen.getByTestId("analyze-button")).not.toBeDisabled();
++    });
++
++    it("422 (手順書なし) もサーバの message を表示する (disabled にしない)", async () => {
++        fetchMock.mockResolvedValue(
++            jsonResponse(422, {
++                message: "手順書をアップロードしてください。",
++                errors: { document: ["手順書をアップロードしてください。"] },
++            }),
++        );
++
++        render(AnalysisPanel, { props: { ...baseProps, hasDocument: false } });
++        await fireEvent.click(screen.getByTestId("analyze-button"));
++
++        await waitFor(() => {
++            expect(screen.getByTestId("analysis-start-error")).toHaveTextContent(
++                "手順書をアップロードしてください",
++            );
++        });
++        expect(screen.getByTestId("analyze-button")).not.toBeDisabled();
++    });
++
++    it("analyzing 中は step ラベルと progress を表示し、解析ボタンは出さない", () => {
++        fetchMock.mockResolvedValue(
++            jsonResponse(200, {
++                id: 9,
++                status: "running",
++                step: "decompose",
++                progress: 35,
++                error: null,
++                manual_status: "analyzing",
++            }),
++        );
++
++        render(AnalysisPanel, {
++            props: {
++                ...baseProps,
++                manualStatus: "analyzing" as const,
++                job: {
++                    id: 9,
++                    status: "running",
++                    step: "decompose",
++                    progress: 35,
++                    error: null,
++                    manual_status: "analyzing",
++                } satisfies AnalysisJobProps,
++            },
++        });
++
++        expect(screen.getByTestId("analysis-step-label")).toHaveTextContent("作業を分解中");
++        expect(screen.queryByTestId("analyze-button")).toBeNull();
++        expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("35");
++    });
++
++    it("failed job はエラーを表示し、再実行 (解析ボタン) できる", () => {
++        render(AnalysisPanel, {
++            props: {
++                ...baseProps,
++                manualStatus: "draft" as const,
++                job: {
++                    id: 9,
++                    status: "failed",
++                    step: "extract",
++                    progress: 10,
++                    error: "テキストを抽出できません。画像・スキャンの手順書は現在未対応です。",
++                    manual_status: "draft",
++                } satisfies AnalysisJobProps,
++            },
++        });
++
++        expect(screen.getByTestId("analysis-error")).toHaveTextContent("テキストを抽出できません");
++        expect(screen.getByTestId("analyze-button")).toBeInTheDocument();
++    });
++
++    it("canManage=false は解析ボタンを出さない (進捗表示のみ)", () => {
++        render(AnalysisPanel, { props: { ...baseProps, canManage: false } });
++
++        expect(screen.queryByTestId("analyze-button")).toBeNull();
++    });
++
++    it("running 応答で currentJob を更新しても再購読されず、ポーリングは 2.5 秒間隔を保つ", async () => {
++        vi.useFakeTimers();
++        const runningJob: AnalysisJobProps = {
++            id: 9,
++            status: "running",
++            step: "decompose",
++            progress: 35,
++            error: null,
++            manual_status: "analyzing",
++        };
++        // 毎回新しいオブジェクトを返す (同一 id の running 更新で effect が再購読されないことの検証)
++        fetchMock.mockImplementation(() =>
++            Promise.resolve(jsonResponse(200, { ...runningJob })),
++        );
++
++        const { unmount } = render(AnalysisPanel, {
++            props: {
++                ...baseProps,
++                manualStatus: "analyzing" as const,
++                job: runningJob,
++            },
++        });
++
++        try {
++            // effect 起動直後の即時 poll で 1 回
++            await vi.advanceTimersByTimeAsync(0);
++            expect(fetchMock).toHaveBeenCalledTimes(1);
++
++            // 応答で currentJob が更新されても、interval 発火前に再ポーリングされない
++            // (effect が currentJob を反応的に読むとここでタイトループになる回帰の検出)
++            await vi.advanceTimersByTimeAsync(1000);
++            expect(fetchMock).toHaveBeenCalledTimes(1);
++
++            // 2.5 秒経過で 2 回目、さらに 2.5 秒で 3 回目
++            await vi.advanceTimersByTimeAsync(1500);
++            expect(fetchMock).toHaveBeenCalledTimes(2);
++            await vi.advanceTimersByTimeAsync(2500);
++            expect(fetchMock).toHaveBeenCalledTimes(3);
++        } finally {
++            unmount();
++            vi.useRealTimers();
++        }
++    });
++
++    it("ready からの起動は確認ダイアログを挟む (既存シナリオ置換の警告)", async () => {
++        render(AnalysisPanel, { props: { ...baseProps, manualStatus: "ready" as const } });
++        await fireEvent.click(screen.getByTestId("analyze-button"));
++
++        // fetch はまだ飛ばず、確認ダイアログが開く
++        expect(fetchMock).not.toHaveBeenCalled();
++        await waitFor(() => {
++            expect(screen.getByTestId("reanalyze-dialog")).toBeInTheDocument();
++        });
++    });
++});
+diff --git a/tests/js/pages/ManualsCreate.test.ts b/tests/js/pages/ManualsCreate.test.ts
+index 5f1150d..75e61bc 100644
+--- a/tests/js/pages/ManualsCreate.test.ts
++++ b/tests/js/pages/ManualsCreate.test.ts
+@@ -40,4 +40,13 @@ describe("Manuals/Create", () => {
+         expect(screen.getByRole("option", { name: "未分類" })).toBeInTheDocument();
+         expect(screen.queryByRole("option", { name: "準備作業" })).toBeNull();
+     });
++
++    it("手順書 (SOP) のファイル入力を描画する (任意・accept 制限付き)", () => {
++        render(Create, { props: baseProps });
++
++        const input = screen.getByTestId("manual-document-input");
++        expect(input).toBeInTheDocument();
++        expect(input.getAttribute("type")).toBe("file");
++        expect(input.getAttribute("accept")).toBe(".pdf,.xlsx,.xls,.txt");
++    });
+ });
+diff --git a/tests/js/pages/ManualsShow.test.ts b/tests/js/pages/ManualsShow.test.ts
+index 5a1378f..db8db11 100644
+--- a/tests/js/pages/ManualsShow.test.ts
++++ b/tests/js/pages/ManualsShow.test.ts
+@@ -12,6 +12,7 @@ const baseProps = {
+         category: { id: 2, name: "仕上げ" },
+         created_at: "2026-07-10 12:00",
+     },
++    analysis: { job: null, hasDocument: false },
+     canManage: true,
+ };
+ 
+@@ -48,4 +49,41 @@ describe("Manuals/Show", () => {
+         expect(screen.queryByTestId("edit-manual-button")).toBeNull();
+         expect(screen.queryByTestId("delete-manual-button")).toBeNull();
+     });
++
++    it("canManage=true (draft) は AI 解析ボタンと手順書アップロード導線を表示する", () => {
++        render(Show, { props: baseProps });
++
++        expect(screen.getByTestId("analyze-button")).toBeInTheDocument();
++        expect(screen.getByTestId("source-document-upload")).toBeInTheDocument();
++    });
++
++    it("canManage=false は解析ボタン・アップロード導線を表示しない", () => {
++        render(Show, { props: { ...baseProps, canManage: false } });
++
++        expect(screen.queryByTestId("analyze-button")).toBeNull();
++        expect(screen.queryByTestId("source-document-upload")).toBeNull();
++    });
++
++    it("analyzing 中は進捗を表示し、アップロード導線は出さない (draft/ready のみ)", () => {
++        render(Show, {
++            props: {
++                ...baseProps,
++                manual: { ...baseProps.manual, status: "analyzing" as VideoManualStatus },
++                analysis: {
++                    job: {
++                        id: 9,
++                        status: "running" as const,
++                        step: "extract" as const,
++                        progress: 10,
++                        error: null,
++                        manual_status: "analyzing" as VideoManualStatus,
++                    },
++                    hasDocument: true,
++                },
++            },
++        });
++
++        expect(screen.queryByTestId("source-document-upload")).toBeNull();
++        expect(screen.getByTestId("analysis-progress")).toBeInTheDocument();
++    });
+ });
+```
