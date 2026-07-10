@@ -178,7 +178,9 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
 
 1. **シナリオ整合の共有ロック規約**: `cuts` / `video_manuals.scenario_version` /
    `video_manuals.status` を書き込む全経路は、対象 VideoManual 行を `lockForUpdate()` で
-   取得した同一トランザクション内で反映する (準拠実装: `Manual/ScenarioService::save()`。
-   後続の AI 解析 materialize / RenderJob 状態遷移 / テイク採用 API も同規約に従う。
-   書き込み経路が 2 つ以上になった時点で経路 inventory を持つ Architecture テストへ昇格する。
+   取得した同一トランザクション内で反映する (準拠実装: `Manual/ScenarioService::save()` /
+   `Manual/ScenarioService::materializeIntoLockedManual()` / `Manual/AnalysisJobService::trigger()` /
+   `Manual/AnalysisJobService::failJob()`。経路 inventory は **`ScenarioWritePathInventoryTest`
+   (Architecture テスト) へ昇格済み** = 新しい書き込み経路は inventory 登録が必須。
+   後続の RenderJob 状態遷移 / テイク採用 API も同規約に従う。
    詳細は `docs/architecture.md` §シナリオ整合の共有不変条件)

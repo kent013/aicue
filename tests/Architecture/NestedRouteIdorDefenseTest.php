@@ -58,6 +58,11 @@ function nestedRouteIdorInventory(): array
         // シナリオ document 保存 (PUT)。{manual} は $project->manuals() 経由 (scopeBindings)
         'projects.manuals.scenario.update' => $s,
         'projects.manuals.destroy' => $s,
+        // SOP アップロード / AI 解析 / job ポーリング ({manual} は $project->manuals()、
+        // {analysisJob} は $manual->analysisJobs() 経由。不整合は認可より前に 404)
+        'projects.manuals.source-documents.store' => $s,
+        'projects.manuals.analyze' => $s,
+        'projects.manuals.jobs.show' => $s,
         // --- inline 親子整合 guard (authorize 前に 子∈親テナント を検査、不整合は 404) ---
         // OrganizationMemberController::resolveOrganizationMember (非 member は 404)
         'organizations.members.update' => $g,

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Services\Billing\TicketLedgerService;
+use App\Services\Manual\AnalysisJobService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -42,3 +43,17 @@ Schedule::command('billing:reconcile-schedules')->daily();
 | 手動運用 (dry-run / 本人削除要請) は docs/inquiry-deletion-runbook.md を参照。
 */
 Schedule::command('inquiry:purge --apply')->daily();
+
+/*
+|--------------------------------------------------------------------------
+| AI 解析 cron
+|--------------------------------------------------------------------------
+| dispatch 喪失 (queued 滞留) と worker 異常終了 (running 滞留) の回復。
+| failJob は行ロック + terminal guard で冪等 (billing:release-stale-reservations と同型)。
+*/
+Artisan::command('analysis:recover-stale-jobs', function (AnalysisJobService $jobs) {
+    $recovered = $jobs->recoverStale();
+    $this->info("recovered {$recovered} stale analysis job(s)");
+})->purpose('滞留した解析ジョブ (queued/running が閾値超過) を失敗確定し予約を解放する');
+
+Schedule::command('analysis:recover-stale-jobs')->everyFiveMinutes();

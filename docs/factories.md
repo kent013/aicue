@@ -24,6 +24,7 @@
 | `VideoManualFactory` | VideoManual | `forProject($project)`, `forCategory($category)`, `createdBy($user)` |
 | `SourceDocumentFactory` | SourceDocument | `forManual($manual)` |
 | `CutFactory` | Cut | `forManual($manual)` / `asPointOf($step)` / `withSortOrder($n)` |
+| `AnalysisJobFactory` | AnalysisJob | `forManual($manual)` / `forDocument($document)` / `running()` / `failed($error)` / `succeeded()` |
 | `TakeFactory` | Take | `forCut($cut)` |
 | `ApiKeyFactory` | ApiKey | `forOrganization($org)`, `revoked()`, `expired(?Carbon $expiresAt = null)` |
 | `OrganizationInvitationFactory` | OrganizationInvitation | `forOrganization($org)`, `expired()`, `accepted()`, `revoked()`, `asAdmin()`。加えて `createWithPlainToken(array): array` (invitation と平文 token を tuple で返す。URL 生成用。DB には sha256 hash のみ保存) |

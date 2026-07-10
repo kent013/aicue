@@ -1,0 +1,51 @@
+# SOP 抽出プロンプト (AI 解析 1 段目。doc/10 §10.4 / doc/03 §3.4)。
+# 抽出済みテキスト (untrusted。UserInput 経由) を「統一 JSON」へ構造化する。
+# max_tokens: 16000 は token budget の出力予約 (AnalysisTokenBudgetInvariantTest が固定)。
+# client_options.timeout: 120 は時間 budget の前提値 (AnalysisTimeBudgetInvariantTest が固定)。
+name: sop-extract
+provider: anthropic
+model: claude-sonnet-4-5-20250929
+max_tokens: 16000
+client_options:
+  timeout: 120
+
+system_prompt: |
+  {{ \Kent013\PrismPrompt\Values\DefensiveInstructions::forUserInputJa() }}
+
+  あなたは製造現場の作業手順書 (SOP) を構造化するエキスパートです。
+  与えられた手順書テキストから、作業手順とその注意点を忠実に抽出します。
+  資料にない情報を捏造しないでください。
+  出力は JSON のみ (前後に説明文・コードフェンスを付けない)。
+
+prompt: |
+  次の手順書テキストを解析し、以下のスキーマの JSON で出力してください。
+
+  ルール:
+  - 資料の記載に忠実に抽出する (資料にない語を足さない)
+  - 手順は資料の記載順を保つ (no は 1 始まりの連番)
+  - 安全 (safety_points)・品質 (quality_points)・保全 (pm_points) の注記は
+    該当する分類へ、それ以外の作業上の注意は work_points へ入れる
+  - セクション見出しが無い資料は title を null にした単一セクションにまとめる
+
+  出力スキーマ:
+  {
+    "header": { "title": string|null, "department": string|null, "revision": string|null },
+    "sections": [
+      {
+        "title": string|null,
+        "steps": [
+          {
+            "no": int,
+            "work_process": string,
+            "work_points": [string],
+            "safety_points": [string],
+            "quality_points": [string],
+            "pm_points": [string]
+          }
+        ]
+      }
+    ]
+  }
+
+  手順書テキスト:
+  {{ $text }}

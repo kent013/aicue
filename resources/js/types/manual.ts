@@ -79,6 +79,51 @@ export type DraftStep = Omit<ScenarioStep, "id" | "points"> & {
     points: DraftPoint[];
 };
 
+/** PHP: App\Enums\Manual\JobStatus と対 (値集合を一致させる) */
+export type AnalysisJobStatus = "queued" | "running" | "succeeded" | "failed";
+
+/** PHP: App\Enums\Manual\AnalysisStep と対 */
+export type AnalysisStep = "extract" | "decompose" | "generate";
+
+/** AnalysisStep の表示ラベル (AnalysisPanel の進捗表示) */
+export const ANALYSIS_STEP_LABELS: Record<AnalysisStep, string> = {
+    extract: "手順書を読み取り中",
+    decompose: "作業を分解中",
+    generate: "シナリオを生成中",
+};
+
+/** PHP: AnalysisJobData::toArray() と対 (show props / ポーリング / analyze 201 の共通 shape) */
+export interface AnalysisJobProps {
+    id: number;
+    status: AnalysisJobStatus;
+    step: AnalysisStep | null;
+    progress: number | null;
+    error: string | null;
+    manual_status: VideoManualStatus;
+}
+
+/** PHP: VideoManualController::show の analysis props と対 */
+export interface AnalysisProps {
+    job: AnalysisJobProps | null;
+    hasDocument: boolean;
+}
+
+/** PHP: App\Enums\Manual\AnalysisConflictType と対 */
+export type AnalysisConflictType = "in_flight" | "status_not_analyzable";
+
+/** PHP: AnalysisConflictResource と対 (analyze 409 ボディ。code 厳格一致) */
+export interface AnalysisConflictBody {
+    code: "analysis_conflict";
+    conflict_type: AnalysisConflictType;
+    message: string;
+}
+
+/** PHP: InsufficientTicketsResource と対 (analyze 402 ボディ。code 厳格一致) */
+export interface InsufficientTicketsBody {
+    code: "insufficient_tickets";
+    message: string;
+}
+
 /** PHP: App\Enums\Manual\ScenarioConflictType と対 (discriminated union) */
 export type ScenarioConflictType = "version_mismatch" | "rendering" | "analyzing";
 

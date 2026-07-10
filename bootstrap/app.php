@@ -20,6 +20,7 @@ use App\Http\Middleware\ResolveApiActor;
 use App\Http\Middleware\SecurityHeaders;
 use App\Http\Middleware\VerifyMcpOrigin;
 use App\Http\Middleware\VerifySnsSignature;
+use App\Http\Resources\Billing\InsufficientTicketsResource;
 use App\Support\Http\AdminPanelPath;
 use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
 use Illuminate\Foundation\Application;
@@ -147,7 +148,17 @@ return Application::configure(basePath: dirname(__DIR__))
             return $request->is('api/*') ? null : back()->with('error', $exception->getMessage());
         });
         $exceptions->render(function (InsufficientTicketsException $exception, Request $request) {
-            return $request->is('api/*') ? null : back()->with('error', $exception->getMessage());
+            if ($request->is('api/*')) {
+                return null; // ApiExceptionRenderer に委譲 (既存)
+            }
+            if ($request->expectsJson()) {
+                // XHR (analyze 等) は 402 + JsonResource (response()->json() 直書きはしない)
+                return InsufficientTicketsResource::make($exception)
+                    ->response($request)
+                    ->setStatusCode(402);
+            }
+
+            return back()->with('error', $exception->getMessage()); // 既存の web 挙動を維持
         });
 
         // REST API v1 の統一エラー envelope ({error: {code, message, status, details?}})。

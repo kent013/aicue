@@ -50,4 +50,12 @@ class VideoManualPolicy
 
         return $project !== null && $this->projectPolicy->update($user, $project);
     }
+
+    /** AI 解析の実行: プロジェクトを操作できる人 (編集者)。撮影者は不可 */
+    public function analyze(User $user, VideoManual $manual): bool
+    {
+        $project = $manual->project;
+
+        return $project !== null && $this->projectPolicy->update($user, $project);
+    }
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Projects;
 
+use App\DataTransferObjects\Manual\AnalysisJobData;
 use App\DataTransferObjects\Manual\ScenarioDocumentData;
 use App\Http\Concerns\ResolvesCurrentOrganization;
 use App\Http\Controllers\Controller;
@@ -16,6 +17,7 @@ use App\Models\VideoManual;
 use App\Services\Manual\VideoManualService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -71,8 +73,11 @@ class VideoManualController extends Controller
         // 入力名は category (保護キー category_id とは別名)。null = 未分類
         $category = $request->validated('category');
         Assert::nullOrIntegerish($category);
+        // SOP 同時アップロード (任意)
+        $document = $request->validated('document');
+        Assert::nullOrIsInstanceOf($document, UploadedFile::class);
 
-        $manual = $manuals->create($project, $title, $category === null ? null : (int) $category, $user->id);
+        $manual = $manuals->create($project, $title, $category === null ? null : (int) $category, $user->id, $document);
 
         return redirect()
             ->route('projects.manuals.show', [$project, $manual])
@@ -105,6 +110,13 @@ class VideoManualController extends Controller
                     ? null
                     : ['id' => $category->id, 'name' => $category->name],
                 'created_at' => $manual->created_at?->format('Y-m-d H:i') ?? '',
+            ],
+            // AI 解析パネル (最新 job + 手順書有無)。AnalysisJobData::toArray() と対
+            'analysis' => [
+                'job' => ($latest = $manual->analysisJobs()->latest('id')->first()) === null
+                    ? null
+                    : AnalysisJobData::fromJob($latest, $manual)->toArray(),
+                'hasDocument' => $manual->sourceDocuments()->exists(),
             ],
             'canManage' => $user->can('update', $manual),
         ]);

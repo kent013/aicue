@@ -44,6 +44,19 @@ return [
             'after_commit' => false,
         ],
 
+        // AI 解析専用 (RunManualAnalysis)。retry_after は job timeout (1,380s) より長く
+        // 予約 TTL (1,800s) より短い (AnalysisTimeBudgetInvariantTest が連鎖を固定)。
+        // 運用契約: worker は `php artisan queue:work database-analysis` を必須登録
+        // (docs/architecture.md。滞留は analysis:recover-stale-jobs cron が回収)
+        'database-analysis' => [
+            'driver' => 'database',
+            'connection' => env('DB_QUEUE_CONNECTION'),
+            'table' => env('DB_QUEUE_TABLE', 'jobs'),
+            'queue' => 'analysis',
+            'retry_after' => 1560,
+            'after_commit' => false,
+        ],
+
         'beanstalkd' => [
             'driver' => 'beanstalkd',
             'host' => env('BEANSTALKD_QUEUE_HOST', 'localhost'),

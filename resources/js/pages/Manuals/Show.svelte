@@ -6,14 +6,16 @@
     import TextLink from "@/components/atoms/TextLink.svelte";
     import DangerZone from "@/components/molecules/DangerZone.svelte";
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
+    import AnalysisPanel from "@/components/features/manual/AnalysisPanel.svelte";
+    import SourceDocumentUpload from "@/components/features/manual/SourceDocumentUpload.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
     import type { SharedProps } from "@/lib/shared-props";
-    import type { VideoManualStatus } from "@/types/manual";
+    import type { AnalysisProps, VideoManualStatus } from "@/types/manual";
     import { VIDEO_MANUAL_STATUS_LABELS } from "@/types/manual";
 
     /**
-     * 動画マニュアル詳細 (メタデータ表示)。撮影者も閲覧可 (編集操作は canManage のみ)。
-     * SOP アップロード・シナリオ・撮影は後続フェーズで本画面に載る。
+     * 動画マニュアル詳細 (メタデータ + AI 解析パネル)。撮影者も閲覧可
+     * (編集操作・解析起動は canManage のみ。撮影者には進捗表示のみ)。
      */
     interface Props {
         project: { id: number; name: string };
@@ -24,10 +26,11 @@
             category: { id: number; name: string } | null;
             created_at: string;
         };
+        analysis: AnalysisProps;
         canManage: boolean;
     }
 
-    let { project, manual, canManage }: Props = $props();
+    let { project, manual, analysis, canManage }: Props = $props();
 
     const shared = $derived(page.props as unknown as SharedProps);
     const appName = $derived(shared.appName ?? "");
@@ -90,12 +93,30 @@
     </div>
 
     <div class="mt-6 flex max-w-2xl flex-col gap-10">
-        <Card padding="lg">
-            <h2 class="text-h3">シナリオ</h2>
-            <p class="mt-2 text-body text-text-secondary">
-                SOP をアップロードすると、AI が撮るべきカットを設計したシナリオを生成します (準備中)。
-            </p>
-        </Card>
+        <AnalysisPanel
+            projectId={project.id}
+            manualId={manual.id}
+            manualStatus={manual.status}
+            job={analysis.job}
+            hasDocument={analysis.hasDocument}
+            {canManage}
+        />
+
+        {#if canManage && (manual.status === "draft" || manual.status === "ready")}
+            <Card padding="lg">
+                <h2 class="text-h3">手順書 (SOP)</h2>
+                <p class="mt-2 text-caption text-text-secondary">
+                    PDF / Excel / テキストの手順書をアップロードできます。差し替えた場合は最新のファイルが解析対象になります。
+                </p>
+                <div class="mt-4">
+                    <SourceDocumentUpload
+                        projectId={project.id}
+                        manualId={manual.id}
+                        hasDocument={analysis.hasDocument}
+                    />
+                </div>
+            </Card>
+        {/if}
 
         {#if canManage}
             <DangerZone

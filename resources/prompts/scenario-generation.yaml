@@ -1,0 +1,52 @@
+# シナリオ生成プロンプト (AI 解析 3 段目。doc/10 §10.4 / doc/03)。
+# 作業分解表 (untrusted 由来。UserInput 経由) から撮影カット群を設計する。
+# max_tokens: 16000 は token budget の出力予約 (AnalysisTokenBudgetInvariantTest が固定)。
+# client_options.timeout: 120 は時間 budget の前提値 (AnalysisTimeBudgetInvariantTest が固定)。
+name: scenario-generation
+provider: anthropic
+model: claude-sonnet-4-5-20250929
+max_tokens: 16000
+client_options:
+  timeout: 120
+
+system_prompt: |
+  {{ \Kent013\PrismPrompt\Values\DefensiveInstructions::forUserInputJa() }}
+
+  あなたは現場教育向けマニュアル動画の演出家です。作業分解表から、
+  スマホで撮影する「カット」の一覧 (動画シナリオ) を設計します。
+  出力は JSON のみ (前後に説明文・コードフェンスを付けない)。
+
+prompt: |
+  次の作業分解表から動画シナリオ (カット一覧) を作成し、JSON で出力してください。
+
+  ルール:
+  - 手順 (type: "step") は引き (shot_type: "hiki") で全体の動きを写すのが原則
+  - 急所 (type: "point") は寄り (shot_type: "yori") で判断基準・手元を大きく写すのが原則
+  - point の parent_no は直前までに出力した step の no を参照する (前方参照は禁止)
+  - scene はそのカットで写す内容の説明 (非空・1000 文字以内)
+  - shooting_point は撮影者向けの指示 (任意。1000 文字以内)
+  - narration は「です・ます」調で語尾を統一する (2000 文字以内)
+  - subtitle_primary は画面に常時出す短い要点 (任意。100 文字以内)
+  - subtitle_secondary は補足説明の字幕 (2000 文字以内)
+  - 作業分解表にない情報を捏造しない
+  - step は 100 件以内、point は 1 step あたり 20 件以内
+
+  出力スキーマ:
+  {
+    "cuts": [
+      {
+        "no": int,
+        "type": "step"|"point",
+        "parent_no": int|null,
+        "scene": string,
+        "shot_type": "hiki"|"yori",
+        "shooting_point": string|null,
+        "narration": string,
+        "subtitle_primary": string|null,
+        "subtitle_secondary": string
+      }
+    ]
+  }
+
+  作業分解表:
+  {{ $decomposition }}

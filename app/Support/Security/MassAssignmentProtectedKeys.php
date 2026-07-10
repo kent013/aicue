@@ -45,6 +45,7 @@ final class MassAssignmentProtectedKeys
             // billing (Service / Seeder がサーバ側で導出する)
             'plan_id',
             'reservation_id',
+            'ticket_reservation_id', // AI-CUE: analysis_jobs の予約冪等キー (doc/10 §10.1)
             // secret (サーバ生成値)
             'token_hash',
             'key_hash',
