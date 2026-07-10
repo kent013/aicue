@@ -1,0 +1,8 @@
+{
+  "run_id": "20260618-test",
+  "shards": ["0", "1", "2"],
+  "executed_routes": [
+    {"route_name": "register.store", "shard": "2", "story": "S1", "status": "ok"},
+    {"route_name": "organizations.store", "shard": "1", "story": "S1", "status": "ok"}
+  ]
+}

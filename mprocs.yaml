@@ -1,0 +1,16 @@
+procs:
+  # dev server は --env=local で .env.local を読ませる (composer dev が .env を
+  # .env.local にコピーする)。
+  # Browser テスト (composer test:browser, pest-plugin-browser) は in-process サーバを
+  # テストプロセス内に立てるため、E2E 用の常駐 serve は不要 (旧 Dusk エントリは撤去済み)。
+  server:
+    shell: "php artisan serve --env=local --port=8001"
+  # Stripe webhook をローカル dev server に転送する (課金フェーズ導入後に有効化)。
+  # stripe:
+  #   shell: "stripe listen --forward-to localhost:8001/stripe/webhook"
+  queue:
+    shell: "php artisan queue:listen --tries=1 --timeout=0"
+  logs:
+    shell: "php artisan pail --timeout=0"
+  vite:
+    shell: "pnpm run dev"

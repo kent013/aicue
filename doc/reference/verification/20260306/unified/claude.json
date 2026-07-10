@@ -1,0 +1,315 @@
+{
+  "header": {
+    "document_name": "作業手順書",
+    "work_name": "グラインダー研削作業",
+    "assumed_risks": "はさまれ・巻き込まれ・飛散・指の切創・研削屑が目に入る",
+    "trouble_cases": "防塵メガネ(ゴーグルタイプ)・防塵マスク・保護手袋(革手袋)",
+    "protective_equipment": "防塵メガネ(ゴーグルタイプ)・防塵マスク・保護手袋(革手袋)",
+    "tools": [
+      "両頭グラインダー"
+    ],
+    "author": "福山 隆",
+    "revision_history": [
+      {
+        "type": "制定",
+        "date": "'89年 5月 30日",
+        "reason": "",
+        "approvers": {
+          "承認者": "池田 永田 福山 稲盛"
+        }
+      },
+      {
+        "type": "改定",
+        "date": "'10年 6月 10日",
+        "reason": "災害発生による見直し",
+        "approvers": {
+          "承認者": "小川 小田浦 西林"
+        }
+      },
+      {
+        "type": "改定",
+        "date": "11年 4月 15日",
+        "reason": "災害発生による見直し",
+        "approvers": {
+          "承認者": "小川 福山 岡田"
+        }
+      }
+    ]
+  },
+  "sections": [
+    {
+      "section_name": "使用前点検",
+      "steps": [
+        {
+          "no": 1,
+          "work_process": "モスイッチの解放",
+          "illustration_notes": [
+            "画像：品2-2 スキマ：5mm以下"
+          ],
+          "work_points": [
+            "指差確認呼称をする"
+          ],
+          "safety_points": [
+            "爆発させない様を小れる"
+          ],
+          "quality_points": [],
+          "pm_points": []
+        },
+        {
+          "no": 2,
+          "work_process": "トンクレストの調整",
+          "illustration_notes": [
+            "画像：品2-1 トング 10mm"
+          ],
+          "work_points": [
+            "専用ゲージある場合はそれを使用する"
+          ],
+          "safety_points": [
+            "レストを引き寄せられていること"
+          ],
+          "quality_points": [
+            "トング10mm〜レスト3mm以下（規程外は調整する）",
+            "カバーと砥石にスキマ5mm以下"
+          ],
+          "pm_points": []
+        },
+        {
+          "no": 3,
+          "work_process": "保護手袋の着装",
+          "illustration_notes": [],
+          "work_points": [
+            "軍手または厚手袋を使用"
+          ],
+          "safety_points": [
+            "服装の確認する（特に袖ロのボタン）"
+          ],
+          "quality_points": [],
+          "pm_points": []
+        },
+        {
+          "no": 4,
+          "work_process": "砥石の確認",
+          "illustration_notes": [
+            "画像：品2-1 レスト：3mm以下"
+          ],
+          "work_points": [
+            "手で上方向へ1周以上回す（下へ回すとレストに指を挟む危険がある）",
+            "不具合がある時は交換または目ドレッサーをかける（別手順書で対応）"
+          ],
+          "safety_points": [
+            "欠け・割れ・偏摩耗なし"
+          ],
+          "quality_points": [],
+          "pm_points": []
+        },
+        {
+          "no": 5,
+          "work_process": "被研削物冷却水の確認",
+          "illustration_notes": [
+            "画像説明あり"
+          ],
+          "work_points": [],
+          "safety_points": [],
+          "quality_points": [
+            "8分目程度の水量がある事"
+          ],
+          "pm_points": []
+        },
+        {
+          "no": 6,
+          "work_process": "集塵機の確認",
+          "illustration_notes": [
+            "画像：安3-1 ・最後の確認（硬れ）ほつれなし）桐ロのボタンは"
+          ],
+          "work_points": [
+            "炉布式集塵機は運転確認をする（砥石運動点は空運転時に確認する）"
+          ],
+          "safety_points": [
+            "桐易集塵機の場合はシート部が"
+          ],
+          "quality_points": [],
+          "pm_points": []
+        },
+        {
+          "no": 7,
+          "work_process": "モスイッチの投入",
+          "illustration_notes": [],
+          "work_points": [
+            "指差確認呼称をする"
+          ],
+          "safety_points": [
+            "手元SW「切」状態の確認・札の取外し大尺していること"
+          ],
+          "quality_points": [],
+          "pm_points": []
+        },
+        {
+          "no": 8,
+          "work_process": "保護メガネ・防塵マスクの着装",
+          "illustration_notes": [
+            "画像：品8-1 シュート部が水没していること（集塵能力）"
+          ],
+          "work_points": [
+            "メガネはゴーグルタイプを着用する"
+          ],
+          "safety_points": [
+            "顔に密着させる（メガネは事前にュープフロー等で清潔にする）"
+          ],
+          "quality_points": [],
+          "pm_points": []
+        },
+        {
+          "no": 9,
+          "work_process": "空運転の実施(手元スイッチ投入)",
+          "illustration_notes": [],
+          "work_points": [
+            "指差確認呼称をする",
+            "1分以上回転する（タイマー使用）"
+          ],
+          "safety_points": [
+            "能石がバーをかません"
+          ],
+          "quality_points": [],
+          "pm_points": [
+            "異音・異常振動が ない事"
+          ]
+        },
+        {
+          "no": 10,
+          "work_process": "空運転の終了（手元スイッチ開放）（研削作業）",
+          "illustration_notes": [
+            "画像：安11-2 2名での作業は、禁止（接触の恐れあり）"
+          ],
+          "work_points": [
+            "指差確認呼称をする"
+          ],
+          "safety_points": [],
+          "quality_points": [],
+          "pm_points": []
+        }
+      ]
+    },
+    {
+      "section_name": "研削作業",
+      "steps": [
+        {
+          "no": 11,
+          "work_process": "砥石カバーをあける",
+          "illustration_notes": [
+            "画像：安13-1 足を前後に開いて立つ（万一の時飛んでくる方向）"
+          ],
+          "work_points": [],
+          "safety_points": [
+            "使用する側のカバーのみ取手もしてあける（砥石回転時は禁止）",
+            "2名同時の研削作業は禁止"
+          ],
+          "quality_points": [],
+          "pm_points": []
+        },
+        {
+          "no": 12,
+          "work_process": "手元スイッチを投入する",
+          "illustration_notes": [],
+          "work_points": [
+            "指差確認呼称をする"
+          ],
+          "safety_points": [
+            "保護メガネ・保護手袋（革手袋）"
+          ],
+          "quality_points": [
+            "衝撃マスクを着装"
+          ],
+          "pm_points": []
+        },
+        {
+          "no": 13,
+          "work_process": "研削実施",
+          "illustration_notes": [],
+          "work_points": [
+            "被切削物は床に置いて押し付ける",
+            "連続切削をやらず、適度に冷却する"
+          ],
+          "safety_points": [
+            "足を前後に開いて立つ（砥み込み等の制御の現象に対応する）",
+            "立ち位置正でさるだけ砥石正面をさける"
+          ],
+          "quality_points": [
+            "砥石全体を使用する"
+          ],
+          "pm_points": []
+        },
+        {
+          "no": 14,
+          "work_process": "手元スイッチを開放する",
+          "illustration_notes": [
+            "画像：安13-4 反対側手はレスト台に乗える（万一の時体を支えるため）安13-5 被切削物はレスト台に載せて回る（噛み込み防止）安13-7 3mm以下の物は研削禁止（噛み込み防止）厚さ：<3mm"
+          ],
+          "work_points": [
+            "組み込みやすい：鋼",
+            "火の粉がでない・熱伝達しやすい：アルミ",
+            "研削部が赤熱しやすい：ステンレス",
+            "→強い押付け力で削らない・適度な冷却する"
+          ],
+          "safety_points": [
+            "50mm以下の小物はプライヤー・専用治具で把持する",
+            "反対手はレスト台に添える",
+            "被研削物はレスト台に乗せる",
+            "砥石の側面使用は禁止",
+            "厚み3mm以下の物は研削禁止"
+          ],
+          "quality_points": [],
+          "pm_points": []
+        },
+        {
+          "no": 15,
+          "work_process": "砥石の確認",
+          "illustration_notes": [],
+          "work_points": [
+            "指差確認呼称をする"
+          ],
+          "safety_points": [],
+          "quality_points": [
+            "砥石が完全に停止してから自測す",
+            "砥石の摩耗が多い時はトンクレストを調整する"
+          ],
+          "pm_points": []
+        },
+        {
+          "no": 16,
+          "work_process": "砥石カバーをかぶせる",
+          "illustration_notes": [],
+          "work_points": [],
+          "safety_points": [],
+          "quality_points": [],
+          "pm_points": []
+        },
+        {
+          "no": 17,
+          "work_process": "モスイッチの開放",
+          "illustration_notes": [],
+          "work_points": [
+            "指差確認呼称をする"
+          ],
+          "safety_points": [],
+          "quality_points": [],
+          "pm_points": []
+        },
+        {
+          "no": 18,
+          "work_process": "周辺の1S",
+          "illustration_notes": [],
+          "work_points": [],
+          "safety_points": [
+            "保護具は整頓した定実施",
+            "木材・黒鉛・アルミ等可燃物や粉塵",
+            "爆発の恐れがあるもの研削した時は",
+            "集塵機の掃除も実施する（特に布布）"
+          ],
+          "quality_points": [],
+          "pm_points": []
+        }
+      ]
+    }
+  ],
+  "source": "claude"
+}

@@ -1,0 +1,36 @@
+# Accepted security advisories with explicit owner / approved_at / expiry.
+#
+# scripts/audit-gate.ts は本ファイルを以下のとおり扱う:
+#   - YAML 全 entry の expiry を常時検査 (JST 基準)。期限切れは fail
+#   - audit JSON で検出されない accepted entry は cleanup 必須として fail
+#   - 突合キーは `ecosystem + package + id` (trim + lowercase で正規化)
+#   - 全 severity で `approved_at` ベースの max-days を機械的に強制
+#   - accepted severity < advisory severity の迂回受容は fail
+#
+# 必須フィールド (全 severity 共通):
+#   id, package, ecosystem, severity, owner, approved_at, expiry, rationale
+#     - ecosystem: npm | composer | pypi (pypi は pyproject.toml があるリポジトリのみ)
+#     - severity:  low | moderate | high | critical
+#     - 日付:      YYYY-MM-DD
+#
+# severity が high/critical の場合、追加で以下が必須:
+#   approved_by, compensating_controls, tracking_issue
+#
+# 運用上限 (review-checklist.md §3 と一致、機械的に強制される):
+#   - low / moderate: 90 日
+#   - high:           30 日
+#   - critical:       14 日
+#   - 0day 緊急時:    7 日 (review-checklist.md §5 参照)
+#
+# 例 (moderate):
+#   - id: GHSA-xxxx-xxxx-xxxx
+#     package: vendor/pkg
+#     ecosystem: composer
+#     severity: moderate
+#     owner: <担当者>
+#     approved_at: 2026-06-08
+#     expiry: 2026-09-06
+#     rationale: 影響経路が無い (該当 API 未使用) ため期限付きで受容。
+#
+# 詳細は docs/supply-chain/review-checklist.md を参照。
+[]

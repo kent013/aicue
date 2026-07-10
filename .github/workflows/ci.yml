@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  php:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          coverage: none
+      - name: Install composer dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+      - name: Prepare environment
+        # passport:keys: OAuth/MCP テストは Passport 鍵 (storage/oauth-*.key) を要する。
+        # CI には鍵が無いため生成する (未生成だと "Invalid key supplied" で fail)
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+          php artisan passport:keys --force
+      - name: Pint (code style)
+        run: vendor/bin/pint --test
+      - name: PHPStan
+        run: composer phpstan
+      - name: Pest
+        run: composer test
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.3.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: ESLint
+        run: pnpm lint
+      - name: TypeScript
+        run: pnpm typecheck
+      - name: Vitest
+        run: pnpm test
+      - name: Build
+        run: pnpm build

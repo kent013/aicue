@@ -1,0 +1,20 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    level: 10
+    paths:
+        - app
+        - config
+        - database
+        - routes
+    excludePaths:
+        - vendor
+    ignoreErrors:
+        # AppliesCriticalActionContextToAudit は派生アプリの Auditable モデル向けに
+        # テンプレートが同梱する trait (テンプレート本体は Auditable モデルを同梱しない
+        # ため使用箇所ゼロ)。派生アプリで使用された時点で通常解析される。
+        # 実挙動は tests/Feature/Audit/ModelAuditGatingTest.php が検証している。
+        -
+            identifier: trait.unused
+            path: app/Models/Concerns/AppliesCriticalActionContextToAudit.php

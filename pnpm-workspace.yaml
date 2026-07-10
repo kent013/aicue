@@ -1,0 +1,57 @@
+# pnpm workspace 設定 (Global Virtual Store + isolated linker)。
+
+packages:
+    - '.'
+    - 'packages/*'
+
+# ネイティブ build script の実行許可 (pnpm 11 の build-script gating)。
+# Vite 8 が引き込む esbuild は postinstall で platform binary を配置するため、
+# 明示許可しないと ERR_PNPM_IGNORED_BUILDS で install/build が落ちる。
+allowBuilds:
+    esbuild: true
+
+# git worktree 運用での重複実体 (= TypeScript 型 identity 衝突) を防ぐため
+# global virtual store を有効化する。main と全 worktree が同一 content-addressable
+# store (<store-path>/links/) を共有することで realpath を収束させ、かつ worktree 内
+# pnpm install/add の影響を自 worktree に局所化する (workspace を直接汚染しない)。
+enableGlobalVirtualStore: true
+
+# linker を default 任せにせず明示固定する (GVS は isolated 前提)。
+# 将来の default 変更や `.npmrc` 復活時に hoisted 等へ無断切替されると
+# enableGlobalVirtualStore の前提が崩れるため、明示固定で設定ドリフトを防ぐ。
+nodeLinker: isolated
+
+# workspace 内 package を registry より優先解決し silent misresolve を防ぐ safety net。
+# packages/* と同名の package が npmjs.org にあった場合の誤解決を排除する。
+linkWorkspacePackages: true
+
+# === overrides: transitive 依存の既知脆弱性を patched 版へ強制するためのセクション ===
+# 運用規約:
+#   - pnpm audit (high/moderate) の解消のみに使う。機能目的の版固定はここに書かない
+#   - 追加時は GHSA ID・脆弱レンジ・patch 選定理由 (major 据え置き等) をコメントで残す
+#   - 複数 major が混在する package は脆弱な major のみ scoped に上げる (例: 'ws@8': ^8.21.0)
+#   - 直接依存の bump で advisory が解消されたらエントリを削除する
+overrides: {}
+
+# === packageExtensions: 暗黙の peer dependency を明示宣言する補正 ===
+# 背景: enableGlobalVirtualStore 有効時、ESM では NODE_PATH が効かないため
+#       「peer として宣言していない依存を import するパッケージ」が global store から
+#       host project の依存を解決できなくなる (pnpm Issue #11221、公式 doc caveat 明記)。
+# 対応: 該当 package の peerDependencies を packageExtensions で補完し、pnpm が
+#       global store 内に peer の symlink を配置するように仕向ける。
+# 参考: https://pnpm.io/settings#enableglobalvirtualstore
+#       https://github.com/pnpm/pnpm/issues/11221
+packageExtensions:
+    # @testing-library/jest-dom の vitest.js が peer 宣言なしで `import 'vitest'` する。
+    # 宣言しないと global store 内 jest-dom から vitest を解決できず、tests/js/setup.ts の
+    # matcher 拡張 (toBeInTheDocument / toHaveClass 等) が無効化される。
+    '@testing-library/jest-dom':
+        peerDependencies:
+            vitest: '>=4.0.0'
+    # vite-plugin-full-reload (laravel-vite-plugin の依存) は `import 'vite'` するが
+    # peerDependencies を宣言していない。hoisted linker では vite がホイストされ偶然解決
+    # できたが、isolated + GVS では暗黙依存が central store 上で解決できず
+    # `vite build` が ERR_MODULE_NOT_FOUND で落ちる。peer を明示補完する。
+    'vite-plugin-full-reload':
+        peerDependencies:
+            vite: '*'

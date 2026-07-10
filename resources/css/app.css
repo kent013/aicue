@@ -1,0 +1,10 @@
+@import 'tailwindcss';
+@import './tokens.css';
+
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+@source '../../storage/framework/views/*.php';
+@source '../**/*.blade.php';
+@source '../**/*.ts';
+@source '../**/*.svelte';
+
+/* DS tokens は tokens.css に集約。ここにはアプリ固有の animation 専用 token のみ置く。 */

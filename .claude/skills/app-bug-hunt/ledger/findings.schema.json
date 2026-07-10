@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://app/skills/bug-hunt/findings.schema.json",
+  "title": "Bug-hunt Finding Ledger record",
+  "description": "1 行 = 1 finding。report.md は人間向け本文の正本、findings.jsonl は分類の正本。同じ説明文を両方に書かない。詳細は README.md / .claude/skills/app-bug-hunt/SKILL.md。",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "finding_id",
+    "run_id",
+    "story_id",
+    "capability_tag",
+    "principal",
+    "tenant_relation",
+    "failure_class",
+    "resource_type",
+    "operation",
+    "species_key",
+    "oracle_attribution",
+    "evidence_ref",
+    "triage_status"
+  ],
+  "properties": {
+    "finding_id": { "type": "string", "description": "report.md の F-xx と対応", "pattern": "^F-" },
+    "run_id": { "type": "string", "minLength": 1 },
+    "story_id": { "type": "string", "description": "app ストーリー S1..S8 等。逸脱は S3-dev 等。enum 化しない自由文字列 (fix-gate #4)", "minLength": 1 },
+    "shard_id": { "type": ["string", "integer", "null"], "description": "並列時のシャード番号 (0-8。直列は :8010 で shard 0、並列は :8011..8018 で shard 1..8)" },
+    "capability_tag": { "type": "string", "description": "capability-catalog の id。未割当は 'unmapped'、tag 不能は 'unknown'", "minLength": 1 },
+    "principal": { "type": "string", "description": "操作主体 (例 org_b_admin / guest / member_enforced_org)", "minLength": 1 },
+    "tenant_relation": {
+      "type": "string",
+      "enum": ["self", "same_tenant", "cross_tenant", "guest", "n/a"]
+    },
+    "failure_class": {
+      "type": "string",
+      "description": "種分類の軸 (制御語彙)",
+      "enum": [
+        "authz_bypass",
+        "idor",
+        "ux_dead_end",
+        "claimed_success_no_change",
+        "validation_gap",
+        "broken_flow",
+        "error_exposure",
+        "data_integrity",
+        "perf",
+        "test_env",
+        "other"
+      ]
+    },
+    "resource_type": { "type": "string", "description": "正規化済み小文字 (例 scenario / organization / evaluation / site / page)", "pattern": "^[a-z0-9_]+$" },
+    "operation": { "type": "string", "description": "正規化済み小文字 (例 read / create / update / delete / start)", "pattern": "^[a-z0-9_]+$" },
+    "species_key": {
+      "type": "string",
+      "description": "自由文禁止。failure_class:resource_type:operation:tenant_relation から機械生成する (validator が整合検証)",
+      "pattern": "^[a-z0-9_]+:[a-z0-9_]+:[a-z0-9_]+:(self|same_tenant|cross_tenant|guest|n/a)$"
+    },
+    "oracle_attribution": {
+      "type": "string",
+      "description": "検出した oracle rule の id、または検出 oracle が無かったことを示す 'oracle_gap'",
+      "minLength": 1
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["critical", "high", "medium", "low", "needs_review"]
+    },
+    "same_as": { "type": ["string", "null"], "description": "既知 species/finding と同一なら参照 finding_id、なければ null" },
+    "triage_status": {
+      "type": "string",
+      "enum": ["proposed", "confirmed", "same_as", "split", "fixed", "test_env", "wont_fix", "needs_spec"]
+    },
+    "evidence_ref": { "type": "string", "description": "report.md#F-xx / screenshots/F-xx.png 等の参照", "minLength": 1 },
+    "regression_link": { "type": ["string", "null"], "description": "テスト化されたら test path/識別子、未なら null" }
+  }
+}

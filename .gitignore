@@ -1,0 +1,67 @@
+*.log
+.DS_Store
+.env
+.env.backup
+.env.local
+.env.bughunt.local
+.env.production
+.phpactor.json
+.phpunit.result.cache
+/.claude/bug-hunt.lock
+# worktree 実体と setup/teardown lock (scripts/setup-worktree.sh / teardown-worktree.sh)
+/.claude/worktrees/
+/.code-review-graph/
+/.codex
+/.cursor/
+/.fleet
+/.idea
+/.nova
+/.phpunit.cache
+# CI matrix sharding の生成物 (scripts/ci/make-shard-phpunit.php)
+/phpunit.ci-shard.xml
+# pest-plugin-browser が失敗時 screenshot を書く (runtime artifact)
+/tests/Browser/Screenshots/
+/.vscode/*
+!/.vscode/settings.json
+/.zed
+/auth.json
+/.pnpm-store
+/node_modules
+/packages/*/coverage
+/packages/*/dist
+/packages/*/dist-test
+/packages/*/node_modules
+# oclif prepack が生成する CLI コマンド manifest (packages/cli)
+/packages/*/oclif.manifest.json
+/public/build
+/public/fonts-manifest.dev.json
+/public/hot
+/public/storage
+/storage/*.key
+/storage/pail
+# prism prompt debug の出力先 (config/prism-prompt.php の storage_path)
+/storage/prism-prompt-debug/
+# bug-hunt コード到達カバレッジの出力先 (scripts/bug-hunt-shard.sh --coverage)
+/storage/bughunt-coverage/
+/vendor
+_ide_helper.php
+Homestead.json
+Homestead.yaml
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+
+# 外部 skill (skills-lock.json から再インストール可能。.claude/skills/* は symlink)
+/.agents
+/.claude/skills/stripe-*
+
+# template repo specific
+/tmp
+
+# Filament が php artisan filament:assets / filament:upgrade で再生成する
+# publish 済みアセット (コミットせず各環境で再生成する)
+/public/css/filament/
+/public/js/filament/
+/public/fonts/filament/

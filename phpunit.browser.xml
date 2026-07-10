@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Browser (pest-plugin-browser) 専用 PHPUnit 設定。
+
+  Browser lane は本 config 経由でのみ動く (scripts/run-browser-test.sh が
+  `vendor/bin/pest -c phpunit.browser.xml` で起動する)。既定 phpunit.xml の
+  testsuite には tests/Browser を含めないため、composer test (Feature/Unit/
+  Architecture lane) から Browser テストが誤起動することはない。
+
+  DB は Feature lane と同じ worktree 固有 pgsql テスト DB を使う:
+  bootstrap="tests/bootstrap.php" が DB_DATABASE を `<slug>_test_<worktree-hash>`
+  に注入し、Laravel boot 前に fail-closed 検証する (dev-DB 保護は phpunit.xml と
+  同一機構)。同じ base DB を共有するため、composer test との同時実行は
+  scripts/run-browser-test.sh の flock (test.lock 共有) で排他する。
+
+  <php> の値は phpunit.xml と揃える (乖離させない)。差分は memory_limit のみ
+  (実ブラウザ + in-process サーバの分だけ余裕を持たせる)。
+-->
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="tests/bootstrap.php"
+         colors="true"
+>
+    <testsuites>
+        <testsuite name="Browser">
+            <directory>tests/Browser</directory>
+        </testsuite>
+    </testsuites>
+    <source>
+        <include>
+            <directory>app</directory>
+        </include>
+    </source>
+    <php>
+        <ini name="memory_limit" value="1G"/>
+        <server name="APP_ENV" value="testing" force="true"/>
+        <server name="APP_MAINTENANCE_DRIVER" value="file" force="true"/>
+        <server name="BCRYPT_ROUNDS" value="4" force="true"/>
+        <server name="BROADCAST_CONNECTION" value="null" force="true"/>
+        <server name="CACHE_STORE" value="array" force="true"/>
+        <!-- DB_DATABASE は tests/bootstrap.php が worktree 固有の pgsql DB 名を注入する -->
+        <server name="DB_CONNECTION" value="pgsql" force="true"/>
+        <server name="DB_URL" value="" force="true"/>
+        <server name="MAIL_MAILER" value="array" force="true"/>
+        <!-- 同期実行で決定論性を確保 (ブラウザ操作の直後に job の副作用を assert できる) -->
+        <server name="QUEUE_CONNECTION" value="sync" force="true"/>
+        <server name="SESSION_DRIVER" value="array" force="true"/>
+        <!--
+          LLM 実通信遮断 (二層防御)。主防御は StrayLlmCallGuard + BrowserPromptFake
+          (tests/Pest.php の Browser lane)。新 LLM provider 導入時は phpunit.xml と
+          あわせてここにもダミー値を追加すること。
+        -->
+        <server name="OPENAI_API_KEY" value="test-dummy-openai-key" force="true"/>
+        <server name="ANTHROPIC_API_KEY" value="test-dummy-anthropic-key" force="true"/>
+        <server name="GEMINI_API_KEY" value="test-dummy-gemini-key" force="true"/>
+        <!-- 課金: テンプレート既定通貨 (jpy)。Stripe API はテストから呼ばない -->
+        <server name="CASHIER_CURRENCY" value="jpy" force="true"/>
+        <server name="STRIPE_KEY" value="" force="true"/>
+        <server name="STRIPE_SECRET" value="" force="true"/>
+        <server name="STRIPE_WEBHOOK_SECRET" value="" force="true"/>
+        <server name="PULSE_ENABLED" value="false" force="true"/>
+        <server name="TELESCOPE_ENABLED" value="false" force="true"/>
+        <server name="NIGHTWATCH_ENABLED" value="false" force="true"/>
+    </php>
+</phpunit>

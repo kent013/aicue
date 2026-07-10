@@ -1,0 +1,5 @@
+# correlate.py fixture: run 20260618-test の findings。route 直結 + capability 経由の両方。
+{"finding_id":"F-1-01","run_id":"20260618-test","story_id":"S1","capability_tag":"AUTH-01","route_name":"login.store","resource_type":"session","operation":"create","species_key":"broken_flow:session:create:guest","severity":"high","failure_class":"broken_flow"}
+{"finding_id":"F-1-02","run_id":"20260618-test","story_id":"S1","capability_tag":"AUTH-01","route_name":"login.store","resource_type":"session","operation":"create","species_key":"validation_gap:session:create:guest","severity":"medium","failure_class":"validation_gap"}
+{"finding_id":"F-1-03","run_id":"20260618-test","story_id":"S1","capability_tag":"AUTH-03","resource_type":"verification","operation":"verify","species_key":"broken_flow:verification:verify:guest","severity":"low","failure_class":"broken_flow"}
+{"finding_id":"F-9-01","run_id":"20260618-other","story_id":"S9","capability_tag":"X","species_key":"other:x:y:self","severity":"low","failure_class":"other"}

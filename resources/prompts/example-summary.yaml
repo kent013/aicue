@@ -1,0 +1,22 @@
+# サンプルプロンプト (テンプレートの見本)。
+# 規約: prompt 文字列をコードに直書きしない。YAML + Prompt サブクラス
+# (app/Prompts/ExampleSummaryPrompt) のペアで定義する。
+# untrusted な自由テキストは UserInput 型で渡し、system_prompt 冒頭に
+# DefensiveInstructions preamble を置く (prompt-injection 防御)。
+# name はログ/メトリクスの識別子 (全 YAML 横断で一意。PromptYamlContractTest が強制)。
+# client_options.timeout は provider 無応答時の打ち切り (PromptClientTimeoutInvariantTest が強制)。
+name: example-summary
+provider: anthropic
+model: claude-sonnet-4-5-20250929
+client_options:
+  timeout: 60
+
+system_prompt: |
+  {{ \Kent013\PrismPrompt\Values\DefensiveInstructions::forUserInputJa() }}
+
+  あなたはテキストを 1 文に要約するアシスタントです。
+
+prompt: |
+  次のテキストを日本語 1 文で要約してください。
+
+  {{ $text }}

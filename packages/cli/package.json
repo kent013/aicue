@@ -1,0 +1,58 @@
+{
+    "name": "@app/cli",
+    "version": "0.1.0",
+    "description": "First-party CLI (oclif) for the app — version negotiation, doctor, profiles and OAuth sign-in.",
+    "license": "MIT",
+    "type": "module",
+    "bin": {
+        "app": "./bin/run.js"
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "files": [
+        "dist",
+        "bin",
+        "README.md"
+    ],
+    "oclif": {
+        "bin": "app",
+        "dirname": "app",
+        "commands": "./dist/oclif/commands",
+        "topicSeparator": ":",
+        "plugins": [
+            "@oclif/plugin-help"
+        ],
+        "topics": {
+            "auth": {
+                "description": "Sign in / out with OAuth and inspect authentication status"
+            },
+            "profile": {
+                "description": "Manage API profiles (URL + API key + connection options)"
+            }
+        }
+    },
+    "scripts": {
+        "build": "tsc -p tsconfig.json",
+        "test": "vitest run",
+        "typecheck": "tsc --noEmit -p tsconfig.test.json",
+        "lint": "eslint src"
+    },
+    "dependencies": {
+        "@napi-rs/keyring": "^1.2.0",
+        "@oclif/core": "^4.10.5",
+        "@oclif/plugin-help": "^6.2.44",
+        "envinfo": "^7.21.0",
+        "undici": "^6.27.0",
+        "yaml": "^2.9.0",
+        "zod": "^3.23.0"
+    },
+    "devDependencies": {
+        "@types/envinfo": "^7.8.4",
+        "@types/node": "^25.9.2",
+        "typescript": "^6.0.0",
+        "vitest": "^4.1.8"
+    },
+    "engines": {
+        "node": ">=22.14.0"
+    }
+}

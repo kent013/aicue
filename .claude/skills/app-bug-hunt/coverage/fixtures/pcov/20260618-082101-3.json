@@ -1,0 +1,5 @@
+# shard 3: 不正行 (JSON でない / 必須キー欠落) を skip する検証用。
+{"file":"app/Http/Controllers/Org/InviteController.php","covered":[30],"all":[30,31,32]}
+this-is-not-json
+{"file":"app/Broken.php","covered":[1]}
+{"covered":[1],"all":[1,2]}

@@ -1,0 +1,182 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Models;
+
+use App\Enums\OrganizationRole;
+use App\Models\Billing\OrganizationQuota;
+use App\Models\Billing\Plan;
+use App\Models\Billing\TicketLedgerEntry;
+use App\Models\Billing\TicketReservation;
+use Database\Factories\OrganizationFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Notifications\Notification;
+use Illuminate\Notifications\RoutesNotifications;
+use Laravel\Cashier\Billable;
+use Webmozart\Assert\Assert;
+
+/**
+ * 組織 (テナント) = 課金主体 (Cashier Billable。AppServiceProvider の
+ * Cashier::useCustomerModel 参照)。Laratrust Team と 1:1 で、権限判定は常に
+ * laratrust_team_id を明示して行う (strict_check=true)。
+ *
+ * laratrust_team_id / is_personal は所有権・状態キーのため $fillable 外
+ * (OrganizationProvisioningService が明示代入する)。
+ * plan_code は現在プランの状態キーのため $fillable 外 (StripeWebhookProcessor が
+ * webhook から同期する。クライアント入力では変更できない)。
+ */
+class Organization extends Model
+{
+    /** @use HasFactory<OrganizationFactory> */
+    use Billable, HasFactory, RoutesNotifications, SoftDeletes;
+
+    /** @var list<string> */
+    protected $fillable = [
+        'name',
+        'slug',
+    ];
+
+    /**
+     * @return BelongsTo<Team, $this>
+     */
+    public function laratrustTeam(): BelongsTo
+    {
+        return $this->belongsTo(Team::class, 'laratrust_team_id');
+    }
+
+    /**
+     * @return BelongsToMany<User, $this>
+     */
+    public function users(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class)->withTimestamps();
+    }
+
+    /**
+     * @return HasMany<CustomTeam, $this>
+     */
+    public function customTeams(): HasMany
+    {
+        return $this->hasMany(CustomTeam::class);
+    }
+
+    /**
+     * @return HasManyThrough<Project, CustomTeam, $this>
+     */
+    public function projects(): HasManyThrough
+    {
+        return $this->hasManyThrough(Project::class, CustomTeam::class);
+    }
+
+    /**
+     * @return HasMany<OrganizationInvitation, $this>
+     */
+    public function invitations(): HasMany
+    {
+        return $this->hasMany(OrganizationInvitation::class);
+    }
+
+    /**
+     * @return HasMany<ApiKey, $this>
+     */
+    public function apiKeys(): HasMany
+    {
+        return $this->hasMany(ApiKey::class);
+    }
+
+    /**
+     * OAuth セッション (CLI ログイン)。組織管理経路の一覧/失効と scopeBindings の解決に使う。
+     *
+     * @return HasMany<OauthSession, $this>
+     */
+    public function oauthSessions(): HasMany
+    {
+        return $this->hasMany(OauthSession::class);
+    }
+
+    /**
+     * 現在の契約プラン (plan_code → plans.code。null = 未契約)。
+     *
+     * @return BelongsTo<Plan, $this>
+     */
+    public function plan(): BelongsTo
+    {
+        return $this->belongsTo(Plan::class, 'plan_code', 'code');
+    }
+
+    /**
+     * Quota override (1:1。無ければ config/quota.php のプラン既定値のみが効く)。
+     *
+     * @return HasOne<OrganizationQuota, $this>
+     */
+    public function quota(): HasOne
+    {
+        return $this->hasOne(OrganizationQuota::class);
+    }
+
+    /**
+     * @return HasMany<TicketLedgerEntry, $this>
+     */
+    public function ticketLedgerEntries(): HasMany
+    {
+        return $this->hasMany(TicketLedgerEntry::class);
+    }
+
+    /**
+     * @return HasMany<TicketReservation, $this>
+     */
+    public function ticketReservations(): HasMany
+    {
+        return $this->hasMany(TicketReservation::class);
+    }
+
+    /**
+     * Default Team (docs/default-team-pattern.md)。
+     * provisioning が必ず生成するため、存在しないのは不変条件違反。
+     */
+    public function defaultTeam(): CustomTeam
+    {
+        $team = $this->customTeams()->where('is_default', true)->first();
+        Assert::isInstanceOf($team, CustomTeam::class, "Organization {$this->id} に Default Team がありません (不変条件違反)");
+
+        return $team;
+    }
+
+    /**
+     * 請求通知の宛先 (BillingNotificationDispatcher が組織宛に notify する)。
+     * テンプレートは請求先メール列を持たないため Owner メンバーの email に送る。
+     * Owner を解決できない場合は null (dispatcher が failed(missing_billing_recipient)
+     * として確定し queued 滞留を防ぐ)。
+     * 派生アプリは billing_contact_email 等の正本列を追加して本メソッドを上書きする。
+     */
+    public function routeNotificationForMail(Notification $notification): ?string
+    {
+        /** @var User|null $owner */
+        $owner = $this->users()
+            ->get()
+            ->first(fn (User $member): bool => $member->organizationRole($this) === OrganizationRole::Owner);
+
+        return $owner?->email;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'is_personal' => 'boolean',
+            // 2FA 必須方針。セキュリティ方針キーのため $fillable 外
+            // (OrganizationController::updateTwoFactorRequirement が forceFill で明示代入する)
+            'two_factor_required' => 'boolean',
+        ];
+    }
+}

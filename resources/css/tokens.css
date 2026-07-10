@@ -1,0 +1,89 @@
+/**
+ * DS tokens — DESIGN.md (canonical source) の実装写像。
+ *
+ * 値の変更は DESIGN.md / docs/design-system.md と同一 PR で必ず行うこと
+ * (tests/js/styles/canonical-source-parity.test.ts が drift を検出する)。
+ *
+ * 取り込み契約:
+ *   本ファイルは単独でビルドしない。常に Tailwind 処理コンテキスト
+ *   (`@import "tailwindcss"` の直後) から取り込まれることを前提とする。
+ */
+
+@theme {
+    /* ===== Brand colors (DESIGN.md Slate × Blue) ===== */
+    --color-primary:         #2563eb;
+    --color-primary-hover:   #1d4ed8;
+    --color-primary-soft:    rgba(37, 99, 235, 0.12);  /* primary 12% — badge / focus ring 用 */
+    --color-tertiary:        #0f766e;
+    --color-tertiary-hover:  #115e59;
+
+    /* ===== Neutrals & surface ===== */
+    --color-neutral:         #f4f4f5;  /* page background */
+    --color-surface:         #ffffff;  /* card / modal background */
+    --color-border:          #e4e4e7;
+    --color-border-strong:   #a1a1aa;
+    --color-text:            #18181b;
+    --color-text-secondary:  #52525b;
+
+    /* ===== Status colors ===== */
+    --color-success:         #15803d;
+    --color-warning:         #b45309;
+    --color-danger:          #dc2626;
+
+    /* ===== Fonts ===== */
+    --font-sans:  'Noto Sans JP', 'Hiragino Sans', 'Yu Gothic UI', 'Segoe UI',
+                  ui-sans-serif, system-ui, sans-serif,
+                  'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+
+    /* ===== Radius (DESIGN.md rounded) ===== */
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+}
+
+/* ===== Typography ramp =====
+   全ランプ Noto Sans JP、ウェイトは 400 / 500 の 2 階層のみ (DESIGN.md 準拠) */
+
+@utility text-display {
+    font-family: var(--font-sans);
+    font-size: 48px;
+    font-weight: 500;
+    line-height: 1.2;
+    letter-spacing: 0.02em;
+}
+
+@utility text-h1 {
+    font-family: var(--font-sans);
+    font-size: 32px;
+    font-weight: 500;
+    line-height: 1.3;
+    letter-spacing: 0.02em;
+}
+
+@utility text-h2 {
+    font-family: var(--font-sans);
+    font-size: 24px;
+    font-weight: 500;
+    line-height: 1.4;
+}
+
+@utility text-h3 {
+    font-family: var(--font-sans);
+    font-size: 18px;
+    font-weight: 500;
+    line-height: 1.5;
+}
+
+@utility text-body {
+    font-family: var(--font-sans);
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 1.7;
+}
+
+@utility text-caption {
+    font-family: var(--font-sans);
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.5;
+}

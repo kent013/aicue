@@ -1,0 +1,41 @@
+{
+  "_meta": {
+    "template_version": 0
+  },
+  "fixtures": [
+    {
+      "name": "standard_product",
+      "path": "/v1/products",
+      "method": "post",
+      "params": {
+        "name": "Standard プラン",
+        "description": "Standard プラン (月額)",
+        "metadata": {
+          "plan_code": "standard",
+          "managed_by": "app"
+        }
+      }
+    },
+    {
+      "name": "standard_base_price",
+      "path": "/v1/prices",
+      "method": "post",
+      "params": {
+        "currency": "jpy",
+        "unit_amount": 1980,
+        "product": "${standard_product:id}",
+        "lookup_key": "app_standard_base",
+        "nickname": "Standard 基本料 (月額)",
+        "recurring": {
+          "interval": "month",
+          "interval_count": 1
+        },
+        "metadata": {
+          "plan_code": "standard",
+          "kind": "base",
+          "managed_by": "app"
+        }
+      }
+    }
+  ]
+}
