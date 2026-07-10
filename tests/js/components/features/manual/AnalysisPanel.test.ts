@@ -177,6 +177,50 @@ describe("AnalysisPanel", () => {
         expect(screen.queryByTestId("analyze-button")).toBeNull();
     });
 
+    it("running 応答で currentJob を更新しても再購読されず、ポーリングは 2.5 秒間隔を保つ", async () => {
+        vi.useFakeTimers();
+        const runningJob: AnalysisJobProps = {
+            id: 9,
+            status: "running",
+            step: "decompose",
+            progress: 35,
+            error: null,
+            manual_status: "analyzing",
+        };
+        // 毎回新しいオブジェクトを返す (同一 id の running 更新で effect が再購読されないことの検証)
+        fetchMock.mockImplementation(() =>
+            Promise.resolve(jsonResponse(200, { ...runningJob })),
+        );
+
+        const { unmount } = render(AnalysisPanel, {
+            props: {
+                ...baseProps,
+                manualStatus: "analyzing" as const,
+                job: runningJob,
+            },
+        });
+
+        try {
+            // effect 起動直後の即時 poll で 1 回
+            await vi.advanceTimersByTimeAsync(0);
+            expect(fetchMock).toHaveBeenCalledTimes(1);
+
+            // 応答で currentJob が更新されても、interval 発火前に再ポーリングされない
+            // (effect が currentJob を反応的に読むとここでタイトループになる回帰の検出)
+            await vi.advanceTimersByTimeAsync(1000);
+            expect(fetchMock).toHaveBeenCalledTimes(1);
+
+            // 2.5 秒経過で 2 回目、さらに 2.5 秒で 3 回目
+            await vi.advanceTimersByTimeAsync(1500);
+            expect(fetchMock).toHaveBeenCalledTimes(2);
+            await vi.advanceTimersByTimeAsync(2500);
+            expect(fetchMock).toHaveBeenCalledTimes(3);
+        } finally {
+            unmount();
+            vi.useRealTimers();
+        }
+    });
+
     it("ready からの起動は確認ダイアログを挟む (既存シナリオ置換の警告)", async () => {
         render(AnalysisPanel, { props: { ...baseProps, manualStatus: "ready" as const } });
         await fireEvent.click(screen.getByTestId("analyze-button"));

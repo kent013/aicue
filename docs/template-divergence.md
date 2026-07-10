@@ -34,11 +34,11 @@
 
 ---
 
-## D1 ✅ Tier B スキーマの先取り (SourceDocument / Cut / Take を振る舞い無しで先行作成)
+## D1 ✅ Tier B スキーマの先取り (Cut / Take を振る舞い無しで先行作成)
 
 | 観点 | テンプレート | 本アプリ |
 |---|---|---|
-| リソース追加 | Item 見本の 15 点フルセット (route/Controller/UI まで) を同時に張る | SourceDocument / Cut / Take は migration + Model + Factory + 保護キーのみ (route/Controller/UI なし) |
+| リソース追加 | Item 見本の 15 点フルセット (route/Controller/UI まで) を同時に張る | Cut / Take は migration + Model + Factory + 保護キーのみ (route/Controller/UI なし)。SourceDocument は T003 (AI 解析) で route/Controller/UI を追加済みで本差分の対象外 |
 
 ### なぜ正当な差分か(logic-driven)
 AI-CUE の中核集約 (VideoManual ─< SourceDocument / Cut ─< Take) はフェーズ1で
@@ -46,15 +46,25 @@ AI-CUE の中核集約 (VideoManual ─< SourceDocument / Cut ─< Take) はフ�
 振る舞いだけを足せるようにする (doc/10 §10.6 フェーズ1定義)。実 route 未確定のまま
 IDOR inventory だけ先行させないため、route/UI は張らない。
 
+なお SourceDocument は T003 (AI 解析) で振る舞いが確定し、
+`SourceDocumentController` + `projects.manuals.source-documents.store` route +
+`SourceDocumentUpload.svelte` を追加して本差分から**卒業**した。残る先取りは Cut / Take のみ
+(Cut は書き込み経路のみ ScenarioService 経由で存在し、per-row route は張っていない。D5 参照)。
+
 ### 揃えている不変条件(これは保証し続ける)
 > 「route/UI を張るまで外部到達不可。張るときに NestedRouteIdorDefenseTest inventory 登録と
 > relation 経由解決 + 404 テストを同時に行う」
 NestedRouteIdorDefenseTest の deny-by-default (2+param route の未分類 fail) が、後続フェーズで
 route を張った瞬間に分類登録を強制する。保護キー (video_manual_id/cut_id/parent_cut_id/
 adopted_take_id) は MassAssignmentSafetyTest が $fillable 不含を自動走査する。
+SourceDocument の卒業時にはこの不変条件どおり、`projects.manuals.source-documents.store` の
+NestedRouteIdorDefenseTest inventory 登録と relation 経由解決 + 404 テスト
+(`tests/Feature/Projects/SourceDocumentUploadTest.php`) を route 追加と同時に行った。
 
 ### 関連
-- 実装: `database/migrations/2026_07_10_*`, `app/Models/{SourceDocument,Cut,Take}.php`
+- 実装: `database/migrations/2026_07_10_*`, `app/Models/{SourceDocument,Cut,Take}.php`,
+  卒業分: `app/Http/Controllers/Projects/SourceDocumentController.php`,
+  `resources/js/components/features/manual/SourceDocumentUpload.svelte`
 - 設計: `devnotes/20260710-2137-aicue-domain-foundation/detailed-design.md` 施策2/4/5
 
 ## D2 ✅ 循環 FK の 3 段階マイグレーション (cuts の parent_cut_id / adopted_take_id を後付け)

@@ -46,10 +46,16 @@
     const stepLabel = $derived(
         currentJob?.step ? ANALYSIS_STEP_LABELS[currentJob.step] : "解析を待機中",
     );
+    // ポーリング対象の job id。effect の依存を id に狭めることで、running/queued の
+    // 各応答で currentJob を更新しても同一 id なら effect が再購読されず、
+    // setInterval の 2.5 秒間隔が保たれる (terminal 遷移で analyzing=false → null で停止)
+    const pollJobId = $derived(analyzing && currentJob !== null ? currentJob.id : null);
 
     /* ---- ポーリング (analyzing 中のみ。cleanup で必ず破棄) ---- */
     $effect(() => {
-        if (!analyzing || currentJob === null) return;
+        // この effect の反応的依存は pollJobId のみ (currentJob 本体は読まない)
+        const jobId = pollJobId;
+        if (jobId === null) return;
 
         let stopped = false;
         let interval: ReturnType<typeof setInterval> | null = null;
@@ -58,7 +64,7 @@
             if (stopped || document.hidden) return;
             try {
                 const res = await fetch(
-                    `/projects/${projectId}/manuals/${manualId}/jobs/${currentJob!.id}`,
+                    `/projects/${projectId}/manuals/${manualId}/jobs/${jobId}`,
                     {
                         headers: {
                             Accept: "application/json",
