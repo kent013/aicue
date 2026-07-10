@@ -229,6 +229,35 @@ test('cross-org の project 配下マニュアルは 404 (存在を漏らさな�
     expect($manualB->fresh()?->title)->toBe('元のタイトル');
 });
 
+test('cross-org project への category id 探索は exists 検証より前に 404 (所属オラクル防止)', function (): void {
+    [, $ownerA] = createOrganizationWithOwner('組織A');
+    [$orgB] = createOrganizationWithOwner('組織B');
+    $projectB = Project::factory()->forOrganization($orgB)->create();
+    $categoryInB = Category::factory()->forProject($projectB)->create();
+    $otherProjectB = Project::factory()->forOrganization($orgB)->create();
+    $categoryOutOfB = Category::factory()->forProject($otherProjectB)->create();
+    $manualB = VideoManual::factory()->forProject($projectB)->create(['title' => '元のタイトル']);
+
+    // {project} に属する category id / 属さない category id のどちらも同じ 404 —
+    // exists ルールの 422/404 差分で他組織の category↔project 所属関係を探索できないこと
+    // (project.in-current-org middleware が FormRequest の DB ルールより前に 404 に落とす)
+    $this->actingAs($ownerA)
+        ->from('/projects')
+        ->post("/projects/{$projectB->id}/manuals", ['title' => 'x', 'category' => $categoryInB->id])
+        ->assertNotFound();
+    $this->actingAs($ownerA)
+        ->from('/projects')
+        ->post("/projects/{$projectB->id}/manuals", ['title' => 'x', 'category' => $categoryOutOfB->id])
+        ->assertNotFound();
+    $this->actingAs($ownerA)
+        ->from('/projects')
+        ->patch("/projects/{$projectB->id}/manuals/{$manualB->id}", ['title' => 'x', 'category' => $categoryOutOfB->id])
+        ->assertNotFound();
+
+    expect($projectB->manuals()->count())->toBe(1);
+    expect($manualB->fresh()?->title)->toBe('元のタイトル');
+});
+
 test('cross-project の {manual} は 404 (scopeBindings)', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $projectA = Project::factory()->forOrganization($organization)->create();

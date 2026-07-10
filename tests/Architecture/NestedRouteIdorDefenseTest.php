@@ -40,14 +40,18 @@ function nestedRouteIdorInventory(): array
         'organizations.api-keys.sessions.revoke' => $s,
         // {invitation} は $organization->invitations() 経由 (招待取り消し。cross-org は 404)
         'organizations.invitations.revoke' => $s,
-        // {item} は $project->items() 経由 ({project} ∈ current org は controller の inline guard)
+        // {item} は $project->items() 経由 ({project} ∈ current org は
+        // project.in-current-org middleware + controller inline guard の 2 層)
         'projects.items.update' => $s,
         'projects.items.destroy' => $s,
-        // {category} は $project->categories() 経由 ({project} ∈ current org は controller の inline guard)
+        // {category} は $project->categories() 経由 ({project} ∈ current org は
+        // project.in-current-org middleware + controller inline guard の 2 層。
+        // FormRequest の DB ルール (unique) より前の 404 は ProjectRouteCurrentOrgGuardTest 参照)
         'projects.categories.update' => $s,
         'projects.categories.destroy' => $s,
         // {manual} は $project->manuals() 経由 (relation 名は route パラメータ {manual} の
-        // scopeBindings 推論と一致させた manuals()。{project} ∈ current org は inline guard)
+        // scopeBindings 推論と一致させた manuals()。{project} ∈ current org は
+        // project.in-current-org middleware + inline guard の 2 層)
         'projects.manuals.show' => $s,
         'projects.manuals.edit' => $s,
         'projects.manuals.update' => $s,

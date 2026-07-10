@@ -293,11 +293,15 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
     | を持たない組織は billing へ redirect される (JSON は 402)。
     | 新しい業務ドメインの route はこの group 内に追加すること。
     */
-    Route::middleware('require-active-subscription')->group(function (): void {
+    Route::middleware(['require-active-subscription', 'project.in-current-org'])->group(function (): void {
         /*
         | プロジェクト (current org スコープ。URL に org / team セグメントを含めない =
         | Default Team パターンのルーティング仕様)。
-        | {project} は URL 整合 guard ({project} ∈ current org) で認可より前に 404。
+        | {project} の URL 整合 guard ({project} ∈ current org) は 2 層:
+        | (1) project.in-current-org middleware — FormRequest の DB ルール (unique/exists) より
+        |     前に cross-org を 404 に落とす (存在オラクル防止。{project} を持たない route では
+        |     no-op のため group 一括付与。網羅性は ProjectRouteCurrentOrgGuardTest が固定)
+        | (2) controller の inline guard (resolveOrganizationProject) — 二重防御
         */
         Route::get('/projects', [ProjectController::class, 'index'])
             ->name('projects.index');

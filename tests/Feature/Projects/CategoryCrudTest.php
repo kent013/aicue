@@ -180,6 +180,27 @@ test('cross-org の project 配下カテゴリ操作は 404 (存在を漏らさ�
     expect($categoryB->fresh()?->name)->toBe('元の名前');
 });
 
+test('cross-org project へのカテゴリ name 探索は unique 検証より前に 404 (存在オラクル防止)', function (): void {
+    [, $ownerA] = createOrganizationWithOwner('組織A');
+    [$orgB] = createOrganizationWithOwner('組織B');
+    $projectB = Project::factory()->forOrganization($orgB)->create();
+    $categoryB = Category::factory()->forProject($projectB)->create(['name' => '秘密カテゴリ']);
+
+    // 衝突する name を送っても 422 (unique) ではなく 404 — 422/404 の応答差分で
+    // 他組織プロジェクトのカテゴリ名を辞書探索できないこと (project.in-current-org middleware が
+    // FormRequest の DB ルールより前に cross-org を 404 に落とす)
+    $this->actingAs($ownerA)
+        ->from('/projects')
+        ->post("/projects/{$projectB->id}/categories", ['name' => '秘密カテゴリ'])
+        ->assertNotFound();
+    $this->actingAs($ownerA)
+        ->from('/projects')
+        ->patch("/projects/{$projectB->id}/categories/{$categoryB->id}", ['name' => '秘密カテゴリ'])
+        ->assertNotFound();
+
+    expect($projectB->categories()->count())->toBe(1);
+});
+
 test('cross-project の {category} は 404 (scopeBindings)', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $projectA = Project::factory()->forOrganization($organization)->create();
