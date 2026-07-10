@@ -25,6 +25,7 @@
 | `SourceDocumentFactory` | SourceDocument | `forManual($manual)` |
 | `CutFactory` | Cut | `forManual($manual)` / `asPointOf($step)` / `withSortOrder($n)` |
 | `AnalysisJobFactory` | AnalysisJob | `forManual($manual)` / `forDocument($document)` / `running()` / `failed($error)` / `succeeded()` |
+| `RenderJobFactory` | RenderJob | `forManual($manual)` / `preview()` / `running()` / `succeeded($outputPath)` / `failed($code, $error)` |
 | `TakeFactory` | Take | `forCut($cut)` / `downloaded()` (DL 済み ACK 打刻済み = 削除不可) |
 | `TakeUploadReservationFactory` | TakeUploadReservation | `forCut($cut)` / `verifying()` / `completed()` / `released()` / `expired()`。`organization_id` は cut→manual→project→org を辿ってサーバ導出 (afterMaking) |
 | `ApiKeyFactory` | ApiKey | `forOrganization($org)`, `revoked()`, `expired(?Carbon $expiresAt = null)` |

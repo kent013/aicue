@@ -7,10 +7,11 @@
     import DangerZone from "@/components/molecules/DangerZone.svelte";
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
     import AnalysisPanel from "@/components/features/manual/AnalysisPanel.svelte";
+    import RenderPanel from "@/components/features/manual/RenderPanel.svelte";
     import SourceDocumentUpload from "@/components/features/manual/SourceDocumentUpload.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
     import type { SharedProps } from "@/lib/shared-props";
-    import type { AnalysisProps, VideoManualStatus } from "@/types/manual";
+    import type { AnalysisProps, RenderProps, VideoManualStatus } from "@/types/manual";
     import { VIDEO_MANUAL_STATUS_LABELS } from "@/types/manual";
 
     /**
@@ -27,10 +28,11 @@
             created_at: string;
         };
         analysis: AnalysisProps;
+        render: RenderProps;
         canManage: boolean;
     }
 
-    let { project, manual, analysis, canManage }: Props = $props();
+    let { project, manual, analysis, render, canManage }: Props = $props();
 
     const shared = $derived(page.props as unknown as SharedProps);
     const appName = $derived(shared.appName ?? "");
@@ -99,6 +101,16 @@
             manualStatus={manual.status}
             job={analysis.job}
             hasDocument={analysis.hasDocument}
+            {canManage}
+        />
+
+        <RenderPanel
+            projectId={project.id}
+            manualId={manual.id}
+            manualStatus={manual.status}
+            job={render.job}
+            previewJob={render.previewJob}
+            playbackJobId={render.playbackJobId}
             {canManage}
         />
 

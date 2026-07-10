@@ -63,6 +63,13 @@ function nestedRouteIdorInventory(): array
         'projects.manuals.source-documents.store' => $s,
         'projects.manuals.analyze' => $s,
         'projects.manuals.jobs.show' => $s,
+        // レンダ/プレビュー/ポーリング/再生/DL ({manual} は $project->manuals()、
+        // {renderJob} は $manual->renderJobs() 経由。不整合は認可より前に 404。§10.3)
+        'projects.manuals.render' => $s,
+        'projects.manuals.preview' => $s,
+        'projects.manuals.render-jobs.show' => $s,
+        'projects.manuals.render-jobs.playback' => $s,
+        'projects.manuals.download' => $s,
         // 撮影 PWA (/app/*。doc/10 §10.8-3)。{manual}∈{project}, {cut}∈{manual}, {take}∈{cut} は
         // scopeBindings + 各書き込み Service の tx 内連鎖再解決 (二重防御)。
         // {project} ∈ current org は project.in-current-org middleware + inline guard の 2 層

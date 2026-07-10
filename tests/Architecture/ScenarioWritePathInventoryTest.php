@@ -15,6 +15,11 @@ declare(strict_types=1);
  * | ScenarioService::materializeIntoLockedManual() | cuts / scenario_version / status (analyzing→ready のみ) |
  * | AnalysisJobService::trigger() | status (draft·ready→analyzing のみ) |
  * | AnalysisJobService::failJob() | status (analyzing→ready·draft のみ。cuts 有無で決定) |
+ * | RenderJobService::trigger() | status (ready→rendering のみ。scenario_version はスナップショット読み) |
+ * | RenderJobService::failJob() | status (rendering→ready のみ。kind=render に限る) |
+ * | RenderJobService::completeRenderIntoLockedManual() | cuts.cut_length_ms / total_length_ms / status (rendering→published のみ) |
+ * (RenderPipeline は VideoManualStatus を直接書かない = 全て RenderJobService メソッド経由。
+ *  buildManifest/finalize の scenario_version は guard 読みのみ)
  *
  * deny-by-default の token ベース静的走査 (PrismDirectDispatchScanner と同じ token_get_all 流儀。
  * コメント/docblock/文字列リテラル**内容**中の出現は無視する)。走査対象: app/ 配下の .php。
@@ -25,6 +30,8 @@ declare(strict_types=1);
  * 検出 3: materializeIntoLockedManual の宣言は ScenarioService.php のみ、
  *         呼び出しは AnalysisPipeline.php のみ (ScenarioService 自身の中の呼び出しも fail =
  *         ファイル単位 allowlist の抜け穴を塞ぐ)
+ * 検出 5: completeRenderIntoLockedManual の宣言は RenderJobService.php のみ、
+ *         呼び出しは RenderPipeline.php (terminal tx) のみ (検出 3 と同型)
  */
 final class ScenarioWritePathScanner
 {
@@ -37,12 +44,20 @@ final class ScenarioWritePathScanner
         'Services/Manual/ScenarioService.php',
         'DataTransferObjects/Manual/ScenarioDocumentData.php',
         'Services/Capture/CaptureTakeService.php',
+        // レンダ: trigger のスナップショット読み / buildManifest・finalize の guard 読み /
+        // casts 宣言 (書き込みは検出 2 が別途 deny する)
+        'Services/Manual/RenderJobService.php',
+        'Services/Manual/RenderPipeline.php',
+        'Models/RenderJob.php',
     ];
 
     /** 検出 2 の allowlist (app/ 相対パス) */
     private const STATUS_WRITE_ALLOWED = [
         'Services/Manual/ScenarioService.php',
         'Services/Manual/AnalysisJobService.php',
+        // trigger: ready→rendering / failJob: rendering→ready / complete...: rendering→published。
+        // RenderPipeline は VideoManualStatus を直接書かない (全て Service メソッド経由)
+        'Services/Manual/RenderJobService.php',
     ];
 
     /**
@@ -86,6 +101,8 @@ final class ScenarioWritePathScanner
             'materialize_call' => [],
             'adopted_take_id' => [],
             'adopted_take_id_write' => [],
+            'complete_render_declaration' => [],
+            'complete_render_call' => [],
         ];
 
         foreach (self::phpFiles($appDir) as $path) {
@@ -118,6 +135,14 @@ final class ScenarioWritePathScanner
             if (self::containsAdoptedTakeIdWrite($source)
                 && ! in_array($relative, self::ADOPTED_TAKE_ID_WRITE_ALLOWED, true)) {
                 $violations['adopted_take_id_write'][] = $relative;
+            }
+            if (self::containsCompleteRenderDeclaration($source)
+                && $relative !== 'Services/Manual/RenderJobService.php') {
+                $violations['complete_render_declaration'][] = $relative;
+            }
+            if (self::containsCompleteRenderCall($source)
+                && $relative !== 'Services/Manual/RenderPipeline.php') {
+                $violations['complete_render_call'][] = $relative;
             }
         }
 
@@ -249,6 +274,30 @@ final class ScenarioWritePathScanner
     /** 宣言: `function materializeIntoLockedManual` */
     public static function containsMaterializeDeclaration(string $source): bool
     {
+        return self::containsMethodDeclaration($source, 'materializeIntoLockedManual');
+    }
+
+    /** 呼び出し: `->materializeIntoLockedManual(` / `::materializeIntoLockedManual(` */
+    public static function containsMaterializeCall(string $source): bool
+    {
+        return self::containsMethodCall($source, 'materializeIntoLockedManual');
+    }
+
+    /** 検出 5: 宣言 `function completeRenderIntoLockedManual` (検出 3 と同型) */
+    public static function containsCompleteRenderDeclaration(string $source): bool
+    {
+        return self::containsMethodDeclaration($source, 'completeRenderIntoLockedManual');
+    }
+
+    /** 検出 5: 呼び出し `->completeRenderIntoLockedManual(` / `::completeRenderIntoLockedManual(` */
+    public static function containsCompleteRenderCall(string $source): bool
+    {
+        return self::containsMethodCall($source, 'completeRenderIntoLockedManual');
+    }
+
+    /** 宣言: `function {$method}` */
+    private static function containsMethodDeclaration(string $source, string $method): bool
+    {
         $tokens = token_get_all($source);
         foreach ($tokens as $i => $token) {
             if (! is_array($token) || $token[0] !== T_FUNCTION) {
@@ -256,7 +305,7 @@ final class ScenarioWritePathScanner
             }
             $j = self::nextNonWhitespace($tokens, $i);
             if ($j !== null && is_array($tokens[$j]) && $tokens[$j][0] === T_STRING
-                && $tokens[$j][1] === 'materializeIntoLockedManual') {
+                && $tokens[$j][1] === $method) {
                 return true;
             }
         }
@@ -264,8 +313,8 @@ final class ScenarioWritePathScanner
         return false;
     }
 
-    /** 呼び出し: `->materializeIntoLockedManual(` / `::materializeIntoLockedManual(` */
-    public static function containsMaterializeCall(string $source): bool
+    /** 呼び出し: `->{$method}(` / `::{$method}(` */
+    private static function containsMethodCall(string $source, string $method): bool
     {
         $tokens = token_get_all($source);
         foreach ($tokens as $i => $token) {
@@ -275,7 +324,7 @@ final class ScenarioWritePathScanner
             }
             $j = self::nextNonWhitespace($tokens, $i);
             if ($j === null || ! is_array($tokens[$j]) || $tokens[$j][0] !== T_STRING
-                || $tokens[$j][1] !== 'materializeIntoLockedManual') {
+                || $tokens[$j][1] !== $method) {
                 continue;
             }
             $k = self::nextNonWhitespace($tokens, $j);
@@ -420,6 +469,12 @@ test('scenario_version / status 書き込み / materialize の経路が inventor
     expect($violations['adopted_take_id_write'])->toBe([],
         'adopted_take_id の書き込み形は CaptureTakeService のロック済み経路のみです: '
         .implode(', ', $violations['adopted_take_id_write']));
+    expect($violations['complete_render_declaration'])->toBe([],
+        'completeRenderIntoLockedManual の宣言は RenderJobService.php のみです: '
+        .implode(', ', $violations['complete_render_declaration']));
+    expect($violations['complete_render_call'])->toBe([],
+        'completeRenderIntoLockedManual の呼び出しは RenderPipeline.php (terminal tx) のみです: '
+        .implode(', ', $violations['complete_render_call']));
 });
 
 test('現行コードベースに宣言 1 箇所 + 呼び出し 1 箇所が実在する (degenerate PASS 防止)', function (): void {
@@ -430,6 +485,36 @@ test('現行コードベースに宣言 1 箇所 + 呼び出し 1 箇所が実�
     $pipeline = (string) file_get_contents($appDir.'/Services/Manual/AnalysisPipeline.php');
     expect(ScenarioWritePathScanner::containsMaterializeDeclaration($scenarioService))->toBeTrue();
     expect(ScenarioWritePathScanner::containsMaterializeCall($pipeline))->toBeTrue();
+});
+
+test('現行コードベースに completeRender の宣言 1 箇所 + 呼び出し 1 箇所が実在する (検出 5 の degenerate PASS 防止)', function (): void {
+    $appDir = ScenarioWritePathScanner::appDir();
+
+    $renderJobService = (string) file_get_contents($appDir.'/Services/Manual/RenderJobService.php');
+    $renderPipeline = (string) file_get_contents($appDir.'/Services/Manual/RenderPipeline.php');
+    expect(ScenarioWritePathScanner::containsCompleteRenderDeclaration($renderJobService))->toBeTrue();
+    expect(ScenarioWritePathScanner::containsCompleteRenderCall($renderPipeline))->toBeTrue();
+});
+
+test('scanner 自己検証: completeRender の宣言 / 呼び出しを検出しコメントは無視する (検出 5)', function (): void {
+    $call = <<<'PHP'
+<?php
+class P { public function go($m, $r): void { $this->jobs->completeRenderIntoLockedManual($m, $r); } }
+PHP;
+    $declaration = <<<'PHP'
+<?php
+class Q { public function completeRenderIntoLockedManual($m, $r): void {} }
+PHP;
+    $comment = <<<'PHP'
+<?php
+// $this->completeRenderIntoLockedManual($m, $r) はコメント
+class R {}
+PHP;
+
+    expect(ScenarioWritePathScanner::containsCompleteRenderCall($call))->toBeTrue();
+    expect(ScenarioWritePathScanner::containsCompleteRenderDeclaration($declaration))->toBeTrue();
+    expect(ScenarioWritePathScanner::containsCompleteRenderCall($comment))->toBeFalse();
+    expect(ScenarioWritePathScanner::containsCompleteRenderDeclaration($comment))->toBeFalse();
 });
 
 test('scanner 自己検証: コメント内の出現は無視する', function (): void {

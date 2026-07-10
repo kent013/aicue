@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Projects;
 
 use App\DataTransferObjects\Manual\AnalysisJobData;
+use App\DataTransferObjects\Manual\RenderJobData;
 use App\DataTransferObjects\Manual\ScenarioDocumentData;
+use App\Enums\Manual\JobStatus;
+use App\Enums\Manual\RenderKind;
 use App\Http\Concerns\ResolvesCurrentOrganization;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Projects\StoreVideoManualRequest;
@@ -117,6 +120,21 @@ class VideoManualController extends Controller
                     ? null
                     : AnalysisJobData::fromJob($latest, $manual)->toArray(),
                 'hasDocument' => $manual->sourceDocuments()->exists(),
+            ],
+            // レンダパネル (最新 render job / 最新 preview job / 再生可能 preview)。RenderProps と対
+            'render' => [
+                'job' => ($render = $manual->renderJobs()->where('kind', RenderKind::Render->value)->latest('id')->first()) === null
+                    ? null
+                    : RenderJobData::fromJob($render, $manual)->toArray(),
+                'previewJob' => ($preview = $manual->renderJobs()->where('kind', RenderKind::Preview->value)->latest('id')->first()) === null
+                    ? null
+                    : RenderJobData::fromJob($preview, $manual)->toArray(),
+                'playbackJobId' => $manual->renderJobs()
+                    ->where('kind', RenderKind::Preview->value)
+                    ->where('status', JobStatus::Succeeded->value)
+                    ->whereNotNull('output_path')
+                    ->latest('id')
+                    ->value('id'),
             ],
             'canManage' => $user->can('update', $manual),
         ]);

@@ -6,7 +6,7 @@ namespace App\Enums\Manual;
 
 /**
  * 解析/レンダジョブの状態 (doc/10 §10.2)。
- * v1 は AnalysisJob が使用する (RenderJob は後続フェーズ)。
+ * AnalysisJob / RenderJob が共用する。
  */
 enum JobStatus: string
 {

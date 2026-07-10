@@ -183,3 +183,35 @@ checksum query の存在を固定し、`TakeRegistrationTest` が三点照合の
 ### 関連
 - 実装: `app/Services/Capture/TakeObjectStorage.php`
 - 設計: `devnotes/20260711-0345-capture-pwa/detailed-design.md` 施策3
+
+## D7 ✅ org 同時 preview 上限の「直列化実証テスト」は subprocess 方式を保留 (逐次境界テストで代替)
+
+| 観点 | 設計 (T005 詳細設計 施策 4/15) | 本アプリ |
+|---|---|---|
+| 実証方法 | 親が Organization 行ロック保持 → 子プロセス (Symfony Process 起動の artisan) で triggerPreview → ロック待ち順序を同期ポイント付きで検証 | 逐次境界の Feature テスト (上限-1 通過 / 上限 409 / terminal 化で枠が空く / kind=render は数えない) + skip 済みプレースホルダテスト |
+
+### なぜ正当な差分か (logic-driven)
+
+テストスイートは `RefreshDatabase` をグローバル適用しており (AGENTS.md 実装規約)、テストの
+フィクスチャは**未コミットのトランザクション内**にしか存在しない。別プロセス (subprocess) や
+別 DB connection からは親テストの Organization / VideoManual 行が見えないため、子プロセスで
+`triggerPreview` を実行する実証は**専用の非トランザクション pgsql 環境** (fixtures を実
+コミットする別 lane) が前提になる。この lane 導入はテスト基盤の変更 (RefreshDatabase 規約の
+例外化) を伴うため、本フィーチャの worktree では行わない。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「org 同時 preview 上限の検査 + job 作成は Organization 行ロック下で行い、異なる manual への
+> 並行トリガーでも上限を超えない」
+
+- 直列化の実装は `RenderJobService::triggerPreview` の `Organization ... lockForUpdate()`
+  (`TicketLedgerService::reserve` の残高判定と同一手法 = 実証済みパターンの転用)
+- 逐次境界は `tests/Feature/Manual/RenderPreviewConcurrencyTest.php` が固定
+- ロック順 `video_manuals → organizations` はグローバル順の部分列 (docs/architecture.md
+  §レンダジョブの運用契約が正本)
+- subprocess 実証は同テストの skip プレースホルダとして残置 (専用 lane 導入時に実装する)
+
+### 関連
+
+- 実装: `app/Services/Manual/RenderJobService.php` (triggerPreview)
+- 設計: `devnotes/20260711-0549-render/detailed-design.md` 施策 4 テスト計画
