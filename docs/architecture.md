@@ -35,7 +35,8 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
 | `Item` | **ドメインリソースの見本**。新規リソース追加はこれを複製して始める | Project 従属 |
 | `Category` | AI-CUE: 動画マニュアルの分類 (project 内で name ユニーク・sort_order は Service 専有) | Project 従属 |
 | `VideoManual` | AI-CUE: 動画マニュアル本体 (status enum・カテゴリ削除で未分類化) | Project 従属 |
-| `SourceDocument` | AI-CUE: SOP ファイル (Tier B schema 先取り。UI/route は後続フェーズ) | VideoManual 従属 |
+| `SourceDocument` | AI-CUE: SOP ファイル (追記型 immutable。差し替え = 新規行、解析は latest 勝ち。extracted_json は解析の write-only 監査スナップショット) | VideoManual 従属 |
+| `AnalysisJob` | AI-CUE: AI 解析ジョブ (status/step/progress。ticket_reservation_id = 予約の冪等キー。$fillable なし = Service の明示代入のみ) | VideoManual 従属 |
 | `Cut` | AI-CUE: シナリオカット (Tier B schema 先取り。自己参照 parent_cut_id / 循環 FK adopted_take_id は後付け migration) | VideoManual 従属 |
 | `Take` | AI-CUE: 撮影素材 (Tier B schema 先取り。(cut_id, client_take_id) UNIQUE = 同期冪等キー) | Cut 従属 |
 | `Role` / `Permission` | Laratrust のロール・権限 (seed 固定) | Team スコープ |
@@ -67,7 +68,11 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
 | `Project/ProjectService` | プロジェクト CRUD |
 | `Manual/CategoryService` | AI-CUE: カテゴリ create/update/reorder/delete (Project 行ロックで直列化・sort_order 専有) |
 | `Manual/VideoManualService` | AI-CUE: 動画マニュアル create/updateMeta/delete (created_by サーバ導出・category 保存時再解決) |
-| `Manual/ScenarioService` | AI-CUE: シナリオ (Cut 群) の document 単位保存 (VideoManual 行ロック → rendering/analyzing・楽観ロック guard → 2 段階 reconcile → version+1)。§シナリオ整合の共有不変条件の最初の準拠実装 |
+| `Manual/ScenarioService` | AI-CUE: シナリオ (Cut 群) の document 単位保存 (VideoManual 行ロック → rendering/analyzing・楽観ロック guard → 2 段階 reconcile → version+1) + AI 解析結果の materialize (`materializeIntoLockedManual` = ロック済み前提メソッド)。§シナリオ整合の共有不変条件の準拠実装 |
+| `Manual/SourceDocumentService` | AI-CUE: SOP (SourceDocument) の保存。追記型 immutable (差し替え = 新規行)。専用 route 経路は VideoManual 行ロック + draft/ready guard、MIME は内容 sniff で再判定 (polyglot 対策) |
+| `Manual/AnalysisJobService` | AI-CUE: AI 解析の状態機械 (trigger = draft/ready→analyzing + in-flight 冪等 + 残高事前チェック / failJob = 行ロック + terminal guard の冪等失敗確定 / recoverStale = stale 回復 cron 本体) |
+| `Manual/AnalysisPipeline` | AI-CUE: 解析パイプライン本体 (extract→decompose→generate→terminal tx)。チケット 2 フェーズ (予約冪等キー = analysis_jobs.ticket_reservation_id、materialize + commit + succeeded を単一 tx で原子化)。LLM 出力の有界リトライ (JSON 検証失敗のみ最大 2 回) |
+| `Manual/SopTextExtractor` | AI-CUE: SOP テキスト抽出 (pdf = smalot/pdfparser / xlsx·xls = phpoffice/phpspreadsheet / txt)。UTF-8 strict 検証 + UTF-8 バイト上限 (token budget 導出。AnalysisTokenBudgetInvariantTest が算術を固定) |
 | `Auth/SocialAccountService` | ソーシャルログイン連携 |
 | `Billing/BillingAccess` | 課金ゲート判定 (`subscription('default')` が active/trialing なら許可)。**課金による利用可否の判定は本クラス経由のみ** (アプリは本クラスの差し替えで gate 方針を変更する)。適用は `require-active-subscription` middleware (業務 route group。billing / webhook は構造的 allowlist) |
 | `Billing/QuotaService` | quota の消費・検証 |
@@ -93,12 +98,31 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
   シナリオ書き込みに無関係のため、直列化粒度を manual に意図的に絞る)。
   親 relation 経由の再解決 (`$project->manuals()->whereKey(...)->lockForUpdate()`) で
   「子は親に属する」も同時に担保する
-- 現在の準拠実装は `Manual/ScenarioService::save()` のみ。後続フェーズの
-  **AI 解析 job の Cut materialize / RenderJob の状態遷移 / テイク採用 API** も本規約に従うこと
+- 準拠実装 (メソッド粒度の経路 inventory。`ScenarioWritePathInventoryTest` が
+  deny-by-default の token 走査で機械検証する = **Architecture テストへ昇格済み**):
+
+  | 経路 | 書いてよいもの |
+  |---|---|
+  | `ScenarioService::save()` | cuts / scenario_version / status (rendering·analyzing guard 付き) |
+  | `ScenarioService::materializeIntoLockedManual()` | cuts / scenario_version / status (analyzing→ready のみ。呼び出しは AnalysisPipeline::finalize の terminal tx に限定) |
+  | `AnalysisJobService::trigger()` | status (draft·ready→analyzing のみ) |
+  | `AnalysisJobService::failJob()` | status (analyzing→ready·draft のみ。cuts 有無で決定) |
+
+  後続フェーズの **RenderJob の状態遷移 / テイク採用 API** も本規約 + inventory 登録に従うこと
 - 状態 guard (rendering/analyzing 中の保存は 409) は第一防衛、共有行ロックは
   「job 側の書き込みと保存が絶対に交差しない」ための構造的防衛 (二重防御)
-- **書き込み経路が 2 つ以上になった時点で、経路 inventory を持つ Architecture テストへ昇格させる**
-  (現時点は経路が 1 つで機械検証対象がないためテスト化は見送り = 過剰設計回避)
+
+### AI 解析ジョブの運用契約
+
+- 解析ジョブ (`RunManualAnalysis`) は専用 queue connection **`database-analysis`**
+  (queue=analysis、retry_after=1560) で流れる。**本番/ステージングの worker プロセス定義・
+  デプロイ手順・監視対象に `php artisan queue:work database-analysis` を必須項目として登録する**
+  (専用 worker が居ないとジョブは滞留する。queued 滞留は `analysis:recover-stale-jobs` cron が
+  30 分で failJob するため、滞留 = 監視で気づける)
+- 時間 budget の連鎖 `job timeout (1,380s) < retry_after (1,560s) < 予約 TTL (1,800s) ≤ stale 閾値 (1,800s)`
+  は `AnalysisTimeBudgetInvariantTest` が CI 固定する
+- ローカル/テストの検証: パイプラインの同期実行は `AnalysisPipeline::run()` の直接呼び出し、
+  dispatch の検証は `Queue::fake()` (sync ドライバの自動実行には依存しない)
 
 ## 公開面
 

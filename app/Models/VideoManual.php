@@ -87,4 +87,14 @@ class VideoManual extends Model
     {
         return $this->hasMany(Cut::class);
     }
+
+    /**
+     * AI 解析ジョブ (route param {analysisJob} の scopeBindings 推論と一致する relation 名)。
+     *
+     * @return HasMany<AnalysisJob, $this>
+     */
+    public function analysisJobs(): HasMany
+    {
+        return $this->hasMany(AnalysisJob::class);
+    }
 }

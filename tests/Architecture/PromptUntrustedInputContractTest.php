@@ -3,6 +3,9 @@
 declare(strict_types=1);
 
 use App\Prompts\ExampleSummaryPrompt;
+use App\Prompts\ScenarioGenerationPrompt;
+use App\Prompts\SopExtractPrompt;
+use App\Prompts\WorkDecompositionPrompt;
 use Kent013\PrismPrompt\Prompt;
 use Kent013\PrismPrompt\Values\UserInput;
 
@@ -32,6 +35,19 @@ function promptUntrustedInputInventory(): array
         ExampleSummaryPrompt::class => [
             ['text'],
             fn (): Prompt => ExampleSummaryPrompt::make('untrusted end-user text'),
+        ],
+        // AI 解析 3 段 (SOP 由来の untrusted テキスト/JSON は全段 UserInput 経由)
+        SopExtractPrompt::class => [
+            ['text'],
+            fn (): Prompt => SopExtractPrompt::make('untrusted sop text'),
+        ],
+        WorkDecompositionPrompt::class => [
+            ['extracted'],
+            fn (): Prompt => WorkDecompositionPrompt::make('{"sections":[]}'),
+        ],
+        ScenarioGenerationPrompt::class => [
+            ['decomposition'],
+            fn (): Prompt => ScenarioGenerationPrompt::make('{"steps":[]}'),
         ],
     ];
 }

@@ -19,9 +19,11 @@ use App\Http\Controllers\Organizations\OrganizationOwnershipController;
 use App\Http\Controllers\Organizations\OrganizationSwitchController;
 use App\Http\Controllers\Projects\CategoryController;
 use App\Http\Controllers\Projects\ItemController;
+use App\Http\Controllers\Projects\ManualAnalysisController;
 use App\Http\Controllers\Projects\ManualScenarioController;
 use App\Http\Controllers\Projects\ProjectController;
 use App\Http\Controllers\Projects\ProjectMemberController;
+use App\Http\Controllers\Projects\SourceDocumentController;
 use App\Http\Controllers\Projects\VideoManualController;
 use App\Http\Controllers\Seo\AiTxtController;
 use App\Http\Controllers\Seo\LlmsTxtController;
@@ -365,6 +367,15 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
             // project.in-current-org middleware + controller inline guard の 2 層 (既存 group が担保)
             Route::put('/projects/{project}/manuals/{manual}/scenario', [ManualScenarioController::class, 'update'])
                 ->name('projects.manuals.scenario.update');
+            // SOP アップロード (追記型 immutable。差し替え = 新規行。doc/10 §10.3)
+            Route::post('/projects/{project}/manuals/{manual}/source-documents', [SourceDocumentController::class, 'store'])
+                ->name('projects.manuals.source-documents.store');
+            // AI 解析トリガー (残高事前チェック→job 投入。同一オリジン XHR/JSON。doc/10 §10.3, §10.8-8)
+            Route::post('/projects/{project}/manuals/{manual}/analyze', [ManualAnalysisController::class, 'store'])
+                ->name('projects.manuals.analyze');
+            // job 状態ポーリング ({analysisJob} は $manual->analysisJobs() 経由 = cross-manual 404)
+            Route::get('/projects/{project}/manuals/{manual}/jobs/{analysisJob}', [ManualAnalysisController::class, 'show'])
+                ->name('projects.manuals.jobs.show');
             Route::delete('/projects/{project}/manuals/{manual}', [VideoManualController::class, 'destroy'])
                 ->name('projects.manuals.destroy');
         });

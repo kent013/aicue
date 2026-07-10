@@ -19,6 +19,7 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use LogicException;
 use Webmozart\Assert\Assert;
 
 /**
@@ -94,6 +95,51 @@ class ScenarioService
 
             return ScenarioDocumentData::fromManual($locked);
         });
+    }
+
+    /**
+     * AI 解析結果の materialize (共有ロック規約の第 2 の書き込み経路。概念設計 §5)。
+     *
+     * **ロック済み前提メソッド**: transaction / lockForUpdate は呼び出し側 (AnalysisPipeline::
+     * finalize の terminal tx) が最外層で張る。本メソッドは内側 transaction を張らない
+     * (transaction/lock の層を 1 箇所に統一しロック順逆転を構造的に防ぐ)。
+     * 前提の担保は 2 層 (PHPDoc 前提だけに依存しない):
+     *  1. 呼び出し経路の構造的限定: 呼び出し元は AnalysisPipeline のみ
+     *     (ScenarioWritePathInventoryTest が deny-by-default で機械検証する)
+     *  2. runtime 検査 (defensive): tx 外呼び出し / analyzing 以外は LogicException
+     *     (terminal tx ごと rollback → failJob)
+     *
+     * - 既存 cuts 全削除 → 生成ツリー挿入 (再解析は全置換)。sort_order/parent/type はサーバ導出
+     * - version+1 と status(analyzing→ready) を cuts と同一 tx で反映 (共有ロック規約)
+     *
+     * @param  list<ScenarioStepInput>  $steps
+     */
+    public function materializeIntoLockedManual(VideoManual $lockedManual, array $steps): void
+    {
+        if (DB::transactionLevel() === 0) {
+            throw new LogicException('materialize はロック済みトランザクション内からのみ呼び出せます');
+        }
+        if ($lockedManual->status !== VideoManualStatus::Analyzing) {
+            throw new LogicException('materialize は analyzing 中のみ実行できます');
+        }
+
+        // 全置換 (save() と同じ理由で bulk delete を避ける。配下 Take は FK cascade)
+        $lockedManual->cuts()->get()->each->delete();
+
+        $changed = true; // 生成は常に実変更 (upsertCut の isDirty 追跡は新規行で必ず true)
+        foreach ($steps as $stepIndex => $stepInput) {
+            /** @var Collection<int, Cut> $noExisting */
+            $noExisting = new Collection;
+            $step = $this->upsertCut($lockedManual, $noExisting, $stepInput, CutType::Step, null, $stepIndex, $changed);
+            foreach ($stepInput->points as $pointIndex => $pointInput) {
+                $this->upsertCut($lockedManual, $noExisting, $pointInput, CutType::Point, $step->id, $pointIndex, $changed);
+            }
+        }
+
+        $lockedManual->forceFill([
+            'scenario_version' => $lockedManual->scenario_version + 1,
+            'status' => VideoManualStatus::Ready,
+        ])->save();
     }
 
     /**

@@ -10,6 +10,7 @@ use App\DataTransferObjects\Manual\ScenarioStepInput;
 use App\Enums\Manual\MaterialType;
 use App\Enums\Manual\ShotType;
 use App\Http\Requests\Concerns\ProhibitsProtectedKeys;
+use App\Support\Manual\ScenarioLimits;
 use App\Support\Security\MassAssignmentProtectedKeys;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -28,11 +29,6 @@ use Webmozart\Assert\Assert;
 class UpdateScenarioRequest extends FormRequest
 {
     use ProhibitsProtectedKeys;
-
-    /** 有界入力 (DoS guard)。仕様確定までの暫定値 */
-    private const int MAX_STEPS = 100;
-
-    private const int MAX_POINTS_PER_STEP = 20;
 
     public function authorize(): bool
     {
@@ -82,10 +78,10 @@ class UpdateScenarioRequest extends FormRequest
         return array_merge(
             [
                 'expected_version' => ['required', 'integer', 'min:0'],
-                'steps' => ['present', 'array', 'max:'.self::MAX_STEPS],
+                'steps' => ['present', 'array', 'max:'.ScenarioLimits::MAX_STEPS],
                 // points キー欠落はクライアント直列化バグ。行単位で明示エラーにする
                 'steps.*' => ['array', 'required_array_keys:points'],
-                'steps.*.points' => ['present', 'array', 'max:'.self::MAX_POINTS_PER_STEP],
+                'steps.*.points' => ['present', 'array', 'max:'.ScenarioLimits::MAX_POINTS_PER_STEP],
                 'steps.*.points.*' => ['array'],
             ],
             $this->cutRowRules('steps.*'),

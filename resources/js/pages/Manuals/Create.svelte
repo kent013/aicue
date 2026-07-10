@@ -10,9 +10,9 @@
     import type { CategoryOption } from "@/types/manual";
 
     /**
-     * 動画マニュアル作成 (タイトル + カテゴリ)。
+     * 動画マニュアル作成 (タイトル + カテゴリ + 任意の手順書アップロード)。
      * カテゴリの入力名は保護キー category_id と別名の `category` (id 値)。
-     * 空選択 = 未分類 (null で送信)。
+     * 空選択 = 未分類 (null で送信)。document は multipart で任意送信。
      */
     interface Props {
         project: { id: number; name: string };
@@ -24,13 +24,23 @@
     const shared = $derived(page.props as unknown as SharedProps);
     const appName = $derived(shared.appName ?? "");
 
-    const form = useForm({ title: "", category: "" });
+    const form = useForm<{ title: string; category: string; document: File | null }>({
+        title: "",
+        category: "",
+        document: null,
+    });
+
+    function onFileChange(event: Event): void {
+        const input = event.currentTarget as HTMLInputElement;
+        form.document = input.files?.[0] ?? null;
+    }
 
     function submit(event: SubmitEvent): void {
         event.preventDefault();
         form.transform((data) => ({
             title: data.title,
             category: data.category === "" ? null : Number(data.category),
+            document: data.document,
         })).post(`/projects/${project.id}/manuals`);
     }
 </script>
@@ -69,6 +79,25 @@
                                 <option value={String(category.id)}>{category.name}</option>
                             {/each}
                         </Select>
+                    {/snippet}
+                </FormField>
+                <FormField
+                    label="手順書 (SOP・任意)"
+                    id="manual-document"
+                    error={form.errors.document}
+                    help="PDF / Excel / テキスト。アップロードすると AI 解析でシナリオを生成できます。"
+                >
+                    {#snippet children({ id, describedBy, invalid })}
+                        <input
+                            {id}
+                            type="file"
+                            accept=".pdf,.xlsx,.xls,.txt"
+                            onchange={onFileChange}
+                            aria-describedby={describedBy}
+                            aria-invalid={invalid}
+                            class="block w-full text-body text-text file:mr-3 file:rounded-md file:border file:border-border file:bg-surface file:px-3 file:py-1.5 file:text-caption file:text-text"
+                            data-testid="manual-document-input"
+                        />
                     {/snippet}
                 </FormField>
                 <div class="flex items-center gap-2">

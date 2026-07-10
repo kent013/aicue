@@ -12,6 +12,7 @@ const baseProps = {
         category: { id: 2, name: "仕上げ" },
         created_at: "2026-07-10 12:00",
     },
+    analysis: { job: null, hasDocument: false },
     canManage: true,
 };
 
@@ -47,5 +48,42 @@ describe("Manuals/Show", () => {
 
         expect(screen.queryByTestId("edit-manual-button")).toBeNull();
         expect(screen.queryByTestId("delete-manual-button")).toBeNull();
+    });
+
+    it("canManage=true (draft) は AI 解析ボタンと手順書アップロード導線を表示する", () => {
+        render(Show, { props: baseProps });
+
+        expect(screen.getByTestId("analyze-button")).toBeInTheDocument();
+        expect(screen.getByTestId("source-document-upload")).toBeInTheDocument();
+    });
+
+    it("canManage=false は解析ボタン・アップロード導線を表示しない", () => {
+        render(Show, { props: { ...baseProps, canManage: false } });
+
+        expect(screen.queryByTestId("analyze-button")).toBeNull();
+        expect(screen.queryByTestId("source-document-upload")).toBeNull();
+    });
+
+    it("analyzing 中は進捗を表示し、アップロード導線は出さない (draft/ready のみ)", () => {
+        render(Show, {
+            props: {
+                ...baseProps,
+                manual: { ...baseProps.manual, status: "analyzing" as VideoManualStatus },
+                analysis: {
+                    job: {
+                        id: 9,
+                        status: "running" as const,
+                        step: "extract" as const,
+                        progress: 10,
+                        error: null,
+                        manual_status: "analyzing" as VideoManualStatus,
+                    },
+                    hasDocument: true,
+                },
+            },
+        });
+
+        expect(screen.queryByTestId("source-document-upload")).toBeNull();
+        expect(screen.getByTestId("analysis-progress")).toBeInTheDocument();
     });
 });

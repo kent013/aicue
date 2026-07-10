@@ -40,4 +40,13 @@ describe("Manuals/Create", () => {
         expect(screen.getByRole("option", { name: "未分類" })).toBeInTheDocument();
         expect(screen.queryByRole("option", { name: "準備作業" })).toBeNull();
     });
+
+    it("手順書 (SOP) のファイル入力を描画する (任意・accept 制限付き)", () => {
+        render(Create, { props: baseProps });
+
+        const input = screen.getByTestId("manual-document-input");
+        expect(input).toBeInTheDocument();
+        expect(input.getAttribute("type")).toBe("file");
+        expect(input.getAttribute("accept")).toBe(".pdf,.xlsx,.xls,.txt");
+    });
 });

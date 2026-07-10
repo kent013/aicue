@@ -6,6 +6,7 @@ namespace App\Services\Manual;
 
 use App\Models\Project;
 use App\Models\VideoManual;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -19,10 +20,14 @@ use Illuminate\Support\Facades\DB;
  */
 class VideoManualService
 {
-    /** VideoManual 作成 (status は DB default の draft)。 */
-    public function create(Project $project, string $title, ?int $categoryId, int $userId): VideoManual
+    public function __construct(
+        private readonly SourceDocumentService $sourceDocuments,
+    ) {}
+
+    /** VideoManual 作成 (status は DB default の draft)。$document は任意の SOP 同時アップロード */
+    public function create(Project $project, string $title, ?int $categoryId, int $userId, ?UploadedFile $document = null): VideoManual
     {
-        return DB::transaction(function () use ($project, $title, $categoryId, $userId): VideoManual {
+        return DB::transaction(function () use ($project, $title, $categoryId, $userId, $document): VideoManual {
             $locked = Project::whereKey($project->id)->lockForUpdate()->firstOrFail();
             $manual = $locked->manuals()->make(['title' => $title]);
             $manual->forceFill(['created_by' => $userId])->save();
@@ -30,6 +35,10 @@ class VideoManualService
                 // 保存時再解決: ロック済み project 配下から取得 (cross-project は 404)
                 $category = $locked->categories()->whereKey($categoryId)->firstOrFail();
                 $manual->category()->associate($category)->save();
+            }
+            if ($document !== null) {
+                // 新規 manual は競合なし (状態 guard 不要) のため appendDocument 直呼び
+                $this->sourceDocuments->appendDocument($manual, $document);
             }
 
             return $manual;
