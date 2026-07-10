@@ -20,11 +20,19 @@ class StorageUsageService
      * Quota 判定に渡す占有量 (bytes_used + bytes_pending) の安全合成。
      * 呼び出し側で生の加算をさせない (overflow は上限側に丸める。checkAddition の
      * 事前条件 current >= 0 も本メソッドが保証する)。
+     *
+     * 読み取り順は **pending → used** を維持すること (並行制御上の不変条件):
+     * issue() は Organization 行ロック下で呼ばれるが、テイク登録の finalize
+     * (verifying 予約→Take 確定) は VideoManual ロックしか取らず直列化されない。
+     * READ COMMITTED では 2 本の読み取りの隙間に finalize がコミットしうるため、
+     * used→pending の順だと当該予約が「どちらにも数えられず」過少計上になり
+     * Quota を一時的にバイパスできる。pending→used の順なら同じ競合は
+     * 二重計上 (= 拒否側・安全側) に倒れる。
      */
     public function occupiedBytes(Organization $organization): int
     {
-        $used = $this->bytesUsed($organization);
         $pending = $this->bytesPending($organization);
+        $used = $this->bytesUsed($organization);
 
         return $used > PHP_INT_MAX - $pending ? PHP_INT_MAX : $used + $pending;
     }

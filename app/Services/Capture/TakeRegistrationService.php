@@ -133,6 +133,11 @@ class TakeRegistrationService
      * 確定 tx: VideoManual 行ロック (sort_order 先頭採番の競合防止。cuts は書かない) +
      * 予約 completed 化の CAS (verifying → completed)。CAS 勝者だけが Take を作成する
      * (敗者 = sweeper が先に released 化していた場合は Take を作らず 422)。
+     *
+     * 注意: 本 tx は Organization 行ロックを取らないため issue() の Quota 判定とは
+     * 直列化されない。過少計上を防ぐ担保は StorageUsageService::occupiedBytes() の
+     * pending→used 読み取り順 (同 docblock 参照)。ここで org ロックを追加しないこと
+     * (登録確定が Quota 発行と競合してロック待ちになるのを避ける設計)。
      */
     private function finalize(Project $project, VideoManual $manual, Cut $cut, TakeRegistrationInput $input, TakeUploadReservation $reservation): TakeRegistrationResult
     {

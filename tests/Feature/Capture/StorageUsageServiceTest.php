@@ -74,3 +74,34 @@ test('occupiedBytes = bytes_used + bytes_pending (overflow は PHP_INT_MAX に�
     TakeUploadReservation::factory()->forCut($cut)->create(['size_bytes' => PHP_INT_MAX - 150]);
     expect(app(StorageUsageService::class)->occupiedBytes($organization))->toBe(PHP_INT_MAX);
 });
+
+test('occupiedBytes は pending → used の順で読む (finalize 競合時に二重計上=安全側へ倒す)', function (): void {
+    // READ COMMITTED 下で used→pending の順だと、2 読取の隙間に verifying 予約の
+    // finalize (予約消滅 + Take 出現) がコミットした場合に「どちらにも数えられず」
+    // Quota を過少計上でバイパスできる。pending→used なら同じ競合は二重計上に倒れる。
+    [$organization] = storageUsageContext();
+
+    $service = new class extends StorageUsageService
+    {
+        /** @var list<string> */
+        public array $readOrder = [];
+
+        public function bytesPending(Organization $organization): int
+        {
+            $this->readOrder[] = 'pending';
+
+            return parent::bytesPending($organization);
+        }
+
+        public function bytesUsed(Organization $organization): int
+        {
+            $this->readOrder[] = 'used';
+
+            return parent::bytesUsed($organization);
+        }
+    };
+
+    $service->occupiedBytes($organization);
+
+    expect($service->readOrder)->toBe(['pending', 'used']);
+});

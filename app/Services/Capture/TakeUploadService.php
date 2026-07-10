@@ -53,7 +53,9 @@ class TakeUploadService
             $lockedCut = $lockedManual->cuts()->whereKey($cut->id)->firstOrFail();
 
             // Quota: bytes_used + bytes_pending + size が上限を超えるなら 422 (QuotaExceededException)。
-            // 加算合成は occupiedBytes() (overflow 安全) に委譲し、呼び出し側で生加算しない
+            // 加算合成は occupiedBytes() (overflow 安全) に委譲し、呼び出し側で生加算しない。
+            // occupiedBytes() は pending→used の読み取り順が並行制御上の不変条件
+            // (finalize は org ロックを取らないため。StorageUsageService の docblock 参照)
             $this->quota->checkAddition(
                 $lockedOrg,
                 QuotaKey::MaxStorageBytes,
