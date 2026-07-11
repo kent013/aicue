@@ -116,6 +116,11 @@ class DashboardService
         /** @var list<int> $manualIds */
         $manualIds = $manuals->pluck('id')->all();
 
+        // 進行中マニュアルが 0 件なら job クエリ 2 本を省略する
+        if ($manualIds === []) {
+            return [];
+        }
+
         // keyBy('video_manual_id') + orderBy('id') 昇順取得 → 最終要素が最新 (keyBy は後勝ち)
         /** @var Collection<int, AnalysisJob> $analysisJobs */
         $analysisJobs = AnalysisJob::query()
@@ -218,7 +223,7 @@ class DashboardService
         $limit = $this->quota->limits($organization)[QuotaKey::MaxStorageBytes->value] ?? null;
         $percent = ($limit === null || $limit <= 0)
             ? null
-            : (int) min(100, floor($used / $limit * 100));
+            : (int) max(0, min(100, floor($used / $limit * 100)));
 
         return new BillingSummaryData(
             ticketBalance: $balance,

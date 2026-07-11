@@ -92,6 +92,23 @@ test('進行中ジョブ: preview の RenderJob は引き当てない (job_statu
             ->where('dashboard.in_progress.0.progress', null));
 });
 
+test('進行中ジョブ: failed の job は引き当てない (queued/running のみが契約)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+    $analyzing = VideoManual::factory()->forProject($project)->create([
+        'status' => VideoManualStatus::Analyzing->value,
+    ]);
+    AnalysisJob::factory()->forManual($analyzing)->failed()->create();
+
+    // manual 行は残る (状態カード) が、failed job は進行中扱いにしない
+    $this->actingAs($owner)->get('/dashboard')
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('dashboard.in_progress', 1)
+            ->where('dashboard.in_progress.0.manual_id', $analyzing->id)
+            ->where('dashboard.in_progress.0.job_status', null)
+            ->where('dashboard.in_progress.0.progress', null));
+});
+
 test('進行中ジョブ: progress は 0-100 に clamp される', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $project = Project::factory()->forOrganization($organization)->create();
@@ -214,6 +231,20 @@ test('容量: takes.size_bytes 合計と limit から storage_usage_percent が�
             ->where('dashboard.billing.storage_used_bytes', 250)
             ->where('dashboard.billing.storage_limit_bytes', 1_000)
             ->where('dashboard.billing.storage_usage_percent', 25));
+});
+
+test('容量: storage_usage_percent は 0-100 に clamp される (不正データで負値にしない)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $organization->quota()->create(['limits' => ['max_storage_bytes' => 1_000]]);
+    $project = Project::factory()->forOrganization($organization)->create();
+    $manual = VideoManual::factory()->forProject($project)->create();
+    $cut = Cut::factory()->forManual($manual)->create();
+    // データ不整合 (負の size_bytes) が起きても percent は 0 に丸める防御的契約
+    Take::factory()->forCut($cut)->create(['size_bytes' => -500]);
+
+    $this->actingAs($owner)->get('/dashboard')
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('dashboard.billing.storage_usage_percent', 0));
 });
 
 test('容量: pending 予約 (未失効) の bytes_pending が加算される', function (): void {
