@@ -73,7 +73,9 @@ test('組織設定画面はメンバー一覧と自分のロールを返す', fu
             ->where('organization.slug', $organization->slug)
             ->where('currentUserRole', OrganizationRole::Owner->value)
             ->has('members', 2)
-            ->has('invitations', 0),
+            // メンバー管理はユーザー管理画面へ移設済み: settings は最小 shape (id/name) のみ
+            ->missing('invitations')
+            ->missing('members.0.email'),
     );
 });
 

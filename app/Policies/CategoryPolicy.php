@@ -21,6 +21,16 @@ class CategoryPolicy
         private readonly ProjectPolicy $projectPolicy,
     ) {}
 
+    /**
+     * カテゴリ管理画面 (専用 index) の閲覧: プロジェクトを操作できる人 (= 編集者以上)。
+     * 撮影者の read は一覧 props (projects.show / capture) 経由であり、管理画面には入れない。
+     * 対象 Category が無いため Project を追加引数に取る (create/reorder と同じシグネチャ規約)。
+     */
+    public function viewAny(User $user, Project $project): bool
+    {
+        return $this->projectPolicy->update($user, $project);
+    }
+
     /** 閲覧: プロジェクトを閲覧できる人 */
     public function view(User $user, Category $category): bool
     {

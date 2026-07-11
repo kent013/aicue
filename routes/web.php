@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Admin\UserManagementController;
 use App\Http\Controllers\Auth\ConfirmRecentAuthController;
 use App\Http\Controllers\Auth\SocialAuthController;
 use App\Http\Controllers\Billing\BillingController;
@@ -239,6 +240,15 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         ->name('organizations.transfer-ownership');
 
     /*
+    | 管理メニュー (doc/04 §4.2 管理者専用)。ユーザー管理は org メンバー管理の専用画面
+    | (書き込みは既存 organizations.* endpoint)。/admin/* は Filament panel が占有するため /manage/*。
+    | org 管理系として課金ゲート外 (未契約でもメンバー整理可能 = organizations.members.* と整合)。
+    | /manage/ 配下の route は auth+verified 必須 (ManageRouteAuthGuardTest が deny-by-default で強制)。
+    */
+    Route::get('/manage/users', [UserManagementController::class, 'index'])
+        ->name('manage.users.index');
+
+    /*
     | API キー (org スコープ。manageApiKeys = owner / admin)。
     | 平文キーは発行直後の flash 経由 1 度きり表示。{apiKey} は scopeBindings で
     | $organization->apiKeys() 経由の解決 (不整合は認可より前に 404。
@@ -344,6 +354,9 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         // reorder は {category} を取らない ({project} のみ = 1 param) ため IDOR inventory 対象外。
         // {category} は scopeBindings で $project->categories() 経由の解決
         // (子→親不整合は認可より前に 404。NestedRouteIdorDefenseTest 登録済み)
+        // カテゴリ管理画面 (管理メニュー。一覧表示のみ。write は下記既存 route)
+        Route::get('/projects/{project}/categories', [CategoryController::class, 'index'])
+            ->name('projects.categories.index');
         Route::post('/projects/{project}/categories', [CategoryController::class, 'store'])
             ->name('projects.categories.store');
         Route::patch('/projects/{project}/categories/reorder', [CategoryController::class, 'reorder'])

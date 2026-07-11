@@ -215,3 +215,46 @@ checksum query の存在を固定し、`TakeRegistrationTest` が三点照合の
 
 - 実装: `app/Services/Manual/RenderJobService.php` (triggerPreview)
 - 設計: `devnotes/20260711-0549-render/detailed-design.md` 施策 4 テスト計画
+
+---
+
+## D8 ✅ 管理メニューのユーザー管理 = 招待一本化 + 遷移コマンドロール + Settings からの UI 移設
+
+| 観点 | テンプレート | 本アプリ |
+|---|---|---|
+| メンバー管理 UI | `Organizations/Settings.svelte` に組織設定と同居 | 管理メニュー専用画面 `Admin/Users` (GET `/manage/users`) へ移設。Settings は組織設定 (名称 / 2FA 方針 / API キー導線 / オーナー移譲) のみ |
+| ロールの語彙 | org ロール直接指定 (`organization_admin` / `organization_member`) | **3 値遷移コマンド** (`AdminConsoleRole`: admin/editor/shooter)。org ロール + Default Project pivot への「正規状態への遷移」を 1 tx で適用 (`applyConsoleRole`)。表示は導出 5 値 (`MemberRoleState`: owner/admin/editor/shooter/unassigned) |
+| 招待 | org ロールのみ | `organization_invitations.project_role` (nullable・forceFill 専有) を追加し、受諾時に Default Project へ pivot attach。旧行 (null) は従来どおり org 参加のみ |
+| settings() props | members に email / role / twoFactorStatus | members は `{id, name}` に縮小 (オーナー移譲 select 用途のみ = PII 最小化)。invitations prop は撤去 |
+| ユーザー作成 | (doc/04 レガシーモック: 管理者がパスワード直接発行・平文一覧表示) | **招待一本化** (ユーザー ID → email へマッピング)。パスワードは本人設定のみ |
+
+### なぜ正当な差分か (logic-driven)
+
+doc/04 §4.2 (管理メニュー) + doc/02 §2.5 (管理者/一般の分離) + doc/10 §10.5
+(project_admin=編集者 / project_member=撮影者) を、テンプレの org メンバー基盤の上に
+「org ロール + Default Project pivot の合成」で実現するため。doc/04 レガシーモックの
+直接発行・平文パスワード表示はセキュリティ不変条件 (PasswordPolicy / CipherSweet) と
+衝突するため招待一本化に reconcile した。ロールを保存概念にしない (毎リクエスト導出) ことで
+backfill 不要・非正規状態 (未割当 / stale pivot) の可視化と修復が可能になる。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「招待 token は hash-only 保存 / 重複は中立メッセージ / 権限判定は laratrust_team_id 明示 /
+> Owner 昇格は transferOwnership のみ / PII 可視性は manageMembers 到達境界 (403)」
+
+- Owner は `AdminConsoleRole` の enum 外 = 型で構造的に指定不可
+- project_role はクライアント payload から受けない (role コマンドからサーバ導出 + forceFill。
+  `ProhibitsProtectedKeys` は入口で保護キーを missing 強制)
+- pivot 書き込み経路は `OrganizationMembershipService` / `ProjectMemberController` に閉じる
+  (**`ProjectMemberPivotWritePathTest`** が deny-by-default で強制)
+- `/manage/` 配下 route の auth+verified は **`ManageRouteAuthGuardTest`** が deny-by-default で強制
+- drift 防止テスト: `ConsoleRoleTransitionTest` / `UserManagementPageTest` /
+  `OrganizationsSettings.test.ts` (メンバー管理 UI 不在の回帰封じ)
+
+### 関連
+
+- 実装: `app/Enums/AdminConsoleRole.php` / `app/Enums/MemberRoleState.php` /
+  `app/Services/Organization/OrganizationMembershipService.php` /
+  `app/Services/Project/DefaultProjectResolver.php` /
+  `app/Http/Controllers/Admin/UserManagementController.php`
+- 設計: `devnotes/20260711-1009-admin-console/` (概念設計 D1/D2/D6・詳細設計 施策 1〜7)

@@ -11,15 +11,18 @@ use App\Http\Requests\Projects\StoreCategoryRequest;
 use App\Http\Requests\Projects\UpdateCategoryRequest;
 use App\Models\Category;
 use App\Models\Project;
+use App\Models\User;
 use App\Services\Manual\CategoryService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Inertia\Inertia;
+use Inertia\Response;
 use Webmozart\Assert\Assert;
 
 /**
- * Category (Project 配下の動画マニュアル分類) の書き込み操作。
- * 一覧表示は Projects/Show が担うため Index / Show アクションは持たない。
+ * Category (Project 配下の動画マニュアル分類) の管理画面 (index) と書き込み操作。
+ * 一覧表示はカテゴリ管理画面 (Admin/Categories) が担う (Projects/Show はフィルタ select のみ)。
  *
  * nested route の URL 整合は 2 層 (Item 見本と同じ):
  * 1. {project} ∈ current org (resolveOrganizationProject = inline guard)
@@ -31,6 +34,31 @@ use Webmozart\Assert\Assert;
 class CategoryController extends Controller
 {
     use ResolvesCurrentOrganization;
+
+    /** カテゴリ管理画面 (doc/04 §4.2。追加・編集・削除・▲▼ は既存 write endpoint を使う) */
+    public function index(Request $request, Project $project): Response
+    {
+        $organization = $this->resolveCurrentOrganization($request);
+        // URL 整合 guard: 認可より前に 404 (cross-org の存在を漏らさない)
+        $this->resolveOrganizationProject($organization, $project);
+        Gate::authorize('viewAny', [Category::class, $project]);
+
+        $user = $request->user();
+        Assert::isInstanceOf($user, User::class);
+
+        return Inertia::render('Admin/Categories', [
+            'project' => ['id' => $project->id, 'name' => $project->name],
+            // sort_order 順 (▲▼ の表示順 = 動画一覧の並び順と同一規約)
+            'categories' => array_values($project->categories()->orderBy('sort_order')->get()
+                ->map(fn (Category $category): array => [
+                    'id' => $category->id,
+                    'name' => $category->name,
+                ])
+                ->all()),
+            // 管理メニュー nav: ユーザー管理リンク (org 管理者のみ。can 連動。route helper で生成)
+            'usersUrl' => $user->can('manageMembers', $organization) ? route('manage.users.index') : null,
+        ]);
+    }
 
     /** Category 作成。project_id は URL から導出し relation 経由で代入する (payload では 422) */
     public function store(StoreCategoryRequest $request, Project $project, CategoryService $categories): RedirectResponse

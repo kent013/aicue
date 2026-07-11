@@ -1,6 +1,5 @@
 <script lang="ts">
     import { page, router, useForm } from "@inertiajs/svelte";
-    import { ChevronDown, ChevronUp } from "@lucide/svelte";
     import Badge from "@/components/atoms/Badge.svelte";
     import Button from "@/components/atoms/Button.svelte";
     import Card from "@/components/atoms/Card.svelte";
@@ -39,12 +38,15 @@
         project: { id: number; name: string; description: string | null };
         items: Item[];
         canManage: boolean;
+        /** 管理メニュー > ユーザー管理への導線を出すか (org owner/admin。単一根拠は Gate) */
+        canManageMembers: boolean;
         manuals: { data: ManualListItem[]; meta: PaginationMeta };
         categories: CategoryOption[];
         manualFilters: ManualFilters;
     }
 
-    let { project, items, canManage, manuals, categories, manualFilters }: Props = $props();
+    let { project, items, canManage, canManageMembers, manuals, categories, manualFilters }: Props =
+        $props();
 
     const shared = $derived(page.props as unknown as SharedProps);
     const appName = $derived(shared.appName ?? "");
@@ -90,77 +92,6 @@
             preserveScroll: true,
             only: ["manuals", "manualFilters"],
         });
-    }
-
-    /* ---- カテゴリ管理 ---- */
-    const addCategoryForm = useForm({ name: "" });
-
-    function submitAddCategory(event: SubmitEvent): void {
-        event.preventDefault();
-        addCategoryForm.post(`/projects/${project.id}/categories`, {
-            preserveScroll: true,
-            onSuccess: () => {
-                addCategoryForm.reset();
-            },
-        });
-    }
-
-    let editCategoryTarget = $state<CategoryOption | null>(null);
-    let editCategoryModalOpen = $state(false);
-    const editCategoryForm = useForm({ name: "" });
-
-    function openEditCategoryModal(category: CategoryOption): void {
-        editCategoryTarget = category;
-        editCategoryForm.name = category.name;
-        editCategoryForm.clearErrors();
-        editCategoryModalOpen = true;
-    }
-
-    function submitEditCategory(event: SubmitEvent): void {
-        event.preventDefault();
-        if (editCategoryTarget === null) return;
-        editCategoryForm.patch(`/projects/${project.id}/categories/${editCategoryTarget.id}`, {
-            preserveScroll: true,
-            onSuccess: () => {
-                editCategoryModalOpen = false;
-            },
-        });
-    }
-
-    let removeCategoryTarget = $state<CategoryOption | null>(null);
-    let removeCategoryDialogOpen = $state(false);
-    let removingCategory = $state(false);
-
-    function openRemoveCategoryDialog(category: CategoryOption): void {
-        removeCategoryTarget = category;
-        removeCategoryDialogOpen = true;
-    }
-
-    function removeCategory(): void {
-        if (removeCategoryTarget === null) return;
-        router.delete(`/projects/${project.id}/categories/${removeCategoryTarget.id}`, {
-            preserveScroll: true,
-            onStart: () => {
-                removingCategory = true;
-            },
-            onFinish: () => {
-                removingCategory = false;
-                removeCategoryDialogOpen = false;
-            },
-        });
-    }
-
-    /** 並べ替え: index の要素を direction (±1) 方向へ入れ替えた id 順序配列を送る */
-    function moveCategory(index: number, direction: -1 | 1): void {
-        const target = index + direction;
-        if (target < 0 || target >= categories.length) return;
-        const order = categories.map((category) => category.id);
-        [order[index], order[target]] = [order[target], order[index]];
-        router.patch(
-            `/projects/${project.id}/categories/reorder`,
-            { order },
-            { preserveScroll: true },
-        );
     }
 
     /* ---- Item 追加 ---- */
@@ -370,96 +301,31 @@
             {/if}
         </Card>
 
-        {#if canManage}
+        {#if canManage || canManageMembers}
             <Card padding="lg">
-                <h2 class="text-h3">カテゴリ管理</h2>
+                <h2 class="text-h3">管理メニュー</h2>
                 <p class="mt-1 text-caption text-text-secondary">
-                    動画マニュアルの分類に使うカテゴリを管理します。削除したカテゴリの動画は未分類になります。
+                    管理者向けの管理画面への導線です。権限のある項目のみ表示されます。
                 </p>
-                {#if categories.length === 0}
-                    <EmptyState
-                        description="カテゴリはまだありません。追加すると動画マニュアルを分類できます。"
-                        testId="categories-empty"
-                    />
-                {:else}
-                    <ul
-                        class="mt-4 flex flex-col divide-y divide-border"
-                        data-testid="category-list"
-                    >
-                        {#each categories as category, index (category.id)}
-                            <li class="flex items-center justify-between gap-4 py-3">
-                                <p class="min-w-0 truncate text-body">{category.name}</p>
-                                <div class="flex shrink-0 items-center gap-2">
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        iconOnly
-                                        ariaLabel={`「${category.name}」を上へ移動`}
-                                        onclick={() => moveCategory(index, -1)}
-                                        testId={`move-up-category-${category.id}`}
-                                    >
-                                        <ChevronUp class="size-4" aria-hidden="true" />
-                                    </Button>
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        iconOnly
-                                        ariaLabel={`「${category.name}」を下へ移動`}
-                                        onclick={() => moveCategory(index, 1)}
-                                        testId={`move-down-category-${category.id}`}
-                                    >
-                                        <ChevronDown class="size-4" aria-hidden="true" />
-                                    </Button>
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onclick={() => openEditCategoryModal(category)}
-                                        testId={`edit-category-${category.id}`}
-                                    >
-                                        編集
-                                    </Button>
-                                    <Button
-                                        variant="danger-ghost"
-                                        size="sm"
-                                        onclick={() => openRemoveCategoryDialog(category)}
-                                        testId={`remove-category-${category.id}`}
-                                    >
-                                        削除
-                                    </Button>
-                                </div>
-                            </li>
-                        {/each}
-                    </ul>
-                {/if}
-                <form onsubmit={submitAddCategory} class="mt-4 flex items-start gap-2">
-                    <div class="grow">
-                        <FormField
-                            label="カテゴリ名"
-                            id="category-name"
-                            error={addCategoryForm.errors.name}
-                            required
-                        >
-                            {#snippet children({ id, describedBy, invalid })}
-                                <Input
-                                    {id}
-                                    type="text"
-                                    bind:value={addCategoryForm.name}
-                                    error={invalid}
-                                    aria-describedby={describedBy}
-                                />
-                            {/snippet}
-                        </FormField>
-                    </div>
-                    <div class="pt-6">
-                        <Button
-                            type="submit"
-                            loading={addCategoryForm.processing}
-                            testId="category-submit"
-                        >
-                            追加
-                        </Button>
-                    </div>
-                </form>
+                <ul class="mt-4 flex flex-col gap-2">
+                    {#if canManage}
+                        <li>
+                            <TextLink
+                                href={`/projects/${project.id}/categories`}
+                                testId="link-manage-categories"
+                            >
+                                カテゴリ管理
+                            </TextLink>
+                        </li>
+                    {/if}
+                    {#if canManageMembers}
+                        <li>
+                            <TextLink href="/manage/users" testId="link-manage-users">
+                                ユーザー管理
+                            </TextLink>
+                        </li>
+                    {/if}
+                </ul>
             </Card>
         {/if}
 
@@ -557,59 +423,6 @@
             </DangerZone>
         {/if}
     </div>
-
-    <Modal
-        bind:open={editCategoryModalOpen}
-        title="カテゴリを編集"
-        processing={editCategoryForm.processing}
-        testId="edit-category-modal"
-    >
-        <form onsubmit={submitEditCategory} class="flex flex-col gap-4">
-            <FormField
-                label="カテゴリ名"
-                id="edit-category-name"
-                error={editCategoryForm.errors.name}
-                required
-            >
-                {#snippet children({ id, describedBy, invalid })}
-                    <Input
-                        {id}
-                        type="text"
-                        bind:value={editCategoryForm.name}
-                        error={invalid}
-                        aria-describedby={describedBy}
-                    />
-                {/snippet}
-            </FormField>
-            <div class="flex items-center justify-end gap-2">
-                <Button
-                    variant="ghost"
-                    onclick={() => (editCategoryModalOpen = false)}
-                    disabled={editCategoryForm.processing}
-                >
-                    キャンセル
-                </Button>
-                <Button
-                    type="submit"
-                    loading={editCategoryForm.processing}
-                    testId="edit-category-submit"
-                >
-                    保存
-                </Button>
-            </div>
-        </form>
-    </Modal>
-
-    <ConfirmDialog
-        bind:open={removeCategoryDialogOpen}
-        title="カテゴリ削除"
-        message={`「${removeCategoryTarget?.name ?? ""}」を削除しますか？ このカテゴリの動画マニュアルは未分類になります。`}
-        confirmLabel="削除する"
-        confirmVariant="danger"
-        processing={removingCategory}
-        onConfirm={removeCategory}
-        testId="remove-category-dialog"
-    />
 
     <Modal
         bind:open={editModalOpen}

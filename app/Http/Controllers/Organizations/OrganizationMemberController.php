@@ -8,6 +8,7 @@ use App\Enums\OrganizationRole;
 use App\Enums\SecurityEventType;
 use App\Enums\TwoFactorStatus;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Organizations\UpdateOrganizationMemberRoleRequest;
 use App\Models\Organization;
 use App\Models\User;
 use App\Notifications\User\TwoFactorResetSecurityNotification;
@@ -17,7 +18,6 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Laravel\Fortify\Actions\DisableTwoFactorAuthentication;
 use Webmozart\Assert\Assert;
@@ -29,23 +29,14 @@ use Webmozart\Assert\Assert;
  */
 class OrganizationMemberController extends Controller
 {
-    public function update(Request $request, Organization $organization, User $user, OrganizationMembershipService $membership): RedirectResponse
+    public function update(UpdateOrganizationMemberRoleRequest $request, Organization $organization, User $user, OrganizationMembershipService $membership): RedirectResponse
     {
         // URL 整合 guard: 認可より前に 404 (cross-tenant の存在を漏らさない)
         $this->resolveOrganizationMember($organization, $user);
         Gate::authorize('manageMembers', $organization);
 
-        $request->validate([
-            // Owner への昇格は transferOwnership のみ (ここでは指定不可)
-            'role' => ['required', 'string', Rule::in([
-                OrganizationRole::Admin->value,
-                OrganizationRole::Member->value,
-            ])],
-        ]);
-        $role = $request->input('role');
-        Assert::string($role);
-
-        $membership->changeRole($organization, $user, OrganizationRole::from($role));
+        // 3 値遷移コマンド (admin/editor/shooter)。Owner 指定は enum 外 = 構造的に不可能
+        $membership->applyConsoleRole($organization, $user, $request->role());
 
         return back()->with('success', 'ロールを変更しました');
     }

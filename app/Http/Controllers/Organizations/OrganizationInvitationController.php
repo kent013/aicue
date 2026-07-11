@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Organizations;
 
-use App\Enums\OrganizationRole;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Organizations\StoreOrganizationInvitationRequest;
 use App\Models\Organization;
 use App\Models\OrganizationInvitation;
 use App\Models\User;
@@ -13,37 +13,23 @@ use App\Services\Organization\OrganizationMembershipService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Validation\Rule;
 use Webmozart\Assert\Assert;
 
 /**
- * メンバー招待の送信。
+ * メンバー招待の送信 (3 値遷移コマンド: admin/editor/shooter)。
  * 応答は back + success flash で完結する (画面遷移しない。
  * devnotes/20260611-template-extraction/14 §4: 操作系 POST で intended を使わない)。
  */
 class OrganizationInvitationController extends Controller
 {
-    public function store(Request $request, Organization $organization, OrganizationMembershipService $membership): RedirectResponse
+    public function store(StoreOrganizationInvitationRequest $request, Organization $organization, OrganizationMembershipService $membership): RedirectResponse
     {
         Gate::authorize('manageMembers', $organization);
 
         $user = $request->user();
         Assert::isInstanceOf($user, User::class);
 
-        $request->validate([
-            'email' => ['required', 'string', 'email', 'max:255'],
-            // Owner 招待は不可 (Owner は transferOwnership のみが正規経路)
-            'role' => ['required', 'string', Rule::in([
-                OrganizationRole::Admin->value,
-                OrganizationRole::Member->value,
-            ])],
-        ]);
-        $email = $request->input('email');
-        $role = $request->input('role');
-        Assert::string($email);
-        Assert::string($role);
-
-        $membership->inviteMember($organization, $user, $email, OrganizationRole::from($role));
+        $membership->inviteMember($organization, $user, $request->email(), $request->role());
 
         return back()->with('success', '招待メールを送信しました');
     }

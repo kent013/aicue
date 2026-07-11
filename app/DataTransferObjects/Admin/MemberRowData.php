@@ -1,0 +1,44 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\DataTransferObjects\Admin;
+
+use App\Enums\MemberRoleState;
+use App\Enums\OrganizationRole;
+use App\Enums\ProjectRole;
+use App\Models\User;
+
+/**
+ * ユーザー管理画面 (Admin/Users) のメンバー 1 行分。TS 側 types/admin.ts の MemberRow と対で保守。
+ * 表示状態 (roleState) は org ロール × Default Project pivot から毎回導出する (概念設計 D2(a))。
+ * email は CipherSweet 復号値。本画面は manageMembers 権限者しか到達できない (403) ため
+ * 行レベルの可視性分岐は持たない (PII 可視性は画面到達境界で担保)。
+ */
+final readonly class MemberRowData
+{
+    public function __construct(
+        public int $id,
+        public string $name,
+        public string $email,
+        public string $roleState,       // MemberRoleState value
+        public string $roleLabel,
+        public string $twoFactorStatus, // disabled|pending|enabled
+        public bool $isSelf,
+    ) {}
+
+    public static function fromUser(User $user, ?OrganizationRole $orgRole, ?ProjectRole $projectRole, int $currentUserId): self
+    {
+        $state = MemberRoleState::derive($orgRole, $projectRole);
+
+        return new self(
+            id: $user->id,
+            name: $user->name,
+            email: $user->email,
+            roleState: $state->value,
+            roleLabel: $state->label(),
+            twoFactorStatus: $user->twoFactorStatus()->value,
+            isSelf: $user->id === $currentUserId,
+        );
+    }
+}

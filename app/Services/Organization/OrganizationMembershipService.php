@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace App\Services\Organization;
 
+use App\Enums\AdminConsoleRole;
 use App\Enums\OrganizationRole;
+use App\Enums\ProjectRole;
 use App\Enums\SecurityEventType;
 use App\Models\Organization;
 use App\Models\OrganizationInvitation;
 use App\Models\User;
 use App\Notifications\OrganizationInvitationNotification;
+use App\Services\Project\DefaultProjectResolver;
 use App\Services\Security\SecurityEventRecorder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
@@ -30,14 +33,16 @@ class OrganizationMembershipService
 
     public function __construct(
         private readonly SecurityEventRecorder $recorder,
+        private readonly DefaultProjectResolver $defaultProjects,
     ) {}
 
     /**
-     * メンバー招待。招待レコード生成 + 受諾 URL 付きメール送信。
+     * メンバー招待 (3 値ロールコマンド)。招待レコード生成 + 受諾 URL 付きメール送信。
+     * 編集者/撮影者は Default Project 存在が必須 (不在は ValidationException = Inertia error bag)。
      *
-     * @throws ValidationException 既存メンバー / 有効な既存招待 (中立メッセージ)
+     * @throws ValidationException 既存メンバー / 有効な既存招待 (中立メッセージ) / project 不在
      */
-    public function inviteMember(Organization $organization, User $invitedBy, string $email, OrganizationRole $role): OrganizationInvitation
+    public function inviteMember(Organization $organization, User $invitedBy, string $email, AdminConsoleRole $role): OrganizationInvitation
     {
         if ($this->emailBelongsToMember($organization, $email) || $this->hasPendingInvitation($organization, $email)) {
             // 既存メンバーか既存招待かを開示しない中立メッセージ (アカウント列挙対策)
@@ -46,14 +51,23 @@ class OrganizationMembershipService
             ]);
         }
 
+        // 編集者/撮影者は Default Project が前提 (送信時点の静的確認。受諾時の最終確認は
+        // joinOrganization が resolveForUpdate で行い、不在なら未割当に落とす)
+        if ($role->projectRole() !== null && $this->defaultProjects->resolve($organization) === null) {
+            throw ValidationException::withMessages([
+                'role' => ['編集者・撮影者を招待するには、先にプロジェクトを作成してください。'],
+            ]);
+        }
+
         $plainToken = OrganizationInvitation::generateToken();
 
         $invitation = new OrganizationInvitation(['email' => $email]);
         $invitation->organization()->associate($organization);
         $invitation->invitedBy()->associate($invitedBy);
-        // role / token_hash / expires_at は明示代入 (mass-assignment させない)
+        // role / project_role / token_hash / expires_at は明示代入 (mass-assignment させない)
         $invitation->forceFill([
-            'role' => $role->value,
+            'role' => $role->organizationRole()->value,
+            'project_role' => $role->projectRole()?->value,
             'token_hash' => OrganizationInvitation::hashToken($plainToken),
             'expires_at' => now()->addDays(self::EXPIRES_DAYS),
         ]);
@@ -157,16 +171,119 @@ class OrganizationMembershipService
     }
 
     /**
-     * 招待受諾の確定処理 (attach + ロール付与 + accepted_at)。両受諾経路の共通コア。
+     * 招待受諾の確定処理 (attach + ロール付与 + pivot attach + accepted_at)。両受諾経路の共通コア。
      * accepted_at は $fillable 外のため forceFill で明示代入する。
+     *
+     * 並行受諾への防御は 2 層:
+     * 1. **招待行の lockForUpdate**: 同一招待 (同一トークン二重送信) の並行受諾を直列化し、
+     *    accepted_at / revoked_at / expires_at の判定をロック下で再実行する (TOCTOU 封じ。
+     *    呼び出し元の事前検証は第 1 層として維持)
+     * 2. **organization_user の原子的 INSERT (insertOrIgnore)**: 別招待経由の並行 join
+     *    (同一 user × 同一 org) でも unique 違反にならず、勝った側だけが role/pivot を付与する
+     *    (affected rows = 0 なら join 済みと判断してスキップ)。値はすべてサーバ側モデル由来
+     *    (organization/user は relation 解決済み) で、payload 不信の保護キー規約に反しない。
+     *    organization_user は (organization_id, user_id) UNIQUE + timestamps のみの pivot。
+     *
+     * project_role 付き招待は Default Project (resolveForUpdate = 行ロック) へ pivot attach。
+     * 受諾時に project が消えていた場合は org 参加のみ = 「未割当」表示状態に落ちる (可視 degrade)。
      */
     private function joinOrganization(OrganizationInvitation $invitation, Organization $organization, User $user, OrganizationRole $role): void
     {
         DB::transaction(function () use ($organization, $user, $role, $invitation): void {
-            $organization->users()->attach($user);
-            $user->addRole($role->value, $organization->laratrust_team_id);
-            $invitation->forceFill(['accepted_at' => now()])->save();
+            // 1. 招待行ロック + 受諾可能状態のロック下再検証 (並行受諾に敗れた側は冪等 no-op)
+            /** @var OrganizationInvitation $locked */
+            $locked = OrganizationInvitation::query()->whereKey($invitation->id)->lockForUpdate()->firstOrFail();
+            if ($locked->isAccepted() || $locked->isRevoked() || $locked->isExpired()) {
+                return; // 期限境界の TOCTOU も含めロック下で完全再検証 (敗者は冪等 no-op)
+            }
+
+            // 2. org 参加の原子的 INSERT。0 行 = 別経路で join 済み (role/pivot は変更しない。
+            //    非正規状態が残る場合も「未割当」として可視化され管理画面から修復できる)
+            $joined = DB::table('organization_user')->insertOrIgnore([
+                'organization_id' => $organization->id,
+                'user_id' => $user->getKey(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            if ($joined === 1) {
+                $user->addRole($role->value, $organization->laratrust_team_id);
+
+                $projectRole = $locked->project_role;
+                if ($projectRole instanceof ProjectRole) {
+                    $project = $this->defaultProjects->resolveForUpdate($organization);
+                    $project?->members()->syncWithoutDetaching([
+                        $user->id => ['role' => $projectRole->value],
+                    ]);
+                }
+            }
+
+            $locked->forceFill(['accepted_at' => now()])->save();
         });
+    }
+
+    /**
+     * ロール遷移コマンドの適用 (概念設計 D2(b))。1 トランザクションで最終状態を保証する:
+     * - Admin:   org Admin + org 配下 project pivot detach (stale 掃除)
+     * - Editor:  org Member + Default Project pivot role=project_admin (sync)
+     * - Shooter: org Member + Default Project pivot role=project_member (sync)
+     * changeRole 再利用により非メンバー拒否・最終 Owner 保護を継承する
+     * (DB::transaction のネストは savepoint 扱いのため、changeRole の ValidationException は
+     * そのまま外へ伝播し外側 tx ごと rollback される)。
+     *
+     * @throws ValidationException 非メンバー / 最終 Owner 保護 / Default Project 不在
+     */
+    public function applyConsoleRole(Organization $organization, User $target, AdminConsoleRole $role): void
+    {
+        DB::transaction(function () use ($organization, $target, $role): void {
+            $projectRole = $role->projectRole();
+
+            if ($projectRole === null) {
+                // Admin コマンド: org ロール正規化 → stale pivot 掃除
+                // (org 配下 project に限定 = cross-org 不変条件)
+                $this->normalizeOrganizationRole($organization, $target, $role);
+                $this->detachProjectMemberships($organization, $target);
+
+                return;
+            }
+
+            // Editor/Shooter コマンド: 書き込み用解決を先に行う (行ロック保持。
+            // 取得〜pivot 更新まで削除競合を排除 + 不在エラーをロール変更より前に確定)
+            $project = $this->defaultProjects->resolveForUpdate($organization);
+            if ($project === null) {
+                throw ValidationException::withMessages([
+                    'role' => ['編集者・撮影者を割り当てるには、先にプロジェクトを作成してください。'],
+                ]);
+            }
+
+            $this->normalizeOrganizationRole($organization, $target, $role);
+            $project->members()->syncWithoutDetaching([
+                $target->id => ['role' => $projectRole->value],
+            ]);
+        });
+    }
+
+    /**
+     * 遷移コマンドの org ロール正規化。attach 済みかつ Laratrust ロール未付与の異常行 (表示状態は
+     * 「未割当」= MemberRoleState::derive(null, ...)) は changeRole が「非メンバー」として
+     * 拒否するため、修復経路として addRole で直接付与する (管理画面から正規化できる契約)。
+     *
+     * @throws ValidationException 非メンバー / 最終 Owner 保護 (changeRole 継承)
+     */
+    private function normalizeOrganizationRole(Organization $organization, User $target, AdminConsoleRole $role): void
+    {
+        if ($target->organizationRole($organization) === null) {
+            // 非 attach は changeRole と同じ契約で拒否 (第 1 層は Controller の URL 整合 guard = 404)
+            if (! $organization->users()->whereKey($target->getKey())->exists()) {
+                throw ValidationException::withMessages(['role' => ['このユーザーは組織のメンバーではありません。']]);
+            }
+            $target->addRole($role->organizationRole()->value, $organization->laratrust_team_id);
+
+            return;
+        }
+
+        // 同値なら changeRole 内で早期 return = 冪等。最終 Owner 保護も継承
+        $this->changeRole($organization, $target, $role->organizationRole());
     }
 
     /**
@@ -221,11 +338,34 @@ class OrganizationMembershipService
             if ($role !== null) {
                 $target->removeRole($role->value, $organization->laratrust_team_id);
             }
+            // project pivot 掃除 (org 配下 project に限定。別 org の pivot は維持)
+            $this->detachProjectMemberships($organization, $target);
             // 削除した組織を current にしていた場合は外す (次回アクセス時に選び直す)
             if ($target->current_organization_id === $organization->id) {
                 $target->forceFill(['current_organization_id' => null])->save();
             }
         });
+    }
+
+    /**
+     * org 配下 project の pivot を一括 detach する。対象 project id は必ず
+     * $organization->projects() (org-scoped relation) から解決する (cross-org 不変条件)。
+     * project_members は pivot テーブルで対応する Eloquent モデル・モデルイベントを持たないため、
+     * 意図的に素の delete を使う (belongsToMany::detach も pivot イベントは発火しない = 等価)。
+     * 挙動契約は ConsoleRoleTransitionTest が固定する。
+     */
+    private function detachProjectMemberships(Organization $organization, User $target): void
+    {
+        /** @var list<int> $projectIds */
+        $projectIds = $organization->projects()->pluck('projects.id')->all();
+        if ($projectIds === []) {
+            return;
+        }
+
+        DB::table('project_members')
+            ->whereIn('project_id', $projectIds)
+            ->where('user_id', $target->getKey())
+            ->delete();
     }
 
     /**
