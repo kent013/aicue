@@ -402,6 +402,23 @@ test('shooter 招待の受諾で Default Project へ project_member pivot が at
     expect($project->memberRole($invitee))->toBe(ProjectRole::Member);
 });
 
+test('招待送信の role が不正値ならカスタムメッセージ付き error bag になる (Enum ルールキー解決の回帰防止)', function (): void {
+    Notification::fake();
+    [$organization, $owner] = createOrganizationWithOwner();
+
+    $response = $this->actingAs($owner)->post("/organizations/{$organization->slug}/invitations", [
+        'email' => 'someone@example.com',
+        'role' => 'superuser',
+    ]);
+
+    // messages() の 'role.'.Enum::class キーが実際に解決されることを固定する
+    $response->assertSessionHasErrors([
+        'role' => 'ロールの指定が不正です。画面を再読み込みしてやり直してください。',
+    ]);
+    Notification::assertNothingSent();
+    expect(OrganizationInvitation::query()->count())->toBe(0);
+});
+
 test('editor/shooter 招待の送信は Default Project 不在なら error bag (role)', function (string $role): void {
     Notification::fake();
     [$organization, $owner] = createOrganizationWithOwner();
