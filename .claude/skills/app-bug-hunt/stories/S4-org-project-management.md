@@ -1,16 +1,22 @@
-# S4: 組織・プロジェクト管理
+# S4: 組織・プロジェクト・カテゴリ・ユーザー管理
 
-> **スケルトン**: 手順・期待・screens/operations 対応はアプリのルートに合わせて埋めること (SKILL.md Phase 1 で route:list から)。
-
-- 前提状態: 代表ユーザーでログイン済み
-- 目的: 組織/プロジェクトの作成・編集・切替・削除が反映され矛盾しないか (H10)
+- 前提状態: 組織オーナー/管理者(project_admin)でログイン済み。
+- 目的: 組織/プロジェクトの作成・編集・切替・削除、カテゴリ管理(専用画面)、管理者向けユーザー管理が反映され矛盾しないか。管理者専用機能が非管理者に漏れないか。
 
 ## 手順
-1. (操作) → (期待)
+1. `organizations.create` → `organizations.store` で組織作成、`organizations.switch` で切替、`organizations.settings` で設定確認。オーナー移譲 `organizations.transfer-ownership`、2FA 必須化 `organizations.two-factor-requirement.update`。
+2. `projects.index` → `projects.create` → `projects.store`、`projects.edit` → `projects.update`、`projects.destroy`。プロジェクトメンバー追加/削除 `projects.members.store`/`destroy`。
+3. カテゴリ管理(専用画面 `projects.categories.index`): 追加 `projects.categories.store`(名20字・同名不可・空値不可 → 押下時エラー)、名称編集 `update`、削除 `destroy`(そのカテゴリの動画が「未分類」になる)、並べ替え▲▼ `reorder`(動画一覧の並びに反映)。
+4. 管理者ユーザー管理(`manage.users.index`): ユーザー一覧・追加・編集・削除(確認ダイアログ)。ID英数20字・重複不可、表示名全角20字、PW 8〜16字、メール形式。違反/空値/重複は押下時エラー。
+5. API キー/オンボーディング: `organizations.api-keys.index`/`store`/`revoke`、`organizations.api-keys.sessions.*`、`organizations.onboarding.cli`/`mcp`。
+6. サンプルリソース Item(テンプレ見本): `projects.items.store`/`update`/`destroy`(存在する場合)。
 
 ## このストーリーで消化する screens / operations
-- screens: (screens.md の該当行を列挙)
-- operations: (operations.md の該当行を列挙)
+- screens: organizations.create, organizations.settings, organizations.api-keys.index, organizations.api-keys.sessions.index, organizations.onboarding.cli, organizations.onboarding.mcp, manage.users.index, projects.index, projects.create, projects.edit, projects.categories.index
+- operations: organizations.store, organizations.update, organizations.switch, organizations.transfer-ownership, organizations.two-factor-requirement.update, organizations.api-keys.store, organizations.api-keys.revoke, organizations.api-keys.sessions.revoke, projects.store, projects.update, projects.destroy, projects.categories.store, projects.categories.update, projects.categories.destroy, projects.categories.reorder, projects.members.store, projects.members.destroy, projects.items.store, projects.items.update, projects.items.destroy, debug.login-as
 
 ## 逸脱アイデア (--deviate 時)
-- (IDOR 探索・二重送信・戻る/リロード・隣接 ID 書き換え 等)
+- 撮影者(project_member)/一般ユーザーで `manage.users.index` やカテゴリ管理に直アクセス → 403・サイドバー非表示になるか。
+- カテゴリ reorder を二重送信/古い集合で送る → sort_order が壊れないか(Project 行ロックで直列化)。
+- 組織切替直後に別組織の project id を叩く → 認可前 404 か。
+- ユーザー削除・組織削除の確認ダイアログをスキップ(直 POST)→ 保護されるか。最後のオーナー削除で組織が孤児化しないか。

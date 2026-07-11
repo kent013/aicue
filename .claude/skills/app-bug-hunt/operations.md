@@ -1,33 +1,71 @@
-# 操作インベントリ (operations.md) — スケルトン
+# 操作インベントリ (operations.md) — AI-CUE
 
-> **これはテンプレート同梱のスケルトンである。** bug-hunt カバレッジの分母となる「書き込み操作」
-> (非GET × web セッション面) の一覧をアプリごとに埋めること。初回は SKILL.md「Phase 1」のコマンドで
-> `php artisan route:list` から生成する。ドリフト検知は `scripts/bug-hunt-inventory-check.sh`。
->
-> **列フォーマット (correlate.py の fix-gate #3 が依存、厳守)**: markdown leading-pipe の **5 列**。
-> `| method | route | name | story | 区分 |`。graph join の**キーは name 列 (index 2)**。
-> name 列の backtick は剥がされる。API/CLI 面のみ 6 列 (`| method | route | api route name | CLI | story | 区分 |`)。
-
-## 生成手順
-
-```bash
-php artisan route:list --json | python3 -c "
-import json,sys
-for r in json.load(sys.stdin):
-    m=r['method'].split('|')[0]
-    if m in ('GET','HEAD','OPTIONS'): continue
-    mw=str(r.get('middleware',[])); name=r.get('name') or '-'
-    if 'web' not in mw: continue
-    if name.startswith(('cashier','passport','livewire')) or 'webhook' in name: continue
-    print('|', m, '|', r['uri'], '|', name, '| S? | 通常 |')" | sort -k4
-```
+> bug-hunt カバレッジの分母となる「書き込み操作」(非GET × web セッション面) の一覧。`php artisan route:list`
+> から生成しストーリー (S1..S7) を割り当てた。ドリフト検知は `scripts/bug-hunt-inventory-check.sh`。
+> 列フォーマット: markdown leading-pipe 5 列 `| method | route | name | story | 区分 |` (correlate.py 依存)。
 
 ## 操作一覧 (web セッション面)
 
 | method | route | name | story | 区分 |
 |---|---|---|---|---|
-
-<!-- 生成後の記入例 (先頭パイプにすると行として parse される。埋めるときは下記の形で表に追記):
-POST   organizations                  organizations.store    S4  通常
-DELETE organizations/{organization}   organizations.destroy  S4  destructive
--->
+| POST | billing/checkout | billing.checkout | S5 | 通常 |
+| POST | billing/portal | billing.portal | S5 | 通常 |
+| POST | app/projects/{project}/manuals/{manual}/sync | capture.manuals.sync | S3 | 通常 |
+| POST | app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take}/adopt | capture.takes.adopt | S3 | 通常 |
+| DELETE | app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take} | capture.takes.destroy | S3 | 通常 |
+| POST | app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take}/downloaded | capture.takes.downloaded | S3 | 通常 |
+| POST | app/projects/{project}/manuals/{manual}/cuts/{cut}/takes | capture.takes.store | S3 | 通常 |
+| PATCH | app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take} | capture.takes.update | S3 | 通常 |
+| POST | app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/upload-url | capture.takes.upload-url | S3 | 通常 |
+| POST | contact | contact.store | S1 | 通常 |
+| POST | debug/login/{userId} | debug.login-as | S1 | 通常 |
+| POST | invitations/accept | invitations.accept.store | S2 | 通常 |
+| POST | login | login.store | S1 | 通常 |
+| POST | logout | logout | S1 | 通常 |
+| DELETE | organizations/{organization:slug}/api-keys/{apiKey} | organizations.api-keys.revoke | S4 | 通常 |
+| DELETE | organizations/{organization:slug}/api-keys/sessions/{oauthSession} | organizations.api-keys.sessions.revoke | S4 | 通常 |
+| POST | organizations/{organization:slug}/api-keys | organizations.api-keys.store | S4 | 通常 |
+| DELETE | organizations/{organization:slug}/invitations/{invitation} | organizations.invitations.revoke | S2 | 通常 |
+| POST | organizations/{organization:slug}/invitations | organizations.invitations.store | S2 | 通常 |
+| DELETE | organizations/{organization:slug}/members/{user} | organizations.members.destroy | S2 | 通常 |
+| DELETE | organizations/{organization:slug}/members/{user}/two-factor | organizations.members.two-factor.reset | S2 | 通常 |
+| PATCH | organizations/{organization:slug}/members/{user} | organizations.members.update | S2 | 通常 |
+| POST | organizations | organizations.store | S4 | 通常 |
+| POST | organizations/{organization}/switch | organizations.switch | S4 | 通常 |
+| POST | organizations/{organization:slug}/transfer-ownership | organizations.transfer-ownership | S4 | 通常 |
+| PATCH | organizations/{organization:slug}/two-factor-requirement | organizations.two-factor-requirement.update | S4 | 通常 |
+| PATCH | organizations/{organization:slug} | organizations.update | S4 | 通常 |
+| POST | user/confirm-password | password.confirm.store | S6 | 通常 |
+| POST | forgot-password | password.email | S1 | 通常 |
+| POST | reset-password | password.update | S1 | 通常 |
+| DELETE | projects/{project}/categories/{category} | projects.categories.destroy | S4 | 通常 |
+| PATCH | projects/{project}/categories/reorder | projects.categories.reorder | S4 | 通常 |
+| POST | projects/{project}/categories | projects.categories.store | S4 | 通常 |
+| PATCH | projects/{project}/categories/{category} | projects.categories.update | S4 | 通常 |
+| DELETE | projects/{project} | projects.destroy | S4 | 通常 |
+| DELETE | projects/{project}/items/{item} | projects.items.destroy | S4 | 通常 |
+| POST | projects/{project}/items | projects.items.store | S4 | 通常 |
+| PATCH | projects/{project}/items/{item} | projects.items.update | S4 | 通常 |
+| POST | projects/{project}/manuals/{manual}/analyze | projects.manuals.analyze | S3 | 通常 |
+| DELETE | projects/{project}/manuals/{manual} | projects.manuals.destroy | S3 | 通常 |
+| POST | projects/{project}/manuals/{manual}/preview | projects.manuals.preview | S3 | 通常 |
+| POST | projects/{project}/manuals/{manual}/render | projects.manuals.render | S3 | 通常 |
+| PUT | projects/{project}/manuals/{manual}/scenario | projects.manuals.scenario.update | S3 | 通常 |
+| POST | projects/{project}/manuals/{manual}/source-documents | projects.manuals.source-documents.store | S3 | 通常 |
+| POST | projects/{project}/manuals | projects.manuals.store | S3 | 通常 |
+| PATCH | projects/{project}/manuals/{manual} | projects.manuals.update | S3 | 通常 |
+| DELETE | projects/{project}/members/{user} | projects.members.destroy | S4 | 通常 |
+| POST | projects/{project}/members | projects.members.store | S4 | 通常 |
+| POST | projects | projects.store | S4 | 通常 |
+| PATCH | projects/{project} | projects.update | S4 | 通常 |
+| POST | recent-auth/password | recent-auth.password | S6 | 通常 |
+| POST | register | register.store | S1 | 通常 |
+| DELETE | settings/account | settings.account.destroy | S6 | 通常 |
+| POST | user/confirmed-two-factor-authentication | two-factor.confirm | S6 | 通常 |
+| DELETE | user/two-factor-authentication | two-factor.disable | S6 | 通常 |
+| POST | user/two-factor-authentication | two-factor.enable | S6 | 通常 |
+| POST | two-factor-challenge | two-factor.login.store | S1 | 通常 |
+| POST | user/two-factor-recovery-codes | two-factor.regenerate-recovery-codes | S6 | 通常 |
+| PUT | user/password | user-password.update | S6 | 通常 |
+| PUT | user/profile-information | user-profile-information.update | S6 | 通常 |
+| POST | email/verification-notification | verification.send | S1 | 通常 |
