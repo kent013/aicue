@@ -5,6 +5,8 @@
  * (literal union で UI 分岐漏れを検出する。乖離検知は当面手動確認)。
  */
 
+import type { BadgeTone } from "@/components/atoms/Badge.types";
+
 export type VideoManualStatus = "draft" | "analyzing" | "ready" | "rendering" | "published";
 
 /** VideoManualStatus の表示ラベル (UI 共通) */
@@ -15,6 +17,18 @@ export const VIDEO_MANUAL_STATUS_LABELS: Record<VideoManualStatus, string> = {
     rendering: "書き出し中",
     published: "公開済み",
 };
+
+/**
+ * 状態バッジの tone (結果表示の意味色。UI 共通)。
+ * satisfies でキー漏れ (status 追加時) をコンパイル時検出する。
+ */
+export const STATUS_TONES = {
+    draft: "neutral",
+    analyzing: "tertiary",
+    ready: "success",
+    rendering: "warning",
+    published: "primary",
+} as const satisfies Record<VideoManualStatus, BadgeTone>;
 
 export interface PaginationMeta {
     current_page: number;

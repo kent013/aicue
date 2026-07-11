@@ -12,7 +12,7 @@
     import AppLayout from "@/components/templates/AppLayout.svelte";
     import type { SharedProps } from "@/lib/shared-props";
     import type { AnalysisProps, RenderProps, VideoManualStatus } from "@/types/manual";
-    import { VIDEO_MANUAL_STATUS_LABELS } from "@/types/manual";
+    import { STATUS_TONES, VIDEO_MANUAL_STATUS_LABELS } from "@/types/manual";
 
     /**
      * 動画マニュアル詳細 (メタデータ + AI 解析パネル)。撮影者も閲覧可
@@ -36,17 +36,6 @@
 
     const shared = $derived(page.props as unknown as SharedProps);
     const appName = $derived(shared.appName ?? "");
-
-    const STATUS_TONES: Record<
-        VideoManualStatus,
-        "primary" | "tertiary" | "success" | "warning" | "neutral"
-    > = {
-        draft: "neutral",
-        analyzing: "tertiary",
-        ready: "success",
-        rendering: "warning",
-        published: "primary",
-    };
 
     /* ---- 削除 ---- */
     let deleteDialogOpen = $state(false);
