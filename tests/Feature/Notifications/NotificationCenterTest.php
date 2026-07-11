@@ -12,6 +12,8 @@ use App\Models\VideoManual;
 use App\Notifications\InApp\InvitationReceivedNotification;
 use App\Notifications\InApp\ManualAnalyzedNotification;
 use App\Notifications\InApp\TicketBalanceLowNotification;
+use App\Services\Notification\NotificationCenterService;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -120,6 +122,20 @@ test('read/open: 他人の通知 uuid は 404 (403 でない = 存在秘匿)。�
     // 他人の通知は未読のまま (影響しない)
     expect($other->unreadNotifications()->count())->toBe(1);
 });
+
+test('read/open: 不正形式 (非UUID) の id は route 不一致で 404 (pgsql uuid 比較の 22P02 = 500 を出さない)', function (): void {
+    [, $owner] = notificationCenterContext();
+
+    $this->actingAs($owner)->post('/notifications/not-a-uuid/read')->assertNotFound();
+    $this->actingAs($owner)->post('/notifications/not-a-uuid/open')->assertNotFound();
+});
+
+test('findOwnOrFail: 非UUID id は service 層でも ModelNotFoundException (route 制約を通らない将来経路の防護)', function (): void {
+    [, $owner] = notificationCenterContext();
+
+    app(NotificationCenterService::class)
+        ->findOwnOrFail($owner, 'not-a-uuid');
+})->throws(ModelNotFoundException::class);
 
 test('read-all: 自分の未読のみ全既読 (他人の行に影響しない)', function (): void {
     [$organization, $owner, $project, $manual] = notificationCenterContext();

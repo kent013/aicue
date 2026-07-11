@@ -20,8 +20,10 @@ use App\Notifications\InApp\InvitationReceivedNotification;
 use App\Notifications\InApp\ManualAnalyzedNotification;
 use App\Notifications\InApp\ManualRenderedNotification;
 use App\Notifications\InApp\TicketBalanceLowNotification;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Notifications\DatabaseNotification;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Str;
 use Throwable;
 use Webmozart\Assert\Assert;
 
@@ -165,9 +167,15 @@ class NotificationCenterService
 
     /**
      * 自分宛以外は 404 (存在オラクル封じ。403 で存在を漏らさない)。relation 経由で解決する。
+     * 非UUID は pgsql の uuid 比較 (22P02) に到達させず ModelNotFoundException に寄せる
+     * (web 経路は route の whereUuid が先に 404 にするが、将来の別経路呼び出しにも防護を持たせる)。
      */
     public function findOwnOrFail(User $user, string $id): DatabaseNotification
     {
+        if (! Str::isUuid($id)) {
+            throw (new ModelNotFoundException)->setModel(DatabaseNotification::class, $id);
+        }
+
         return $user->notifications()->whereKey($id)->firstOrFail();
     }
 

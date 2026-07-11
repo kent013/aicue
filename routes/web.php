@@ -326,6 +326,7 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
     | 受け皿として必要)。{notification} は implicit binding を使わず controller が
     | $request->user()->notifications() 経由で解決する (cross-user は構造的に 404 =
     | 存在オラクル封じ。1 param のため NestedRouteIdorDefenseTest の inventory 対象外)。
+    | whereUuid は不正形式 id を route 不一致 = 404 に落とす (pgsql uuid 比較の 22P02 防止)。
     | open は POST + 303 (GET にしない = prefetch による意図しない既読化防止)。
     */
     Route::get('/notifications', [NotificationController::class, 'index'])
@@ -333,8 +334,10 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
     Route::post('/notifications/read-all', [NotificationController::class, 'readAll'])
         ->name('notifications.read-all');
     Route::post('/notifications/{notification}/open', [NotificationController::class, 'open'])
+        ->whereUuid('notification')
         ->name('notifications.open');
     Route::post('/notifications/{notification}/read', [NotificationController::class, 'read'])
+        ->whereUuid('notification')
         ->name('notifications.read');
 
     /*
