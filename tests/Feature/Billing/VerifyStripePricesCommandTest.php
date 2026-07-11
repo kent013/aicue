@@ -12,7 +12,7 @@ use App\Support\Billing\StripePriceLookupKeys;
 /*
  * billing:verify-stripe-prices (fixture / Stripe Catalog / plan_prices の整合検証)。
  * Stripe API は呼ばない: StripePriceCatalogClient をモックして検証する。
- * fixture 側の期待値は stripe/fixtures/plan_standard.json (unit_amount=1980) に一致させる。
+ * fixture 側の期待値は stripe/fixtures/plan_standard.json (unit_amount=4980) に一致させる。
  */
 
 function verifyStandardBaseLookupKey(): string
@@ -38,7 +38,7 @@ function alignPlanPricesToStripe(): void
     PlanPrice::query()
         ->where('lookup_key', verifyStandardBaseLookupKey())
         ->where('is_current', true)
-        ->update(['stripe_price_id' => 'price_live_standard_base', 'amount' => 1980]);
+        ->update(['stripe_price_id' => 'price_live_standard_base', 'amount' => 4980]);
 }
 
 /**
@@ -48,7 +48,7 @@ function happyStripeEntries(): array
 {
     $lookupKey = verifyStandardBaseLookupKey();
 
-    return [$lookupKey => verifyEntry($lookupKey, 'price_live_standard_base', 1980)];
+    return [$lookupKey => verifyEntry($lookupKey, 'price_live_standard_base', 4980)];
 }
 
 beforeEach(function (): void {
@@ -112,7 +112,7 @@ test('lookup_key が Stripe Catalog に無ければ失敗する', function (): v
 test('fixture spec が Stripe Catalog と不一致なら失敗する', function (): void {
     alignPlanPricesToStripe();
     $lookupKey = verifyStandardBaseLookupKey();
-    // fixture は 1980 だが Stripe が 30000 = matchesSpec 不一致。
+    // fixture は 4980 だが Stripe が 30000 = matchesSpec 不一致。
     // plan_prices.amount も合わせて (d) でなく (a) を単独発火させる
     $entries = [$lookupKey => verifyEntry($lookupKey, 'price_live_standard_base', 30000)];
     PlanPrice::query()->where('lookup_key', $lookupKey)->where('is_current', true)->update(['amount' => 30000]);
