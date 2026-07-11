@@ -13,6 +13,7 @@ use App\Http\Requests\Projects\TriggerRenderRequest;
 use App\Http\Resources\Manual\RenderJobResource;
 use App\Models\Project;
 use App\Models\RenderJob;
+use App\Models\User;
 use App\Models\VideoManual;
 use App\Services\Manual\RenderJobService;
 use App\Services\Render\RenderObjectStorage;
@@ -45,7 +46,9 @@ class ManualRenderController extends Controller
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('render', $manual);
 
-        $job = $render->trigger($project, $manual);
+        // actor = ジョブ実行者 (通知宛先の導出用。Auth から明示的に渡す = payload 不信任)
+        $actor = $request->user();
+        $job = $render->trigger($project, $manual, $actor instanceof User ? $actor : null);
         $manual->refresh(); // trigger で rendering へ遷移済み
 
         return RenderJobResource::make(RenderJobData::fromJob($job, $manual))
@@ -61,7 +64,8 @@ class ManualRenderController extends Controller
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('render', $manual); // preview も編集者専用 (§10.5)
 
-        $job = $render->triggerPreview($project, $manual);
+        $actor = $request->user();
+        $job = $render->triggerPreview($project, $manual, $actor instanceof User ? $actor : null);
         $manual->refresh();
 
         return RenderJobResource::make(RenderJobData::fromJob($job, $manual))

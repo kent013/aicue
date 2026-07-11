@@ -212,6 +212,40 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
   DB 行は checkout 開始時の期限切れ回収 (`status=pending AND expires_at <= now` → expired) で
   局所回収する (専用 cron は作らない)
 
+## アプリ内通知センター (T008) の運用契約
+
+- **格納**: Laravel 標準 `notifications` テーブル (Eloquent 標準 `DatabaseNotification` を使う。
+  新規モデル / Factory は作らない。テストは `$user->notify(...)` 実発火で行を作る)。
+  `organization_id` は first-class 列 (nullable FK, cascadeOnDelete)。
+  `OrganizationScopedDatabaseChannel` (標準 DatabaseChannel の `buildPayload` 拡張 +
+  container binding 差し替え) がサーバ導出で埋める。`data` (jsonb) は表示用 payload 限定
+  (org 判定・クエリには使わない)
+- **type 規約**: `notifications.type` には `NotificationType` enum の value を格納する
+  (クラス名を DB に置かない。`InAppNotificationTypeInvariantTest` が
+  `app/Notifications/InApp/*` の全派生に deny-by-default で強制。
+  TS 側 `types/notification.ts` との値集合同期は `NotificationTypeTsSyncInvariantTest`)
+- **発火**: すべて `NotificationCenterService` 経由・既存 exactly-once 遷移の **commit 後**
+  (解析/レンダ terminal 遷移の bool ゲート / 招待作成後 / reserve の残高閾値クロス検知)。
+  terminal tx 内に通知 insert を入れない。通知例外は catch + report でジョブ本流を壊さない
+- **配信保証は at-most-once** (重複なし・欠落あり得る)。正はジョブ status + 既存ポーリング UI で、
+  通知は補助チャネル。terminal commit 直後〜通知 insert 間のプロセス停止の欠落窓 (数 ms) は許容し、
+  outbox 台帳は作らない (送達保証が要件化したときに outbox へ移行する)。worker のジョブ実行中
+  停止は `recoverStale` → `failJob` 経由で失敗通知が発火する
+- **宛先導出**: ジョブ通知 = `manual.created_by` ∪ `triggered_by` (jobs 列。Auth からの明示代入のみ =
+  `MassAssignmentProtectedKeys` 登録済み) を org 所属再確認 + dedup / 招待 = `whereBlind` 一致の
+  既存ユーザーのみ (平文 token 非含有) / 残高低下 = org の owner/admin
+  (`organizationRole` = laratrust_team_id 明示判定)
+- **残高低下のクロス検知**: `TicketLedgerService::reserve` の org 行ロック内で
+  「実効残高 (Reserved 拘束込み) が `billing.ticket_low_balance_threshold` を跨いだ」ときのみ
+  `DB::afterCommit` で 1 回通知 (commit は拘束と台帳が相殺し balance 不変 = クロスを発生させない。
+  release/grant で回復して再度跨げば再通知)。`billing_notifications` (メール送達台帳) には行を作らない
+- **読み出し**: 自分宛 (notifiable = 自分) で構造的に閉じる (org フィルタなし = 全 org 横断)。
+  `{notification}` は implicit binding を使わず relation 経由解決 (cross-user は 404 = 存在秘匿)。
+  `open` は POST + 303 のサーバ解決遷移 (認可判断は複製せず遷移先の Gate が唯一の判断点)。
+  未読数は `HandleInertiaRequests` の shared props `notifications.unreadCount` (closure 共有のため
+  `router.reload({ only: ['notifications'] })` の partial reload キーとしてそのまま使える。
+  将来の SPA 内ポーリングはこのキーで実現する。v1 はページ遷移時更新のみ)
+
 ## 撮影 PWA (presigned アップロード + 容量 Quota) の運用契約
 
 doc/10 §10.3 / §10.8-4/-7 の実装 (T004)。routes は `/app/projects/{project}/...`

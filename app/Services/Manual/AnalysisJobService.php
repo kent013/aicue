@@ -14,8 +14,10 @@ use App\Jobs\Manual\RunManualAnalysis;
 use App\Models\AnalysisJob;
 use App\Models\Organization;
 use App\Models\Project;
+use App\Models\User;
 use App\Models\VideoManual;
 use App\Services\Billing\TicketLedgerService;
+use App\Services\Notification\NotificationCenterService;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
@@ -38,6 +40,7 @@ class AnalysisJobService
 {
     public function __construct(
         private readonly TicketLedgerService $tickets,
+        private readonly NotificationCenterService $notifications,
     ) {}
 
     /**
@@ -46,10 +49,12 @@ class AnalysisJobService
      * - 実行可能状態: status ∈ {draft, ready} のみ (ready→analyzing = 再解析は正式遷移)
      * - analyze 冪等: 同一 manual の in-flight (queued/running) は 1 つ → 409
      * - 残高事前チェックは fail-fast の入口ゲート (真の残高保証は pipeline の reserve)
+     * - $actor はジョブ実行者 (通知宛先の導出用)。web 経路では必ず存在するが、
+     *   将来の CLI 経路に備え nullable (未指定時は triggered_by NULL = creator のみ宛先)
      */
-    public function trigger(Project $project, VideoManual $manual): AnalysisJob
+    public function trigger(Project $project, VideoManual $manual, ?User $actor = null): AnalysisJob
     {
-        $job = DB::transaction(function () use ($project, $manual): AnalysisJob {
+        $job = DB::transaction(function () use ($project, $manual, $actor): AnalysisJob {
             // 共有ロック規約: status を書くため VideoManual 行ロック (親 relation 経由 = 子∈親も担保)
             /** @var VideoManual $locked */
             $locked = $project->manuals()->whereKey($manual->id)->lockForUpdate()->firstOrFail();
@@ -81,6 +86,9 @@ class AnalysisJobService
             $job = $locked->analysisJobs()->make();
             $job->status = JobStatus::Queued;
             $job->sourceDocument()->associate($document);
+            if ($actor !== null) {
+                $job->triggeredBy()->associate($actor); // Auth 導出のみ (保護キー。payload 直送は 422)
+            }
             $job->save();
 
             $locked->forceFill(['status' => VideoManualStatus::Analyzing])->save();
@@ -105,7 +113,7 @@ class AnalysisJobService
      */
     public function failJob(AnalysisJob $job, string $error): bool
     {
-        return DB::transaction(function () use ($job, $error): bool {
+        $failed = DB::transaction(function () use ($job, $error): bool {
             /** @var AnalysisJob $locked */
             $locked = AnalysisJob::query()->whereKey($job->getKey())->lockForUpdate()->firstOrFail();
             if ($locked->status->isTerminal()) {
@@ -137,6 +145,15 @@ class AnalysisJobService
 
             return true;
         });
+
+        // terminal 遷移が実際に起きたときだけ・commit 後に通知する (at-most-once。詳細設計
+        // 「配信保証仕様」)。通知例外は NotificationCenterService 内 catch + report で
+        // ジョブ本流を壊さない。二重 fail は上の terminal guard (false) が通知ごと握る
+        if ($failed) {
+            $this->notifications->notifyAnalysisFinished($job->refresh());
+        }
+
+        return $failed;
     }
 
     /**

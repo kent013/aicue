@@ -11,6 +11,7 @@ use App\Http\Requests\Projects\AnalyzeManualRequest;
 use App\Http\Resources\Manual\AnalysisJobResource;
 use App\Models\AnalysisJob;
 use App\Models\Project;
+use App\Models\User;
 use App\Models\VideoManual;
 use App\Services\Manual\AnalysisJobService;
 use Illuminate\Http\JsonResponse;
@@ -37,7 +38,9 @@ class ManualAnalysisController extends Controller
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('analyze', $manual);
 
-        $job = $analysis->trigger($project, $manual);
+        // actor = ジョブ実行者 (通知宛先の導出用。Auth から明示的に渡す = payload 不信任)
+        $actor = $request->user();
+        $job = $analysis->trigger($project, $manual, $actor instanceof User ? $actor : null);
         $manual->refresh(); // trigger で analyzing へ遷移済み
 
         return AnalysisJobResource::make(AnalysisJobData::fromJob($job, $manual))

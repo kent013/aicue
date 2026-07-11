@@ -27,6 +27,7 @@ use Illuminate\Support\Carbon;
  * @property AnalysisStep|null $step
  * @property int|null $progress
  * @property int|null $ticket_reservation_id
+ * @property int|null $triggered_by
  * @property array<array-key, mixed>|null $result_json
  * @property string|null $error
  * @property Carbon|null $created_at
@@ -72,5 +73,15 @@ class AnalysisJob extends Model
     public function ticketReservation(): BelongsTo
     {
         return $this->belongsTo(TicketReservation::class);
+    }
+
+    /**
+     * ジョブ実行者 (通知宛先の導出用。Auth からの明示代入のみ = 保護キー)。
+     *
+     * @return BelongsTo<User, $this>
+     */
+    public function triggeredBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'triggered_by');
     }
 }

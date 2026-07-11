@@ -31,6 +31,7 @@ use Illuminate\Support\Carbon;
  * @property int|null $progress
  * @property int $scenario_version
  * @property int|null $ticket_reservation_id
+ * @property int|null $triggered_by
  * @property string|null $output_path
  * @property string|null $error
  * @property RenderErrorCode|null $error_code
@@ -71,5 +72,15 @@ class RenderJob extends Model
     public function ticketReservation(): BelongsTo
     {
         return $this->belongsTo(TicketReservation::class);
+    }
+
+    /**
+     * ジョブ実行者 (通知宛先の導出用。Auth からの明示代入のみ = 保護キー)。
+     *
+     * @return BelongsTo<User, $this>
+     */
+    public function triggeredBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'triggered_by');
     }
 }

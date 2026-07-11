@@ -25,6 +25,7 @@ use App\Models\Project;
 use App\Models\RenderJob;
 use App\Models\VideoManual;
 use App\Services\Billing\TicketLedgerService;
+use App\Services\Notification\NotificationCenterService;
 use App\Services\Render\RenderObjectStorage;
 use App\Services\Render\VideoComposer;
 use Illuminate\Support\Facades\DB;
@@ -65,6 +66,7 @@ class RenderPipeline
         private readonly VideoComposer $composer,
         private readonly RenderObjectStorage $storage,
         private readonly TicketLedgerService $tickets,
+        private readonly NotificationCenterService $notifications,
     ) {}
 
     public function run(int $renderJobId): void
@@ -102,6 +104,11 @@ class RenderPipeline
             );
             if ($this->finalize($job, $result)) {
                 $uploadedKey = null; // succeeded に到達した出力は正 (後始末しない)
+                // succeeded 到達時のみ・terminal tx の commit 後に通知 (kind=render のみ。
+                // finalize が $job->refresh() 済み。preview は通知しない)
+                if ($job->kind === RenderKind::Render) {
+                    $this->notifications->notifyRenderFinished($job);
+                }
             }
         } catch (Throwable $exception) {
             report($exception);

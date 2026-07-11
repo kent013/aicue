@@ -1,4 +1,5 @@
 import type { FlashPayload } from "@/lib/stores/flash-to-toast";
+import type { NotificationSharedProps } from "@/types/notification";
 
 /**
  * HandleInertiaRequests が共有する props の型 (backend が真実)。
@@ -32,6 +33,8 @@ export interface SharedProps {
     organizations: OrganizationSummary[];
     currentOrganization: CurrentOrganization | null;
     flash: FlashPayload;
+    /** 通知センターの未読数 (全 org 横断・自分宛のみ。未ログイン時は 0) */
+    notifications: NotificationSharedProps;
     /** サーバ描画 <title> と同一の完成タイトル (document-title.ts が SPA 遷移時に同期する) */
     title: string;
 }

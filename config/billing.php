@@ -34,4 +34,11 @@ return [
     */
     'ticket_unit_price_floor' => (int) env('BILLING_TICKET_UNIT_PRICE_FLOOR', 50),
 
+    /*
+    | チケット残高低下のアプリ内通知閾値。reserve (実効残高が実際に減る唯一の消費起点) で
+    | 「閾値以上 → 閾値未満」を跨いだときのみ owner/admin に 1 回通知する (クロス検知。
+    | TicketLedgerService::reserve)。
+    */
+    'ticket_low_balance_threshold' => (int) env('BILLING_TICKET_LOW_BALANCE_THRESHOLD', 5),
+
 ];

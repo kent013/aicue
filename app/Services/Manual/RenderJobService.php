@@ -21,8 +21,10 @@ use App\Jobs\Manual\RunManualRender;
 use App\Models\Organization;
 use App\Models\Project;
 use App\Models\RenderJob;
+use App\Models\User;
 use App\Models\VideoManual;
 use App\Services\Billing\TicketLedgerService;
+use App\Services\Notification\NotificationCenterService;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Database\Query\Builder;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
@@ -52,6 +54,7 @@ class RenderJobService
 {
     public function __construct(
         private readonly TicketLedgerService $tickets,
+        private readonly NotificationCenterService $notifications,
     ) {}
 
     /**
@@ -61,10 +64,12 @@ class RenderJobService
      * - render 冪等: 同一 manual の in-flight kind=render は 1 つ → 409 (preview は妨げない)
      * - 採用テイク欠落は 422 (スキップしない: 標準化された成果物の完全性)
      * - 尺上限ソフトゲート 422 (§10.8-1: TTL 内 commit)・残高事前チェック 402
+     * - $actor はジョブ実行者 (通知宛先の導出用)。web 経路では必ず存在するが、
+     *   将来の CLI 経路に備え nullable (未指定時は triggered_by NULL = creator のみ宛先)
      */
-    public function trigger(Project $project, VideoManual $manual): RenderJob
+    public function trigger(Project $project, VideoManual $manual, ?User $actor = null): RenderJob
     {
-        $job = DB::transaction(function () use ($project, $manual): RenderJob {
+        $job = DB::transaction(function () use ($project, $manual, $actor): RenderJob {
             // 共有ロック規約: status を書くため VideoManual 行ロック (親 relation 経由 = 子∈親も担保)
             /** @var VideoManual $locked */
             $locked = $project->manuals()->whereKey($manual->id)->lockForUpdate()->firstOrFail();
@@ -92,6 +97,9 @@ class RenderJobService
             $job->kind = RenderKind::Render;
             $job->status = JobStatus::Queued;
             $job->scenario_version = $locked->scenario_version; // §10.8-6 スナップショット
+            if ($actor !== null) {
+                $job->triggeredBy()->associate($actor); // Auth 導出のみ (保護キー。payload 直送は 422)
+            }
             $job->save();
 
             $locked->forceFill(['status' => VideoManualStatus::Rendering])->save();
@@ -111,9 +119,9 @@ class RenderJobService
      * org 同時 preview 上限は Organization 行ロックで直列化する (reserve と同じ手法。
      * ロック順 video_manuals → organizations はグローバル順の部分列)。
      */
-    public function triggerPreview(Project $project, VideoManual $manual): RenderJob
+    public function triggerPreview(Project $project, VideoManual $manual, ?User $actor = null): RenderJob
     {
-        $job = DB::transaction(function () use ($project, $manual): RenderJob {
+        $job = DB::transaction(function () use ($project, $manual, $actor): RenderJob {
             /** @var VideoManual $locked */
             $locked = $project->manuals()->whereKey($manual->id)->lockForUpdate()->firstOrFail();
 
@@ -141,6 +149,9 @@ class RenderJobService
             $job->kind = RenderKind::Preview;
             $job->status = JobStatus::Queued;
             $job->scenario_version = $locked->scenario_version;
+            if ($actor !== null) {
+                $job->triggeredBy()->associate($actor); // Auth 導出のみ (preview は通知対象外だが監査用に記録)
+            }
             $job->save();
 
             return $job; // manual status は変更しない (編集と並走)
@@ -163,7 +174,7 @@ class RenderJobService
      */
     public function failJob(RenderJob $job, RenderErrorCode $code, string $error): bool
     {
-        return DB::transaction(function () use ($job, $code, $error): bool {
+        $failed = DB::transaction(function () use ($job, $code, $error): bool {
             /** @var RenderJob $locked */
             $locked = RenderJob::query()->whereKey($job->getKey())->lockForUpdate()->firstOrFail();
             if ($locked->status->isTerminal()) {
@@ -196,6 +207,18 @@ class RenderJobService
 
             return true;
         });
+
+        // terminal 遷移が実際に起きたときだけ・commit 後に通知する (kind=render のみ。
+        // preview はノイズ・status 遷移も無いため通知しない。at-most-once = 詳細設計「配信保証仕様」。
+        // 通知例外は NotificationCenterService 内 catch + report でジョブ本流を壊さない)
+        if ($failed) {
+            $job->refresh();
+            if ($job->kind === RenderKind::Render) {
+                $this->notifications->notifyRenderFinished($job);
+            }
+        }
+
+        return $failed;
     }
 
     /**
