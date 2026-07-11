@@ -2,6 +2,8 @@
     import { router } from "@inertiajs/svelte";
     import { Clapperboard, Download, LoaderCircle, Play } from "@lucide/svelte";
     import Alert from "@/components/atoms/Alert.svelte";
+    import TextLink from "@/components/atoms/TextLink.svelte";
+    import { isInsufficientTickets } from "@/components/features/manual/insufficient-tickets";
     import Button from "@/components/atoms/Button.svelte";
     import Card from "@/components/atoms/Card.svelte";
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
@@ -42,6 +44,8 @@
     let status = $state<VideoManualStatus>(manualStatus);
     let starting = $state(false);
     let errorMessage = $state<string | null>(null);
+    // 402 (残高不足) のとき購入導線を併記する (code 厳格一致。他エラーで誤表示しない)
+    let showPurchaseLink = $state(false);
     let sessionExpiredMessage = $state<string | null>(null);
     let confirmingRender = $state(false);
 
@@ -158,6 +162,7 @@
         if (starting) return; // 多重送信ガード (disabled にはしない)
         starting = true;
         errorMessage = null;
+        showPurchaseLink = false;
         sessionExpiredMessage = null;
         try {
             const res = await fetch(`/projects/${projectId}/manuals/${manualId}/${kind}`, {
@@ -180,6 +185,7 @@
 
     async function handleStartResponse(kind: "render" | "preview", res: Response): Promise<void> {
         const body = (await res.json().catch(() => null)) as unknown;
+        showPurchaseLink = res.status === 402 && isInsufficientTickets(body);
         if (res.status === 201 && body !== null && typeof body === "object") {
             const jobBody = body as RenderJobProps;
             if (kind === "render") {
@@ -282,7 +288,16 @@
 
     {#if errorMessage}
         <div class="mt-4" data-testid="render-start-error">
-            <Alert type="danger">{errorMessage}</Alert>
+            <Alert type="danger">
+                {errorMessage}
+                {#if showPurchaseLink}
+                    <span class="ml-1">
+                        <TextLink href="/purchase-tickets" testId="render-purchase-link">
+                            チケットを購入する
+                        </TextLink>
+                    </span>
+                {/if}
+            </Alert>
         </div>
     {/if}
     {#if sessionExpiredMessage}

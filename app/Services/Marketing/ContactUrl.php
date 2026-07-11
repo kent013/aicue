@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Marketing;
 
+use App\Enums\Inquiry\InquirySource;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -38,6 +39,34 @@ final class ContactUrl
         }
 
         return $configured;
+    }
+
+    /**
+     * source attribution 付きの宛先を解決する。
+     *
+     * 内部 path のときのみ `source={value}` を安全に付与する (既存 query の有無で
+     * `?`/`&` を使い分け、`#fragment` があれば fragment 直前に挿入する)。
+     * 外部 URL / mailto は先方フォームの query 契約が不明なため付与しない
+     * (resolve() と同値を返す)。
+     */
+    public function resolveForSource(InquirySource $source): string
+    {
+        $url = $this->resolve();
+
+        if ($this->kind() !== ContactDestinationKind::Internal) {
+            return $url;
+        }
+
+        $fragment = '';
+        $hashPos = strpos($url, '#');
+        if ($hashPos !== false) {
+            $fragment = substr($url, $hashPos);
+            $url = substr($url, 0, $hashPos);
+        }
+
+        $separator = str_contains($url, '?') ? '&' : '?';
+
+        return $url.$separator.'source='.$source->value.$fragment;
     }
 
     /**

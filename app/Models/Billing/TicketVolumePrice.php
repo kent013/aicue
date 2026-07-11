@@ -109,6 +109,7 @@ class TicketVolumePrice extends Model
             unitAmount: $row->unit_amount,
             stripePriceId: $row->stripe_price_id,
             lookupKey: $row->lookup_key,
+            currency: $row->currency,
         );
     }
 

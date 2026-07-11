@@ -5,6 +5,8 @@
     import Button from "@/components/atoms/Button.svelte";
     import Card from "@/components/atoms/Card.svelte";
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
+    import TextLink from "@/components/atoms/TextLink.svelte";
+    import { isInsufficientTickets } from "@/components/features/manual/insufficient-tickets";
     import { csrfToken } from "@/lib/csrf";
     import type { AnalysisJobProps, VideoManualStatus } from "@/types/manual";
     import { ANALYSIS_STEP_LABELS } from "@/types/manual";
@@ -35,6 +37,8 @@
     let status = $state<VideoManualStatus>(manualStatus);
     let starting = $state(false);
     let errorMessage = $state<string | null>(null);
+    // 402 (残高不足) のとき購入導線を併記する (code 厳格一致。他エラーで誤表示しない)
+    let showPurchaseLink = $state(false);
     // セッション失効 (401/419) の案内。解析中表示の中で出す (ポーリングは停止する)
     let sessionExpiredMessage = $state<string | null>(null);
     let confirmingReanalyze = $state(false);
@@ -131,6 +135,7 @@
         if (starting) return; // 多重送信ガード (disabled にはしない)
         starting = true;
         errorMessage = null;
+        showPurchaseLink = false;
         sessionExpiredMessage = null;
         try {
             const res = await fetch(`/projects/${projectId}/manuals/${manualId}/analyze`, {
@@ -153,6 +158,7 @@
 
     async function handleStartResponse(res: Response): Promise<void> {
         const body = (await res.json().catch(() => null)) as unknown;
+        showPurchaseLink = res.status === 402 && isInsufficientTickets(body);
         if (res.status === 201 && body !== null && typeof body === "object") {
             const jobBody = body as AnalysisJobProps;
             currentJob = jobBody;
@@ -226,7 +232,16 @@
         {/if}
         {#if errorMessage}
             <div class="mt-4" data-testid="analysis-start-error">
-                <Alert type="danger">{errorMessage}</Alert>
+                <Alert type="danger">
+                    {errorMessage}
+                    {#if showPurchaseLink}
+                        <span class="ml-1">
+                            <TextLink href="/purchase-tickets" testId="analysis-purchase-link">
+                                チケットを購入する
+                            </TextLink>
+                        </span>
+                    {/if}
+                </Alert>
             </div>
         {/if}
         <p class="mt-2 text-body text-text-secondary">

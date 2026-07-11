@@ -57,6 +57,7 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
 | `Billing/StripeWebhookEvent` | Stripe webhook の冪等マシン | tenant 外 |
 | `Billing/TicketLedgerEntry` / `Billing/TicketReservation` | チケット台帳 (reserve→commit/release の 2 フェーズ。期限付き付与・idempotency_key 冪等付与・返金 clawback) | Organization 従属 |
 | `Billing/TicketVolumePrice` | スポット購入の数量逐減 (volume tier) 単価の Stripe Price snapshot | tenant 外 (マスタ) |
+| `Billing/TicketCheckoutSession` | チケットスポット購入の Stripe Checkout Session 追跡 (attempt_token 冪等 + 単価 pin = webhook 金額照合の出典。status: pending/completed/expired) | Organization 従属 |
 | `Billing/Subscription` | Cashier Subscription のテンプレート拡張 (current_period_end / Subscription Schedule の部分完了追跡列) | Organization 従属 |
 | `Billing/BillingNotification` | 請求通知の delivery record (通知台帳。(type, invoice_id) / (type, dedup_key) 複合 UNIQUE で send-once を構造保証) | Organization 従属 |
 
@@ -89,6 +90,10 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
 | `Billing/StripePriceCatalogClient` | Stripe Price Catalog への read-only adapter (`prices.list` の lookup_keys で現行 active Price を解決。価格カタログ as-code の sync/verify コマンドが利用) |
 | `Billing/PortalConfigurationSpec` | Customer Portal の許可機能ポリシー固定真実源 (subscription_update 無効化。`billing:ensure-portal-configuration` が生成/検証) |
 | `Billing/TicketLedgerService` | チケットの reserve/commit/release と冪等付与 (grantMonthly/grantSignupGrant/grantPurchased)・返金逆仕訳 (clawback) |
+| `Billing/TicketCheckoutService` | チケットスポット購入の冪等 Checkout 開始 (org 単位 Cache::lock 直列化 + attempt_token 冪等 + live pending dedup + INSERT unique 違反の re-read 収束。二重課金防止の冪等マシン) |
+| `Billing/TicketCheckoutGateway` (interface) + `Billing/CashierTicketCheckoutGateway` | Stripe one-time Checkout の抽象 (mode=payment / card のみ / promo・tax なし = amount_subtotal 照合の前提。idempotency key 対応。テストは fake を bind) |
+| `Billing/TicketPricingService` | チケット価格の表示専用読み取り口 (傾斜表 / spot 単価 / signup grant 表示値。消費・購入経路と独立) |
+| `Marketing/PricingService` | 料金表 (/pricing) のプラン一覧構築 (plan_prices current + config/quota.php limits の値のみ参照) |
 | `OAuth/OauthSessionListService` | OAuth セッション一覧 (CLI セッション + legacy MCP token の併記) |
 | `VersionInfoService` | `/api/v1/version` の capability negotiation payload (semver fail-fast + CLI client id 解決) |
 | `Mcp/McpIdempotencyService` | MCP 書き込み tool の冪等 replay/store (`mcp_idempotency_keys`) |
@@ -181,6 +186,31 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
   | `DeleteRenderOutputsJob::handle` | 行ロックなし (読み取り検証 → tx 外 S3 削除 → CAS update の 3 段) |
 - ローカル/テストの検証: パイプラインの同期実行は `RenderPipeline::run()` の直接呼び出し +
   fake `VideoComposer` (container swap)、dispatch の検証は `Queue::fake()`
+
+## チケットスポット購入 (T007) の運用契約
+
+- **経路**: `GET /purchase-tickets` (閲覧 = 組織メンバー) / `POST /purchase-tickets/checkout`
+  (`manageBilling` のみ)。課金ゲート (`require-active-subscription`) の対象外 = 未契約 /
+  free プラン組織でも購入できる。payload は `count` / `attempt_token` のみ
+  (金額・Price ID は `TicketVolumePrice::currentTierFor` がサーバ権威で解決)
+- **二重課金防止 4 層**: attempt_token 冪等 (UNIQUE(org, attempt_token) + Stripe idempotency key
+  `purchase:{token}`) → live pending dedup (同 org×user の決済待ち session を 1 本に収束) →
+  INSERT unique 違反の re-read 収束 → webhook 冪等 (claim + 台帳 idempotency_key
+  `purchase:{sessionId}` UNIQUE)
+- **webhook 付与 (checkout.session.completed)**: 真実源は `ticket_checkout_sessions` 行。
+  payload の customer / metadata.org_ref は照合のみ (不一致・行不在・payment_status≠paid・
+  amount_subtotal≠count×pin 単価・currency 不一致は例外 throw = retryable failure →
+  Stripe 再送で再処理)。作成側 payload は promo / automatic tax を含まない
+  (amount_subtotal 照合の前提。gateway invariant テストで固定)
+- **terminal failure の運用手順**: 付与系イベント (checkout.session.completed / invoice.paid) が
+  attempts 上限 (8) に到達すると terminal-ack + `report()` (運用アラート) される。
+  対応: `stripe_webhook_events.failure_reason` を参照し、Stripe ダッシュボードで決済状態を確認 →
+  決済済み・未付与が確定した場合のみ tinker 等で `TicketLedgerService::grantPurchased()` を
+  手動実行する (idempotency_key `purchase:{sessionId}` により再実行しても二重付与しない)。
+  併せて `ticket_checkout_sessions` 行を completed 化する
+- **放棄 session の回収**: Stripe Checkout 自体の有効期限 (既定 24h) で Stripe 側が expire し、
+  DB 行は checkout 開始時の期限切れ回収 (`status=pending AND expires_at <= now` → expired) で
+  局所回収する (専用 cron は作らない)
 
 ## 撮影 PWA (presigned アップロード + 容量 Quota) の運用契約
 

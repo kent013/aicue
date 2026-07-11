@@ -39,10 +39,12 @@ it('home は完全な SEO ヘッド (canonical / og / JSON-LD) をサーバ描�
         ->and($html)->not->toContain('noindex');
 });
 
-it('home の SoftwareApplication は価格未確定 (null) のため offers を出さない', function (): void {
+it('home の SoftwareApplication は Free プラン開始可能 (lowPrice 0) の offers を出す', function (): void {
+    // T007: LP の「無料開始」訴求と JSON-LD を一致させる (lowPriceJpy=0 供給)
     $html = (string) $this->get('/')->getContent();
 
-    expect($html)->not->toContain('AggregateOffer');
+    expect($html)->toContain('AggregateOffer')
+        ->toContain('"lowPrice":0');
 });
 
 it('認証配下ページは noindex + per-page title のみで canonical / og を漏らさない', function (): void {
