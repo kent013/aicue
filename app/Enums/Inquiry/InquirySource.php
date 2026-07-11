@@ -15,12 +15,14 @@ enum InquirySource: string
 {
     case Landing = 'landing';
     case Billing = 'billing';
+    case Pricing = 'pricing';
 
     public function label(): string
     {
         return match ($this) {
             self::Landing => 'トップページ',
             self::Billing => '請求画面',
+            self::Pricing => '料金プラン',
         };
     }
 

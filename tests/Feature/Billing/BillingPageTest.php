@@ -26,7 +26,7 @@ test('owner は /billing でプラン一覧・残高・管理フラグを見ら�
             ->where('plans.1.code', 'standard')
             ->where('plans.1.monthlyTicketGrant', 100)
             ->has('plans.1.price', fn (Assert $price) => $price
-                ->where('unitAmount', 1980)
+                ->where('unitAmount', 4980)
                 ->where('currency', 'jpy'))
             ->where('currentPlanCode', null)
             ->where('ticketBalance', 10)

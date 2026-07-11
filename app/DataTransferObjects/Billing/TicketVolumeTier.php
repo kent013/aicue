@@ -18,5 +18,6 @@ final readonly class TicketVolumeTier
         public int $unitAmount,
         public string $stripePriceId,
         public string $lookupKey,
+        public string $currency,
     ) {}
 }

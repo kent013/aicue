@@ -30,7 +30,7 @@ class PlanSeeder extends Seeder
      * @var array<string, array<string, int>>
      */
     private const PRICE_AMOUNTS = [
-        'standard' => ['base' => 1980],
+        'standard' => ['base' => 4980],
     ];
 
     public function run(): void

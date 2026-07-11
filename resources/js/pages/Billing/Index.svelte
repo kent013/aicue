@@ -3,6 +3,7 @@
     import Badge from "@/components/atoms/Badge.svelte";
     import Button from "@/components/atoms/Button.svelte";
     import Card from "@/components/atoms/Card.svelte";
+    import TextLink from "@/components/atoms/TextLink.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
     import type { SharedProps } from "@/lib/shared-props";
 
@@ -101,6 +102,12 @@
                     <h2 class="text-h3">チケット残高</h2>
                     <p class="mt-2 text-body" data-testid="ticket-balance">
                         {ticketBalance.toLocaleString("ja-JP")} 枚
+                    </p>
+                    <!-- 遷移先が role-aware (非管理者には購入依頼の案内) のため権限に依らず表示 -->
+                    <p class="mt-1">
+                        <TextLink href="/purchase-tickets" testId="purchase-tickets-link">
+                            チケットを購入
+                        </TextLink>
                     </p>
                 </div>
             </div>

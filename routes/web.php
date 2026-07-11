@@ -6,6 +6,7 @@ use App\Http\Controllers\Admin\UserManagementController;
 use App\Http\Controllers\Auth\ConfirmRecentAuthController;
 use App\Http\Controllers\Auth\SocialAuthController;
 use App\Http\Controllers\Billing\BillingController;
+use App\Http\Controllers\Billing\TicketPurchaseController;
 use App\Http\Controllers\Capture\CaptureManualController;
 use App\Http\Controllers\Capture\CaptureSyncController;
 use App\Http\Controllers\Capture\CaptureTakeController;
@@ -13,6 +14,7 @@ use App\Http\Controllers\Capture\TakeUploadUrlController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\DebugLoginController;
 use App\Http\Controllers\HomeController;
+use App\Http\Controllers\Marketing\PricingController;
 use App\Http\Controllers\Organizations\InvitationAcceptanceController;
 use App\Http\Controllers\Organizations\OrganizationApiKeyController;
 use App\Http\Controllers\Organizations\OrganizationController;
@@ -117,12 +119,12 @@ Route::get('/contact/thanks', [ContactController::class, 'thanks'])->name('conta
 |--------------------------------------------------------------------------
 | 公開マーケ / 法的ページ (auth 不要)
 |--------------------------------------------------------------------------
-| /pricing は公開 Inertia 雛形 (SEO minimal 分類。SeoComposer が title を供給)。
+| /pricing は公開料金表 (SEO full 分類。PricingController が SeoManager にメタを供給)。
 | /terms /privacy /commerce-disclosure は Route::view の薄い Blade スタブ。文面が
 | 未確定のプレースホルダのため noindex (blade の <meta robots> + NoIndex middleware の
 | X-Robots-Tag で二重防御)。正式文面へ差し替えて公開する際に noindex を外すこと。
 */
-Route::get('/pricing', fn () => Inertia::render('Pricing'))->name('pricing');
+Route::get('/pricing', PricingController::class)->name('pricing');
 Route::middleware(NoIndex::class)->group(function (): void {
     Route::view('/terms', 'legal.terms')->name('legal.terms');
     Route::view('/privacy', 'legal.privacy')->name('legal.privacy');
@@ -307,6 +309,16 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         ->name('billing.checkout');
     Route::post('/billing/portal', [BillingController::class, 'portal'])
         ->name('billing.portal');
+
+    /*
+    | チケットスポット購入 (current org スコープ)。billing.* と同じく課金ゲート
+    | (require-active-subscription) の対象外 = 未契約 / free プラン組織でも購入できる。
+    | 閲覧は組織メンバー全員、Checkout 開始は manageBilling (owner / admin) のみ。
+    */
+    Route::get('/purchase-tickets', [TicketPurchaseController::class, 'show'])
+        ->name('billing.tickets.show');
+    Route::post('/purchase-tickets/checkout', [TicketPurchaseController::class, 'checkout'])
+        ->name('billing.tickets.checkout');
 
     /*
     | 組織配下の業務 route (課金ゲート対象)。有効な subscription (BillingAccess 判定)

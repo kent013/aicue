@@ -52,15 +52,13 @@ return [
     | 上記いずれにも属さない route (認証配下のアプリ画面等) は noindex + title のみ描画される。
     */
     'route_classification' => [
-        'full' => ['home'],
-        'minimal' => ['pricing'],
+        'full' => ['home', 'pricing'],
+        'minimal' => [],
         'excluded' => ['seo.robots', 'seo.sitemap', 'seo.llms', 'seo.ai'],
     ],
 
     // minimal 分類のページ固有 title (route name => 固有名)。
-    'minimal_titles' => [
-        'pricing' => '料金プラン',
-    ],
+    'minimal_titles' => [],
 
     /*
     | sitemap.xml に載せる公開 HTML ページ (route name => changefreq/priority)。
@@ -102,6 +100,7 @@ return [
         'invitations.accept' => '組織への招待',
         // 課金
         'billing.index' => 'プランとお支払い',
+        'billing.tickets.show' => 'チケットを購入',
         // プロジェクト (show は controller が setPrivateTitle でプロジェクト名を供給)
         'projects.index' => 'プロジェクト',
         'projects.create' => 'プロジェクトの作成',

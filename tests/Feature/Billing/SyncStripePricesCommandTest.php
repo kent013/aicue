@@ -23,7 +23,7 @@ function syncStandardBaseLookupKey(): string
  */
 function syncEntry(string $lookupKey, string $stripePriceId, array $overrides = []): StripePriceCatalogEntry
 {
-    $unitAmount = $overrides['unitAmount'] ?? 1980;
+    $unitAmount = $overrides['unitAmount'] ?? 4980;
     assert(is_int($unitAmount));
     $currency = $overrides['currency'] ?? 'jpy';
     assert(is_string($currency));

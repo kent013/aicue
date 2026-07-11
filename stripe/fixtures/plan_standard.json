@@ -22,7 +22,7 @@
       "method": "post",
       "params": {
         "currency": "jpy",
-        "unit_amount": 1980,
+        "unit_amount": 4980,
         "product": "${standard_product:id}",
         "lookup_key": "app_standard_base",
         "nickname": "Standard 基本料 (月額)",

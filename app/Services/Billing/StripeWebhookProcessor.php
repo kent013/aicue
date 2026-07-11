@@ -6,11 +6,13 @@ namespace App\Services\Billing;
 
 use App\Enums\Billing\BillingNotificationType;
 use App\Enums\Billing\HandledStripeWebhookEvent;
+use App\Enums\Billing\TicketCheckoutSessionStatus;
 use App\Enums\Billing\WebhookEventStatus;
 use App\Models\Billing\Plan;
 use App\Models\Billing\PlanPrice;
 use App\Models\Billing\StripeWebhookEvent;
 use App\Models\Billing\Subscription;
+use App\Models\Billing\TicketCheckoutSession;
 use App\Models\Organization;
 use App\Notifications\Billing\PaymentFailedNotification;
 use Carbon\CarbonImmutable;
@@ -19,6 +21,7 @@ use Illuminate\Support\Facades\Log;
 use Laravel\Cashier\Events\WebhookReceived;
 use RuntimeException;
 use Throwable;
+use Webmozart\Assert\Assert;
 
 /**
  * Stripe webhook の冪等マシン (Cashier の WebhookReceived listener)。
@@ -123,6 +126,14 @@ class StripeWebhookProcessor
                         'type' => $type,
                         'attempts' => $existing->attempts,
                     ]);
+                    // 付与系イベントの取りこぼしは「決済済み・未付与」を残すため運用アラート経路
+                    // (report) にも載せる (failure_reason 参照 → 手動 grantPurchased 判断)
+                    if (in_array($type, [
+                        HandledStripeWebhookEvent::CheckoutSessionCompleted->value,
+                        HandledStripeWebhookEvent::InvoicePaid->value,
+                    ], true)) {
+                        report(new RuntimeException("stripe webhook terminal failure (grant イベント): {$eventId} ({$type})"));
+                    }
 
                     return null;
                 }
@@ -159,9 +170,8 @@ class StripeWebhookProcessor
             HandledStripeWebhookEvent::InvoicePaid => $this->grantMonthlyTickets($payload),
             HandledStripeWebhookEvent::ChargeRefunded => $this->clawbackRefundedTickets($payload),
             HandledStripeWebhookEvent::InvoicePaymentFailed => $this->handleInvoicePaymentFailed($payload),
-            // 拡張点: テンプレートでは受理のみ (派生アプリで
-            // TicketLedgerService::grantPurchased によるチケット購入付与等を実装する)
-            HandledStripeWebhookEvent::CheckoutSessionCompleted => null,
+            // チケットスポット購入の冪等付与 (T007。真実源は ticket_checkout_sessions 行)
+            HandledStripeWebhookEvent::CheckoutSessionCompleted => $this->grantPurchasedTickets($payload),
             null => null, // 未対応 type は受理のみ (processed として記録)
         };
     }
@@ -349,6 +359,97 @@ class StripeWebhookProcessor
         } catch (Throwable $e) {
             report($e);
         }
+    }
+
+    /**
+     * checkout.session.completed: チケットスポット購入の冪等付与。
+     *
+     * - purpose ガード: metadata.purpose=ticket_purchase かつ mode=payment 以外は受理のみ
+     *   (サブスク checkout / 他 purpose を failed にしない)
+     * - 真実源は自 DB 行 (ticket_checkout_sessions)。payload の customer / metadata は照合のみ
+     *   (tenant キー不信)。行不在・照合不一致・未決済・金額不一致は例外 throw =
+     *   retryable failure (既存 handle() の catch で failed + Stripe 再送。恒久不整合は
+     *   attempts 上限の terminal-ack + failure_reason で運用調査へ)
+     * - 付与は TicketLedgerService::grantPurchased (idempotency_key purchase:{sessionId}
+     *   UNIQUE) で冪等。event_id 違い再送でも二重付与しない
+     *
+     * @param  array<mixed>  $payload
+     */
+    private function grantPurchasedTickets(array $payload): void
+    {
+        // (1) purpose ガード: ticket_purchase 以外 (サブスク checkout / 他 purpose / mode≠payment) は受理のみ
+        if ($this->stringAt($payload, 'data.object.metadata.purpose') !== 'ticket_purchase') {
+            return;
+        }
+        if ($this->stringAt($payload, 'data.object.mode') !== 'payment') {
+            return;
+        }
+
+        $sessionId = $this->stringAt($payload, 'data.object.id');
+        if ($sessionId === null) {
+            throw new RuntimeException('checkout.session.completed: session id 欠落 (ticket_purchase)');
+        }
+
+        // (2) 真実源は自 DB 行。行不在は retryable failure (crash 先着 webhook は同一 attempt の
+        //     再試行で DB 行が記録された後、Stripe の event 再送で本経路に収束する)
+        $session = TicketCheckoutSession::query()->where('stripe_session_id', $sessionId)->first();
+        if ($session === null) {
+            throw new RuntimeException("ticket purchase webhook: 未追跡 session {$sessionId} (DB 行なし、再送待ち)");
+        }
+
+        // (3) tenant キー不信: payload の customer / metadata.org_ref は照合のみ。不一致は throw (fail-closed)
+        $organization = $session->organization;
+        Assert::isInstanceOf($organization, Organization::class);
+        $customerId = $this->stringAt($payload, 'data.object.customer');
+        if ($customerId === null || $organization->stripe_id !== $customerId) {
+            throw new RuntimeException("ticket purchase webhook: customer 照合不一致 (session {$sessionId})");
+        }
+        // org_ref は照合専用 (認可・org 解決には使わない。真実源は DB 行 → organization relation)
+        $metaOrgRef = $this->stringAt($payload, 'data.object.metadata.org_ref');
+        if ($metaOrgRef !== (string) $organization->id) {
+            throw new RuntimeException("ticket purchase webhook: metadata org_ref 照合不一致 (session {$sessionId})");
+        }
+
+        // (4) payment_status=paid 必須 (card 固定下の防御線。未決済 completed を付与しない)
+        if ($this->stringAt($payload, 'data.object.payment_status') !== 'paid') {
+            throw new RuntimeException("ticket purchase webhook: payment_status が paid でない (session {$sessionId})");
+        }
+
+        // (5) 金額照合: amount_subtotal === count × pin 単価、currency === pin (欠落・不一致は throw)。
+        //     amount_total は税・割引の運用設定ドリフトで壊れるため使わない
+        //     (作成側でも promo / automatic tax を使わない構成に固定 = 二重防御)
+        $amountSubtotal = data_get($payload, 'data.object.amount_subtotal');
+        $currency = $this->stringAt($payload, 'data.object.currency');
+        if (! is_int($amountSubtotal)
+            || $amountSubtotal !== $session->ticket_count * $session->unit_amount
+            || $currency !== $session->currency) {
+            // expected/actual を記録する (failed 連鎖時の運用復旧を高速化)
+            throw new RuntimeException(sprintf(
+                'ticket purchase webhook: 金額/通貨照合不一致 (session %s, expected %d %s, actual %s %s)',
+                $sessionId,
+                $session->ticket_count * $session->unit_amount,
+                $session->currency,
+                is_int($amountSubtotal) ? (string) $amountSubtotal : 'missing',
+                $currency ?? 'missing',
+            ));
+        }
+
+        // (6) 冪等付与 (idempotency_key purchase:{sessionId} UNIQUE) + 行 completed 化 (同一 TX)
+        $paymentIntentId = $this->stringAt($payload, 'data.object.payment_intent');
+        DB::transaction(function () use ($organization, $session, $amountSubtotal, $paymentIntentId): void {
+            $this->tickets->grantPurchased(
+                $organization,
+                $session->ticket_count,
+                $session->stripe_session_id,
+                $paymentIntentId,
+                $amountSubtotal, // 返金按分の分母 (clawback が使う)
+            );
+            if ($session->status !== TicketCheckoutSessionStatus::Completed) {
+                $session->status = TicketCheckoutSessionStatus::Completed;
+                $session->completed_at = CarbonImmutable::now();
+                $session->save();
+            }
+        });
     }
 
     /**

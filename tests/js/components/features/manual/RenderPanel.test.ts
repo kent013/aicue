@@ -8,7 +8,9 @@ const { routerReloadMock } = vi.hoisted(() => ({
     routerReloadMock: vi.fn(),
 }));
 
-vi.mock("@inertiajs/svelte", () => ({
+// Link (TextLink 経由) は実物を使い、router のみ差し替える
+vi.mock("@inertiajs/svelte", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("@inertiajs/svelte")>()),
     router: {
         reload: routerReloadMock,
     },
@@ -137,6 +139,13 @@ describe("RenderPanel", () => {
         });
         // 押下可能なまま (disabled にしない)
         expect(screen.getByTestId("render-button")).toBeInTheDocument();
+        // T007: 残高不足 (code 厳格一致) では購入導線を併記する
+        expect(screen.getByTestId("render-purchase-link")).toBeInTheDocument();
+        expect(
+            new URL(
+                (screen.getByTestId("render-purchase-link") as HTMLAnchorElement).href,
+            ).pathname,
+        ).toBe("/purchase-tickets");
     });
 
     it("rendering 中は step ラベルと progress を表示する", () => {

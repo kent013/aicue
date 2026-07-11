@@ -13,8 +13,15 @@ use Illuminate\Database\QueryException;
  * - tier 解決: min_count <= count を満たす最大 min_count の current 行
  * - 該当なしは fail-closed (TicketVolumeTierUnavailableException)
  * - floor (config billing.ticket_unit_price_floor) 未満の単価は設定異常として停止
- * - TicketVolumePriceSeeder はオプトインのサンプル段 (DatabaseSeeder 非登録)
+ * - TicketVolumePriceSeeder は T007 で DatabaseSeeder に登録済み (スポット購入の bootstrap)
  */
+
+beforeEach(function (): void {
+    // T007 で TicketVolumePriceSeeder が DatabaseSeeder に登録され、全テストで 7 段が
+    // bootstrap 投入されるようになった。本テストは段構成そのものを自前で制御して
+    // 検証するため、既定行をクリアして「明示投入した段のみ」の前提を維持する。
+    TicketVolumePrice::query()->delete();
+});
 
 /** current の tier 行を明示投入する */
 function seedVolumeTier(int $minCount, int $unitAmount): TicketVolumePrice

@@ -8,7 +8,9 @@ const { routerReloadMock } = vi.hoisted(() => ({
     routerReloadMock: vi.fn(),
 }));
 
-vi.mock("@inertiajs/svelte", () => ({
+// Link (TextLink 経由) は実物を使い、router のみ差し替える
+vi.mock("@inertiajs/svelte", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("@inertiajs/svelte")>()),
     router: {
         reload: routerReloadMock,
     },
@@ -98,6 +100,32 @@ describe("AnalysisPanel", () => {
             );
         });
         expect(screen.getByTestId("analyze-button")).not.toBeDisabled();
+        // T007: 残高不足 (code 厳格一致) では購入導線を併記する
+        expect(screen.getByTestId("analysis-purchase-link")).toBeInTheDocument();
+        expect(
+            new URL(
+                (screen.getByTestId("analysis-purchase-link") as HTMLAnchorElement).href,
+            ).pathname,
+        ).toBe("/purchase-tickets");
+    });
+
+    it("insufficient_tickets 以外の 402/409 では購入導線を出さない (誤表示防止)", async () => {
+        fetchMock.mockResolvedValue(
+            jsonResponse(409, {
+                code: "analysis_conflict",
+                message: "解析が進行中です。",
+            }),
+        );
+
+        render(AnalysisPanel, { props: baseProps });
+        await fireEvent.click(screen.getByTestId("analyze-button"));
+
+        await waitFor(() => {
+            expect(screen.getByTestId("analysis-start-error")).toHaveTextContent(
+                "解析が進行中です。",
+            );
+        });
+        expect(screen.queryByTestId("analysis-purchase-link")).toBeNull();
     });
 
     it("422 (手順書なし) もサーバの message を表示する (disabled にしない)", async () => {
