@@ -1,0 +1,7 @@
+全体判定: CHANGES_REQUESTED
+
+[Warning] Serviceトランザクション内でresolverを呼ぶだけでは、Default Projectの削除競合は防げません。取得直後に別トランザクションから削除される余地があり、「TOCTOU封じ」という保証が成立しません。
+
+修正提案: 書き込み用途ではDefault Projectを `lockForUpdate()` 付きで解決する専用メソッドを使用し、取得からpivot更新まで行ロックを保持すると明記してください。通常表示やcapture.homeのresolverはロック不要なので、read用とwrite用を分けます。
+
+それ以外のRound 2指摘は適切に解消されています。上記の排他方式が明記されればAPPROVEDです。
