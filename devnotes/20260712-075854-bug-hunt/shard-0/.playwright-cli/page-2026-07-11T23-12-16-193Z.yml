@@ -1,0 +1,23 @@
+- generic [ref=f23e2]:
+  - generic [ref=f23e3]:
+    - heading "プライバシーポリシー" [level=1] [ref=f23e4]
+    - paragraph [ref=f23e5]: "最終改定日: （アプリ公開時に記入）"
+    - paragraph [ref=f23e6]:
+      - text: 本ページは
+      - strong [ref=f23e7]: "${APP_NAME}"
+      - text: （以下「本サービス」）における 個人情報の取り扱いに関するプレースホルダです。アプリ公開前に、実際の取得項目・利用目的・ 第三者提供・保管期間等に合わせて正式な文面へ差し替えてください。
+    - heading "1. 取得する情報" [level=2] [ref=f23e8]
+    - paragraph [ref=f23e9]: アカウント登録情報（メールアドレス・氏名等）、サービス利用に伴い自動的に生成されるログ情報等。
+    - heading "2. 利用目的" [level=2] [ref=f23e10]
+    - paragraph [ref=f23e11]: 本サービスの提供・運用・改善、本人確認、不正利用の防止、およびお問い合わせへの対応のために利用します。
+    - heading "3. 第三者提供" [level=2] [ref=f23e12]
+    - paragraph [ref=f23e13]: 法令に基づく場合を除き、本人の同意なく個人情報を第三者に提供しません。
+    - heading "4. 開示・訂正・削除" [level=2] [ref=f23e14]
+    - paragraph [ref=f23e15]: 利用者は自己の個人情報の開示・訂正・削除を請求できます。手続きはお問い合わせフォームよりご連絡ください。
+    - paragraph [ref=f23e16]:
+      - text: ご不明点は
+      - link "お問い合わせフォーム" [ref=f23e17] [cursor=pointer]:
+        - /url: http://127.0.0.1:8010/contact
+      - text: よりご連絡ください。
+  - link "← ホームに戻る" [ref=f23e18] [cursor=pointer]:
+    - /url: /

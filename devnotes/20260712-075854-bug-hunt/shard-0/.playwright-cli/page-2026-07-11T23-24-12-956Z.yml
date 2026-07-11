@@ -1,0 +1,14 @@
+- generic [ref=f56e34]:
+  - paragraph [ref=f56e35]: "${APP_NAME}"
+  - main [ref=f56e36]:
+    - heading "2要素認証" [level=1] [ref=f56e37]
+    - tablist [ref=f56e38]:
+      - tab "認証コード" [selected] [ref=f56e39]
+      - tab "リカバリコード" [ref=f56e40]
+    - generic [ref=f56e41]:
+      - tabpanel "認証コード" [ref=f56e42]:
+        - paragraph [ref=f56e43]: 認証アプリに表示されている 6 桁のコードを入力してください。
+        - generic [ref=f56e44]:
+          - generic [ref=f56e45]: 認証コード
+          - textbox "認証コード" [ref=f56e46]
+      - button "認証する" [ref=f56e47]

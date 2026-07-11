@@ -1,0 +1,43 @@
+- generic [ref=f50e2]:
+  - status [ref=f50e86]:
+    - generic [ref=f50e88]: API キーを失効しました
+    - button "閉じる" [ref=f50e89]
+  - generic [ref=f50e3]:
+    - banner [ref=f50e4]:
+      - generic [ref=f50e5]:
+        - 'link "${APP_NAME}" [ref=f50e6] [cursor=pointer]':
+          - /url: /dashboard
+        - link "通知" [ref=f50e8] [cursor=pointer]:
+          - /url: http://127.0.0.1:8010/notifications
+    - main [ref=f50e10]:
+      - heading "API キー" [level=1] [ref=f50e11]
+      - paragraph [ref=f50e12]: シャード0検証組織-更新済み の REST API / MCP アクセスに使う組織スコープのキーとセッションを管理します。
+      - generic [ref=f50e13]:
+        - navigation "API キー / 接続セッション切替" [ref=f50e14]:
+          - link "API キー" [ref=f50e15] [cursor=pointer]:
+            - /url: http://127.0.0.1:8010/organizations/org-mg3sqi/api-keys
+          - link "接続セッション" [ref=f50e16] [cursor=pointer]:
+            - /url: http://127.0.0.1:8010/organizations/org-mg3sqi/api-keys/sessions
+        - generic [ref=f50e17]:
+          - generic [ref=f50e18]:
+            - generic [ref=f50e19]:
+              - generic [ref=f50e20]:
+                - heading "発行済みキー" [level=2] [ref=f50e21]
+                - paragraph [ref=f50e22]: 平文キーは発行直後に 1 度だけ表示されます。失効済みキーは監査痕跡として残ります。
+              - button "発行" [ref=f50e23]
+            - list [ref=f50e66]:
+              - listitem [ref=f50e67]:
+                - generic [ref=f50e68]:
+                  - generic [ref=f50e69]:
+                    - paragraph [ref=f50e70]: shard0-test-key
+                    - generic [ref=f50e71]: 読み取り
+                    - generic [ref=f50e91]: 失効済み
+                  - paragraph [ref=f50e72]: app_pNxETaLH… ・ 発行 2026-07-11 ・ 最終利用 未使用
+          - generic [ref=f50e27]:
+            - heading "導入ガイド" [level=2] [ref=f50e28]
+            - paragraph [ref=f50e29]: AI クライアント (MCP) やターミナル (CLI) からの接続手順を確認できます。
+            - generic [ref=f50e30]:
+              - link "MCP 導入ガイド" [ref=f50e31] [cursor=pointer]:
+                - /url: http://127.0.0.1:8010/organizations/org-mg3sqi/onboarding/mcp
+              - link "CLI 導入ガイド" [ref=f50e32] [cursor=pointer]:
+                - /url: http://127.0.0.1:8010/organizations/org-mg3sqi/onboarding/cli

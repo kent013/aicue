@@ -1,0 +1,28 @@
+- generic [ref=f19e18]:
+  - paragraph [ref=f19e19]: "${APP_NAME}"
+  - main [ref=f19e20]:
+    - heading "ログイン" [level=1] [ref=f19e21]
+    - generic [ref=f19e22]:
+      - generic [ref=f19e23]:
+        - generic [ref=f19e24]: メールアドレス
+        - textbox "メールアドレス" [ref=f19e25]
+      - generic [ref=f19e26]:
+        - generic [ref=f19e27]: パスワード
+        - generic [ref=f19e28]:
+          - textbox "パスワード" [ref=f19e29]
+          - button "パスワードを表示" [ref=f19e30]
+      - generic [ref=f19e33]:
+        - checkbox "ログイン状態を保持" [ref=f19e34]
+        - generic [ref=f19e35]: ログイン状態を保持
+      - button "ログイン" [ref=f19e36]
+    - generic [ref=f19e37]: または
+    - link "Google でログイン" [ref=f19e43] [cursor=pointer]:
+      - /url: /auth/google/redirect/login
+  - generic [ref=f19e44]:
+    - paragraph [ref=f19e45]:
+      - text: アカウントをお持ちでない方は
+      - link "登録" [ref=f19e46] [cursor=pointer]:
+        - /url: http://127.0.0.1:8010/register
+    - paragraph [ref=f19e47]:
+      - link "パスワードをお忘れの方" [ref=f19e48] [cursor=pointer]:
+        - /url: http://127.0.0.1:8010/forgot-password

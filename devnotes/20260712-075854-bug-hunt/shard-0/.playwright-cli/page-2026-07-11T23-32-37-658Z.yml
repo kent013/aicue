@@ -1,0 +1,115 @@
+- generic [active]:
+  - generic:
+    - generic:
+      - banner:
+        - generic:
+          - 'link "${APP_NAME}"':
+            - /url: /dashboard
+          - generic:
+            - link "通知":
+              - /url: http://127.0.0.1:8010/notifications
+      - main:
+        - heading "ユーザー管理" [level=1]
+        - paragraph: 組織のメンバーと招待を管理します。ロールは「管理者・編集者・撮影者」から選択します。
+        - generic:
+          - complementary:
+            - generic:
+              - heading "管理メニュー" [level=2]
+              - navigation "管理メニュー":
+                - list:
+                  - listitem:
+                    - generic: ユーザー管理
+          - generic:
+            - generic:
+              - heading "メンバー一覧" [level=2]
+              - paragraph: プロジェクトがまだありません。編集者・撮影者を割り当てるには、先にプロジェクトを作成してください。
+              - list:
+                - listitem:
+                  - generic:
+                    - generic:
+                      - paragraph: Multi Org User (更新済み)
+                      - generic: 2FA
+                      - generic: 未割当
+                    - paragraph: multi-org@example.com
+                  - generic:
+                    - button "2FA 解除"
+                    - combobox "Multi Org User (更新済み) のロール":
+                      - option "未割当（選択してください）" [selected]
+                      - option "管理者"
+                      - option "編集者"
+                      - option "撮影者"
+                    - button "削除"
+                - listitem:
+                  - generic:
+                    - generic:
+                      - paragraph: Free Admin
+                    - paragraph: admin-free@example.com
+                  - generic:
+                    - combobox "Free Admin のロール":
+                      - option "管理者" [selected]
+                      - option "編集者"
+                      - option "撮影者"
+                    - button "削除"
+                - listitem:
+                  - generic:
+                    - generic:
+                      - paragraph: Free Owner
+                    - paragraph: owner-free@example.com
+                  - generic: 管理者（オーナー）
+                - listitem:
+                  - generic:
+                    - generic:
+                      - paragraph: Unverified User
+                      - generic: 未割当
+                    - paragraph: unverified@example.com
+                  - generic:
+                    - combobox "Unverified User のロール":
+                      - option "未割当（選択してください）" [selected]
+                      - option "管理者"
+                      - option "編集者"
+                      - option "撮影者"
+                    - button "削除"
+                - listitem:
+                  - generic:
+                    - generic:
+                      - paragraph: Free Member
+                      - generic: 未割当
+                    - paragraph: member-free@example.com
+                  - generic:
+                    - combobox "Free Member のロール":
+                      - option "未割当（選択してください）" [selected]
+                      - option "管理者"
+                      - option "編集者"
+                      - option "撮影者"
+                    - button "削除"
+            - generic:
+              - heading "ユーザーを追加" [level=2]
+              - paragraph: 招待メールを送信します。招待の有効期限は 7 日間です。
+              - generic:
+                - generic:
+                  - generic: メールアドレス
+                  - textbox "メールアドレス"
+                - generic:
+                  - generic: ロール
+                  - combobox "ロール":
+                    - option "管理者"
+                    - option "編集者"
+                    - option "撮影者" [selected]
+                - generic:
+                  - button "招待を送信"
+            - generic:
+              - heading "招待中" [level=2]
+              - generic:
+                - heading "有効な招待はありません" [level=3]
+                - paragraph: 送信した招待は受諾されるか期限が切れるまでここに表示されます。
+  - dialog [ref=f77e89]:
+    - generic [ref=f77e90]:
+      - heading "メンバーの 2FA を解除" [level=2] [ref=f77e91]
+      - button "閉じる" [ref=f77e92]
+    - generic [ref=f77e95]:
+      - paragraph [ref=f77e96]: Multi Org User (更新済み) さんの 2 段階認証を解除します。 解除はこのアカウント全体に及び、本人へセキュリティ通知が送信されます。
+      - generic [ref=f77e97]:
+        - generic [ref=f77e98]: 理由 (10 文字以上。監査ログに記録されます)
+        - textbox "理由 (10 文字以上。監査ログに記録されます)" [invalid] [ref=f77e99]
+        - paragraph [ref=f77e102]: reasonは必須項目です。
+      - button "解除する" [ref=f77e101]

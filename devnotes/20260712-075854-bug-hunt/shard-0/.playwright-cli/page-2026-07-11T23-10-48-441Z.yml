@@ -1,0 +1,13 @@
+- generic [ref=f18e3]:
+  - paragraph [ref=f18e4]: "${APP_NAME}"
+  - main [ref=f18e5]:
+    - heading "パスワードをお忘れの方" [level=1] [ref=f18e6]
+    - paragraph [ref=f18e7]: ご登録のメールアドレスを入力してください。パスワードリセット用のリンクをお送りします。
+    - generic [ref=f18e8]:
+      - generic [ref=f18e9]:
+        - generic [ref=f18e10]: メールアドレス
+        - textbox "メールアドレス" [ref=f18e11]: owner-free@example.com
+      - button "リセットリンクを送信" [ref=f18e12]
+  - paragraph [ref=f18e14]:
+    - link "ログインに戻る" [ref=f18e15] [cursor=pointer]:
+      - /url: http://127.0.0.1:8010/login

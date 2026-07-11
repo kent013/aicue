@@ -1,0 +1,15 @@
+- generic [ref=f21e3]:
+  - paragraph [ref=f21e4]: "${APP_NAME}"
+  - main [ref=f21e5]:
+    - heading "パスワードリセット" [level=1] [ref=f21e6]
+    - generic [ref=f21e7]:
+      - generic [ref=f21e8]:
+        - generic [ref=f21e9]: メールアドレス
+        - textbox "メールアドレス" [invalid] [ref=f21e10]: owner-free@example.com
+        - paragraph [ref=f21e18]: このパスワード再設定トークンは無効です。
+      - generic [ref=f21e11]:
+        - generic [ref=f21e12]: 新しいパスワード
+        - generic [ref=f21e13]:
+          - textbox "新しいパスワード" [ref=f21e14]: AnotherPass7yQ3z
+          - button "パスワードを表示" [ref=f21e15]
+      - button "パスワードをリセット" [ref=f21e17]

@@ -1,0 +1,5 @@
+- generic [ref=f43e4]:
+  - heading "この招待リンクは使用できません" [level=1] [ref=f43e6]
+  - paragraph [ref=f43e7]: 招待が無効になっているか、すでに使用済みか、期限が切れています。 招待を送った担当者に、新しい招待リンクの再送を依頼してください。
+  - link "ダッシュボードへ戻る" [ref=f43e8] [cursor=pointer]:
+    - /url: http://127.0.0.1:8010/dashboard

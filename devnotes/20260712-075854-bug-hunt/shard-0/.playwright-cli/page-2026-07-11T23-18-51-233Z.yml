@@ -1,0 +1,72 @@
+- generic:
+  - generic:
+    - generic:
+      - banner:
+        - generic:
+          - 'link "${APP_NAME}"':
+            - /url: /dashboard
+          - generic:
+            - link "通知":
+              - /url: http://127.0.0.1:8010/notifications
+      - main:
+        - heading "ユーザー管理" [level=1]
+        - paragraph: 組織のメンバーと招待を管理します。ロールは「管理者・編集者・撮影者」から選択します。
+        - generic:
+          - complementary:
+            - generic:
+              - heading "管理メニュー" [level=2]
+              - navigation "管理メニュー":
+                - list:
+                  - listitem:
+                    - generic: ユーザー管理
+          - generic:
+            - generic:
+              - heading "メンバー一覧" [level=2]
+              - paragraph: プロジェクトがまだありません。編集者・撮影者を割り当てるには、先にプロジェクトを作成してください。
+              - list:
+                - listitem:
+                  - generic:
+                    - generic:
+                      - paragraph: Multi Org User
+                    - paragraph: multi-org@example.com
+                  - generic: 管理者（オーナー）
+                - listitem:
+                  - generic:
+                    - generic:
+                      - paragraph: 招待テスト管理者
+                    - paragraph: shard0-invitee@example.com
+                    - paragraph: 編集者・撮影者を割り当てるには、先にプロジェクトを作成してください。
+                  - generic:
+                    - combobox "招待テスト管理者 のロール":
+                      - option "管理者"
+                      - option "編集者" [selected]
+                      - option "撮影者"
+                    - button "削除"
+            - generic:
+              - heading "ユーザーを追加" [level=2]
+              - paragraph: 招待メールを送信します。招待の有効期限は 7 日間です。
+              - generic:
+                - generic:
+                  - generic: メールアドレス
+                  - textbox "メールアドレス"
+                - generic:
+                  - generic: ロール
+                  - combobox "ロール":
+                    - option "管理者"
+                    - option "編集者"
+                    - option "撮影者" [selected]
+                - generic:
+                  - button "招待を送信"
+            - generic:
+              - heading "招待中" [level=2]
+              - generic:
+                - heading "有効な招待はありません" [level=3]
+                - paragraph: 送信した招待は受諾されるか期限が切れるまでここに表示されます。
+  - dialog [ref=f42e61]:
+    - generic [ref=f42e62]:
+      - heading "ユーザー削除" [level=2] [ref=f42e63]
+      - button "閉じる" [active] [ref=f42e64]
+    - paragraph [ref=f42e67]: 招待テスト管理者 さんをこの組織から削除しますか？ この操作は取り消せません。
+    - generic [ref=f42e68]:
+      - button "キャンセル" [ref=f42e69]
+      - button "削除する" [ref=f42e70]

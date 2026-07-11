@@ -1,0 +1,25 @@
+- generic [ref=f22e2]:
+  - generic [ref=f22e3]:
+    - heading "利用規約" [level=1] [ref=f22e4]
+    - paragraph [ref=f22e5]: "最終改定日: （アプリ公開時に記入）"
+    - paragraph [ref=f22e6]:
+      - text: 本ページは
+      - strong [ref=f22e7]: "${APP_NAME}"
+      - text: （以下「本サービス」）の利用規約の プレースホルダです。アプリ公開前に、サービス内容に合わせて正式な文面へ差し替えてください。
+    - heading "第1条（適用）" [level=2] [ref=f22e8]
+    - paragraph [ref=f22e9]: 本規約は、本サービスの利用に関する条件を、利用者と運営者との間で定めるものです。
+    - heading "第2条（アカウント）" [level=2] [ref=f22e10]
+    - paragraph [ref=f22e11]: 利用者は登録情報を正確かつ最新の状態に保ち、認証情報の管理について自ら責任を負います。
+    - heading "第3条（禁止事項）" [level=2] [ref=f22e12]
+    - paragraph [ref=f22e13]: 法令または公序良俗に違反する行為、他者の権利を侵害する行為、本サービスの運営を妨げる行為を禁止します。
+    - heading "第4条（免責）" [level=2] [ref=f22e14]
+    - paragraph [ref=f22e15]: 運営者は、本サービスの利用または利用不能により生じた損害について、法令で認められる範囲で責任を負いません。
+    - heading "第5条（準拠法・裁判管轄）" [level=2] [ref=f22e16]
+    - paragraph [ref=f22e17]: 本規約の解釈および適用は日本法に準拠します。
+    - paragraph [ref=f22e18]:
+      - text: ご不明点は
+      - link "お問い合わせフォーム" [ref=f22e19] [cursor=pointer]:
+        - /url: http://127.0.0.1:8010/contact
+      - text: よりご連絡ください。
+  - link "← ホームに戻る" [ref=f22e20] [cursor=pointer]:
+    - /url: /

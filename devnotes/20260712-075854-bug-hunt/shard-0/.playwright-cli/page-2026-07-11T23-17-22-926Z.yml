@@ -1,0 +1,33 @@
+- generic [ref=f38e3]:
+  - paragraph [ref=f38e4]: "${APP_NAME}"
+  - main [ref=f38e5]:
+    - heading "アカウント登録" [level=1] [ref=f38e6]
+    - generic [ref=f38e7]:
+      - generic [ref=f38e8]:
+        - generic [ref=f38e9]: 名前
+        - textbox "名前" [ref=f38e10]: 招待テスト管理者
+      - generic [ref=f38e11]:
+        - generic [ref=f38e12]: メールアドレス
+        - textbox "メールアドレス" [ref=f38e13]: shard0-invitee@example.com
+      - generic [ref=f38e14]:
+        - generic [ref=f38e15]: パスワード
+        - generic [ref=f38e16]:
+          - textbox "パスワード" [ref=f38e17]: Xk7pQm2wTz9vBn5L
+          - button "パスワードを表示" [ref=f38e18]
+      - generic [ref=f38e21]:
+        - checkbox "利用規約とプライバシーポリシーに同意します" [checked] [active] [ref=f38e22]
+        - generic [ref=f38e23]:
+          - link "利用規約" [ref=f38e24] [cursor=pointer]:
+            - /url: http://127.0.0.1:8010/terms
+          - text: と
+          - link "プライバシーポリシー" [ref=f38e25] [cursor=pointer]:
+            - /url: http://127.0.0.1:8010/privacy
+          - text: に同意します
+      - button "登録" [ref=f38e26]
+    - generic [ref=f38e27]: または
+    - link "Google で登録" [ref=f38e33] [cursor=pointer]:
+      - /url: /auth/google/redirect/register?terms_accepted=1
+  - paragraph [ref=f38e35]:
+    - text: すでにアカウントをお持ちの方は
+    - link "ログイン" [ref=f38e36] [cursor=pointer]:
+      - /url: http://127.0.0.1:8010/login

@@ -1,0 +1,132 @@
+- generic [ref=f17e94]:
+  - banner [ref=f17e95]:
+    - generic [ref=f17e96]:
+      - 'link "${APP_NAME}" [ref=f17e97] [cursor=pointer]':
+        - /url: /
+      - navigation [ref=f17e98]:
+        - link "料金プラン" [ref=f17e99] [cursor=pointer]:
+          - /url: /pricing
+        - link "ログイン" [ref=f17e100] [cursor=pointer]:
+          - /url: /login
+        - link "無料で始める" [ref=f17e101] [cursor=pointer]:
+          - /url: /register
+  - main [ref=f17e102]:
+    - generic [ref=f17e103]:
+      - generic [ref=f17e104]:
+        - generic [ref=f17e105]: AI がカットを設計するマニュアル動画
+        - heading "動画マニュアルを、 手順書から。" [level=1] [ref=f17e107]: 動画マニュアルを、手順書から。
+        - paragraph [ref=f17e108]: 現場にある作業手順書 (SOP) を渡せば、AI が撮るべきカットを設計。スマホのナビに従って撮るだけで、 編集ゼロで字幕付きのマニュアル動画が完成します。台本作成・撮影判断・編集は、もう要りません。
+        - generic [ref=f17e109]:
+          - link "無料で始める" [ref=f17e110] [cursor=pointer]:
+            - /url: /register
+          - link "仕組みを見る" [ref=f17e111] [cursor=pointer]:
+            - /url: "#how"
+      - generic [ref=f17e113]:
+        - generic [ref=f17e114]:
+          - generic [ref=f17e115]: バルブ閉止作業マニュアル
+          - generic [ref=f17e116]: 撮影中 3/8
+        - generic [ref=f17e117]:
+          - generic [ref=f17e118]: "カット 1: 作業前の全体"
+          - generic [ref=f17e120]: "カット 2: 元栓の位置を確認"
+          - generic [ref=f17e122]: "カット 3: バルブを閉める"
+          - generic [ref=f17e124]: "カット 4: 閉止後の目視確認"
+        - paragraph [ref=f17e127]: "ガイド: バルブ全体が映る位置から、閉め終わるまで撮影してください"
+    - generic [ref=f17e130]:
+      - heading "動画マニュアルには、3 つの壁がある。" [level=2] [ref=f17e131]
+      - paragraph [ref=f17e132]: 「作ったほうがいい」と分かっていても進まないのは、台本・撮影・編集のすべてに専門知識が要るからです。
+      - generic [ref=f17e133]:
+        - generic [ref=f17e134]:
+          - heading "台本作成の壁" [level=3] [ref=f17e137]
+          - paragraph [ref=f17e138]: 何をどう撮ればマニュアルになるのか。構成と台本を考えるだけで手が止まります。
+        - generic [ref=f17e139]:
+          - heading "撮影判断の壁" [level=3] [ref=f17e142]
+          - paragraph [ref=f17e143]: 現場でどこから撮るか迷い、撮り直しが増える。品質が撮影者のスキルに左右されます。
+        - generic [ref=f17e144]:
+          - heading "編集の壁" [level=3] [ref=f17e147]
+          - paragraph [ref=f17e148]: 切り貼り・字幕付け・書き出し。撮ったあとの編集に一番時間がかかります。
+    - generic [ref=f17e149]:
+      - heading "思考ゼロ・編集ゼロの 4 ステップ。" [level=2] [ref=f17e150]
+      - paragraph [ref=f17e151]: 考える工程は AI が、撮る工程はナビが、編集は自動合成が引き受けます。
+      - generic [ref=f17e152]:
+        - generic [ref=f17e153]: 手順書
+        - generic [ref=f17e155]: AI がカット設計
+        - generic [ref=f17e157]: ナビ撮影
+        - generic [ref=f17e159]: 自動合成
+      - generic [ref=f17e160]:
+        - generic [ref=f17e161]:
+          - text: STEP 1
+          - heading "手順書をアップロード" [level=3] [ref=f17e164]
+          - paragraph [ref=f17e165]: 現場にある作業手順書 (PDF / Excel) をそのまま渡します。作り直しは不要です。
+        - generic [ref=f17e166]:
+          - text: STEP 2
+          - heading "AI がカットを設計" [level=3] [ref=f17e169]
+          - paragraph [ref=f17e170]: AI が手順を読み解き、撮るべきカットを並べた動画シナリオ (撮影指示) を生成します。
+        - generic [ref=f17e171]:
+          - text: STEP 3
+          - heading "スマホでナビ撮影" [level=3] [ref=f17e174]
+          - paragraph [ref=f17e175]: スマホ (PWA) がカットごとに撮影をナビゲート。指示に従って撮るだけです。
+        - generic [ref=f17e176]:
+          - text: STEP 4
+          - heading "自動で動画に合成" [level=3] [ref=f17e179]
+          - paragraph [ref=f17e180]: 撮ったテイクを字幕付きの完成動画へ自動合成。編集作業はありません。
+    - generic [ref=f17e181]:
+      - generic [ref=f17e182]:
+        - heading "手元の手順書から、そのまま作れる。" [level=2] [ref=f17e183]
+        - paragraph [ref=f17e184]: 作業手順書・作業標準・点検要領——現場に既にある文書が、そのまま動画マニュアルの設計図になります。 動画のために資料を作り直したり、構成を考え直したりする必要はありません。
+        - paragraph [ref=f17e185]: AI は手順の意図を読み解き、「どの作業を・どこから・どう撮るか」まで設計した動画シナリオに変換します。
+      - generic [ref=f17e186]:
+        - generic [ref=f17e187]:
+          - generic [ref=f17e188]: 作業手順書.pdf
+          - generic [ref=f17e190]: 作業標準.xlsx
+        - generic [ref=f17e194]:
+          - generic [ref=f17e195]: バルブ閉止作業 の動画シナリオ
+          - paragraph [ref=f17e199]: カット割り・撮影ガイド・字幕まで設計済み。あとはナビに従って撮るだけです。
+    - generic [ref=f17e200]:
+      - heading "誰が撮っても、同じ品質に。" [level=2] [ref=f17e201]
+      - generic [ref=f17e202]:
+        - generic [ref=f17e203]:
+          - heading "撮る人は、ナビに従うだけ" [level=3] [ref=f17e206]
+          - paragraph [ref=f17e207]: 動画の専門知識はいりません。画面の指示どおりに撮れば、必要なカットが揃います。
+        - generic [ref=f17e208]:
+          - heading "教える人の品質に、依存しない" [level=3] [ref=f17e211]
+          - paragraph [ref=f17e212]: 標準作業を起点に AI が教材を設計するため、撮影者・指導者のスキルで品質がぶれません。
+        - generic [ref=f17e213]:
+          - heading "管理者には、標準化された資産を" [level=3] [ref=f17e216]
+          - paragraph [ref=f17e217]: 熟練者の暗黙知が、組織で共有できる標準化された動画マニュアル資産として残ります。
+    - generic [ref=f17e218]:
+      - heading "組織で安全に運用できます。" [level=2] [ref=f17e219]
+      - generic [ref=f17e220]:
+        - generic [ref=f17e224]:
+          - heading "組織分離" [level=3] [ref=f17e225]
+          - paragraph [ref=f17e226]: 組織ごとにデータを分離。他組織のマニュアル・メンバー情報は見えません。
+        - generic [ref=f17e230]:
+          - heading "アクセス権限 (RBAC)" [level=3] [ref=f17e231]
+          - paragraph [ref=f17e232]: 役割ごとに操作できる範囲を制御します。
+        - generic [ref=f17e236]:
+          - heading "個人情報 (PII) の暗号化" [level=3] [ref=f17e237]
+          - paragraph [ref=f17e238]: 氏名やメールアドレスなど個人を特定しうる情報は暗号化して保管します。
+    - generic [ref=f17e239]:
+      - heading "無料で始められます。" [level=2] [ref=f17e240]
+      - paragraph [ref=f17e241]: Free プランで今すぐ試せます。新規登録でチケット 10 枚が無料 (AI 解析 1 枚・動画レンダ 3 枚を消費)。
+      - generic [ref=f17e242]:
+        - link "無料で始める" [ref=f17e243] [cursor=pointer]:
+          - /url: /register
+        - link "料金プランを見る" [ref=f17e244] [cursor=pointer]:
+          - /url: http://127.0.0.1:8010/pricing
+    - generic [ref=f17e246]:
+      - heading "導入のご相談・お問い合わせ" [level=2] [ref=f17e247]
+      - paragraph [ref=f17e248]: 拠点展開・運用設計のご相談も承ります。お気軽にお問い合わせください。
+      - link "お問い合わせ" [ref=f17e249] [cursor=pointer]:
+        - /url: /contact?source=landing
+  - contentinfo [ref=f17e252]:
+    - generic [ref=f17e253]:
+      - generic [ref=f17e254]: "© 2026 ${APP_NAME}"
+      - generic [ref=f17e255]:
+        - link "料金プラン" [ref=f17e256] [cursor=pointer]:
+          - /url: /pricing
+        - link "利用規約" [ref=f17e257] [cursor=pointer]:
+          - /url: /terms
+        - link "プライバシーポリシー" [ref=f17e258] [cursor=pointer]:
+          - /url: /privacy
+        - link "お問い合わせ" [ref=f17e259] [cursor=pointer]:
+          - /url: /contact?source=landing

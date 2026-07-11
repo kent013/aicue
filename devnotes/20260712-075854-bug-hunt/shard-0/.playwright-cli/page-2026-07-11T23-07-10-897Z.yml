@@ -1,0 +1,7 @@
+- generic [ref=f4e2]:
+  - 'img "${APP_NAME}" [ref=f4e3]'
+  - generic [ref=f4e6]: "403"
+  - heading "アクセスできません" [level=1] [ref=f4e7]
+  - paragraph [ref=f4e8]: このページにアクセスする権限がありません。
+  - link "ホームに戻る" [ref=f4e9] [cursor=pointer]:
+    - /url: /

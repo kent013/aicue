@@ -1,0 +1,8 @@
+- generic [ref=f3e42]:
+  - paragraph [ref=f3e43]: "${APP_NAME}"
+  - main [ref=f3e44]:
+    - heading "メール認証" [level=1] [ref=f3e45]
+    - paragraph [ref=f3e46]: ご登録いただいたメールアドレスに認証メールを送信しました。 メール内のリンクをクリックして認証を完了してください。 メールが届かない場合は、再送信できます。
+    - generic [ref=f3e47]:
+      - button "認証メールを再送信" [ref=f3e48]
+      - button "ログアウト" [ref=f3e49]

@@ -1,0 +1,55 @@
+- generic:
+  - generic:
+    - generic:
+      - banner:
+        - generic:
+          - 'link "${APP_NAME}"':
+            - /url: /dashboard
+          - generic:
+            - link "通知":
+              - /url: http://127.0.0.1:8010/notifications
+      - main:
+        - heading "設定" [level=1]
+        - navigation "設定メニュー":
+          - link "プロフィール":
+            - /url: http://127.0.0.1:8010/settings
+          - link "セキュリティ":
+            - /url: http://127.0.0.1:8010/settings/security
+        - generic:
+          - generic:
+            - heading "プロフィール" [level=2]
+            - paragraph: 名前とメールアドレスを更新します。
+            - generic:
+              - generic:
+                - generic: 名前
+                - textbox "名前": 招待テスト管理者
+              - generic:
+                - generic: メールアドレス
+                - textbox "メールアドレス": shard0-invitee@example.com
+              - generic:
+                - button "保存"
+          - generic:
+            - heading "パスワード変更" [level=2]
+            - paragraph: 現在のパスワードを確認のうえ、新しいパスワードに変更します。
+            - generic:
+              - generic:
+                - generic: 現在のパスワード
+                - textbox "現在のパスワード"
+              - generic:
+                - generic: 新しいパスワード
+                - textbox "新しいパスワード"
+              - generic:
+                - button "パスワードを変更"
+          - region "アカウント削除":
+            - heading "アカウント削除" [level=3]
+            - paragraph: アカウントを削除すると、すべてのデータが完全に失われます。この操作は取り消せません。
+            - generic:
+              - button "アカウントを削除"
+  - dialog [ref=f66e46]:
+    - generic [ref=f66e47]:
+      - heading "アカウント削除" [level=2] [ref=f66e48]
+      - button "閉じる" [active] [ref=f66e49]
+    - paragraph [ref=f66e52]: 本当にアカウントを削除しますか？ すべてのデータが完全に失われ、この操作は取り消せません。
+    - generic [ref=f66e53]:
+      - button "キャンセル" [ref=f66e54]
+      - button "削除する" [ref=f66e55]

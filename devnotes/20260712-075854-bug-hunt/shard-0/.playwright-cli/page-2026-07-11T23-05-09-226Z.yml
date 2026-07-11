@@ -1,0 +1,12 @@
+- generic [ref=f2e45]:
+  - banner [ref=f2e46]:
+    - 'link "${APP_NAME}" [ref=f2e48] [cursor=pointer]':
+      - /url: /
+  - main [ref=f2e49]:
+    - generic [ref=f2e51]:
+      - heading "お問い合わせを受け付けました" [level=1] [ref=f2e53]
+      - paragraph [ref=f2e54]: 内容を確認のうえ、担当者より折り返しご連絡いたします。 受付確認メールをお送りしましたのでご確認ください。
+      - link "トップへ戻る" [ref=f2e56] [cursor=pointer]:
+        - /url: http://127.0.0.1:8010/
+  - contentinfo [ref=f2e57]:
+    - generic [ref=f2e58]: "© 2026 ${APP_NAME}"

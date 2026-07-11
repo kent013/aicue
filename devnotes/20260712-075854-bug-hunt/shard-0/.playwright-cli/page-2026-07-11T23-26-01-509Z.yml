@@ -1,0 +1,7 @@
+- generic [ref=f60e2]:
+  - 'img "${APP_NAME}" [ref=f60e3]'
+  - generic [ref=f60e6]: "500"
+  - heading "サーバーエラー" [level=1] [ref=f60e7]
+  - paragraph [ref=f60e8]: サーバーで問題が発生しました。しばらく時間をおいてからもう一度お試しください。
+  - link "ホームに戻る" [ref=f60e9] [cursor=pointer]:
+    - /url: /

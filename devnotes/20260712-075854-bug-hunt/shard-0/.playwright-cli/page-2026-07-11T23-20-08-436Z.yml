@@ -1,0 +1,44 @@
+- generic [ref=f45e34]:
+  - banner [ref=f45e35]:
+    - generic [ref=f45e36]:
+      - 'link "${APP_NAME}" [ref=f45e37] [cursor=pointer]':
+        - /url: /dashboard
+      - generic [ref=f45e38]:
+        - link "通知" [ref=f45e39] [cursor=pointer]:
+          - /url: http://127.0.0.1:8010/notifications
+        - link "設定" [ref=f45e41] [cursor=pointer]:
+          - /url: http://127.0.0.1:8010/settings
+        - button "ログアウト" [ref=f45e42]
+  - main [ref=f45e43]:
+    - heading "Free Member さん、ようこそ" [level=1] [ref=f45e44]
+    - paragraph [ref=f45e45]: 今日のアクティビティを確認しましょう。
+    - generic [ref=f45e46]:
+      - generic [ref=f45e47]:
+        - generic [ref=f45e52]:
+          - paragraph [ref=f45e53]: チケット残高
+          - paragraph [ref=f45e54]: "0"
+          - paragraph [ref=f45e55]: 残高が少なくなっています
+        - paragraph [ref=f45e56]:
+          - link "チケットを購入" [ref=f45e57] [cursor=pointer]:
+            - /url: http://127.0.0.1:8010/purchase-tickets
+      - generic [ref=f45e62]:
+        - paragraph [ref=f45e63]: 容量使用率
+        - paragraph [ref=f45e64]: 0%
+        - paragraph [ref=f45e65]: 0 B / 1.0 GB
+      - generic [ref=f45e66]:
+        - generic [ref=f45e71]:
+          - paragraph [ref=f45e72]: 未読通知
+          - paragraph [ref=f45e73]: "0"
+        - paragraph [ref=f45e74]:
+          - link "通知を確認" [ref=f45e75] [cursor=pointer]:
+            - /url: http://127.0.0.1:8010/notifications
+      - generic [ref=f45e80]:
+        - paragraph [ref=f45e81]: 進行中ジョブ
+        - paragraph [ref=f45e82]: "0"
+    - generic [ref=f45e83]:
+      - paragraph [ref=f45e84]: 有効なサブスクリプションがありません。プランを契約すると、マニュアルの作成・撮影を再開できます。
+      - link "プランを見る" [ref=f45e86] [cursor=pointer]:
+        - /url: http://127.0.0.1:8010/billing
+    - generic [ref=f45e88]:
+      - heading "プロジェクトがまだありません" [level=3] [ref=f45e90]
+      - paragraph [ref=f45e91]: 「Freeプラン組織」の管理者にプロジェクト作成を依頼してください。

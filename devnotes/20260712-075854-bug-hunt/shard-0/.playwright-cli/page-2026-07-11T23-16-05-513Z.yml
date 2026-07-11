@@ -1,0 +1,48 @@
+- generic [ref=f36e65]:
+  - banner [ref=f36e66]:
+    - generic [ref=f36e67]:
+      - 'link "${APP_NAME}" [ref=f36e68] [cursor=pointer]':
+        - /url: /dashboard
+      - link "通知" [ref=f36e70] [cursor=pointer]:
+        - /url: http://127.0.0.1:8010/notifications
+  - main [ref=f36e72]:
+    - heading "ユーザー管理" [level=1] [ref=f36e73]
+    - paragraph [ref=f36e74]: 組織のメンバーと招待を管理します。ロールは「管理者・編集者・撮影者」から選択します。
+    - generic [ref=f36e75]:
+      - complementary [ref=f36e76]:
+        - generic [ref=f36e77]:
+          - heading "管理メニュー" [level=2] [ref=f36e78]
+          - navigation "管理メニュー" [ref=f36e79]:
+            - list [ref=f36e80]:
+              - listitem [ref=f36e81]:
+                - generic [ref=f36e83]: ユーザー管理
+      - generic [ref=f36e84]:
+        - generic [ref=f36e85]:
+          - heading "メンバー一覧" [level=2] [ref=f36e86]
+          - paragraph [ref=f36e87]: プロジェクトがまだありません。編集者・撮影者を割り当てるには、先にプロジェクトを作成してください。
+          - list [ref=f36e88]:
+            - listitem [ref=f36e89]:
+              - generic [ref=f36e90]:
+                - paragraph [ref=f36e92]: Multi Org User
+                - paragraph [ref=f36e93]: multi-org@example.com
+              - generic [ref=f36e94]: 管理者（オーナー）
+        - generic [ref=f36e96]:
+          - heading "ユーザーを追加" [level=2] [ref=f36e97]
+          - paragraph [ref=f36e98]: 招待メールを送信します。招待の有効期限は 7 日間です。
+          - generic [ref=f36e99]:
+            - generic [ref=f36e100]:
+              - generic [ref=f36e101]: メールアドレス
+              - textbox "メールアドレス" [ref=f36e102]: shard0-invitee@example.com
+            - generic [ref=f36e103]:
+              - generic [ref=f36e104]: ロール
+              - combobox "ロール" [invalid] [ref=f36e105]:
+                - option "管理者" [selected]
+                - option "編集者"
+                - option "撮影者"
+              - paragraph [ref=f36e113]: 編集者・撮影者を招待するには、先にプロジェクトを作成してください。
+            - button "招待を送信" [ref=f36e107]
+        - generic [ref=f36e108]:
+          - heading "招待中" [level=2] [ref=f36e109]
+          - generic [ref=f36e110]:
+            - heading "有効な招待はありません" [level=3] [ref=f36e111]
+            - paragraph [ref=f36e112]: 送信した招待は受諾されるか期限が切れるまでここに表示されます。
