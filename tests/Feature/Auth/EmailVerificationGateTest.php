@@ -2,8 +2,8 @@
 
 declare(strict_types=1);
 
+use App\Enums\AdminConsoleRole;
 use App\Enums\Auth\EmailVerificationGateContext;
-use App\Enums\OrganizationRole;
 use App\Models\User;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
@@ -109,7 +109,7 @@ it('blocks an unverified owner on invitations.store with the invite message and 
         ->from("/organizations/{$organization->slug}/settings")
         ->post("/organizations/{$organization->slug}/invitations", [
             'email' => 'invitee@example.com',
-            'role' => OrganizationRole::Member->value,
+            'role' => AdminConsoleRole::Admin->value,
         ]);
 
     // referer (from) が同一オリジンなのでそこへ戻す + invite 文言の error flash。
@@ -126,7 +126,7 @@ it('lets a verified owner pass the invitations.store gate', function (): void {
         ->from("/organizations/{$organization->slug}/settings")
         ->post("/organizations/{$organization->slug}/invitations", [
             'email' => 'invitee@example.com',
-            'role' => OrganizationRole::Member->value,
+            'role' => AdminConsoleRole::Admin->value,
         ]);
 
     // gate は通過し招待が送信される (back + success flash)。

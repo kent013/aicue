@@ -15,6 +15,7 @@ use App\Models\User;
 use App\Models\VideoManual;
 use App\Services\Capture\TakeObjectStorage;
 use App\Services\Capture\UploadTicketCodec;
+use App\Services\Project\DefaultProjectResolver;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -35,11 +36,10 @@ class CaptureManualController extends Controller
      * PWA エントリ (manifest start_url)。current org の先頭 project の一覧へ redirect
      * (v1 は単一 Default Project 前提。複数 project 化の際は選択画面へ差し替え)。
      */
-    public function home(Request $request): RedirectResponse
+    public function home(Request $request, DefaultProjectResolver $defaultProjects): RedirectResponse
     {
         $organization = $this->resolveCurrentOrganization($request);
-        /** @var Project|null $project */
-        $project = $organization->projects()->orderBy('projects.id')->first();
+        $project = $defaultProjects->resolve($organization);
         abort_if($project === null, 404);
 
         return redirect()->route('capture.manuals.index', ['project' => $project]);

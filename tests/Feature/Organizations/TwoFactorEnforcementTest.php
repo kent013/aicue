@@ -139,7 +139,7 @@ test('解除に前提条件は無い (enabled Owner が解除できる)', functi
     expect($organization->fresh()->two_factor_required)->toBeFalse();
 });
 
-test('settings props に twoFactorRequired とメンバーの twoFactorStatus が乗る', function (): void {
+test('settings props に twoFactorRequired が乗る (メンバーの twoFactorStatus は Admin/Users へ移設)', function (): void {
     [$organization, $owner] = tfeCreateOrganization(twoFactorRequired: true);
     tfeAddMember($organization, 'pending');
 
@@ -148,8 +148,29 @@ test('settings props に twoFactorRequired とメンバーの twoFactorStatus �
         ->assertInertia(fn ($page) => $page
             ->component('Organizations/Settings')
             ->where('organization.twoFactorRequired', true)
-            ->where('members.0.twoFactorStatus', 'enabled')
-            ->where('members.1.twoFactorStatus', 'pending'));
+            // メンバー管理はユーザー管理画面へ移設済み: settings は最小 shape (id/name) のみ
+            ->missing('members.0.twoFactorStatus')
+            ->missing('members.0.email')
+            ->missing('invitations'));
+});
+
+test('ユーザー管理画面 (manage.users) props にメンバーの twoFactorStatus が乗る', function (): void {
+    [$organization, $owner] = tfeCreateOrganization(twoFactorRequired: true);
+    $pendingMember = tfeAddMember($organization, 'pending');
+
+    $this->actingAs($owner)
+        ->get(route('manage.users.index'))
+        ->assertInertia(function ($page) use ($owner, $pendingMember): void {
+            $page->component('Admin/Users');
+            /** @var list<array{id: int, twoFactorStatus: string}> $members */
+            $members = $page->toArray()['props']['members'];
+            $statuses = [];
+            foreach ($members as $row) {
+                $statuses[$row['id']] = $row['twoFactorStatus'];
+            }
+            expect($statuses[$owner->id])->toBe('enabled');
+            expect($statuses[$pendingMember->id])->toBe('pending');
+        });
 });
 
 // ──────────────────────────── 未準拠ユーザーの全画面ゲート ────────────────────────────

@@ -2,11 +2,14 @@
 
 declare(strict_types=1);
 
+use App\Enums\AdminConsoleRole;
 use App\Enums\OrganizationRole;
 
 /*
  * メンバー管理 (ロール変更 / 削除)。
  * ロール操作は laratrust_team_id 明示 (strict_check=true) で行われる。
+ * ロール変更は 3 値遷移コマンド (admin/editor/shooter = AdminConsoleRole)。
+ * 遷移の最終状態 (org ロール + Default Project pivot) は ConsoleRoleTransitionTest が固定する。
  */
 
 test('owner はメンバーのロールを変更できる', function (): void {
@@ -16,7 +19,7 @@ test('owner はメンバーのロールを変更できる', function (): void {
     $response = $this->actingAs($owner)
         ->from("/organizations/{$organization->slug}/settings")
         ->patch("/organizations/{$organization->slug}/members/{$member->id}", [
-            'role' => OrganizationRole::Admin->value,
+            'role' => AdminConsoleRole::Admin->value,
         ]);
 
     $response->assertRedirect("/organizations/{$organization->slug}/settings");
@@ -31,7 +34,7 @@ test('最後の Owner は降格できない', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
 
     $response = $this->actingAs($owner)->patch("/organizations/{$organization->slug}/members/{$owner->id}", [
-        'role' => OrganizationRole::Member->value,
+        'role' => AdminConsoleRole::Admin->value,
     ]);
 
     $response->assertSessionHasErrors('role');
@@ -43,14 +46,14 @@ test('他に Owner がいれば Owner を降格できる', function (): void {
     attachOrganizationMember($organization, OrganizationRole::Owner);
 
     $response = $this->actingAs($owner)->patch("/organizations/{$organization->slug}/members/{$owner->id}", [
-        'role' => OrganizationRole::Admin->value,
+        'role' => AdminConsoleRole::Admin->value,
     ]);
 
     $response->assertSessionHasNoErrors();
     expect($owner->fresh()->organizationRole($organization))->toBe(OrganizationRole::Admin);
 });
 
-test('Owner への昇格はロール変更経路では指定できない', function (): void {
+test('Owner への昇格はロール変更経路では指定できない (enum 外の値は errors)', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization);
 
@@ -95,9 +98,34 @@ test('manageMembers 権限がない member はロール変更できない (403)'
     $other = attachOrganizationMember($organization);
 
     $response = $this->actingAs($member)->patch("/organizations/{$organization->slug}/members/{$other->id}", [
-        'role' => OrganizationRole::Admin->value,
+        'role' => AdminConsoleRole::Admin->value,
     ]);
 
     $response->assertForbidden();
     expect($other->fresh()->organizationRole($organization))->toBe(OrganizationRole::Member);
+});
+
+test('旧契約値 (organization_admin / organization_member) は enum 外として errors になる', function (string $legacyRole): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $member = attachOrganizationMember($organization);
+
+    $response = $this->actingAs($owner)->patch("/organizations/{$organization->slug}/members/{$member->id}", [
+        'role' => $legacyRole,
+    ]);
+
+    $response->assertSessionHasErrors('role');
+    expect($member->fresh()->organizationRole($organization))->toBe(OrganizationRole::Member);
+})->with(['organization_admin', 'organization_member']);
+
+test('保護キーを payload に混ぜたロール変更は errors (ProhibitsProtectedKeys)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $member = attachOrganizationMember($organization);
+
+    $response = $this->actingAs($owner)->patch("/organizations/{$organization->slug}/members/{$member->id}", [
+        'role' => AdminConsoleRole::Admin->value,
+        'organization_id' => 999,
+    ]);
+
+    $response->assertSessionHasErrors('organization_id');
+    expect($member->fresh()->organizationRole($organization))->toBe(OrganizationRole::Member);
 });

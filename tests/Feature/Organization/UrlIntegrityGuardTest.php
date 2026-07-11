@@ -15,7 +15,7 @@ test('他組織のユーザーへのメンバー操作は 404 (認可より前)'
 
     // ownerB は orgA のメンバーではない → 404 (422 や 403 ではない)
     $this->actingAs($ownerA)
-        ->patch("/organizations/{$orgA->slug}/members/{$ownerB->id}", ['role' => 'organization_member'])
+        ->patch("/organizations/{$orgA->slug}/members/{$ownerB->id}", ['role' => 'admin'])
         ->assertNotFound();
 
     $this->actingAs($ownerA)

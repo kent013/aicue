@@ -30,6 +30,7 @@ const baseProps = {
         { id: 2, name: "アイテム弐", note: null },
     ],
     canManage: true,
+    canManageMembers: true,
     manuals: {
         data: manualsFixture,
         meta: { ...emptyMeta, total: 2 },
@@ -120,27 +121,51 @@ describe("Projects/Show", () => {
         expect(submit).not.toBeDisabled();
     });
 
-    it("canManage=true なら新規作成導線とカテゴリ管理を表示する", () => {
+    it("canManage=true なら新規作成導線を表示する", () => {
         render(Show, { props: baseProps });
 
         expect(screen.getByTestId("create-manual-button").getAttribute("href")).toMatch(
             /\/projects\/1\/manuals\/create$/,
         );
-        expect(screen.getByRole("heading", { name: "カテゴリ管理" })).toBeInTheDocument();
-        expect(screen.getByTestId("category-list")).toBeInTheDocument();
-        expect(screen.getByTestId("move-up-category-1")).toBeInTheDocument();
-        expect(screen.getByTestId("move-down-category-1")).toBeInTheDocument();
-        expect(screen.getByTestId("edit-category-1")).toBeInTheDocument();
-        expect(screen.getByTestId("remove-category-1")).toBeInTheDocument();
-        expect(screen.getByTestId("category-submit")).toBeInTheDocument();
     });
 
-    it("canManage=false なら新規作成導線とカテゴリ管理を表示しない (一覧は閲覧可)", () => {
-        render(Show, { props: { ...baseProps, canManage: false } });
+    it("カテゴリ CRUD UI は存在しない (Admin/Categories へ移設済み = 並走 UI の回帰封じ)", () => {
+        render(Show, { props: baseProps });
 
-        expect(screen.queryByTestId("create-manual-button")).toBeNull();
-        expect(screen.queryByRole("heading", { name: "カテゴリ管理" })).toBeNull();
         expect(screen.queryByTestId("category-list")).toBeNull();
+        expect(screen.queryByTestId("category-submit")).toBeNull();
+        expect(screen.queryByTestId("move-up-category-1")).toBeNull();
+        expect(screen.queryByTestId("edit-category-1")).toBeNull();
+        expect(screen.queryByTestId("remove-category-1")).toBeNull();
+    });
+
+    it("カテゴリフィルタ select は存続する (撤去し過ぎの回帰封じ)", () => {
+        render(Show, { props: baseProps });
+
+        const categorySelect = screen.getByTestId("manual-filter-category");
+        expect(categorySelect).toBeInTheDocument();
+        expect(screen.getByRole("option", { name: "準備作業" })).toBeInTheDocument();
+    });
+
+    it("canManage / canManageMembers に応じて管理メニュー導線を表示する", () => {
+        render(Show, { props: baseProps });
+
+        expect(screen.getByTestId("link-manage-categories").getAttribute("href")).toMatch(
+            /\/projects\/1\/categories$/,
+        );
+        expect(screen.getByTestId("link-manage-users").getAttribute("href")).toMatch(
+            /\/manage\/users$/,
+        );
+    });
+
+    it("権限がなければ管理メニュー導線を表示しない", () => {
+        render(Show, {
+            props: { ...baseProps, canManage: false, canManageMembers: false },
+        });
+
+        expect(screen.queryByTestId("link-manage-categories")).toBeNull();
+        expect(screen.queryByTestId("link-manage-users")).toBeNull();
+        expect(screen.queryByRole("heading", { name: "管理メニュー" })).toBeNull();
         expect(screen.getByTestId("manual-list")).toBeInTheDocument();
     });
 });

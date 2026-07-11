@@ -10,91 +10,71 @@ const baseProps = {
         isPersonal: false,
         twoFactorRequired: false,
     },
+    // オーナー移譲 select 用の最小 shape (id/name)。email / 2FA は Admin/Users へ移設済み
     members: [
-        {
-            id: 1,
-            name: "オーナー 太郎",
-            email: "owner@example.com",
-            role: "organization_owner",
-            twoFactorStatus: "enabled" as const,
-        },
-        {
-            id: 2,
-            name: "メンバー 花子",
-            email: "member@example.com",
-            role: "organization_member",
-            twoFactorStatus: "enabled" as const,
-        },
+        { id: 1, name: "オーナー 太郎" },
+        { id: 2, name: "メンバー 花子" },
     ],
-    invitations: [],
     currentUserRole: "organization_owner",
     canManageApiKeys: true,
+    usersUrl: "/manage/users",
 };
 
 describe("Organizations/Settings", () => {
-    it("組織名フォームとメンバー一覧を描画する", () => {
+    it("組織名フォームを描画する", () => {
         render(Settings, { props: baseProps });
 
         expect(screen.getByRole("heading", { name: "組織設定" })).toBeInTheDocument();
         expect(screen.getByLabelText("組織名")).toBeInTheDocument();
-        expect(screen.getByTestId("member-list")).toBeInTheDocument();
-        expect(screen.getByText("owner@example.com")).toBeInTheDocument();
-        expect(screen.getByText("member@example.com")).toBeInTheDocument();
     });
 
-    it("owner には招待フォーム (email + role) が表示される", () => {
+    it("メンバー管理 UI は存在しない (Admin/Users へ移設済み = 旧 UI 並走の回帰封じ)", () => {
         render(Settings, { props: baseProps });
 
-        expect(screen.getByRole("heading", { name: "メンバーを招待" })).toBeInTheDocument();
-        expect(screen.getByLabelText("メールアドレス")).toBeInTheDocument();
-        expect(screen.getByLabelText("ロール")).toBeInTheDocument();
-        expect(screen.getByTestId("invite-submit")).toBeInTheDocument();
+        expect(screen.queryByTestId("member-list")).toBeNull();
+        expect(screen.queryByTestId("invite-submit")).toBeNull();
+        expect(screen.queryByRole("heading", { name: "メンバーを招待" })).toBeNull();
+        expect(screen.queryByTestId("reset-two-factor-2")).toBeNull();
+        expect(screen.queryByTestId("member-role-2")).toBeNull();
+        expect(screen.queryByTestId("remove-member-2")).toBeNull();
     });
 
-    it("member ロールには招待フォームと管理操作を表示しない", () => {
+    it("manageMembers 権限者にはユーザー管理画面への導線リンクを出す", () => {
+        render(Settings, { props: baseProps });
+
+        const link = screen.getByTestId("link-manage-users");
+        expect(link).toBeInTheDocument();
+        expect(link.getAttribute("href")).toMatch(/\/manage\/users$/);
+    });
+
+    it("usersUrl が null (権限なし) ならユーザー管理導線を出さない", () => {
         render(Settings, {
             props: {
                 ...baseProps,
                 currentUserRole: "organization_member",
                 canManageApiKeys: false,
+                usersUrl: null,
             },
         });
 
-        expect(screen.queryByRole("heading", { name: "メンバーを招待" })).toBeNull();
+        expect(screen.queryByTestId("link-manage-users")).toBeNull();
         expect(screen.queryByLabelText("組織名")).toBeNull();
-        expect(screen.queryByTestId("remove-member-2")).toBeNull();
-        // API キー管理画面への導線は manageApiKeys 境界のメンバーには出さない
         expect(screen.queryByTestId("link-api-keys")).toBeNull();
-        // 2FA 必須化トグル (owner 専権) とメンバー 2FA 解除も表示しない
         expect(screen.queryByTestId("toggle-two-factor-requirement")).toBeNull();
-        expect(screen.queryByTestId("reset-two-factor-1")).toBeNull();
     });
 
-    it("owner には 2FA 必須化トグルとメンバーの 2FA 解除ボタンが表示される", () => {
+    it("owner には 2FA 必須化トグルが表示される", () => {
         render(Settings, { props: baseProps });
 
         expect(screen.getByTestId("toggle-two-factor-requirement")).toBeInTheDocument();
-        // 2FA 設定済み (enabled) のメンバーにのみ解除導線を出す
-        expect(screen.getByTestId("reset-two-factor-2")).toBeInTheDocument();
     });
 
-    it("2FA 未設定 (disabled) のメンバーには解除ボタンを出さない", () => {
-        render(Settings, {
-            props: {
-                ...baseProps,
-                members: [
-                    {
-                        id: 2,
-                        name: "メンバー 花子",
-                        email: "member@example.com",
-                        role: "organization_member",
-                        twoFactorStatus: "disabled" as const,
-                    },
-                ],
-            },
-        });
+    it("オーナー移譲 select は members (id/name) で動く", () => {
+        render(Settings, { props: baseProps });
 
-        expect(screen.queryByTestId("reset-two-factor-2")).toBeNull();
+        expect(screen.getByTestId("transfer-ownership-button")).toBeInTheDocument();
+        expect(screen.getByLabelText("移譲先のメンバー")).toBeInTheDocument();
+        expect(screen.getByRole("option", { name: "メンバー 花子" })).toBeInTheDocument();
     });
 
     it("canManageApiKeys の場合は API キー / 接続セッション管理画面への導線を出す", () => {

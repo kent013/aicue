@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Enums\ProjectRole;
 use Database\Factories\OrganizationInvitationFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -21,6 +22,8 @@ use Spatie\LaravelCipherSweet\Contracts\CipherSweetEncrypted;
  * email は CipherSweet 暗号化 + blind index。
  * token_hash / organization_id / invited_by_user_id は $fillable 外。
  * 取り消しは行削除ではなく revoked_at による論理失効 (spirux 方式)。
+ *
+ * @property-read ProjectRole|null $project_role 受諾時に Default Project へ付与する pivot ロール
  */
 class OrganizationInvitation extends Model implements CipherSweetEncrypted
 {
@@ -116,6 +119,9 @@ class OrganizationInvitation extends Model implements CipherSweetEncrypted
     protected function casts(): array
     {
         return [
+            // 受諾時に Default Project へ付与する pivot ロール (null = org 参加のみ)。
+            // サーバ導出値のため $fillable 外 (forceFill 専用 = tenant キー不信の流儀)
+            'project_role' => ProjectRole::class,
             'expires_at' => 'datetime',
             'accepted_at' => 'datetime',
             'revoked_at' => 'datetime',

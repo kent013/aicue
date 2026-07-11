@@ -213,6 +213,57 @@ doc/10 §10.3 / §10.8-4/-7 の実装 (T004)。routes は `/app/projects/{projec
   再取得 1 回リトライ)。SW (`public/capture-sw.js`) は同一オリジン GET `/build/*` のみ
   stale-while-revalidate (アプリ応答・S3 は素通し)
 
+## 管理メニュー (/manage/users・/projects/{project}/categories)
+
+doc/04 §4.2 の管理者専用画面 (T006)。書き込みは既存 endpoint を再利用し、GET 画面のみ新設。
+
+### ロールの 2 層モデル (保存しない = 導出)
+
+| 遷移コマンド (`AdminConsoleRole`) | 適用後の最終状態 (1 tx で保証) |
+|---|---|
+| admin | org ロール Admin + org 配下 project pivot detach (stale 掃除) |
+| editor | org ロール Member + Default Project pivot `project_admin` |
+| shooter | org ロール Member + Default Project pivot `project_member` |
+
+表示状態 (`MemberRoleState`) は org ロール × Default Project pivot から毎リクエスト導出する
+5 値 (owner/admin/editor/shooter/**unassigned**)。未割当 (旧招待・project 削除後・Laratrust
+ロール未付与の異常行) は非表示にせず可視化し、ロール割当コマンドで修復できる
+(`OrganizationMembershipService::applyConsoleRole` の修復経路)。
+
+- `organizations.members.update` (PATCH) / `organizations.invitations.store` (POST) の role
+  payload は 3 値コマンド (旧 org ロール値は enum 検証で拒否)。Owner は enum 外 = 構造的に
+  指定不可 (Owner 昇格は transferOwnership のみ)
+- 招待は `organization_invitations.project_role` (nullable・サーバ導出・forceFill 専有) を持ち、
+  受諾 (`joinOrganization` = 招待行 lockForUpdate + organization_user の insertOrIgnore) で
+  Default Project へ pivot attach。受諾時 project 不在は org 参加のみ = 未割当へ可視 degrade
+
+### DefaultProjectResolver の read/write 契約
+
+`Services/Project/DefaultProjectResolver` が「org の先頭 project (projects.id 昇順)」解決の
+single source of truth (capture.home も同 resolver)。表示/redirect は `resolve()` (ロックなし)、
+pivot 書き込みは `resolveForUpdate()` (呼び出し側 tx 内で Project 行ロックを保持 =
+CategoryService の Project 行ロック直列化と同型) のみを使う。
+
+### pivot 書き込み経路の inventory
+
+`project_members` への書き込みは `OrganizationMembershipService` (applyConsoleRole /
+joinOrganization / removeMember の掃除) と `ProjectMemberController` に閉じる。
+**`ProjectMemberPivotWritePathTest`** (Architecture) が deny-by-default で強制する
+(掃除対象は必ず `$organization->projects()` 経由 = cross-org 不変条件)。
+
+### 画面と guard
+
+| route | 画面 | guard |
+|---|---|---|
+| GET `/manage/users` | `Admin/Users` (メンバー + 招待中 + 追加) | current org 解決 (org param なし = 越境不能) + `manageMembers` (403)。`/manage/` 配下の auth+verified は `ManageRouteAuthGuardTest` が強制 |
+| GET `/projects/{project}/categories` | `Admin/Categories` (一覧・追加・編集・削除・▲▼) | 業務 group (課金ゲート + project.in-current-org = cross-org は認可前 404) + `CategoryPolicy::viewAny` (= ProjectPolicy::update 委譲。撮影者 403) |
+
+**A+B 不可分の理由**: `members.update` / `invitations.store` の 3 値コマンド契約書き換えと
+唯一の caller UI (Admin/Users + Settings スリム化) は同一リリース単位でなければならない
+(分離すると旧 Settings UI が旧契約値を送信する並走/破壊状態になる。将来の分割 PR 事故防止)。
+Settings の members props は `{id, name}` のみ (PII 最小化)、メンバー管理 UI の不在は
+Vitest (`OrganizationsSettings.test.ts`) と Feature 両面で回帰固定する。
+
 ## 公開面
 
 | 面 | 入口 | 認証 |

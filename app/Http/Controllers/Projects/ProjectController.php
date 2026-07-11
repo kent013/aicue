@@ -127,6 +127,8 @@ class ProjectController extends Controller
             'manuals' => $this->manualRows($project, $filters),
             'categories' => $this->categoryRows($project),
             'manualFilters' => $filters,
+            // 管理メニュー導線 (doc/04: 管理者のみサイドバー表示)。単一根拠は Gate
+            'canManageMembers' => $user->can('manageMembers', $organization),
         ]);
     }
 

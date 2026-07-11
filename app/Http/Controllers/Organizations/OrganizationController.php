@@ -8,12 +8,10 @@ use App\Enums\TwoFactorStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Organizations\UpdateOrganizationRequest;
 use App\Models\Organization;
-use App\Models\OrganizationInvitation;
 use App\Models\User;
 use App\Services\Organization\OrganizationProvisioningService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
@@ -56,7 +54,10 @@ class OrganizationController extends Controller
     }
 
     /**
-     * 組織設定画面 (name 編集 / メンバー一覧 / 招待一覧)。
+     * 組織設定画面 (name 編集 / 2FA 必須方針 / オーナー移譲)。
+     * メンバー管理 (一覧 / 招待 / ロール / 削除 / 2FA リセット) は管理メニュー > ユーザー管理
+     * (/manage/users) へ移設済み。members はオーナー移譲 select 用の最小 shape (id/name) のみ
+     * (email / 2FA を出さない = PII 最小化)。
      * API キー / 接続セッションは専用画面 (ApiKeys/Index, ApiKeys/Sessions) に分離し、
      * ここからはリンク導線 (canManageApiKeys) のみ出す。
      */
@@ -69,34 +70,12 @@ class OrganizationController extends Controller
         $user = $request->user();
         Assert::isInstanceOf($user, User::class);
 
+        // オーナー移譲の移譲先 select 用途のみ (最小 props。email / 2FA は Admin/Users が担う)
         $members = $organization->users()->get()
             ->map(fn (User $member): array => [
                 'id' => $member->id,
                 'name' => $member->name,
-                'email' => $member->email,
-                'role' => $member->organizationRole($organization)?->value,
-                // 2FA 状態 (管理者のリセット導線・必須方針の準拠確認に使う)
-                'twoFactorStatus' => $member->twoFactorStatus()->value,
             ])
-            ->values()
-            ->all();
-
-        // 有効な (未失効・未受諾の) 招待のみ表示する
-        $invitations = $organization->invitations()
-            ->whereNull('accepted_at')
-            ->where('expires_at', '>', now())
-            ->get()
-            ->map(function (OrganizationInvitation $invitation): array {
-                $expiresAt = $invitation->getAttribute('expires_at');
-                Assert::isInstanceOf($expiresAt, Carbon::class);
-
-                return [
-                    'id' => $invitation->id,
-                    'email' => $invitation->email,
-                    'role' => $invitation->role,
-                    'expiresAt' => $expiresAt->toDateString(),
-                ];
-            })
             ->values()
             ->all();
 
@@ -109,10 +88,11 @@ class OrganizationController extends Controller
                 'twoFactorRequired' => $organization->two_factor_required,
             ],
             'members' => $members,
-            'invitations' => $invitations,
             'currentUserRole' => $user->organizationRole($organization)?->value,
             // API キー / 接続セッション管理画面への導線を出すか (境界は manageApiKeys と同一)
             'canManageApiKeys' => Gate::allows('manageApiKeys', $organization),
+            // ユーザー管理画面 (管理メニュー) への導線 (can 連動。URL は route helper で生成)
+            'usersUrl' => Gate::allows('manageMembers', $organization) ? route('manage.users.index') : null,
         ]);
     }
 

@@ -109,6 +109,24 @@ test('member は詳細を閲覧できる (items と canManage=false が渡る)',
             ->where('canManage', false));
 });
 
+test('canManageMembers prop は org admin=true / project_admin (org Member)=false', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+    $editor = attachOrganizationMember($organization);
+    attachProjectMember($project, $editor, ProjectRole::Admin);
+    $editor->forceFill(['current_organization_id' => $organization->id])->save();
+
+    // org owner/admin → 管理メニューのユーザー管理導線あり
+    $this->actingAs($owner)->get("/projects/{$project->id}")
+        ->assertInertia(fn (Assert $page) => $page->where('canManageMembers', true));
+
+    // 編集者 (project_admin だが org は Member) → canManage=true でも members 管理は不可
+    $this->actingAs($editor)->get("/projects/{$project->id}")
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('canManage', true)
+            ->where('canManageMembers', false));
+});
+
 test('owner はプロジェクトを更新できる', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $project = Project::factory()->forOrganization($organization)->create();
