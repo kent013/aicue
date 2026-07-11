@@ -15,6 +15,7 @@ use App\Http\Controllers\ContactController;
 use App\Http\Controllers\DebugLoginController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\Marketing\PricingController;
+use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\Organizations\InvitationAcceptanceController;
 use App\Http\Controllers\Organizations\OrganizationApiKeyController;
 use App\Http\Controllers\Organizations\OrganizationController;
@@ -319,6 +320,25 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         ->name('billing.tickets.show');
     Route::post('/purchase-tickets/checkout', [TicketPurchaseController::class, 'checkout'])
         ->name('billing.tickets.checkout');
+
+    /*
+    | 通知センター (課金ゲート外 = サブスク失効中でもベルは機能させる。残高/課金系通知の
+    | 受け皿として必要)。{notification} は implicit binding を使わず controller が
+    | $request->user()->notifications() 経由で解決する (cross-user は構造的に 404 =
+    | 存在オラクル封じ。1 param のため NestedRouteIdorDefenseTest の inventory 対象外)。
+    | whereUuid は不正形式 id を route 不一致 = 404 に落とす (pgsql uuid 比較の 22P02 防止)。
+    | open は POST + 303 (GET にしない = prefetch による意図しない既読化防止)。
+    */
+    Route::get('/notifications', [NotificationController::class, 'index'])
+        ->name('notifications.index');
+    Route::post('/notifications/read-all', [NotificationController::class, 'readAll'])
+        ->name('notifications.read-all');
+    Route::post('/notifications/{notification}/open', [NotificationController::class, 'open'])
+        ->whereUuid('notification')
+        ->name('notifications.open');
+    Route::post('/notifications/{notification}/read', [NotificationController::class, 'read'])
+        ->whereUuid('notification')
+        ->name('notifications.read');
 
     /*
     | 組織配下の業務 route (課金ゲート対象)。有効な subscription (BillingAccess 判定)

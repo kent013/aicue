@@ -59,6 +59,11 @@ class HandleInertiaRequests extends Middleware
             ],
             'organizations' => $this->organizationsProp($user),
             'currentOrganization' => $this->currentOrganizationProp($user),
+            // 通知センターの未読数 (全 org 横断・自分宛のみ)。closure = Inertia partial reload で
+            // 省略可能 (将来の router.reload({ only: ['notifications'] }) ポーリング拡張にも使える)
+            'notifications' => [
+                'unreadCount' => fn (): int => $user === null ? 0 : $user->unreadNotifications()->count(),
+            ],
             'flash' => [
                 'success' => $request->session()->get('success'),
                 'error' => $request->session()->get('error'),

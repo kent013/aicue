@@ -18,6 +18,7 @@ use App\Models\ApiKey;
 use App\Models\Billing\Subscription;
 use App\Models\Organization;
 use App\Models\User;
+use App\Notifications\Channels\OrganizationScopedDatabaseChannel;
 use App\Services\Billing\CashierTicketCheckoutGateway;
 use App\Services\Billing\StripeWebhookProcessor;
 use App\Services\Billing\TicketCheckoutGateway;
@@ -39,6 +40,7 @@ use Illuminate\Foundation\Application as FoundationApplication;
 use Illuminate\Foundation\Support\Providers\EventServiceProvider;
 use Illuminate\Http\Request;
 use Illuminate\Mail\Events\MessageSending;
+use Illuminate\Notifications\Channels\DatabaseChannel;
 use Illuminate\Notifications\Events\NotificationSent;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Event;
@@ -100,6 +102,12 @@ class AppServiceProvider extends ServiceProvider
 
         // チケットスポット購入の Stripe Checkout 抽象 (T007)。テストは fake を bind する
         $this->app->bind(TicketCheckoutGateway::class, CashierTicketCheckoutGateway::class);
+
+        // アプリ内通知 (T008): database channel を薄い拡張へ差し替え、AppNotification の
+        // organization_id を notifications テーブルの first-class 列として書き込む
+        // (ChannelManager::createDatabaseDriver は container 解決のため binding が効く。
+        // AppNotification 以外の通知は素通し = 後方互換)
+        $this->app->bind(DatabaseChannel::class, OrganizationScopedDatabaseChannel::class);
     }
 
     public function boot(): void

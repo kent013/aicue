@@ -27,6 +27,7 @@ final class MassAssignmentProtectedKeys
             'user_id',
             'created_by_user_id',
             'created_by', // AI-CUE ドメイン (video_manuals) の actor キー (doc/10 §10.1 準拠の命名)
+            'triggered_by', // AI-CUE: analysis_jobs / render_jobs のジョブ実行者 (通知宛先導出。Auth 導出のみ)
             'invited_by_user_id',
             // tenant / ownership (route・コンテキストから導出する)
             'organization_id',

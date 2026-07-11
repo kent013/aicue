@@ -23,6 +23,7 @@ use App\Prompts\ScenarioGenerationPrompt;
 use App\Prompts\SopExtractPrompt;
 use App\Prompts\WorkDecompositionPrompt;
 use App\Services\Billing\TicketLedgerService;
+use App\Services\Notification\NotificationCenterService;
 use Illuminate\Support\Facades\DB;
 use LogicException;
 use Throwable;
@@ -45,6 +46,7 @@ class AnalysisPipeline
         private readonly ScenarioService $scenarios,
         private readonly SopTextExtractor $extractor,
         private readonly TicketLedgerService $tickets,
+        private readonly NotificationCenterService $notifications,
     ) {}
 
     public function run(int $analysisJobId): void
@@ -61,7 +63,10 @@ class AnalysisPipeline
             $extracted = $this->runExtractStep($job, $document, $text);
             $decomposition = $this->runDecomposeStep($job, $extracted);
             $generated = $this->runGenerateStep($job, $decomposition);
-            $this->finalize($job, $generated);
+            if ($this->finalize($job, $generated)) {
+                // succeeded 到達時のみ・terminal tx の commit 後に通知 (stale 先勝ち false は通知しない)
+                $this->notifications->notifyAnalysisFinished($job->refresh());
+            }
         } catch (Throwable $exception) {
             report($exception);
             $this->jobs->failJob($job, $this->userMessageFor($exception));
@@ -182,15 +187,18 @@ class AnalysisPipeline
      *   - releaseStale (billing cron): ticket_reservations → organizations (前方リソースを保持しない)
      *   - ScenarioService::save: video_manuals のみ
      * いずれもグローバル順の部分列であり循環待ちは構成できない。
+     *
+     * @return bool succeeded に到達したか (stale 回復先勝ちなら false = 通知しない。
+     *              RenderPipeline::finalize と同型の bool 返却)
      */
-    private function finalize(AnalysisJob $job, GeneratedScenarioData $generated): void
+    private function finalize(AnalysisJob $job, GeneratedScenarioData $generated): bool
     {
-        DB::transaction(function () use ($job, $generated): void {
+        return DB::transaction(function () use ($job, $generated): bool {
             // ロック 1: job 行 (stale 回復 cron との直列化点)
             /** @var AnalysisJob $locked */
             $locked = AnalysisJob::query()->whereKey($job->getKey())->lockForUpdate()->firstOrFail();
             if ($locked->status !== JobStatus::Running) {
-                return; // stale 回復 cron が先勝ち → materialize も commit もしない (無課金 succeeded 排除)
+                return false; // stale 回復 cron が先勝ち → materialize も commit もしない (無課金 succeeded 排除)
             }
 
             // ロック 2: manual 行 (共有ロック規約。親 relation 経由再解決 = 子∈親も担保)
@@ -212,6 +220,8 @@ class AnalysisPipeline
             $locked->status = JobStatus::Succeeded;
             $locked->progress = 100;
             $locked->save();
+
+            return true;
         });
     }
 

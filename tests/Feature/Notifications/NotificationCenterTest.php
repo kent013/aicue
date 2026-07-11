@@ -1,0 +1,248 @@
+<?php
+
+declare(strict_types=1);
+
+use App\DataTransferObjects\Notification\InvitationReceivedPayload;
+use App\DataTransferObjects\Notification\ManualJobPayload;
+use App\DataTransferObjects\Notification\TicketBalanceLowPayload;
+use App\Models\Organization;
+use App\Models\Project;
+use App\Models\User;
+use App\Models\VideoManual;
+use App\Notifications\InApp\InvitationReceivedNotification;
+use App\Notifications\InApp\ManualAnalyzedNotification;
+use App\Notifications\InApp\TicketBalanceLowNotification;
+use App\Services\Notification\NotificationCenterService;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Inertia\Testing\AssertableInertia as Assert;
+
+/*
+ * 通知センター route (施策6): index / open / read / read-all の全分岐。
+ * - 自分宛のみ表示 (全 org 横断)・ページネーション
+ * - cross-user は 404 (403 でない = 存在秘匿)・GET open は 405
+ * - open の遷移解決 (manual 現存 / 削除済み / org 不一致 / 残高 / 招待 / 未知 type)
+ * - 未認証は login へ / unverified は verified ガード
+ */
+
+/**
+ * 通知一覧テスト用: owner の org + project + manual (creator=owner)。
+ *
+ * @return array{Organization, User, Project, VideoManual}
+ */
+function notificationCenterContext(): array
+{
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+    $manual = VideoManual::factory()->forProject($project)->createdBy($owner)->create([
+        'title' => '通知対象マニュアル',
+    ]);
+
+    return [$organization, $owner, $project, $manual];
+}
+
+/** manual 系通知を owner へ発火し、その通知 uuid を返す */
+function notifyManualAnalyzed(Organization $organization, User $user, Project $project, VideoManual $manual): string
+{
+    $user->notify(new ManualAnalyzedNotification($organization->id, new ManualJobPayload(
+        projectId: $project->id,
+        manualId: $manual->id,
+        manualTitle: $manual->title,
+        organizationName: $organization->name,
+        succeeded: true,
+        error: null,
+    )));
+
+    $id = $user->notifications()->latest()->firstOrFail()->getKey();
+    assert(is_string($id));
+
+    return $id;
+}
+
+test('index: 自分宛のみ表示 (他人の通知が混ざらない)・未読/既読・全 org 横断', function (): void {
+    [$organization, $owner, $project, $manual] = notificationCenterContext();
+    $other = attachOrganizationMember($organization);
+    notifyManualAnalyzed($organization, $owner, $project, $manual);
+    notifyManualAnalyzed($organization, $other, $project, $manual);
+
+    // 別 org の通知も自分宛なら見える (全 org 横断)
+    [$organization2] = createOrganizationWithOwner('第二組織');
+    $organization2->users()->attach($owner);
+    $owner->notify(new TicketBalanceLowNotification(
+        $organization2->id, new TicketBalanceLowPayload('第二組織', 3, 5),
+    ));
+
+    $this->actingAs($owner)->get('/notifications')
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('Notifications/Index')
+            ->has('notifications', 2)
+            ->where('meta.total', 2));
+});
+
+test('index: ページネーション (20 件/頁)', function (): void {
+    [$organization, $owner, $project, $manual] = notificationCenterContext();
+    for ($i = 0; $i < 25; $i++) {
+        notifyManualAnalyzed($organization, $owner, $project, $manual);
+    }
+
+    $this->actingAs($owner)->get('/notifications')
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('notifications', 20)
+            ->where('meta.last_page', 2)
+            ->where('meta.total', 25));
+
+    $this->actingAs($owner)->get('/notifications?page=2')
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('notifications', 5)
+            ->where('meta.current_page', 2));
+});
+
+test('read: 自分の通知は既読化され back で戻る', function (): void {
+    [$organization, $owner, $project, $manual] = notificationCenterContext();
+    $id = notifyManualAnalyzed($organization, $owner, $project, $manual);
+
+    $this->actingAs($owner)->from('/notifications')
+        ->post("/notifications/{$id}/read")
+        ->assertRedirect('/notifications');
+
+    expect($owner->unreadNotifications()->count())->toBe(0);
+});
+
+test('read/open: 他人の通知 uuid は 404 (403 でない = 存在秘匿)。存在しない uuid も 404', function (): void {
+    [$organization, $owner, $project, $manual] = notificationCenterContext();
+    $other = attachOrganizationMember($organization);
+    $othersId = notifyManualAnalyzed($organization, $other, $project, $manual);
+
+    $this->actingAs($owner)->post("/notifications/{$othersId}/read")->assertNotFound();
+    $this->actingAs($owner)->post("/notifications/{$othersId}/open")->assertNotFound();
+    $this->actingAs($owner)->post('/notifications/'.Str::uuid()->toString().'/read')->assertNotFound();
+
+    // 他人の通知は未読のまま (影響しない)
+    expect($other->unreadNotifications()->count())->toBe(1);
+});
+
+test('read/open: 不正形式 (非UUID) の id は route 不一致で 404 (pgsql uuid 比較の 22P02 = 500 を出さない)', function (): void {
+    [, $owner] = notificationCenterContext();
+
+    $this->actingAs($owner)->post('/notifications/not-a-uuid/read')->assertNotFound();
+    $this->actingAs($owner)->post('/notifications/not-a-uuid/open')->assertNotFound();
+});
+
+test('findOwnOrFail: 非UUID id は service 層でも ModelNotFoundException (route 制約を通らない将来経路の防護)', function (): void {
+    [, $owner] = notificationCenterContext();
+
+    app(NotificationCenterService::class)
+        ->findOwnOrFail($owner, 'not-a-uuid');
+})->throws(ModelNotFoundException::class);
+
+test('read-all: 自分の未読のみ全既読 (他人の行に影響しない)', function (): void {
+    [$organization, $owner, $project, $manual] = notificationCenterContext();
+    $other = attachOrganizationMember($organization);
+    notifyManualAnalyzed($organization, $owner, $project, $manual);
+    notifyManualAnalyzed($organization, $owner, $project, $manual);
+    notifyManualAnalyzed($organization, $other, $project, $manual);
+
+    $this->actingAs($owner)->from('/notifications')
+        ->post('/notifications/read-all')
+        ->assertRedirect('/notifications')
+        ->assertSessionHas('success');
+
+    expect($owner->unreadNotifications()->count())->toBe(0);
+    expect($other->unreadNotifications()->count())->toBe(1);
+});
+
+test('open: manual 現存 + 同一 org → manuals.show へ 303 + 既読化', function (): void {
+    [$organization, $owner, $project, $manual] = notificationCenterContext();
+    $id = notifyManualAnalyzed($organization, $owner, $project, $manual);
+
+    $response = $this->actingAs($owner)->post("/notifications/{$id}/open");
+
+    $response->assertStatus(303)
+        ->assertRedirect("/projects/{$project->id}/manuals/{$manual->id}");
+    expect($owner->unreadNotifications()->count())->toBe(0);
+});
+
+test('open: manual 削除済み → 一覧へ 303 + info (既読化はされる)', function (): void {
+    [$organization, $owner, $project, $manual] = notificationCenterContext();
+    $id = notifyManualAnalyzed($organization, $owner, $project, $manual);
+    $manual->delete();
+
+    $this->actingAs($owner)->post("/notifications/{$id}/open")
+        ->assertStatus(303)
+        ->assertRedirect('/notifications')
+        ->assertSessionHas('info', '対象の動画マニュアルは削除されています。');
+    expect($owner->unreadNotifications()->count())->toBe(0);
+});
+
+test('open: 通知 org ≠ current org → 一覧へ 303 + 組織切替の案内 (自動切替しない)', function (): void {
+    [$organization, $owner, $project, $manual] = notificationCenterContext();
+    $id = notifyManualAnalyzed($organization, $owner, $project, $manual);
+
+    // current org を別組織へ切り替えた状態にする
+    [$organization2] = createOrganizationWithOwner('別組織');
+    $organization2->users()->attach($owner);
+    $owner->forceFill(['current_organization_id' => $organization2->id])->save();
+
+    $this->actingAs($owner)->post("/notifications/{$id}/open")
+        ->assertStatus(303)
+        ->assertRedirect('/notifications')
+        ->assertSessionHas('info', 'この通知は別の組織のものです。組織を切り替えてから開いてください。');
+});
+
+test('open: ticket_balance_low → billing.tickets.show へ 303', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $owner->notify(new TicketBalanceLowNotification(
+        $organization->id, new TicketBalanceLowPayload($organization->name, 3, 5),
+    ));
+    $id = $owner->notifications()->firstOrFail()->getKey();
+
+    $this->actingAs($owner)->post("/notifications/{$id}/open")
+        ->assertStatus(303)
+        ->assertRedirect('/purchase-tickets');
+});
+
+test('open: invitation_received → 一覧へ 303 + 招待案内 info', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $owner->notify(new InvitationReceivedNotification(
+        $organization->id, new InvitationReceivedPayload($organization->name),
+    ));
+    $id = $owner->notifications()->firstOrFail()->getKey();
+
+    $this->actingAs($owner)->post("/notifications/{$id}/open")
+        ->assertStatus(303)
+        ->assertRedirect('/notifications')
+        ->assertSessionHas('info', '招待はメールの受諾リンクから参加してください。');
+});
+
+test('open: 未知 type → 一覧へ 303 + 汎用 info (招待文言と混同しない)・既読化のみ', function (): void {
+    [, $owner] = createOrganizationWithOwner();
+    $owner->notifications()->create([
+        'id' => Str::uuid()->toString(),
+        'type' => 'legacy_unknown_type', // enum⇔DB ドリフトの防御分岐
+        'data' => [],
+    ]);
+    $id = $owner->notifications()->firstOrFail()->getKey();
+
+    $this->actingAs($owner)->post("/notifications/{$id}/open")
+        ->assertStatus(303)
+        ->assertRedirect('/notifications')
+        ->assertSessionHas('info', 'この通知には開ける対象がありません。');
+    expect($owner->unreadNotifications()->count())->toBe(0);
+});
+
+test('GET /notifications/{id}/open は 405 (POST 限定 = prefetch 既読化防止)', function (): void {
+    [$organization, $owner, $project, $manual] = notificationCenterContext();
+    $id = notifyManualAnalyzed($organization, $owner, $project, $manual);
+
+    $this->actingAs($owner)->get("/notifications/{$id}/open")->assertStatus(405);
+    expect($owner->unreadNotifications()->count())->toBe(1); // 既読化されない
+});
+
+test('未認証は login へ redirect / unverified は verified ガード', function (): void {
+    $this->get('/notifications')->assertRedirect('/login');
+
+    $unverified = User::factory()->unverified()->create();
+    $this->actingAs($unverified)->get('/notifications')->assertRedirect('/email/verify');
+});

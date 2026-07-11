@@ -11,6 +11,7 @@ use App\Exceptions\Billing\InsufficientTicketsException;
 use App\Models\Billing\TicketLedgerEntry;
 use App\Models\Billing\TicketReservation;
 use App\Models\Organization;
+use App\Services\Notification\NotificationCenterService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use LogicException;
@@ -32,6 +33,10 @@ class TicketLedgerService
 {
     /** reserve の TTL (分)。入口の二重起動・放置予約による残高死蔵を防ぐ */
     private const int RESERVATION_TTL_MINUTES = 30;
+
+    public function __construct(
+        private readonly NotificationCenterService $notifications,
+    ) {}
 
     /** チケットを付与する (運用調整の正エントリ。冪等付与は grantMonthly / grantPurchased を使う) */
     public function grant(Organization $organization, int $amount, string $description): TicketLedgerEntry
@@ -254,6 +259,19 @@ class TicketLedgerService
             $reservation->status = TicketReservationStatus::Reserved;
             $reservation->expires_at = CarbonImmutable::now()->addMinutes(self::RESERVATION_TTL_MINUTES);
             $reservation->save();
+
+            // 残高低下の閾値クロス検知。クロス判定を reserve に置く理由: balance() は
+            // 「有効台帳合計 − Reserved 拘束」であり、実効残高が減る唯一の消費イベントは reserve
+            // (Reserved→Committed の commit は拘束 -amount と台帳 -amount が相殺し balance() 不変)。
+            // reserve は org 行ロック下で直列化済みのため、並行 reserve でもクロスを観測するのは
+            // ちょうど 1 回 (release/grant で回復して再度跨げば再通知される = 仕様)
+            $threshold = config()->integer('billing.ticket_low_balance_threshold');
+            $after = $balance - $amount;
+            if ($balance >= $threshold && $after < $threshold) {
+                // afterCommit: reserve は pipeline の startJob tx 内から savepoint で呼ばれ得るため、
+                // 最外層 commit 成立後にのみ通知する (rollback 時は発火しない)
+                DB::afterCommit(fn () => $this->notifications->notifyTicketBalanceLow($organization, $after, $threshold));
+            }
 
             return $reservation;
         });

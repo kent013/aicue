@@ -42,6 +42,10 @@
 
 Factory を持たないモデル (Role / Permission / Team 等) は seed 固定値
 または Service (`OrganizationProvisioningService` 等) 経由で作る。
+アプリ内通知 (`notifications` テーブル) は Eloquent 標準 `DatabaseNotification` を使うため
+新規モデル / Factory は作らない (テストでは `$user->notify(new ManualAnalyzedNotification(...))`
+の実発火で行を作る。`AnalysisJob` / `RenderJob` の `triggered_by` は nullable のため
+Factory は既存のまま。テストで必要なときは create 属性 `['triggered_by' => $user->id]` を渡す)。
 
 ## 使い方
 

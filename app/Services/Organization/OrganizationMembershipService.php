@@ -12,6 +12,7 @@ use App\Models\Organization;
 use App\Models\OrganizationInvitation;
 use App\Models\User;
 use App\Notifications\OrganizationInvitationNotification;
+use App\Services\Notification\NotificationCenterService;
 use App\Services\Project\DefaultProjectResolver;
 use App\Services\Security\SecurityEventRecorder;
 use Illuminate\Support\Facades\DB;
@@ -34,6 +35,7 @@ class OrganizationMembershipService
     public function __construct(
         private readonly SecurityEventRecorder $recorder,
         private readonly DefaultProjectResolver $defaultProjects,
+        private readonly NotificationCenterService $notifications,
     ) {}
 
     /**
@@ -78,6 +80,9 @@ class OrganizationMembershipService
             organizationName: $organization->name,
             acceptUrl: url('/invitations/accept?token='.$plainToken),
         ));
+
+        // 既存ユーザーが宛先ならアプリ内でも気づけるようにする (メールの補完。平文 token は含めない)
+        $this->notifications->notifyInvitationReceived($invitation);
 
         return $invitation;
     }
