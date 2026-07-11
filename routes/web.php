@@ -12,6 +12,7 @@ use App\Http\Controllers\Capture\CaptureSyncController;
 use App\Http\Controllers\Capture\CaptureTakeController;
 use App\Http\Controllers\Capture\TakeUploadUrlController;
 use App\Http\Controllers\ContactController;
+use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DebugLoginController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\Marketing\PricingController;
@@ -150,9 +151,8 @@ Route::get('/auth/{provider}/callback', [SocialAuthController::class, 'callback'
 |--------------------------------------------------------------------------
 */
 Route::middleware(['auth', 'verified'])->group(function (): void {
-    Route::get('/dashboard', function () {
-        return Inertia::render('Dashboard');
-    })->name('dashboard');
+    // ログイン直後の着地点 (課金ゲート外のまま。未契約でも状況把握と復帰導線を提供)
+    Route::get('/dashboard', DashboardController::class)->name('dashboard');
 
     /*
     | recent-auth (generic step-up 再認証)。機微操作 route の `recent-auth` middleware が

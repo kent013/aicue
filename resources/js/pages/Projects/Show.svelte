@@ -20,9 +20,8 @@
         ManualFilters,
         ManualListItem,
         PaginationMeta,
-        VideoManualStatus,
     } from "@/types/manual";
-    import { VIDEO_MANUAL_STATUS_LABELS } from "@/types/manual";
+    import { STATUS_TONES, VIDEO_MANUAL_STATUS_LABELS } from "@/types/manual";
 
     /**
      * プロジェクト詳細。動画マニュアル一覧 (フィルタ + paginate)・カテゴリ管理・
@@ -50,18 +49,6 @@
 
     const shared = $derived(page.props as unknown as SharedProps);
     const appName = $derived(shared.appName ?? "");
-
-    /* ---- 動画マニュアル: 状態バッジの tone (結果表示の意味色) ---- */
-    const STATUS_TONES: Record<
-        VideoManualStatus,
-        "primary" | "tertiary" | "success" | "warning" | "neutral"
-    > = {
-        draft: "neutral",
-        analyzing: "tertiary",
-        ready: "success",
-        rendering: "warning",
-        published: "primary",
-    };
 
     /* ---- 動画マニュアル: フィルタ (GET クエリで manuals のみ部分更新) ---- */
     let filterCategory = $state(manualFilters.category ?? "");
