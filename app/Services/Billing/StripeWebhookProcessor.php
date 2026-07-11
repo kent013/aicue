@@ -423,7 +423,15 @@ class StripeWebhookProcessor
         if (! is_int($amountSubtotal)
             || $amountSubtotal !== $session->ticket_count * $session->unit_amount
             || $currency !== $session->currency) {
-            throw new RuntimeException("ticket purchase webhook: 金額/通貨照合不一致 (session {$sessionId})");
+            // expected/actual を記録する (failed 連鎖時の運用復旧を高速化)
+            throw new RuntimeException(sprintf(
+                'ticket purchase webhook: 金額/通貨照合不一致 (session %s, expected %d %s, actual %s %s)',
+                $sessionId,
+                $session->ticket_count * $session->unit_amount,
+                $session->currency,
+                is_int($amountSubtotal) ? (string) $amountSubtotal : 'missing',
+                $currency ?? 'missing',
+            ));
         }
 
         // (6) 冪等付与 (idempotency_key purchase:{sessionId} UNIQUE) + 行 completed 化 (同一 TX)

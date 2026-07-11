@@ -40,13 +40,23 @@ class TicketPurchaseController extends Controller
     private const int DEFAULT_COUNT = 10;
 
     /** 購入画面 (attempt_token は render ごとに ULID 発行) */
-    public function show(Request $request, TicketPricingService $pricing, TicketLedgerService $tickets): Response
-    {
+    public function show(
+        Request $request,
+        TicketPricingService $pricing,
+        TicketLedgerService $tickets,
+        TicketCheckoutService $checkout,
+    ): Response {
         $organization = $this->resolveCurrentOrganization($request);
         Gate::authorize('view', $organization);
 
         $user = $request->user();
         Assert::isInstanceOf($user, User::class);
+
+        // Stripe success_url からの帰還 (表示専用)。session_id を current org の自 DB 行と
+        // 照合できた時のみバナー表示 (org 切替中の誤表示・query 偽装を fail-closed で防ぐ)
+        $sessionId = $request->query('session_id');
+        $purchased = $request->boolean('purchased')
+            && $checkout->confirmsPurchaseReturn($organization, is_string($sessionId) ? $sessionId : null);
 
         $dto = new PurchaseTicketsPageDto(
             tiers: $pricing->volumeTiersForDisplay(),
@@ -56,7 +66,7 @@ class TicketPurchaseController extends Controller
             balance: $tickets->balance($organization),
             canManage: $user->can('manageBilling', $organization),
             attemptToken: (string) Str::ulid(),
-            purchased: $request->boolean('purchased'), // Stripe success_url からの帰還 (表示専用)
+            purchased: $purchased,
         );
 
         return Inertia::render('Billing/PurchaseTickets', ['page' => $dto->toArray()]);

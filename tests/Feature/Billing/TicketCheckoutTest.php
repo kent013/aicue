@@ -104,6 +104,8 @@ test('owner の checkout は gateway 1 回呼び出しで Stripe URL へ遷移�
     expect($fake->created)->toHaveCount(1);
     expect($fake->created[0]['quantity'])->toBe(30);
     expect($fake->created[0]['idempotencyKey'])->toBe("purchase:{$token}");
+    // success_url は purchased=1 + Stripe 置換テンプレート session_id (帰還時の自 org 照合用)
+    expect($fake->created[0]['successUrl'])->toContain('purchased=1&session_id={CHECKOUT_SESSION_ID}');
     expect($fake->created[0]['metadata'])->toBe([
         'purpose' => 'ticket_purchase',
         'org_ref' => (string) $organization->id,
@@ -118,6 +120,37 @@ test('owner の checkout は gateway 1 回呼び出しで Stripe URL へ遷移�
     expect($session->currency)->toBe('jpy');
     expect($session->status)->toBe(TicketCheckoutSessionStatus::Pending);
     expect($session->attempt_token)->toBe($token);
+});
+
+test('purchased バナーは session_id が自 org の checkout 行と一致した時のみ表示される', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    TicketCheckoutSession::factory()
+        ->forOrganization($organization)
+        ->initiatedBy($owner)
+        ->create(['stripe_session_id' => 'cs_test_return_1']);
+
+    // 一致 → バナー表示
+    $this->actingAs($owner)->get('/purchase-tickets?purchased=1&session_id=cs_test_return_1')
+        ->assertInertia(fn (Assert $page) => $page->where('page.purchased', true));
+
+    // session_id なし / 未知 session → 非表示 (query 偽装で成功バナーを出さない fail-closed)
+    $this->actingAs($owner)->get('/purchase-tickets?purchased=1')
+        ->assertInertia(fn (Assert $page) => $page->where('page.purchased', false));
+    $this->actingAs($owner)->get('/purchase-tickets?purchased=1&session_id=cs_unknown')
+        ->assertInertia(fn (Assert $page) => $page->where('page.purchased', false));
+});
+
+test('他 org の session_id では purchased バナーを表示しない (org 切替帰還の誤表示防止)', function (): void {
+    [$organizationA, $ownerA] = createOrganizationWithOwner();
+    TicketCheckoutSession::factory()
+        ->forOrganization($organizationA)
+        ->initiatedBy($ownerA)
+        ->create(['stripe_session_id' => 'cs_test_org_a_1']);
+
+    [, $ownerB] = createOrganizationWithOwner();
+
+    $this->actingAs($ownerB)->get('/purchase-tickets?purchased=1&session_id=cs_test_org_a_1')
+        ->assertInertia(fn (Assert $page) => $page->where('page.purchased', false));
 });
 
 test('同一 attempt_token の再送は gateway を呼ばず同一 URL を replay する', function (): void {

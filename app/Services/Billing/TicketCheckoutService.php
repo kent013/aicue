@@ -69,6 +69,25 @@ class TicketCheckoutService
         }
     }
 
+    /**
+     * Stripe success_url 帰還の purchased 表示を検証する (表示専用・fail-closed)。
+     *
+     * session_id が current org の checkout 行と一致する時のみ true。org 切替中の帰還や
+     * 任意 query (?purchased=1) では購入完了バナーを出さない (課金付与は webhook が真実源
+     * のため、ここは表示の正確性のみを守る)。
+     */
+    public function confirmsPurchaseReturn(Organization $organization, ?string $sessionId): bool
+    {
+        if ($sessionId === null || $sessionId === '') {
+            return false;
+        }
+
+        return TicketCheckoutSession::query()
+            ->where('organization_id', $organization->id)
+            ->where('stripe_session_id', $sessionId)
+            ->exists();
+    }
+
     private function startCheckoutLocked(
         Organization $organization,
         User $user,
@@ -127,11 +146,14 @@ class TicketCheckoutService
         // (3) Stripe 作成 (idempotency key = purchase:{attemptToken}) → DB 記録。
         //     metadata は照合専用 (認可・org 解決の判断には一切使わない。真実源は ticket_checkout_sessions 行)。
         //     tenant キー不信の誤読を防ぐため organization_id ではなく非権限キー名 org_ref を使う。
+        //     success_url の {CHECKOUT_SESSION_ID} は Stripe 側で実 session id に置換される
+        //     (帰還時に confirmsPurchaseReturn() が current org の自 DB 行と照合し、
+        //     org 切替中の誤バナー・任意 query による purchased 偽装を防ぐ)。
         $created = $this->gateway->createTicketCheckout(
             $organization,
             $tier->stripePriceId,
             $count,
-            route('billing.tickets.show', ['purchased' => 1]),
+            route('billing.tickets.show', ['purchased' => 1]).'&session_id={CHECKOUT_SESSION_ID}',
             route('billing.tickets.show'),
             'purchase:'.$attemptToken,
             [

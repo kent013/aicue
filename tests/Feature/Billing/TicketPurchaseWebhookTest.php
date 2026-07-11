@@ -190,6 +190,20 @@ test('purpose 外・mode 外は受理のみ (processed) で付与しない', fun
     'mode=subscription' => [['mode' => 'subscription']],
 ]);
 
+test('expired 行への遅延 completed webhook でも付与し completed 化する (決済成立が真実源)', function (): void {
+    // DB 上 expired 扱いでも Stripe 側で決済が成立していれば completed event が届きうる
+    // (expire API との競合・event 遅延到着)。支払い済みの付与を落とさない方針を pin する
+    [$organization, , $session] = ticketPurchaseFixture();
+    $session->status = TicketCheckoutSessionStatus::Expired;
+    $session->save();
+
+    event(new WebhookReceived(paidTicketPayload($organization)));
+
+    expect(app(TicketLedgerService::class)->balance($organization))->toBe(30);
+    expect($session->refresh()->status)->toBe(TicketCheckoutSessionStatus::Completed);
+    expect($session->completed_at)->not->toBeNull();
+});
+
 test('attempts 上限到達の checkout.session.completed は terminal-ack + report される', function (): void {
     [$organization] = ticketPurchaseFixture();
 

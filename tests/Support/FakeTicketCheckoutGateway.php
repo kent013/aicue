@@ -19,7 +19,7 @@ use RuntimeException;
  */
 final class FakeTicketCheckoutGateway implements TicketCheckoutGateway
 {
-    /** @var list<array{organizationId: int, stripePriceId: string, quantity: int, idempotencyKey: string, metadata: array<string, string>}> */
+    /** @var list<array{organizationId: int, stripePriceId: string, quantity: int, successUrl: string, cancelUrl: string, idempotencyKey: string, metadata: array<string, string>}> */
     public array $created = [];
 
     /** @var list<string> expire を要求された session id */
@@ -48,6 +48,8 @@ final class FakeTicketCheckoutGateway implements TicketCheckoutGateway
             'organizationId' => $organization->id,
             'stripePriceId' => $stripePriceId,
             'quantity' => $quantity,
+            'successUrl' => $successUrl,
+            'cancelUrl' => $cancelUrl,
             'idempotencyKey' => $idempotencyKey,
             'metadata' => $metadata,
         ];

@@ -101,6 +101,7 @@
                 表示は各プランの基本料金 (月額) です。AI 解析・動画レンダにはどのプランでも共通のチケットを使います
                 (AI 解析 {page.analysisTicketCost} 枚・動画レンダ {page.renderTicketCost} 枚。<a
                     href="#ticket-pricing"
+                    aria-label="チケット料金セクションへ移動"
                     class="text-primary underline">チケット料金</a
                 >をご覧ください)。
             </p>
