@@ -1,0 +1,7 @@
+- generic [ref=f69e2]:
+  - 'img "${APP_NAME}" [ref=f69e3]'
+  - generic [ref=f69e6]: "404"
+  - heading "ページが見つかりません" [level=1] [ref=f69e7]
+  - paragraph [ref=f69e8]: お探しのページは存在しないか、移動された可能性があります。
+  - link "ホームに戻る" [ref=f69e9] [cursor=pointer]:
+    - /url: /

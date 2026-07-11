@@ -1,0 +1,35 @@
+- generic [ref=f54e3]:
+  - banner [ref=f54e4]:
+    - generic [ref=f54e5]:
+      - 'link "${APP_NAME}" [ref=f54e6] [cursor=pointer]':
+        - /url: /dashboard
+      - link "通知" [ref=f54e8] [cursor=pointer]:
+        - /url: http://127.0.0.1:8010/notifications
+  - main [ref=f54e10]:
+    - heading "設定" [level=1] [ref=f54e11]
+    - navigation "設定メニュー" [ref=f54e12]:
+      - link "プロフィール" [ref=f54e13] [cursor=pointer]:
+        - /url: http://127.0.0.1:8010/settings
+      - link "セキュリティ" [ref=f54e14] [cursor=pointer]:
+        - /url: http://127.0.0.1:8010/settings/security
+    - generic [ref=f54e15]:
+      - generic [ref=f54e16]:
+        - generic [ref=f54e17]:
+          - heading "2要素認証" [level=2] [ref=f54e18]
+          - generic [ref=f54e19]: 無効
+        - paragraph [ref=f54e20]: 認証アプリのワンタイムコードでログインを保護します。
+        - generic [ref=f54e30]:
+          - paragraph [ref=f54e31]: 認証アプリで以下の QR コードを読み取り、表示されたコードを入力して設定を完了してください。
+          - generic [ref=f54e38]:
+            - generic [ref=f54e39]:
+              - generic [ref=f54e40]: 認証コード
+              - textbox "認証コード" [ref=f54e41]
+            - button "確認して有効化" [ref=f54e43]
+      - generic [ref=f54e23]:
+        - heading "ソーシャルログイン連携" [level=2] [ref=f54e24]
+        - paragraph [ref=f54e25]: 外部アカウントを連携すると、そのアカウントでもログインできます。
+        - list [ref=f54e26]:
+          - listitem [ref=f54e27]:
+            - generic [ref=f54e28]: Google
+            - link "連携する" [ref=f54e29] [cursor=pointer]:
+              - /url: /auth/google/redirect/link

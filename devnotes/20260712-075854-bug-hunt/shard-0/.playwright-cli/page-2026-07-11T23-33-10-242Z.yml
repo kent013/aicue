@@ -1,0 +1,100 @@
+- generic [ref=f77e2]:
+  - status [ref=f77e103]:
+    - generic [ref=f77e105]: 「Multi Org User (更新済み)」の 2 段階認証を解除しました
+    - button "閉じる" [ref=f77e106]
+  - generic [ref=f77e3]:
+    - banner [ref=f77e4]:
+      - generic [ref=f77e5]:
+        - 'link "${APP_NAME}" [ref=f77e6] [cursor=pointer]':
+          - /url: /dashboard
+        - link "通知" [ref=f77e8] [cursor=pointer]:
+          - /url: http://127.0.0.1:8010/notifications
+    - main [ref=f77e10]:
+      - heading "ユーザー管理" [level=1] [ref=f77e11]
+      - paragraph [ref=f77e12]: 組織のメンバーと招待を管理します。ロールは「管理者・編集者・撮影者」から選択します。
+      - generic [ref=f77e13]:
+        - complementary [ref=f77e14]:
+          - generic [ref=f77e15]:
+            - heading "管理メニュー" [level=2] [ref=f77e16]
+            - navigation "管理メニュー" [ref=f77e17]:
+              - list [ref=f77e18]:
+                - listitem [ref=f77e19]:
+                  - generic [ref=f77e21]: ユーザー管理
+        - generic [ref=f77e22]:
+          - generic [ref=f77e23]:
+            - heading "メンバー一覧" [level=2] [ref=f77e24]
+            - paragraph [ref=f77e25]: プロジェクトがまだありません。編集者・撮影者を割り当てるには、先にプロジェクトを作成してください。
+            - list [ref=f77e26]:
+              - listitem [ref=f77e34]:
+                - generic [ref=f77e35]:
+                  - paragraph [ref=f77e37]: Free Admin
+                  - paragraph [ref=f77e38]: admin-free@example.com
+                - generic [ref=f77e39]:
+                  - combobox "Free Admin のロール" [ref=f77e40]:
+                    - option "管理者" [selected]
+                    - option "編集者"
+                    - option "撮影者"
+                  - button "削除" [ref=f77e41]
+              - listitem [ref=f77e27]:
+                - generic [ref=f77e76]:
+                  - generic [ref=f77e77]:
+                    - paragraph [ref=f77e78]: Multi Org User (更新済み)
+                    - generic [ref=f77e29]: 未割当
+                  - paragraph [ref=f77e79]: multi-org@example.com
+                - generic [ref=f77e30]:
+                  - combobox "Multi Org User (更新済み) のロール" [ref=f77e32]:
+                    - option "未割当（選択してください）" [selected]
+                    - option "管理者"
+                    - option "編集者"
+                    - option "撮影者"
+                  - button "削除" [ref=f77e33]
+              - listitem [ref=f77e42]:
+                - generic [ref=f77e43]:
+                  - paragraph [ref=f77e45]: Free Owner
+                  - paragraph [ref=f77e46]: owner-free@example.com
+                - generic [ref=f77e47]: 管理者（オーナー）
+              - listitem [ref=f77e49]:
+                - generic [ref=f77e80]:
+                  - generic [ref=f77e81]:
+                    - paragraph [ref=f77e82]: Unverified User
+                    - generic [ref=f77e50]: 未割当
+                  - paragraph [ref=f77e83]: unverified@example.com
+                - generic [ref=f77e51]:
+                  - combobox "Unverified User のロール" [ref=f77e52]:
+                    - option "未割当（選択してください）" [selected]
+                    - option "管理者"
+                    - option "編集者"
+                    - option "撮影者"
+                  - button "削除" [ref=f77e53]
+              - listitem [ref=f77e54]:
+                - generic [ref=f77e84]:
+                  - generic [ref=f77e85]:
+                    - paragraph [ref=f77e86]: Free Member
+                    - generic [ref=f77e55]: 未割当
+                  - paragraph [ref=f77e87]: member-free@example.com
+                - generic [ref=f77e56]:
+                  - combobox "Free Member のロール" [ref=f77e57]:
+                    - option "未割当（選択してください）" [selected]
+                    - option "管理者"
+                    - option "編集者"
+                    - option "撮影者"
+                  - button "削除" [ref=f77e58]
+          - generic [ref=f77e59]:
+            - heading "ユーザーを追加" [level=2] [ref=f77e60]
+            - paragraph [ref=f77e61]: 招待メールを送信します。招待の有効期限は 7 日間です。
+            - generic [ref=f77e62]:
+              - generic [ref=f77e63]:
+                - generic [ref=f77e64]: メールアドレス
+                - textbox "メールアドレス" [ref=f77e65]
+              - generic [ref=f77e66]:
+                - generic [ref=f77e67]: ロール
+                - combobox "ロール" [ref=f77e68]:
+                  - option "管理者"
+                  - option "編集者"
+                  - option "撮影者" [selected]
+              - button "招待を送信" [ref=f77e70]
+          - generic [ref=f77e71]:
+            - heading "招待中" [level=2] [ref=f77e72]
+            - generic [ref=f77e73]:
+              - heading "有効な招待はありません" [level=3] [ref=f77e74]
+              - paragraph [ref=f77e75]: 送信した招待は受諾されるか期限が切れるまでここに表示されます。

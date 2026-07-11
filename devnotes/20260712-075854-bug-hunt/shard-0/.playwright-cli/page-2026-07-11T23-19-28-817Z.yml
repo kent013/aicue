@@ -1,0 +1,63 @@
+- generic:
+  - generic:
+    - generic:
+      - banner:
+        - generic:
+          - 'link "${APP_NAME}"':
+            - /url: /dashboard
+          - generic:
+            - link "通知":
+              - /url: http://127.0.0.1:8010/notifications
+      - main:
+        - heading "ユーザー管理" [level=1]
+        - paragraph: 組織のメンバーと招待を管理します。ロールは「管理者・編集者・撮影者」から選択します。
+        - generic:
+          - complementary:
+            - generic:
+              - heading "管理メニュー" [level=2]
+              - navigation "管理メニュー":
+                - list:
+                  - listitem:
+                    - generic: ユーザー管理
+          - generic:
+            - generic:
+              - heading "メンバー一覧" [level=2]
+              - paragraph: プロジェクトがまだありません。編集者・撮影者を割り当てるには、先にプロジェクトを作成してください。
+              - list:
+                - listitem:
+                  - generic:
+                    - generic:
+                      - paragraph: Multi Org User
+                    - paragraph: multi-org@example.com
+                  - generic: 管理者（オーナー）
+            - generic:
+              - heading "ユーザーを追加" [level=2]
+              - paragraph: 招待メールを送信します。招待の有効期限は 7 日間です。
+              - generic:
+                - generic:
+                  - generic: メールアドレス
+                  - textbox "メールアドレス"
+                - generic:
+                  - generic: ロール
+                  - combobox "ロール":
+                    - option "管理者"
+                    - option "編集者"
+                    - option "撮影者" [selected]
+                - generic:
+                  - button "招待を送信"
+            - generic:
+              - heading "招待中" [level=2]
+              - list:
+                - listitem:
+                  - paragraph: shard0-revoke-test@example.com
+                  - generic:
+                    - paragraph: 管理者 ・ 期限 2026-07-18
+                    - button "取消"
+  - dialog [ref=f42e89]:
+    - generic [ref=f42e90]:
+      - heading "招待の取り消し" [level=2] [ref=f42e91]
+      - button "閉じる" [active] [ref=f42e92]
+    - paragraph [ref=f42e95]: shard0-revoke-test@example.com への招待を取り消しますか？ 取り消した招待は受諾できなくなります。
+    - generic [ref=f42e96]:
+      - button "キャンセル" [ref=f42e97]
+      - button "取り消す" [ref=f42e98]

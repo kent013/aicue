@@ -1,0 +1,19 @@
+- generic [ref=f65e34]:
+  - banner [ref=f65e35]:
+    - generic [ref=f65e36]:
+      - 'link "${APP_NAME}" [ref=f65e37] [cursor=pointer]':
+        - /url: /dashboard
+      - generic [ref=f65e38]:
+        - link "通知" [ref=f65e39] [cursor=pointer]:
+          - /url: http://127.0.0.1:8010/notifications
+        - link "設定" [ref=f65e41] [cursor=pointer]:
+          - /url: http://127.0.0.1:8010/settings
+        - button "ログアウト" [ref=f65e42]
+  - main [ref=f65e43]:
+    - heading "招待テスト管理者 さん、ようこそ" [level=1] [ref=f65e44]
+    - paragraph [ref=f65e45]: 今日のアクティビティを確認しましょう。
+    - generic [ref=f65e47]:
+      - heading "まずは組織を作成しましょう" [level=3] [ref=f65e49]
+      - paragraph [ref=f65e50]: 組織を作成すると、プロジェクトとマニュアルの管理を始められます。
+      - link "組織を作成" [ref=f65e52] [cursor=pointer]:
+        - /url: http://127.0.0.1:8010/organizations/create

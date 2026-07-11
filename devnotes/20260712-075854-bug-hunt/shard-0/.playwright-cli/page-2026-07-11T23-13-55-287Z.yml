@@ -1,0 +1,38 @@
+- generic [ref=f30e63]:
+  - banner [ref=f30e64]:
+    - generic [ref=f30e65]:
+      - 'link "${APP_NAME}" [ref=f30e66] [cursor=pointer]':
+        - /url: /dashboard
+      - link "通知" [ref=f30e68] [cursor=pointer]:
+        - /url: http://127.0.0.1:8010/notifications
+  - main [ref=f30e70]:
+    - heading "プランとお支払い" [level=1] [ref=f30e71]
+    - paragraph [ref=f30e72]: この組織のプランとチケット残高を管理します。
+    - generic [ref=f30e73]:
+      - generic [ref=f30e74]:
+        - generic [ref=f30e75]:
+          - generic [ref=f30e76]:
+            - heading "現在のプラン" [level=2] [ref=f30e77]
+            - paragraph [ref=f30e78]: Free
+          - generic [ref=f30e79]:
+            - heading "チケット残高" [level=2] [ref=f30e80]
+            - paragraph [ref=f30e81]: 0 枚
+            - paragraph [ref=f30e82]:
+              - link "チケットを購入" [ref=f30e83] [cursor=pointer]:
+                - /url: http://127.0.0.1:8010/purchase-tickets
+        - button "お支払い方法を管理 (Stripe)" [ref=f30e85]
+      - generic [ref=f30e86]:
+        - heading "プラン一覧" [level=2] [ref=f30e87]
+        - list [ref=f30e88]:
+          - listitem [ref=f30e89]:
+            - generic [ref=f30e92]:
+              - generic [ref=f30e93]:
+                - heading "Free" [level=3] [ref=f30e94]
+                - generic [ref=f30e95]: 現在のプラン
+              - paragraph [ref=f30e96]: 無料 ・ 月 10 枚のチケット付与
+          - listitem [ref=f30e97]:
+            - generic [ref=f30e99]:
+              - generic [ref=f30e100]:
+                - heading "Standard" [level=3] [ref=f30e102]
+                - paragraph [ref=f30e103]: ¥4,980 / 月 ・ 月 100 枚のチケット付与
+              - button "このプランにする" [ref=f30e104]

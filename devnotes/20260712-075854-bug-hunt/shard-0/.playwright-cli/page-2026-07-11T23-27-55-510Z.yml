@@ -1,0 +1,29 @@
+- generic [ref=f67e3]:
+  - paragraph [ref=f67e4]: "${APP_NAME}"
+  - main [ref=f67e5]:
+    - heading "ログイン" [level=1] [ref=f67e6]
+    - generic [ref=f67e7]:
+      - generic [ref=f67e8]:
+        - generic [ref=f67e9]: メールアドレス
+        - textbox "メールアドレス" [invalid] [ref=f67e10]: shard0-invitee@example.com
+        - paragraph [ref=f67e34]: 認証に失敗しました。
+      - generic [ref=f67e11]:
+        - generic [ref=f67e12]: パスワード
+        - generic [ref=f67e13]:
+          - textbox "パスワード" [ref=f67e14]: Xk7pQm2wTz9vBn5L
+          - button "パスワードを表示" [ref=f67e15]
+      - generic [ref=f67e18]:
+        - checkbox "ログイン状態を保持" [ref=f67e19]
+        - generic [ref=f67e20]: ログイン状態を保持
+      - button "ログイン" [ref=f67e21]
+    - generic [ref=f67e22]: または
+    - link "Google でログイン" [ref=f67e28] [cursor=pointer]:
+      - /url: /auth/google/redirect/login
+  - generic [ref=f67e29]:
+    - paragraph [ref=f67e30]:
+      - text: アカウントをお持ちでない方は
+      - link "登録" [ref=f67e31] [cursor=pointer]:
+        - /url: http://127.0.0.1:8010/register
+    - paragraph [ref=f67e32]:
+      - link "パスワードをお忘れの方" [ref=f67e33] [cursor=pointer]:
+        - /url: http://127.0.0.1:8010/forgot-password

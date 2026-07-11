@@ -1,0 +1,55 @@
+- generic:
+  - generic:
+    - generic:
+      - banner:
+        - generic:
+          - 'link "${APP_NAME}"':
+            - /url: /dashboard
+          - generic:
+            - link "通知":
+              - /url: http://127.0.0.1:8010/notifications
+      - main:
+        - heading "API キー" [level=1]
+        - paragraph: シャード0検証組織-更新済み の REST API / MCP アクセスに使う組織スコープのキーとセッションを管理します。
+        - generic:
+          - navigation "API キー / 接続セッション切替":
+            - link "API キー":
+              - /url: http://127.0.0.1:8010/organizations/org-mg3sqi/api-keys
+            - link "接続セッション":
+              - /url: http://127.0.0.1:8010/organizations/org-mg3sqi/api-keys/sessions
+          - generic:
+            - generic:
+              - generic:
+                - generic:
+                  - heading "発行済みキー" [level=2]
+                  - paragraph: 平文キーは発行直後に 1 度だけ表示されます。失効済みキーは監査痕跡として残ります。
+                - button "発行"
+              - generic:
+                - paragraph: shard0-test-key を発行しました
+                - paragraph: このキーが表示されるのは今回限りです。安全な場所に保存してください。
+                - code: app_pNxETaLH_FQ2WHy0SkP2zqhZ9WufkUSpYfmuMUqZC70nneTGi
+              - list:
+                - listitem:
+                  - generic:
+                    - generic:
+                      - paragraph: shard0-test-key
+                      - generic: 読み取り
+                    - paragraph: app_pNxETaLH… ・ 発行 2026-07-11 ・ 最終利用 未使用
+                  - generic:
+                    - button "失効"
+            - generic:
+              - heading "導入ガイド" [level=2]
+              - paragraph: AI クライアント (MCP) やターミナル (CLI) からの接続手順を確認できます。
+              - generic:
+                - link "MCP 導入ガイド":
+                  - /url: http://127.0.0.1:8010/organizations/org-mg3sqi/onboarding/mcp
+                - link "CLI 導入ガイド":
+                  - /url: http://127.0.0.1:8010/organizations/org-mg3sqi/onboarding/cli
+  - dialog [ref=f50e76]:
+    - generic [ref=f50e77]:
+      - heading "API キー失効" [level=2] [ref=f50e78]
+      - button "閉じる" [active] [ref=f50e79]
+    - paragraph [ref=f50e82]: shard0-test-key を失効しますか？ このキーを使う連携は直ちに動かなくなります。この操作は取り消せません。
+    - generic [ref=f50e83]:
+      - button "キャンセル" [ref=f50e84]
+      - button "失効する" [ref=f50e85]

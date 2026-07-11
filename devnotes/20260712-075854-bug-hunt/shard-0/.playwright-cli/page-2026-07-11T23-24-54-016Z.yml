@@ -1,0 +1,41 @@
+- generic [ref=f57e3]:
+  - banner [ref=f57e4]:
+    - generic [ref=f57e5]:
+      - 'link "${APP_NAME}" [ref=f57e6] [cursor=pointer]':
+        - /url: /dashboard
+      - link "通知" [ref=f57e8] [cursor=pointer]:
+        - /url: http://127.0.0.1:8010/notifications
+  - main [ref=f57e10]:
+    - heading "設定" [level=1] [ref=f57e11]
+    - navigation "設定メニュー" [ref=f57e12]:
+      - link "プロフィール" [ref=f57e13] [cursor=pointer]:
+        - /url: http://127.0.0.1:8010/settings
+      - link "セキュリティ" [ref=f57e14] [cursor=pointer]:
+        - /url: http://127.0.0.1:8010/settings/security
+    - generic [ref=f57e15]:
+      - generic [ref=f57e16]:
+        - heading "プロフィール" [level=2] [ref=f57e17]
+        - paragraph [ref=f57e18]: 名前とメールアドレスを更新します。
+        - generic [ref=f57e19]:
+          - generic [ref=f57e20]:
+            - generic [ref=f57e21]: 名前
+            - textbox "名前" [ref=f57e22]: Multi Org User (更新済み)
+          - generic [ref=f57e23]:
+            - generic [ref=f57e24]: メールアドレス
+            - textbox "メールアドレス" [ref=f57e25]: multi-org@example.com
+          - button "保存" [ref=f57e27]
+      - generic [ref=f57e28]:
+        - heading "パスワード変更" [level=2] [ref=f57e29]
+        - paragraph [ref=f57e30]: 現在のパスワードを確認のうえ、新しいパスワードに変更します。
+        - generic [ref=f57e31]:
+          - generic [ref=f57e32]:
+            - generic [ref=f57e33]: 現在のパスワード
+            - textbox "現在のパスワード" [ref=f57e34]
+          - generic [ref=f57e35]:
+            - generic [ref=f57e36]: 新しいパスワード
+            - textbox "新しいパスワード" [ref=f57e37]
+          - button "パスワードを変更" [ref=f57e39]
+      - region [ref=f57e40]:
+        - heading "アカウント削除" [level=3] [ref=f57e41]
+        - paragraph [ref=f57e42]: アカウントを削除すると、すべてのデータが完全に失われます。この操作は取り消せません。
+        - button "アカウントを削除" [ref=f57e44]

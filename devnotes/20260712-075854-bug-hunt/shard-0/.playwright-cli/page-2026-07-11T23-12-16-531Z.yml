@@ -1,0 +1,44 @@
+- generic [ref=f24e2]:
+  - generic [ref=f24e3]:
+    - heading "特定商取引法に基づく表記" [level=1] [ref=f24e4]
+    - paragraph [ref=f24e5]: 本ページはプレースホルダです。有償サービスを提供する場合は事業者情報を記入してください。
+    - generic [ref=f24e6]:
+      - generic [ref=f24e7]:
+        - term [ref=f24e8]: 販売事業者
+        - definition [ref=f24e9]: （事業者名を記入）
+      - generic [ref=f24e10]:
+        - term [ref=f24e11]: 運営統括責任者
+        - definition [ref=f24e12]: （責任者名を記入）
+      - generic [ref=f24e13]:
+        - term [ref=f24e14]: 所在地
+        - definition [ref=f24e15]: 請求があったら遅滞なく開示します。
+      - generic [ref=f24e16]:
+        - term [ref=f24e17]: 連絡先
+        - definition [ref=f24e18]:
+          - link "お問い合わせフォーム" [ref=f24e19] [cursor=pointer]:
+            - /url: http://127.0.0.1:8010/contact
+          - text: よりご連絡ください。
+      - generic [ref=f24e20]:
+        - term [ref=f24e21]: 販売価格
+        - definition [ref=f24e22]:
+          - text: 各プランの詳細は
+          - link "料金ページ" [ref=f24e23] [cursor=pointer]:
+            - /url: http://127.0.0.1:8010/pricing
+          - text: をご参照ください。
+      - generic [ref=f24e24]:
+        - term [ref=f24e25]: 商品代金以外の必要料金
+        - definition [ref=f24e26]: なし（消費税は表示価格に含みます）。
+      - generic [ref=f24e27]:
+        - term [ref=f24e28]: 支払方法
+        - definition [ref=f24e29]: クレジットカード（Stripe による決済）。
+      - generic [ref=f24e30]:
+        - term [ref=f24e31]: 支払時期
+        - definition [ref=f24e32]: お申し込み時、および以降は更新日に課金されます。
+      - generic [ref=f24e33]:
+        - term [ref=f24e34]: 役務の提供時期
+        - definition [ref=f24e35]: 決済完了後、即時にご利用いただけます。
+      - generic [ref=f24e36]:
+        - term [ref=f24e37]: 返品・解約について
+        - definition [ref=f24e38]: サブスクリプションは請求管理画面からいつでも解約できます。役務の性質上、提供済み期間の返金は行いません。
+  - link "← ホームに戻る" [ref=f24e39] [cursor=pointer]:
+    - /url: /

@@ -1,0 +1,47 @@
+- generic [ref=f8e45]:
+  - banner [ref=f8e46]:
+    - generic [ref=f8e47]:
+      - 'link "${APP_NAME}" [ref=f8e48] [cursor=pointer]':
+        - /url: /dashboard
+      - link "通知" [ref=f8e50] [cursor=pointer]:
+        - /url: http://127.0.0.1:8010/notifications
+  - main [ref=f8e52]:
+    - heading "チケットを購入" [level=1] [ref=f8e53]
+    - paragraph [ref=f8e54]: チケットは AI 解析・動画レンダに使います。まとめ買いで 1 枚あたりの料金が下がります。
+    - generic [ref=f8e55]:
+      - generic [ref=f8e59]:
+        - heading "現在の残高" [level=2] [ref=f8e60]
+        - paragraph [ref=f8e61]: 0 枚
+      - generic [ref=f8e62]:
+        - heading "購入枚数" [level=2] [ref=f8e63]
+        - generic [ref=f8e65]:
+          - generic [ref=f8e66]: 枚数 (1〜1000)
+          - spinbutton "枚数 (1〜1000)" [ref=f8e67]: "10"
+        - paragraph [ref=f8e68]: 単価 ¥100 × 10 枚 = 合計 ¥1,000
+        - button "購入手続きへ (Stripe)" [ref=f8e70]
+        - paragraph [ref=f8e72]: Stripe の決済画面に移動します。決済確認後にチケットが付与されます。
+      - generic [ref=f8e73]:
+        - heading "チケット料金" [level=2] [ref=f8e74]
+        - list [ref=f8e75]:
+          - listitem [ref=f8e76]:
+            - generic [ref=f8e77]: 1〜19 枚
+            - generic [ref=f8e78]: ¥100 ／ 枚
+          - listitem [ref=f8e79]:
+            - generic [ref=f8e80]: 20〜49 枚
+            - generic [ref=f8e81]: ¥80 ／ 枚
+          - listitem [ref=f8e82]:
+            - generic [ref=f8e83]: 50〜99 枚
+            - generic [ref=f8e84]: ¥70 ／ 枚
+          - listitem [ref=f8e85]:
+            - generic [ref=f8e86]: 100〜199 枚
+            - generic [ref=f8e87]: ¥65 ／ 枚
+          - listitem [ref=f8e88]:
+            - generic [ref=f8e89]: 200〜299 枚
+            - generic [ref=f8e90]: ¥60 ／ 枚
+          - listitem [ref=f8e91]:
+            - generic [ref=f8e92]: 300〜499 枚
+            - generic [ref=f8e93]: ¥55 ／ 枚
+          - listitem [ref=f8e94]:
+            - generic [ref=f8e95]: 500 枚以上
+            - generic [ref=f8e96]: ¥50 ／ 枚
+        - paragraph [ref=f8e97]: 購入したチケットに有効期限はありません。

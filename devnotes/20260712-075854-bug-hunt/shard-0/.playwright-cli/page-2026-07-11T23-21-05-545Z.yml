@@ -1,0 +1,54 @@
+- generic:
+  - generic:
+    - generic:
+      - banner:
+        - generic:
+          - 'link "${APP_NAME}"':
+            - /url: /dashboard
+          - generic:
+            - link "通知":
+              - /url: http://127.0.0.1:8010/notifications
+      - main:
+        - heading "API キー" [level=1]
+        - paragraph: シャード0検証組織-更新済み の REST API / MCP アクセスに使う組織スコープのキーとセッションを管理します。
+        - generic:
+          - navigation "API キー / 接続セッション切替":
+            - link "API キー":
+              - /url: http://127.0.0.1:8010/organizations/org-mg3sqi/api-keys
+            - link "接続セッション":
+              - /url: http://127.0.0.1:8010/organizations/org-mg3sqi/api-keys/sessions
+          - generic:
+            - generic:
+              - generic:
+                - generic:
+                  - heading "発行済みキー" [level=2]
+                  - paragraph: 平文キーは発行直後に 1 度だけ表示されます。失効済みキーは監査痕跡として残ります。
+                - button "発行"
+              - generic:
+                - heading "API キーはありません" [level=3]
+                - paragraph: 発行したキーはここに表示されます。
+            - generic:
+              - heading "導入ガイド" [level=2]
+              - paragraph: AI クライアント (MCP) やターミナル (CLI) からの接続手順を確認できます。
+              - generic:
+                - link "MCP 導入ガイド":
+                  - /url: http://127.0.0.1:8010/organizations/org-mg3sqi/onboarding/mcp
+                - link "CLI 導入ガイド":
+                  - /url: http://127.0.0.1:8010/organizations/org-mg3sqi/onboarding/cli
+  - dialog [ref=f50e34]:
+    - generic [ref=f50e35]:
+      - heading "API キーを発行" [level=2] [ref=f50e36]
+      - button "閉じる" [active] [ref=f50e37]
+    - generic [ref=f50e40]:
+      - generic [ref=f50e41]:
+        - generic [ref=f50e42]: キー名
+        - textbox "キー名" [ref=f50e43]
+      - group "権限 (ability)" [ref=f50e44]:
+        - generic [ref=f50e47]:
+          - checkbox "読み取り (read)" [checked] [ref=f50e48]
+          - generic [ref=f50e49]: 読み取り (read)
+        - generic [ref=f50e51]:
+          - checkbox "書き込み (write)" [ref=f50e52]
+          - generic [ref=f50e53]: 書き込み (write)
+      - paragraph [ref=f50e54]: 平文キーは発行直後に 1 度だけ表示されます。再表示はできません。
+      - button "発行する" [ref=f50e56]

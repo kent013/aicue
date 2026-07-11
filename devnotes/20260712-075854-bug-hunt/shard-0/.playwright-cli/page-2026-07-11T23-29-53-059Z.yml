@@ -1,0 +1,26 @@
+- generic [ref=f74e1]:
+  - main [ref=f74e4]:
+    - generic [ref=f74e6]:
+      - generic [ref=f74e7]:
+        - generic [ref=f74e8]: "${APP_NAME}"
+        - heading "アカウントにログイン" [level=1] [ref=f74e9]
+      - generic [ref=f74e13]:
+        - generic [ref=f74e17]:
+          - generic [ref=f74e20]:
+            - generic [ref=f74e24]:
+              - text: メールアドレス
+              - superscript [ref=f74e25]: "*"
+            - textbox "メールアドレス*" [active] [ref=f74e29]
+          - generic [ref=f74e32]:
+            - generic [ref=f74e36]:
+              - text: パスワード
+              - superscript [ref=f74e37]: "*"
+            - generic [ref=f74e39]:
+              - textbox "パスワード*" [ref=f74e41]
+              - button "パスワードを表示" [ref=f74e44]
+          - generic [ref=f74e52]:
+            - checkbox "ログインしたままにする" [ref=f74e53]
+            - generic [ref=f74e54]: ログインしたままにする
+        - button [ref=f74e60]
+  - generic:
+    - status

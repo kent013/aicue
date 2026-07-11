@@ -1,0 +1,42 @@
+- generic [ref=f36e2]:
+  - status [ref=f36e21]:
+    - generic [ref=f36e23]: 組織を作成しました
+    - button "閉じる" [ref=f36e24]
+  - generic [ref=f36e26]:
+    - banner [ref=f36e27]:
+      - generic [ref=f36e28]:
+        - 'link "${APP_NAME}" [ref=f36e29] [cursor=pointer]':
+          - /url: /dashboard
+        - link "通知" [ref=f36e31] [cursor=pointer]:
+          - /url: http://127.0.0.1:8010/notifications
+    - main [ref=f36e33]:
+      - heading "組織設定" [level=1] [ref=f36e34]
+      - paragraph [ref=f36e35]: シャード0検証組織 の設定を管理します。
+      - generic [ref=f36e36]:
+        - generic [ref=f36e37]:
+          - heading "組織名" [level=2] [ref=f36e38]
+          - generic [ref=f36e39]:
+            - generic [ref=f36e40]:
+              - generic [ref=f36e41]: 組織名
+              - textbox "組織名" [ref=f36e42]: シャード0検証組織
+            - button "保存" [ref=f36e44]
+        - generic [ref=f36e45]:
+          - heading "セキュリティ" [level=2] [ref=f36e46]
+          - paragraph [ref=f36e47]: 2 段階認証を必須にすると、未設定のメンバーは設定が完了するまで他のページを利用できなくなります。
+          - generic [ref=f36e48]:
+            - generic [ref=f36e49]:
+              - generic [ref=f36e50]: 2 段階認証の必須化
+              - generic [ref=f36e51]: 無効
+            - button "必須にする" [ref=f36e52]
+        - generic [ref=f36e54]:
+          - generic [ref=f36e55]:
+            - heading "ユーザー管理" [level=2] [ref=f36e56]
+            - paragraph [ref=f36e57]: メンバーの一覧・招待・ロール変更・削除は管理メニューのユーザー管理画面で行います。
+          - link "管理画面を開く" [ref=f36e58] [cursor=pointer]:
+            - /url: http://127.0.0.1:8010/manage/users
+        - generic [ref=f36e60]:
+          - generic [ref=f36e61]:
+            - heading "API キー / 接続セッション" [level=2] [ref=f36e62]
+            - paragraph [ref=f36e63]: REST API / MCP アクセスのキー発行・失効と、CLI / MCP の接続セッション管理は専用画面で行います。
+          - link "管理画面を開く" [ref=f36e64] [cursor=pointer]:
+            - /url: http://127.0.0.1:8010/organizations/org-mg3sqi/api-keys

@@ -1,0 +1,34 @@
+- generic [ref=f51e3]:
+  - banner [ref=f51e4]:
+    - generic [ref=f51e5]:
+      - 'link "${APP_NAME}" [ref=f51e6] [cursor=pointer]':
+        - /url: /dashboard
+      - link "通知" [ref=f51e8] [cursor=pointer]:
+        - /url: http://127.0.0.1:8010/notifications
+  - main [ref=f51e10]:
+    - heading "CLI 導入ガイド" [level=1] [ref=f51e11]
+    - paragraph [ref=f51e12]: "ターミナルから ${APP_NAME} を操作する CLI の導入手順です。人間の認証はブラウザログイン (OAuth) が標準で、 API キーは CI / 自動化専用です。"
+    - generic [ref=f51e13]:
+      - generic [ref=f51e14]:
+        - heading "1. インストール" [level=2] [ref=f51e15]
+        - paragraph [ref=f51e16]: 配布は公開されており、ダウンロードに API キーは不要です。
+        - generic [ref=f51e18]:
+          - code [ref=f51e20]: npm install -g @app/cli@latest
+          - button "コピー" [ref=f51e22]
+      - generic [ref=f51e23]:
+        - heading "2. プロファイル登録 + ログイン" [level=2] [ref=f51e24]
+        - paragraph [ref=f51e25]:
+          - text: 実行すると自動でブラウザが開き、ログイン・組織選択・権限承認が行われます。 API base URL は
+          - code [ref=f51e26]: http://127.0.0.1:8010/api/v1
+          - text: です。
+        - generic [ref=f51e28]:
+          - code [ref=f51e30]: "# 1. profile を登録 (api-url はアプリのルート URL) app profile:add org-4 --api-url http://127.0.0.1:8010 # 2. ブラウザでログイン (OAuth。API キーの発行・入力は不要) app auth:login --profile org-4"
+          - button "コピー" [ref=f51e32]
+      - generic [ref=f51e33]:
+        - heading "CI / 自動化で使う場合 (API キー)" [level=2] [ref=f51e34]
+        - paragraph [ref=f51e35]: ブラウザを開けない環境向けです。API キーは組織の API キー管理画面で発行し、CI のシークレットに設定してください。 平文キーを履歴や argv に残さないよう環境変数経由で登録します。
+        - generic [ref=f51e37]:
+          - code [ref=f51e39]: "# CI / 自動化 (ブラウザを開けない環境) 向け。API キーはシークレットから読む。 export APP_API_KEY=<YOUR_API_KEY> printf '%s' \"$APP_API_KEY\" | app auth:login --profile org-4 --stdin"
+          - button "コピー" [ref=f51e41]
+      - link "API キー管理へ戻る" [ref=f51e43] [cursor=pointer]:
+        - /url: http://127.0.0.1:8010/organizations/org-mg3sqi/api-keys

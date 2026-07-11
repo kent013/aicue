@@ -1,0 +1,41 @@
+- generic [ref=f54e3]:
+  - banner [ref=f54e4]:
+    - generic [ref=f54e5]:
+      - 'link "${APP_NAME}" [ref=f54e6] [cursor=pointer]':
+        - /url: /dashboard
+      - link "通知" [ref=f54e8] [cursor=pointer]:
+        - /url: http://127.0.0.1:8010/notifications
+  - main [ref=f54e10]:
+    - heading "設定" [level=1] [ref=f54e11]
+    - navigation "設定メニュー" [ref=f54e12]:
+      - link "プロフィール" [ref=f54e13] [cursor=pointer]:
+        - /url: http://127.0.0.1:8010/settings
+      - link "セキュリティ" [ref=f54e14] [cursor=pointer]:
+        - /url: http://127.0.0.1:8010/settings/security
+    - generic [ref=f54e15]:
+      - generic [ref=f54e16]:
+        - generic [ref=f54e17]:
+          - heading "2要素認証" [level=2] [ref=f54e18]
+          - generic [ref=f54e44]: 有効
+        - paragraph [ref=f54e20]: 認証アプリのワンタイムコードでログインを保護します。
+        - generic [ref=f54e45]:
+          - generic [ref=f54e46]:
+            - paragraph [ref=f54e47]: リカバリコードは安全な場所に保管してください。各コードは一度だけ使えます。
+            - list [ref=f54e48]:
+              - listitem [ref=f54e49]: ecVNM2Yh1x-1gjr88rv5U
+              - listitem [ref=f54e50]: nXyvsfwLOR-NiknWikkJ8
+              - listitem [ref=f54e51]: AFcmhXSAhV-wb8xypXNyT
+              - listitem [ref=f54e52]: KRo3NO3a21-JIZjWoBOUb
+              - listitem [ref=f54e53]: aHoFUlrXFd-51KsAjOYqo
+              - listitem [ref=f54e54]: VWINEc2XvX-ohXpvnVUfF
+              - listitem [ref=f54e55]: BuG0rjsREc-TspppVHVjw
+              - listitem [ref=f54e56]: D8zKSGvl50-9MoLZifr9f
+          - button "2要素認証を無効化" [ref=f54e58]
+      - generic [ref=f54e23]:
+        - heading "ソーシャルログイン連携" [level=2] [ref=f54e24]
+        - paragraph [ref=f54e25]: 外部アカウントを連携すると、そのアカウントでもログインできます。
+        - list [ref=f54e26]:
+          - listitem [ref=f54e27]:
+            - generic [ref=f54e28]: Google
+            - link "連携する" [ref=f54e29] [cursor=pointer]:
+              - /url: /auth/google/redirect/link
