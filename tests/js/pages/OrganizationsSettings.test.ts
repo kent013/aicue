@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/svelte";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
+import { router } from "@inertiajs/svelte";
 import Settings from "@/pages/Organizations/Settings.svelte";
 
 const baseProps = {
@@ -84,5 +85,136 @@ describe("Organizations/Settings", () => {
         expect(link).toBeInTheDocument();
         // Inertia Link は jsdom で絶対 URL に解決するため末尾一致で検証する
         expect(link.getAttribute("href")).toMatch(/\/organizations\/test-org\/api-keys$/);
+    });
+});
+
+describe("Organizations/Settings オーナー移譲の常時表示 (F-12)", () => {
+    // 自分 (id:1) しかいない組織 = 移譲候補 0 人。
+    // 実運用では members に自分が必ず含まれる (controller は全メンバーを返す) が、
+    // 本テストは page 未モックで myId=null のため members: [] で候補 0 人を表現する
+    // (どちらでも transferCandidates.length === 0 の同一分岐)。
+    const soloProps = { ...baseProps, members: [] };
+
+    it("候補 0 人でもオーナーにはセクションと案内文が表示される", () => {
+        render(Settings, { props: soloProps });
+
+        expect(screen.getByRole("heading", { name: "オーナー移譲" })).toBeInTheDocument();
+        expect(screen.getByTestId("transfer-no-candidates")).toBeInTheDocument();
+        expect(screen.getByTestId("transfer-no-candidates")).toHaveTextContent("ユーザー管理");
+        const button = screen.getByTestId("transfer-ownership-button");
+        expect(button).toBeInTheDocument();
+        expect(button).not.toBeDisabled();
+    });
+
+    it("候補 0 人で押下すると確認ダイアログを開かずエラーを表示する", async () => {
+        render(Settings, { props: soloProps });
+
+        await fireEvent.click(screen.getByTestId("transfer-ownership-button"));
+
+        expect(
+            screen.getByText(
+                "移譲先にできるメンバーがいません。先にメンバーを招待してください。",
+            ),
+        ).toBeInTheDocument();
+        // ConfirmDialog (Modal) は開いていない
+        expect(screen.queryByRole("button", { name: "移譲する" })).toBeNull();
+    });
+
+    it("未選択のまま押下すると確認ダイアログを開かず選択エラーを表示する", async () => {
+        render(Settings, { props: baseProps });
+
+        await fireEvent.click(screen.getByTestId("transfer-ownership-button"));
+
+        expect(screen.getByText("移譲先のメンバーを選択してください。")).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "移譲する" })).toBeNull();
+    });
+
+    it("非オーナーにはオーナー移譲セクションを表示しない", () => {
+        render(Settings, {
+            props: { ...baseProps, currentUserRole: "organization_admin" },
+        });
+
+        expect(screen.queryByTestId("transfer-ownership-button")).toBeNull();
+        expect(screen.queryByRole("heading", { name: "オーナー移譲" })).toBeNull();
+    });
+});
+
+describe("Organizations/Settings オーナー移譲の確定フロー (F-12)", () => {
+    /**
+     * useForm (実物) の post は内部で router.post に委譲するため、router.post を spy して
+     * URL / verb / payload を固定する。recent-auth precheck (fetch /recent-auth/status) は
+     * URL 分岐の fetch stub で fresh/stale を切り替える。
+     */
+    function stubRecentAuthStatus(recent: boolean): ReturnType<typeof vi.fn> {
+        const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+            if (String(input).includes("/recent-auth/status")) {
+                return Promise.resolve({
+                    ok: true,
+                    status: 200,
+                    json: () =>
+                        Promise.resolve({
+                            recent,
+                            passwordSet: true,
+                            availableProviders: [],
+                            canSatisfy: true,
+                            confirmedAt: recent ? 1 : null,
+                        }),
+                });
+            }
+            return Promise.reject(new Error(`unexpected fetch: ${String(input)}`));
+        });
+        vi.stubGlobal("fetch", fetchMock);
+        return fetchMock;
+    }
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+    });
+
+    it("有効候補を選択→確認ダイアログ→確定で transferForm.post が正しい URL に発火する (precheck 込み)", async () => {
+        const routerPostSpy = vi.spyOn(router, "post").mockImplementation(() => {});
+        const fetchMock = stubRecentAuthStatus(true);
+        render(Settings, { props: baseProps });
+
+        // page 未モック (myId=null) のため候補は全メンバー。花子 (id:2) を選択する
+        await fireEvent.change(screen.getByLabelText("移譲先のメンバー"), {
+            target: { value: "2" },
+        });
+        await fireEvent.click(screen.getByTestId("transfer-ownership-button"));
+
+        // 確認ダイアログが開く (確定までは POST しない)
+        const confirmButton = screen.getByRole("button", { name: "移譲する" });
+        expect(confirmButton).toBeInTheDocument();
+        expect(routerPostSpy).not.toHaveBeenCalled();
+
+        await fireEvent.click(confirmButton);
+
+        await waitFor(() => {
+            expect(routerPostSpy).toHaveBeenCalledWith(
+                "/organizations/test-org/transfer-ownership",
+                expect.objectContaining({ user_id: "2" }),
+                expect.objectContaining({ preserveScroll: true }),
+            );
+        });
+        // recent-auth precheck (/recent-auth/status) を経由している
+        expect(fetchMock).toHaveBeenCalledWith("/recent-auth/status", expect.anything());
+    });
+
+    it("recent-auth が stale なら再認証モーダルを開き、POST しない", async () => {
+        const routerPostSpy = vi.spyOn(router, "post").mockImplementation(() => {});
+        stubRecentAuthStatus(false);
+        render(Settings, { props: baseProps });
+
+        await fireEvent.change(screen.getByLabelText("移譲先のメンバー"), {
+            target: { value: "2" },
+        });
+        await fireEvent.click(screen.getByTestId("transfer-ownership-button"));
+        await fireEvent.click(screen.getByRole("button", { name: "移譲する" }));
+
+        await waitFor(() => {
+            expect(screen.getByTestId("recent-auth-modal")).toBeInTheDocument();
+        });
+        expect(routerPostSpy).not.toHaveBeenCalled();
     });
 });

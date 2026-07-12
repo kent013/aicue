@@ -15,8 +15,10 @@ use App\Http\Responses\Fortify\RegisterResponse;
 use App\Http\Responses\Fortify\TwoFactorDisabledResponse;
 use App\Http\Responses\Fortify\VerificationNotificationSentResponse;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
@@ -34,6 +36,20 @@ use Laravel\Fortify\Fortify;
 
 class FortifyServiceProvider extends ServiceProvider
 {
+    /**
+     * recent-auth (step-up) を後付け配線する Fortify 登録ルート。
+     * リカバリコードは TOTP を伴わないログイン成立手段 = 第二要素の bypass 経路そのものなので、
+     * 表示 (GET) / 再生成 (POST) の双方を機微操作として扱う
+     * (姉妹操作: organizations.members.two-factor.reset / settings.account.destroy 等と同基準)。
+     * 付与漏れは RecentAuthRouteTest (Architecture) が CI で検出する。
+     *
+     * @var list<string>
+     */
+    private const RECENT_AUTH_ROUTE_NAMES = [
+        'two-factor.recovery-codes',
+        'two-factor.regenerate-recovery-codes',
+    ];
+
     public function register(): void
     {
         // Fortify Response contract の差し替え (redirect + flash の Inertia 整合化)。
@@ -59,6 +75,36 @@ class FortifyServiceProvider extends ServiceProvider
 
         $this->configureRateLimiters();
         $this->configureViews();
+        $this->attachRecentAuthToSensitiveRoutes();
+    }
+
+    /**
+     * Fortify が登録する機微な 2FA 管理ルートへ recent-auth middleware を後付けする。
+     *
+     * Fortify 標準の password.confirm は generic recent-auth へ置換済み
+     * (config/fortify.php features.twoFactorAuthentication.confirmPassword=false) のため、
+     * そのままではリカバリコードの表示/再生成が step-up なしで到達可能になる。
+     * ルート登録は Fortify package provider の boot 内で行われるため、全 provider boot 後の
+     * booted callback で名前解決して append する。route:cache 下でも
+     * CompiledRouteCollection::getByName() が nameCache に memoize した同一 instance を
+     * match() が返すため、この変更は dispatch にも有効。
+     */
+    private function attachRecentAuthToSensitiveRoutes(): void
+    {
+        $this->app->booted(static function (Application $app): void {
+            $routes = $app->make(Router::class)->getRoutes();
+            // fluent な ->name() 付与はコレクションの name index に遅延反映のため明示 refresh
+            $routes->refreshNameLookups();
+
+            foreach (self::RECENT_AUTH_ROUTE_NAMES as $name) {
+                $route = $routes->getByName($name);
+                // 長寿命プロセス等で callback が同一 Route instance に複数回届いても
+                // 重複付与しない (idempotent)
+                if ($route !== null && ! in_array('recent-auth', $route->middleware(), true)) {
+                    $route->middleware('recent-auth');
+                }
+            }
+        });
     }
 
     private function configureRateLimiters(): void

@@ -94,9 +94,29 @@
             "",
     );
 
+    /** 候補 0 人時の共通文言 (案内文と押下時エラーで揺れないよう単一定義。テストも本文言を検証) */
+    const NO_TRANSFER_CANDIDATES = "移譲先にできるメンバーがいません。";
+
+    /**
+     * 移譲確認ダイアログを開く。成立し得ない操作は ConfirmDialog まで進めず、
+     * 押下時にエラー表示する (disabled 禁止 = AGENTS.md 8)。
+     * 選択値の実在検証は DOM 改変・stale 値の早期排除で、最終ゲートはサーバ
+     * (Policy + exists:users,id + Service のメンバーシップ検証)。
+     * select の value は string のため、Member.id (number) は String() に揃えて比較する。
+     */
     function openTransferDialog(event: SubmitEvent): void {
         event.preventDefault();
-        if (transferForm.user_id === "") {
+        if (transferCandidates.length === 0) {
+            transferForm.setError(
+                "user_id",
+                `${NO_TRANSFER_CANDIDATES}先にメンバーを招待してください。`,
+            );
+            return;
+        }
+        const isValidTarget = transferCandidates.some(
+            (member) => String(member.id) === transferForm.user_id,
+        );
+        if (!isValidTarget) {
             transferForm.setError("user_id", "移譲先のメンバーを選択してください。");
             return;
         }
@@ -227,11 +247,25 @@
             </Card>
         {/if}
 
-        {#if isOwner && transferCandidates.length > 0}
+        {#if isOwner}
             <DangerZone
                 title="オーナー移譲"
                 description="組織のオーナー権限を別のメンバーへ移譲します。移譲後、あなたは管理者になります。この操作にはパスワードの再確認が必要です。"
             >
+                {#if transferCandidates.length === 0}
+                    <p
+                        class="text-caption text-text-secondary"
+                        data-testid="transfer-no-candidates"
+                    >
+                        {NO_TRANSFER_CANDIDATES}先に
+                        {#if usersUrl !== null}
+                            <TextLink href={usersUrl}>管理メニュー &gt; ユーザー管理</TextLink>
+                            からメンバーを招待してください。
+                        {:else}
+                            メンバーを招待できる管理者に依頼してください。
+                        {/if}
+                    </p>
+                {/if}
                 <form onsubmit={openTransferDialog} class="flex flex-col gap-4">
                     <FormField
                         label="移譲先のメンバー"
