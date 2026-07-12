@@ -21,6 +21,8 @@
 
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
+| T017 | 撮影カメラ実行時失敗のファイルフォールバック到達 (bug-hunt F-03) | frontend | カメラ実行時失敗でfile fallbackへ切替 | Critical | standalone | [設計](devnotes/20260712-1952-bugfix-capture-camera-fallback/) | 2026-07-12 21:59 |
+| T018 | bug-hunt環境の専用queue worker起動/停止 (bug-hunt F-01) | test | bughunt provisionでqueue worker起動/teardown停止 | Critical | standalone | [設計](devnotes/20260712-1954-bugfix-bughunt-queue-worker/) | 2026-07-12 21:59 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
