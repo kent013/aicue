@@ -41,7 +41,7 @@ function runWithBughuntGuardSatisfied(Closure $callback): void
 }
 
 test('guard 不成立 (既定の testing env / 非 bughunt DB 名) では no-op', function (): void {
-    [$organization] = createOrganizationWithOwner('標準組織', subscribed: false);
+    [$organization] = createOrganizationWithOwner('標準組織');
     $organization->forceFill(['plan_code' => 'standard'])->save();
 
     $this->seed(BughuntBillingSeeder::class);
@@ -51,7 +51,7 @@ test('guard 不成立 (既定の testing env / 非 bughunt DB 名) では no-op'
 });
 
 test('fake_externals=true でも env=testing のままなら no-op (flag 単独では点火しない)', function (): void {
-    [$organization] = createOrganizationWithOwner('標準組織', subscribed: false);
+    [$organization] = createOrganizationWithOwner('標準組織');
     $organization->forceFill(['plan_code' => 'standard'])->save();
 
     config(['testing.fake_externals' => true]);
@@ -62,9 +62,9 @@ test('fake_externals=true でも env=testing のままなら no-op (flag 単独�
 });
 
 test('guard 成立時: standard 組織のみ active sub + チケット 100 を付与し、再実行しても増えない (冪等)', function (): void {
-    [$standardOrg] = createOrganizationWithOwner('標準組織', subscribed: false);
+    [$standardOrg] = createOrganizationWithOwner('標準組織');
     $standardOrg->forceFill(['plan_code' => 'standard'])->save();
-    [$freeOrg] = createOrganizationWithOwner('無料組織', subscribed: false);
+    [$freeOrg] = createOrganizationWithOwner('無料組織');
     $freeOrg->forceFill(['plan_code' => 'free'])->save();
 
     runWithBughuntGuardSatisfied(function (): void {
@@ -88,7 +88,7 @@ test('guard 成立時: standard 組織のみ active sub + チケット 100 を�
 });
 
 test('既存 subscription が past_due でも再実行で active に回復する (行は増えない)', function (): void {
-    [$organization] = createOrganizationWithOwner('標準組織', subscribed: false);
+    [$organization] = createOrganizationWithOwner('標準組織');
     $organization->forceFill(['plan_code' => 'standard'])->save();
     createFakeSubscription($organization, 'past_due');
 
