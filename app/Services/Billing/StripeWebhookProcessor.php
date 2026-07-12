@@ -42,6 +42,13 @@ use Webmozart\Assert\Assert;
  *
  * subscriptions テーブル自体の同期 (updateOrCreate) は Cashier の WebhookController
  * が行うため、ここではアプリ状態 (plan_code / チケット) だけを扱う。
+ *
+ * plan_code 不変条件: `organizations.plan_code` は Stripe Price を持つ有償プランの
+ * 契約 (active/trialing) 時のみ本クラスが set し、`customer.subscription.deleted` で
+ * null に戻す状態キー。**null = 未契約 = 支払い不要の free tier**
+ * (config/quota.php の fallback_plan が適用される)。BillingAccess はこの契約を
+ * entitlement 判定の根拠にするため、支払い不要のプランを plan_code に載せる場合は
+ * BillingAccess とセットで見直すこと (RequireActiveSubscriptionMiddlewareTest が固定)。
  */
 class StripeWebhookProcessor
 {

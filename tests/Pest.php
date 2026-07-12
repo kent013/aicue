@@ -114,27 +114,39 @@ pest()->extend(TestCase::class)
  * Owner 付きの組織を provisioning 経由で生成する (Default Team 込み)。
  * owner の current_organization_id はこの組織になる。
  *
- * 業務 route (/projects 等) は require-active-subscription で gate されるため、
- * 既定で active な default subscription を持たせる。未契約状態を検証するテストは
- * `subscribed: false` で生成する (RequireActiveSubscriptionMiddlewareTest 参照)。
+ * 生成される組織は Free (未契約 = plan_code null) — 業務 route は free でも通る
+ * (BillingAccess の entitlement 判定)。有償プラン契約状態を検証するテストは
+ * contractPaidPlan() を併用する (RequireActiveSubscriptionMiddlewareTest 参照)。
  *
  * @return array{Organization, User} [organization, owner]
  */
-function createOrganizationWithOwner(string $name = 'テスト組織', bool $subscribed = true): array
+function createOrganizationWithOwner(string $name = 'テスト組織'): array
 {
     $owner = User::factory()->create();
     $organization = app(OrganizationProvisioningService::class)->provision($owner, $name);
-
-    if ($subscribed) {
-        createFakeSubscription($organization);
-    }
 
     return [$organization, $owner];
 }
 
 /**
+ * 組織を有償プラン契約状態にする (plan_code + Cashier subscription 行)。
+ * plan_code は $fillable 外の状態キー (webhook 同期のみ) のため forceFill で明示代入。
+ * BillingAccess は plan_code 非 null の組織にのみ active/trialing subscription を要求する。
+ *
+ * plan_code は PlanSeeder が投入する有償プラン code ('standard') を使う
+ * (プラン名分岐ではなく seeded fixture の参照。アプリコードには入らない)。
+ */
+function contractPaidPlan(Organization $organization, string $status = 'active'): Subscription
+{
+    $organization->forceFill(['plan_code' => 'standard'])->save();
+
+    return createFakeSubscription($organization, status: $status);
+}
+
+/**
  * テスト用の Cashier subscription 行を直接作成する (Stripe には到達しない)。
- * BillingAccess (課金ゲート) は stripe_status が active / trialing のとき許可する。
+ * BillingAccess (課金ゲート) は plan_code 非 null の組織に対して stripe_status が
+ * active / trialing のとき許可する (plan_code null = free tier は行の有無に依らず許可)。
  */
 function createFakeSubscription(
     Organization $organization,

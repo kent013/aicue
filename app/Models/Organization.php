@@ -32,6 +32,9 @@ use Webmozart\Assert\Assert;
  * (OrganizationProvisioningService が明示代入する)。
  * plan_code は現在プランの状態キーのため $fillable 外 (StripeWebhookProcessor が
  * webhook から同期する。クライアント入力では変更できない)。
+ * plan_code は Stripe Price を持つ有償プランの契約 (active/trialing) 時のみ set され、
+ * subscription.deleted で null に戻る。**null = 未契約 = 支払い不要の free tier**
+ * (config/quota.php の fallback_plan が適用され、BillingAccess は業務 route を許可する)。
  */
 class Organization extends Model
 {
@@ -103,7 +106,8 @@ class Organization extends Model
     }
 
     /**
-     * 現在の契約プラン (plan_code → plans.code。null = 未契約)。
+     * 現在の契約プラン (plan_code → plans.code。null = 未契約 = 支払い不要の free tier。
+     * quota は config/quota.php の fallback_plan、業務 route は BillingAccess が許可する)。
      *
      * @return BelongsTo<Plan, $this>
      */

@@ -15,7 +15,7 @@ function billingData(overrides: Partial<BillingSummary> = {}): BillingSummary {
         storage_used_bytes: 250 * 1024 * 1024,
         storage_limit_bytes: 1024 * 1024 * 1024,
         storage_usage_percent: 25,
-        has_active_subscription: true,
+        has_billing_access: true,
         ...overrides,
     };
 }
@@ -245,18 +245,37 @@ describe("Dashboard", () => {
         expect(screen.getByTestId("stat-tickets")).toHaveTextContent("残高が少なくなっています");
     });
 
-    it("has_active_subscription=false で billing callout が出る", () => {
+    it("has_billing_access=false で billing callout が出る (支払い確認文言 + /billing CTA)", () => {
         render(Dashboard, {
             props: {
                 dashboard: dashboardData({
-                    billing: billingData({ has_active_subscription: false }),
+                    billing: billingData({ has_billing_access: false }),
                 }),
             },
         });
 
         const callout = screen.getByTestId("billing-callout");
         expect(callout).toBeInTheDocument();
-        expect(screen.getByText("プランを見る").getAttribute("href")).toMatch(/\/billing$/);
+        // 表示対象は「有償プラン契約中の支払い不健全」— 新規契約を誘導する文言・CTA への
+        // 後退 (二重契約誘導) を検出するため、文言と遷移先を固定する
+        expect(callout).toHaveTextContent(
+            "サブスクリプションのお支払いが確認できないため、一部機能を一時停止しています。お支払い方法をご確認ください。",
+        );
+        expect(screen.getByText("お支払い方法を確認").getAttribute("href")).toMatch(
+            /\/billing$/,
+        );
+    });
+
+    it("has_billing_access=true で billing callout は出ない", () => {
+        render(Dashboard, {
+            props: {
+                dashboard: dashboardData({
+                    billing: billingData({ has_billing_access: true }),
+                }),
+            },
+        });
+
+        expect(screen.queryByTestId("billing-callout")).toBeNull();
     });
 
     it("disabled 属性を持つ要素が 1 つも存在しない", () => {

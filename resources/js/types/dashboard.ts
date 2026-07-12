@@ -38,7 +38,7 @@ export interface BillingSummary {
     storage_used_bytes: number;
     storage_limit_bytes: number | null;
     storage_usage_percent: number | null;
-    has_active_subscription: boolean;
+    has_billing_access: boolean;
 }
 
 export interface DashboardData {

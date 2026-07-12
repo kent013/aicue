@@ -26,11 +26,10 @@ function reminderOrgWithRenewal(int $daysUntilRenewal, bool $withOwner = true): 
 {
     if ($withOwner) {
         [$organization] = createOrganizationWithOwner();
-        $subscription = $organization->subscriptions()->sole();
     } else {
         $organization = Organization::factory()->create();
-        $subscription = createFakeSubscription($organization);
     }
+    $subscription = createFakeSubscription($organization);
     /** @var Subscription $subscription */
     $subscription->forceFill(['current_period_end' => now()->addDays($daysUntilRenewal)->subHour()])->save();
 
@@ -111,7 +110,7 @@ test('customer.subscription.updated webhook で current_period_end が同期さ�
     $organization->stripe_id = 'cus_period_sync_1';
     $organization->save();
     /** @var Subscription $subscription */
-    $subscription = $organization->subscriptions()->sole();
+    $subscription = createFakeSubscription($organization);
     expect($subscription->current_period_end)->toBeNull();
 
     $periodEnd = now()->addMonth()->startOfSecond();

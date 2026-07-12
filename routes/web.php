@@ -302,7 +302,8 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
     | Stripe webhook ルート (POST /stripe/webhook) は Cashier が自動登録する
     | (CSRF 除外は bootstrap/app.php の validateCsrfTokens except 'stripe/*')。
     | billing / webhook / 組織管理系は課金ゲート (require-active-subscription) の
-    | allowlist (gate group に含めない)。未契約でも checkout に到達できることを保証する。
+    | allowlist (gate group に含めない)。遮断対象 (有償プラン契約中の支払い不健全) でも
+    | checkout / Customer Portal に到達できることを保証する。
     */
     Route::get('/billing', [BillingController::class, 'index'])
         ->name('billing.index');
@@ -313,7 +314,8 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
 
     /*
     | チケットスポット購入 (current org スコープ)。billing.* と同じく課金ゲート
-    | (require-active-subscription) の対象外 = 未契約 / free プラン組織でも購入できる。
+    | (require-active-subscription) の対象外 = 支払い不健全で遮断中の組織でも購入できる
+    | (free 組織はそもそも遮断されない = BillingAccess の entitlement 判定)。
     | 閲覧は組織メンバー全員、Checkout 開始は manageBilling (owner / admin) のみ。
     */
     Route::get('/purchase-tickets', [TicketPurchaseController::class, 'show'])
@@ -341,8 +343,9 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         ->name('notifications.read');
 
     /*
-    | 組織配下の業務 route (課金ゲート対象)。有効な subscription (BillingAccess 判定)
-    | を持たない組織は billing へ redirect される (JSON は 402)。
+    | 組織配下の業務 route (課金ゲート対象)。BillingAccess の entitlement 判定で
+    | 不許可 = 有償プラン契約中の支払い不健全のみ billing へ redirect + 理由 flash
+    | (JSON は 402)。free (未契約 = plan_code null) 組織は遮断されない。
     | 新しい業務ドメインの route はこの group 内に追加すること。
     */
     Route::middleware(['require-active-subscription', 'project.in-current-org'])->group(function (): void {

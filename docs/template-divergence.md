@@ -258,3 +258,41 @@ backfill 不要・非正規状態 (未割当 / stale pivot) の可視化と修�
   `app/Services/Project/DefaultProjectResolver.php` /
   `app/Http/Controllers/Admin/UserManagementController.php`
 - 設計: `devnotes/20260711-1009-admin-console/` (概念設計 D1/D2/D6・詳細設計 施策 1〜7)
+
+## D9 ✅ BillingAccess の entitlement 判定への書き換え (free tier は課金ゲートを通す)
+
+| 観点 | テンプレート | 本アプリ |
+|---|---|---|
+| BillingAccess::hasActiveAccess | `subscription('default')` が active/trialing のときのみ許可 (未契約 = fail-closed) | plan_code null (未契約 = 支払い不要 free tier) は許可 / plan_code 非 null (有償プラン契約状態) のみ active/trialing を要求 |
+| 遮断時の UX | billing へ redirect (理由提示なし) / JSON 402 「有効なサブスクリプションがありません」 | billing へ redirect + 理由 flash / JSON 402 (両経路とも「サブスクリプションのお支払いが確認できないため…」で統一) |
+| ダッシュボード callout | `has_active_subscription` (subscription 有無) | `has_billing_access` (billing entitlement) + 支払い方法確認 CTA |
+
+### なぜ正当な差分か (logic-driven)
+
+AI-CUE は「Free プランで今すぐ試せます」を掲げる freemium 設計 (pricing / home)。テンプレート
+既定の「active subscription 必須」では、未契約の新規組織が business route (/projects, /app) に
+一切到達できず、North Star フロー (SOP→シナリオ→撮影→動画) が入口で詰む
+(bug-hunt F-07: devnotes/20260712-075854-bug-hunt)。有償価値は別レイヤで gate 済み
+(チケット残高 = analyze/render、Quota = max_projects / max_storage_bytes) のため、
+本ゲートの責務は「有償プラン契約中の支払い健全性の担保」のみで足りる。
+なお BillingAccess docblock 自身が「アプリは本クラスの書き換えで gate 方針を変更する」と
+宣言する公式拡張ポイントのため、これは構造逸脱ではなくサンクション済み拡張の記録。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「課金による利用可否の判定は BillingAccess 経由のみ / 有償契約の支払い不健全
+> (past_due / canceled / incomplete / 行不在) は fail-closed で遮断 / billing・checkout は
+> 構造的 allowlist で遮断中も到達可能 / plan_code は Stripe Price を持つ有償プラン契約時のみ
+> webhook が set する状態キー (null = 未契約 = free tier)」
+
+- 挙動固定: `RequireActiveSubscriptionMiddlewareTest` (F-07 再現 3 本 + 有償契約マトリクス +
+  free プランが Stripe Price を持たない前提の固定 + BillingAccess 単体マトリクス)
+- 遮断 UX: 同テストが flash / 402 message の文言を両経路で固定。
+  ダッシュボード callout は `DashboardTest` + `Dashboard.test.ts` が固定
+
+### 関連
+
+- 実装: `app/Services/Billing/BillingAccess.php` /
+  `app/Http/Middleware/RequireActiveSubscription.php` /
+  `app/DataTransferObjects/Dashboard/BillingSummaryData.php`
+- 設計: `devnotes/20260712-0927-bugfix-billing-free-access/` (概念設計 + 詳細設計 施策 1〜5)

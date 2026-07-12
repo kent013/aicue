@@ -205,7 +205,7 @@ test('残高/容量: grant 済み残高・低残高フラグ・使用率が正�
             ->where('dashboard.billing.ticket_balance', 10)
             ->where('dashboard.billing.is_low_balance', false)
             ->where('dashboard.billing.storage_used_bytes', 0)
-            ->where('dashboard.billing.has_active_subscription', true));
+            ->where('dashboard.billing.has_billing_access', true));
 });
 
 test('残高/容量: threshold 未満で is_low_balance=true', function (): void {
@@ -409,14 +409,27 @@ test('dangling current の cross-org 防御: 他 org のデータは一切出ず
     expect($member->fresh()->current_organization_id)->toBe($organization->id);
 });
 
-test('未契約 org: dashboard 200 + has_active_subscription=false + CTA 遷移先も 200', function (): void {
-    [$organization, $owner] = createOrganizationWithOwner(subscribed: false);
+test('Free (未契約) org: dashboard 200 + has_billing_access=true + 業務 route 開通', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
     Project::factory()->forOrganization($organization)->create();
 
     $this->actingAs($owner)->get('/dashboard')
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
-            ->where('dashboard.billing.has_active_subscription', false));
+            ->where('dashboard.billing.has_billing_access', true));
+
+    $this->actingAs($owner)->get('/projects')->assertOk();
+});
+
+test('有償契約 + 支払い不健全 org: has_billing_access=false + CTA 遷移先 200 (redirect loop なし)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    contractPaidPlan($organization, status: 'past_due');
+    Project::factory()->forOrganization($organization)->create();
+
+    $this->actingAs($owner)->get('/dashboard')
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('dashboard.billing.has_billing_access', false));
 
     // CTA 遷移先は課金ゲート外 (redirect loop なし不変条件)
     $this->actingAs($owner)->get('/purchase-tickets')->assertOk();
