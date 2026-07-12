@@ -57,3 +57,18 @@ test('認証メール再送は success flash を返す (web)', function (): void
     $response->assertSessionMissing('status');
     Notification::assertSentTo($user, VerifyEmail::class);
 });
+
+test('認証メール再送は JSON リクエストに 202 を返す (Fortify 既定互換)', function (): void {
+    // VerificationNotificationSentResponse の wantsJson 分岐は Fortify 既定
+    // (wantsJson / 202) の挙動互換を維持する設計意図の固定。誤って expectsJson 化・
+    // ステータス変更されると XHR クライアントの契約が壊れるため契約テストで固定する。
+    // 別ユーザーで 1 リクエストのみ発行するため throttle:6,1 には触れない。
+    Notification::fake();
+    $user = User::factory()->unverified()->create();
+
+    $response = $this->actingAs($user)
+        ->postJson('/email/verification-notification');
+
+    $response->assertStatus(202);
+    Notification::assertSentTo($user, VerifyEmail::class);
+});
