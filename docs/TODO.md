@@ -21,7 +21,6 @@
 
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
-| T014 | 欠落UIの追加(F-10 リカバリコード再生成 / F-12 オーナー移譲) | frontend | 定義済みでUI欠落の2操作の画面追加 | Medium | standalone | [設計](devnotes/20260712-0949-missing-operation-ui/) | 2026-07-12 10:19 |
 | T015 | bug-hunt基盤整備(F-05 Stripe fake配線・F-13 filamentアセット・seeder subscription) | test | bughunt基盤・Stripe/アセット/sub整備 | High | standalone | [設計](devnotes/20260712-0949-bugfix-bughunt-infra/) | 2026-07-12 10:19 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
