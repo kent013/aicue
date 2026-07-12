@@ -10,6 +10,7 @@
     import UploadQueueBar from "@/components/features/capture/UploadQueueBar.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
     import { supportsMediaRecorder } from "@/lib/capture/camera";
+    import type { CameraUnavailableReason } from "@/lib/capture/camera";
     import { createIdbPendingStore } from "@/lib/capture/idb";
     import { generateClientTakeId, UploadQueue } from "@/lib/capture/upload-queue";
     import type { PendingStore } from "@/lib/capture/upload-queue";
@@ -33,7 +34,19 @@
 
     let selectedCutId = $state<number | null>(null);
     const selectedCut = $derived(manual.cuts.find((cut) => cut.id === selectedCutId) ?? null);
+    // 静的 feature-detect (従来) + 実行時失敗による上書き (F-03: doc/10 §10.8-3)
     const canRecord = typeof window !== "undefined" && supportsMediaRecorder();
+    let cameraUnavailableReason = $state<CameraUnavailableReason | null>(null);
+    const showRecorder = $derived(canRecord && cameraUnavailableReason === null);
+    // 実行時フォールバックの説明文 (reason で出し分け。静的 feature-detect 由来は
+    // CaptureFileFallback 既存の説明文だけで足りるため notice なし)
+    const fallbackNotice = $derived.by(() => {
+        if (cameraUnavailableReason === null) return null;
+        if (cameraUnavailableReason === "permission_denied") {
+            return "カメラを利用できないため、ファイル選択でのアップロードに切り替えました。カメラで撮影する場合はブラウザまたは端末・組織のカメラ設定を確認して再読み込みしてください。";
+        }
+        return "この端末ではカメラ録画を利用できないため、ファイル選択でのアップロードに切り替えました。";
+    });
 
     /* ---- アップロードキュー ---- */
     const store: PendingStore = createIdbPendingStore();
@@ -165,12 +178,22 @@
                     {/if}
                 </div>
 
-                {#if canRecord}
+                {#if showRecorder}
                     <CameraRecorder
                         onCaptured={(blob, mimeType, durationMs) =>
                             handleCaptured(blob, mimeType, durationMs)}
+                        onCameraUnavailable={(reason) => (cameraUnavailableReason = reason)}
                     />
                 {:else}
+                    {#if fallbackNotice !== null}
+                        <p
+                            class="text-caption text-text-secondary"
+                            role="status"
+                            data-testid="camera-fallback-notice"
+                        >
+                            {fallbackNotice}
+                        </p>
+                    {/if}
                     <CaptureFileFallback
                         onCaptured={(file) => handleCaptured(file, file.type, null)}
                     />
