@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/svelte";
+import { fireEvent, render, screen } from "@testing-library/svelte";
 import Settings from "@/pages/Organizations/Settings.svelte";
 
 const baseProps = {
@@ -84,5 +84,56 @@ describe("Organizations/Settings", () => {
         expect(link).toBeInTheDocument();
         // Inertia Link は jsdom で絶対 URL に解決するため末尾一致で検証する
         expect(link.getAttribute("href")).toMatch(/\/organizations\/test-org\/api-keys$/);
+    });
+});
+
+describe("Organizations/Settings オーナー移譲の常時表示 (F-12)", () => {
+    // 自分 (id:1) しかいない組織 = 移譲候補 0 人。
+    // 実運用では members に自分が必ず含まれる (controller は全メンバーを返す) が、
+    // 本テストは page 未モックで myId=null のため members: [] で候補 0 人を表現する
+    // (どちらでも transferCandidates.length === 0 の同一分岐)。
+    const soloProps = { ...baseProps, members: [] };
+
+    it("候補 0 人でもオーナーにはセクションと案内文が表示される", () => {
+        render(Settings, { props: soloProps });
+
+        expect(screen.getByRole("heading", { name: "オーナー移譲" })).toBeInTheDocument();
+        expect(screen.getByTestId("transfer-no-candidates")).toBeInTheDocument();
+        expect(screen.getByTestId("transfer-no-candidates")).toHaveTextContent("ユーザー管理");
+        const button = screen.getByTestId("transfer-ownership-button");
+        expect(button).toBeInTheDocument();
+        expect(button).not.toBeDisabled();
+    });
+
+    it("候補 0 人で押下すると確認ダイアログを開かずエラーを表示する", async () => {
+        render(Settings, { props: soloProps });
+
+        await fireEvent.click(screen.getByTestId("transfer-ownership-button"));
+
+        expect(
+            screen.getByText(
+                "移譲先にできるメンバーがいません。先にメンバーを招待してください。",
+            ),
+        ).toBeInTheDocument();
+        // ConfirmDialog (Modal) は開いていない
+        expect(screen.queryByRole("button", { name: "移譲する" })).toBeNull();
+    });
+
+    it("未選択のまま押下すると確認ダイアログを開かず選択エラーを表示する", async () => {
+        render(Settings, { props: baseProps });
+
+        await fireEvent.click(screen.getByTestId("transfer-ownership-button"));
+
+        expect(screen.getByText("移譲先のメンバーを選択してください。")).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "移譲する" })).toBeNull();
+    });
+
+    it("非オーナーにはオーナー移譲セクションを表示しない", () => {
+        render(Settings, {
+            props: { ...baseProps, currentUserRole: "organization_admin" },
+        });
+
+        expect(screen.queryByTestId("transfer-ownership-button")).toBeNull();
+        expect(screen.queryByRole("heading", { name: "オーナー移譲" })).toBeNull();
     });
 });
