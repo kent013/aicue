@@ -14,6 +14,7 @@ use App\Http\Responses\Fortify\RecoveryCodesGeneratedResponse;
 use App\Http\Responses\Fortify\RegisterResponse;
 use App\Http\Responses\Fortify\TwoFactorDisabledResponse;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
@@ -104,8 +105,17 @@ class FortifyServiceProvider extends ServiceProvider
 
         Fortify::verifyEmailView(static fn (): InertiaResponse => Inertia::render('Auth/VerifyEmail'));
 
-        // password.confirm (Fortify 生 step-up) は generic recent-auth に置換済みのため
-        // confirmPasswordView は登録しない (確認画面は Auth/ConfirmRecentAuth)。
+        // password.confirm (Fortify 生 step-up) は generic recent-auth に置換済み。
+        // ただし fortify.views=true の間は GET /user/confirm-password が Fortify により
+        // 無条件登録され、ConfirmPasswordViewResponse 未 bind だと直アクセスが
+        // BindingResolutionException で 500 になる (bug-hunt F-11)。正規の確認画面
+        // (recent-auth.confirm、password or 再SSO) へ 302 で誘導する。
+        // 注意: これは GET view の救済 redirect であり、`password.confirm` middleware 互換
+        // (auth.password_confirmed_at の充足) は提供しない。middleware 互換が必要になったら
+        // 別途設計すること (config/fortify.php の TODO(template) 参照)。
+        Fortify::confirmPasswordView(
+            static fn (): RedirectResponse => redirect()->route('recent-auth.confirm'),
+        );
 
         Fortify::twoFactorChallengeView(static fn (): InertiaResponse => Inertia::render('Auth/TwoFactorChallenge'));
     }
