@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/svelte";
+import { render, screen, within } from "@testing-library/svelte";
 import Users from "@/pages/Admin/Users.svelte";
 import type { InvitationRow, MemberRow } from "@/types/admin";
 
@@ -23,11 +23,23 @@ const membersFixture: MemberRow[] = [
         isSelf: false,
     },
     {
+        // F-14 (モバイル横スクロール) の bug-hunt 実測の最悪幅構成を再現する行:
+        // 2FA バッジ + 未割当バッジ + 2FA 解除ボタン + 未割当 select + 削除ボタンが同一行に揃う
+        // (閲覧者は id=1 の owner なので canResetTwoFactor は unassigned でも真)
         id: 3,
         name: "未割当 次郎",
         email: "unassigned@example.com",
         roleState: "unassigned",
         roleLabel: "未割当",
+        twoFactorStatus: "enabled",
+        isSelf: false,
+    },
+    {
+        id: 4,
+        name: "撮影 四郎",
+        email: "shooter@example.com",
+        roleState: "shooter",
+        roleLabel: "撮影者",
         twoFactorStatus: "disabled",
         isSelf: false,
     },
@@ -108,9 +120,10 @@ describe("Admin/Users", () => {
     it("2FA 設定済み・非同格メンバーには 2FA 解除ボタンを出す (owner 閲覧)", () => {
         render(Users, { props: baseProps });
 
-        // editor (enabled) → 出る / unassigned (disabled) → 出ない / self → 出ない
+        // editor/unassigned (enabled) → 出る / shooter (disabled) → 出ない / self → 出ない
         expect(screen.getByTestId("reset-two-factor-2")).toBeInTheDocument();
-        expect(screen.queryByTestId("reset-two-factor-3")).toBeNull();
+        expect(screen.getByTestId("reset-two-factor-3")).toBeInTheDocument();
+        expect(screen.queryByTestId("reset-two-factor-4")).toBeNull();
         expect(screen.queryByTestId("reset-two-factor-1")).toBeNull();
     });
 
@@ -168,6 +181,45 @@ describe("Admin/Users", () => {
 
         expect(screen.getByTestId("no-project-note")).toBeInTheDocument();
         expect(screen.queryByTestId("admin-nav-categories")).toBeNull();
+    });
+
+    it("メンバー行はモバイル縦積みクラスを持ち、操作ブロックは flex-wrap を持つ (F-14)", () => {
+        // jsdom はレイアウト計算をしないため、クラス不変条件を横スクロール回避のプロキシとして固定する。
+        // 対象要素は data-testid 起点で特定し DOM 順序に依存しない。
+        render(Users, { props: baseProps });
+
+        const roleSelect = screen.getByTestId("member-role-3");
+        const row = roleSelect.closest("li");
+        expect(row).not.toBeNull();
+        expect(row).toHaveClass("flex-col", "sm:flex-row");
+
+        const actions = roleSelect.parentElement;
+        expect(actions).not.toBeNull();
+        expect(actions).toHaveClass("flex-wrap");
+
+        // bug-hunt 実測の最悪幅構成 (2FA バッジ + 未割当バッジ + 2FA 解除 + 未割当 select + 削除)
+        // が同一行に揃っていることを固定する
+        const rowScope = within(row as HTMLElement);
+        expect(rowScope.getByText("2FA")).toBeInTheDocument();
+        expect(rowScope.getByTestId("unassigned-3")).toBeInTheDocument();
+        expect(rowScope.getByTestId("reset-two-factor-3")).toBeInTheDocument();
+        expect(rowScope.getByTestId("remove-member-3")).toBeInTheDocument();
+        expect(
+            rowScope.getByRole("option", { name: "未割当（選択してください）" }),
+        ).toBeInTheDocument();
+    });
+
+    it("招待行もモバイル縦積みクラスを持ち、右側ブロックは flex-wrap を持つ (F-14)", () => {
+        render(Users, { props: baseProps });
+
+        const revokeButton = screen.getByTestId("revoke-invitation-10");
+        const row = revokeButton.closest("li");
+        expect(row).not.toBeNull();
+        expect(row).toHaveClass("flex-col", "sm:flex-row");
+
+        const actions = revokeButton.parentElement;
+        expect(actions).not.toBeNull();
+        expect(actions).toHaveClass("flex-wrap");
     });
 
     it("削除 ConfirmDialog はメンバー名入りの警告文言を持つ", async () => {

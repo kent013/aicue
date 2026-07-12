@@ -232,7 +232,10 @@
                 {/if}
                 <ul class="mt-4 flex flex-col divide-y divide-border" data-testid="member-list">
                     {#each members as member (member.id)}
-                        <li class="flex items-center justify-between gap-4 py-3">
+                        <!-- 375px 方針: モバイルは縦積み、sm 以上は現行の横並び (F-14)。操作ブロックは要素単位で折り返し可 -->
+                        <li
+                            class="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+                        >
                             <div class="min-w-0">
                                 <div class="flex items-center gap-2">
                                     <p class="truncate text-body">{member.name}</p>
@@ -255,7 +258,7 @@
                                     />
                                 {/if}
                             </div>
-                            <div class="flex shrink-0 items-center gap-2">
+                            <div class="flex flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end">
                                 {#if canResetTwoFactor(member)}
                                     <Button
                                         variant="danger-ghost"
@@ -364,9 +367,12 @@
                         data-testid="invitation-list"
                     >
                         {#each invitations as invitation (invitation.id)}
-                            <li class="flex items-center justify-between gap-4 py-3">
-                                <p class="truncate text-body">{invitation.email}</p>
-                                <div class="flex shrink-0 items-center gap-3">
+                            <!-- 375px 方針: モバイルは縦積み、sm 以上は現行の横並び (F-14) -->
+                            <li
+                                class="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+                            >
+                                <p class="min-w-0 truncate text-body">{invitation.email}</p>
+                                <div class="flex flex-wrap items-center gap-3 sm:shrink-0 sm:justify-end">
                                     <p class="text-caption text-text-secondary">
                                         {invitation.roleLabel} ・ 期限 {invitation.expiresAt}
                                     </p>

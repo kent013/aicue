@@ -264,4 +264,16 @@ describe("Dashboard", () => {
 
         expect(container.querySelectorAll("[disabled]")).toHaveLength(0);
     });
+
+    it("page-local の設定/ログアウトを持たない (AppLayout 常設ナビに一本化)", () => {
+        // テスト環境は page store 未設定 = auth なしのため AppLayout の常設ナビは描画されない。
+        // 旧実装の page-local headerActions snippet が残っていれば auth なしでも描画されるため、
+        // どちらも null であることが旧実装残存を確実に検出する (F-08 の回帰固定)。
+        // logout POST は AppLayout の単一ハンドラの責務であり、Dashboard 内のイベントから
+        // router.post("/logout") を直接呼ばない。
+        render(Dashboard, { props: { dashboard: fullData() } });
+
+        expect(screen.queryByRole("link", { name: "設定" })).toBeNull();
+        expect(screen.queryByRole("button", { name: "ログアウト" })).toBeNull();
+    });
 });
