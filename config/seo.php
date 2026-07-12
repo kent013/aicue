@@ -105,6 +105,9 @@ return [
         'projects.index' => 'プロジェクト',
         'projects.create' => 'プロジェクトの作成',
         'projects.edit' => 'プロジェクトの編集',
+        // 動画マニュアル (show/edit/撮影 show は controller が setPrivateTitle で
+        // マニュアル名を供給。create のみ静的 = 対象実体が未存在のため)
+        'projects.manuals.create' => '動画マニュアルの作成',
     ],
 
 ];
