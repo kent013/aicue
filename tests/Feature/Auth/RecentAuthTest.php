@@ -134,6 +134,19 @@ test('GET /user/confirm-password の救済 redirect は再認証の stamp をし
         ->assertSessionMissing('recent_auth_at');
 });
 
+test('GET /user/confirm-password の救済 redirect はクエリや url.intended に依らず固定先へ向かう', function (): void {
+    // open redirect 否定の回帰ガード: この redirect は常に recent-auth.confirm への
+    // 内部固定リダイレクトであり、リクエストのクエリパラメータや session の url.intended を
+    // 参照しない (Codex 最終実装レビュー Round 1 Suggestion 対応)。
+    $user = User::factory()->create();
+
+    $response = $this->actingAs($user)
+        ->withSession(['url.intended' => 'https://evil.example/phish'])
+        ->get('/user/confirm-password?redirect=https://evil.example/phish&next=/admin');
+
+    $response->assertRedirect(route('recent-auth.confirm'));
+});
+
 /* ---------------------------------------------------------------- confirm 画面 / status */
 
 test('confirm 画面は passwordSet / availableProviders / canSatisfy を返す', function (): void {

@@ -158,6 +158,9 @@ return [
             // recovery-codes/qr-code/secret-key) は step-up なしで到達可能になる。アプリでは
             // Fortify 登録ルートへ recent-auth を後付け配線して固めること
             // (参照: aigenba RequireRecentAuthOnFortifyRoutes / spirux attachFortifyRouteMiddleware)。
+            // 注意: FortifyServiceProvider の confirmPasswordView は GET /user/confirm-password の
+            // 救済 redirect (recent-auth.confirm への誘導) のみで、`password.confirm` middleware 互換
+            // (auth.password_confirmed_at の充足) は現行未提供 (bug-hunt F-11)。
             'confirmPassword' => false,
         ]),
     ],
