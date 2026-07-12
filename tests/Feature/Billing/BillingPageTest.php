@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use App\Models\User;
+use App\Services\Billing\Fakes\FakeSubscriptionCheckoutGateway;
+use App\Services\Billing\SubscriptionCheckoutGateway;
 use App\Services\Billing\TicketLedgerService;
 use Inertia\Testing\AssertableInertia as Assert;
 
@@ -86,4 +88,29 @@ test('current organization が無いユーザーは 404', function (): void {
     $user = User::factory()->create();
 
     $this->actingAs($user)->get('/billing')->assertNotFound();
+});
+
+test('owner の checkout は fake gateway 経由で中立帰還 URL へ遷移する (happy path)', function (): void {
+    [, $owner] = createOrganizationWithOwner();
+    $this->app->bind(SubscriptionCheckoutGateway::class, FakeSubscriptionCheckoutGateway::class);
+
+    $response = $this->actingAs($owner)->post('/billing/checkout', ['plan_code' => 'standard']);
+
+    // 非 Inertia リクエストでは Inertia::location は 302 redirect を返す
+    $response->assertStatus(302);
+    $location = $response->headers->get('Location');
+    expect($location)->toContain('/billing')
+        ->and($location)->toContain('fake_external=stripe');
+});
+
+test('owner の portal は fake gateway 経由で中立帰還 URL へ遷移する (happy path)', function (): void {
+    [, $owner] = createOrganizationWithOwner();
+    $this->app->bind(SubscriptionCheckoutGateway::class, FakeSubscriptionCheckoutGateway::class);
+
+    $response = $this->actingAs($owner)->post('/billing/portal');
+
+    $response->assertStatus(302);
+    $location = $response->headers->get('Location');
+    expect($location)->toContain('/billing')
+        ->and($location)->toContain('fake_external=stripe');
 });

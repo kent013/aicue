@@ -18,6 +18,7 @@ use Throwable;
  * - APP_DEBUG=false (stack trace / 設定露出防止)
  * - SECURITY_HSTS_ENABLED / SECURITY_CSP_ENABLED=true (セキュリティヘッダ必須)
  * - DEBUG_LOGIN_USER / DEBUG_LOGIN_PASSWORD が空 (local 専用機構の誤投入防止)
+ * - TESTING_FAKE_EXTERNALS=false (外部 fake の本番混入防止)
  * - TrustHosts allowlist (Host header injection 防御の allowlist 非空・書式)
  */
 class ProductionEnvGuard
@@ -76,6 +77,14 @@ class ProductionEnvGuard
         if ($debugUser !== '' || $debugPassword !== '') {
             $errors[] = 'DEBUG_LOGIN_USER and DEBUG_LOGIN_PASSWORD must be empty in production '
                 .'(both are local-dev only; presence indicates dangerous misconfiguration).';
+        }
+
+        // 外部 fake flag は非本番専用。production で true なら課金 (Stripe) が fake に
+        // 差し替わり得る危険設定のため fail-fast する (FakeExternalsServiceProvider の
+        // allowlist で bind 自体は起きないが、設定として存在すること自体を拒否する)
+        if (config('testing.fake_externals') === true) {
+            $errors[] = 'TESTING_FAKE_EXTERNALS must be false in production '
+                .'(external fakes must never be enabled in production).';
         }
 
         // Host header injection 防御の TrustHosts allowlist を起動時検証。

@@ -19,8 +19,10 @@ use App\Models\Billing\Subscription;
 use App\Models\Organization;
 use App\Models\User;
 use App\Notifications\Channels\OrganizationScopedDatabaseChannel;
+use App\Services\Billing\CashierSubscriptionCheckoutGateway;
 use App\Services\Billing\CashierTicketCheckoutGateway;
 use App\Services\Billing\StripeWebhookProcessor;
+use App\Services\Billing\SubscriptionCheckoutGateway;
 use App\Services\Billing\TicketCheckoutGateway;
 use App\Services\Mail\Sns\AwsSnsSignatureVerifier;
 use App\Services\Mail\Sns\SnsSignatureVerifier;
@@ -102,6 +104,10 @@ class AppServiceProvider extends ServiceProvider
 
         // チケットスポット購入の Stripe Checkout 抽象 (T007)。テストは fake を bind する
         $this->app->bind(TicketCheckoutGateway::class, CashierTicketCheckoutGateway::class);
+
+        // サブスク Checkout / Customer Portal の Stripe 抽象。fake_externals 時は
+        // FakeExternalsServiceProvider が fake に rebind する (providers.php で後勝ち)
+        $this->app->bind(SubscriptionCheckoutGateway::class, CashierSubscriptionCheckoutGateway::class);
 
         // アプリ内通知 (T008): database channel を薄い拡張へ差し替え、AppNotification の
         // organization_id を notifications テーブルの first-class 列として書き込む
