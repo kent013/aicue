@@ -95,6 +95,45 @@ test('外部 origin の referer は intended に採用されない (open redirec
     expect(session('url.intended'))->toBe(route('dashboard'));
 });
 
+/* ------------------------------------------- fortify password.confirm 救済 redirect */
+
+test('GET /user/confirm-password 直アクセスは recent-auth confirm へ 302 (500 にしない)', function (): void {
+    $user = User::factory()->create();
+
+    $response = $this->actingAs($user)->get('/user/confirm-password');
+
+    $response->assertRedirect(route('recent-auth.confirm'));
+});
+
+test('GET /user/confirm-password は追従すると 200 で ConfirmRecentAuth フォームが出る', function (): void {
+    $user = User::factory()->create();
+
+    $response = $this->actingAs($user)->followingRedirects()->get('/user/confirm-password');
+
+    $response->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Auth/ConfirmRecentAuth')
+            ->where('passwordSet', true)
+            ->where('canSatisfy', true));
+});
+
+test('GET /user/confirm-password は未ログインなら login へ redirect (既存 auth ガード)', function (): void {
+    $this->get('/user/confirm-password')->assertRedirect(route('login'));
+});
+
+test('GET /user/confirm-password の救済 redirect は再認証の stamp をしない', function (): void {
+    // 誤用防止の回帰ガード: この redirect は「画面への誘導」であり、password.confirm
+    // middleware 互換 (auth.password_confirmed_at) も recent-auth 鮮度 (recent_auth_at) も
+    // 付与しない (Codex 詳細レビュー Round 1 Warning 対応)。
+    $user = User::factory()->create();
+
+    $response = $this->actingAs($user)->get('/user/confirm-password');
+
+    $response->assertRedirect(route('recent-auth.confirm'))
+        ->assertSessionMissing('auth.password_confirmed_at')
+        ->assertSessionMissing('recent_auth_at');
+});
+
 /* ---------------------------------------------------------------- confirm 画面 / status */
 
 test('confirm 画面は passwordSet / availableProviders / canSatisfy を返す', function (): void {
