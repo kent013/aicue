@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { tick } from "svelte";
     import { router } from "@inertiajs/svelte";
     import { ChevronDown, ChevronUp, ListPlus, Plus, Trash2 } from "@lucide/svelte";
     import Alert from "@/components/atoms/Alert.svelte";
@@ -92,8 +93,30 @@
     let snapshot = $state(serializeSteps(toDraftSteps(scenario.steps)));
     let saving = $state(false);
     let errors = $state<Record<string, string[]>>({});
-    let conflict = $state<ScenarioConflictBody | null>(null);
-    let genericError = $state<string | null>(null);
+
+    /**
+     * 保存失敗フィードバックの判別可能 union。
+     * - conflict: 409 (scenario_conflict 契約。理由はサーバ供給 message)
+     * - forbidden: 403 (セッション途中の権限剥奪等。将来の再ログイン導線はこの分岐に足す)
+     * - generic: 通信断・5xx・shape 不一致などその他の失敗
+     */
+    type SaveFailure =
+        | { kind: "conflict"; body: ScenarioConflictBody }
+        | { kind: "forbidden" }
+        | { kind: "generic"; message: string };
+
+    /** アラート描画用の表示モデル (kind → 見た目の導出を switch 1 箇所に集約) */
+    interface FailureView {
+        type: "warning" | "danger";
+        title?: string;
+        message: string;
+        showReloadCta: boolean;
+        testId: string;
+    }
+
+    let saveFailure = $state<SaveFailure | null>(null);
+    /** 失敗アラートの focus 対象 wrapper (tabindex=-1) */
+    let failureEl = $state<HTMLDivElement | null>(null);
     let confirmingStepIndex = $state<number | null>(null);
     let confirmingReload = $state(false);
     /** 明示同意済みの最新取得中フラグ (dirty 離脱確認を二重に出さない) */
@@ -146,19 +169,81 @@
         [points[index], points[next]] = [points[next], points[index]];
     }
 
+    /**
+     * union 網羅の型固定 (kind 追加時は引数の never 不一致でコンパイルエラーになり
+     * 表示漏れを検出する)。runtime に到達した場合は throw せず汎用 fallback を返す
+     * ($derived 内の throw で画面全体を巻き込まない。詳細レビュー合意)。
+     */
+    function unreachableFailureView(_value: never): FailureView {
+        return {
+            type: "danger",
+            message: "保存に失敗しました。時間をおいて再度お試しください。",
+            showReloadCta: false,
+            testId: "scenario-generic-error",
+        };
+    }
+
+    const failureView = $derived.by((): FailureView | null => {
+        if (saveFailure === null) return null; // null 先処理 → switch (概念レビュー合意)
+        switch (saveFailure.kind) {
+            case "conflict":
+                return {
+                    type: "warning",
+                    title: CONFLICT_TITLES[saveFailure.body.conflict_type],
+                    message: saveFailure.body.message,
+                    showReloadCta: saveFailure.body.conflict_type === "version_mismatch",
+                    testId: "scenario-conflict-banner",
+                };
+            case "forbidden":
+                return {
+                    type: "danger",
+                    message:
+                        "この操作を行う権限がありません。ページを再読み込みして状態を確認してください。",
+                    showReloadCta: false,
+                    testId: "scenario-forbidden-error",
+                };
+            case "generic":
+                return {
+                    type: "danger",
+                    message: saveFailure.message,
+                    showReloadCta: false,
+                    testId: "scenario-generic-error",
+                };
+            default:
+                return unreachableFailureView(saveFailure);
+        }
+    });
+
+    /**
+     * 失敗フィードバックの単一表示経路 (全 kind 共通)。state 確定 → tick() で DOM 反映を
+     * 待ち → focus({preventScroll}) → scrollIntoView({block:"nearest"}) の順で知覚させる。
+     * 明示呼び出し限定 ($effect の state 監視にしない = 無関係な再レンダで再発火しない)。
+     * focus 既定スクロールは抑止し、スクロール制御を scrollIntoView に一本化する
+     * (完全可視ならスクロールは原則発生せず、連続失敗時のジャンプを起こしにくい)。
+     */
+    async function showFailure(failure: SaveFailure): Promise<void> {
+        saveFailure = failure;
+        await tick();
+        failureEl?.focus({ preventScroll: true });
+        // UA 差異を残さないよう block/inline/behavior を全指定で固定 (Vitest は引数完全一致で担保)
+        failureEl?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "auto" });
+    }
+
     async function save(): Promise<void> {
         if (saving) return; // 多重送信ガード (disabled にはしない。押下は受けて即 return)
         saving = true;
         errors = {};
-        conflict = null;
-        genericError = null; // 前回の失敗表示をクリア (再保存成功後に旧エラーを残さない)
+        saveFailure = null; // 前回の失敗表示をクリア (再保存成功後に旧エラーを残さない)
         try {
             const res = await putScenario();
             await handleResponse(res);
         } catch {
             // ネットワーク断・fetch reject (419 回復 GET / 再試行 PUT の reject も含む)。
             // 作業コピーは保持したまま汎用エラーを表示 (未処理 Promise を漏らさない)
-            genericError = "通信に失敗しました。接続を確認して再度お試しください。";
+            await showFailure({
+                kind: "generic",
+                message: "通信に失敗しました。接続を確認して再度お試しください。",
+            });
         } finally {
             saving = false;
         }
@@ -186,7 +271,10 @@
                 applySaved(body);
                 return;
             }
-            genericError = "保存結果の取得に失敗しました。画面を再読み込みしてください。";
+            await showFailure({
+                kind: "generic",
+                message: "保存結果の取得に失敗しました。画面を再読み込みしてください。",
+            });
             return;
         }
         if (res.status === 419 && !retried) {
@@ -200,14 +288,22 @@
         }
         if (res.status === 401 || res.status === 419) {
             // セッション失効: 作業コピーは破棄せず、別タブでの再ログインを案内 (リダイレクトしない)
-            genericError =
-                "セッションが切れました。別のタブでログインし直してから、もう一度保存してください。";
+            await showFailure({
+                kind: "generic",
+                message:
+                    "セッションが切れました。別のタブでログインし直してから、もう一度保存してください。",
+            });
+            return;
+        }
+        if (res.status === 403) {
+            // 権限剥奪など。理由を明示する (汎用「時間をおいて再試行」への誤誘導をやめる)
+            await showFailure({ kind: "forbidden" });
             return;
         }
         if (res.status === 409) {
             const body = (await res.json().catch(() => null)) as ScenarioConflictBody | null;
             if (body?.code === "scenario_conflict") {
-                conflict = body; // 作業コピーは保持 (黙って編集内容を失わない)
+                await showFailure({ kind: "conflict", body }); // 作業コピーは保持
                 return;
             }
         }
@@ -219,7 +315,10 @@
                 return;
             }
         }
-        genericError = "保存に失敗しました。時間をおいて再度お試しください。";
+        await showFailure({
+            kind: "generic",
+            message: "保存に失敗しました。時間をおいて再度お試しください。",
+        });
     }
 
     /**
@@ -281,7 +380,7 @@
      */
     function reloadScenario(): void {
         confirmingReload = false;
-        conflict = null;
+        saveFailure = null;
         reloading = true;
         router.reload({
             only: ["scenario", "manual"],
@@ -291,13 +390,17 @@
                     reseed(latest);
                     return;
                 }
-                genericError =
-                    "最新シナリオの取得に失敗しました。画面を再読み込みしてください。";
+                void showFailure({
+                    kind: "generic",
+                    message: "最新シナリオの取得に失敗しました。画面を再読み込みしてください。",
+                });
             },
             onError: () => {
                 // 部分リロード自体の失敗 (ネットワーク断等)。無反応に見せない
-                genericError =
-                    "最新シナリオの取得に失敗しました。画面を再読み込みしてください。";
+                void showFailure({
+                    kind: "generic",
+                    message: "最新シナリオの取得に失敗しました。画面を再読み込みしてください。",
+                });
             },
             onFinish: () => {
                 reloading = false;
@@ -482,31 +585,6 @@
 {/snippet}
 
 <section aria-label="シナリオ編集">
-    {#if conflict}
-        <Alert type="warning" title={CONFLICT_TITLES[conflict.conflict_type]} testId="scenario-conflict-banner">
-            <p>{conflict.message}</p>
-            {#snippet action()}
-                {#if conflict?.conflict_type === "version_mismatch"}
-                    <Button
-                        variant="neutral"
-                        size="sm"
-                        onclick={() => (confirmingReload = true)}
-                        testId="scenario-conflict-reload"
-                    >
-                        サーバの最新を取得
-                    </Button>
-                {/if}
-            {/snippet}
-        </Alert>
-    {/if}
-    {#if genericError}
-        <div class="mt-3">
-            <Alert type="danger" testId="scenario-generic-error">
-                <p>{genericError}</p>
-            </Alert>
-        </div>
-    {/if}
-
     {#if steps.length === 0}
         <div class="mt-4">
             <EmptyState
@@ -636,6 +714,37 @@
                 <Plus class="size-4" aria-hidden="true" />
                 手順を追加
             </Button>
+        </div>
+    {/if}
+
+    <!-- 再取得 CTA (トップレベル snippet として宣言し、必要な場合のみ Alert の action prop へ渡す) -->
+    {#snippet reloadAction()}
+        <Button
+            variant="neutral"
+            size="sm"
+            onclick={() => (confirmingReload = true)}
+            testId="scenario-conflict-reload"
+        >
+            サーバの最新を取得
+        </Button>
+    {/snippet}
+
+    {#if failureView}
+        <!-- 操作点 (シナリオを更新) 直上の失敗フィードバック。tabindex=-1 で programmatic focus を受ける -->
+        <div
+            class="mt-6 focus:outline-none"
+            bind:this={failureEl}
+            tabindex="-1"
+            data-testid="scenario-failure-region"
+        >
+            <Alert
+                type={failureView.type}
+                title={failureView.title}
+                action={failureView.showReloadCta ? reloadAction : undefined}
+                testId={failureView.testId}
+            >
+                <p>{failureView.message}</p>
+            </Alert>
         </div>
     {/if}
 

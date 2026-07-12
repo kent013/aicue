@@ -16,6 +16,7 @@ use App\Models\VideoManual;
 use App\Services\Capture\TakeObjectStorage;
 use App\Services\Capture\UploadTicketCodec;
 use App\Services\Project\DefaultProjectResolver;
+use App\Support\Seo\SeoManager;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -90,10 +91,14 @@ class CaptureManualController extends Controller
         VideoManual $manual,
         TakeObjectStorage $storage,
         UploadTicketCodec $codec,
+        SeoManager $seo,
     ): Response {
         $organization = $this->resolveCurrentOrganization($request);
         $this->resolveOrganizationProject($organization, $project); // 認可より前に 404
         Gate::authorize('view', $manual); // 読み取りは撮影者含む org member
+
+        // 撮影 PWA であることをタブ上で判別可能にする動的固有名
+        $seo->setPrivateTitle($manual->title.' の撮影');
 
         $user = $request->user();
         Assert::isInstanceOf($user, User::class);

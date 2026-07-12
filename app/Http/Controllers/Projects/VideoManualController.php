@@ -18,6 +18,7 @@ use App\Models\Project;
 use App\Models\User;
 use App\Models\VideoManual;
 use App\Services\Manual\VideoManualService;
+use App\Support\Seo\SeoManager;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -88,12 +89,15 @@ class VideoManualController extends Controller
     }
 
     /** 詳細 (撮影者も閲覧可) */
-    public function show(Request $request, Project $project, VideoManual $manual): Response
+    public function show(Request $request, Project $project, VideoManual $manual, SeoManager $seo): Response
     {
         $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404 ({manual} ∈ {project} は scopeBindings が担保済み)
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('view', $manual);
+
+        // 動的固有名の per-page タイトル (noindex 維持。projects.show の参考実装踏襲)
+        $seo->setPrivateTitle($manual->title);
 
         $user = $request->user();
         Assert::isInstanceOf($user, User::class);
@@ -141,12 +145,15 @@ class VideoManualController extends Controller
     }
 
     /** 編集フォーム (メタデータ = title / category + シナリオ document) */
-    public function edit(Request $request, Project $project, VideoManual $manual): Response
+    public function edit(Request $request, Project $project, VideoManual $manual, SeoManager $seo): Response
     {
         $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404 ({manual} ∈ {project} は scopeBindings が担保済み)
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('update', $manual);
+
+        // 複数 manual の並行編集タブを判別できるよう動的固有名 (概念レビュー合意)
+        $seo->setPrivateTitle($manual->title.' の編集');
 
         return Inertia::render('Manuals/Edit', [
             'project' => [

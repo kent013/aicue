@@ -119,6 +119,9 @@ beforeEach(() => {
     routerOnMock.mockClear();
     vi.stubGlobal("fetch", fetchMock);
     clearToasts();
+    // jsdom は scrollIntoView 未実装。失敗フィードバックの知覚処理 (showFailure) が
+    // 全失敗経路で呼ぶため、毎テスト新しい spy を注入する (呼び出し順/引数検証にも使う)
+    Element.prototype.scrollIntoView = vi.fn();
 });
 
 afterEach(() => {
@@ -627,5 +630,142 @@ describe("ScenarioEditor", () => {
     it("保存ボタンは disabled にしない", () => {
         render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
         expect(screen.getByTestId("scenario-submit")).not.toBeDisabled();
+    });
+
+    // --- F-02 知覚可能性 (perceivability) の回帰テスト群 ---
+
+    it("失敗フィードバックは操作点 (シナリオを更新ボタン) の直前に描画される", async () => {
+        fetchMock.mockResolvedValueOnce(
+            jsonResponse(409, {
+                code: "scenario_conflict",
+                conflict_type: "version_mismatch",
+                message: "他の編集と競合しました。",
+                current_version: 9,
+            }),
+        );
+
+        render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+        await fireEvent.click(screen.getByTestId("scenario-submit"));
+
+        await waitFor(() => {
+            expect(screen.getByTestId("scenario-failure-region")).toBeInTheDocument();
+        });
+        const region = screen.getByTestId("scenario-failure-region");
+        const submit = screen.getByTestId("scenario-submit");
+        // region は submit より前方 (DOCUMENT_POSITION_FOLLOWING) かつ同一 section 配下
+        const position = region.compareDocumentPosition(submit);
+        expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(region.closest("section")).toBe(submit.closest("section"));
+    });
+
+    it("失敗表示は focus(preventScroll) → scrollIntoView の順で知覚させる (全 kind 共通)", async () => {
+        const focusSpy = vi.spyOn(HTMLElement.prototype, "focus");
+        const scrollMock = Element.prototype.scrollIntoView as ReturnType<typeof vi.fn>;
+
+        // 3 分岐 (conflict=409 / forbidden=403 / generic=500) それぞれで順序と引数を検証する
+        const cases: Array<{ status: number; body: unknown }> = [
+            {
+                status: 409,
+                body: {
+                    code: "scenario_conflict",
+                    conflict_type: "version_mismatch",
+                    message: "他の編集と競合しました。",
+                    current_version: 9,
+                },
+            },
+            { status: 403, body: {} },
+            { status: 500, body: {} },
+        ];
+
+        for (const { status, body } of cases) {
+            focusSpy.mockClear();
+            scrollMock.mockClear();
+            fetchMock.mockResolvedValueOnce(jsonResponse(status, body));
+
+            const { unmount } = render(ScenarioEditor, {
+                props: { ...baseProps, scenario: makeDocument() },
+            });
+            await fireEvent.click(screen.getByTestId("scenario-submit"));
+
+            await waitFor(() => {
+                expect(scrollMock).toHaveBeenCalledTimes(1);
+            });
+            expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true });
+            expect(scrollMock).toHaveBeenCalledWith({
+                block: "nearest",
+                inline: "nearest",
+                behavior: "auto",
+            });
+            // focus が scrollIntoView より先に呼ばれる
+            const focusOrder = Math.min(...focusSpy.mock.invocationCallOrder);
+            expect(focusOrder).toBeLessThan(scrollMock.mock.invocationCallOrder[0]);
+            unmount();
+        }
+
+        focusSpy.mockRestore();
+    });
+
+    it("409 (analyzing) はサーバ供給 message を表示し再取得 CTA を出さない", async () => {
+        fetchMock.mockResolvedValueOnce(
+            jsonResponse(409, {
+                code: "scenario_conflict",
+                conflict_type: "analyzing",
+                message: "AI 解析中のため保存できません。完了後に再度お試しください。",
+                current_version: 3,
+            }),
+        );
+
+        render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+        await fireEvent.click(screen.getByTestId("scenario-submit"));
+
+        await waitFor(() => {
+            expect(screen.getByTestId("scenario-conflict-banner")).toHaveTextContent(
+                "AI 解析中のため保存できません。完了後に再度お試しください。",
+            );
+        });
+        // version_mismatch 以外はリロード導線を出さない (空 action 余白も出さない)
+        expect(screen.queryByTestId("scenario-conflict-reload")).not.toBeInTheDocument();
+    });
+
+    it("403 は権限エラーの固定文言を表示し作業コピーを破棄しない", async () => {
+        fetchMock.mockResolvedValueOnce(jsonResponse(403, { message: "This action is unauthorized." }));
+
+        render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+        await typeInto("step-0-scene", "手順シーンAX");
+        await fireEvent.click(screen.getByTestId("scenario-submit"));
+
+        await waitFor(() => {
+            expect(screen.getByTestId("scenario-forbidden-error")).toHaveTextContent(
+                "この操作を行う権限がありません。ページを再読み込みして状態を確認してください。",
+            );
+        });
+        // サーバ 403 body の英語文言は表示しない (内部状態を漏らさない)
+        expect(
+            screen.queryByText("This action is unauthorized."),
+        ).not.toBeInTheDocument();
+        // dirty (作業コピー) は保持
+        expect(screen.getByTestId("step-0-scene")).toHaveValue("手順シーンAX");
+        expect(screen.getByTestId("scenario-dirty-indicator")).toBeInTheDocument();
+    });
+
+    it("保存成功で失敗リージョンが消える", async () => {
+        fetchMock
+            .mockResolvedValueOnce(jsonResponse(403, {}))
+            .mockResolvedValueOnce(jsonResponse(200, makeDocument()));
+
+        render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+        await fireEvent.click(screen.getByTestId("scenario-submit"));
+        await waitFor(() => {
+            expect(screen.getByTestId("scenario-failure-region")).toBeInTheDocument();
+        });
+        // 保存完了で submit が再度有効になる (loading 中は disabled=多重送信ガード) のを待つ
+        await waitFor(() => {
+            expect(screen.getByTestId("scenario-submit")).not.toBeDisabled();
+        });
+
+        await fireEvent.click(screen.getByTestId("scenario-submit"));
+        await waitFor(() => {
+            expect(screen.queryByTestId("scenario-failure-region")).not.toBeInTheDocument();
+        });
     });
 });
