@@ -21,7 +21,6 @@
 
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
-| T018 | bug-hunt環境の専用queue worker起動/停止 (bug-hunt F-01) | test | bughunt provisionでqueue worker起動/teardown停止 | Critical | standalone | [設計](devnotes/20260712-1954-bugfix-bughunt-queue-worker/) | 2026-07-12 21:59 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
