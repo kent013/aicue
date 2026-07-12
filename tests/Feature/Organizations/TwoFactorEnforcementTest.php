@@ -433,6 +433,23 @@ test('理由は必須 (10 文字未満は validation error)', function (?string 
     '短すぎる' => ['短い理由'],
 ]);
 
+// F-02 再現: reason 未入力時に内部キー 'reason' ではなく日本語ラベルの文言が返る
+// (表示文言そのものが検証対象のため意図的に厳密一致)
+test('2FA 解除の理由が空だと日本語ラベルのエラー文言が返る', function (): void {
+    // .env.testing は APP_LOCALE=en のため、日本語文言の検証対象ロケールを明示する
+    $this->app->setLocale('ja');
+
+    [$organization, $owner] = tfeCreateOrganization();
+    $member = tfeAddMember($organization, 'enabled');
+
+    $this->actingAs($owner)
+        ->withSession(['recent_auth_at' => time()])
+        ->delete(tfeResetUrl($organization, $member), ['reason' => ''])
+        ->assertSessionHasErrors(['reason' => '理由は必須項目です。']);
+
+    expect($member->fresh()->two_factor_secret)->not->toBeNull();
+});
+
 test('2FA 未設定 (disabled) のメンバーへのリセットは明示拒否 (validation error)', function (): void {
     [$organization, $owner] = tfeCreateOrganization();
     $member = tfeAddMember($organization, 'disabled');

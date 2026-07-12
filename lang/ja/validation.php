@@ -8,8 +8,11 @@ declare(strict_types=1);
  *
  * 1. `password.uncompromised`: `Password::uncompromised()` (= HIBP 漏洩照合) を
  *    「漏洩した可能性」ではなく確定として伝えるため上書き。PasswordPolicy が本 rule を使う。
- * 2. `attributes`: `:attribute` placeholder を `resources/js/pages/Auth/Register.svelte`
- *    の form label と揃った日本語ラベルへ置換する map。
+ * 2. `attributes`: `:attribute` placeholder を日本語ラベルへ置換する map。
+ *    **ラベルは対応する Svelte フォームの label 文言を正とする** (語彙ズレ禁止)。
+ *    フィールド追加時の登録漏れは tests/Architecture/ValidationAttributeCoverageTest が検出する。
+ *    同名キーでフォーム毎にラベルを変えたい場合のみ FormRequest::attributes() で上書きする
+ *    (例: UpdateOrganizationRequest の 'name' => '組織名')。
  *
  * 上記以外は laravel-lang/lang の publish 結果に追従させる。Laravel 側で rule key が
  * 増減した場合は `php artisan lang:add ja` を再実行し、1/2 のカスタマイズを再適用する。
@@ -179,11 +182,86 @@ return [
      * laravel-lang/lang は当 section を publish しないため、 本アプリ側で手動メンテする。
      */
     'attributes' => [
+        // --- 認証・アカウント ---
         'name' => '名前',
         'email' => 'メールアドレス',
         'password' => 'パスワード',
         'password_confirmation' => 'パスワード（確認）',
         'current_password' => '現在のパスワード',
         'terms_accepted' => '利用規約への同意',
+        // --- お問い合わせ ---
+        'company_name' => '会社・組織名',
+        'message' => 'お問い合わせ内容',
+        'type' => 'お問い合わせ種別',
+        'source' => '参照元',
+        'website' => 'ウェブサイト',
+        // required 違反の文言は StoreInquiryRequest::messages() の個別定義が正。
+        // 本 entry は個別 messages がカバーしない残り rule (string / Recaptcha) で
+        // :attribute が生キーのまま露出しないための fallback
+        'g-recaptcha-response' => 'reCAPTCHA',
+        // --- 組織・メンバー管理 ---
+        'reason' => '理由',
+        'role' => 'ロール',
+        'token' => '招待トークン',
+        'enabled' => '2 段階認証の必須化',
+        'user_id' => '対象ユーザー',
+        'abilities' => '権限',
+        'abilities.*' => '権限',
+        // --- 課金 ---
+        'plan_code' => 'プラン',
+        'count' => '購入枚数',
+        'attempt_token' => '操作トークン',
+        // --- プロジェクト・マニュアル ---
+        'description' => '説明',
+        'note' => 'メモ',
+        'title' => 'タイトル',
+        'category' => 'カテゴリ',
+        'document' => '手順書ファイル',
+        'order' => '表示順',
+        'order.*' => '表示順',
+        'lang' => '字幕言語',
+        // --- シナリオ編集 (steps.* は数値 index → * 正規化で解決される) ---
+        'expected_version' => 'シナリオバージョン',
+        'steps' => '手順',
+        'steps.*' => '手順',
+        'steps.*.points' => '撮影ポイント',
+        'steps.*.points.*' => '撮影ポイント',
+        'steps.*.id' => 'ID',
+        'steps.*.scene' => 'シーン',
+        'steps.*.shot_type' => '画角',
+        'steps.*.shooting_point' => '撮影ポイント',
+        'steps.*.narration' => 'ナレーション',
+        'steps.*.subtitle_primary' => '字幕①',
+        'steps.*.subtitle_secondary' => '字幕②',
+        'steps.*.material_type' => '素材',
+        'steps.*.static_display_seconds' => '静止表示秒数',
+        'steps.*.points.*.id' => 'ID',
+        'steps.*.points.*.scene' => 'シーン',
+        'steps.*.points.*.shot_type' => '画角',
+        'steps.*.points.*.shooting_point' => '撮影ポイント',
+        'steps.*.points.*.narration' => 'ナレーション',
+        'steps.*.points.*.subtitle_primary' => '字幕①',
+        'steps.*.points.*.subtitle_secondary' => '字幕②',
+        'steps.*.points.*.material_type' => '素材',
+        'steps.*.points.*.static_display_seconds' => '静止表示秒数',
+        // --- 撮影 PWA ---
+        'ticket' => '撮影チケット',
+        'client_take_id' => 'テイクID',
+        'duration_ms' => '撮影時間',
+        'captured_at' => '撮影日時',
+        'video_path' => '動画ファイル',
+        'size_bytes' => 'ファイルサイズ',
+        'status' => 'ステータス',
+        'sort_order' => '並び順',
+        'content_type' => 'ファイル形式',
+        'checksum_sha256' => 'チェックサム',
+        'comment' => 'コメント',
+        'position' => '表示位置',
+        'downloaded_at' => 'ダウンロード日時',
+        'ack_token' => '確認トークン',
+        'takes' => 'テイク一覧',
+        'takes.*.cut' => 'カット',
+        'takes.*.client_take_id' => 'テイクID',
+        'takes.*.cut_id' => 'カットID',
     ],
 ];

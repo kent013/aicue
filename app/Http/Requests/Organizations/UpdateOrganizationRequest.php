@@ -29,4 +29,14 @@ class UpdateOrganizationRequest extends FormRequest
             'name' => ['required', 'string', 'max:255'],
         ], $this->protectedKeyMissingRules());
     }
+
+    /**
+     * @return array<string, string>
+     */
+    public function attributes(): array
+    {
+        // UI ラベル (Organizations/Settings.svelte「組織名」) と揃える。
+        // グローバル attributes の 'name' => '名前' より優先される局所上書き。
+        return ['name' => '組織名'];
+    }
 }

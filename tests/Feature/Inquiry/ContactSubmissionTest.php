@@ -129,6 +129,20 @@ test('運用列 (status) は payload から書き込めない ($fillable 外)', 
     expect($inquiry->closed_at)->toBeNull();
 });
 
+// F-02 再現: 未翻訳キー ('message') ではなくユーザー向け日本語ラベルの文言が返る。
+// 表示文言そのものが検証対象のため意図的に厳密一致 (lang の required 文言を変えたら
+// 本テストも更新する = ユーザーに見える文言の変更を明示的にレビューさせる)
+test('お問い合わせ内容が空だと日本語ラベルのエラー文言が返る', function (): void {
+    // .env.testing は APP_LOCALE=en のため、日本語文言の検証対象ロケールを明示する
+    $this->app->setLocale('ja');
+
+    $response = $this->from('/contact')
+        ->post('/contact', validInquiryPayload(['message' => '']));
+
+    // 検証対象は「表示文言」。エラー bag のキーが 'message' であること自体は仕様
+    $response->assertSessionHasErrors(['message' => 'お問い合わせ内容は必須項目です。']);
+});
+
 test('throttle:inquiry が同一 IP の連続送信を 429 で抑制する', function (): void {
     // limiter は validation 前に走るため、payload は空でもヒット数に数えられる
     for ($i = 0; $i < 5; $i++) {
