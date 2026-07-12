@@ -10,7 +10,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Billing\BillingCheckoutRequest;
 use App\Models\Billing\Plan;
 use App\Models\User;
-use App\Services\Billing\PortalConfigurationSpec;
+use App\Services\Billing\SubscriptionCheckoutGateway;
 use App\Services\Billing\TicketLedgerService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -65,8 +65,11 @@ class BillingController extends Controller
         ]);
     }
 
-    /** Stripe Checkout を開始し、Checkout URL へリダイレクトする */
-    public function checkout(BillingCheckoutRequest $request): SymfonyResponse|RedirectResponse
+    /**
+     * Stripe Checkout を開始し、Checkout URL へリダイレクトする
+     * (戻り型に RedirectResponse を含むのは price 不在時の back() 分岐のため)
+     */
+    public function checkout(BillingCheckoutRequest $request, SubscriptionCheckoutGateway $gateway): SymfonyResponse|RedirectResponse
     {
         $organization = $this->resolveCurrentOrganization($request);
         Gate::authorize('manageBilling', $organization);
@@ -80,32 +83,23 @@ class BillingController extends Controller
             return back()->with('error', '選択したプランは現在お申し込みいただけません。');
         }
 
-        $checkout = $organization
-            ->newSubscription('default', $price->stripe_price_id)
-            ->checkout([
-                'success_url' => route('billing.index'),
-                'cancel_url' => route('billing.index'),
-            ]);
-
-        $url = $checkout->asStripeCheckoutSession()->url;
-        Assert::string($url, 'Checkout Session に URL がありません (ui_mode: hosted のみ対応)');
+        $redirect = $gateway->createSubscriptionCheckout(
+            $organization,
+            $price->stripe_price_id,
+            route('billing.index'),
+            route('billing.index'),
+        );
 
         // 外部 URL への遷移は Inertia::location (full page redirect)
-        return Inertia::location($url);
+        return Inertia::location($redirect->url);
     }
 
     /** Stripe Customer Portal へリダイレクトする (支払い方法・解約の自己管理) */
-    public function portal(Request $request): SymfonyResponse
+    public function portal(Request $request, SubscriptionCheckoutGateway $gateway): SymfonyResponse
     {
         $organization = $this->resolveCurrentOrganization($request);
         Gate::authorize('manageBilling', $organization);
 
-        // configuration id (billing:ensure-portal-configuration で生成) が設定されていれば
-        // subscription_update 無効の spec 準拠 configuration で portal session を作る
-        // (未設定なら Dashboard 既定 configuration。PortalConfigurationSpec 参照)
-        return Inertia::location($organization->billingPortalUrl(
-            route('billing.index'),
-            PortalConfigurationSpec::sessionOptions(config('cashier.portal_configuration_id')),
-        ));
+        return Inertia::location($gateway->portalRedirect($organization, route('billing.index'))->url);
     }
 }

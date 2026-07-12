@@ -35,8 +35,7 @@ use Webmozart\Assert\Assert;
  */
 class BughuntOAuthSeeder extends Seeder
 {
-    /** bug-hunt DB 名の許容 regex (bug-hunt 隔離規約と一致)。 */
-    private const string BUGHUNT_DB_REGEX = '/^bug_hunt(_[1-8])?$/';
+    use Concerns\DetectsBughuntDatabase;
 
     /** legacy MCP token の決定論 id (冪等キー)。char(80) PK に収まる固定値。 */
     private const string LEGACY_MCP_TOKEN_ID_PREFIX = 'bughunt-legacy-mcp-token';
@@ -50,11 +49,10 @@ class BughuntOAuthSeeder extends Seeder
     public function run(): void
     {
         // fail-secure 三軸: fake_externals かつ bughunt.local かつ DB 名 bug_hunt* の全成立時のみ。
-        $dbName = DB::connection()->getDatabaseName();
         if (
             config('testing.fake_externals') !== true
             || ! app()->environment('bughunt.local')
-            || preg_match(self::BUGHUNT_DB_REGEX, $dbName) !== 1
+            || ! $this->isBughuntDatabase()
         ) {
             $this->command->warn('BughuntOAuthSeeder: fake_externals / bughunt.local / bug_hunt DB のいずれか不成立のため skip (production/dev safety)。');
 

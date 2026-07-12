@@ -55,6 +55,16 @@ test('owner は購入画面で tiers / 残高 / canManage / attemptToken を受�
             ->has('page.attemptToken'));
 });
 
+test('fake_external marker query は purchased 表示に転用されない (アプリ非解釈)', function (): void {
+    [, $owner] = createOrganizationWithOwner();
+
+    // runtime fake (FakeExternalsServiceProvider) の中立帰還 URL に付く観測用 marker。
+    // アプリはこの query を一切解釈しない = purchased 偽装にならないことを固定する
+    $this->actingAs($owner)->get('/purchase-tickets?fake_external=stripe')
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page->where('page.purchased', false));
+});
+
 test('member は閲覧可能 (canManage=false) だが POST は 403', function (): void {
     [$organization] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization);

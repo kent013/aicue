@@ -15,6 +15,7 @@ beforeEach(function (): void {
     config(['security.csp.enabled' => true]);
     config(['debug.login.user' => '']);
     config(['debug.login.password' => '']);
+    config(['testing.fake_externals' => false]);
     config(['trusted_hosts.exact_hosts' => ['app.example.com']]);
     config(['trusted_hosts.wildcard_suffixes' => []]);
     config(['trusted_hosts.raw_wildcard_suffixes' => []]);
@@ -91,6 +92,13 @@ test('DEBUG_LOGIN_PASSWORD が production で残っていたら violation', func
     $errors = (new ProductionEnvGuard)->violations();
     expect($errors)->toHaveCount(1);
     expect($errors[0])->toContain('DEBUG_LOGIN');
+});
+
+test('TESTING_FAKE_EXTERNALS が true なら violation', function (): void {
+    config(['testing.fake_externals' => true]);
+    $errors = (new ProductionEnvGuard)->violations();
+    expect($errors)->toHaveCount(1);
+    expect($errors[0])->toContain('TESTING_FAKE_EXTERNALS');
 });
 
 test('TrustHosts allowlist が空なら violation', function (): void {

@@ -518,6 +518,51 @@ cmd_assets_check() {
     return 1
 }
 
+# --- filament assets guard (worktree は composer install --no-scripts のため -----
+#     post-autoload-dump の filament:upgrade が走らず public/*/filament が欠落する)
+
+FILAMENT_ASSET_MARKER=public/js/filament/.bughunt-filament-version
+FILAMENT_REQUIRED_ASSETS=(public/js/filament/filament/app.js public/css/filament/filament/app.css)
+
+filament_version_from_lock() {
+    php -r '
+        $lock = json_decode((string) file_get_contents("composer.lock"), true);
+        foreach (($lock["packages"] ?? []) as $p) {
+            if (($p["name"] ?? "") === "filament/filament") { echo $p["version"] ?? ""; return; }
+        }
+    ' 2>/dev/null
+}
+
+filament_assets_present() {
+    local f
+    for f in "${FILAMENT_REQUIRED_ASSETS[@]}"; do
+        [[ -s "${f}" ]] || return 1
+    done
+    return 0
+}
+
+# 冪等 publish: marker (composer.lock の filament version) 一致 ∧ 必須アセット実在なら skip。
+# marker は filament:assets 成功後にのみ書く (失敗時は残さず次回再実行)。
+# 並列 fan-out (provision-all) は shard を直列 provision するため race しない。
+# 将来 provision を並列化する場合は本 helper を worktree 単位の事前フェーズへ移すこと。
+ensure_filament_assets() {
+    local db=$1 url=$2
+    is_dryrun && return 0
+    local version; version="$(filament_version_from_lock)"
+    [[ -z "${version}" ]] \
+        && echo "warning: composer.lock から filament/filament version を解決できない (marker skip 不可 = 毎回 publish 判定)" >&2
+    if [[ -n "${version}" && -f "${FILAMENT_ASSET_MARKER}" \
+        && "$(cat "${FILAMENT_ASSET_MARKER}")" == "${version}" ]] && filament_assets_present; then
+        return 0
+    fi
+    echo ">>> filament assets missing/stale → filament:assets"
+    artisan_for_shard "${db}" "${url}" filament:assets
+    filament_assets_present \
+        || die 1 "filament:assets 実行後も必須アセットが無い (${FILAMENT_REQUIRED_ASSETS[*]})。filament の publish 先変更を疑い、artisan filament:assets の出力を確認すること"
+    [[ -n "${version}" ]] && printf '%s' "${version}" > "${FILAMENT_ASSET_MARKER}"
+    return 0
+}
+
 cmd_keepdb_check() {
     local shard=$1
     cmd_assets_check || die 1 "--keep-db reuse 中止: アセットが stale (上記理由)。provision をスキップせず再 provision してください。"
@@ -592,6 +637,9 @@ cmd_provision() {
     #     (ドメイン固有シーダーはアプリ側で本ブロックに追記する)。
     artisan_for_shard "${db}" "${url}" migrate:fresh --seed --force
     artisan_for_shard "${db}" "${url}" db:seed --class=ManualTestSeeder --force
+    # 有料プラン組織に active subscription + 初期チケットを付与 (三重ガード付き)。
+    # free 組織は未契約のまま = 課金なし経路の探索能力を温存する。
+    artisan_for_shard "${db}" "${url}" db:seed --class=BughuntBillingSeeder --force
     # 管理画面 (Filament admin) 探索用 admin user。AdminUserSeeder は local 限定 (DatabaseSeeder が
     # local でしか呼ばない) のため bughunt では明示 seed する。admin MFA は .env.bughunt.local の
     # ADMIN_MFA_REQUIRED=false で無効化済 (email+password ログイン可)。
@@ -599,6 +647,9 @@ cmd_provision() {
     # CLI OAuth client + CLI session + legacy MCP token を直付与 (fake_externals かつ bughunt.local かつ
     # bug_hunt DB の三重ガード付き。config('testing.fake_externals') 未導入なら seeder 側で no-op)。
     artisan_for_shard "${db}" "${url}" db:seed --class=BughuntOAuthSeeder --force
+
+    # (b2) Filament 静的アセット publish (F-13 対策)。冪等 (marker + 実在確認で skip)。
+    ensure_filament_assets "${db}" "${url}"
 
     # (c) 実効 env 検証 (不一致 fail-fast)
     local effective
@@ -745,6 +796,9 @@ cmd_reseed() {
     db="$(shard_db "${shard}")"; url="$(shard_url "${shard}")"
     artisan_for_shard "${db}" "${url}" migrate:fresh --seed --force
     artisan_for_shard "${db}" "${url}" db:seed --class=ManualTestSeeder --force
+    # 有料プラン組織に active subscription + 初期チケットを付与 (三重ガード付き)。
+    # free 組織は未契約のまま = 課金なし経路の探索能力を温存する。
+    artisan_for_shard "${db}" "${url}" db:seed --class=BughuntBillingSeeder --force
     artisan_for_shard "${db}" "${url}" db:seed --class=AdminUserSeeder --force
     artisan_for_shard "${db}" "${url}" db:seed --class=BughuntOAuthSeeder --force
     echo "reseeded: ${db}"

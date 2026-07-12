@@ -72,7 +72,14 @@ test('presignUpload は checksum / content-type を署名対象に含む presign
     expect($presigned->url)->toContain('s3.invalid.test');
     expect($presigned->url)->toContain('projects/1/manuals/2/cuts/3/takes/01TEST.mp4');
     expect($presigned->url)->toContain('X-Amz-Signature=');
-    expect($presigned->url)->toContain('X-Amz-Expires=1800');
+    // 失効時刻 = X-Amz-Date + X-Amz-Expires が渡した expiresAt と正確に一致する
+    // (SDK は Expires 秒数を内部 time() 基準で算出するため、テスト側 now() との間に
+    // クライアント初回ビルド等の遅延が入ると固定値 1800 の照合は秒境界で flake する。
+    // 署名日時基準で失効時刻そのものを検証する方が厳密かつ決定的)
+    expect(preg_match('/X-Amz-Date=(\d{8}T\d{6}Z)/', $presigned->url, $dateMatch))->toBe(1);
+    expect(preg_match('/X-Amz-Expires=(\d+)/', $presigned->url, $expiresMatch))->toBe(1);
+    $signedAt = CarbonImmutable::createFromFormat('Ymd\THis\Z', $dateMatch[1], 'UTC');
+    expect($signedAt->getTimestamp() + (int) $expiresMatch[1])->toBe($expiresAt->getTimestamp());
     // D2b: checksum が署名に固定される (query パラメータ + SignedHeaders の両方。
     // content-type/length は PHP SDK が presign 署名から除外するため、その照合は
     // HeadObject 三点照合が担う = checksum が内容とサイズを一意に固定する)
