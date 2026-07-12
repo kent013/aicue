@@ -217,13 +217,13 @@
                 />
             </div>
 
-            {#if !billing.has_active_subscription}
+            {#if !billing.has_billing_access}
                 <Card class="mt-6" testId="billing-callout">
                     <p class="text-body text-text">
-                        有効なサブスクリプションがありません。プランを契約すると、マニュアルの作成・撮影を再開できます。
+                        サブスクリプションのお支払いが確認できないため、一部機能を一時停止しています。お支払い方法をご確認ください。
                     </p>
                     <div class="mt-4">
-                        <Button href="/billing" inertia>プランを見る</Button>
+                        <Button href="/billing" inertia>お支払い方法を確認</Button>
                     </div>
                 </Card>
             {/if}

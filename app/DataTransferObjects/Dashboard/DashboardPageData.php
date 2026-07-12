@@ -47,7 +47,7 @@ final readonly class DashboardPageData
      *     pending_cuts_count: int}>,
      *   billing: array{ticket_balance: int, is_low_balance: bool, storage_used_bytes: int,
      *     storage_limit_bytes: int|null, storage_usage_percent: int|null,
-     *     has_active_subscription: bool}|null}
+     *     has_billing_access: bool}|null}
      */
     public function toArray(): array
     {

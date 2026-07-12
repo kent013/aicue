@@ -16,13 +16,13 @@ final readonly class BillingSummaryData
         public int $storageUsedBytes,       // StorageUsageService::occupiedBytes
         public ?int $storageLimitBytes,     // QuotaService::limits[max_storage_bytes] (無制限は null)
         public ?int $storageUsagePercent,   // 0-100 に clamp (limit null なら null)
-        public bool $hasActiveSubscription, // BillingAccess::hasActiveAccess
+        public bool $hasBillingAccess,      // BillingAccess::hasActiveAccess (billing entitlement。free 組織は true)
     ) {}
 
     /**
      * @return array{ticket_balance: int, is_low_balance: bool, storage_used_bytes: int,
      *   storage_limit_bytes: int|null, storage_usage_percent: int|null,
-     *   has_active_subscription: bool}
+     *   has_billing_access: bool}
      */
     public function toArray(): array
     {
@@ -32,7 +32,7 @@ final readonly class BillingSummaryData
             'storage_used_bytes' => $this->storageUsedBytes,
             'storage_limit_bytes' => $this->storageLimitBytes,
             'storage_usage_percent' => $this->storageUsagePercent,
-            'has_active_subscription' => $this->hasActiveSubscription,
+            'has_billing_access' => $this->hasBillingAccess,
         ];
     }
 }

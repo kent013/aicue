@@ -231,7 +231,7 @@ class DashboardService
             storageUsedBytes: $used,
             storageLimitBytes: $limit,
             storageUsagePercent: $percent,
-            hasActiveSubscription: $this->billingAccess->hasActiveAccess($organization),
+            hasBillingAccess: $this->billingAccess->hasActiveAccess($organization),
         );
     }
 }

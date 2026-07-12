@@ -18,7 +18,12 @@ use Illuminate\Support\Carbon;
  * - 価格の真実源は plan_prices (DB snapshot)。ここでは bootstrap 行
  *   (stripe_price_id=price_test_* / livemode=false / synced_at=null) を投入し、
  *   実運用では `billing:sync-stripe-prices` が Stripe Catalog の実 Price ID へ上書きする
- * - free プランは Stripe Price を持たない (Checkout 対象外。未契約の既定)
+ * - free プランは Stripe Price を持たない (Checkout 対象外。未契約の既定)。
+ *   これは BillingAccess の entitlement 判定の前提でもある: plan_code は Stripe Price →
+ *   Plan 解決 (StripeWebhookProcessor) でのみ set されるため、Price を持たない free が
+ *   plan_code に載る経路はない (null = 未契約 = 支払い不要の free tier)。free に Price を
+ *   持たせる場合は BillingAccess とセットで見直すこと
+ *   (RequireActiveSubscriptionMiddlewareTest が固定)
  */
 class PlanSeeder extends Seeder
 {

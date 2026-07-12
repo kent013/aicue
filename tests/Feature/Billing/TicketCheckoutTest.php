@@ -78,7 +78,7 @@ test('current org を持たないユーザーは 404', function (): void {
 
 test('未契約 org (subscription なし) でも GET/POST に到達できる (課金ゲート対象外)', function (): void {
     $fake = fakeTicketGateway();
-    [, $owner] = createOrganizationWithOwner(subscribed: false);
+    [, $owner] = createOrganizationWithOwner();
 
     $this->actingAs($owner)->get('/purchase-tickets')->assertOk();
 

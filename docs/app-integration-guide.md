@@ -132,6 +132,12 @@
   group に含めない構造的 allowlist)。判定方針を変えたいアプリは `BillingAccess` の
   書き換え(または container での差し替え bind)だけで済ませる(spirux は
   billing_access_state カラム判定、aigenba は entitlement 導出に差し替えた実績)。
+  本アプリ (AI-CUE) は entitlement 判定へ書き換え済み: `organizations.plan_code` null
+  (未契約) = 支払い不要の free tier として許可し、plan_code 非 null (有償プラン契約中)
+  のみ支払い健全性 (active/trialing) を要求する。plan_code は Stripe Price を持つ
+  有償プランの契約時のみ webhook が set し subscription.deleted で null に戻す状態キー —
+  支払い不要のプランを plan_code に載せる場合は `BillingAccess` とセットで見直すこと
+  (`RequireActiveSubscriptionMiddlewareTest` が固定)。
 
 ## 5. API・外部公開面のマッピング
 
@@ -181,7 +187,9 @@ LLM を使う機能が要件に来たら、まず利用形態を分類する:
 6. **任意 class の逆シリアライズを許さない**(cache serializable_classes は既定 false。
    object cache が必要になったときだけ最小 allowlist)
 7. **課金系の冪等性**: webhook は冪等マシン経由、消費は 2 フェーズ、通知は dedup_key。
-   課金による利用可否の判定は `BillingAccess` 経由のみ(subscription 直参照の gate 分岐禁止)
+   課金による利用可否の判定は `BillingAccess` 経由のみ(subscription 直参照の gate 分岐禁止。
+   AI-CUE の判定は billing entitlement: plan_code null = free tier 許可 / 有償契約中のみ
+   支払い健全性を要求)
 8. **テストなしの実装完了はない**(不変条件 1-7 はそれぞれ対応する Architecture/Feature
    テストに新リソースを登録して初めて「実装済み」)
 

@@ -33,7 +33,7 @@ function agedSubscription(): Subscription
 {
     [$organization] = createOrganizationWithOwner();
     /** @var Subscription $subscription */
-    $subscription = $organization->subscriptions()->sole();
+    $subscription = createFakeSubscription($organization);
     $subscription->forceFill(['created_at' => now()->subHours(2)])->save();
 
     return $subscription;
@@ -41,6 +41,7 @@ function agedSubscription(): Subscription
 
 test('subscriptions() はテンプレート拡張 Subscription モデルを返す (useSubscriptionModel)', function (): void {
     [$organization] = createOrganizationWithOwner();
+    createFakeSubscription($organization);
 
     expect($organization->subscriptions()->sole())->toBeInstanceOf(Subscription::class);
 });
@@ -75,6 +76,7 @@ test('retryMissing: remote にも schedule が無ければ何もしない', func
 
 test('retryMissing: 作成 1h 未満の subscription は in-flight とみなし照会しない', function (): void {
     [$organization] = createOrganizationWithOwner();
+    createFakeSubscription($organization);
     $this->mock(StripeScheduleGateway::class)
         ->shouldReceive('retrieve')->never();
 
@@ -88,7 +90,7 @@ test('retryMissing: 作成 1h 未満の subscription は in-flight とみなし�
 test('retryPartial: Created で remote phases 設定済みなら Configured へ昇格する', function (): void {
     [$organization] = createOrganizationWithOwner();
     /** @var Subscription $subscription */
-    $subscription = $organization->subscriptions()->sole();
+    $subscription = createFakeSubscription($organization);
     $subscription->markScheduleCreated('sub_sched_partial_1');
 
     $this->mock(StripeScheduleGateway::class)
@@ -105,7 +107,7 @@ test('retryPartial: Created で remote phases 設定済みなら Configured へ�
 test('retryPartial: remote から schedule が消えていれば None へ reset する', function (): void {
     [$organization] = createOrganizationWithOwner();
     /** @var Subscription $subscription */
-    $subscription = $organization->subscriptions()->sole();
+    $subscription = createFakeSubscription($organization);
     $subscription->markScheduleCreated('sub_sched_gone_1');
 
     $this->mock(StripeScheduleGateway::class)
@@ -125,10 +127,10 @@ test('1 件の Stripe 例外で全体を止めない (warning + continue)', func
     [$org1] = createOrganizationWithOwner();
     [$org2] = createOrganizationWithOwner();
     /** @var Subscription $failing */
-    $failing = $org1->subscriptions()->sole();
+    $failing = createFakeSubscription($org1);
     $failing->markScheduleCreated('sub_sched_err_1');
     /** @var Subscription $healthy */
-    $healthy = $org2->subscriptions()->sole();
+    $healthy = createFakeSubscription($org2);
     $healthy->markScheduleCreated('sub_sched_ok_1');
 
     $mock = $this->mock(StripeScheduleGateway::class);
