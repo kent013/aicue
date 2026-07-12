@@ -15,10 +15,13 @@ use Laravel\Fortify\Contracts\SuccessfulPasswordResetLinkRequestResponse as Succ
  *
  * Fortify 標準は user 在/不在で異なるレスポンス (成功 flash vs エラー) を返すため
  * account enumeration を許してしまう。user 在/不在を問わず常に同一の
- * 「送信しました」flash を返して抑止する。
+ * 「送信しました」flash (キーは success = flash-to-toast の消費対象) を返して抑止する。
  *
  * 成功 (SuccessfulPasswordResetLinkRequestResponse) / 失敗
  * (FailedPasswordResetLinkRequestResponse) の両契約を本クラスに差し替える。
+ *
+ * `STATUS_MESSAGE` は Fortify の status 言語キーに対応するメッセージ内容の意味であり、
+ * flash キー名 (`success`) とは無関係。
  */
 final class EnumerationSafePasswordResetLinkResponse implements FailedPasswordResetLinkRequestResponseContract, SuccessfulPasswordResetLinkRequestResponseContract
 {
@@ -40,7 +43,9 @@ final class EnumerationSafePasswordResetLinkResponse implements FailedPasswordRe
             return new JsonResponse(['message' => self::STATUS_MESSAGE], 200);
         }
 
-        return back()->with('status', self::STATUS_MESSAGE);
+        // flash キー統一ポリシー: web 向け操作成功 flash は success に統一する
+        // (status は flash-to-toast が意図的に gating しており toast にならない = F-06)
+        return back()->with('success', self::STATUS_MESSAGE);
     }
 
     /**

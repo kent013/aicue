@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { page, router } from "@inertiajs/svelte";
+    import { page } from "@inertiajs/svelte";
     import { Bell, Building, Camera, FolderPlus, HardDrive, Loader, Ticket } from "@lucide/svelte";
     import Badge from "@/components/atoms/Badge.svelte";
     import Button from "@/components/atoms/Button.svelte";
@@ -29,23 +29,6 @@
     const project = $derived(dashboard.project);
     const isEditor = $derived(dashboard.role === "editor");
     const isShooter = $derived(dashboard.role === "shooter");
-
-    let loggingOut = $state(false);
-
-    function logout(): void {
-        router.post(
-            "/logout",
-            {},
-            {
-                onStart: () => {
-                    loggingOut = true;
-                },
-                onFinish: () => {
-                    loggingOut = false;
-                },
-            },
-        );
-    }
 
     /** バイト数の可読表記 (残容量タイルの subtext 用) */
     function formatBytes(bytes: number): string {
@@ -151,14 +134,8 @@
     </Card>
 {/snippet}
 
+<!-- 設定/ログアウトのヘッダーナビは AppLayout が常設する (F-08。page-local に持たない) -->
 <AppLayout {appName}>
-    {#snippet headerActions()}
-        <TextLink href="/settings">設定</TextLink>
-        <Button variant="ghost" size="sm" onclick={logout} loading={loggingOut}>
-            ログアウト
-        </Button>
-    {/snippet}
-
     <h1 class="text-h2">{user?.name ?? ""} さん、ようこそ</h1>
     <p class="mt-1 text-caption text-text-secondary">今日のアクティビティを確認しましょう。</p>
 
