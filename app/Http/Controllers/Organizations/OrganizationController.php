@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Organizations;
 
 use App\Enums\TwoFactorStatus;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Organizations\StoreOrganizationRequest;
 use App\Http\Requests\Organizations\UpdateOrganizationRequest;
 use App\Models\Organization;
 use App\Models\User;
@@ -34,15 +35,12 @@ class OrganizationController extends Controller
     }
 
     /** 新規組織作成 → provisioning (Default Team 込み) → 作成した組織へ切替 */
-    public function store(Request $request, OrganizationProvisioningService $provisioning): RedirectResponse
+    public function store(StoreOrganizationRequest $request, OrganizationProvisioningService $provisioning): RedirectResponse
     {
         $user = $request->user();
         Assert::isInstanceOf($user, User::class);
 
-        $request->validate([
-            'name' => ['required', 'string', 'max:255'],
-        ]);
-        $name = $request->input('name');
+        $name = $request->validated('name');
         Assert::string($name);
 
         $organization = $provisioning->provision($user, $name);
