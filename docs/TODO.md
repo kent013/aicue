@@ -21,7 +21,6 @@
 
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
-| T011 | confirm-password 直アクセス500の修正(F-11) | backend | confirm直アクセス500をフォールバック | High | standalone | [設計](devnotes/20260712-0925-bugfix-auth-confirm-password-500/) | 2026-07-12 10:19 |
 | T012 | コピー崩れの修正(F-01 APP_NAME未展開 / F-02 未翻訳キー) | frontend | APP_NAME展開+バリデーション訳キー補完 | Medium | standalone | [設計](devnotes/20260712-0926-bugfix-i18n-copy/) | 2026-07-12 10:19 |
 | T013 | UX整備(F-03/F-06 feedback欠落・F-08 ナビ不統一・F-14 モバイル横スクロール) | frontend | 成功flash補完+ナビ統一+モバイル横スクロール対応 | Medium | standalone | [設計](devnotes/20260712-0953-bugfix-ux-feedback-nav-responsive/) | 2026-07-12 10:19 |
 | T014 | 欠落UIの追加(F-10 リカバリコード再生成 / F-12 オーナー移譲) | frontend | 定義済みでUI欠落の2操作の画面追加 | Medium | standalone | [設計](devnotes/20260712-0949-missing-operation-ui/) | 2026-07-12 10:19 |
