@@ -8,8 +8,10 @@
     import TextLink from "@/components/atoms/TextLink.svelte";
     import FormField from "@/components/molecules/FormField.svelte";
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
+    import RecentAuthModal from "@/components/organisms/RecentAuthModal.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
     import { useForm } from "@inertiajs/svelte";
+    import { withRecentAuth, type RecentAuthStatus } from "@/lib/recent-auth";
     import type { SharedProps } from "@/lib/shared-props";
     import { providerLabel } from "@/lib/social";
     import { addToast } from "@/lib/stores/toast";
@@ -30,9 +32,33 @@
      * 未有効 → 有効化開始 (POST) → QR + コード確認 (confirming)
      * → リカバリコード表示 → 有効。無効化は ConfirmDialog 経由。
      * 注: Fortify の password.confirm は撤去済み (generic recent-auth へ統一)。
-     * 2FA エンドポイントへの recent-auth 配線はアプリ側の課題
-     * (config/fortify.php の TODO(template) 参照)。
+     * リカバリコード表示/再生成の endpoint は recent-auth 配線済み
+     * (FortifyServiceProvider::attachRecentAuthToSensitiveRoutes())。フロントは
+     * guardWithRecentAuth で precheck し、stale なら再認証モーダルを挟んで再開する。
+     * 残る 2FA endpoint の配線は config/fortify.php の TODO(template) 参照。
      * ---------------------------------------------------------------- */
+
+    /* ---- recent-auth (step-up) precheck。stale なら再認証モーダルを挟んで再開する ---- */
+    let recentAuthOpen = $state(false);
+    let recentAuthStatus = $state<RecentAuthStatus | null>(null);
+    let pendingAction: (() => void) | null = null;
+
+    function guardWithRecentAuth(action: () => void): void {
+        void withRecentAuth({
+            onFresh: action,
+            onStale: (status) => {
+                recentAuthStatus = status;
+                pendingAction = action;
+                recentAuthOpen = true;
+            },
+        });
+    }
+
+    function resumePendingAction(): void {
+        const action = pendingAction;
+        pendingAction = null;
+        action?.();
+    }
 
     /** QR 確認待ち (有効化開始済みだが未確認) */
     let confirming = $state(false);
@@ -82,11 +108,18 @@
         }
     }
 
-    /** 「リカバリコードを表示」押下時 (既存挙動の維持: 失敗は取得失敗トースト) */
-    async function showRecoveryCodes(): Promise<void> {
-        if (!(await loadRecoveryCodes())) {
-            addToast("error", "リカバリコードの取得に失敗しました。");
-        }
+    /**
+     * 「リカバリコードを表示」押下時 (失敗は取得失敗トースト)。
+     * GET も recent-auth 配線済みのため precheck を通す (stale なら再認証モーダル→再開)。
+     */
+    function showRecoveryCodes(): void {
+        guardWithRecentAuth(() => {
+            void (async () => {
+                if (!(await loadRecoveryCodes())) {
+                    addToast("error", "リカバリコードの取得に失敗しました。");
+                }
+            })();
+        });
     }
 
     /* ---- リカバリコード再生成 (F-10) ----
@@ -117,27 +150,30 @@
         );
     }
 
+    /** 再生成は recent-auth 必須 (サーバが最終ゲート)。stale なら再認証モーダル→再開 */
     function regenerateRecoveryCodes(): void {
-        router.post(
-            "/user/two-factor-recovery-codes",
-            {},
-            {
-                preserveScroll: true,
-                onStart: () => {
-                    regenerating = true;
+        guardWithRecentAuth(() => {
+            router.post(
+                "/user/two-factor-recovery-codes",
+                {},
+                {
+                    preserveScroll: true,
+                    onStart: () => {
+                        regenerating = true;
+                    },
+                    onSuccess: () => {
+                        void handleRegenerateSuccess();
+                    },
+                    onError: () => {
+                        regenerateDialogOpen = false;
+                        addToast("error", "リカバリコードの再生成に失敗しました。");
+                    },
+                    onFinish: () => {
+                        regenerating = false;
+                    },
                 },
-                onSuccess: () => {
-                    void handleRegenerateSuccess();
-                },
-                onError: () => {
-                    regenerateDialogOpen = false;
-                    addToast("error", "リカバリコードの再生成に失敗しました。");
-                },
-                onFinish: () => {
-                    regenerating = false;
-                },
-            },
-        );
+            );
+        });
     }
 
     function enableTwoFactor(): void {
@@ -168,7 +204,7 @@
                 confirming = false;
                 qrSvg = null;
                 confirmForm.reset();
-                void showRecoveryCodes();
+                showRecoveryCodes();
             },
         });
     }
@@ -243,7 +279,7 @@
                         <div>
                             <Button
                                 variant="ghost"
-                                onclick={() => void showRecoveryCodes()}
+                                onclick={showRecoveryCodes}
                                 loading={loadingRecoveryCodes}
                                 testId="show-recovery-codes-button"
                             >
@@ -371,5 +407,13 @@
         processing={regenerating}
         onConfirm={regenerateRecoveryCodes}
         testId="regenerate-recovery-codes-dialog"
+    />
+
+    <RecentAuthModal
+        bind:open={recentAuthOpen}
+        passwordSet={recentAuthStatus?.passwordSet ?? false}
+        availableProviders={recentAuthStatus?.availableProviders ?? []}
+        canSatisfy={recentAuthStatus?.canSatisfy ?? true}
+        onConfirmed={resumePendingAction}
     />
 </AppLayout>

@@ -30,6 +30,10 @@ function recentAuthRequiredRouteNames(): array
         'organizations.two-factor-requirement.update',
         // メンバー 2FA リセット (アカウント全体の第二要素を外す機微操作)
         'organizations.members.two-factor.reset',
+        // リカバリコード表示 / 再生成 (第二要素の bypass 経路。Fortify 登録ルートへ
+        // FortifyServiceProvider::attachRecentAuthToSensitiveRoutes() が後付け配線)
+        'two-factor.recovery-codes',
+        'two-factor.regenerate-recovery-codes',
     ];
 }
 

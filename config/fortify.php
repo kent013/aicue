@@ -154,9 +154,11 @@ return [
             // Fortify 標準の password.confirm (3h・パスワード限定) は無効化し、step-up を
             // generic recent-auth (15 分窓・パスワード or 再SSO) へ統一する。SSO-only ユーザーを
             // password 固定の確認画面で詰ませないため。
-            // TODO(template): この撤去により 2FA 管理エンドポイント (enable/confirm/disable/
-            // recovery-codes/qr-code/secret-key) は step-up なしで到達可能になる。アプリでは
-            // Fortify 登録ルートへ recent-auth を後付け配線して固めること
+            // recovery-codes (GET/POST) は FortifyServiceProvider::attachRecentAuthToSensitiveRoutes()
+            // で recent-auth を後付け配線済み (RecentAuthRouteTest が CI 固定)。
+            // TODO(template): 残る 2FA 管理エンドポイント (enable/confirm/disable/qr-code/secret-key)
+            // は step-up なしで到達可能。enable/confirm は enrollment 動線 (2FA 強制組織の
+            // オンボーディング) と衝突しない設計を決めてから同方式で固めること
             // (参照: aigenba RequireRecentAuthOnFortifyRoutes / spirux attachFortifyRouteMiddleware)。
             'confirmPassword' => false,
         ]),
