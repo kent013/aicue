@@ -8,10 +8,10 @@ use App\Http\Requests\Concerns\ProhibitsProtectedKeys;
 use Illuminate\Foundation\Http\FormRequest;
 
 /**
- * 組織名更新。Policy 検証は Controller 側 ($this->authorize) で行う
+ * 組織作成。認可は「認証済みユーザーなら誰でも作成可」のため常に true
  * (FormRequest は validation 単独責務 = テンプレート規約)。
  */
-class UpdateOrganizationRequest extends FormRequest
+class StoreOrganizationRequest extends FormRequest
 {
     use ProhibitsProtectedKeys;
 
@@ -35,8 +35,9 @@ class UpdateOrganizationRequest extends FormRequest
      */
     public function attributes(): array
     {
-        // UI ラベル (Organizations/Settings.svelte「組織名」) と揃える。
-        // グローバル attributes の 'name' => '名前' より優先される局所上書き。
+        // UI ラベル (Organizations/Create.svelte「組織名」) と揃える。
+        // グローバル attributes の 'name' => '名前' より優先される局所上書き
+        // (UpdateOrganizationRequest と対称)。
         return ['name' => '組織名'];
     }
 }
