@@ -88,6 +88,14 @@ return Application::configure(basePath: dirname(__DIR__))
             BlockTwoFactorDisableForEnforcedOrganizations::class,
         ]);
 
+        // パスワード変更/リセット時に他デバイスのセッション・remember-me を確実に失効させるため、
+        // web グループで AuthenticateSession (alias 'auth.session') を有効化する。
+        // 各認証済みリクエストで session 保存の password_hash と現在ハッシュを照合し、不一致なら
+        // 現在デバイスを logout する (guest は no-op)。Auth::logoutOtherDevices() の実効性はこの
+        // middleware が担保する (Laravel 標準の "Log Out Other Browser Sessions" 構成)。
+        // Filament panel は独自 middleware stack を持ち web グループを経由しないため二重適用にならない。
+        $middleware->authenticateSessions();
+
         // REST API v1 / MCP の middleware alias (routes/api.php・routes/ai.php で使う)。
         // API キー認証は auth guard ('auth:api-key') に置換済みのため alias なし。
         // recent-auth は web の機微操作 route 用 (generic step-up 再認証)。
