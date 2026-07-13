@@ -46,7 +46,7 @@
         <server name="QUEUE_CONNECTION" value="sync" force="true"/>
         <server name="SESSION_DRIVER" value="array" force="true"/>
         <!--
-          LLM 実通信遮断 (二層防御)。主防御は StrayLlmCallGuard + BrowserPromptFake
+          LLM 実通信遮断 (二層防御)。主防御は StrayLlmCallGuard + CannedPromptFake
           (tests/Pest.php の Browser lane)。新 LLM provider 導入時は phpunit.xml と
           あわせてここにもダミー値を追加すること。
         -->

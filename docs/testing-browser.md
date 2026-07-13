@@ -46,7 +46,7 @@ pest 終了後に orphan 化した `playwright run-server` (node) はスクリ�
 ## テストの書き方
 
 `tests/Browser/` 配下に置く。suite の配線は `tests/Pest.php` の Browser lane
-(TestCase + RefreshDatabase + StrayLlmCallGuard + BrowserPromptFake) と
+(TestCase + RefreshDatabase + StrayLlmCallGuard + CannedPromptFake) と
 `phpunit.browser.xml` が担う。既定 `phpunit.xml` の testsuite には含まれないため、
 `composer test` からは実行されない。
 
@@ -83,9 +83,10 @@ Browser lane では LLM 呼び出しを二層で遮断する (`tests/Pest.php` �
 
 1. **StrayLlmCallGuard** (Feature/Unit と共通): 未 fake の LLM 呼び出しは accumulator に
    記録され afterEach で fail する。
-2. **BrowserPromptFake** (`app/Services/AI/Testing/`): `Prompt` 実行を prompt class 単位の
-   決定論 canned response に差し替える (sequence 枯渇しない無限供給)。
-   `BrowserPromptFakeRegistrar` が `Prompt::installFake()` で beforeEach ごとにインストールする。
+2. **CannedPromptFake** (`app/Services/AI/Testing/`): `Prompt` 実行を SystemMessage の役割文
+   (signature) 単位の決定論 canned response に差し替える (sequence 枯渇しない無限供給)。
+   `CannedPromptFakeRegistrar` が `Prompt::installFake()` で beforeEach ごとにインストールする。
+   この canned 機構は bughunt 実行時 (`FakeExternalsServiceProvider::boot`) とも共有される。
 
 さらに `phpunit.browser.xml` が LLM provider API キーをダミー値で `<server force>` する
 (guard が万一無効化された場合の最終防壁。phpunit.xml と同じ 3 プロバイダ)。
@@ -93,8 +94,10 @@ Browser lane では LLM 呼び出しを二層で遮断する (`tests/Pest.php` �
 ### canned response の追加
 
 新しい Prompt を Browser テストから呼ぶ場合、
-`app/Services/AI/Testing/BrowserCannedResponses.php` の `map()` に 1 行追加する。
-未登録の Prompt から呼ばれると即 `RuntimeException` で fail-fast する (silent green 防止)。
+`app/Services/AI/Testing/CannedPromptResponses.php` の `map()` に
+「system_prompt 固有の一意句 (signature) => canned response」を 1 行追加する。
+どの signature にも一致しない (0 件) / 複数一致 (2 件以上) の Prompt から呼ばれると即
+`RuntimeException` で fail-fast する (silent green 防止)。
 
 キーの注意: `Prompt::load()` を使う factory (例: `App\Prompts\ExampleSummaryPrompt`) は
 generic な `TextPrompt` を実行するため、記録される prompt class は `TextPrompt::class` になる。
