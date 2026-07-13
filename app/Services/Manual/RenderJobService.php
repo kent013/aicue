@@ -181,18 +181,20 @@ class RenderJobService
                 return false;
             }
 
+            // preview/render とも失敗確定時の scenario_version を snapshot する必要があるため、
+            // manual を常に lock で取得する (従来は kind=render のみ取得だった)。ロック順 job → manual。
+            /** @var VideoManual $manual */
+            $manual = VideoManual::query()->whereKey($locked->video_manual_id)->lockForUpdate()->firstOrFail();
+
             $locked->status = JobStatus::Failed;
             $locked->error = $error;
             $locked->error_code = $code;
+            $locked->scenario_version_at_terminal = $manual->scenario_version;
             $locked->save();
 
             // manual 復帰 (kind=render かつ rendering のときのみ。preview は status を触らない)
-            if ($locked->kind === RenderKind::Render) {
-                /** @var VideoManual $manual */
-                $manual = VideoManual::query()->whereKey($locked->video_manual_id)->lockForUpdate()->firstOrFail();
-                if ($manual->status === VideoManualStatus::Rendering) {
-                    $manual->forceFill(['status' => VideoManualStatus::Ready])->save();
-                }
+            if ($locked->kind === RenderKind::Render && $manual->status === VideoManualStatus::Rendering) {
+                $manual->forceFill(['status' => VideoManualStatus::Ready])->save();
             }
 
             // 予約 release (Reserved のみ。並行 commit/release 済みは LogicException → 握って冪等)

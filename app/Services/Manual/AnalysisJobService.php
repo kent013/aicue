@@ -120,13 +120,17 @@ class AnalysisJobService
                 return false;
             }
 
+            // manual を先に lock で取得し (job → manual のロック順を維持)、失敗確定時の
+            // scenario_version を job にスナップショットする (stale alert 判定の順序基準。T032)。
+            /** @var VideoManual $manual */
+            $manual = VideoManual::query()->whereKey($locked->video_manual_id)->lockForUpdate()->firstOrFail();
+
             $locked->status = JobStatus::Failed;
             $locked->error = $error;
+            $locked->scenario_version_at_terminal = $manual->scenario_version;
             $locked->save();
 
             // manual 復帰 (analyzing のときのみ。cuts があれば ready、無ければ draft = 概念設計 §4)
-            /** @var VideoManual $manual */
-            $manual = VideoManual::query()->whereKey($locked->video_manual_id)->lockForUpdate()->firstOrFail();
             if ($manual->status === VideoManualStatus::Analyzing) {
                 $manual->forceFill([
                     'status' => $manual->cuts()->exists() ? VideoManualStatus::Ready : VideoManualStatus::Draft,

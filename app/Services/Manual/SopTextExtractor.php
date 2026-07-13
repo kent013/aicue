@@ -47,7 +47,7 @@ class SopTextExtractor
 
         $bytes = strlen($text);
         if ($bytes < config()->integer('manual.analysis_min_text_bytes')) {
-            throw AnalysisFailedException::unextractable(); // 画像/スキャン → v1 未対応の明示文言
+            throw AnalysisFailedException::tooShort(); // 短い有効テキスト → 画像未対応と別文言
         }
         if ($bytes > config()->integer('manual.analysis_max_text_bytes')) {
             throw AnalysisFailedException::tooLarge();

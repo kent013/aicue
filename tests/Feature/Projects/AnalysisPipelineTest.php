@@ -359,7 +359,7 @@ test('再解析の materialize は既存 cuts を全置換する (旧 cut id が
     expect($manual->cuts()->whereKey($oldCut->id)->exists())->toBeFalse();
 });
 
-test('抽出不能 (実質空の SOP) は failed + ユーザー向け文言', function (): void {
+test('実質空の SOP は failed + tooShort 文言 (画像未対応と弁別)', function (): void {
     [, , , , $document, $job] = pipelineContext();
     Storage::put($document->file_path, '短すぎ'); // min_text_bytes (100) 未満
 
@@ -367,7 +367,8 @@ test('抽出不能 (実質空の SOP) は failed + ユーザー向け文言', fu
 
     $job->refresh();
     expect($job->status)->toBe(JobStatus::Failed);
-    expect($job->error)->toBe('テキストを抽出できません。画像・スキャンの手順書は現在未対応です。');
+    // 抽出はできたが本文が短いケース → 画像/スキャン (unextractable) とは別文言 (T032 F-1-2)
+    expect($job->error)->toBe('手順書の本文が短すぎます。もう少し詳しい手順書をアップロードしてください。');
 });
 
 test('バイト上限超過の SOP は failed (分割を促す文言)', function (): void {

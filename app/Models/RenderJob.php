@@ -35,6 +35,7 @@ use Illuminate\Support\Carbon;
  * @property string|null $output_path
  * @property string|null $error
  * @property RenderErrorCode|null $error_code
+ * @property int|null $scenario_version_at_terminal
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
