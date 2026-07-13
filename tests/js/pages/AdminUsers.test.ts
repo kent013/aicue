@@ -1,7 +1,50 @@
-import { describe, expect, it } from "vitest";
-import { render, screen, within } from "@testing-library/svelte";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
 import Users from "@/pages/Admin/Users.svelte";
 import type { InvitationRow, MemberRow } from "@/types/admin";
+
+// router.patch をモックして visit options (第3引数) を捕捉し、page は errors を
+// 差し替え可能な可変オブジェクトにする (SettingsSecurity.test.ts の手法を踏襲)。
+const { routerPatchMock, routerDeleteMock, routerPostMock, pageState } = vi.hoisted(() => ({
+    routerPatchMock: vi.fn(),
+    routerDeleteMock: vi.fn(),
+    routerPostMock: vi.fn(),
+    pageState: {
+        props: {} as Record<string, unknown>,
+        url: "/manage/users",
+    },
+}));
+
+vi.mock("@inertiajs/svelte", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("@inertiajs/svelte")>()),
+    router: { patch: routerPatchMock, delete: routerDeleteMock, post: routerPostMock },
+    page: pageState,
+}));
+
+/** router.patch の第3引数 (visit options) の検証対象部分。自己参照キャストを避けて明示定義する */
+interface InertiaVisitOptions {
+    onStart?: () => void;
+    onSuccess?: () => void;
+    onError?: () => void;
+    onFinish?: () => void;
+}
+
+/** 最後の router.patch 呼び出しの visit options (第3引数) を取り出す */
+function lastPatchOptions(): InertiaVisitOptions {
+    const call = routerPatchMock.mock.calls.at(-1);
+    if (!call) throw new Error("router.patch が呼ばれていない");
+    return call[2] as InertiaVisitOptions;
+}
+
+// Default Project 不在時にサーバが role error bag へ載せる文言 (拒否ケースの再現用)
+const REJECT_MESSAGE = "編集者・撮影者を割り当てるには、先にプロジェクトを作成してください。";
+
+beforeEach(() => {
+    routerPatchMock.mockReset();
+    routerDeleteMock.mockReset();
+    routerPostMock.mockReset();
+    pageState.props = { appName: "AI-CUE" };
+});
 
 const membersFixture: MemberRow[] = [
     {
@@ -232,5 +275,142 @@ describe("Admin/Users", () => {
         expect(dialog).toBeInTheDocument();
         expect(dialog.textContent).toContain("編集 花子");
         expect(dialog.textContent).toContain("削除しますか");
+    });
+});
+
+describe("Admin/Users ロール変更フィードバック", () => {
+    it("拒否時に対象行 Select が権威値へ戻る", async () => {
+        pageState.props = { appName: "AI-CUE", errors: { role: REJECT_MESSAGE } };
+        render(Users, { props: baseProps });
+
+        const select = screen.getByTestId("member-role-2") as HTMLSelectElement;
+        expect(select).toHaveValue("editor");
+
+        // 一方向 value 伝播では権威値 (editor) と乖離した DOM 選択 (admin) が残る
+        await fireEvent.change(select, { target: { value: "admin" } });
+        expect(routerPatchMock).toHaveBeenCalledTimes(1);
+
+        const options = lastPatchOptions();
+        options.onError?.();
+        options.onFinish?.();
+
+        // remount により権威値 editor へ復帰する
+        await waitFor(() =>
+            expect(screen.getByTestId("member-role-2")).toHaveValue("editor"),
+        );
+    });
+
+    it("拒否時に対象行のみ invalid + combobox 直下にエラーが出る", async () => {
+        pageState.props = { appName: "AI-CUE", errors: { role: REJECT_MESSAGE } };
+        render(Users, { props: baseProps });
+
+        const select = screen.getByTestId("member-role-2") as HTMLSelectElement;
+        await fireEvent.change(select, { target: { value: "admin" } });
+
+        const options = lastPatchOptions();
+        options.onError?.();
+        options.onFinish?.();
+
+        await waitFor(() => {
+            const rejected = screen.getByTestId("member-role-2");
+            expect(rejected).toHaveAttribute("aria-invalid", "true");
+            expect(rejected).toHaveAttribute("aria-describedby", "role-error-2");
+        });
+
+        const error = screen.getByTestId("role-error-2");
+        expect(error).toHaveTextContent(REJECT_MESSAGE);
+        expect(error).toHaveAttribute("id", "role-error-2");
+    });
+
+    it("成功時は新ロールが props で反映され invalid / エラーが残らない", async () => {
+        pageState.props = { appName: "AI-CUE", errors: { role: REJECT_MESSAGE } };
+        const { rerender } = render(Users, { props: baseProps });
+
+        const select = screen.getByTestId("member-role-2") as HTMLSelectElement;
+        await fireEvent.change(select, { target: { value: "admin" } });
+
+        const options = lastPatchOptions();
+        options.onSuccess?.();
+        options.onFinish?.();
+
+        // 成功相当の再取得 props (id=2 が admin へ) で再描画する
+        await rerender({
+            ...baseProps,
+            members: membersFixture.map((member) =>
+                member.id === 2
+                    ? { ...member, roleState: "admin", roleLabel: "管理者" }
+                    : member,
+            ),
+        });
+
+        await waitFor(() =>
+            expect(screen.getByTestId("member-role-2")).toHaveValue("admin"),
+        );
+        expect(screen.getByTestId("member-role-2")).not.toHaveAttribute("aria-invalid");
+        expect(screen.queryByTestId("role-error-2")).toBeNull();
+    });
+
+    it("拒否時に失敗行以外は invalid にならずエラーも出ない", async () => {
+        pageState.props = { appName: "AI-CUE", errors: { role: REJECT_MESSAGE } };
+        render(Users, { props: baseProps });
+
+        const select = screen.getByTestId("member-role-2") as HTMLSelectElement;
+        await fireEvent.change(select, { target: { value: "admin" } });
+
+        const options = lastPatchOptions();
+        options.onError?.();
+        options.onFinish?.();
+
+        await waitFor(() =>
+            expect(screen.getByTestId("member-role-2")).toHaveAttribute(
+                "aria-invalid",
+                "true",
+            ),
+        );
+        expect(screen.getByTestId("member-role-3")).not.toHaveAttribute("aria-invalid");
+        expect(screen.getByTestId("member-role-4")).not.toHaveAttribute("aria-invalid");
+        expect(screen.queryByTestId("role-error-3")).toBeNull();
+        expect(screen.queryByTestId("role-error-4")).toBeNull();
+    });
+
+    it("in-flight 中は全ロール Select が disabled になり onFinish で解除される", async () => {
+        pageState.props = { appName: "AI-CUE", errors: {} };
+        render(Users, { props: baseProps });
+
+        const select = screen.getByTestId("member-role-2") as HTMLSelectElement;
+        await fireEvent.change(select, { target: { value: "admin" } });
+
+        // onFinish 未発火 (通信中) は全ロール Select が disabled
+        await waitFor(() => {
+            expect(screen.getByTestId("member-role-2")).toBeDisabled();
+            expect(screen.getByTestId("member-role-3")).toBeDisabled();
+            expect(screen.getByTestId("member-role-4")).toBeDisabled();
+        });
+
+        const options = lastPatchOptions();
+        options.onSuccess?.();
+        options.onFinish?.();
+
+        await waitFor(() => {
+            expect(screen.getByTestId("member-role-2")).not.toBeDisabled();
+            expect(screen.getByTestId("member-role-3")).not.toBeDisabled();
+            expect(screen.getByTestId("member-role-4")).not.toBeDisabled();
+        });
+    });
+
+    it("拒否後にフォーカスが失敗行 Select へ復帰する", async () => {
+        pageState.props = { appName: "AI-CUE", errors: { role: REJECT_MESSAGE } };
+        render(Users, { props: baseProps });
+
+        const select = screen.getByTestId("member-role-2") as HTMLSelectElement;
+        await fireEvent.change(select, { target: { value: "admin" } });
+
+        const options = lastPatchOptions();
+        options.onError?.();
+        // onFinish 前 (disabled 中) はまだフォーカス復帰していない
+        expect(screen.getByTestId("member-role-2")).not.toHaveFocus();
+
+        options.onFinish?.();
+        await waitFor(() => expect(screen.getByTestId("member-role-2")).toHaveFocus());
     });
 });
