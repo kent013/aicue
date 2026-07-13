@@ -21,6 +21,11 @@
 
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
+| T031 | メールアドレス変更のrecent-auth保護+旧アドレス通知 | backend | profile更新にrecent-auth+旧メール変更通知 | High | incremental | [設計](devnotes/20260714-0159-profile-update-recent-auth/) | 2026-07-14 |
+| T032 | manuals画面のstale alert/メッセージ/バリデーション整理 | frontend | alertのstate整合+SOP文言+タイトル検証クリア | High | incremental | [設計](devnotes/20260714-0159-manuals-stale-alert-followup/) | 2026-07-14 |
+| T033 | メンバーのロール変更が無言で破棄される問題の修正 | frontend | ロール変更拒否をUIに正しく反映 | High | incremental | [設計](devnotes/20260714-0216-member-role-update-feedback/) | 2026-07-14 |
+| T034 | notifications画面のブラウザタブtitle追加 | backend | app_titlesにnotifications追加 | Low | incremental | [設計](devnotes/20260714-0221-notifications-tab-title/) | 2026-07-14 |
+| T035 | bughunt実行時環境へのLLM(Prism)応答fake配線 | test | FakeにPrism応答配線しLLM401解消 | High | standalone | [設計](devnotes/20260714-0227-bughunt-llm-fake-wiring/) | 2026-07-14 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 

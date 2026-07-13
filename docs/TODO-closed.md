@@ -45,6 +45,7 @@ Open リストは [TODO.md](TODO.md) を参照。
 | T027 | homeヘッダーのモバイルレスポンシブ化。375px幅でハンバーガーメニュー化 | frontend | 2026-07-13 19:44 |
 | T028 | プロジェクト個別メンバー管理UIの追加。members.store/destroyを呼ぶUI追加 | frontend | 2026-07-13 19:46 |
 | T029 | 未設定画面のブラウザタブtitle追加。config/seo.php app_titlesに6ルート追加 | backend | 2026-07-13 19:49 |
+| T030 | 招待経由登録の組織未所属+特典誤付与修正。招待token登録で参加のみ・grant無しを保証 | backend | 2026-07-14 03:40 |
 
 ## Obsoleted
 
