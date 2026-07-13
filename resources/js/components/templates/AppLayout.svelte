@@ -4,6 +4,7 @@
     import Button from "@/components/atoms/Button.svelte";
     import TextLink from "@/components/atoms/TextLink.svelte";
     import EmailVerificationBanner from "@/components/features/auth/EmailVerificationBanner.svelte";
+    import OrganizationSwitcher from "@/components/features/organizations/OrganizationSwitcher.svelte";
     import NotificationBell from "@/components/molecules/NotificationBell.svelte";
     import ToastContainer from "@/components/organisms/ToastContainer.svelte";
     import type { SharedProps } from "@/lib/shared-props";
@@ -11,7 +12,8 @@
 
     /**
      * 認証済み画面用レイアウト (最小骨格)。
-     * Phase 2 (組織・Team・Project 導入) でサイドバー・組織切替・通知センターを拡張する。
+     * 組織スイッチャー/組織メニューを常設 (組織切替・組織設定/請求/招待/API キー導線)。
+     * サイドバー/Team/Project ナビは後続 Phase。
      * Laravel flash は consumeFlash で toast に変換する (visitKey で de-dup)。
      * ログイン中は通知ベル・設定・ログアウトを全ページ常設する (F-08: ナビ統一)。
      * ログアウト POST はこのレイアウトの単一ハンドラに一本化する (ページ側に実装を残さない)。
@@ -74,6 +76,10 @@
                     {@render headerActions()}
                 {/if}
                 {#if showAccountNav}
+                    <OrganizationSwitcher
+                        currentOrganization={shared.currentOrganization ?? null}
+                        organizations={shared.organizations ?? []}
+                    />
                     <NotificationBell unreadCount={shared.notifications?.unreadCount ?? 0} />
                     <TextLink href="/settings" testId="nav-settings">設定</TextLink>
                     <Button

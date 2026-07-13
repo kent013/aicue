@@ -20,11 +20,22 @@ export interface OrganizationSummary {
     isPersonal: boolean;
 }
 
+/** OrganizationRole enum の value と 1:1 のユニオン (型の網羅性を上げる) */
+export type OrganizationRoleValue =
+    | "organization_owner"
+    | "organization_admin"
+    | "organization_member";
+
 export interface CurrentOrganization {
     id: number;
     name: string;
-    /** OrganizationRole の value (organization_owner / organization_admin / organization_member) */
-    role: string | null;
+    /** organizations.settings / api-keys.index ({organization:slug}) 用 */
+    slug: string;
+    role: OrganizationRoleValue | null;
+    /** メンバー管理 (/manage/users) 導線の表示可否 (owner/admin) */
+    canManageMembers: boolean;
+    /** API キー画面 (organizations.api-keys.index) 導線の表示可否 */
+    canManageApiKeys: boolean;
 }
 
 export interface SharedProps {

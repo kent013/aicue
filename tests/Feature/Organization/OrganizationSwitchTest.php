@@ -35,6 +35,24 @@ test('所属していない組織へは切り替えられない (存在秘匿で
     expect($user->fresh()->current_organization_id)->toBe($organizationA->id);
 });
 
+test('slug 画面 (settings) 起点で切替しても dashboard へ 302 + current が更新される', function (): void {
+    // スイッチャーは組織設定 (slug 画面) 内からも押せるため、slug 起点でも中立ページ
+    // (dashboard) へ着地する post-switch redirect 契約を明示的に固定する
+    // (既存の switch 基本テストと重複しない観点)。
+    [$organizationA, $user] = createOrganizationWithOwner('組織A');
+    $organizationB = Organization::factory()->create();
+    $organizationB->users()->attach($user);
+    $user->addRole(OrganizationRole::Member->value, $organizationB->laratrust_team_id);
+
+    // slug 画面 (A の設定) へ到達してからスイッチャーで B へ切替
+    $this->actingAs($user)->get("/organizations/{$organizationA->slug}/settings")->assertOk();
+
+    $response = $this->actingAs($user)->post("/organizations/{$organizationB->id}/switch");
+
+    $response->assertRedirect('/dashboard');
+    expect($user->fresh()->current_organization_id)->toBe($organizationB->id);
+});
+
 test('新規組織を作成すると provisioning が走り current が切り替わる', function (): void {
     [, $user] = createOrganizationWithOwner('既存組織');
 

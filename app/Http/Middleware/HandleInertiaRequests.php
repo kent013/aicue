@@ -105,9 +105,24 @@ class HandleInertiaRequests extends Middleware
     }
 
     /**
-     * 現在の組織 + 自分のロール (organizationRole = laratrust_team_id 明示判定)。
+     * 現在の組織 + 自分のロール + ナビ表示に必要な最小権限フラグ。
+     * 権限は currentOrganization ($organization) を対象に評価し、OrganizationPolicy を
+     * 唯一の真実源とする (role 直見しない)。Policy は organizationRole($organization)
+     * = laratrust_team_id を明示した strict_check 判定を経由するため、別組織で付与された
+     * 権限は現在組織へ漏れない (cross-org 分離。テストで固定)。
+     * slug は organizations.settings / organizations.api-keys.index ({organization:slug}
+     * バインド) への恒常リンク生成に必須。
+     * defense-in-depth: current_organization_id が万一 (データドリフト等で) 非所属 org を
+     * 指した場合に slug/name を露出しないよう、isMemberOf で membership を再検証して null に倒す。
      *
-     * @return array{id: int, name: string, role: string|null}|null
+     * @return array{
+     *     id: int,
+     *     name: string,
+     *     slug: string,
+     *     role: string|null,
+     *     canManageMembers: bool,
+     *     canManageApiKeys: bool
+     * }|null
      */
     private function currentOrganizationProp(?User $user): ?array
     {
@@ -116,10 +131,20 @@ class HandleInertiaRequests extends Middleware
             return null;
         }
 
+        // cross-org 防御: current が非所属 org を指していたら共有しない (存在秘匿)。
+        if (! $user->isMemberOf($organization)) {
+            return null;
+        }
+
         return [
             'id' => $organization->id,
             'name' => $organization->name,
+            'slug' => $organization->slug,
             'role' => $user->organizationRole($organization)?->value,
+            // ナビ表示用の最小権限 (settings/billing は view=メンバー全員のためフラグ不要)。
+            // billing 画面内の操作出し分けは既存 canManageBilling prop が担うため shared には載せない。
+            'canManageMembers' => $user->can('manageMembers', $organization),
+            'canManageApiKeys' => $user->can('manageApiKeys', $organization),
         ];
     }
 }
