@@ -60,6 +60,16 @@
         action?.();
     }
 
+    $effect(() => {
+        // 再認証モーダルが閉じたら pending の destructive closure を破棄 (キャンセル時の残置防止)。
+        // onConfirmed 経由の resume は action をローカルへ退避してから pendingAction を null 化するため
+        // (resumePendingAction: `const a = pendingAction; pendingAction = null; a?.();`)、
+        // 本 effect と二重で走っても resume が先に action を握っており安全。
+        if (!recentAuthOpen) {
+            pendingAction = null;
+        }
+    });
+
     /** QR 確認待ち (有効化開始済みだが未確認) */
     let confirming = $state(false);
     let enabling = $state(false);
@@ -213,20 +223,35 @@
     let disabling = $state(false);
 
     function disableTwoFactor(): void {
-        router.delete("/user/two-factor-authentication", {
-            preserveScroll: true,
-            onStart: () => {
-                disabling = true;
-            },
-            onSuccess: () => {
+        // recent-auth 必須 (サーバが最終ゲート)。regenerateRecoveryCodes と同一の resume 契約。
+        const action = () => {
+            router.delete("/user/two-factor-authentication", {
+                preserveScroll: true,
+                onStart: () => {
+                    disabling = true;
+                },
+                onSuccess: () => {
+                    disableDialogOpen = false;
+                    confirming = false;
+                    qrSvg = null;
+                    recoveryCodes = [];
+                },
+                onFinish: () => {
+                    disabling = false;
+                },
+            });
+        };
+
+        void withRecentAuth({
+            onFresh: action,
+            onStale: (status) => {
+                // 二重モーダル回避: 確認ダイアログを閉じてから再認証ダイアログを開く。
                 disableDialogOpen = false;
-                confirming = false;
-                qrSvg = null;
-                recoveryCodes = [];
+                recentAuthStatus = status;
+                pendingAction = action;
+                recentAuthOpen = true;
             },
-            onFinish: () => {
-                disabling = false;
-            },
+            // delegated (status 取得失敗) は onFresh フォールバック = server middleware が最終ゲート。
         });
     }
 </script>

@@ -13,8 +13,9 @@ import Security from "@/pages/Settings/Security.svelte";
  */
 
 // router.post をモックし、page は 2FA 状態を書き換えられる可変オブジェクトにする
-const { routerPostMock, pageState, addToastMock } = vi.hoisted(() => ({
+const { routerPostMock, routerDeleteMock, pageState, addToastMock } = vi.hoisted(() => ({
     routerPostMock: vi.fn(),
+    routerDeleteMock: vi.fn(),
     pageState: {
         props: {} as Record<string, unknown>,
         url: "/settings/security",
@@ -24,7 +25,7 @@ const { routerPostMock, pageState, addToastMock } = vi.hoisted(() => ({
 
 vi.mock("@inertiajs/svelte", async (importOriginal) => ({
     ...(await importOriginal<typeof import("@inertiajs/svelte")>()),
-    router: { post: routerPostMock, delete: vi.fn() },
+    router: { post: routerPostMock, delete: routerDeleteMock },
     page: pageState,
 }));
 
@@ -93,6 +94,7 @@ afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
     routerPostMock.mockReset();
+    routerDeleteMock.mockReset();
     addToastMock.mockReset();
     fetchMock.mockReset();
 });
@@ -116,6 +118,12 @@ function lastVisitOptions(): InertiaVisitOptions {
 async function confirmRegenerate(): Promise<void> {
     await fireEvent.click(screen.getByTestId("regenerate-recovery-codes-button"));
     await fireEvent.click(screen.getByRole("button", { name: "再生成する" }));
+}
+
+/** 無効化ダイアログを開いて確定する (recent-auth precheck が挟まるため DELETE は async) */
+async function confirmDisable(): Promise<void> {
+    await fireEvent.click(screen.getByTestId("disable-two-factor-button"));
+    await fireEvent.click(screen.getByRole("button", { name: "無効化する" }));
 }
 
 describe("Settings/Security リカバリコード再生成 (F-10)", () => {
@@ -293,5 +301,93 @@ describe("Settings/Security リカバリコード表示 (recent-auth precheck)",
         // /user/two-factor-recovery-codes への GET は発火していない (status のみ)
         const requestedUrls = fetchMock.mock.calls.map((call) => String(call[0]));
         expect(requestedUrls).not.toContain("/user/two-factor-recovery-codes");
+    });
+});
+
+describe("Settings/Security 2FA 無効化 (recent-auth precheck)", () => {
+    it("fresh なら DELETE /user/two-factor-authentication が exactly once 発火する", async () => {
+        stubFetchRoutes({ recent: true });
+        render(Security, { props: {} });
+
+        await confirmDisable();
+
+        await waitFor(() => {
+            expect(routerDeleteMock).toHaveBeenCalledWith(
+                "/user/two-factor-authentication",
+                expect.objectContaining({ preserveScroll: true }),
+            );
+        });
+        expect(routerDeleteMock).toHaveBeenCalledTimes(1);
+        expect(fetchMock).toHaveBeenCalledWith("/recent-auth/status", expect.anything());
+    });
+
+    it("stale なら再認証モーダルを開き確認ダイアログを閉じ、DELETE しない (二重モーダル回避)", async () => {
+        stubFetchRoutes({ recent: false });
+        render(Security, { props: {} });
+
+        await confirmDisable();
+
+        await waitFor(() => {
+            expect(screen.getByTestId("recent-auth-modal")).toBeInTheDocument();
+        });
+        expect(routerDeleteMock).not.toHaveBeenCalled();
+        // 二重モーダル回避: 無効化確認ダイアログ (disable-two-factor-dialog) は閉じている
+        expect(screen.queryByTestId("disable-two-factor-dialog")).toBeNull();
+    });
+
+    it("stale → 再認証キャンセルで pending を破棄し、後続の別操作 resume でも DELETE しない", async () => {
+        stubFetchRoutes({ recent: false });
+        render(Security, { props: {} });
+
+        // 1. disable を stale で開始 → 再認証モーダル表示
+        await confirmDisable();
+        await waitFor(() => {
+            expect(screen.getByTestId("recent-auth-modal")).toBeInTheDocument();
+        });
+
+        // 2. 再認証をキャンセル (open=false) → $effect が pendingAction を破棄
+        await fireEvent.click(screen.getByRole("button", { name: "キャンセル" }));
+        await waitFor(() => {
+            expect(screen.queryByTestId("recent-auth-modal")).toBeNull();
+        });
+
+        // 3. 別操作 (再生成) を stale → 再認証成功させても disable closure は resume されない
+        await confirmRegenerate();
+        await waitFor(() => {
+            expect(screen.getByTestId("recent-auth-modal")).toBeInTheDocument();
+        });
+        await fireEvent.input(screen.getByTestId("recent-auth-password-input"), {
+            target: { value: "current-password" },
+        });
+        await fireEvent.click(screen.getByTestId("recent-auth-submit"));
+
+        // regenerate (POST) は resume されるが、破棄された disable (DELETE) は一度も発火しない
+        await waitFor(() => {
+            expect(routerPostMock).toHaveBeenCalled();
+        });
+        expect(routerDeleteMock).not.toHaveBeenCalled();
+    });
+
+    it("stale → 再認証成功で保留していた DELETE を exactly once 再開する", async () => {
+        stubFetchRoutes({ recent: false });
+        render(Security, { props: {} });
+
+        await confirmDisable();
+        await waitFor(() => {
+            expect(screen.getByTestId("recent-auth-modal")).toBeInTheDocument();
+        });
+
+        await fireEvent.input(screen.getByTestId("recent-auth-password-input"), {
+            target: { value: "current-password" },
+        });
+        await fireEvent.click(screen.getByTestId("recent-auth-submit"));
+
+        await waitFor(() => {
+            expect(routerDeleteMock).toHaveBeenCalledWith(
+                "/user/two-factor-authentication",
+                expect.objectContaining({ preserveScroll: true }),
+            );
+        });
+        expect(routerDeleteMock).toHaveBeenCalledTimes(1);
     });
 });

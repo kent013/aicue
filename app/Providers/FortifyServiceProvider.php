@@ -38,9 +38,14 @@ class FortifyServiceProvider extends ServiceProvider
 {
     /**
      * recent-auth (step-up) を後付け配線する Fortify 登録ルート。
-     * リカバリコードは TOTP を伴わないログイン成立手段 = 第二要素の bypass 経路そのものなので、
-     * 表示 (GET) / 再生成 (POST) の双方を機微操作として扱う
-     * (姉妹操作: organizations.members.two-factor.reset / settings.account.destroy 等と同基準)。
+     * いずれも「確立済み第二要素の bypass / 除去」経路であり、通常セッション認証だけで
+     * 到達させない (姉妹操作: organizations.members.two-factor.reset /
+     * settings.account.destroy 等と同基準)。
+     * - recovery-codes 表示 (GET) / 再生成 (POST): TOTP を伴わないログイン成立手段の露出・更新。
+     * - disable (DELETE): 第二要素そのものの無効化 (bug-hunt F-H3)。
+     *   ※ 2FA 必須組織の準拠ユーザーは BlockTwoFactorDisableForEnforcedOrganizations
+     *     (web group、recent-auth より先行) が 422 で拒否するため、本配線が実効するのは
+     *     self-disable が許可される非 enforced 組織のユーザー。
      * 付与漏れは RecentAuthRouteTest (Architecture) が CI で検出する。
      *
      * @var list<string>
@@ -48,6 +53,7 @@ class FortifyServiceProvider extends ServiceProvider
     private const RECENT_AUTH_ROUTE_NAMES = [
         'two-factor.recovery-codes',
         'two-factor.regenerate-recovery-codes',
+        'two-factor.disable',
     ];
 
     public function register(): void
