@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { tick } from "svelte";
     import { page, router, useForm } from "@inertiajs/svelte";
     import Badge from "@/components/atoms/Badge.svelte";
     import Button from "@/components/atoms/Button.svelte";
@@ -57,10 +58,16 @@
 
     /* ---- ロール変更 (3 値遷移コマンド) ---- */
     let roleErrorMemberId = $state<number | null>(null);
+    // 拒否時に該当行 Select を remount して権威値 (member.roleState) を読み直させるためのキー。
+    // 一方向 value 伝播では admin→admin の同値へ再同期されない問題を remount で断つ。
+    let roleResetTokens = $state<Record<number, number>>({});
+    // フォーカス復帰対象 (onError で保存し、onFinish で disabled 解除後に復帰)。
+    let roleRefocusMemberId = $state<number | null>(null);
     let changingRole = $state(false);
 
     function changeRole(member: MemberRow, role: string): void {
         if (role === "" || changingRole) return; // 未割当の空 option / 二重送信の冪等ガード
+        roleErrorMemberId = null; // 送信開始時に前回エラーをクリア (次通信中まで残さない)
         changingRole = true;
         router.patch(
             `/organizations/${organizationSlug}/members/${member.id}`,
@@ -68,19 +75,46 @@
             {
                 preserveScroll: true,
                 onError: () => {
+                    // 拒否: 権威値へ戻すため該当行を remount。実フォーカス復帰は onFinish (disabled 解除後)。
                     roleErrorMemberId = member.id;
+                    roleResetTokens[member.id] = (roleResetTokens[member.id] ?? 0) + 1;
+                    roleRefocusMemberId = member.id;
                 },
                 onSuccess: () => {
+                    // 成功時はエラー行・フォーカス復帰対象を残さない (拒否残渣の持ち越し防止)
                     roleErrorMemberId = null;
+                    roleRefocusMemberId = null;
                 },
                 onFinish: () => {
                     changingRole = false;
+                    void refocusRole();
                 },
             },
         );
     }
 
-    const pageErrors = $derived((page.props.errors ?? {}) as Record<string, string>);
+    // remount + disabled 解除の反映を待ってから、失敗行 Select へフォーカスを戻す。
+    // Select atom は id / data-testid を native <select> にそのまま渡すため atom 改造は不要。
+    async function refocusRole(): Promise<void> {
+        const id = roleRefocusMemberId;
+        if (id === null) return;
+        roleRefocusMemberId = null;
+        await tick();
+        const el = document.querySelector<HTMLSelectElement>(
+            `[data-testid="member-role-${id}"]`,
+        );
+        el?.focus();
+    }
+
+    const pageErrors = $derived(
+        (page.props.errors ?? {}) as Record<string, string | string[]>,
+    );
+    // error bag の配列化 (Laravel の複数メッセージ経路) に堅牢化: 先頭要素へ正規化。
+    // 表示・aria-describedby・invalid 判定をこの一本の派生に集約する。
+    const roleMessage = $derived.by(() => {
+        const raw = pageErrors.role;
+        return Array.isArray(raw) ? raw[0] : raw;
+    });
 
     /* ---- メンバー削除 (モック 08 削除アラート) ---- */
     let removeTarget = $state<MemberRow | null>(null);
@@ -251,12 +285,6 @@
                                 <p class="truncate text-caption text-text-secondary">
                                     {member.email}
                                 </p>
-                                {#if roleErrorMemberId === member.id && pageErrors.role}
-                                    <FormError
-                                        message={pageErrors.role}
-                                        testId={`role-error-${member.id}`}
-                                    />
-                                {/if}
                             </div>
                             <div class="flex flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end">
                                 {#if canResetTwoFactor(member)}
@@ -270,22 +298,44 @@
                                     </Button>
                                 {/if}
                                 {#if canChangeRole(member)}
-                                    <Select
-                                        value={member.roleState === "unassigned"
-                                            ? ""
-                                            : member.roleState}
-                                        aria-label={`${member.name} のロール`}
-                                        onchange={(event) =>
-                                            changeRole(member, event.currentTarget.value)}
-                                        testId={`member-role-${member.id}`}
-                                    >
-                                        {#if member.roleState === "unassigned"}
-                                            <option value="">未割当（選択してください）</option>
-                                        {/if}
-                                        {#each ROLE_OPTIONS as option (option.value)}
-                                            <option value={option.value}>{option.label}</option>
-                                        {/each}
-                                    </Select>
+                                    <!-- 拒否時は該当行のみ remount して権威値 (member.roleState) を読み直す。
+                                         {#key} は論理ブロックで DOM 親を追加しない = actions 列の flex-wrap を保つ (F-14) -->
+                                    {#key roleResetTokens[member.id] ?? 0}
+                                        <Select
+                                            value={member.roleState === "unassigned"
+                                                ? ""
+                                                : member.roleState}
+                                            aria-label={`${member.name} のロール`}
+                                            error={roleErrorMemberId === member.id &&
+                                                !!roleMessage}
+                                            aria-describedby={roleErrorMemberId === member.id &&
+                                            roleMessage
+                                                ? `role-error-${member.id}`
+                                                : undefined}
+                                            disabled={changingRole}
+                                            onchange={(event) =>
+                                                changeRole(member, event.currentTarget.value)}
+                                            testId={`member-role-${member.id}`}
+                                        >
+                                            {#if member.roleState === "unassigned"}
+                                                <option value="">未割当（選択してください）</option>
+                                            {/if}
+                                            {#each ROLE_OPTIONS as option (option.value)}
+                                                <option value={option.value}>{option.label}</option>
+                                            {/each}
+                                        </Select>
+                                    {/key}
+                                    <!-- combobox 直下エラー: flex-wrap 内の full-width 要素として
+                                         select の次行に落とす。Select の parentElement は actions 列のまま (F-14) -->
+                                    {#if roleErrorMemberId === member.id && roleMessage}
+                                        <div class="w-full sm:text-right">
+                                            <FormError
+                                                id={`role-error-${member.id}`}
+                                                message={roleMessage}
+                                                testId={`role-error-${member.id}`}
+                                            />
+                                        </div>
+                                    {/if}
                                     <Button
                                         variant="danger-ghost"
                                         size="sm"

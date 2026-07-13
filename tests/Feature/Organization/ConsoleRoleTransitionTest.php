@@ -86,7 +86,7 @@ test('editor/shooter コマンドは Default Project 不在なら ValidationExce
     'shooter' => [AdminConsoleRole::Shooter],
 ]);
 
-test('endpoint 経由: Default Project 不在の editor コマンドは error bag (押下時エラー表示)', function (): void {
+test('endpoint 経由: Default Project 不在の editor コマンドは error bag (サイレント成功でない)', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization);
 
@@ -94,7 +94,10 @@ test('endpoint 経由: Default Project 不在の editor コマンドは error ba
         'role' => AdminConsoleRole::Editor->value,
     ]);
 
+    // 検証エラーで拒否され、成功トースト (success flash) は出ない = サイレント成功の回帰ネット
     $response->assertSessionHasErrors('role');
+    $response->assertSessionMissing('success');
+    // org ロールは Member のまま (部分適用なし)
     expect($member->fresh()->organizationRole($organization))->toBe(OrganizationRole::Member);
 });
 
