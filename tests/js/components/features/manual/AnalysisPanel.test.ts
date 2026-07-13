@@ -147,6 +147,119 @@ describe("AnalysisPanel", () => {
         expect(screen.getByTestId("analyze-button")).not.toBeDisabled();
     });
 
+    it("SOP アップロード成功 (hasDocument false→true) で 422 の残留 alert が消える", async () => {
+        // bug-hunt F-H2 再現: 422 の start error が SOP アップロード成功後も残留しないこと
+        fetchMock.mockResolvedValue(
+            jsonResponse(422, {
+                message: "手順書をアップロードしてください。",
+                errors: { document: ["手順書をアップロードしてください。"] },
+            }),
+        );
+        const { rerender } = render(AnalysisPanel, {
+            props: { ...baseProps, hasDocument: false },
+        });
+        await fireEvent.click(screen.getByTestId("analyze-button"));
+        await waitFor(() =>
+            expect(screen.getByTestId("analysis-start-error")).toHaveTextContent(
+                "手順書をアップロードしてください",
+            ),
+        );
+        // SOP アップロード成功 = Inertia が hasDocument=true で Show を再描画
+        await rerender({ ...baseProps, hasDocument: true });
+        await waitFor(() => expect(screen.queryByTestId("analysis-start-error")).toBeNull());
+        // 非干渉: 購入リンク等の他 overlay を巻き込んで表示していない
+        expect(screen.queryByTestId("analysis-purchase-link")).toBeNull();
+    });
+
+    it("402 (残高不足) は他 props 更新後も消えない (missing_document 以外は保持)", async () => {
+        fetchMock.mockResolvedValue(
+            jsonResponse(402, {
+                code: "insufficient_tickets",
+                message: "チケット残高が不足しています。",
+            }),
+        );
+        // 402 は手順書ありの文脈で発生する → hasDocument:true 開始 (baseProps 既定)
+        const { rerender } = render(AnalysisPanel, { props: baseProps });
+        await fireEvent.click(screen.getByTestId("analyze-button"));
+        await waitFor(() =>
+            expect(screen.getByTestId("analysis-start-error")).toHaveTextContent(
+                "チケット残高が不足",
+            ),
+        );
+        // 別 props (manualStatus) が更新されても start error は保持される
+        await rerender({ ...baseProps, manualStatus: "ready" as const });
+        expect(screen.getByTestId("analysis-start-error")).toBeInTheDocument();
+    });
+
+    it("非退行: failed job (server-truth) は hasDocument false→true でも維持される", async () => {
+        const failedJob: AnalysisJobProps = {
+            id: 9,
+            status: "failed",
+            step: "extract",
+            progress: 10,
+            error: "テキストを抽出できません。画像・スキャンの手順書は現在未対応です。",
+            manual_status: "draft",
+        };
+        const { rerender } = render(AnalysisPanel, {
+            props: { ...baseProps, hasDocument: false, manualStatus: "draft" as const, job: failedJob },
+        });
+        expect(screen.getByTestId("analysis-error")).toHaveTextContent("テキストを抽出できません");
+        // overlay 破棄は start-error のみ対象。failedJob は currentJob 由来なので残る
+        await rerender({
+            ...baseProps,
+            hasDocument: true,
+            manualStatus: "draft" as const,
+            job: failedJob,
+        });
+        expect(screen.getByTestId("analysis-error")).toBeInTheDocument();
+    });
+
+    it("解析要求中に hasDocument が true になり、遅延 422 が来ても alert は残らない", async () => {
+        let resolveFetch!: (r: Response) => void;
+        fetchMock.mockReturnValue(
+            new Promise<Response>((r) => {
+                resolveFetch = r;
+            }),
+        );
+        const { rerender } = render(AnalysisPanel, {
+            props: { ...baseProps, hasDocument: false },
+        });
+        await fireEvent.click(screen.getByTestId("analyze-button"));
+        // 応答が返る前に SOP アップロード完了 → Inertia が hasDocument=true で再描画
+        await rerender({ ...baseProps, hasDocument: true });
+        // 遅延していた 422 がここで解決 (分類は hadDocumentAtStart=false → missing_document)
+        resolveFetch(
+            jsonResponse(422, {
+                message: "手順書をアップロードしてください。",
+                errors: { document: ["手順書をアップロードしてください。"] },
+            }),
+        );
+        // level-triggered effect が hasDocument=true && missing_document を検知して即破棄
+        await waitFor(() => expect(screen.queryByTestId("analysis-start-error")).toBeNull());
+    });
+
+    it("422 でも解析要求時に手順書があれば (hadDocumentAtStart=true) generic 扱いで破棄されない", async () => {
+        // 分類仕様の固定: missing_document は「要求時に手順書なし」限定。要求時 true の 422 は
+        // errors.document を含んでいても generic とし、hasDocument=true でも自動破棄しない。
+        fetchMock.mockResolvedValue(
+            jsonResponse(422, {
+                message: "手順書をアップロードしてください。",
+                errors: { document: ["手順書をアップロードしてください。"] },
+            }),
+        );
+        // baseProps は hasDocument:true
+        const { rerender } = render(AnalysisPanel, { props: baseProps });
+        await fireEvent.click(screen.getByTestId("analyze-button"));
+        await waitFor(() =>
+            expect(screen.getByTestId("analysis-start-error")).toHaveTextContent(
+                "手順書をアップロードしてください",
+            ),
+        );
+        // hasDocument は true のまま (別 props 更新) → generic なので破棄されない
+        await rerender({ ...baseProps, manualStatus: "ready" as const });
+        expect(screen.getByTestId("analysis-start-error")).toBeInTheDocument();
+    });
+
     it("analyzing 中は step ラベルと progress を表示し、解析ボタンは出さない", () => {
         fetchMock.mockResolvedValue(
             jsonResponse(200, {
