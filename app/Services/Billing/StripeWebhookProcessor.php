@@ -263,15 +263,11 @@ class StripeWebhookProcessor
             return; // サブスク以外の請求 (one-time 等) では付与しない
         }
 
-        // 初回 signup grant (「まず触れる」導線)。subscription id が取れない場合は
-        // 安定した冪等キーを作れないため fail-closed で付与しない (report で可観測化)
+        // 初回 signup grant (「まず触れる」導線)。冪等キーは org スコープ (grantSignupGrant 内部で生成) のため
+        // subscription id は不要。1 組織 1 回の不変条件は idempotency_key + 部分 UNIQUE index が保証する。
+        // (通常は登録時に付与済のため、ここは非個人組織のサブスク等に対する no-op ないし 1 回付与の安全網)
         if ($billingReason === 'subscription_create') {
-            $subscriptionId = $this->resolveInvoiceSubscriptionId($payload);
-            if ($subscriptionId !== null) {
-                $this->tickets->grantSignupGrant($organization, "signup_grant:{$subscriptionId}");
-            } else {
-                report(new RuntimeException('invoice.paid subscription_create: subscription id 不明で signup grant skip'));
-            }
+            $this->tickets->grantSignupGrant($organization);
         }
 
         $plan = $this->resolveInvoicePlan($payload, $organization);
@@ -477,19 +473,6 @@ class StripeWebhookProcessor
             $paymentIntentId,
             is_int($amountRefunded) ? $amountRefunded : 0,
         );
-    }
-
-    /**
-     * invoice payload から紐づく subscription id を解決する (signup grant の安定冪等キー用)。
-     * 旧 Stripe API は top-level `subscription`、新 API は lines 配下に持つため両系を fallback で拾う。
-     *
-     * @param  array<mixed>  $payload
-     */
-    private function resolveInvoiceSubscriptionId(array $payload): ?string
-    {
-        return $this->stringAt($payload, 'data.object.subscription')
-            ?? $this->stringAt($payload, 'data.object.lines.data.0.subscription')
-            ?? $this->stringAt($payload, 'data.object.lines.data.0.parent.subscription_item_details.subscription');
     }
 
     /**

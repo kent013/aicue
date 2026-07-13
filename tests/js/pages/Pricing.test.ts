@@ -73,8 +73,10 @@ describe("Pricing", () => {
         expect(table).toHaveTextContent("500 枚以上");
         expect(table).toHaveTextContent("¥50 ／ 枚");
 
+        // 招待経由 (所属組織の残高を共有) は LP CTA の対象外。付与は個人組織を作る
+        // 「新規登録」時に走るため、文言も「新規登録で」で挙動と整合させる。
         expect(screen.getByTestId("signup-grant-note")).toHaveTextContent(
-            "新規契約でチケット 10 枚が無料でついてきます (付与から 30 日間有効)",
+            "新規登録でチケット 10 枚が無料でついてきます (付与から 30 日間有効)",
         );
     });
 

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Models\User;
+use App\Services\Billing\TicketLedgerService;
 
 test('登録できる (同意の証跡が記録される)', function (): void {
     $response = $this->post('/register', [
@@ -19,6 +20,12 @@ test('登録できる (同意の証跡が記録される)', function (): void {
     $user = User::whereBlind('email', 'email_index', 'taro@example.com')->firstOrFail();
     expect($user->terms_accepted_at)->not->toBeNull();
     expect($user->consent_version)->toBe(config()->string('legal.consent_version'));
+
+    // LP が約束する「新規登録で無償チケット」を個人組織へ付与する。
+    // 固定値ではなく config 由来値を期待に使う (設定変更後も意味が一貫する)。
+    $personalOrg = $user->organizations()->where('is_personal', true)->firstOrFail();
+    expect(app(TicketLedgerService::class)->balance($personalOrg))
+        ->toBe(config()->integer('billing.signup_grant_tickets'));
 });
 
 test('利用規約に同意しないと登録できない', function (): void {
