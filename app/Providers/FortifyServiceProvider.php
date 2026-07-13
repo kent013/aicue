@@ -21,6 +21,7 @@ use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Routing\RouteCollectionInterface;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
@@ -60,6 +61,16 @@ class FortifyServiceProvider extends ServiceProvider
         'two-factor.recovery-codes',
         'two-factor.regenerate-recovery-codes',
         'two-factor.disable',
+    ];
+
+    /**
+     * email 変更時のみ recent-auth を課す条件付き付与 (氏名のみ変更は素通し)。
+     * profile 更新は Fortify 登録ルートのため booted で後付けする。
+     *
+     * @var array<string, string> route name => middleware alias
+     */
+    private const CONDITIONAL_RECENT_AUTH_ROUTES = [
+        'user-profile-information.update' => 'recent-auth.on-email-change',
     ];
 
     public function register(): void
@@ -115,14 +126,28 @@ class FortifyServiceProvider extends ServiceProvider
             $routes->refreshNameLookups();
 
             foreach (self::RECENT_AUTH_ROUTE_NAMES as $name) {
-                $route = $routes->getByName($name);
-                // 長寿命プロセス等で callback が同一 Route instance に複数回届いても
-                // 重複付与しない (idempotent)
-                if ($route !== null && ! in_array('recent-auth', $route->middleware(), true)) {
-                    $route->middleware('recent-auth');
-                }
+                self::appendMiddlewareIfMissing($routes, $name, 'recent-auth');
+            }
+
+            foreach (self::CONDITIONAL_RECENT_AUTH_ROUTES as $name => $alias) {
+                self::appendMiddlewareIfMissing($routes, $name, $alias);
             }
         });
+    }
+
+    /**
+     * named route に middleware alias を idempotent に append する (未登録時のみ)。
+     *
+     * booted callback (static クロージャ) から呼ぶため **static** で定義し
+     * `self::appendMiddlewareIfMissing(...)` で呼ぶ。長寿命プロセス等で callback が
+     * 同一 Route instance に複数回届いても重複付与しない (idempotent)。
+     */
+    private static function appendMiddlewareIfMissing(RouteCollectionInterface $routes, string $name, string $alias): void
+    {
+        $route = $routes->getByName($name);
+        if ($route !== null && ! in_array($alias, $route->middleware(), true)) {
+            $route->middleware($alias);
+        }
     }
 
     private function configureRateLimiters(): void

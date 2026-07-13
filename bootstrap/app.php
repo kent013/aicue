@@ -15,6 +15,7 @@ use App\Http\Middleware\RedirectToHttps;
 use App\Http\Middleware\RequireActiveSubscription;
 use App\Http\Middleware\RequireApiKeyAbility;
 use App\Http\Middleware\RequireRecentAuth;
+use App\Http\Middleware\RequireRecentAuthOnEmailChange;
 use App\Http\Middleware\RequireTwoFactorForEnforcedOrganizations;
 use App\Http\Middleware\ResolveApiActor;
 use App\Http\Middleware\SecurityHeaders;
@@ -102,6 +103,8 @@ return Application::configure(basePath: dirname(__DIR__))
         // require-active-subscription は業務 route の課金ゲート (判定は BillingAccess 経由のみ)
         $middleware->alias([
             'recent-auth' => RequireRecentAuth::class,
+            // profile 更新の email 変更時のみ step-up を課す条件付きゲート
+            'recent-auth.on-email-change' => RequireRecentAuthOnEmailChange::class,
             'require-active-subscription' => RequireActiveSubscription::class,
             // `verified` の web POST 向け代替。未認証時に back + error flash で元ページへ戻す
             // (context 別文言は EmailVerificationGateContext)。organizations.store /

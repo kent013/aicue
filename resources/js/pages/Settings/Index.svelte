@@ -47,12 +47,34 @@
         email: initialUser?.email ?? "",
     });
 
-    function submitProfile(event: SubmitEvent): void {
-        event.preventDefault();
+    // baseline email。更新成功のたびに最新値へ同期し、連続操作 (変更→再編集) 時の
+    // precheck 判定ドリフトを抑える。
+    let baselineEmail = $state(initialUser?.email ?? "");
+
+    function putProfile(): void {
+        // 送信時点の email をスナップショット。onSuccess で「サーバが受理した値」を
+        // baseline にするため、送信後〜応答前に入力が変わっても現在入力値で baseline を汚さない。
+        const submittedEmail = profileForm.email;
         profileForm.put("/user/profile-information", {
             errorBag: "updateProfileInformation",
             preserveScroll: true,
+            onSuccess: () => {
+                // 成功時、受理された送信値を baseline に (連続操作の判定ズレ防止)
+                baselineEmail = submittedEmail;
+            },
         });
+    }
+
+    function submitProfile(event: SubmitEvent): void {
+        event.preventDefault();
+        // email 変更時のみ step-up precheck (氏名のみ変更は従来通り即 put)。
+        // サーバ側 recent-auth.on-email-change が最終ゲート、これは UX 補助。
+        const emailChanged = profileForm.email !== baselineEmail;
+        if (emailChanged) {
+            guardWithRecentAuth(putProfile);
+            return;
+        }
+        putProfile();
     }
 
     const passwordForm = useForm({
