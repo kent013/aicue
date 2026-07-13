@@ -104,6 +104,38 @@ describe("templates/AppLayout", () => {
         expect(screen.queryByTestId("unread-badge")).toBeNull();
     });
 
+    it("ログイン中は組織スイッチャートリガーを常設描画する", () => {
+        setPageProps({
+            auth: { user: authUser() },
+            notifications: { unreadCount: 0 },
+            currentOrganization: {
+                id: 1,
+                name: "アクメ社",
+                slug: "acme",
+                role: "organization_owner",
+                canManageMembers: true,
+                canManageApiKeys: true,
+            },
+            organizations: [{ id: 1, name: "アクメ社", isPersonal: false }],
+        });
+        render(AppLayout, { props: { appName: "AI-CUE", children } });
+
+        expect(screen.getByTestId("org-switcher-trigger")).toBeInTheDocument();
+        expect(screen.getByTestId("org-switcher-trigger")).toHaveTextContent("アクメ社");
+    });
+
+    it("組織スイッチャートリガーは shrink-0 で 375px ヘッダー折返しを維持する", () => {
+        setPageProps({
+            auth: { user: authUser() },
+            notifications: { unreadCount: 0 },
+            currentOrganization: null,
+            organizations: [],
+        });
+        render(AppLayout, { props: { appName: "AI-CUE", children } });
+
+        expect(screen.getByTestId("org-switcher-trigger")).toHaveClass("shrink-0");
+    });
+
     it("ページ固有の headerActions snippet と常設ナビが共存する (常設ナビは各 1 個)", () => {
         setPageProps({
             auth: { user: authUser() },
