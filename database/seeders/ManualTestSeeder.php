@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Database\Seeders;
 
+use App\Enums\Billing\PlanPriceKind;
 use App\Enums\OrganizationRole;
 use App\Models\Billing\Plan;
 use App\Models\Organization;
@@ -119,15 +120,51 @@ class ManualTestSeeder extends Seeder
 
     /**
      * 組織生成は provisioning 経由 (Default Team パターンの不変条件を担保する唯一の窓口)。
-     * plan_code は状態キー ($fillable 外) のため forceFill で明示代入する。
+     *
+     * plan_code の不変条件を尊重する: 「plan_code は Stripe Price を持つ有償プランの契約状態でのみ
+     * set される」(Model/StripeWebhookProcessor/BillingAccess の docblock が定める)。
+     * よって有償プラン (current base Price あり) のときのみ plan_code を forceFill し、あわせて
+     * active な Cashier subscription 行を投入する (plan_code 非 null ⇔ 契約行あり を seed でも満たす)。
+     * Free (Price 無し) は plan_code を null のまま = 未契約 = 支払い不要 tier として BillingAccess が許可する。
+     *
+     * 有償/Free の判定は Plan の「値」(current base Price の有無) からのみ導出し、プラン名 (code) の
+     * 文字列比較はしない (AGENTS.md ドメイン規約)。
      */
     private function createOrganization(User $owner, Plan $plan): Organization
     {
         $organization = app(OrganizationProvisioningService::class)
             ->provision($owner, "{$plan->name}プラン組織");
-        $organization->forceFill(['plan_code' => $plan->code])->save();
+
+        // current な base Price を持つ = Checkout 可能な有償プラン。plan_code は状態キー ($fillable 外)
+        if ($plan->currentPrice(PlanPriceKind::Base) !== null) {
+            $organization->forceFill(['plan_code' => $plan->code])->save();
+            $this->attachFakeActiveSubscription($organization);
+        }
 
         return $organization;
+    }
+
+    /**
+     * 手動テスト用に active な Cashier subscription 行を直接投入する (Stripe API 非到達)。
+     * BillingAccess は plan_code 非 null の組織に active/trialing subscription を要求するため、
+     * plan_code を載せた有償組織は本行が無いと課金ゲートで締め出される。
+     * subscription('default') が active を返すための最小カラムのみを設定する。
+     *
+     * メソッド単体で冪等: 既に default subscription があれば作らない (run() の冪等 guard に依存せず、
+     * 部分実行・手動呼び出し・将来の guard 変更でも重複行を生まない)。
+     */
+    private function attachFakeActiveSubscription(Organization $organization): void
+    {
+        if ($organization->subscription('default') !== null) {
+            return; // 冪等: 既存の default subscription を尊重する
+        }
+
+        $organization->subscriptions()->create([
+            'type' => 'default',
+            'stripe_id' => 'sub_seed_'.Str::random(24),
+            'stripe_status' => 'active',
+            'quantity' => 1,
+        ]);
     }
 
     private function addToOrganization(
