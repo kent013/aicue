@@ -15,6 +15,8 @@ use App\Notifications\OrganizationInvitationNotification;
 use App\Services\Notification\NotificationCenterService;
 use App\Services\Project\DefaultProjectResolver;
 use App\Services\Security\SecurityEventRecorder;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Validation\ValidationException;
@@ -195,6 +197,10 @@ class OrganizationMembershipService
     private function joinOrganization(OrganizationInvitation $invitation, Organization $organization, User $user, OrganizationRole $role): void
     {
         DB::transaction(function () use ($organization, $user, $role, $invitation): void {
+            // canonical 共通ロック境界 (users 昇順 → organizations)。並行メンバー追加を
+            // deleteAccount 等と直列化する (招待行ロックの手前で org/user 行ロックを取る)。
+            $this->lockForMembershipWrite([$this->keyOf($user)], [$this->keyOf($organization)]);
+
             // 1. 招待行ロック + 受諾可能状態のロック下再検証 (並行受諾に敗れた側は冪等 no-op)
             /** @var OrganizationInvitation $locked */
             $locked = OrganizationInvitation::query()->whereKey($invitation->id)->lockForUpdate()->firstOrFail();
@@ -241,6 +247,10 @@ class OrganizationMembershipService
     public function applyConsoleRole(Organization $organization, User $target, AdminConsoleRole $role): void
     {
         DB::transaction(function () use ($organization, $target, $role): void {
+            // canonical 共通ロック境界 (users 昇順 → organizations)。normalizeOrganizationRole の
+            // 直接 addRole 経路も含めロック下で直列化する。
+            $this->lockForMembershipWrite([$this->keyOf($target)], [$this->keyOf($organization)]);
+
             $projectRole = $role->projectRole();
 
             if ($projectRole === null) {
@@ -299,24 +309,30 @@ class OrganizationMembershipService
      */
     public function changeRole(Organization $organization, User $target, OrganizationRole $newRole): void
     {
-        $currentRole = $target->organizationRole($organization);
-        if ($currentRole === null) {
-            throw ValidationException::withMessages(['role' => ['このユーザーは組織のメンバーではありません。']]);
-        }
-        if ($currentRole === $newRole) {
-            return;
-        }
+        // [TOCTOU 封じ] 事前チェックを撤廃し、検証をすべてロック取得後・ロック下で行う。
+        DB::transaction(function () use ($organization, $target, $newRole): void {
+            // canonical 共通ロック境界 (users 昇順 → organizations)。deleteAccount 等と直列化。
+            $this->lockForMembershipWrite([$this->keyOf($target)], [$this->keyOf($organization)]);
 
-        // Owner を降格させる場合は他に Owner がいることを要求 (Owner 不在の組織を作らない)
-        if ($currentRole === OrganizationRole::Owner && ! $this->hasAnotherOwner($organization, $target)) {
-            throw ValidationException::withMessages([
-                'role' => ['最後のオーナーは降格できません。先にオーナーを移譲してください。'],
-            ]);
-        }
+            // ロック下で最新状態を再取得 (laratrust のロールキャッシュも fresh で破棄)
+            $freshTarget = $target->fresh();
+            Assert::isInstanceOf($freshTarget, User::class);
 
-        DB::transaction(function () use ($organization, $target, $currentRole, $newRole): void {
-            $target->removeRole($currentRole->value, $organization->laratrust_team_id);
-            $target->addRole($newRole->value, $organization->laratrust_team_id);
+            $currentRole = $freshTarget->organizationRole($organization);
+            if ($currentRole === null) {
+                throw ValidationException::withMessages(['role' => ['このユーザーは組織のメンバーではありません。']]);
+            }
+            if ($currentRole === $newRole) {
+                return; // 冪等
+            }
+            // Owner を降格させる場合は他に Owner がいることを要求 (Owner 不在の組織を作らない)
+            if ($currentRole === OrganizationRole::Owner && ! $this->hasAnotherOwner($organization, $freshTarget)) {
+                throw ValidationException::withMessages([
+                    'role' => ['最後のオーナーは降格できません。先にオーナーを移譲してください。'],
+                ]);
+            }
+            $freshTarget->removeRole($currentRole->value, $organization->laratrust_team_id);
+            $freshTarget->addRole($newRole->value, $organization->laratrust_team_id);
         });
     }
 
@@ -327,27 +343,31 @@ class OrganizationMembershipService
      */
     public function removeMember(Organization $organization, User $target): void
     {
-        if (! $organization->users()->whereKey($target->getKey())->exists()) {
-            throw ValidationException::withMessages(['member' => ['このユーザーは組織のメンバーではありません。']]);
-        }
+        // [TOCTOU 封じ] 検証をロック取得後・ロック下で行う。
+        DB::transaction(function () use ($organization, $target): void {
+            // canonical 共通ロック境界 (users 昇順 → organizations)。deleteAccount 等と直列化。
+            $this->lockForMembershipWrite([$this->keyOf($target)], [$this->keyOf($organization)]);
 
-        $role = $target->organizationRole($organization);
-        if ($role === OrganizationRole::Owner) {
-            throw ValidationException::withMessages([
-                'member' => ['オーナーは削除できません。先にオーナーを移譲してください。'],
-            ]);
-        }
-
-        DB::transaction(function () use ($organization, $target, $role): void {
-            $organization->users()->detach($target->getKey());
+            if (! $organization->users()->whereKey($target->getKey())->exists()) {
+                throw ValidationException::withMessages(['member' => ['このユーザーは組織のメンバーではありません。']]);
+            }
+            $freshTarget = $target->fresh();
+            Assert::isInstanceOf($freshTarget, User::class);
+            $role = $freshTarget->organizationRole($organization);
+            if ($role === OrganizationRole::Owner) {
+                throw ValidationException::withMessages([
+                    'member' => ['オーナーは削除できません。先にオーナーを移譲してください。'],
+                ]);
+            }
+            $organization->users()->detach($freshTarget->getKey());
             if ($role !== null) {
-                $target->removeRole($role->value, $organization->laratrust_team_id);
+                $freshTarget->removeRole($role->value, $organization->laratrust_team_id);
             }
             // project pivot 掃除 (org 配下 project に限定。別 org の pivot は維持)
-            $this->detachProjectMemberships($organization, $target);
+            $this->detachProjectMemberships($organization, $freshTarget);
             // 削除した組織を current にしていた場合は外す (次回アクセス時に選び直す)
-            if ($target->current_organization_id === $organization->id) {
-                $target->forceFill(['current_organization_id' => null])->save();
+            if ($freshTarget->current_organization_id === $organization->id) {
+                $freshTarget->forceFill(['current_organization_id' => null])->save();
             }
         });
     }
@@ -386,37 +406,46 @@ class OrganizationMembershipService
         }
 
         DB::transaction(function () use ($organization, $from, $to): void {
-            // 両者のメンバーシップ行をロック (並行する移譲・削除を直列化)。
-            // count() + FOR UPDATE は pgsql が集約関数との併用を拒否するため、行を
-            // 取得してロードした上で PHP 側で件数を確認する (organization_user は
+            // canonical 共通ロック境界 (users 昇順 → organizations)。deleteAccount 等と直列化。
+            // 従来の pivot 行ロックを users 行ロックへ置換し、移譲の直列化基点を統一する。
+            $this->lockForMembershipWrite([$this->keyOf($from), $this->keyOf($to)], [$this->keyOf($organization)]);
+
+            // ロック下で最新インスタンスを再取得して検証 (事前取得モデル・stale org を信用しない)
+            /** @var Organization $freshOrg */
+            $freshOrg = Organization::query()->whereKey($organization->getKey())->firstOrFail();
+            /** @var User $freshFrom */
+            $freshFrom = User::query()->whereKey($from->getKey())->firstOrFail();
+            /** @var User $freshTo */
+            $freshTo = User::query()->whereKey($to->getKey())->firstOrFail();
+
+            // 両者が組織メンバーであることをロック下で確認 (organization_user は
             // (organization_id, user_id) UNIQUE のため最大 2 行)。
-            $lockedUserIds = DB::table('organization_user')
-                ->where('organization_id', $organization->id)
-                ->whereIn('user_id', [$from->getKey(), $to->getKey()])
-                ->lockForUpdate()
+            $memberUserIds = DB::table('organization_user')
+                ->where('organization_id', $freshOrg->id)
+                ->whereIn('user_id', [$freshFrom->getKey(), $freshTo->getKey()])
                 ->pluck('user_id')
                 ->all();
-            if (count($lockedUserIds) < 2) {
+            if (count($memberUserIds) < 2) {
                 throw ValidationException::withMessages([
                     'user_id' => ['移譲先は組織のメンバーである必要があります。'],
                 ]);
             }
 
             // ロック取得後に最新状態で Owner を再確認する (TOCTOU 防止)
-            if ($from->organizationRole($organization) !== OrganizationRole::Owner) {
+            if ($freshFrom->organizationRole($freshOrg) !== OrganizationRole::Owner) {
                 throw ValidationException::withMessages(['user_id' => ['オーナーのみ移譲できます。']]);
             }
 
-            $teamId = $organization->laratrust_team_id;
-            $toRole = $to->organizationRole($organization);
+            $teamId = $freshOrg->laratrust_team_id;
+            $toRole = $freshTo->organizationRole($freshOrg);
 
-            $from->removeRole(OrganizationRole::Owner->value, $teamId);
-            $from->addRole(OrganizationRole::Admin->value, $teamId);
+            $freshFrom->removeRole(OrganizationRole::Owner->value, $teamId);
+            $freshFrom->addRole(OrganizationRole::Admin->value, $teamId);
 
             if ($toRole !== null) {
-                $to->removeRole($toRole->value, $teamId);
+                $freshTo->removeRole($toRole->value, $teamId);
             }
-            $to->addRole(OrganizationRole::Owner->value, $teamId);
+            $freshTo->addRole(OrganizationRole::Owner->value, $teamId);
         });
 
         $this->recorder->record(SecurityEventType::OwnershipTransferred, $from, [
@@ -424,6 +453,137 @@ class OrganizationMembershipService
             'from_user_id' => $from->getKey(),
             'to_user_id' => $to->getKey(),
         ]);
+    }
+
+    /**
+     * 削除するとその組織を Owner 不在で残す組織 (= 削除ブロック対象)。
+     * 述語: $user が Owner かつ 他に Owner がいない かつ 他に 1 人以上メンバーが残る。
+     * 個人組織のように $user が唯一メンバーの組織は「孤児化するメンバーが居ない」ため対象外。
+     *
+     * 読み取り専用判定 (ロックしない。表示スナップショット用)。権威判定は deleteAccount が
+     * ロック下で再評価する。
+     *
+     * @return Collection<int, Organization>
+     */
+    public function organizationsBlockingDeletion(User $user): Collection
+    {
+        return $user->organizations()
+            ->withCount('users')
+            ->get()
+            ->filter(function (Organization $organization) use ($user): bool {
+                // withCount('users') 派生属性。PHPStan は型を知らないため integerish で narrowing。
+                $usersCount = $organization->getAttribute('users_count');
+                Assert::integerish($usersCount);
+
+                return $user->organizationRole($organization) === OrganizationRole::Owner
+                    && (int) $usersCount > 1
+                    && ! $this->hasAnotherOwner($organization, $user);
+            })
+            ->values();
+    }
+
+    /**
+     * メンバーシップ書き込みの共通ロック境界。canonical 順序で行ロックを取り、
+     * デッドロックを構造的に排除する: **users(id 昇順) → organizations(id 昇順)**。
+     * ロック取得後は呼び出し側が最新状態を DB から再取得して判定すること (事前取得値を信用しない)。
+     *
+     * @param  list<int>  $userIds
+     * @param  list<int>  $organizationIds
+     */
+    private function lockForMembershipWrite(array $userIds, array $organizationIds): void
+    {
+        $sortedUserIds = collect($userIds)->unique()->sort()->values()->all();
+        if ($sortedUserIds !== []) {
+            DB::table('users')->whereIn('id', $sortedUserIds)->orderBy('id')->lockForUpdate()->get();
+        }
+        $sortedOrgIds = collect($organizationIds)->unique()->sort()->values()->all();
+        if ($sortedOrgIds !== []) {
+            DB::table('organizations')->whereIn('id', $sortedOrgIds)->orderBy('id')->lockForUpdate()->get();
+        }
+    }
+
+    /**
+     * モデルの主キーを int として取得する (getKey() の mixed を PHPStan L10 で narrowing)。
+     * 本アプリのメンバーシップ関連モデル (User / Organization) は bigint auto-increment 主キー。
+     */
+    private function keyOf(Model $model): int
+    {
+        $key = $model->getKey();
+        Assert::integer($key);
+
+        return $key;
+    }
+
+    /**
+     * アカウント削除。ガードと削除を同一トランザクション + 行ロックで直列化する。
+     * 削除するとその組織を Owner 不在で残す組織があれば拒否する (孤児化防止・最終権威)。
+     *
+     * 直列化の仕組み (owner 判定は role_user を読むが role_user を直接ロックはしない):
+     * 組織の owner 集合を変える書き込み経路 (changeRole / transferOwnership / removeMember /
+     * applyConsoleRole / joinOrganization) はすべて自 tx 冒頭で `lockForMembershipWrite`
+     * により対象 organizations 行をロックする (施策7 の drift-guard が新経路の登録を強制し、
+     * 施策8b の role-grant sole-gateway テストが本サービス外の owner 付与を禁止する)。
+     * よって「organizations 行」が owner 集合変更の共通 mutex となり、deleteAccount が自分の
+     * 所属組織行をすべてロックしている間は、それらの組織の owner 数を変える並行書き込みは
+     * ブロックされる (集約ルート行ロックで子テーブル書き込みを直列化する既存パターン。
+     * cf. AGENTS.md ドメイン規約1 の VideoManual lockForUpdate)。step1 の user 行ロックは
+     * 「新組織への owner 移譲で所属集合そのものが増える」race を封じる。
+     *
+     * $beforeDelete はガード通過後・削除直前 (user 行が存在するうち・ロック下) に実行する
+     * フック。呼び出し側のセッション破棄 (Auth::logout) をここで行うことで、ログアウトが
+     * 発火する監査イベント (logout) を user 行が存在する間に記録できる (削除後だと user_id の
+     * FK 違反になり記録が失われる)。ブロック時はガードが先に例外を投げ、フックは実行されない
+     * (ブロックされたユーザーはログアウトされない)。**フックは例外を投げてはならない**
+     * (投げると削除トランザクション全体が rollback する)。
+     *
+     * @param  (\Closure(): void)|null  $beforeDelete  例外を投げないこと (投げると削除全体が rollback)
+     *
+     * @throws ValidationException 唯一 Owner かつ他メンバーが残る組織がある
+     */
+    public function deleteAccount(User $user, ?\Closure $beforeDelete = null): void
+    {
+        DB::transaction(function () use ($user, $beforeDelete): void {
+            // 1. 対象 User 行を最初にロック (この後の所属列挙を安定させる。列挙前に user を
+            //    ロックしないと、列挙〜user ロック取得の間に別 txn が新組織 B の Owner を user へ
+            //    移譲し、B を未検査のまま削除する race が残る)。
+            $this->lockForMembershipWrite([$this->keyOf($user)], []);
+
+            // 2. user ロック下で所属組織を列挙 → organizations 行を昇順ロック
+            //    (メンバー追加/移譲経路も user 行をロックするため、ここで列挙は安定する)
+            /** @var list<int> $organizationIds */
+            $organizationIds = $user->organizations()
+                ->orderBy('organizations.id')
+                ->pluck('organizations.id')
+                ->map(function (mixed $id): int {
+                    Assert::integer($id);
+
+                    return $id;
+                })
+                ->values()
+                ->all();
+            $this->lockForMembershipWrite([], $organizationIds);
+
+            // 3. ロック下で述語を再評価 (fresh。事前取得値は信用しない。null フォールバック禁止)
+            $freshUser = $user->fresh();
+            Assert::isInstanceOf($freshUser, User::class);
+            $blockers = $this->organizationsBlockingDeletion($freshUser);
+            if ($blockers->isNotEmpty()) {
+                $names = $blockers->pluck('name')->implode('、');
+                throw ValidationException::withMessages([
+                    'account' => ["次の組織のオーナーであるため削除できません。先にオーナーを移譲してください: {$names}"],
+                ]);
+            }
+
+            // 4. ガード通過後・削除直前のフック (呼び出し側のセッション破棄等。user 行が
+            //    存在するうちに認証イベントを発火させる)。
+            if ($beforeDelete !== null) {
+                $beforeDelete();
+            }
+
+            // 5. 監査記録 (純 DB insert。user_id は nullOnDelete で削除時に null 化される)
+            $this->recorder->record(SecurityEventType::AccountDeleted, $freshUser);
+            $freshUser->delete();
+        });
     }
 
     /**
