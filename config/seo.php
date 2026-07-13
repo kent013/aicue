@@ -125,6 +125,8 @@ return [
         'organizations.onboarding.cli' => 'CLI 導入ガイド',
         // MCP 導入ガイド (organizations.onboarding.mcp — Onboarding/Mcp.svelte h1「MCP 導入ガイド」)
         'organizations.onboarding.mcp' => 'MCP 導入ガイド',
+        // 通知一覧 (notifications.index — Notifications/Index.svelte h1「通知」)
+        'notifications.index' => '通知',
     ],
 
 ];
