@@ -34,6 +34,17 @@ Open リストは [TODO.md](TODO.md) を参照。
 | T016 | シナリオ保存失敗フィードバックの知覚性改善 + 動画マニュアルtitle供給 (bug-hunt F-02/F-05)。保存失敗を SaveFailure union へ再構成し、失敗アラートを操作点(シナリオを更新ボタン)直上へ移設 + focus(preventScroll)→scrollIntoView で知覚可能化。403 分岐追加で権限エラーを固定文言明示(内部状態を漏らさない)。保存ロジック・409応答契約は無変更。動画マニュアル show/edit/撮影show に setPrivateTitle で固有 title 供給、create は config/seo.php 静的登録。Vitest 新規5ケース + ManualPageTitleTest。Codex impl-review Round 1 APPROVED (Critical/Warning なし、Suggestion 2件は見送り記録) | frontend | 2026-07-12 22:16 |
 | T017 | 撮影カメラ実行時失敗のファイルフォールバック到達 (bug-hunt F-03)。camera.ts に CameraUnavailableReason union + classifyGetUserMediaError(恒久/一時/unknown分類)。CameraRecorder に onCameraUnavailable 必須 prop、恒久失敗は親へ委譲・一時失敗のみローカル表示、開始処理再入ガード、MediaRecorder 構築/start() 失敗時は stream 解放してフォールバックへ倒す(詰みを作らない §10.8-3)。Show.svelte で実行時 file fallback + reason別 notice 切替。Vitest 3ファイル(分類/親通知/分岐表示/enqueue引き渡し/成功契約/再入)。Codex impl-review Round 2 APPROVED (Round1 Warning 2件対応済み) | frontend | 2026-07-12 22:26 |
 | T018 | bug-hunt環境の専用queue worker起動/停止 (bug-hunt F-01)。専用 connection(database-analysis/render/media)のジョブが QUEUE_CONNECTION=sync をバイパスして jobs テーブルに積まれるのに provision が worker を起動せず永久 queued 滞留する問題を解消。worker 共通ヘルパ(worker_alive の /proc cmdline 照合・start_shard_workers = setsid + queue:listen + 起動時 pid==pgid 検証 + 失敗ロールバック・stop_shard_workers = TERM→group消滅待ち→KILL→再確認、所有確認不能は pidfile 保持+rc=1)、provision 起動配線、teardown 再構成(worker停止をserve前・停止失敗shardのdropdb抑止・非ゼロ終了)、keepdb-check の worker 生存確認、self-test [y] (drift PHP実評価/構造/stop機能 y6a-d) を追加。Codex impl-review Round 1 APPROVED、self-test 全pass。実機 provisioning は未実施(impl-notes.md に運用手順明記) | test | 2026-07-12 22:36 |
+| T019 | 組織ナビ&組織スイッチャー導線の追加。組織設定/請求/招待の恒常ナビ+組織切替UI | frontend | 2026-07-13 19:21 |
+| T020 | Freeプラン組織の課金ゲート誤締め出し修正。Seederのplan_code=free是正でfree無償許可(誤締め出し解消)。PlanSeederPriceInvariant/SeededFreePlanBillingAccess/ManualTestSeeder テスト追加 | infrastructure | 2026-07-13 19:26 |
+| T021 | 新規登録時のチケット10枚付与。登録完了(CreateNewUser)で無料チケット10枚を付与。TicketLedgerService に signup grant + ticket_ledger_entries への unique index migration で二重付与防止、StripeWebhookProcessor 冪等性連携。RegistrationTest/TicketGrantTest/SignupGrantUniqueIndexInvariantTest 追加 | backend | 2026-07-13 19:30 |
+| T022 | manuals画面の残留エラーalert解消。成功操作後にstaleなエラーalertをクリア | frontend | 2026-07-13 19:32 |
+| T023 | 2FA無効化/再生成に再認証(recent-auth)必須化。2FA disable/recovery-codes再生成にrecent-auth(パスワード再確認)を要求 | backend | 2026-07-13 19:35 |
+| T024 | パスワード変更時に他デバイスのセッション失効 (bug-hunt F-H4)。パスワード変更成功時に現在セッション以外を失効させる | backend | 2026-07-13 19:37 |
+| T025 | 唯一オーナーのアカウント削除ガード (bug-hunt F-H5)。唯一オーナー削除を警告/ブロックしオーナー移譲要求 | backend | 2026-07-13 19:40 |
+| T026 | 保存成功フィードバック統一と二重トースト解消。profile/password保存に成功トースト+二重発火解消 | frontend | 2026-07-13 19:41 |
+| T027 | homeヘッダーのモバイルレスポンシブ化。375px幅でハンバーガーメニュー化 | frontend | 2026-07-13 19:44 |
+| T028 | プロジェクト個別メンバー管理UIの追加。members.store/destroyを呼ぶUI追加 | frontend | 2026-07-13 19:46 |
+| T029 | 未設定画面のブラウザタブtitle追加。config/seo.php app_titlesに6ルート追加 | backend | 2026-07-13 19:49 |
 
 ## Obsoleted
 
