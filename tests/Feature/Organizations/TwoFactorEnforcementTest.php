@@ -317,6 +317,7 @@ test('非必須組織のみ所属の準拠ユーザーは self-disable できる
     $member = tfeAddMember($organization, 'enabled');
 
     $this->actingAs($member)
+        ->withSession(freshRecentAuthSession()) // recent-auth を満たす (step-up 済み相当)
         ->delete('/user/two-factor-authentication')
         ->assertRedirect();
 

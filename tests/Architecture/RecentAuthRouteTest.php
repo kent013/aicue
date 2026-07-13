@@ -34,6 +34,8 @@ function recentAuthRequiredRouteNames(): array
         // FortifyServiceProvider::attachRecentAuthToSensitiveRoutes() が後付け配線)
         'two-factor.recovery-codes',
         'two-factor.regenerate-recovery-codes',
+        // 2FA 無効化 (第二要素そのものの除去。bug-hunt F-H3。同じく後付け配線)
+        'two-factor.disable',
     ];
 }
 

@@ -129,6 +129,18 @@ function createOrganizationWithOwner(string $name = 'テスト組織'): array
 }
 
 /**
+ * recent-auth (step-up) を確実に満たす fresh session 値。
+ * 窓は config('auth.recent_auth_timeout')(既定 900s)。注入時点の elapsed≈0 で窓に対し十分 fresh。
+ * recent-auth を要する route を「step-up 済み相当」で叩くテストは withSession() でこれを注入する。
+ *
+ * @return array{recent_auth_at: int}
+ */
+function freshRecentAuthSession(): array
+{
+    return ['recent_auth_at' => now()->timestamp];
+}
+
+/**
  * 組織を有償プラン契約状態にする (plan_code + Cashier subscription 行)。
  * plan_code は $fillable 外の状態キー (webhook 同期のみ) のため forceFill で明示代入。
  * BillingAccess は plan_code 非 null の組織にのみ active/trialing subscription を要求する。
