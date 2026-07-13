@@ -33,19 +33,48 @@
         note: string | null;
     }
 
+    interface Member {
+        id: number;
+        name: string;
+        /** canViewMemberEmails=false のときは常に null (キー常在契約) */
+        email: string | null;
+        /** ProjectRole の value。暗黙メンバー (org 管理継承) は null */
+        role: string | null;
+        /** true = org owner/admin の管理継承 (pivot なし = 削除/ロール変更不可) */
+        implicit: boolean;
+    }
+
+    interface AssignableUser {
+        id: number;
+        name: string;
+    }
+
     interface Props {
         project: { id: number; name: string; description: string | null };
         items: Item[];
         canManage: boolean;
         /** 管理メニュー > ユーザー管理への導線を出すか (org owner/admin。単一根拠は Gate) */
         canManageMembers: boolean;
+        members: Member[];
+        canViewMemberEmails: boolean;
+        assignableUsers: AssignableUser[];
         manuals: { data: ManualListItem[]; meta: PaginationMeta };
         categories: CategoryOption[];
         manualFilters: ManualFilters;
     }
 
-    let { project, items, canManage, canManageMembers, manuals, categories, manualFilters }: Props =
-        $props();
+    let {
+        project,
+        items,
+        canManage,
+        canManageMembers,
+        members,
+        canViewMemberEmails,
+        assignableUsers,
+        manuals,
+        categories,
+        manualFilters,
+    }: Props = $props();
 
     const shared = $derived(page.props as unknown as SharedProps);
     const appName = $derived(shared.appName ?? "");
@@ -78,6 +107,80 @@
             preserveState: true,
             preserveScroll: true,
             only: ["manuals", "manualFilters"],
+        });
+    }
+
+    /* ---- プロジェクトメンバー管理 ---- */
+    // ProjectRole の value → 日本語ラベル (追加/変更 select の option 定数。サーバ enum に対応)
+    const PROJECT_ROLE_OPTIONS: { value: string; label: string }[] = [
+        { value: "project_admin", label: "編集者" },
+        { value: "project_member", label: "撮影者" },
+    ];
+
+    /* メンバー追加 (store。assignableUsers から選択) */
+    const memberForm = useForm({ user_id: "", role: "project_member" });
+
+    function submitAddMember(event: SubmitEvent): void {
+        event.preventDefault();
+        if (memberForm.processing) return; // 二重送信ガード
+        // 候補未選択なら押下時エラー (disabled にしない = 禁止事項 8)
+        if (memberForm.user_id === "") {
+            memberForm.setError("user_id", "追加するメンバーを選択してください。");
+            return;
+        }
+        memberForm.post(`/projects/${project.id}/members`, {
+            preserveScroll: true,
+            onSuccess: () => {
+                memberForm.reset();
+            },
+        });
+    }
+
+    /* ロール変更 (store 再実行 = upsert。Admin/Users の 1 セレクト流儀) */
+    // 二重送信ガードは handler 早期 return で行う (Select に disabled を付けない = 禁止事項 8 回避)
+    let changingRoleId = $state<number | null>(null);
+
+    function changeMemberRole(member: Member, role: string): void {
+        if (role === "" || changingRoleId !== null) return; // 二重送信ガード (disabled に頼らない)
+        changingRoleId = member.id;
+        router.post(
+            `/projects/${project.id}/members`,
+            { user_id: member.id, role },
+            {
+                preserveScroll: true,
+                // 保存失敗時は表示がサーバと乖離するため props を再取得して再同期する
+                // (非 optimistic。field/flash error は Inertia の errors 経由で表示)
+                onError: () => {
+                    router.reload({ only: ["members", "assignableUsers"] });
+                },
+                onFinish: () => {
+                    changingRoleId = null;
+                },
+            },
+        );
+    }
+
+    /* メンバー削除 (destroy。ConfirmDialog) */
+    let removeMemberTarget = $state<Member | null>(null);
+    let removeMemberDialogOpen = $state(false);
+    let removingMember = $state(false);
+
+    function openRemoveMemberDialog(member: Member): void {
+        removeMemberTarget = member;
+        removeMemberDialogOpen = true;
+    }
+
+    function removeMember(): void {
+        if (removeMemberTarget === null || removingMember) return;
+        router.delete(`/projects/${project.id}/members/${removeMemberTarget.id}`, {
+            preserveScroll: true,
+            onStart: () => {
+                removingMember = true;
+            },
+            onFinish: () => {
+                removingMember = false;
+                removeMemberDialogOpen = false;
+            },
         });
     }
 
@@ -316,6 +419,138 @@
             </Card>
         {/if}
 
+        {#if canManage}
+            <Card padding="lg">
+                <h2 class="text-h3">プロジェクトメンバー</h2>
+                <p class="mt-1 text-caption text-text-secondary">
+                    編集者・撮影者を割り当てます。組織の管理者はプロジェクト未所属でも管理できます。
+                </p>
+
+                {#if members.length === 0}
+                    <EmptyState
+                        title="メンバーはまだいません"
+                        description="組織メンバーをこのプロジェクトに割り当てると、ここに表示されます。"
+                        testId="project-members-empty"
+                    />
+                {:else}
+                    <ul
+                        class="mt-4 flex flex-col divide-y divide-border"
+                        data-testid="project-member-list"
+                    >
+                        {#each members as member (member.id)}
+                            <li
+                                class="flex items-center justify-between gap-4 py-3"
+                                data-testid={`project-member-${member.id}`}
+                            >
+                                <div class="min-w-0">
+                                    <p class="truncate text-body">{member.name}</p>
+                                    {#if canViewMemberEmails && member.email}
+                                        <p class="truncate text-caption text-text-secondary">
+                                            {member.email}
+                                        </p>
+                                    {/if}
+                                </div>
+                                <div class="flex shrink-0 items-center gap-2">
+                                    {#if member.implicit}
+                                        <!-- 暗黙メンバー: org 管理継承。pivot なし = ロール変更/削除不可 -->
+                                        <Badge
+                                            tone="neutral"
+                                            testId={`project-member-implicit-${member.id}`}
+                                        >
+                                            管理者（組織）
+                                        </Badge>
+                                    {:else}
+                                        <!-- disabled は付けない (禁止事項 8)。二重送信は
+                                             changeMemberRole の handler 早期 return でガードする -->
+                                        <Select
+                                            value={member.role ?? ""}
+                                            aria-label={`${member.name} のロール`}
+                                            onchange={(event) =>
+                                                changeMemberRole(member, event.currentTarget.value)}
+                                            testId={`project-member-role-${member.id}`}
+                                        >
+                                            {#each PROJECT_ROLE_OPTIONS as option (option.value)}
+                                                <option value={option.value}>{option.label}</option>
+                                            {/each}
+                                        </Select>
+                                        <Button
+                                            variant="danger-ghost"
+                                            size="sm"
+                                            onclick={() => openRemoveMemberDialog(member)}
+                                            testId={`project-member-remove-${member.id}`}
+                                        >
+                                            削除
+                                        </Button>
+                                    {/if}
+                                </div>
+                            </li>
+                        {/each}
+                    </ul>
+                {/if}
+
+                <!-- 追加フォーム -->
+                <form
+                    onsubmit={submitAddMember}
+                    class="mt-6 flex flex-col gap-4"
+                    data-testid="project-member-add-form"
+                >
+                    {#if assignableUsers.length === 0}
+                        <p
+                            class="text-caption text-text-secondary"
+                            data-testid="project-member-no-candidates"
+                        >
+                            アサインできる組織メンバーがいません。
+                            {#if canManageMembers}
+                                <TextLink href="/manage/users">ユーザー管理</TextLink>から招待・確認できます。
+                            {/if}
+                        </p>
+                    {/if}
+                    <FormField
+                        label="メンバー"
+                        id="project-member-user"
+                        error={memberForm.errors.user_id}
+                    >
+                        {#snippet children({ id, describedBy, invalid })}
+                            <Select
+                                {id}
+                                bind:value={memberForm.user_id}
+                                error={invalid}
+                                aria-describedby={describedBy}
+                            >
+                                <option value="">選択してください</option>
+                                {#each assignableUsers as candidate (candidate.id)}
+                                    <option value={String(candidate.id)}>{candidate.name}</option>
+                                {/each}
+                            </Select>
+                        {/snippet}
+                    </FormField>
+                    <FormField label="ロール" id="project-member-role" error={memberForm.errors.role}>
+                        {#snippet children({ id, describedBy, invalid })}
+                            <Select
+                                {id}
+                                bind:value={memberForm.role}
+                                error={invalid}
+                                aria-describedby={describedBy}
+                            >
+                                {#each PROJECT_ROLE_OPTIONS as option (option.value)}
+                                    <option value={option.value}>{option.label}</option>
+                                {/each}
+                            </Select>
+                        {/snippet}
+                    </FormField>
+                    <div>
+                        <Button
+                            type="submit"
+                            loading={memberForm.processing}
+                            testId="project-member-submit"
+                        >
+                            メンバーを追加
+                        </Button>
+                    </div>
+                </form>
+            </Card>
+        {/if}
+
         <Card padding="lg">
             <h2 class="text-h3">アイテム</h2>
             {#if items.length === 0}
@@ -464,6 +699,17 @@
         processing={removing}
         onConfirm={removeItem}
         testId="remove-item-dialog"
+    />
+
+    <ConfirmDialog
+        bind:open={removeMemberDialogOpen}
+        title="メンバー削除"
+        message={`「${removeMemberTarget?.name ?? ""}」をこのプロジェクトから外しますか？ 組織のメンバーシップは維持されます。`}
+        confirmLabel="削除する"
+        confirmVariant="danger"
+        processing={removingMember}
+        onConfirm={removeMember}
+        testId="project-member-remove-dialog"
     />
 
     <ConfirmDialog

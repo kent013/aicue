@@ -111,6 +111,9 @@ class ProjectController extends Controller
 
         $filters = $this->parseManualFilters($request);
 
+        // memberRows は members prop と assignableUsers 導出の双方で使うため 1 度だけ算出する
+        $memberRows = $this->memberRows($organization, $project, $canManage);
+
         return Inertia::render('Projects/Show', [
             'project' => [
                 'id' => $project->id,
@@ -118,11 +121,14 @@ class ProjectController extends Controller
                 'description' => $project->description,
             ],
             'items' => $items,
-            'members' => $this->memberRows($organization, $project, $canManage),
+            'members' => $memberRows,
             'canManage' => $canManage,
             // メンバー email 可視性の単一根拠 (can('update', $project))。members[].email の
             // 実値有無と常に一致する (ProjectShowEmailVisibilityTest が契約を固定)
             'canViewMemberEmails' => $canManage,
+            // メンバー追加フォームの候補。canManage=false のときは [] (name も PII のため
+            // payload 生成時点で絞る = canViewMemberEmails と同じ流儀)
+            'assignableUsers' => $this->assignableUserRows($organization, $memberRows, $canManage),
             // 動画マニュアル一覧 (専用 index は持たず本画面に内包。GET クエリで絞り込み + paginate)
             'manuals' => $this->manualRows($project, $filters),
             'categories' => $this->categoryRows($project),
@@ -272,6 +278,37 @@ class ProjectController extends Controller
         }
 
         return array_values($rows);
+    }
+
+    /**
+     * メンバー追加フォームの候補 (id/name のみ・PII 最小)。
+     *
+     * - $canManage=false のときは [] (name も PII。UI 非表示に頼らず payload 生成時点で絞る =
+     *   canViewMemberEmails と同じ流儀)。
+     * - 候補 = current org のメンバーのうち $memberRows に含まれない者 (明示メンバーも
+     *   暗黙メンバー = org owner/admin も除外)。暗黙メンバーは既に管理アクセスを持つため追加が無意味。
+     *
+     * @param  list<array{id: int, name: string, email: string|null, role: string|null, implicit: bool}>  $memberRows
+     * @return list<array{id: int, name: string}>
+     */
+    private function assignableUserRows(Organization $organization, array $memberRows, bool $canManage): array
+    {
+        if (! $canManage) {
+            return [];
+        }
+
+        // memberRows の shape (id:int) から list<int> を明示 (PHPStan L10 で in_array の推論を固定)
+        /** @var list<int> $memberIds */
+        $memberIds = array_column($memberRows, 'id');
+
+        // NOTE: memberRows でも org->users() を読むため org あたり 2 クエリ。org メンバー数 N は
+        // 通常小さく許容。将来 N が大きくなれば単一クエリ化を検討する (現時点で最適化はしない)。
+        return array_values(
+            $organization->users()->orderBy('users.name')->get()
+                ->reject(fn (User $user): bool => in_array($user->id, $memberIds, true))
+                ->map(fn (User $user): array => ['id' => $user->id, 'name' => $user->name])
+                ->all()
+        );
     }
 
     /** プロジェクト編集フォーム */

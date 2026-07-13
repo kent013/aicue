@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/svelte";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, within } from "@testing-library/svelte";
+import { router } from "@inertiajs/svelte";
 import Show from "@/pages/Projects/Show.svelte";
 import type { ManualFilters, ManualListItem, PaginationMeta } from "@/types/manual";
 
@@ -31,6 +32,26 @@ const baseProps = {
     ],
     canManage: true,
     canManageMembers: true,
+    members: [
+        // 暗黙メンバー (org admin。pivot なし = role null / implicit)
+        { id: 1, name: "オーナー 太郎", email: "owner@example.com", role: null, implicit: true },
+        {
+            id: 2,
+            name: "編集 花子",
+            email: "editor@example.com",
+            role: "project_admin",
+            implicit: false,
+        },
+        {
+            id: 3,
+            name: "撮影 三郎",
+            email: "shooter@example.com",
+            role: "project_member",
+            implicit: false,
+        },
+    ],
+    canViewMemberEmails: true,
+    assignableUsers: [{ id: 4, name: "候補 四郎" }],
     manuals: {
         data: manualsFixture,
         meta: { ...emptyMeta, total: 2 },
@@ -167,5 +188,138 @@ describe("Projects/Show", () => {
         expect(screen.queryByTestId("link-manage-users")).toBeNull();
         expect(screen.queryByRole("heading", { name: "管理メニュー" })).toBeNull();
         expect(screen.getByTestId("manual-list")).toBeInTheDocument();
+    });
+});
+
+describe("Projects/Show メンバー管理", () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it("canManage=true でメンバー一覧・追加フォーム・各明示メンバーの操作を描画する", () => {
+        render(Show, { props: baseProps });
+
+        expect(screen.getByRole("heading", { name: "プロジェクトメンバー" })).toBeInTheDocument();
+        expect(screen.getByTestId("project-member-list")).toBeInTheDocument();
+        expect(screen.getByTestId("project-member-add-form")).toBeInTheDocument();
+        expect(screen.getByTestId("project-member-submit")).toBeInTheDocument();
+        // 明示メンバーは role select + 削除ボタンを持つ
+        expect(screen.getByTestId("project-member-role-2")).toBeInTheDocument();
+        expect(screen.getByTestId("project-member-remove-2")).toBeInTheDocument();
+    });
+
+    it("canManage=false ではメンバー管理 UI を一切表示しない", () => {
+        render(Show, { props: { ...baseProps, canManage: false } });
+
+        expect(screen.queryByRole("heading", { name: "プロジェクトメンバー" })).toBeNull();
+        expect(screen.queryByTestId("project-member-list")).toBeNull();
+        expect(screen.queryByTestId("project-member-add-form")).toBeNull();
+        expect(screen.queryByTestId("project-member-role-2")).toBeNull();
+        expect(screen.queryByTestId("project-member-remove-2")).toBeNull();
+    });
+
+    it("暗黙メンバー行はロール select・削除を出さず「管理者（組織）」バッジを表示する", () => {
+        render(Show, { props: baseProps });
+
+        expect(screen.getByTestId("project-member-implicit-1")).toHaveTextContent("管理者（組織）");
+        expect(screen.queryByTestId("project-member-role-1")).toBeNull();
+        expect(screen.queryByTestId("project-member-remove-1")).toBeNull();
+    });
+
+    it("候補を選んで送信すると router.post が payload 付きで発火する", async () => {
+        const postSpy = vi.spyOn(router, "post").mockImplementation(() => {});
+        render(Show, { props: baseProps });
+
+        const userSelect = screen.getByLabelText("メンバー");
+        await fireEvent.change(userSelect, { target: { value: "4" } });
+        await fireEvent.submit(screen.getByTestId("project-member-add-form"));
+
+        expect(postSpy).toHaveBeenCalledTimes(1);
+        expect(postSpy.mock.calls[0][0]).toBe("/projects/1/members");
+        expect(postSpy.mock.calls[0][1]).toMatchObject({ user_id: "4" });
+    });
+
+    it("候補未選択で送信すると router.post は呼ばれず field error を表示する (disabled 不使用)", async () => {
+        const postSpy = vi.spyOn(router, "post").mockImplementation(() => {});
+        render(Show, { props: baseProps });
+
+        const submit = screen.getByTestId("project-member-submit");
+        expect(submit).not.toBeDisabled();
+        await fireEvent.submit(screen.getByTestId("project-member-add-form"));
+
+        expect(postSpy).not.toHaveBeenCalled();
+        expect(screen.getByText("追加するメンバーを選択してください。")).toBeInTheDocument();
+    });
+
+    it("明示メンバーの role select を変更すると router.post が upsert payload で発火する", async () => {
+        const postSpy = vi.spyOn(router, "post").mockImplementation(() => {});
+        render(Show, { props: baseProps });
+
+        await fireEvent.change(screen.getByTestId("project-member-role-2"), {
+            target: { value: "project_member" },
+        });
+
+        expect(postSpy).toHaveBeenCalledTimes(1);
+        expect(postSpy.mock.calls[0][0]).toBe("/projects/1/members");
+        expect(postSpy.mock.calls[0][1]).toEqual({ user_id: 2, role: "project_member" });
+    });
+
+    it("ロール変更処理中は次のロール変更を受け付けない (二重送信ガード)", async () => {
+        // router.post は onFinish を発火させない mock なので changingRoleId が張られたまま。
+        // 連続 change しても 1 回しか送信されないこと (in-flight ロックの退行検知) を固定する。
+        const postSpy = vi.spyOn(router, "post").mockImplementation(() => {});
+        render(Show, { props: baseProps });
+
+        await fireEvent.change(screen.getByTestId("project-member-role-2"), {
+            target: { value: "project_member" },
+        });
+        await fireEvent.change(screen.getByTestId("project-member-role-3"), {
+            target: { value: "project_admin" },
+        });
+
+        expect(postSpy).toHaveBeenCalledTimes(1);
+        expect(postSpy.mock.calls[0][1]).toEqual({ user_id: 2, role: "project_member" });
+    });
+
+    it("削除ボタン → 確認ダイアログ確定で router.delete が対象 URL で発火する", async () => {
+        const deleteSpy = vi.spyOn(router, "delete").mockImplementation(() => {});
+        render(Show, { props: baseProps });
+
+        await fireEvent.click(screen.getByTestId("project-member-remove-2"));
+        const dialog = screen.getByTestId("project-member-remove-dialog");
+        await fireEvent.click(within(dialog).getByRole("button", { name: "削除する" }));
+
+        expect(deleteSpy).toHaveBeenCalledTimes(1);
+        expect(deleteSpy.mock.calls[0][0]).toBe("/projects/1/members/2");
+    });
+
+    it("canViewMemberEmails=false かつ email=null なら member email を描画しない", () => {
+        render(Show, {
+            props: {
+                ...baseProps,
+                canViewMemberEmails: false,
+                members: baseProps.members.map((member) => ({ ...member, email: null })),
+            },
+        });
+
+        expect(screen.queryByText("editor@example.com")).toBeNull();
+        expect(screen.queryByText("shooter@example.com")).toBeNull();
+    });
+
+    it("assignableUsers が空なら候補なし案内 (canManageMembers ではユーザー管理リンク) を出す", () => {
+        render(Show, { props: { ...baseProps, assignableUsers: [] } });
+
+        const note = screen.getByTestId("project-member-no-candidates");
+        expect(note).toBeInTheDocument();
+        expect(within(note).getByRole("link", { name: "ユーザー管理" }).getAttribute("href")).toMatch(
+            /\/manage\/users$/,
+        );
+    });
+
+    it("members が空のときは EmptyState を表示する", () => {
+        render(Show, { props: { ...baseProps, members: [] } });
+
+        expect(screen.getByTestId("project-members-empty")).toBeInTheDocument();
+        expect(screen.queryByTestId("project-member-list")).toBeNull();
     });
 });
