@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/svelte";
+import { fireEvent, render, screen, within } from "@testing-library/svelte";
 import Welcome from "@/pages/Welcome.svelte";
 import type { LandingPageProps } from "@/types/marketing";
 
@@ -85,5 +85,45 @@ describe("Welcome (LP)", () => {
         const { container } = render(Welcome, { props: baseProps });
 
         expect(container.querySelectorAll("button[disabled]")).toHaveLength(0);
+    });
+
+    it("既定ではモバイルパネルを描画せずナビリンクが単一ヒットする", () => {
+        render(Welcome, { props: baseProps });
+
+        expect(screen.queryByTestId("guest-nav-panel")).not.toBeInTheDocument();
+        // 広幅ナビのみ = 単一ヒット (hidden sm:flex は jsdom で DOM に残るが二重化しない)。
+        // "ログイン" は nav 専用リンク (footer には無い) のため単一ヒットで固定できる。
+        expect(screen.getByRole("link", { name: "ログイン" })).toBeInTheDocument();
+    });
+
+    it("ハンバーガー押下でモバイルパネルが開き aria-expanded が切り替わる", async () => {
+        render(Welcome, { props: baseProps });
+
+        const toggle = screen.getByTestId("guest-nav-toggle");
+        expect(toggle).toHaveAttribute("aria-expanded", "false");
+        await fireEvent.click(toggle);
+        expect(toggle).toHaveAttribute("aria-expanded", "true");
+        const panel = screen.getByTestId("guest-nav-panel");
+        expect(within(panel).getByRole("link", { name: "ログイン" })).toBeInTheDocument();
+    });
+
+    it("Escape でモバイルパネルが閉じ、トグルにフォーカスが戻る", async () => {
+        render(Welcome, { props: baseProps });
+
+        const toggle = screen.getByTestId("guest-nav-toggle");
+        await fireEvent.click(toggle);
+        await fireEvent.keyDown(window, { key: "Escape" });
+        expect(screen.queryByTestId("guest-nav-panel")).not.toBeInTheDocument();
+        // element bindable によるフォーカス復帰を回帰固定
+        expect(toggle).toHaveFocus();
+    });
+
+    it("パネル内リンク押下でパネルが閉じる", async () => {
+        render(Welcome, { props: baseProps });
+
+        await fireEvent.click(screen.getByTestId("guest-nav-toggle"));
+        const panel = screen.getByTestId("guest-nav-panel");
+        await fireEvent.click(within(panel).getByRole("link", { name: "料金プラン" }));
+        expect(screen.queryByTestId("guest-nav-panel")).not.toBeInTheDocument();
     });
 });

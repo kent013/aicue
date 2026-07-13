@@ -177,6 +177,8 @@ file-scoped allowlist で個別管理する。
 - **anchor 対応**: `href` 指定で `<a>`(`inertia` 指定で Inertia Link)。anchor モードでは
   `type`/`disabled` は型レベルで禁止。`target="_blank"` には `rel="noopener noreferrer"` を自動補完
 - **iconOnly**: `ghost` / `neutral` / `danger-ghost` のみ許可。`ariaLabel` が型で必須
+- **disclosure**: button モード限定で `ariaExpanded` / `ariaControls` / `element`(bindable な
+  `HTMLButtonElement` 参照)を受ける。ハンバーガー等のトグルはこれを使い素の `<button>` を書かない
 - size: `sm`(caption)/ `md`(既定)/ `lg`(form 入力面との高さ整合限定)
 
 ### Input / Textarea / Select(入力系 atom)
