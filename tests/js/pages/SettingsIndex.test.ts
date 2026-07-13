@@ -11,18 +11,41 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/sv
  * - 削除 (router.delete) の onError はダイアログを閉じる (押下後に理由が見える)
  */
 
-const { pageState, routerDeleteMock } = vi.hoisted(() => ({
+const { pageState, routerDeleteMock, formHolder } = vi.hoisted(() => ({
     pageState: {
         props: {} as Record<string, unknown>,
         url: "/settings",
     },
     routerDeleteMock: vi.fn(),
+    // profileForm (email キーを持つ form) を捕捉する holder。case 6 で put を検証する。
+    formHolder: { profile: null as Record<string, unknown> | null },
 }));
 
 vi.mock("@inertiajs/svelte", async (importOriginal) => ({
     ...(await importOriginal<typeof import("@inertiajs/svelte")>()),
     router: { delete: routerDeleteMock },
     page: pageState,
+    // useForm を最小 fake に差し替え、profileForm.put を spy する (case 6)。
+    // email キーを持つ form を profileForm とみなし holder に記録する。
+    useForm: (initial: Record<string, unknown>) => {
+        const form: Record<string, unknown> = {
+            ...initial,
+            errors: {},
+            processing: false,
+            get: vi.fn(),
+            post: vi.fn(),
+            put: vi.fn(),
+            patch: vi.fn(),
+            delete: vi.fn(),
+            submit: vi.fn(),
+            reset: vi.fn(),
+            clearErrors: vi.fn(),
+        };
+        if ("email" in initial) {
+            formHolder.profile = form;
+        }
+        return form;
+    },
 }));
 
 // eslint-disable-next-line import/first
@@ -57,6 +80,37 @@ function stubRecentAuthFresh(): void {
     );
 }
 
+/**
+ * recent-auth precheck を stale (/recent-auth/status → recent:false) にし、
+ * satisfier (/recent-auth/password) は 204 成功を返すスタブ (case 6 用)。
+ */
+function stubRecentAuthStaleThenConfirm(): void {
+    vi.stubGlobal(
+        "fetch",
+        vi.fn((input: RequestInfo | URL) => {
+            const url = typeof input === "string" ? input : input.toString();
+            if (url.includes("/recent-auth/status")) {
+                return Promise.resolve({
+                    ok: true,
+                    status: 200,
+                    json: () =>
+                        Promise.resolve({
+                            recent: false,
+                            passwordSet: true,
+                            availableProviders: [],
+                            canSatisfy: true,
+                            confirmedAt: null,
+                        }),
+                });
+            }
+            if (url.includes("/recent-auth/password")) {
+                return Promise.resolve({ status: 204 });
+            }
+            return Promise.reject(new Error(`unexpected fetch: ${url}`));
+        }),
+    );
+}
+
 /** router.delete 第2引数 (visit options) の onError を取り出す */
 interface DeleteVisitOptions {
     onError?: () => void;
@@ -66,6 +120,7 @@ interface DeleteVisitOptions {
 
 beforeEach(() => {
     setProps();
+    formHolder.profile = null;
 });
 
 afterEach(() => {
@@ -156,5 +211,73 @@ describe("Settings/Index 唯一オーナー削除ガード", () => {
         await waitFor(() =>
             expect(screen.queryByTestId("delete-account-dialog")).toBeNull(),
         );
+    });
+});
+
+describe("Settings/Index プロフィール更新の recent-auth precheck", () => {
+    it("email 変更 + stale は precheck 段階で put せず、再認証後に 1 回だけ put する", async () => {
+        stubRecentAuthStaleThenConfirm();
+        render(Index, { props: {} });
+
+        const profileForm = formHolder.profile;
+        expect(profileForm).not.toBeNull();
+        const putMock = profileForm?.put as ReturnType<typeof vi.fn>;
+
+        // 名前と email を編集 (email 変更で precheck が発火する)
+        await fireEvent.input(screen.getByLabelText("名前"), {
+            target: { value: "新しい名前" },
+        });
+        await fireEvent.input(screen.getByLabelText("メールアドレス"), {
+            target: { value: "new@example.com" },
+        });
+
+        // 保存 → email 変更 → precheck stale → 再認証モーダル
+        const saveButton = screen.getByRole("button", { name: "保存" });
+        const form = saveButton.closest("form");
+        expect(form).not.toBeNull();
+        await fireEvent.submit(form as HTMLFormElement);
+
+        await waitFor(() =>
+            expect(screen.getByTestId("recent-auth-modal")).toBeInTheDocument(),
+        );
+        // precheck 段階では put されない (二重送信回帰の捕捉)
+        expect(putMock).not.toHaveBeenCalled();
+
+        // モーダルで再認証 → 204 → onConfirmed → resumePendingAction → put
+        await fireEvent.input(screen.getByTestId("recent-auth-password-input"), {
+            target: { value: "password" },
+        });
+        await fireEvent.submit(
+            screen.getByTestId("recent-auth-submit").closest("form") as HTMLFormElement,
+        );
+
+        await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+        const call = putMock.mock.calls.at(-1);
+        expect(call?.[0]).toBe("/user/profile-information");
+        // 編集済み name/email が保持されたまま再送される
+        expect(profileForm?.name).toBe("新しい名前");
+        expect(profileForm?.email).toBe("new@example.com");
+    });
+
+    it("氏名のみ変更 (email 不変) は precheck を経ず直ちに put する", async () => {
+        // status を叩いたら失敗させ、precheck が発火しないことを保証する
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(() => Promise.reject(new Error("precheck should not run"))),
+        );
+        render(Index, { props: {} });
+
+        const profileForm = formHolder.profile;
+        const putMock = profileForm?.put as ReturnType<typeof vi.fn>;
+
+        await fireEvent.input(screen.getByLabelText("名前"), {
+            target: { value: "氏名だけ変更" },
+        });
+
+        const saveButton = screen.getByRole("button", { name: "保存" });
+        await fireEvent.submit(saveButton.closest("form") as HTMLFormElement);
+
+        await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+        expect(screen.queryByTestId("recent-auth-modal")).toBeNull();
     });
 });

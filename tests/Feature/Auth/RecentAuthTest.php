@@ -2,8 +2,13 @@
 
 declare(strict_types=1);
 
+use App\Listeners\Auth\StampRecentAuthOnLogin;
 use App\Models\SocialAccount;
 use App\Models\User;
+use App\Security\RecentAuthState;
+use Illuminate\Auth\Events\Login;
+use Illuminate\Auth\SessionGuard;
+use Illuminate\Contracts\Auth\Factory as AuthFactory;
 use Illuminate\Support\Facades\DB;
 use Laravel\Socialite\Contracts\Provider;
 use Laravel\Socialite\Contracts\User as SocialiteUserContract;
@@ -280,6 +285,46 @@ test('fresh login (password) で recent-auth が stamp される (二重壁の�
     ]);
 
     $this->assertAuthenticated();
+    expect(session('recent_auth_at'))->toBeInt();
+    expect(session('recent_auth_method'))->toBe('login');
+});
+
+test('case 4: viaRemember の web login は recent-auth を stamp しない (remember-me 復元 = stale)', function (): void {
+    // remember-me cookie による自動ログイン復元 (SessionGuard::viaRemember()===true) は
+    // fresh 認証扱いしない契約 (StampRecentAuthOnLogin docblock) を listener 単位で固定する。
+    $user = User::factory()->create();
+
+    /** @var SessionGuard&MockInterface $guard */
+    $guard = Mockery::mock(SessionGuard::class);
+    $guard->shouldReceive('viaRemember')->andReturn(true);
+
+    /** @var AuthFactory&MockInterface $authFactory */
+    $authFactory = Mockery::mock(AuthFactory::class);
+    $authFactory->shouldReceive('guard')->with('web')->andReturn($guard);
+
+    $listener = new StampRecentAuthOnLogin(app(RecentAuthState::class), $authFactory);
+    $listener->handle(new Login('web', $user, true));
+
+    expect(session('recent_auth_at'))->toBeNull();
+    expect(session('recent_auth_method'))->toBeNull();
+});
+
+test('case 4 対照: viaRemember でない web login は recent-auth を stamp する', function (): void {
+    // 通常 credential login (viaRemember()===false) では fresh 扱いで stamp される契約を
+    // 両側から固定する。
+    $user = User::factory()->create();
+
+    /** @var SessionGuard&MockInterface $guard */
+    $guard = Mockery::mock(SessionGuard::class);
+    $guard->shouldReceive('viaRemember')->andReturn(false);
+
+    /** @var AuthFactory&MockInterface $authFactory */
+    $authFactory = Mockery::mock(AuthFactory::class);
+    $authFactory->shouldReceive('guard')->with('web')->andReturn($guard);
+
+    $listener = new StampRecentAuthOnLogin(app(RecentAuthState::class), $authFactory);
+    $listener->handle(new Login('web', $user, false));
+
     expect(session('recent_auth_at'))->toBeInt();
     expect(session('recent_auth_method'))->toBe('login');
 });

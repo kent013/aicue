@@ -36,6 +36,10 @@ function recentAuthRequiredRouteNames(): array
         'two-factor.regenerate-recovery-codes',
         // 2FA 無効化 (第二要素そのものの除去。bug-hunt F-H3。同じく後付け配線)
         'two-factor.disable',
+        // profile 更新 (email 変更時のみ条件付き step-up。配線は
+        // FortifyServiceProvider::attachRecentAuthToSensitiveRoutes()。
+        // routeHasRecentAuth は 'recent-auth.on-email-change' も str_starts_with で検出)
+        'user-profile-information.update',
     ];
 }
 
