@@ -83,7 +83,7 @@ it('setPrivateTitle の動的上書きが app_titles 既定より優先される
         ->and($manager->resolveDocumentTitle('projects.show'))->toBe('My Project | Acme');
 });
 
-it('resolveDocumentTitle: 未登録だった 6 アプリ画面が固有 title を返す (仕様固定・h1 と一致)', function (
+it('resolveDocumentTitle: 未登録だったアプリ画面が固有 title を返す (仕様固定・h1 と一致)', function (
     string $routeName,
     string $expectedFragment,
 ): void {
@@ -106,4 +106,6 @@ it('resolveDocumentTitle: 未登録だった 6 アプリ画面が固有 title �
     '接続セッション' => ['organizations.api-keys.sessions.index', '接続セッション'],
     'CLI 導入ガイド' => ['organizations.onboarding.cli', 'CLI 導入ガイド'],
     'MCP 導入ガイド' => ['organizations.onboarding.mcp', 'MCP 導入ガイド'],
+    // F-4-02 (T029 取りこぼし) 回帰防止: 通知一覧 (Notifications/Index.svelte h1「通知」)
+    '通知' => ['notifications.index', '通知'],
 ]);
