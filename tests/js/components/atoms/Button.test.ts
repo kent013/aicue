@@ -59,6 +59,22 @@ describe("Button", () => {
         expect(onclick).not.toHaveBeenCalled();
     });
 
+    it("ariaExpanded / ariaControls を <button> に反映する", () => {
+        render(Button, { props: { ariaExpanded: true, ariaControls: "panel-x", testId: "t" } });
+
+        const btn = screen.getByTestId("t");
+        expect(btn).toHaveAttribute("aria-expanded", "true");
+        expect(btn).toHaveAttribute("aria-controls", "panel-x");
+    });
+
+    it("disclosure props 未指定なら aria-expanded / aria-controls を出さない", () => {
+        render(Button, { props: { testId: "t" } });
+
+        const btn = screen.getByTestId("t");
+        expect(btn).not.toHaveAttribute("aria-expanded");
+        expect(btn).not.toHaveAttribute("aria-controls");
+    });
+
     it("iconOnly は ariaLabel が必須 / anchor で disabled は使えない (型レベル)", () => {
         // @ts-expect-error iconOnly には ariaLabel が必須
         const _missingLabel: ButtonProps = { iconOnly: true };

@@ -77,6 +77,12 @@ type ModeProps =
           type?: "button" | "submit" | "reset";
           disabled?: boolean;
           onclick?: (event: MouseEvent) => void;
+          /** disclosure ボタン用。トグルの開閉状態を aria-expanded で公開する */
+          ariaExpanded?: boolean;
+          /** disclosure ボタンが制御する要素の id (aria-controls) */
+          ariaControls?: string;
+          /** フォーカス制御用の DOM 参照 (bindable, button モード限定・具体型を維持) */
+          element?: HTMLButtonElement;
       }
     | {
           href: string;
@@ -87,6 +93,10 @@ type ModeProps =
           type?: never;
           disabled?: never;
           onclick?: (event: MouseEvent) => void;
+          /** anchor モードでは disclosure props を型で禁止しつつ分割代入を可能にする */
+          ariaExpanded?: never;
+          ariaControls?: never;
+          element?: never;
       };
 
 export type ButtonProps = BaseProps & IconOnlyProps & ModeProps;
