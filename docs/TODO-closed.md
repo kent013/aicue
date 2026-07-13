@@ -51,6 +51,7 @@ Open リストは [TODO.md](TODO.md) を参照。
 | T033 | メンバーのロール変更が無言で破棄される問題の修正。ロール変更拒否をUIに正しく反映 | frontend | 2026-07-14 03:44 |
 | T034 | notifications画面のブラウザタブtitle追加。app_titlesにnotifications追加 | backend | 2026-07-14 03:45 |
 | T035 | bughunt実行時環境へのLLM(Prism)応答fake配線。FakeにPrism応答配線しLLM401解消 | test | 2026-07-14 03:47 |
+| T036 | bug-hunt real-llmモード(既定)とfake-llm/real-storageオプション。LLMを既定でreal接続しfake-llmをopt-in化 | infrastructure | 2026-07-14 04:46 |
 
 ## Obsoleted
 
