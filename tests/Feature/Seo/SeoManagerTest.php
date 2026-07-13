@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Support\Seo\SeoManager;
 use App\Support\Seo\SeoMeta;
 use App\Support\Seo\SeoUrl;
+use Webmozart\Assert\Assert;
 
 /*
  * SeoManager: リクエスト単位のメタ保持 (scoped 束縛 = Octane 安全) と
@@ -81,3 +82,28 @@ it('setPrivateTitle の動的上書きが app_titles 既定より優先される
     expect($manager->resolvePrivateTitle('projects.show'))->toBe('My Project')
         ->and($manager->resolveDocumentTitle('projects.show'))->toBe('My Project | Acme');
 });
+
+it('resolveDocumentTitle: 未登録だった 6 アプリ画面が固有 title を返す (仕様固定・h1 と一致)', function (
+    string $routeName,
+    string $expectedFragment,
+): void {
+    // 実 config/seo.php の app_titles を検証対象にする (beforeEach は site_name のみ上書き)。
+    $manager = new SeoManager;
+
+    expect($manager->resolveDocumentTitle($routeName))
+        ->toBe("{$expectedFragment} | Acme");
+
+    // config の実値にも固有名が存在すること (エントリ欠落の drift を検出)。
+    // route name 自体が dot を含む (例: projects.categories.index) ため
+    // config() の dot 記法では引けない。配列を取得しリテラルキーで参照する。
+    $appTitles = config('seo.app_titles');
+    Assert::isArray($appTitles);
+    expect($appTitles[$routeName] ?? null)->toBe($expectedFragment);
+})->with([
+    'カテゴリ管理' => ['projects.categories.index', 'カテゴリ管理'],
+    'ユーザー管理' => ['manage.users.index', 'ユーザー管理'],
+    'API キー' => ['organizations.api-keys.index', 'API キー'],
+    '接続セッション' => ['organizations.api-keys.sessions.index', '接続セッション'],
+    'CLI 導入ガイド' => ['organizations.onboarding.cli', 'CLI 導入ガイド'],
+    'MCP 導入ガイド' => ['organizations.onboarding.mcp', 'MCP 導入ガイド'],
+]);

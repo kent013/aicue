@@ -108,6 +108,23 @@ return [
         // 動画マニュアル (show/edit/撮影 show は controller が setPrivateTitle で
         // マニュアル名を供給。create のみ静的 = 対象実体が未存在のため)
         'projects.manuals.create' => '動画マニュアルの作成',
+        /*
+        | 以下は各画面の h1 見出しと一致させる (タブ title と画面見出しの表現一貫性)。
+        | いずれも静的見出しで足りるため controller の setPrivateTitle 上書きは不要。
+        | 見出し文言を変えるときは本 map も追随させること (SeoManagerTest が固有 title を固定)。
+        */
+        // カテゴリ管理 (projects.categories.index — Admin/Categories.svelte h1「カテゴリ管理」)
+        'projects.categories.index' => 'カテゴリ管理',
+        // ユーザー管理 (manage.users.index — Admin/Users.svelte h1「ユーザー管理」)
+        'manage.users.index' => 'ユーザー管理',
+        // API キー (organizations.api-keys.index — ApiKeys/Index.svelte h1「API キー」)
+        'organizations.api-keys.index' => 'API キー',
+        // 接続セッション (organizations.api-keys.sessions.index — ApiKeys/Sessions.svelte h1「接続セッション」)
+        'organizations.api-keys.sessions.index' => '接続セッション',
+        // CLI 導入ガイド (organizations.onboarding.cli — Onboarding/Cli.svelte h1「CLI 導入ガイド」)
+        'organizations.onboarding.cli' => 'CLI 導入ガイド',
+        // MCP 導入ガイド (organizations.onboarding.mcp — Onboarding/Mcp.svelte h1「MCP 導入ガイド」)
+        'organizations.onboarding.mcp' => 'MCP 導入ガイド',
     ],
 
 ];
