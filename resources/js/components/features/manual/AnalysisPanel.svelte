@@ -43,6 +43,15 @@
     let sessionExpiredMessage = $state<string | null>(null);
     let confirmingReanalyze = $state(false);
 
+    /**
+     * start error (解析起動 XHR の失敗) の種別。文言一致でなく種別で分岐することで、
+     * i18n・文言変更に強く、「手順書なし(422)」だけを型安全に破棄できる。
+     * - missing_document: 422 かつ errors.document 由来 (SOP 未アップロード)
+     * - insufficient_tickets / conflict / generic: それ以外
+     */
+    type StartErrorKind = "missing_document" | "insufficient_tickets" | "conflict" | "generic";
+    let startErrorKind = $state<StartErrorKind | null>(null);
+
     const analyzing = $derived(
         status === "analyzing" ||
             currentJob?.status === "queued" ||
@@ -122,6 +131,26 @@
         };
     });
 
+    /* ---- stale overlay 破棄 (bug-hunt F-H2 再現対策) ----
+     * 症状: 解析起動が 422「手順書をアップロードしてください。」で失敗して errorMessage が
+     *   出た後、同一 Show 画面で SOP アップロードが成功しても (Inertia が Show を再描画し
+     *   hasDocument: false→true) errorMessage が seed のまま残留する。
+     * 対策 (level-triggered): 「手順書があれば解消される種別 (missing_document)」の start error が
+     *   出ている状態で hasDocument が true になったら破棄する。missing_document かつ hasDocument=true は
+     *   常に矛盾なので、edge (false→true 遷移) でなく level で判定する。これにより
+     *   「422 表示 → upload」と「解析要求中に upload 完了 → 遅延 422 到達」の両順序を一様に扱える。
+     * 注: currentJob/status は server-truth、sessionExpiredMessage は poll 系のため触らない。
+     *   ポーリングは props を変えない (XHR でローカル state のみ更新) ので、この effect は
+     *   ポーリング進行では発火せず、進捗表示・2.5 秒間隔は壊れない。
+     */
+    $effect(() => {
+        if (hasDocument && isResolvedByDocumentUpload(startErrorKind)) {
+            errorMessage = null;
+            showPurchaseLink = false;
+            startErrorKind = null;
+        }
+    });
+
     /* ---- 起動 ---- */
     function requestAnalyze(): void {
         if (status === "ready") {
@@ -137,6 +166,9 @@
         errorMessage = null;
         showPurchaseLink = false;
         sessionExpiredMessage = null;
+        startErrorKind = null; // 再送時に種別もリセット
+        // 分類を要求時点に固定 (応答遅延中に hasDocument が変わっても安定分類)
+        const hadDocumentAtStart = hasDocument;
         try {
             const res = await fetch(`/projects/${projectId}/manuals/${manualId}/analyze`, {
                 method: "POST",
@@ -147,31 +179,65 @@
                 },
                 credentials: "same-origin",
             });
-            await handleStartResponse(res);
+            await handleStartResponse(res, hadDocumentAtStart);
         } catch {
             errorMessage = "通信に失敗しました。接続を確認して再度お試しください。";
+            startErrorKind = "generic";
         } finally {
             starting = false;
             confirmingReanalyze = false;
         }
     }
 
-    async function handleStartResponse(res: Response): Promise<void> {
+    async function handleStartResponse(res: Response, hadDocumentAtStart: boolean): Promise<void> {
         const body = (await res.json().catch(() => null)) as unknown;
         showPurchaseLink = res.status === 402 && isInsufficientTickets(body);
         if (res.status === 201 && body !== null && typeof body === "object") {
             const jobBody = body as AnalysisJobProps;
             currentJob = jobBody;
             status = jobBody.manual_status;
+            startErrorKind = null; // 成功時は種別もクリア (自己記述的)
             return;
         }
-        // 402 (残高不足) / 409 (競合) / 422 (手順書なし) はサーバのメッセージをそのまま表示
-        const message = extractMessage(body);
-        if (message !== null) {
-            errorMessage = message;
-            return;
+        // 402 (残高不足) / 409 (競合) / 422 (手順書なし) は種別を記録しつつサーバのメッセージを表示
+        startErrorKind = classifyStartError(res.status, body, hadDocumentAtStart);
+        errorMessage =
+            extractMessage(body) ?? "解析を開始できませんでした。時間をおいて再度お試しください。";
+    }
+
+    /**
+     * start error 種別を res.status / body / 解析開始時の hadDocumentAtStart から判定する (文言非依存)。
+     * missing_document は「解析要求時に手順書が無かった (hadDocumentAtStart=false)」を条件に含める。
+     * これにより:
+     *  - 将来 document フィールド由来の別 422 (形式/容量) を誤分類しない。
+     *  - 応答遅延中に hasDocument が true へ変わっても、要求時点の値で安定して分類できる。
+     */
+    function classifyStartError(
+        status: number,
+        body: unknown,
+        hadDocumentAtStart: boolean,
+    ): StartErrorKind {
+        if (status === 402 && isInsufficientTickets(body)) return "insufficient_tickets";
+        if (status === 409) return "conflict";
+        if (status === 422 && !hadDocumentAtStart && hasDocumentValidationError(body)) {
+            return "missing_document";
         }
-        errorMessage = "解析を開始できませんでした。時間をおいて再度お試しください。";
+        return "generic";
+    }
+
+    /** 422 body に errors.document (SOP 未アップロード) が含まれるか。
+     *  bare 422 を一律 missing_document にしない (将来別用途の 422 と混同しないため)。 */
+    function hasDocumentValidationError(body: unknown): boolean {
+        if (body === null || typeof body !== "object") return false;
+        const errors = (body as { errors?: unknown }).errors;
+        if (errors === null || typeof errors !== "object") return false;
+        const doc = (errors as { document?: unknown }).document;
+        return Array.isArray(doc) && doc.length > 0;
+    }
+
+    /** hasDocument が満たされたとき自動破棄してよい start error 種別か (missing_document のみ) */
+    function isResolvedByDocumentUpload(kind: StartErrorKind | null): boolean {
+        return kind === "missing_document";
     }
 
     /** 402/409 の { message } と 422 の { message, errors } からユーザー向け文言を取り出す */
