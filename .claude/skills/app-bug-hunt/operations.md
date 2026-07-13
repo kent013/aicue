@@ -10,6 +10,10 @@
 |---|---|---|---|---|
 | POST | billing/checkout | billing.checkout | S5 | 通常 |
 | POST | billing/portal | billing.portal | S5 | 通常 |
+| POST | purchase-tickets/checkout | billing.tickets.checkout | S5 | 通常 |
+| POST | notifications/read-all | notifications.read-all | S6 | 通常 |
+| POST | notifications/{notification}/open | notifications.open | S6 | 通常 |
+| POST | notifications/{notification}/read | notifications.read | S6 | 通常 |
 | POST | app/projects/{project}/manuals/{manual}/sync | capture.manuals.sync | S3 | 通常 |
 | POST | app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take}/adopt | capture.takes.adopt | S3 | 通常 |
 | DELETE | app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take} | capture.takes.destroy | S3 | 通常 |
