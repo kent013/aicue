@@ -1,5 +1,6 @@
 <script lang="ts">
     import { page, router, useForm } from "@inertiajs/svelte";
+    import Alert from "@/components/atoms/Alert.svelte";
     import Button from "@/components/atoms/Button.svelte";
     import Card from "@/components/atoms/Card.svelte";
     import Input from "@/components/atoms/Input.svelte";
@@ -12,10 +13,29 @@
     import { withRecentAuth, type RecentAuthStatus } from "@/lib/recent-auth";
     import type { SharedProps } from "@/lib/shared-props";
 
-    const shared = $derived(page.props as unknown as SharedProps);
-    const appName = $derived(shared.appName ?? "");
+    // ページ専用 props 型 (SharedProps を継承しページ固有 prop を足す。多重キャスト排除)。
+    // SharedProps に errors フィールドは無く、Inertia が別途注入するため継承衝突しない。
+    interface SoleOwnedOrganization {
+        name: string;
+        slug: string;
+    }
+    interface SettingsPageProps extends SharedProps {
+        soleOwnedOrganizations?: SoleOwnedOrganization[];
+        errors?: Record<string, string | string[]>;
+    }
 
-    const initialUser = (page.props as unknown as SharedProps).auth?.user ?? null;
+    const props = $derived(page.props as unknown as SettingsPageProps);
+    const appName = $derived(props.appName ?? "");
+    const soleOwnedOrganizations = $derived(props.soleOwnedOrganizations ?? []);
+
+    // ブロック時にサーバーが返す errors.account を表示文字列へ正規化 (string | string[] 両対応)
+    const accountError = $derived.by((): string | null => {
+        const err = props.errors?.account;
+        if (err === undefined) return null;
+        return Array.isArray(err) ? (err[0] ?? null) : err;
+    });
+
+    const initialUser = props.auth?.user ?? null;
 
     /**
      * Fortify の PUT /user/profile-information は errorBag (updateProfileInformation)
@@ -80,8 +100,13 @@
     function deleteAccount(): void {
         guardWithRecentAuth(() => {
             router.delete("/settings/account", {
+                preserveScroll: true,
                 onStart: () => {
                     deleting = true;
+                },
+                // ブロック時 (errors.account): ダイアログを閉じ DangerZone の Alert を露出させる
+                onError: () => {
+                    deleteDialogOpen = false;
                 },
                 onFinish: () => {
                     deleting = false;
@@ -188,6 +213,24 @@
             title="アカウント削除"
             description="アカウントを削除すると、すべてのデータが完全に失われます。この操作は取り消せません。"
         >
+            {#if soleOwnedOrganizations.length > 0}
+                <Alert type="warning" title="オーナー移譲が必要です" class="mb-3">
+                    以下の組織であなたが唯一のオーナーです。アカウントを削除する前に、各組織で
+                    オーナーを別のメンバーへ移譲してください（削除時にサーバーが再判定します）。
+                    <ul class="mt-2 list-disc pl-5">
+                        {#each soleOwnedOrganizations as org (org.slug)}
+                            <li>
+                                <TextLink href={`/organizations/${org.slug}/settings`}>
+                                    {org.name} の設定へ
+                                </TextLink>
+                            </li>
+                        {/each}
+                    </ul>
+                </Alert>
+            {/if}
+            {#if accountError}
+                <Alert type="danger" class="mb-3">{accountError}</Alert>
+            {/if}
             <Button
                 variant="danger-outline"
                 onclick={() => {

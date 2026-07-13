@@ -41,6 +41,7 @@ use App\Http\Controllers\Seo\LlmsTxtController;
 use App\Http\Controllers\Seo\RobotsController;
 use App\Http\Controllers\Seo\SitemapController;
 use App\Http\Controllers\Settings\AccountController;
+use App\Http\Controllers\Settings\ProfileController;
 use App\Http\Controllers\Webhooks\SesNotificationController;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\LocalOnly;
@@ -168,9 +169,7 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         ->middleware('throttle:6,1')
         ->name('recent-auth.password');
 
-    Route::get('/settings', function () {
-        return Inertia::render('Settings/Index');
-    })->name('settings');
+    Route::get('/settings', [ProfileController::class, 'index'])->name('settings');
 
     Route::get('/settings/security', function () {
         // admin guard 追加で user() は User|AdminUser の union になるため narrowing する
