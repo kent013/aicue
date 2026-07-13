@@ -2,7 +2,7 @@
 name: app-bug-hunt
 description: このアプリの LLM 探索的バグハント。専用 bughunt 環境 (直列 :8010 / 並列 shard :8011..8018) に対し隔離ブラウザ (Bash 駆動の @playwright/cli) でユーザーストーリーを実走し、UX破綻・詰み・認可漏れ (IDOR) を発見してレポートする (修正はしない)。テンプレート同梱のオプトイン基盤 (未使用時は完全 no-op)。
 user-invocable: true
-argument-hint: "省略時は --all --coverage --parallel --deviate (既定=全ストーリー並列+コードカバレッジ+逸脱)。絞るなら [S1..S7 ...] [--no-deviate] [--keep-db] 例: /app-bug-hunt, /app-bug-hunt S3"
+argument-hint: "省略時は --all --coverage --parallel --deviate --real-llm 相当 (既定=全ストーリー並列+コードカバレッジ+逸脱+実LLM接続)。絞るなら [S1..S7 ...] [--no-deviate] [--keep-db] [--fake-llm] 例: /app-bug-hunt, /app-bug-hunt S3"
 ---
 
 # 探索的バグハント (bug-hunt)
@@ -28,12 +28,12 @@ screens.md (画面 = GET×inertia) と operations.md (全書き込み操作 = �
 
 ## 引数
 
-> **既定 (引数なし) = `--all --coverage --parallel --deviate`**
-> (= 全ストーリーを並列 shard + コード到達カバレッジ計装 + 逸脱込みで走行)。狭めたいときだけ下表で絞る。
+> **既定 (引数なし) = `--all --coverage --parallel --deviate --real-llm`**
+> (= 全ストーリーを並列 shard + コード到達カバレッジ計装 + 逸脱込み + 実 LLM 接続で走行)。狭めたいときだけ下表で絞る。
 
 | 引数 | 必須 | 説明 |
 |------|------|------|
-| (引数なし) | — | 既定で `--all --coverage --parallel --deviate` 相当を実行 (worktree 走行) |
+| (引数なし) | — | 既定で `--all --coverage --parallel --deviate --real-llm` 相当を実行 (worktree 走行) |
 | S1..S7 | No | 実行するストーリーカード (stories/ 配下、複数指定可)。明示するとその指定分だけに絞る (直列走行) |
 | --all | No | 全ストーリーを実行 (S7 は S3 の状態を前提にするため S3 の後)。既定に含まれる |
 | --coverage | No | serve を pcov 付き php で起動しコード到達カバレッジ (C3) を収集する。既定に含まれる。pcov 未導入環境では middleware が no-op で安全に続行 |
@@ -41,7 +41,10 @@ screens.md (画面 = GET×inertia) と operations.md (全書き込み操作 = �
 | --parallel[=N] | No | 並列シャード実行 (N=2/4/6/8、cap=8、既定 4)。既定に含まれる。親はインベントリ確認 → `provision-all` → `bughunt-shard` subagent を Workflow で N 体 fan-out → `verify-run` → 統合レポート |
 | --deviate | No | 各ストーリー末尾の「逸脱アイデア」も実行する。既定に含まれる |
 | --no-deviate | No | 逸脱探索を省く |
-| --keep-db | No | Phase 0 の provision (migrate:fresh) をスキップし現状の `bug_hunt` を使う (連続実行の 2 回目以降用) |
+| --real-llm | No | LLM を実 Anthropic API に接続して走行する (既定)。親リポジトリ `.env` の `ANTHROPIC_API_KEY` が必須で、未設定なら provision が fail-fast する。生成内容・所要時間は run ごとに非決定的 |
+| --fake-llm | No | LLM を canned 応答 (T035) に切り替える (実 API 未接続)。再現・切り分け用。`--real-llm` とは同時指定不可 |
+| --real-storage | No | `TESTING_FAKE_STORAGE=false` を注入する。※実 S3 接続の実配線は未実装 = **inert トグル** (現状は挙動不変) |
+| --keep-db | No | Phase 0 の provision (migrate:fresh) をスキップし現状の `bug_hunt` を使う (連続実行の 2 回目以降用)。mode は provision 時に確定したものを保持 (mode を変えるには --keep-db を外して再 provision) |
 | --shard {i} | No | (内部用) シャード i として走行。--parallel の子として起動される |
 | --run-id {ts} | No | (内部用) 親が採番した run-id。--shard とセット |
 
@@ -66,9 +69,11 @@ screens.md (画面 = GET×inertia) と operations.md (全書き込み操作 = �
      `DB_*`/`PG*` を遮断してから bughunt 値を注入することでこれを無力化する。生 tinker/artisan はこの遮断を
      受けられず **dev DB に書き込む**。
    - **あらゆる DB 書き込みの前に接続先 DB を検証する** (`db-check` または getDatabaseName)。検証なしの書き込み禁止。
-4. **実外部サービスに触れない。** `TESTING_FAKE_EXTERNALS=true` で LLM・決済・Captcha・SSO 等が fake される前提で
-   走行する (fake 基盤の導入状況はアプリ依存。未導入なら該当機能は fake されない点に注意)。network requests に
-   外部ドメインへの実リクエストを検知したら即中断して報告する。
+4. **許可する実外部接続は LLM プロバイダ (Anthropic) API ドメインのみ (real-llm 既定)。** 決済 / Captcha /
+   SSO / mail / S3 等その他の外部は fake / 外部通信なし。**LLM プロバイダ API ドメイン以外の外部ドメインへの
+   実リクエストは従来どおり全面禁止**で、検知したら即中断して報告する (egress ガードの許可先に LLM API ドメインを
+   加えるだけで、他は不変。SSRF/egress ガードの他ドメイン全面禁止は変わらない)。`--fake-llm` 時は LLM も canned
+   (実接続なし)。real-llm は実キー必須で、未設定なら provision が fail-fast する (`--fake-llm` を案内)。
 5. **誤検知をバグとして断定しない。** 期待仕様が設計文書 (devnotes/docs) から確認できないものは
    「要確認」に分類し、severity を付けない。
 
@@ -181,7 +186,9 @@ BUGHUNT_ORCHESTRATOR=1 scripts/bug-hunt-shard.sh provision --shard 0 --run-id {t
 | 項目 | 値 |
 |---|---|
 | 対象 URL | 直列 = `http://127.0.0.1:8010` (APP_ENV=bughunt.local, DB=bug_hunt) |
-| 外部サービス | `TESTING_FAKE_EXTERNALS=true` で fake (fake 基盤の適用範囲はアプリ依存)。外部ドメインへの実 request 検知で即中断 |
+| 外部サービス | **LLM=real (実 Anthropic API 接続。既定 real-llm)**、その他 (決済/Captcha/SSO/mail/S3) は fake / 外部通信なし。許可先は LLM API ドメインのみで、それ以外の外部ドメインへの実 request 検知で即中断 |
+| LLM モード | 既定 real-llm。親 `.env` の `ANTHROPIC_API_KEY` が必須 (未設定なら provision が fail-fast → `--fake-llm` を案内)。`--fake-llm` で canned 応答 (再現/切り分け用)。生成内容・所要時間は run ごとに非決定的。**real-llm × --parallel は shard 数ぶん実 API を並行呼びするためレート/コストに注意** |
+| ストレージ | 既定 fake (`filesystems.default=local`)。`--real-storage` は inert トグル (実 S3 配線は未実装) |
 | メール | MAIL_MAILER=log。署名 URL は `tmp/bug-hunt/shard-0-cmd.sh mail-urls [--count K]` で取得 |
 | テストアカウント | ManualTestSeeder が投入 (`{role}-{plan}@example.com` / `multi-org@example.com` / `unverified@example.com`、全員 `password123`)。管理画面 admin は `admin@example.com` / `password12345` (AdminUserSeeder) |
 | 管理画面 MFA | `.env.bughunt.local` の `ADMIN_MFA_REQUIRED=false` で無効化 (email+password でログイン可) |
@@ -298,7 +305,7 @@ findings.jsonl は分類の正本。同じ説明文を両方に書かない)。
 
 各カード末尾の「逸脱アイデア」を実行する。加えて任意の画面で汎用逸脱を 1〜2 個試す:
 ブラウザバック直後の再操作 / リロード連打 / URL パラメータの隣接 ID 書き換え (IDOR=H9 探索) / 2 タブ同時操作。
-**逸脱中も禁止事項 4 (実外部サービス) は維持。**
+**逸脱中も禁止事項 4 (実外部接続は LLM API ドメインのみ許可、他ドメインは全面禁止) は維持。**
 
 ## Phase 4: レポート + クロージング
 
