@@ -89,7 +89,7 @@ class VideoManualController extends Controller
     }
 
     /** 詳細 (撮影者も閲覧可) */
-    public function show(Request $request, Project $project, VideoManual $manual, SeoManager $seo): Response
+    public function show(Request $request, Project $project, VideoManual $manual, SeoManager $seo, VideoManualService $manuals): Response
     {
         $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404 ({manual} ∈ {project} は scopeBindings が担保済み)
@@ -103,6 +103,11 @@ class VideoManualController extends Controller
         Assert::isInstanceOf($user, User::class);
 
         $category = $manual->category;
+
+        // stale な失敗 (失敗確定後に scenario 保存が成立) は job=null で抑制する (T032 / F-1-1)
+        $analysisJob = $manuals->displayAnalysisJob($manual);
+        $renderJob = $manuals->displayRenderJob($manual);
+        $previewJob = $manuals->displayPreviewJob($manual);
 
         return Inertia::render('Manuals/Show', [
             'project' => [
@@ -120,19 +125,20 @@ class VideoManualController extends Controller
             ],
             // AI 解析パネル (最新 job + 手順書有無)。AnalysisJobData::toArray() と対
             'analysis' => [
-                'job' => ($latest = $manual->analysisJobs()->latest('id')->first()) === null
+                'job' => $analysisJob === null
                     ? null
-                    : AnalysisJobData::fromJob($latest, $manual)->toArray(),
+                    : AnalysisJobData::fromJob($analysisJob, $manual)->toArray(),
                 'hasDocument' => $manual->sourceDocuments()->exists(),
             ],
             // レンダパネル (最新 render job / 最新 preview job / 再生可能 preview)。RenderProps と対
             'render' => [
-                'job' => ($render = $manual->renderJobs()->where('kind', RenderKind::Render->value)->latest('id')->first()) === null
+                'job' => $renderJob === null
                     ? null
-                    : RenderJobData::fromJob($render, $manual)->toArray(),
-                'previewJob' => ($preview = $manual->renderJobs()->where('kind', RenderKind::Preview->value)->latest('id')->first()) === null
+                    : RenderJobData::fromJob($renderJob, $manual)->toArray(),
+                'previewJob' => $previewJob === null
                     ? null
-                    : RenderJobData::fromJob($preview, $manual)->toArray(),
+                    : RenderJobData::fromJob($previewJob, $manual)->toArray(),
+                // playbackJobId は succeeded preview のみを見るため staleness 抑制の対象外 (不変)
                 'playbackJobId' => $manual->renderJobs()
                     ->where('kind', RenderKind::Preview->value)
                     ->where('status', JobStatus::Succeeded->value)

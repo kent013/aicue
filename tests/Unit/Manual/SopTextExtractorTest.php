@@ -82,9 +82,18 @@ test('判定不能バイナリは unextractable (推測変換で LLM に渡さ�
         ->toThrow(AnalysisFailedException::class, 'テキストを抽出できません');
 });
 
-test('実質空 (min_text_bytes 未満) は unextractable', function (): void {
+test('実質空 (min_text_bytes 未満) は tooShort (画像未対応と別文言)', function (): void {
     Storage::fake();
     $document = storedDocument('短い', 'text/plain', 'txt');
+
+    // 抽出はできたが本文が短すぎるケース。画像/スキャン (unextractable) とは別文言で弁別する
+    expect(fn () => app(SopTextExtractor::class)->extract($document))
+        ->toThrow(AnalysisFailedException::class, '本文が短すぎます');
+});
+
+test('未知 mime は従来どおり unextractable (テキストを抽出できません)', function (): void {
+    Storage::fake();
+    $document = storedDocument(str_repeat('内容', 100), 'image/png', 'png');
 
     expect(fn () => app(SopTextExtractor::class)->extract($document))
         ->toThrow(AnalysisFailedException::class, 'テキストを抽出できません');

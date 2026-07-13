@@ -4,8 +4,12 @@ declare(strict_types=1);
 
 namespace App\Services\Manual;
 
+use App\Enums\Manual\JobStatus;
+use App\Enums\Manual\RenderKind;
 use App\Jobs\Capture\DeleteTakeObjectsJob;
+use App\Models\AnalysisJob;
 use App\Models\Project;
+use App\Models\RenderJob;
 use App\Models\SourceDocument;
 use App\Models\Take;
 use App\Models\VideoManual;
@@ -100,5 +104,52 @@ class VideoManualService
         if ($paths !== []) {
             DeleteTakeObjectsJob::dispatch($paths); // tx 成功後に media queue へ (重複キーは除去済み)
         }
+    }
+
+    /**
+     * 表示用の最新解析 job。stale な失敗 (失敗確定後に scenario 保存が成立) は null を返す。
+     * これにより Show の解析パネルは矛盾した「解析失敗」alert を出さない (T032 / F-1-1)。
+     */
+    public function displayAnalysisJob(VideoManual $manual): ?AnalysisJob
+    {
+        $job = $manual->analysisJobs()->latest('id')->first();
+
+        return $job !== null && $this->isStaleFailure($manual, $job->status, $job->scenario_version_at_terminal)
+            ? null
+            : $job;
+    }
+
+    /** 表示用の最新 kind=render の job (stale 失敗は null)。 */
+    public function displayRenderJob(VideoManual $manual): ?RenderJob
+    {
+        return $this->latestRenderJobForDisplay($manual, RenderKind::Render);
+    }
+
+    /** 表示用の最新 kind=preview の job (stale 失敗は null)。 */
+    public function displayPreviewJob(VideoManual $manual): ?RenderJob
+    {
+        return $this->latestRenderJobForDisplay($manual, RenderKind::Preview);
+    }
+
+    private function latestRenderJobForDisplay(VideoManual $manual, RenderKind $kind): ?RenderJob
+    {
+        $job = $manual->renderJobs()->where('kind', $kind->value)->latest('id')->first();
+
+        return $job !== null && $this->isStaleFailure($manual, $job->status, $job->scenario_version_at_terminal)
+            ? null
+            : $job;
+    }
+
+    /**
+     * 失敗 job が stale か (失敗確定後に scenario 保存が成立 = version が進んだ)。
+     * snapshot が null (旧データ / 非失敗) の場合は not stale = 表示 (保守的に隠さない)。
+     * 比較は `>` であり `>=` ではない: 同世代 (保存が挟まらなかった) 失敗はユーザーの
+     * 現在の状態と矛盾しないため alert を残す。version が進んだ = 保存が挟まった時だけ抑制する。
+     */
+    private function isStaleFailure(VideoManual $manual, JobStatus $status, ?int $versionAtTerminal): bool
+    {
+        return $status === JobStatus::Failed
+            && $versionAtTerminal !== null
+            && $manual->scenario_version > $versionAtTerminal;
     }
 }

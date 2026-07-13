@@ -30,6 +30,7 @@ use Illuminate\Support\Carbon;
  * @property int|null $triggered_by
  * @property array<array-key, mixed>|null $result_json
  * @property string|null $error
+ * @property int|null $scenario_version_at_terminal
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */

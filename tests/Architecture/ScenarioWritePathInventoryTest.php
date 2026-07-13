@@ -14,7 +14,8 @@ declare(strict_types=1);
  * | ScenarioService::save() | cuts / scenario_version / status (rendering·analyzing guard 付き) |
  * | ScenarioService::materializeIntoLockedManual() | cuts / scenario_version / status (analyzing→ready のみ) |
  * | AnalysisJobService::trigger() | status (draft·ready→analyzing のみ) |
- * | AnalysisJobService::failJob() | status (analyzing→ready·draft のみ。cuts 有無で決定) |
+ * | AnalysisJobService::failJob() | status (analyzing→ready·draft のみ。cuts 有無で決定。scenario_version は snapshot 読みのみ) |
+ * | VideoManualService::displayXxxJob() | 書き込みなし (stale 判定で scenario_version を読むのみ) |
  * | RenderJobService::trigger() | status (ready→rendering のみ。scenario_version はスナップショット読み) |
  * | RenderJobService::failJob() | status (rendering→ready のみ。kind=render に限る) |
  * | RenderJobService::completeRenderIntoLockedManual() | cuts.cut_length_ms / total_length_ms / status (rendering→published のみ) |
@@ -49,6 +50,11 @@ final class ScenarioWritePathScanner
         'Services/Manual/RenderJobService.php',
         'Services/Manual/RenderPipeline.php',
         'Models/RenderJob.php',
+        // T032: failJob が失敗確定時の scenario_version を job にスナップショット読みする
+        // (書き込むのは scenario_version_at_terminal であり scenario_version ではない)
+        'Services/Manual/AnalysisJobService.php',
+        // T032: stale alert 判定 (displayXxxJob) が manual.scenario_version を読み取る (read-only)
+        'Services/Manual/VideoManualService.php',
     ];
 
     /** 検出 2 の allowlist (app/ 相対パス) */

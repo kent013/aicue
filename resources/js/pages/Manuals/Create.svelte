@@ -62,6 +62,10 @@
                             bind:value={form.title}
                             error={invalid}
                             aria-describedby={describedBy}
+                            oninput={() => {
+                                // 入力し始めたらその場でタイトルエラーをクリア (次 submit を待たない)
+                                if (form.errors.title) form.clearErrors("title");
+                            }}
                         />
                     {/snippet}
                 </FormField>
