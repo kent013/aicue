@@ -10,6 +10,7 @@ use App\Models\OrganizationInvitation;
 use App\Models\Project;
 use App\Models\User;
 use App\Notifications\OrganizationInvitationNotification;
+use App\Services\Billing\TicketLedgerService;
 use App\Services\Organization\OrganizationMembershipService;
 use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Support\Facades\Notification;
@@ -328,6 +329,31 @@ test('招待 email で register すると個人組織を作らず招待組織へ
     // 招待は受諾済みになる & session の token は落ちる
     expect(OrganizationInvitation::query()->sole()->isAccepted())->toBeTrue();
     $response->assertSessionMissing('invitation_token');
+});
+
+test('招待経由登録では個人組織を作らず signup grant を付与しない (増幅防止)', function (): void {
+    // 招待経由は個人組織を作らず所属組織の残高を共有する。ここで付与すると招待 N 人 = N×10 の
+    // 増幅になるため、signup grant は「個人組織を作る新規登録」時のみに限定する (LP CTA も同じ意図)。
+    [$organization, $owner] = createOrganizationWithOwner('招待組織');
+    $token = inviteAndCaptureToken($organization, $owner, 'nofree@example.com', AdminConsoleRole::Admin);
+
+    $this->withSession(['invitation_token' => $token])->post('/register', [
+        'name' => '無償なし 花子',
+        'email' => 'nofree@example.com',
+        'password' => 'SecurePass1234',
+        'terms_accepted' => '1',
+    ])->assertRedirect(route('verification.notice'));
+
+    $user = User::whereBlind('email', 'email_index', 'nofree@example.com')->firstOrFail();
+    // 個人組織は生成されない
+    expect($user->organizations()->where('is_personal', true)->exists())->toBeFalse();
+    // 招待組織の残高に signup grant は乗らない (owner の付与ぶんも招待組織には走っていない)
+    expect(app(TicketLedgerService::class)->balance($organization))->toBe(0);
+    expect(
+        $organization->ticketLedgerEntries()
+            ->where('idempotency_key', 'like', 'signup_grant:%')
+            ->count(),
+    )->toBe(0);
 });
 
 test('招待 email と異なる email で register すると email エラーになる', function (): void {

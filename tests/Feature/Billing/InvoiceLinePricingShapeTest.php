@@ -5,7 +5,6 @@ declare(strict_types=1);
 use App\Enums\Billing\PlanPriceKind;
 use App\Models\Billing\Plan;
 use App\Models\Organization;
-use App\Services\Billing\TicketLedgerService;
 use Laravel\Cashier\Events\WebhookReceived;
 use Webmozart\Assert\Assert;
 
@@ -77,8 +76,11 @@ test('新形状 (pricing.price_details.price) の invoice.paid で月次付与�
         ],
     ])));
 
-    // standard プランの monthly_ticket_grant (100) が付与される
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(100);
+    // standard プランの monthly_ticket_grant (100) が「月次付与」として計上される。
+    // subscription_create ではこれに加え signup grant (10) も走るため、balance ではなく
+    // 月次エントリ (monthly:%) を直接検証してこのテストの関心 (pricing 形状解決) に絞る。
+    expect($organization->ticketLedgerEntries()
+        ->where('idempotency_key', 'like', 'monthly:%')->sum('delta'))->toBe(100);
 });
 
 test('旧形状 (price.id) の invoice.paid でも月次付与される (後方互換)', function (): void {
@@ -88,10 +90,11 @@ test('旧形状 (price.id) の invoice.paid でも月次付与される (後方�
         'price' => ['id' => pricingShapeStandardBasePriceId()],
     ])));
 
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(100);
+    expect($organization->ticketLedgerEntries()
+        ->where('idempotency_key', 'like', 'monthly:%')->sum('delta'))->toBe(100);
 });
 
-test('新形状の price が plan_prices に無ければ付与しない', function (): void {
+test('新形状の price が plan_prices に無ければ月次付与しない', function (): void {
     $organization = pricingShapeStripeCustomer('cus_clover_unknown');
 
     event(new WebhookReceived(invoicePaidPayloadWithLine('evt_clover_unknown', 'cus_clover_unknown', [
@@ -102,6 +105,8 @@ test('新形状の price が plan_prices に無ければ付与しない', functi
         ],
     ])));
 
-    // plan_code fallback も無い (未契約) ため付与されない
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(0);
+    // plan_code fallback も無い (未契約) ため「月次付与」は走らない
+    // (subscription_create なので signup grant は別途走るが、本テストの関心外)。
+    expect($organization->ticketLedgerEntries()
+        ->where('idempotency_key', 'like', 'monthly:%')->count())->toBe(0);
 });

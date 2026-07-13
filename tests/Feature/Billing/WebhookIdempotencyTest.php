@@ -130,14 +130,14 @@ test('billing_reason=subscription_create の invoice.paid は月次付与に加�
 
     $payload = invoicePaidPayload('evt_signup_1');
     $payload['data']['object']['billing_reason'] = 'subscription_create';
-    $payload['data']['object']['subscription'] = 'sub_signup_1';
 
     event(new WebhookReceived($payload));
 
     // 月次 100 + signup grant (config billing.signup_grant_tickets = 10)
     expect(app(TicketLedgerService::class)->balance($organization))->toBe(110);
+    // 冪等キーは org スコープ (grantSignupGrant 内部生成)。subscription id には依存しない。
     $signup = $organization->ticketLedgerEntries()
-        ->where('idempotency_key', 'signup_grant:sub_signup_1')
+        ->where('idempotency_key', "signup_grant:org:{$organization->id}")
         ->firstOrFail();
     expect($signup->delta)->toBe(config('billing.signup_grant_tickets'));
     expect($signup->expires_at)->not->toBeNull();
@@ -150,21 +150,23 @@ test('billing_reason=subscription_create の invoice.paid は月次付与に加�
     expect(app(TicketLedgerService::class)->balance($organization))->toBe(110);
 });
 
-test('subscription id が取れない subscription_create では signup grant を付与しない (fail-closed)', function (): void {
+test('subscription id が無くても org スコープキーで signup grant を付与する', function (): void {
     $organization = billingStripeCustomer();
 
+    // subscription id を含まない subscription_create の invoice.paid。
+    // org スコープキー (signup_grant:org:{id}) は subscription id に依存しないため付与される。
     $payload = invoicePaidPayload('evt_signup_nosub');
     $payload['data']['object']['billing_reason'] = 'subscription_create';
 
     event(new WebhookReceived($payload));
 
-    // 月次付与のみ (signup grant は安定冪等キーを作れないため skip)
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(100);
+    // 月次 100 + signup grant 10
+    expect(app(TicketLedgerService::class)->balance($organization))->toBe(110);
     expect(
         $organization->ticketLedgerEntries()
             ->where('idempotency_key', 'like', 'signup_grant:%')
             ->count(),
-    )->toBe(0);
+    )->toBe(1);
 });
 
 test('customer.subscription.updated で organizations.plan_code が同期される', function (): void {
