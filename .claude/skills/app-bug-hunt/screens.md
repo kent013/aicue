@@ -24,6 +24,7 @@
 | invitations/accept | invitations.accept | S2 |
 | login | login | S1 |
 | manage/users | manage.users.index | S4 |
+| notifications | notifications.index | S6 |
 | organizations/create | organizations.create | S4 |
 | organizations/{organization:slug}/api-keys | organizations.api-keys.index | S4 |
 | organizations/{organization:slug}/api-keys/sessions | organizations.api-keys.sessions.index | S4 |
@@ -32,6 +33,7 @@
 | organizations/{organization:slug}/settings | organizations.settings | S4 |
 | pricing | pricing | S5 |
 | privacy | legal.privacy | S1 |
+| purchase-tickets | billing.tickets.show | S5 |
 | projects | projects.index | S4 |
 | projects/create | projects.create | S4 |
 | projects/{project} | projects.show | S3 |

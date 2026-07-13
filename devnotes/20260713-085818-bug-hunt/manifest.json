@@ -1,0 +1,68 @@
+{
+  "run_id": "20260713-085818",
+  "shards": {
+    "1": {
+      "serve_pid": 175793,
+      "port": 8011,
+      "db": "bug_hunt_1",
+      "app_url": "http://127.0.0.1:8011",
+      "log_offset": 0,
+      "worker_pid_database_analysis": 175838,
+      "worker_pid_database_render": 175844,
+      "worker_pid_database_media": 175851,
+      "started_at": "2026-07-13 08:58:31",
+      "stories": "S3 S7",
+      "report_present": true,
+      "report_nonblank_lines": 238,
+      "report_substantive": true
+    },
+    "2": {
+      "serve_pid": 176428,
+      "port": 8012,
+      "db": "bug_hunt_2",
+      "app_url": "http://127.0.0.1:8012",
+      "log_offset": 0,
+      "worker_pid_database_analysis": 176488,
+      "worker_pid_database_render": 176493,
+      "worker_pid_database_media": 176501,
+      "started_at": "2026-07-13 08:58:42",
+      "stories": "S1 S2",
+      "report_present": true,
+      "report_nonblank_lines": 177,
+      "report_substantive": true
+    },
+    "3": {
+      "serve_pid": 177191,
+      "port": 8013,
+      "db": "bug_hunt_3",
+      "app_url": "http://127.0.0.1:8013",
+      "log_offset": 0,
+      "worker_pid_database_analysis": 177272,
+      "worker_pid_database_render": 177279,
+      "worker_pid_database_media": 177286,
+      "started_at": "2026-07-13 08:58:53",
+      "stories": "S4 S5",
+      "report_present": true,
+      "report_nonblank_lines": 116,
+      "report_substantive": true
+    },
+    "4": {
+      "serve_pid": 178131,
+      "port": 8014,
+      "db": "bug_hunt_4",
+      "app_url": "http://127.0.0.1:8014",
+      "log_offset": 0,
+      "worker_pid_database_analysis": 178228,
+      "worker_pid_database_render": 178236,
+      "worker_pid_database_media": 178241,
+      "started_at": "2026-07-13 08:59:07",
+      "stories": "S6",
+      "report_present": true,
+      "report_nonblank_lines": 130,
+      "report_substantive": true
+    }
+  },
+  "parallel": 4,
+  "mode": "fan-out",
+  "started_at": "2026-07-13 08:58:18"
+}
