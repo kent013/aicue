@@ -26,6 +26,9 @@ test('登録できる (同意の証跡が記録される)', function (): void {
     $personalOrg = $user->organizations()->where('is_personal', true)->firstOrFail();
     expect(app(TicketLedgerService::class)->balance($personalOrg))
         ->toBe(config()->integer('billing.signup_grant_tickets'));
+
+    // [分岐 B 固定] 通常登録では現在組織が個人組織に確定する (招待成立分岐と排他)
+    expect($user->current_organization_id)->toBe($personalOrg->id);
 });
 
 test('利用規約に同意しないと登録できない', function (): void {

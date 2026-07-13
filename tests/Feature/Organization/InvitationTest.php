@@ -14,6 +14,7 @@ use App\Services\Billing\TicketLedgerService;
 use App\Services\Organization\OrganizationMembershipService;
 use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Support\Facades\Notification;
+use Inertia\Testing\AssertableInertia;
 
 /*
  * 組織招待 (送信 / 受諾 / 拒否系)。
@@ -75,7 +76,11 @@ test('token 受諾でメンバーシップ + 招待ロールが付与される',
     [$organization, $owner] = createOrganizationWithOwner();
     $token = inviteAndCaptureToken($organization, $owner, 'invitee@example.com', AdminConsoleRole::Admin);
 
-    $invitee = User::factory()->create();
+    // 受諾するユーザーは別組織を現在組織に持つ (POST 受諾が現在組織を切り替えないことを固定するため)
+    [$otherOrg, $invitee] = createOrganizationWithOwner('受諾者の既存組織');
+    $invitee->forceFill(['current_organization_id' => $otherOrg->id])->save();
+    $before = $invitee->current_organization_id;
+
     $response = $this->actingAs($invitee)->post('/invitations/accept', ['token' => $token]);
 
     $response->assertRedirect('/dashboard');
@@ -83,6 +88,10 @@ test('token 受諾でメンバーシップ + 招待ロールが付与される',
     expect($organization->users()->whereKey($invitee->id)->exists())->toBeTrue();
     expect($invitee->organizationRole($organization))->toBe(OrganizationRole::Admin);
     expect(OrganizationInvitation::query()->sole()->isAccepted())->toBeTrue();
+
+    // [register 専用前提の保護] POST 受諾 (ログイン後経路) は現在組織を切り替えない。
+    // 将来 joinOrganization へ現在組織確定を誤って昇格させる回帰を検知する。
+    expect($invitee->refresh()->current_organization_id)->toBe($before);
 });
 
 test('受諾画面 (GET) は組織名と token を表示する', function (): void {
@@ -329,6 +338,33 @@ test('招待 email で register すると個人組織を作らず招待組織へ
     // 招待は受諾済みになる & session の token は落ちる
     expect(OrganizationInvitation::query()->sole()->isAccepted())->toBeTrue();
     $response->assertSessionMissing('invitation_token');
+
+    // [回帰固定] 招待成立で現在組織が招待先組織に確定する (登録直後・自己修復非依存)
+    expect($user->current_organization_id)->toBe($organization->id);
+});
+
+test('招待経由登録の直後、dashboard 自己修復を経ずに共有プロップ currentOrganization が招待先を指す', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner('招待組織');
+    $token = inviteAndCaptureToken($organization, $owner, 'header@example.com', AdminConsoleRole::Admin);
+
+    $this->withSession(['invitation_token' => $token])->post('/register', [
+        'name' => 'ヘッダー 確認',
+        'email' => 'header@example.com',
+        'password' => 'SecurePass1234',
+        'terms_accepted' => '1',
+    ])->assertRedirect(route('verification.notice'));
+
+    // verification.notice は未検証ユーザーが到達でき、CurrentOrganizationResolver の自己修復を
+    // 通さない (dashboard 専用)。ここで共有プロップが招待先組織を指せば、ヘッダーが登録直後の
+    // 全ページで一貫することを保証できる。
+    $this->get(route('verification.notice'))
+        ->assertOk()
+        ->assertInertia(fn (AssertableInertia $page) => $page
+            ->where('currentOrganization.id', $organization->id)
+            ->where('currentOrganization.slug', $organization->slug)
+            ->where('currentOrganization.role', OrganizationRole::Admin->value)
+            // 共有プロップ間の整合: organizations 一覧にも招待先が載る
+            ->where('organizations.0.id', $organization->id));
 });
 
 test('招待経由登録では個人組織を作らず signup grant を付与しない (増幅防止)', function (): void {
@@ -396,6 +432,10 @@ test('取り消し済みの招待 token で register すると通常登録 (個�
     // 招待組織へは参加せず、個人組織が生成される
     expect($organization->users()->whereKey($user->id)->exists())->toBeFalse();
     expect($user->organizations()->where('is_personal', true)->exists())->toBeTrue();
+
+    // [分岐 B(fallback) 固定] 無効 token の fallback でも現在組織は個人組織 (招待先ではない)
+    $personalOrg = $user->organizations()->where('is_personal', true)->firstOrFail();
+    expect($user->current_organization_id)->toBe($personalOrg->id);
 });
 
 /*
