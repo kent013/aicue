@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Prompts\ExampleSummaryPrompt;
 use App\Providers\FakeExternalsServiceProvider;
 use App\Services\Billing\CashierSubscriptionCheckoutGateway;
 use App\Services\Billing\CashierTicketCheckoutGateway;
@@ -9,13 +10,24 @@ use App\Services\Billing\Fakes\FakeSubscriptionCheckoutGateway;
 use App\Services\Billing\Fakes\FakeTicketCheckoutGateway;
 use App\Services\Billing\SubscriptionCheckoutGateway;
 use App\Services\Billing\TicketCheckoutGateway;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Kent013\PrismPrompt\Prompt;
 
 /*
  * FakeExternalsServiceProvider: config('testing.fake_externals') が capability flag。
  * fail-secure 二軸 (flag 既定 false = 完全 no-op / 環境 allowlist) を固定する。
  * Pest はテスト毎に app を再構築するため register() 再実行の container 汚染は漏れない。
+ *
+ * boot() は LLM (Prism) fake を配線する。Prompt::$fake は static (プロセスグローバル) のため
+ * allowlist は bughunt.local のみ (testing/local は除外)。static リークを避けるため
+ * afterEach で必ず stopFaking する (テスト本体が例外で落ちても到達させる)。
  */
+
+afterEach(function (): void {
+    // boot() が install した Prompt::$fake (static) を各テスト境界でリークさせない。
+    Prompt::stopFaking();
+});
 
 test('既定 (flag=false) では両 gateway とも Cashier 実装に解決される', function (): void {
     expect(config('testing.fake_externals'))->toBeFalse();
@@ -46,4 +58,76 @@ test('flag=true でも allowlist 外の環境 (production) では fake に bind 
     expect(app(TicketCheckoutGateway::class))->toBeInstanceOf(CashierTicketCheckoutGateway::class);
     expect(app(SubscriptionCheckoutGateway::class))->toBeInstanceOf(CashierSubscriptionCheckoutGateway::class);
     Log::shouldHaveReceived('warning')->once();
+});
+
+/*
+ * boot(): LLM (Prism) fake の環境 allowlist (bughunt.local のみ)。
+ * 各テストは env と config を try/finally で原値復元する (static/config 汚染を漏らさない)。
+ */
+
+test('boot: env=bughunt.local ∧ flag=true で Prompt fake が有効になり canned を返す', function (): void {
+    // 万一の FX 解決 HTTP を stray にしない防御。
+    Http::fake(['*' => Http::response(['base' => 'USD', 'rates' => ['JPY' => 150.0]])]);
+
+    $originalEnv = $this->app['env'];
+    $originalFlag = config('testing.fake_externals');
+    try {
+        config(['testing.fake_externals' => true]);
+        $this->app['env'] = 'bughunt.local';
+        (new FakeExternalsServiceProvider($this->app))->boot();
+
+        expect(Prompt::isFaking())->toBeTrue();
+
+        // 代表 prompt が canned を返す (stray call 0 = 実 API 未到達)。
+        $summary = ExampleSummaryPrompt::make('本文')->executeSync();
+        expect($summary)->toBeString();
+        expect(trim((string) $summary))->not->toBe('');
+    } finally {
+        Prompt::stopFaking();
+        config(['testing.fake_externals' => $originalFlag]);
+        $this->app['env'] = $originalEnv;
+    }
+});
+
+test('boot: env=testing ∧ flag=true では Prompt::$fake に触れない (static 占有を避ける)', function (): void {
+    $originalFlag = config('testing.fake_externals');
+    try {
+        // env は既定の testing のまま。
+        config(['testing.fake_externals' => true]);
+        (new FakeExternalsServiceProvider($this->app))->boot();
+
+        expect(Prompt::isFaking())->toBeFalse();
+    } finally {
+        config(['testing.fake_externals' => $originalFlag]);
+    }
+});
+
+test('boot: env=local ∧ flag=true では Prompt::$fake に触れない (実 API 検証を潰さない)', function (): void {
+    $originalEnv = $this->app['env'];
+    $originalFlag = config('testing.fake_externals');
+    try {
+        config(['testing.fake_externals' => true]);
+        $this->app['env'] = 'local';
+        (new FakeExternalsServiceProvider($this->app))->boot();
+
+        expect(Prompt::isFaking())->toBeFalse();
+    } finally {
+        config(['testing.fake_externals' => $originalFlag]);
+        $this->app['env'] = $originalEnv;
+    }
+});
+
+test('boot: flag=false では bughunt.local でも Prompt fake を配線しない (完全 no-op)', function (): void {
+    $originalEnv = $this->app['env'];
+    $originalFlag = config('testing.fake_externals');
+    try {
+        config(['testing.fake_externals' => false]);
+        $this->app['env'] = 'bughunt.local';
+        (new FakeExternalsServiceProvider($this->app))->boot();
+
+        expect(Prompt::isFaking())->toBeFalse();
+    } finally {
+        config(['testing.fake_externals' => $originalFlag]);
+        $this->app['env'] = $originalEnv;
+    }
 });

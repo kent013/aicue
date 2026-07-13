@@ -8,7 +8,7 @@ use App\Models\ApiKey;
 use App\Models\Organization;
 use App\Models\Project;
 use App\Models\User;
-use App\Services\AI\Testing\BrowserPromptFakeRegistrar;
+use App\Services\AI\Testing\CannedPromptFakeRegistrar;
 use App\Services\Organization\OrganizationProvisioningService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Vite;
@@ -84,10 +84,11 @@ pest()->extend(TestCase::class)
         // accumulator に記録され afterEach で fail する)。
         StrayLlmCallGuard::install($this->app);
 
-        // Browser lane は Prompt を常時 canned fake 化する (クラス別の決定論応答。
-        // 未登録の Prompt から呼ばれると fail-fast)。install() 内の stopFaking の
-        // 後に上書きインストールするのが load-bearing。
-        app(BrowserPromptFakeRegistrar::class)->install();
+        // Browser lane は Prompt を常時 canned fake 化する (SystemMessage signature 別の
+        // 決定論応答。未登録の Prompt から呼ばれると fail-fast)。canned PromptFake は
+        // Browser lane と bughunt 実行時の両方で共有 (registrar 参照)。install() 内の
+        // stopFaking の後に上書きインストールするのが load-bearing。
+        app(CannedPromptFakeRegistrar::class)->install();
     })
     ->afterEach(function (): void {
         try {
