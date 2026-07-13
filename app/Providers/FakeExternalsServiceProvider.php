@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
 
 /**
- * 外部サービス fake の配線 (config('testing.fake_externals') が capability flag)。
+ * 外部サービス fake の配線 (系統別に capability flag を分離)。
  *
  * bootstrap/providers.php で AppServiceProvider より後に登録する (後勝ち rebind)。
  * fail-secure 二軸:
@@ -22,10 +22,13 @@ use Illuminate\Support\ServiceProvider;
  *    未知環境で flag が誤設定されても fake しない (warning ログで検出可能にする)。
  *    production は加えて ProductionEnvGuard が flag=true を deploy 時 fail-fast で拒否する。
  *
- * fake 対象は 2 系統で allowlist が異なる:
- * - Stripe 課金 gateway: container bind (per-test 隔離が効くため testing 可)。register() で配線。
- * - LLM (Prism): Prompt::$fake は static (プロセスグローバル) のため testing/local を除外。
- *   boot() で bughunt.local のみ配線 (HTTP serve / queue worker / artisan 全 bootstrap で発火)。
+ * fake 対象は 2 系統で capability flag も allowlist も異なる:
+ * - Stripe 課金 gateway: config('testing.fake_externals') が capability flag。
+ *   container bind (per-test 隔離が効くため testing 可)。register() で配線。
+ * - LLM (Prism): config('testing.fake_llm') が capability flag (fake_externals から分離)。
+ *   Prompt::$fake は static (プロセスグローバル) のため testing/local を除外し bughunt.local のみ配線。
+ *   bughunt 既定は real-llm (fake_llm off) で install しない。--fake-llm 時のみ install する。
+ *   LLM fake 許可環境は bughunt.local のみ (定数 LLM_FAKE_ENVIRONMENTS が正本)。
  */
 class FakeExternalsServiceProvider extends ServiceProvider
 {
@@ -57,12 +60,16 @@ class FakeExternalsServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        if (config('testing.fake_externals') !== true) {
+        // LLM fake は fake_llm (既定 false = real LLM) で判定する。bughunt 既定は real-llm で、
+        // --fake-llm 指定時のみ TESTING_FAKE_LLM=true が注入され install される。
+        // Stripe fake (register) は従来どおり fake_externals 依存で不変。
+        if (config('testing.fake_llm') !== true) {
             return;
         }
 
         // LLM fake は Prompt::$fake (プロセスグローバル static) を書き換えるため、
-        // per-test で static を占有する testing、実 API 検証を潰す local は除外する。
+        // per-test で static を占有する testing、実 API 検証を潰す local は allowlist から除外する。
+        // LLM fake 許可環境は bughunt.local のみ (定数 LLM_FAKE_ENVIRONMENTS が正本)。
         // (Stripe と違い warning は出さない: testing/local の除外は誤設定ではなく設計上の除外)
         if (! in_array($this->app->environment(), self::LLM_FAKE_ENVIRONMENTS, true)) {
             return;

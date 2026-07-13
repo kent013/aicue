@@ -29,6 +29,12 @@
 #                                      #             (既定 OFF。pcov 不在なら no-op で続行)。
 #   provision-all [--parallel=N] [--coverage] [--hold-lock]
 #                                      # (fan-out 用) lock を保持し run-id 採番 → shard 1..N を一括 provision。
+#   モードフラグ (provision / provision-all 専用。--keep-db reuse は provision 時に確定した mode を保持):
+#     --real-llm      LLM=real (既定)。親 .env の ANTHROPIC_API_KEY を serve/worker に注入。未設定なら fail-fast。
+#     --fake-llm      LLM=fake。canned 応答 (再現/切り分け用)。実 API 未接続。
+#     --real-storage  storage=real (TESTING_FAKE_STORAGE=false)。※実 S3 配線は未実装 = inert トグル。
+#     既定は real-llm + fake-storage。--real-llm と --fake-llm は同時指定不可。mode を変えるには
+#     --keep-db を外して再 provision する。
 #   reseed    --shard I --run-id TS    # 自 DB のみ migrate:fresh+seed
 #   db-check  --shard I --run-id TS    # DB 名 + User::count() 表示
 #   db-exists --shard I --run-id TS    # pg_database 存在確認 (owner role, read-only)
@@ -66,11 +72,13 @@ if [[ -n "${BUGHUNT_SANDBOX:-}" ]]; then
     TMP_BASE="${BUGHUNT_SANDBOX}/tmp/bug-hunt"
     LOCK_FILE="${BUGHUNT_SANDBOX}/bug-hunt.lock"
     ENV_FILE="${BUGHUNT_SANDBOX}/.env.bughunt.local"
+    MAIN_ENV_FILE="${BUGHUNT_SANDBOX}/.env"     # 親リポジトリ .env (実キー ANTHROPIC_API_KEY 由来)
 else
     RUN_BASE="devnotes"
     TMP_BASE="tmp/bug-hunt"
     LOCK_FILE="${WORKSPACE}/.claude/bug-hunt.lock"
     ENV_FILE=".env.bughunt.local"
+    MAIN_ENV_FILE=".env"                        # 親リポジトリ .env (実キー ANTHROPIC_API_KEY 由来)
 fi
 
 is_dryrun() { [[ -n "${BUGHUNT_SELFTEST_DRYRUN:-}" ]]; }
@@ -194,6 +202,86 @@ env_file_required() {
     v="$(env_file_get "$1")"
     [[ -n "${v}" ]] || die 1 "${ENV_FILE} に $1 が無い (隔離前提値を確認すること)"
     echo "${v}"
+}
+
+# --- モード制御 (real-llm 既定 / fake-llm / real-storage) -----------------------
+# bug-hunt は既定 real-llm (実 Anthropic 接続)。--fake-llm 時のみ canned 応答 (T035 の
+# CannedPromptFakeRegistrar)。storage は既定 fake (実 S3 未配線 = inert トグル)。
+# フラグは provision 時に env -i で明示注入する (残留 env による反転を防ぐため両モードとも明示)。
+LLM_MODE="real"        # real (既定) | fake
+STORAGE_MODE="fake"    # fake (既定) | real
+# MODE_ENV:    フラグのみ (TESTING_FAKE_LLM / TESTING_FAKE_STORAGE)。serve/worker/実効 env 検証に注入可 (秘密なし)。
+# LLM_KEY_ENV: ANTHROPIC_API_KEY (実キー)。serve/worker のみに注入 (実 LLM を呼ぶプロセスに限定)。
+#              値はここでのみ扱い、echo / manifest_update / migrate/seed/verify には渡さない。
+# (set -u 安全: assert が build_mode_env 前に呼ばれても ${#LLM_KEY_ENV[@]} が壊れないよう空配列で初期化)
+MODE_ENV=()
+LLM_KEY_ENV=()
+
+# 秘密取扱の xtrace ガード: 本スクリプトは既定 set -euo pipefail (-x 無し) だが、-x 有効時も
+# 秘密 (キー値・キーを含む代入/起動) を trace に出さない防御。BEGIN/END で秘密取扱区間を挟む。
+# ネスト非対応 (単純用途)。
+_SECRET_XTRACE_SAVED=0
+secret_xtrace_off()     { case $- in *x*) _SECRET_XTRACE_SAVED=1; set +x ;; *) _SECRET_XTRACE_SAVED=0 ;; esac; }
+secret_xtrace_restore() { [[ "${_SECRET_XTRACE_SAVED}" == 1 ]] && set -x; return 0; }
+
+# 親 .env から 1 キーを読む。値はログ・stderr に出さない (xtrace 局所退避。command 置換の
+# subshell 内で set +x するため親の -x 状態は汚さない)。キーは awk 完全一致 (正規表現メタ文字の
+# 事故を防ぐ。dotenv 標準どおり `KEY=value` で `=` 前後に空白を置かない前提)。export 前置・単/
+# ダブルクォート・非クォート値の後置コメントを正しく処理する (実キー誤読で real-llm 判定を誤らせないため)。
+main_env_get() {
+    { set +x; } 2>/dev/null
+    [[ -f "${MAIN_ENV_FILE}" ]] || { printf ''; return 0; }
+    local v
+    v="$(awk -v k="$1" '
+        { s=$0; sub(/^[[:space:]]*export[[:space:]]+/, "", s);
+          eq=index(s, "=");
+          if (eq>0 && substr(s,1,eq-1)==k) { print substr(s, eq+1); exit } }
+    ' "${MAIN_ENV_FILE}")"
+    if   [[ "${v}" == \"*\" ]]; then v="${v#\"}"; v="${v%\"}"       # "..." を剥がす
+    elif [[ "${v}" == \'*\' ]]; then v="${v#\'}"; v="${v%\'}"       # '...' を剥がす
+    else v="${v%%[[:space:]]#*}"; fi                               # 非クォート時のみ後置 # コメント除去
+    v="${v#"${v%%[![:space:]]*}"}"; v="${v%"${v##*[![:space:]]}"}" # 前後空白除去
+    printf '%s' "${v}"
+}
+
+# モード env を構築する (フラグと実キーを分離 = 最小権限)。両フラグを常に明示注入し、
+# real-llm 時のみ LLM_KEY_ENV に実キーを載せる。秘密取扱区間は xtrace 退避で囲む。
+build_mode_env() {
+    secret_xtrace_off                              # キー代入を trace に出さない
+    MODE_ENV=(); LLM_KEY_ENV=()
+    if [[ "${LLM_MODE}" == "fake" ]]; then
+        MODE_ENV+=("TESTING_FAKE_LLM=true")
+    else
+        MODE_ENV+=("TESTING_FAKE_LLM=false")       # real も明示注入 (残留 env による反転防止)
+        local key; key="$(main_env_get ANTHROPIC_API_KEY)"
+        LLM_KEY_ENV+=("ANTHROPIC_API_KEY=${key}")  # serve/worker 限定
+    fi
+    if [[ "${STORAGE_MODE}" == "real" ]]; then
+        MODE_ENV+=("TESTING_FAKE_STORAGE=false")
+    else
+        MODE_ENV+=("TESTING_FAKE_STORAGE=true")     # 既定 fake も明示注入
+    fi
+    secret_xtrace_restore
+}
+
+# real-llm ∧ キー空/未設定なら die。キーの読取は build_mode_env の 1 箇所のみ (ここでは再読しない)。
+# 既に構築済みの LLM_KEY_ENV を検査する (単一正本)。値を trace に出さないよう xtrace 退避で囲む。
+assert_llm_key_present() {
+    [[ "${LLM_MODE}" == "real" ]] || return 0
+    secret_xtrace_off
+    if [[ "${#LLM_KEY_ENV[@]}" -ne 1 || "${LLM_KEY_ENV[0]}" == "ANTHROPIC_API_KEY=" ]]; then
+        secret_xtrace_restore
+        die 1 "real-llm (既定) だが ${MAIN_ENV_FILE} に ANTHROPIC_API_KEY が無い/空です。\
+実キーで探索するか、--fake-llm で canned 応答に切り替えてください (fake-llm は再現/切り分け用)。(キー値はログに出しません)"
+    fi
+    secret_xtrace_restore
+}
+
+# cmd_provision 冒頭と cmd_provision_all のループ前で共通に呼ぶ (分岐差を作らない)。
+# build_mode_env (キー読取) → assert_llm_key_present (配列検査) の順で LLM_KEY_ENV を単一正本にする。
+prepare_mode_and_preflight() {
+    build_mode_env
+    assert_llm_key_present
 }
 
 # --- ★ 用途別 wrapper (env -i で最小環境、bughunt 値のみ明示注入) --------------
@@ -623,18 +711,23 @@ start_shard_workers() {
     local shard=$1 db=$2 url=$3
     guard_bughunt_runtime "${db}" bughunt
     local conn pid
+    # 秘密 (LLM_KEY_ENV) を展開するプロセス起動を xtrace ガードで挟む (-x 有効時も値を trace に出さない)。
+    # worker は serve と同一の env 隔離 + モードフラグ + 実キー (real-llm 時のみ) を注入する。
+    secret_xtrace_off
     for conn in "${BUGHUNT_WORKER_CONNECTIONS[@]}"; do
         env -i PATH="${PATH}" HOME="${HOME}" \
             DB_CONNECTION=pgsql \
             DB_HOST="$(env_file_required DB_HOST)" DB_PORT="$(env_file_required DB_PORT)" \
             DB_DATABASE="${db}" DB_USERNAME=bughunt DB_PASSWORD="$(env_file_get DB_PASSWORD)" \
             APP_URL="${url}" \
+            ${MODE_ENV[@]+"${MODE_ENV[@]}"} ${LLM_KEY_ENV[@]+"${LLM_KEY_ENV[@]}"} \
             setsid php artisan queue:listen "${conn}" --env=bughunt.local \
                 --sleep=1 --tries=1 --timeout=1800 \
             > "$(worker_logfile "${shard}" "${conn}")" 2>&1 &
         pid=$!
         echo "${pid}" > "$(worker_pidfile "${shard}" "${conn}")"
     done
+    secret_xtrace_restore
     # fail-fast: 起動 1 秒後の即死検知 (artisan 起動失敗・接続不能などを provision 段階で顕在化)。
     # 併せて pid==pgid (setsid が新 session/process group を確立したこと) を検証する
     # (group kill / group 消滅待ちの前提条件を起動時不変条件として固定。Codex 詳細 R3 反映)。
@@ -757,6 +850,10 @@ cmd_provision() {
     [[ "$(env_file_get APP_ENV)" == "bughunt.local" ]] || die 1 "${ENV_FILE} の APP_ENV が bughunt.local でない"
     [[ "$(env_file_get DB_USERNAME)" == "bughunt" ]] || die 1 "${ENV_FILE} の DB_USERNAME は bughunt 固定"
 
+    # モード env を構築し real-llm の実キーを fail-fast 検証する (createdb の前)。
+    # build_mode_env (キー読取) → assert_llm_key_present (配列検査) の単一正本。
+    prepare_mode_and_preflight
+
     clear_stale_config
     ensure_fresh_assets
 
@@ -783,9 +880,19 @@ cmd_provision() {
     # (b2) Filament 静的アセット publish (F-13 対策)。冪等 (marker + 実在確認で skip)。
     ensure_filament_assets "${db}" "${url}"
 
-    # (c) 実効 env 検証 (不一致 fail-fast)
+    # (c) 実効 env 検証 (不一致 fail-fast)。serve/worker と同一フラグ (MODE_ENV) で config が
+    #     解決されることを検証する (config key / env 名の typo を provision 段階で検出)。
+    #     artisan_for_shard は migrate/seed と共用で MODE_ENV を載せないため、serve と同型の専用
+    #     env -i ブロックで MODE_ENV (フラグのみ) を展開する。実キー (LLM_KEY_ENV) は verify に載せない。
+    guard_bughunt_runtime "${db}" bughunt
     local effective
-    effective="$(artisan_for_shard "${db}" "${url}" tinker --execute='
+    effective="$(env -i PATH="${PATH}" HOME="${HOME}" \
+        DB_CONNECTION=pgsql \
+        DB_HOST="$(env_file_required DB_HOST)" DB_PORT="$(env_file_required DB_PORT)" \
+        DB_DATABASE="${db}" DB_USERNAME=bughunt DB_PASSWORD="$(env_file_get DB_PASSWORD)" \
+        APP_URL="${url}" \
+        ${MODE_ENV[@]+"${MODE_ENV[@]}"} \
+        php artisan tinker --execute='
         echo json_encode([
             "db" => config("database.connections.pgsql.database"),
             "app_url" => config("app.url"),
@@ -795,16 +902,24 @@ cmd_provision() {
             "mail" => config("mail.default"),
             "filesystem" => config("filesystems.default"),
             "admin_mfa_required" => config("admin.mfa_required"),
-        ]);' | grep -o '{.*}' | tail -1)"
-    EFFECTIVE="${effective}" DB="${db}" URL="${url}" python3 - <<'PY'
+            "fake_llm" => config("testing.fake_llm"),
+            "fake_storage" => config("testing.fake_storage"),
+        ]);' --env=bughunt.local | grep -o '{.*}' | tail -1)"
+    EFFECTIVE="${effective}" DB="${db}" URL="${url}" LLM_MODE="${LLM_MODE}" STORAGE_MODE="${STORAGE_MODE}" python3 - <<'PY'
 import json, os, sys
 e = json.loads(os.environ["EFFECTIVE"])
 expected = {
     "db": os.environ["DB"], "app_url": os.environ["URL"],
     "session": "database", "cache": "database", "queue": "sync",
-    "mail": "log", "filesystem": "local",
+    "mail": "log",
     "admin_mfa_required": False,
+    # モードから期待値を導出 (serve/worker と同一フラグで config が解決されることを固定)。
+    "fake_llm": (os.environ["LLM_MODE"] == "fake"),
+    "fake_storage": (os.environ["STORAGE_MODE"] == "fake"),
 }
+# filesystem は fake_storage (既定) 時のみ local を必須化。real-storage は inert のため緩める。
+if os.environ["STORAGE_MODE"] == "fake":
+    expected["filesystem"] = "local"
 diff = {k: (e.get(k), v) for k, v in expected.items() if e.get(k) != v}
 if diff:
     print(f"error: 隔離前提の実効 env が不一致 (実効値, 期待値): {diff}", file=sys.stderr)
@@ -841,15 +956,20 @@ PY
 
     # (e) serve 起動 + ヘルスチェック。--no-reload 必須 (ServeCommand が --env 時に
     #     passthrough 外の env を php -S 子から破棄する)。coverage_env は同じ env -i 行で明示展開する。
+    # 秘密 (LLM_KEY_ENV) を展開するプロセス起動を xtrace ガードで挟む (-x 有効時も値を trace に出さない)。
+    # coverage_env / MODE_ENV / LLM_KEY_ENV は同じ env -i 行で明示展開する (real-llm 時のみ実キーが載る)。
+    secret_xtrace_off
     env -i PATH="${PATH}" HOME="${HOME}" \
         DB_CONNECTION=pgsql \
         DB_HOST="$(env_file_required DB_HOST)" DB_PORT="$(env_file_required DB_PORT)" \
         DB_DATABASE="${db}" DB_USERNAME=bughunt DB_PASSWORD="$(env_file_get DB_PASSWORD)" \
         APP_URL="${url}" \
         ${coverage_env[@]+"${coverage_env[@]}"} \
+        ${MODE_ENV[@]+"${MODE_ENV[@]}"} ${LLM_KEY_ENV[@]+"${LLM_KEY_ENV[@]}"} \
         nohup php artisan serve --env=bughunt.local --port="${port}" --no-reload \
         > "${TMP_BASE}/serve-${shard}.log" 2>&1 &
     local serve_pid=$!
+    secret_xtrace_restore
     echo "${serve_pid}" > "${TMP_BASE}/serve-${shard}.pid"
     manifest_update "${run_id}" "${shard}" "serve_pid=${serve_pid}" "port=${port}"
     local t code=000
@@ -898,6 +1018,10 @@ cmd_provision_all() {
     if ! flock -n 222; then
         die 1 "別の bug-hunt run が実行中 (${LOCK_FILE})。完了を待つこと"
     fi
+
+    # モード env / 実キーの fail-fast を run-id 採番・shard provision の前に共通で通す
+    # (real-llm でキー欠落なら shard 1 に進む前に止める。dryrun はキー検証をスキップ)。
+    is_dryrun || prepare_mode_and_preflight
 
     if [[ -n "${COVERAGE:-}" ]]; then
         echo "coverage: 全 ${n} shard の serve が pcov 付きで起動する (実装到達カバレッジ収集。pcov 不在なら no-op)" >&2
@@ -1628,6 +1752,134 @@ CURLEOF
     rm -f "$(worker_pidfile 8 database-media)"
     t_ok "queue worker wiring (derivation/drift/structure/alive/dryrun/stop 正常系+失敗系)"
 
+    echo "[z] real-llm/fake-llm/real-storage モード制御 (フラグ/キー分離・fail-fast・秘密漏洩防止・引数解析)"
+    local _e
+    local z_env="${sandbox}/main-with-key.env"
+    cat > "${z_env}" <<'ZENVEOF'
+APP_ENV=local
+ANTHROPIC_API_KEY=sk-ant-SELFTEST-DUMMY
+OTHER=x
+ZENVEOF
+    local z_env_nokey="${sandbox}/main-no-key.env"
+    cat > "${z_env_nokey}" <<'ZENVEOF'
+APP_ENV=local
+ANTHROPIC_API_KEY=
+ZENVEOF
+    local _saved_main_env="${MAIN_ENV_FILE}"
+    local _saved_llm_mode="${LLM_MODE}" _saved_storage_mode="${STORAGE_MODE}"
+    arr_has() { local needle=$1; shift; local e; for e in "$@"; do [[ "$e" == "$needle" ]] && return 0; done; return 1; }
+
+    # [z1] build_mode_env: フラグ/キー分離 (MODE_ENV には実キーが決して含まれない)
+    MAIN_ENV_FILE="${z_env}"
+    LLM_MODE="real"; STORAGE_MODE="fake"; build_mode_env
+    arr_has "TESTING_FAKE_LLM=false" "${MODE_ENV[@]}" || t_fail "[z1] real-llm で MODE_ENV に TESTING_FAKE_LLM=false が無い"
+    arr_has "TESTING_FAKE_STORAGE=true" "${MODE_ENV[@]}" || t_fail "[z1] fake-storage 既定で MODE_ENV に TESTING_FAKE_STORAGE=true が無い"
+    { [[ "${#LLM_KEY_ENV[@]}" == 1 && "${LLM_KEY_ENV[0]}" == "ANTHROPIC_API_KEY=sk-ant-SELFTEST-DUMMY" ]]; } \
+        || t_fail "[z1] real-llm で LLM_KEY_ENV に実キーが載らない"
+    arr_has "ANTHROPIC_API_KEY=sk-ant-SELFTEST-DUMMY" "${MODE_ENV[@]}" && t_fail "[z1] MODE_ENV に実キーが混入 (フラグ/キー分離違反)"
+    for _e in "${MODE_ENV[@]}"; do [[ "${_e}" == *"sk-ant-SELFTEST-DUMMY"* ]] && t_fail "[z1] MODE_ENV 要素にキー値が含まれる"; done
+    LLM_MODE="fake"; STORAGE_MODE="fake"; build_mode_env
+    arr_has "TESTING_FAKE_LLM=true" "${MODE_ENV[@]}" || t_fail "[z1] fake-llm で MODE_ENV に TESTING_FAKE_LLM=true が無い"
+    [[ "${#LLM_KEY_ENV[@]}" == 0 ]] || t_fail "[z1] fake-llm で LLM_KEY_ENV が空でない"
+    LLM_MODE="fake"; STORAGE_MODE="real"; build_mode_env
+    arr_has "TESTING_FAKE_STORAGE=false" "${MODE_ENV[@]}" || t_fail "[z1] real-storage で TESTING_FAKE_STORAGE=false が無い"
+    t_ok "[z1] build_mode_env フラグ/キー分離"
+
+    # [z1b] main_env_get: export/クォート/後置コメント/完全一致
+    local z_parse="${sandbox}/main-parse.env"
+    cat > "${z_parse}" <<'ZPEOF'
+export EXPKEY=expval
+DQ="dqval"
+SQ='sqval'
+CM=cmval  # trailing comment
+ANTHROPIC_API_KEY=realkey
+ANTHROPIC_API_KEY_SUFFIX=shouldnotmatch
+ZPEOF
+    MAIN_ENV_FILE="${z_parse}"
+    [[ "$(main_env_get EXPKEY)" == "expval" ]] || t_fail "[z1b] export 前置を剥がせない"
+    [[ "$(main_env_get DQ)" == "dqval" ]] || t_fail "[z1b] ダブルクォート除去失敗"
+    [[ "$(main_env_get SQ)" == "sqval" ]] || t_fail "[z1b] シングルクォート除去失敗"
+    [[ "$(main_env_get CM)" == "cmval" ]] || t_fail "[z1b] 後置コメント除去失敗"
+    [[ "$(main_env_get ANTHROPIC_API_KEY)" == "realkey" ]] || t_fail "[z1b] 完全一致キー取得失敗"
+    [[ -z "$(main_env_get ANTHROPIC_API)" ]] || t_fail "[z1b] 部分一致キーを誤取得"
+    [[ -z "$(main_env_get NOPE)" ]] || t_fail "[z1b] 欠損キーが空でない"
+    t_ok "[z1b] main_env_get parsing"
+
+    # [z2] assert_llm_key_present: real∧キー無し→die(1) / real∧キー有り→0 / fake∧キー無し→0
+    MAIN_ENV_FILE="${z_env}"; LLM_MODE="real"; STORAGE_MODE="fake"; build_mode_env
+    ( assert_llm_key_present ) >/dev/null 2>&1 || t_fail "[z2] real-llm ∧ キー有りで die"
+    MAIN_ENV_FILE="${z_env_nokey}"; LLM_MODE="real"; build_mode_env
+    rc=0; ( assert_llm_key_present ) >/dev/null 2>&1 || rc=$?
+    [[ "${rc}" == 1 ]] || t_fail "[z2] real-llm ∧ キー無しで die(1) しない (rc=${rc})"
+    MAIN_ENV_FILE="${z_env_nokey}"; LLM_MODE="fake"; build_mode_env
+    ( assert_llm_key_present ) >/dev/null 2>&1 || t_fail "[z2] fake-llm ∧ キー無しでも rc=0 のはず"
+    t_ok "[z2] assert_llm_key_present"
+
+    # [z3] 秘密漏洩防止: stdout/stderr どちらにもキー値が出ない (通常 + set -x 有効実行)
+    MAIN_ENV_FILE="${z_env}"; LLM_MODE="real"; STORAGE_MODE="fake"
+    local z3_out z3_err
+    z3_out="$( ( prepare_mode_and_preflight ) 2>"${sandbox}/z3.err" )"
+    z3_err="$(cat "${sandbox}/z3.err")"
+    echo "${z3_out}" | grep -q 'sk-ant-SELFTEST-DUMMY' && t_fail "[z3] 通常実行の stdout にキー値が漏洩"
+    echo "${z3_err}" | grep -q 'sk-ant-SELFTEST-DUMMY' && t_fail "[z3] 通常実行の stderr にキー値が漏洩"
+    z3_out="$( ( set -x; prepare_mode_and_preflight ) 2>"${sandbox}/z3x.err" )"
+    z3_err="$(cat "${sandbox}/z3x.err")"
+    echo "${z3_out}" | grep -q 'sk-ant-SELFTEST-DUMMY' && t_fail "[z3] set -x 実行の stdout にキー値が漏洩"
+    echo "${z3_err}" | grep -q 'sk-ant-SELFTEST-DUMMY' && t_fail "[z3] set -x 実行の stderr にキー値が漏洩 (xtrace ガード不発)"
+    prepare_mode_and_preflight
+    for _e in "${MODE_ENV[@]}"; do [[ "${_e}" == *"sk-ant-SELFTEST-DUMMY"* ]] && t_fail "[z3] MODE_ENV にキー値混入"; done
+    t_ok "[z3] 秘密漏洩防止 (通常/set -x)"
+
+    # [z4] 引数解析: 相互排他 + provision 系専用 + provision 系 dryrun 受理
+    rc=0; ("${SCRIPT_PATH}" provision --shard 0 --run-id 20990401-000000 --real-llm --fake-llm) >/dev/null 2>&1 || rc=$?
+    [[ "${rc}" == 2 ]] || t_fail "[z4] --real-llm --fake-llm 同時指定が exit ${rc} (expected 2)"
+    for badsub in teardown reseed db-check verify-run self-test; do
+        for badflag in --real-llm --fake-llm --real-storage; do
+            rc=0; ("${SCRIPT_PATH}" "${badsub}" --run-id 20990401-000000 "${badflag}") >/dev/null 2>&1 || rc=$?
+            [[ "${rc}" == 2 ]] || t_fail "[z4] ${badflag} が ${badsub} で exit ${rc} (expected 2)"
+        done
+    done
+    export BUGHUNT_SELFTEST_DRYRUN=1
+    rc=0; ("${SCRIPT_PATH}" provision --shard 0 --run-id 20990402-000000 --fake-llm) >/dev/null 2>&1 || rc=$?
+    [[ "${rc}" == 0 ]] || t_fail "[z4] provision --fake-llm (dryrun) が exit ${rc} (expected 0)"
+    rc=0; ("${SCRIPT_PATH}" provision --shard 0 --run-id 20990403-000000 --real-storage) >/dev/null 2>&1 || rc=$?
+    [[ "${rc}" == 0 ]] || t_fail "[z4] provision --real-storage (dryrun) が exit ${rc} (expected 0)"
+    unset BUGHUNT_SELFTEST_DRYRUN
+    t_ok "[z4] 引数解析 (相互排他 / provision 系専用)"
+
+    # [z5] 実効 env 検証の期待値導出 (python 断片) を mode 別に単体評価
+    local z5
+    z5="$(LLM_MODE=fake STORAGE_MODE=fake python3 - <<'PY'
+import os
+expected = {}
+expected["fake_llm"] = (os.environ["LLM_MODE"] == "fake")
+expected["fake_storage"] = (os.environ["STORAGE_MODE"] == "fake")
+if os.environ["STORAGE_MODE"] == "fake":
+    expected["filesystem"] = "local"
+assert expected["fake_llm"] is True and expected["fake_storage"] is True and expected["filesystem"] == "local"
+print("ok")
+PY
+)"
+    [[ "${z5}" == "ok" ]] || t_fail "[z5] fake/fake 期待値導出が不正"
+    z5="$(LLM_MODE=real STORAGE_MODE=real python3 - <<'PY'
+import os
+expected = {}
+expected["fake_llm"] = (os.environ["LLM_MODE"] == "fake")
+expected["fake_storage"] = (os.environ["STORAGE_MODE"] == "fake")
+if os.environ["STORAGE_MODE"] == "fake":
+    expected["filesystem"] = "local"
+assert expected["fake_llm"] is False and expected["fake_storage"] is False and "filesystem" not in expected
+print("ok")
+PY
+)"
+    [[ "${z5}" == "ok" ]] || t_fail "[z5] real/real 期待値導出が不正"
+    t_ok "[z5] 実効 env 期待値導出 (real/fake/real-storage)"
+
+    # モード globals を復元 (後続に影響させない)
+    MAIN_ENV_FILE="${_saved_main_env}"
+    LLM_MODE="${_saved_llm_mode}"; STORAGE_MODE="${_saved_storage_mode}"
+    MODE_ENV=(); LLM_KEY_ENV=()
+
     rm -rf "${sandbox}"
     unset BUGHUNT_SANDBOX
     if [[ "${failures}" -gt 0 ]]; then
@@ -1640,7 +1892,9 @@ CURLEOF
 # --- 引数解析 -----------------------------------------------------------------
 
 usage() {
-    sed -n '2,55p' "${SCRIPT_PATH}" | sed 's/^# \{0,1\}//'
+    # ヘッダコメント (2 行目〜 `set -euo pipefail` の直前) を動的に切り出す。行数固定依存を避け、
+    # ヘッダにモード表などを追記しても usage が確実に全文を出す (Codex 実装レビュー R1 Critical 反映)。
+    awk 'NR==1{next} /^set -euo pipefail/{exit} {print}' "${SCRIPT_PATH}" | sed 's/^# \{0,1\}//'
     exit 2
 }
 
@@ -1649,6 +1903,10 @@ main() {
     shift || true
     local shard="" run_id="" count=5 drop_db="" parallel=4 hold_lock=""
     COVERAGE=""    # --coverage: pcov 付きで serve 起動しコード到達カバレッジを収集 (既定 OFF)
+    # モードは既定 real-llm + fake-storage。専用フラグ変数で「同時指定」「適用範囲」を判定する
+    # (LLM_MODE/STORAGE_MODE の上書きだけだと「既定と同値の明示指定」を取りこぼすため)。
+    LLM_MODE="real"; STORAGE_MODE="fake"
+    local _llm_flag_real=0 _llm_flag_fake=0 _storage_flag_real=0
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -1658,6 +1916,9 @@ main() {
             --parallel=*) parallel="${1#--parallel=}"; shift ;;
             --parallel) shift ;;
             --coverage) COVERAGE=1; shift ;;
+            --real-llm) LLM_MODE="real"; _llm_flag_real=1; shift ;;
+            --fake-llm) LLM_MODE="fake"; _llm_flag_fake=1; shift ;;
+            --real-storage) STORAGE_MODE="real"; _storage_flag_real=1; shift ;;
             --drop-db) drop_db="--drop-db"; shift ;;
             --hold-lock) hold_lock="--hold-lock"; shift ;;
             *) die 2 "unknown option: $1" ;;
@@ -1667,6 +1928,15 @@ main() {
     if [[ -n "${COVERAGE}" ]]; then
         [[ "${sub}" == "provision" || "${sub}" == "provision-all" ]] \
             || die 2 "--coverage は provision または provision-all でのみ使える"
+    fi
+
+    # モードフラグ: 相互排他 + provision 系専用 (--coverage と同じ流儀。teardown --real-llm 等も拒否)。
+    if [[ "${_llm_flag_real}" == 1 && "${_llm_flag_fake}" == 1 ]]; then
+        die 2 "--real-llm と --fake-llm は同時指定できません (モードを 1 つ選ぶ)"
+    fi
+    if [[ "${_llm_flag_real}" == 1 || "${_llm_flag_fake}" == 1 || "${_storage_flag_real}" == 1 ]]; then
+        [[ "${sub}" == "provision" || "${sub}" == "provision-all" ]] \
+            || die 2 "--real-llm / --fake-llm / --real-storage は provision または provision-all でのみ使える"
     fi
 
     case "${sub}" in

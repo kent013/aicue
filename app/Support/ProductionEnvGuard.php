@@ -18,7 +18,9 @@ use Throwable;
  * - APP_DEBUG=false (stack trace / 設定露出防止)
  * - SECURITY_HSTS_ENABLED / SECURITY_CSP_ENABLED=true (セキュリティヘッダ必須)
  * - DEBUG_LOGIN_USER / DEBUG_LOGIN_PASSWORD が空 (local 専用機構の誤投入防止)
- * - TESTING_FAKE_EXTERNALS=false (外部 fake の本番混入防止)
+ * - TESTING_FAKE_EXTERNALS=false (Stripe 外部 fake の本番混入防止)
+ * - TESTING_FAKE_LLM=false (LLM fake の本番混入防止)
+ * - TESTING_FAKE_STORAGE=false (storage fake の本番混入防止)
  * - TrustHosts allowlist (Host header injection 防御の allowlist 非空・書式)
  */
 class ProductionEnvGuard
@@ -85,6 +87,18 @@ class ProductionEnvGuard
         if (config('testing.fake_externals') === true) {
             $errors[] = 'TESTING_FAKE_EXTERNALS must be false in production '
                 .'(external fakes must never be enabled in production).';
+        }
+
+        // LLM fake は production で real LLM を潰すため禁止 (fake_externals と同じ fail-secure)。
+        if (config('testing.fake_llm') === true) {
+            $errors[] = 'TESTING_FAKE_LLM must be false in production '
+                .'(LLM fake must never be enabled in production).';
+        }
+
+        // storage fake は production で実ストレージを潰し得るため禁止。
+        if (config('testing.fake_storage') === true) {
+            $errors[] = 'TESTING_FAKE_STORAGE must be false in production '
+                .'(storage fake must never be enabled in production).';
         }
 
         // Host header injection 防御の TrustHosts allowlist を起動時検証。

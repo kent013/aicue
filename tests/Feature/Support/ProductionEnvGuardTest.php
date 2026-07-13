@@ -16,6 +16,8 @@ beforeEach(function (): void {
     config(['debug.login.user' => '']);
     config(['debug.login.password' => '']);
     config(['testing.fake_externals' => false]);
+    config(['testing.fake_llm' => false]);
+    config(['testing.fake_storage' => false]);
     config(['trusted_hosts.exact_hosts' => ['app.example.com']]);
     config(['trusted_hosts.wildcard_suffixes' => []]);
     config(['trusted_hosts.raw_wildcard_suffixes' => []]);
@@ -99,6 +101,20 @@ test('TESTING_FAKE_EXTERNALS が true なら violation', function (): void {
     $errors = (new ProductionEnvGuard)->violations();
     expect($errors)->toHaveCount(1);
     expect($errors[0])->toContain('TESTING_FAKE_EXTERNALS');
+});
+
+test('TESTING_FAKE_LLM が true なら violation', function (): void {
+    config(['testing.fake_llm' => true]);
+    $errors = (new ProductionEnvGuard)->violations();
+    expect($errors)->toHaveCount(1);
+    expect($errors[0])->toContain('TESTING_FAKE_LLM');
+});
+
+test('TESTING_FAKE_STORAGE が true なら violation', function (): void {
+    config(['testing.fake_storage' => true]);
+    $errors = (new ProductionEnvGuard)->violations();
+    expect($errors)->toHaveCount(1);
+    expect($errors[0])->toContain('TESTING_FAKE_STORAGE');
 });
 
 test('TrustHosts allowlist が空なら violation', function (): void {
