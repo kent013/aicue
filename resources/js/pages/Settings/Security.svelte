@@ -134,29 +134,30 @@
 
     /* ---- リカバリコード再生成 (F-10) ----
        POST 成功 = 旧コードは既に失効。表示中の旧コードを即クリアしてから GET で
-       新コードを取得し、成功時のみ成功トースト + 一覧へフォーカス (再保管を促す)。
-       GET 失敗時は「旧コードは無効」を明示し、既存の「リカバリコードを表示」ボタンが
-       再試行導線になる (recoveryCodes が空に戻るため自然に表示される)。 */
+       新コードを取得し、成功時は一覧へフォーカスする (再保管を促す)。成功 toast は
+       サーバ flash (RecoveryCodesGeneratedResponse) を単一の源とし client では出さない
+       (二重発火 F-L1 の解消)。GET 失敗時は「再生成は成功／表示取得が失敗」を明示し、
+       既存の「リカバリコードを表示」ボタンが再試行導線になる (recoveryCodes が空に戻る)。 */
     let regenerateDialogOpen = $state(false);
     let regenerating = $state(false);
 
     /** POST 成功後の後処理 (旧コードは既に失効している前提)。 */
     async function handleRegenerateSuccess(): Promise<void> {
         regenerateDialogOpen = false;
-        // 旧コードは失効済み。誤保管を防ぐため画面から即クリアする
+        // 旧コードは失効済み。誤保管を防ぐため画面から即クリアする。
+        // 成功 toast はサーバ flash (RecoveryCodesGeneratedResponse) が単一の源として出す
+        // (二重発火 F-L1 の解消)。ここでは client 楽観 toast を出さない。
         recoveryCodes = [];
         if (await loadRecoveryCodes()) {
-            addToast(
-                "success",
-                "リカバリコードを再生成しました。新しいコードを保管してください。",
-            );
             await tick();
             recoveryCodesPanel?.focus();
             return;
         }
+        // GET 失敗は「表示取得の失敗」= 再生成成功とは別事象。成功 toast と並んでも
+        // 矛盾しないよう対象を明示する。
         addToast(
             "error",
-            "新しいコードの取得に失敗しました。以前のコードは既に無効です。「リカバリコードを表示」から再取得してください。",
+            "リカバリコードは再生成されましたが、新しいコードの表示取得に失敗しました。旧コードは既に無効です。「リカバリコードを表示」から再取得してください。",
         );
     }
 

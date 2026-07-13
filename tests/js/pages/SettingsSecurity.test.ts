@@ -7,7 +7,7 @@ import Security from "@/pages/Settings/Security.svelte";
  * - 2FA 有効時のみ再生成ボタンが出る (非権限者非表示)
  * - ConfirmDialog 経由でのみ POST される
  * - 再生成 / 表示は recent-auth precheck 込み (stale なら再認証モーダル、POST しない)
- * - POST 成功 → GET 成功: 新コード表示 + success トースト
+ * - POST 成功 → GET 成功: 新コード表示 (success トーストはサーバ flash 委譲。client では出さない)
  * - POST 成功 → GET 失敗: 旧コード非表示のまま error トースト + 再試行導線
  * - disabled 不使用 (AGENTS.md 禁止事項 8)
  */
@@ -209,7 +209,7 @@ describe("Settings/Security リカバリコード再生成 (F-10)", () => {
         });
     });
 
-    it("POST 成功 → GET 成功で新コードを表示し success トーストを出す", async () => {
+    it("POST 成功 → GET 成功で新コードを表示する (success トーストはサーバ flash 委譲。client では出さない)", async () => {
         stubFetchRoutes({ recent: true, codes: ["new-code-1", "new-code-2"], codesOk: true });
         render(Security, { props: {} });
 
@@ -222,10 +222,9 @@ describe("Settings/Security リカバリコード再生成 (F-10)", () => {
         await waitFor(() => {
             expect(screen.getByTestId("recovery-codes")).toHaveTextContent("new-code-1");
         });
-        expect(addToastMock).toHaveBeenCalledWith(
-            "success",
-            expect.stringContaining("再生成しました"),
-        );
+        // 成功 toast はサーバ flash (RecoveryCodesGeneratedResponse) が単一の源。
+        // client 楽観 toast は出さない (二重発火 F-L1 の解消)。
+        expect(addToastMock).not.toHaveBeenCalledWith("success", expect.anything());
     });
 
     it("POST 成功 → GET 失敗では旧コードを残さず error トースト + 再試行導線に戻る", async () => {
@@ -241,9 +240,13 @@ describe("Settings/Security リカバリコード再生成 (F-10)", () => {
         await waitFor(() => {
             expect(addToastMock).toHaveBeenCalledWith(
                 "error",
-                expect.stringContaining("以前のコードは既に無効です"),
+                expect.stringContaining("再生成されました"),
             );
         });
+        expect(addToastMock).toHaveBeenCalledWith(
+            "error",
+            expect.stringContaining("表示取得に失敗"),
+        );
         expect(screen.queryByTestId("recovery-codes")).toBeNull();
         expect(screen.getByTestId("show-recovery-codes-button")).toBeInTheDocument();
     });
