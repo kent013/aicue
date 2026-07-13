@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Models\User;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Password;
 
 /*
  * Fortify Response contract bind (app/Http/Responses/Fortify/) の応答契約の正本。
@@ -71,4 +72,124 @@ test('認証メール再送は JSON リクエストに 202 を返す (Fortify �
 
     $response->assertStatus(202);
     Notification::assertSentTo($user, VerifyEmail::class);
+});
+
+test('プロフィール更新は success flash を返す (web)', function (): void {
+    $user = User::factory()->create();
+
+    // email は現状維持 (同一 email 分岐で通知/再検証を発火させず flash 契約に集中)
+    $response = $this->actingAs($user)
+        ->from('/settings')
+        ->put('/user/profile-information', [
+            'name' => '更新後の名前',
+            'email' => $user->email,
+        ]);
+
+    $response->assertRedirect('/settings');
+    $response->assertSessionHas('success', 'プロフィールを更新しました。');
+    $response->assertSessionMissing('status');
+});
+
+test('プロフィール更新は JSON リクエストに 200 を返す', function (): void {
+    $user = User::factory()->create();
+
+    $response = $this->actingAs($user)
+        ->putJson('/user/profile-information', [
+            'name' => '更新後の名前',
+            'email' => $user->email,
+        ]);
+
+    $response->assertStatus(200);
+});
+
+test('パスワード変更は success flash を返す (web)', function (): void {
+    $user = User::factory()->create();
+
+    $response = $this->actingAs($user)
+        ->from('/settings')
+        ->put('/user/password', [
+            'current_password' => 'password',
+            'password' => 'NewPassword123',
+        ]);
+
+    $response->assertRedirect('/settings');
+    $response->assertSessionHas('success', 'パスワードを変更しました。');
+    $response->assertSessionMissing('status');
+});
+
+test('パスワード変更は JSON リクエストに 200 を返す', function (): void {
+    $user = User::factory()->create();
+
+    $response = $this->actingAs($user)
+        ->putJson('/user/password', [
+            'current_password' => 'password',
+            'password' => 'NewPassword123',
+        ]);
+
+    $response->assertStatus(200);
+});
+
+test('パスワードリセットは success flash + login redirect を返す (web)', function (): void {
+    $user = User::factory()->create();
+    $token = Password::createToken($user);
+
+    $response = $this->from('/reset-password')->post('/reset-password', [
+        'token' => $token,
+        'email' => $user->email,
+        'password' => 'NewPassword123',
+        'password_confirmation' => 'NewPassword123',
+    ]);
+
+    $response->assertRedirect(route('login'));
+    $response->assertSessionHas('success', 'パスワードを変更しました。ログインしてください。');
+    $response->assertSessionMissing('status');
+});
+
+test('パスワードリセットは JSON リクエストに 200 + message を返す', function (): void {
+    $user = User::factory()->create();
+    $token = Password::createToken($user);
+
+    $response = $this->postJson('/reset-password', [
+        'token' => $token,
+        'email' => $user->email,
+        'password' => 'NewPassword123',
+        'password_confirmation' => 'NewPassword123',
+    ]);
+
+    $response->assertOk();
+    $response->assertJsonPath('message', __('passwords.reset'));
+});
+
+test('パスワードリセットは不正 token では success flash を出さない (非回帰)', function (): void {
+    $user = User::factory()->create();
+
+    $response = $this->from('/reset-password')->post('/reset-password', [
+        'token' => 'invalid-token-string',
+        'email' => $user->email,
+        'password' => 'NewPassword123',
+        'password_confirmation' => 'NewPassword123',
+    ]);
+
+    $response->assertSessionHasErrors();
+    $response->assertSessionMissing('success');
+});
+
+test('パスワードリセットは期限切れ token では success flash を出さない (非回帰)', function (): void {
+    $user = User::factory()->create();
+    $token = Password::createToken($user);
+
+    // token 有効期限 (config auth.passwords.users.expire=60分) を超過させる
+    $this->travel(61)->minutes();
+
+    $response = $this->from('/reset-password')->post('/reset-password', [
+        'token' => $token,
+        'email' => $user->email,
+        'password' => 'NewPassword123',
+        'password_confirmation' => 'NewPassword123',
+    ]);
+
+    $this->travelBack();
+
+    $response->assertSessionHasErrors();
+    $response->assertSessionMissing('success');
 });

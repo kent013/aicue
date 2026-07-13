@@ -7,19 +7,19 @@ namespace App\Http\Responses\Fortify;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Laravel\Fortify\Contracts\RecoveryCodesGeneratedResponse as RecoveryCodesGeneratedResponseContract;
+use Laravel\Fortify\Contracts\PasswordUpdateResponse as PasswordUpdateResponseContract;
 
 /**
- * リカバリコード再生成後のレスポンス (Fortify contract bind)。
+ * パスワード変更後のレスポンス (Fortify contract bind)。
  *
  * Fortify 既定は `back()->with('status', ...)` を返すが、flash-to-toast は
- * status を意図的に gating (toast 化しない)。再生成の完了を toast でフィードバック
- * するため、web のみ `success` キーへ寄せる。expectsJson (XHR / API) は
+ * status を意図的に gating (toast 化しない)。変更完了を toast でフィードバック
+ * するため web のみ `success` キーへ寄せる。expectsJson (XHR / API) は
  * Fortify 既定どおり JSON 200 を維持する。
  */
-final class RecoveryCodesGeneratedResponse implements RecoveryCodesGeneratedResponseContract
+final class PasswordUpdatedResponse implements PasswordUpdateResponseContract
 {
-    private const string SUCCESS_MESSAGE = 'リカバリコードを再生成しました。新しいコードを保管してください。';
+    private const string SUCCESS_MESSAGE = 'パスワードを変更しました。';
 
     /**
      * @param  Request  $request
