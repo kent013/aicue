@@ -48,6 +48,7 @@ Open リストは [TODO.md](TODO.md) を参照。
 | T030 | 招待経由登録の組織未所属+特典誤付与修正。招待token登録で参加のみ・grant無しを保証 | backend | 2026-07-14 03:40 |
 | T031 | メールアドレス変更のrecent-auth保護+旧アドレス通知。profile更新にrecent-auth+旧メール変更通知 | backend | 2026-07-14 03:41 |
 | T032 | manuals画面のstale alert/メッセージ/バリデーション整理。alertのstate整合+SOP文言+タイトル検証クリア | frontend | 2026-07-14 03:43 |
+| T033 | メンバーのロール変更が無言で破棄される問題の修正。ロール変更拒否をUIに正しく反映 | frontend | 2026-07-14 03:44 |
 
 ## Obsoleted
 
