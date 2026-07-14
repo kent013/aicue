@@ -4,10 +4,11 @@ FROM php:8.4-cli
 ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8
 
-# システムパッケージ
+# システムパッケージ (ffmpeg = v1 動画合成 FfmpegVideoComposer の render runtime 依存。ffprobe 同梱)
 RUN apt-get update && apt-get install -y \
     git \
     curl \
+    ffmpeg \
     libpng-dev \
     libonig-dev \
     libxml2-dev \
