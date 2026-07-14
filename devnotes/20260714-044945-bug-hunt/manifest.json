@@ -1,0 +1,16 @@
+{
+  "run_id": "20260714-044945",
+  "shards": {
+    "0": {
+      "serve_pid": 614437,
+      "port": 8010,
+      "db": "bug_hunt",
+      "app_url": "http://127.0.0.1:8010",
+      "log_offset": 26749671,
+      "worker_pid_database_analysis": 614472,
+      "worker_pid_database_render": 614480,
+      "worker_pid_database_media": 614484,
+      "started_at": "2026-07-14 04:50:02"
+    }
+  }
+}
