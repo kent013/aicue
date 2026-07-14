@@ -72,3 +72,37 @@ export function classifyGetUserMediaError(error: unknown): CameraErrorClassifica
             return { kind: "unavailable", reason: "unknown" };
     }
 }
+
+/** 前後カメラの facingMode (doc/05 §5.2 カメラ反転 in/out)。型の単一ソース。 */
+export type FacingMode = "environment" | "user";
+
+/** environment ⇄ user の反転。型の単一ソース化 + テスト容易性のため pure 関数化。 */
+export function nextFacingMode(mode: FacingMode): FacingMode {
+    return mode === "environment" ? "user" : "environment";
+}
+
+/**
+ * 経過ミリ秒を mm:ss へ整形 (録画タイマー表示用。doc/05 §5.2「00:00」)。
+ * 負値・NaN は 0 に丸め、60 分以上も mm が桁溢れして連続表示される (分を切り捨てない)。
+ */
+export function formatElapsed(ms: number): string {
+    const totalSeconds = Number.isFinite(ms) && ms > 0 ? Math.floor(ms / 1000) : 0;
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    const mm = String(minutes).padStart(2, "0");
+    const ss = String(seconds).padStart(2, "0");
+    return `${mm}:${ss}`;
+}
+
+/**
+ * MediaRecorder が pause()/resume() を提供するかの **存在確認のみ** (doc/05 §5.2 一時停止/再開)。
+ * 注意: これは API の存在確認であって正常動作の保証ではない。実行時の InvalidStateError や
+ * pause/resume イベント未到達への退行 (recorder.state からの phase 復旧) が最終防御。
+ */
+export function supportsPauseResume(): boolean {
+    return (
+        typeof window.MediaRecorder !== "undefined" &&
+        typeof window.MediaRecorder.prototype?.pause === "function" &&
+        typeof window.MediaRecorder.prototype?.resume === "function"
+    );
+}

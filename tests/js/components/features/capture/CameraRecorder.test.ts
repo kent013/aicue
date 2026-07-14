@@ -16,13 +16,22 @@ class FakeMediaRecorder {
     }
     static shouldThrowOnConstruct = false;
     static shouldThrowOnStart = false;
+    static shouldThrowOnPause = false;
     /** false のとき stop() は onstop を自動発火せず、テストが手動で駆動する (stopping 観測用) */
     static autoStop = true;
+    /** false のとき pause()/resume() は onpause/onresume を自動発火せず、テストが手動で駆動する */
+    static autoPauseResume = true;
 
     ondataavailable: ((event: { data: Blob }) => void) | null = null;
     onstop: (() => void) | null = null;
     onerror: (() => void) | null = null;
+    onpause: (() => void) | null = null;
+    onresume: (() => void) | null = null;
     stopCalls = 0;
+    pauseCalls = 0;
+    resumeCalls = 0;
+    /** RecordingState 相当 (recoverPhaseFromRecorderState が参照する真実源) */
+    state: "inactive" | "recording" | "paused" = "inactive";
 
     constructor(
         public stream: unknown,
@@ -37,20 +46,46 @@ class FakeMediaRecorder {
         if (FakeMediaRecorder.shouldThrowOnStart) {
             throw new DOMException("invalid state", "InvalidStateError");
         }
+        this.state = "recording";
         // no-op (テストは stop() で明示的に onstop を駆動する)
     }
 
     stop(): void {
         this.stopCalls += 1;
+        this.state = "inactive";
         if (!FakeMediaRecorder.autoStop) return; // 手動駆動モード
         this.ondataavailable?.({ data: new Blob(["frame"], { type: this.options.mimeType }) });
         this.onstop?.();
     }
 
+    pause(): void {
+        if (FakeMediaRecorder.shouldThrowOnPause) {
+            throw new DOMException("invalid state", "InvalidStateError");
+        }
+        this.pauseCalls += 1;
+        this.state = "paused";
+        if (FakeMediaRecorder.autoPauseResume) this.onpause?.();
+    }
+
+    resume(): void {
+        this.resumeCalls += 1;
+        this.state = "recording";
+        if (FakeMediaRecorder.autoPauseResume) this.onresume?.();
+    }
+
     /** 手動モードで onstop を駆動する (blob 生成 → onstop) */
     fireStop(): void {
+        this.state = "inactive";
         this.ondataavailable?.({ data: new Blob(["frame"], { type: this.options.mimeType }) });
         this.onstop?.();
+    }
+
+    /** 手動モードで onpause/onresume を駆動する */
+    firePause(): void {
+        this.onpause?.();
+    }
+    fireResume(): void {
+        this.onresume?.();
     }
 }
 
@@ -65,18 +100,31 @@ class TrackingFakeMediaRecorder extends FakeMediaRecorder {
 
 const getUserMediaMock = vi.fn<() => Promise<MediaStream>>();
 
-/** getTracks() が stop spy 付き track を返す fake stream (解放検証用) */
-function fakeStream(): {
+interface FakeTrack {
+    stop: ReturnType<typeof vi.fn>;
+    onended: (() => void) | null;
+    applyConstraints: ReturnType<typeof vi.fn>;
+    getSettings: ReturnType<typeof vi.fn>;
+}
+
+/** getTracks()/getVideoTracks() が stop spy 付き track を返す fake stream (解放・flip 検証用) */
+function fakeStream(facing: "environment" | "user" = "environment"): {
     stream: MediaStream;
     stop: ReturnType<typeof vi.fn>;
-    track: { stop: ReturnType<typeof vi.fn>; onended: (() => void) | null };
+    track: FakeTrack;
 } {
     const stop = vi.fn();
-    const track: { stop: ReturnType<typeof vi.fn>; onended: (() => void) | null } = {
+    const track: FakeTrack = {
         stop,
         onended: null,
+        // 既定は制約適用成功 + getSettings が要求 facingMode を返す (段階1 成功)
+        applyConstraints: vi.fn().mockResolvedValue(undefined),
+        getSettings: vi.fn(() => ({ facingMode: facing })),
     };
-    const stream = { getTracks: () => [track] } as unknown as MediaStream;
+    const stream = {
+        getTracks: () => [track],
+        getVideoTracks: () => [track],
+    } as unknown as MediaStream;
     return { stream, stop, track };
 }
 
@@ -84,7 +132,9 @@ beforeEach(() => {
     FakeMediaRecorder.supportedTypes = ["video/webm"];
     FakeMediaRecorder.shouldThrowOnConstruct = false;
     FakeMediaRecorder.shouldThrowOnStart = false;
+    FakeMediaRecorder.shouldThrowOnPause = false;
     FakeMediaRecorder.autoStop = true;
+    FakeMediaRecorder.autoPauseResume = true;
     lastRecorder = null;
     getUserMediaMock.mockReset();
     vi.stubGlobal("MediaRecorder", TrackingFakeMediaRecorder);
@@ -98,6 +148,7 @@ beforeEach(() => {
 
 afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
 });
@@ -588,5 +639,376 @@ describe("CameraRecorder", () => {
         getUserMediaMock.mockResolvedValueOnce(fakeStream().stream);
         await ref.resumeAfterPreview();
         expect(getUserMediaMock).toHaveBeenCalledTimes(3);
+    });
+
+    // ---- T056 / S3-S6: 録画タイマー・一時停止/再開・グリッド・カメラ反転 ----
+
+    /** 録画開始し phase=recording (stop ボタン出現) まで進める共通ヘルパ */
+    async function startAndRecord(props: Record<string, unknown> = {}): Promise<void> {
+        render(CameraRecorder, {
+            props: { onCaptured: vi.fn(), onCameraUnavailable: vi.fn(), ...props },
+        });
+        await fireEvent.click(screen.getByTestId("start-recording"));
+        await vi.waitFor(() => expect(screen.getByTestId("stop-recording")).toBeInTheDocument());
+    }
+
+    it("一時停止/再開: pause→onpause で paused、resume→onresume で recording に戻る (イベント基準)", async () => {
+        getUserMediaMock.mockResolvedValue(fakeStream().stream);
+        await startAndRecord();
+
+        // 録画中は一時停止ボタンが出る (canPauseResume=true)
+        expect(screen.getByTestId("pause-recording")).toBeInTheDocument();
+        await fireEvent.click(screen.getByTestId("pause-recording"));
+
+        // onpause 到達で paused: 再開ボタン + タイマーに「一時停止中」sr-only
+        await vi.waitFor(() => expect(screen.getByTestId("resume-recording")).toBeInTheDocument());
+        expect(lastRecorder?.pauseCalls).toBe(1);
+        expect(screen.queryByTestId("pause-recording")).not.toBeInTheDocument();
+        expect(screen.getByTestId("record-timer")).toHaveTextContent("一時停止中");
+
+        // 再開
+        await fireEvent.click(screen.getByTestId("resume-recording"));
+        await vi.waitFor(() => expect(screen.getByTestId("pause-recording")).toBeInTheDocument());
+        expect(lastRecorder?.resumeCalls).toBe(1);
+        expect(screen.queryByTestId("resume-recording")).not.toBeInTheDocument();
+    });
+
+    it("paused から停止すると onCaptured を 1 本呼び idle へ戻る", async () => {
+        getUserMediaMock.mockResolvedValue(fakeStream().stream);
+        const onCaptured = vi.fn();
+        await startAndRecord({ onCaptured });
+
+        await fireEvent.click(screen.getByTestId("pause-recording"));
+        await vi.waitFor(() => expect(screen.getByTestId("resume-recording")).toBeInTheDocument());
+
+        await fireEvent.click(screen.getByTestId("stop-recording"));
+        // idle へ復帰 (録画開始ボタン)
+        await vi.waitFor(() => expect(screen.getByTestId("start-recording")).toBeInTheDocument());
+        expect(onCaptured).toHaveBeenCalledTimes(1);
+    });
+
+    it("多重押下ガード: pause 要求後 onpause 到達前に再クリックしても pause() は 1 回", async () => {
+        FakeMediaRecorder.autoPauseResume = false; // onpause を手動制御
+        getUserMediaMock.mockResolvedValue(fakeStream().stream);
+        await startAndRecord();
+
+        await fireEvent.click(screen.getByTestId("pause-recording"));
+        await fireEvent.click(screen.getByTestId("pause-recording"));
+        expect(lastRecorder?.pauseCalls).toBe(1); // pending 中の 2 度目は弾く
+    });
+
+    it("能力未対応 (prototype に pause/resume 無し) は一時停止ボタンを表示しない", async () => {
+        class NoPauseRecorder {
+            static isTypeSupported(type: string): boolean {
+                return ["video/webm"].includes(type);
+            }
+            ondataavailable: ((event: { data: Blob }) => void) | null = null;
+            onstop: (() => void) | null = null;
+            onerror: (() => void) | null = null;
+            stopCalls = 0;
+            state = "inactive";
+            constructor(
+                public stream: unknown,
+                public options: { mimeType: string },
+            ) {}
+            start(): void {
+                this.state = "recording";
+            }
+            stop(): void {
+                this.stopCalls += 1;
+                this.state = "inactive";
+                this.ondataavailable?.({
+                    data: new Blob(["frame"], { type: this.options.mimeType }),
+                });
+                this.onstop?.();
+            }
+        }
+        vi.stubGlobal("MediaRecorder", NoPauseRecorder);
+        getUserMediaMock.mockResolvedValue(fakeStream().stream);
+        const onCaptured = vi.fn();
+
+        render(CameraRecorder, { props: { onCaptured, onCameraUnavailable: vi.fn() } });
+        await fireEvent.click(screen.getByTestId("start-recording"));
+        await vi.waitFor(() => expect(screen.getByTestId("stop-recording")).toBeInTheDocument());
+
+        // 一時停止ボタンは非表示 (start/stop のみ)。録画→停止は成立する
+        expect(screen.queryByTestId("pause-recording")).not.toBeInTheDocument();
+        await fireEvent.click(screen.getByTestId("stop-recording"));
+        await vi.waitFor(() => expect(onCaptured).toHaveBeenCalledTimes(1));
+    });
+
+    it("InvalidStateError: pause() が throw したら recorder.state から phase を復旧する (recording 維持)", async () => {
+        getUserMediaMock.mockResolvedValue(fakeStream().stream);
+        await startAndRecord();
+
+        FakeMediaRecorder.shouldThrowOnPause = true; // pause() は throw (state は recording のまま)
+        await fireEvent.click(screen.getByTestId("pause-recording"));
+
+        // 復旧: recording のまま (再度 pause ボタンが押せる = 詰まない)
+        expect(screen.getByTestId("pause-recording")).toBeInTheDocument();
+        expect(screen.queryByTestId("resume-recording")).not.toBeInTheDocument();
+    });
+
+    it("paused 中の onerror でも safeStop→onstop で停止完了し idle へ戻る (R1-Critical)", async () => {
+        getUserMediaMock.mockResolvedValue(fakeStream().stream);
+        const onCaptured = vi.fn();
+        await startAndRecord({ onCaptured });
+
+        await fireEvent.click(screen.getByTestId("pause-recording"));
+        await vi.waitFor(() => expect(screen.getByTestId("resume-recording")).toBeInTheDocument());
+
+        // paused 中に recorder.onerror が発火 → safeStop (paused も停止可)
+        lastRecorder?.onerror?.();
+        await vi.waitFor(() => expect(screen.getByTestId("start-recording")).toBeInTheDocument());
+        expect(onCaptured).toHaveBeenCalledTimes(1); // idle 復帰 + テイク確定
+    });
+
+    it("タイムアウト復旧: onpause 未達でも 2s 後に recorder.state から paused へ同期し、遅延 onpause は二重遷移しない (R1-W)", async () => {
+        FakeMediaRecorder.autoPauseResume = false; // onpause を発火させない
+        getUserMediaMock.mockResolvedValue(fakeStream().stream);
+        await startAndRecord();
+
+        await fireEvent.click(screen.getByTestId("pause-recording"));
+        // onpause 未達。recorder.state は paused。タイムアウト(2s)で recover が同期する
+        await vi.waitFor(() => expect(screen.getByTestId("resume-recording")).toBeInTheDocument(), {
+            timeout: 3000,
+        });
+
+        // 遅延 onpause が後から到達しても phase は paused のまま (二重遷移しない)
+        lastRecorder?.firePause();
+        expect(screen.getByTestId("resume-recording")).toBeInTheDocument();
+        expect(screen.queryByTestId("pause-recording")).not.toBeInTheDocument();
+    });
+
+    it("stale onpause で timer/phase を触らない: pause 要求直後に stop→idle 後の onpause は no-op (R2-Critical)", async () => {
+        FakeMediaRecorder.autoPauseResume = false;
+        FakeMediaRecorder.autoStop = false;
+        getUserMediaMock.mockResolvedValue(fakeStream().stream);
+        const onCaptured = vi.fn();
+        await startAndRecord({ onCaptured });
+
+        // pause 要求 (pending=pause, onpause 未達 → phase は recording のまま)
+        await fireEvent.click(screen.getByTestId("pause-recording"));
+        // 続けて停止 (recording から stopping。clearPauseResumePending で pending 解除)
+        await fireEvent.click(screen.getByTestId("stop-recording"));
+        // onstop 到達で idle
+        lastRecorder?.fireStop();
+        await vi.waitFor(() => expect(screen.getByTestId("start-recording")).toBeInTheDocument());
+        expect(onCaptured).toHaveBeenCalledTimes(1);
+
+        // idle 後に stale onpause が到着しても timer/phase を触らない (idle のまま)
+        lastRecorder?.firePause();
+        expect(screen.getByTestId("start-recording")).toBeInTheDocument();
+        expect(screen.queryByTestId("record-timer")).not.toBeInTheDocument();
+    });
+
+    it("操作種別付き pending の交差: resume pending 中の stale onpause は resume を解除しない (R3-2)", async () => {
+        FakeMediaRecorder.autoPauseResume = false;
+        getUserMediaMock.mockResolvedValue(fakeStream().stream);
+        await startAndRecord();
+
+        // pause → onpause 手動発火で paused 確定 (pending 解除)
+        await fireEvent.click(screen.getByTestId("pause-recording"));
+        lastRecorder?.firePause();
+        await vi.waitFor(() => expect(screen.getByTestId("resume-recording")).toBeInTheDocument());
+
+        // resume 要求 (pending=resume, onresume 未達 → phase は paused のまま)
+        await fireEvent.click(screen.getByTestId("resume-recording"));
+        // stale onpause が到着: pendingOperation は "resume" のため解除されず、phase!=recording で no-op
+        lastRecorder?.firePause();
+        // onresume が到達すれば recording へ遷移できる (resume pending が生きている証拠)
+        lastRecorder?.fireResume();
+        await vi.waitFor(() => expect(screen.getByTestId("pause-recording")).toBeInTheDocument());
+    });
+
+    it("stale onresume: idle 到達後に onresume が来ても timer/phase を復活させない (R2-Critical)", async () => {
+        FakeMediaRecorder.autoPauseResume = false;
+        FakeMediaRecorder.autoStop = false;
+        getUserMediaMock.mockResolvedValue(fakeStream().stream);
+        const onCaptured = vi.fn();
+        await startAndRecord({ onCaptured });
+
+        // pause → onpause で paused 確定
+        await fireEvent.click(screen.getByTestId("pause-recording"));
+        lastRecorder?.firePause();
+        await vi.waitFor(() => expect(screen.getByTestId("resume-recording")).toBeInTheDocument());
+
+        // paused から停止 → onstop で idle
+        await fireEvent.click(screen.getByTestId("stop-recording"));
+        lastRecorder?.fireStop();
+        await vi.waitFor(() => expect(screen.getByTestId("start-recording")).toBeInTheDocument());
+
+        // idle 後の stale onresume は phase !== "paused" で no-op (timer/interval を復活させない)
+        lastRecorder?.fireResume();
+        expect(screen.getByTestId("start-recording")).toBeInTheDocument();
+        expect(screen.queryByTestId("record-timer")).not.toBeInTheDocument();
+    });
+
+    it("グリッドトグル: toggle-grid で grid-overlay 表示/非表示 + aria-pressed 反転 (字幕が空でも押下可)", async () => {
+        render(CameraRecorder, { props: { onCaptured: vi.fn(), onCameraUnavailable: vi.fn() } });
+        const toggle = screen.getByTestId("toggle-grid");
+        expect(toggle).not.toBeDisabled();
+        expect(toggle).toHaveAttribute("aria-pressed", "false");
+        expect(screen.queryByTestId("grid-overlay")).not.toBeInTheDocument();
+
+        await fireEvent.click(toggle);
+        expect(screen.getByTestId("grid-overlay")).toBeInTheDocument();
+        expect(toggle).toHaveAttribute("aria-pressed", "true");
+        expect(toggle).toHaveAttribute("aria-label", "グリッドを非表示");
+
+        await fireEvent.click(toggle);
+        expect(screen.queryByTestId("grid-overlay")).not.toBeInTheDocument();
+        expect(toggle).toHaveAttribute("aria-pressed", "false");
+        expect(toggle).toHaveAttribute("aria-label", "グリッドを表示");
+    });
+
+    it("録画タイマー: recording 中に経過が更新され、pause で停止し stop で消える", async () => {
+        let now = 1000;
+        vi.spyOn(performance, "now").mockImplementation(() => now);
+        getUserMediaMock.mockResolvedValue(fakeStream().stream);
+        await startAndRecord();
+
+        // 開始直後は 00:00
+        expect(screen.getByTestId("record-timer")).toHaveTextContent("00:00");
+
+        // 5 秒経過 → interval tick で 00:05
+        now = 6000;
+        await vi.waitFor(() =>
+            expect(screen.getByTestId("record-timer")).toHaveTextContent("00:05"),
+        );
+
+        // pause で計測停止 (壁時計だけ進めても表示は据え置き)
+        await fireEvent.click(screen.getByTestId("pause-recording"));
+        await vi.waitFor(() => expect(screen.getByTestId("resume-recording")).toBeInTheDocument());
+        now = 60000;
+        await new Promise((r) => setTimeout(r, 250)); // interval 周期を跨ぐ
+        expect(screen.getByTestId("record-timer")).toHaveTextContent("00:05");
+
+        // stop でタイマーは消える
+        await fireEvent.click(screen.getByTestId("stop-recording"));
+        await vi.waitFor(() =>
+            expect(screen.queryByTestId("record-timer")).not.toBeInTheDocument(),
+        );
+    });
+
+    it("durationMs は pause 区間を除外する (実録画尺のみ、R1-W)", async () => {
+        let now = 1000;
+        vi.spyOn(performance, "now").mockImplementation(() => now);
+        getUserMediaMock.mockResolvedValue(fakeStream().stream);
+        const onCaptured = vi.fn();
+        await startAndRecord({ onCaptured }); // startTimer: segmentStart=1000
+
+        now = 3000; // 区間A = 2000ms
+        await fireEvent.click(screen.getByTestId("pause-recording")); // stopTimer: accumulated=2000
+        await vi.waitFor(() => expect(screen.getByTestId("resume-recording")).toBeInTheDocument());
+
+        now = 10000; // pause 中の壁時計 (7000ms) は除外されるべき
+        await fireEvent.click(screen.getByTestId("resume-recording")); // startTimer: segmentStart=10000
+        await vi.waitFor(() => expect(screen.getByTestId("pause-recording")).toBeInTheDocument());
+
+        now = 11500; // 区間B = 1500ms
+        await fireEvent.click(screen.getByTestId("stop-recording"));
+        await vi.waitFor(() => expect(onCaptured).toHaveBeenCalledTimes(1));
+
+        const durationMs = onCaptured.mock.calls[0][2] as number;
+        expect(durationMs).toBe(3500); // 区間A(2000) + 区間B(1500)、pause の 7000 は含まない
+    });
+
+    it("カメラ反転 (録画前・live stream 無し): flip で次回 getUserMedia の facingMode が 'user'", async () => {
+        const first = fakeStream("user");
+        getUserMediaMock.mockResolvedValue(first.stream);
+
+        render(CameraRecorder, { props: { onCaptured: vi.fn(), onCameraUnavailable: vi.fn() } });
+        // 録画前は stream 未保持 → flip は state 更新のみ (getUserMedia を呼ばない)
+        await fireEvent.click(screen.getByTestId("flip-camera"));
+        expect(getUserMediaMock).not.toHaveBeenCalled();
+
+        // 録画開始時の getUserMedia constraint に facingMode:"user" が反映される
+        await fireEvent.click(screen.getByTestId("start-recording"));
+        await vi.waitFor(() => expect(getUserMediaMock).toHaveBeenCalledTimes(1));
+        const constraint = (getUserMediaMock.mock.calls[0] as unknown[])[0] as {
+            video: MediaTrackConstraints;
+        };
+        expect(constraint.video).toMatchObject({ facingMode: "user" });
+    });
+
+    it("カメラ反転 (live stream + applyConstraints 成功): 同一 stream を維持し getUserMedia を再呼び出ししない", async () => {
+        const s = fakeStream("user"); // getSettings は target(user) を返す = 段階1 成功
+        getUserMediaMock.mockResolvedValue(s.stream);
+
+        // 録画→停止で idle かつ stream 保持状態を作る
+        await startAndRecord();
+        await fireEvent.click(screen.getByTestId("stop-recording"));
+        await vi.waitFor(() => expect(screen.getByTestId("start-recording")).toBeInTheDocument());
+        expect(getUserMediaMock).toHaveBeenCalledTimes(1);
+
+        await fireEvent.click(screen.getByTestId("flip-camera"));
+        await vi.waitFor(() => expect(s.track.applyConstraints).toHaveBeenCalled());
+        expect(getUserMediaMock).toHaveBeenCalledTimes(1); // 再取得なし
+        expect(s.stop).not.toHaveBeenCalled(); // stream 維持
+    });
+
+    it("カメラ反転 (getSettings().facingMode が undefined): 未検証扱いで再取得経路へ倒す (R1-W)", async () => {
+        const live = fakeStream();
+        live.track.getSettings = vi.fn(() => ({})); // facingMode を返さない端末
+        const reacquired = fakeStream();
+        getUserMediaMock
+            .mockResolvedValueOnce(live.stream) // 初回録画
+            .mockResolvedValueOnce(reacquired.stream); // flip 再取得
+
+        await startAndRecord();
+        await fireEvent.click(screen.getByTestId("stop-recording"));
+        await vi.waitFor(() => expect(screen.getByTestId("start-recording")).toBeInTheDocument());
+
+        await fireEvent.click(screen.getByTestId("flip-camera"));
+        // 段階1 は未検証で false → releaseCamera + getUserMedia 再取得
+        await vi.waitFor(() => expect(getUserMediaMock).toHaveBeenCalledTimes(2));
+        expect(live.stop).toHaveBeenCalled();
+    });
+
+    it("カメラ反転 (新 facing のみ不可): 旧 facingMode へ復旧し onCameraUnavailable を呼ばない", async () => {
+        const live = fakeStream();
+        live.track.applyConstraints = vi.fn().mockRejectedValue(
+            new DOMException("overconstrained", "OverconstrainedError"),
+        );
+        const recovered = fakeStream();
+        getUserMediaMock
+            .mockResolvedValueOnce(live.stream) // 初回録画
+            .mockRejectedValueOnce(new DOMException("no front", "OverconstrainedError")) // 新 facing 不可
+            .mockResolvedValueOnce(recovered.stream); // 旧 facing 復旧
+        const onCameraUnavailable = vi.fn();
+
+        await startAndRecord({ onCameraUnavailable });
+        await fireEvent.click(screen.getByTestId("stop-recording"));
+        await vi.waitFor(() => expect(screen.getByTestId("start-recording")).toBeInTheDocument());
+
+        await fireEvent.click(screen.getByTestId("flip-camera"));
+        await vi.waitFor(() =>
+            expect(screen.getByRole("alert")).toHaveTextContent("カメラを切り替えられませんでした"),
+        );
+        // 元カメラは復旧済み。F-03 (onCameraUnavailable) には倒さない
+        expect(onCameraUnavailable).not.toHaveBeenCalled();
+        expect(getUserMediaMock).toHaveBeenCalledTimes(3);
+    });
+
+    it("カメラ反転 (両カメラ喪失・恒久失敗): onCameraUnavailable(reason) へ委譲する (段階4 F-03)", async () => {
+        const live = fakeStream();
+        live.track.applyConstraints = vi.fn().mockRejectedValue(
+            new DOMException("overconstrained", "OverconstrainedError"),
+        );
+        getUserMediaMock
+            .mockResolvedValueOnce(live.stream) // 初回録画
+            .mockRejectedValueOnce(new DOMException("no front", "OverconstrainedError")) // 新 facing 不可
+            .mockRejectedValueOnce(new DOMException("gone", "NotFoundError")); // 旧 facing も喪失
+        const onCameraUnavailable = vi.fn();
+
+        await startAndRecord({ onCameraUnavailable });
+        await fireEvent.click(screen.getByTestId("stop-recording"));
+        await vi.waitFor(() => expect(screen.getByTestId("start-recording")).toBeInTheDocument());
+
+        await fireEvent.click(screen.getByTestId("flip-camera"));
+        await vi.waitFor(() =>
+            expect(onCameraUnavailable).toHaveBeenCalledWith("device_missing"),
+        );
     });
 });
