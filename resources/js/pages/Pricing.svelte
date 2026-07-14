@@ -226,6 +226,7 @@
         <a href="/" class="hover:text-primary">トップ</a>
         <a href="/terms" class="hover:text-primary">利用規約</a>
         <a href="/privacy" class="hover:text-primary">プライバシーポリシー</a>
+        <a href="/commerce-disclosure" class="hover:text-primary">特定商取引法に基づく表記</a>
         <a href={page.contactUrl} class="hover:text-primary">お問い合わせ</a>
     {/snippet}
 </GuestLayout>

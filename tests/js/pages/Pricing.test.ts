@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/svelte";
+import { fireEvent, render, screen, within } from "@testing-library/svelte";
 import Pricing from "@/pages/Pricing.svelte";
 import type { PricingPageProps } from "@/types/marketing";
 
@@ -111,5 +111,32 @@ describe("Pricing", () => {
         const { container } = render(Pricing, { props: { page: basePage } });
 
         expect(container.querySelectorAll("button[disabled]")).toHaveLength(0);
+    });
+
+    it("フッターに法的リンク3件 (利用規約→プライバシー→特商法) を href と順序どおり出す", () => {
+        render(Pricing, { props: { page: basePage } });
+
+        const footer = screen.getByRole("contentinfo");
+
+        // (a) 法的3リンクを名前で個別取得し href を契約化。
+        expect(within(footer).getByRole("link", { name: "利用規約" })).toHaveAttribute(
+            "href",
+            "/terms",
+        );
+        expect(
+            within(footer).getByRole("link", { name: "プライバシーポリシー" }),
+        ).toHaveAttribute("href", "/privacy");
+        expect(
+            within(footer).getByRole("link", { name: "特定商取引法に基づく表記" }),
+        ).toHaveAttribute("href", "/commerce-disclosure");
+
+        // (b) 法的リンクのみを DOM 順で抽出し表示順を固定 (非法的リンクは filter で除外)。
+        const legalHrefs = within(footer)
+            .getAllByRole("link")
+            .map((a) => a.getAttribute("href"))
+            .filter((href) =>
+                ["/terms", "/privacy", "/commerce-disclosure"].includes(href ?? ""),
+            );
+        expect(legalHrefs).toEqual(["/terms", "/privacy", "/commerce-disclosure"]);
     });
 });
