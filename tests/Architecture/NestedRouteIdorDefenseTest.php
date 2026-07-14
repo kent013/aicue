@@ -82,6 +82,7 @@ function nestedRouteIdorInventory(): array
         'capture.takes.destroy' => $s,
         'capture.takes.adopt' => $s,
         'capture.takes.downloaded' => $s,
+        'capture.takes.playback' => $s,
         // --- inline 親子整合 guard (authorize 前に 子∈親テナント を検査、不整合は 404) ---
         // OrganizationMemberController::resolveOrganizationMember (非 member は 404)
         'organizations.members.update' => $g,

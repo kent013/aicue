@@ -16,9 +16,13 @@ class FakeMediaRecorder {
     }
     static shouldThrowOnConstruct = false;
     static shouldThrowOnStart = false;
+    /** false のとき stop() は onstop を自動発火せず、テストが手動で駆動する (stopping 観測用) */
+    static autoStop = true;
 
     ondataavailable: ((event: { data: Blob }) => void) | null = null;
     onstop: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    stopCalls = 0;
 
     constructor(
         public stream: unknown,
@@ -37,26 +41,53 @@ class FakeMediaRecorder {
     }
 
     stop(): void {
+        this.stopCalls += 1;
+        if (!FakeMediaRecorder.autoStop) return; // 手動駆動モード
         this.ondataavailable?.({ data: new Blob(["frame"], { type: this.options.mimeType }) });
         this.onstop?.();
+    }
+
+    /** 手動モードで onstop を駆動する (blob 生成 → onstop) */
+    fireStop(): void {
+        this.ondataavailable?.({ data: new Blob(["frame"], { type: this.options.mimeType }) });
+        this.onstop?.();
+    }
+}
+
+/** 直近に構築された FakeMediaRecorder を捕捉する (onerror/onstop 手動駆動用) */
+let lastRecorder: FakeMediaRecorder | null = null;
+class TrackingFakeMediaRecorder extends FakeMediaRecorder {
+    constructor(stream: unknown, options: { mimeType: string }) {
+        super(stream, options);
+        lastRecorder = this;
     }
 }
 
 const getUserMediaMock = vi.fn<() => Promise<MediaStream>>();
 
 /** getTracks() が stop spy 付き track を返す fake stream (解放検証用) */
-function fakeStream(): { stream: MediaStream; stop: ReturnType<typeof vi.fn> } {
+function fakeStream(): {
+    stream: MediaStream;
+    stop: ReturnType<typeof vi.fn>;
+    track: { stop: ReturnType<typeof vi.fn>; onended: (() => void) | null };
+} {
     const stop = vi.fn();
-    const stream = { getTracks: () => [{ stop }] } as unknown as MediaStream;
-    return { stream, stop };
+    const track: { stop: ReturnType<typeof vi.fn>; onended: (() => void) | null } = {
+        stop,
+        onended: null,
+    };
+    const stream = { getTracks: () => [track] } as unknown as MediaStream;
+    return { stream, stop, track };
 }
 
 beforeEach(() => {
     FakeMediaRecorder.supportedTypes = ["video/webm"];
     FakeMediaRecorder.shouldThrowOnConstruct = false;
     FakeMediaRecorder.shouldThrowOnStart = false;
+    FakeMediaRecorder.autoStop = true;
+    lastRecorder = null;
     getUserMediaMock.mockReset();
-    vi.stubGlobal("MediaRecorder", FakeMediaRecorder);
+    vi.stubGlobal("MediaRecorder", TrackingFakeMediaRecorder);
     vi.stubGlobal("navigator", {
         ...navigator,
         mediaDevices: { getUserMedia: getUserMediaMock },
@@ -284,5 +315,278 @@ describe("CameraRecorder", () => {
         // 実クリックで状態遷移する (押下不能=詰みにしない)
         await fireEvent.click(toggle);
         expect(toggle).toHaveAttribute("aria-pressed", "false");
+    });
+
+    // ---- T050 / S4: 撮影 active phase マシン + preview 解放/復帰 ----
+
+    it("onCaptureActiveChange は start で true / idle 到達で false を通知する", async () => {
+        getUserMediaMock.mockResolvedValue(fakeStream().stream);
+        const onCaptureActiveChange = vi.fn();
+
+        render(CameraRecorder, {
+            props: { onCaptured: vi.fn(), onCameraUnavailable: vi.fn(), onCaptureActiveChange },
+        });
+        await fireEvent.click(screen.getByTestId("start-recording"));
+        await vi.waitFor(() => expect(onCaptureActiveChange).toHaveBeenCalledWith(true));
+        // 録画確立 (stop ボタン出現) を待ってから停止する
+        await vi.waitFor(() => expect(screen.getByTestId("stop-recording")).toBeInTheDocument());
+
+        await fireEvent.click(screen.getByTestId("stop-recording"));
+        await vi.waitFor(() => expect(onCaptureActiveChange).toHaveBeenCalledWith(false));
+    });
+
+    it("recording→stopping では false を発火せず、idle 到達で初めて false (stopping 中は active 維持)", async () => {
+        FakeMediaRecorder.autoStop = false; // stop() で onstop を自動発火させず stopping を観測する
+        getUserMediaMock.mockResolvedValue(fakeStream().stream);
+        const onCaptureActiveChange = vi.fn();
+
+        render(CameraRecorder, {
+            props: { onCaptured: vi.fn(), onCameraUnavailable: vi.fn(), onCaptureActiveChange },
+        });
+        await fireEvent.click(screen.getByTestId("start-recording"));
+        await vi.waitFor(() => expect(onCaptureActiveChange).toHaveBeenLastCalledWith(true));
+        // 録画確立 (stop ボタン出現) を待つ
+        await vi.waitFor(() => expect(screen.getByTestId("stop-recording")).toBeInTheDocument());
+
+        // 停止要求 → stopping (まだ idle でない = false を出さない)
+        await fireEvent.click(screen.getByTestId("stop-recording"));
+        expect(lastRecorder?.stopCalls).toBe(1);
+        expect(onCaptureActiveChange).not.toHaveBeenCalledWith(false);
+
+        // onstop 到達で初めて idle → false
+        lastRecorder?.fireStop();
+        await vi.waitFor(() => expect(onCaptureActiveChange).toHaveBeenLastCalledWith(false));
+    });
+
+    it("track.onended は safeStop→recorder.stop() を呼び、onstop(idle) でのみ false を出す", async () => {
+        FakeMediaRecorder.autoStop = false;
+        const { stream, track } = fakeStream();
+        getUserMediaMock.mockResolvedValue(stream);
+        const onCaptureActiveChange = vi.fn();
+
+        render(CameraRecorder, {
+            props: { onCaptured: vi.fn(), onCameraUnavailable: vi.fn(), onCaptureActiveChange },
+        });
+        await fireEvent.click(screen.getByTestId("start-recording"));
+        await vi.waitFor(() => expect(track.onended).not.toBeNull());
+
+        track.onended?.(); // デバイス側で track 終了 → safeStop
+        expect(lastRecorder?.stopCalls).toBe(1);
+        expect(onCaptureActiveChange).not.toHaveBeenCalledWith(false); // stopping 中はまだ
+
+        lastRecorder?.fireStop();
+        await vi.waitFor(() => expect(onCaptureActiveChange).toHaveBeenLastCalledWith(false));
+    });
+
+    it("onstop の onCaptured が reject しても idle に戻り、未処理 rejection にせずローカルエラー表示する", async () => {
+        getUserMediaMock.mockResolvedValue(fakeStream().stream);
+        const onCaptured = vi.fn().mockRejectedValue(new Error("upload failed"));
+        const onCaptureActiveChange = vi.fn();
+
+        render(CameraRecorder, {
+            props: { onCaptured, onCameraUnavailable: vi.fn(), onCaptureActiveChange },
+        });
+        await fireEvent.click(screen.getByTestId("start-recording"));
+        await vi.waitFor(() => expect(screen.getByTestId("stop-recording")).toBeInTheDocument());
+        await fireEvent.click(screen.getByTestId("stop-recording"));
+
+        // idle へ戻り録画開始ボタンが復帰 (撮影状態が解除される)
+        await vi.waitFor(() => expect(screen.getByTestId("start-recording")).toBeInTheDocument());
+        expect(onCaptureActiveChange).toHaveBeenLastCalledWith(false);
+        expect(screen.getByRole("alert")).toHaveTextContent("撮影データの処理に失敗しました");
+    });
+
+    it("safeStop 多重呼び出しで recorder.stop() が重複しない (phase ガード)", async () => {
+        FakeMediaRecorder.autoStop = false;
+        getUserMediaMock.mockResolvedValue(fakeStream().stream);
+
+        render(CameraRecorder, { props: { onCaptured: vi.fn(), onCameraUnavailable: vi.fn() } });
+        await fireEvent.click(screen.getByTestId("start-recording"));
+        await vi.waitFor(() => expect(screen.getByTestId("stop-recording")).toBeInTheDocument());
+
+        await fireEvent.click(screen.getByTestId("stop-recording"));
+        await fireEvent.click(screen.getByTestId("stop-recording"));
+        expect(lastRecorder?.stopCalls).toBe(1); // stopping 中の 2 度目は no-op
+    });
+
+    it("releaseForPreview: 待機中 (idle かつ stream あり) は stream を解放し、resumeAfterPreview で再取得", async () => {
+        const first = fakeStream();
+        const second = fakeStream();
+        getUserMediaMock.mockResolvedValueOnce(first.stream).mockResolvedValueOnce(second.stream);
+
+        const { component } = render(CameraRecorder, {
+            props: { onCaptured: vi.fn(), onCameraUnavailable: vi.fn() },
+        });
+        // 待機 stream を得るため一度録画開始→停止で idle かつ stream 保持状態を作る
+        await fireEvent.click(screen.getByTestId("start-recording"));
+        await vi.waitFor(() => expect(screen.getByTestId("stop-recording")).toBeInTheDocument());
+        await fireEvent.click(screen.getByTestId("stop-recording"));
+        await vi.waitFor(() => expect(screen.getByTestId("start-recording")).toBeInTheDocument());
+
+        // preview を開く: idle かつ stream 保持 → 解放される
+        (component as unknown as { releaseForPreview: () => void }).releaseForPreview();
+        expect(first.stop).toHaveBeenCalled();
+
+        // preview close: 解放前 live だったので再取得する
+        await (component as unknown as { resumeAfterPreview: () => Promise<void> }).resumeAfterPreview();
+        expect(getUserMediaMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("開始処理中 (getUserMedia grant 待ち) は active=true を通知し、preview 用解放を拒否する", async () => {
+        let resolveStart: ((stream: MediaStream) => void) | undefined;
+        const pending = fakeStream();
+        getUserMediaMock.mockImplementation(
+            () =>
+                new Promise<MediaStream>((resolve) => {
+                    resolveStart = resolve;
+                }),
+        );
+        const onCaptureActiveChange = vi.fn();
+
+        const { component } = render(CameraRecorder, {
+            props: { onCaptured: vi.fn(), onCameraUnavailable: vi.fn(), onCaptureActiveChange },
+        });
+        // getUserMedia が pending の間 (starting=true, phase=idle)
+        await fireEvent.click(screen.getByTestId("start-recording"));
+        // active=true が即通知される → 親の captureActive=true → TakeStrip は preview を開かない
+        await vi.waitFor(() => expect(onCaptureActiveChange).toHaveBeenCalledWith(true));
+
+        // 万一 releaseForPreview が呼ばれても取得中 stream を横取り解放しない (二重防御)
+        (component as unknown as { releaseForPreview: () => void }).releaseForPreview();
+        resolveStart?.(pending.stream);
+        await vi.waitFor(() => expect(screen.getByTestId("stop-recording")).toBeInTheDocument());
+        expect(pending.stop).not.toHaveBeenCalled();
+        // recording への遷移で true を重複通知しない (starting→recording は同一 active)
+        expect(onCaptureActiveChange.mock.calls.filter(([a]) => a === true)).toHaveLength(1);
+    });
+
+    it("開始が失敗 (getUserMedia reject) すると active が true→false に戻る", async () => {
+        getUserMediaMock.mockRejectedValue(new DOMException("denied", "NotAllowedError"));
+        const onCaptureActiveChange = vi.fn();
+
+        render(CameraRecorder, {
+            props: { onCaptured: vi.fn(), onCameraUnavailable: vi.fn(), onCaptureActiveChange },
+        });
+        await fireEvent.click(screen.getByTestId("start-recording"));
+
+        await vi.waitFor(() => expect(onCaptureActiveChange).toHaveBeenLastCalledWith(false));
+        expect(onCaptureActiveChange).toHaveBeenNthCalledWith(1, true); // 開始押下で一旦 active
+    });
+
+    it("releaseForPreview: 録画中は no-op (録画データを暗黙終了しない)", async () => {
+        FakeMediaRecorder.autoStop = false;
+        const { stream, stop } = fakeStream();
+        getUserMediaMock.mockResolvedValue(stream);
+
+        const { component } = render(CameraRecorder, {
+            props: { onCaptured: vi.fn(), onCameraUnavailable: vi.fn() },
+        });
+        await fireEvent.click(screen.getByTestId("start-recording"));
+        await vi.waitFor(() => expect(screen.getByTestId("stop-recording")).toBeInTheDocument());
+
+        (component as unknown as { releaseForPreview: () => void }).releaseForPreview();
+        expect(stop).not.toHaveBeenCalled(); // 解放しない
+        expect(lastRecorder?.stopCalls).toBe(0); // 録画終了処理も呼ばない
+    });
+
+    it("resume 取得中 (getUserMedia grant 待ち) は active=true で、preview 解放も録画開始も抑止する", async () => {
+        const recordStream = fakeStream();
+        let resolveResume: ((stream: MediaStream) => void) | undefined;
+        const resumeStream = fakeStream();
+        getUserMediaMock
+            .mockResolvedValueOnce(recordStream.stream) // 初回録画
+            .mockImplementationOnce(
+                () =>
+                    new Promise<MediaStream>((resolve) => {
+                        resolveResume = resolve;
+                    }),
+            );
+        const onCaptureActiveChange = vi.fn();
+
+        const { component } = render(CameraRecorder, {
+            props: { onCaptured: vi.fn(), onCameraUnavailable: vi.fn(), onCaptureActiveChange },
+        });
+        const ref = component as unknown as {
+            releaseForPreview: () => void;
+            resumeAfterPreview: () => Promise<void>;
+        };
+        // 録画→停止で idle かつ stream 保持状態を作る
+        await fireEvent.click(screen.getByTestId("start-recording"));
+        await vi.waitFor(() => expect(screen.getByTestId("stop-recording")).toBeInTheDocument());
+        await fireEvent.click(screen.getByTestId("stop-recording"));
+        await vi.waitFor(() => expect(screen.getByTestId("start-recording")).toBeInTheDocument());
+
+        // preview open → release (idle, stream 保持 → wasActiveBeforePreview=true)
+        ref.releaseForPreview();
+        // preview close → resume (getUserMedia は pending)
+        const resumePromise = ref.resumeAfterPreview();
+        await vi.waitFor(() => expect(onCaptureActiveChange).toHaveBeenLastCalledWith(true));
+        expect(getUserMediaMock).toHaveBeenCalledTimes(2); // 録画 + resume の 2 回
+
+        // resume 取得中: 再度 releaseForPreview は no-op / 録画開始も getUserMedia を増やさない
+        ref.releaseForPreview();
+        await fireEvent.click(screen.getByTestId("start-recording"));
+        expect(getUserMediaMock).toHaveBeenCalledTimes(2); // 二重取得しない
+
+        // resume 完了で active=false へ戻る
+        resolveResume?.(resumeStream.stream);
+        await resumePromise;
+        await vi.waitFor(() => expect(onCaptureActiveChange).toHaveBeenLastCalledWith(false));
+    });
+
+    it("resume が失敗しても active=false へ戻る (再試行可能)", async () => {
+        const recordStream = fakeStream();
+        getUserMediaMock
+            .mockResolvedValueOnce(recordStream.stream)
+            .mockRejectedValueOnce(new DOMException("busy", "NotReadableError"));
+        const onCaptureActiveChange = vi.fn();
+
+        const { component } = render(CameraRecorder, {
+            props: { onCaptured: vi.fn(), onCameraUnavailable: vi.fn(), onCaptureActiveChange },
+        });
+        const ref = component as unknown as {
+            releaseForPreview: () => void;
+            resumeAfterPreview: () => Promise<void>;
+        };
+        await fireEvent.click(screen.getByTestId("start-recording"));
+        await vi.waitFor(() => expect(screen.getByTestId("stop-recording")).toBeInTheDocument());
+        await fireEvent.click(screen.getByTestId("stop-recording"));
+        await vi.waitFor(() => expect(screen.getByTestId("start-recording")).toBeInTheDocument());
+
+        onCaptureActiveChange.mockClear();
+        ref.releaseForPreview();
+        await ref.resumeAfterPreview(); // 取得失敗 (transient)
+
+        // active は true→false を経て最終 false (取得失敗でも撮影状態を残さない)
+        expect(onCaptureActiveChange).toHaveBeenCalledWith(true);
+        expect(onCaptureActiveChange).toHaveBeenLastCalledWith(false);
+    });
+
+    it("resumeAfterPreview: 多重呼び出しで getUserMedia が二重発火しない / 失敗後は再試行できる", async () => {
+        const first = fakeStream();
+        getUserMediaMock.mockResolvedValueOnce(first.stream); // 初回録画で live に
+
+        const { component } = render(CameraRecorder, {
+            props: { onCaptured: vi.fn(), onCameraUnavailable: vi.fn() },
+        });
+        await fireEvent.click(screen.getByTestId("start-recording"));
+        await vi.waitFor(() => expect(screen.getByTestId("stop-recording")).toBeInTheDocument());
+        await fireEvent.click(screen.getByTestId("stop-recording"));
+        await vi.waitFor(() => expect(screen.getByTestId("start-recording")).toBeInTheDocument());
+
+        const ref = component as unknown as { releaseForPreview: () => void; resumeAfterPreview: () => Promise<void> };
+        ref.releaseForPreview();
+        expect(getUserMediaMock).toHaveBeenCalledTimes(1); // 録画開始の 1 回のみ
+
+        // 復帰取得が一時失敗 → wasActiveBeforePreview を保持 (再試行可能)
+        getUserMediaMock.mockRejectedValueOnce(new DOMException("busy", "NotReadableError"));
+        // 多重 close/open を模して 2 連続呼び出し (再入ガードで getUserMedia は 1 回)
+        await Promise.all([ref.resumeAfterPreview(), ref.resumeAfterPreview()]);
+        expect(getUserMediaMock).toHaveBeenCalledTimes(2);
+
+        // 再試行が成功する (wasActiveBeforePreview が false 化していない)
+        getUserMediaMock.mockResolvedValueOnce(fakeStream().stream);
+        await ref.resumeAfterPreview();
+        expect(getUserMediaMock).toHaveBeenCalledTimes(3);
     });
 });
