@@ -1,9 +1,11 @@
 <script lang="ts">
     import { onDestroy } from "svelte";
-    import { Circle, Square } from "@lucide/svelte";
+    import { Captions, CaptionsOff, Circle, Square } from "@lucide/svelte";
     import Button from "@/components/atoms/Button.svelte";
+    import SubtitleOverlay from "@/components/features/capture/SubtitleOverlay.svelte";
     import { classifyGetUserMediaError, preferredRecordingMimeType } from "@/lib/capture/camera";
     import type { CameraUnavailableReason } from "@/lib/capture/camera";
+    import type { CaptureCut } from "@/types/capture";
 
     /**
      * MediaRecorder による録画 (概念設計 D9)。停止時に blob を親へ渡す。
@@ -15,9 +17,21 @@
         onCaptured: (blob: Blob, mimeType: string, durationMs: number) => void;
         /** カメラが恒久的に使えないと判明したときの通知 (親がフォールバックへ切替) */
         onCameraUnavailable: (reason: CameraUnavailableReason) => void;
+        /** 選択中カットの字幕 (撮影ガイド overlay 用。焼込ではない)。既定は空 (字幕なし) */
+        subtitlePrimary?: CaptureCut["subtitle_primary"];
+        subtitleSecondary?: CaptureCut["subtitle_secondary"];
     }
 
-    let { onCaptured, onCameraUnavailable }: Props = $props();
+    let {
+        onCaptured,
+        onCameraUnavailable,
+        subtitlePrimary = null,
+        subtitleSecondary = "",
+    }: Props = $props();
+
+    // 字幕オーバーレイの表示トグル (doc/05 §5.2)。v1 中核価値が字幕のため既定 ON。
+    let showSubtitles = $state(true);
+    const subtitleToggleLabel = $derived(showSubtitles ? "字幕を非表示" : "字幕を表示");
 
     let video: HTMLVideoElement | null = $state(null);
     let stream: MediaStream | null = null;
@@ -110,15 +124,22 @@
 </script>
 
 <div class="flex flex-col gap-3">
-    <!-- svelte-ignore a11y_media_has_caption -->
-    <video
-        bind:this={video}
-        autoplay
-        playsinline
-        muted
-        class="aspect-video w-full rounded-md bg-surface object-cover"
-        data-testid="camera-preview"
-    ></video>
+    <div class="relative">
+        <!-- svelte-ignore a11y_media_has_caption -->
+        <video
+            bind:this={video}
+            autoplay
+            playsinline
+            muted
+            class="aspect-video w-full rounded-md bg-surface object-cover"
+            data-testid="camera-preview"
+        ></video>
+        <SubtitleOverlay
+            primary={subtitlePrimary}
+            secondary={subtitleSecondary}
+            visible={showSubtitles}
+        />
+    </div>
     <div class="flex items-center justify-center gap-3">
         {#if recording}
             <Button variant="danger" onclick={stopRecording} testId="stop-recording">
@@ -131,6 +152,22 @@
                 録画開始
             </Button>
         {/if}
+        <!-- 字幕トグル (録画ボタン右)。二値の pressed 状態は raw button + aria-pressed で表現
+             (先例: molecules/PasswordInput.svelte)。字幕が空でも disabled にしない (禁止事項 8) -->
+        <button
+            type="button"
+            class="flex items-center rounded-sm p-2 text-text-secondary transition-colors duration-150 hover:text-text focus-visible:ring-3 focus-visible:ring-primary/35 focus-visible:outline-none"
+            aria-label={subtitleToggleLabel}
+            aria-pressed={showSubtitles}
+            onclick={() => (showSubtitles = !showSubtitles)}
+            data-testid="toggle-subtitles"
+        >
+            {#if showSubtitles}
+                <Captions class="size-5" aria-hidden="true" />
+            {:else}
+                <CaptionsOff class="size-5" aria-hidden="true" />
+            {/if}
+        </button>
     </div>
     {#if error}
         <p class="text-center text-caption text-danger" role="alert">{error}</p>

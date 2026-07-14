@@ -210,4 +210,79 @@ describe("CameraRecorder", () => {
             expect(onCameraUnavailable).toHaveBeenCalledWith("permission_denied");
         });
     });
+
+    // --- T047: 字幕オーバーレイのトグル配線 (追記。既存ケースは無改変) ---
+
+    it("字幕 props 既定 (省略) でも既存フローは無変更で render できる (後方互換)", () => {
+        render(CameraRecorder, {
+            props: { onCaptured: vi.fn(), onCameraUnavailable: vi.fn() },
+        });
+        // 既定 ON でも字幕なしなら overlay は描画されない
+        expect(screen.queryByTestId("subtitle-overlay")).not.toBeInTheDocument();
+        // トグルは常に存在する
+        expect(screen.getByTestId("toggle-subtitles")).toBeInTheDocument();
+    });
+
+    it("字幕 props を渡すと既定 showSubtitles=true で overlay が表示される", () => {
+        render(CameraRecorder, {
+            props: {
+                onCaptured: vi.fn(),
+                onCameraUnavailable: vi.fn(),
+                subtitlePrimary: "名称A",
+                subtitleSecondary: "メイン字幕",
+            },
+        });
+        expect(screen.getByTestId("subtitle-overlay")).toBeInTheDocument();
+        const toggle = screen.getByTestId("toggle-subtitles");
+        expect(toggle).toHaveAttribute("aria-pressed", "true");
+        expect(toggle).toHaveAttribute("aria-label", "字幕を非表示");
+    });
+
+    it("トグルクリックで overlay 非表示 + aria-pressed=false / aria-label='字幕を表示'", async () => {
+        render(CameraRecorder, {
+            props: {
+                onCaptured: vi.fn(),
+                onCameraUnavailable: vi.fn(),
+                subtitlePrimary: "名称A",
+                subtitleSecondary: "メイン字幕",
+            },
+        });
+        await fireEvent.click(screen.getByTestId("toggle-subtitles"));
+
+        expect(screen.queryByTestId("subtitle-overlay")).not.toBeInTheDocument();
+        const toggle = screen.getByTestId("toggle-subtitles");
+        expect(toggle).toHaveAttribute("aria-pressed", "false");
+        expect(toggle).toHaveAttribute("aria-label", "字幕を表示");
+    });
+
+    it("再クリックで overlay 再表示 + aria-pressed=true / aria-label='字幕を非表示'", async () => {
+        render(CameraRecorder, {
+            props: {
+                onCaptured: vi.fn(),
+                onCameraUnavailable: vi.fn(),
+                subtitlePrimary: "名称A",
+                subtitleSecondary: "メイン字幕",
+            },
+        });
+        const toggle = screen.getByTestId("toggle-subtitles");
+        await fireEvent.click(toggle);
+        await fireEvent.click(toggle);
+
+        expect(screen.getByTestId("subtitle-overlay")).toBeInTheDocument();
+        expect(toggle).toHaveAttribute("aria-pressed", "true");
+        expect(toggle).toHaveAttribute("aria-label", "字幕を非表示");
+    });
+
+    it("字幕が空でもトグルは disabled にならず、クリックで状態遷移する (禁止事項 8)", async () => {
+        render(CameraRecorder, {
+            props: { onCaptured: vi.fn(), onCameraUnavailable: vi.fn() },
+        });
+        const toggle = screen.getByTestId("toggle-subtitles");
+        // disabled 属性を持たない
+        expect(toggle).not.toBeDisabled();
+        expect(toggle).toHaveAttribute("aria-pressed", "true");
+        // 実クリックで状態遷移する (押下不能=詰みにしない)
+        await fireEvent.click(toggle);
+        expect(toggle).toHaveAttribute("aria-pressed", "false");
+    });
 });

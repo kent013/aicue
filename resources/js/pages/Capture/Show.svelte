@@ -183,6 +183,8 @@
                         onCaptured={(blob, mimeType, durationMs) =>
                             handleCaptured(blob, mimeType, durationMs)}
                         onCameraUnavailable={(reason) => (cameraUnavailableReason = reason)}
+                        subtitlePrimary={selectedCut.subtitle_primary}
+                        subtitleSecondary={selectedCut.subtitle_secondary}
                     />
                 {:else}
                     {#if fallbackNotice !== null}
