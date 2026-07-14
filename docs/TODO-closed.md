@@ -57,6 +57,7 @@ Open リストは [TODO.md](TODO.md) を参照。
 | T037 | 撮影画面(capture.manuals.show)のモバイル/タブレット横overflow修正。grid-cols-1化+min-w-0+shooting_point truncate構造化 | frontend | 2026-07-14 13:36 |
 | T041 | purchase-tickets の入力エラーが有効値修正後も残る問題の修正。有効値入力でclientErrorをクリアしstale invalid解消 | frontend | 2026-07-14 14:16 |
 | T042 | 軽微UI: manage/usersのタブレット名切れとsettingsのパスワード表示トグル。S1=メンバー/招待行にsm:flex-wrap+名前/メール列sm:min-w-40の床+操作sm:ml-auto(sm:justify-between除去)、S2=パスワード変更2入力をPasswordInput moleculeへ差し替え表示トグル付与。Codex(gpt-5.3-codex) impl-review R1でAPPROVED。 | frontend | 2026-07-14 14:32 |
+| T040 | manual画面のシナリオ保存トースト帰属確認とrender/preview失敗alertの発生源明示。S1=ScenarioEditorに保存成功のその場残留インジケータjustSaved追加(toast 4s自動消去非依存・保存成功パスのみtrue・dirtyと排他)、S2=RenderPanelのrender/preview起動失敗stateをsource別に分離+全danger Alertにphase-aware title付与し発生源×局面で帰属明示(preview-start-error/preview-purchase-link新設)。frontendのみ。Codex(gpt-5.3-codex) impl-review R1でAPPROVED。 | frontend | 2026-07-14 14:47 |
 
 ## Obsoleted
 
