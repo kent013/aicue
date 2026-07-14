@@ -449,6 +449,10 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
                 ->name('projects.manuals.download');
             Route::delete('/projects/{project}/manuals/{manual}', [VideoManualController::class, 'destroy'])
                 ->name('projects.manuals.destroy');
+            // マニュアル複製 (別名保存の実体。保存済み cuts を雛形に新タイトル・カテゴリで新規作成)。
+            // {manual} は $project->manuals() 経由 (scopeBindings) = cross-manual/cross-project は 404。
+            Route::post('/projects/{project}/manuals/{manual}/duplicate', [VideoManualController::class, 'duplicate'])
+                ->name('projects.manuals.duplicate');
         });
 
         // プロジェクトメンバー管理 (追加は payload の user_id、削除は URL の {user})。

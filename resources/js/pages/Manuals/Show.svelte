@@ -7,11 +7,12 @@
     import DangerZone from "@/components/molecules/DangerZone.svelte";
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
     import AnalysisPanel from "@/components/features/manual/AnalysisPanel.svelte";
+    import DuplicateManualDialog from "@/components/features/manual/DuplicateManualDialog.svelte";
     import RenderPanel from "@/components/features/manual/RenderPanel.svelte";
     import SourceDocumentUpload from "@/components/features/manual/SourceDocumentUpload.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
     import type { SharedProps } from "@/lib/shared-props";
-    import type { AnalysisProps, RenderProps, VideoManualStatus } from "@/types/manual";
+    import type { AnalysisProps, CategoryOption, RenderProps, VideoManualStatus } from "@/types/manual";
     import { STATUS_TONES, VIDEO_MANUAL_STATUS_LABELS } from "@/types/manual";
 
     /**
@@ -30,12 +31,16 @@
         analysis: AnalysisProps;
         render: RenderProps;
         canManage: boolean;
+        categories: CategoryOption[];
     }
 
-    let { project, manual, analysis, render, canManage }: Props = $props();
+    let { project, manual, analysis, render, canManage, categories }: Props = $props();
 
     const shared = $derived(page.props as unknown as SharedProps);
     const appName = $derived(shared.appName ?? "");
+
+    /* ---- 複製 (別名保存) ---- */
+    let duplicateDialogOpen = $state(false);
 
     /* ---- 削除 ---- */
     let deleteDialogOpen = $state(false);
@@ -72,14 +77,23 @@
             </div>
         </div>
         {#if canManage}
-            <Button
-                variant="ghost"
-                href={`/projects/${project.id}/manuals/${manual.id}/edit`}
-                inertia
-                testId="edit-manual-button"
-            >
-                編集
-            </Button>
+            <div class="flex items-center gap-2">
+                <Button
+                    variant="ghost"
+                    onclick={() => (duplicateDialogOpen = true)}
+                    testId="duplicate-manual-button"
+                >
+                    複製
+                </Button>
+                <Button
+                    variant="ghost"
+                    href={`/projects/${project.id}/manuals/${manual.id}/edit`}
+                    inertia
+                    testId="edit-manual-button"
+                >
+                    編集
+                </Button>
+            </div>
         {/if}
     </div>
 
@@ -134,6 +148,17 @@
             </DangerZone>
         {/if}
     </div>
+
+    {#if canManage}
+        <DuplicateManualDialog
+            bind:open={duplicateDialogOpen}
+            projectId={project.id}
+            manualId={manual.id}
+            defaultTitle={`${manual.title} のコピー`}
+            defaultCategory={manual.category?.id ?? null}
+            {categories}
+        />
+    {/if}
 
     <ConfirmDialog
         bind:open={deleteDialogOpen}

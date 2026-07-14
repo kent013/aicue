@@ -58,6 +58,7 @@ function nestedRouteIdorInventory(): array
         // シナリオ document 保存 (PUT)。{manual} は $project->manuals() 経由 (scopeBindings)
         'projects.manuals.scenario.update' => $s,
         'projects.manuals.destroy' => $s,
+        'projects.manuals.duplicate' => $s, // {manual} は $project->manuals() 経由 (保存済み cuts を複製)
         // SOP アップロード / AI 解析 / job ポーリング ({manual} は $project->manuals()、
         // {analysisJob} は $manual->analysisJobs() 経由。不整合は認可より前に 404)
         'projects.manuals.source-documents.store' => $s,

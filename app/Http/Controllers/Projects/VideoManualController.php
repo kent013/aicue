@@ -11,6 +11,7 @@ use App\Enums\Manual\JobStatus;
 use App\Enums\Manual\RenderKind;
 use App\Http\Concerns\ResolvesCurrentOrganization;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Projects\DuplicateVideoManualRequest;
 use App\Http\Requests\Projects\StoreVideoManualRequest;
 use App\Http\Requests\Projects\UpdateVideoManualRequest;
 use App\Models\Category;
@@ -147,7 +148,26 @@ class VideoManualController extends Controller
                     ->value('id'),
             ],
             'canManage' => $user->can('update', $manual),
+            'categories' => $this->categoryOptions($project), // 複製ダイアログのカテゴリ選択肢 (既存 helper 再利用)
         ]);
+    }
+
+    /** VideoManual 複製 (別名保存)。保存済み cuts を雛形に新タイトル・カテゴリで新規作成し詳細へ遷移 */
+    public function duplicate(DuplicateVideoManualRequest $request, Project $project, VideoManual $manual, VideoManualService $manuals): RedirectResponse
+    {
+        $organization = $this->resolveCurrentOrganization($request);
+        // URL 整合 guard: 認可より前に 404 ({manual} ∈ {project} は scopeBindings が担保済み)
+        $this->resolveOrganizationProject($organization, $project);
+        Gate::authorize('duplicate', $manual);
+
+        $user = $request->user();
+        Assert::isInstanceOf($user, User::class);
+
+        $copy = $manuals->duplicate($project, $manual, $request->title(), $request->categoryId(), $user->id);
+
+        return redirect()
+            ->route('projects.manuals.show', [$project, $copy])
+            ->with('success', '動画マニュアルを複製しました（手順書は引き継がれません）');
     }
 
     /** 編集フォーム (メタデータ = title / category + シナリオ document) */

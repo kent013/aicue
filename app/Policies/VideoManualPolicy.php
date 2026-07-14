@@ -51,6 +51,14 @@ class VideoManualPolicy
         return $project !== null && $this->projectPolicy->update($user, $project);
     }
 
+    /** 複製 (別名保存): 元を閲覧でき、かつ同一プロジェクトに作成できる人 = プロジェクト編集者のみ。撮影者は不可 */
+    public function duplicate(User $user, VideoManual $manual): bool
+    {
+        $project = $manual->project;
+
+        return $project !== null && $this->projectPolicy->update($user, $project);
+    }
+
     /** AI 解析の実行: プロジェクトを操作できる人 (編集者)。撮影者は不可 */
     public function analyze(User $user, VideoManual $manual): bool
     {

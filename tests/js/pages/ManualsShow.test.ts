@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/svelte";
+import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import Show from "@/pages/Manuals/Show.svelte";
 import type { VideoManualStatus } from "@/types/manual";
 
@@ -15,6 +15,10 @@ const baseProps = {
     analysis: { job: null, hasDocument: false },
     render: { job: null, previewJob: null, playbackJobId: null },
     canManage: true,
+    categories: [
+        { id: 1, name: "準備作業" },
+        { id: 2, name: "仕上げ" },
+    ],
 };
 
 describe("Manuals/Show", () => {
@@ -35,20 +39,38 @@ describe("Manuals/Show", () => {
         expect(screen.getByTestId("manual-category")).toHaveTextContent("未分類");
     });
 
-    it("canManage=true なら編集・削除導線を表示する", () => {
+    it("canManage=true なら複製・編集・削除導線を表示する", () => {
         render(Show, { props: baseProps });
 
+        expect(screen.getByTestId("duplicate-manual-button")).toBeInTheDocument();
         expect(screen.getByTestId("edit-manual-button").getAttribute("href")).toMatch(
             /\/projects\/1\/manuals\/5\/edit$/,
         );
         expect(screen.getByTestId("delete-manual-button")).toBeInTheDocument();
     });
 
-    it("canManage=false なら編集・削除導線を表示しない", () => {
+    it("canManage=false なら複製・編集・削除導線を表示しない", () => {
         render(Show, { props: { ...baseProps, canManage: false } });
 
+        expect(screen.queryByTestId("duplicate-manual-button")).toBeNull();
         expect(screen.queryByTestId("edit-manual-button")).toBeNull();
         expect(screen.queryByTestId("delete-manual-button")).toBeNull();
+    });
+
+    it("複製ボタン押下でダイアログが開き、タイトルは『{元タイトル} のコピー』・カテゴリは元 category をプリフィルする", async () => {
+        render(Show, { props: baseProps });
+
+        await fireEvent.click(screen.getByTestId("duplicate-manual-button"));
+
+        await waitFor(() => {
+            expect(screen.getByTestId("duplicate-manual-dialog")).toBeInTheDocument();
+        });
+        const title = screen.getByLabelText(/タイトル/) as HTMLInputElement;
+        expect(title.value).toBe("ネジ締め作業 のコピー");
+        const category = screen.getByTestId("duplicate-category-select") as HTMLSelectElement;
+        expect(category.value).toBe("2");
+        // 送信ボタンは必須未充足でも disabled にしない (禁止事項8)
+        expect(screen.getByTestId("duplicate-manual-confirm")).not.toBeDisabled();
     });
 
     it("canManage=true (draft) は AI 解析ボタンと手順書アップロード導線を表示する", () => {
