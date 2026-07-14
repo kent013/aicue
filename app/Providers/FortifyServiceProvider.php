@@ -17,6 +17,7 @@ use App\Http\Responses\Fortify\RecoveryCodesGeneratedResponse;
 use App\Http\Responses\Fortify\RegisterResponse;
 use App\Http\Responses\Fortify\TwoFactorDisabledResponse;
 use App\Http\Responses\Fortify\VerificationNotificationSentResponse;
+use App\Services\Organization\OrganizationMembershipService;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Http\RedirectResponse;
@@ -40,6 +41,7 @@ use Laravel\Fortify\Contracts\RegisterResponse as RegisterResponseContract;
 use Laravel\Fortify\Contracts\SuccessfulPasswordResetLinkRequestResponse as SuccessfulPasswordResetLinkRequestResponseContract;
 use Laravel\Fortify\Contracts\TwoFactorDisabledResponse as TwoFactorDisabledResponseContract;
 use Laravel\Fortify\Fortify;
+use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 
 class FortifyServiceProvider extends ServiceProvider
 {
@@ -177,9 +179,28 @@ class FortifyServiceProvider extends ServiceProvider
             'socialProviders' => array_keys(config()->array('template.social_providers')),
         ]));
 
-        Fortify::registerView(static fn (): InertiaResponse => Inertia::render('Auth/Register', [
-            'socialProviders' => array_keys(config()->array('template.social_providers')),
-        ]));
+        Fortify::registerView(static function (Request $request): SymfonyResponse {
+            // 招待リンク経由 (session に active token) の場合のみ招待先 email を prefill 用に解決する。
+            // resolver 内で stale/invalid token は session から破棄される (fail-secure)。
+            $invitationEmail = app(OrganizationMembershipService::class)
+                ->resolveRegisterPrefillEmail($request->session());
+
+            $response = Inertia::render('Auth/Register', [
+                'socialProviders' => array_keys(config()->array('template.social_providers')),
+                'invitationEmail' => $invitationEmail,
+            ])->toResponse($request);
+
+            // PII (招待先 email) を含む応答を HTTP キャッシュ (共有/中間プロキシ/ブラウザの
+            // HTTP キャッシュ) に保存させない (bearer token 由来 PII の運用 fail-safe)。
+            // email を含まない通常登録応答には付けない (不要なキャッシュ抑止を避ける)。
+            // 「PII 実在 = 非空 email 文字列」で判定する (resolver 契約と frontend の isInvited
+            //  = invitationEmail != null && !== "" に揃え、null 判定だけの暗黙契約に依存しない)。
+            if ($invitationEmail !== null && $invitationEmail !== '') {
+                $response->headers->set('Cache-Control', 'no-store');
+            }
+
+            return $response;
+        });
 
         Fortify::requestPasswordResetLinkView(
             static fn (): InertiaResponse => Inertia::render('Auth/ForgotPassword'),

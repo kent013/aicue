@@ -13,13 +13,20 @@
     interface Props {
         appName?: string;
         socialProviders?: string[];
+        invitationEmail?: string | null;
     }
 
-    let { appName, socialProviders = [] }: Props = $props();
+    let { appName, socialProviders = [], invitationEmail = null }: Props = $props();
+
+    // 招待リンク経由 (invitationEmail あり) は招待先 email を初期値にし、以降 readonly で固定する。
+    // readonly は UX 上の "誘導" に過ぎない: devtools で外して別 email を POST しても、サーバの
+    // MatchesInvitationEmail (active token がある間は招待 email 以外を 422) が真正性を強制する。
+    // prefill + readonly は「正しい値を先に入れて手入力ミスを防ぐ」ためのものでセキュリティ境界ではない。
+    const isInvited = $derived(invitationEmail != null && invitationEmail !== "");
 
     const form = useForm({
         name: "",
-        email: "",
+        email: invitationEmail ?? "",
         password: "",
         terms_accepted: false,
     });
@@ -73,7 +80,12 @@
             {/snippet}
         </FormField>
 
-        <FormField label="メールアドレス" id="email" error={form.errors.email}>
+        <FormField
+            label="メールアドレス"
+            id="email"
+            error={form.errors.email}
+            help={isInvited ? "招待されたメールアドレスで登録します。" : undefined}
+        >
             {#snippet children({ id, describedBy, invalid })}
                 <Input
                     {id}
@@ -82,6 +94,7 @@
                     error={invalid}
                     aria-describedby={describedBy}
                     autocomplete="email"
+                    readonly={isInvited}
                 />
             {/snippet}
         </FormField>

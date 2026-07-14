@@ -36,17 +36,10 @@ class MatchesInvitationEmail implements ValidationRule
             return;
         }
 
-        // 平文 token は DB 非保存。sha256 hash で照合する
-        /** @var OrganizationInvitation|null $invitation */
-        $invitation = OrganizationInvitation::query()
-            ->where('token_hash', OrganizationInvitation::hashToken($this->invitationToken))
-            ->first();
+        // 平文 token は DB 非保存。active 判定は findActiveByPlainToken に集約 (単一解決口)。
+        // 不在/失効/受諾済/取り消しはここでは弾かず、後段の受諾処理が中立メッセージで扱う。
+        $invitation = OrganizationInvitation::findActiveByPlainToken($this->invitationToken);
         if ($invitation === null) {
-            return;
-        }
-
-        // 受諾不能 (失効/受諾済/取り消し) は後段の受諾処理が中立メッセージで扱う
-        if ($invitation->isAccepted() || $invitation->isRevoked() || $invitation->isExpired()) {
             return;
         }
 
