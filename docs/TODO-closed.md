@@ -64,6 +64,7 @@ Open リストは [TODO.md](TODO.md) を参照。
 | T046 | AIシナリオ生成の導入カット/総括カット自動挿入。AI生成シナリオに導入/総括カットを自動付与 | backend | 2026-07-14 23:16 |
 | T047 | 撮影中カメラプレビューへの字幕オーバーレイ表示。撮影プレビューに字幕を重畳表示（焼込でない/トグル可） | frontend | 2026-07-14 23:17 |
 | T048 | シナリオ編集のUndo/Redo(一つ戻る/進む)。シナリオ編集の保存前ローカル編集に対する Undo/Redo（一つ戻る/進む） | frontend | 2026-07-14 23:19 |
+| T049 | マニュアル(シナリオ)の別名保存/複製。保存済みシナリオ(cuts)を雛形に新タイトル・カテゴリで別 manual を複製(status=draft/scenario_version=0 リセット、takes/adopted_take_id/render成果物/source_documents/analysis_jobs は非複製)。複製route(scopeBindings群・cross-manual/project は404)+DuplicateVideoManualRequest(保護キー不信+category project スコープ)+VideoManualPolicy::duplicate(撮影者403)+VideoManualService::duplicate(共有ロック規約: 元/新manualをlockForUpdateした同一tx内でcuts作成・point の parent_cut_id を新step idへ張替・孤児pointはskip+warning)+DuplicateManualDialog導線。NestedRouteIdorDefenseTest/ScenarioWritePathInventoryTest inventory登録+ManualDuplicateTest。Codex impl-review APPROVED (Round 2) | backend | 2026-07-15 00:02 |
 
 ## Obsoleted
 
