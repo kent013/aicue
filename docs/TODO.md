@@ -21,7 +21,6 @@
 
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
-| T044 | client-side stale validation の横展開修正(移譲フォーム他) | frontend | 有効値復帰でclientErrorをクリア(移譲フォーム他) | Medium | incremental | [設計](devnotes/20260714-1654-stale-validation-sweep/) | 2026-07-14 |
 | T045 | 特定商取引法ページ(commerce-disclosure)へのサイト内リンク追加 | frontend | フッターに特定商取引法リンクを追加しreachability回復 | Low | incremental | [設計](devnotes/20260714-1654-commerce-disclosure-link/) | 2026-07-14 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
