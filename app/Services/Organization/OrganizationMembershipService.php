@@ -15,6 +15,7 @@ use App\Notifications\OrganizationInvitationNotification;
 use App\Services\Notification\NotificationCenterService;
 use App\Services\Project\DefaultProjectResolver;
 use App\Services\Security\SecurityEventRecorder;
+use Illuminate\Contracts\Session\Session;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -146,12 +147,9 @@ class OrganizationMembershipService
      */
     public function acceptInvitationIfValid(string $plainToken, User $user): ?Organization
     {
-        $invitation = OrganizationInvitation::query()
-            ->where('token_hash', OrganizationInvitation::hashToken($plainToken))
-            ->first();
-
-        // active (未受諾・未失効・期限内) でなければ join しない
-        if ($invitation === null || $invitation->isRevoked() || $invitation->isAccepted() || $invitation->isExpired()) {
+        // active (未受諾・未失効・期限内) 解決は findActiveByPlainToken に集約 (単一解決口)。
+        $invitation = OrganizationInvitation::findActiveByPlainToken($plainToken);
+        if ($invitation === null) {
             return null;
         }
 
@@ -182,6 +180,52 @@ class OrganizationMembershipService
         $user->forceFill(['current_organization_id' => $organization->id])->save();
 
         return $organization;
+    }
+
+    /**
+     * register 画面のメール prefill 用に、session の invitation_token から
+     * 「active な招待の招待先 email」を解決する。fail-secure:
+     *  - session 値が非文字列/空 → forget して null
+     *  - findActiveByPlainToken が null (不在/失効/取消/受諾済) → session から forget して null
+     *    (GET 時点で stale/invalid な token を破棄し「UI は通常登録・サーバは招待フロー」の
+     *    不整合を除去する)
+     *  - active → 招待先 email (CipherSweet 自動復号後は string) を返す
+     *
+     * 平文 email 検索は行わない (token_hash 照合のみ)。列挙面を広げない。
+     * 正常系 (active) では forget しない: 後続 POST の CreateNewUser が受諾に token を使う。
+     *
+     * **戻り契約**: 非 null を返す場合は必ず非空の email 文字列である (空文字は null に潰す)。
+     * 呼び出し側 (Fortify registerView の no-store 判定 / frontend の isInvited) はこの契約に依存する。
+     */
+    public function resolveRegisterPrefillEmail(Session $session): ?string
+    {
+        $raw = $session->get('invitation_token');
+
+        if (! is_string($raw) || $raw === '') {
+            if ($raw !== null) {
+                $session->forget('invitation_token'); // 汚染値を除去
+            }
+
+            return null;
+        }
+
+        $invitation = OrganizationInvitation::findActiveByPlainToken($raw);
+        if ($invitation === null) {
+            $session->forget('invitation_token'); // stale/invalid を GET 時点で破棄
+
+            return null;
+        }
+
+        // CipherSweet 復号後の email。空文字 (想定外の欠損) は fail-secure に握り、
+        // token を破棄して null 返却する (prefill しない)。
+        $email = $invitation->email;
+        if ($email === '') {
+            $session->forget('invitation_token');
+
+            return null;
+        }
+
+        return $email;
     }
 
     /**

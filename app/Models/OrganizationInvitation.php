@@ -60,6 +60,26 @@ class OrganizationInvitation extends Model implements CipherSweetEncrypted
         return hash('sha256', $plainToken);
     }
 
+    /**
+     * 平文 token から「受諾可能 (active: 未受諾・未失効・期限内)」な招待を解決する。
+     * token_hash 照合 + scopeActive のみ (平文 email 検索は行わない = 列挙面を広げない)。
+     * active でない (不在/失効/取消/受諾済) 場合は null。
+     *
+     * MatchesInvitationEmail / acceptInvitationIfValid / register prefill resolver が共有し、
+     * active 判定条件のドリフトを防ぐ単一解決口。
+     * (POST 受諾 acceptInvitation() は revoked/accepted/expired を個別メッセージに出し分けるため
+     *  本メソッドを使わない)
+     */
+    public static function findActiveByPlainToken(string $plainToken): ?self
+    {
+        // active の定義は scopeActive が単一の正 (未受諾・未失効・期限内: expires_at > now)。
+        // isExpired()/isAccepted()/isRevoked() の個別判定と概念的に一致させ、ドリフトを防ぐ。
+        return self::query()
+            ->active()
+            ->where('token_hash', self::hashToken($plainToken))
+            ->first();
+    }
+
     public static function configureCipherSweet(EncryptedRow $encryptedRow): void
     {
         $encryptedRow

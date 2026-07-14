@@ -26,6 +26,9 @@ test('OrganizationMembershipService の書き込みメソッドは共通ロッ�
         'revokeInvitation', // 招待の論理失効のみ (membership/role 不変)
         // 読み取り専用判定 (ロック不要・表示スナップショット)。deleteAccount がロック下で権威判定する
         'organizationsBlockingDeletion',
+        // register prefill 用の read + session forget のみ (membership/role/DB 書き込みなし)。
+        // token_hash 照合で active 招待の email を返すだけで、共通ロック規約の対象外。
+        'resolveRegisterPrefillEmail',
     ];
 
     $reflection = new ReflectionClass(OrganizationMembershipService::class);

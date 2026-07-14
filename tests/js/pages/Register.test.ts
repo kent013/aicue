@@ -49,4 +49,38 @@ describe("Auth/Register", () => {
         );
         expect(screen.queryByText("利用規約への同意が必要です。")).toBeNull();
     });
+
+    it("invitationEmail props あり → email 欄が readonly で招待 email を prefill し補足文言を表示する", () => {
+        render(Register, {
+            props: {
+                appName: "My App",
+                socialProviders: [],
+                invitationEmail: "invited@example.com",
+            },
+        });
+
+        const email = screen.getByLabelText("メールアドレス");
+        expect(email).toHaveAttribute("readonly");
+        expect(email).toHaveValue("invited@example.com");
+        expect(screen.getByText("招待されたメールアドレスで登録します。")).toBeInTheDocument();
+    });
+
+    it("invitationEmail props なし → email 欄は readonly でなく空 (通常登録)", () => {
+        render(Register, { props: { appName: "My App", socialProviders: [] } });
+
+        const email = screen.getByLabelText("メールアドレス");
+        expect(email.hasAttribute("readonly")).toBe(false);
+        expect(email).toHaveValue("");
+        expect(screen.queryByText("招待されたメールアドレスで登録します。")).toBeNull();
+    });
+
+    it("invitationEmail = null → email 欄は readonly でなく空 (回帰強化)", () => {
+        render(Register, {
+            props: { appName: "My App", socialProviders: [], invitationEmail: null },
+        });
+
+        const email = screen.getByLabelText("メールアドレス");
+        expect(email.hasAttribute("readonly")).toBe(false);
+        expect(email).toHaveValue("");
+    });
 });
