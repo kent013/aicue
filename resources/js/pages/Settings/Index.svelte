@@ -7,6 +7,7 @@
     import TextLink from "@/components/atoms/TextLink.svelte";
     import DangerZone from "@/components/molecules/DangerZone.svelte";
     import FormField from "@/components/molecules/FormField.svelte";
+    import PasswordInput from "@/components/molecules/PasswordInput.svelte";
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
     import RecentAuthModal from "@/components/organisms/RecentAuthModal.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
@@ -197,9 +198,8 @@
                     error={passwordForm.errors.current_password}
                 >
                     {#snippet children({ id, describedBy, invalid })}
-                        <Input
+                        <PasswordInput
                             {id}
-                            type="password"
                             bind:value={passwordForm.current_password}
                             error={invalid}
                             aria-describedby={describedBy}
@@ -213,9 +213,8 @@
                     error={passwordForm.errors.password}
                 >
                     {#snippet children({ id, describedBy, invalid })}
-                        <Input
+                        <PasswordInput
                             {id}
-                            type="password"
                             bind:value={passwordForm.password}
                             error={invalid}
                             aria-describedby={describedBy}

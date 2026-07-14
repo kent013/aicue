@@ -268,9 +268,9 @@
                     {#each members as member (member.id)}
                         <!-- 375px 方針: モバイルは縦積み、sm 以上は現行の横並び (F-14)。操作ブロックは要素単位で折り返し可 -->
                         <li
-                            class="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+                            class="flex flex-col gap-2 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4"
                         >
-                            <div class="min-w-0">
+                            <div class="min-w-0 sm:min-w-40">
                                 <div class="flex items-center gap-2">
                                     <p class="truncate text-body">{member.name}</p>
                                     {#if member.twoFactorStatus === "enabled"}
@@ -286,7 +286,7 @@
                                     {member.email}
                                 </p>
                             </div>
-                            <div class="flex flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end">
+                            <div class="flex flex-wrap items-center gap-2 sm:ml-auto sm:shrink-0 sm:justify-end">
                                 {#if canResetTwoFactor(member)}
                                     <Button
                                         variant="danger-ghost"
@@ -419,10 +419,10 @@
                         {#each invitations as invitation (invitation.id)}
                             <!-- 375px 方針: モバイルは縦積み、sm 以上は現行の横並び (F-14) -->
                             <li
-                                class="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+                                class="flex flex-col gap-2 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4"
                             >
-                                <p class="min-w-0 truncate text-body">{invitation.email}</p>
-                                <div class="flex flex-wrap items-center gap-3 sm:shrink-0 sm:justify-end">
+                                <p class="min-w-0 truncate text-body sm:min-w-40">{invitation.email}</p>
+                                <div class="flex flex-wrap items-center gap-3 sm:ml-auto sm:shrink-0 sm:justify-end">
                                     <p class="text-caption text-text-secondary">
                                         {invitation.roleLabel} ・ 期限 {invitation.expiresAt}
                                     </p>
