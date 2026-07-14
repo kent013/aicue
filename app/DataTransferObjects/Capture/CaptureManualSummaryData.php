@@ -10,6 +10,8 @@ use Webmozart\Assert\Assert;
 /**
  * 撮影一覧 (Capture/Index) の 1 行分。TS 側 types/capture.ts の CaptureManualSummary と対で保守。
  * 進捗カウント (cuts_total / cuts_adopted / cuts_with_takes) は withCount 済みモデルから読む。
+ * creator は表示目的のみ (検索対象外)。User.name は CipherSweet PII のため whereBlind 検索の
+ * 対象にはしない (自作フィルタは created_by の id 一致で行う)。
  */
 final readonly class CaptureManualSummaryData
 {
@@ -23,11 +25,12 @@ final readonly class CaptureManualSummaryData
         public int $cutsAdopted,
         public int $cutsWithTakes,
         public ?string $updatedAt,
+        public ?string $creatorName,
     ) {}
 
     /**
      * withCount('cuts', 'cuts as cuts_adopted_count', 'cuts as cuts_with_takes_count') +
-     * with('category') 済みの manual から生成する (Capture/IndexController の一覧クエリと対)。
+     * with('category', 'creator') 済みの manual から生成する (Capture/IndexController の一覧クエリと対)。
      */
     public static function fromManual(VideoManual $manual): self
     {
@@ -48,13 +51,14 @@ final readonly class CaptureManualSummaryData
             cutsAdopted: $cutsAdopted,
             cutsWithTakes: $cutsWithTakes,
             updatedAt: $manual->updated_at?->toIso8601String(),
+            creatorName: $manual->creator?->name, // 退会/削除で null (実運用では FK RESTRICT)
         );
     }
 
     /**
      * @return array{id: int, title: string, status: string, category_id: int|null,
      *   category_name: string|null, cuts_total: int, cuts_adopted: int, cuts_with_takes: int,
-     *   updated_at: string|null}
+     *   updated_at: string|null, creator_name: string|null}
      */
     public function toArray(): array
     {
@@ -68,6 +72,7 @@ final readonly class CaptureManualSummaryData
             'cuts_adopted' => $this->cutsAdopted,
             'cuts_with_takes' => $this->cutsWithTakes,
             'updated_at' => $this->updatedAt,
+            'creator_name' => $this->creatorName,
         ];
     }
 }

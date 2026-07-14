@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Projects;
 
+use App\Enums\Manual\ManualSortOption;
 use App\Enums\Manual\VideoManualStatus;
 use App\Http\Concerns\ResolvesCurrentOrganization;
 use App\Http\Controllers\Controller;
@@ -30,6 +31,8 @@ use Webmozart\Assert\Assert;
  * - current org スコープ: ResolvesCurrentOrganization で解決 (URL に org セグメントを持たない)
  * - URL 整合 guard: {project} が current org に属さなければ**認可より前に 404**
  * - teams_visible=false の既定では Team 概念を UI に出さない (Default Team は Service が自動割当)
+ *
+ * @phpstan-import-type ManualOrdering from ManualSortOption
  */
 class ProjectController extends Controller
 {
@@ -130,9 +133,9 @@ class ProjectController extends Controller
             // payload 生成時点で絞る = canViewMemberEmails と同じ流儀)
             'assignableUsers' => $this->assignableUserRows($organization, $memberRows, $canManage),
             // 動画マニュアル一覧 (専用 index は持たず本画面に内包。GET クエリで絞り込み + paginate)
-            'manuals' => $this->manualRows($project, $filters),
+            'manuals' => $this->manualRows($project, $filters, $user->id),
             'categories' => $this->categoryRows($project),
-            'manualFilters' => $filters,
+            'manualFilters' => $this->toManualFilterProps($filters),
             // 管理メニュー導線 (doc/04: 管理者のみサイドバー表示)。単一根拠は Gate
             'canManageMembers' => $user->can('manageMembers', $organization),
         ]);
@@ -141,9 +144,12 @@ class ProjectController extends Controller
     /**
      * 動画マニュアル一覧の GET クエリ絞り込み条件。
      * category は「数値 id 文字列 | 'uncategorized' (未分類 sentinel) | null」、
-     * status は VideoManualStatus の値のみ許容 (不正値は無視 = null)。
+     * status は VideoManualStatus の値のみ許容 (不正値は無視 = null)、
+     * sort は ManualSortOption の allowlist のみ (不正値は null = 既定順)、
+     * mine は自分の作成分のみに絞る bool。
      *
-     * @return array{category: string|null, status: string|null, q: string|null}
+     * @return array{category: string|null, status: string|null, q: string|null,
+     *   sort: ManualSortOption|null, mine: bool}
      */
     private function parseManualFilters(Request $request): array
     {
@@ -159,25 +165,66 @@ class ProjectController extends Controller
         $q = $request->query('q');
         $q = is_string($q) && trim($q) !== '' ? trim($q) : null;
 
-        return ['category' => $category, 'status' => $status, 'q' => $q];
+        $sortRaw = $request->query('sort');
+        // allowlist 外は null (= 既定順)。ユーザー入力をカラム名に渡さない
+        $sort = is_string($sortRaw) ? ManualSortOption::tryFrom($sortRaw) : null;
+
+        return [
+            'category' => $category,
+            'status' => $status,
+            'q' => $q,
+            'sort' => $sort,
+            'mine' => $request->boolean('mine'), // "1"/"true" を bool 正規化
+        ];
+    }
+
+    /**
+     * Inertia へ返す manualFilters prop (sort enum → string 値へ落とす単一変換点)。
+     * PHP 内部表現は ManualSortOption を持つため、prop 化時に string|null へ落とす。
+     *
+     * @param  array{category: string|null, status: string|null, q: string|null, sort: ManualSortOption|null, mine: bool}  $filters
+     * @return array{category: string|null, status: string|null, q: string|null, sort: string|null, mine: bool}
+     */
+    private function toManualFilterProps(array $filters): array
+    {
+        return [
+            'category' => $filters['category'],
+            'status' => $filters['status'],
+            'q' => $filters['q'],
+            'sort' => $filters['sort']?->value, // string|null (TS の ManualFilters.sort と一致)
+            'mine' => $filters['mine'],
+        ];
     }
 
     /**
      * 動画マニュアル一覧 rows (paginate + typed array で shape を固定)。
      * 未分類は category => null (フロントは「未分類」を表示する)。
+     * creator は退会/削除で解決不可のとき null (実運用では FK RESTRICT で常に解決)。
      *
-     * @param  array{category: string|null, status: string|null, q: string|null}  $filters
+     * @param  array{category: string|null, status: string|null, q: string|null, sort: ManualSortOption|null, mine: bool}  $filters
      * @return array{
-     *   data: list<array{id: int, title: string, status: string, category: array{id: int, name: string}|null, created_at: string}>,
+     *   data: list<array{id: int, title: string, status: string,
+     *     category: array{id: int, name: string}|null,
+     *     creator: array{id: int, name: string}|null,
+     *     created_at: string, updated_at: string}>,
      *   meta: array{current_page: int, last_page: int, per_page: int, total: int}
      * }
      */
-    private function manualRows(Project $project, array $filters): array
+    private function manualRows(Project $project, array $filters, int $viewerId): array
     {
-        $query = $project->manuals()->with('category')
-            ->orderByDesc('created_at')
-            ->orderByDesc('id');
+        $query = $project->manuals()->with(['category', 'creator']);
 
+        // 並べ替え (allowlist enum 由来のカラム名のみ。既定は現行踏襲 created_at desc, id desc)
+        $orderings = $filters['sort']?->orderings() ?? ManualSortOption::defaultOrderings();
+        foreach ($orderings as $ordering) {
+            /** @var ManualOrdering $ordering */
+            $query->orderBy($ordering['column'], $ordering['direction']);
+        }
+
+        if ($filters['mine']) {
+            // 自ユーザー id のみ (payload 非受領 = tenant/actor キー不信)
+            $query->where('created_by', $viewerId);
+        }
         if ($filters['category'] === 'uncategorized') {
             $query->whereNull('category_id');
         } elseif ($filters['category'] !== null) {
@@ -197,6 +244,7 @@ class ProjectController extends Controller
         foreach ($paginated->items() as $manual) {
             Assert::isInstanceOf($manual, VideoManual::class);
             $category = $manual->category;
+            $creator = $manual->creator; // 退会/削除で null になり得る (実運用では FK RESTRICT)
             $data[] = [
                 'id' => $manual->id,
                 'title' => $manual->title,
@@ -204,7 +252,11 @@ class ProjectController extends Controller
                 'category' => $category === null
                     ? null
                     : ['id' => $category->id, 'name' => $category->name],
+                'creator' => $creator === null
+                    ? null
+                    : ['id' => $creator->id, 'name' => $creator->name],
                 'created_at' => $manual->created_at?->format('Y-m-d H:i') ?? '',
+                'updated_at' => $manual->updated_at?->format('Y-m-d H:i') ?? '',
             ];
         }
 

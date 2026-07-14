@@ -90,6 +90,45 @@ test('index は category / q で絞り込める + 進捗カウントを含む', 
         ->assertInertia(fn (Assert $page) => $page->has('manuals', 0));
 });
 
+test('index は mine=1 で自作シナリオのみに絞る (ready/published と AND)', function (): void {
+    [$organization, $owner, $project] = browsingContext();
+    $other = attachOrganizationMember($organization);
+    $mine = VideoManual::factory()->forProject($project)->createdBy($owner)->create([
+        'status' => 'ready', 'title' => '自作 ready',
+    ]);
+    // 他人作 (mine で除外) / 自作だが draft (status で除外)
+    VideoManual::factory()->forProject($project)->createdBy($other)->create(['status' => 'ready']);
+    VideoManual::factory()->forProject($project)->createdBy($owner)->create(['status' => 'draft']);
+
+    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals?mine=1")
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('manuals', 1)
+            ->where('manuals.0.id', $mine->id)
+            ->where('filters.mine', true));
+});
+
+test('index は manuals.*.creator_name と filters.mine を供給する', function (): void {
+    [, $owner, $project] = browsingContext();
+    VideoManual::factory()->forProject($project)->createdBy($owner)->create(['status' => 'ready']);
+
+    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals")
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('manuals.0.creator_name', $owner->name)
+            ->where('filters.mine', false));
+});
+
+test('index の summary shape は TS CaptureManualSummary と対のキー集合 (PHP↔TS 契約)', function (): void {
+    [, $owner, $project] = browsingContext();
+    VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
+
+    $summary = $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals")
+        ->inertiaPage()['props']['manuals'][0];
+    expect(array_keys($summary))->toBe([
+        'id', 'title', 'status', 'category_id', 'category_name',
+        'cuts_total', 'cuts_adopted', 'cuts_with_takes', 'updated_at', 'creator_name',
+    ]);
+});
+
 test('show は cuts+takes を返し、採用テイクのみ playback_url / download_ack_token を持つ', function (): void {
     [, $owner, $project] = browsingContext();
     $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);

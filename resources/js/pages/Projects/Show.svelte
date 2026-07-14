@@ -3,6 +3,7 @@
     import Badge from "@/components/atoms/Badge.svelte";
     import Button from "@/components/atoms/Button.svelte";
     import Card from "@/components/atoms/Card.svelte";
+    import Checkbox from "@/components/atoms/Checkbox.svelte";
     import Input from "@/components/atoms/Input.svelte";
     import Select from "@/components/atoms/Select.svelte";
     import TextLink from "@/components/atoms/TextLink.svelte";
@@ -83,12 +84,26 @@
     let filterCategory = $state(manualFilters.category ?? "");
     let filterStatus = $state(manualFilters.status ?? "");
     let filterQ = $state(manualFilters.q ?? "");
+    let filterSort = $state<string>(manualFilters.sort ?? "");
+    let filterMine = $state(manualFilters.mine);
+
+    // 並べ替え option (空値 = 既定「新しい順(作成)」)。ManualSortOption の allowlist と対
+    const MANUAL_SORT_OPTIONS: { value: string; label: string }[] = [
+        { value: "", label: "新しい順（作成）" },
+        { value: "updated_desc", label: "更新が新しい順" },
+        { value: "updated_asc", label: "更新が古い順" },
+        { value: "title_asc", label: "タイトル昇順" },
+        { value: "title_desc", label: "タイトル降順" },
+    ];
 
     function manualQuery(pageNumber?: number): Record<string, string | number> {
         const query: Record<string, string | number> = {};
         if (filterCategory !== "") query.category = filterCategory;
         if (filterStatus !== "") query.status = filterStatus;
         if (filterQ.trim() !== "") query.q = filterQ.trim();
+        if (filterSort !== "") query.sort = filterSort;
+        if (filterMine) query.mine = 1;
+        // pageNumber 未指定 (フィルタ変更時) は page を載せない = 1 ページ目にリセットする
         if (pageNumber !== undefined && pageNumber > 1) query.page = pageNumber;
         return query;
     }
@@ -350,6 +365,21 @@
                         {/each}
                     </Select>
                 </div>
+                <div class="flex flex-col gap-1">
+                    <label class="text-caption text-text-secondary" for="manual-filter-sort">
+                        並べ替え
+                    </label>
+                    <Select
+                        id="manual-filter-sort"
+                        bind:value={filterSort}
+                        onchange={() => applyManualFilters()}
+                        testId="manual-filter-sort"
+                    >
+                        {#each MANUAL_SORT_OPTIONS as option (option.value)}
+                            <option value={option.value}>{option.label}</option>
+                        {/each}
+                    </Select>
+                </div>
                 <div class="flex min-w-40 grow flex-col gap-1">
                     <label class="text-caption text-text-secondary" for="manual-filter-q">
                         キーワード
@@ -361,6 +391,13 @@
                         testId="manual-filter-q"
                     />
                 </div>
+                <Checkbox
+                    id="manual-filter-mine"
+                    bind:checked={filterMine}
+                    label="自分の作成分のみ"
+                    onchange={() => applyManualFilters()}
+                    testId="manual-filter-mine"
+                />
                 <Button type="submit" variant="ghost" testId="manual-filter-submit">検索</Button>
             </form>
 
@@ -382,7 +419,8 @@
                                     {manual.title}
                                 </TextLink>
                                 <p class="mt-1 text-caption text-text-secondary">
-                                    {manual.category?.name ?? "未分類"} ・ {manual.created_at}
+                                    {manual.category?.name ?? "未分類"} ・ {manual.creator?.name ??
+                                        "不明"} ・ 更新 {manual.updated_at}
                                 </p>
                             </div>
                             <Badge
