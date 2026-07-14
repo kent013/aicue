@@ -748,6 +748,98 @@ describe("ScenarioEditor", () => {
         expect(screen.getByTestId("scenario-dirty-indicator")).toBeInTheDocument();
     });
 
+    // --- T040 F-1-1: 保存成功のその場残留インジケータ (justSaved) ---
+
+    it("保存成功後は「保存しました」インジケータを表示し dirty 表示は出さない", async () => {
+        fetchMock.mockResolvedValueOnce(jsonResponse(200, { ...makeDocument(), scenario_version: 4 }));
+
+        render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+        await typeInto("step-0-scene", "手順シーンAX");
+        await fireEvent.click(screen.getByTestId("scenario-submit"));
+
+        await waitFor(() => {
+            expect(screen.getByTestId("scenario-saved-indicator")).toBeInTheDocument();
+        });
+        expect(screen.getByTestId("scenario-saved-indicator")).toHaveTextContent("保存しました");
+        expect(screen.queryByTestId("scenario-dirty-indicator")).not.toBeInTheDocument();
+    });
+
+    it("保存直後は dirty=false でも justSaved=true を維持する (意図せぬ消去が混入しない不変)", async () => {
+        // dirty 算出変更に対する回帰の砦: applySaved 後もインジケータが残ることを固定する
+        fetchMock.mockResolvedValueOnce(jsonResponse(200, { ...makeDocument(), scenario_version: 4 }));
+
+        render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+        await fireEvent.click(screen.getByTestId("scenario-submit"));
+
+        await waitFor(() => {
+            expect(screen.getByTestId("scenario-saved-indicator")).toBeInTheDocument();
+        });
+        expect(screen.queryByTestId("scenario-dirty-indicator")).not.toBeInTheDocument();
+    });
+
+    it("保存成功後に編集で dirty に転じると保存インジケータが消え dirty 表示に切り替わる", async () => {
+        fetchMock.mockResolvedValueOnce(jsonResponse(200, { ...makeDocument(), scenario_version: 4 }));
+
+        render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+        await fireEvent.click(screen.getByTestId("scenario-submit"));
+        await waitFor(() => {
+            expect(screen.getByTestId("scenario-saved-indicator")).toBeInTheDocument();
+        });
+
+        await typeInto("step-0-scene", "手順シーンAX");
+        await waitFor(() => {
+            expect(screen.getByTestId("scenario-dirty-indicator")).toBeInTheDocument();
+        });
+        expect(screen.queryByTestId("scenario-saved-indicator")).not.toBeInTheDocument();
+    });
+
+    it("409 競合後のサーバ最新取得 (reseed) では偽の保存インジケータを出さない", async () => {
+        fetchMock.mockResolvedValueOnce(
+            jsonResponse(409, {
+                code: "scenario_conflict",
+                conflict_type: "version_mismatch",
+                message: "他の編集と競合しました。",
+                current_version: 9,
+            }),
+        );
+
+        render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+        await typeInto("step-0-scene", "手順シーンAX");
+        await fireEvent.click(screen.getByTestId("scenario-submit"));
+        await waitFor(() => {
+            expect(screen.getByTestId("scenario-conflict-reload")).toBeInTheDocument();
+        });
+        await fireEvent.click(screen.getByTestId("scenario-conflict-reload"));
+        await waitFor(() => {
+            expect(screen.getByRole("button", { name: "破棄して最新を取得" })).toBeInTheDocument();
+        });
+        await fireEvent.click(screen.getByRole("button", { name: "破棄して最新を取得" }));
+
+        const latest: ScenarioDocument = {
+            scenario_version: 9,
+            steps: [{ ...makeDocument().steps[0], scene: "サーバ最新シーン", points: [] }],
+        };
+        lastReloadOptions().onSuccess({ props: { scenario: latest } });
+        lastReloadOptions().onFinish();
+
+        await waitFor(() => {
+            expect(screen.getByTestId("step-0-scene")).toHaveValue("サーバ最新シーン");
+        });
+        expect(screen.queryByTestId("scenario-saved-indicator")).not.toBeInTheDocument();
+    });
+
+    it("保存失敗 (generic) では保存インジケータを出さない", async () => {
+        fetchMock.mockRejectedValueOnce(new TypeError("network error"));
+
+        render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+        await fireEvent.click(screen.getByTestId("scenario-submit"));
+
+        await waitFor(() => {
+            expect(screen.getByTestId("scenario-generic-error")).toBeInTheDocument();
+        });
+        expect(screen.queryByTestId("scenario-saved-indicator")).not.toBeInTheDocument();
+    });
+
     it("保存成功で失敗リージョンが消える", async () => {
         fetchMock
             .mockResolvedValueOnce(jsonResponse(403, {}))

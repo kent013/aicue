@@ -43,9 +43,12 @@
     // svelte-ignore state_referenced_locally
     let status = $state<VideoManualStatus>(manualStatus);
     let starting = $state(false);
-    let errorMessage = $state<string | null>(null);
-    // 402 (残高不足) のとき購入導線を併記する (code 厳格一致。他エラーで誤表示しない)
-    let showPurchaseLink = $state(false);
+    // 起動失敗の表示モデル (message + 402 残高不足時の購入導線)。402 (残高不足) のときのみ
+    // showPurchaseLink=true (code 厳格一致。他エラーで誤表示しない)。
+    type StartError = { message: string; showPurchaseLink: boolean };
+    // 起動失敗は render/preview 独立に保持する (共有だと後発が先発を上書きし帰属が崩れる)
+    let renderStartError = $state<StartError | null>(null);
+    let previewStartError = $state<StartError | null>(null);
     let sessionExpiredMessage = $state<string | null>(null);
     let confirmingRender = $state(false);
 
@@ -161,8 +164,9 @@
     async function start(kind: "render" | "preview"): Promise<void> {
         if (starting) return; // 多重送信ガード (disabled にはしない)
         starting = true;
-        errorMessage = null;
-        showPurchaseLink = false;
+        // 該当 source のみクリア (もう片方の失敗表示は帰属を保つため残す)
+        if (kind === "render") renderStartError = null;
+        else previewStartError = null;
         sessionExpiredMessage = null;
         try {
             const res = await fetch(`/projects/${projectId}/manuals/${manualId}/${kind}`, {
@@ -176,7 +180,12 @@
             });
             await handleStartResponse(kind, res);
         } catch {
-            errorMessage = "通信に失敗しました。接続を確認して再度お試しください。";
+            const failure: StartError = {
+                message: "通信に失敗しました。接続を確認して再度お試しください。",
+                showPurchaseLink: false,
+            };
+            if (kind === "render") renderStartError = failure;
+            else previewStartError = failure;
         } finally {
             starting = false;
             confirmingRender = false;
@@ -185,7 +194,6 @@
 
     async function handleStartResponse(kind: "render" | "preview", res: Response): Promise<void> {
         const body = (await res.json().catch(() => null)) as unknown;
-        showPurchaseLink = res.status === 402 && isInsufficientTickets(body);
         if (res.status === 201 && body !== null && typeof body === "object") {
             const jobBody = body as RenderJobProps;
             if (kind === "render") {
@@ -196,10 +204,16 @@
             }
             return;
         }
-        // 402 (残高不足) / 409 (競合) / 422 (採用テイク欠落・尺超過) はサーバのメッセージを表示
-        const message = extractMessage(body);
-        errorMessage =
-            message ?? "書き出しを開始できませんでした。時間をおいて再度お試しください。";
+        // 402 (残高不足) / 409 (競合) / 422 (採用テイク欠落・尺超過) はサーバのメッセージを表示。
+        // 起動失敗は source 別 state に積む (完成動画/プレビューの帰属を保つ)。
+        const failure: StartError = {
+            message:
+                extractMessage(body) ??
+                "書き出しを開始できませんでした。時間をおいて再度お試しください。",
+            showPurchaseLink: res.status === 402 && isInsufficientTickets(body),
+        };
+        if (kind === "render") renderStartError = failure;
+        else previewStartError = failure;
     }
 
     /** 402/409 の { message } と 422 の { message, errors } からユーザー向け文言を取り出す */
@@ -259,7 +273,9 @@
     {:else}
         {#if failedRenderJob?.error}
             <div class="mt-4" data-testid="render-error">
-                <Alert type="danger">{failedRenderJob.error}</Alert>
+                <Alert type="danger" title="完成動画の生成に失敗しました">
+                    {failedRenderJob.error}
+                </Alert>
             </div>
         {/if}
         {#if needsRegenerate}
@@ -286,11 +302,11 @@
         {/if}
     {/if}
 
-    {#if errorMessage}
+    {#if renderStartError}
         <div class="mt-4" data-testid="render-start-error">
-            <Alert type="danger">
-                {errorMessage}
-                {#if showPurchaseLink}
+            <Alert type="danger" title="完成動画の生成を開始できませんでした">
+                {renderStartError.message}
+                {#if renderStartError.showPurchaseLink}
                     <span class="ml-1">
                         <TextLink href="/purchase-tickets" testId="render-purchase-link">
                             チケットを購入する
@@ -318,7 +334,7 @@
                 </div>
             {:else if failedPreviewJob}
                 <div data-testid="preview-error">
-                    <Alert type="danger">
+                    <Alert type="danger" title="プレビューの生成に失敗しました">
                         {failedPreviewJob.error ?? "プレビューの生成に失敗しました。"}
                     </Alert>
                 </div>
@@ -334,6 +350,20 @@
                         </Button>
                     </div>
                 {/if}
+            {/if}
+            {#if previewStartError}
+                <div data-testid="preview-start-error">
+                    <Alert type="danger" title="プレビューの生成を開始できませんでした">
+                        {previewStartError.message}
+                        {#if previewStartError.showPurchaseLink}
+                            <span class="ml-1">
+                                <TextLink href="/purchase-tickets" testId="preview-purchase-link">
+                                    チケットを購入する
+                                </TextLink>
+                            </span>
+                        {/if}
+                    </Alert>
+                </div>
             {/if}
             {#if playbackId !== null && !previewInFlight}
                 <!-- svelte-ignore a11y_media_has_caption (プレビュー動画の字幕は焼き込み済み) -->

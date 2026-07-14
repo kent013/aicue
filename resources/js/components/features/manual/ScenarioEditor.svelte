@@ -1,7 +1,7 @@
 <script lang="ts">
     import { tick } from "svelte";
     import { router } from "@inertiajs/svelte";
-    import { ChevronDown, ChevronUp, ListPlus, Plus, Trash2 } from "@lucide/svelte";
+    import { Check, ChevronDown, ChevronUp, ListPlus, Plus, Trash2 } from "@lucide/svelte";
     import Alert from "@/components/atoms/Alert.svelte";
     import Button from "@/components/atoms/Button.svelte";
     import Card from "@/components/atoms/Card.svelte";
@@ -92,6 +92,9 @@
     // svelte-ignore state_referenced_locally
     let snapshot = $state(serializeSteps(toDraftSteps(scenario.steps)));
     let saving = $state(false);
+    // 直近の保存成功をその場に残す (toast の 4s 自動消去に依存しない永続確認)。
+    // true にするのは applySaved() のみ。reseed()・save 開始・失敗・dirty 転換で false。
+    let justSaved = $state(false);
     let errors = $state<Record<string, string[]>>({});
 
     /**
@@ -123,6 +126,12 @@
     let reloading = false;
 
     const dirty = $derived(serializeSteps(steps) !== snapshot);
+
+    // 編集で dirty に転じたら成功確認を消す (level-triggered)。dirty は derived で決定的なため
+    // applySaved 直後は dirty=false のままで justSaved=true が保たれる。
+    $effect(() => {
+        if (dirty) justSaved = false;
+    });
 
     /** 新規行の空値 (scene のみ必須のため空で作る) */
     function emptyRow(shotType: "hiki" | "yori"): Omit<DraftPoint, "id"> {
@@ -222,6 +231,7 @@
      * (完全可視ならスクロールは原則発生せず、連続失敗時のジャンプを起こしにくい)。
      */
     async function showFailure(failure: SaveFailure): Promise<void> {
+        justSaved = false; // 失敗表示時は成功確認を消す
         saveFailure = failure;
         await tick();
         failureEl?.focus({ preventScroll: true });
@@ -233,6 +243,7 @@
         if (saving) return; // 多重送信ガード (disabled にはしない。押下は受けて即 return)
         saving = true;
         errors = {};
+        justSaved = false; // 再保存中は前回の成功確認を伏せる
         saveFailure = null; // 前回の失敗表示をクリア (再保存成功後に旧エラーを残さない)
         try {
             const res = await putScenario();
@@ -330,11 +341,13 @@
         steps = toDraftSteps(document.steps);
         snapshot = serializeSteps(steps);
         errors = {};
+        justSaved = false; // 409 競合/明示リロードの reseed で偽の成功表示を出さない
     }
 
     /** 成功応答の取り込み: 確定 id + version + スナップショット更新 + 成功トースト */
     function applySaved(document: ScenarioDocument): void {
         reseed(document);
+        justSaved = true; // 保存成功パスのみ (reseed の後)
         addToast("success", "シナリオを保存しました");
     }
 
@@ -753,6 +766,14 @@
         {#if dirty}
             <span class="text-caption text-text-secondary" data-testid="scenario-dirty-indicator">
                 未保存の変更があります
+            </span>
+        {:else if justSaved}
+            <span
+                class="flex items-center gap-1 text-caption text-success"
+                data-testid="scenario-saved-indicator"
+            >
+                <Check class="size-4" aria-hidden="true" />
+                保存しました
             </span>
         {/if}
     </div>
