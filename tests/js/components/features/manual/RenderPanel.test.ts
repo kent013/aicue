@@ -137,6 +137,10 @@ describe("RenderPanel", () => {
                 "チケット残高が不足しています",
             );
         });
+        // T040: 起動失敗は完成動画への帰属を title で明示する
+        expect(screen.getByTestId("render-start-error")).toHaveTextContent(
+            "完成動画の生成を開始できませんでした",
+        );
         // 押下可能なまま (disabled にしない)
         expect(screen.getByTestId("render-button")).toBeInTheDocument();
         // T007: 残高不足 (code 厳格一致) では購入導線を併記する
@@ -184,6 +188,8 @@ describe("RenderPanel", () => {
         });
 
         expect(screen.getByTestId("render-error")).toHaveTextContent("書き出しに失敗しました");
+        // T040: ジョブ失敗も完成動画への帰属を title で明示する
+        expect(screen.getByTestId("render-error")).toHaveTextContent("完成動画の生成に失敗しました");
     });
 
     it("preview failed + scenario_version_changed は「作り直す」CTA を表示する", async () => {
@@ -201,6 +207,8 @@ describe("RenderPanel", () => {
         });
 
         expect(screen.getByTestId("preview-error")).toHaveTextContent("シナリオが変更された");
+        // T040: プレビューのジョブ失敗を title で帰属明示する
+        expect(screen.getByTestId("preview-error")).toHaveTextContent("プレビューの生成に失敗しました");
         fetchMock.mockResolvedValueOnce(
             jsonResponse(201, renderJobBody({ kind: "preview", manual_status: "ready" })),
         );
@@ -245,5 +253,140 @@ describe("RenderPanel", () => {
         expect(screen.queryByTestId("render-button")).not.toBeInTheDocument();
         expect(screen.queryByTestId("preview-button")).not.toBeInTheDocument();
         expect(screen.getByTestId("render-progress")).toBeInTheDocument();
+    });
+
+    // --- T040 F-1-2: 起動失敗 alert の source+phase 帰属 ---
+
+    it("プレビュー起動 402 は preview-start-error に帰属し、完成動画欄には出さない", async () => {
+        fetchMock.mockResolvedValueOnce(
+            jsonResponse(402, {
+                code: "insufficient_tickets",
+                message: "チケット残高が不足しています (必要: 1 / 残高: 0)。",
+            }),
+        );
+
+        render(RenderPanel, { props: baseProps });
+        await fireEvent.click(screen.getByTestId("preview-button"));
+
+        await waitFor(() => {
+            expect(screen.getByTestId("preview-start-error")).toHaveTextContent(
+                "チケット残高が不足しています",
+            );
+        });
+        expect(screen.getByTestId("preview-start-error")).toHaveTextContent(
+            "プレビューの生成を開始できませんでした",
+        );
+        // プレビュー起動 402 の購入導線は preview 側に出る
+        expect(screen.getByTestId("preview-purchase-link")).toBeInTheDocument();
+        expect(
+            new URL(
+                (screen.getByTestId("preview-purchase-link") as HTMLAnchorElement).href,
+            ).pathname,
+        ).toBe("/purchase-tickets");
+        // 完成動画欄へ誤帰属しない
+        expect(screen.queryByTestId("render-start-error")).not.toBeInTheDocument();
+        expect(screen.queryByTestId("render-purchase-link")).not.toBeInTheDocument();
+    });
+
+    it("完成動画起動失敗とプレビュー起動失敗は別々に共存し、後発が先発を消さない", async () => {
+        render(RenderPanel, { props: baseProps });
+
+        // 完成動画起動を 422 で失敗させる
+        fetchMock.mockResolvedValueOnce(
+            jsonResponse(422, { message: "採用テイクが不足しています。" }),
+        );
+        await fireEvent.click(screen.getByTestId("render-button"));
+        await waitFor(() => {
+            expect(screen.getByTestId("render-dialog")).toBeInTheDocument();
+        });
+        await fireEvent.click(screen.getByText("生成する"));
+        await waitFor(() => {
+            expect(screen.getByTestId("render-start-error")).toHaveTextContent(
+                "採用テイクが不足しています",
+            );
+        });
+
+        // 続けてプレビュー起動を 422 で失敗させる
+        fetchMock.mockResolvedValueOnce(
+            jsonResponse(422, { message: "プレビューを開始できません。" }),
+        );
+        await fireEvent.click(screen.getByTestId("preview-button"));
+        await waitFor(() => {
+            expect(screen.getByTestId("preview-start-error")).toHaveTextContent(
+                "プレビューを開始できません",
+            );
+        });
+
+        // 両方が別 title で共存する (後発が先発を上書きしない)
+        expect(screen.getByTestId("render-start-error")).toHaveTextContent(
+            "完成動画の生成を開始できませんでした",
+        );
+        expect(screen.getByTestId("preview-start-error")).toHaveTextContent(
+            "プレビューの生成を開始できませんでした",
+        );
+    });
+
+    it("片方の起動成功では該当 source の失敗のみ消え、もう片方の失敗表示は温存する", async () => {
+        render(RenderPanel, { props: baseProps });
+
+        // 先にプレビュー起動を 422 で失敗させる
+        fetchMock.mockResolvedValueOnce(
+            jsonResponse(422, { message: "プレビューを開始できません。" }),
+        );
+        await fireEvent.click(screen.getByTestId("preview-button"));
+        await waitFor(() => {
+            expect(screen.getByTestId("preview-start-error")).toBeInTheDocument();
+        });
+
+        // 続けて完成動画起動を成功 (201) させる
+        fetchMock.mockResolvedValueOnce(jsonResponse(201, renderJobBody()));
+        await fireEvent.click(screen.getByTestId("render-button"));
+        await waitFor(() => {
+            expect(screen.getByTestId("render-dialog")).toBeInTheDocument();
+        });
+        await fireEvent.click(screen.getByText("生成する"));
+        await waitFor(() => {
+            expect(screen.getByTestId("render-progress")).toBeInTheDocument();
+        });
+
+        // render 側は成功したが、preview 側の失敗表示は温存される (source 別クリア)
+        expect(screen.queryByTestId("render-start-error")).not.toBeInTheDocument();
+        expect(screen.getByTestId("preview-start-error")).toHaveTextContent(
+            "プレビューを開始できません",
+        );
+    });
+
+    it("プレビューのジョブ失敗と完成動画の起動失敗が別 title で並ぶ", async () => {
+        render(RenderPanel, {
+            props: {
+                ...baseProps,
+                previewJob: renderJobBody({
+                    kind: "preview",
+                    status: "failed",
+                    error: "プレビュー合成に失敗しました。",
+                    error_code: "internal",
+                    manual_status: "ready",
+                }),
+            },
+        });
+
+        fetchMock.mockResolvedValueOnce(
+            jsonResponse(422, { message: "採用テイクが不足しています。" }),
+        );
+        await fireEvent.click(screen.getByTestId("render-button"));
+        await waitFor(() => {
+            expect(screen.getByTestId("render-dialog")).toBeInTheDocument();
+        });
+        await fireEvent.click(screen.getByText("生成する"));
+        await waitFor(() => {
+            expect(screen.getByTestId("render-start-error")).toBeInTheDocument();
+        });
+
+        expect(screen.getByTestId("preview-error")).toHaveTextContent(
+            "プレビューの生成に失敗しました",
+        );
+        expect(screen.getByTestId("render-start-error")).toHaveTextContent(
+            "完成動画の生成を開始できませんでした",
+        );
     });
 });
