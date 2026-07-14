@@ -8,9 +8,12 @@ use App\Models\ApiKey;
 use App\Models\Organization;
 use App\Models\Project;
 use App\Models\User;
+use App\Providers\FakeExternalsServiceProvider;
 use App\Services\AI\Testing\CannedPromptFakeRegistrar;
 use App\Services\Organization\OrganizationProvisioningService;
+use App\Services\Storage\Fakes\FakeObjectStore;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Vite;
 use Illuminate\Support\Str;
 use Kent013\PrismPrompt\Prompt;
@@ -226,4 +229,31 @@ function attachProjectMember(
     ProjectRole $role = ProjectRole::Member,
 ): void {
     $project->members()->attach($user, ['role' => $role->value]);
+}
+
+/**
+ * storage fake を有効化する (Feature テスト用)。
+ *
+ * config('testing.fake_storage')=true にした上で **provider 自身を再実走** させ、
+ * bind と signed route を確立する (手動 bind/route 再実装は provider の欠陥を隠すため禁止)。
+ * app env は phpunit.xml の testing + runningUnitTests()===true のため FakeStorageGate が成立する。
+ * s3_fake disk は Storage::fake で tmp へ隔離し、実 s3 disk は放置 =
+ * もし実 S3 に触れたら即例外になる (fake が実 S3 非依存であることの negative 担保)。
+ *
+ * 各テストは setUp の refreshApplication で fresh app + fresh config を得るため、
+ * 明示的な env/config の後始末は不要 (テスト間リークしない)。
+ */
+function enableFakeStorage(): void
+{
+    config()->set('testing.fake_storage', true);
+
+    $provider = new FakeExternalsServiceProvider(app());
+    $provider->register();
+    $provider->boot();
+    // provider の register()/boot() は本来 bootstrap 時に走り、フレームワークが route 読込後に
+    // name lookup を再構築する。テストでは boot を後追いで実行するため、その最終手順のみ明示的に補う
+    // (route 自体は provider が登録済み = 配線ロジックは provider を実走して検証している)。
+    app('router')->getRoutes()->refreshNameLookups();
+
+    Storage::fake(FakeObjectStore::DISK);
 }
