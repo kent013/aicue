@@ -50,6 +50,7 @@
 | POST | projects/{project}/items | projects.items.store | S4 | 通常 |
 | PATCH | projects/{project}/items/{item} | projects.items.update | S4 | 通常 |
 | POST | projects/{project}/manuals/{manual}/analyze | projects.manuals.analyze | S3 | 通常 |
+| POST | projects/{project}/manuals/{manual}/duplicate | projects.manuals.duplicate | S3 | 通常 |
 | DELETE | projects/{project}/manuals/{manual} | projects.manuals.destroy | S3 | 通常 |
 | POST | projects/{project}/manuals/{manual}/preview | projects.manuals.preview | S3 | 通常 |
 | POST | projects/{project}/manuals/{manual}/render | projects.manuals.render | S3 | 通常 |

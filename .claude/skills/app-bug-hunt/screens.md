@@ -13,6 +13,7 @@
 | app/csrf-cookie | capture.csrf-cookie | S3 |
 | app/projects/{project}/manuals | capture.manuals.index | S3 |
 | app/projects/{project}/manuals/{manual} | capture.manuals.show | S3 |
+| app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take}/playback | capture.takes.playback | S3 |
 | billing | billing.index | S5 |
 | commerce-disclosure | legal.commerce-disclosure | S1 |
 | contact | contact | S1 |
