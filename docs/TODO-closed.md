@@ -62,6 +62,7 @@ Open リストは [TODO.md](TODO.md) を参照。
 | T044 | client-side stale validation の横展開修正(移譲フォーム他)。有効値復帰でclientErrorをクリア(移譲フォーム他) | frontend | 2026-07-14 17:55 |
 | T045 | 特定商取引法ページ(commerce-disclosure)へのサイト内リンク追加。フッターに特定商取引法リンクを追加しreachability回復 | frontend | 2026-07-14 17:57 |
 | T046 | AIシナリオ生成の導入カット/総括カット自動挿入。AI生成シナリオに導入/総括カットを自動付与 | backend | 2026-07-14 23:16 |
+| T047 | 撮影中カメラプレビューへの字幕オーバーレイ表示。撮影プレビューに字幕を重畳表示（焼込でない/トグル可） | frontend | 2026-07-14 23:17 |
 
 ## Obsoleted
 
