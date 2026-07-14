@@ -10,6 +10,7 @@ use App\Models\Organization;
 use App\Models\Project;
 use App\Models\User;
 use App\Models\VideoManual;
+use App\Support\Manual\ScenarioLimits;
 use Inertia\Testing\AssertableInertia as Assert;
 
 /*
@@ -506,9 +507,10 @@ test('steps / points の上限超過は 422 (有界入力)', function (): void {
     [, $owner, $project, $manual] = scenarioTestContext();
     $url = "/projects/{$project->id}/manuals/{$manual->id}/scenario";
 
+    // top-level 上限は MAX_TOP_LEVEL_CUTS(=102。生成 100 + 導入/総括 2)。超過 (103) で 422
     $this->actingAs($owner)->putJson($url, [
         'expected_version' => 0,
-        'steps' => array_fill(0, 101, scenarioStepPayload()),
+        'steps' => array_fill(0, ScenarioLimits::MAX_TOP_LEVEL_CUTS + 1, scenarioStepPayload()),
     ])->assertStatus(422)->assertJsonValidationErrors('steps');
 
     $this->actingAs($owner)->putJson($url, [

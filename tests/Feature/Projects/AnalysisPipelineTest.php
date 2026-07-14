@@ -6,6 +6,7 @@ use App\DataTransferObjects\Manual\Analysis\GeneratedScenarioData;
 use App\Enums\Billing\TicketReservationStatus;
 use App\Enums\Manual\CutType;
 use App\Enums\Manual\JobStatus;
+use App\Enums\Manual\ShotType;
 use App\Enums\Manual\VideoManualStatus;
 use App\Models\AnalysisJob;
 use App\Models\Billing\TicketReservation;
@@ -136,11 +137,23 @@ test('成功パス: cuts materialize / ready / version+1 / succeeded / committed
     $manual->refresh();
     expect($manual->status)->toBe(VideoManualStatus::Ready);
     expect($manual->scenario_version)->toBe(1);
+    // 導入 + 生成 step + 生成 point + 総括 = 4 (top-level は 導入/生成 step/総括 の 3)
     $cuts = $manual->cuts()->orderBy('sort_order')->get();
-    expect($cuts)->toHaveCount(2);
-    $step = $cuts->firstWhere('type', CutType::Step);
+    expect($cuts)->toHaveCount(4);
+    $topLevel = $cuts->where('parent_cut_id', null)->values();
+    expect($topLevel)->toHaveCount(3);
+    // 先頭=導入 / 末尾=総括 (位置・型・shot_type・親子を退行検出)
+    $intro = $topLevel->first();
+    expect($intro->parent_cut_id)->toBeNull();
+    expect($intro->shot_type)->toBe(ShotType::Hiki);
+    expect($intro->narration)->toContain($manual->title);
+    $summary = $topLevel->last();
+    expect($summary->parent_cut_id)->toBeNull();
+    expect($summary->shot_type)->toBe(ShotType::Hiki);
+    // 生成 step は導入と総括の間 / 生成 point はその step 配下 (fixture 由来の本文は不変)
+    $step = $topLevel->get(1);
     $point = $cuts->firstWhere('type', CutType::Point);
-    expect($step)->not->toBeNull();
+    expect($step->type)->toBe(CutType::Step);
     expect($point)->not->toBeNull();
     expect($point->parent_cut_id)->toBe($step->id);
     expect($step->scene)->toBe('ネジ締めの全体');
@@ -355,7 +368,8 @@ test('再解析の materialize は既存 cuts を全置換する (旧 cut id が
 
     expect($job->refresh()->status)->toBe(JobStatus::Succeeded);
     $manual->refresh();
-    expect($manual->cuts()->count())->toBe(2);
+    // 導入 + 生成 step + 生成 point + 総括 = 4 (旧 cut は全置換で消える)
+    expect($manual->cuts()->count())->toBe(4);
     expect($manual->cuts()->whereKey($oldCut->id)->exists())->toBeFalse();
 });
 

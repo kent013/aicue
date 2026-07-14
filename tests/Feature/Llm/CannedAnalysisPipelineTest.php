@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Enums\Manual\CutType;
 use App\Enums\Manual\JobStatus;
+use App\Enums\Manual\ShotType;
 use App\Enums\Manual\VideoManualStatus;
 use App\Models\AnalysisJob;
 use App\Models\Project;
@@ -55,16 +56,24 @@ test('canned fake 配線下で AnalysisPipeline が succeeded し cuts (step+poi
     expect($job->status)->toBe(JobStatus::Succeeded);
     expect($job->error)->toBeNull();
 
-    // manual: cuts ツリー (step 1 + point 1) / ready。
+    // manual: cuts ツリー (導入 + 生成 step + 生成 point + 総括) / ready。
     $manual->refresh();
     expect($manual->status)->toBe(VideoManualStatus::Ready);
-    $cuts = $manual->cuts()->get();
-    expect($cuts)->toHaveCount(2);
-    $step = $cuts->firstWhere('type', CutType::Step);
+    $cuts = $manual->cuts()->orderBy('sort_order')->get();
+    expect($cuts)->toHaveCount(4); // 導入 + step + point + 総括
+    $topLevel = $cuts->where('parent_cut_id', null)->values();
+    expect($topLevel)->toHaveCount(3);
+    // 先頭=導入 / 末尾=総括: 位置・型・shot_type・親子を退行検出 (件数のみに頼らない)
+    expect($topLevel->first()->parent_cut_id)->toBeNull();
+    expect($topLevel->first()->shot_type)->toBe(ShotType::Hiki);
+    expect($topLevel->first()->narration)->toContain($manual->title);
+    expect($topLevel->last()->parent_cut_id)->toBeNull();
+    expect($topLevel->last()->shot_type)->toBe(ShotType::Hiki);
+    // 生成 step / point は従来どおり存在し、point は中間 step にぶら下がる
+    $generatedStep = $topLevel->get(1); // 導入(0) と 総括(2) の間
     $point = $cuts->firstWhere('type', CutType::Point);
-    expect($step)->not->toBeNull();
     expect($point)->not->toBeNull();
-    expect($point->parent_cut_id)->toBe($step->id);
+    expect($point->parent_cut_id)->toBe($generatedStep->id);
 
     // 実 LLM provider へは 1 度も到達していない (fake の recorded に 3 段が記録されている)。
     $fake = Prompt::getFake();

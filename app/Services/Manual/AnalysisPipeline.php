@@ -47,6 +47,7 @@ class AnalysisPipeline
         private readonly SopTextExtractor $extractor,
         private readonly TicketLedgerService $tickets,
         private readonly NotificationCenterService $notifications,
+        private readonly ScenarioBookendBuilder $bookend,
     ) {}
 
     public function run(int $analysisJobId): void
@@ -207,9 +208,13 @@ class AnalysisPipeline
             $lockedManual = $project->manuals()
                 ->whereKey($locked->video_manual_id)->lockForUpdate()->firstOrFail();
 
+            // 導入/総括カットを terminal tx 内 (locked manual 参照) で決定的に前後付与する。
+            // 再掲元は今回生成の steps のみ (DB 既存 cuts 不参照)。
+            $steps = $this->bookend->wrap($lockedManual, $generated->toScenarioSteps());
+
             // cuts + version + status(analyzing→ready) はロック済み manual 前提メソッドで反映
             // (内側 transaction を張らない。analyzing guard 違反は LogicException → 全体 rollback)
-            $this->scenarios->materializeIntoLockedManual($lockedManual, $generated->toScenarioSteps());
+            $this->scenarios->materializeIntoLockedManual($lockedManual, $steps);
 
             // ロック 3: reservation/org 行 (TicketLedgerService::commit 内部。savepoint)
             $reservation = $locked->ticketReservation;

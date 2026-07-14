@@ -78,7 +78,9 @@ class UpdateScenarioRequest extends FormRequest
         return array_merge(
             [
                 'expected_version' => ['required', 'integer', 'min:0'],
-                'steps' => ['present', 'array', 'max:'.ScenarioLimits::MAX_STEPS],
+                // v1 は定型カットを識別できないため、手動保存の上限は「top-level cut 総数 ≤ 102」で表現する
+                // (生成 100 手順 + 導入/総括 2 の materialized をそのまま再保存できる)。内訳 (通常/定型) は強制しない。
+                'steps' => ['present', 'array', 'max:'.ScenarioLimits::MAX_TOP_LEVEL_CUTS],
                 // points キー欠落はクライアント直列化バグ。行単位で明示エラーにする
                 'steps.*' => ['array', 'required_array_keys:points'],
                 'steps.*.points' => ['present', 'array', 'max:'.ScenarioLimits::MAX_POINTS_PER_STEP],

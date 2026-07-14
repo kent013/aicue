@@ -26,6 +26,12 @@ return [
     // stale ジョブ回復閾値 (分)。queued: dispatch 喪失、running: worker 異常終了
     'analysis_stale_after_minutes' => 30,
 
+    // ── シナリオ導入/総括カット (概念設計 §改善アイデア) ──────────────
+    // 総括カットの要点再掲に載せる最大件数 (先頭から)。0 以下は builder が 1 件扱いに補正。
+    'summary_recap_max_points' => 3,
+    // 導入/総括の作業名補間で用いるタイトルの truncate 上限 (subtitle_primary=100 に収める)。
+    'scenario_bookend_title_max_chars' => 60,
+
     // SOP アップロード上限 (bytes) と許可拡張子 (mime rule 用)
     'source_document_max_bytes' => 20 * 1024 * 1024,
     'source_document_mimes' => ['pdf', 'xlsx', 'xls', 'txt'],
