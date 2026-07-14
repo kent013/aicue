@@ -30,6 +30,25 @@ export const STATUS_TONES = {
     published: "primary",
 } as const satisfies Record<VideoManualStatus, BadgeTone>;
 
+/**
+ * 撮影ナビ (capture.manuals.show) へ導線を出してよい状態か。
+ * 撮影ナビ一覧 (CaptureManualController::index) が列挙する ready/published と一致させる
+ * (draft/analyzing/rendering はシナリオ未確定でナビ画面が空になるため導線を出さない)。
+ * satisfies で status 追加時のキー漏れをコンパイル時検出する (STATUS_TONES と同方針)。
+ */
+export const CAPTURE_NAVIGABLE_BY_STATUS = {
+    draft: false,
+    analyzing: false,
+    ready: true,
+    rendering: false,
+    published: true,
+} as const satisfies Record<VideoManualStatus, boolean>;
+
+/** PC 編集/詳細から撮影ナビへ導線を出してよいか (型付き判定の単一ソース) */
+export function isCaptureNavigable(status: VideoManualStatus): boolean {
+    return CAPTURE_NAVIGABLE_BY_STATUS[status];
+}
+
 export interface PaginationMeta {
     current_page: number;
     last_page: number;

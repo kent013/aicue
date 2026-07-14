@@ -1,5 +1,6 @@
 <script lang="ts">
     import { page, router } from "@inertiajs/svelte";
+    import { Camera } from "@lucide/svelte";
     import Badge from "@/components/atoms/Badge.svelte";
     import Button from "@/components/atoms/Button.svelte";
     import Card from "@/components/atoms/Card.svelte";
@@ -13,7 +14,7 @@
     import AppLayout from "@/components/templates/AppLayout.svelte";
     import type { SharedProps } from "@/lib/shared-props";
     import type { AnalysisProps, CategoryOption, RenderProps, VideoManualStatus } from "@/types/manual";
-    import { STATUS_TONES, VIDEO_MANUAL_STATUS_LABELS } from "@/types/manual";
+    import { STATUS_TONES, VIDEO_MANUAL_STATUS_LABELS, isCaptureNavigable } from "@/types/manual";
 
     /**
      * 動画マニュアル詳細 (メタデータ + AI 解析パネル)。撮影者も閲覧可
@@ -38,6 +39,9 @@
 
     const shared = $derived(page.props as unknown as SharedProps);
     const appName = $derived(shared.appName ?? "");
+
+    // 撮影ナビ (capture.manuals.show) への文脈リンクを出してよい状態か
+    const captureNavigable = $derived(isCaptureNavigable(manual.status));
 
     /* ---- 複製 (別名保存) ---- */
     let duplicateDialogOpen = $state(false);
@@ -76,23 +80,38 @@
                 <span class="text-caption text-text-secondary">{manual.created_at}</span>
             </div>
         </div>
-        {#if canManage}
+        <!-- action コンテナは撮影導線か管理系のいずれかが出るときだけ描画 (空 div を残さない) -->
+        {#if captureNavigable || canManage}
             <div class="flex items-center gap-2">
-                <Button
-                    variant="ghost"
-                    onclick={() => (duplicateDialogOpen = true)}
-                    testId="duplicate-manual-button"
-                >
-                    複製
-                </Button>
-                <Button
-                    variant="ghost"
-                    href={`/projects/${project.id}/manuals/${manual.id}/edit`}
-                    inertia
-                    testId="edit-manual-button"
-                >
-                    編集
-                </Button>
+                {#if captureNavigable}
+                    <!-- canManage 内外を問わず表示 (撮影者=project_member も撮影ナビ view 可) -->
+                    <Button
+                        variant="primary"
+                        href={`/app/projects/${project.id}/manuals/${manual.id}`}
+                        inertia
+                        testId="capture-manual-link"
+                    >
+                        <Camera class="size-4" aria-hidden="true" />
+                        この手順書を撮影する
+                    </Button>
+                {/if}
+                {#if canManage}
+                    <Button
+                        variant="ghost"
+                        onclick={() => (duplicateDialogOpen = true)}
+                        testId="duplicate-manual-button"
+                    >
+                        複製
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        href={`/projects/${project.id}/manuals/${manual.id}/edit`}
+                        inertia
+                        testId="edit-manual-button"
+                    >
+                        編集
+                    </Button>
+                {/if}
             </div>
         {/if}
     </div>

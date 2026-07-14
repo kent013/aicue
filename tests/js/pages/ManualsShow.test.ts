@@ -87,6 +87,44 @@ describe("Manuals/Show", () => {
         expect(screen.queryByTestId("source-document-upload")).toBeNull();
     });
 
+    it("ready 状態では撮影ナビへの導線を表示し href が撮影ナビを厳密に指す", () => {
+        render(Show, {
+            props: { ...baseProps, manual: { ...baseProps.manual, status: "ready" } },
+        });
+
+        // Inertia Link は jsdom で origin 付き絶対 URL に解決される。
+        // path 全体を start/end 固定で照合し prefix / suffix / クエリ変化を検知する。
+        expect(screen.getByTestId("capture-manual-link").getAttribute("href")).toMatch(
+            /^https?:\/\/[^/]+\/app\/projects\/1\/manuals\/5$/,
+        );
+    });
+
+    it("published 状態でも撮影導線を表示する", () => {
+        render(Show, {
+            props: { ...baseProps, manual: { ...baseProps.manual, status: "published" } },
+        });
+
+        expect(screen.getByTestId("capture-manual-link")).toBeInTheDocument();
+    });
+
+    it("ready 状態なら canManage=false (撮影者) でも撮影導線を表示する", () => {
+        render(Show, {
+            props: {
+                ...baseProps,
+                canManage: false,
+                manual: { ...baseProps.manual, status: "ready" },
+            },
+        });
+
+        expect(screen.getByTestId("capture-manual-link")).toBeInTheDocument();
+    });
+
+    it("draft 状態では撮影導線を表示しない", () => {
+        render(Show, { props: baseProps });
+
+        expect(screen.queryByTestId("capture-manual-link")).toBeNull();
+    });
+
     it("analyzing 中は進捗を表示し、アップロード導線は出さない (draft/ready のみ)", () => {
         render(Show, {
             props: {

@@ -57,4 +57,22 @@ describe("Manuals/Edit", () => {
         expect(screen.getByTestId("manual-submit")).not.toBeDisabled();
         expect(screen.getByTestId("scenario-submit")).not.toBeDisabled();
     });
+
+    it("published 状態では撮影ナビへの導線を表示し href が撮影ナビを厳密に指す", () => {
+        render(Edit, {
+            props: { ...baseProps, manual: { ...baseProps.manual, status: "published" as const } },
+        });
+
+        // Inertia Link は jsdom で origin 付き絶対 URL に解決される。
+        // path 全体を start/end 固定で照合し prefix / suffix / クエリ変化を検知する。
+        expect(screen.getByTestId("capture-manual-link").getAttribute("href")).toMatch(
+            /^https?:\/\/[^/]+\/app\/projects\/1\/manuals\/5$/,
+        );
+    });
+
+    it("draft 状態では撮影導線を表示しない", () => {
+        render(Edit, { props: baseProps });
+
+        expect(screen.queryByTestId("capture-manual-link")).toBeNull();
+    });
 });
