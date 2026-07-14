@@ -63,12 +63,6 @@ export interface UploadTicket {
     expires_at: string;
 }
 
-/** POST .../sync の応答 (CaptureSyncResultResource と対) */
-export interface SyncResult {
-    pending_upload: { cut: number; client_take_id: string }[];
-    manual: CaptureManualDetail;
-}
-
 /** 422 quota 超過ボディ (QuotaExceededResource と対) */
 export interface QuotaExceededBody {
     code: "quota_exceeded";

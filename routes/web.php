@@ -8,7 +8,6 @@ use App\Http\Controllers\Auth\SocialAuthController;
 use App\Http\Controllers\Billing\BillingController;
 use App\Http\Controllers\Billing\TicketPurchaseController;
 use App\Http\Controllers\Capture\CaptureManualController;
-use App\Http\Controllers\Capture\CaptureSyncController;
 use App\Http\Controllers\Capture\CaptureTakeController;
 use App\Http\Controllers\Capture\TakeUploadUrlController;
 use App\Http\Controllers\ContactController;
@@ -488,8 +487,6 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
             Route::scopeBindings()->group(function (): void {
                 Route::get('/projects/{project}/manuals/{manual}', [CaptureManualController::class, 'show'])
                     ->name('manuals.show');
-                Route::post('/projects/{project}/manuals/{manual}/sync', [CaptureSyncController::class, 'store'])
-                    ->name('manuals.sync');
                 Route::post('/projects/{project}/manuals/{manual}/cuts/{cut}/takes/upload-url', [TakeUploadUrlController::class, 'store'])
                     ->name('takes.upload-url');
                 Route::post('/projects/{project}/manuals/{manual}/cuts/{cut}/takes', [CaptureTakeController::class, 'store'])
