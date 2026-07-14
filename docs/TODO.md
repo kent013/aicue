@@ -21,7 +21,6 @@
 
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
-| T054 | PC編集面から該当マニュアルの撮影ナビ面への文脈リンク | frontend | 編集面から撮影ナビへ文脈リンク追加(純フロント) | Low | incremental | [設計](devnotes/20260715-0048-pc-capture-context-link/) | 2026-07-15 |
 | T055 | 招待経由登録フォームでの招待メールアドレス自動入力 | frontend | 招待メールを登録フォームにprefill(readonly) | Low | incremental | [設計](devnotes/20260715-0100-invite-email-prefill/) | 2026-07-15 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
