@@ -21,6 +21,8 @@
 
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
+| T037 | 撮影画面(capture.manuals.show)のモバイル/タブレット横overflow修正 | frontend | 撮影画面のモバイル/タブレット横overflow修正 | High | incremental | [設計](devnotes/20260714-1049-capture-show-responsive/) | 2026-07-14 |
+| T039 | dev/bughunt/CI環境へのffmpeg導入(動画レンダー疎通) | infrastructure | Dockerfileにffmpeg追加しrender疎通 | High | incremental | [設計](devnotes/20260714-1050-ffmpeg-provisioning/) | 2026-07-14 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
