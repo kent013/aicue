@@ -8,11 +8,12 @@
 2. `billing.index` → 現在のプラン・チケット残高・使用量(容量 Quota 含む)が表示。
 3. `billing.checkout`(プラン申込/チケットチャージ) → Stripe fake の checkout へ → 戻ると残高/プランが更新され、二重送信しても二重課金にならない(冪等)。
 4. `billing.portal` → Stripe カスタマーポータルへ遷移。
-5. チケット消費との整合(S3 と連動): analyze で 1、render で N 消費され、残高が減る。preview は非消費。ジョブ失敗時は予約が解放され残高が戻る(reserve→commit/release の 2 フェーズ)。
+5. チケットスポット購入 `billing.tickets.show`(`/purchase-tickets`) → 枚数入力 → `billing.tickets.checkout`(Stripe fake)。**枚数に範囲外(>上限)を入れてエラー表示後、有効値に修正するとエラー/invalid が即座に消える**か(stale invalid 解消, T041)。合計金額が枚数に応じ再計算されるか。
+6. チケット消費との整合(S3 と連動): analyze で 1、render で N 消費され、残高が減る。preview は非消費。ジョブ失敗時は予約が解放され残高が戻る(reserve→commit/release の 2 フェーズ)。
 
 ## このストーリーで消化する screens / operations
-- screens: pricing, billing.index
-- operations: billing.checkout, billing.portal
+- screens: pricing, billing.index, billing.tickets.show
+- operations: billing.checkout, billing.portal, billing.tickets.checkout
 
 ## 逸脱アイデア (--deviate 時)
 - checkout を二重送信/戻る→再送 → 二重課金・二重チャージにならないか(冪等マシン/webhook)。
