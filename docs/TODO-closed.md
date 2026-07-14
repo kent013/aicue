@@ -54,6 +54,7 @@ Open リストは [TODO.md](TODO.md) を参照。
 | T036 | bug-hunt real-llmモード(既定)とfake-llm/real-storageオプション。LLMを既定でreal接続しfake-llmをopt-in化 | infrastructure | 2026-07-14 04:46 |
 | T038 | bug-hunt環境のテイク動画storageのfake配線(実S3非依存化)。take/render動画storageをfake配線し500解消 | infrastructure | 2026-07-14 12:51 |
 | T039 | dev/bughunt/CI環境へのffmpeg導入(動画レンダー疎通)。Dockerfileにffmpeg追加しrender疎通 | infrastructure | 2026-07-14 12:54 |
+| T037 | 撮影画面(capture.manuals.show)のモバイル/タブレット横overflow修正。grid-cols-1化+min-w-0+shooting_point truncate構造化 | frontend | 2026-07-14 13:36 |
 
 ## Obsoleted
 

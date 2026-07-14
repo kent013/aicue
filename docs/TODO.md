@@ -21,7 +21,6 @@
 
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
-| T037 | 撮影画面(capture.manuals.show)のモバイル/タブレット横overflow修正 | frontend | 撮影画面のモバイル/タブレット横overflow修正 | High | incremental | [設計](devnotes/20260714-1049-capture-show-responsive/) | 2026-07-14 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
