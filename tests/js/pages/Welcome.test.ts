@@ -126,4 +126,34 @@ describe("Welcome (LP)", () => {
         await fireEvent.click(within(panel).getByRole("link", { name: "料金プラン" }));
         expect(screen.queryByTestId("guest-nav-panel")).not.toBeInTheDocument();
     });
+
+    it("フッターに法的リンク3件 (利用規約→プライバシー→特商法) を href と順序どおり出す", () => {
+        render(Welcome, { props: baseProps });
+
+        // <footer> は contentinfo landmark。nav 側リンクと混ざらないよう footer に限定する。
+        const footer = screen.getByRole("contentinfo");
+
+        // (a) 法的3リンクを名前で個別取得し href を契約化。
+        //     commerce は本バグ F-2-01 の主対象。terms/privacy も欠落検知のため個別検証する。
+        expect(within(footer).getByRole("link", { name: "利用規約" })).toHaveAttribute(
+            "href",
+            "/terms",
+        );
+        expect(
+            within(footer).getByRole("link", { name: "プライバシーポリシー" }),
+        ).toHaveAttribute("href", "/privacy");
+        expect(
+            within(footer).getByRole("link", { name: "特定商取引法に基づく表記" }),
+        ).toHaveAttribute("href", "/commerce-disclosure");
+
+        // (b) 法的リンクだけを DOM 順で抽出し表示順を固定 (非法的リンクは filter で除外済み
+        //     なので、料金プラン/お問い合わせ等の増減では壊れない = ノイズ耐性あり)。
+        const legalHrefs = within(footer)
+            .getAllByRole("link")
+            .map((a) => a.getAttribute("href"))
+            .filter((href) =>
+                ["/terms", "/privacy", "/commerce-disclosure"].includes(href ?? ""),
+            );
+        expect(legalHrefs).toEqual(["/terms", "/privacy", "/commerce-disclosure"]);
+    });
 });
