@@ -53,14 +53,25 @@ class CaptureManualController extends Controller
         $this->resolveOrganizationProject($organization, $project); // 認可より前に 404
         Gate::authorize('view', $project);
 
+        $user = $request->user();
+        Assert::isInstanceOf($user, User::class); // view 認可済み = 認証済み。早期に int を確定
+        $userId = $user->id;
+
         $categoryId = $request->filled('category') ? (int) $request->string('category')->value() : null;
         $search = $request->filled('q') ? $request->string('q')->value() : null;
+        $mine = $request->boolean('mine'); // "1"/"true" を bool 正規化
 
         $manuals = $project->manuals()
             ->whereIn('status', [VideoManualStatus::Ready, VideoManualStatus::Published])
             ->when($categoryId !== null, fn (Builder $query) => $query->where('category_id', $categoryId))
-            ->when($search !== null, fn (Builder $query) => $query->where('title', 'like', '%'.$search.'%'))
-            ->with('category')
+            // LIKE メタ文字 (%/_/\) はリテラル検索として扱う (PC 一覧 manualRows と統一)
+            ->when($search !== null, function (Builder $query) use ($search): void {
+                Assert::string($search);
+                $query->where('title', 'like', '%'.addcslashes($search, '%_\\').'%');
+            })
+            // 自作フィルタ: 自ユーザー id のみ (payload 非受領 = tenant/actor キー不信)
+            ->when($mine, fn (Builder $query) => $query->where('created_by', $userId))
+            ->with(['category', 'creator'])
             ->withCount([
                 'cuts',
                 // 採用済み cut 数 (relation 経由 = 'adopted_take_id' リテラルを撮影経路に増やさない)
@@ -80,7 +91,7 @@ class CaptureManualController extends Controller
                 ->get()
                 ->map(static fn (Category $category): array => ['id' => $category->id, 'name' => $category->name])
                 ->all(),
-            'filters' => ['category' => $categoryId, 'q' => $search],
+            'filters' => ['category' => $categoryId, 'q' => $search, 'mine' => $mine],
         ]);
     }
 

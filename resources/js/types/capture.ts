@@ -52,6 +52,8 @@ export interface CaptureManualSummary {
     cuts_adopted: number;
     cuts_with_takes: number;
     updated_at: string | null;
+    /** 作成者名。退会/削除で解決不可のときは null (UI は「不明」) */
+    creator_name: string | null;
 }
 
 /** POST .../takes/upload-url の応答 (TakeUploadTicketResource と対) */

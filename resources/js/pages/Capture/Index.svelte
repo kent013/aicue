@@ -3,10 +3,12 @@
     import { Camera, Search } from "@lucide/svelte";
     import Badge from "@/components/atoms/Badge.svelte";
     import Card from "@/components/atoms/Card.svelte";
+    import Checkbox from "@/components/atoms/Checkbox.svelte";
     import Input from "@/components/atoms/Input.svelte";
     import Select from "@/components/atoms/Select.svelte";
     import EmptyState from "@/components/molecules/EmptyState.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import { formatDate } from "@/lib/date-format";
     import type { SharedProps } from "@/lib/shared-props";
     import type { CaptureManualSummary } from "@/types/capture";
 
@@ -18,7 +20,7 @@
         project: { id: number; name: string };
         manuals: CaptureManualSummary[];
         categories: { id: number; name: string }[];
-        filters: { category: number | null; q: string | null };
+        filters: { category: number | null; q: string | null; mine: boolean };
     }
 
     let { project, manuals, categories, filters }: Props = $props();
@@ -28,11 +30,13 @@
 
     let search = $state(filters.q ?? "");
     let categoryId = $state(filters.category === null ? "" : String(filters.category));
+    let mine = $state(filters.mine);
 
     function applyFilters(): void {
         const query: Record<string, string> = {};
         if (search !== "") query.q = search;
         if (categoryId !== "") query.category = categoryId;
+        if (mine) query.mine = "1";
         router.get(`/app/projects/${project.id}/manuals`, query, {
             preserveState: true,
             preserveScroll: true,
@@ -72,6 +76,16 @@
         </div>
     </div>
 
+    <div class="mt-3">
+        <Checkbox
+            id="capture-mine"
+            bind:checked={mine}
+            label="自分が作ったシナリオ"
+            onchange={applyFilters}
+            testId="capture-mine"
+        />
+    </div>
+
     <div class="mt-4 flex flex-col gap-3" data-testid="capture-manual-list">
         {#if manuals.length === 0}
             <EmptyState
@@ -89,6 +103,11 @@
                             <p class="mt-1 text-caption text-text-secondary">
                                 {manual.category_name ?? "未分類"}
                                 ・カット {manual.cuts_total} / 採用済 {manual.cuts_adopted}
+                            </p>
+                            <p class="mt-0.5 text-caption text-text-secondary">
+                                {manual.creator_name ?? "不明"} ・ 更新 {formatDate(
+                                    manual.updated_at,
+                                )}
                             </p>
                         </div>
                         <div class="shrink-0">

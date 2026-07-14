@@ -37,13 +37,19 @@ export interface PaginationMeta {
     total: number;
 }
 
+/** PHP App\Enums\Manual\ManualSortOption と値集合を一致させる (allowlist) */
+export type ManualSortOption = "updated_desc" | "updated_asc" | "title_asc" | "title_desc";
+
 export interface ManualListItem {
     id: number;
     title: string;
     status: VideoManualStatus;
     /** null = 未分類 */
     category: { id: number; name: string } | null;
+    /** 作成者。退会/削除で解決不可のときは null (UI は「不明」) */
+    creator: { id: number; name: string } | null;
     created_at: string;
+    updated_at: string;
 }
 
 export interface CategoryOption {
@@ -56,6 +62,10 @@ export interface ManualFilters {
     category: string | null;
     status: string | null;
     q: string | null;
+    /** 並べ替え。null = 既定 (作成日降順) */
+    sort: ManualSortOption | null;
+    /** 自分の作成分のみ */
+    mine: boolean;
 }
 
 /**

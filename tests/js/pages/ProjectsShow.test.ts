@@ -5,7 +5,13 @@ import Show from "@/pages/Projects/Show.svelte";
 import type { ManualFilters, ManualListItem, PaginationMeta } from "@/types/manual";
 
 const emptyMeta: PaginationMeta = { current_page: 1, last_page: 1, per_page: 10, total: 0 };
-const emptyFilters: ManualFilters = { category: null, status: null, q: null };
+const emptyFilters: ManualFilters = {
+    category: null,
+    status: null,
+    q: null,
+    sort: null,
+    mine: false,
+};
 
 const manualsFixture: ManualListItem[] = [
     {
@@ -13,14 +19,18 @@ const manualsFixture: ManualListItem[] = [
         title: "ネジ締め作業",
         status: "draft",
         category: { id: 1, name: "準備作業" },
+        creator: { id: 2, name: "編集 花子" },
         created_at: "2026-07-10 12:00",
+        updated_at: "2026-07-11 09:00",
     },
     {
         id: 2,
         title: "洗浄手順",
         status: "published",
         category: null,
+        creator: null,
         created_at: "2026-07-10 13:00",
+        updated_at: "2026-07-11 10:00",
     },
 ];
 
@@ -110,9 +120,10 @@ describe("Projects/Show", () => {
             /\/projects\/1\/manuals\/1$/,
         );
         expect(screen.getByTestId("manual-status-1")).toHaveTextContent("下書き");
-        expect(screen.getByText(/準備作業 ・ 2026-07-10 12:00/)).toBeInTheDocument();
+        // カテゴリ ・ 作成者 ・ 更新日 (作成者 null は「不明」)
+        expect(screen.getByText(/準備作業 ・ 編集 花子 ・ 更新 2026-07-11 09:00/)).toBeInTheDocument();
         expect(screen.getByTestId("manual-status-2")).toHaveTextContent("公開済み");
-        expect(screen.getByText(/未分類 ・ 2026-07-10 13:00/)).toBeInTheDocument();
+        expect(screen.getByText(/未分類 ・ 不明 ・ 更新 2026-07-11 10:00/)).toBeInTheDocument();
     });
 
     it("manuals が空のときは EmptyState を表示する", () => {
@@ -188,6 +199,78 @@ describe("Projects/Show", () => {
         expect(screen.queryByTestId("link-manage-users")).toBeNull();
         expect(screen.queryByRole("heading", { name: "管理メニュー" })).toBeNull();
         expect(screen.getByTestId("manual-list")).toBeInTheDocument();
+    });
+});
+
+describe("Projects/Show 並べ替え・自作フィルタ", () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it("並べ替え select と自作 checkbox を描画する (disabled 不使用)", () => {
+        render(Show, { props: baseProps });
+
+        const sortSelect = screen.getByTestId("manual-filter-sort");
+        expect(sortSelect).toBeInTheDocument();
+        expect(sortSelect).not.toBeDisabled();
+        expect(screen.getByRole("option", { name: "更新が新しい順" })).toBeInTheDocument();
+        expect(screen.getByRole("option", { name: "タイトル昇順" })).toBeInTheDocument();
+
+        const mine = screen.getByTestId("manual-filter-mine");
+        expect(mine).toBeInTheDocument();
+        expect(mine).not.toBeDisabled();
+    });
+
+    it("並べ替え変更で GET クエリに sort が載る (page は載せない = 1 ページ目へ)", async () => {
+        const getSpy = vi.spyOn(router, "get").mockImplementation(() => {});
+        render(Show, { props: baseProps });
+
+        await fireEvent.change(screen.getByTestId("manual-filter-sort"), {
+            target: { value: "updated_desc" },
+        });
+
+        expect(getSpy).toHaveBeenCalledTimes(1);
+        expect(getSpy.mock.calls[0][0]).toBe("/projects/1");
+        expect(getSpy.mock.calls[0][1]).toEqual({ sort: "updated_desc" });
+        expect(getSpy.mock.calls[0][1]).not.toHaveProperty("page");
+    });
+
+    it("自作 checkbox で GET クエリに mine=1 が載る", async () => {
+        const getSpy = vi.spyOn(router, "get").mockImplementation(() => {});
+        render(Show, { props: baseProps });
+
+        await fireEvent.click(screen.getByTestId("manual-filter-mine"));
+
+        expect(getSpy).toHaveBeenCalledTimes(1);
+        expect(getSpy.mock.calls[0][1]).toEqual({ mine: 1 });
+    });
+
+    it("q 入力中に並べ替えを操作しても trim 済み q がクエリに維持される", async () => {
+        const getSpy = vi.spyOn(router, "get").mockImplementation(() => {});
+        render(Show, { props: baseProps });
+
+        await fireEvent.input(screen.getByTestId("manual-filter-q"), {
+            target: { value: "  ネジ  " },
+        });
+        await fireEvent.change(screen.getByTestId("manual-filter-sort"), {
+            target: { value: "title_asc" },
+        });
+
+        expect(getSpy.mock.calls[0][1]).toEqual({ q: "ネジ", sort: "title_asc" });
+    });
+
+    it("既存フィルタ状態は props から復元される (sort / mine)", () => {
+        render(Show, {
+            props: {
+                ...baseProps,
+                manualFilters: { ...emptyFilters, sort: "title_desc", mine: true },
+            },
+        });
+
+        expect((screen.getByTestId("manual-filter-sort") as HTMLSelectElement).value).toBe(
+            "title_desc",
+        );
+        expect((screen.getByTestId("manual-filter-mine") as HTMLInputElement).checked).toBe(true);
     });
 });
 
