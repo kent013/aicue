@@ -21,7 +21,6 @@
 
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
-| T053 | 動画一覧の並べ替え・自作フィルタ・作成者/更新日メタ表示 | backend | 一覧に並替(PC)/自作filter/作成者・更新日メタ追加 | Medium | standalone | [設計](devnotes/20260715-0037-manual-list-sort-filter/) | 2026-07-15 |
 | T054 | PC編集面から該当マニュアルの撮影ナビ面への文脈リンク | frontend | 編集面から撮影ナビへ文脈リンク追加(純フロント) | Low | incremental | [設計](devnotes/20260715-0048-pc-capture-context-link/) | 2026-07-15 |
 | T055 | 招待経由登録フォームでの招待メールアドレス自動入力 | frontend | 招待メールを登録フォームにprefill(readonly) | Low | incremental | [設計](devnotes/20260715-0100-invite-email-prefill/) | 2026-07-15 |
 
