@@ -21,6 +21,10 @@
 
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
+| T047 | 撮影中カメラプレビューへの字幕オーバーレイ表示 | frontend | 撮影プレビューに字幕を重畳表示（焼込でない/トグル可） | High | incremental | [設計](devnotes/20260714-2034-capture-subtitle-overlay/) | 2026-07-14 |
+| T048 | シナリオ編集のUndo/Redo(一つ戻る/進む) | frontend | シナリオ編集のUndo/Redo（保存前ローカル編集対象） | Medium | incremental | [設計](devnotes/20260714-2054-scenario-editor-undo-redo/) | 2026-07-14 |
+| T049 | マニュアル(シナリオ)の別名保存/複製 | backend | 保存済みシナリオを別名/カテゴリで複製（draft化） | Medium | standalone | [設計](devnotes/20260714-2107-manual-duplicate/) | 2026-07-14 |
+| T050 | テイクのインラインプレビュー再生+ナレ/字幕トグル | frontend | テイクをインライン再生（字幕トグル+採用同居） | Medium | incremental | [設計](devnotes/20260714-2126-take-inline-preview/) | 2026-07-14 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
