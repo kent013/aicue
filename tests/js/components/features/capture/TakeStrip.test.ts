@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
 import TakeStrip from "@/components/features/capture/TakeStrip.svelte";
 import type { CaptureCut, CaptureTake } from "@/types/capture";
 
@@ -81,7 +81,60 @@ describe("TakeStrip", () => {
         expect(fetchMock.mock.calls[0][1].method).toBe("POST");
     });
 
-    it("DL 済みテイクの削除ボタンは disabled にせず、押下時に 422 メッセージを表示する", async () => {
+    it("削除ボタン押下では即 DELETE せず、確認ダイアログを表示する", async () => {
+        const onChanged = vi.fn();
+        render(TakeStrip, {
+            projectId: 1,
+            manualId: 2,
+            cut: makeCut([makeTake()]),
+            onChanged,
+        });
+
+        await fireEvent.click(screen.getByTestId("take-delete-10"));
+
+        expect(fetchMock).not.toHaveBeenCalled();
+        expect(screen.getByTestId("take-delete-dialog")).toBeInTheDocument();
+        expect(onChanged).not.toHaveBeenCalled();
+    });
+
+    it("確認ダイアログの『削除する』押下で DELETE .../takes/{id} が飛び onChanged が呼ばれる", async () => {
+        fetchMock.mockResolvedValueOnce(jsonResponse(200, {}));
+        const onChanged = vi.fn();
+        render(TakeStrip, {
+            projectId: 1,
+            manualId: 2,
+            cut: makeCut([makeTake()]),
+            onChanged,
+        });
+
+        await fireEvent.click(screen.getByTestId("take-delete-10"));
+        const dialog = screen.getByTestId("take-delete-dialog");
+        await fireEvent.click(within(dialog).getByRole("button", { name: "削除する" }));
+
+        await waitFor(() => expect(onChanged).toHaveBeenCalled());
+        expect(fetchMock.mock.calls[0][0]).toBe("/app/projects/1/manuals/2/cuts/3/takes/10");
+        expect(fetchMock.mock.calls[0][1].method).toBe("DELETE");
+    });
+
+    it("確認ダイアログのキャンセルでは DELETE が発火せずダイアログが閉じる", async () => {
+        const onChanged = vi.fn();
+        render(TakeStrip, {
+            projectId: 1,
+            manualId: 2,
+            cut: makeCut([makeTake()]),
+            onChanged,
+        });
+
+        await fireEvent.click(screen.getByTestId("take-delete-10"));
+        const dialog = screen.getByTestId("take-delete-dialog");
+        await fireEvent.click(within(dialog).getByRole("button", { name: "キャンセル" }));
+
+        await waitFor(() => expect(fetchMock).not.toHaveBeenCalled());
+        expect(onChanged).not.toHaveBeenCalled();
+        expect(screen.queryByTestId("take-delete-dialog")).not.toBeInTheDocument();
+    });
+
+    it("DL 済みテイクの削除ボタンは disabled にせず、確認後 422 メッセージを表示する", async () => {
         fetchMock.mockResolvedValueOnce(
             jsonResponse(422, { message: "ダウンロード済みのテイクは削除できません。" }),
         );
@@ -97,12 +150,16 @@ describe("TakeStrip", () => {
         expect(deleteButton).not.toBeDisabled(); // 事前条件 disabled 禁止 (DESIGN.md)
 
         await fireEvent.click(deleteButton);
+        const dialog = screen.getByTestId("take-delete-dialog");
+        await fireEvent.click(within(dialog).getByRole("button", { name: "削除する" }));
 
         await waitFor(() =>
             expect(screen.getByTestId("take-strip-error").textContent).toContain(
                 "ダウンロード済みのテイクは削除できません",
             ),
         );
+        expect(fetchMock.mock.calls[0][0]).toBe("/app/projects/1/manuals/2/cuts/3/takes/10");
+        expect(fetchMock.mock.calls[0][1].method).toBe("DELETE");
         expect(onChanged).not.toHaveBeenCalled();
     });
 

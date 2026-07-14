@@ -3,6 +3,7 @@
     import Badge from "@/components/atoms/Badge.svelte";
     import Button from "@/components/atoms/Button.svelte";
     import TakeCommentDialog from "@/components/features/capture/TakeCommentDialog.svelte";
+    import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
     import { captureJson, extractErrorMessage } from "@/lib/capture/http";
     import type { CaptureCut, CaptureTake } from "@/types/capture";
 
@@ -26,6 +27,37 @@
     let commentDialogOpen = $state(false);
     let commentSaving = $state(false);
     let commentError = $state<string | null>(null);
+
+    // 削除確認ダイアログ。id をスナップショット保持し、ラベルは開いた時点の値で確定する
+    // (親の再取得・並べ替えで参照内容がずれないように object 参照ではなく id + label を持つ)。
+    let deleteTargetId = $state<number | null>(null);
+    let deleteLabel = $state("");
+    let deleteDialogOpen = $state(false);
+
+    // 削除ボタン押下: 即 DELETE せず、対象を確定して確認ダイアログを開く。
+    function requestDelete(take: CaptureTake, index: number): void {
+        deleteTargetId = take.id;
+        deleteLabel = `テイク ${index + 1}`;
+        deleteDialogOpen = true;
+    }
+
+    // 「削除する」確定時のみ DELETE を送る。null ガードを明示 (optional 連鎖任せにしない)。
+    async function confirmDelete(): Promise<void> {
+        const id = deleteTargetId;
+        if (id === null) return;
+        const target = cut.takes.find((t) => t.id === id);
+        if (target === undefined) {
+            // 既に一覧から消えている等: ダイアログを閉じるだけ
+            deleteDialogOpen = false;
+            deleteTargetId = null;
+            return;
+        }
+        // 成功・失敗いずれも解決後に閉じる。失敗 (422 等) は既存の take-strip-error (role="alert") に表示。
+        await remove(target);
+        deleteDialogOpen = false;
+        deleteTargetId = null;
+        deleteLabel = ""; // 再オープン時の古い文言混入を防ぐ (design-review S1 Suggestion)
+    }
 
     function takeUrl(take: CaptureTake, suffix = ""): string {
         return `/app/projects/${projectId}/manuals/${manualId}/cuts/${cut.id}/takes/${take.id}${suffix}`;
@@ -189,7 +221,7 @@
                     size="sm"
                     iconOnly
                     ariaLabel="削除"
-                    onclick={() => remove(take)}
+                    onclick={() => requestDelete(take, index)}
                     testId={`take-delete-${take.id}`}
                 >
                     <Trash2 class="size-4" aria-hidden="true" />
@@ -208,4 +240,15 @@
     saving={commentSaving}
     error={commentError}
     onSave={saveComment}
+/>
+
+<ConfirmDialog
+    bind:open={deleteDialogOpen}
+    title="テイク削除"
+    message={`${deleteLabel}を削除しますか？ この操作は取り消せません。`}
+    confirmLabel="削除する"
+    confirmVariant="danger"
+    processing={deleteTargetId !== null && busyTakeId === deleteTargetId}
+    onConfirm={confirmDelete}
+    testId="take-delete-dialog"
 />
