@@ -60,6 +60,7 @@ Open リストは [TODO.md](TODO.md) を参照。
 | T040 | manual画面のシナリオ保存トースト帰属確認とrender/preview失敗alertの発生源明示。S1=ScenarioEditorに保存成功のその場残留インジケータjustSaved追加(toast 4s自動消去非依存・保存成功パスのみtrue・dirtyと排他)、S2=RenderPanelのrender/preview起動失敗stateをsource別に分離+全danger Alertにphase-aware title付与し発生源×局面で帰属明示(preview-start-error/preview-purchase-link新設)。frontendのみ。Codex(gpt-5.3-codex) impl-review R1でAPPROVED。 | frontend | 2026-07-14 14:47 |
 | T043 | テイク削除(capture.takes.destroy)に確認ダイアログを追加。削除前に確認ダイアログを挟む | frontend | 2026-07-14 17:53 |
 | T044 | client-side stale validation の横展開修正(移譲フォーム他)。有効値復帰でclientErrorをクリア(移譲フォーム他) | frontend | 2026-07-14 17:55 |
+| T045 | 特定商取引法ページ(commerce-disclosure)へのサイト内リンク追加。フッターに特定商取引法リンクを追加しreachability回復 | frontend | 2026-07-14 17:57 |
 
 ## Obsoleted
 
