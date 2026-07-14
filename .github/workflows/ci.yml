@@ -23,6 +23,19 @@ jobs:
           cp .env.example .env
           php artisan key:generate
           php artisan passport:keys --force
+      # レンダー smoke テスト (施策 4) の前提。Dockerfile (dev/bughunt) と別に CI runner にも
+      # ffmpeg/ffprobe と字幕フォントを導入し、存在・フォント解決を fail-fast 検証する (層 1)。
+      - name: Provision ffmpeg for render smoke
+        run: |
+          sudo apt-get update
+          # fontconfig を明示 (fc-match の依存。ランナー差異で未導入の可能性をゼロにする。design-review R1)
+          sudo apt-get install -y ffmpeg fonts-noto-cjk fontconfig
+          ffmpeg -version
+          ffprobe -version
+          # fc-match の終了コードだけでなく、解決 family が Noto CJK であることを機械的に判定
+          # (代替フォントへのフォールバックを検出する。-f '%{family}' で family のみ抽出しノイズ耐性を上げる)
+          fc-match -f '%{family}\n' "Noto Sans CJK JP" | grep -qi 'Noto Sans CJK' \
+            || { echo "::error::Noto Sans CJK JP did not resolve to a Noto CJK family"; exit 1; }
       - name: Pint (code style)
         run: vendor/bin/pint --test
       - name: PHPStan
