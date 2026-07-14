@@ -21,7 +21,6 @@
 
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
-| T055 | 招待経由登録フォームでの招待メールアドレス自動入力 | frontend | 招待メールを登録フォームにprefill(readonly) | Low | incremental | [設計](devnotes/20260715-0100-invite-email-prefill/) | 2026-07-15 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
