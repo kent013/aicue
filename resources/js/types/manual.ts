@@ -86,10 +86,15 @@ export interface ScenarioDocument {
     steps: ScenarioStep[];
 }
 
-/** 編集中の作業コピー (未保存行は id: null)。PUT payload の steps はこの型を直列化する */
-export type DraftPoint = Omit<ScenarioPoint, "id"> & { id: number | null };
+/**
+ * 編集中の作業コピー (未保存行は id: null)。
+ * clientKey は each の安定 key 用のクライアント専用識別子。
+ * serializeSteps() には含めるが PUT payload (payloadSteps) には含めない (サーバ非公開)。
+ */
+export type DraftPoint = Omit<ScenarioPoint, "id"> & { id: number | null; clientKey: string };
 export type DraftStep = Omit<ScenarioStep, "id" | "points"> & {
     id: number | null;
+    clientKey: string;
     points: DraftPoint[];
 };
 

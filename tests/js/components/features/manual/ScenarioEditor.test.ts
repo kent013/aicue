@@ -5,6 +5,21 @@ import ScenarioEditor from "@/components/features/manual/ScenarioEditor.svelte";
 import { clearToasts, toasts } from "@/lib/stores/toast";
 import type { ScenarioDocument } from "@/types/manual";
 
+// parseHistorySnapshot の fail-safe テスト用 partial mock。
+// 既定は real 実装へ委譲し (holder.real)、fail-safe テストのみ mockReturnValueOnce(null) で破損扱いにする。
+const holder = vi.hoisted(() => ({
+    mock: vi.fn(),
+    real: undefined as
+        | undefined
+        | typeof import("@/lib/manual/scenario-history").parseHistorySnapshot,
+}));
+vi.mock("@/lib/manual/scenario-history", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("@/lib/manual/scenario-history")>();
+    holder.real = actual.parseHistorySnapshot; // real を保持
+    holder.mock.mockImplementation(actual.parseHistorySnapshot); // 既定 = real 委譲
+    return { ...actual, parseHistorySnapshot: holder.mock }; // 他 export は実物
+});
+
 // router.reload (部分リロード) はテスト環境では実行できないためモックする。
 // onSuccess をテスト側から呼び、サーバ最新 document の再取り込みを検証する。
 const { routerReloadMock, routerOnMock } = vi.hoisted(() => ({
@@ -122,6 +137,9 @@ beforeEach(() => {
     // jsdom は scrollIntoView 未実装。失敗フィードバックの知覚処理 (showFailure) が
     // 全失敗経路で呼ぶため、毎テスト新しい spy を注入する (呼び出し順/引数検証にも使う)
     Element.prototype.scrollIntoView = vi.fn();
+    // parseHistorySnapshot mock を毎テスト既定 (real 委譲) へ復帰させ、fail-safe テストの
+    // mockReturnValueOnce が他テストへ波及しないようにする
+    if (holder.real) holder.mock.mockImplementation(holder.real);
 });
 
 afterEach(() => {
@@ -858,6 +876,333 @@ describe("ScenarioEditor", () => {
         await fireEvent.click(screen.getByTestId("scenario-submit"));
         await waitFor(() => {
             expect(screen.queryByTestId("scenario-failure-region")).not.toBeInTheDocument();
+        });
+    });
+
+    // --- T048: Undo/Redo (一つ戻る / 進む) ---
+
+    describe("Undo/Redo", () => {
+        /** フィールド編集セッションを模す: focusIn → input → focusOut (1 履歴エントリ) */
+        async function editCell(testId: string, value: string): Promise<void> {
+            const el = screen.getByTestId(testId);
+            await fireEvent.focusIn(el);
+            await fireEvent.input(el, { target: { value } });
+            await fireEvent.focusOut(el);
+        }
+
+        /** keydown を window に dispatch し、defaultPrevented 判定用に event を返す */
+        function dispatchKey(init: KeyboardEventInit): KeyboardEvent {
+            const ev = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init });
+            window.dispatchEvent(ev);
+            return ev;
+        }
+
+        const undoBtn = (): HTMLElement => screen.getByTestId("scenario-undo");
+        const redoBtn = (): HTMLElement => screen.getByTestId("scenario-redo");
+
+        it("初期表示は dirty なし・Undo/Redo とも disabled (clientKey 二重採番の回帰検出)", () => {
+            render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+
+            expect(screen.queryByTestId("scenario-dirty-indicator")).not.toBeInTheDocument();
+            expect(undoBtn()).toBeDisabled();
+            expect(redoBtn()).toBeDisabled();
+        });
+
+        it("PUT payload に clientKey を含めない (保護キー混入防止)", async () => {
+            fetchMock.mockResolvedValueOnce(jsonResponse(200, { ...makeDocument(), scenario_version: 4 }));
+
+            render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+            await editCell("step-0-scene", "手順シーンAX");
+            await fireEvent.click(screen.getByTestId("scenario-submit"));
+
+            await waitFor(() => {
+                expect(fetchMock).toHaveBeenCalledTimes(1);
+            });
+            const payload = lastPutPayload();
+            expect(payload.steps[0]).not.toHaveProperty("clientKey");
+            expect(
+                (payload.steps[0].points as Array<Record<string, unknown>>)[0],
+            ).not.toHaveProperty("clientKey");
+        });
+
+        it("セル編集 → Undo で前状態 → Redo で再適用", async () => {
+            render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+
+            await editCell("step-0-scene", "手順シーンAX");
+            expect(screen.getByTestId("step-0-scene")).toHaveValue("手順シーンAX");
+
+            await fireEvent.click(undoBtn());
+            expect(screen.getByTestId("step-0-scene")).toHaveValue("手順シーンA");
+
+            await fireEvent.click(redoBtn());
+            expect(screen.getByTestId("step-0-scene")).toHaveValue("手順シーンAX");
+        });
+
+        it("行追加 → Undo で消える → Redo で戻る", async () => {
+            render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+
+            await fireEvent.click(screen.getByTestId("scenario-add-step"));
+            expect(screen.getByTestId("step-2-scene")).toBeInTheDocument();
+
+            await fireEvent.click(undoBtn());
+            expect(screen.queryByTestId("step-2-scene")).not.toBeInTheDocument();
+
+            await fireEvent.click(redoBtn());
+            expect(screen.getByTestId("step-2-scene")).toBeInTheDocument();
+        });
+
+        it("手順削除 (確認ダイアログ) → Undo で配下急所ごと復活", async () => {
+            render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+
+            await fireEvent.click(screen.getByTestId("step-0-remove"));
+            await fireEvent.click(screen.getByRole("button", { name: "削除する" }));
+            expect(screen.getByTestId("step-0-scene")).toHaveValue("手順シーンB");
+            expect(screen.queryByTestId("point-0-0-scene")).not.toBeInTheDocument();
+
+            await fireEvent.click(undoBtn());
+            expect(screen.getByTestId("step-0-scene")).toHaveValue("手順シーンA");
+            expect(screen.getByTestId("point-0-0-scene")).toHaveValue("急所シーンA-1");
+        });
+
+        it("並べ替え → Undo で順序が戻る", async () => {
+            render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+
+            await fireEvent.click(screen.getByTestId("step-0-move-down"));
+            expect(screen.getByTestId("step-0-scene")).toHaveValue("手順シーンB");
+
+            await fireEvent.click(undoBtn());
+            expect(screen.getByTestId("step-0-scene")).toHaveValue("手順シーンA");
+            expect(screen.getByTestId("step-1-scene")).toHaveValue("手順シーンB");
+        });
+
+        it("複数操作 (追加→編集→並べ替え) を 3 回 Undo で初期状態へ戻す", async () => {
+            render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+
+            await fireEvent.click(screen.getByTestId("scenario-add-step")); // 操作1
+            await editCell("step-0-scene", "手順シーンAX"); // 操作2
+            await fireEvent.click(screen.getByTestId("step-0-move-down")); // 操作3
+
+            await fireEvent.click(undoBtn());
+            await fireEvent.click(undoBtn());
+            await fireEvent.click(undoBtn());
+
+            expect(screen.getByTestId("step-0-scene")).toHaveValue("手順シーンA");
+            expect(screen.getByTestId("step-1-scene")).toHaveValue("手順シーンB");
+            expect(screen.queryByTestId("step-2-scene")).not.toBeInTheDocument();
+            expect(screen.queryByTestId("scenario-dirty-indicator")).not.toBeInTheDocument();
+        });
+
+        it("Undo 後に別セルを編集すると Redo がクリアされる", async () => {
+            render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+
+            await editCell("step-0-scene", "手順シーンAX");
+            await fireEvent.click(undoBtn());
+            expect(redoBtn()).not.toBeDisabled();
+
+            await editCell("step-1-scene", "手順シーンBX");
+            expect(redoBtn()).toBeDisabled();
+        });
+
+        it("保存成功後は履歴がリセットされ Undo が disabled になる", async () => {
+            fetchMock.mockResolvedValueOnce(jsonResponse(200, { ...makeDocument(), scenario_version: 4 }));
+
+            render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+            await editCell("step-0-scene", "手順シーンAX");
+            expect(undoBtn()).not.toBeDisabled();
+
+            await fireEvent.click(screen.getByTestId("scenario-submit"));
+            await waitFor(() => {
+                expect(screen.getByTestId("scenario-saved-indicator")).toBeInTheDocument();
+            });
+            expect(undoBtn()).toBeDisabled();
+            expect(redoBtn()).toBeDisabled();
+        });
+
+        it("409 → 明示リロード後は履歴がリセットされる", async () => {
+            fetchMock.mockResolvedValueOnce(
+                jsonResponse(409, {
+                    code: "scenario_conflict",
+                    conflict_type: "version_mismatch",
+                    message: "他の編集と競合しました。",
+                    current_version: 9,
+                }),
+            );
+
+            render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+            await editCell("step-0-scene", "手順シーンAX");
+            expect(undoBtn()).not.toBeDisabled();
+
+            await fireEvent.click(screen.getByTestId("scenario-submit"));
+            await waitFor(() => {
+                expect(screen.getByTestId("scenario-conflict-reload")).toBeInTheDocument();
+            });
+            await fireEvent.click(screen.getByTestId("scenario-conflict-reload"));
+            await waitFor(() => {
+                expect(screen.getByRole("button", { name: "破棄して最新を取得" })).toBeInTheDocument();
+            });
+            await fireEvent.click(screen.getByRole("button", { name: "破棄して最新を取得" }));
+
+            const latest: ScenarioDocument = {
+                scenario_version: 9,
+                steps: [{ ...makeDocument().steps[0], scene: "サーバ最新シーン", points: [] }],
+            };
+            lastReloadOptions().onSuccess({ props: { scenario: latest } });
+            lastReloadOptions().onFinish();
+
+            await waitFor(() => {
+                expect(screen.getByTestId("step-0-scene")).toHaveValue("サーバ最新シーン");
+            });
+            expect(undoBtn()).toBeDisabled();
+            expect(redoBtn()).toBeDisabled();
+        });
+
+        it("ショートカット: 非編集要素に focus 時 Ctrl+Z / Cmd+Z で Undo", async () => {
+            render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+            await editCell("step-0-scene", "手順シーンAX");
+            // editCell の focusOut 後、activeElement は body (非編集要素)
+            expect(document.activeElement?.tagName).not.toBe("INPUT");
+
+            const ctrl = dispatchKey({ ctrlKey: true, key: "z" });
+            expect(ctrl.defaultPrevented).toBe(true);
+            await waitFor(() => {
+                expect(screen.getByTestId("step-0-scene")).toHaveValue("手順シーンA");
+            });
+
+            // Cmd+Z (mac) でも Undo が走る (別編集を積んで再検証)
+            await editCell("step-0-scene", "手順シーンAY");
+            dispatchKey({ metaKey: true, key: "z" });
+            await waitFor(() => {
+                expect(screen.getByTestId("step-0-scene")).toHaveValue("手順シーンA");
+            });
+        });
+
+        it("ショートカット: 編集フィールド focus 中は native に委譲し app undo を走らせない", async () => {
+            render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+            await editCell("step-0-scene", "手順シーンAX");
+
+            const input = screen.getByTestId("step-0-scene") as HTMLInputElement;
+            input.focus();
+            expect(document.activeElement).toBe(input);
+
+            const ev = dispatchKey({ ctrlKey: true, key: "z" });
+            // 編集フィールド内なので preventDefault されず (native 委譲)、app undo も走らない
+            expect(ev.defaultPrevented).toBe(false);
+            expect(screen.getByTestId("step-0-scene")).toHaveValue("手順シーンAX");
+        });
+
+        it("ショートカット: IME 変換中 (isComposing) は無視する", async () => {
+            render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+            await editCell("step-0-scene", "手順シーンAX");
+
+            const ev = dispatchKey({ ctrlKey: true, key: "z", isComposing: true });
+            expect(ev.defaultPrevented).toBe(false);
+            expect(screen.getByTestId("step-0-scene")).toHaveValue("手順シーンAX");
+        });
+
+        it("ショートカット: Ctrl+Shift+Z で Redo", async () => {
+            render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+            await editCell("step-0-scene", "手順シーンAX");
+            await fireEvent.click(undoBtn());
+            expect(screen.getByTestId("step-0-scene")).toHaveValue("手順シーンA");
+
+            dispatchKey({ ctrlKey: true, shiftKey: true, key: "z" });
+            await waitFor(() => {
+                expect(screen.getByTestId("step-0-scene")).toHaveValue("手順シーンAX");
+            });
+        });
+
+        it("blur → 構造操作(click) で二重 push しない (1 編集 + 1 構造 = Undo 2 回で初期)", async () => {
+            render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+
+            await editCell("step-0-scene", "手順シーンAX"); // 1 エントリ
+            await fireEvent.click(screen.getByTestId("scenario-add-step")); // 1 エントリ
+
+            await fireEvent.click(undoBtn()); // 追加取消
+            expect(screen.queryByTestId("step-2-scene")).not.toBeInTheDocument();
+            await fireEvent.click(undoBtn()); // 編集取消
+            expect(screen.getByTestId("step-0-scene")).toHaveValue("手順シーンA");
+            expect(undoBtn()).toBeDisabled(); // これ以上戻れない (2 エントリのみ)
+        });
+
+        it("IME 順序1: focusout(composing) → compositionend で 1 エントリに確定", async () => {
+            render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+            const section = screen.getByLabelText("シナリオ編集");
+            const el = screen.getByTestId("step-0-scene");
+
+            await fireEvent.focusIn(el);
+            await fireEvent.compositionStart(section);
+            await fireEvent.input(el, { target: { value: "手順シーンAX" } });
+            await fireEvent.focusOut(el); // composing 中: 保留 (中間文字列を積まない)
+            await fireEvent.compositionEnd(section); // 確定で 1 エントリ
+
+            await fireEvent.click(undoBtn());
+            expect(screen.getByTestId("step-0-scene")).toHaveValue("手順シーンA");
+            expect(undoBtn()).toBeDisabled(); // 1 エントリのみ
+        });
+
+        it("IME 順序2: focusout → 構造click → compositionend で テキスト1 + 構造1", async () => {
+            render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+            const section = screen.getByLabelText("シナリオ編集");
+            const el = screen.getByTestId("step-0-scene");
+
+            await fireEvent.focusIn(el);
+            await fireEvent.compositionStart(section);
+            await fireEvent.input(el, { target: { value: "手順シーンAX" } });
+            await fireEvent.focusOut(el);
+            await fireEvent.click(screen.getByTestId("scenario-add-step")); // composing 中: FIFO 保留
+            await fireEvent.compositionEnd(section); // テキスト確定 → 構造実行 の順
+
+            // 構造操作 (追加) が反映され、Undo で取消
+            expect(screen.getByTestId("step-2-scene")).toBeInTheDocument();
+            await fireEvent.click(undoBtn());
+            expect(screen.queryByTestId("step-2-scene")).not.toBeInTheDocument();
+            // テキスト編集も 1 エントリ残る
+            await fireEvent.click(undoBtn());
+            expect(screen.getByTestId("step-0-scene")).toHaveValue("手順シーンA");
+            expect(undoBtn()).toBeDisabled();
+        });
+
+        it("復元 fail-safe: 履歴破損時は steps 非破壊・履歴リセット・warning トースト", async () => {
+            render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+            await editCell("step-0-scene", "手順シーンAX");
+
+            // 次の parseHistorySnapshot 呼び出し (undo の restoreFrom) のみ破損扱いにする
+            holder.mock.mockReturnValueOnce(null);
+            await fireEvent.click(undoBtn());
+
+            // steps は変えない (編集値のまま) + 履歴リセットで Undo/Redo disabled + warning トースト
+            expect(screen.getByTestId("step-0-scene")).toHaveValue("手順シーンAX");
+            expect(undoBtn()).toBeDisabled();
+            expect(redoBtn()).toBeDisabled();
+            expect(get(toasts).some((toast) => toast.type === "warning")).toBe(true);
+        });
+
+        it("canUndo は pending 編集を含む (focusout 前でも Undo が活性)", async () => {
+            render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+            const el = screen.getByTestId("step-0-scene");
+
+            await fireEvent.focusIn(el);
+            await fireEvent.input(el, { target: { value: "手順シーンAX" } });
+            // focusOut を発火せず (pending 編集) でも Undo は活性
+            expect(undoBtn()).not.toBeDisabled();
+        });
+
+        it("reactivity: 構造操作直後に Undo 活性・dirty 表示が即時反映される", async () => {
+            render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+
+            await fireEvent.click(screen.getByTestId("scenario-add-step"));
+            expect(undoBtn()).not.toBeDisabled();
+            expect(screen.getByTestId("scenario-dirty-indicator")).toBeInTheDocument();
+        });
+
+        it("Undo で snapshot まで戻すと dirty 表示 (離脱警告) が解除される", async () => {
+            render(ScenarioEditor, { props: { ...baseProps, scenario: makeDocument() } });
+
+            await editCell("step-0-scene", "手順シーンAX");
+            expect(screen.getByTestId("scenario-dirty-indicator")).toBeInTheDocument();
+
+            await fireEvent.click(undoBtn());
+            expect(screen.queryByTestId("scenario-dirty-indicator")).not.toBeInTheDocument();
         });
     });
 });
