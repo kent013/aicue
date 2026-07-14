@@ -60,6 +60,17 @@ return [
             'report' => false,
         ],
 
+        // bughunt / testing の storage fake 用ローカル disk (実 S3 非依存の emulation)。
+        // FakeTakeObjectStorage / FakeRenderObjectStorage が共有し S3 key namespace を再現する。
+        // 本番では誰も解決しない (FakeStorageGate 成立時のみ fake が bind される限り inert)。
+        // throw=true で失敗を握り潰さない。FILESYSTEM_DISK の default (local) は不変。
+        's3_fake' => [
+            'driver' => 'local',
+            'root' => storage_path('app/s3-fake'),
+            'throw' => true,
+            'report' => false,
+        ],
+
     ],
 
     /*

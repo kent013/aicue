@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Render;
 
 use App\Models\VideoManual;
+use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 use Webmozart\Assert\Assert;
@@ -12,13 +13,22 @@ use Webmozart\Assert\Assert;
 /**
  * レンダ出力 S3 オブジェクト操作の集約点 (TakeObjectStorage と同じ Storage::disk('s3') 経由)。
  * ダウンロード/アップロード/署名 URL/削除はすべて本クラス経由 (Feature テストは Storage::fake('s3'))。
+ *
+ * disk 解決は disk() の 1 箇所に集約する。fake (FakeRenderObjectStorage) は disk() を s3_fake へ
+ * override するだけで read/download 系を切り替えられる (後方互換の並走を残さない)。
  */
 class RenderObjectStorage
 {
+    /** 集約された disk 解決点 (fake は本メソッドを override する。挙動不変) */
+    protected function disk(): Filesystem
+    {
+        return Storage::disk('s3');
+    }
+
     /** S3 素材をローカル一時ファイルへ取得する (readStream → ローカル書き込み) */
     public function downloadToLocal(string $key, string $localPath): void
     {
-        $stream = Storage::disk('s3')->readStream($key);
+        $stream = $this->disk()->readStream($key);
         if ($stream === null) {
             throw new RuntimeException("S3 オブジェクトを読めません: {$key}");
         }
@@ -49,7 +59,7 @@ class RenderObjectStorage
         }
 
         try {
-            Storage::disk('s3')->writeStream($key, $stream);
+            $this->disk()->writeStream($key, $stream);
         } finally {
             if (is_resource($stream)) {
                 fclose($stream);
@@ -60,7 +70,7 @@ class RenderObjectStorage
     /** preview 再生用の署名 GET URL (TTL は config manual.render_playback_url_ttl_minutes) */
     public function temporaryPlaybackUrl(string $key): string
     {
-        return Storage::disk('s3')->temporaryUrl(
+        return $this->disk()->temporaryUrl(
             $key,
             now()->addMinutes(config()->integer('manual.render_playback_url_ttl_minutes')),
         );
@@ -74,7 +84,7 @@ class RenderObjectStorage
      */
     public function temporaryDownloadUrl(string $key, string $filename): string
     {
-        return Storage::disk('s3')->temporaryUrl(
+        return $this->disk()->temporaryUrl(
             $key,
             now()->addMinutes(config()->integer('manual.render_playback_url_ttl_minutes')),
             ['ResponseContentDisposition' => $this->contentDisposition($filename)],
@@ -84,7 +94,7 @@ class RenderObjectStorage
     /** オブジェクト削除 (存在しないキーは no-op = 冪等) */
     public function delete(string $key): void
     {
-        Storage::disk('s3')->delete($key);
+        $this->disk()->delete($key);
     }
 
     /** manual 配下のレンダ出力 prefix (DeleteRenderOutputsJob の過大削除防止に使う) */

@@ -4,12 +4,20 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Http\Controllers\Testing\GetFakeStorageObjectController;
+use App\Http\Controllers\Testing\PutFakeStorageObjectController;
 use App\Services\AI\Testing\CannedPromptFakeRegistrar;
 use App\Services\Billing\Fakes\FakeSubscriptionCheckoutGateway;
 use App\Services\Billing\Fakes\FakeTicketCheckoutGateway;
 use App\Services\Billing\SubscriptionCheckoutGateway;
 use App\Services\Billing\TicketCheckoutGateway;
+use App\Services\Capture\Fakes\FakeTakeObjectStorage;
+use App\Services\Capture\TakeObjectStorage;
+use App\Services\Render\Fakes\FakeRenderObjectStorage;
+use App\Services\Render\RenderObjectStorage;
+use App\Support\FakeStorageGate;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 
 /**
@@ -40,6 +48,20 @@ class FakeExternalsServiceProvider extends ServiceProvider
 
     public function register(): void
     {
+        // capability ごとに独立 private method へ分離する (early return が他 capability を巻き込まない)。
+        $this->registerPaymentFakes(); // Stripe: fake_externals 依存 (挙動不変)
+        $this->registerStorageFakes(); // storage: fake_storage (FakeStorageGate) 依存 — 独立
+    }
+
+    public function boot(): void
+    {
+        $this->bootLlmFake();       // LLM: fake_llm 依存 (挙動不変)
+        $this->bootStorageRoutes(); // storage signed route — 独立
+    }
+
+    /** Stripe 課金 gateway fake (fake_externals + PAYMENT_FAKE_ENVIRONMENTS。挙動不変) */
+    private function registerPaymentFakes(): void
+    {
         if (config('testing.fake_externals') !== true) {
             return;
         }
@@ -58,7 +80,8 @@ class FakeExternalsServiceProvider extends ServiceProvider
         $this->app->bind(SubscriptionCheckoutGateway::class, FakeSubscriptionCheckoutGateway::class);
     }
 
-    public function boot(): void
+    /** LLM (Prism) fake (fake_llm + LLM_FAKE_ENVIRONMENTS。挙動不変) */
+    private function bootLlmFake(): void
     {
         // LLM fake は fake_llm (既定 false = real LLM) で判定する。bughunt 既定は real-llm で、
         // --fake-llm 指定時のみ TESTING_FAKE_LLM=true が注入され install される。
@@ -77,5 +100,40 @@ class FakeExternalsServiceProvider extends ServiceProvider
 
         // Browser lane (tests/Pest.php) と同一の install API を使う (Prompt::installFake の封じ込め)。
         $this->app->make(CannedPromptFakeRegistrar::class)->install();
+    }
+
+    /**
+     * storage fake: FakeStorageGate 成立時のみ concrete → fake へ rebind (gate = predicate SSOT)。
+     * env allowlist / production 拒否は gate に一元化される。
+     */
+    private function registerStorageFakes(): void
+    {
+        if (! $this->app->make(FakeStorageGate::class)->enabled()) {
+            return;
+        }
+
+        $this->app->bind(TakeObjectStorage::class, FakeTakeObjectStorage::class);
+        $this->app->bind(RenderObjectStorage::class, FakeRenderObjectStorage::class);
+    }
+
+    /** storage fake の signed route (gate 成立時のみ。web CSRF group 外 = signed のみ) */
+    private function bootStorageRoutes(): void
+    {
+        if (! $this->app->make(FakeStorageGate::class)->enabled()) {
+            return;
+        }
+
+        // 冪等化: boot() が複数回走っても (route:cache 併用・テストの provider 再実走等)
+        // 同名 route を二重登録しない。通常の bootstrap では未登録 = そのまま登録される。
+        if (Route::has('bughunt.storage.put')) {
+            return;
+        }
+
+        Route::middleware('signed')->group(function (): void {
+            Route::put('/_fake-storage/object', PutFakeStorageObjectController::class)
+                ->name('bughunt.storage.put');
+            Route::get('/_fake-storage/object', GetFakeStorageObjectController::class)
+                ->name('bughunt.storage.get');
+        });
     }
 }
