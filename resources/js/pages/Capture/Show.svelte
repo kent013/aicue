@@ -10,6 +10,7 @@
     import TakeStrip from "@/components/features/capture/TakeStrip.svelte";
     import UploadQueueBar from "@/components/features/capture/UploadQueueBar.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import { AdoptedTakeAutoDownloader } from "@/lib/capture/auto-download";
     import { supportsMediaRecorder } from "@/lib/capture/camera";
     import type { CameraUnavailableReason } from "@/lib/capture/camera";
     import { createIdbPendingStore } from "@/lib/capture/idb";
@@ -55,6 +56,13 @@
     /* ---- アップロードキュー ---- */
     const store: PendingStore = createIdbPendingStore();
     const queue = new UploadQueue({ store });
+
+    /* ---- 採用済みテイクの自動 DL (T051) ----
+     * project.id / manual.id はインスタンス生存中は安定 (別 manual へ遷移すると Inertia が
+     * ページを remount する。reload({only:["manual"]}) は id を変えない)。mount 時点の値で
+     * 確定させるのが意図どおりなので state_referenced_locally を明示的に無視する。 */
+    // svelte-ignore state_referenced_locally
+    const autoDownloader = new AdoptedTakeAutoDownloader(project.id, manual.id);
     let pendingCount = $state(0);
     let pendingBytes = $state(0);
     let uploading = $state(false);
@@ -94,6 +102,14 @@
         }
     }
 
+    // 入室時 / online 復帰時に採用済み未 DL テイクを自動取得する。changed のときのみ
+    // reload を 1 回行う (複数採用テイクでも reload は 1 回)。多重発火は内部 running ガードが抑止。
+    // reload 後は downloaded=true で対象が空になるため再 DL は起きない (冪等)。
+    async function runAutoDownload(): Promise<void> {
+        const { changed } = await autoDownloader.run(manual);
+        if (changed) reloadManual();
+    }
+
     async function resumeUploads(): Promise<void> {
         uploading = true;
         try {
@@ -109,6 +125,7 @@
 
     onMount(() => {
         void refreshPending();
+        void runAutoDownload();
 
         // SW 登録 (Capture ページ mount 時に限定。素の JS・/build/* のみキャッシュ)
         if ("serviceWorker" in navigator) {
@@ -133,7 +150,9 @@
     }
 
     function handleOnline(): void {
+        // resumeUploads と runAutoDownload は独立・順序非依存 (将来回帰防止のため明記)
         void resumeUploads();
+        void runAutoDownload();
     }
 
     function handleSwMessage(event: MessageEvent): void {

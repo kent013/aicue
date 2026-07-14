@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import CaptureShow from "@/pages/Capture/Show.svelte";
-import type { CaptureCut, CaptureManualDetail } from "@/types/capture";
+import type { CaptureCut, CaptureManualDetail, CaptureTake } from "@/types/capture";
 
 /*
  * 撮影ページ Capture/Show: F-03 実行時カメラフォールバック。
@@ -11,9 +11,10 @@ import type { CaptureCut, CaptureManualDetail } from "@/types/capture";
  * enqueue 後の HTTP 経路は upload-queue.test.ts が担うため、本テストは enqueue 引き渡しまで。
  */
 
-const { routerReloadMock, enqueueMock } = vi.hoisted(() => ({
+const { routerReloadMock, enqueueMock, autoDownloadRunMock } = vi.hoisted(() => ({
     routerReloadMock: vi.fn(),
     enqueueMock: vi.fn(),
+    autoDownloadRunMock: vi.fn(),
 }));
 
 vi.mock("@inertiajs/svelte", async (importOriginal) => ({
@@ -49,6 +50,15 @@ vi.mock("@/lib/capture/upload-queue", async (importOriginal) => ({
     },
 }));
 
+// AdoptedTakeAutoDownloader は run spy 付き stub に差し替え。状態機械の厳密検証は
+// auto-download.test.ts が担うため、本テストは Show 側の結線 (発火/reload) のみ検証する。
+// stub には running ガードが無いので多重実行抑止は検証しない (二重ガード回避方針)。
+vi.mock("@/lib/capture/auto-download", () => ({
+    AdoptedTakeAutoDownloader: class {
+        run = autoDownloadRunMock;
+    },
+}));
+
 function makeCut(overrides: Partial<CaptureCut> = {}): CaptureCut {
     return {
         id: 101,
@@ -72,6 +82,29 @@ function makeManual(): CaptureManualDetail {
         title: "ネジ締め作業",
         status: "ready",
         cuts: [makeCut()],
+    };
+}
+
+/** 採用済み・未 DL テイク (playback_url/ack_token 保持) を持つ manual */
+function makeAdoptedManual(): CaptureManualDetail {
+    const take: CaptureTake = {
+        id: 900,
+        client_take_id: "01J0ADOPT",
+        status: "ready",
+        size_bytes: 2048,
+        duration_ms: 3000,
+        comment: null,
+        captured_at: "2026-07-11T00:00:00Z",
+        sort_order: 0,
+        downloaded: false,
+        playback_url: "https://s3.example.test/take-900.mp4?sig=1",
+        download_ack_token: "ack-900",
+    };
+    return {
+        id: 5,
+        title: "ネジ締め作業",
+        status: "ready",
+        cuts: [makeCut({ adopted_take_id: take.id, takes: [take] })],
     };
 }
 
@@ -102,6 +135,9 @@ beforeEach(() => {
     enqueueMock.mockImplementation((item: { clientTakeId: string }) =>
         Promise.resolve({ status: "uploaded", clientTakeId: item.clientTakeId }),
     );
+    autoDownloadRunMock.mockReset();
+    // 既定: 対象なし (changed=false)。個別ケースで override する
+    autoDownloadRunMock.mockResolvedValue({ changed: false, hasPendingAck: false });
     getUserMediaMock.mockReset();
 });
 
@@ -212,6 +248,91 @@ describe("Capture/Show カメラフォールバック", () => {
             expect(enqueueMock).toHaveBeenCalledTimes(1);
         });
         expect(enqueueMock.mock.calls[0][0].contentType).toBe("video/webm");
+    });
+});
+
+describe("Capture/Show 採用済みテイク自動 DL 結線 (T051)", () => {
+    const adoptedProps = { project: { id: 1, name: "現場A" }, manual: makeAdoptedManual() };
+
+    it("入室時に run(manual) が発火し、changed=true なら manual reload される", async () => {
+        stubCameraSupported(false);
+        autoDownloadRunMock.mockResolvedValue({ changed: true, hasPendingAck: false });
+
+        render(CaptureShow, { props: adoptedProps });
+
+        await vi.waitFor(() => {
+            expect(autoDownloadRunMock).toHaveBeenCalledTimes(1);
+        });
+        expect(autoDownloadRunMock).toHaveBeenCalledWith(adoptedProps.manual);
+        await vi.waitFor(() => {
+            expect(routerReloadMock).toHaveBeenCalledWith({ only: ["manual"] });
+        });
+    });
+
+    it("changed=false のときは reload しない (DL 済み対象空 = 再発火抑止)", async () => {
+        stubCameraSupported(false);
+        autoDownloadRunMock.mockResolvedValue({ changed: false, hasPendingAck: false });
+
+        render(CaptureShow, { props: adoptedProps });
+
+        await vi.waitFor(() => {
+            expect(autoDownloadRunMock).toHaveBeenCalledTimes(1);
+        });
+        expect(routerReloadMock).not.toHaveBeenCalled();
+    });
+
+    it("online 復帰でも run が再度呼ばれる", async () => {
+        stubCameraSupported(false);
+        autoDownloadRunMock.mockResolvedValue({ changed: false, hasPendingAck: false });
+
+        render(CaptureShow, { props: adoptedProps });
+        await vi.waitFor(() => {
+            expect(autoDownloadRunMock).toHaveBeenCalledTimes(1);
+        });
+
+        await fireEvent(window, new Event("online"));
+
+        await vi.waitFor(() => {
+            expect(autoDownloadRunMock).toHaveBeenCalledTimes(2);
+        });
+    });
+
+    it("online を連続 dispatch すると各回で run 起動要求が出る (結線責務のみ)", async () => {
+        stubCameraSupported(false);
+        autoDownloadRunMock.mockResolvedValue({ changed: false, hasPendingAck: false });
+
+        render(CaptureShow, { props: adoptedProps });
+        await vi.waitFor(() => {
+            expect(autoDownloadRunMock).toHaveBeenCalledTimes(1);
+        });
+
+        await fireEvent(window, new Event("online"));
+        await fireEvent(window, new Event("online"));
+
+        await vi.waitFor(() => {
+            expect(autoDownloadRunMock).toHaveBeenCalledTimes(3);
+        });
+    });
+
+    it("自動 DL stub は録画フォールバックの enqueue 経路に干渉しない (a〜e 系の非回帰)", async () => {
+        stubCameraSupported(true);
+        getUserMediaMock.mockRejectedValue(new DOMException("denied", "NotAllowedError"));
+
+        render(CaptureShow, { props: { project: { id: 1, name: "現場A" }, manual: makeManual() } });
+        await selectCut();
+        await fireEvent.click(screen.getByTestId("start-recording"));
+        await vi.waitFor(() => {
+            expect(screen.getByTestId("capture-file-input")).toBeInTheDocument();
+        });
+
+        const file = new File(["data"], "take.mp4", { type: "video/mp4" });
+        await fireEvent.change(screen.getByTestId("capture-file-input"), {
+            target: { files: [file] },
+        });
+
+        await vi.waitFor(() => {
+            expect(enqueueMock).toHaveBeenCalledTimes(1);
+        });
     });
 });
 
