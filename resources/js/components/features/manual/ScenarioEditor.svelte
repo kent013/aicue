@@ -1,7 +1,16 @@
 <script lang="ts">
     import { tick } from "svelte";
     import { router } from "@inertiajs/svelte";
-    import { Check, ChevronDown, ChevronUp, ListPlus, Plus, Trash2 } from "@lucide/svelte";
+    import {
+        Check,
+        ChevronDown,
+        ChevronUp,
+        ListPlus,
+        Plus,
+        Redo2,
+        Trash2,
+        Undo2,
+    } from "@lucide/svelte";
     import Alert from "@/components/atoms/Alert.svelte";
     import Button from "@/components/atoms/Button.svelte";
     import Card from "@/components/atoms/Card.svelte";
@@ -12,6 +21,7 @@
     import FormField from "@/components/molecules/FormField.svelte";
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
     import { csrfToken } from "@/lib/csrf";
+    import { boundHistory, parseHistorySnapshot, pushHistory } from "@/lib/manual/scenario-history";
     import { addToast } from "@/lib/stores/toast";
     import type {
         DraftPoint,
@@ -35,12 +45,25 @@
 
     let { projectId, manualId, scenario }: Props = $props();
 
+    // インスタンス内カウンタ (instance script 宣言 = コンポーネントインスタンスごとに独立)。
+    // 採番値は履歴文字列に保存され undo/redo で round-trip する。
+    let clientKeySeq = 0;
+    function nextClientKey(): string {
+        clientKeySeq += 1;
+        return `ck-${clientKeySeq}`;
+    }
+
     /** サーバ shape → 編集用作業コピー (新しい配列/オブジェクトに clone し props と分離する) */
     function toDraftSteps(steps: ScenarioStep[]): DraftStep[] {
         return steps.map((step) => ({
             ...rowOf(step),
             id: step.id,
-            points: step.points.map((point) => ({ ...rowOf(point), id: point.id })),
+            clientKey: nextClientKey(),
+            points: step.points.map((point) => ({
+                ...rowOf(point),
+                id: point.id,
+                clientKey: nextClientKey(),
+            })),
         }));
     }
 
@@ -70,13 +93,22 @@
         }));
     }
 
-    /** 正規化シリアライザ (キー順固定・payload 対象フィールドのみ)。比較と送信の正規形を一本化する */
+    /**
+     * 正規化シリアライザ (履歴/dirty 比較の正規形)。
+     * clientKey を含め undo/redo で安定 key を round-trip させる。
+     * payloadSteps (PUT body) は clientKey を含めない (サーバ保護キー混入防止)。
+     */
     function serializeSteps(list: DraftStep[]): string {
         return JSON.stringify(
             list.map((step) => ({
+                clientKey: step.clientKey,
                 id: step.id,
                 ...rowOf(step),
-                points: step.points.map((point) => ({ id: point.id, ...rowOf(point) })),
+                points: step.points.map((point) => ({
+                    clientKey: point.clientKey,
+                    id: point.id,
+                    ...rowOf(point),
+                })),
             })),
         );
     }
@@ -86,16 +118,30 @@
     // applySaved (保存成功) / reloadScenario (409 からの明示同意リロード) が reseed で行う。
     // svelte-ignore state_referenced_locally
     let version = $state(scenario.scenario_version);
+    // clientKey 採番は 1 回だけ (2 回呼ぶと steps と snapshot で異なるキーが振られ初期 dirty になる)。
     // svelte-ignore state_referenced_locally
-    let steps = $state<DraftStep[]>(toDraftSteps(scenario.steps));
+    const initialSteps = toDraftSteps(scenario.steps);
+    // svelte-ignore state_referenced_locally
+    let steps = $state<DraftStep[]>(initialSteps);
     /** 保存済みスナップショット (正規形の JSON 文字列。$state proxy と参照を共有しない) */
     // svelte-ignore state_referenced_locally
-    let snapshot = $state(serializeSteps(toDraftSteps(scenario.steps)));
+    let snapshot = $state(serializeSteps(initialSteps));
     let saving = $state(false);
     // 直近の保存成功をその場に残す (toast の 4s 自動消去に依存しない永続確認)。
     // true にするのは applySaved() のみ。reseed()・save 開始・失敗・dirty 転換で false。
     let justSaved = $state(false);
     let errors = $state<Record<string, string[]>>({});
+
+    // --- undo/redo 履歴 (保存前のローカル編集のみ対象。サーバ状態 version/snapshot は不変) ---
+    let undoStack = $state<string[]>([]);
+    let redoStack = $state<string[]>([]);
+    /** 編集フィールド focus 時の「変更前」状態 (未確定の pending 編集の基準)。canUndo が参照するため $state */
+    let editBaseline = $state<string | null>(null);
+    // IME/保留は event handler 内でのみ同期参照するため非 reactive local で足りる
+    let composing = false;
+    let flushDeferred = false;
+    /** composing 中に要求された構造操作/undo/redo を compositionend 後に FIFO 実行する */
+    let pendingActions: Array<() => void> = [];
 
     /**
      * 保存失敗フィードバックの判別可能 union。
@@ -127,15 +173,22 @@
 
     const dirty = $derived(serializeSteps(steps) !== snapshot);
 
+    const canUndo = $derived(
+        undoStack.length > 0 ||
+            (editBaseline !== null && editBaseline !== serializeSteps(steps)),
+    );
+    const canRedo = $derived(redoStack.length > 0);
+
     // 編集で dirty に転じたら成功確認を消す (level-triggered)。dirty は derived で決定的なため
     // applySaved 直後は dirty=false のままで justSaved=true が保たれる。
     $effect(() => {
         if (dirty) justSaved = false;
     });
 
-    /** 新規行の空値 (scene のみ必須のため空で作る) */
+    /** 新規行の空値 (scene のみ必須のため空で作る)。clientKey は安定 key 用に採番する */
     function emptyRow(shotType: "hiki" | "yori"): Omit<DraftPoint, "id"> {
         return {
+            clientKey: nextClientKey(),
             scene: "",
             shot_type: shotType,
             shooting_point: null,
@@ -148,35 +201,203 @@
     }
 
     function addStep(): void {
-        steps.push({ ...emptyRow("hiki"), id: null, points: [] });
+        runSettled(() =>
+            commitStructural(() => steps.push({ ...emptyRow("hiki"), id: null, points: [] })),
+        );
     }
 
     function addPoint(stepIndex: number): void {
-        steps[stepIndex].points.push({ ...emptyRow("yori"), id: null });
+        runSettled(() =>
+            commitStructural(() => steps[stepIndex].points.push({ ...emptyRow("yori"), id: null })),
+        );
     }
 
     function removeStep(index: number): void {
-        steps.splice(index, 1);
-        confirmingStepIndex = null;
+        runSettled(() => commitStructural(() => steps.splice(index, 1)));
+        confirmingStepIndex = null; // 確認ダイアログを閉じるのは即時 (履歴とは独立)
     }
 
     function removePoint(stepIndex: number, pointIndex: number): void {
-        steps[stepIndex].points.splice(pointIndex, 1);
+        runSettled(() => commitStructural(() => steps[stepIndex].points.splice(pointIndex, 1)));
     }
 
     /** ▲▼ 並べ替え (同一スコープ内のみ。階層をまたぐ移動は提供しない) */
     function moveStep(index: number, delta: -1 | 1): void {
         const next = index + delta;
-        if (next < 0 || next >= steps.length) return;
-        [steps[index], steps[next]] = [steps[next], steps[index]];
+        if (next < 0 || next >= steps.length) return; // 境界: 履歴も積まない
+        runSettled(() =>
+            commitStructural(() => {
+                [steps[index], steps[next]] = [steps[next], steps[index]];
+            }),
+        );
     }
 
     function movePoint(stepIndex: number, index: number, delta: -1 | 1): void {
         const points = steps[stepIndex].points;
         const next = index + delta;
         if (next < 0 || next >= points.length) return;
-        [points[index], points[next]] = [points[next], points[index]];
+        runSettled(() =>
+            commitStructural(() => {
+                [points[index], points[next]] = [points[next], points[index]];
+            }),
+        );
     }
+
+    // --- 履歴コア (保存前ローカル編集のみ対象。undo/redo は steps を再代入し安定 clientKey で差分描画) ---
+
+    /** 保存/リロード時に履歴を断つ (保存前ローカル編集のみ対象。R1 決定) */
+    function resetHistory(): void {
+        undoStack = [];
+        redoStack = [];
+        editBaseline = null;
+        flushDeferred = false;
+        pendingActions = [];
+    }
+
+    /** editBaseline を(変化があれば)確定して 1 エントリに積む。IME-aware・冪等 */
+    function flushPendingEdit(): void {
+        if (composing) {
+            flushDeferred = true; // 変換確定後に compositionend で flush
+            return;
+        }
+        if (editBaseline === null) return;
+        const before = editBaseline;
+        editBaseline = null; // 冪等化 (直後の focusout で再 push しない)
+        if (pushHistory(undoStack, before, serializeSteps(steps))) {
+            redoStack = []; // 新規編集で redo クリア
+        }
+    }
+
+    /** 構造操作/undo/redo の IME ゲート。composing 中は compositionend まで保留 */
+    function runSettled(action: () => void): void {
+        if (composing) {
+            pendingActions.push(action); // FIFO: 発行順に compositionend で実行 (R4 policy)
+            return;
+        }
+        action();
+    }
+
+    /** 構造操作の共通コミット: pending 編集確定 → 変更前を控え → 変異 → 変化があれば push */
+    function commitStructural(mutate: () => void): void {
+        flushPendingEdit();
+        const before = serializeSteps(steps);
+        mutate();
+        if (pushHistory(undoStack, before, serializeSteps(steps))) {
+            redoStack = [];
+        }
+    }
+
+    /**
+     * 履歴文字列を検証(util)→ rowOf 正規化で新規 DraftStep[] を作り steps に反映。
+     * 壊れていれば false(steps を変えない fail-safe)。素の型アサーションを残さない。
+     */
+    function restoreFrom(serialized: string): boolean {
+        const parsed = parseHistorySnapshot(serialized); // util: unknown→type predicate→検証済み
+        if (parsed === null) return false;
+        steps = parsed.map((step) => ({
+            ...rowOf(step),
+            id: step.id,
+            clientKey: step.clientKey, // 安定 key を round-trip
+            points: step.points.map((point) => ({
+                ...rowOf(point),
+                id: point.id,
+                clientKey: point.clientKey,
+            })),
+        }));
+        return true;
+    }
+
+    function reportHistoryCorruption(): void {
+        resetHistory();
+        if (import.meta.env.DEV) {
+            console.warn("[ScenarioEditor] 編集履歴の復元に失敗しました (履歴を破棄)");
+        }
+        addToast("warning", "編集履歴を復元できませんでした");
+    }
+
+    function undo(): void {
+        runSettled(doUndo);
+    }
+    function redo(): void {
+        runSettled(doRedo);
+    }
+
+    function doUndo(): void {
+        flushPendingEdit(); // 進行中のテキスト編集を先に 1 エントリ確定
+        if (undoStack.length === 0) return;
+        const current = serializeSteps(steps); // 復元前 = redo へ退避する状態
+        if (!restoreFrom(undoStack[undoStack.length - 1])) {
+            reportHistoryCorruption(); // fail-safe: steps は変えない
+            return;
+        }
+        undoStack.pop();
+        redoStack.push(current);
+        boundHistory(redoStack);
+        editBaseline = null;
+    }
+
+    function doRedo(): void {
+        flushPendingEdit(); // pending 編集があれば「新規編集」= redo クリア (この後 length 0 で no-op)
+        if (redoStack.length === 0) return;
+        const current = serializeSteps(steps);
+        if (!restoreFrom(redoStack[redoStack.length - 1])) {
+            reportHistoryCorruption();
+            return;
+        }
+        redoStack.pop();
+        undoStack.push(current);
+        boundHistory(undoStack);
+        editBaseline = null;
+    }
+
+    // --- focus / composition ハンドラ (section に委譲。バブリングする focusin/focusout を使う) ---
+
+    /** input/textarea/select/contenteditable か */
+    function isEditableField(el: EventTarget | null): boolean {
+        if (!(el instanceof HTMLElement)) return false;
+        const tag = el.tagName;
+        return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
+    }
+
+    function onEditorFocusIn(event: FocusEvent): void {
+        if (isEditableField(event.target) && editBaseline === null) {
+            editBaseline = serializeSteps(steps); // このフィールド編集セッションの基準
+        }
+    }
+    function onEditorFocusOut(): void {
+        flushPendingEdit(); // composing 中なら flushDeferred に退避される
+    }
+    // 粒度=フィールド単位 (1 フィールドの編集 = 1 履歴エントリ)。値を変えないフォーカス巡回は
+    // pushHistory(before===current) が no-op のため履歴を汚さない。
+    function onCompositionStart(): void {
+        composing = true;
+    }
+    function onCompositionEnd(): void {
+        composing = false;
+        if (flushDeferred) {
+            flushDeferred = false;
+            flushPendingEdit(); // テキスト編集を 1 エントリ確定 (中間文字列は積まれない)
+        }
+        const queued = pendingActions;
+        pendingActions = [];
+        for (const action of queued) action(); // 構造操作/undo/redo を発行順に実行
+    }
+
+    // キーボードショートカット (Ctrl/Cmd+Z = undo, +Shift = redo)。編集フィールド内は native に委譲
+    $effect(() => {
+        const onKeydown = (event: KeyboardEvent): void => {
+            if (event.isComposing) return; // IME 変換中は無視
+            if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "z") return;
+            if (saving || confirmingStepIndex !== null || confirmingReload) return;
+            // 編集フィールドに focus がある間は native の文字単位 undo に委ねる (R1 決定)
+            if (isEditableField(document.activeElement)) return;
+            event.preventDefault();
+            if (event.shiftKey) redo();
+            else undo();
+        };
+        window.addEventListener("keydown", onKeydown);
+        return () => window.removeEventListener("keydown", onKeydown);
+    });
 
     /**
      * union 網羅の型固定 (kind 追加時は引数の never 不一致でコンパイルエラーになり
@@ -342,6 +563,7 @@
         snapshot = serializeSteps(steps);
         errors = {};
         justSaved = false; // 409 競合/明示リロードの reseed で偽の成功表示を出さない
+        resetHistory(); // 保存成功/明示リロードで履歴を断つ (保存前ローカル編集のみ対象)
     }
 
     /** 成功応答の取り込み: 確定 id + version + スナップショット更新 + 成功トースト */
@@ -597,7 +819,13 @@
     </div>
 {/snippet}
 
-<section aria-label="シナリオ編集">
+<section
+    aria-label="シナリオ編集"
+    onfocusin={onEditorFocusIn}
+    onfocusout={onEditorFocusOut}
+    oncompositionstart={onCompositionStart}
+    oncompositionend={onCompositionEnd}
+>
     {#if steps.length === 0}
         <div class="mt-4">
             <EmptyState
@@ -611,7 +839,7 @@
         </div>
     {:else}
         <ol class="mt-4 flex flex-col gap-4" data-testid="scenario-steps">
-            {#each steps as step, stepIndex (step)}
+            {#each steps as step, stepIndex (step.clientKey)}
                 <li>
                     <Card padding="md">
                         <div class="flex items-start justify-between gap-2">
@@ -655,7 +883,7 @@
 
                         {#if step.points.length > 0}
                             <ol class="mt-4 flex flex-col gap-3 border-l-2 border-border pl-4">
-                                {#each step.points as point, pointIndex (point)}
+                                {#each step.points as point, pointIndex (point.clientKey)}
                                     <li>
                                         <div class="flex items-start justify-between gap-2">
                                             <h4 class="text-caption font-medium text-text-secondary">
@@ -761,8 +989,28 @@
         </div>
     {/if}
 
-    <div class="mt-6 flex items-center gap-2">
+    <div class="mt-6 flex flex-wrap items-center gap-2">
         <Button onclick={save} loading={saving} testId="scenario-submit">シナリオを更新</Button>
+        <Button
+            variant="neutral"
+            size="sm"
+            onclick={undo}
+            disabled={!canUndo}
+            testId="scenario-undo"
+        >
+            <Undo2 class="size-4" aria-hidden="true" />
+            元に戻す
+        </Button>
+        <Button
+            variant="neutral"
+            size="sm"
+            onclick={redo}
+            disabled={!canRedo}
+            testId="scenario-redo"
+        >
+            <Redo2 class="size-4" aria-hidden="true" />
+            やり直す
+        </Button>
         {#if dirty}
             <span class="text-caption text-text-secondary" data-testid="scenario-dirty-indicator">
                 未保存の変更があります
