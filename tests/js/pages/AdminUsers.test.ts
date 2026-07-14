@@ -234,11 +234,18 @@ describe("Admin/Users", () => {
         const roleSelect = screen.getByTestId("member-role-3");
         const row = roleSelect.closest("li");
         expect(row).not.toBeNull();
-        expect(row).toHaveClass("flex-col", "sm:flex-row");
+        expect(row).toHaveClass("flex-col", "sm:flex-row", "sm:flex-wrap");
+        // 行折り返しへ切替済み: justify-between へ逆戻りしていないこと (T042 S1)
+        expect(row).not.toHaveClass("sm:justify-between");
 
         const actions = roleSelect.parentElement;
         expect(actions).not.toBeNull();
-        expect(actions).toHaveClass("flex-wrap");
+        expect(actions).toHaveClass("flex-wrap", "sm:ml-auto");
+
+        // 名前/メール列は sm 以上で最小幅の床を持ち、過剰 truncate を防ぐ (T042 S1)
+        const nameColumn = screen.getByText("unassigned@example.com").parentElement;
+        expect(nameColumn).not.toBeNull();
+        expect(nameColumn).toHaveClass("min-w-0", "sm:min-w-40");
 
         // bug-hunt 実測の最悪幅構成 (2FA バッジ + 未割当バッジ + 2FA 解除 + 未割当 select + 削除)
         // が同一行に揃っていることを固定する
@@ -258,11 +265,17 @@ describe("Admin/Users", () => {
         const revokeButton = screen.getByTestId("revoke-invitation-10");
         const row = revokeButton.closest("li");
         expect(row).not.toBeNull();
-        expect(row).toHaveClass("flex-col", "sm:flex-row");
+        expect(row).toHaveClass("flex-col", "sm:flex-row", "sm:flex-wrap");
+        // 行折り返しへ切替済み: justify-between へ逆戻りしていないこと (T042 S1)
+        expect(row).not.toHaveClass("sm:justify-between");
 
         const actions = revokeButton.parentElement;
         expect(actions).not.toBeNull();
-        expect(actions).toHaveClass("flex-wrap");
+        expect(actions).toHaveClass("flex-wrap", "sm:ml-auto");
+
+        // 招待メール列は sm 以上で最小幅の床を持つ (T042 S1)
+        const emailColumn = screen.getByText("invited@example.com");
+        expect(emailColumn).toHaveClass("min-w-0", "truncate", "sm:min-w-40");
     });
 
     it("削除 ConfirmDialog はメンバー名入りの警告文言を持つ", async () => {

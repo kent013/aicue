@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
 
 /*
  * プロフィール設定画面 (T025: 唯一オーナーのアカウント削除ガード)。
@@ -11,14 +11,22 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/sv
  * - 削除 (router.delete) の onError はダイアログを閉じる (押下後に理由が見える)
  */
 
-const { pageState, routerDeleteMock, formHolder } = vi.hoisted(() => ({
+const { pageState, routerDeleteMock, formHolder, formSeed } = vi.hoisted(() => ({
     pageState: {
         props: {} as Record<string, unknown>,
         url: "/settings",
     },
     routerDeleteMock: vi.fn(),
-    // profileForm (email キーを持つ form) を捕捉する holder。case 6 で put を検証する。
-    formHolder: { profile: null as Record<string, unknown> | null },
+    // useForm fake が捕捉する各 form の holder。初期データキーで二分岐する:
+    //   "email" を持つ → profileForm (case 6 で put を検証)
+    //   "current_password" を持つ → passwordForm (T042 S2 で put/errorBag を検証)
+    formHolder: {
+        profile: null as Record<string, unknown> | null,
+        password: null as Record<string, unknown> | null,
+    },
+    // passwordForm の初期 errors シード。FormField は error があるときだけ
+    // aria-describedby を生成するため、透過検証ケースだけがここに値を入れる。
+    formSeed: { passwordErrors: {} as Record<string, string> },
 }));
 
 vi.mock("@inertiajs/svelte", async (importOriginal) => ({
@@ -30,7 +38,7 @@ vi.mock("@inertiajs/svelte", async (importOriginal) => ({
     useForm: (initial: Record<string, unknown>) => {
         const form: Record<string, unknown> = {
             ...initial,
-            errors: {},
+            errors: "current_password" in initial ? { ...formSeed.passwordErrors } : {},
             processing: false,
             get: vi.fn(),
             post: vi.fn(),
@@ -43,6 +51,8 @@ vi.mock("@inertiajs/svelte", async (importOriginal) => ({
         };
         if ("email" in initial) {
             formHolder.profile = form;
+        } else if ("current_password" in initial) {
+            formHolder.password = form;
         }
         return form;
     },
@@ -121,6 +131,8 @@ interface DeleteVisitOptions {
 beforeEach(() => {
     setProps();
     formHolder.profile = null;
+    formHolder.password = null;
+    formSeed.passwordErrors = {};
 });
 
 afterEach(() => {
@@ -279,5 +291,105 @@ describe("Settings/Index プロフィール更新の recent-auth precheck", () =
 
         await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
         expect(screen.queryByTestId("recent-auth-modal")).toBeNull();
+    });
+});
+
+describe("Settings/Index パスワード変更フォームの表示トグル (T042 S2)", () => {
+    /** ラベル文言からパスワード入力とその PasswordInput コンテナ (div.relative) を得る */
+    function passwordField(label: string): { input: HTMLInputElement; container: HTMLElement } {
+        const input = screen.getByLabelText(label) as HTMLInputElement;
+        const container = input.parentElement as HTMLElement;
+        expect(container).not.toBeNull();
+        return { input, container };
+    }
+
+    it("現在/新しい パスワード入力が表示トグル付き (PasswordInput) で描画される", () => {
+        render(Index, { props: {} });
+
+        const current = passwordField("現在のパスワード");
+        const next = passwordField("新しいパスワード");
+
+        // 初期状態は伏字。各コンテナ内に表示トグルボタンが 1 個ずつ存在する
+        expect(current.input.type).toBe("password");
+        expect(next.input.type).toBe("password");
+        expect(
+            within(current.container).getByRole("button", { name: "パスワードを表示" }),
+        ).toBeInTheDocument();
+        expect(
+            within(next.container).getByRole("button", { name: "パスワードを表示" }),
+        ).toBeInTheDocument();
+    });
+
+    it("トグルで type が password↔text に切り替わり、2 フィールドは独立している", async () => {
+        render(Index, { props: {} });
+
+        const current = passwordField("現在のパスワード");
+        const next = passwordField("新しいパスワード");
+
+        // 現在のパスワードだけトグル → current は text、next は password のまま (相互干渉なし)
+        await fireEvent.click(
+            within(current.container).getByRole("button", { name: "パスワードを表示" }),
+        );
+        expect(current.input.type).toBe("text");
+        expect(next.input.type).toBe("password");
+
+        // もう一度押すと password に戻る
+        await fireEvent.click(
+            within(current.container).getByRole("button", { name: "パスワードを非表示" }),
+        );
+        expect(current.input.type).toBe("password");
+
+        // 新しいパスワード側も独立して切り替わる
+        await fireEvent.click(
+            within(next.container).getByRole("button", { name: "パスワードを表示" }),
+        );
+        expect(next.input.type).toBe("text");
+        expect(current.input.type).toBe("password");
+    });
+
+    it("autocomplete / aria-describedby が PasswordInput を透過して保持される", () => {
+        // FormField は error があるときだけ aria-describedby を生成するため、
+        // 透過を検証するには両フィールドにエラーを載せた状態で描画する。
+        formSeed.passwordErrors = {
+            current_password: "現在のパスワードが違います",
+            password: "パスワードは8文字以上必要です",
+        };
+        render(Index, { props: {} });
+
+        const current = passwordField("現在のパスワード");
+        const next = passwordField("新しいパスワード");
+
+        expect(current.input).toHaveAttribute("autocomplete", "current-password");
+        expect(next.input).toHaveAttribute("autocomplete", "new-password");
+        // FormField 由来の aria-describedby (error id) が rest props として透過している
+        expect(current.input).toHaveAttribute("aria-describedby", "current-password-error");
+        expect(next.input).toHaveAttribute("aria-describedby", "new-password-error");
+    });
+
+    it("送信配線 (put ルート + errorBag) と bind:value が維持される", async () => {
+        render(Index, { props: {} });
+
+        const passwordForm = formHolder.password;
+        expect(passwordForm).not.toBeNull();
+        const putMock = passwordForm?.put as ReturnType<typeof vi.fn>;
+
+        const current = passwordField("現在のパスワード");
+        const next = passwordField("新しいパスワード");
+
+        await fireEvent.input(current.input, { target: { value: "old-secret" } });
+        await fireEvent.input(next.input, { target: { value: "new-secret" } });
+
+        // bind:value が PasswordInput 経由でも form に反映される
+        expect(passwordForm?.current_password).toBe("old-secret");
+        expect(passwordForm?.password).toBe("new-secret");
+
+        const saveButton = screen.getByRole("button", { name: "パスワードを変更" });
+        await fireEvent.submit(saveButton.closest("form") as HTMLFormElement);
+
+        await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+        const call = putMock.mock.calls.at(-1);
+        expect(call?.[0]).toBe("/user/password");
+        const options = call?.[1] as { errorBag?: string };
+        expect(options.errorBag).toBe("updatePassword");
     });
 });
