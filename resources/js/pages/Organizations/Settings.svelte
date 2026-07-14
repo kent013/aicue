@@ -87,12 +87,29 @@
     /* ---- オーナー移譲 (recent-auth 必須。precheck で鮮度を確認してから送る) ---- */
     const transferForm = useForm({ user_id: "" });
     let transferDialogOpen = $state(false);
+    // client precheck 専用の transient error。serverErrors (transferForm.errors) とは分離し、
+    // 有効値復帰で自動解消する (「押下時にエラー表示」契約は維持: 無効のままなら残す)。
+    let transferClientError = $state<string | null>(null);
 
     const transferCandidates = $derived(members.filter((member) => member.id !== myId));
     const transferTargetName = $derived(
         transferCandidates.find((member) => String(member.id) === transferForm.user_id)?.name ??
             "",
     );
+
+    // precheck 合格条件 = 選択値が実在候補に一致すること。エラー条件はこの否定。
+    const isValidTransferTarget = $derived(
+        transferCandidates.some((member) => String(member.id) === transferForm.user_id),
+    );
+
+    // 有効候補へ復帰した時点で client error を連動クリア (過剰クリア防止: clientError!=null かつ有効時のみ)。
+    // 候補 0 人ケースのエラーは isValidTransferTarget が常に false のため残留する = 選択では直せないので正しい。
+    // serverErrors (transferForm.errors) はこの effect の対象外 = 非退行。
+    $effect(() => {
+        if (transferClientError !== null && isValidTransferTarget) {
+            transferClientError = null;
+        }
+    });
 
     /** 候補 0 人時の共通文言 (案内文と押下時エラーで揺れないよう単一定義。テストも本文言を検証) */
     const NO_TRANSFER_CANDIDATES = "移譲先にできるメンバーがいません。";
@@ -107,17 +124,11 @@
     function openTransferDialog(event: SubmitEvent): void {
         event.preventDefault();
         if (transferCandidates.length === 0) {
-            transferForm.setError(
-                "user_id",
-                `${NO_TRANSFER_CANDIDATES}先にメンバーを招待してください。`,
-            );
+            transferClientError = `${NO_TRANSFER_CANDIDATES}先にメンバーを招待してください。`;
             return;
         }
-        const isValidTarget = transferCandidates.some(
-            (member) => String(member.id) === transferForm.user_id,
-        );
-        if (!isValidTarget) {
-            transferForm.setError("user_id", "移譲先のメンバーを選択してください。");
+        if (!isValidTransferTarget) {
+            transferClientError = "移譲先のメンバーを選択してください。";
             return;
         }
         transferDialogOpen = true;
@@ -129,6 +140,8 @@
                 preserveScroll: true,
                 onFinish: () => {
                     transferDialogOpen = false;
+                    // 再 mount しないライフサイクル (再認証キャンセル等) でも stale を残さない
+                    transferClientError = null;
                 },
             });
         });
@@ -270,7 +283,7 @@
                     <FormField
                         label="移譲先のメンバー"
                         id="transfer-target"
-                        error={transferForm.errors.user_id}
+                        error={transferClientError ?? transferForm.errors.user_id}
                     >
                         {#snippet children({ id, describedBy, invalid })}
                             <Select

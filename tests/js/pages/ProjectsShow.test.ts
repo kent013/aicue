@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/svelte";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
 import { router } from "@inertiajs/svelte";
 import Show from "@/pages/Projects/Show.svelte";
 import type { ManualFilters, ManualListItem, PaginationMeta } from "@/types/manual";
@@ -321,5 +321,85 @@ describe("Projects/Show メンバー管理", () => {
 
         expect(screen.getByTestId("project-members-empty")).toBeInTheDocument();
         expect(screen.queryByTestId("project-member-list")).toBeNull();
+    });
+});
+
+describe("Projects/Show メンバー追加の client error 自動解消 (T044)", () => {
+    // 有効候補 2 人 (A id:4 / B id:5)。A→B の切替で $effect のクリア分岐を通す。
+    const multiCandidateProps = {
+        ...baseProps,
+        assignableUsers: [
+            { id: 4, name: "候補 四郎" },
+            { id: 5, name: "候補 五郎" },
+        ],
+    };
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it("未選択で押下→エラー表示後、候補を選ぶと client error と aria-invalid が自動解消する", async () => {
+        vi.spyOn(router, "post").mockImplementation(() => {});
+        render(Show, { props: multiCandidateProps });
+
+        await fireEvent.submit(screen.getByTestId("project-member-add-form"));
+        expect(screen.getByText("追加するメンバーを選択してください。")).toBeInTheDocument();
+        const select = screen.getByLabelText("メンバー");
+        expect(select).toHaveAttribute("aria-invalid", "true");
+
+        await fireEvent.change(select, { target: { value: "4" } });
+
+        await waitFor(() => {
+            expect(screen.queryByText("追加するメンバーを選択してください。")).toBeNull();
+        });
+        expect(select).not.toHaveAttribute("aria-invalid");
+    });
+
+    it("未選択のまま維持なら client error は残留する (過剰クリア防止)", async () => {
+        vi.spyOn(router, "post").mockImplementation(() => {});
+        render(Show, { props: multiCandidateProps });
+
+        await fireEvent.submit(screen.getByTestId("project-member-add-form"));
+        expect(screen.getByText("追加するメンバーを選択してください。")).toBeInTheDocument();
+
+        const select = screen.getByLabelText("メンバー");
+        await fireEvent.change(select, { target: { value: "" } });
+
+        expect(screen.getByText("追加するメンバーを選択してください。")).toBeInTheDocument();
+        expect(select).toHaveAttribute("aria-invalid", "true");
+    });
+
+    it("client error の自動クリアは serverErrors を破壊せず、背後のサーバエラーが再表示される (非退行)", async () => {
+        const serverMsg = "サーバ由来: 追加できません";
+        vi.spyOn(router, "post").mockImplementation(
+            (_url, _data, opts) => {
+                (opts as { onError?: (e: Record<string, string>) => void } | undefined)?.onError?.(
+                    { user_id: serverMsg },
+                );
+            },
+        );
+        render(Show, { props: multiCandidateProps });
+
+        const select = screen.getByLabelText("メンバー");
+
+        // 1. 有効候補 A を選択 → 追加 → サーバエラー表示 (onError 経路のため reset は発火せず選択値は残る)
+        await fireEvent.change(select, { target: { value: "4" } });
+        await fireEvent.submit(screen.getByTestId("project-member-add-form"));
+        await waitFor(() => {
+            expect(screen.getByText(serverMsg)).toBeInTheDocument();
+        });
+
+        // 2. 空選択に戻して送信 → client error がサーバエラーを一時的に覆う
+        await fireEvent.change(select, { target: { value: "" } });
+        await fireEvent.submit(screen.getByTestId("project-member-add-form"));
+        expect(screen.getByText("追加するメンバーを選択してください。")).toBeInTheDocument();
+        expect(screen.queryByText(serverMsg)).toBeNull();
+
+        // 3. 有効候補 B を選択 → $effect がクリア分岐を通り client error=null → サーバエラー再表示
+        await fireEvent.change(select, { target: { value: "5" } });
+        await waitFor(() => {
+            expect(screen.queryByText("追加するメンバーを選択してください。")).toBeNull();
+        });
+        expect(screen.getByText(serverMsg)).toBeInTheDocument();
     });
 });
