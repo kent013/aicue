@@ -1,5 +1,6 @@
 <script lang="ts">
     import { page, useForm } from "@inertiajs/svelte";
+    import { Camera } from "@lucide/svelte";
     import Button from "@/components/atoms/Button.svelte";
     import Card from "@/components/atoms/Card.svelte";
     import Input from "@/components/atoms/Input.svelte";
@@ -9,6 +10,7 @@
     import AppLayout from "@/components/templates/AppLayout.svelte";
     import type { SharedProps } from "@/lib/shared-props";
     import type { CategoryOption, ScenarioDocument, VideoManualStatus } from "@/types/manual";
+    import { isCaptureNavigable } from "@/types/manual";
 
     /**
      * 動画マニュアルの編集 (基本情報 + シナリオ)。
@@ -34,6 +36,9 @@
     const shared = $derived(page.props as unknown as SharedProps);
     const appName = $derived(shared.appName ?? "");
 
+    // 撮影ナビ (capture.manuals.show) への文脈リンクを出してよい状態か
+    const captureNavigable = $derived(isCaptureNavigable(manual.status));
+
     const form = useForm({
         title: manual.title,
         category: manual.category === null ? "" : String(manual.category),
@@ -49,10 +54,25 @@
 </script>
 
 <AppLayout {appName}>
-    <h1 class="text-h2">動画マニュアルの編集</h1>
-    <p class="mt-1 text-caption text-text-secondary">
-        基本情報とシナリオ (撮影台本) を編集できます。
-    </p>
+    <div class="flex items-start justify-between gap-4">
+        <div class="min-w-0">
+            <h1 class="text-h2">動画マニュアルの編集</h1>
+            <p class="mt-1 text-caption text-text-secondary">
+                基本情報とシナリオ (撮影台本) を編集できます。
+            </p>
+        </div>
+        {#if captureNavigable}
+            <Button
+                variant="primary"
+                href={`/app/projects/${project.id}/manuals/${manual.id}`}
+                inertia
+                testId="capture-manual-link"
+            >
+                <Camera class="size-4" aria-hidden="true" />
+                この手順書を撮影する
+            </Button>
+        {/if}
+    </div>
 
     <div class="mt-6 max-w-2xl">
         <Card padding="lg">
