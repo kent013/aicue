@@ -273,6 +273,15 @@ doc/10 §10.3 / §10.8-4/-7 の実装 (T004)。routes は `/app/projects/{projec
 - **DL 済み削除不可 (D6)**: 詳細 GET が採用テイクの署名 DL URL と同時に発行する ACK トークン
   (Crypt 封緘・同 TTL) を `POST .../takes/{take}/downloaded` が検証して `takes.downloaded_at` を
   打刻する。非 null のテイクは DELETE 422
+- **入室時の採用テイク自動 DL (T051)**: `pages/Capture/Show.svelte` が mount 時 (と online 復帰時) に
+  `lib/capture/auto-download.ts` の `AdoptedTakeAutoDownloader` を起動し、採用 && ready && 未 DL の
+  テイクを順次 `fetch(playback_url, {credentials:"omit"})` で実バイト完読 → 上記 ACK 経路へ送る
+  (サーバ変更なし・既存 ACK と同一冪等打刻)。手動 DL ボタンと同一意味。**`downloaded_at` は取得済み・
+  同期済みを示す可用性指標であり、端末内保存・オフライン再生・ブラウザキャッシュ残存を保証しない**
+  (ワークフロー単位のグローバル同期状態であり端末単位ではない)。将来オフライン再生等で永続保存が
+  必要になれば `downloaded_at` を流用せず別状態を設計する。本番 S3 は署名 URL への CORS GET 許可
+  (`AllowedMethods` に GET、size 検査を使うなら `Access-Control-Expose-Headers: Content-Length,
+  Content-Encoding`) が受け入れ条件 (未公開でも size 検査を自動スキップして degrade 成立)
 - **PWA フロント**: `pages/Capture/*` + `features/capture/*` + `lib/capture/*`
   (即時アップロード優先・IndexedDB は失敗/オフライン時の一時バッファ・419 は csrf-cookie
   再取得 1 回リトライ)。SW (`public/capture-sw.js`) は同一オリジン GET `/build/*` のみ
