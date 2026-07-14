@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
     classifyGetUserMediaError,
+    formatElapsed,
+    nextFacingMode,
     preferredRecordingMimeType,
     supportsMediaRecorder,
+    supportsPauseResume,
 } from "@/lib/capture/camera";
 
 /*
@@ -123,5 +126,50 @@ describe("classifyGetUserMediaError", () => {
             kind: "unavailable",
             reason: "unknown",
         });
+    });
+});
+
+describe("nextFacingMode", () => {
+    it("environment ⇄ user を双方向に反転する", () => {
+        expect(nextFacingMode("environment")).toBe("user");
+        expect(nextFacingMode("user")).toBe("environment");
+    });
+});
+
+describe("formatElapsed", () => {
+    it("経過ミリ秒を mm:ss へ整形する (秒切り捨て)", () => {
+        expect(formatElapsed(0)).toBe("00:00");
+        expect(formatElapsed(5000)).toBe("00:05");
+        expect(formatElapsed(65000)).toBe("01:05");
+        expect(formatElapsed(3599000)).toBe("59:59");
+    });
+
+    it("60 分以上は mm が桁溢れして連続表示される (分を切り捨てない)", () => {
+        expect(formatElapsed(3600000)).toBe("60:00");
+    });
+
+    it("負値・NaN は 00:00 に丸める", () => {
+        expect(formatElapsed(-1)).toBe("00:00");
+        expect(formatElapsed(Number.NaN)).toBe("00:00");
+        expect(formatElapsed(Number.POSITIVE_INFINITY)).toBe("00:00");
+    });
+});
+
+describe("supportsPauseResume", () => {
+    it("prototype に pause/resume を持つ MediaRecorder は true", () => {
+        vi.stubGlobal("MediaRecorder", {
+            prototype: { pause: () => undefined, resume: () => undefined },
+        });
+        expect(supportsPauseResume()).toBe(true);
+    });
+
+    it("pause/resume を持たない MediaRecorder は false", () => {
+        vi.stubGlobal("MediaRecorder", { prototype: {} });
+        expect(supportsPauseResume()).toBe(false);
+    });
+
+    it("MediaRecorder 自体が無ければ false", () => {
+        vi.stubGlobal("MediaRecorder", undefined);
+        expect(supportsPauseResume()).toBe(false);
     });
 });
