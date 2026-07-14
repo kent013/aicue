@@ -53,9 +53,9 @@
                     </p>
                     <p class="truncate text-body">{cut.scene}</p>
                     {#if cut.shooting_point}
-                        <p class="flex items-center gap-1 truncate text-caption text-text-secondary">
+                        <p class="flex min-w-0 items-center gap-1 text-caption text-text-secondary">
                             <MapPin class="size-3 shrink-0" aria-hidden="true" />
-                            {cut.shooting_point}
+                            <span class="min-w-0 flex-1 truncate">{cut.shooting_point}</span>
                         </p>
                     {/if}
                 </div>

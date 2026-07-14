@@ -214,3 +214,16 @@ describe("Capture/Show カメラフォールバック", () => {
         expect(enqueueMock.mock.calls[0][0].contentType).toBe("video/webm");
     });
 });
+
+describe("Capture/Show レイアウト overflow ガード (H13/F-1-3)", () => {
+    it("グリッドは mobile 単一列 (grid-cols-1)、左右 pane が min-w-0 を持つ", () => {
+        stubCameraSupported(false);
+        render(CaptureShow, { props: baseProps });
+
+        const grid = screen.getByTestId("capture-grid");
+        expect(grid.className).toContain("grid-cols-1");
+
+        expect(screen.getByTestId("capture-left-pane").className).toContain("min-w-0");
+        expect(screen.getByTestId("capture-right-pane").className).toContain("min-w-0");
+    });
+});

@@ -150,8 +150,8 @@
         <UploadQueueBar {pendingCount} {pendingBytes} {uploading} {quotaMessage} onResume={resumeUploads} />
     </div>
 
-    <div class="mt-4 grid gap-4 lg:grid-cols-2">
-        <section class="rounded-md border border-border bg-surface">
+    <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2" data-testid="capture-grid">
+        <section class="min-w-0 rounded-md border border-border bg-surface" data-testid="capture-left-pane">
             <h2 class="border-b border-border px-3 py-2 text-caption text-text-secondary">
                 シナリオ (タップして撮影)
             </h2>
@@ -162,7 +162,7 @@
             />
         </section>
 
-        <section class="flex flex-col gap-4">
+        <section class="flex min-w-0 flex-col gap-4" data-testid="capture-right-pane">
             {#if selectedCut === null}
                 <p class="text-caption text-text-secondary">
                     左のシナリオからカットを選ぶと撮影パネルが開きます。
