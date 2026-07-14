@@ -218,3 +218,116 @@ describe("Organizations/Settings オーナー移譲の確定フロー (F-12)", (
         expect(routerPostSpy).not.toHaveBeenCalled();
     });
 });
+
+describe("Organizations/Settings オーナー移譲の client error 自動解消 (T044)", () => {
+    // 自分 (id:1) + 有効候補 2 人 (A id:2 / B id:3)。page 未モック (myId=null) のため
+    // 3 人全員が候補になるが、A→B の切替で $effect のクリア分岐を通せればよい。
+    const multiCandidateProps = {
+        ...baseProps,
+        members: [
+            { id: 1, name: "オーナー 太郎" },
+            { id: 2, name: "候補 A" },
+            { id: 3, name: "候補 B" },
+        ],
+    };
+
+    function stubRecentAuthStatus(recent: boolean): ReturnType<typeof vi.fn> {
+        const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+            if (String(input).includes("/recent-auth/status")) {
+                return Promise.resolve({
+                    ok: true,
+                    status: 200,
+                    json: () =>
+                        Promise.resolve({
+                            recent,
+                            passwordSet: true,
+                            availableProviders: [],
+                            canSatisfy: true,
+                            confirmedAt: recent ? 1 : null,
+                        }),
+                });
+            }
+            return Promise.reject(new Error(`unexpected fetch: ${String(input)}`));
+        });
+        vi.stubGlobal("fetch", fetchMock);
+        return fetchMock;
+    }
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+    });
+
+    it("空選択で押下→エラー表示後、有効候補を選ぶと client error と aria-invalid が自動解消する", async () => {
+        render(Settings, { props: multiCandidateProps });
+
+        await fireEvent.click(screen.getByTestId("transfer-ownership-button"));
+
+        expect(screen.getByText("移譲先のメンバーを選択してください。")).toBeInTheDocument();
+        const select = screen.getByLabelText("移譲先のメンバー");
+        expect(select).toHaveAttribute("aria-invalid", "true");
+
+        await fireEvent.change(select, { target: { value: "2" } });
+
+        await waitFor(() => {
+            expect(
+                screen.queryByText("移譲先のメンバーを選択してください。"),
+            ).toBeNull();
+        });
+        expect(select).not.toHaveAttribute("aria-invalid");
+    });
+
+    it("無効値のまま (空選択維持) なら client error は残留する (過剰クリア防止)", async () => {
+        render(Settings, { props: multiCandidateProps });
+
+        await fireEvent.click(screen.getByTestId("transfer-ownership-button"));
+        expect(screen.getByText("移譲先のメンバーを選択してください。")).toBeInTheDocument();
+
+        // 選択を空のまま保持 (isValidTransferTarget=false) → $effect はクリアしない
+        const select = screen.getByLabelText("移譲先のメンバー");
+        await fireEvent.change(select, { target: { value: "" } });
+
+        expect(screen.getByText("移譲先のメンバーを選択してください。")).toBeInTheDocument();
+        expect(select).toHaveAttribute("aria-invalid", "true");
+    });
+
+    it("client error の自動クリアは serverErrors を破壊せず、背後のサーバエラーが再表示される (非退行)", async () => {
+        // router.post を onError 呼び出しに差し替える。useForm 内部 onError が
+        // form.clearErrors().setError(errors) を実行し、実 transferForm.errors.user_id に載る。
+        const serverMsg = "サーバ由来: 対象は組織メンバーではありません";
+        vi.spyOn(router, "post").mockImplementation(
+            (_url, _data, opts) => {
+                (opts as { onError?: (e: Record<string, string>) => void } | undefined)?.onError?.(
+                    { user_id: serverMsg },
+                );
+            },
+        );
+        stubRecentAuthStatus(true);
+        render(Settings, { props: multiCandidateProps });
+
+        const select = screen.getByLabelText("移譲先のメンバー");
+
+        // 1. 有効候補 A を選択 → 確認ダイアログ → 確定 → サーバエラー表示 (client error は null)
+        await fireEvent.change(select, { target: { value: "2" } });
+        await fireEvent.click(screen.getByTestId("transfer-ownership-button"));
+        await fireEvent.click(screen.getByRole("button", { name: "移譲する" }));
+        await waitFor(() => {
+            expect(screen.getByText(serverMsg)).toBeInTheDocument();
+        });
+
+        // 2. 空選択に戻して送信 → client error がサーバエラーを一時的に覆う
+        await fireEvent.change(select, { target: { value: "" } });
+        await fireEvent.click(screen.getByTestId("transfer-ownership-button"));
+        expect(screen.getByText("移譲先のメンバーを選択してください。")).toBeInTheDocument();
+        expect(screen.queryByText(serverMsg)).toBeNull();
+
+        // 3. 有効候補 B を選択 → $effect がクリア分岐を通り client error=null → サーバエラー再表示
+        await fireEvent.change(select, { target: { value: "3" } });
+        await waitFor(() => {
+            expect(
+                screen.queryByText("移譲先のメンバーを選択してください。"),
+            ).toBeNull();
+        });
+        expect(screen.getByText(serverMsg)).toBeInTheDocument();
+    });
+});

@@ -119,19 +119,33 @@
 
     /* メンバー追加 (store。assignableUsers から選択) */
     const memberForm = useForm({ user_id: "", role: "project_member" });
+    // client precheck 専用の transient error。serverErrors (memberForm.errors) とは分離。
+    let addMemberClientError = $state<string | null>(null);
+
+    // precheck 合格条件 = 候補が選択済み。エラー条件はこの否定。
+    const isAddMemberSelected = $derived(memberForm.user_id !== "");
+
+    // 選択が入った時点で client error を連動クリア (過剰クリア防止)。serverErrors は対象外 = 非退行。
+    $effect(() => {
+        if (addMemberClientError !== null && isAddMemberSelected) {
+            addMemberClientError = null;
+        }
+    });
 
     function submitAddMember(event: SubmitEvent): void {
         event.preventDefault();
         if (memberForm.processing) return; // 二重送信ガード
         // 候補未選択なら押下時エラー (disabled にしない = 禁止事項 8)
         if (memberForm.user_id === "") {
-            memberForm.setError("user_id", "追加するメンバーを選択してください。");
+            addMemberClientError = "追加するメンバーを選択してください。";
             return;
         }
         memberForm.post(`/projects/${project.id}/members`, {
             preserveScroll: true,
             onSuccess: () => {
                 memberForm.reset();
+                // reset で user_id が空へ戻るため、直前の client error も揃えて解消する
+                addMemberClientError = null;
             },
         });
     }
@@ -508,7 +522,7 @@
                     <FormField
                         label="メンバー"
                         id="project-member-user"
-                        error={memberForm.errors.user_id}
+                        error={addMemberClientError ?? memberForm.errors.user_id}
                     >
                         {#snippet children({ id, describedBy, invalid })}
                             <Select
