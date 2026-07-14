@@ -498,6 +498,8 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
                     ->name('takes.adopt');
                 Route::post('/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take}/downloaded', [CaptureTakeController::class, 'markDownloaded'])
                     ->name('takes.downloaded');
+                Route::get('/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take}/playback', [CaptureTakeController::class, 'playback'])
+                    ->name('takes.playback');
             });
         });
 });

@@ -55,12 +55,17 @@ beforeEach(() => {
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("open", vi.fn());
     document.cookie = "XSRF-TOKEN=test-token";
+    // jsdom は HTMLMediaElement の再生系メソッドを未実装 (preview dialog の video 用)
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
 });
 
 afterEach(() => {
     cleanup();
     fetchMock.mockReset();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
 });
 
 describe("TakeStrip", () => {
@@ -187,6 +192,118 @@ describe("TakeStrip", () => {
         expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
             ack_token: "sealed-ack-token",
         });
+    });
+
+    it("ready テイクに再生ボタンを表示し、押下で preview dialog が開く (video src = playback URL)", async () => {
+        render(TakeStrip, {
+            projectId: 1,
+            manualId: 2,
+            cut: makeCut([makeTake()]),
+            onChanged: vi.fn(),
+        });
+
+        await fireEvent.click(screen.getByTestId("take-preview-10"));
+
+        const video = await screen.findByTestId("take-preview-video");
+        expect(video).toHaveAttribute("src", "/app/projects/1/manuals/2/cuts/3/takes/10/playback");
+        expect(window.open).not.toHaveBeenCalled(); // preview は video element (DL の window.open とは別)
+    });
+
+    it("撮影 active 中は再生ボタン押下で dialog を開かずエラー表示する", async () => {
+        render(TakeStrip, {
+            projectId: 1,
+            manualId: 2,
+            cut: makeCut([makeTake()]),
+            onChanged: vi.fn(),
+            captureActive: true,
+            onRequestCameraRelease: vi.fn(),
+            onCameraResume: vi.fn(),
+        });
+
+        await fireEvent.click(screen.getByTestId("take-preview-10"));
+
+        expect(screen.queryByTestId("take-preview-video")).not.toBeInTheDocument();
+        expect(screen.getByTestId("take-strip-error").textContent).toContain(
+            "撮影中はプレビューを再生できません",
+        );
+    });
+
+    it("preview を開くと onRequestCameraRelease を呼ぶ (撮影待機 stream 解放)", async () => {
+        const onRequestCameraRelease = vi.fn();
+        render(TakeStrip, {
+            projectId: 1,
+            manualId: 2,
+            cut: makeCut([makeTake()]),
+            onChanged: vi.fn(),
+            captureActive: false,
+            onRequestCameraRelease,
+            onCameraResume: vi.fn(),
+        });
+
+        await fireEvent.click(screen.getByTestId("take-preview-10"));
+        expect(onRequestCameraRelease).toHaveBeenCalledTimes(1);
+    });
+
+    it("preview の閉じるボタンで dialog が閉じ onCameraResume がちょうど 1 回呼ばれる", async () => {
+        const onCameraResume = vi.fn();
+        render(TakeStrip, {
+            projectId: 1,
+            manualId: 2,
+            cut: makeCut([makeTake()]),
+            onChanged: vi.fn(),
+            captureActive: false,
+            onRequestCameraRelease: vi.fn(),
+            onCameraResume,
+        });
+
+        await fireEvent.click(screen.getByTestId("take-preview-10"));
+        await screen.findByTestId("take-preview-video");
+        await fireEvent.click(screen.getByTestId("take-preview-close"));
+
+        await waitFor(() =>
+            expect(screen.queryByTestId("take-preview-video")).not.toBeInTheDocument(),
+        );
+        expect(onCameraResume).toHaveBeenCalledTimes(1);
+    });
+
+    it("preview から採用すると POST .../adopt が飛び、成功で dialog が閉じ onCameraResume が 1 回", async () => {
+        fetchMock.mockResolvedValueOnce(jsonResponse(200, {}));
+        const onChanged = vi.fn();
+        const onCameraResume = vi.fn();
+        render(TakeStrip, {
+            projectId: 1,
+            manualId: 2,
+            cut: makeCut([makeTake()]),
+            onChanged,
+            captureActive: false,
+            onRequestCameraRelease: vi.fn(),
+            onCameraResume,
+        });
+
+        await fireEvent.click(screen.getByTestId("take-preview-10"));
+        await screen.findByTestId("take-preview-video");
+        await fireEvent.click(screen.getByTestId("take-preview-adopt"));
+
+        await waitFor(() => expect(onChanged).toHaveBeenCalled());
+        expect(fetchMock.mock.calls[0][0]).toBe("/app/projects/1/manuals/2/cuts/3/takes/10/adopt");
+        await waitFor(() =>
+            expect(screen.queryByTestId("take-preview-video")).not.toBeInTheDocument(),
+        );
+        expect(onCameraResume).toHaveBeenCalledTimes(1);
+    });
+
+    it("非 ready テイクには再生ボタンを出さず、理由の補助文言を表示する", () => {
+        render(TakeStrip, {
+            projectId: 1,
+            manualId: 2,
+            cut: makeCut([makeTake({ status: "processing" })]),
+            onChanged: vi.fn(),
+        });
+
+        expect(screen.queryByTestId("take-preview-10")).not.toBeInTheDocument();
+        expect(screen.getByTestId("take-not-ready-10")).toHaveTextContent(
+            "アップロード処理中は再生できません",
+        );
     });
 
     it("採用中バッジと DL 済みバッジを表示する", () => {

@@ -1,8 +1,9 @@
 <script lang="ts">
-    import { Check, ChevronDown, ChevronUp, Download, Pencil, Trash2 } from "@lucide/svelte";
+    import { Check, ChevronDown, ChevronUp, Download, Pencil, Play, Trash2 } from "@lucide/svelte";
     import Badge from "@/components/atoms/Badge.svelte";
     import Button from "@/components/atoms/Button.svelte";
     import TakeCommentDialog from "@/components/features/capture/TakeCommentDialog.svelte";
+    import TakePreviewDialog from "@/components/features/capture/TakePreviewDialog.svelte";
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
     import { captureJson, extractErrorMessage } from "@/lib/capture/http";
     import type { CaptureCut, CaptureTake } from "@/types/capture";
@@ -17,9 +18,23 @@
         manualId: number;
         cut: CaptureCut;
         onChanged: () => void;
+        /** 撮影 active (recording|stopping) なら preview を開かずエラー表示 (資源競合防止) */
+        captureActive?: boolean;
+        /** preview を開く直前に撮影待機中の live stream を解放させる (親: CameraRecorder) */
+        onRequestCameraRelease?: () => void;
+        /** preview close で撮影待機を復帰させる (親: CameraRecorder) */
+        onCameraResume?: () => void;
     }
 
-    let { projectId, manualId, cut, onChanged }: Props = $props();
+    let {
+        projectId,
+        manualId,
+        cut,
+        onChanged,
+        captureActive = false,
+        onRequestCameraRelease,
+        onCameraResume,
+    }: Props = $props();
 
     let error = $state<string | null>(null);
     let busyTakeId = $state<number | null>(null);
@@ -27,6 +42,11 @@
     let commentDialogOpen = $state(false);
     let commentSaving = $state(false);
     let commentError = $state<string | null>(null);
+
+    // プレビュー再生ダイアログ (T050)。preview は video element での確認 (DL の window.open とは別用途)。
+    let previewTarget = $state<CaptureTake | null>(null);
+    let previewOpen = $state(false);
+    const previewUrl = $derived(previewTarget !== null ? takeUrl(previewTarget, "/playback") : null);
 
     // 削除確認ダイアログ。id をスナップショット保持し、ラベルは開いた時点の値で確定する
     // (親の再取得・並べ替えで参照内容がずれないように object 参照ではなく id + label を持つ)。
@@ -84,6 +104,38 @@
     const remove = (take: CaptureTake) => run(take, () => captureJson(takeUrl(take), "DELETE"));
     const move = (take: CaptureTake, position: number) =>
         run(take, () => captureJson(takeUrl(take), "PATCH", { position: Math.max(0, position) }));
+
+    // 再生ボタン押下: 撮影中はエラー表示して開かない (押下時エラー。disabled 禁止)。
+    function openPreview(take: CaptureTake): void {
+        error = null;
+        if (captureActive) {
+            // captureActive は recording|stopping を含む (撮影データ保護のため preview と同居させない)
+            error = "撮影中はプレビューを再生できません。撮影を停止してからお試しください。";
+            return;
+        }
+        previewTarget = take;
+        onRequestCameraRelease?.(); // 撮影待機中の live stream を解放
+        previewOpen = true;
+    }
+
+    // dialog が閉じた時 (背景クリック / Esc / × / 閉じるボタン / 採用成功) の単一クリーンアップ点。
+    // TakePreviewDialog が open の true→false 遷移でちょうど 1 回だけ呼ぶ (二重復帰防止)。
+    function handlePreviewClose(): void {
+        previewTarget = null;
+        onCameraResume?.(); // 録画待機を復帰
+    }
+
+    // dialog の採用ボタン: 既存 adopt を呼び、成功時のみ dialog を閉じる。
+    // previewOpen=false 遷移が handlePreviewClose を発火させる (復帰は 1 経路に集約)。
+    // run() は失敗時に error を設定するので dialog はそのまま (error を表示)。
+    async function adoptFromPreview(): Promise<void> {
+        const target = previewTarget;
+        if (target === null) return;
+        await adopt(target);
+        if (error === null) {
+            previewOpen = false;
+        }
+    }
 
     function openComment(take: CaptureTake): void {
         commentTarget = take;
@@ -182,8 +234,29 @@
                         ・{take.comment}
                     {/if}
                 </p>
+                {#if take.status !== "ready"}
+                    <p class="text-caption text-text-secondary" data-testid={`take-not-ready-${take.id}`}>
+                        {#if take.status === "failed"}
+                            アップロードに失敗しました。
+                        {:else}
+                            アップロード処理中は再生できません。
+                        {/if}
+                    </p>
+                {/if}
             </div>
             <div class="flex shrink-0 items-center gap-1">
+                {#if take.status === "ready"}
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        iconOnly
+                        ariaLabel="再生"
+                        onclick={() => openPreview(take)}
+                        testId={`take-preview-${take.id}`}
+                    >
+                        <Play class="size-4" aria-hidden="true" />
+                    </Button>
+                {/if}
                 <Button
                     variant="neutral"
                     size="sm"
@@ -233,6 +306,17 @@
         <p class="text-caption text-danger" role="alert" data-testid="take-strip-error">{error}</p>
     {/if}
 </div>
+
+<TakePreviewDialog
+    bind:open={previewOpen}
+    take={previewTarget}
+    {cut}
+    playbackUrl={previewUrl}
+    adopting={previewTarget !== null && busyTakeId === previewTarget.id}
+    {error}
+    onAdopt={adoptFromPreview}
+    onClose={handlePreviewClose}
+/>
 
 <TakeCommentDialog
     bind:open={commentDialogOpen}

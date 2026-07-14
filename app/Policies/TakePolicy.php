@@ -45,6 +45,12 @@ class TakePolicy
         return $this->captureVia($user, $take);
     }
 
+    /** プレビュー再生: 撮影者 (project_member) 以上。採用前テイクも対象 (doc/04・doc/05) */
+    public function preview(User $user, Take $take): bool
+    {
+        return $this->captureVia($user, $take);
+    }
+
     private function captureVia(User $user, Take $take): bool
     {
         $project = $take->cut?->videoManual?->project;

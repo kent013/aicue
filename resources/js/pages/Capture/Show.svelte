@@ -4,6 +4,7 @@
     import { ArrowLeft } from "@lucide/svelte";
     import TextLink from "@/components/atoms/TextLink.svelte";
     import CameraRecorder from "@/components/features/capture/CameraRecorder.svelte";
+    import type CameraRecorderType from "@/components/features/capture/CameraRecorder.svelte";
     import CaptureFileFallback from "@/components/features/capture/CaptureFileFallback.svelte";
     import CutNavigator from "@/components/features/capture/CutNavigator.svelte";
     import TakeStrip from "@/components/features/capture/TakeStrip.svelte";
@@ -38,6 +39,9 @@
     const canRecord = typeof window !== "undefined" && supportsMediaRecorder();
     let cameraUnavailableReason = $state<CameraUnavailableReason | null>(null);
     const showRecorder = $derived(canRecord && cameraUnavailableReason === null);
+    // 撮影 active (recording|stopping) と recorder 参照 (preview の資源競合制御。T050 / S4)
+    let captureActive = $state(false);
+    let recorderRef = $state<CameraRecorderType | null>(null);
     // 実行時フォールバックの説明文 (reason で出し分け。静的 feature-detect 由来は
     // CaptureFileFallback 既存の説明文だけで足りるため notice なし)
     const fallbackNotice = $derived.by(() => {
@@ -180,9 +184,11 @@
 
                 {#if showRecorder}
                     <CameraRecorder
+                        bind:this={recorderRef}
                         onCaptured={(blob, mimeType, durationMs) =>
                             handleCaptured(blob, mimeType, durationMs)}
                         onCameraUnavailable={(reason) => (cameraUnavailableReason = reason)}
+                        onCaptureActiveChange={(active) => (captureActive = active)}
                     />
                 {:else}
                     {#if fallbackNotice !== null}
@@ -204,6 +210,9 @@
                     manualId={manual.id}
                     cut={selectedCut}
                     onChanged={reloadManual}
+                    {captureActive}
+                    onRequestCameraRelease={() => recorderRef?.releaseForPreview()}
+                    onCameraResume={() => void recorderRef?.resumeAfterPreview()}
                 />
             {/if}
         </section>
