@@ -48,6 +48,17 @@
         parsedCount !== null && parsedCount >= page.minCount && parsedCount <= page.maxCount,
     );
 
+    // clientError は「購入枚数の範囲バリデーション」専用の transient state。押下時にのみ設定され、
+    // 値が有効へ復帰した時点で自動解消する (「押下時にエラー表示」契約は維持: 無効のままなら残す)。
+    // serverErrors (full POST 往復由来) は本 effect の対象外で別経路。
+    // ※不変条件: 将来 clientError に別種のメッセージを載せる場合はこのクリア条件の再検討が必要。
+    // clientError の有無も条件に含めることで不要な代入を避け、意図を明確化する。
+    $effect(() => {
+        if (clientError !== null && isValidCount) {
+            clientError = null;
+        }
+    });
+
     // 適用単価: tiers (minCount 昇順) から minCount <= count の最大段を選ぶ
     const appliedUnit = $derived.by<number | null>(() => {
         if (parsedCount === null) return null;
