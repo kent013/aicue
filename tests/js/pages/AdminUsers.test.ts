@@ -278,6 +278,27 @@ describe("Admin/Users", () => {
         expect(screen.queryByTestId("admin-nav-categories")).toBeNull();
     });
 
+    it("project 不在時は projects.create への作成リンクを出す (href 正しい・注記文言維持)", () => {
+        render(Users, {
+            props: { ...baseProps, hasDefaultProject: false, categoriesUrl: null },
+        });
+
+        const link = screen.getByTestId("create-project-link");
+        // Inertia Link は href を絶対 URL に正規化するため pathname で検証する
+        const href = link.getAttribute("href") ?? "";
+        expect(new URL(href, "http://localhost").pathname).toBe("/projects/create");
+        // 既存注記の文言は維持
+        expect(screen.getByTestId("no-project-note")).toHaveTextContent(
+            "編集者・撮影者を割り当てるには、先にプロジェクトを作成してください。",
+        );
+    });
+
+    it("project 在時は作成リンクを出さない", () => {
+        render(Users, { props: { ...baseProps, hasDefaultProject: true } });
+
+        expect(screen.queryByTestId("create-project-link")).toBeNull();
+    });
+
     it("メンバー行はモバイル縦積みクラスを持ち、操作ブロックは flex-wrap を持つ (F-14)", () => {
         // jsdom はレイアウト計算をしないため、クラス不変条件を横スクロール回避のプロキシとして固定する。
         // 対象要素は data-testid 起点で特定し DOM 順序に依存しない。

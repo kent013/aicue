@@ -51,6 +51,27 @@ test('org Member (編集者 = project_admin でも org は Member) は 403', fun
     $this->actingAs($editor)->get('/manage/users')->assertForbidden();
 });
 
+// CTA 導線の到達性 (T067): ユーザー管理注記の「プロジェクトを作成」リンクが指す
+// projects.create に、ユーザー管理を見られる owner/admin は到達でき、見られない member は
+// 到達できない (403) ことを HTTP レベルで固定する。CTA が 403 で詰まらない不変条件を守る。
+test('CTA 導線: Owner/Admin は projects.create に到達できる (200)', function (): void {
+    // createOrganizationWithOwner は無償プラン (plan_code null) = 課金ゲート通過
+    [$organization, $owner] = createOrganizationWithOwner();
+    $admin = attachOrganizationMember($organization, OrganizationRole::Admin);
+    $admin->forceFill(['current_organization_id' => $organization->id])->save();
+
+    $this->actingAs($owner)->get('/projects/create')->assertOk();
+    $this->actingAs($admin)->get('/projects/create')->assertOk();
+});
+
+test('CTA 導線: org Member は projects.create で 403 (権限境界が非退化)', function (): void {
+    [$organization] = createOrganizationWithOwner();
+    $member = attachOrganizationMember($organization, OrganizationRole::Member);
+    $member->forceFill(['current_organization_id' => $organization->id])->save();
+
+    $this->actingAs($member)->get('/projects/create')->assertForbidden();
+});
+
 test('未ログインは login へ redirect される', function (): void {
     $this->get('/manage/users')->assertRedirect('/login');
 });
