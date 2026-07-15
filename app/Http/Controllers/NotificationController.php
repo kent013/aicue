@@ -47,6 +47,10 @@ class NotificationController extends Controller
 
         return Inertia::render('Notifications/Index', [
             'notifications' => $items,
+            // 未読数をページ表示制御 (read-all ボタン表示可否) 用に渡す。専用 scalar なのは
+            // shared prop notifications.unreadCount がページ prop `notifications` (配列) と
+            // キー衝突するため (詳細は Index.svelte JSDoc)。
+            'unreadCount' => $this->notifications->unreadCountFor($user),
             // 既存 ManualListItem のページャ shape (ProjectController::manualRows) と同形
             'meta' => [
                 'current_page' => $paginator->currentPage(),

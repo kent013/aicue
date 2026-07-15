@@ -99,6 +99,61 @@ test('index: ページネーション (20 件/頁)', function (): void {
             ->where('meta.current_page', 2));
 });
 
+test('index: 未読数を unreadCount prop で渡す (自分宛のみ・既読を除外)', function (): void {
+    [$organization, $owner, $project, $manual] = notificationCenterContext();
+
+    // 自分宛の未読を 3 件発火
+    $ids = [];
+    for ($i = 0; $i < 3; $i++) {
+        $ids[] = notifyManualAnalyzed($organization, $owner, $project, $manual);
+    }
+
+    // 別ユーザー宛の通知は自分の未読数に含めない (自分宛のみカウントを検証)
+    $other = attachOrganizationMember($organization);
+    notifyManualAnalyzed($organization, $other, $project, $manual);
+
+    // 1 件を既読化 → 未読は 2 件 (既読を除外することを検証)
+    $owner->notifications()->whereKey($ids[0])->firstOrFail()->markAsRead();
+
+    $this->actingAs($owner)->get('/notifications')
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('Notifications/Index')
+            ->where('unreadCount', 2));
+});
+
+test('index: unreadCount は全 org 横断で自分宛未読を数える', function (): void {
+    [$organization, $owner, $project, $manual] = notificationCenterContext();
+    notifyManualAnalyzed($organization, $owner, $project, $manual);
+
+    // 別組織に owner を所属させ、その org 由来の自分宛通知も未読数に含める (全 org 横断契約)
+    [$organization2] = createOrganizationWithOwner('第二組織');
+    $organization2->users()->attach($owner);
+    $owner->notify(new TicketBalanceLowNotification(
+        $organization2->id, new TicketBalanceLowPayload('第二組織', 3, 5),
+    ));
+
+    $this->actingAs($owner)->get('/notifications')
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('Notifications/Index')
+            ->where('unreadCount', 2));
+});
+
+test('index: 全既読なら unreadCount=0', function (): void {
+    [$organization, $owner, $project, $manual] = notificationCenterContext();
+    notifyManualAnalyzed($organization, $owner, $project, $manual);
+    notifyManualAnalyzed($organization, $owner, $project, $manual);
+
+    app(NotificationCenterService::class)->markAllRead($owner);
+
+    $this->actingAs($owner)->get('/notifications')
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('Notifications/Index')
+            ->where('unreadCount', 0));
+});
+
 test('read: 自分の通知は既読化され back で戻る', function (): void {
     [$organization, $owner, $project, $manual] = notificationCenterContext();
     $id = notifyManualAnalyzed($organization, $owner, $project, $manual);
