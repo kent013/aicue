@@ -1,0 +1,68 @@
+{
+  "run_id": "20260715-084108",
+  "shards": {
+    "1": {
+      "serve_pid": 1653745,
+      "port": 8011,
+      "db": "bug_hunt_1",
+      "app_url": "http://127.0.0.1:8011",
+      "log_offset": 0,
+      "worker_pid_database_analysis": 1653787,
+      "worker_pid_database_render": 1653792,
+      "worker_pid_database_media": 1653799,
+      "started_at": "2026-07-15 08:41:31",
+      "stories": "S3 S7",
+      "report_present": true,
+      "report_nonblank_lines": 127,
+      "report_substantive": true
+    },
+    "2": {
+      "serve_pid": 1654347,
+      "port": 8012,
+      "db": "bug_hunt_2",
+      "app_url": "http://127.0.0.1:8012",
+      "log_offset": 0,
+      "worker_pid_database_analysis": 1654398,
+      "worker_pid_database_render": 1654402,
+      "worker_pid_database_media": 1654410,
+      "started_at": "2026-07-15 08:41:46",
+      "stories": "S1 S2",
+      "report_present": true,
+      "report_nonblank_lines": 67,
+      "report_substantive": true
+    },
+    "3": {
+      "serve_pid": 1655054,
+      "port": 8013,
+      "db": "bug_hunt_3",
+      "app_url": "http://127.0.0.1:8013",
+      "log_offset": 0,
+      "worker_pid_database_analysis": 1655120,
+      "worker_pid_database_render": 1655124,
+      "worker_pid_database_media": 1655129,
+      "started_at": "2026-07-15 08:41:59",
+      "stories": "S4 S5",
+      "report_present": true,
+      "report_nonblank_lines": 59,
+      "report_substantive": true
+    },
+    "4": {
+      "serve_pid": 1655899,
+      "port": 8014,
+      "db": "bug_hunt_4",
+      "app_url": "http://127.0.0.1:8014",
+      "log_offset": 0,
+      "worker_pid_database_analysis": 1655983,
+      "worker_pid_database_render": 1655989,
+      "worker_pid_database_media": 1655995,
+      "started_at": "2026-07-15 08:42:12",
+      "stories": "S6",
+      "report_present": true,
+      "report_nonblank_lines": 56,
+      "report_substantive": true
+    }
+  },
+  "parallel": 4,
+  "mode": "fan-out",
+  "started_at": "2026-07-15 08:41:08"
+}

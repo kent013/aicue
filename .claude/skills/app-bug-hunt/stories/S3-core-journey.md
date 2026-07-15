@@ -14,7 +14,7 @@
    - **Undo/Redo(T048)**: 行の追加/削除/並べ替え/セル編集を「元に戻す/やり直す」(ボタン + Ctrl/Cmd+Z / Shift+Z)で取消・再適用できるか。保存前のローカル編集のみが対象で、サーバ状態と矛盾しないか。
    - **別名保存/複製 `projects.manuals.duplicate`(T049)**: 既存シナリオを雛形に新タイトル・カテゴリで複製 → cuts が複製され takes は空・status=draft の新マニュアルに遷移するか。他組織のマニュアル複製が 404 か(S7 連動)。
    - **撮影ナビへの文脈リンク(T054)**: 詳細/編集画面から「この手順書を撮影する」で該当マニュアルの `capture.manuals.show` へ直接遷移できるか。
-7. 撮影(PWA面): `capture.home` → `capture.manuals.index`(**並べ替え/自作フィルタ/進捗バッジ/作成者メタ**が効く, T053) → `capture.manuals.show`。詳細入室時に**採用済み未DLテイクが自動ダウンロード+ACK**され DL済みバッジが反映されるか(T051)。シナリオを見ながら各 Cut にテイクをアップロード(`capture.takes.upload-url` → `capture.takes.store`)。fake storage で upload→store→adopt が 500 なく通るか。
+7. 撮影(PWA面): `capture.home` → `capture.manuals.index`(**自作フィルタ/進捗バッジ/作成者メタ**が効く, T053。※撮影PWA一覧の並べ替え UI は v1 スコープ外) → `capture.manuals.show`。詳細入室時に**採用済み未DLテイクが自動ダウンロード+ACK**され DL済みバッジが反映されるか(T051)。シナリオを見ながら各 Cut にテイクをアップロード(`capture.takes.upload-url` → `capture.takes.store`)。fake storage で upload→store→adopt が 500 なく通るか。
    - **撮影中カメラプレビュー(`CameraRecorder`)**: 当該 Cut の**字幕オーバーレイ(T047)**が重畳表示され ON/OFF できるか(焼込ではないガイド)。**録画タイマー・グリッド表示・一時停止/再開(同一テイク継続)・カメラ反転(前後)(T056)**が動作するか。カメラ不可環境ではファイル選択にフォールバック。
    - テイクの並べ替え/コメント(`capture.takes.update`)、**インラインプレビュー再生 + 字幕トグル(T050、`capture.takes.playback`)**で採用前に確認、採用(`capture.takes.adopt`)、削除(`capture.takes.destroy`、**確認ダイアログ**があるか T043)。
 8. `projects.manuals.preview`(チケット非消費)で確認 → `projects.manuals.render`(video_render チケット消費) → status=rendering → `projects.manuals.render-jobs.show` ポーリング → 完了で published。ffmpeg で実際に合成されるか。複数の失敗 alert(プレビュー失敗/採用テイク未設定/レンダ失敗)が**帰属明示**されるか(T040)。
