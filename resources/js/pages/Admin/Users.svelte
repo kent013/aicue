@@ -267,6 +267,17 @@
                     <p class="mt-2 text-caption text-text-secondary" data-testid="no-project-note">
                         プロジェクトがまだありません。編集者・撮影者を割り当てるには、先にプロジェクトを作成してください。
                     </p>
+                    <!-- 詰まりの文脈から 1 ホップで作成画面へ (既存 CTA 流儀 = Button href+inertia) -->
+                    <Button
+                        href="/projects/create"
+                        inertia
+                        variant="ghost"
+                        size="sm"
+                        class="mt-3"
+                        testId="create-project-link"
+                    >
+                        プロジェクトを作成
+                    </Button>
                 {/if}
                 <ul class="mt-4 flex flex-col divide-y divide-border" data-testid="member-list">
                     {#each members as member (member.id)}
