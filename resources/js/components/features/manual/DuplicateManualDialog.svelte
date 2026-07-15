@@ -29,16 +29,41 @@
         categories,
     }: Props = $props();
 
-    // useForm はマウント時 1 回だけ初期化する (Manuals/Edit と同じ流儀。複製後は redirect で
-    // 画面遷移するため props の再供給は起きない = 初期値のみ参照で足りる)。
+    // useForm はマウント時 1 回だけ初期化する (Manuals/Edit と同じ流儀)。
+    // 複製成功は同一 Manuals/Show へ props 差し替えで遷移するため本コンポーネントは再マウント
+    // されない。そこで閉→開エッジで seedFromDefaults により現 props へ値を揃える (下記 $effect)。
     const form = useForm<{ title: string; category: string }>({
         title: defaultTitle,
         category: defaultCategory === null ? "" : String(defaultCategory),
     });
 
+    // 閉→開エッジでのみ現 props を再 seed する。open=true 中の props 変化では seed しない
+    // (入力途中の上書きを防ぐ)。代入対象は useForm の shape と一致する title / category の
+    // 2 キーのみ (他キー拡張時の事故防止)。
+    function seedFromDefaults(): void {
+        form.title = defaultTitle;
+        form.category = defaultCategory === null ? "" : String(defaultCategory);
+        form.clearErrors();
+    }
+
+    // prevOpen は非 reactive なローカル変数 (初回 open で同期)。$effect の依存は open だけに限定し、
+    // prevOpen の読み書きを追跡対象にしない ($state 化すると effect が自己依存し余分に再実行されるため避ける)。
+    let prevOpen = open;
+    $effect(() => {
+        const isOpen = open;
+        if (isOpen && !prevOpen) {
+            seedFromDefaults();
+        }
+        prevOpen = isOpen;
+    });
+
     // 送信本体。form 送信 (Enter) と footer ボタン onclick の双方から呼ぶ
     // (Button atom は form 属性を持たないため footer は onclick で発火させる)。
     function submit(): void {
+        // 送信中の再入 (二重クリック / Enter 連打 / redirect 完了前の再クリック) を塞ぐ。
+        // これは「必須未充足で disabled」(禁止事項8) ではなく、送信中の submit 多重防止。
+        if (form.processing) return;
+
         form
             .transform((data) => ({
                 title: data.title,
@@ -46,7 +71,11 @@
                 category: data.category === "" ? null : Number(data.category),
             }))
             .post(`/projects/${projectId}/manuals/${manualId}/duplicate`, {
-                // 成功時は redirect で新 manual へ遷移するため onSuccess で閉じる必要はない
+                // 成功時は新 manual へ redirect するが、遷移先も同一 Manuals/Show のため
+                // 親の open state が生存しモーダルが残る。ここで明示的に閉じる (F-1-01)。
+                onSuccess: () => {
+                    open = false;
+                },
                 onError: () => {
                     /* エラーは FormField 経由で表示 (ダイアログは開いたまま) */
                 },
