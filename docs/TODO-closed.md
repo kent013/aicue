@@ -77,6 +77,7 @@ Open リストは [TODO.md](TODO.md) を参照。
 | T060 | パスワード変更の送信中pending表示と前回エラークリア。送信中はpending表示し前回エラーをクリア | frontend | 2026-07-15 13:51 |
 | T062 | 撮影テイク行の mobile 375px レイアウト崩れ修正。テイク行のmobile崩れ修正 | frontend | 2026-07-15 13:55 |
 | T063 | 未確定2FAメンバーに「2FA解除」ボタンを表示しない。確定2FAのみ解除ボタン表示 | frontend | 2026-07-15 13:57 |
+| T057 | 撮影PWAのカメラ許可 (Permissions-Policy に camera/microphone=(self) 例外)。撮影 document route (capture.manuals.show) のみ camera=(self),microphone=(self) を送出、非対象・404は baseline維持 | backend | 2026-07-15 14:16 |
 
 ## Obsoleted
 
