@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use App\Models\User;
 use App\Services\Billing\TicketLedgerService;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Http;
 
 test('登録できる (同意の証跡が記録される)', function (): void {
     $response = $this->post('/register', [
@@ -30,6 +32,30 @@ test('登録できる (同意の証跡が記録される)', function (): void {
     // [分岐 B 固定] 通常登録では現在組織が個人組織に確定する (招待成立分岐と排他)
     expect($user->current_organization_id)->toBe($personalOrg->id);
 });
+
+test('登録 POST は非本番で api.pwnedpasswords.com を呼ばない (F-4-01 非退行)', function (): void {
+    // HIBP エンドポイントのみ intercept して実ネットワークを遮断する
+    // (preventStrayRequests は合法な他 HTTP まで例外化するため使わない = 過検出回避)。
+    // uncompromised は NotPwnedVerifier (Http client factory 経由) のため Http::fake で捕捉できる。
+    Http::fake([
+        'api.pwnedpasswords.com/*' => Http::response('', 200),
+    ]);
+
+    $response = $this->post('/register', [
+        'name' => 'Test User',
+        'email' => 'newuser@example.com',
+        'password' => 'SecurePass1234',
+        'terms_accepted' => '1', // 既存 RegistrationTest と同じ表現 (Fortify 契約)
+    ]);
+
+    // シナリオ成立を固定 (別要因の早期失敗で「未送信」だけ通るのを防ぐ)。
+    // 既存「登録できる」テストと同じく verification.notice へ誘導される。
+    $response->assertSessionHasNoErrors();
+    $response->assertRedirect(route('verification.notice'));
+
+    // 主アサーション: HIBP エンドポイントへの送出 0 回に限定 (合法な他 HTTP の偽陽性を避ける)。
+    Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), 'api.pwnedpasswords.com'));
+})->group('auth');
 
 test('利用規約に同意しないと登録できない', function (): void {
     $response = $this->from('/register')->post('/register', [
