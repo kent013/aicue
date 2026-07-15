@@ -80,6 +80,7 @@ Open リストは [TODO.md](TODO.md) を参照。
 | T057 | 撮影PWAのカメラ許可 (Permissions-Policy に camera/microphone=(self) 例外)。撮影 document route (capture.manuals.show) のみ camera=(self),microphone=(self) を送出、非対象・404は baseline維持 | backend | 2026-07-15 14:16 |
 | T061 | published マニュアルでシナリオパネルが未作成表示に戻る不具合。status=ready/rendering/published を確定相として型付き helper isScenarioEstablished で判定し確定相で「未生成」案内を出さない、AI解析CTAは isAnalyzable(draft/ready) 限定。Codex impl-review APPROVED (F-1-03) | frontend | 2026-07-15 14:24 |
 | T064 | HIBP(uncompromised)照合を非本番環境で無効化。HIBP漏洩照合を非本番envのみ無効化 | backend | 2026-07-15 16:12 |
+| T065 | 通知行に個別「既読」ボタンを配線 (notifications.read dead surface 解消)。未読行に read ボタン追加、POST /notifications/{id}/read を preserveScroll で呼び遷移せず 1 件既読化、楽観state(prop優先・単調)+二重送信/相互排他ガード+成功時focus復帰+失敗toast。vitest 8 ケース追加。Codex impl-review APPROVED (Critical/Warning 0) | frontend | 2026-07-15 19:21 |
 
 ## Obsoleted
 
