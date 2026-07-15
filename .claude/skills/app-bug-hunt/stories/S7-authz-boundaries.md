@@ -9,14 +9,14 @@
 1. B のログインで、A の URL を直叩き: `projects.show`/`projects.manuals.show`/`projects.manuals.edit`/`projects.manuals.jobs.show`/`projects.manuals.render-jobs.show`/`capture.manuals.show` → いずれも 404(403 でも Blade エラーでもなく)。
 2. B から A の manual への書き込み: `projects.manuals.update`/`destroy`/`scenario.update`/`analyze`/`render`/`preview`/`source-documents.store` → 404。
 3. B から A の category: `projects.categories.update`/`destroy`/`reorder` → 404。同名 category を A/B 別々に作れる(project スコープ unique)が、B の reorder に A の category id を混ぜると 422/404 の差分オラクルにならない。
-4. 撮影面(PWA): B から A の `capture.takes.*`(store/adopt/update/destroy/upload-url/downloaded)/`capture.manuals.sync` → 404。
+4. 撮影面(PWA): B から A の `capture.takes.*`(store/adopt/update/destroy/upload-url/downloaded/playback) → 404。
 5. cross-cut 採用: A 内で cut X のテイクを cut Y の adopt に渡す → 404(cut->takes() 経由解決)。
 6. 撮影者(project_member)ロールで編集者専用操作(manuals.store/update/destroy, categories.*, analyze, render, manage.users)→ 403。編集者は撮影者専用でない全操作可。
 7. tenant/protected キーを payload に混入(project_id/created_by/category_id/parent_cut_id/adopted_take_id/ticket_reservation_id/video_manual_id/cut_id)→ 422(ProhibitsProtectedKeys)。`category` 別名は許容、`category_id` 直送は 422。
 
 ## このストーリーで消化する screens / operations
 - screens: (S3/S4 の全 nested screen を B 視点で 404 確認。新規消化はしないが再走査)
-- operations: projects.manuals.update, projects.manuals.destroy, projects.manuals.scenario.update, projects.categories.update, projects.categories.destroy, projects.categories.reorder, capture.takes.adopt, capture.takes.destroy, capture.manuals.sync(いずれも越境で 404)
+- operations: projects.manuals.update, projects.manuals.destroy, projects.manuals.duplicate, projects.manuals.scenario.update, projects.categories.update, projects.categories.destroy, projects.categories.reorder, capture.takes.adopt, capture.takes.destroy(いずれも越境で 404)
 
 ## 逸脱アイデア (--deviate 時)
 - 隣接 ID 総当り(manual/cut/take/category/render-job の id を ±1)→ 他組織・他プロジェクトのリソースに到達できないか。

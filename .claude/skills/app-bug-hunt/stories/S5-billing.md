@@ -5,7 +5,7 @@
 
 ## 手順
 1. `pricing`(料金表)を開く → プラン・チケット価格・付与量が表示され、CTA(申込/チャージ)導線が見える。未ログインでも閲覧でき、申込はログインへ誘導。
-2. `billing.index` → 現在のプラン・チケット残高・使用量(容量 Quota 含む)が表示。
+2. `billing.index` → 現在のプラン・チケット残高・月次付与枚数が表示(※容量Quota使用率は Dashboard 側。billing.index には容量ウィジェットは無い)。
 3. `billing.checkout`(プラン申込/チケットチャージ) → Stripe fake の checkout へ → 戻ると残高/プランが更新され、二重送信しても二重課金にならない(冪等)。
 4. `billing.portal` → Stripe カスタマーポータルへ遷移。
 5. チケットスポット購入 `billing.tickets.show`(`/purchase-tickets`) → 枚数入力 → `billing.tickets.checkout`(Stripe fake)。**枚数に範囲外(>上限)を入れてエラー表示後、有効値に修正するとエラー/invalid が即座に消える**か(stale invalid 解消, T041)。合計金額が枚数に応じ再計算されるか。
