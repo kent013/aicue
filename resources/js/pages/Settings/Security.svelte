@@ -79,6 +79,15 @@
     /** 新コード一覧へのフォーカス移動用 (再生成成功時に再保管を促す) */
     let recoveryCodesPanel = $state<HTMLDivElement | null>(null);
 
+    /**
+     * Fortify の 2FA 確認アクション (ConfirmTwoFactorAuthentication) は検証失敗を
+     * 名前付き error bag "confirmTwoFactorAuthentication" に投げる
+     * (login チャレンジ側は default bag)。Inertia は default bag が無いと named bag を
+     * ネストしたまま共有するため、client 側で同名の errorBag を指定しないと
+     * confirmForm.errors.code が解決されず、誤コード時に無言失敗する (F-2-02)。
+     */
+    const CONFIRM_TWO_FACTOR_ERROR_BAG = "confirmTwoFactorAuthentication" as const;
+
     const confirmForm = useForm({
         code: "",
     });
@@ -211,6 +220,8 @@
         event.preventDefault();
         confirmForm.post("/user/confirmed-two-factor-authentication", {
             preserveScroll: true,
+            // Fortify の named error bag からエラーをスコープする (未指定だと errors.code が解決されない)
+            errorBag: CONFIRM_TWO_FACTOR_ERROR_BAG,
             onSuccess: () => {
                 confirming = false;
                 qrSvg = null;
