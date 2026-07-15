@@ -1,0 +1,7 @@
+# shard-1 (run 20260715-213842): 新規 proposed finding は 0 件。
+# 本 run の主眼は T057-T067 回帰確認であり、前回 run (20260715-084108) の
+# F-1-01(High)/F-1-03(Medium)/F-1-04(High)/F-1-05(Medium) は shard-report.md の
+# 「回帰確認チェックリスト」節ですべて修正確認 (regression fix confirmed) 済み。
+# triage_status=fixed への遷移は人手/親 adjudication の管轄のため、本 shard (子) は
+# proposed finding を持たないこの run では空とし、詳細は report.md に記述する
+# (SKILL.md: shard agent は素の proposed finding のみ書く)。
