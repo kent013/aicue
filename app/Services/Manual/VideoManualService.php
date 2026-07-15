@@ -7,6 +7,7 @@ namespace App\Services\Manual;
 use App\Enums\Manual\CutType;
 use App\Enums\Manual\JobStatus;
 use App\Enums\Manual\RenderKind;
+use App\Enums\Manual\VideoManualStatus;
 use App\Jobs\Capture\DeleteTakeObjectsJob;
 use App\Models\AnalysisJob;
 use App\Models\Cut;
@@ -58,15 +59,18 @@ class VideoManualService
     /**
      * VideoManual の複製 (別名保存)。保存済み cuts (シナリオ) を雛形に、新タイトル・カテゴリで
      * 新規 manual を作る。**takes / adopted_take_id / render 成果物 / source_documents /
-     * analysis_jobs は複製しない** (新規撮影・再合成前提)。status=draft・scenario_version=0
-     * (いずれも DB default) にリセットする。
+     * analysis_jobs は複製しない** (新規撮影・再合成前提)。複製 manual は必ず
+     * status=Draft・scenario_version=0 から開始する (この初期状態を INSERT 時に明示代入し、
+     * DB カラム default に依存しない = 将来の migration default 変更による silent break を防ぐ)。
      *
-     * シナリオ整合の共有ロック規約 (AGENTS.md ドメイン規約 1) の新しい書き込み経路:
-     *  - 元 manual を lockForUpdate してシナリオを一貫読み取り
+     * シナリオ整合の共有ロック規約 (AGENTS.md ドメイン規約 1) の書き込み経路:
+     *  - 元 manual を lockForUpdate してシナリオを一貫読み取り (read/copy の一貫性を確保)
      *  - cuts の書き込み先は**新規** manual。新 manual を save() 後に同一 tx 内で
      *    lockForUpdate 再取得し、その locked インスタンスの relation 経由で cut を作成する
      *    (「対象 VideoManual 行を lockForUpdate で取得した同一 tx 内で反映」を literal に満たす)
-     *  - scenario_version / status のリテラル書き込みはしない (新規行は DB default 依存)
+     *  - scenario_version / status は新 manual の INSERT 時に明示代入する (新規行生成のため
+     *    lockForUpdate 前だが、その tx が生成した排他的新規行であり既存行への並行書き込みではない)。
+     *    ScenarioWritePathInventoryTest の STATUS_WRITE_ALLOWED / SCENARIO_VERSION_ALLOWED に登録済み
      */
     public function duplicate(Project $project, VideoManual $source, string $title, ?int $categoryId, int $userId): VideoManual
     {
@@ -77,9 +81,15 @@ class VideoManualService
             /** @var VideoManual $lockedSource */
             $lockedSource = $locked->manuals()->whereKey($source->id)->lockForUpdate()->firstOrFail();
 
-            // 新 manual (status/scenario_version は DB default = draft/0)。created_by はサーバ導出
+            // 新 manual: status=Draft / scenario_version=0 を INSERT 時に明示代入して
+            // 不変条件をアプリ層で固定する (DB default 依存をやめ silent break を防ぐ)。
+            // created_by はサーバ導出。すべて排他的新規行 (並行書き込みなし) の初期値。
             $new = $locked->manuals()->make(['title' => $title]);
-            $new->forceFill(['created_by' => $userId])->save();
+            $new->forceFill([
+                'created_by' => $userId,
+                'status' => VideoManualStatus::Draft,
+                'scenario_version' => 0,
+            ])->save();
             if ($categoryId !== null) {
                 // 保存時再解決: 既存 create() と同一の firstOrFail。通常の不正/他 project category は
                 // FormRequest の Rule::exists で 422 (検証時) に落ち、ここで 404 になるのは

@@ -112,6 +112,37 @@ test('複製先は status=draft・scenario_version=0、step/point 両層で adop
     }
 });
 
+test('複製は元 manual の status/version に関わらず必ず Draft/0 を明示代入し、元 manual は不変', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+    // 元 manual を default とは異なる進行状態にする (rendering / version 9)
+    $source = VideoManual::factory()->forProject($project)->create([
+        'title' => '進行中元',
+        'status' => VideoManualStatus::Rendering->value,
+        'scenario_version' => 9,
+    ]);
+
+    $this->actingAs($owner)->post("/projects/{$project->id}/manuals/{$source->id}/duplicate", [
+        'title' => '不変条件確認',
+    ])->assertSessionHas('success');
+
+    /** @var VideoManual $copy */
+    $copy = $project->manuals()->where('id', '!=', $source->id)->firstOrFail();
+    // 複製先は default に依存せず Draft/0
+    expect($copy->status)->toBe(VideoManualStatus::Draft);
+    expect($copy->scenario_version)->toBe(0);
+    // created_by は複製実行者由来 (duplicate の契約を明文化)
+    expect($copy->created_by)->toBe($owner->id);
+    // 元 manual は不変 (複製は元を書き換えない)
+    $source->refresh();
+    expect($source->status)->toBe(VideoManualStatus::Rendering);
+    expect($source->scenario_version)->toBe(9);
+});
+
+// 注: 「明示代入が存在すること (DB default 非依存)」の fail-first 契約は、振る舞いだけでは
+// DB default で pass してしまうため、ScenarioWritePathInventoryTest の degenerate PASS 防止
+// (token ベースで VideoManualService に status 書き込みが実在することを要求) で担保する。
+
 test('複製は category 未指定なら未分類で作成される', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $project = Project::factory()->forOrganization($organization)->create();
