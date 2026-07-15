@@ -9,7 +9,7 @@
     import { isInsufficientTickets } from "@/components/features/manual/insufficient-tickets";
     import { csrfToken } from "@/lib/csrf";
     import type { AnalysisJobProps, VideoManualStatus } from "@/types/manual";
-    import { ANALYSIS_STEP_LABELS } from "@/types/manual";
+    import { ANALYSIS_STEP_LABELS, isAnalyzable, isScenarioEstablished } from "@/types/manual";
 
     /**
      * AI 解析パネル (起動・進捗ポーリング・エラー表示)。doc/10 §10.3 / 概念設計 §8。
@@ -251,7 +251,7 @@
 <Card padding="lg">
     <div class="flex items-center justify-between gap-3">
         <h2 class="text-h3">シナリオ</h2>
-        {#if canManage && !analyzing}
+        {#if canManage && isAnalyzable(status) && !analyzing}
             <Button
                 onclick={requestAnalyze}
                 loading={starting}
@@ -311,10 +311,14 @@
             </div>
         {/if}
         <p class="mt-2 text-body text-text-secondary">
-            {#if !hasDocument}
+            {#if isScenarioEstablished(status)}
+                {#if status === "ready"}
+                    手順書から生成したシナリオを編集画面で確認できます。再解析すると既存のシナリオは置き換えられます。
+                {:else}
+                    生成済みのシナリオは編集画面で確認できます。
+                {/if}
+            {:else if !hasDocument}
                 手順書 (SOP) をアップロードすると、AI が撮るべきカットを設計したシナリオを生成します。
-            {:else if status === "ready"}
-                手順書から生成したシナリオを編集画面で確認できます。再解析すると既存のシナリオは置き換えられます。
             {:else}
                 アップロード済みの手順書から AI がシナリオを生成できます。
             {/if}

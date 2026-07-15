@@ -409,4 +409,96 @@ describe("AnalysisPanel", () => {
             expect(screen.getByTestId("reanalyze-dialog")).toBeInTheDocument();
         });
     });
+
+    describe("シナリオ説明文の status × document 分岐 (F-1-03)", () => {
+        it("draft + document なし: 未アップロード案内を表示し、解析ボタンも表示", () => {
+            render(AnalysisPanel, {
+                props: { ...baseProps, manualStatus: "draft" as const, hasDocument: false },
+            });
+            expect(
+                screen.getByText(/手順書 \(SOP\) をアップロードすると/),
+            ).toBeInTheDocument();
+            expect(screen.getByTestId("analyze-button")).toBeInTheDocument();
+        });
+
+        it("draft + document あり: 生成可能案内を表示し、解析ボタンも表示", () => {
+            render(AnalysisPanel, {
+                props: { ...baseProps, manualStatus: "draft" as const, hasDocument: true },
+            });
+            expect(
+                screen.getByText(/アップロード済みの手順書から AI がシナリオを生成できます/),
+            ).toBeInTheDocument();
+            expect(screen.getByTestId("analyze-button")).toBeInTheDocument();
+        });
+
+        it("ready + document あり: シナリオ確認 + 再解析注記を表示し、解析ボタンも表示 (既存不変)", () => {
+            render(AnalysisPanel, {
+                props: { ...baseProps, manualStatus: "ready" as const, hasDocument: true },
+            });
+            expect(
+                screen.getByText(/手順書から生成したシナリオを編集画面で確認できます。再解析すると/),
+            ).toBeInTheDocument();
+            expect(screen.getByTestId("analyze-button")).toBeInTheDocument();
+        });
+
+        it("ready + document なし: 確定相優先でシナリオ有り文言を表示 (未生成案内は出さない)", () => {
+            render(AnalysisPanel, {
+                props: { ...baseProps, manualStatus: "ready" as const, hasDocument: false },
+            });
+            expect(screen.getByText(/編集画面で確認できます/)).toBeInTheDocument();
+            expect(screen.queryByText(/アップロードすると/)).toBeNull();
+            expect(screen.queryByText(/シナリオを生成できます/)).toBeNull();
+            // ready は解析可能状態なのでボタンは表示
+            expect(screen.getByTestId("analyze-button")).toBeInTheDocument();
+        });
+
+        it("rendering + document あり: 生成済み文言を表示し、解析ボタンは非表示", () => {
+            render(AnalysisPanel, {
+                props: { ...baseProps, manualStatus: "rendering" as const, hasDocument: true },
+            });
+            expect(
+                screen.getByText(/生成済みのシナリオは編集画面で確認できます/),
+            ).toBeInTheDocument();
+            expect(screen.queryByText(/アップロードすると/)).toBeNull();
+            expect(screen.queryByText(/シナリオを生成できます/)).toBeNull();
+            expect(screen.queryByTestId("analyze-button")).toBeNull();
+        });
+
+        it("rendering + document なし: 確定相優先でシナリオ有り文言を表示し、解析ボタンは非表示 (再発耐性)", () => {
+            render(AnalysisPanel, {
+                props: { ...baseProps, manualStatus: "rendering" as const, hasDocument: false },
+            });
+            expect(
+                screen.getByText(/生成済みのシナリオは編集画面で確認できます/),
+            ).toBeInTheDocument();
+            expect(screen.queryByText(/手順書 \(SOP\) をアップロードすると/)).toBeNull();
+            expect(screen.queryByText(/シナリオを生成できます/)).toBeNull();
+            expect(screen.queryByTestId("analyze-button")).toBeNull();
+        });
+
+        it("published + document あり: 生成済み文言を表示し、解析ボタンは非表示 (F-1-03)", () => {
+            render(AnalysisPanel, {
+                props: { ...baseProps, manualStatus: "published" as const, hasDocument: true },
+            });
+            expect(
+                screen.getByText(/生成済みのシナリオは編集画面で確認できます/),
+            ).toBeInTheDocument();
+            expect(screen.queryByText(/手順書 \(SOP\) をアップロードすると/)).toBeNull();
+            expect(
+                screen.queryByText(/アップロード済みの手順書から AI がシナリオを生成できます/),
+            ).toBeNull();
+            expect(screen.queryByTestId("analyze-button")).toBeNull();
+        });
+
+        it("published + document なし: 確定相優先でシナリオ有り文言を表示し、解析ボタンは非表示 (再発耐性)", () => {
+            render(AnalysisPanel, {
+                props: { ...baseProps, manualStatus: "published" as const, hasDocument: false },
+            });
+            expect(
+                screen.getByText(/生成済みのシナリオは編集画面で確認できます/),
+            ).toBeInTheDocument();
+            expect(screen.queryByText(/手順書 \(SOP\) をアップロードすると/)).toBeNull();
+            expect(screen.queryByTestId("analyze-button")).toBeNull();
+        });
+    });
 });
