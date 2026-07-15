@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Enums\OrganizationRole;
+use App\Enums\SecurityEventType;
 use App\Http\Middleware\RequireTwoFactorForEnforcedOrganizations;
 use App\Models\Organization;
 use App\Models\SecurityAuditEvent;
@@ -459,6 +460,32 @@ test('2FA 未設定 (disabled) のメンバーへのリセットは明示拒否 
         ->withSession(['recent_auth_at' => time()])
         ->delete(tfeResetUrl($organization, $member), ['reason' => '設定していない対象への誤操作'])
         ->assertSessionHasErrors(['two_factor']);
+});
+
+test('2FA 未確認 (pending) のメンバーへのリセットも明示拒否 (validation error / 通知・監査なし)', function (): void {
+    Notification::fake();
+    [$organization, $owner] = tfeCreateOrganization();
+    $member = tfeAddMember($organization, 'pending');
+
+    $this->actingAs($owner)
+        ->withSession(['recent_auth_at' => time()])
+        ->delete(tfeResetUrl($organization, $member), ['reason' => '未確認 secret への誤操作'])
+        ->assertSessionHasErrors(['two_factor']);
+
+    // 未確認 secret は解除されず残る (冪等成功にしない)。fresh は一度だけ取得。
+    $fresh = $member->fresh();
+    expect($fresh->two_factor_secret)->not->toBeNull();
+    expect($fresh->two_factor_confirmed_at)->toBeNull();
+
+    // 拒否時は本人通知・監査イベントを発火しない (誤解を招く通知/監査の抑止を仕様固定)。
+    // event_type は enum value を使い、対象ユーザーでも絞る (enum 変更・別 fixture に強い)。
+    Notification::assertNothingSentTo($member);
+    expect(
+        SecurityAuditEvent::query()
+            ->where('event_type', SecurityEventType::OrgMemberTwoFactorReset->value)
+            ->where('user_id', $member->id)
+            ->count(),
+    )->toBe(0);
 });
 
 test('接続: 必須組織メンバーの 2FA を管理者が解除すると次のリクエストからゲートされる', function (): void {

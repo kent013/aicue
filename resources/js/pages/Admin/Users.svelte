@@ -192,9 +192,13 @@
         });
     }
 
-    /** 2FA リセットを提示できる対象か (自分以外 + 設定済み + Admin は org Member 系のみ対象) */
+    /**
+     * 2FA リセットを提示できる対象か (自分以外 + 2FA 確定済み + Admin は org Member 系のみ対象)。
+     * pending (secret 生成済・TOTP 未確認) は 2FA 無効として扱い、解除ボタンを出さない
+     * (本人の設定画面・2FA バッジと表示意味論を揃える。F-2-03)。
+     */
     function canResetTwoFactor(member: MemberRow): boolean {
-        if (member.isSelf || member.twoFactorStatus === "disabled") {
+        if (member.isSelf || member.twoFactorStatus !== "enabled") {
             return false;
         }
         // Owner は誰でも。Admin は org Member (editor/shooter/unassigned) のみ (同格以上は不可)
