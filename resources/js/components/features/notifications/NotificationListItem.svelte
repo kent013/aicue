@@ -1,8 +1,9 @@
 <script lang="ts">
-    import type { Component } from "svelte";
+    import { tick, type Component } from "svelte";
     import { router } from "@inertiajs/svelte";
-    import { Bell, FileSearch, Film, Mail, TicketMinus } from "@lucide/svelte";
+    import { Bell, Check, FileSearch, Film, Mail, TicketMinus } from "@lucide/svelte";
     import Badge from "@/components/atoms/Badge.svelte";
+    import { addToast } from "@/lib/stores/toast";
     import type {
         InvitationReceivedPayload,
         ManualJobPayload,
@@ -14,6 +15,8 @@
      * 通知一覧の 1 行。type ごとにアイコン・文言を組み立てる。
      * 行クリック = POST /notifications/{id}/open (サーバが既読化 + 遷移先を解決する 303。
      * GET にしない = prefetch による意図しない既読化防止)。
+     * 右上の個別「既読」ボタン = POST /notifications/{id}/read (遷移せず 1 件だけ既読化。
+     * back() 完結)。未読行のみ表示 (禁止事項#8: disabled にせず表示/非表示で制御)。
      * 未知 type (enum⇔TS の一時的ドリフト) は汎用アイコン + rawType 表示の fallback。
      */
     interface Props {
@@ -22,9 +25,17 @@
 
     let { notification }: Props = $props();
 
-    let opening = $state(false);
+    let opening = $state(false); // open (行クリック) の in-flight
+    let reading = $state(false); // read (個別既読) の in-flight
+    let optimisticallyRead = $state(false); // 楽観既読 (単調・未読→既読方向のみ。onError で復帰)
+    let contentButton = $state<HTMLButtonElement | null>(null); // 既読成功時のフォーカス移動先
 
-    const unread = $derived(notification.read_at === null);
+    // read_at (prop = source of truth) を最優先。楽観 state は「未読→既読」方向のみ足す
+    // (read-all 等が prop.read_at を確定すれば楽観 state に関わらず既読表示となり乖離しない)。
+    const unread = $derived(notification.read_at === null && !optimisticallyRead);
+    // 既読ボタンの表示条件を明示 derived で分離。未読の間、または in-flight 中
+    // (楽観既読で unread=false になっても aria-busy を見せる) は DOM に残す。
+    const showReadButton = $derived(unread || reading);
 
     // payload の判別は type discriminant + null 検査 (サーバ側で検証復元済み)
     const manualPayload = $derived(
@@ -114,16 +125,47 @@
     }
 
     function open(): void {
-        if (opening) return; // 連打ガード (disabled 属性ではなく送信ガード)
+        if (opening || reading) return; // read/open in-flight ガード (disabled ではなく送信ガード)
+        opening = true; // router.post 前に同期設定 (onStart 待ちの競合窓を閉じる)
         router.post(
             `/notifications/${notification.id}/open`,
             {},
             {
-                onStart: () => {
-                    opening = true;
-                },
                 onFinish: () => {
                     opening = false;
+                },
+            },
+        );
+    }
+
+    /**
+     * 個別既読化。遷移せず 1 件だけ既読にする (read route は back() 完結)。
+     * ガード通過直後・router.post 前に reading=true を同期設定して二重送信窓を閉じる。
+     */
+    async function markRead(event: MouseEvent): Promise<void> {
+        event.stopPropagation(); // 兄弟要素だが将来 wrapper に click を置く変更への防御
+        if (reading || opening || !unread) return; // read/open in-flight ガード + 既読には無反応
+        reading = true;
+        router.post(
+            `/notifications/${notification.id}/read`,
+            {},
+            {
+                preserveScroll: true,
+                onSuccess: () => {
+                    optimisticallyRead = true; // 楽観既読 (サーバ back() 再読込が prop を確定)
+                },
+                onError: () => {
+                    optimisticallyRead = false; // defensive reset (単調前提が崩れても未読へ戻す)
+                    addToast("error", "既読にできませんでした。再試行してください。");
+                },
+                onFinish: async () => {
+                    reading = false;
+                    // 成功でボタンが DOM から消える場合、DOM 確定 (tick) を待って
+                    // 行の open ボタンへフォーカスを移す (フォーカスロスト防止)
+                    if (optimisticallyRead) {
+                        await tick();
+                        contentButton?.focus();
+                    }
                 },
             },
         );
@@ -132,40 +174,61 @@
     const Icon = $derived(icon);
 </script>
 
-<button
-    type="button"
-    onclick={open}
-    class="flex w-full items-start gap-3 border-b border-border px-4 py-3 text-left
-        hover:bg-neutral {unread ? 'bg-primary-soft/40' : 'bg-surface'}"
-    data-testid="notification-item"
-    data-unread={unread}
+<div
+    class="relative flex items-stretch border-b border-border
+        {unread ? 'bg-primary-soft/40' : 'bg-surface'}"
+    data-testid="notification-item-row"
 >
-    <span
-        class="mt-0.5 inline-flex size-8 shrink-0 items-center justify-center rounded-md
-            {unread ? 'bg-primary-soft text-primary' : 'bg-neutral text-text-secondary'}"
-        aria-hidden="true"
+    <!-- 主操作: open (行の hit area を保持)。右端は既読ボタン用に pr-12 を常時確保 -->
+    <button
+        type="button"
+        onclick={open}
+        bind:this={contentButton}
+        class="flex min-w-0 flex-1 items-start gap-3 px-4 py-3 pr-12 text-left hover:bg-neutral"
+        data-testid="notification-item"
+        data-unread={unread}
     >
-        <Icon class="size-4" />
-    </span>
-    <span class="min-w-0 flex-1">
-        <span class="block text-body {unread ? 'font-medium' : ''} text-text">{title}</span>
-        {#if body !== null}
-            <span class="mt-0.5 block truncate text-caption text-text-secondary">{body}</span>
-        {/if}
-        <span class="mt-1 flex items-center gap-2">
-            {#if organizationName !== null}
-                <Badge tone="neutral" size="sm">{organizationName}</Badge>
+        <span
+            class="mt-0.5 inline-flex size-8 shrink-0 items-center justify-center rounded-md
+                {unread ? 'bg-primary-soft text-primary' : 'bg-neutral text-text-secondary'}"
+            aria-hidden="true"
+        >
+            <Icon class="size-4" />
+        </span>
+        <span class="min-w-0 flex-1">
+            <span class="block text-body {unread ? 'font-medium' : ''} text-text">{title}</span>
+            {#if body !== null}
+                <span class="mt-0.5 block truncate text-caption text-text-secondary">{body}</span>
             {/if}
-            <span class="text-caption text-text-secondary">
-                {relativeTime(notification.created_at)}
+            <span class="mt-1 flex items-center gap-2">
+                {#if organizationName !== null}
+                    <Badge tone="neutral" size="sm">{organizationName}</Badge>
+                {/if}
+                <span class="text-caption text-text-secondary">
+                    {relativeTime(notification.created_at)}
+                </span>
+                {#if unread}
+                    <span
+                        class="inline-block size-2 shrink-0 rounded-sm bg-primary"
+                        aria-label="未読"
+                        data-testid="unread-dot"
+                    ></span>
+                {/if}
             </span>
         </span>
-    </span>
-    {#if unread}
-        <span
-            class="mt-2 inline-block size-2 shrink-0 rounded-sm bg-primary"
-            aria-label="未読"
-            data-testid="unread-dot"
-        ></span>
+    </button>
+    <!-- 副操作: 個別既読 (遷移しない)。未読 or in-flight のとき右上に絶対配置 -->
+    {#if showReadButton}
+        <button
+            type="button"
+            onclick={(e) => markRead(e)}
+            aria-label={reading ? "既読処理中" : "既読にする"}
+            aria-busy={reading}
+            class="absolute top-2 right-2 inline-flex size-8 items-center justify-center
+                rounded-md text-text-secondary hover:bg-neutral hover:text-text"
+            data-testid="notification-read-button"
+        >
+            <Check class="size-4" />
+        </button>
     {/if}
-</button>
+</div>

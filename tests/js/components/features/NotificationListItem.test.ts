@@ -1,11 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/svelte";
+import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import NotificationListItem from "@/components/features/notifications/NotificationListItem.svelte";
 import type { NotificationItem } from "@/types/notification";
 
-// 行クリックの POST (open) は router をモックして検証する
+/** router.post に渡す visit options のうち本テストで発火させるコールバック部分 */
+interface ReadVisitOptions {
+    preserveScroll?: boolean;
+    onSuccess?: () => void;
+    onError?: () => void;
+    onFinish?: () => void | Promise<void>;
+}
+
+// 行クリックの POST (open) / 個別既読 (read) は router をモックして検証する
 const { routerPostMock } = vi.hoisted(() => ({
     routerPostMock: vi.fn(),
+}));
+
+// 既読失敗時の toast は addToast をモックして検証する
+const { addToastMock } = vi.hoisted(() => ({
+    addToastMock: vi.fn(),
 }));
 
 vi.mock("@inertiajs/svelte", async (importOriginal) => ({
@@ -14,6 +27,19 @@ vi.mock("@inertiajs/svelte", async (importOriginal) => ({
         post: routerPostMock,
     },
 }));
+
+vi.mock("@/lib/stores/toast", () => ({
+    addToast: addToastMock,
+}));
+
+/** router.post mock に渡された最後の read visit options を取り出す (複数 read でも末尾を返す) */
+function lastReadOptions(): ReadVisitOptions {
+    const call = [...routerPostMock.mock.calls]
+        .reverse()
+        .find((c) => String(c[0]).endsWith("/read"));
+    if (!call) throw new Error("read POST が発火していません");
+    return call[2] as ReadVisitOptions;
+}
 
 function manualAnalyzedItem(overrides: Partial<NotificationItem> = {}): NotificationItem {
     return {
@@ -36,6 +62,7 @@ function manualAnalyzedItem(overrides: Partial<NotificationItem> = {}): Notifica
 
 beforeEach(() => {
     routerPostMock.mockReset();
+    addToastMock.mockReset();
 });
 
 describe("NotificationListItem", () => {
@@ -137,5 +164,98 @@ describe("NotificationListItem", () => {
 
         expect(screen.getByText("招待元組織 に招待されています")).toBeInTheDocument();
         expect(screen.getByText("メールの受諾リンクから参加してください")).toBeInTheDocument();
+    });
+
+    it("未読行には個別既読ボタンを表示する", () => {
+        render(NotificationListItem, { props: { notification: manualAnalyzedItem() } });
+        expect(screen.getByTestId("notification-read-button")).toBeInTheDocument();
+    });
+
+    it("既読行 (read_at 非 null) には個別既読ボタンを表示しない", () => {
+        render(NotificationListItem, {
+            props: { notification: manualAnalyzedItem({ read_at: new Date().toISOString() }) },
+        });
+        expect(screen.queryByTestId("notification-read-button")).toBeNull();
+    });
+
+    it("既読ボタン押下で POST /notifications/{id}/read が preserveScroll + 各コールバック付きで 1 回発火し、open は呼ばれない", async () => {
+        render(NotificationListItem, { props: { notification: manualAnalyzedItem() } });
+
+        await fireEvent.click(screen.getByTestId("notification-read-button"));
+
+        expect(routerPostMock).toHaveBeenCalledTimes(1);
+        const [url, payload, options] = routerPostMock.mock.calls[0];
+        expect(url).toBe("/notifications/11111111-1111-1111-1111-111111111111/read");
+        expect(payload).toEqual({});
+        expect(options).toMatchObject({
+            preserveScroll: true,
+            onSuccess: expect.any(Function),
+            onError: expect.any(Function),
+            onFinish: expect.any(Function),
+        });
+        // 遷移しない = open URL は呼ばれない
+        expect(routerPostMock.mock.calls.some((c) => String(c[0]).endsWith("/open"))).toBe(false);
+    });
+
+    it("既読成功 (onSuccess+onFinish) で該当行が既読表示になり、read ボタンが消え、フォーカスが open ボタンへ移る", async () => {
+        render(NotificationListItem, { props: { notification: manualAnalyzedItem() } });
+
+        await fireEvent.click(screen.getByTestId("notification-read-button"));
+        const options = lastReadOptions();
+        options.onSuccess?.();
+        await options.onFinish?.();
+
+        await waitFor(() => {
+            expect(screen.getByTestId("notification-item")).toHaveAttribute("data-unread", "false");
+        });
+        expect(screen.queryByTestId("unread-dot")).toBeNull();
+        expect(screen.queryByTestId("notification-read-button")).toBeNull();
+        expect(document.activeElement).toBe(screen.getByTestId("notification-item"));
+    });
+
+    it("既読失敗 (onError) で addToast('error', ...) が呼ばれ、行は未読のまま", async () => {
+        render(NotificationListItem, { props: { notification: manualAnalyzedItem() } });
+
+        await fireEvent.click(screen.getByTestId("notification-read-button"));
+        const options = lastReadOptions();
+        options.onError?.();
+        await options.onFinish?.();
+
+        expect(addToastMock).toHaveBeenCalledWith("error", expect.stringContaining("既読にできませんでした"));
+        await waitFor(() => {
+            expect(screen.getByTestId("notification-item")).toHaveAttribute("data-unread", "true");
+        });
+        // 再試行できるようボタンは残る
+        expect(screen.getByTestId("notification-read-button")).toBeInTheDocument();
+    });
+
+    it("二重送信防止: コールバック未発火のまま既読ボタンを 2 回押しても read POST は 1 回のみ", async () => {
+        render(NotificationListItem, { props: { notification: manualAnalyzedItem() } });
+
+        const button = screen.getByTestId("notification-read-button");
+        await fireEvent.click(button);
+        await fireEvent.click(button);
+
+        expect(routerPostMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("open/read 相互排他: open が in-flight (コールバック未発火) の間に既読を押しても追加 POST は発生しない", async () => {
+        render(NotificationListItem, { props: { notification: manualAnalyzedItem() } });
+
+        await fireEvent.click(screen.getByTestId("notification-item")); // open in-flight
+        await fireEvent.click(screen.getByTestId("notification-read-button"));
+
+        expect(routerPostMock).toHaveBeenCalledTimes(1);
+        expect(routerPostMock.mock.calls[0][0]).toBe(
+            "/notifications/11111111-1111-1111-1111-111111111111/open",
+        );
+    });
+
+    it("排他 (逆方向): open (行) クリックで read URL は呼ばれない", async () => {
+        render(NotificationListItem, { props: { notification: manualAnalyzedItem() } });
+
+        await fireEvent.click(screen.getByTestId("notification-item"));
+
+        expect(routerPostMock.mock.calls.some((c) => String(c[0]).endsWith("/read"))).toBe(false);
     });
 });
