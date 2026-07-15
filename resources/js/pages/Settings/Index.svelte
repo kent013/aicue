@@ -85,6 +85,10 @@
 
     function submitPassword(event: SubmitEvent): void {
         event.preventDefault();
+        // 送信中の誤認防止のため、前回エラーを送信開始時に明示クリアする
+        // (Inertia useForm は送信ではクリアせず応答後にのみ errors を更新するため)。
+        // 本フォームが所有するフィールドに限定してクリアし、過剰クリアの余地を残さない。
+        passwordForm.clearErrors("current_password", "password");
         passwordForm.put("/user/password", {
             errorBag: "updatePassword",
             preserveScroll: true,
@@ -224,7 +228,7 @@
                 </FormField>
                 <div>
                     <Button type="submit" loading={passwordForm.processing}>
-                        パスワードを変更
+                        {passwordForm.processing ? "変更中…" : "パスワードを変更"}
                     </Button>
                 </div>
             </form>
