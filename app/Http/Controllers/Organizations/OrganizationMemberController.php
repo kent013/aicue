@@ -101,8 +101,11 @@ class OrganizationMemberController extends Controller
                 abort(403);
             }
 
-            // disabled は明示拒否 (冪等成功にすると監査ノイズ・誤認が増える)
-            if ($lockedUser->twoFactorStatus() === TwoFactorStatus::Disabled) {
+            // 2FA が確定 (Enabled) しているメンバーのみ解除対象。未設定 (Disabled) と
+            // 設定途中 (Pending) はともに「2FA 無効」として明示拒否する。UI (解除ボタンは
+            // enabled のみ表示) と API の意味論を揃え、未確認 secret のクリアに対して
+            // 誤解を招く監査記録・本人へのセキュリティ通知が発生するのを防ぐ (F-2-03)。
+            if ($lockedUser->twoFactorStatus() !== TwoFactorStatus::Enabled) {
                 throw ValidationException::withMessages([
                     'two_factor' => ['このメンバーは 2 段階認証を設定していません。'],
                 ]);

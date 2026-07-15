@@ -170,6 +170,58 @@ describe("Admin/Users", () => {
         expect(screen.queryByTestId("reset-two-factor-1")).toBeNull();
     });
 
+    it("2FA 未確認 (pending) メンバーには解除ボタン・2FA バッジを出さない (owner 閲覧)", () => {
+        // viewer=owner (id=1, isSelf) を明示。対象は role=editor に固定し role 条件を満たさせる。
+        render(Users, {
+            props: {
+                ...baseProps,
+                members: [
+                    {
+                        id: 1,
+                        name: "オーナー 太郎",
+                        email: "owner@example.com",
+                        roleState: "owner",
+                        roleLabel: "管理者（オーナー）",
+                        twoFactorStatus: "enabled",
+                        isSelf: true,
+                    },
+                    {
+                        id: 2,
+                        name: "確定 花子",
+                        email: "enabled@example.com",
+                        roleState: "editor",
+                        roleLabel: "編集者",
+                        twoFactorStatus: "enabled",
+                        isSelf: false,
+                    },
+                    {
+                        id: 5,
+                        name: "設定中 五郎",
+                        email: "pending@example.com",
+                        roleState: "editor",
+                        roleLabel: "編集者",
+                        twoFactorStatus: "pending",
+                        isSelf: false,
+                    },
+                ] satisfies MemberRow[],
+            },
+        });
+
+        // enabled (id=2): 従来どおり解除ボタン表示（回帰しないことの対照）
+        expect(screen.getByTestId("reset-two-factor-2")).toBeInTheDocument();
+        // pending (id=5): 解除ボタン非表示（本バグの修正点）
+        expect(screen.queryByTestId("reset-two-factor-5")).toBeNull();
+
+        // pending 行には 2FA バッジも出ない（バッジと解除ボタンの意味論一致）。
+        // 行スコープ: 対象メンバー固有の email から closest('li') を辿る（件数アサーションを避ける）
+        const pendingRow = screen.getByText("pending@example.com").closest("li");
+        expect(pendingRow).not.toBeNull();
+        expect(within(pendingRow as HTMLElement).queryByText("2FA")).toBeNull();
+        // enabled 行には 2FA バッジが出る（対照）
+        const enabledRow = screen.getByText("enabled@example.com").closest("li");
+        expect(within(enabledRow as HTMLElement).getByText("2FA")).toBeInTheDocument();
+    });
+
     it("admin 閲覧者は同格 (admin) の 2FA 解除ボタンを出さない", () => {
         render(Users, {
             props: {
