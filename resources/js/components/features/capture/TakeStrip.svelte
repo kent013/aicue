@@ -188,12 +188,12 @@
     {/if}
     {#each cut.takes as take, index (take.id)}
         <div
-            class="flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 {take.downloaded
+            class="flex flex-wrap items-center gap-x-2 gap-y-2 rounded-md border border-border bg-surface px-3 py-2 sm:flex-nowrap {take.downloaded
                 ? 'border-border-strong'
                 : ''}"
             data-testid={`take-item-${take.id}`}
         >
-            <div class="flex flex-col gap-1">
+            <div class="flex shrink-0 flex-col gap-1">
                 <Button
                     variant="ghost"
                     size="sm"
@@ -216,7 +216,10 @@
                 </Button>
             </div>
             <div class="min-w-0 flex-1">
-                <p class="flex items-center gap-2 text-body">
+                <p
+                    class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-body"
+                    data-testid={`take-label-${take.id}`}
+                >
                     テイク {index + 1}
                     {#if cut.adopted_take_id === take.id}
                         <Badge tone="success" testId={`take-adopted-${take.id}`}>採用中</Badge>
@@ -244,7 +247,10 @@
                     </p>
                 {/if}
             </div>
-            <div class="flex shrink-0 items-center gap-1">
+            <div
+                class="flex w-full shrink-0 flex-wrap items-center justify-end gap-x-1 gap-y-1 sm:w-auto sm:flex-nowrap sm:justify-start"
+                data-testid={`take-actions-${take.id}`}
+            >
                 {#if take.status === "ready"}
                     <Button
                         variant="ghost"

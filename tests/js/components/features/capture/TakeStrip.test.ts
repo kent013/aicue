@@ -319,3 +319,42 @@ describe("TakeStrip", () => {
         expect(screen.getByText("DL 済み")).toBeInTheDocument();
     });
 });
+
+describe("mobile 375px レイアウト構造 (F-1-05)", () => {
+    it("行コンテナは mobile で wrap し sm で 1 行復帰する", () => {
+        render(TakeStrip, { projectId: 1, manualId: 2, cut: makeCut([makeTake()]), onChanged: vi.fn() });
+        const row = screen.getByTestId("take-item-10");
+        expect(row.className).toContain("flex-wrap");
+        expect(row.className).toContain("sm:flex-nowrap");
+    });
+
+    it("操作列は mobile full-width 右寄せ+wrap failsafe・sm で従来 1 行に戻る", () => {
+        render(TakeStrip, { projectId: 1, manualId: 2, cut: makeCut([makeTake()]), onChanged: vi.fn() });
+        const actions = screen.getByTestId("take-actions-10");
+        for (const c of ["w-full", "justify-end", "flex-wrap", "sm:w-auto", "sm:flex-nowrap", "sm:justify-start"]) {
+            expect(actions.className).toContain(c);
+        }
+    });
+
+    it("ラベル(バッジ)行は wrap・min-w-0 で段落ちできる", () => {
+        render(TakeStrip, { projectId: 1, manualId: 2, cut: makeCut([makeTake()]), onChanged: vi.fn() });
+        const label = screen.getByTestId("take-label-10");
+        expect(label.className).toContain("flex-wrap");
+        expect(label.className).toContain("min-w-0");
+    });
+
+    it("採用中+DL済み 両バッジがラベル行内に収まる (重なりでなく段落ち構造)", () => {
+        const take = makeTake({ downloaded: true });
+        render(TakeStrip, { projectId: 1, manualId: 2, cut: makeCut([take], take.id), onChanged: vi.fn() });
+        const label = within(screen.getByTestId("take-label-10"));
+        expect(label.getByTestId("take-adopted-10")).toBeInTheDocument();
+        expect(label.getByText("DL 済み")).toBeInTheDocument();
+    });
+
+    it("最小ケース (未採用・未DL) ではバッジが混入しない", () => {
+        render(TakeStrip, { projectId: 1, manualId: 2, cut: makeCut([makeTake()]), onChanged: vi.fn() });
+        const label = within(screen.getByTestId("take-label-10"));
+        expect(label.queryByTestId("take-adopted-10")).not.toBeInTheDocument();
+        expect(label.queryByText("DL 済み")).not.toBeInTheDocument();
+    });
+});
