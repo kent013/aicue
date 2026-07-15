@@ -82,6 +82,7 @@ Open リストは [TODO.md](TODO.md) を参照。
 | T064 | HIBP(uncompromised)照合を非本番環境で無効化。HIBP漏洩照合を非本番envのみ無効化 | backend | 2026-07-15 16:12 |
 | T065 | 通知行に個別「既読」ボタンを配線 (notifications.read dead surface 解消)。未読行に read ボタン追加、POST /notifications/{id}/read を preserveScroll で呼び遷移せず 1 件既読化、楽観state(prop優先・単調)+二重送信/相互排他ガード+成功時focus復帰+失敗toast。vitest 8 ケース追加。Codex impl-review APPROVED (Critical/Warning 0) | frontend | 2026-07-15 19:21 |
 | T066 | マニュアル複製の status/scenario_version を明示代入 (DB default 依存排除)。VideoManualService::duplicate() で status=Draft/scenario_version=0 を INSERT 時に明示 forceFill。ScenarioWritePathInventoryTest に VideoManualService を allowlist 追加 + containsScenarioVersionWrite() 追加で明示 write を token ベースに fail-first 担保。ManualDuplicateTest に振る舞い回帰テスト追加。Codex impl-review APPROVED (Round 3) | backend | 2026-07-15 19:52 |
+| T067 | プロジェクト不在注記から projects.create への直リンク追加。Admin/Users.svelte の !hasDefaultProject 注記に「プロジェクトを作成」CTA (Button href=/projects/create inertia, variant=ghost) を追加し 1 ホップで作成画面へ。禁止事項#8 遵守 (disabled 化せず条件表示)。純フロント。vitest でリンク/href/非表示/文言維持を検証、UserManagementPageTest で CTA 到達性 (Owner/Admin=200・Member=403) を固定。Codex impl-review APPROVED (Round 1) | frontend | 2026-07-15 20:14 |
 
 ## Obsoleted
 
