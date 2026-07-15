@@ -6,6 +6,10 @@ declare(strict_types=1);
  * SecurityHeaders / RedirectToHttps の挙動検証。
  */
 
+use App\Models\Project;
+use App\Models\User;
+use App\Models\VideoManual;
+
 test('全レスポンスに baseline セキュリティヘッダが付く', function (): void {
     $response = $this->get('/');
 
@@ -114,4 +118,86 @@ test('production:preflight --strict が非 production 環境を検出して fail
     // APP_ENV=testing のため --strict では必ず fail する (CI/CD の設定ミス検出)。
     // guard の各検査項目は tests/Feature/Support/ProductionEnvGuardTest.php が網羅する
     $this->artisan('production:preflight', ['--strict' => true])->assertFailed();
+});
+
+/*
+ * 撮影 PWA のカメラ許可 (T057): 撮影 document route (capture.manuals.show) のみ
+ * Permissions-Policy で camera/microphone を (self) に緩め、他ルート・404 は baseline 厳格値を維持する。
+ */
+
+/**
+ * @return array{User, Project, VideoManual}
+ */
+function captureShowContext(): array
+{
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+    $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
+
+    return [$owner, $project, $manual];
+}
+
+test('撮影 document route は camera/microphone を (self) に緩める', function (): void {
+    [$owner, $project, $manual] = captureShowContext();
+
+    // 完全一致で検証: camera/microphone のみ (self)、geolocation / payment は baseline のまま (drift 検出)
+    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals/{$manual->id}")
+        ->assertOk()
+        ->assertHeader(
+            'Permissions-Policy',
+            'geolocation=(), microphone=(self), camera=(self), payment=(self "https://js.stripe.com")',
+        );
+});
+
+test('capture 内の非 recorder ルート (index) は厳格な baseline を維持する', function (): void {
+    [$owner, $project] = captureShowContext();
+
+    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals")
+        ->assertOk()
+        ->assertHeader(
+            'Permissions-Policy',
+            'geolocation=(), microphone=(), camera=(), payment=(self "https://js.stripe.com")',
+        );
+});
+
+test('binding 失敗 404 には Permissions-Policy が一切付かない (緩和の漏れなし)', function (): void {
+    [$owner, $project] = captureShowContext();
+
+    // 存在しない manual id → scopeBindings 失敗で 404。SecurityHeaders は SubstituteBindings より
+    // 内側 (append) のため到達せず、ヘッダは付かない (fail-safe)。
+    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals/999999999")
+        ->assertNotFound()
+        ->assertHeaderMissing('Permissions-Policy');
+});
+
+test('capture 用 config が空文字 (opt-out) なら撮影 route でも非送出になる', function (): void {
+    [$owner, $project, $manual] = captureShowContext();
+
+    config()->set('security.capture_permissions_policy', '');
+
+    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals/{$manual->id}")
+        ->assertOk()
+        ->assertHeaderMissing('Permissions-Policy');
+});
+
+test('allowlist の非文字列要素は無視される (型安全 fail-safe)', function (): void {
+    [$owner, $project, $manual] = captureShowContext();
+
+    config()->set('security.capture_permissions_policy_routes', ['capture.manuals.show', 123, null]);
+
+    // 撮影 route は capture 値 (非文字列要素を落としても route は生き残る)
+    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals/{$manual->id}")
+        ->assertOk()
+        ->assertHeader(
+            'Permissions-Policy',
+            'geolocation=(), microphone=(self), camera=(self), payment=(self "https://js.stripe.com")',
+        );
+
+    // 非 recorder は baseline のまま
+    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals")
+        ->assertOk()
+        ->assertHeader(
+            'Permissions-Policy',
+            'geolocation=(), microphone=(), camera=(), payment=(self "https://js.stripe.com")',
+        );
 });

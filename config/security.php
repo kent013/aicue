@@ -33,6 +33,25 @@ return [
         'geolocation=(), microphone=(), camera=(), payment=(self "https://js.stripe.com")',
     ),
 
+    /*
+    | 撮影 document route 専用の Permissions-Policy override。撮影 recorder (CameraRecorder) が
+    | getUserMedia({ video, audio: true }) を要求するため camera/microphone を (self) に緩める
+    | (同一オリジン PWA のみ許可 = v1 スコープ)。geolocation / payment 等の他 directive は baseline
+    | と同一に保つ。env 上書き可。null / 空文字でヘッダ非送出 (opt-out, env による一時 rollback)。
+    */
+    'capture_permissions_policy' => env(
+        'SECURITY_CAPTURE_PERMISSIONS_POLICY',
+        'geolocation=(), microphone=(self), camera=(self), payment=(self "https://js.stripe.com")',
+    ),
+
+    /*
+    | capture 用 Permissions-Policy を適用する route 名 allowlist (least-privilege)。
+    | Permissions-Policy は document 単位に効くため、recorder を描画する撮影 document route のみ
+    | 緩和し、他の capture HTML document (一覧等) や未解決 404 は baseline (厳格値) のままにする。
+    | 将来撮影画面が増えたら本 allowlist へ明示追加する (追加はレビュー対象になる)。
+    */
+    'capture_permissions_policy_routes' => ['capture.manuals.show'],
+
     'csp' => [
         'enabled' => (bool) env('SECURITY_CSP_ENABLED', true),
         /*

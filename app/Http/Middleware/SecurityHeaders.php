@@ -35,8 +35,9 @@ class SecurityHeaders
         $response->headers->set('X-Content-Type-Options', 'nosniff');
         $response->headers->set('Referrer-Policy', 'strict-origin-when-cross-origin');
 
-        // Permissions-Policy は常時送出。null / 空文字は opt-out (非送出、env で一時 rollback)
-        $permissionsPolicy = config('security.permissions_policy');
+        // Permissions-Policy は常時送出。撮影 document route (config allowlist に一致) のみ
+        // camera/microphone を (self) に緩めた capture 用値を送る。null / 空文字は opt-out (非送出)。
+        $permissionsPolicy = $this->resolvePermissionsPolicy($request);
         if (is_string($permissionsPolicy) && $permissionsPolicy !== '') {
             $response->headers->set('Permissions-Policy', $permissionsPolicy);
         }
@@ -66,6 +67,32 @@ class SecurityHeaders
         }
 
         return $response;
+    }
+
+    /**
+     * 送出する Permissions-Policy 値を決める。
+     *
+     * 撮影 document route (security.capture_permissions_policy_routes の allowlist に一致) では
+     * camera/microphone を (self) に緩めた capture 用値 (security.capture_permissions_policy) を、
+     * それ以外は baseline 値 (security.permissions_policy) を返す。null / 空文字は呼び出し側で
+     * opt-out (非送出) として扱う。allowlist が空、または route 未解決 (例: /app 配下の 404) では
+     * routeIs が false となり baseline に落ちる (fail-secure)。
+     */
+    private function resolvePermissionsPolicy(Request $request): ?string
+    {
+        /** @var list<string> $captureRoutes */
+        $captureRoutes = array_values(array_filter(
+            config()->array('security.capture_permissions_policy_routes'),
+            is_string(...),
+        ));
+
+        $key = ($captureRoutes !== [] && $request->routeIs(...$captureRoutes))
+            ? 'security.capture_permissions_policy'
+            : 'security.permissions_policy';
+
+        $value = config($key);
+
+        return is_string($value) ? $value : null;
     }
 
     /**
