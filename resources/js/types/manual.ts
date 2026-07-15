@@ -49,6 +49,46 @@ export function isCaptureNavigable(status: VideoManualStatus): boolean {
     return CAPTURE_NAVIGABLE_BY_STATUS[status];
 }
 
+/**
+ * シナリオが確定した「表示相」か (ready 以降)。
+ * status がシナリオ確定相 (ready / rendering / published) かを表す **UI 表示判定** であり、
+ * cuts の実在判定ではない (複製直後の draft+cuts はここでは false = 別症状)。
+ * これにより確定相で「未生成」案内を出さない。
+ * 注: CAPTURE_NAVIGABLE_BY_STATUS (撮影ナビ導線, rendering=false) とは別概念なので統合しない。
+ * satisfies で status 追加時のキー漏れをコンパイル時検出する。
+ */
+export const SCENARIO_ESTABLISHED_BY_STATUS = {
+    draft: false,
+    analyzing: false,
+    ready: true,
+    rendering: true,
+    published: true,
+} as const satisfies Record<VideoManualStatus, boolean>;
+
+/** status がシナリオ確定相 (ready 以降) の表示相か (型付き判定の単一ソース) */
+export function isScenarioEstablished(status: VideoManualStatus): boolean {
+    return SCENARIO_ESTABLISHED_BY_STATUS[status];
+}
+
+/**
+ * AI 解析操作を適用できる状態か (サーバ AnalysisJobService の許可集合 = draft / ready と一致)。
+ * これは **解析操作の適用可能状態** の判定であり、rendering / published / analyzing は
+ * status_not_analyzable (409) となるため false。AI 解析ボタン (CTA) の表示可否に使う。
+ * satisfies で status 追加時のキー漏れをコンパイル時検出する。
+ */
+export const SCENARIO_ANALYZABLE_BY_STATUS = {
+    draft: true,
+    analyzing: false,
+    ready: true,
+    rendering: false,
+    published: false,
+} as const satisfies Record<VideoManualStatus, boolean>;
+
+/** AI 解析操作を適用できる状態か (draft / ready。型付き判定の単一ソース) */
+export function isAnalyzable(status: VideoManualStatus): boolean {
+    return SCENARIO_ANALYZABLE_BY_STATUS[status];
+}
+
 export interface PaginationMeta {
     current_page: number;
     last_page: number;
