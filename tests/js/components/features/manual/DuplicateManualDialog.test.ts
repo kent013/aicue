@@ -66,4 +66,112 @@ describe("features/manual/DuplicateManualDialog", () => {
             expect(screen.getByTestId("duplicate-manual-confirm")).not.toBeDisabled();
         });
     });
+
+    it("複製 submit の onSuccess でダイアログが閉じる (F-1-01)", async () => {
+        render(DuplicateManualDialog, { props: baseProps });
+
+        await waitFor(() => {
+            expect(screen.getByTestId("duplicate-manual-confirm")).toBeInTheDocument();
+        });
+        await fireEvent.click(screen.getByTestId("duplicate-manual-confirm"));
+
+        const form = holder.last as { post: ReturnType<typeof vi.fn> };
+        expect(form.post).toHaveBeenCalledTimes(1);
+        // reactiveUseForm の post は callback を自動実行しないため、捕捉した onSuccess を手動発火する
+        const options = form.post.mock.calls[0][1] as { onSuccess?: () => void };
+        options.onSuccess?.();
+
+        await waitFor(() => {
+            expect(screen.queryByTestId("duplicate-manual-dialog")).not.toBeInTheDocument();
+        });
+    });
+
+    it("送信中は submit() 冒頭ガードで二重送信しない (関数ガード)", async () => {
+        render(DuplicateManualDialog, { props: baseProps });
+
+        await waitFor(() => {
+            expect(screen.getByTestId("duplicate-manual-confirm")).toBeInTheDocument();
+        });
+
+        const form = holder.last as { processing: boolean; post: ReturnType<typeof vi.fn> };
+        form.processing = true;
+
+        // フォームへ submit を直接発火 (ボタン disabled に依らず handler を叩く = Enter 相当)。
+        // Modal は portal でツリー外へ描画されるため document から取得する。
+        const formEl = document.getElementById("duplicate-manual-form") as HTMLFormElement;
+        await fireEvent.submit(formEl);
+
+        expect(form.post).not.toHaveBeenCalled();
+    });
+
+    it("送信中は confirm ボタンが disabled かつ aria-busy になる (UI ガード)", async () => {
+        render(DuplicateManualDialog, { props: baseProps });
+
+        await waitFor(() => {
+            expect(screen.getByTestId("duplicate-manual-confirm")).toBeInTheDocument();
+        });
+
+        const form = holder.last as { processing: boolean };
+        form.processing = true;
+
+        await waitFor(() => {
+            const confirm = screen.getByTestId("duplicate-manual-confirm");
+            expect(confirm).toHaveAttribute("aria-busy", "true");
+            expect(confirm).toBeDisabled();
+        });
+    });
+
+    it("再オープン (false→true) で現 props に再 seed + clearErrors + エラーDOM消滅", async () => {
+        const { rerender } = render(DuplicateManualDialog, { props: baseProps });
+
+        await waitFor(() => {
+            expect(screen.getByTestId("duplicate-manual-dialog")).toBeInTheDocument();
+        });
+
+        // エラー文言が一度 DOM 表示されたことを確認 (偽陽性防止)
+        const form = holder.last as {
+            errors: Record<string, string>;
+            title: string;
+            category: string;
+            clearErrors: ReturnType<typeof vi.fn>;
+        };
+        form.errors.title = "サーバエラー";
+        await waitFor(() => {
+            expect(screen.getByText("サーバエラー")).toBeInTheDocument();
+        });
+
+        // 一旦閉じて unmount を確認してから再オープンする (false 状態を effect が観測できるように)
+        await rerender({ ...baseProps, open: false });
+        await waitFor(() => {
+            expect(screen.queryByTestId("duplicate-manual-dialog")).not.toBeInTheDocument();
+        });
+
+        form.clearErrors.mockClear();
+
+        // false→true エッジで seedFromDefaults 発火
+        await rerender({
+            ...baseProps,
+            open: true,
+            defaultTitle: "新タイトル のコピー",
+            defaultCategory: 1,
+        });
+
+        await waitFor(() => {
+            expect(screen.getByTestId("duplicate-manual-dialog")).toBeInTheDocument();
+        });
+
+        expect(form.title).toBe("新タイトル のコピー");
+        expect(form.category).toBe("1");
+        expect(form.clearErrors).toHaveBeenCalled();
+        expect(screen.queryByText("サーバエラー")).not.toBeInTheDocument();
+
+        // エッジ限定: open=true のまま props 変化しても再 seed しない
+        await rerender({
+            ...baseProps,
+            open: true,
+            defaultTitle: "別タイトル",
+            defaultCategory: 1,
+        });
+        expect(form.title).toBe("新タイトル のコピー");
+    });
 });

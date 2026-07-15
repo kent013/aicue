@@ -7,7 +7,9 @@ import { vi } from "vitest";
  * 再描画を観測できない。本フェイクは errors を $state で持ち、clearErrors がキーを削除すると
  * バインド先 (FormField の error prop) が再評価される = ユーザー体験と同じ挙動を検証できる。
  */
-export function reactiveUseForm<TData extends Record<string, unknown>>(
+export function reactiveUseForm<
+  TData extends Record<string, unknown> & { processing?: never; errors?: never },
+>(
   initial: TData,
   initialErrors: Record<string, string> = {},
 ): TData & {
@@ -18,6 +20,7 @@ export function reactiveUseForm<TData extends Record<string, unknown>>(
   post: ReturnType<typeof vi.fn>;
 } {
   const errors = $state<Record<string, string>>({ ...initialErrors });
+  let processing = $state(false);
   const post = vi.fn();
 
   const form = {
@@ -25,7 +28,12 @@ export function reactiveUseForm<TData extends Record<string, unknown>>(
     get errors() {
       return errors;
     },
-    processing: false,
+    get processing() {
+      return processing;
+    },
+    set processing(value: boolean) {
+      processing = value;
+    },
     clearErrors: vi.fn((...keys: string[]) => {
       if (keys.length === 0) {
         for (const key of Object.keys(errors)) delete errors[key];
