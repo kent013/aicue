@@ -29,34 +29,44 @@ const { pageState, routerDeleteMock, formHolder, formSeed } = vi.hoisted(() => (
     formSeed: { passwordErrors: {} as Record<string, string> },
 }));
 
-vi.mock("@inertiajs/svelte", async (importOriginal) => ({
-    ...(await importOriginal<typeof import("@inertiajs/svelte")>()),
-    router: { delete: routerDeleteMock },
-    page: pageState,
-    // useForm を最小 fake に差し替え、profileForm.put を spy する (case 6)。
-    // email キーを持つ form を profileForm とみなし holder に記録する。
-    useForm: (initial: Record<string, unknown>) => {
-        const form: Record<string, unknown> = {
-            ...initial,
-            errors: "current_password" in initial ? { ...formSeed.passwordErrors } : {},
-            processing: false,
-            get: vi.fn(),
-            post: vi.fn(),
-            put: vi.fn(),
-            patch: vi.fn(),
-            delete: vi.fn(),
-            submit: vi.fn(),
-            reset: vi.fn(),
-            clearErrors: vi.fn(),
-        };
-        if ("email" in initial) {
-            formHolder.profile = form;
-        } else if ("current_password" in initial) {
-            formHolder.password = form;
-        }
-        return form;
-    },
-}));
+vi.mock("@inertiajs/svelte", async (importOriginal) => {
+    // password フォームは反応的 double を使う (clearErrors で errors が消える再描画、
+    // processing=true で pending 文言が出る再描画を DOM で観測するため)。hoisting 制約は
+    // async factory 内の dynamic import で回避する (既存 ManualsCreate.test と同じ helper)。
+    const { reactiveUseForm } = await import("../support/reactiveUseForm.svelte");
+    return {
+        ...(await importOriginal<typeof import("@inertiajs/svelte")>()),
+        router: { delete: routerDeleteMock },
+        page: pageState,
+        // useForm を fake に差し替え、form を holder に記録する。
+        //   "current_password" を持つ → passwordForm: 反応的 double
+        //   "email" を持つ → profileForm: 最小 fake (put を spy)
+        useForm: (initial: Record<string, unknown>) => {
+            if ("current_password" in initial) {
+                const form = reactiveUseForm(initial, { ...formSeed.passwordErrors });
+                formHolder.password = form;
+                return form;
+            }
+            const form: Record<string, unknown> = {
+                ...initial,
+                errors: {},
+                processing: false,
+                get: vi.fn(),
+                post: vi.fn(),
+                put: vi.fn(),
+                patch: vi.fn(),
+                delete: vi.fn(),
+                submit: vi.fn(),
+                reset: vi.fn(),
+                clearErrors: vi.fn(),
+            };
+            if ("email" in initial) {
+                formHolder.profile = form;
+            }
+            return form;
+        },
+    };
+});
 
 // eslint-disable-next-line import/first
 import Index from "@/pages/Settings/Index.svelte";
@@ -391,5 +401,87 @@ describe("Settings/Index パスワード変更フォームの表示トグル (T0
         expect(call?.[0]).toBe("/user/password");
         const options = call?.[1] as { errorBag?: string };
         expect(options.errorBag).toBe("updatePassword");
+    });
+});
+
+describe("Settings/Index パスワード変更の pending / エラークリア (F-4-01)", () => {
+    /** submit ボタンを含む form 要素を null 安全に取得し、submit の完了を待つ */
+    async function submitPasswordForm(): Promise<void> {
+        const submit = screen.getByRole("button", { name: /パスワードを変更|変更中…/ });
+        const formEl = submit.closest("form");
+        expect(formEl).not.toBeNull();
+        await fireEvent.submit(formEl as HTMLFormElement);
+    }
+
+    it("送信すると前回のエラー文言が pending 中に画面から消える (clearErrors)", async () => {
+        formSeed.passwordErrors = { current_password: "現在のパスワードが違います" };
+        render(Index, { props: {} });
+
+        // 前回の失敗エラーが初期表示されている
+        expect(screen.getByText("現在のパスワードが違います")).toBeInTheDocument();
+
+        // 送信 → submitPassword が clearErrors() → 反応的 errors が空になり文言が DOM から消える
+        await submitPasswordForm();
+
+        await waitFor(() =>
+            expect(screen.queryByText("現在のパスワードが違います")).toBeNull(),
+        );
+        // 送信自体は継続している (put が 1 回呼ばれる)
+        const passwordForm = formHolder.password;
+        const clearMock = passwordForm?.clearErrors as ReturnType<typeof vi.fn>;
+        expect(clearMock).toHaveBeenCalledTimes(1);
+        // 本フォームが所有するフィールドに限定してクリアする (過剰クリア防止の意図を固定)
+        expect(clearMock).toHaveBeenCalledWith("current_password", "password");
+        expect(passwordForm?.put as ReturnType<typeof vi.fn>).toHaveBeenCalledTimes(1);
+    });
+
+    it("clearErrors は put より前に呼ばれる (pending 前にエラーを消す)", async () => {
+        formSeed.passwordErrors = { current_password: "現在のパスワードが違います" };
+        render(Index, { props: {} });
+
+        await submitPasswordForm();
+
+        const form = formHolder.password;
+        const clearMock = form?.clearErrors as ReturnType<typeof vi.fn>;
+        const putMock = form?.put as ReturnType<typeof vi.fn>;
+        // まず両方が確実に 1 回ずつ呼ばれたことを確認 (invocationCallOrder が undefined になる偽陽性を防ぐ)
+        await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+        expect(clearMock).toHaveBeenCalledTimes(1);
+        // その上で呼び出し順序を比較する
+        expect(clearMock.mock.invocationCallOrder[0]).toBeLessThan(
+            putMock.mock.invocationCallOrder[0],
+        );
+    });
+
+    it("送信中は『変更中…』文言 + disabled + aria-busy を示す", async () => {
+        render(Index, { props: {} });
+
+        // 通常時は「パスワードを変更」
+        expect(screen.getByRole("button", { name: "パスワードを変更" })).toBeInTheDocument();
+
+        // processing=true に切替 (反応的 double)。tick 1 回依存でフレークしないよう waitFor で待つ
+        const form = formHolder.password as { processing: boolean };
+        form.processing = true;
+
+        await waitFor(() =>
+            expect(screen.getByRole("button", { name: "変更中…" })).toBeInTheDocument(),
+        );
+        const busyButton = screen.getByRole("button", { name: "変更中…" });
+        expect(busyButton).toBeDisabled();
+        expect(busyButton).toHaveAttribute("aria-busy", "true");
+    });
+
+    it("成功時はフォームを reset する (成功トーストはサーバ flash 経由 = 別テストで担保)", async () => {
+        render(Index, { props: {} });
+        const form = formHolder.password;
+        const putMock = form?.put as ReturnType<typeof vi.fn>;
+
+        await submitPasswordForm();
+        await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+
+        // put のオプションの onSuccess が reset を呼ぶ配線を検証
+        const options = putMock.mock.calls.at(-1)?.[1] as { onSuccess?: () => void };
+        options.onSuccess?.();
+        expect(form?.reset as ReturnType<typeof vi.fn>).toHaveBeenCalledTimes(1);
     });
 });
