@@ -22,7 +22,6 @@
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
 | T057 | 撮影PWAのカメラ許可 (Permissions-Policy に camera/microphone=(self) 例外) | backend | 撮影ルートのみcamera/mic許可 | High | standalone | [設計](devnotes/20260715-1122-capture-permissions-policy/) | 2026-07-15 |
-| T059 | 2FAセットアップ確認で誤コード時にエラー表示 | frontend | 2FA確認の誤コードにエラー表示 | High | incremental | [設計](devnotes/20260715-1142-twofa-setup-error-feedback/) | 2026-07-15 |
 | T060 | パスワード変更の送信中pending表示と前回エラークリア | frontend | パスワード変更の送信中表示とエラー消去 | High | incremental | [設計](devnotes/20260715-1145-password-change-pending/) | 2026-07-15 |
 | T061 | published マニュアルでシナリオパネルが未作成表示に戻る不具合 | frontend | 確定相でシナリオ有り判定に修正 | Medium | incremental | [設計](devnotes/20260715-1153-published-scenario-panel/) | 2026-07-15 |
 | T062 | 撮影テイク行の mobile 375px レイアウト崩れ修正 | frontend | テイク行のmobile崩れ修正 | Medium | incremental | [設計](devnotes/20260715-1158-capture-take-row-mobile/) | 2026-07-15 |
