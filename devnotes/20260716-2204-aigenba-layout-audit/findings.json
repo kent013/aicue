@@ -1,0 +1,668 @@
+[
+  {
+    "slice": "pages-projects",
+    "findings": [
+      {
+        "area": "Projects/Index.svelte, Show.svelte, Create.svelte, Edit.svelte (全4ページの外枠) + components/templates/ に PageContainer.svelte が存在しない",
+        "divergence": "4ページとも <AppLayout> 直下に <PageContent> を置くのみで、aigenba の必須中間ラッパー <PageContainer>(px-4 py-8 sm:px-6 lg:px-8 の本文 padding)が無い。AI-CUE には PageContainer.svelte primitive 自体が存在しない(find で 0 件)。代わりに AppLayout の <main> 側が独自 padding px-4 py-6 lg:px-8 を持つ(aigenba の PageContainer は py-8、AI-CUE main は py-6 で値も相違)。この padding 差分は aigenba PageHeader/PageHeaderSection が負マージン -mt-8/-mx-4 で PageContainer の py-8/px-4 を前提に描くため、PageHeader 実装の前提としても必要。",
+        "aigenbaPattern": "templates/PageContainer.svelte を <AppLayout> 直下に置き、その内側に PageHeaderSection と PageContent を並べる(/tmp/aigenba/resources/js/pages/Organizations/Projects/Index.svelte:38-141、templates/PageContainer.svelte)。",
+        "category": "missing-primitive",
+        "severity": "high",
+        "blocksImplementation": true,
+        "suggestedAction": "components/templates/PageContainer.svelte を aigenba から移植(px-4 py-8 sm:px-6 lg:px-8)、AppLayout の <main> 内 padding を撤去または整合させ、Projects 全ページを <AppLayout><PageContainer>…</PageContainer></AppLayout> 構造へ移行。別 TODO 化。"
+      },
+      {
+        "area": "Projects/Index.svelte:35-47, Show.svelte:297-314, Create.svelte:29-32, Edit.svelte:33-37 の見出しブロック + PageHeader/PageHeaderSection primitive 不在",
+        "divergence": "全4ページが見出しを生の <h1 class=\"text-h2\"> + <p class=\"text-caption\"> の手書きブロックで実装(Index/Show はさらに <div class=\"flex justify-between\"> でアクションボタンを手動配置)。aigenba の見出し molecule PageHeader / PageHeaderSection が AI-CUE に存在しない(find で 0 件)。結果として icon 表示・description サブバー・breadcrumbs・actions slot・testId 一貫化がすべて手書き/欠落。特に Show/Edit/Create は project 配下のネストページなのに breadcrumbs が一切無い(Breadcrumb primitive も AI-CUE に存在しない)。",
+        "aigenbaPattern": "<PageHeaderSection breadcrumbs title description icon>(actions は children slot)、ルート画面は shorthand の <PageHeader>(molecules/PageHeader.svelte, PageHeaderSection.svelte)。Index は description のみ、詳細ページは breadcrumbs を渡す標準運用。",
+        "category": "missing-primitive",
+        "severity": "high",
+        "blocksImplementation": true,
+        "suggestedAction": "molecules/PageHeaderSection.svelte・PageHeader.svelte・Breadcrumb.svelte を aigenba から移植し、4ページの手書き見出し+アクション行を PageHeader(Section) へ置換(icon・breadcrumbs・actions slot 化)。別 TODO 化。"
+      },
+      {
+        "area": "components/templates/PageContent.svelte(4ページ全てが maxWidth prop 付きで利用)",
+        "divergence": "AI-CUE の PageContent は maxWidth 必須 prop(sm〜7xl の union → 静的 Record)を持ち、mx-auto w-full max-w-{n} を可変で出す独自版。aigenba の PageContent は prop 完全無しで mx-auto max-w-7xl 固定。primitive の API 自体が乖離しており、幅責務がページ側へ漏れている。",
+        "aigenbaPattern": "templates/PageContent.svelte は prop を取らず <div class=\"mx-auto max-w-7xl\"> 固定。幅制御は primitive が一元所有しページは幅を指定しない。",
+        "category": "divergent-primitive",
+        "severity": "medium",
+        "blocksImplementation": false,
+        "suggestedAction": "PageContent を aigenba 準拠の prop 無し max-w-7xl 固定へ収束させ、ページ側の maxWidth 指定を撤去。移行期は maxWidth をオプション化してデフォルト 7xl とする案も可。"
+      },
+      {
+        "area": "Projects/Index.svelte:34, Show.svelte:296, Create.svelte:28, Edit.svelte:33 の maxWidth 指定",
+        "divergence": "4ページ全てが <PageContent maxWidth=\"2xl\">。max-w-2xl(狭幅・中央寄せだが 672px 相当の narrow)で本文が絞られる。aigenba は全ページ一律 max-w-7xl。特に Show は動画マニュアル一覧テーブル/フィルタ/メンバー管理まで含む広い画面なのに 2xl に押し込められている。",
+        "aigenbaPattern": "全ページ一律 max-w-7xl(PageContent 固定幅)。ページ独自の narrow max-w(2xl 等)は aigenba に存在しない。",
+        "category": "width",
+        "severity": "high",
+        "blocksImplementation": false,
+        "suggestedAction": "4ページの maxWidth=\"2xl\" を撤去し max-w-7xl 相当へ統一(上記 PageContent 収束と同時に解消)。"
+      },
+      {
+        "area": "Projects/Show.svelte:448-474 の「管理メニュー」Card(TextLink: カテゴリ管理 /projects/{id}/categories、ユーザー管理 /manage/users)",
+        "divergence": "Show ページ内に <h2>管理メニュー</h2> の Card を設け、カテゴリ管理・ユーザー管理へのページ内二次リンク集を独自に持つ。これは aigenba に無いページ内の二次「管理メニュー」導線であり、管理系機能をページ本文の副次ナビとして露出している。",
+        "aigenbaPattern": "aigenba には二次的な「管理メニュー」サブナビ(aside もページ内リンク集も)は無い。管理系は左サイドバー top-level nav 項目として提供する。",
+        "category": "custom-element",
+        "severity": "medium",
+        "blocksImplementation": false,
+        "suggestedAction": "「管理メニュー」Card を廃止し、カテゴリ管理・ユーザー管理をサイドバー top-level nav もしくは PageHeader の actions slot 相当へ移設。ページ本文からは二次ナビを除去。"
+      },
+      {
+        "area": "Projects/Index.svelte, Show.svelte, Create.svelte, Edit.svelte の <svelte:head> / ページタイトル",
+        "divergence": "AI-CUE の Projects 4ページは <svelte:head><title> を一切持たず、page-title lib も存在しない(find 0 件)。ブラウザタブ/ドキュメントタイトルがページ単位で設定されない。",
+        "aigenbaPattern": "各ページが <svelte:head><title>{pageTitle('プロジェクト')}</title></svelte:head> を持ち lib/page-title で統一(/tmp/aigenba/.../Projects/Index.svelte:34-36)。",
+        "category": "shell-pattern",
+        "severity": "low",
+        "blocksImplementation": false,
+        "suggestedAction": "lib/page-title を移植し 4ページに <svelte:head><title> を付与(外枠テンプレ整備の一環)。"
+      }
+    ]
+  },
+  {
+    "slice": "pages-settings-billing",
+    "findings": [
+      {
+        "area": "Settings/Index.svelte, Settings/Security.svelte, Billing/Index.svelte, Billing/PurchaseTickets.svelte (全4ページ) / components/templates/",
+        "divergence": "aigenba の外枠は <PageContainer>(px-4 py-8 sm:px-6 lg:px-8 の薄い padding wrapper) を必ず挟むが、AI-CUE には PageContainer primitive 自体が存在しない (templates/ には PageContent.svelte のみ)。4ページとも <AppLayout> 直下に <PageContent> を置くだけで、padding は AppLayout の <main> 内側 div (px-4 py-6 lg:px-8) に暗黙依存。py が 8→6、sm:px-6 段も欠落し、aigenba のページ padding 契約と不一致。",
+        "aigenbaPattern": "components/templates/PageContainer.svelte (div class=\"w-full px-4 py-8 sm:px-6 lg:px-8\") を AppLayout と PageHeader/PageContent の間に必ず挟む (例: Organizations/Settings.svelte L209 <PageContainer>)。",
+        "category": "missing-primitive",
+        "severity": "high",
+        "blocksImplementation": true,
+        "suggestedAction": "aigenba の PageContainer.svelte を AI-CUE に移植し、4ページとも <AppLayout><PageContainer>…</PageContainer></AppLayout> でラップする (別TODO化)。"
+      },
+      {
+        "area": "Settings/Index.svelte L149, Settings/Security.svelte L274, Billing/Index.svelte L89, Billing/PurchaseTickets.svelte L117 / components/molecules/",
+        "divergence": "aigenba は見出しを <PageHeader>/<PageHeaderSection>(title/description/icon/testId、border-b 付きヘッダバー) molecule で描くが、AI-CUE には PageHeader/PageHeaderSection molecule が存在しない (molecules/ に Page* ヘッダ無し)。4ページとも生の <h1 class=\"text-h2\"> を本文冒頭に直書きし、description は Billing 2ページでは <h1> 直下の <p class=\"mt-1 text-caption text-text-secondary\"> をインライン描画。icon・testId・border-b サブバー等の header molecule 機能は全て欠落。",
+        "aigenbaPattern": "components/molecules/PageHeaderSection.svelte (+ shorthand PageHeader.svelte) を PageContainer 直下・PageContent の外に置く (例: Organizations/Settings.svelte L210 <PageHeaderSection title=\"組織設定\" description=… icon={Settings} />)。",
+        "category": "missing-primitive",
+        "severity": "high",
+        "blocksImplementation": true,
+        "suggestedAction": "aigenba の PageHeader/PageHeaderSection molecule を移植し、各ページの生 <h1>+インライン description を PageHeader(title/description/icon/testId) に置換する (別TODO化)。"
+      },
+      {
+        "area": "components/templates/PageContent.svelte（4ページすべてが利用）",
+        "divergence": "AI-CUE の PageContent は maxWidth を必須 prop に取り union(sm..7xl)→静的 Record で max-w-* を解決する独自仕様。aigenba の PageContent は prop を一切取らず mx-auto max-w-7xl 固定。primitive のシグネチャと幅責務が乖離しており、ページ側が幅を個別指定できてしまう(=幅バラつきの温床)。",
+        "aigenbaPattern": "components/templates/PageContent.svelte は <div class=\"mx-auto max-w-7xl\">{@render children()}</div> のみ。prop 無し・幅固定。",
+        "category": "divergent-primitive",
+        "severity": "high",
+        "blocksImplementation": false,
+        "suggestedAction": "PageContent を prop 無し・max-w-7xl 固定へ寄せる。maxWidth 依存の全 caller を洗い出し撤去してから primitive を単純化する。"
+      },
+      {
+        "area": "Settings/Index.svelte L148 (2xl), Settings/Security.svelte L273 (2xl), Billing/Index.svelte L88 (3xl), Billing/PurchaseTickets.svelte L116 (3xl)",
+        "divergence": "4ページとも PageContent maxWidth に narrow 値(Settings=2xl, Billing=3xl)を渡し、本文が中央寄せの狭幅になっている。aigenba は全ページ一律 max-w-7xl。ページ独自の narrow max-w は aigenba に存在しない。",
+        "aigenbaPattern": "全ページ本文幅は max-w-7xl 中央寄せで統一(PageContent 固定)。ページ側で幅を指定しない。",
+        "category": "width",
+        "severity": "high",
+        "blocksImplementation": false,
+        "suggestedAction": "PageContent を max-w-7xl 固定化する対応と併せ、各ページの maxWidth=\"2xl\"/\"3xl\" 指定を撤去する。"
+      },
+      {
+        "area": "Settings/Index.svelte L151-154, Settings/Security.svelte L276-279",
+        "divergence": "両 Settings ページが本文冒頭に二次的な in-page サブナビ <nav aria-label=\"設定メニュー\">(border-b + TextLink プロフィール/セキュリティ)を持つ。aigenba には二次的なサブナビ(管理メニュー)は無く、管理系は左サイドバー top-level nav 項目で扱う。AI-CUE 固有の独自 nav 構造。",
+        "aigenbaPattern": "二次サブナビ無し。プロフィール/セキュリティ等の切替は左サイドバーの top-level nav で行う(ページ本文にタブ的サブナビを置かない)。",
+        "category": "nav-structure",
+        "severity": "medium",
+        "blocksImplementation": false,
+        "suggestedAction": "設定メニューのサブナビを本文から撤去し、左サイドバー nav へ寄せる(別途 nav 設計の TODO 検討)。少なくとも aigenba パターンに合わせるなら本文からは除去。"
+      },
+      {
+        "area": "Settings/Index.svelte L239-270 (DangerZone molecule)",
+        "divergence": "AI-CUE はアカウント削除に molecules/DangerZone.svelte(AI-CUE 固有 molecule)を使う。aigenba には DangerZone molecule が無く、危険操作は inline の <div class=\"rounded-lg border border-danger bg-surface p-8\">＋アイコン＋見出しで直書きする(Organizations/Settings.svelte L416-)。危険操作ブロックの構造 primitive が乖離。",
+        "aigenbaPattern": "危険操作は専用 molecule を使わず、border-danger のカード div をページ内に直書きする(TriangleAlert アイコン + h3 text-danger + 説明 + Button)。",
+        "category": "custom-element",
+        "severity": "low",
+        "blocksImplementation": false,
+        "suggestedAction": "aigenba に厳密一致させるなら DangerZone を使わず inline border-danger カードで描く。ただし DangerZone は AI-CUE 全体の共通 molecule のため、統一方針を決めてから判断する。"
+      }
+    ]
+  },
+  {
+    "findings": [
+      {
+        "area": "Manuals/Show.svelte, Manuals/Create.svelte, Manuals/Edit.svelte (全3ページの外枠)",
+        "divergence": "3ページとも <AppLayout><PageContent> の2層構造で、aigenba 必須の <PageContainer> 層が無い。AI-CUE には PageContainer primitive 自体が存在しない (templates/ に AppLayout/AuthLayout/GuestLayout/PageContent のみ)。padding は AppLayout の <main> 内 div (px-4 py-6 lg:px-8) が肩代わりしており、aigenba の PageContainer (px-4 py-8 sm:px-6 lg:px-8) とは値も配置場所も異なる (py-6 vs py-8、sm:px-6 欠落)。",
+        "aigenbaPattern": "/tmp/aigenba/resources/js/components/templates/PageContainer.svelte を <AppLayout> 直下に置き、その children に PageHeader(Section)+PageContent を入れる (例: /tmp/aigenba/resources/js/pages/Organizations/Teams/Projects/{Show,Create,Edit}.svelte)。",
+        "category": "missing-primitive",
+        "severity": "high",
+        "blocksImplementation": true,
+        "suggestedAction": "AI-CUE に PageContainer.svelte (px-4 py-8 sm:px-6 lg:px-8) を新設し、AppLayout <main> 内蔵 padding を撤去して各ページを AppLayout>PageContainer>PageHeader>PageContent の4層に揃える (別TODO化)。"
+      },
+      {
+        "area": "Manuals/Show.svelte (67-119), Create.svelte (49-54), Edit.svelte (57-77) の見出し",
+        "divergence": "3ページとも見出しを手書き (Show/Edit/Create は <h1 class=\"text-h2\"> + 説明 <p class=\"mt-1 text-caption text-text-secondary\">) で構成し、aigenba の PageHeader/PageHeaderSection molecule を使っていない。AI-CUE には PageHeader.svelte / PageHeaderSection.svelte が存在しない (molecules/ に両方とも無い)。結果として aigenba の header の border-b・bg-surface・icon slot・サブバー等の外枠が再現されていない。",
+        "aigenbaPattern": "/tmp/aigenba/resources/js/components/molecules/PageHeader.svelte (root画面) または PageHeaderSection.svelte (breadcrumbs/actions有) を PageContainer 直下・PageContent の外に置き、title/description/icon/testId を prop で渡す。",
+        "category": "missing-primitive",
+        "severity": "high",
+        "blocksImplementation": true,
+        "suggestedAction": "PageHeader / PageHeaderSection molecule を AI-CUE に移植し、各 Manuals ページの手書き見出しを置換する (別TODO化)。"
+      },
+      {
+        "area": "resources/js/components/templates/PageContent.svelte (AI-CUE版) と3ページの利用",
+        "divergence": "AI-CUE の PageContent は必須 maxWidth prop (sm〜7xl の Record) を持ち幅をページ側から可変指定する独自 primitive。aigenba の PageContent は prop 無しで <div class=\"mx-auto max-w-7xl\"> 固定。Manuals はこの prop を Show/Create=\"2xl\"、Edit=\"4xl\" と使い分けている。",
+        "aigenbaPattern": "/tmp/aigenba/resources/js/components/templates/PageContent.svelte は prop を一切取らず全ページ mx-auto max-w-7xl 固定。",
+        "category": "divergent-primitive",
+        "severity": "medium",
+        "blocksImplementation": false,
+        "suggestedAction": "PageContent の maxWidth prop 依存を廃し、aigenba 同様に幅固定 (max-w-7xl) の prop 無し版へ収束させる方針を検討 (全スライス横断のため上位で調整)。"
+      },
+      {
+        "area": "Manuals/Show.svelte (68), Create.svelte (50), Edit.svelte (58)",
+        "divergence": "ページ幅が aigenba 一律 max-w-7xl 中央寄せに対し、Show=max-w-2xl、Create=max-w-2xl、Edit=max-w-4xl と狭く指定されている。aigenba には narrow max-w のページ独自指定は無い。",
+        "aigenbaPattern": "全ページ PageContent 固定の max-w-7xl 中央寄せ (幅のページ別上書き無し)。",
+        "category": "width",
+        "severity": "high",
+        "blocksImplementation": false,
+        "suggestedAction": "PageContent の maxWidth を全ページ 7xl に統一 (primitive を prop 無し固定化する場合は自動的に解消)。"
+      },
+      {
+        "area": "Manuals/Edit.svelte (79)",
+        "divergence": "PageContent maxWidth=\"4xl\" の内側でさらに基本情報カードを <div class=\"mt-6 max-w-2xl\"> で二重に幅制限している。同一ページ内で PageContent と別レイヤーの max-w を重ねる構造は aigenba パターンに無い (幅責務は PageContent 一元)。",
+        "aigenbaPattern": "幅責務は PageContent に一元化し、本文内で追加の max-w-* ラッパーを重ねない。",
+        "category": "width",
+        "severity": "medium",
+        "blocksImplementation": false,
+        "suggestedAction": "内側の max-w-2xl ラッパーを撤去し、幅は PageContent (=max-w-7xl 統一) のみで制御する。"
+      },
+      {
+        "area": "Manuals/Show.svelte (69-119)",
+        "divergence": "header 相当を PageContent 内で手書き flex justify-between として組み、プロジェクト名リンク (TextLink) を見出し上部に、Badge/カテゴリ/日付・撮影/複製/編集ボタン群を右アクションとして直接配置している。aigenba では親リンクは PageHeaderSection の breadcrumbs prop、アクション群は children (actions) slot、見出し・badge は header 内に収める形が正で、これらを PageContent の外の header レイヤーに置く。独自の header レイアウトになっている。",
+        "aigenbaPattern": "PageHeaderSection に breadcrumbs (親プロジェクトへの導線)・title・testId を渡し、アクション (撮影/複製/編集) は children slot に入れる。badge 等は header 内の actions/children slot 側で描画する。",
+        "category": "custom-element",
+        "severity": "medium",
+        "blocksImplementation": false,
+        "suggestedAction": "PageHeaderSection 導入後、Show の手書き header (親リンク+h1+badge行+アクション行) を breadcrumbs prop と children slot に移設する (実装は PageHeaderSection 移植=別TODO に依存)。"
+      }
+    ],
+    "slice": "pages-manuals"
+  },
+  {
+    "slice": "pages-admin",
+    "findings": [
+      {
+        "area": "components/features/admin/AdminMenuNav.svelte (used by Admin/Users.svelte L261-263 と Admin/Categories.svelte L126-132)",
+        "divergence": "AI-CUE 独自の二次左メニュー。両ページが <aside class=\"w-full shrink-0 md:w-56\"> 内に <Card> ベースの「管理メニュー」サブナビ (ユーザー管理 / カテゴリ管理 リンク) を持ち、本文と md:flex-row の 2 カラムを組む。aigenba にはこの二次サブナビの概念自体が無い。",
+        "aigenbaPattern": "管理系導線は左サイドバー top-level nav 項目のみ (AppLayout navItems)。ページ本文は二次メニューを持たず単一カラム全幅 (Organizations/Members/Index.svelte は PageContent 直下に本文のみ)。",
+        "category": "custom-element",
+        "severity": "high",
+        "blocksImplementation": false,
+        "suggestedAction": "AdminMenuNav.svelte を撤去し、両ページの <aside> + md:flex-row 2カラム scaffold を削除して本文を単一カラム全幅化する。導線はサイドバー top-level nav へ移す。"
+      },
+      {
+        "area": "AppLayout サイドバー navItems (templates/AppLayout.svelte L98-112) と Admin/Categories.svelte の到達性",
+        "divergence": "top-level nav には /manage/users (メンバー) はあるが、カテゴリ管理の nav 項目が存在しない。カテゴリ管理ページの唯一の入口が AdminMenuNav の二次リンク。AdminMenuNav 撤去でカテゴリ管理が nav から到達不能になる。",
+        "aigenbaPattern": "全管理系ページは左サイドバー top-level nav から直接到達 (organizationNavItems に概要/メンバー/チーム/プロジェクト/シナリオ/API キー/請求 を列挙)。二次リンク経由の隠れページは無い。",
+        "category": "nav-structure",
+        "severity": "high",
+        "blocksImplementation": false,
+        "suggestedAction": "AdminMenuNav 撤去に伴い、カテゴリ管理を top-level nav 項目 (can 連動 = URL/条件付き push) として navItems に追加し、単独の入口を確保する。メンバーは既に top-level なので流用。"
+      },
+      {
+        "area": "templates/PageContainer.svelte (AI-CUE に存在しない / pages 使用 0 件)",
+        "divergence": "aigenba 外枠の最外層 padding wrapper PageContainer (px-4 py-8 sm:px-6 lg:px-8) が AI-CUE に無い。両 admin ページは AppLayout 直下に PageContent を置くだけで、この層が欠落。",
+        "aigenbaPattern": "AppLayout > PageContainer > PageHeader > PageContent の 4 層。PageContainer が px-4 py-8 sm:px-6 lg:px-8 を所有し、PageHeader の負マージン full-bleed の基準になる。",
+        "category": "missing-primitive",
+        "severity": "high",
+        "blocksImplementation": true,
+        "suggestedAction": "aigenba の PageContainer.svelte を AI-CUE へ移植し、両 admin ページを AppLayout > PageContainer > (PageHeader) > PageContent の入れ子へ組み替える。"
+      },
+      {
+        "area": "molecules/PageHeader.svelte / PageHeaderSection.svelte (AI-CUE に存在しない / pages 使用 0 件)",
+        "divergence": "見出し molecule が AI-CUE に無い。両 admin ページは PageContent 内で素の <h1 class=\"text-h2\"> + <p class=\"mt-1 text-caption text-text-secondary\"> を手書きしており、full-bleed 境界バー・icon・breadcrumbs/actions slot を持たない。",
+        "aigenbaPattern": "PageHeaderSection が title/description/icon/testId(+breadcrumbs/actions slot) を受け取り、-mx-4 -mt-8 の負マージンで surface 背景 + border-b の full-bleed ヘッダーバーを描画 (Members は icon=UserPlus)。ルート画面は PageHeader shorthand。",
+        "category": "missing-primitive",
+        "severity": "high",
+        "blocksImplementation": true,
+        "suggestedAction": "aigenba の PageHeader/PageHeaderSection(+依存 Breadcrumb) を移植し、両ページの手書き h1/p を <PageHeader title description icon testId /> に置換 (Users は Users/UserPlus 系、Categories は Tags 系 icon)。"
+      },
+      {
+        "area": "templates/PageContent.svelte (AI-CUE 独自版) と両 admin ページの maxWidth=\"7xl\" 指定 (Users.svelte L254 / Categories.svelte L119)",
+        "divergence": "AI-CUE PageContent は maxWidth 必須 prop + testId + PageContentMaxWidth union (sm〜7xl の静的 Record) を持つ独自実装。aigenba PageContent は prop 無しで mx-auto max-w-7xl 固定。両 admin ページは maxWidth=\"7xl\" を明示指定している。",
+        "aigenbaPattern": "PageContent は children のみを受け、mx-auto max-w-7xl を無条件適用 (幅はページ側で選ばせない)。",
+        "category": "divergent-primitive",
+        "severity": "medium",
+        "blocksImplementation": false,
+        "suggestedAction": "PageContent を aigenba 同様 prop 無し max-w-7xl 固定へ収束させ、両ページの maxWidth prop 渡しを除去する。幅段階の選択肢 (union/Record) は撤去。"
+      },
+      {
+        "area": "外枠の入れ子順序 (Admin/Users.svelte L253-254 / Admin/Categories.svelte L118-119)",
+        "divergence": "AI-CUE は AppLayout > PageContent(maxWidth=7xl) の 2 層で、PageContent 直下に見出しと本文を直置き。PageContainer 層と PageHeader 層が無く、PageContent が最外の幅/中央寄せを兼ねる誤った入れ子。",
+        "aigenbaPattern": "AppLayout > PageContainer > PageHeader(Section) > PageContent > 本文 の統一 4 層。見出しは PageHeader が、padding は PageContainer が、中央寄せ幅は PageContent が分担。",
+        "category": "shell-pattern",
+        "severity": "high",
+        "blocksImplementation": false,
+        "suggestedAction": "PageContainer/PageHeader 移植後、両ページの外枠を 4 層入れ子へ組み替える。手書き見出しと maxWidth prop を廃し、本文 (Card 群) のみを PageContent 配下に残す。"
+      },
+      {
+        "area": "AppLayout <main> の padding (templates/AppLayout.svelte L472 `px-4 py-6 lg:px-8`)",
+        "divergence": "AI-CUE は本文 padding を AppLayout の main (px-4 py-6 lg:px-8) に持たせている。aigenba は main に padding を持たせず (w-full flex-1 のみ)、各ページ PageContainer (px-4 py-8 sm:px-6 lg:px-8) が padding を所有。値も py-6 vs py-8、sm:px-6 段の有無で相違。",
+        "aigenbaPattern": "AppLayout main は無 padding。padding は PageContainer が px-4 py-8 sm:px-6 lg:px-8 で一元所有。",
+        "category": "shell-pattern",
+        "severity": "medium",
+        "blocksImplementation": false,
+        "suggestedAction": "PageContainer 導入に合わせ AppLayout main の padding を除去し、padding を PageContainer 側 (px-4 py-8 sm:px-6 lg:px-8) へ移す。二重 padding を避ける。"
+      }
+    ]
+  },
+  {
+    "findings": [
+      {
+        "area": "resources/js/components/templates/ (PageContainer 不在)",
+        "divergence": "aigenba の統一外枠は AppLayout>PageContainer>PageHeader>PageContent。PageContainer.svelte(padding: px-4 py-8 sm:px-6 lg:px-8 の薄い wrapper)が AI-CUE の templates/ に存在しない。担当3ページ(Dashboard/Notifications/Invitations Accept)はいずれも PageContainer を経由せず、AppLayout の <main> 内 <div class=\"px-4 py-6 lg:px-8\"> に padding を直書きして代替している。",
+        "aigenbaPattern": "<AppLayout><PageContainer><PageHeader/><PageContent>…</PageContent></PageContainer></AppLayout>。padding は PageContainer が所有し、aigenba の AppLayout <main> は padding を持たない(w-full flex-1 のみ)。",
+        "category": "missing-primitive",
+        "severity": "high",
+        "blocksImplementation": true,
+        "suggestedAction": "aigenba の templates/PageContainer.svelte(padding prop 付き薄 wrapper)を AI-CUE に移植し、AppLayout <main> の padding 直書きを撤去して各ページを PageContainer で包む。"
+      },
+      {
+        "area": "resources/js/components/molecules/ (PageHeader / PageHeaderSection 不在)",
+        "divergence": "aigenba の見出しは PageHeader / PageHeaderSection molecule(icon + h1 text-h2 + description + actions slot を持つ border-b 付き見出しバー)。AI-CUE の molecules/ には PageHeader も PageHeaderSection も存在せず、担当3ページは全て <h1 class=\"text-h2\"> を直書きして見出しを自作している。",
+        "aigenbaPattern": "<PageHeader title description icon testId /> (root 画面 shorthand) / <PageHeaderSection title breadcrumbs description icon>{actions}</PageHeaderSection>。",
+        "category": "missing-primitive",
+        "severity": "high",
+        "blocksImplementation": true,
+        "suggestedAction": "aigenba の molecules/PageHeader.svelte と PageHeaderSection.svelte(依存 Breadcrumb 含む)を移植し、各ページの <h1> 直書きを PageHeader 呼び出しへ置換する。"
+      },
+      {
+        "area": "resources/js/components/templates/PageContent.svelte",
+        "divergence": "AI-CUE の PageContent は maxWidth 必須 prop(sm〜7xl の union → Record で max-w-* 解決)を持つ独自版。aigenba の PageContent は prop 無しで max-w-7xl 固定(<div class=\"mx-auto max-w-7xl\">)。AI-CUE は幅可変にした結果、ページ毎に narrow 幅(md 等)を選べてしまい「全ページ一律 max-w-7xl」規約から逸脱可能な設計になっている。",
+        "aigenbaPattern": "PageContent は children のみ受け取り max-w-7xl 中央寄せ固定。幅はページで選ばない。",
+        "category": "divergent-primitive",
+        "severity": "medium",
+        "blocksImplementation": false,
+        "suggestedAction": "PageContent を aigenba 同様に max-w-7xl 固定・prop 無しへ寄せる(narrow が必要な認証/招待系は AuthLayout 側で扱う)。maxWidth prop 依存箇所の洗い出しが必要。"
+      },
+      {
+        "area": "resources/js/pages/Dashboard.svelte:139-142",
+        "divergence": "外枠が <AppLayout {appName}><PageContent maxWidth=\"7xl\"> のみで PageContainer と PageHeader を欠く。見出しは <h1 class=\"text-h2\">{user.name} さん、ようこそ</h1> + <p> description を直書き。aigenba の Dashboard は PageContainer>PageHeader(icon=LayoutDashboard, title/description)>PageContent の3層。",
+        "aigenbaPattern": "<PageContainer><PageHeader title=\"ダッシュボード\" description=… icon={LayoutDashboard} testId /><PageContent>…</PageContent></PageContainer>。",
+        "category": "shell-pattern",
+        "severity": "high",
+        "blocksImplementation": false,
+        "suggestedAction": "PageContainer で包み、<h1>+<p> 直書きを <PageHeader> に置換(icon 付与)。実装は PageContainer/PageHeader 移植(上記 blocker)完了後。"
+      },
+      {
+        "area": "resources/js/pages/Notifications/Index.svelte:60-74",
+        "divergence": "外枠が <AppLayout {appName}><PageContent maxWidth=\"7xl\"> のみで PageContainer/PageHeader を欠く。さらに見出しを <div class=\"flex items-start justify-between\"> 内に <h1 class=\"text-h2\">通知</h1>+description と「すべて既読にする」Button を並べる自作ヘッダを実装しており、これは PageHeaderSection の actions slot(children)パターンをインライン再実装したもの。",
+        "aigenbaPattern": "<PageHeader title=\"通知\" description=…>{#snippet children}…すべて既読にする Button…{/snippet}</PageHeader>(actions は PageHeaderSection children slot)。",
+        "category": "custom-element",
+        "severity": "high",
+        "blocksImplementation": false,
+        "suggestedAction": "自作 flex ヘッダを撤去し、PageHeaderSection の actions slot に read-all ボタンを載せる。PageContainer で包む。PageHeaderSection 移植後に実施。"
+      },
+      {
+        "area": "resources/js/pages/Invitations/Accept.svelte:28-31",
+        "divergence": "<PageContent maxWidth=\"md\"> で max-w-md の narrow 幅・中央寄せカードを使用。aigenba は「全ページ一律 max-w-7xl」規約で narrow 幅を持たない。加えて aigenba の招待受諾相当(Invitations/Landing.svelte)は AppLayout ではなく AuthLayout + AuthHeroSection の hero パターンで実装されており、shell 自体が異なる。",
+        "aigenbaPattern": "招待受諾は <AuthLayout><AuthHeroSection title subtitle badge badgeIcon>…</AuthHeroSection></AuthLayout>(narrow 幅は AuthLayout/AuthHeroSection 側の責務)。AppLayout 配下なら max-w-7xl。",
+        "category": "width",
+        "severity": "high",
+        "blocksImplementation": false,
+        "suggestedAction": "AppLayout+narrow PageContent をやめ、aigenba 同様 AuthLayout+AuthHeroSection へ寄せる(下記 AuthHeroSection 移植が前提)。または AppLayout 維持なら max-w-7xl + PageHeader に統一。"
+      },
+      {
+        "area": "resources/js/components/molecules/ (AuthHeroSection 不在)",
+        "divergence": "aigenba の招待ランディング/認証系 narrow 画面は molecules/AuthHeroSection.svelte(title/subtitle/badge/badgeIcon を持つ hero カード)で構成されるが、AI-CUE の molecules/ には AuthHeroSection が存在しない。このため Invitations/Accept を aigenba と同一 shell(AuthLayout+AuthHeroSection)で再現できず、AppLayout+自作 Card で代替されている。",
+        "aigenbaPattern": "molecules/AuthHeroSection.svelte を AuthLayout 配下で使用。",
+        "category": "missing-primitive",
+        "severity": "medium",
+        "blocksImplementation": true,
+        "suggestedAction": "aigenba の AuthHeroSection.svelte を移植し、Invitations/Accept をそれで再構成する。"
+      },
+      {
+        "area": "resources/js/components/templates/AppLayout.svelte:472 (main padding)",
+        "divergence": "AI-CUE は <main> 内 <div class=\"px-4 py-6 lg:px-8\"> で padding を直書き。aigenba は padding を PageContainer(px-4 py-8 sm:px-6 lg:px-8)に集約し AppLayout <main> は padding を持たない。値も差異あり: 縦 py-6(aigenba py-8)、sm:px-6 breakpoint 欠落。",
+        "aigenbaPattern": "AppLayout <main> は w-full flex-1 のみ。padding は PageContainer が px-4 py-8 sm:px-6 lg:px-8 で所有。",
+        "category": "divergent-primitive",
+        "severity": "medium",
+        "blocksImplementation": false,
+        "suggestedAction": "PageContainer 移植に合わせ AppLayout の padding 直書きを撤去し、padding を PageContainer(px-4 py-8 sm:px-6 lg:px-8)へ移す。"
+      },
+      {
+        "area": "resources/js/pages/{Dashboard,Notifications/Index,Invitations/Accept}.svelte (AppLayout appName prop)",
+        "divergence": "AI-CUE の AppLayout は appName を必須 prop に取り、3ページとも <AppLayout {appName}> で shared props から appName を渡している。aigenba の AppLayout は appName prop を取らない(<AppLayout> のみ)。shell 呼び出し API が乖離している。",
+        "aigenbaPattern": "<AppLayout>…</AppLayout>(appName prop なし。ページタイトルは svelte:head の pageTitle() で解決)。",
+        "category": "divergent-primitive",
+        "severity": "low",
+        "blocksImplementation": false,
+        "suggestedAction": "AppLayout の appName prop 依存を見直し(aigenba は svelte:head pageTitle で解決)、shell 呼び出しを引数なしへ寄せられるか検討。"
+      }
+    ],
+    "slice": "pages-dashboard-notif-invite"
+  },
+  {
+    "slice": "nav-shell",
+    "findings": [
+      {
+        "area": "resources/js/components/features/admin/AdminMenuNav.svelte (使用: pages/Admin/Users.svelte:261-263, pages/Admin/Categories.svelte:126-132)",
+        "divergence": "AI-CUE 独自の二次的な左「管理メニュー」サブナビ。Admin/Users・Admin/Categories が本文左に <aside class=\"w-full shrink-0 md:w-56\"> + AdminMenuNav(<Card> 内に h2『管理メニュー』+ ユーザー管理/カテゴリ管理 の縦 nav)を置く 2 カラム構成。aigenba にはこの種の <aside> 管理サブナビは一切存在せず、管理系は全て左サイドバー top-level nav 項目で表現される。",
+        "aigenbaPattern": "aigenba AppLayout.svelte の organizationNavItems (概要/メンバー/チーム/プロジェクト/シナリオ/APIキー/請求) のように、管理導線は左サイドバーの top-level nav 項目に集約。ページ本文に二次左メニュー <aside> は作らない。",
+        "category": "custom-element",
+        "severity": "high",
+        "blocksImplementation": false,
+        "suggestedAction": "AdminMenuNav の <aside> 二次メニューを廃し、ユーザー管理/カテゴリ管理を左サイドバー nav 項目 (navItems) へ昇格。Admin ページは 2 カラムをやめ PageContainer/PageContent 単一カラムに戻す。"
+      },
+      {
+        "area": "AppLayout.svelte:21,210,228 (NotificationBell) — AI-CUE",
+        "divergence": "AI-CUE はシェルに NotificationBell を常設 (desktop サイドバー logo 行に 1 個 + mobile top bar に 1 個、unreadCount 表示)。aigenba の AppLayout には通知ベル/通知概念が全く無い (grep で components に NotificationBell なし)。ロゴ行が AI-CUE では justify-between + ベル、aigenba では単純ロゴのみ。",
+        "aigenbaPattern": "aigenba AppLayout の logo ブロックは BrandLogo のみ、mobile top bar も menu ボタン + BrandLogo のみでベル無し。",
+        "category": "custom-element",
+        "severity": "medium",
+        "blocksImplementation": false,
+        "suggestedAction": "aigenba 完全一致を厳格に取るならベルを撤去。通知機能を残す方針なら『aigenba に無い AI-CUE 固有シェル要素』として明示的に許容判断する (color/余白ではなく構造差なので要決定)。"
+      },
+      {
+        "area": "AppLayout.svelte:208,223-226,381-383 (ロゴ) — AI-CUE",
+        "divergence": "AI-CUE はブランドを素の text link `{appName}` (class text-h3 text-primary) で描画。aigenba は BrandLogo molecule (アイコン+名称、size sm/md, withName prop) を使用。AI-CUE には BrandLogo コンポーネントが存在しない (find で 0 件)。",
+        "aigenbaPattern": "aigenba: components/molecules/BrandLogo.svelte を desktop (size=md, withName={sidebarOpen})・mobile (size=sm) で使用。",
+        "category": "missing-primitive",
+        "severity": "medium",
+        "blocksImplementation": true,
+        "suggestedAction": "BrandLogo molecule を AI-CUE に用意し、AppLayout の text ロゴ 3 箇所 (desktop/mobile drawer/mobile top bar) を BrandLogo に置換。折りたたみ時 withName=false 連動。"
+      },
+      {
+        "area": "AppLayout.svelte:190,22 (ToastContainer + consumeFlash) — AI-CUE vs aigenba:595-613,84-160 (inline toast)",
+        "divergence": "flash→toast の実装場所が異なる。AI-CUE は ToastContainer organism + lib/stores/flash-to-toast の consumeFlash に外出し。aigenba は AppLayout 内にトースト markup と提示ロジック (showFlashToast/presentFlash/router.on('success'))・QuotaWarningBanner/QuotaExceededModal を直接内包。シェルの責務分割が構造的に異なる。",
+        "aigenbaPattern": "aigenba AppLayout がトースト DOM (fixed top-4 right-4, TOAST_BG/TOAST_ICON) と flash 提示を自前で持つ。",
+        "category": "shell-pattern",
+        "severity": "low",
+        "blocksImplementation": false,
+        "suggestedAction": "レイアウト外観に影響しないなら現状の分割 (ToastContainer) 維持で可。厳密一致が要件なら提示位置/型を aigenba と揃える。純粋な内部実装差のため優先度低。"
+      },
+      {
+        "area": "AppLayout.svelte:462-475 (main wrapper padding) — AI-CUE",
+        "divergence": "AI-CUE は <main> 内ラッパーに px-4 py-6 lg:px-8 のページ padding を直接付与し、シェルが本文余白を所有。aigenba の <main> は margin-left (サイドバー幅) のみで padding を持たず、余白は各ページの PageContainer (px-4 py-8 sm:px-6 lg:px-8) が所有。padding の所有レイヤが違う (py 値も 6 vs 8、sm:px-6 段の有無)。",
+        "aigenbaPattern": "aigenba: <main> は幅/margin のみ。ページ padding は templates/PageContainer.svelte が px-4 py-8 sm:px-6 lg:px-8 で一元所有。",
+        "category": "shell-pattern",
+        "severity": "medium",
+        "blocksImplementation": false,
+        "suggestedAction": "AppLayout main から padding を除去し、PageContainer primitive (未導入なら別 TODO) に px-4 py-8 sm:px-6 lg:px-8 で移管。各ページを PageContainer で包む前提に揃える。"
+      },
+      {
+        "area": "AppLayout.svelte:98-115 (navItems 生成) vs aigenba:248-290",
+        "divergence": "nav 生成モデルが構造的に異なる。AI-CUE は単一フラット list を capability で出し分け (dashboard/projects/members(/manage/users)/api-keys/billing) で URL は flat と org-scoped の混在。aigenba は hasManagementRole+org でモード切替: globalNavItems(コース/履歴) か organizationNavItems(全項目 org-scoped slug URL)。AI-CUE は role によるモード切替を持たず、org-scoped/flat URL 体系も不統一。",
+        "aigenbaPattern": "aigenba: navItems = hasManagementRole && currentOrganization ? organizationNavItems() : globalNavItems。管理系 top-level は全て /organizations/{slug}/... で統一。",
+        "category": "nav-structure",
+        "severity": "medium",
+        "blocksImplementation": false,
+        "suggestedAction": "nav 項目自体はドメイン差 (AI-CUE に courses/teams/scenarios 無し) だが、URL 体系 (flat vs org-scoped slug) と role モード切替の有無は要方針決定。少なくとも org-scoped 項目の URL 規約を aigenba に揃えるか検討。"
+      },
+      {
+        "area": "SidebarUserMenu.svelte (primary links) — AI-CUE vs aigenba",
+        "divergence": "ユーザーメニューの項目構成と順序が相違。AI-CUE: 個人設定(/settings)→組織設定→CLI→MCP。aigenba: トップページ(/)→CLI→MCP→組織設定→個人設定(/profile)。AI-CUE は『トップページ』link を持たず、個人設定の route が /settings (aigenba は /profile)。詳細セクションも AI-CUE は利用規約/プライバシー/特商法のみ、aigenba は ヘルプ(/help)・運営会社(外部 link, ExternalLink アイコン) を追加保持。",
+        "aigenbaPattern": "aigenba SidebarUserMenu: primary = トップページ/CLI/MCP/組織設定/個人設定(/profile)、詳細 = ヘルプ/利用規約/プライバシー/特商法/運営会社。",
+        "category": "divergent-primitive",
+        "severity": "low",
+        "blocksImplementation": false,
+        "suggestedAction": "項目・順序・route はドメイン/情報設計差。完全一致要件なら順序と『トップページ/ヘルプ/運営会社』の有無、個人設定 route (/settings vs /profile) を要すり合わせ。"
+      },
+      {
+        "area": "AppLayout.svelte:297-345,450-459 (組織スイッチャー) — AI-CUE vs aigenba:416-460,529-553",
+        "divergence": "組織スイッチャーの構造差。aigenba は各項目に Building2 アイコン + 末尾 Check、空検索時『該当する組織が見つかりません』、canCreateOrganization で『新しい組織を作成』(Plus) ボタンを持つ。AI-CUE は現在組織のみ先頭 Check・非現在は空 spacer で項目アイコン無し、空検索メッセージ無し、組織作成ボタン無し。切替も AI-CUE は id で POST /organizations/{id}/switch、aigenba は slug で router.visit + cookie 保存。",
+        "aigenbaPattern": "aigenba: 全項目 Building2 アイコン + 現在に Check、空状態メッセージ、canCreateOrganization 時『新しい組織を作成』ボタン、slug ベース navigation + last_organization_slug cookie。",
+        "category": "divergent-primitive",
+        "severity": "medium",
+        "blocksImplementation": false,
+        "suggestedAction": "組織スイッチャーを aigenba 構造に合わせる: 項目アイコン統一・空状態メッセージ追加・組織作成導線 (権限連動) 追加を検討。切替 API (id POST vs slug visit) は AI-CUE 既存仕様のため据え置き可だが UI 要素の欠落は補完。"
+      }
+    ]
+  },
+  {
+    "findings": [
+      {
+        "area": "resources/js/components/templates/ (PageContainer.svelte が存在しない)",
+        "divergence": "aigenba には templates/PageContainer.svelte (padding wrapper: px-4 py-8 sm:px-6 lg:px-8) が存在し全認証ページの外枠の第1層を担うが、AI-CUE には PageContainer 自体が無い。padding は AppLayout の <main> 内 div (px-4 py-6 lg:px-8) が肩代わりしており、ページ側で padding 層を差し込む primitive が存在しない。",
+        "aigenbaPattern": "<PageContainer>(templates/PageContainer.svelte, padding=true で px-4 py-8 sm:px-6 lg:px-8)で本文全体を包む",
+        "category": "missing-primitive",
+        "severity": "high",
+        "blocksImplementation": true,
+        "suggestedAction": "aigenba の templates/PageContainer.svelte を移植し、AppLayout <main> の直接 padding を撤去してページ側で PageContainer を使う構成に統一する"
+      },
+      {
+        "area": "resources/js/components/templates/PageContent.svelte",
+        "divergence": "aigenba の PageContent は prop 無しで <div class=\"mx-auto max-w-7xl\"> 固定。AI-CUE は独自に必須 prop maxWidth (sm|md|lg|xl|2xl..7xl の union → 静的 Record) と testId を持ち、幅をページごとに可変にしている。コメントでも『認証ページ標準幅は 2xl』と規定しており、aigenba の一律 max-w-7xl とは思想が逆。",
+        "aigenbaPattern": "<PageContent>(prop 無し・常に mx-auto max-w-7xl)",
+        "category": "divergent-primitive",
+        "severity": "high",
+        "blocksImplementation": false,
+        "suggestedAction": "maxWidth/testId prop を撤去し max-w-7xl 固定へ戻す。可変幅が必要な少数ページのみ別途例外扱いにする"
+      },
+      {
+        "area": "resources/js/components/templates/PageContent.svelte (幅ポリシー)",
+        "divergence": "AI-CUE は maxWidth prop 経由で認証ページ標準を max-w-2xl (narrow) にしている。aigenba は全ページ一律 max-w-7xl 中央寄せで、narrow 幅の運用自体が存在しない。結果として同一ページの実効コンテンツ幅が両アプリで大きく異なる。",
+        "aigenbaPattern": "全ページ max-w-7xl 中央寄せ (ページ独自 narrow max-w は無い)",
+        "category": "width",
+        "severity": "high",
+        "blocksImplementation": false,
+        "suggestedAction": "各ページの PageContent 幅指定を廃し max-w-7xl に統一する"
+      },
+      {
+        "area": "resources/js/components/templates/AppLayout.svelte (<main> 462-476)",
+        "divergence": "AI-CUE は shell の <main> 内 div に px-4 py-6 lg:px-8 を直付けし、ここが唯一の外周 padding。aigenba は <main> に padding を持たせず PageContainer (px-4 py-8 sm:px-6 lg:px-8) がページ側で担う。値も差異(py-6 vs py-8、sm:px-6 欠落)。加えて aigenba PageHeaderSection は PageContainer の padding を前提とした負マージン契約(-mt-8 / -mx-4 sm:-mx-6 lg:-mx-8)で全幅バーを描くため、AI-CUE の shell padding のままでは PageHeader を移植しても端が揃わない。",
+        "aigenbaPattern": "<main> は padding 無し / 外周 padding は PageContainer が px-4 py-8 sm:px-6 lg:px-8 で供給",
+        "category": "shell-pattern",
+        "severity": "high",
+        "blocksImplementation": false,
+        "suggestedAction": "AppLayout <main> の直接 padding を撤去し PageContainer に padding 責務を移譲。値も py-8 + sm:px-6 に合わせ PageHeaderSection の負マージン契約と整合させる"
+      },
+      {
+        "area": "resources/js/components/molecules/ (PageHeader.svelte が存在しない)",
+        "divergence": "aigenba には molecules/PageHeader.svelte (title/description/icon/testId を受ける root 画面用見出し shorthand) があり全認証ページの外枠の第2層。AI-CUE には PageHeader が無く、参照も 0 件。各ページが独自に見出しを組んでいる。",
+        "aigenbaPattern": "<PageHeader title description icon testId />(内部で PageHeaderSection を呼ぶ)",
+        "category": "missing-primitive",
+        "severity": "high",
+        "blocksImplementation": true,
+        "suggestedAction": "aigenba の molecules/PageHeader.svelte を移植する(PageHeaderSection/Breadcrumb と併せて)"
+      },
+      {
+        "area": "resources/js/components/molecules/ (PageHeaderSection.svelte が存在しない)",
+        "divergence": "aigenba の molecules/PageHeaderSection.svelte は breadcrumbs/description/icon/actions(children) を持つ full-feature 見出しバー(全幅・border-b・py-4 で sidebar ロゴ高と揃える 73px 契約)。AI-CUE には無く、breadcrumbs/actions を伴う詳細ページ見出しを表現する primitive が存在しない。",
+        "aigenbaPattern": "<PageHeaderSection title breadcrumbs description icon>{actions}</PageHeaderSection>",
+        "category": "missing-primitive",
+        "severity": "high",
+        "blocksImplementation": true,
+        "suggestedAction": "aigenba の molecules/PageHeaderSection.svelte を移植する(負マージン全幅バー契約ごと)"
+      },
+      {
+        "area": "resources/js/components/molecules/ (Breadcrumb.svelte + types BreadcrumbItem が存在しない)",
+        "divergence": "aigenba には molecules/Breadcrumb.svelte と types/components.ts の BreadcrumbItem 型があり PageHeaderSection のパンくずを描く。AI-CUE にはどちらも存在せず(find/grep とも 0 件)、PageHeaderSection 移植の前提が欠落。",
+        "aigenbaPattern": "<Breadcrumb items={BreadcrumbItem[]} />(ChevronRight 区切り)",
+        "category": "missing-primitive",
+        "severity": "high",
+        "blocksImplementation": true,
+        "suggestedAction": "molecules/Breadcrumb.svelte と types の BreadcrumbItem を併せて移植する"
+      },
+      {
+        "area": "resources/js/components/templates/AppLayout.svelte (208/225/382 の {appName} テキスト表示) / molecules に BrandLogo.svelte が無い",
+        "divergence": "aigenba は molecules/BrandLogo.svelte(インライン SVG ロゴ、size sm/md、withName 切替)を AppLayout(mobile top bar / desktop sidebar / mobile sidebar)+ GuestLayout + AuthLayout の 5 箇所で使用。AI-CUE には BrandLogo が無く、ブランド表示は AppLayout 内で {appName} を text-h3 text-primary のテキスト wordmark として直書きしているだけ(3 箇所)。ロゴ molecule が完全欠落。",
+        "aigenbaPattern": "<BrandLogo size=\"sm|md\" withName={...} />(molecules/BrandLogo.svelte のインライン SVG)",
+        "category": "missing-primitive",
+        "severity": "high",
+        "blocksImplementation": true,
+        "suggestedAction": "aigenba の molecules/BrandLogo.svelte を移植し、AppLayout/GuestLayout/AuthLayout の {appName} テキストを BrandLogo に置換する"
+      },
+      {
+        "area": "resources/js/components/molecules/ (AuthHeroSection.svelte が存在しない)",
+        "divergence": "aigenba には molecules/AuthHeroSection.svelte(Auth ページ共通の card-hero: border-card + badge + title/subtitle + form children)があり Auth 配下 10 ページで再利用。AI-CUE には無く、認証ページの hero カードを表す共通 molecule が欠落。",
+        "aigenbaPattern": "<AuthHeroSection title subtitle badge badgeIcon>{form}</AuthHeroSection>",
+        "category": "missing-feature-blocker",
+        "severity": "medium",
+        "blocksImplementation": true,
+        "suggestedAction": "aigenba の molecules/AuthHeroSection.svelte を移植して認証ページの hero を統一する(ただし GuestLayout/認証ページ側スライスと調整)"
+      },
+      {
+        "area": "resources/js/components/molecules/ (OrgCard.svelte / Tooltip.svelte が存在しない)",
+        "divergence": "aigenba molecules の OrgCard.svelte(組織カード共通枠)と Tooltip.svelte が AI-CUE には無い。OrgCard は Dashboard/Organizations で共通化される layout molecule、Tooltip は汎用 primitive。両方欠落。",
+        "aigenbaPattern": "<OrgCard href title badge>{body}</OrgCard> / <Tooltip>",
+        "category": "missing-primitive",
+        "severity": "low",
+        "blocksImplementation": true,
+        "suggestedAction": "該当ページ実装時に aigenba の OrgCard.svelte / Tooltip.svelte を移植する(組織/ダッシュボードスライスと重複確認)"
+      },
+      {
+        "area": "resources/js/components/molecules/{FormField,Tabs,Divider,DangerZone,Pagination,NotificationBell}.svelte / organisms/Modal.svelte",
+        "divergence": "aigenba に存在しない AI-CUE 独自 molecule 群: FormField/Tabs/Divider/DangerZone/Pagination/NotificationBell(aigenba では find 0 件)。また Modal は aigenba では molecules 層だが AI-CUE では organisms 層、CodeSnippet は aigenba では atoms 層だが AI-CUE では molecules 層に置かれており layer 分類が乖離。",
+        "aigenbaPattern": "これらの独自 molecule は aigenba に無い / Modal=molecules・CodeSnippet=atoms の層配置",
+        "category": "custom-element",
+        "severity": "low",
+        "blocksImplementation": false,
+        "suggestedAction": "aigenba に無い独自 molecule は用途を精査し、重複や層乖離(Modal/CodeSnippet)は aigenba の層分類に合わせて整理する"
+      },
+      {
+        "area": "resources/js/components/templates/ (SessionLayout.svelte が存在しない)",
+        "divergence": "aigenba には templates/SessionLayout.svelte(encounter session の immersive page shell、header/banners/children Snippet)があるが AI-CUE には無い。認証ページ外枠の parity には直接関係しない feature 固有 shell。",
+        "aigenbaPattern": "<SessionLayout {header} {banners}>{children}</SessionLayout>",
+        "category": "other",
+        "severity": "low",
+        "blocksImplementation": false,
+        "suggestedAction": "session/immersive 機能を AI-CUE に持ち込む場合のみ移植を検討。認証レイアウト parity のスコープ外として扱う"
+      }
+    ],
+    "slice": "primitives"
+  },
+  {
+    "slice": "pages-organizations",
+    "findings": [
+      {
+        "area": "Create.svelte, Settings.svelte, ApiKeys/Index.svelte, ApiKeys/Sessions.svelte, Onboarding/Cli.svelte, Onboarding/Mcp.svelte (全6ページ共通の外枠)",
+        "divergence": "全6ページが <AppLayout><PageContent maxWidth=...> の2層だけで組まれており、aigenba の必須外枠である PageContainer (px-4 py-8 sm:px-6 lg:px-8 のページ内 padding) が存在しない。AI-CUE には PageContainer.svelte 自体が無い (find で0件)。結果、ページ本文の padding が aigenba と構造的に一致しない。",
+        "aigenbaPattern": "templates/PageContainer.svelte を <AppLayout> 直下に必ず挟み、その中に PageHeaderSection と PageContent を置く (aigenba の全 Organizations ページで統一)。",
+        "category": "missing-primitive",
+        "severity": "high",
+        "blocksImplementation": true,
+        "suggestedAction": "aigenba の PageContainer.svelte を AI-CUE の components/templates/ に移植し、対象6ページの外枠を AppLayout > PageContainer > (PageHeader) > PageContent の3層に統一する。別TODO化候補。"
+      },
+      {
+        "area": "全6ページの見出し (Create l24-27, Settings l169-172, ApiKeys/Index l140-143, Sessions l95-98, Onboarding/Cli l28-32, Mcp l26-30)",
+        "divergence": "見出しを PageHeader molecule ではなく、各ページで inline の <h1 class=\"text-h2\"> + <p class=\"mt-1 text-caption text-text-secondary\"> をベタ書きしている。aigenba の PageHeader/PageHeaderSection が持つ icon(lucide)、下線バー(border-b border-border bg-surface)、フルブリード見出し帯、breadcrumbs スロットが全て欠落。AI-CUE には PageHeader*.svelte が存在しない (find で0件)。",
+        "aigenbaPattern": "<PageHeaderSection title description icon breadcrumbs /> を PageContainer 直下・PageContent の外に置く。aigenba Settings は icon=Settings、ApiKeys/Index は icon=KeyRound + actions スロットに発行ボタン、Sessions は icon=MonitorSmartphone。",
+        "category": "missing-primitive",
+        "severity": "high",
+        "blocksImplementation": true,
+        "suggestedAction": "aigenba の molecules/PageHeader.svelte と PageHeaderSection.svelte (+依存 Breadcrumb) を移植し、6ページの inline 見出しを PageHeader 呼び出しに置換する。別TODO化候補。"
+      },
+      {
+        "area": "components/templates/PageContent.svelte (全6ページが利用)",
+        "divergence": "AI-CUE の PageContent は maxWidth を必須 prop に取り、union→静的 Record で max-w-sm..7xl を出し分ける独自実装(l30-53)。aigenba の PageContent は prop を一切取らず mx-auto max-w-7xl 固定。幅責務の所有が根本的に異なる(ページ側で幅指定 vs primitive 内固定)。",
+        "aigenbaPattern": "templates/PageContent.svelte = <div class=\"mx-auto max-w-7xl\">{children}</div> のみ。prop 無し・幅は全ページ一律 max-w-7xl。",
+        "category": "divergent-primitive",
+        "severity": "high",
+        "blocksImplementation": false,
+        "suggestedAction": "PageContent を aigenba 同様の prop 無し max-w-7xl 固定へ収斂(または maxWidth 撤去)。各ページの maxWidth 指定を除去。"
+      },
+      {
+        "area": "全6ページの PageContent 呼び出し (Create l23, Settings l168, ApiKeys/Index l139, Sessions l94, Onboarding/Cli l27, Mcp l25)",
+        "divergence": "6ページとも maxWidth=\"2xl\" (max-w-2xl ≈42rem の狭幅) を中央寄せで指定。aigenba は全 Organizations ページが max-w-7xl (80rem) 中央寄せで、狭い narrow max-w はどのページにも無い。ページ本文の可視幅が aigenba の約半分になる観察可能な差分。",
+        "aigenbaPattern": "ページ幅は全ページ一律 max-w-7xl 中央寄せ (PageContent 固定値)。",
+        "category": "width",
+        "severity": "high",
+        "blocksImplementation": false,
+        "suggestedAction": "6ページの maxWidth=\"2xl\" を除去し max-w-7xl に統一する (PageContent を prop 無し固定化すれば自動解消)。"
+      },
+      {
+        "area": "Create.svelte, Settings.svelte, ApiKeys/Index.svelte, ApiKeys/Sessions.svelte",
+        "divergence": "aigenba では Create(breadcrumbs=[新規作成])、Settings(=[設定])、ApiKeys/Index(=[API キー])、Sessions(=[API キー, 接続セッション]) が PageHeaderSection に breadcrumbs を渡すが、AI-CUE の該当4ページには breadcrumbs が一切無い(inline 見出しのみ)。ナビ階層の可視化が欠落。",
+        "aigenbaPattern": "PageHeaderSection breadcrumbs={[...]} で現在地パンくずを表示 (2件以上のとき描画)。",
+        "category": "nav-structure",
+        "severity": "medium",
+        "blocksImplementation": false,
+        "suggestedAction": "PageHeader 移植後、各ページに aigenba と同じ breadcrumbs 配列を渡す。"
+      },
+      {
+        "area": "components/molecules/ApiKeyTabNav.svelte (ApiKeys/Index l146, Sessions l101 が利用)",
+        "divergence": "AI-CUE の ApiKeyTabNav は汎用 tabs 配列 prop (label/href/active/testId) を受け、ページ側が URL とアクティブ判定を組み立てる(Index l48-56, Sessions l28-36)。aigenba は slug + active('api-keys'|'sessions') の2 prop のみで URL を内部生成し、各タブに KeyRound/MonitorSmartphone アイコンを内蔵。ラベルも aigenba は「API キー（自動化用）」、AI-CUE は「API キー」。root nav の class も差 (aigenba: mb-6 gap-2 + data-testid、AI-CUE: それ無し)。",
+        "aigenbaPattern": "<ApiKeyTabNav slug={organization.slug} active=\"api-keys\" /> — prop 2つ、アイコン内蔵、URL/ラベル内部固定。",
+        "category": "divergent-primitive",
+        "severity": "medium",
+        "blocksImplementation": false,
+        "suggestedAction": "ApiKeyTabNav の API を aigenba の slug+active 形へ寄せ、アイコンとラベルを内蔵化する。呼び出し側の tabs 組み立てを撤去。"
+      },
+      {
+        "area": "Onboarding/Cli.svelte, Onboarding/Mcp.svelte",
+        "divergence": "AI-CUE の Onboarding は AppLayout>PageContent(2xl) の中に inline の <h1>+Card+CodeSnippet を並べる独自構成で、props も installCommand/profileCommands/apiKeyLoginCommand (Cli)・mcpEndpointUrl/mcpConfigJson/claudeCodeCommand (Mcp) というコマンド直挿し型。aigenba は専用 feature コンポーネント features/onboarding/OnboardingGuide.svelte に丸ごと委譲し、conceptHtml/markdownHtml/markdownSource/publicMarkdownUrl/aiPrompt/apiKeyIssueUrl という markdown 駆動 + AI プロンプト型 props で、PageHeader(icon=Terminal/Rocket)・goal/apiKey スニペットを持つ。AI-CUE に OnboardingGuide 相当は存在しない。外枠・見出し・コンテンツモデルが全面的に異なる。",
+        "aigenbaPattern": "<AppLayout><OnboardingGuide title description breadcrumbLabel icon goalHeading markdownLabel {conceptHtml}...>{#snippet goalBody/apiKeyBody}...</OnboardingGuide></AppLayout> — 見出し/外枠は OnboardingGuide 内部が PageHeader 込みで所有。",
+        "category": "custom-element",
+        "severity": "high",
+        "blocksImplementation": true,
+        "suggestedAction": "aigenba の features/onboarding/OnboardingGuide.svelte (と markdown/AIプロンプト系 props・型 OnboardingGuideProps) を移植し、2ページを OnboardingGuide 委譲へ作り替える。コントローラ側の提供 props 変更も伴うため別TODO化候補。"
+      },
+      {
+        "area": "Settings.svelte l230-263 (ユーザー管理カード / API キーカード)",
+        "divergence": "AI-CUE Settings は「ユーザー管理」「API キー / 接続セッション」の外部導線 Card を本文中に持ち、TextLink で /manage/users(usersUrl) や api-keys 画面へ飛ばす。コメント/文言も『メンバー管理は管理メニューのユーザー管理画面で行います』(l236,277) と二次的な『管理メニュー』の存在を前提にしている。aigenba の Settings にはこれらの link-out カードは無く、メンバー管理は左サイドバー top-level nav の独立ページ。aigenba には二次的『管理メニュー』が無い前提と衝突する AI-CUE 固有の導線。",
+        "aigenbaPattern": "組織設定ページは設定項目のみを持ち、メンバー/ユーザー管理は左サイドバー top-level の独立ページへ。設定内に管理メニュー参照の link-out カードは置かない。",
+        "category": "nav-structure",
+        "severity": "medium",
+        "blocksImplementation": false,
+        "suggestedAction": "『管理メニュー』依存の link-out カード方針を再検討し、aigenba のように管理系を top-level nav 側へ寄せるか、少なくとも Settings 本文の二次メニュー参照カードを整理する (nav-structure スライスと要調整)。"
+      }
+    ]
+  },
+  {
+    "slice": "pages-capture",
+    "findings": [
+      {
+        "area": "resources/js/components/templates/ (PageContainer 不在) — Capture/Index.svelte, Capture/Show.svelte 両方に影響",
+        "divergence": "aigenba の外枠は AppLayout > PageContainer > PageHeader > PageContent の4層 (Scenarios/Index.svelte で確認)。AI-CUE には PageContainer.svelte が存在しない (templates/ は AppLayout/AuthLayout/GuestLayout/PageContent のみ)。代わりに padding を AppLayout の <main> に直接焼き込んでいる (AppLayout.svelte:472 `px-4 py-6 lg:px-8`)。aigenba の PageContainer は `px-4 py-8 sm:px-6 lg:px-8`。両 Capture ページとも PageContainer を持たない。",
+        "aigenbaPattern": "<PageContainer> (templates/PageContainer.svelte, padding px-4 py-8 sm:px-6 lg:px-8) で本文をラップ",
+        "category": "missing-primitive",
+        "severity": "high",
+        "blocksImplementation": true,
+        "suggestedAction": "PageContainer.svelte を templates/ に新設し、AppLayout <main> から padding を除去して PageContainer に移譲する shell-level 移行を別 TODO 化。これが無いと Capture ページを aigenba 同一の外枠にできない (現状は main に padding、py も 6 で aigenba の 8 と不一致、sm:px-6 段も欠落)。"
+      },
+      {
+        "area": "resources/js/components/molecules/ (PageHeader/PageHeaderSection 不在) — Capture/Index.svelte, Capture/Show.svelte 両方に影響",
+        "divergence": "aigenba には見出し molecule PageHeader.svelte / PageHeaderSection.svelte があり title/description/icon/testId/breadcrumbs/actions を統一提供する。AI-CUE の molecules/ には page 系見出しコンポーネントが一切無い。両 Capture ページとも生の <h1 class=\"text-h2\"> を直書きしている (Index.svelte:50, Show.svelte:170)。",
+        "aigenbaPattern": "<PageHeader title description icon testId /> (molecules/PageHeader.svelte)。詳細画面は <PageHeaderSection> で breadcrumbs/actions を使う。",
+        "category": "missing-primitive",
+        "severity": "high",
+        "blocksImplementation": true,
+        "suggestedAction": "PageHeader / PageHeaderSection molecule を移植する別 TODO 化。これが無いと Capture ページの見出しを aigenba 同等 (icon 付き見出しバー + border-b サブバー) にできない。"
+      },
+      {
+        "area": "resources/js/components/templates/PageContent.svelte (divergent) — Capture/Index.svelte:49",
+        "divergence": "aigenba の PageContent は prop 無しで `mx-auto max-w-7xl` 固定 (全ページ一律幅)。AI-CUE の PageContent は maxWidth を必須 prop に取り union→Record で max-w-sm〜7xl を出し分ける独自版で、Index.svelte は maxWidth=\"7xl\" を渡している。幅の値自体は 7xl で一致するが、prop で任意化している点が aigenba 規約 (幅は primitive が一元固定) と乖離。",
+        "aigenbaPattern": "<PageContent>...</PageContent> (prop 無し・mx-auto max-w-7xl 固定)",
+        "category": "divergent-primitive",
+        "severity": "medium",
+        "blocksImplementation": false,
+        "suggestedAction": "PageContent の maxWidth prop 廃止 (max-w-7xl 固定化) を全ページ横断で計画。Capture/Index は prop 無し呼び出しに書き換え (幅は現状維持で無害)。"
+      },
+      {
+        "area": "Capture/Index.svelte:48-51",
+        "divergence": "外枠が AppLayout > PageContent のみで PageContainer を欠く。見出しは PageHeader molecule でなく生の <h1 class=\"text-h2\">撮影するマニュアルを選ぶ</h1> + <p class=\"text-caption text-text-secondary\">{project.name}</p> を直書き (icon/testId/border-b サブバー無し)。aigenba の Index 相当は PageContainer>PageHeader(title=見出し, description=サブ, icon)>PageContent 構成。",
+        "aigenbaPattern": "AppLayout>PageContainer>PageHeader(title description icon)>PageContent",
+        "category": "custom-element",
+        "severity": "medium",
+        "blocksImplementation": false,
+        "suggestedAction": "PageContainer/PageHeader 新設後、生 h1+p を PageHeader(title=\"撮影するマニュアルを選ぶ\", description=project.name, icon=Camera) に置換し PageContainer でラップ。"
+      },
+      {
+        "area": "Capture/Show.svelte:163-241",
+        "divergence": "本文を PageContent で全く包んでおらず、AppLayout <main> 直下にコンテンツを直置きしている。AppLayout main は幅制約が無い (padding のみ) ため、本文が max-w 非制約のフルブリード幅になる。2カラム grid (grid-cols-1 lg:grid-cols-2, Show.svelte:176) も max-w-7xl の中央寄せに乗っていない。aigenba は詳細/ワイド面も含め全ページ一律 max-w-7xl 中央寄せ。",
+        "aigenbaPattern": "AppLayout>PageContainer>PageHeaderSection>PageContent(mx-auto max-w-7xl) で本文 (2カラム grid 含む) を包む",
+        "category": "width",
+        "severity": "high",
+        "blocksImplementation": false,
+        "suggestedAction": "Show の本文を PageContent (max-w-7xl 中央寄せ) で包む。2カラムのワイド面でも aigenba 規約上 max-width 非制約は不可、max-w-7xl が正。PageContainer/PageHeaderSection 新設と併せて外枠4層化する。"
+      },
+      {
+        "area": "Capture/Show.svelte:164-170",
+        "divergence": "詳細画面の戻り導線を生の <TextLink href=一覧> + <ArrowLeft> (\"一覧へ戻る\") と生 <h1 class=\"text-h2\"> で構成している。aigenba の詳細画面は PageHeaderSection の breadcrumbs slot で戻り導線を出し、見出しは PageHeaderSection の title で描画する統一パターン。AI-CUE Capture/Show は独自の back-link + 生 h1。",
+        "aigenbaPattern": "<PageHeaderSection title breadcrumbs={[一覧, 現ページ]} /> (breadcrumbs で戻り導線)",
+        "category": "custom-element",
+        "severity": "medium",
+        "blocksImplementation": false,
+        "suggestedAction": "PageHeaderSection 移植後、独自 back-link+h1 を PageHeaderSection(title=manual.title, breadcrumbs=[マニュアル一覧, manual.title]) に置換。"
+      },
+      {
+        "area": "Capture 機能全体 (撮影 PWA) — aigenba に対応機能なし",
+        "divergence": "aigenba の pages/ には Capture 相当が存在しない (Auth/Billing/Courses/Encounters/Scenarios 等のみで撮影 PWA 無し)。CameraRecorder/UploadQueueBar/CutNavigator/TakeStrip 等 AI-CUE 固有の feature 群で構成され、外枠 primitive の正しい適用形を突き合わせられる参照ページが aigenba 側に無い。方向は逆 (AI-CUE にあり aigenba に無い) で、これ自体は移植対象ではなく『外枠をどう aigenba 準拠にするか』の判断材料が欠ける点が問題。",
+        "aigenbaPattern": "参照不能 (aigenba に撮影 PWA 相当ページが存在しない)",
+        "category": "missing-feature-blocker",
+        "severity": "low",
+        "blocksImplementation": true,
+        "suggestedAction": "外枠 (PageContainer/PageHeader/PageContent max-w-7xl 中央寄せ) は他 aigenba ページの規約をそのまま適用可能と判断してよいが、機能そのものの参照が無いため『Capture の外枠 aigenba 化』TODO では primitive 新設 (上記 finding) を前提条件として明記し、本文 feature 群 (2カラム grid・録画パネル) は max-w-7xl 内での再配置に留める旨を決め打ちで指示すること。"
+      }
+    ]
+  }
+]
