@@ -10,6 +10,16 @@ procs:
   #   shell: "stripe listen --forward-to localhost:8001/stripe/webhook"
   queue:
     shell: "php artisan queue:listen --tries=1 --timeout=0"
+  # 専用 connection (analysis/render/media) は既定 database connection の default
+  # キューを見る上の worker では拾われないため、docs/architecture.md の運用契約どおり
+  # connection ごとに worker を分けて常駐させる (retry_after が connection 固有のため
+  # 1 本にまとめない)。
+  queue-analysis:
+    shell: "php artisan queue:listen database-analysis --tries=1 --timeout=0"
+  queue-render:
+    shell: "php artisan queue:listen database-render --tries=1 --timeout=0"
+  queue-media:
+    shell: "php artisan queue:listen database-media --tries=1 --timeout=0"
   logs:
     shell: "php artisan pail --timeout=0"
   vite:
