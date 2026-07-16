@@ -8,13 +8,26 @@ use App\Services\ApiKey\ApiKeyPermissionService;
 use Inertia\Testing\AssertableInertia as Assert;
 
 /*
+ * sidebar visibility contract:
  * HandleInertiaRequests の共有 prop currentOrganization に slug + ナビ表示用の
  * 最小権限フラグ (canManageMembers / canManageApiKeys) が role 別に載ること、
  * および cross-org 分離 (別組織で付与された権限が現在組織へ漏れない) を固定する。
+ * 左サイドバー (templates/AppLayout) の org 導線可視条件はこの shared prop に依存するため、
+ * 本テストが UI 可視条件の回帰を検知する契約テストを兼ねる (将来の shape 破壊を止める)。
  *
  * 権限は OrganizationPolicy (organizationRole = laratrust_team_id 明示) を唯一の真実源とし、
  * defense-in-depth の isMemberOf フォールバックで dangling current を秘匿する。
  */
+
+test('未認証: currentOrganization / auth.user とも null を共有する (sidebar visibility contract)', function (): void {
+    // ゲスト到達 Inertia ページ (Fortify loginView = Auth/Login) で shared prop の未認証 shape を固定。
+    // サイドバーはこの null を見て nav / メニュー / ベルを一切描画しない。
+    $this->get('/login')
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('currentOrganization', null)
+            ->where('auth.user', null));
+});
 
 test('owner: slug + 両権限フラグ true を共有する', function (): void {
     [$organization, $owner] = createOrganizationWithOwner('オーナー組織');
