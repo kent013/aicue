@@ -1,0 +1,52 @@
+- generic [ref=f12e3]:
+  - complementary [ref=f12e4]:
+    - generic [ref=f12e5]:
+      - link "AI-CUE" [ref=f12e6] [cursor=pointer]:
+        - /url: /dashboard
+      - link "通知" [ref=f12e7] [cursor=pointer]:
+        - /url: http://127.0.0.1:8010/notifications
+    - button "サイドバーを折りたたむ" [ref=f12e9]
+    - navigation [ref=f12e11]:
+      - link "ダッシュボード" [ref=f12e12] [cursor=pointer]:
+        - /url: /dashboard
+      - link "プロジェクト" [ref=f12e15] [cursor=pointer]:
+        - /url: /projects
+      - link "メンバー" [ref=f12e18] [cursor=pointer]:
+        - /url: /manage/users
+      - link "API キー" [ref=f12e21] [cursor=pointer]:
+        - /url: /organizations/free-09dmfu/api-keys
+      - link "請求" [ref=f12e24] [cursor=pointer]:
+        - /url: /billing
+      - link "設定" [ref=f12e27] [cursor=pointer]:
+        - /url: /settings
+    - button [ref=f12e31]:
+      - generic [ref=f12e34]:
+        - paragraph [ref=f12e35]: Freeプラン組織
+        - paragraph [ref=f12e36]: Free Owner
+  - main [ref=f12e38]:
+    - generic [ref=f12e40]:
+      - heading "Free Owner さん、ようこそ" [level=1] [ref=f12e41]
+      - paragraph [ref=f12e42]: 今日のアクティビティを確認しましょう。
+      - generic [ref=f12e43]:
+        - generic [ref=f12e49]:
+          - paragraph [ref=f12e50]: チケット残高
+          - paragraph [ref=f12e51]: "100"
+        - generic [ref=f12e56]:
+          - paragraph [ref=f12e57]: 容量使用率
+          - paragraph [ref=f12e58]: 0%
+          - paragraph [ref=f12e59]: 0 B / 1.0 GB
+        - generic [ref=f12e60]:
+          - generic [ref=f12e65]:
+            - paragraph [ref=f12e66]: 未読通知
+            - paragraph [ref=f12e67]: "0"
+          - paragraph [ref=f12e68]:
+            - link "通知を確認" [ref=f12e69] [cursor=pointer]:
+              - /url: http://127.0.0.1:8010/notifications
+        - generic [ref=f12e74]:
+          - paragraph [ref=f12e75]: 進行中ジョブ
+          - paragraph [ref=f12e76]: "0"
+      - generic [ref=f12e78]:
+        - heading "プロジェクトを作成しましょう" [level=3] [ref=f12e80]
+        - paragraph [ref=f12e81]: プロジェクトを作成すると、マニュアルの管理を始められます。
+        - link "プロジェクトを作成" [ref=f12e83] [cursor=pointer]:
+          - /url: http://127.0.0.1:8010/projects/create

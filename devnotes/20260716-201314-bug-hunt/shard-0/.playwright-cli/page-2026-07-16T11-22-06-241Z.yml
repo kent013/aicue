@@ -1,0 +1,74 @@
+- generic [ref=f21e3]:
+  - complementary [ref=f21e4]:
+    - generic [ref=f21e5]:
+      - link "AI-CUE" [ref=f21e6] [cursor=pointer]:
+        - /url: /dashboard
+      - link "通知" [ref=f21e7] [cursor=pointer]:
+        - /url: http://127.0.0.1:8010/notifications
+    - button "サイドバーを折りたたむ" [ref=f21e9]
+    - navigation [ref=f21e11]:
+      - link "ダッシュボード" [ref=f21e12] [cursor=pointer]:
+        - /url: /dashboard
+      - link "プロジェクト" [ref=f21e15] [cursor=pointer]:
+        - /url: /projects
+      - link "メンバー" [ref=f21e18] [cursor=pointer]:
+        - /url: /manage/users
+      - link "API キー" [ref=f21e21] [cursor=pointer]:
+        - /url: /organizations/free-09dmfu/api-keys
+      - link "請求" [ref=f21e24] [cursor=pointer]:
+        - /url: /billing
+      - link "設定" [ref=f21e27] [cursor=pointer]:
+        - /url: /settings
+    - button [ref=f21e31]:
+      - generic [ref=f21e34]:
+        - paragraph [ref=f21e35]: Freeプラン組織
+        - paragraph [ref=f21e36]: Free Owner
+  - main [ref=f21e38]:
+    - generic [ref=f21e40]:
+      - heading "設定" [level=1] [ref=f21e41]
+      - navigation "設定メニュー" [ref=f21e42]:
+        - link "プロフィール" [ref=f21e43] [cursor=pointer]:
+          - /url: http://127.0.0.1:8010/settings
+        - link "セキュリティ" [ref=f21e44] [cursor=pointer]:
+          - /url: http://127.0.0.1:8010/settings/security
+      - generic [ref=f21e45]:
+        - generic [ref=f21e46]:
+          - heading "プロフィール" [level=2] [ref=f21e47]
+          - paragraph [ref=f21e48]: 名前とメールアドレスを更新します。
+          - generic [ref=f21e49]:
+            - generic [ref=f21e50]:
+              - generic [ref=f21e51]: 名前
+              - textbox "名前" [ref=f21e52]: Free Owner
+            - generic [ref=f21e53]:
+              - generic [ref=f21e54]: メールアドレス
+              - textbox "メールアドレス" [ref=f21e55]: owner-free@example.com
+            - button "保存" [ref=f21e57]
+        - generic [ref=f21e58]:
+          - heading "パスワード変更" [level=2] [ref=f21e59]
+          - paragraph [ref=f21e60]: 現在のパスワードを確認のうえ、新しいパスワードに変更します。
+          - generic [ref=f21e61]:
+            - generic [ref=f21e62]:
+              - generic [ref=f21e63]: 現在のパスワード
+              - generic [ref=f21e64]:
+                - textbox "現在のパスワード" [ref=f21e65]
+                - button "パスワードを表示" [ref=f21e66]
+            - generic [ref=f21e68]:
+              - generic [ref=f21e69]: 新しいパスワード
+              - generic [ref=f21e70]:
+                - textbox "新しいパスワード" [ref=f21e71]
+                - button "パスワードを表示" [ref=f21e72]
+            - button "パスワードを変更" [ref=f21e75]
+        - region [ref=f21e76]:
+          - heading "アカウント削除" [level=3] [ref=f21e77]
+          - paragraph [ref=f21e78]: アカウントを削除すると、すべてのデータが完全に失われます。この操作は取り消せません。
+          - generic [ref=f21e79]:
+            - status [ref=f21e80]:
+              - generic [ref=f21e82]:
+                - heading "オーナー移譲が必要です" [level=4] [ref=f21e83]
+                - generic [ref=f21e84]:
+                  - text: 以下の組織であなたが唯一のオーナーです。アカウントを削除する前に、各組織で オーナーを別のメンバーへ移譲してください（削除時にサーバーが再判定します）。
+                  - list [ref=f21e85]:
+                    - listitem [ref=f21e86]:
+                      - link "Freeプラン組織 の設定へ" [ref=f21e87] [cursor=pointer]:
+                        - /url: http://127.0.0.1:8010/organizations/free-09dmfu/settings
+            - button "アカウントを削除" [ref=f21e88]

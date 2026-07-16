@@ -1,0 +1,54 @@
+- generic [ref=f8e3]:
+  - generic [ref=f8e4]:
+    - generic [ref=f8e5]:
+      - button "メニューを開く" [ref=f8e6]
+      - link "AI-CUE" [ref=f8e8] [cursor=pointer]:
+        - /url: /dashboard
+    - link "通知" [ref=f8e9] [cursor=pointer]:
+      - /url: http://127.0.0.1:8010/notifications
+  - complementary [ref=f8e11]:
+    - generic [ref=f8e12]:
+      - link "AI-CUE" [ref=f8e13] [cursor=pointer]:
+        - /url: /dashboard
+      - button "メニューを閉じる" [ref=f8e14]
+    - navigation [ref=f8e16]:
+      - link "ダッシュボード" [ref=f8e17] [cursor=pointer]:
+        - /url: /dashboard
+      - link "プロジェクト" [ref=f8e20] [cursor=pointer]:
+        - /url: /projects
+      - link "メンバー" [ref=f8e23] [cursor=pointer]:
+        - /url: /manage/users
+      - link "API キー" [ref=f8e26] [cursor=pointer]:
+        - /url: /organizations/free-09dmfu/api-keys
+      - link "請求" [ref=f8e29] [cursor=pointer]:
+        - /url: /billing
+      - link "設定" [ref=f8e32] [cursor=pointer]:
+        - /url: /settings
+    - generic [ref=f8e35]:
+      - generic [ref=f8e39]:
+        - paragraph [ref=f8e40]: Freeプラン組織
+        - paragraph [ref=f8e41]: Free Owner
+      - paragraph [ref=f8e42]: 組織
+      - generic [ref=f8e43]: Freeプラン組織
+      - generic [ref=f8e47]:
+        - generic [ref=f8e48]:
+          - link "個人設定" [ref=f8e49] [cursor=pointer]:
+            - /url: /settings
+          - link "組織設定" [ref=f8e52] [cursor=pointer]:
+            - /url: /organizations/free-09dmfu/settings
+          - link "CLI セットアップ" [ref=f8e55] [cursor=pointer]:
+            - /url: /organizations/free-09dmfu/onboarding/cli
+          - link "MCP セットアップ" [ref=f8e58] [cursor=pointer]:
+            - /url: /organizations/free-09dmfu/onboarding/mcp
+        - button "詳細" [ref=f8e63]
+        - button "ログアウト" [ref=f8e68]
+  - main [ref=f8e71]:
+    - generic [ref=f8e73]:
+      - generic [ref=f8e75]:
+        - heading "プロジェクト" [level=1] [ref=f8e76]
+        - paragraph [ref=f8e77]: この組織のプロジェクトの一覧です。
+      - generic [ref=f8e79]:
+        - heading "プロジェクトはまだありません" [level=3] [ref=f8e81]
+        - paragraph [ref=f8e82]: 最初のプロジェクトを作成して、リソースの管理を始めましょう。
+        - link "プロジェクトを作成" [ref=f8e84] [cursor=pointer]:
+          - /url: http://127.0.0.1:8010/projects/create

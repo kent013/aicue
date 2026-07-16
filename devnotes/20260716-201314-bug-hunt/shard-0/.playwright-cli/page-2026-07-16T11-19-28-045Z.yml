@@ -1,0 +1,71 @@
+- generic [ref=f7e3]:
+  - generic [ref=f7e4]:
+    - generic [ref=f7e5]:
+      - button "メニューを開く" [ref=f7e6]
+      - link "AI-CUE" [ref=f7e8] [cursor=pointer]:
+        - /url: /dashboard
+    - link "通知" [ref=f7e9] [cursor=pointer]:
+      - /url: http://127.0.0.1:8010/notifications
+  - complementary [ref=f7e11]:
+    - generic [ref=f7e12]:
+      - link "AI-CUE" [ref=f7e13] [cursor=pointer]:
+        - /url: /dashboard
+      - button "メニューを閉じる" [ref=f7e14]
+    - navigation [ref=f7e16]:
+      - link "ダッシュボード" [ref=f7e17] [cursor=pointer]:
+        - /url: /dashboard
+      - link "プロジェクト" [ref=f7e20] [cursor=pointer]:
+        - /url: /projects
+      - link "メンバー" [ref=f7e23] [cursor=pointer]:
+        - /url: /manage/users
+      - link "API キー" [ref=f7e26] [cursor=pointer]:
+        - /url: /organizations/free-09dmfu/api-keys
+      - link "請求" [ref=f7e29] [cursor=pointer]:
+        - /url: /billing
+      - link "設定" [ref=f7e32] [cursor=pointer]:
+        - /url: /settings
+    - generic [ref=f7e35]:
+      - generic [ref=f7e39]:
+        - paragraph [ref=f7e40]: Freeプラン組織
+        - paragraph [ref=f7e41]: Free Owner
+      - paragraph [ref=f7e42]: 組織
+      - generic [ref=f7e43]: Freeプラン組織
+      - generic [ref=f7e47]:
+        - generic [ref=f7e48]:
+          - link "個人設定" [ref=f7e49] [cursor=pointer]:
+            - /url: /settings
+          - link "組織設定" [ref=f7e52] [cursor=pointer]:
+            - /url: /organizations/free-09dmfu/settings
+          - link "CLI セットアップ" [ref=f7e55] [cursor=pointer]:
+            - /url: /organizations/free-09dmfu/onboarding/cli
+          - link "MCP セットアップ" [ref=f7e58] [cursor=pointer]:
+            - /url: /organizations/free-09dmfu/onboarding/mcp
+        - button "詳細" [ref=f7e63]
+        - button "ログアウト" [ref=f7e68]
+  - main [ref=f7e71]:
+    - generic [ref=f7e73]:
+      - heading "Free Owner さん、ようこそ" [level=1] [ref=f7e74]
+      - paragraph [ref=f7e75]: 今日のアクティビティを確認しましょう。
+      - generic [ref=f7e76]:
+        - generic [ref=f7e82]:
+          - paragraph [ref=f7e83]: チケット残高
+          - paragraph [ref=f7e84]: "100"
+        - generic [ref=f7e89]:
+          - paragraph [ref=f7e90]: 容量使用率
+          - paragraph [ref=f7e91]: 0%
+          - paragraph [ref=f7e92]: 0 B / 1.0 GB
+        - generic [ref=f7e93]:
+          - generic [ref=f7e98]:
+            - paragraph [ref=f7e99]: 未読通知
+            - paragraph [ref=f7e100]: "0"
+          - paragraph [ref=f7e101]:
+            - link "通知を確認" [ref=f7e102] [cursor=pointer]:
+              - /url: http://127.0.0.1:8010/notifications
+        - generic [ref=f7e107]:
+          - paragraph [ref=f7e108]: 進行中ジョブ
+          - paragraph [ref=f7e109]: "0"
+      - generic [ref=f7e111]:
+        - heading "プロジェクトを作成しましょう" [level=3] [ref=f7e113]
+        - paragraph [ref=f7e114]: プロジェクトを作成すると、マニュアルの管理を始められます。
+        - link "プロジェクトを作成" [ref=f7e116] [cursor=pointer]:
+          - /url: http://127.0.0.1:8010/projects/create

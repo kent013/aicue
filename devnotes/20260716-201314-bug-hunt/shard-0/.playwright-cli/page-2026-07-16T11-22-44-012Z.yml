@@ -1,0 +1,117 @@
+- generic [ref=f27e3]:
+  - complementary [ref=f27e4]:
+    - generic [ref=f27e5]:
+      - link "AI-CUE" [ref=f27e6] [cursor=pointer]:
+        - /url: /dashboard
+      - link "通知" [ref=f27e7] [cursor=pointer]:
+        - /url: http://127.0.0.1:8010/notifications
+    - button "サイドバーを折りたたむ" [ref=f27e9]
+    - navigation [ref=f27e11]:
+      - link "ダッシュボード" [ref=f27e12] [cursor=pointer]:
+        - /url: /dashboard
+      - link "プロジェクト" [ref=f27e15] [cursor=pointer]:
+        - /url: /projects
+      - link "メンバー" [ref=f27e18] [cursor=pointer]:
+        - /url: /manage/users
+      - link "API キー" [ref=f27e21] [cursor=pointer]:
+        - /url: /organizations/free-09dmfu/api-keys
+      - link "請求" [ref=f27e24] [cursor=pointer]:
+        - /url: /billing
+      - link "設定" [ref=f27e27] [cursor=pointer]:
+        - /url: /settings
+    - button [ref=f27e31]:
+      - generic [ref=f27e34]:
+        - paragraph [ref=f27e35]: Freeプラン組織
+        - paragraph [ref=f27e36]: Free Owner
+  - main [ref=f27e38]:
+    - generic [ref=f27e40]:
+      - heading "ユーザー管理" [level=1] [ref=f27e41]
+      - paragraph [ref=f27e42]: 組織のメンバーと招待を管理します。ロールは「管理者・編集者・撮影者」から選択します。
+      - generic [ref=f27e43]:
+        - complementary [ref=f27e44]:
+          - generic [ref=f27e45]:
+            - heading "管理メニュー" [level=2] [ref=f27e46]
+            - navigation "管理メニュー" [ref=f27e47]:
+              - list [ref=f27e48]:
+                - listitem [ref=f27e49]:
+                  - generic [ref=f27e51]: ユーザー管理
+        - generic [ref=f27e52]:
+          - generic [ref=f27e53]:
+            - heading "メンバー一覧" [level=2] [ref=f27e54]
+            - paragraph [ref=f27e55]: プロジェクトがまだありません。編集者・撮影者を割り当てるには、先にプロジェクトを作成してください。
+            - link "プロジェクトを作成" [ref=f27e56] [cursor=pointer]:
+              - /url: http://127.0.0.1:8010/projects/create
+            - list [ref=f27e57]:
+              - listitem [ref=f27e58]:
+                - generic [ref=f27e59]:
+                  - paragraph [ref=f27e61]: Free Owner
+                  - paragraph [ref=f27e62]: owner-free@example.com
+                - generic [ref=f27e63]: 管理者（オーナー）
+              - listitem [ref=f27e65]:
+                - generic [ref=f27e66]:
+                  - paragraph [ref=f27e68]: Free Admin
+                  - paragraph [ref=f27e69]: admin-free@example.com
+                - generic [ref=f27e70]:
+                  - combobox "Free Admin のロール" [ref=f27e71]:
+                    - option "管理者" [selected]
+                    - option "編集者"
+                    - option "撮影者"
+                  - button "削除" [ref=f27e72]
+              - listitem [ref=f27e73]:
+                - generic [ref=f27e74]:
+                  - generic [ref=f27e75]:
+                    - paragraph [ref=f27e76]: Free Member
+                    - generic [ref=f27e77]: 未割当
+                  - paragraph [ref=f27e78]: member-free@example.com
+                - generic [ref=f27e79]:
+                  - combobox "Free Member のロール" [ref=f27e80]:
+                    - option "未割当（選択してください）" [selected]
+                    - option "管理者"
+                    - option "編集者"
+                    - option "撮影者"
+                  - button "削除" [ref=f27e81]
+              - listitem [ref=f27e82]:
+                - generic [ref=f27e83]:
+                  - generic [ref=f27e84]:
+                    - paragraph [ref=f27e85]: Multi Org User
+                    - generic [ref=f27e86]: 未割当
+                  - paragraph [ref=f27e87]: multi-org@example.com
+                - generic [ref=f27e88]:
+                  - combobox "Multi Org User のロール" [ref=f27e89]:
+                    - option "未割当（選択してください）" [selected]
+                    - option "管理者"
+                    - option "編集者"
+                    - option "撮影者"
+                  - button "削除" [ref=f27e90]
+              - listitem [ref=f27e91]:
+                - generic [ref=f27e92]:
+                  - generic [ref=f27e93]:
+                    - paragraph [ref=f27e94]: Unverified User
+                    - generic [ref=f27e95]: 未割当
+                  - paragraph [ref=f27e96]: unverified@example.com
+                - generic [ref=f27e97]:
+                  - combobox "Unverified User のロール" [ref=f27e98]:
+                    - option "未割当（選択してください）" [selected]
+                    - option "管理者"
+                    - option "編集者"
+                    - option "撮影者"
+                  - button "削除" [ref=f27e99]
+          - generic [ref=f27e100]:
+            - heading "ユーザーを追加" [level=2] [ref=f27e101]
+            - paragraph [ref=f27e102]: 招待メールを送信します。招待の有効期限は 7 日間です。
+            - generic [ref=f27e103]:
+              - generic [ref=f27e104]:
+                - generic [ref=f27e105]: メールアドレス
+                - textbox "メールアドレス" [ref=f27e106]
+              - generic [ref=f27e107]:
+                - generic [ref=f27e108]: ロール
+                - combobox "ロール" [ref=f27e109]:
+                  - option "管理者"
+                  - option "編集者"
+                  - option "撮影者" [selected]
+              - button "招待を送信" [ref=f27e111]
+          - generic [ref=f27e112]:
+            - heading "招待中" [level=2] [ref=f27e113]
+            - generic [ref=f27e114]:
+              - heading "有効な招待はありません" [level=3] [ref=f27e115]
+              - paragraph [ref=f27e116]: 送信した招待は受諾されるか期限が切れるまでここに表示されます。

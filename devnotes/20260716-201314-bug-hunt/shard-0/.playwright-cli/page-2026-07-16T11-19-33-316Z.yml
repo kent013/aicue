@@ -1,0 +1,74 @@
+- generic [ref=f9e3]:
+  - generic [ref=f9e4]:
+    - generic [ref=f9e5]:
+      - button "メニューを開く" [ref=f9e6]
+      - link "AI-CUE" [ref=f9e8] [cursor=pointer]:
+        - /url: /dashboard
+    - link "通知" [ref=f9e9] [cursor=pointer]:
+      - /url: http://127.0.0.1:8010/notifications
+  - complementary [ref=f9e11]:
+    - generic [ref=f9e12]:
+      - link "AI-CUE" [ref=f9e13] [cursor=pointer]:
+        - /url: /dashboard
+      - button "メニューを閉じる" [ref=f9e14]
+    - navigation [ref=f9e16]:
+      - link "ダッシュボード" [ref=f9e17] [cursor=pointer]:
+        - /url: /dashboard
+      - link "プロジェクト" [ref=f9e20] [cursor=pointer]:
+        - /url: /projects
+      - link "メンバー" [ref=f9e23] [cursor=pointer]:
+        - /url: /manage/users
+      - link "API キー" [ref=f9e26] [cursor=pointer]:
+        - /url: /organizations/free-09dmfu/api-keys
+      - link "請求" [ref=f9e29] [cursor=pointer]:
+        - /url: /billing
+      - link "設定" [ref=f9e32] [cursor=pointer]:
+        - /url: /settings
+    - generic [ref=f9e35]:
+      - generic [ref=f9e39]:
+        - paragraph [ref=f9e40]: Freeプラン組織
+        - paragraph [ref=f9e41]: Free Owner
+      - paragraph [ref=f9e42]: 組織
+      - generic [ref=f9e43]: Freeプラン組織
+      - generic [ref=f9e47]:
+        - generic [ref=f9e48]:
+          - link "個人設定" [ref=f9e49] [cursor=pointer]:
+            - /url: /settings
+          - link "組織設定" [ref=f9e52] [cursor=pointer]:
+            - /url: /organizations/free-09dmfu/settings
+          - link "CLI セットアップ" [ref=f9e55] [cursor=pointer]:
+            - /url: /organizations/free-09dmfu/onboarding/cli
+          - link "MCP セットアップ" [ref=f9e58] [cursor=pointer]:
+            - /url: /organizations/free-09dmfu/onboarding/mcp
+        - button "詳細" [ref=f9e63]
+        - button "ログアウト" [ref=f9e68]
+  - main [ref=f9e71]:
+    - generic [ref=f9e73]:
+      - heading "プランとお支払い" [level=1] [ref=f9e74]
+      - paragraph [ref=f9e75]: この組織のプランとチケット残高を管理します。
+      - generic [ref=f9e76]:
+        - generic [ref=f9e77]:
+          - generic [ref=f9e78]:
+            - generic [ref=f9e79]:
+              - heading "現在のプラン" [level=2] [ref=f9e80]
+              - paragraph [ref=f9e81]: 未契約 (Free 相当)
+            - generic [ref=f9e82]:
+              - heading "チケット残高" [level=2] [ref=f9e83]
+              - paragraph [ref=f9e84]: 100 枚
+              - paragraph [ref=f9e85]:
+                - link "チケットを購入" [ref=f9e86] [cursor=pointer]:
+                  - /url: http://127.0.0.1:8010/purchase-tickets
+          - button "お支払い方法を管理 (Stripe)" [ref=f9e88]
+        - generic [ref=f9e89]:
+          - heading "プラン一覧" [level=2] [ref=f9e90]
+          - list [ref=f9e91]:
+            - listitem [ref=f9e92]:
+              - generic [ref=f9e95]:
+                - heading "Free" [level=3] [ref=f9e97]
+                - paragraph [ref=f9e98]: 無料 ・ 月 10 枚のチケット付与
+            - listitem [ref=f9e99]:
+              - generic [ref=f9e101]:
+                - generic [ref=f9e102]:
+                  - heading "Standard" [level=3] [ref=f9e104]
+                  - paragraph [ref=f9e105]: ¥4,980 / 月 ・ 月 100 枚のチケット付与
+                - button "このプランにする" [ref=f9e106]

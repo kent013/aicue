@@ -1,0 +1,55 @@
+- generic [ref=f26e3]:
+  - complementary [ref=f26e4]:
+    - generic [ref=f26e5]:
+      - link "AI-CUE" [ref=f26e6] [cursor=pointer]:
+        - /url: /dashboard
+      - link "通知" [ref=f26e7] [cursor=pointer]:
+        - /url: http://127.0.0.1:8010/notifications
+    - button "サイドバーを折りたたむ" [ref=f26e9]
+    - navigation [ref=f26e11]:
+      - link "ダッシュボード" [ref=f26e12] [cursor=pointer]:
+        - /url: /dashboard
+      - link "プロジェクト" [ref=f26e15] [cursor=pointer]:
+        - /url: /projects
+      - link "メンバー" [ref=f26e18] [cursor=pointer]:
+        - /url: /manage/users
+      - link "API キー" [ref=f26e21] [cursor=pointer]:
+        - /url: /organizations/free-09dmfu/api-keys
+      - link "請求" [ref=f26e24] [cursor=pointer]:
+        - /url: /billing
+      - link "設定" [ref=f26e27] [cursor=pointer]:
+        - /url: /settings
+    - button [ref=f26e31]:
+      - generic [ref=f26e34]:
+        - paragraph [ref=f26e35]: Freeプラン組織
+        - paragraph [ref=f26e36]: Free Owner
+  - main [ref=f26e38]:
+    - generic [ref=f26e40]:
+      - heading "プランとお支払い" [level=1] [ref=f26e41]
+      - paragraph [ref=f26e42]: この組織のプランとチケット残高を管理します。
+      - generic [ref=f26e43]:
+        - generic [ref=f26e44]:
+          - generic [ref=f26e45]:
+            - generic [ref=f26e46]:
+              - heading "現在のプラン" [level=2] [ref=f26e47]
+              - paragraph [ref=f26e48]: 未契約 (Free 相当)
+            - generic [ref=f26e49]:
+              - heading "チケット残高" [level=2] [ref=f26e50]
+              - paragraph [ref=f26e51]: 100 枚
+              - paragraph [ref=f26e52]:
+                - link "チケットを購入" [ref=f26e53] [cursor=pointer]:
+                  - /url: http://127.0.0.1:8010/purchase-tickets
+          - button "お支払い方法を管理 (Stripe)" [ref=f26e55]
+        - generic [ref=f26e56]:
+          - heading "プラン一覧" [level=2] [ref=f26e57]
+          - list [ref=f26e58]:
+            - listitem [ref=f26e59]:
+              - generic [ref=f26e62]:
+                - heading "Free" [level=3] [ref=f26e64]
+                - paragraph [ref=f26e65]: 無料 ・ 月 10 枚のチケット付与
+            - listitem [ref=f26e66]:
+              - generic [ref=f26e68]:
+                - generic [ref=f26e69]:
+                  - heading "Standard" [level=3] [ref=f26e71]
+                  - paragraph [ref=f26e72]: ¥4,980 / 月 ・ 月 100 枚のチケット付与
+                - button "このプランにする" [ref=f26e73]

@@ -1,0 +1,69 @@
+- generic [ref=e35]:
+  - complementary [ref=e36]:
+    - generic [ref=e37]:
+      - link "AI-CUE" [ref=e38] [cursor=pointer]:
+        - /url: /dashboard
+      - link "通知" [ref=e39] [cursor=pointer]:
+        - /url: http://127.0.0.1:8010/notifications
+    - button "サイドバーを折りたたむ" [ref=e41]
+    - navigation [ref=e43]:
+      - link "ダッシュボード" [ref=e44] [cursor=pointer]:
+        - /url: /dashboard
+      - link "プロジェクト" [ref=e47] [cursor=pointer]:
+        - /url: /projects
+      - link "メンバー" [ref=e50] [cursor=pointer]:
+        - /url: /manage/users
+      - link "API キー" [ref=e53] [cursor=pointer]:
+        - /url: /organizations/free-09dmfu/api-keys
+      - link "請求" [ref=e56] [cursor=pointer]:
+        - /url: /billing
+      - link "設定" [ref=e59] [cursor=pointer]:
+        - /url: /settings
+    - generic [ref=e62]:
+      - button "メニューを閉じる" [ref=e116]
+      - button [expanded] [active] [ref=e63]:
+        - generic [ref=e66]:
+          - paragraph [ref=e67]: Freeプラン組織
+          - paragraph [ref=e68]: Free Owner
+      - menu [ref=e117]:
+        - generic [ref=e118]:
+          - paragraph [ref=e119]: 組織
+          - generic [ref=e120]: Freeプラン組織
+        - generic [ref=e125]:
+          - link "個人設定" [ref=e126] [cursor=pointer]:
+            - /url: /settings
+          - link "組織設定" [ref=e129] [cursor=pointer]:
+            - /url: /organizations/free-09dmfu/settings
+          - link "CLI セットアップ" [ref=e132] [cursor=pointer]:
+            - /url: /organizations/free-09dmfu/onboarding/cli
+          - link "MCP セットアップ" [ref=e135] [cursor=pointer]:
+            - /url: /organizations/free-09dmfu/onboarding/mcp
+        - button "詳細" [ref=e140]
+        - button "ログアウト" [ref=e145]
+  - main [ref=e70]:
+    - generic [ref=e72]:
+      - heading "Free Owner さん、ようこそ" [level=1] [ref=e73]
+      - paragraph [ref=e74]: 今日のアクティビティを確認しましょう。
+      - generic [ref=e75]:
+        - generic [ref=e81]:
+          - paragraph [ref=e82]: チケット残高
+          - paragraph [ref=e83]: "100"
+        - generic [ref=e88]:
+          - paragraph [ref=e89]: 容量使用率
+          - paragraph [ref=e90]: 0%
+          - paragraph [ref=e91]: 0 B / 1.0 GB
+        - generic [ref=e92]:
+          - generic [ref=e97]:
+            - paragraph [ref=e98]: 未読通知
+            - paragraph [ref=e99]: "0"
+          - paragraph [ref=e100]:
+            - link "通知を確認" [ref=e101] [cursor=pointer]:
+              - /url: http://127.0.0.1:8010/notifications
+        - generic [ref=e106]:
+          - paragraph [ref=e107]: 進行中ジョブ
+          - paragraph [ref=e108]: "0"
+      - generic [ref=e110]:
+        - heading "プロジェクトを作成しましょう" [level=3] [ref=e112]
+        - paragraph [ref=e113]: プロジェクトを作成すると、マニュアルの管理を始められます。
+        - link "プロジェクトを作成" [ref=e115] [cursor=pointer]:
+          - /url: http://127.0.0.1:8010/projects/create
