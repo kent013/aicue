@@ -465,11 +465,12 @@
     >
         <div class="transition-[margin-left] duration-300 lg:[margin-left:var(--app-sidebar-w)]">
             {#if showEmailBanner}
-                <div class="px-4 pt-4 lg:px-8">
+                <div class="px-4 pt-4 sm:px-6 lg:px-8">
                     <EmailVerificationBanner />
                 </div>
             {/if}
-            <div class="px-4 py-6 lg:px-8" data-testid="app-main">
+            <!-- padding は各ページの PageContainer が担う (aigenba parity, T071)。ここでは付けない。 -->
+            <div data-testid="app-main">
                 {@render children()}
             </div>
         </div>

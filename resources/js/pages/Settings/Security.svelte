@@ -9,8 +9,11 @@
     import FormField from "@/components/molecules/FormField.svelte";
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
     import RecentAuthModal from "@/components/organisms/RecentAuthModal.svelte";
+    import PageHeader from "@/components/molecules/PageHeader.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
+    import { Settings } from "@lucide/svelte";
     import { useForm } from "@inertiajs/svelte";
     import { withRecentAuth, type RecentAuthStatus } from "@/lib/recent-auth";
     import type { SharedProps } from "@/lib/shared-props";
@@ -270,10 +273,10 @@
 </script>
 
 <AppLayout {appName}>
-    <PageContent maxWidth="2xl">
-        <h1 class="text-h2">設定</h1>
-
-        <nav aria-label="設定メニュー" class="mt-4 flex gap-4 border-b border-border pb-2">
+    <PageContainer>
+        <PageHeader title="設定" icon={Settings} testId="settings-heading" />
+        <PageContent>
+            <nav aria-label="設定メニュー" class="mt-4 flex gap-4 border-b border-border pb-2">
             <TextLink href="/settings">プロフィール</TextLink>
             <TextLink href="/settings/security">セキュリティ</TextLink>
         </nav>
@@ -455,5 +458,6 @@
             canSatisfy={recentAuthStatus?.canSatisfy ?? true}
             onConfirmed={resumePendingAction}
         />
-    </PageContent>
+        </PageContent>
+    </PageContainer>
 </AppLayout>

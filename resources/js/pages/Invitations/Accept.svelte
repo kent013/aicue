@@ -1,9 +1,12 @@
 <script lang="ts">
     import { page, useForm } from "@inertiajs/svelte";
+    import { UserPlus } from "@lucide/svelte";
     import Button from "@/components/atoms/Button.svelte";
     import Card from "@/components/atoms/Card.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
+    import PageHeader from "@/components/molecules/PageHeader.svelte";
     import type { SharedProps } from "@/lib/shared-props";
 
     interface Props {
@@ -25,19 +28,21 @@
 </script>
 
 <AppLayout {appName}>
-    <PageContent maxWidth="md">
-        <div class="mt-8">
+    <PageContainer>
+        <PageHeader
+            title="組織への招待"
+            description={`「${organizationName}」に招待されています。受諾するとこの組織のメンバーになります。`}
+            icon={UserPlus}
+            testId="accept-invitation-heading"
+        />
+        <PageContent>
             <Card padding="lg">
-                <h1 class="text-h2">組織への招待</h1>
-                <p class="mt-3 text-body">
-                    「{organizationName}」に招待されています。受諾するとこの組織のメンバーになります。
-                </p>
-                <form onsubmit={submit} class="mt-6">
+                <form onsubmit={submit}>
                     <Button type="submit" loading={form.processing} testId="accept-invitation-button">
                         招待を受諾する
                     </Button>
                 </form>
             </Card>
-        </div>
-    </PageContent>
+        </PageContent>
+    </PageContainer>
 </AppLayout>

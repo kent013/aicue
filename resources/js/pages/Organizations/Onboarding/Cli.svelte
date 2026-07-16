@@ -3,9 +3,12 @@
     import Card from "@/components/atoms/Card.svelte";
     import TextLink from "@/components/atoms/TextLink.svelte";
     import CodeSnippet from "@/components/molecules/CodeSnippet.svelte";
+    import PageHeader from "@/components/molecules/PageHeader.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
     import type { SharedProps } from "@/lib/shared-props";
+    import { Terminal } from "@lucide/svelte";
 
     interface Props {
         organization: { id: number; name: string; slug: string };
@@ -24,14 +27,15 @@
 </script>
 
 <AppLayout {appName}>
-    <PageContent maxWidth="2xl">
-        <h1 class="text-h2">CLI 導入ガイド</h1>
-        <p class="mt-1 text-caption text-text-secondary">
-            ターミナルから {appName} を操作する CLI の導入手順です。人間の認証はブラウザログイン (OAuth) が標準で、
-            API キーは CI / 自動化専用です。
-        </p>
-
-        <div class="mt-6 flex flex-col gap-6">
+    <PageContainer>
+        <PageHeader
+            title="CLI 導入ガイド"
+            description={`ターミナルから ${appName} を操作する CLI の導入手順です。人間の認証はブラウザログイン (OAuth) が標準で、API キーは CI / 自動化専用です。`}
+            icon={Terminal}
+            testId="cli-onboarding-heading"
+        />
+        <PageContent>
+            <div class="flex flex-col gap-6">
             <Card padding="lg">
                 <h2 class="text-h3">1. インストール</h2>
                 <p class="mt-1 text-caption text-text-secondary">
@@ -77,6 +81,7 @@
                     API キー管理へ戻る
                 </TextLink>
             </div>
-        </div>
-    </PageContent>
+            </div>
+        </PageContent>
+    </PageContainer>
 </AppLayout>

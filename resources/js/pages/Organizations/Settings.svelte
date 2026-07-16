@@ -10,9 +10,12 @@
     import FormField from "@/components/molecules/FormField.svelte";
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
     import RecentAuthModal from "@/components/organisms/RecentAuthModal.svelte";
+    import PageHeader from "@/components/molecules/PageHeader.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
     import { withRecentAuth, type RecentAuthStatus } from "@/lib/recent-auth";
+    import { Settings } from "@lucide/svelte";
     import type { SharedProps } from "@/lib/shared-props";
 
     /**
@@ -165,13 +168,15 @@
 </script>
 
 <AppLayout {appName}>
-    <PageContent maxWidth="2xl">
-        <h1 class="text-h2">組織設定</h1>
-        <p class="mt-1 text-caption text-text-secondary">
-            {organization.name} の設定を管理します。
-        </p>
-
-        <div class="mt-6 flex flex-col gap-10">
+    <PageContainer>
+        <PageHeader
+            title="組織設定"
+            description={`${organization.name} の設定を管理します。`}
+            icon={Settings}
+            testId="organization-settings-heading"
+        />
+        <PageContent>
+            <div class="flex flex-col gap-10">
             <Card padding="lg">
                 <h2 class="text-h3">組織名</h2>
                 {#if canManage}
@@ -335,5 +340,6 @@
             canSatisfy={recentAuthStatus?.canSatisfy ?? true}
             onConfirmed={resumePendingAction}
         />
-    </PageContent>
+        </PageContent>
+    </PageContainer>
 </AppLayout>

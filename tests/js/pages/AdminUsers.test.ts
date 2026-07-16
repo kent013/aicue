@@ -103,7 +103,6 @@ const baseProps = {
     members: membersFixture,
     invitations: invitationsFixture,
     hasDefaultProject: true,
-    categoriesUrl: "/projects/1/categories",
 };
 
 describe("Admin/Users", () => {
@@ -269,18 +268,20 @@ describe("Admin/Users", () => {
         expect(screen.queryByTestId("invitation-list")).toBeNull();
     });
 
-    it("project 不在時は案内文を出し、カテゴリ管理 nav 項目は非表示 (URL null)", () => {
+    it("project 不在時は案内文を出す。独自二次左メニュー(AdminMenuNav)は撤去済み (aigenba parity, T071)", () => {
         render(Users, {
-            props: { ...baseProps, hasDefaultProject: false, categoriesUrl: null },
+            props: { ...baseProps, hasDefaultProject: false },
         });
 
         expect(screen.getByTestId("no-project-note")).toBeInTheDocument();
+        // 旧 AdminMenuNav の nav 項目は撤去済み (カテゴリ管理はプロジェクト詳細から到達)
         expect(screen.queryByTestId("admin-nav-categories")).toBeNull();
+        expect(screen.queryByTestId("admin-nav-users")).toBeNull();
     });
 
     it("project 不在時は projects.create への作成リンクを出す (href 正しい・注記文言維持)", () => {
         render(Users, {
-            props: { ...baseProps, hasDefaultProject: false, categoriesUrl: null },
+            props: { ...baseProps, hasDefaultProject: false },
         });
 
         const link = screen.getByTestId("create-project-link");

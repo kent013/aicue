@@ -7,8 +7,11 @@
     import EmptyState from "@/components/molecules/EmptyState.svelte";
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
     import RecentAuthModal from "@/components/organisms/RecentAuthModal.svelte";
+    import PageHeader from "@/components/molecules/PageHeader.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
+    import { Plug } from "@lucide/svelte";
     import { withRecentAuth, type RecentAuthStatus } from "@/lib/recent-auth";
     import type { SharedProps } from "@/lib/shared-props";
     import type { OAuthSession } from "@/types/OAuthSession";
@@ -91,13 +94,14 @@
 </script>
 
 <AppLayout {appName}>
-    <PageContent maxWidth="2xl">
-        <h1 class="text-h2">接続セッション</h1>
-        <p class="mt-1 text-caption text-text-secondary">
-            {organization.name} の CLI / MCP 接続 (OAuth) を管理します。失効するとそのセッション配下のトークンは以降拒否されます。
-        </p>
-
-        <div class="mt-6">
+    <PageContainer>
+        <PageHeader
+            title="接続セッション"
+            description={`${organization.name} の CLI / MCP 接続 (OAuth) を管理します。失効するとそのセッション配下のトークンは以降拒否されます。`}
+            icon={Plug}
+            testId="sessions-heading"
+        />
+        <PageContent>
             <ApiKeyTabNav {tabs} />
 
             <div class="mt-6 flex flex-col gap-6">
@@ -190,9 +194,8 @@
                     </Card>
                 {/if}
             </div>
-        </div>
 
-        <ConfirmDialog
+            <ConfirmDialog
             bind:open={revokeDialogOpen}
             title="セッション失効"
             message={`${revokeTarget?.userName ?? "この"} さんの接続を失効しますか？ 配下のトークンは以降拒否されます。この操作は取り消せません。`}
@@ -210,5 +213,6 @@
             canSatisfy={recentAuthStatus?.canSatisfy ?? true}
             onConfirmed={resumePendingAction}
         />
-    </PageContent>
+        </PageContent>
+    </PageContainer>
 </AppLayout>

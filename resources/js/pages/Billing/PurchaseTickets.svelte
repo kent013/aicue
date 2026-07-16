@@ -6,7 +6,9 @@
     import Card from "@/components/atoms/Card.svelte";
     import Input from "@/components/atoms/Input.svelte";
     import FormField from "@/components/molecules/FormField.svelte";
+    import PageHeader from "@/components/molecules/PageHeader.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
     import type { SharedProps } from "@/lib/shared-props";
     import type { PurchaseTicketsPageProps } from "@/types/billing";
@@ -113,13 +115,15 @@
 </script>
 
 <AppLayout {appName}>
-    <PageContent maxWidth="3xl">
-        <h1 class="text-h2">チケットを購入</h1>
-        <p class="mt-1 text-caption text-text-secondary">
-            チケットは AI 解析・動画レンダに使います。まとめ買いで 1 枚あたりの料金が下がります。
-        </p>
-
-        <div class="mt-6 flex flex-col gap-6">
+    <PageContainer>
+        <PageHeader
+            title="チケットを購入"
+            description="チケットは AI 解析・動画レンダに使います。まとめ買いで 1 枚あたりの料金が下がります。"
+            icon={ShoppingCart}
+            testId="purchase-tickets-heading"
+        />
+        <PageContent>
+            <div class="flex flex-col gap-6">
             {#if page.purchased}
                 <Alert type="success" title="ご購入ありがとうございます" testId="purchase-success-banner">
                     決済の確認後、残高に反映されます (通常数秒〜数分)。反映はページの再読み込みでご確認いただけます。
@@ -207,6 +211,7 @@
                     購入したチケットに有効期限はありません。
                 </p>
             </section>
-        </div>
-    </PageContent>
+            </div>
+        </PageContent>
+    </PageContainer>
 </AppLayout>

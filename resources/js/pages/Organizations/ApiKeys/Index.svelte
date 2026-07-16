@@ -12,9 +12,12 @@
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
     import Modal from "@/components/organisms/Modal.svelte";
     import RecentAuthModal from "@/components/organisms/RecentAuthModal.svelte";
+    import PageHeader from "@/components/molecules/PageHeader.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
     import { withRecentAuth, type RecentAuthStatus } from "@/lib/recent-auth";
+    import { KeyRound } from "@lucide/svelte";
     import type { SharedProps } from "@/lib/shared-props";
 
     interface ApiKeyItem {
@@ -136,14 +139,16 @@
 </script>
 
 <AppLayout {appName}>
-    <PageContent maxWidth="2xl">
-        <h1 class="text-h2">API キー</h1>
-        <p class="mt-1 text-caption text-text-secondary">
-            {organization.name} の REST API / MCP アクセスに使う組織スコープのキーとセッションを管理します。
-        </p>
-
-        <div class="mt-6">
-            <ApiKeyTabNav {tabs} />
+    <PageContainer>
+        <PageHeader
+            title="API キー"
+            description={`${organization.name} の REST API / MCP アクセスに使う組織スコープのキーとセッションを管理します。`}
+            icon={KeyRound}
+            testId="api-keys-heading"
+        />
+        <PageContent>
+            <div>
+                <ApiKeyTabNav {tabs} />
 
             <div class="mt-6 flex flex-col gap-6">
                 <Card padding="lg">
@@ -302,5 +307,6 @@
             canSatisfy={recentAuthStatus?.canSatisfy ?? true}
             onConfirmed={resumePendingAction}
         />
-    </PageContent>
+        </PageContent>
+    </PageContainer>
 </AppLayout>

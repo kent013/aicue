@@ -11,7 +11,6 @@ use App\Http\Requests\Projects\StoreCategoryRequest;
 use App\Http\Requests\Projects\UpdateCategoryRequest;
 use App\Models\Category;
 use App\Models\Project;
-use App\Models\User;
 use App\Services\Manual\CategoryService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -43,9 +42,6 @@ class CategoryController extends Controller
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('viewAny', [Category::class, $project]);
 
-        $user = $request->user();
-        Assert::isInstanceOf($user, User::class);
-
         return Inertia::render('Admin/Categories', [
             'project' => ['id' => $project->id, 'name' => $project->name],
             // sort_order 順 (▲▼ の表示順 = 動画一覧の並び順と同一規約)
@@ -55,8 +51,6 @@ class CategoryController extends Controller
                     'name' => $category->name,
                 ])
                 ->all()),
-            // 管理メニュー nav: ユーザー管理リンク (org 管理者のみ。can 連動。route helper で生成)
-            'usersUrl' => $user->can('manageMembers', $organization) ? route('manage.users.index') : null,
         ]);
     }
 

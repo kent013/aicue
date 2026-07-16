@@ -24,21 +24,22 @@ test('org Owner は 200 + Admin/Categories component を受け取る', function 
     $response->assertInertia(fn ($page) => $page
         ->component('Admin/Categories')
         ->where('project.id', $project->id)
-        ->where('usersUrl', route('manage.users.index')));
+        // T071: 独自二次左メニュー(AdminMenuNav)撤去に伴い usersUrl prop は廃止 → 存在しない
+        ->missing('usersUrl'));
 });
 
-test('project_admin (編集者。org は Member) も 200 で閲覧でき usersUrl は null', function (): void {
+test('project_admin (編集者。project update 可) も 200 で閲覧できる (viewAny≡update の回帰。usersUrl prop なし)', function (): void {
     [$organization] = createOrganizationWithOwner();
     $project = Project::factory()->forOrganization($organization)->create();
     $editor = attachOrganizationMember($organization);
     attachProjectMember($project, $editor, ProjectRole::Admin);
     $editor->forceFill(['current_organization_id' => $organization->id])->save();
 
+    // CategoryPolicy::viewAny ≡ projectPolicy->update。project を update できる編集者は categories に 200 到達する。
     $response = $this->actingAs($editor)->get("/projects/{$project->id}/categories");
 
     $response->assertOk();
-    // 編集者は org メンバー管理権限を持たない → ユーザー管理導線は非表示 (null)
-    $response->assertInertia(fn ($page) => $page->where('usersUrl', null));
+    $response->assertInertia(fn ($page) => $page->missing('usersUrl'));
 });
 
 test('project_member (撮影者) は 403', function (): void {

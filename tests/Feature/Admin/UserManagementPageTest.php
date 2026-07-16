@@ -30,7 +30,8 @@ test('org Owner は 200 + Admin/Users component で members/invitations shape �
         ->where('invitations.0.email', 'pending-editor@example.com')
         ->where('invitations.0.roleState', 'editor')
         ->where('hasDefaultProject', false)
-        ->where('categoriesUrl', null));
+        // T071: 独自二次左メニュー(AdminMenuNav)撤去に伴い categoriesUrl prop は廃止 → 存在しない
+        ->missing('categoriesUrl'));
 });
 
 test('org Admin も閲覧できる (200)', function (): void {
@@ -109,18 +110,19 @@ test('roleState 導出: owner/admin/editor/shooter/unassigned の 5 状態が ro
     });
 });
 
-test('categoriesUrl: project があり org admin なら URL・project 不在なら null', function (): void {
+test('categoriesUrl prop は撤去済み (T071: カテゴリ導線はプロジェクト詳細へ移設)。hasDefaultProject は維持', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
 
+    // AdminMenuNav 撤去に伴い categoriesUrl prop は存在しない (project 有無に関わらず)
     $this->actingAs($owner)->get('/manage/users')
-        ->assertInertia(fn ($page) => $page->where('categoriesUrl', null)->where('hasDefaultProject', false));
+        ->assertInertia(fn ($page) => $page->missing('categoriesUrl')->where('hasDefaultProject', false));
 
-    $project = Project::factory()->forOrganization($organization)->create();
+    Project::factory()->forOrganization($organization)->create();
 
     $this->actingAs($owner)->get('/manage/users')
         ->assertInertia(fn ($page) => $page
             ->where('hasDefaultProject', true)
-            ->where('categoriesUrl', route('projects.categories.index', $project)));
+            ->missing('categoriesUrl'));
 });
 
 test('招待一覧は active のみ (失効・受諾済・取消済は出ない)', function (): void {
