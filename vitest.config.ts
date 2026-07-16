@@ -14,6 +14,10 @@ export default defineConfig({
     test: {
         globals: true,
         environment: "jsdom",
+        // CPU を食い尽くさないよう並列ワーカーをコア数の半分に抑える
+        // (環境非依存: 10コア→5, 8コア→4 のように自動追従)
+        maxWorkers: "50%",
+        minWorkers: 1,
         setupFiles: ["./tests/js/setup.ts"],
         include: ["tests/js/**/*.test.ts", "scripts/**/*.test.ts"],
         coverage: {
