@@ -5,7 +5,10 @@
     import Card from "@/components/atoms/Card.svelte";
     import TextLink from "@/components/atoms/TextLink.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
+    import PageHeader from "@/components/molecules/PageHeader.svelte";
+    import { CreditCard } from "@lucide/svelte";
     import type { SharedProps } from "@/lib/shared-props";
 
     /**
@@ -85,13 +88,15 @@
 </script>
 
 <AppLayout {appName}>
-    <PageContent maxWidth="3xl">
-        <h1 class="text-h2">プランとお支払い</h1>
-        <p class="mt-1 text-caption text-text-secondary">
-            この組織のプランとチケット残高を管理します。
-        </p>
-
-        <div class="mt-6 flex flex-col gap-10">
+    <PageContainer>
+        <PageHeader
+            title="プランとお支払い"
+            description="この組織のプランとチケット残高を管理します。"
+            icon={CreditCard}
+            testId="billing-heading"
+        />
+        <PageContent>
+            <div class="flex flex-col gap-10">
             <Card padding="lg" testId="billing-summary">
                 <div class="flex flex-wrap items-start justify-between gap-4">
                     <div>
@@ -164,6 +169,7 @@
                     {/each}
                 </ul>
             </section>
-        </div>
-    </PageContent>
+            </div>
+        </PageContent>
+    </PageContainer>
 </AppLayout>

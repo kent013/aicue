@@ -1,8 +1,10 @@
 <script lang="ts">
     import { onMount } from "svelte";
     import { page, router } from "@inertiajs/svelte";
-    import { ArrowLeft } from "@lucide/svelte";
+    import { ArrowLeft, Video } from "@lucide/svelte";
     import TextLink from "@/components/atoms/TextLink.svelte";
+    import PageContainer from "@/components/templates/PageContainer.svelte";
+    import PageHeaderSection from "@/components/molecules/PageHeaderSection.svelte";
     import CameraRecorder from "@/components/features/capture/CameraRecorder.svelte";
     import type CameraRecorderType from "@/components/features/capture/CameraRecorder.svelte";
     import CaptureFileFallback from "@/components/features/capture/CaptureFileFallback.svelte";
@@ -161,15 +163,15 @@
 </script>
 
 <AppLayout {appName}>
-    <p class="text-caption text-text-secondary">
-        <TextLink href={`/app/projects/${project.id}/manuals`}>
-            <ArrowLeft class="inline size-3" aria-hidden="true" />
-            一覧へ戻る
-        </TextLink>
-    </p>
-    <h1 class="mt-1 truncate text-h2" data-testid="capture-manual-title">{manual.title}</h1>
+    <PageContainer>
+        <PageHeaderSection title={manual.title} icon={Video} testId="capture-manual-title">
+            <TextLink href={`/app/projects/${project.id}/manuals`}>
+                <ArrowLeft class="inline size-3" aria-hidden="true" />
+                一覧へ戻る
+            </TextLink>
+        </PageHeaderSection>
 
-    <div class="mt-3">
+        <div class="mt-3">
         <UploadQueueBar {pendingCount} {pendingBytes} {uploading} {quotaMessage} onResume={resumeUploads} />
     </div>
 
@@ -237,5 +239,6 @@
                 />
             {/if}
         </section>
-    </div>
+        </div>
+    </PageContainer>
 </AppLayout>

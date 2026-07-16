@@ -1,15 +1,16 @@
 <script lang="ts">
     import { page, router, useForm } from "@inertiajs/svelte";
-    import { ChevronDown, ChevronUp } from "@lucide/svelte";
+    import { ChevronDown, ChevronUp, Tags } from "@lucide/svelte";
     import Button from "@/components/atoms/Button.svelte";
     import Card from "@/components/atoms/Card.svelte";
     import Input from "@/components/atoms/Input.svelte";
     import EmptyState from "@/components/molecules/EmptyState.svelte";
     import FormField from "@/components/molecules/FormField.svelte";
-    import AdminMenuNav from "@/components/features/admin/AdminMenuNav.svelte";
+    import PageHeader from "@/components/molecules/PageHeader.svelte";
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
     import Modal from "@/components/organisms/Modal.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
     import type { SharedProps } from "@/lib/shared-props";
     import type { CategoryOption } from "@/types/manual";
@@ -23,10 +24,9 @@
     interface Props {
         project: { id: number; name: string };
         categories: CategoryOption[];
-        usersUrl: string | null;
     }
 
-    let { project, categories, usersUrl }: Props = $props();
+    let { project, categories }: Props = $props();
 
     const shared = $derived(page.props as unknown as SharedProps);
     const appName = $derived(shared.appName ?? "");
@@ -116,22 +116,15 @@
 </script>
 
 <AppLayout {appName}>
-    <PageContent maxWidth="7xl">
-        <h1 class="text-h2">カテゴリ管理</h1>
-        <p class="mt-1 text-caption text-text-secondary">
-            {project.name} の動画マニュアルの分類に使うカテゴリを管理します。削除したカテゴリの動画は未分類になります。
-        </p>
-
-        <div class="mt-6 flex flex-col gap-6 md:flex-row md:items-start">
-            <aside class="w-full shrink-0 md:w-56">
-                <AdminMenuNav
-                    active="categories"
-                    {usersUrl}
-                    categoriesUrl={`/projects/${project.id}/categories`}
-                />
-            </aside>
-
-            <div class="flex min-w-0 grow flex-col gap-10">
+    <PageContainer>
+        <PageHeader
+            title="カテゴリ管理"
+            description={`${project.name} の動画マニュアルの分類に使うカテゴリを管理します。削除したカテゴリの動画は未分類になります。`}
+            icon={Tags}
+            testId="categories-heading"
+        />
+        <PageContent>
+            <div class="flex min-w-0 flex-col gap-10">
                 <Card padding="lg">
                     <h2 class="text-h3">カテゴリを追加</h2>
                     <form onsubmit={submitAddCategory} class="mt-4 flex items-start gap-2">
@@ -228,7 +221,6 @@
                     {/if}
                 </Card>
             </div>
-        </div>
 
         <Modal
             bind:open={editCategoryModalOpen}
@@ -282,5 +274,6 @@
             onConfirm={removeCategory}
             testId="remove-category-dialog"
         />
-    </PageContent>
+        </PageContent>
+    </PageContainer>
 </AppLayout>

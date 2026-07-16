@@ -1,6 +1,7 @@
 <script lang="ts">
     import { tick } from "svelte";
     import { page, router, useForm } from "@inertiajs/svelte";
+    import { Users } from "@lucide/svelte";
     import Badge from "@/components/atoms/Badge.svelte";
     import Button from "@/components/atoms/Button.svelte";
     import Card from "@/components/atoms/Card.svelte";
@@ -9,11 +10,12 @@
     import Select from "@/components/atoms/Select.svelte";
     import EmptyState from "@/components/molecules/EmptyState.svelte";
     import FormField from "@/components/molecules/FormField.svelte";
-    import AdminMenuNav from "@/components/features/admin/AdminMenuNav.svelte";
+    import PageHeader from "@/components/molecules/PageHeader.svelte";
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
     import Modal from "@/components/organisms/Modal.svelte";
     import RecentAuthModal from "@/components/organisms/RecentAuthModal.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
     import { withRecentAuth, type RecentAuthStatus } from "@/lib/recent-auth";
     import type { SharedProps } from "@/lib/shared-props";
@@ -31,11 +33,9 @@
         members: MemberRow[];
         invitations: InvitationRow[];
         hasDefaultProject: boolean;
-        categoriesUrl: string | null;
     }
 
-    let { organizationSlug, members, invitations, hasDefaultProject, categoriesUrl }: Props =
-        $props();
+    let { organizationSlug, members, invitations, hasDefaultProject }: Props = $props();
 
     const shared = $derived(page.props as unknown as SharedProps);
     const appName = $derived(shared.appName ?? "");
@@ -251,17 +251,14 @@
 </script>
 
 <AppLayout {appName}>
-    <PageContent maxWidth="7xl">
-        <h1 class="text-h2">ユーザー管理</h1>
-        <p class="mt-1 text-caption text-text-secondary">
-            組織のメンバーと招待を管理します。ロールは「管理者・編集者・撮影者」から選択します。
-        </p>
-
-        <div class="mt-6 flex flex-col gap-6 md:flex-row md:items-start">
-            <aside class="w-full shrink-0 md:w-56">
-                <AdminMenuNav active="users" usersUrl="/manage/users" {categoriesUrl} />
-            </aside>
-
+    <PageContainer>
+        <PageHeader
+            title="ユーザー管理"
+            description="組織のメンバーと招待を管理します。ロールは「管理者・編集者・撮影者」から選択します。"
+            icon={Users}
+            testId="users-heading"
+        />
+        <PageContent>
             <div class="flex min-w-0 grow flex-col gap-10">
                 <Card padding="lg">
                     <h2 class="text-h3">メンバー一覧</h2>
@@ -458,7 +455,6 @@
                     {/if}
                 </Card>
             </div>
-        </div>
 
         <ConfirmDialog
             bind:open={removeDialogOpen}
@@ -528,5 +524,6 @@
             canSatisfy={recentAuthStatus?.canSatisfy ?? true}
             onConfirmed={resumePendingAction}
         />
-    </PageContent>
+        </PageContent>
+    </PageContainer>
 </AppLayout>

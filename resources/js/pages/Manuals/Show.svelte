@@ -1,17 +1,18 @@
 <script lang="ts">
     import { page, router } from "@inertiajs/svelte";
-    import { Camera } from "@lucide/svelte";
+    import { BookOpen, Camera } from "@lucide/svelte";
     import Badge from "@/components/atoms/Badge.svelte";
     import Button from "@/components/atoms/Button.svelte";
     import Card from "@/components/atoms/Card.svelte";
-    import TextLink from "@/components/atoms/TextLink.svelte";
     import DangerZone from "@/components/molecules/DangerZone.svelte";
+    import PageHeaderSection from "@/components/molecules/PageHeaderSection.svelte";
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
     import AnalysisPanel from "@/components/features/manual/AnalysisPanel.svelte";
     import DuplicateManualDialog from "@/components/features/manual/DuplicateManualDialog.svelte";
     import RenderPanel from "@/components/features/manual/RenderPanel.svelte";
     import SourceDocumentUpload from "@/components/features/manual/SourceDocumentUpload.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
     import type { SharedProps } from "@/lib/shared-props";
     import type { AnalysisProps, CategoryOption, RenderProps, VideoManualStatus } from "@/types/manual";
@@ -65,60 +66,58 @@
 </script>
 
 <AppLayout {appName}>
-    <PageContent maxWidth="2xl">
-        <div class="flex items-start justify-between gap-4">
-            <div class="min-w-0">
-                <p class="text-caption text-text-secondary">
-                    <TextLink href={`/projects/${project.id}`}>{project.name}</TextLink>
-                </p>
-                <h1 class="mt-1 truncate text-h2" data-testid="manual-title">{manual.title}</h1>
-                <div class="mt-2 flex items-center gap-3">
-                    <Badge tone={STATUS_TONES[manual.status]} testId="manual-status">
-                        {VIDEO_MANUAL_STATUS_LABELS[manual.status]}
-                    </Badge>
-                    <span class="text-caption text-text-secondary" data-testid="manual-category">
-                        {manual.category?.name ?? "未分類"}
-                    </span>
-                    <span class="text-caption text-text-secondary">{manual.created_at}</span>
-                </div>
-            </div>
-            <!-- action コンテナは撮影導線か管理系のいずれかが出るときだけ描画 (空 div を残さない) -->
-            {#if captureNavigable || canManage}
-                <div class="flex items-center gap-2">
-                    {#if captureNavigable}
-                        <!-- canManage 内外を問わず表示 (撮影者=project_member も撮影ナビ view 可) -->
-                        <Button
-                            variant="primary"
-                            href={`/app/projects/${project.id}/manuals/${manual.id}`}
-                            inertia
-                            testId="capture-manual-link"
-                        >
-                            <Camera class="size-4" aria-hidden="true" />
-                            この手順書を撮影する
-                        </Button>
-                    {/if}
-                    {#if canManage}
-                        <Button
-                            variant="ghost"
-                            onclick={() => (duplicateDialogOpen = true)}
-                            testId="duplicate-manual-button"
-                        >
-                            複製
-                        </Button>
-                        <Button
-                            variant="ghost"
-                            href={`/projects/${project.id}/manuals/${manual.id}/edit`}
-                            inertia
-                            testId="edit-manual-button"
-                        >
-                            編集
-                        </Button>
-                    {/if}
-                </div>
+    <PageContainer>
+        <PageHeaderSection
+            title={manual.title}
+            icon={BookOpen}
+            testId="manual-title"
+            breadcrumbs={[
+                { label: project.name, href: `/projects/${project.id}` },
+                { label: manual.title },
+            ]}
+        >
+            {#if captureNavigable}
+                <!-- canManage 内外を問わず表示 (撮影者=project_member も撮影ナビ view 可) -->
+                <Button
+                    variant="primary"
+                    href={`/app/projects/${project.id}/manuals/${manual.id}`}
+                    inertia
+                    testId="capture-manual-link"
+                >
+                    <Camera class="size-4" aria-hidden="true" />
+                    この手順書を撮影する
+                </Button>
             {/if}
-        </div>
+            {#if canManage}
+                <Button
+                    variant="ghost"
+                    onclick={() => (duplicateDialogOpen = true)}
+                    testId="duplicate-manual-button"
+                >
+                    複製
+                </Button>
+                <Button
+                    variant="ghost"
+                    href={`/projects/${project.id}/manuals/${manual.id}/edit`}
+                    inertia
+                    testId="edit-manual-button"
+                >
+                    編集
+                </Button>
+            {/if}
+        </PageHeaderSection>
+        <PageContent>
+            <div class="flex items-center gap-3">
+                <Badge tone={STATUS_TONES[manual.status]} testId="manual-status">
+                    {VIDEO_MANUAL_STATUS_LABELS[manual.status]}
+                </Badge>
+                <span class="text-caption text-text-secondary" data-testid="manual-category">
+                    {manual.category?.name ?? "未分類"}
+                </span>
+                <span class="text-caption text-text-secondary">{manual.created_at}</span>
+            </div>
 
-        <div class="mt-6 flex flex-col gap-10">
+            <div class="mt-6 flex flex-col gap-10">
             <AnalysisPanel
                 projectId={project.id}
                 manualId={manual.id}
@@ -191,5 +190,6 @@
             onConfirm={deleteManual}
             testId="delete-manual-dialog"
         />
-    </PageContent>
+        </PageContent>
+    </PageContainer>
 </AppLayout>

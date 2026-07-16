@@ -1,9 +1,12 @@
 <script lang="ts">
     import { page } from "@inertiajs/svelte";
+    import { Plug } from "@lucide/svelte";
     import Card from "@/components/atoms/Card.svelte";
     import TextLink from "@/components/atoms/TextLink.svelte";
     import CodeSnippet from "@/components/molecules/CodeSnippet.svelte";
+    import PageHeader from "@/components/molecules/PageHeader.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
     import type { SharedProps } from "@/lib/shared-props";
 
@@ -22,14 +25,15 @@
 </script>
 
 <AppLayout {appName}>
-    <PageContent maxWidth="2xl">
-        <h1 class="text-h2">MCP 導入ガイド</h1>
-        <p class="mt-1 text-caption text-text-secondary">
-            Claude Desktop / Claude Code などの MCP クライアントから {appName} に接続する手順です。
-            接続時にブラウザで本人承認 (OAuth) を行うため、クライアントに API キーを貼り付ける必要はありません。
-        </p>
-
-        <div class="mt-6 flex flex-col gap-6">
+    <PageContainer>
+        <PageHeader
+            title="MCP 導入ガイド"
+            description={`Claude Desktop / Claude Code などの MCP クライアントから ${appName} に接続する手順です。接続時にブラウザで本人承認 (OAuth) を行うため、クライアントに API キーを貼り付ける必要はありません。`}
+            icon={Plug}
+            testId="mcp-onboarding-heading"
+        />
+        <PageContent>
+            <div class="flex flex-col gap-6">
             <Card padding="lg">
                 <h2 class="text-h3">エンドポイント URL</h2>
                 <p class="mt-1 text-caption text-text-secondary">
@@ -71,5 +75,6 @@
                 </TextLink>
             </div>
         </div>
-    </PageContent>
+        </PageContent>
+    </PageContainer>
 </AppLayout>

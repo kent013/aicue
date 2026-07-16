@@ -1,13 +1,15 @@
 <script lang="ts">
     import { page, useForm } from "@inertiajs/svelte";
-    import { Camera } from "@lucide/svelte";
+    import { BookOpen, Camera } from "@lucide/svelte";
     import Button from "@/components/atoms/Button.svelte";
     import Card from "@/components/atoms/Card.svelte";
     import Input from "@/components/atoms/Input.svelte";
     import Select from "@/components/atoms/Select.svelte";
     import ScenarioEditor from "@/components/features/manual/ScenarioEditor.svelte";
     import FormField from "@/components/molecules/FormField.svelte";
+    import PageHeaderSection from "@/components/molecules/PageHeaderSection.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
     import type { SharedProps } from "@/lib/shared-props";
     import type { CategoryOption, ScenarioDocument, VideoManualStatus } from "@/types/manual";
@@ -55,14 +57,13 @@
 </script>
 
 <AppLayout {appName}>
-    <PageContent maxWidth="4xl">
-        <div class="flex items-start justify-between gap-4">
-            <div class="min-w-0">
-                <h1 class="text-h2">動画マニュアルの編集</h1>
-                <p class="mt-1 text-caption text-text-secondary">
-                    基本情報とシナリオ (撮影台本) を編集できます。
-                </p>
-            </div>
+    <PageContainer>
+        <PageHeaderSection
+            title="動画マニュアルの編集"
+            description="基本情報とシナリオ (撮影台本) を編集できます。"
+            icon={BookOpen}
+            testId="manual-edit-heading"
+        >
             {#if captureNavigable}
                 <Button
                     variant="primary"
@@ -74,9 +75,9 @@
                     この手順書を撮影する
                 </Button>
             {/if}
-        </div>
-
-        <div class="mt-6 max-w-2xl">
+        </PageHeaderSection>
+        <PageContent>
+            <div class="max-w-2xl">
             <Card padding="lg">
                 <h2 class="text-h3">基本情報</h2>
                 <form onsubmit={submit} class="mt-4 flex flex-col gap-4">
@@ -130,5 +131,6 @@
             </p>
             <ScenarioEditor {scenario} projectId={project.id} manualId={manual.id} />
         </div>
-    </PageContent>
+        </PageContent>
+    </PageContainer>
 </AppLayout>

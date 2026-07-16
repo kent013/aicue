@@ -6,7 +6,10 @@
     import Select from "@/components/atoms/Select.svelte";
     import FormField from "@/components/molecules/FormField.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
+    import PageHeader from "@/components/molecules/PageHeader.svelte";
+    import { BookOpen } from "@lucide/svelte";
     import type { SharedProps } from "@/lib/shared-props";
     import type { CategoryOption } from "@/types/manual";
 
@@ -47,13 +50,14 @@
 </script>
 
 <AppLayout {appName}>
-    <PageContent maxWidth="2xl">
-        <h1 class="text-h2">動画マニュアルの作成</h1>
-        <p class="mt-1 text-caption text-text-secondary">
-            {project.name} に新しい動画マニュアルを作成します。
-        </p>
-
-        <div class="mt-6">
+    <PageContainer>
+        <PageHeader
+            title="動画マニュアルの作成"
+            description={`${project.name} に新しい動画マニュアルを作成します。`}
+            icon={BookOpen}
+            testId="manual-create-heading"
+        />
+        <PageContent>
             <Card padding="lg">
                 <form onsubmit={submit} class="flex flex-col gap-4">
                     <FormField label="タイトル" id="manual-title" error={form.errors.title} required>
@@ -116,6 +120,6 @@
                     </div>
                 </form>
             </Card>
-        </div>
-    </PageContent>
+        </PageContent>
+    </PageContainer>
 </AppLayout>

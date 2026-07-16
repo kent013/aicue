@@ -101,6 +101,21 @@ describe("Projects/Show", () => {
         expect(screen.getByTestId("delete-project-button")).toBeInTheDocument();
     });
 
+    it("canManage=true なら見出しにカテゴリ管理リンク (/projects/{id}/categories) を出す (T071: AdminMenuNav 導線の移設先)", () => {
+        render(Show, { props: baseProps });
+
+        const link = screen.getByTestId("manage-categories-link");
+        expect(new URL(link.getAttribute("href") ?? "", "http://localhost").pathname).toBe(
+            "/projects/1/categories",
+        );
+    });
+
+    it("canManage=false ならカテゴリ管理リンクを出さない (viewAny≡update ゲート)", () => {
+        render(Show, { props: { ...baseProps, canManage: false } });
+
+        expect(screen.queryByTestId("manage-categories-link")).toBeNull();
+    });
+
     it("canManage=false なら管理操作を表示しない", () => {
         render(Show, { props: { ...baseProps, canManage: false } });
 

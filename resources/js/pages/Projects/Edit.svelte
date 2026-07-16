@@ -6,7 +6,10 @@
     import Textarea from "@/components/atoms/Textarea.svelte";
     import FormField from "@/components/molecules/FormField.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
+    import PageHeader from "@/components/molecules/PageHeader.svelte";
+    import { FolderKanban } from "@lucide/svelte";
     import type { SharedProps } from "@/lib/shared-props";
 
     /** プロジェクト編集 (name / description)。所属 Team の変更 UI は出さない。 */
@@ -30,13 +33,14 @@
 </script>
 
 <AppLayout {appName}>
-    <PageContent maxWidth="2xl">
-        <h1 class="text-h2">プロジェクトの編集</h1>
-        <p class="mt-1 text-caption text-text-secondary">
-            {project.name} の名前と説明を変更します。
-        </p>
-
-        <div class="mt-6">
+    <PageContainer>
+        <PageHeader
+            title="プロジェクトの編集"
+            description={`${project.name} の名前と説明を変更します。`}
+            icon={FolderKanban}
+            testId="project-edit-heading"
+        />
+        <PageContent>
             <Card padding="lg">
                 <form onsubmit={submit} class="flex flex-col gap-4">
                     <FormField label="プロジェクト名" id="project-name" error={form.errors.name} required>
@@ -70,6 +74,6 @@
                     </div>
                 </form>
             </Card>
-        </div>
-    </PageContent>
+        </PageContent>
+    </PageContainer>
 </AppLayout>

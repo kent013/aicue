@@ -5,7 +5,10 @@
     import Input from "@/components/atoms/Input.svelte";
     import FormField from "@/components/molecules/FormField.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
+    import PageHeader from "@/components/molecules/PageHeader.svelte";
+    import { Building2 } from "@lucide/svelte";
     import type { SharedProps } from "@/lib/shared-props";
 
     const shared = $derived(page.props as unknown as SharedProps);
@@ -20,13 +23,14 @@
 </script>
 
 <AppLayout {appName}>
-    <PageContent maxWidth="2xl">
-        <h1 class="text-h2">組織の作成</h1>
-        <p class="mt-1 text-caption text-text-secondary">
-            新しい組織を作成します。作成後にメンバーを招待できます。
-        </p>
-
-        <div class="mt-6">
+    <PageContainer>
+        <PageHeader
+            title="組織の作成"
+            description="新しい組織を作成します。作成後にメンバーを招待できます。"
+            icon={Building2}
+            testId="organizations-create-heading"
+        />
+        <PageContent>
             <Card padding="lg">
                 <form onsubmit={submit} class="flex flex-col gap-4">
                     <FormField label="組織名" id="organization-name" error={form.errors.name} required>
@@ -45,6 +49,6 @@
                     </div>
                 </form>
             </Card>
-        </div>
-    </PageContent>
+        </PageContent>
+    </PageContainer>
 </AppLayout>

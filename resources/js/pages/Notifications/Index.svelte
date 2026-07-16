@@ -7,7 +7,9 @@
     import Pagination from "@/components/molecules/Pagination.svelte";
     import NotificationListItem from "@/components/features/notifications/NotificationListItem.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
+    import PageHeaderSection from "@/components/molecules/PageHeaderSection.svelte";
     import type { SharedProps } from "@/lib/shared-props";
     import type { PaginationMeta } from "@/types/manual";
     import type { NotificationItem } from "@/types/notification";
@@ -58,51 +60,51 @@
 </script>
 
 <AppLayout {appName}>
-    <PageContent maxWidth="7xl">
-        <div class="flex items-start justify-between gap-4">
-            <div>
-                <h1 class="text-h2">通知</h1>
-                <p class="mt-1 text-caption text-text-secondary">
-                    すべての組織の通知が表示されます。
-                </p>
-            </div>
+    <PageContainer>
+        <PageHeaderSection
+            title="通知"
+            description="すべての組織の通知が表示されます。"
+            icon={Bell}
+            testId="notifications-heading"
+        >
             {#if unreadCount > 0}
                 <Button variant="ghost" size="sm" onclick={markAllRead} testId="read-all-button">
                     すべて既読にする
                 </Button>
             {/if}
-        </div>
-
-        {#if notifications.length === 0}
-            <div class="mt-6">
-                <EmptyState
-                    title="通知はありません"
-                    description="ジョブの完了・招待・チケット残高の通知がここに表示されます。"
-                    icon={Bell}
-                    bordered
-                    testId="notifications-empty"
-                />
-            </div>
-        {:else}
-            <Card padding="none" class="mt-6 overflow-hidden">
-                <ul data-testid="notification-list">
-                    {#each notifications as notification (notification.id)}
-                        <li>
-                            <NotificationListItem {notification} />
-                        </li>
-                    {/each}
-                </ul>
-            </Card>
-            {#if meta.last_page > 1}
+        </PageHeaderSection>
+        <PageContent>
+            {#if notifications.length === 0}
                 <div class="mt-6">
-                    <Pagination
-                        currentPage={meta.current_page}
-                        totalPages={meta.last_page}
-                        onChange={goToPage}
-                        testId="notifications-pagination"
+                    <EmptyState
+                        title="通知はありません"
+                        description="ジョブの完了・招待・チケット残高の通知がここに表示されます。"
+                        icon={Bell}
+                        bordered
+                        testId="notifications-empty"
                     />
                 </div>
+            {:else}
+                <Card padding="none" class="mt-6 overflow-hidden">
+                    <ul data-testid="notification-list">
+                        {#each notifications as notification (notification.id)}
+                            <li>
+                                <NotificationListItem {notification} />
+                            </li>
+                        {/each}
+                    </ul>
+                </Card>
+                {#if meta.last_page > 1}
+                    <div class="mt-6">
+                        <Pagination
+                            currentPage={meta.current_page}
+                            totalPages={meta.last_page}
+                            onChange={goToPage}
+                            testId="notifications-pagination"
+                        />
+                    </div>
+                {/if}
             {/if}
-        {/if}
-    </PageContent>
+        </PageContent>
+    </PageContainer>
 </AppLayout>

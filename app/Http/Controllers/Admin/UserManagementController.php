@@ -75,11 +75,6 @@ class UserManagementController extends Controller
             'members' => $members,         // list<MemberRowData>
             'invitations' => $invitations, // list<InvitationRowData>
             'hasDefaultProject' => $project !== null,
-            // 管理メニュー nav: カテゴリ管理リンク (can 連動 + project 不在は非表示)。
-            // URL は route helper で生成 (route 名変更耐性)
-            'categoriesUrl' => $project !== null && $user->can('update', $project)
-                ? route('projects.categories.index', $project)
-                : null,
         ]);
     }
 }

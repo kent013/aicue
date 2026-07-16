@@ -9,7 +9,6 @@ const baseProps = {
         { id: 2, name: "本作業" },
         { id: 3, name: "仕上げ" },
     ],
-    usersUrl: "/manage/users",
 };
 
 describe("Admin/Categories", () => {
@@ -61,16 +60,13 @@ describe("Admin/Categories", () => {
         expect(dialog.textContent).toContain("未分類になります");
     });
 
-    it("usersUrl が null なら管理メニューのユーザー管理項目を出さない (can 連動)", () => {
-        render(Categories, { props: { ...baseProps, usersUrl: null } });
-
-        expect(screen.queryByTestId("admin-nav-users")).toBeNull();
-    });
-
-    it("usersUrl があれば管理メニューにユーザー管理リンクを出す", () => {
+    it("独自二次左メニュー(管理メニュー AdminMenuNav)は撤去済みで描画しない (aigenba parity, T071)", () => {
         render(Categories, { props: baseProps });
 
-        const link = screen.getByTestId("admin-nav-users");
-        expect(link.getAttribute("href")).toMatch(/\/manage\/users$/);
+        // 旧 AdminMenuNav の nav 項目は存在しない (ユーザー管理は左サイドバー「メンバー」で到達)
+        expect(screen.queryByTestId("admin-nav-users")).toBeNull();
+        expect(screen.queryByTestId("admin-nav-categories")).toBeNull();
+        // 本文(カテゴリ管理)は標準外枠で描画される
+        expect(screen.getByTestId("category-list")).toBeInTheDocument();
     });
 });

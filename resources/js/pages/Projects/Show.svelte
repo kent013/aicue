@@ -1,5 +1,6 @@
 <script lang="ts">
     import { page, router, useForm } from "@inertiajs/svelte";
+    import { FolderKanban } from "@lucide/svelte";
     import Badge from "@/components/atoms/Badge.svelte";
     import Button from "@/components/atoms/Button.svelte";
     import Card from "@/components/atoms/Card.svelte";
@@ -11,10 +12,12 @@
     import DangerZone from "@/components/molecules/DangerZone.svelte";
     import EmptyState from "@/components/molecules/EmptyState.svelte";
     import FormField from "@/components/molecules/FormField.svelte";
+    import PageHeaderSection from "@/components/molecules/PageHeaderSection.svelte";
     import Pagination from "@/components/molecules/Pagination.svelte";
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
     import Modal from "@/components/organisms/Modal.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
     import type { SharedProps } from "@/lib/shared-props";
     import type {
@@ -293,14 +296,13 @@
 </script>
 
 <AppLayout {appName}>
-    <PageContent maxWidth="2xl">
-        <div class="flex items-start justify-between gap-4">
-            <div class="min-w-0">
-                <h1 class="truncate text-h2">{project.name}</h1>
-                {#if project.description}
-                    <p class="mt-1 text-body text-text-secondary">{project.description}</p>
-                {/if}
-            </div>
+    <PageContainer>
+        <PageHeaderSection
+            title={project.name}
+            description={project.description ?? undefined}
+            icon={FolderKanban}
+            testId="project-show-heading"
+        >
             {#if canManage}
                 <Button
                     variant="ghost"
@@ -310,10 +312,19 @@
                 >
                     編集
                 </Button>
+                <!-- カテゴリ管理 (project-scoped)。CategoryPolicy::viewAny ≡ project update = canManage -->
+                <Button
+                    variant="ghost"
+                    href={`/projects/${project.id}/categories`}
+                    inertia
+                    testId="manage-categories-link"
+                >
+                    カテゴリ管理
+                </Button>
             {/if}
-        </div>
-
-        <div class="mt-6 flex flex-col gap-10">
+        </PageHeaderSection>
+        <PageContent>
+            <div class="mt-6 flex flex-col gap-10">
             <Card padding="lg">
                 <div class="flex items-start justify-between gap-4">
                     <h2 class="text-h3">動画マニュアル</h2>
@@ -777,4 +788,5 @@
             testId="delete-project-dialog"
         />
     </PageContent>
+    </PageContainer>
 </AppLayout>
