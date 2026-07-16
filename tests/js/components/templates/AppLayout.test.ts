@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/svelte";
 import { createRawSnippet } from "svelte";
 import { page } from "@inertiajs/svelte";
 import AppLayout from "@/components/templates/AppLayout.svelte";
-import type { AuthUser } from "@/lib/shared-props";
+import type { AuthUser, CurrentOrganization } from "@/lib/shared-props";
 
 // router をモックし page state は実物を使う (テスト毎に props を差し替える)
 const { routerMock } = vi.hoisted(() => ({
@@ -16,9 +16,10 @@ vi.mock("@inertiajs/svelte", async (importOriginal) => ({
 }));
 
 /*
- * AppLayout の常設アカウントナビ (F-08: ナビ統一) の単一の真実。
+ * AppLayout (左サイドバー型) のナビ表示・認可連動・主要インタラクションの単一の真実。
  * 全 AppLayout 利用ページのナビ表示はこの template テストで代表する
- * (ページ個別のナビテストは追加しない)。
+ * (ページ個別のナビテストは追加しない)。sidebar visibility contract のサーバ側 shape は
+ * tests/Feature/Organizations/OrganizationNavSharedPropsTest.php が固定する。
  */
 
 const children = createRawSnippet(() => ({
@@ -35,119 +36,244 @@ function authUser(): AuthUser {
     };
 }
 
+function org(overrides: Partial<CurrentOrganization> = {}): CurrentOrganization {
+    return {
+        id: 1,
+        name: "アクメ社",
+        slug: "acme",
+        role: "organization_member",
+        canManageMembers: false,
+        canManageApiKeys: false,
+        ...overrides,
+    };
+}
+
 function setPageProps(props: Record<string, unknown>): void {
     page.props = props as typeof page.props;
+    page.url = "/dashboard";
+}
+
+function renderApp(): void {
+    render(AppLayout, { props: { appName: "AI-CUE", children } });
+}
+
+/** desktop シェル (app-sidebar) にスコープした query。nav/menu は desktop/mobile 二枚に出るため。 */
+function desktop() {
+    return within(screen.getByTestId("app-sidebar"));
 }
 
 afterEach(() => {
     cleanup();
     routerMock.post.mockReset();
+    localStorage.clear();
     setPageProps({});
 });
 
 describe("templates/AppLayout", () => {
-    it("ログイン中は設定リンク (/settings) とログアウトボタン・通知ベルを常設する", () => {
+    it("ログイン時: 通知ベル (desktop) を単一描画し、page-content を描画する", () => {
         setPageProps({
             auth: { user: authUser() },
             notifications: { unreadCount: 0 },
+            currentOrganization: org(),
         });
-        render(AppLayout, { props: { appName: "AI-CUE", children } });
+        renderApp();
 
-        // Inertia Link は href を絶対 URL に正規化するため pathname で比較する
-        const settingsHref = screen.getByTestId("nav-settings").getAttribute("href") ?? "";
-        expect(new URL(settingsHref, "http://localhost").pathname).toBe("/settings");
-        expect(screen.getByTestId("nav-logout")).toBeInTheDocument();
-        expect(screen.getByTestId("notification-bell")).toBeInTheDocument();
+        // desktop notification-bell は 1 個 (mobile は notification-bell-mobile で別 testId)
+        expect(screen.getAllByTestId("notification-bell")).toHaveLength(1);
+        expect(screen.getByTestId("notification-bell-mobile")).toBeInTheDocument();
         expect(screen.getByTestId("page-content")).toBeInTheDocument();
     });
 
-    it("ログアウトボタン押下で POST /logout が呼ばれる", async () => {
+    it("通知ベルは描画のみで副作用 (fetch / router) を発火しない (回帰: 二重マウント安全性)", () => {
+        const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null));
+        setPageProps({
+            auth: { user: authUser() },
+            notifications: { unreadCount: 3 },
+            currentOrganization: org(),
+        });
+        renderApp();
+
+        expect(fetchSpy).not.toHaveBeenCalled();
+        expect(routerMock.post).not.toHaveBeenCalled();
+        fetchSpy.mockRestore();
+    });
+
+    it("ユーザーメニューを開くと個人設定リンク (/settings) とログアウトが出る", async () => {
         setPageProps({
             auth: { user: authUser() },
             notifications: { unreadCount: 0 },
+            currentOrganization: org(),
         });
-        render(AppLayout, { props: { appName: "AI-CUE", children } });
+        renderApp();
 
-        await fireEvent.click(screen.getByTestId("nav-logout"));
+        await fireEvent.click(desktop().getByTestId("app-user-menu-toggle"));
 
+        const settings = desktop().getByTestId("nav-settings");
+        expect(new URL(settings.getAttribute("href") ?? "", "http://localhost").pathname).toBe(
+            "/settings",
+        );
+        expect(desktop().getByTestId("logout-button")).toBeInTheDocument();
+    });
+
+    it("ログアウトボタン押下で POST /logout が呼ばれ、ボタンは disabled でない", async () => {
+        setPageProps({
+            auth: { user: authUser() },
+            notifications: { unreadCount: 0 },
+            currentOrganization: org(),
+        });
+        renderApp();
+
+        await fireEvent.click(desktop().getByTestId("app-user-menu-toggle"));
+        const logout = desktop().getByTestId("logout-button");
+        expect(logout).not.toBeDisabled();
+
+        await fireEvent.click(logout);
         expect(routerMock.post).toHaveBeenCalledTimes(1);
         expect(routerMock.post.mock.calls[0][0]).toBe("/logout");
     });
 
-    it("auth.user が null なら設定/ログアウト/ベルを描画しない (ゲスト到達ページの回帰)", () => {
+    it("ゲスト到達 (auth.user=null): nav / メニュー / ベルを描画せず page-content のみ", () => {
         setPageProps({ auth: { user: null } });
-        render(AppLayout, { props: { appName: "AI-CUE", children } });
+        renderApp();
 
-        expect(screen.queryByTestId("nav-settings")).toBeNull();
-        expect(screen.queryByTestId("nav-logout")).toBeNull();
+        expect(screen.queryByTestId("app-sidebar")).toBeNull();
+        expect(screen.queryByTestId("app-sidebar-mobile")).toBeNull();
         expect(screen.queryByTestId("notification-bell")).toBeNull();
+        expect(screen.queryByTestId("notification-bell-mobile")).toBeNull();
+        expect(screen.queryByTestId("app-user-menu-toggle")).toBeNull();
         expect(screen.getByTestId("page-content")).toBeInTheDocument();
     });
 
-    it("ログアウトボタンは disabled でない (禁止事項 8 の系)", () => {
-        setPageProps({
-            auth: { user: authUser() },
-            notifications: { unreadCount: 0 },
-        });
-        render(AppLayout, { props: { appName: "AI-CUE", children } });
+    it("notifications undefined でもクラッシュせず unread バッジ非表示", () => {
+        setPageProps({ auth: { user: authUser() }, currentOrganization: org() });
+        renderApp();
 
-        expect(screen.getByTestId("nav-logout")).not.toBeDisabled();
-    });
-
-    it("notifications が undefined でもクラッシュせず unreadCount 0 相当で描画する", () => {
-        // partial reload で shared props の閉包が省略されるケース・テスト環境での
-        // 未定義ケースの両方をカバー (shared.notifications?.unreadCount ?? 0 の回帰固定)
-        setPageProps({ auth: { user: authUser() } });
-        render(AppLayout, { props: { appName: "AI-CUE", children } });
-
-        expect(screen.getByTestId("notification-bell")).toBeInTheDocument();
+        expect(screen.getAllByTestId("notification-bell")).toHaveLength(1);
         expect(screen.queryByTestId("unread-badge")).toBeNull();
     });
 
-    it("ログイン中は組織スイッチャートリガーを常設描画する", () => {
-        setPageProps({
-            auth: { user: authUser() },
-            notifications: { unreadCount: 0 },
-            currentOrganization: {
-                id: 1,
-                name: "アクメ社",
-                slug: "acme",
-                role: "organization_owner",
-                canManageMembers: true,
-                canManageApiKeys: true,
-            },
-            organizations: [{ id: 1, name: "アクメ社", isPersonal: false }],
-        });
-        render(AppLayout, { props: { appName: "AI-CUE", children } });
+    // --- 認可連動 (負例) ---
 
-        expect(screen.getByTestId("org-switcher-trigger")).toBeInTheDocument();
-        expect(screen.getByTestId("org-switcher-trigger")).toHaveTextContent("アクメ社");
-    });
-
-    it("組織スイッチャートリガーは shrink-0 で 375px ヘッダー折返しを維持する", () => {
+    it("currentOrganization=null: org-scoped 導線 (プロジェクト/請求/メンバー/API キー) を出さない", () => {
         setPageProps({
             auth: { user: authUser() },
             notifications: { unreadCount: 0 },
             currentOrganization: null,
-            organizations: [],
         });
-        render(AppLayout, { props: { appName: "AI-CUE", children } });
+        renderApp();
 
-        expect(screen.getByTestId("org-switcher-trigger")).toHaveClass("shrink-0");
+        const d = desktop();
+        expect(d.getByTestId("nav-item-/dashboard")).toBeInTheDocument();
+        expect(d.getByTestId("nav-item-/settings")).toBeInTheDocument();
+        expect(d.queryByTestId("nav-item-/projects")).toBeNull();
+        expect(d.queryByTestId("nav-item-/billing")).toBeNull();
+        expect(d.queryByTestId("nav-item-/manage/users")).toBeNull();
+        expect(d.queryByTestId("nav-item-/organizations/acme/api-keys")).toBeNull();
     });
 
-    it("ページ固有の headerActions snippet と常設ナビが共存する (常設ナビは各 1 個)", () => {
+    it("メンバー (manage 権限なし): メンバー/API キー導線は出さず、プロジェクト/請求は出す", () => {
         setPageProps({
             auth: { user: authUser() },
             notifications: { unreadCount: 0 },
+            currentOrganization: org(),
         });
-        const headerActions = createRawSnippet(() => ({
-            render: () => `<button type="button" data-testid="page-action">ページ操作</button>`,
-        }));
-        render(AppLayout, { props: { appName: "AI-CUE", children, headerActions } });
+        renderApp();
 
-        expect(screen.getByTestId("page-action")).toBeInTheDocument();
-        expect(screen.getAllByTestId("nav-settings")).toHaveLength(1);
-        expect(screen.getAllByTestId("nav-logout")).toHaveLength(1);
+        const d = desktop();
+        expect(d.getByTestId("nav-item-/projects")).toBeInTheDocument();
+        expect(d.getByTestId("nav-item-/billing")).toBeInTheDocument();
+        expect(d.queryByTestId("nav-item-/manage/users")).toBeNull();
+        expect(d.queryByTestId("nav-item-/organizations/acme/api-keys")).toBeNull();
+    });
+
+    it("canManageMembers=true: メンバー導線 (/manage/users) を出す", () => {
+        setPageProps({
+            auth: { user: authUser() },
+            notifications: { unreadCount: 0 },
+            currentOrganization: org({ canManageMembers: true }),
+        });
+        renderApp();
+
+        expect(desktop().getByTestId("nav-item-/manage/users")).toBeInTheDocument();
+    });
+
+    it("canManageApiKeys=true: API キー導線 (/organizations/{slug}/api-keys) を出す", () => {
+        setPageProps({
+            auth: { user: authUser() },
+            notifications: { unreadCount: 0 },
+            currentOrganization: org({ canManageApiKeys: true }),
+        });
+        renderApp();
+
+        expect(desktop().getByTestId("nav-item-/organizations/acme/api-keys")).toBeInTheDocument();
+    });
+
+    // --- 組織切替 / drawer / Escape ---
+
+    it("組織切替: org-switch-{id} 押下で正しい id の POST /organizations/{id}/switch が 1 回", async () => {
+        setPageProps({
+            auth: { user: authUser() },
+            notifications: { unreadCount: 0 },
+            currentOrganization: org({ id: 1 }),
+            organizations: [
+                { id: 1, name: "アクメ社", isPersonal: false },
+                { id: 2, name: "別組織", isPersonal: false },
+            ],
+        });
+        renderApp();
+
+        await fireEvent.click(desktop().getByTestId("app-user-menu-toggle"));
+        await fireEvent.click(desktop().getByTestId("org-switch-2"));
+
+        expect(routerMock.post).toHaveBeenCalledTimes(1);
+        expect(routerMock.post.mock.calls[0][0]).toBe("/organizations/2/switch");
+    });
+
+    it("mobile drawer: メニューボタンで開き、閉じるボタンで閉じる", async () => {
+        setPageProps({
+            auth: { user: authUser() },
+            notifications: { unreadCount: 0 },
+            currentOrganization: org(),
+        });
+        renderApp();
+
+        const drawer = screen.getByTestId("app-sidebar-mobile");
+        expect(drawer.className).toContain("-translate-x-full");
+
+        await fireEvent.click(screen.getByTestId("mobile-menu-button"));
+        expect(drawer.className).toContain("translate-x-0");
+
+        await fireEvent.click(screen.getByTestId("mobile-menu-close"));
+        expect(drawer.className).toContain("-translate-x-full");
+    });
+
+    it("Escape で開いている user menu が閉じる", async () => {
+        setPageProps({
+            auth: { user: authUser() },
+            notifications: { unreadCount: 0 },
+            currentOrganization: org(),
+        });
+        renderApp();
+
+        await fireEvent.click(desktop().getByTestId("app-user-menu-toggle"));
+        expect(screen.getByTestId("app-user-menu")).toBeInTheDocument();
+
+        await fireEvent.keyDown(document, { key: "Escape" });
+        expect(screen.queryByTestId("app-user-menu")).toBeNull();
+    });
+
+    it("サイドバー折りたたみ状態を localStorage から復元する", () => {
+        localStorage.setItem("aicue:layout:sidebarOpen", "false");
+        setPageProps({
+            auth: { user: authUser() },
+            notifications: { unreadCount: 0 },
+            currentOrganization: org(),
+        });
+        renderApp();
+
+        // 折りたたみ時は desktop の notification-bell (sidebarOpen 時のみ描画) が出ない
+        expect(screen.queryByTestId("notification-bell")).toBeNull();
+        // mobile 側は viewport 非依存で常時ある
+        expect(screen.getByTestId("notification-bell-mobile")).toBeInTheDocument();
     });
 });
