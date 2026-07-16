@@ -6,6 +6,7 @@
     import Textarea from "@/components/atoms/Textarea.svelte";
     import FormField from "@/components/molecules/FormField.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import PageContent from "@/components/templates/PageContent.svelte";
     import type { SharedProps } from "@/lib/shared-props";
 
     /**
@@ -24,42 +25,44 @@
 </script>
 
 <AppLayout {appName}>
-    <h1 class="text-h2">プロジェクトの作成</h1>
-    <p class="mt-1 text-caption text-text-secondary">
-        新しいプロジェクトを作成します。
-    </p>
+    <PageContent maxWidth="2xl">
+        <h1 class="text-h2">プロジェクトの作成</h1>
+        <p class="mt-1 text-caption text-text-secondary">
+            新しいプロジェクトを作成します。
+        </p>
 
-    <div class="mt-6 max-w-2xl">
-        <Card padding="lg">
-            <form onsubmit={submit} class="flex flex-col gap-4">
-                <FormField label="プロジェクト名" id="project-name" error={form.errors.name} required>
-                    {#snippet children({ id, describedBy, invalid })}
-                        <Input
-                            {id}
-                            type="text"
-                            bind:value={form.name}
-                            error={invalid}
-                            aria-describedby={describedBy}
-                        />
-                    {/snippet}
-                </FormField>
-                <FormField label="説明" id="project-description" error={form.errors.description}>
-                    {#snippet children({ id, describedBy, invalid })}
-                        <Textarea
-                            {id}
-                            bind:value={form.description}
-                            error={invalid}
-                            aria-describedby={describedBy}
-                        />
-                    {/snippet}
-                </FormField>
-                <div class="flex items-center gap-2">
-                    <Button type="submit" loading={form.processing} testId="project-submit">
-                        作成
-                    </Button>
-                    <Button variant="ghost" href="/projects" inertia>キャンセル</Button>
-                </div>
-            </form>
-        </Card>
-    </div>
+        <div class="mt-6">
+            <Card padding="lg">
+                <form onsubmit={submit} class="flex flex-col gap-4">
+                    <FormField label="プロジェクト名" id="project-name" error={form.errors.name} required>
+                        {#snippet children({ id, describedBy, invalid })}
+                            <Input
+                                {id}
+                                type="text"
+                                bind:value={form.name}
+                                error={invalid}
+                                aria-describedby={describedBy}
+                            />
+                        {/snippet}
+                    </FormField>
+                    <FormField label="説明" id="project-description" error={form.errors.description}>
+                        {#snippet children({ id, describedBy, invalid })}
+                            <Textarea
+                                {id}
+                                bind:value={form.description}
+                                error={invalid}
+                                aria-describedby={describedBy}
+                            />
+                        {/snippet}
+                    </FormField>
+                    <div class="flex items-center gap-2">
+                        <Button type="submit" loading={form.processing} testId="project-submit">
+                            作成
+                        </Button>
+                        <Button variant="ghost" href="/projects" inertia>キャンセル</Button>
+                    </div>
+                </form>
+            </Card>
+        </div>
+    </PageContent>
 </AppLayout>

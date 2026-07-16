@@ -14,6 +14,7 @@
     import Modal from "@/components/organisms/Modal.svelte";
     import RecentAuthModal from "@/components/organisms/RecentAuthModal.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import PageContent from "@/components/templates/PageContent.svelte";
     import { withRecentAuth, type RecentAuthStatus } from "@/lib/recent-auth";
     import type { SharedProps } from "@/lib/shared-props";
     import type { ConsoleRole, InvitationRow, MemberRow } from "@/types/admin";
@@ -250,280 +251,282 @@
 </script>
 
 <AppLayout {appName}>
-    <h1 class="text-h2">ユーザー管理</h1>
-    <p class="mt-1 text-caption text-text-secondary">
-        組織のメンバーと招待を管理します。ロールは「管理者・編集者・撮影者」から選択します。
-    </p>
+    <PageContent maxWidth="7xl">
+        <h1 class="text-h2">ユーザー管理</h1>
+        <p class="mt-1 text-caption text-text-secondary">
+            組織のメンバーと招待を管理します。ロールは「管理者・編集者・撮影者」から選択します。
+        </p>
 
-    <div class="mt-6 flex flex-col gap-6 md:flex-row md:items-start">
-        <aside class="w-full shrink-0 md:w-56">
-            <AdminMenuNav active="users" usersUrl="/manage/users" {categoriesUrl} />
-        </aside>
+        <div class="mt-6 flex flex-col gap-6 md:flex-row md:items-start">
+            <aside class="w-full shrink-0 md:w-56">
+                <AdminMenuNav active="users" usersUrl="/manage/users" {categoriesUrl} />
+            </aside>
 
-        <div class="flex min-w-0 grow flex-col gap-10">
-            <Card padding="lg">
-                <h2 class="text-h3">メンバー一覧</h2>
-                {#if !hasDefaultProject}
-                    <p class="mt-2 text-caption text-text-secondary" data-testid="no-project-note">
-                        プロジェクトがまだありません。編集者・撮影者を割り当てるには、先にプロジェクトを作成してください。
-                    </p>
-                    <!-- 詰まりの文脈から 1 ホップで作成画面へ (既存 CTA 流儀 = Button href+inertia) -->
-                    <Button
-                        href="/projects/create"
-                        inertia
-                        variant="ghost"
-                        size="sm"
-                        class="mt-3"
-                        testId="create-project-link"
-                    >
-                        プロジェクトを作成
-                    </Button>
-                {/if}
-                <ul class="mt-4 flex flex-col divide-y divide-border" data-testid="member-list">
-                    {#each members as member (member.id)}
-                        <!-- 375px 方針: モバイルは縦積み、sm 以上は現行の横並び (F-14)。操作ブロックは要素単位で折り返し可 -->
-                        <li
-                            class="flex flex-col gap-2 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4"
-                        >
-                            <div class="min-w-0 sm:min-w-40">
-                                <div class="flex items-center gap-2">
-                                    <p class="truncate text-body">{member.name}</p>
-                                    {#if member.twoFactorStatus === "enabled"}
-                                        <Badge tone="success">2FA</Badge>
-                                    {/if}
-                                    {#if member.roleState === "unassigned"}
-                                        <Badge tone="warning" testId={`unassigned-${member.id}`}>
-                                            未割当
-                                        </Badge>
-                                    {/if}
-                                </div>
-                                <p class="truncate text-caption text-text-secondary">
-                                    {member.email}
-                                </p>
-                            </div>
-                            <div class="flex flex-wrap items-center gap-2 sm:ml-auto sm:shrink-0 sm:justify-end">
-                                {#if canResetTwoFactor(member)}
-                                    <Button
-                                        variant="danger-ghost"
-                                        size="sm"
-                                        onclick={() => openResetTwoFactorModal(member)}
-                                        testId={`reset-two-factor-${member.id}`}
-                                    >
-                                        2FA 解除
-                                    </Button>
-                                {/if}
-                                {#if canChangeRole(member)}
-                                    <!-- 拒否時は該当行のみ remount して権威値 (member.roleState) を読み直す。
-                                         {#key} は論理ブロックで DOM 親を追加しない = actions 列の flex-wrap を保つ (F-14) -->
-                                    {#key roleResetTokens[member.id] ?? 0}
-                                        <Select
-                                            value={member.roleState === "unassigned"
-                                                ? ""
-                                                : member.roleState}
-                                            aria-label={`${member.name} のロール`}
-                                            error={roleErrorMemberId === member.id &&
-                                                !!roleMessage}
-                                            aria-describedby={roleErrorMemberId === member.id &&
-                                            roleMessage
-                                                ? `role-error-${member.id}`
-                                                : undefined}
-                                            disabled={changingRole}
-                                            onchange={(event) =>
-                                                changeRole(member, event.currentTarget.value)}
-                                            testId={`member-role-${member.id}`}
-                                        >
-                                            {#if member.roleState === "unassigned"}
-                                                <option value="">未割当（選択してください）</option>
-                                            {/if}
-                                            {#each ROLE_OPTIONS as option (option.value)}
-                                                <option value={option.value}>{option.label}</option>
-                                            {/each}
-                                        </Select>
-                                    {/key}
-                                    <!-- combobox 直下エラー: flex-wrap 内の full-width 要素として
-                                         select の次行に落とす。Select の parentElement は actions 列のまま (F-14) -->
-                                    {#if roleErrorMemberId === member.id && roleMessage}
-                                        <div class="w-full sm:text-right">
-                                            <FormError
-                                                id={`role-error-${member.id}`}
-                                                message={roleMessage}
-                                                testId={`role-error-${member.id}`}
-                                            />
-                                        </div>
-                                    {/if}
-                                    <Button
-                                        variant="danger-ghost"
-                                        size="sm"
-                                        onclick={() => openRemoveDialog(member)}
-                                        testId={`remove-member-${member.id}`}
-                                    >
-                                        削除
-                                    </Button>
-                                {:else}
-                                    <span class="text-caption text-text-secondary">
-                                        {member.roleLabel}
-                                    </span>
-                                {/if}
-                            </div>
-                        </li>
-                    {/each}
-                </ul>
-            </Card>
-
-            <Card padding="lg">
-                <h2 class="text-h3">ユーザーを追加</h2>
-                <p class="mt-1 text-caption text-text-secondary">
-                    招待メールを送信します。招待の有効期限は 7 日間です。
-                </p>
-                <form onsubmit={submitInvite} class="mt-4 flex flex-col gap-4">
-                    <FormField
-                        label="メールアドレス"
-                        id="invite-email"
-                        error={inviteForm.errors.email}
-                    >
-                        {#snippet children({ id, describedBy, invalid })}
-                            <Input
-                                {id}
-                                type="email"
-                                bind:value={inviteForm.email}
-                                error={invalid}
-                                aria-describedby={describedBy}
-                                autocomplete="off"
-                            />
-                        {/snippet}
-                    </FormField>
-                    <FormField label="ロール" id="invite-role" error={inviteForm.errors.role}>
-                        {#snippet children({ id, describedBy, invalid })}
-                            <Select
-                                {id}
-                                bind:value={inviteForm.role}
-                                error={invalid}
-                                aria-describedby={describedBy}
-                            >
-                                {#each ROLE_OPTIONS as option (option.value)}
-                                    <option value={option.value}>{option.label}</option>
-                                {/each}
-                            </Select>
-                        {/snippet}
-                    </FormField>
-                    <div>
+            <div class="flex min-w-0 grow flex-col gap-10">
+                <Card padding="lg">
+                    <h2 class="text-h3">メンバー一覧</h2>
+                    {#if !hasDefaultProject}
+                        <p class="mt-2 text-caption text-text-secondary" data-testid="no-project-note">
+                            プロジェクトがまだありません。編集者・撮影者を割り当てるには、先にプロジェクトを作成してください。
+                        </p>
+                        <!-- 詰まりの文脈から 1 ホップで作成画面へ (既存 CTA 流儀 = Button href+inertia) -->
                         <Button
-                            type="submit"
-                            loading={inviteForm.processing}
-                            testId="invite-submit"
+                            href="/projects/create"
+                            inertia
+                            variant="ghost"
+                            size="sm"
+                            class="mt-3"
+                            testId="create-project-link"
                         >
-                            招待を送信
+                            プロジェクトを作成
                         </Button>
-                    </div>
-                </form>
-            </Card>
-
-            <Card padding="lg">
-                <h2 class="text-h3">招待中</h2>
-                {#if invitations.length === 0}
-                    <EmptyState
-                        title="有効な招待はありません"
-                        description="送信した招待は受諾されるか期限が切れるまでここに表示されます。"
-                        testId="invitations-empty"
-                    />
-                {:else}
-                    <ul
-                        class="mt-4 flex flex-col divide-y divide-border"
-                        data-testid="invitation-list"
-                    >
-                        {#each invitations as invitation (invitation.id)}
-                            <!-- 375px 方針: モバイルは縦積み、sm 以上は現行の横並び (F-14) -->
+                    {/if}
+                    <ul class="mt-4 flex flex-col divide-y divide-border" data-testid="member-list">
+                        {#each members as member (member.id)}
+                            <!-- 375px 方針: モバイルは縦積み、sm 以上は現行の横並び (F-14)。操作ブロックは要素単位で折り返し可 -->
                             <li
                                 class="flex flex-col gap-2 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4"
                             >
-                                <p class="min-w-0 truncate text-body sm:min-w-40">{invitation.email}</p>
-                                <div class="flex flex-wrap items-center gap-3 sm:ml-auto sm:shrink-0 sm:justify-end">
-                                    <p class="text-caption text-text-secondary">
-                                        {invitation.roleLabel} ・ 期限 {invitation.expiresAt}
+                                <div class="min-w-0 sm:min-w-40">
+                                    <div class="flex items-center gap-2">
+                                        <p class="truncate text-body">{member.name}</p>
+                                        {#if member.twoFactorStatus === "enabled"}
+                                            <Badge tone="success">2FA</Badge>
+                                        {/if}
+                                        {#if member.roleState === "unassigned"}
+                                            <Badge tone="warning" testId={`unassigned-${member.id}`}>
+                                                未割当
+                                            </Badge>
+                                        {/if}
+                                    </div>
+                                    <p class="truncate text-caption text-text-secondary">
+                                        {member.email}
                                     </p>
-                                    <Button
-                                        variant="danger-ghost"
-                                        size="sm"
-                                        onclick={() => openRevokeDialog(invitation)}
-                                        testId={`revoke-invitation-${invitation.id}`}
-                                    >
-                                        取消
-                                    </Button>
+                                </div>
+                                <div class="flex flex-wrap items-center gap-2 sm:ml-auto sm:shrink-0 sm:justify-end">
+                                    {#if canResetTwoFactor(member)}
+                                        <Button
+                                            variant="danger-ghost"
+                                            size="sm"
+                                            onclick={() => openResetTwoFactorModal(member)}
+                                            testId={`reset-two-factor-${member.id}`}
+                                        >
+                                            2FA 解除
+                                        </Button>
+                                    {/if}
+                                    {#if canChangeRole(member)}
+                                        <!-- 拒否時は該当行のみ remount して権威値 (member.roleState) を読み直す。
+                                             {#key} は論理ブロックで DOM 親を追加しない = actions 列の flex-wrap を保つ (F-14) -->
+                                        {#key roleResetTokens[member.id] ?? 0}
+                                            <Select
+                                                value={member.roleState === "unassigned"
+                                                    ? ""
+                                                    : member.roleState}
+                                                aria-label={`${member.name} のロール`}
+                                                error={roleErrorMemberId === member.id &&
+                                                    !!roleMessage}
+                                                aria-describedby={roleErrorMemberId === member.id &&
+                                                roleMessage
+                                                    ? `role-error-${member.id}`
+                                                    : undefined}
+                                                disabled={changingRole}
+                                                onchange={(event) =>
+                                                    changeRole(member, event.currentTarget.value)}
+                                                testId={`member-role-${member.id}`}
+                                            >
+                                                {#if member.roleState === "unassigned"}
+                                                    <option value="">未割当（選択してください）</option>
+                                                {/if}
+                                                {#each ROLE_OPTIONS as option (option.value)}
+                                                    <option value={option.value}>{option.label}</option>
+                                                {/each}
+                                            </Select>
+                                        {/key}
+                                        <!-- combobox 直下エラー: flex-wrap 内の full-width 要素として
+                                             select の次行に落とす。Select の parentElement は actions 列のまま (F-14) -->
+                                        {#if roleErrorMemberId === member.id && roleMessage}
+                                            <div class="w-full sm:text-right">
+                                                <FormError
+                                                    id={`role-error-${member.id}`}
+                                                    message={roleMessage}
+                                                    testId={`role-error-${member.id}`}
+                                                />
+                                            </div>
+                                        {/if}
+                                        <Button
+                                            variant="danger-ghost"
+                                            size="sm"
+                                            onclick={() => openRemoveDialog(member)}
+                                            testId={`remove-member-${member.id}`}
+                                        >
+                                            削除
+                                        </Button>
+                                    {:else}
+                                        <span class="text-caption text-text-secondary">
+                                            {member.roleLabel}
+                                        </span>
+                                    {/if}
                                 </div>
                             </li>
                         {/each}
                     </ul>
-                {/if}
-            </Card>
-        </div>
-    </div>
+                </Card>
 
-    <ConfirmDialog
-        bind:open={removeDialogOpen}
-        title="ユーザー削除"
-        message={`${removeTarget?.name ?? ""} さんをこの組織から削除しますか？ この操作は取り消せません。`}
-        confirmLabel="削除する"
-        confirmVariant="danger"
-        processing={removing}
-        onConfirm={removeMember}
-        testId="remove-member-dialog"
-    />
+                <Card padding="lg">
+                    <h2 class="text-h3">ユーザーを追加</h2>
+                    <p class="mt-1 text-caption text-text-secondary">
+                        招待メールを送信します。招待の有効期限は 7 日間です。
+                    </p>
+                    <form onsubmit={submitInvite} class="mt-4 flex flex-col gap-4">
+                        <FormField
+                            label="メールアドレス"
+                            id="invite-email"
+                            error={inviteForm.errors.email}
+                        >
+                            {#snippet children({ id, describedBy, invalid })}
+                                <Input
+                                    {id}
+                                    type="email"
+                                    bind:value={inviteForm.email}
+                                    error={invalid}
+                                    aria-describedby={describedBy}
+                                    autocomplete="off"
+                                />
+                            {/snippet}
+                        </FormField>
+                        <FormField label="ロール" id="invite-role" error={inviteForm.errors.role}>
+                            {#snippet children({ id, describedBy, invalid })}
+                                <Select
+                                    {id}
+                                    bind:value={inviteForm.role}
+                                    error={invalid}
+                                    aria-describedby={describedBy}
+                                >
+                                    {#each ROLE_OPTIONS as option (option.value)}
+                                        <option value={option.value}>{option.label}</option>
+                                    {/each}
+                                </Select>
+                            {/snippet}
+                        </FormField>
+                        <div>
+                            <Button
+                                type="submit"
+                                loading={inviteForm.processing}
+                                testId="invite-submit"
+                            >
+                                招待を送信
+                            </Button>
+                        </div>
+                    </form>
+                </Card>
 
-    <ConfirmDialog
-        bind:open={revokeDialogOpen}
-        title="招待の取り消し"
-        message={`${revokeTarget?.email ?? ""} への招待を取り消しますか？ 取り消した招待は受諾できなくなります。`}
-        confirmLabel="取り消す"
-        confirmVariant="danger"
-        processing={revoking}
-        onConfirm={revokeInvitation}
-        testId="revoke-invitation-dialog"
-    />
-
-    <Modal
-        bind:open={resetTwoFactorModalOpen}
-        title="メンバーの 2FA を解除"
-        testId="reset-two-factor-modal"
-    >
-        <form onsubmit={submitResetTwoFactor} class="flex flex-col gap-4">
-            <p class="text-body">
-                {resetTwoFactorTarget?.name ?? ""} さんの 2 段階認証を解除します。
-                解除はこのアカウント全体に及び、本人へセキュリティ通知が送信されます。
-            </p>
-            <FormField
-                label="理由 (10 文字以上。監査ログに記録されます)"
-                id="reset-two-factor-reason"
-                error={resetTwoFactorForm.errors.reason}
-            >
-                {#snippet children({ id, describedBy, invalid })}
-                    <Input
-                        {id}
-                        type="text"
-                        bind:value={resetTwoFactorForm.reason}
-                        error={invalid}
-                        aria-describedby={describedBy}
-                        autocomplete="off"
-                    />
-                {/snippet}
-            </FormField>
-            <div class="flex justify-end">
-                <Button
-                    type="submit"
-                    variant="danger"
-                    loading={resetTwoFactorForm.processing}
-                    testId="reset-two-factor-submit"
-                >
-                    解除する
-                </Button>
+                <Card padding="lg">
+                    <h2 class="text-h3">招待中</h2>
+                    {#if invitations.length === 0}
+                        <EmptyState
+                            title="有効な招待はありません"
+                            description="送信した招待は受諾されるか期限が切れるまでここに表示されます。"
+                            testId="invitations-empty"
+                        />
+                    {:else}
+                        <ul
+                            class="mt-4 flex flex-col divide-y divide-border"
+                            data-testid="invitation-list"
+                        >
+                            {#each invitations as invitation (invitation.id)}
+                                <!-- 375px 方針: モバイルは縦積み、sm 以上は現行の横並び (F-14) -->
+                                <li
+                                    class="flex flex-col gap-2 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4"
+                                >
+                                    <p class="min-w-0 truncate text-body sm:min-w-40">{invitation.email}</p>
+                                    <div class="flex flex-wrap items-center gap-3 sm:ml-auto sm:shrink-0 sm:justify-end">
+                                        <p class="text-caption text-text-secondary">
+                                            {invitation.roleLabel} ・ 期限 {invitation.expiresAt}
+                                        </p>
+                                        <Button
+                                            variant="danger-ghost"
+                                            size="sm"
+                                            onclick={() => openRevokeDialog(invitation)}
+                                            testId={`revoke-invitation-${invitation.id}`}
+                                        >
+                                            取消
+                                        </Button>
+                                    </div>
+                                </li>
+                            {/each}
+                        </ul>
+                    {/if}
+                </Card>
             </div>
-        </form>
-    </Modal>
+        </div>
 
-    <RecentAuthModal
-        bind:open={recentAuthOpen}
-        passwordSet={recentAuthStatus?.passwordSet ?? false}
-        availableProviders={recentAuthStatus?.availableProviders ?? []}
-        canSatisfy={recentAuthStatus?.canSatisfy ?? true}
-        onConfirmed={resumePendingAction}
-    />
+        <ConfirmDialog
+            bind:open={removeDialogOpen}
+            title="ユーザー削除"
+            message={`${removeTarget?.name ?? ""} さんをこの組織から削除しますか？ この操作は取り消せません。`}
+            confirmLabel="削除する"
+            confirmVariant="danger"
+            processing={removing}
+            onConfirm={removeMember}
+            testId="remove-member-dialog"
+        />
+
+        <ConfirmDialog
+            bind:open={revokeDialogOpen}
+            title="招待の取り消し"
+            message={`${revokeTarget?.email ?? ""} への招待を取り消しますか？ 取り消した招待は受諾できなくなります。`}
+            confirmLabel="取り消す"
+            confirmVariant="danger"
+            processing={revoking}
+            onConfirm={revokeInvitation}
+            testId="revoke-invitation-dialog"
+        />
+
+        <Modal
+            bind:open={resetTwoFactorModalOpen}
+            title="メンバーの 2FA を解除"
+            testId="reset-two-factor-modal"
+        >
+            <form onsubmit={submitResetTwoFactor} class="flex flex-col gap-4">
+                <p class="text-body">
+                    {resetTwoFactorTarget?.name ?? ""} さんの 2 段階認証を解除します。
+                    解除はこのアカウント全体に及び、本人へセキュリティ通知が送信されます。
+                </p>
+                <FormField
+                    label="理由 (10 文字以上。監査ログに記録されます)"
+                    id="reset-two-factor-reason"
+                    error={resetTwoFactorForm.errors.reason}
+                >
+                    {#snippet children({ id, describedBy, invalid })}
+                        <Input
+                            {id}
+                            type="text"
+                            bind:value={resetTwoFactorForm.reason}
+                            error={invalid}
+                            aria-describedby={describedBy}
+                            autocomplete="off"
+                        />
+                    {/snippet}
+                </FormField>
+                <div class="flex justify-end">
+                    <Button
+                        type="submit"
+                        variant="danger"
+                        loading={resetTwoFactorForm.processing}
+                        testId="reset-two-factor-submit"
+                    >
+                        解除する
+                    </Button>
+                </div>
+            </form>
+        </Modal>
+
+        <RecentAuthModal
+            bind:open={recentAuthOpen}
+            passwordSet={recentAuthStatus?.passwordSet ?? false}
+            availableProviders={recentAuthStatus?.availableProviders ?? []}
+            canSatisfy={recentAuthStatus?.canSatisfy ?? true}
+            onConfirmed={resumePendingAction}
+        />
+    </PageContent>
 </AppLayout>

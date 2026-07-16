@@ -14,7 +14,6 @@
         KeyRound,
         Menu,
         Plus,
-        Settings,
         UserPlus,
         X,
     } from "@lucide/svelte";
@@ -111,7 +110,7 @@
                 icon: KeyRound,
             });
         if (org) items.push({ href: "/billing", label: "請求", icon: CreditCard });
-        items.push({ href: "/settings", label: "設定", icon: Settings });
+        // 設定は下部 SidebarUserMenu(個人設定)に一本化。左 nav には出さない(aigenba 準拠, T070)。
         return items;
     });
 

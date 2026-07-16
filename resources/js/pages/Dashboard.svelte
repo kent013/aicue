@@ -8,6 +8,7 @@
     import EmptyState from "@/components/molecules/EmptyState.svelte";
     import StatCard from "@/components/molecules/StatCard.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import PageContent from "@/components/templates/PageContent.svelte";
     import type { SharedProps } from "@/lib/shared-props";
     import type { DashboardProps } from "@/types/dashboard";
     import { STATUS_TONES, VIDEO_MANUAL_STATUS_LABELS } from "@/types/manual";
@@ -136,185 +137,187 @@
 
 <!-- 設定/ログアウトのヘッダーナビは AppLayout が常設する (F-08。page-local に持たない) -->
 <AppLayout {appName}>
-    <h1 class="text-h2">{user?.name ?? ""} さん、ようこそ</h1>
-    <p class="mt-1 text-caption text-text-secondary">今日のアクティビティを確認しましょう。</p>
+    <PageContent maxWidth="7xl">
+        <h1 class="text-h2">{user?.name ?? ""} さん、ようこそ</h1>
+        <p class="mt-1 text-caption text-text-secondary">今日のアクティビティを確認しましょう。</p>
 
-    {#if dashboard.state === "no_organization"}
-        <Card padding="none" class="mt-6">
-            <EmptyState
-                title="まずは組織を作成しましょう"
-                description="組織を作成すると、プロジェクトとマニュアルの管理を始められます。"
-                icon={Building}
-                cta={{ kind: "link", label: "組織を作成", href: "/organizations/create" }}
-                testId="dashboard-setup-org"
-            />
-        </Card>
-    {:else}
-        <!-- スタットタイル (org があれば billing は非 null) -->
-        {#if billing}
-            <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <div>
-                    <StatCard
-                        label="チケット残高"
-                        value={billing.ticket_balance}
-                        subtext={billing.is_low_balance ? "残高が少なくなっています" : undefined}
-                        icon={Ticket}
-                        testId="stat-tickets"
-                    />
-                    {#if billing.is_low_balance}
-                        <p class="mt-2 text-caption">
-                            <TextLink href="/purchase-tickets" testId="purchase-link">
-                                チケットを購入
-                            </TextLink>
-                        </p>
-                    {/if}
-                </div>
-                <StatCard
-                    label="容量使用率"
-                    value={billing.storage_usage_percent === null
-                        ? "無制限"
-                        : `${billing.storage_usage_percent}%`}
-                    subtext={billing.storage_limit_bytes === null
-                        ? `${formatBytes(billing.storage_used_bytes)} 使用中`
-                        : `${formatBytes(billing.storage_used_bytes)} / ${formatBytes(billing.storage_limit_bytes)}`}
-                    icon={HardDrive}
-                    testId="stat-storage"
-                />
-                <div>
-                    <StatCard label="未読通知" value={unreadCount} icon={Bell} testId="stat-unread" />
-                    <p class="mt-2 text-caption">
-                        <TextLink href="/notifications">通知を確認</TextLink>
-                    </p>
-                </div>
-                <StatCard
-                    label="進行中ジョブ"
-                    value={dashboard.in_progress.length}
-                    icon={Loader}
-                    testId="stat-inprogress"
-                />
-            </div>
-
-            {#if !billing.has_billing_access}
-                <Card class="mt-6" testId="billing-callout">
-                    <p class="text-body text-text">
-                        サブスクリプションのお支払いが確認できないため、一部機能を一時停止しています。お支払い方法をご確認ください。
-                    </p>
-                    <div class="mt-4">
-                        <Button href="/billing" inertia>お支払い方法を確認</Button>
-                    </div>
-                </Card>
-            {/if}
-        {/if}
-
-        {#if dashboard.state === "no_project"}
+        {#if dashboard.state === "no_organization"}
             <Card padding="none" class="mt-6">
-                {#if dashboard.can_create_project}
-                    <EmptyState
-                        title="プロジェクトを作成しましょう"
-                        description="プロジェクトを作成すると、マニュアルの管理を始められます。"
-                        icon={FolderPlus}
-                        cta={{ kind: "link", label: "プロジェクトを作成", href: "/projects/create" }}
-                        testId="dashboard-setup-project"
-                    />
-                {:else}
-                    <EmptyState
-                        title="プロジェクトがまだありません"
-                        description={`「${dashboard.organization_name ?? ""}」の管理者にプロジェクト作成を依頼してください。`}
-                        icon={FolderPlus}
-                        testId="no-project-guidance"
-                    />
-                {/if}
+                <EmptyState
+                    title="まずは組織を作成しましょう"
+                    description="組織を作成すると、プロジェクトとマニュアルの管理を始められます。"
+                    icon={Building}
+                    cta={{ kind: "link", label: "組織を作成", href: "/organizations/create" }}
+                    testId="dashboard-setup-org"
+                />
             </Card>
-        {:else if dashboard.state === "ready"}
-            {#if dashboard.in_progress.length > 0}
-                <Card class="mt-6" testId="inprogress-card">
-                    <h2 class="text-h3 text-text">進行中ジョブ</h2>
-                    <ul class="mt-3 divide-y divide-border">
-                        {#each dashboard.in_progress as row (row.manual_id)}
-                            <li class="py-3" data-testid="inprogress-item">
-                                <div class="flex flex-wrap items-center justify-between gap-3">
-                                    <p class="min-w-0 truncate text-body text-text">{row.title}</p>
-                                    <Badge tone={STATUS_TONES[row.manual_status]}>
-                                        {VIDEO_MANUAL_STATUS_LABELS[row.manual_status]}
-                                    </Badge>
-                                </div>
-                                {#if row.job_status !== null && row.progress !== null}
-                                    <div
-                                        class="mt-2 h-2 w-full overflow-hidden rounded-sm bg-neutral"
-                                        role="progressbar"
-                                        aria-valuenow={row.progress}
-                                        aria-valuemin={0}
-                                        aria-valuemax={100}
-                                        data-testid="inprogress-bar"
-                                    >
-                                        <div
-                                            class="h-full bg-primary"
-                                            style="width: {row.progress}%"
-                                        ></div>
-                                    </div>
-                                {:else}
-                                    <p class="mt-2 text-caption text-text-secondary">準備中</p>
-                                {/if}
-                                <div
-                                    class="mt-2 flex flex-wrap items-center justify-between gap-2 text-caption text-text-secondary"
-                                >
-                                    <span>
-                                        {row.job_updated_at !== null
-                                            ? `最終更新 ${row.job_updated_at}`
-                                            : ""}
-                                    </span>
-                                    {#if project}
-                                        <TextLink
-                                            href={`/projects/${project.id}/manuals/${row.manual_id}`}
-                                            testId="inprogress-detail-link"
-                                        >
-                                            詳細で最新の進捗を確認
-                                        </TextLink>
-                                    {/if}
-                                </div>
-                            </li>
-                        {/each}
-                    </ul>
-                </Card>
-            {/if}
-
-            {#if isShooter}
-                <!-- 撮影者は撮影対象を先頭に -->
-                {@render shootingCard()}
-                {@render recentCard()}
-            {:else}
-                {@render recentCard()}
-                {@render shootingCard()}
-            {/if}
-
-            {#if project && (isEditor || isShooter)}
-                <Card class="mt-6" testId="quick-actions">
-                    <h2 class="text-h3 text-text">クイックアクション</h2>
-                    <div class="mt-3 flex flex-wrap gap-3">
-                        {#if isEditor}
-                            <Button
-                                href={`/projects/${project.id}/manuals/create`}
-                                inertia
-                                testId="qa-create-manual"
-                            >
-                                新規マニュアル作成
-                            </Button>
-                            <Button
-                                variant="neutral"
-                                href={`/projects/${project.id}/categories`}
-                                inertia
-                                testId="qa-categories"
-                            >
-                                カテゴリ管理
-                            </Button>
+        {:else}
+            <!-- スタットタイル (org があれば billing は非 null) -->
+            {#if billing}
+                <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    <div>
+                        <StatCard
+                            label="チケット残高"
+                            value={billing.ticket_balance}
+                            subtext={billing.is_low_balance ? "残高が少なくなっています" : undefined}
+                            icon={Ticket}
+                            testId="stat-tickets"
+                        />
+                        {#if billing.is_low_balance}
+                            <p class="mt-2 text-caption">
+                                <TextLink href="/purchase-tickets" testId="purchase-link">
+                                    チケットを購入
+                                </TextLink>
+                            </p>
                         {/if}
-                        <Button variant="neutral" href="/app" inertia testId="qa-capture">
-                            <Camera class="size-4" aria-hidden="true" />
-                            撮影アプリを開く
-                        </Button>
                     </div>
+                    <StatCard
+                        label="容量使用率"
+                        value={billing.storage_usage_percent === null
+                            ? "無制限"
+                            : `${billing.storage_usage_percent}%`}
+                        subtext={billing.storage_limit_bytes === null
+                            ? `${formatBytes(billing.storage_used_bytes)} 使用中`
+                            : `${formatBytes(billing.storage_used_bytes)} / ${formatBytes(billing.storage_limit_bytes)}`}
+                        icon={HardDrive}
+                        testId="stat-storage"
+                    />
+                    <div>
+                        <StatCard label="未読通知" value={unreadCount} icon={Bell} testId="stat-unread" />
+                        <p class="mt-2 text-caption">
+                            <TextLink href="/notifications">通知を確認</TextLink>
+                        </p>
+                    </div>
+                    <StatCard
+                        label="進行中ジョブ"
+                        value={dashboard.in_progress.length}
+                        icon={Loader}
+                        testId="stat-inprogress"
+                    />
+                </div>
+
+                {#if !billing.has_billing_access}
+                    <Card class="mt-6" testId="billing-callout">
+                        <p class="text-body text-text">
+                            サブスクリプションのお支払いが確認できないため、一部機能を一時停止しています。お支払い方法をご確認ください。
+                        </p>
+                        <div class="mt-4">
+                            <Button href="/billing" inertia>お支払い方法を確認</Button>
+                        </div>
+                    </Card>
+                {/if}
+            {/if}
+
+            {#if dashboard.state === "no_project"}
+                <Card padding="none" class="mt-6">
+                    {#if dashboard.can_create_project}
+                        <EmptyState
+                            title="プロジェクトを作成しましょう"
+                            description="プロジェクトを作成すると、マニュアルの管理を始められます。"
+                            icon={FolderPlus}
+                            cta={{ kind: "link", label: "プロジェクトを作成", href: "/projects/create" }}
+                            testId="dashboard-setup-project"
+                        />
+                    {:else}
+                        <EmptyState
+                            title="プロジェクトがまだありません"
+                            description={`「${dashboard.organization_name ?? ""}」の管理者にプロジェクト作成を依頼してください。`}
+                            icon={FolderPlus}
+                            testId="no-project-guidance"
+                        />
+                    {/if}
                 </Card>
+            {:else if dashboard.state === "ready"}
+                {#if dashboard.in_progress.length > 0}
+                    <Card class="mt-6" testId="inprogress-card">
+                        <h2 class="text-h3 text-text">進行中ジョブ</h2>
+                        <ul class="mt-3 divide-y divide-border">
+                            {#each dashboard.in_progress as row (row.manual_id)}
+                                <li class="py-3" data-testid="inprogress-item">
+                                    <div class="flex flex-wrap items-center justify-between gap-3">
+                                        <p class="min-w-0 truncate text-body text-text">{row.title}</p>
+                                        <Badge tone={STATUS_TONES[row.manual_status]}>
+                                            {VIDEO_MANUAL_STATUS_LABELS[row.manual_status]}
+                                        </Badge>
+                                    </div>
+                                    {#if row.job_status !== null && row.progress !== null}
+                                        <div
+                                            class="mt-2 h-2 w-full overflow-hidden rounded-sm bg-neutral"
+                                            role="progressbar"
+                                            aria-valuenow={row.progress}
+                                            aria-valuemin={0}
+                                            aria-valuemax={100}
+                                            data-testid="inprogress-bar"
+                                        >
+                                            <div
+                                                class="h-full bg-primary"
+                                                style="width: {row.progress}%"
+                                            ></div>
+                                        </div>
+                                    {:else}
+                                        <p class="mt-2 text-caption text-text-secondary">準備中</p>
+                                    {/if}
+                                    <div
+                                        class="mt-2 flex flex-wrap items-center justify-between gap-2 text-caption text-text-secondary"
+                                    >
+                                        <span>
+                                            {row.job_updated_at !== null
+                                                ? `最終更新 ${row.job_updated_at}`
+                                                : ""}
+                                        </span>
+                                        {#if project}
+                                            <TextLink
+                                                href={`/projects/${project.id}/manuals/${row.manual_id}`}
+                                                testId="inprogress-detail-link"
+                                            >
+                                                詳細で最新の進捗を確認
+                                            </TextLink>
+                                        {/if}
+                                    </div>
+                                </li>
+                            {/each}
+                        </ul>
+                    </Card>
+                {/if}
+
+                {#if isShooter}
+                    <!-- 撮影者は撮影対象を先頭に -->
+                    {@render shootingCard()}
+                    {@render recentCard()}
+                {:else}
+                    {@render recentCard()}
+                    {@render shootingCard()}
+                {/if}
+
+                {#if project && (isEditor || isShooter)}
+                    <Card class="mt-6" testId="quick-actions">
+                        <h2 class="text-h3 text-text">クイックアクション</h2>
+                        <div class="mt-3 flex flex-wrap gap-3">
+                            {#if isEditor}
+                                <Button
+                                    href={`/projects/${project.id}/manuals/create`}
+                                    inertia
+                                    testId="qa-create-manual"
+                                >
+                                    新規マニュアル作成
+                                </Button>
+                                <Button
+                                    variant="neutral"
+                                    href={`/projects/${project.id}/categories`}
+                                    inertia
+                                    testId="qa-categories"
+                                >
+                                    カテゴリ管理
+                                </Button>
+                            {/if}
+                            <Button variant="neutral" href="/app" inertia testId="qa-capture">
+                                <Camera class="size-4" aria-hidden="true" />
+                                撮影アプリを開く
+                            </Button>
+                        </div>
+                    </Card>
+                {/if}
             {/if}
         {/if}
-    {/if}
+    </PageContent>
 </AppLayout>

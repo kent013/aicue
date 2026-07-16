@@ -6,6 +6,7 @@
     import Select from "@/components/atoms/Select.svelte";
     import FormField from "@/components/molecules/FormField.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import PageContent from "@/components/templates/PageContent.svelte";
     import type { SharedProps } from "@/lib/shared-props";
     import type { CategoryOption } from "@/types/manual";
 
@@ -46,73 +47,75 @@
 </script>
 
 <AppLayout {appName}>
-    <h1 class="text-h2">動画マニュアルの作成</h1>
-    <p class="mt-1 text-caption text-text-secondary">
-        {project.name} に新しい動画マニュアルを作成します。
-    </p>
+    <PageContent maxWidth="2xl">
+        <h1 class="text-h2">動画マニュアルの作成</h1>
+        <p class="mt-1 text-caption text-text-secondary">
+            {project.name} に新しい動画マニュアルを作成します。
+        </p>
 
-    <div class="mt-6 max-w-2xl">
-        <Card padding="lg">
-            <form onsubmit={submit} class="flex flex-col gap-4">
-                <FormField label="タイトル" id="manual-title" error={form.errors.title} required>
-                    {#snippet children({ id, describedBy, invalid })}
-                        <Input
-                            {id}
-                            type="text"
-                            bind:value={form.title}
-                            error={invalid}
-                            aria-describedby={describedBy}
-                            oninput={() => {
-                                // 入力し始めたらその場でタイトルエラーをクリア (次 submit を待たない)
-                                if (form.errors.title) form.clearErrors("title");
-                            }}
-                        />
-                    {/snippet}
-                </FormField>
-                <FormField label="カテゴリ" id="manual-category" error={form.errors.category}>
-                    {#snippet children({ id, describedBy, invalid })}
-                        <Select
-                            {id}
-                            bind:value={form.category}
-                            error={invalid}
-                            aria-describedby={describedBy}
-                            testId="manual-category-select"
-                        >
-                            <option value="">未分類</option>
-                            {#each categories as category (category.id)}
-                                <option value={String(category.id)}>{category.name}</option>
-                            {/each}
-                        </Select>
-                    {/snippet}
-                </FormField>
-                <FormField
-                    label="手順書 (SOP・任意)"
-                    id="manual-document"
-                    error={form.errors.document}
-                    help="PDF / Excel / テキスト。アップロードすると AI 解析でシナリオを生成できます。"
-                >
-                    {#snippet children({ id, describedBy, invalid })}
-                        <input
-                            {id}
-                            type="file"
-                            accept=".pdf,.xlsx,.xls,.txt"
-                            onchange={onFileChange}
-                            aria-describedby={describedBy}
-                            aria-invalid={invalid}
-                            class="block w-full text-body text-text file:mr-3 file:rounded-md file:border file:border-border file:bg-surface file:px-3 file:py-1.5 file:text-caption file:text-text"
-                            data-testid="manual-document-input"
-                        />
-                    {/snippet}
-                </FormField>
-                <div class="flex items-center gap-2">
-                    <Button type="submit" loading={form.processing} testId="manual-submit">
-                        作成
-                    </Button>
-                    <Button variant="ghost" href={`/projects/${project.id}`} inertia>
-                        キャンセル
-                    </Button>
-                </div>
-            </form>
-        </Card>
-    </div>
+        <div class="mt-6">
+            <Card padding="lg">
+                <form onsubmit={submit} class="flex flex-col gap-4">
+                    <FormField label="タイトル" id="manual-title" error={form.errors.title} required>
+                        {#snippet children({ id, describedBy, invalid })}
+                            <Input
+                                {id}
+                                type="text"
+                                bind:value={form.title}
+                                error={invalid}
+                                aria-describedby={describedBy}
+                                oninput={() => {
+                                    // 入力し始めたらその場でタイトルエラーをクリア (次 submit を待たない)
+                                    if (form.errors.title) form.clearErrors("title");
+                                }}
+                            />
+                        {/snippet}
+                    </FormField>
+                    <FormField label="カテゴリ" id="manual-category" error={form.errors.category}>
+                        {#snippet children({ id, describedBy, invalid })}
+                            <Select
+                                {id}
+                                bind:value={form.category}
+                                error={invalid}
+                                aria-describedby={describedBy}
+                                testId="manual-category-select"
+                            >
+                                <option value="">未分類</option>
+                                {#each categories as category (category.id)}
+                                    <option value={String(category.id)}>{category.name}</option>
+                                {/each}
+                            </Select>
+                        {/snippet}
+                    </FormField>
+                    <FormField
+                        label="手順書 (SOP・任意)"
+                        id="manual-document"
+                        error={form.errors.document}
+                        help="PDF / Excel / テキスト。アップロードすると AI 解析でシナリオを生成できます。"
+                    >
+                        {#snippet children({ id, describedBy, invalid })}
+                            <input
+                                {id}
+                                type="file"
+                                accept=".pdf,.xlsx,.xls,.txt"
+                                onchange={onFileChange}
+                                aria-describedby={describedBy}
+                                aria-invalid={invalid}
+                                class="block w-full text-body text-text file:mr-3 file:rounded-md file:border file:border-border file:bg-surface file:px-3 file:py-1.5 file:text-caption file:text-text"
+                                data-testid="manual-document-input"
+                            />
+                        {/snippet}
+                    </FormField>
+                    <div class="flex items-center gap-2">
+                        <Button type="submit" loading={form.processing} testId="manual-submit">
+                            作成
+                        </Button>
+                        <Button variant="ghost" href={`/projects/${project.id}`} inertia>
+                            キャンセル
+                        </Button>
+                    </div>
+                </form>
+            </Card>
+        </div>
+    </PageContent>
 </AppLayout>
