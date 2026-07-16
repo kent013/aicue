@@ -1,0 +1,51 @@
+- generic [ref=e34]:
+  - complementary [ref=e35]:
+    - generic [ref=e36]:
+      - link "AI-CUE" [ref=e37] [cursor=pointer]:
+        - /url: /dashboard
+      - link "通知" [ref=e38] [cursor=pointer]:
+        - /url: http://127.0.0.1:8010/notifications
+    - button "サイドバーを折りたたむ" [ref=e40]
+    - navigation [ref=e42]:
+      - link "ダッシュボード" [ref=e43] [cursor=pointer]:
+        - /url: /dashboard
+      - link "プロジェクト" [ref=e46] [cursor=pointer]:
+        - /url: /projects
+      - link "メンバー" [ref=e49] [cursor=pointer]:
+        - /url: /manage/users
+      - link "API キー" [ref=e52] [cursor=pointer]:
+        - /url: /organizations/free-wmxp24/api-keys
+      - link "請求" [ref=e55] [cursor=pointer]:
+        - /url: /billing
+    - button [ref=e59]:
+      - generic [ref=e62]:
+        - paragraph [ref=e63]: Freeプラン組織
+        - paragraph [ref=e64]: Free Owner
+  - main [ref=e66]:
+    - generic [ref=e69]:
+      - heading "Free Owner さん、ようこそ" [level=1] [ref=e75]
+      - paragraph [ref=e77]: 今日のアクティビティを確認しましょう。
+      - generic [ref=e78]:
+        - generic [ref=e79]:
+          - generic [ref=e85]:
+            - paragraph [ref=e86]: チケット残高
+            - paragraph [ref=e87]: "100"
+          - generic [ref=e92]:
+            - paragraph [ref=e93]: 容量使用率
+            - paragraph [ref=e94]: 0%
+            - paragraph [ref=e95]: 0 B / 1.0 GB
+          - generic [ref=e96]:
+            - generic [ref=e101]:
+              - paragraph [ref=e102]: 未読通知
+              - paragraph [ref=e103]: "0"
+            - paragraph [ref=e104]:
+              - link "通知を確認" [ref=e105] [cursor=pointer]:
+                - /url: http://127.0.0.1:8010/notifications
+          - generic [ref=e110]:
+            - paragraph [ref=e111]: 進行中ジョブ
+            - paragraph [ref=e112]: "0"
+        - generic [ref=e114]:
+          - heading "プロジェクトを作成しましょう" [level=3] [ref=e116]
+          - paragraph [ref=e117]: プロジェクトを作成すると、マニュアルの管理を始められます。
+          - link "プロジェクトを作成" [ref=e119] [cursor=pointer]:
+            - /url: http://127.0.0.1:8010/projects/create

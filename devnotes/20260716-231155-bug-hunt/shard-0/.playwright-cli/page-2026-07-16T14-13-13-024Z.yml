@@ -1,0 +1,73 @@
+- generic [ref=f2e3]:
+  - complementary [ref=f2e4]:
+    - generic [ref=f2e5]:
+      - link "AI-CUE" [ref=f2e6] [cursor=pointer]:
+        - /url: /dashboard
+      - link "通知" [ref=f2e7] [cursor=pointer]:
+        - /url: http://127.0.0.1:8010/notifications
+    - button "サイドバーを折りたたむ" [ref=f2e9]
+    - navigation [ref=f2e11]:
+      - link "ダッシュボード" [ref=f2e12] [cursor=pointer]:
+        - /url: /dashboard
+      - link "プロジェクト" [ref=f2e15] [cursor=pointer]:
+        - /url: /projects
+      - link "メンバー" [ref=f2e18] [cursor=pointer]:
+        - /url: /manage/users
+      - link "API キー" [ref=f2e21] [cursor=pointer]:
+        - /url: /organizations/free-wmxp24/api-keys
+      - link "請求" [ref=f2e24] [cursor=pointer]:
+        - /url: /billing
+    - button [ref=f2e28]:
+      - generic [ref=f2e31]:
+        - paragraph [ref=f2e32]: Freeプラン組織
+        - paragraph [ref=f2e33]: Free Owner
+  - main [ref=f2e35]:
+    - generic [ref=f2e38]:
+      - heading "設定" [level=1] [ref=f2e44]
+      - generic [ref=f2e45]:
+        - navigation "設定メニュー" [ref=f2e46]:
+          - link "プロフィール" [ref=f2e47] [cursor=pointer]:
+            - /url: http://127.0.0.1:8010/settings
+          - link "セキュリティ" [ref=f2e48] [cursor=pointer]:
+            - /url: http://127.0.0.1:8010/settings/security
+        - generic [ref=f2e49]:
+          - generic [ref=f2e50]:
+            - heading "プロフィール" [level=2] [ref=f2e51]
+            - paragraph [ref=f2e52]: 名前とメールアドレスを更新します。
+            - generic [ref=f2e53]:
+              - generic [ref=f2e54]:
+                - generic [ref=f2e55]: 名前
+                - textbox "名前" [ref=f2e56]: Free Owner
+              - generic [ref=f2e57]:
+                - generic [ref=f2e58]: メールアドレス
+                - textbox "メールアドレス" [ref=f2e59]: owner-free@example.com
+              - button "保存" [ref=f2e61]
+          - generic [ref=f2e62]:
+            - heading "パスワード変更" [level=2] [ref=f2e63]
+            - paragraph [ref=f2e64]: 現在のパスワードを確認のうえ、新しいパスワードに変更します。
+            - generic [ref=f2e65]:
+              - generic [ref=f2e66]:
+                - generic [ref=f2e67]: 現在のパスワード
+                - generic [ref=f2e68]:
+                  - textbox "現在のパスワード" [ref=f2e69]
+                  - button "パスワードを表示" [ref=f2e70]
+              - generic [ref=f2e72]:
+                - generic [ref=f2e73]: 新しいパスワード
+                - generic [ref=f2e74]:
+                  - textbox "新しいパスワード" [ref=f2e75]
+                  - button "パスワードを表示" [ref=f2e76]
+              - button "パスワードを変更" [ref=f2e79]
+          - region [ref=f2e80]:
+            - heading "アカウント削除" [level=3] [ref=f2e81]
+            - paragraph [ref=f2e82]: アカウントを削除すると、すべてのデータが完全に失われます。この操作は取り消せません。
+            - generic [ref=f2e83]:
+              - status [ref=f2e84]:
+                - generic [ref=f2e86]:
+                  - heading "オーナー移譲が必要です" [level=4] [ref=f2e87]
+                  - generic [ref=f2e88]:
+                    - text: 以下の組織であなたが唯一のオーナーです。アカウントを削除する前に、各組織で オーナーを別のメンバーへ移譲してください（削除時にサーバーが再判定します）。
+                    - list [ref=f2e89]:
+                      - listitem [ref=f2e90]:
+                        - link "Freeプラン組織 の設定へ" [ref=f2e91] [cursor=pointer]:
+                          - /url: http://127.0.0.1:8010/organizations/free-wmxp24/settings
+              - button "アカウントを削除" [ref=f2e92]
