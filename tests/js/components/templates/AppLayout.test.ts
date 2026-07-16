@@ -62,6 +62,11 @@ function desktop() {
     return within(screen.getByTestId("app-sidebar"));
 }
 
+/** mobile シェル (app-sidebar-mobile ドロワー) にスコープした query。 */
+function mobile() {
+    return within(screen.getByTestId("app-sidebar-mobile"));
+}
+
 afterEach(() => {
     cleanup();
     routerMock.post.mockReset();
@@ -164,7 +169,8 @@ describe("templates/AppLayout", () => {
 
         const d = desktop();
         expect(d.getByTestId("nav-item-/dashboard")).toBeInTheDocument();
-        expect(d.getByTestId("nav-item-/settings")).toBeInTheDocument();
+        // 設定は左 nav から撤去 (下部ユーザーメニューに一本化, T070) のため nav 項目としては出ない
+        expect(d.queryByTestId("nav-item-/settings")).toBeNull();
         expect(d.queryByTestId("nav-item-/projects")).toBeNull();
         expect(d.queryByTestId("nav-item-/billing")).toBeNull();
         expect(d.queryByTestId("nav-item-/manage/users")).toBeNull();
@@ -206,6 +212,38 @@ describe("templates/AppLayout", () => {
         renderApp();
 
         expect(desktop().getByTestId("nav-item-/organizations/acme/api-keys")).toBeInTheDocument();
+    });
+
+    // --- 設定は下部ユーザーメニューに一本化 (T070: 左 nav に設定を出さない) ---
+
+    it("左サイドバー nav に「設定」(/settings) を出さない (desktop/mobile 両シェル)", () => {
+        setPageProps({
+            auth: { user: authUser() },
+            notifications: { unreadCount: 0 },
+            currentOrganization: org(),
+        });
+        renderApp();
+
+        // 左 nav に /settings 項目が無い (設定はポップアップの個人設定に一本化)
+        expect(desktop().queryByTestId("nav-item-/settings")).toBeNull();
+        expect(mobile().queryByTestId("nav-item-/settings")).toBeNull();
+        // ダッシュボード等の他 nav は出る (回帰の確認)
+        expect(desktop().getByTestId("nav-item-/dashboard")).toBeInTheDocument();
+    });
+
+    it("個人設定 (/settings) は下部ユーザーメニュー内に一本化して存在する", async () => {
+        setPageProps({
+            auth: { user: authUser() },
+            notifications: { unreadCount: 0 },
+            currentOrganization: org(),
+        });
+        renderApp();
+
+        await fireEvent.click(desktop().getByTestId("app-user-menu-toggle"));
+        const settings = desktop().getByTestId("nav-settings");
+        expect(new URL(settings.getAttribute("href") ?? "", "http://localhost").pathname).toBe(
+            "/settings",
+        );
     });
 
     // --- 組織切替 / drawer / Escape ---

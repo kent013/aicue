@@ -11,6 +11,7 @@
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
     import RecentAuthModal from "@/components/organisms/RecentAuthModal.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import PageContent from "@/components/templates/PageContent.svelte";
     import { withRecentAuth, type RecentAuthStatus } from "@/lib/recent-auth";
     import type { SharedProps } from "@/lib/shared-props";
 
@@ -164,173 +165,175 @@
 </script>
 
 <AppLayout {appName}>
-    <h1 class="text-h2">組織設定</h1>
-    <p class="mt-1 text-caption text-text-secondary">
-        {organization.name} の設定を管理します。
-    </p>
+    <PageContent maxWidth="2xl">
+        <h1 class="text-h2">組織設定</h1>
+        <p class="mt-1 text-caption text-text-secondary">
+            {organization.name} の設定を管理します。
+        </p>
 
-    <div class="mt-6 flex max-w-2xl flex-col gap-10">
-        <Card padding="lg">
-            <h2 class="text-h3">組織名</h2>
-            {#if canManage}
-                <form onsubmit={submitName} class="mt-4 flex flex-col gap-4">
-                    <FormField label="組織名" id="organization-name" error={nameForm.errors.name}>
-                        {#snippet children({ id, describedBy, invalid })}
-                            <Input
-                                {id}
-                                type="text"
-                                bind:value={nameForm.name}
-                                error={invalid}
-                                aria-describedby={describedBy}
-                            />
-                        {/snippet}
-                    </FormField>
-                    <div>
-                        <Button type="submit" loading={nameForm.processing}>保存</Button>
-                    </div>
-                </form>
-            {:else}
-                <p class="mt-2 text-body">{organization.name}</p>
-            {/if}
-        </Card>
-
-        {#if isOwner}
+        <div class="mt-6 flex flex-col gap-10">
             <Card padding="lg">
-                <h2 class="text-h3">セキュリティ</h2>
-                <p class="mt-1 text-caption text-text-secondary">
-                    2 段階認証を必須にすると、未設定のメンバーは設定が完了するまで他のページを利用できなくなります。
-                </p>
-                <div class="mt-4 flex items-center justify-between gap-4">
-                    <div class="flex items-center gap-2">
-                        <span class="text-body">2 段階認証の必須化</span>
-                        <Badge tone={organization.twoFactorRequired ? "success" : "neutral"}>
-                            {organization.twoFactorRequired ? "有効" : "無効"}
-                        </Badge>
-                    </div>
-                    <Button
-                        variant={organization.twoFactorRequired ? "danger-outline" : "primary"}
-                        size="sm"
-                        loading={twoFactorRequirementForm.processing}
-                        onclick={toggleTwoFactorRequirement}
-                        testId="toggle-two-factor-requirement"
-                    >
-                        {organization.twoFactorRequired ? "必須化を解除" : "必須にする"}
-                    </Button>
-                </div>
-                {#if twoFactorRequirementForm.errors.enabled}
-                    <p class="mt-2 text-caption text-danger" role="alert">
-                        {twoFactorRequirementForm.errors.enabled}
-                    </p>
+                <h2 class="text-h3">組織名</h2>
+                {#if canManage}
+                    <form onsubmit={submitName} class="mt-4 flex flex-col gap-4">
+                        <FormField label="組織名" id="organization-name" error={nameForm.errors.name}>
+                            {#snippet children({ id, describedBy, invalid })}
+                                <Input
+                                    {id}
+                                    type="text"
+                                    bind:value={nameForm.name}
+                                    error={invalid}
+                                    aria-describedby={describedBy}
+                                />
+                            {/snippet}
+                        </FormField>
+                        <div>
+                            <Button type="submit" loading={nameForm.processing}>保存</Button>
+                        </div>
+                    </form>
+                {:else}
+                    <p class="mt-2 text-body">{organization.name}</p>
                 {/if}
             </Card>
-        {/if}
 
-        {#if usersUrl !== null}
-            <Card padding="lg">
-                <div class="flex items-start justify-between gap-4">
-                    <div>
-                        <h2 class="text-h3">ユーザー管理</h2>
-                        <p class="mt-1 text-caption text-text-secondary">
-                            メンバーの一覧・招待・ロール変更・削除は管理メニューのユーザー管理画面で行います。
-                        </p>
-                    </div>
-                    <TextLink href={usersUrl} testId="link-manage-users">
-                        管理画面を開く
-                    </TextLink>
-                </div>
-            </Card>
-        {/if}
-
-        {#if canManageApiKeys}
-            <Card padding="lg">
-                <div class="flex items-start justify-between gap-4">
-                    <div>
-                        <h2 class="text-h3">API キー / 接続セッション</h2>
-                        <p class="mt-1 text-caption text-text-secondary">
-                            REST API / MCP アクセスのキー発行・失効と、CLI / MCP の接続セッション管理は専用画面で行います。
-                        </p>
-                    </div>
-                    <TextLink
-                        href={`/organizations/${organization.slug}/api-keys`}
-                        testId="link-api-keys"
-                    >
-                        管理画面を開く
-                    </TextLink>
-                </div>
-            </Card>
-        {/if}
-
-        {#if isOwner}
-            <DangerZone
-                title="オーナー移譲"
-                description="組織のオーナー権限を別のメンバーへ移譲します。移譲後、あなたは管理者になります。この操作にはパスワードの再確認が必要です。"
-            >
-                {#if transferCandidates.length === 0}
-                    <p
-                        class="text-caption text-text-secondary"
-                        data-testid="transfer-no-candidates"
-                    >
-                        {NO_TRANSFER_CANDIDATES}先に
-                        {#if usersUrl !== null}
-                            <TextLink href={usersUrl}>管理メニュー &gt; ユーザー管理</TextLink>
-                            からメンバーを招待してください。
-                        {:else}
-                            メンバーを招待できる管理者に依頼してください。
-                        {/if}
+            {#if isOwner}
+                <Card padding="lg">
+                    <h2 class="text-h3">セキュリティ</h2>
+                    <p class="mt-1 text-caption text-text-secondary">
+                        2 段階認証を必須にすると、未設定のメンバーは設定が完了するまで他のページを利用できなくなります。
                     </p>
-                {/if}
-                <form onsubmit={openTransferDialog} class="flex flex-col gap-4">
-                    <FormField
-                        label="移譲先のメンバー"
-                        id="transfer-target"
-                        error={transferClientError ?? transferForm.errors.user_id}
-                    >
-                        {#snippet children({ id, describedBy, invalid })}
-                            <Select
-                                {id}
-                                bind:value={transferForm.user_id}
-                                error={invalid}
-                                aria-describedby={describedBy}
-                            >
-                                <option value="">選択してください</option>
-                                {#each transferCandidates as candidate (candidate.id)}
-                                    <option value={String(candidate.id)}>
-                                        {candidate.name}
-                                    </option>
-                                {/each}
-                            </Select>
-                        {/snippet}
-                    </FormField>
-                    <div>
+                    <div class="mt-4 flex items-center justify-between gap-4">
+                        <div class="flex items-center gap-2">
+                            <span class="text-body">2 段階認証の必須化</span>
+                            <Badge tone={organization.twoFactorRequired ? "success" : "neutral"}>
+                                {organization.twoFactorRequired ? "有効" : "無効"}
+                            </Badge>
+                        </div>
                         <Button
-                            type="submit"
-                            variant="danger-outline"
-                            testId="transfer-ownership-button"
+                            variant={organization.twoFactorRequired ? "danger-outline" : "primary"}
+                            size="sm"
+                            loading={twoFactorRequirementForm.processing}
+                            onclick={toggleTwoFactorRequirement}
+                            testId="toggle-two-factor-requirement"
                         >
-                            オーナーを移譲
+                            {organization.twoFactorRequired ? "必須化を解除" : "必須にする"}
                         </Button>
                     </div>
-                </form>
-            </DangerZone>
-        {/if}
-    </div>
+                    {#if twoFactorRequirementForm.errors.enabled}
+                        <p class="mt-2 text-caption text-danger" role="alert">
+                            {twoFactorRequirementForm.errors.enabled}
+                        </p>
+                    {/if}
+                </Card>
+            {/if}
 
-    <ConfirmDialog
-        bind:open={transferDialogOpen}
-        title="オーナー移譲"
-        message={`オーナー権限を ${transferTargetName} さんへ移譲しますか？ あなたは管理者に降格します。`}
-        confirmLabel="移譲する"
-        confirmVariant="danger"
-        processing={transferForm.processing}
-        onConfirm={transferOwnership}
-        testId="transfer-ownership-dialog"
-    />
+            {#if usersUrl !== null}
+                <Card padding="lg">
+                    <div class="flex items-start justify-between gap-4">
+                        <div>
+                            <h2 class="text-h3">ユーザー管理</h2>
+                            <p class="mt-1 text-caption text-text-secondary">
+                                メンバーの一覧・招待・ロール変更・削除は管理メニューのユーザー管理画面で行います。
+                            </p>
+                        </div>
+                        <TextLink href={usersUrl} testId="link-manage-users">
+                            管理画面を開く
+                        </TextLink>
+                    </div>
+                </Card>
+            {/if}
 
-    <RecentAuthModal
-        bind:open={recentAuthOpen}
-        passwordSet={recentAuthStatus?.passwordSet ?? false}
-        availableProviders={recentAuthStatus?.availableProviders ?? []}
-        canSatisfy={recentAuthStatus?.canSatisfy ?? true}
-        onConfirmed={resumePendingAction}
-    />
+            {#if canManageApiKeys}
+                <Card padding="lg">
+                    <div class="flex items-start justify-between gap-4">
+                        <div>
+                            <h2 class="text-h3">API キー / 接続セッション</h2>
+                            <p class="mt-1 text-caption text-text-secondary">
+                                REST API / MCP アクセスのキー発行・失効と、CLI / MCP の接続セッション管理は専用画面で行います。
+                            </p>
+                        </div>
+                        <TextLink
+                            href={`/organizations/${organization.slug}/api-keys`}
+                            testId="link-api-keys"
+                        >
+                            管理画面を開く
+                        </TextLink>
+                    </div>
+                </Card>
+            {/if}
+
+            {#if isOwner}
+                <DangerZone
+                    title="オーナー移譲"
+                    description="組織のオーナー権限を別のメンバーへ移譲します。移譲後、あなたは管理者になります。この操作にはパスワードの再確認が必要です。"
+                >
+                    {#if transferCandidates.length === 0}
+                        <p
+                            class="text-caption text-text-secondary"
+                            data-testid="transfer-no-candidates"
+                        >
+                            {NO_TRANSFER_CANDIDATES}先に
+                            {#if usersUrl !== null}
+                                <TextLink href={usersUrl}>管理メニュー &gt; ユーザー管理</TextLink>
+                                からメンバーを招待してください。
+                            {:else}
+                                メンバーを招待できる管理者に依頼してください。
+                            {/if}
+                        </p>
+                    {/if}
+                    <form onsubmit={openTransferDialog} class="flex flex-col gap-4">
+                        <FormField
+                            label="移譲先のメンバー"
+                            id="transfer-target"
+                            error={transferClientError ?? transferForm.errors.user_id}
+                        >
+                            {#snippet children({ id, describedBy, invalid })}
+                                <Select
+                                    {id}
+                                    bind:value={transferForm.user_id}
+                                    error={invalid}
+                                    aria-describedby={describedBy}
+                                >
+                                    <option value="">選択してください</option>
+                                    {#each transferCandidates as candidate (candidate.id)}
+                                        <option value={String(candidate.id)}>
+                                            {candidate.name}
+                                        </option>
+                                    {/each}
+                                </Select>
+                            {/snippet}
+                        </FormField>
+                        <div>
+                            <Button
+                                type="submit"
+                                variant="danger-outline"
+                                testId="transfer-ownership-button"
+                            >
+                                オーナーを移譲
+                            </Button>
+                        </div>
+                    </form>
+                </DangerZone>
+            {/if}
+        </div>
+
+        <ConfirmDialog
+            bind:open={transferDialogOpen}
+            title="オーナー移譲"
+            message={`オーナー権限を ${transferTargetName} さんへ移譲しますか？ あなたは管理者に降格します。`}
+            confirmLabel="移譲する"
+            confirmVariant="danger"
+            processing={transferForm.processing}
+            onConfirm={transferOwnership}
+            testId="transfer-ownership-dialog"
+        />
+
+        <RecentAuthModal
+            bind:open={recentAuthOpen}
+            passwordSet={recentAuthStatus?.passwordSet ?? false}
+            availableProviders={recentAuthStatus?.availableProviders ?? []}
+            canSatisfy={recentAuthStatus?.canSatisfy ?? true}
+            onConfirmed={resumePendingAction}
+        />
+    </PageContent>
 </AppLayout>

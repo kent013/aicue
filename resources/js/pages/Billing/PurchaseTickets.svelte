@@ -7,6 +7,7 @@
     import Input from "@/components/atoms/Input.svelte";
     import FormField from "@/components/molecules/FormField.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import PageContent from "@/components/templates/PageContent.svelte";
     import type { SharedProps } from "@/lib/shared-props";
     import type { PurchaseTicketsPageProps } from "@/types/billing";
 
@@ -112,98 +113,100 @@
 </script>
 
 <AppLayout {appName}>
-    <h1 class="text-h2">チケットを購入</h1>
-    <p class="mt-1 text-caption text-text-secondary">
-        チケットは AI 解析・動画レンダに使います。まとめ買いで 1 枚あたりの料金が下がります。
-    </p>
+    <PageContent maxWidth="3xl">
+        <h1 class="text-h2">チケットを購入</h1>
+        <p class="mt-1 text-caption text-text-secondary">
+            チケットは AI 解析・動画レンダに使います。まとめ買いで 1 枚あたりの料金が下がります。
+        </p>
 
-    <div class="mt-6 flex max-w-3xl flex-col gap-6">
-        {#if page.purchased}
-            <Alert type="success" title="ご購入ありがとうございます" testId="purchase-success-banner">
-                決済の確認後、残高に反映されます (通常数秒〜数分)。反映はページの再読み込みでご確認いただけます。
-            </Alert>
-        {/if}
-        <Card padding="lg" testId="purchase-balance">
-            <div class="flex items-center gap-3">
-                <Ticket class="size-5 text-primary" aria-hidden="true" />
-                <div>
-                    <h2 class="text-h3">現在の残高</h2>
-                    <p class="mt-1 text-body" data-testid="purchase-balance-count">
-                        {page.balance.toLocaleString("ja-JP")} 枚
-                    </p>
-                </div>
-            </div>
-        </Card>
-
-        {#if page.canManage}
-            <Card padding="lg" testId="purchase-form">
-                <h2 class="text-h3">購入枚数</h2>
-                <div class="mt-4 flex max-w-xs flex-col gap-2">
-                    <FormField
-                        label={`枚数 (${page.minCount}〜${page.maxCount})`}
-                        id="ticket-count"
-                        error={clientError ?? serverErrors.count ?? serverErrors.attempt_token ?? null}
-                    >
-                        {#snippet children({ id, describedBy, invalid })}
-                            <Input
-                                {id}
-                                type="number"
-                                bind:value={countText}
-                                error={invalid}
-                                aria-describedby={describedBy}
-                                min={page.minCount}
-                                max={page.maxCount}
-                                testId="ticket-count-input"
-                            />
-                        {/snippet}
-                    </FormField>
-                </div>
-
-                <p class="mt-4 text-body" data-testid="purchase-total">
-                    {#if totalAmount !== null && appliedUnit !== null}
-                        単価 ¥{formatYen(appliedUnit)} × {parsedCount} 枚 = 合計 ¥{formatYen(
-                            totalAmount,
-                        )}
-                    {:else}
-                        合計 —
-                    {/if}
-                </p>
-
-                <div class="mt-6">
-                    <Button onclick={submit} loading={submitting} testId="purchase-submit">
-                        <ShoppingCart class="size-4" aria-hidden="true" />
-                        購入手続きへ (Stripe)
-                    </Button>
-                </div>
-                <p class="mt-2 text-caption text-text-secondary">
-                    Stripe の決済画面に移動します。決済確認後にチケットが付与されます。
-                </p>
-            </Card>
-        {:else}
-            <Alert type="info" testId="purchase-role-note">
-                チケットの購入は組織のオーナーまたは管理者が行えます。管理者に購入を依頼してください。
-            </Alert>
-        {/if}
-
-        <section>
-            <h2 class="text-h3">チケット料金</h2>
-            {#if tierRows.length > 0}
-                <ul
-                    class="mt-3 rounded-lg border border-border bg-surface px-6 py-2 text-body"
-                    data-testid="purchase-tier-table"
-                >
-                    {#each tierRows as row (row.label)}
-                        <li class="flex justify-between border-b border-border py-2 last:border-b-0">
-                            <span class="text-text-secondary">{row.label}</span>
-                            <span class="text-text">¥{formatYen(row.unitAmount)} ／ 枚</span>
-                        </li>
-                    {/each}
-                </ul>
+        <div class="mt-6 flex flex-col gap-6">
+            {#if page.purchased}
+                <Alert type="success" title="ご購入ありがとうございます" testId="purchase-success-banner">
+                    決済の確認後、残高に反映されます (通常数秒〜数分)。反映はページの再読み込みでご確認いただけます。
+                </Alert>
             {/if}
-            <p class="mt-2 inline-flex items-center gap-1 text-caption text-text-secondary">
-                <CircleCheck class="size-3.5" aria-hidden="true" />
-                購入したチケットに有効期限はありません。
-            </p>
-        </section>
-    </div>
+            <Card padding="lg" testId="purchase-balance">
+                <div class="flex items-center gap-3">
+                    <Ticket class="size-5 text-primary" aria-hidden="true" />
+                    <div>
+                        <h2 class="text-h3">現在の残高</h2>
+                        <p class="mt-1 text-body" data-testid="purchase-balance-count">
+                            {page.balance.toLocaleString("ja-JP")} 枚
+                        </p>
+                    </div>
+                </div>
+            </Card>
+
+            {#if page.canManage}
+                <Card padding="lg" testId="purchase-form">
+                    <h2 class="text-h3">購入枚数</h2>
+                    <div class="mt-4 flex max-w-xs flex-col gap-2">
+                        <FormField
+                            label={`枚数 (${page.minCount}〜${page.maxCount})`}
+                            id="ticket-count"
+                            error={clientError ?? serverErrors.count ?? serverErrors.attempt_token ?? null}
+                        >
+                            {#snippet children({ id, describedBy, invalid })}
+                                <Input
+                                    {id}
+                                    type="number"
+                                    bind:value={countText}
+                                    error={invalid}
+                                    aria-describedby={describedBy}
+                                    min={page.minCount}
+                                    max={page.maxCount}
+                                    testId="ticket-count-input"
+                                />
+                            {/snippet}
+                        </FormField>
+                    </div>
+
+                    <p class="mt-4 text-body" data-testid="purchase-total">
+                        {#if totalAmount !== null && appliedUnit !== null}
+                            単価 ¥{formatYen(appliedUnit)} × {parsedCount} 枚 = 合計 ¥{formatYen(
+                                totalAmount,
+                            )}
+                        {:else}
+                            合計 —
+                        {/if}
+                    </p>
+
+                    <div class="mt-6">
+                        <Button onclick={submit} loading={submitting} testId="purchase-submit">
+                            <ShoppingCart class="size-4" aria-hidden="true" />
+                            購入手続きへ (Stripe)
+                        </Button>
+                    </div>
+                    <p class="mt-2 text-caption text-text-secondary">
+                        Stripe の決済画面に移動します。決済確認後にチケットが付与されます。
+                    </p>
+                </Card>
+            {:else}
+                <Alert type="info" testId="purchase-role-note">
+                    チケットの購入は組織のオーナーまたは管理者が行えます。管理者に購入を依頼してください。
+                </Alert>
+            {/if}
+
+            <section>
+                <h2 class="text-h3">チケット料金</h2>
+                {#if tierRows.length > 0}
+                    <ul
+                        class="mt-3 rounded-lg border border-border bg-surface px-6 py-2 text-body"
+                        data-testid="purchase-tier-table"
+                    >
+                        {#each tierRows as row (row.label)}
+                            <li class="flex justify-between border-b border-border py-2 last:border-b-0">
+                                <span class="text-text-secondary">{row.label}</span>
+                                <span class="text-text">¥{formatYen(row.unitAmount)} ／ 枚</span>
+                            </li>
+                        {/each}
+                    </ul>
+                {/if}
+                <p class="mt-2 inline-flex items-center gap-1 text-caption text-text-secondary">
+                    <CircleCheck class="size-3.5" aria-hidden="true" />
+                    購入したチケットに有効期限はありません。
+                </p>
+            </section>
+        </div>
+    </PageContent>
 </AppLayout>

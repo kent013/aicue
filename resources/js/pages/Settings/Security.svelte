@@ -10,6 +10,7 @@
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
     import RecentAuthModal from "@/components/organisms/RecentAuthModal.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import PageContent from "@/components/templates/PageContent.svelte";
     import { useForm } from "@inertiajs/svelte";
     import { withRecentAuth, type RecentAuthStatus } from "@/lib/recent-auth";
     import type { SharedProps } from "@/lib/shared-props";
@@ -269,188 +270,190 @@
 </script>
 
 <AppLayout {appName}>
-    <h1 class="text-h2">設定</h1>
+    <PageContent maxWidth="2xl">
+        <h1 class="text-h2">設定</h1>
 
-    <nav aria-label="設定メニュー" class="mt-4 flex gap-4 border-b border-border pb-2">
-        <TextLink href="/settings">プロフィール</TextLink>
-        <TextLink href="/settings/security">セキュリティ</TextLink>
-    </nav>
+        <nav aria-label="設定メニュー" class="mt-4 flex gap-4 border-b border-border pb-2">
+            <TextLink href="/settings">プロフィール</TextLink>
+            <TextLink href="/settings/security">セキュリティ</TextLink>
+        </nav>
 
-    <div class="mt-6 flex max-w-2xl flex-col gap-10">
-        <Card padding="lg">
-            <div class="flex items-center justify-between gap-4">
-                <h2 class="text-h3">2要素認証</h2>
-                {#if twoFactorEnabled}
-                    <Badge tone="success">有効</Badge>
-                {:else}
-                    <Badge tone="neutral">無効</Badge>
-                {/if}
-            </div>
-            <p class="mt-1 text-caption text-text-secondary">
-                認証アプリのワンタイムコードでログインを保護します。
-            </p>
-
-            {#if twoFactorEnabled}
-                <div class="mt-4 flex flex-col gap-4">
-                    {#if recoveryCodes.length > 0}
-                        <!-- tabindex="-1" は再生成成功時の programmatic focus 用 -->
-                        <div
-                            class="rounded-md border border-border bg-neutral p-4"
-                            tabindex="-1"
-                            bind:this={recoveryCodesPanel}
-                            data-testid="recovery-codes-panel"
-                        >
-                            <p class="text-caption text-text-secondary">
-                                リカバリコードは安全な場所に保管してください。各コードは一度だけ使えます。
-                            </p>
-                            <ul
-                                class="mt-2 grid grid-cols-2 gap-1 text-body font-mono"
-                                data-testid="recovery-codes"
-                            >
-                                {#each recoveryCodes as code (code)}
-                                    <li>{code}</li>
-                                {/each}
-                            </ul>
-                        </div>
+        <div class="mt-6 flex flex-col gap-10">
+            <Card padding="lg">
+                <div class="flex items-center justify-between gap-4">
+                    <h2 class="text-h3">2要素認証</h2>
+                    {#if twoFactorEnabled}
+                        <Badge tone="success">有効</Badge>
                     {:else}
-                        <div>
+                        <Badge tone="neutral">無効</Badge>
+                    {/if}
+                </div>
+                <p class="mt-1 text-caption text-text-secondary">
+                    認証アプリのワンタイムコードでログインを保護します。
+                </p>
+
+                {#if twoFactorEnabled}
+                    <div class="mt-4 flex flex-col gap-4">
+                        {#if recoveryCodes.length > 0}
+                            <!-- tabindex="-1" は再生成成功時の programmatic focus 用 -->
+                            <div
+                                class="rounded-md border border-border bg-neutral p-4"
+                                tabindex="-1"
+                                bind:this={recoveryCodesPanel}
+                                data-testid="recovery-codes-panel"
+                            >
+                                <p class="text-caption text-text-secondary">
+                                    リカバリコードは安全な場所に保管してください。各コードは一度だけ使えます。
+                                </p>
+                                <ul
+                                    class="mt-2 grid grid-cols-2 gap-1 text-body font-mono"
+                                    data-testid="recovery-codes"
+                                >
+                                    {#each recoveryCodes as code (code)}
+                                        <li>{code}</li>
+                                    {/each}
+                                </ul>
+                            </div>
+                        {:else}
+                            <div>
+                                <Button
+                                    variant="ghost"
+                                    onclick={showRecoveryCodes}
+                                    loading={loadingRecoveryCodes}
+                                    testId="show-recovery-codes-button"
+                                >
+                                    リカバリコードを表示
+                                </Button>
+                            </div>
+                        {/if}
+                        <div class="flex flex-wrap gap-3">
                             <Button
                                 variant="ghost"
-                                onclick={showRecoveryCodes}
-                                loading={loadingRecoveryCodes}
-                                testId="show-recovery-codes-button"
+                                onclick={() => {
+                                    regenerateDialogOpen = true;
+                                }}
+                                testId="regenerate-recovery-codes-button"
                             >
-                                リカバリコードを表示
+                                リカバリコードを再生成
+                            </Button>
+                            <Button
+                                variant="danger-outline"
+                                onclick={() => {
+                                    disableDialogOpen = true;
+                                }}
+                                testId="disable-two-factor-button"
+                            >
+                                2要素認証を無効化
                             </Button>
                         </div>
-                    {/if}
-                    <div class="flex flex-wrap gap-3">
+                    </div>
+                {:else if confirming}
+                    <div class="mt-4 flex flex-col gap-4">
+                        <p class="text-body text-text-secondary">
+                            認証アプリで以下の QR コードを読み取り、表示されたコードを入力して設定を完了してください。
+                        </p>
+                        {#if qrSvg}
+                            <!-- QR はサーバ提供の SVG をそのまま描画する -->
+                            <div class="self-start rounded-md border border-border bg-surface p-4">
+                                <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+                                {@html qrSvg}
+                            </div>
+                        {/if}
+                        <form onsubmit={confirmTwoFactor} class="flex flex-col gap-4">
+                            <FormField
+                                label="認証コード"
+                                id="two-factor-code"
+                                error={confirmForm.errors.code}
+                            >
+                                {#snippet children({ id, describedBy, invalid })}
+                                    <Input
+                                        {id}
+                                        type="text"
+                                        inputmode="numeric"
+                                        bind:value={confirmForm.code}
+                                        error={invalid}
+                                        aria-describedby={describedBy}
+                                        autocomplete="one-time-code"
+                                    />
+                                {/snippet}
+                            </FormField>
+                            <div>
+                                <Button type="submit" loading={confirmForm.processing}>
+                                    確認して有効化
+                                </Button>
+                            </div>
+                        </form>
+                    </div>
+                {:else}
+                    <div class="mt-4">
                         <Button
-                            variant="ghost"
-                            onclick={() => {
-                                regenerateDialogOpen = true;
-                            }}
-                            testId="regenerate-recovery-codes-button"
+                            onclick={enableTwoFactor}
+                            loading={enabling}
+                            testId="enable-two-factor-button"
                         >
-                            リカバリコードを再生成
-                        </Button>
-                        <Button
-                            variant="danger-outline"
-                            onclick={() => {
-                                disableDialogOpen = true;
-                            }}
-                            testId="disable-two-factor-button"
-                        >
-                            2要素認証を無効化
+                            有効化
                         </Button>
                     </div>
-                </div>
-            {:else if confirming}
-                <div class="mt-4 flex flex-col gap-4">
-                    <p class="text-body text-text-secondary">
-                        認証アプリで以下の QR コードを読み取り、表示されたコードを入力して設定を完了してください。
-                    </p>
-                    {#if qrSvg}
-                        <!-- QR はサーバ提供の SVG をそのまま描画する -->
-                        <div class="self-start rounded-md border border-border bg-surface p-4">
-                            <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-                            {@html qrSvg}
-                        </div>
-                    {/if}
-                    <form onsubmit={confirmTwoFactor} class="flex flex-col gap-4">
-                        <FormField
-                            label="認証コード"
-                            id="two-factor-code"
-                            error={confirmForm.errors.code}
+                {/if}
+            </Card>
+
+            <Card padding="lg">
+                <h2 class="text-h3">ソーシャルログイン連携</h2>
+                <p class="mt-1 text-caption text-text-secondary">
+                    外部アカウントを連携すると、そのアカウントでもログインできます。
+                </p>
+                <ul class="mt-4 flex flex-col gap-3">
+                    {#each socialProviders as provider (provider)}
+                        <li
+                            class="flex items-center justify-between gap-4 rounded-md border border-border p-3"
                         >
-                            {#snippet children({ id, describedBy, invalid })}
-                                <Input
-                                    {id}
-                                    type="text"
-                                    inputmode="numeric"
-                                    bind:value={confirmForm.code}
-                                    error={invalid}
-                                    aria-describedby={describedBy}
-                                    autocomplete="one-time-code"
-                                />
-                            {/snippet}
-                        </FormField>
-                        <div>
-                            <Button type="submit" loading={confirmForm.processing}>
-                                確認して有効化
-                            </Button>
-                        </div>
-                    </form>
-                </div>
-            {:else}
-                <div class="mt-4">
-                    <Button
-                        onclick={enableTwoFactor}
-                        loading={enabling}
-                        testId="enable-two-factor-button"
-                    >
-                        有効化
-                    </Button>
-                </div>
-            {/if}
-        </Card>
+                            <span class="text-body">{providerLabel(provider)}</span>
+                            {#if linkedProviders.includes(provider)}
+                                <Badge tone="success" testId={`linked-${provider}`}>連携済み</Badge>
+                            {:else}
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    href={`/auth/${provider}/redirect/link`}
+                                    testId={`link-${provider}`}
+                                >
+                                    連携する
+                                </Button>
+                            {/if}
+                        </li>
+                    {/each}
+                </ul>
+            </Card>
+        </div>
 
-        <Card padding="lg">
-            <h2 class="text-h3">ソーシャルログイン連携</h2>
-            <p class="mt-1 text-caption text-text-secondary">
-                外部アカウントを連携すると、そのアカウントでもログインできます。
-            </p>
-            <ul class="mt-4 flex flex-col gap-3">
-                {#each socialProviders as provider (provider)}
-                    <li
-                        class="flex items-center justify-between gap-4 rounded-md border border-border p-3"
-                    >
-                        <span class="text-body">{providerLabel(provider)}</span>
-                        {#if linkedProviders.includes(provider)}
-                            <Badge tone="success" testId={`linked-${provider}`}>連携済み</Badge>
-                        {:else}
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                href={`/auth/${provider}/redirect/link`}
-                                testId={`link-${provider}`}
-                            >
-                                連携する
-                            </Button>
-                        {/if}
-                    </li>
-                {/each}
-            </ul>
-        </Card>
-    </div>
+        <ConfirmDialog
+            bind:open={disableDialogOpen}
+            title="2要素認証の無効化"
+            message="2要素認証を無効化しますか？ リカバリコードも無効になります。"
+            confirmLabel="無効化する"
+            confirmVariant="danger"
+            processing={disabling}
+            onConfirm={disableTwoFactor}
+            testId="disable-two-factor-dialog"
+        />
 
-    <ConfirmDialog
-        bind:open={disableDialogOpen}
-        title="2要素認証の無効化"
-        message="2要素認証を無効化しますか？ リカバリコードも無効になります。"
-        confirmLabel="無効化する"
-        confirmVariant="danger"
-        processing={disabling}
-        onConfirm={disableTwoFactor}
-        testId="disable-two-factor-dialog"
-    />
+        <ConfirmDialog
+            bind:open={regenerateDialogOpen}
+            title="リカバリコードの再生成"
+            message="リカバリコードを再生成しますか？ 既存のリカバリコードは直ちにすべて失効します。新しいコードを必ず保管し直してください。"
+            confirmLabel="再生成する"
+            confirmVariant="danger"
+            processing={regenerating}
+            onConfirm={regenerateRecoveryCodes}
+            testId="regenerate-recovery-codes-dialog"
+        />
 
-    <ConfirmDialog
-        bind:open={regenerateDialogOpen}
-        title="リカバリコードの再生成"
-        message="リカバリコードを再生成しますか？ 既存のリカバリコードは直ちにすべて失効します。新しいコードを必ず保管し直してください。"
-        confirmLabel="再生成する"
-        confirmVariant="danger"
-        processing={regenerating}
-        onConfirm={regenerateRecoveryCodes}
-        testId="regenerate-recovery-codes-dialog"
-    />
-
-    <RecentAuthModal
-        bind:open={recentAuthOpen}
-        passwordSet={recentAuthStatus?.passwordSet ?? false}
-        availableProviders={recentAuthStatus?.availableProviders ?? []}
-        canSatisfy={recentAuthStatus?.canSatisfy ?? true}
-        onConfirmed={resumePendingAction}
-    />
+        <RecentAuthModal
+            bind:open={recentAuthOpen}
+            passwordSet={recentAuthStatus?.passwordSet ?? false}
+            availableProviders={recentAuthStatus?.availableProviders ?? []}
+            canSatisfy={recentAuthStatus?.canSatisfy ?? true}
+            onConfirmed={resumePendingAction}
+        />
+    </PageContent>
 </AppLayout>

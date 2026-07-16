@@ -5,6 +5,7 @@
     import Input from "@/components/atoms/Input.svelte";
     import FormField from "@/components/molecules/FormField.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import PageContent from "@/components/templates/PageContent.svelte";
     import type { SharedProps } from "@/lib/shared-props";
 
     const shared = $derived(page.props as unknown as SharedProps);
@@ -19,29 +20,31 @@
 </script>
 
 <AppLayout {appName}>
-    <h1 class="text-h2">組織の作成</h1>
-    <p class="mt-1 text-caption text-text-secondary">
-        新しい組織を作成します。作成後にメンバーを招待できます。
-    </p>
+    <PageContent maxWidth="2xl">
+        <h1 class="text-h2">組織の作成</h1>
+        <p class="mt-1 text-caption text-text-secondary">
+            新しい組織を作成します。作成後にメンバーを招待できます。
+        </p>
 
-    <div class="mt-6 max-w-2xl">
-        <Card padding="lg">
-            <form onsubmit={submit} class="flex flex-col gap-4">
-                <FormField label="組織名" id="organization-name" error={form.errors.name} required>
-                    {#snippet children({ id, describedBy, invalid })}
-                        <Input
-                            {id}
-                            type="text"
-                            bind:value={form.name}
-                            error={invalid}
-                            aria-describedby={describedBy}
-                        />
-                    {/snippet}
-                </FormField>
-                <div>
-                    <Button type="submit" loading={form.processing}>作成</Button>
-                </div>
-            </form>
-        </Card>
-    </div>
+        <div class="mt-6">
+            <Card padding="lg">
+                <form onsubmit={submit} class="flex flex-col gap-4">
+                    <FormField label="組織名" id="organization-name" error={form.errors.name} required>
+                        {#snippet children({ id, describedBy, invalid })}
+                            <Input
+                                {id}
+                                type="text"
+                                bind:value={form.name}
+                                error={invalid}
+                                aria-describedby={describedBy}
+                            />
+                        {/snippet}
+                    </FormField>
+                    <div>
+                        <Button type="submit" loading={form.processing}>作成</Button>
+                    </div>
+                </form>
+            </Card>
+        </div>
+    </PageContent>
 </AppLayout>

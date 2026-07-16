@@ -11,6 +11,7 @@
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
     import RecentAuthModal from "@/components/organisms/RecentAuthModal.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import PageContent from "@/components/templates/PageContent.svelte";
     import { withRecentAuth, type RecentAuthStatus } from "@/lib/recent-auth";
     import type { SharedProps } from "@/lib/shared-props";
 
@@ -144,146 +145,148 @@
 </script>
 
 <AppLayout {appName}>
-    <h1 class="text-h2">設定</h1>
+    <PageContent maxWidth="2xl">
+        <h1 class="text-h2">設定</h1>
 
-    <nav aria-label="設定メニュー" class="mt-4 flex gap-4 border-b border-border pb-2">
-        <TextLink href="/settings">プロフィール</TextLink>
-        <TextLink href="/settings/security">セキュリティ</TextLink>
-    </nav>
+        <nav aria-label="設定メニュー" class="mt-4 flex gap-4 border-b border-border pb-2">
+            <TextLink href="/settings">プロフィール</TextLink>
+            <TextLink href="/settings/security">セキュリティ</TextLink>
+        </nav>
 
-    <div class="mt-6 flex max-w-2xl flex-col gap-10">
-        <Card padding="lg">
-            <h2 class="text-h3">プロフィール</h2>
-            <p class="mt-1 text-caption text-text-secondary">名前とメールアドレスを更新します。</p>
-            <form onsubmit={submitProfile} class="mt-4 flex flex-col gap-4">
-                <FormField label="名前" id="profile-name" error={profileForm.errors.name}>
-                    {#snippet children({ id, describedBy, invalid })}
-                        <Input
-                            {id}
-                            type="text"
-                            bind:value={profileForm.name}
-                            error={invalid}
-                            aria-describedby={describedBy}
-                            autocomplete="name"
-                        />
-                    {/snippet}
-                </FormField>
-                <FormField
-                    label="メールアドレス"
-                    id="profile-email"
-                    error={profileForm.errors.email}
-                >
-                    {#snippet children({ id, describedBy, invalid })}
-                        <Input
-                            {id}
-                            type="email"
-                            bind:value={profileForm.email}
-                            error={invalid}
-                            aria-describedby={describedBy}
-                            autocomplete="email"
-                        />
-                    {/snippet}
-                </FormField>
-                <div>
-                    <Button type="submit" loading={profileForm.processing}>保存</Button>
-                </div>
-            </form>
-        </Card>
+        <div class="mt-6 flex flex-col gap-10">
+            <Card padding="lg">
+                <h2 class="text-h3">プロフィール</h2>
+                <p class="mt-1 text-caption text-text-secondary">名前とメールアドレスを更新します。</p>
+                <form onsubmit={submitProfile} class="mt-4 flex flex-col gap-4">
+                    <FormField label="名前" id="profile-name" error={profileForm.errors.name}>
+                        {#snippet children({ id, describedBy, invalid })}
+                            <Input
+                                {id}
+                                type="text"
+                                bind:value={profileForm.name}
+                                error={invalid}
+                                aria-describedby={describedBy}
+                                autocomplete="name"
+                            />
+                        {/snippet}
+                    </FormField>
+                    <FormField
+                        label="メールアドレス"
+                        id="profile-email"
+                        error={profileForm.errors.email}
+                    >
+                        {#snippet children({ id, describedBy, invalid })}
+                            <Input
+                                {id}
+                                type="email"
+                                bind:value={profileForm.email}
+                                error={invalid}
+                                aria-describedby={describedBy}
+                                autocomplete="email"
+                            />
+                        {/snippet}
+                    </FormField>
+                    <div>
+                        <Button type="submit" loading={profileForm.processing}>保存</Button>
+                    </div>
+                </form>
+            </Card>
 
-        <Card padding="lg">
-            <h2 class="text-h3">パスワード変更</h2>
-            <p class="mt-1 text-caption text-text-secondary">
-                現在のパスワードを確認のうえ、新しいパスワードに変更します。
-            </p>
-            <form onsubmit={submitPassword} class="mt-4 flex flex-col gap-4">
-                <FormField
-                    label="現在のパスワード"
-                    id="current-password"
-                    error={passwordForm.errors.current_password}
-                >
-                    {#snippet children({ id, describedBy, invalid })}
-                        <PasswordInput
-                            {id}
-                            bind:value={passwordForm.current_password}
-                            error={invalid}
-                            aria-describedby={describedBy}
-                            autocomplete="current-password"
-                        />
-                    {/snippet}
-                </FormField>
-                <FormField
-                    label="新しいパスワード"
-                    id="new-password"
-                    error={passwordForm.errors.password}
-                >
-                    {#snippet children({ id, describedBy, invalid })}
-                        <PasswordInput
-                            {id}
-                            bind:value={passwordForm.password}
-                            error={invalid}
-                            aria-describedby={describedBy}
-                            autocomplete="new-password"
-                        />
-                    {/snippet}
-                </FormField>
-                <div>
-                    <Button type="submit" loading={passwordForm.processing}>
-                        {passwordForm.processing ? "変更中…" : "パスワードを変更"}
-                    </Button>
-                </div>
-            </form>
-        </Card>
+            <Card padding="lg">
+                <h2 class="text-h3">パスワード変更</h2>
+                <p class="mt-1 text-caption text-text-secondary">
+                    現在のパスワードを確認のうえ、新しいパスワードに変更します。
+                </p>
+                <form onsubmit={submitPassword} class="mt-4 flex flex-col gap-4">
+                    <FormField
+                        label="現在のパスワード"
+                        id="current-password"
+                        error={passwordForm.errors.current_password}
+                    >
+                        {#snippet children({ id, describedBy, invalid })}
+                            <PasswordInput
+                                {id}
+                                bind:value={passwordForm.current_password}
+                                error={invalid}
+                                aria-describedby={describedBy}
+                                autocomplete="current-password"
+                            />
+                        {/snippet}
+                    </FormField>
+                    <FormField
+                        label="新しいパスワード"
+                        id="new-password"
+                        error={passwordForm.errors.password}
+                    >
+                        {#snippet children({ id, describedBy, invalid })}
+                            <PasswordInput
+                                {id}
+                                bind:value={passwordForm.password}
+                                error={invalid}
+                                aria-describedby={describedBy}
+                                autocomplete="new-password"
+                            />
+                        {/snippet}
+                    </FormField>
+                    <div>
+                        <Button type="submit" loading={passwordForm.processing}>
+                            {passwordForm.processing ? "変更中…" : "パスワードを変更"}
+                        </Button>
+                    </div>
+                </form>
+            </Card>
 
-        <DangerZone
-            title="アカウント削除"
-            description="アカウントを削除すると、すべてのデータが完全に失われます。この操作は取り消せません。"
-        >
-            {#if soleOwnedOrganizations.length > 0}
-                <Alert type="warning" title="オーナー移譲が必要です" class="mb-3">
-                    以下の組織であなたが唯一のオーナーです。アカウントを削除する前に、各組織で
-                    オーナーを別のメンバーへ移譲してください（削除時にサーバーが再判定します）。
-                    <ul class="mt-2 list-disc pl-5">
-                        {#each soleOwnedOrganizations as org (org.slug)}
-                            <li>
-                                <TextLink href={`/organizations/${org.slug}/settings`}>
-                                    {org.name} の設定へ
-                                </TextLink>
-                            </li>
-                        {/each}
-                    </ul>
-                </Alert>
-            {/if}
-            {#if accountError}
-                <Alert type="danger" class="mb-3">{accountError}</Alert>
-            {/if}
-            <Button
-                variant="danger-outline"
-                onclick={() => {
-                    deleteDialogOpen = true;
-                }}
-                testId="delete-account-button"
+            <DangerZone
+                title="アカウント削除"
+                description="アカウントを削除すると、すべてのデータが完全に失われます。この操作は取り消せません。"
             >
-                アカウントを削除
-            </Button>
-        </DangerZone>
-    </div>
+                {#if soleOwnedOrganizations.length > 0}
+                    <Alert type="warning" title="オーナー移譲が必要です" class="mb-3">
+                        以下の組織であなたが唯一のオーナーです。アカウントを削除する前に、各組織で
+                        オーナーを別のメンバーへ移譲してください（削除時にサーバーが再判定します）。
+                        <ul class="mt-2 list-disc pl-5">
+                            {#each soleOwnedOrganizations as org (org.slug)}
+                                <li>
+                                    <TextLink href={`/organizations/${org.slug}/settings`}>
+                                        {org.name} の設定へ
+                                    </TextLink>
+                                </li>
+                            {/each}
+                        </ul>
+                    </Alert>
+                {/if}
+                {#if accountError}
+                    <Alert type="danger" class="mb-3">{accountError}</Alert>
+                {/if}
+                <Button
+                    variant="danger-outline"
+                    onclick={() => {
+                        deleteDialogOpen = true;
+                    }}
+                    testId="delete-account-button"
+                >
+                    アカウントを削除
+                </Button>
+            </DangerZone>
+        </div>
 
-    <ConfirmDialog
-        bind:open={deleteDialogOpen}
-        title="アカウント削除"
-        message="本当にアカウントを削除しますか？ すべてのデータが完全に失われ、この操作は取り消せません。"
-        confirmLabel="削除する"
-        confirmVariant="danger"
-        processing={deleting}
-        onConfirm={deleteAccount}
-        testId="delete-account-dialog"
-    />
+        <ConfirmDialog
+            bind:open={deleteDialogOpen}
+            title="アカウント削除"
+            message="本当にアカウントを削除しますか？ すべてのデータが完全に失われ、この操作は取り消せません。"
+            confirmLabel="削除する"
+            confirmVariant="danger"
+            processing={deleting}
+            onConfirm={deleteAccount}
+            testId="delete-account-dialog"
+        />
 
-    <RecentAuthModal
-        bind:open={recentAuthOpen}
-        passwordSet={recentAuthStatus?.passwordSet ?? false}
-        availableProviders={recentAuthStatus?.availableProviders ?? []}
-        canSatisfy={recentAuthStatus?.canSatisfy ?? true}
-        onConfirmed={resumePendingAction}
-    />
+        <RecentAuthModal
+            bind:open={recentAuthOpen}
+            passwordSet={recentAuthStatus?.passwordSet ?? false}
+            availableProviders={recentAuthStatus?.availableProviders ?? []}
+            canSatisfy={recentAuthStatus?.canSatisfy ?? true}
+            onConfirmed={resumePendingAction}
+        />
+    </PageContent>
 </AppLayout>

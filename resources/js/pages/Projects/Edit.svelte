@@ -6,6 +6,7 @@
     import Textarea from "@/components/atoms/Textarea.svelte";
     import FormField from "@/components/molecules/FormField.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import PageContent from "@/components/templates/PageContent.svelte";
     import type { SharedProps } from "@/lib/shared-props";
 
     /** プロジェクト編集 (name / description)。所属 Team の変更 UI は出さない。 */
@@ -29,44 +30,46 @@
 </script>
 
 <AppLayout {appName}>
-    <h1 class="text-h2">プロジェクトの編集</h1>
-    <p class="mt-1 text-caption text-text-secondary">
-        {project.name} の名前と説明を変更します。
-    </p>
+    <PageContent maxWidth="2xl">
+        <h1 class="text-h2">プロジェクトの編集</h1>
+        <p class="mt-1 text-caption text-text-secondary">
+            {project.name} の名前と説明を変更します。
+        </p>
 
-    <div class="mt-6 max-w-2xl">
-        <Card padding="lg">
-            <form onsubmit={submit} class="flex flex-col gap-4">
-                <FormField label="プロジェクト名" id="project-name" error={form.errors.name} required>
-                    {#snippet children({ id, describedBy, invalid })}
-                        <Input
-                            {id}
-                            type="text"
-                            bind:value={form.name}
-                            error={invalid}
-                            aria-describedby={describedBy}
-                        />
-                    {/snippet}
-                </FormField>
-                <FormField label="説明" id="project-description" error={form.errors.description}>
-                    {#snippet children({ id, describedBy, invalid })}
-                        <Textarea
-                            {id}
-                            bind:value={form.description}
-                            error={invalid}
-                            aria-describedby={describedBy}
-                        />
-                    {/snippet}
-                </FormField>
-                <div class="flex items-center gap-2">
-                    <Button type="submit" loading={form.processing} testId="project-submit">
-                        保存
-                    </Button>
-                    <Button variant="ghost" href={`/projects/${project.id}`} inertia>
-                        キャンセル
-                    </Button>
-                </div>
-            </form>
-        </Card>
-    </div>
+        <div class="mt-6">
+            <Card padding="lg">
+                <form onsubmit={submit} class="flex flex-col gap-4">
+                    <FormField label="プロジェクト名" id="project-name" error={form.errors.name} required>
+                        {#snippet children({ id, describedBy, invalid })}
+                            <Input
+                                {id}
+                                type="text"
+                                bind:value={form.name}
+                                error={invalid}
+                                aria-describedby={describedBy}
+                            />
+                        {/snippet}
+                    </FormField>
+                    <FormField label="説明" id="project-description" error={form.errors.description}>
+                        {#snippet children({ id, describedBy, invalid })}
+                            <Textarea
+                                {id}
+                                bind:value={form.description}
+                                error={invalid}
+                                aria-describedby={describedBy}
+                            />
+                        {/snippet}
+                    </FormField>
+                    <div class="flex items-center gap-2">
+                        <Button type="submit" loading={form.processing} testId="project-submit">
+                            保存
+                        </Button>
+                        <Button variant="ghost" href={`/projects/${project.id}`} inertia>
+                            キャンセル
+                        </Button>
+                    </div>
+                </form>
+            </Card>
+        </div>
+    </PageContent>
 </AppLayout>

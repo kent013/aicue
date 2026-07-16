@@ -15,6 +15,7 @@
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
     import Modal from "@/components/organisms/Modal.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
+    import PageContent from "@/components/templates/PageContent.svelte";
     import type { SharedProps } from "@/lib/shared-props";
     import type {
         CategoryOption,
@@ -292,486 +293,488 @@
 </script>
 
 <AppLayout {appName}>
-    <div class="flex items-start justify-between gap-4">
-        <div class="min-w-0">
-            <h1 class="truncate text-h2">{project.name}</h1>
-            {#if project.description}
-                <p class="mt-1 text-body text-text-secondary">{project.description}</p>
-            {/if}
-        </div>
-        {#if canManage}
-            <Button
-                variant="ghost"
-                href={`/projects/${project.id}/edit`}
-                inertia
-                testId="edit-project-button"
-            >
-                編集
-            </Button>
-        {/if}
-    </div>
-
-    <div class="mt-6 flex max-w-2xl flex-col gap-10">
-        <Card padding="lg">
-            <div class="flex items-start justify-between gap-4">
-                <h2 class="text-h3">動画マニュアル</h2>
-                {#if canManage}
-                    <Button
-                        href={`/projects/${project.id}/manuals/create`}
-                        inertia
-                        testId="create-manual-button"
-                    >
-                        新規作成
-                    </Button>
+    <PageContent maxWidth="2xl">
+        <div class="flex items-start justify-between gap-4">
+            <div class="min-w-0">
+                <h1 class="truncate text-h2">{project.name}</h1>
+                {#if project.description}
+                    <p class="mt-1 text-body text-text-secondary">{project.description}</p>
                 {/if}
             </div>
-
-            <!-- フィルタ (カテゴリ / 状態 / キーワード)。GET クエリで manuals のみ部分更新する -->
-            <form
-                onsubmit={applyManualFilters}
-                class="mt-4 flex flex-wrap items-end gap-3"
-                data-testid="manual-filter-form"
-            >
-                <div class="flex flex-col gap-1">
-                    <label class="text-caption text-text-secondary" for="manual-filter-category">
-                        カテゴリ
-                    </label>
-                    <Select
-                        id="manual-filter-category"
-                        bind:value={filterCategory}
-                        onchange={() => applyManualFilters()}
-                        testId="manual-filter-category"
-                    >
-                        <option value="">すべて</option>
-                        <option value="uncategorized">未分類</option>
-                        {#each categories as category (category.id)}
-                            <option value={String(category.id)}>{category.name}</option>
-                        {/each}
-                    </Select>
-                </div>
-                <div class="flex flex-col gap-1">
-                    <label class="text-caption text-text-secondary" for="manual-filter-status">
-                        状態
-                    </label>
-                    <Select
-                        id="manual-filter-status"
-                        bind:value={filterStatus}
-                        onchange={() => applyManualFilters()}
-                        testId="manual-filter-status"
-                    >
-                        <option value="">すべて</option>
-                        {#each Object.entries(VIDEO_MANUAL_STATUS_LABELS) as [value, label] (value)}
-                            <option {value}>{label}</option>
-                        {/each}
-                    </Select>
-                </div>
-                <div class="flex flex-col gap-1">
-                    <label class="text-caption text-text-secondary" for="manual-filter-sort">
-                        並べ替え
-                    </label>
-                    <Select
-                        id="manual-filter-sort"
-                        bind:value={filterSort}
-                        onchange={() => applyManualFilters()}
-                        testId="manual-filter-sort"
-                    >
-                        {#each MANUAL_SORT_OPTIONS as option (option.value)}
-                            <option value={option.value}>{option.label}</option>
-                        {/each}
-                    </Select>
-                </div>
-                <div class="flex min-w-40 grow flex-col gap-1">
-                    <label class="text-caption text-text-secondary" for="manual-filter-q">
-                        キーワード
-                    </label>
-                    <Input
-                        id="manual-filter-q"
-                        type="search"
-                        bind:value={filterQ}
-                        testId="manual-filter-q"
-                    />
-                </div>
-                <Checkbox
-                    id="manual-filter-mine"
-                    bind:checked={filterMine}
-                    label="自分の作成分のみ"
-                    onchange={() => applyManualFilters()}
-                    testId="manual-filter-mine"
-                />
-                <Button type="submit" variant="ghost" testId="manual-filter-submit">検索</Button>
-            </form>
-
-            {#if manuals.data.length === 0}
-                <EmptyState
-                    title="動画マニュアルはまだありません"
-                    description="SOP を起点に動画マニュアルを作成すると、ここに表示されます。"
-                    testId="manuals-empty"
-                />
-            {:else}
-                <ul class="mt-4 flex flex-col divide-y divide-border" data-testid="manual-list">
-                    {#each manuals.data as manual (manual.id)}
-                        <li class="flex items-center justify-between gap-4 py-3">
-                            <div class="min-w-0">
-                                <TextLink
-                                    href={`/projects/${project.id}/manuals/${manual.id}`}
-                                    testId={`manual-link-${manual.id}`}
-                                >
-                                    {manual.title}
-                                </TextLink>
-                                <p class="mt-1 text-caption text-text-secondary">
-                                    {manual.category?.name ?? "未分類"} ・ {manual.creator?.name ??
-                                        "不明"} ・ 更新 {manual.updated_at}
-                                </p>
-                            </div>
-                            <Badge
-                                tone={STATUS_TONES[manual.status]}
-                                testId={`manual-status-${manual.id}`}
-                            >
-                                {VIDEO_MANUAL_STATUS_LABELS[manual.status]}
-                            </Badge>
-                        </li>
-                    {/each}
-                </ul>
-                <div class="mt-4">
-                    <Pagination
-                        currentPage={manuals.meta.current_page}
-                        totalPages={manuals.meta.last_page}
-                        onChange={changeManualPage}
-                        testId="manuals-pagination"
-                    />
-                </div>
+            {#if canManage}
+                <Button
+                    variant="ghost"
+                    href={`/projects/${project.id}/edit`}
+                    inertia
+                    testId="edit-project-button"
+                >
+                    編集
+                </Button>
             {/if}
-        </Card>
+        </div>
 
-        {#if canManage || canManageMembers}
+        <div class="mt-6 flex flex-col gap-10">
             <Card padding="lg">
-                <h2 class="text-h3">管理メニュー</h2>
-                <p class="mt-1 text-caption text-text-secondary">
-                    管理者向けの管理画面への導線です。権限のある項目のみ表示されます。
-                </p>
-                <ul class="mt-4 flex flex-col gap-2">
+                <div class="flex items-start justify-between gap-4">
+                    <h2 class="text-h3">動画マニュアル</h2>
                     {#if canManage}
-                        <li>
-                            <TextLink
-                                href={`/projects/${project.id}/categories`}
-                                testId="link-manage-categories"
-                            >
-                                カテゴリ管理
-                            </TextLink>
-                        </li>
+                        <Button
+                            href={`/projects/${project.id}/manuals/create`}
+                            inertia
+                            testId="create-manual-button"
+                        >
+                            新規作成
+                        </Button>
                     {/if}
-                    {#if canManageMembers}
-                        <li>
-                            <TextLink href="/manage/users" testId="link-manage-users">
-                                ユーザー管理
-                            </TextLink>
-                        </li>
-                    {/if}
-                </ul>
-            </Card>
-        {/if}
+                </div>
 
-        {#if canManage}
-            <Card padding="lg">
-                <h2 class="text-h3">プロジェクトメンバー</h2>
-                <p class="mt-1 text-caption text-text-secondary">
-                    編集者・撮影者を割り当てます。組織の管理者はプロジェクト未所属でも管理できます。
-                </p>
+                <!-- フィルタ (カテゴリ / 状態 / キーワード)。GET クエリで manuals のみ部分更新する -->
+                <form
+                    onsubmit={applyManualFilters}
+                    class="mt-4 flex flex-wrap items-end gap-3"
+                    data-testid="manual-filter-form"
+                >
+                    <div class="flex flex-col gap-1">
+                        <label class="text-caption text-text-secondary" for="manual-filter-category">
+                            カテゴリ
+                        </label>
+                        <Select
+                            id="manual-filter-category"
+                            bind:value={filterCategory}
+                            onchange={() => applyManualFilters()}
+                            testId="manual-filter-category"
+                        >
+                            <option value="">すべて</option>
+                            <option value="uncategorized">未分類</option>
+                            {#each categories as category (category.id)}
+                                <option value={String(category.id)}>{category.name}</option>
+                            {/each}
+                        </Select>
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <label class="text-caption text-text-secondary" for="manual-filter-status">
+                            状態
+                        </label>
+                        <Select
+                            id="manual-filter-status"
+                            bind:value={filterStatus}
+                            onchange={() => applyManualFilters()}
+                            testId="manual-filter-status"
+                        >
+                            <option value="">すべて</option>
+                            {#each Object.entries(VIDEO_MANUAL_STATUS_LABELS) as [value, label] (value)}
+                                <option {value}>{label}</option>
+                            {/each}
+                        </Select>
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <label class="text-caption text-text-secondary" for="manual-filter-sort">
+                            並べ替え
+                        </label>
+                        <Select
+                            id="manual-filter-sort"
+                            bind:value={filterSort}
+                            onchange={() => applyManualFilters()}
+                            testId="manual-filter-sort"
+                        >
+                            {#each MANUAL_SORT_OPTIONS as option (option.value)}
+                                <option value={option.value}>{option.label}</option>
+                            {/each}
+                        </Select>
+                    </div>
+                    <div class="flex min-w-40 grow flex-col gap-1">
+                        <label class="text-caption text-text-secondary" for="manual-filter-q">
+                            キーワード
+                        </label>
+                        <Input
+                            id="manual-filter-q"
+                            type="search"
+                            bind:value={filterQ}
+                            testId="manual-filter-q"
+                        />
+                    </div>
+                    <Checkbox
+                        id="manual-filter-mine"
+                        bind:checked={filterMine}
+                        label="自分の作成分のみ"
+                        onchange={() => applyManualFilters()}
+                        testId="manual-filter-mine"
+                    />
+                    <Button type="submit" variant="ghost" testId="manual-filter-submit">検索</Button>
+                </form>
 
-                {#if members.length === 0}
+                {#if manuals.data.length === 0}
                     <EmptyState
-                        title="メンバーはまだいません"
-                        description="組織メンバーをこのプロジェクトに割り当てると、ここに表示されます。"
-                        testId="project-members-empty"
+                        title="動画マニュアルはまだありません"
+                        description="SOP を起点に動画マニュアルを作成すると、ここに表示されます。"
+                        testId="manuals-empty"
                     />
                 {:else}
-                    <ul
-                        class="mt-4 flex flex-col divide-y divide-border"
-                        data-testid="project-member-list"
-                    >
-                        {#each members as member (member.id)}
-                            <li
-                                class="flex items-center justify-between gap-4 py-3"
-                                data-testid={`project-member-${member.id}`}
-                            >
+                    <ul class="mt-4 flex flex-col divide-y divide-border" data-testid="manual-list">
+                        {#each manuals.data as manual (manual.id)}
+                            <li class="flex items-center justify-between gap-4 py-3">
                                 <div class="min-w-0">
-                                    <p class="truncate text-body">{member.name}</p>
-                                    {#if canViewMemberEmails && member.email}
+                                    <TextLink
+                                        href={`/projects/${project.id}/manuals/${manual.id}`}
+                                        testId={`manual-link-${manual.id}`}
+                                    >
+                                        {manual.title}
+                                    </TextLink>
+                                    <p class="mt-1 text-caption text-text-secondary">
+                                        {manual.category?.name ?? "未分類"} ・ {manual.creator?.name ??
+                                            "不明"} ・ 更新 {manual.updated_at}
+                                    </p>
+                                </div>
+                                <Badge
+                                    tone={STATUS_TONES[manual.status]}
+                                    testId={`manual-status-${manual.id}`}
+                                >
+                                    {VIDEO_MANUAL_STATUS_LABELS[manual.status]}
+                                </Badge>
+                            </li>
+                        {/each}
+                    </ul>
+                    <div class="mt-4">
+                        <Pagination
+                            currentPage={manuals.meta.current_page}
+                            totalPages={manuals.meta.last_page}
+                            onChange={changeManualPage}
+                            testId="manuals-pagination"
+                        />
+                    </div>
+                {/if}
+            </Card>
+
+            {#if canManage || canManageMembers}
+                <Card padding="lg">
+                    <h2 class="text-h3">管理メニュー</h2>
+                    <p class="mt-1 text-caption text-text-secondary">
+                        管理者向けの管理画面への導線です。権限のある項目のみ表示されます。
+                    </p>
+                    <ul class="mt-4 flex flex-col gap-2">
+                        {#if canManage}
+                            <li>
+                                <TextLink
+                                    href={`/projects/${project.id}/categories`}
+                                    testId="link-manage-categories"
+                                >
+                                    カテゴリ管理
+                                </TextLink>
+                            </li>
+                        {/if}
+                        {#if canManageMembers}
+                            <li>
+                                <TextLink href="/manage/users" testId="link-manage-users">
+                                    ユーザー管理
+                                </TextLink>
+                            </li>
+                        {/if}
+                    </ul>
+                </Card>
+            {/if}
+
+            {#if canManage}
+                <Card padding="lg">
+                    <h2 class="text-h3">プロジェクトメンバー</h2>
+                    <p class="mt-1 text-caption text-text-secondary">
+                        編集者・撮影者を割り当てます。組織の管理者はプロジェクト未所属でも管理できます。
+                    </p>
+
+                    {#if members.length === 0}
+                        <EmptyState
+                            title="メンバーはまだいません"
+                            description="組織メンバーをこのプロジェクトに割り当てると、ここに表示されます。"
+                            testId="project-members-empty"
+                        />
+                    {:else}
+                        <ul
+                            class="mt-4 flex flex-col divide-y divide-border"
+                            data-testid="project-member-list"
+                        >
+                            {#each members as member (member.id)}
+                                <li
+                                    class="flex items-center justify-between gap-4 py-3"
+                                    data-testid={`project-member-${member.id}`}
+                                >
+                                    <div class="min-w-0">
+                                        <p class="truncate text-body">{member.name}</p>
+                                        {#if canViewMemberEmails && member.email}
+                                            <p class="truncate text-caption text-text-secondary">
+                                                {member.email}
+                                            </p>
+                                        {/if}
+                                    </div>
+                                    <div class="flex shrink-0 items-center gap-2">
+                                        {#if member.implicit}
+                                            <!-- 暗黙メンバー: org 管理継承。pivot なし = ロール変更/削除不可 -->
+                                            <Badge
+                                                tone="neutral"
+                                                testId={`project-member-implicit-${member.id}`}
+                                            >
+                                                管理者（組織）
+                                            </Badge>
+                                        {:else}
+                                            <!-- disabled は付けない (禁止事項 8)。二重送信は
+                                                 changeMemberRole の handler 早期 return でガードする -->
+                                            <Select
+                                                value={member.role ?? ""}
+                                                aria-label={`${member.name} のロール`}
+                                                onchange={(event) =>
+                                                    changeMemberRole(member, event.currentTarget.value)}
+                                                testId={`project-member-role-${member.id}`}
+                                            >
+                                                {#each PROJECT_ROLE_OPTIONS as option (option.value)}
+                                                    <option value={option.value}>{option.label}</option>
+                                                {/each}
+                                            </Select>
+                                            <Button
+                                                variant="danger-ghost"
+                                                size="sm"
+                                                onclick={() => openRemoveMemberDialog(member)}
+                                                testId={`project-member-remove-${member.id}`}
+                                            >
+                                                削除
+                                            </Button>
+                                        {/if}
+                                    </div>
+                                </li>
+                            {/each}
+                        </ul>
+                    {/if}
+
+                    <!-- 追加フォーム -->
+                    <form
+                        onsubmit={submitAddMember}
+                        class="mt-6 flex flex-col gap-4"
+                        data-testid="project-member-add-form"
+                    >
+                        {#if assignableUsers.length === 0}
+                            <p
+                                class="text-caption text-text-secondary"
+                                data-testid="project-member-no-candidates"
+                            >
+                                アサインできる組織メンバーがいません。
+                                {#if canManageMembers}
+                                    <TextLink href="/manage/users">ユーザー管理</TextLink>から招待・確認できます。
+                                {/if}
+                            </p>
+                        {/if}
+                        <FormField
+                            label="メンバー"
+                            id="project-member-user"
+                            error={addMemberClientError ?? memberForm.errors.user_id}
+                        >
+                            {#snippet children({ id, describedBy, invalid })}
+                                <Select
+                                    {id}
+                                    bind:value={memberForm.user_id}
+                                    error={invalid}
+                                    aria-describedby={describedBy}
+                                >
+                                    <option value="">選択してください</option>
+                                    {#each assignableUsers as candidate (candidate.id)}
+                                        <option value={String(candidate.id)}>{candidate.name}</option>
+                                    {/each}
+                                </Select>
+                            {/snippet}
+                        </FormField>
+                        <FormField label="ロール" id="project-member-role" error={memberForm.errors.role}>
+                            {#snippet children({ id, describedBy, invalid })}
+                                <Select
+                                    {id}
+                                    bind:value={memberForm.role}
+                                    error={invalid}
+                                    aria-describedby={describedBy}
+                                >
+                                    {#each PROJECT_ROLE_OPTIONS as option (option.value)}
+                                        <option value={option.value}>{option.label}</option>
+                                    {/each}
+                                </Select>
+                            {/snippet}
+                        </FormField>
+                        <div>
+                            <Button
+                                type="submit"
+                                loading={memberForm.processing}
+                                testId="project-member-submit"
+                            >
+                                メンバーを追加
+                            </Button>
+                        </div>
+                    </form>
+                </Card>
+            {/if}
+
+            <Card padding="lg">
+                <h2 class="text-h3">アイテム</h2>
+                {#if items.length === 0}
+                    <EmptyState
+                        title="アイテムはまだありません"
+                        description="このプロジェクトにアイテムを追加すると、ここに表示されます。"
+                        testId="items-empty"
+                    />
+                {:else}
+                    <ul class="mt-4 flex flex-col divide-y divide-border" data-testid="item-list">
+                        {#each items as item (item.id)}
+                            <li class="flex items-center justify-between gap-4 py-3">
+                                <div class="min-w-0">
+                                    <p class="truncate text-body">{item.name}</p>
+                                    {#if item.note}
                                         <p class="truncate text-caption text-text-secondary">
-                                            {member.email}
+                                            {item.note}
                                         </p>
                                     {/if}
                                 </div>
-                                <div class="flex shrink-0 items-center gap-2">
-                                    {#if member.implicit}
-                                        <!-- 暗黙メンバー: org 管理継承。pivot なし = ロール変更/削除不可 -->
-                                        <Badge
-                                            tone="neutral"
-                                            testId={`project-member-implicit-${member.id}`}
+                                {#if canManage}
+                                    <div class="flex shrink-0 items-center gap-2">
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onclick={() => openEditModal(item)}
+                                            testId={`edit-item-${item.id}`}
                                         >
-                                            管理者（組織）
-                                        </Badge>
-                                    {:else}
-                                        <!-- disabled は付けない (禁止事項 8)。二重送信は
-                                             changeMemberRole の handler 早期 return でガードする -->
-                                        <Select
-                                            value={member.role ?? ""}
-                                            aria-label={`${member.name} のロール`}
-                                            onchange={(event) =>
-                                                changeMemberRole(member, event.currentTarget.value)}
-                                            testId={`project-member-role-${member.id}`}
-                                        >
-                                            {#each PROJECT_ROLE_OPTIONS as option (option.value)}
-                                                <option value={option.value}>{option.label}</option>
-                                            {/each}
-                                        </Select>
+                                            編集
+                                        </Button>
                                         <Button
                                             variant="danger-ghost"
                                             size="sm"
-                                            onclick={() => openRemoveMemberDialog(member)}
-                                            testId={`project-member-remove-${member.id}`}
+                                            onclick={() => openRemoveDialog(item)}
+                                            testId={`remove-item-${item.id}`}
                                         >
                                             削除
                                         </Button>
-                                    {/if}
-                                </div>
+                                    </div>
+                                {/if}
                             </li>
                         {/each}
                     </ul>
                 {/if}
+            </Card>
 
-                <!-- 追加フォーム -->
-                <form
-                    onsubmit={submitAddMember}
-                    class="mt-6 flex flex-col gap-4"
-                    data-testid="project-member-add-form"
+            {#if canManage}
+                <Card padding="lg">
+                    <h2 class="text-h3">アイテムを追加</h2>
+                    <form onsubmit={submitAdd} class="mt-4 flex flex-col gap-4">
+                        <FormField label="名前" id="item-name" error={addForm.errors.name} required>
+                            {#snippet children({ id, describedBy, invalid })}
+                                <Input
+                                    {id}
+                                    type="text"
+                                    bind:value={addForm.name}
+                                    error={invalid}
+                                    aria-describedby={describedBy}
+                                />
+                            {/snippet}
+                        </FormField>
+                        <FormField label="メモ" id="item-note" error={addForm.errors.note}>
+                            {#snippet children({ id, describedBy, invalid })}
+                                <Textarea
+                                    {id}
+                                    rows={2}
+                                    bind:value={addForm.note}
+                                    error={invalid}
+                                    aria-describedby={describedBy}
+                                />
+                            {/snippet}
+                        </FormField>
+                        <div>
+                            <Button type="submit" loading={addForm.processing} testId="item-submit">
+                                追加
+                            </Button>
+                        </div>
+                    </form>
+                </Card>
+
+                <DangerZone
+                    title="プロジェクトの削除"
+                    description="このプロジェクトと配下のすべてのアイテムを削除します。この操作は取り消せません。"
                 >
-                    {#if assignableUsers.length === 0}
-                        <p
-                            class="text-caption text-text-secondary"
-                            data-testid="project-member-no-candidates"
-                        >
-                            アサインできる組織メンバーがいません。
-                            {#if canManageMembers}
-                                <TextLink href="/manage/users">ユーザー管理</TextLink>から招待・確認できます。
-                            {/if}
-                        </p>
-                    {/if}
-                    <FormField
-                        label="メンバー"
-                        id="project-member-user"
-                        error={addMemberClientError ?? memberForm.errors.user_id}
+                    <Button
+                        variant="danger-outline"
+                        onclick={() => (deleteProjectDialogOpen = true)}
+                        testId="delete-project-button"
                     >
-                        {#snippet children({ id, describedBy, invalid })}
-                            <Select
-                                {id}
-                                bind:value={memberForm.user_id}
-                                error={invalid}
-                                aria-describedby={describedBy}
-                            >
-                                <option value="">選択してください</option>
-                                {#each assignableUsers as candidate (candidate.id)}
-                                    <option value={String(candidate.id)}>{candidate.name}</option>
-                                {/each}
-                            </Select>
-                        {/snippet}
-                    </FormField>
-                    <FormField label="ロール" id="project-member-role" error={memberForm.errors.role}>
-                        {#snippet children({ id, describedBy, invalid })}
-                            <Select
-                                {id}
-                                bind:value={memberForm.role}
-                                error={invalid}
-                                aria-describedby={describedBy}
-                            >
-                                {#each PROJECT_ROLE_OPTIONS as option (option.value)}
-                                    <option value={option.value}>{option.label}</option>
-                                {/each}
-                            </Select>
-                        {/snippet}
-                    </FormField>
-                    <div>
-                        <Button
-                            type="submit"
-                            loading={memberForm.processing}
-                            testId="project-member-submit"
-                        >
-                            メンバーを追加
-                        </Button>
-                    </div>
-                </form>
-            </Card>
-        {/if}
-
-        <Card padding="lg">
-            <h2 class="text-h3">アイテム</h2>
-            {#if items.length === 0}
-                <EmptyState
-                    title="アイテムはまだありません"
-                    description="このプロジェクトにアイテムを追加すると、ここに表示されます。"
-                    testId="items-empty"
-                />
-            {:else}
-                <ul class="mt-4 flex flex-col divide-y divide-border" data-testid="item-list">
-                    {#each items as item (item.id)}
-                        <li class="flex items-center justify-between gap-4 py-3">
-                            <div class="min-w-0">
-                                <p class="truncate text-body">{item.name}</p>
-                                {#if item.note}
-                                    <p class="truncate text-caption text-text-secondary">
-                                        {item.note}
-                                    </p>
-                                {/if}
-                            </div>
-                            {#if canManage}
-                                <div class="flex shrink-0 items-center gap-2">
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onclick={() => openEditModal(item)}
-                                        testId={`edit-item-${item.id}`}
-                                    >
-                                        編集
-                                    </Button>
-                                    <Button
-                                        variant="danger-ghost"
-                                        size="sm"
-                                        onclick={() => openRemoveDialog(item)}
-                                        testId={`remove-item-${item.id}`}
-                                    >
-                                        削除
-                                    </Button>
-                                </div>
-                            {/if}
-                        </li>
-                    {/each}
-                </ul>
+                        プロジェクトを削除
+                    </Button>
+                </DangerZone>
             {/if}
-        </Card>
+        </div>
 
-        {#if canManage}
-            <Card padding="lg">
-                <h2 class="text-h3">アイテムを追加</h2>
-                <form onsubmit={submitAdd} class="mt-4 flex flex-col gap-4">
-                    <FormField label="名前" id="item-name" error={addForm.errors.name} required>
-                        {#snippet children({ id, describedBy, invalid })}
-                            <Input
-                                {id}
-                                type="text"
-                                bind:value={addForm.name}
-                                error={invalid}
-                                aria-describedby={describedBy}
-                            />
-                        {/snippet}
-                    </FormField>
-                    <FormField label="メモ" id="item-note" error={addForm.errors.note}>
-                        {#snippet children({ id, describedBy, invalid })}
-                            <Textarea
-                                {id}
-                                rows={2}
-                                bind:value={addForm.note}
-                                error={invalid}
-                                aria-describedby={describedBy}
-                            />
-                        {/snippet}
-                    </FormField>
-                    <div>
-                        <Button type="submit" loading={addForm.processing} testId="item-submit">
-                            追加
-                        </Button>
-                    </div>
-                </form>
-            </Card>
+        <Modal
+            bind:open={editModalOpen}
+            title="アイテムを編集"
+            processing={editForm.processing}
+            testId="edit-item-modal"
+        >
+            <form onsubmit={submitEdit} class="flex flex-col gap-4">
+                <FormField label="名前" id="edit-item-name" error={editForm.errors.name} required>
+                    {#snippet children({ id, describedBy, invalid })}
+                        <Input
+                            {id}
+                            type="text"
+                            bind:value={editForm.name}
+                            error={invalid}
+                            aria-describedby={describedBy}
+                        />
+                    {/snippet}
+                </FormField>
+                <FormField label="メモ" id="edit-item-note" error={editForm.errors.note}>
+                    {#snippet children({ id, describedBy, invalid })}
+                        <Textarea
+                            {id}
+                            rows={2}
+                            bind:value={editForm.note}
+                            error={invalid}
+                            aria-describedby={describedBy}
+                        />
+                    {/snippet}
+                </FormField>
+                <div class="flex items-center justify-end gap-2">
+                    <Button
+                        variant="ghost"
+                        onclick={() => (editModalOpen = false)}
+                        disabled={editForm.processing}
+                    >
+                        キャンセル
+                    </Button>
+                    <Button type="submit" loading={editForm.processing} testId="edit-item-submit">
+                        保存
+                    </Button>
+                </div>
+            </form>
+        </Modal>
 
-            <DangerZone
-                title="プロジェクトの削除"
-                description="このプロジェクトと配下のすべてのアイテムを削除します。この操作は取り消せません。"
-            >
-                <Button
-                    variant="danger-outline"
-                    onclick={() => (deleteProjectDialogOpen = true)}
-                    testId="delete-project-button"
-                >
-                    プロジェクトを削除
-                </Button>
-            </DangerZone>
-        {/if}
-    </div>
+        <ConfirmDialog
+            bind:open={removeDialogOpen}
+            title="アイテム削除"
+            message={`「${removeTarget?.name ?? ""}」を削除しますか？ この操作は取り消せません。`}
+            confirmLabel="削除する"
+            confirmVariant="danger"
+            processing={removing}
+            onConfirm={removeItem}
+            testId="remove-item-dialog"
+        />
 
-    <Modal
-        bind:open={editModalOpen}
-        title="アイテムを編集"
-        processing={editForm.processing}
-        testId="edit-item-modal"
-    >
-        <form onsubmit={submitEdit} class="flex flex-col gap-4">
-            <FormField label="名前" id="edit-item-name" error={editForm.errors.name} required>
-                {#snippet children({ id, describedBy, invalid })}
-                    <Input
-                        {id}
-                        type="text"
-                        bind:value={editForm.name}
-                        error={invalid}
-                        aria-describedby={describedBy}
-                    />
-                {/snippet}
-            </FormField>
-            <FormField label="メモ" id="edit-item-note" error={editForm.errors.note}>
-                {#snippet children({ id, describedBy, invalid })}
-                    <Textarea
-                        {id}
-                        rows={2}
-                        bind:value={editForm.note}
-                        error={invalid}
-                        aria-describedby={describedBy}
-                    />
-                {/snippet}
-            </FormField>
-            <div class="flex items-center justify-end gap-2">
-                <Button
-                    variant="ghost"
-                    onclick={() => (editModalOpen = false)}
-                    disabled={editForm.processing}
-                >
-                    キャンセル
-                </Button>
-                <Button type="submit" loading={editForm.processing} testId="edit-item-submit">
-                    保存
-                </Button>
-            </div>
-        </form>
-    </Modal>
+        <ConfirmDialog
+            bind:open={removeMemberDialogOpen}
+            title="メンバー削除"
+            message={`「${removeMemberTarget?.name ?? ""}」をこのプロジェクトから外しますか？ 組織のメンバーシップは維持されます。`}
+            confirmLabel="削除する"
+            confirmVariant="danger"
+            processing={removingMember}
+            onConfirm={removeMember}
+            testId="project-member-remove-dialog"
+        />
 
-    <ConfirmDialog
-        bind:open={removeDialogOpen}
-        title="アイテム削除"
-        message={`「${removeTarget?.name ?? ""}」を削除しますか？ この操作は取り消せません。`}
-        confirmLabel="削除する"
-        confirmVariant="danger"
-        processing={removing}
-        onConfirm={removeItem}
-        testId="remove-item-dialog"
-    />
-
-    <ConfirmDialog
-        bind:open={removeMemberDialogOpen}
-        title="メンバー削除"
-        message={`「${removeMemberTarget?.name ?? ""}」をこのプロジェクトから外しますか？ 組織のメンバーシップは維持されます。`}
-        confirmLabel="削除する"
-        confirmVariant="danger"
-        processing={removingMember}
-        onConfirm={removeMember}
-        testId="project-member-remove-dialog"
-    />
-
-    <ConfirmDialog
-        bind:open={deleteProjectDialogOpen}
-        title="プロジェクト削除"
-        message={`プロジェクト「${project.name}」と配下のすべてのアイテムを削除しますか？ この操作は取り消せません。`}
-        confirmLabel="削除する"
-        confirmVariant="danger"
-        processing={deletingProject}
-        onConfirm={deleteProject}
-        testId="delete-project-dialog"
-    />
+        <ConfirmDialog
+            bind:open={deleteProjectDialogOpen}
+            title="プロジェクト削除"
+            message={`プロジェクト「${project.name}」と配下のすべてのアイテムを削除しますか？ この操作は取り消せません。`}
+            confirmLabel="削除する"
+            confirmVariant="danger"
+            processing={deletingProject}
+            onConfirm={deleteProject}
+            testId="delete-project-dialog"
+        />
+    </PageContent>
 </AppLayout>
