@@ -1,3 +1,22 @@
+Round 15 の Critical 1 件を対応した。**実害のある指摘だった**（`checkout.session.completed` の `subscription` は
+expandable field で、expand 指定の無い通常 payload では **string ID** で来るため、array 前提だと **本番で T1004 が
+一度も dispatch されない**）。
+
+1. **契約を明示**: `subscriptionIdFrom(array $object): ?string` は **string と `array{id: string}` の両方を受理**。
+   実装を本文に明記: `$v = $object['subscription'] ?? null; if (is_array($v)) { $v = $v['id'] ?? null; }
+   return is_string($v) && $v !== '' ? $v : null;`（それ以外の型は null = fail-closed で dispatch しない）。
+2. **dispatch 箇所のコメント**に「**通常 payload は string ID が主経路。array は expand 済みのみ。array 前提だと本番で
+   発火しない**」を明記（同じ取り違えの再発防止）。
+3. **テスト 50 を必須で拡張**: **(a) string ID `['subscription' => 'sub_x']` → dispatch される（本番の主経路）** /
+   (b) expanded object `['subscription' => ['id' => 'sub_x']]` → id を取り出して dispatch /
+   (c) null・空文字・その他の型 → dispatch されない（fail-closed）。
+
+改訂後の詳細設計書を全文添付する。残る穴があれば指摘し、無ければ APPROVED を出してほしい。
+
+---
+
+## 改訂後の詳細設計書（v2 全文）
+
 # 詳細設計: aigenba-billing-parity（決済ドメインを aigenba に全面一致させる）
 
 ## 使命・制約（絶対遵守）

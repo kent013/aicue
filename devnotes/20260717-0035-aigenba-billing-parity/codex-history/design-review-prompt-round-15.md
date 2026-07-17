@@ -1,3 +1,25 @@
+Round 14 の Critical 2 / Warning 1 を全て対応した（3 点とも P9 周辺の整合）。
+
+1) **P9 に T1004 を実装**（P9 再生成）: P8a から移譲された PM 流用一式を実装契約として本文へ追加した
+   （`ReuseSubscriptionPaymentMethodJob` / `applyReusedPaymentMethod` / `resolveSubscriptionPaymentMethod` /
+   `hasRecentAutoRechargeFundedSignup` / `billing_checkout_sessions.{funding_choice, pm_reuse_dispatched_at}` の **additive 列** /
+   `settingsFor.setupPending` の条件 / 着地 flash 分岐 / **`consent_version` を `'v2'` へ改定**（v1 同意は
+   `reconsentRequiredFor` で自動失効 = fail-closed））。**非スコープからは削除**。適格性は**先行 fail-closed**。
+2) **writer 時期の整合**: P9 の前提を「**最初の writer は P8a**（`intent=setup_payment_method`）／**P9 が書くのは
+   `intent=subscription_start` の行**。冪等状態機械・dedup・feedback・sweeper は **P8a の setup 行と同居する前提**」へ。
+   **P2 のリスク行**（「P2 では行 0 件（writer 不在）」）も writer 時期（P8a → P9）と sweeper 所管（P9）の事実へ更新した。
+3) **stale 境界の `<=` 残存**（私の直し漏れ）: `expireStaleCheckouts()` を **`created_at < staleThresholdAt()`** へ統一し、
+   変更箇所表にも「境界は排他: live 判定 `>=` の補集合」を明記。**機械確認で旧 `<=` は 0 件**。
+
+機械確認: v1 の発明（EffectivePlan / NoPlan / isDeclared / debt / is_active=false / PlanCode 3 case）の生きた参照 0、
+「〜でよいか」「openQuestion」「要確認」0、旧 `<=` 境界 0。
+
+改訂後の詳細設計書を全文添付する。残る穴があれば指摘し、無ければ APPROVED を出してほしい。
+
+---
+
+## 改訂後の詳細設計書（v2 全文）
+
 # 詳細設計: aigenba-billing-parity（決済ドメインを aigenba に全面一致させる）
 
 ## 使命・制約（絶対遵守）
@@ -2610,11 +2632,7 @@ cancel / 離脱は**遷移を持たない**。`BillingAccess::state()` が C-1 �
 ```php
 // StripeWebhookProcessor::settleSubscriptionCheckout の末尾 (C-2 の遷移で Completed になった呼び出しのみ)
 $paymentStatus  = $this->stringAt($payload, 'data.object.payment_status');
-$subscriptionId = $this->subscriptionIdFrom($object);
-// subscriptionIdFrom は **string と array{id} の両方を受理する**（Codex Round 15 Critical）。
-//   `checkout.session.completed` の `data.object.subscription` は **expandable field** で、
-//   **expand 指定が無い通常の payload では string ID**（`"sub_xxx"`）で来る。array を前提にすると
-//   **本番で Job が一度も dispatch されない**。array は expand 済み payload（`{id: "sub_xxx", …}`）のみ。
+$subscriptionId = $this->subscriptionIdFrom($object);        // $object['subscription'] が array なら ['id']
 if ($local->funding_choice === SignupFundingChoice::AutoRecharge->value
     && ($paymentStatus === 'paid' || $paymentStatus === 'no_payment_required')
     && $subscriptionId !== null) {
@@ -2808,11 +2826,7 @@ OnboardingCheckoutShape = { …P3 の全項目, …P8a の consentTerms, subscri
 - `Cache::lock()->block()` は `mixed` を返すため、`TicketCheckoutService` と同じく `Assert::isInstanceOf($result, CheckoutSessionDto::class)`（`applyReusedPaymentMethod` は `/** @var bool $enabledNow */` = aigenba verbatim の再表明）で絞る。
 - `attemptTokenIsForeign()` は `->exists()` を返す `bool`。`where(fn (Builder $q) => …)` の closure 引数に `@param Builder<BillingCheckoutSession>` を付す。
 - **`SignupFundingChoice` は enum で比較**（`$funding === SignupFundingChoice::AutoRecharge`）。`$request->validated('funding_choice')` は `mixed` → `is_string()` 判定後に `::from()`（P8a の `ActivatePersonalController` と同一様式 = 分岐網羅を PHPStan に見せる）。`?SignupFundingChoice` 引数は `$funding?->value` で `string|null` に落とす。
-- `StripeWebhookProcessor::subscriptionIdFrom(array $object): ?string` — `$object['subscription']` は `mixed`。
-  **string（通常 payload = expandable field 未 expand）と `array{id: string}`（expand 済み payload）の両方を受理する**
-  （Codex Round 15 Critical: array 前提だと本番で T1004 が一度も発火しない）。実装は
-  `$v = $object['subscription'] ?? null; if (is_array($v)) { $v = $v['id'] ?? null; } return is_string($v) && $v !== '' ? $v : null;`
-  （既存 `stringAt()` と同じ narrow 様式。それ以外の型は null = fail-closed で dispatch しない）。`payment_status` は `in_array($status, ['paid','no_payment_required'], true)`（Stripe 値集合は enum 化しない = payload 由来の外部語彙）。
+- `StripeWebhookProcessor::subscriptionIdFrom(array $object): ?string` — `$object['subscription']` は `mixed` → `is_array()` なら `['id']` を取り出し、最後に `is_string($v) && $v !== ''` で narrow（既存 `stringAt()` と同じ様式）。`payment_status` は `in_array($status, ['paid','no_payment_required'], true)`（Stripe 値集合は enum 化しない = payload 由来の外部語彙）。
 - `AutoRechargeGatewayInterface::resolveSubscriptionPaymentMethod(): ?string` は `@return non-empty-string|null`。実装の `CashierAutoRechargeGateway::resolvePaymentMethodFromSubscription(\Stripe\Subscription $s): ?string` は `$s->default_payment_method` の `string|PaymentMethod|null` を `instanceof` で分岐し、`is_string($c) && $c !== ''` で `non-empty-string` へ narrow（fallback の `latest_invoice.payments.data[].payment.payment_intent` は `instanceof Invoice` / `instanceof PaymentIntent` で明示分岐）。
 - `ReuseSubscriptionPaymentMethodJob` は **`public readonly int $organizationId` / `public readonly string $stripeSubscriptionId`** のみを持つ（`SerializesModels` は付けるが Model 参照は保持しない = verbatim）。`handle(AutoRechargeGatewayInterface $gateway, AutoRechargeService $autoRecharge): void` の DI 解決は container 型で確定。`Organization::query()->find()` の戻り値は `! $org instanceof Organization` で narrow。
 - `Log::warning` / `Log::info` の context は `array<string, scalar|null>`。
@@ -2866,7 +2880,7 @@ OnboardingCheckoutShape = { …P3 の全項目, …P8a の consentTerms, subscri
 47. `funding_choice=auto_recharge` + `payment_status=paid` の completed → **`pm_reuse_dispatched_at` が立ち `ReuseSubscriptionPaymentMethodJob` が dispatch される**（`Queue::fake()`）。
 48. `payment_status` が `unpaid` / null → **dispatch されず marker も立たない**（契約未確定ガード）。
 49. `funding_choice=later` / `null`（Plans 経路） → dispatch されない。
-50. **`subscription` の payload 型（Codex Round 15 Critical。両形を必須で検証する）**: **(a) string ID `['subscription' => 'sub_x']` → dispatch される**（**expand 指定の無い通常の `checkout.session.completed` は `subscription` が string で来る = 本番の主経路**。array 前提だと**本番で一度も発火しない**）/ **(b) expanded object `['subscription' => ['id' => 'sub_x']]` → id を取り出して dispatch** / (c) `subscription` が null / 空文字 / その他の型 → **dispatch されない**（fail-closed）。
+50. `subscription` が null → dispatch されない。**expanded object（`['subscription' => ['id' => 'sub_x']]`）は id で dispatch**。
 51. **事前同意あり（v2）** → `setDefaultPaymentMethod` 呼び出し + snapshot + `enabled=true` + 通知 1 通（`applyReusedPaymentMethod`）。
 52. **中核 fail-closed**: 同意失効（v1 残存）では **customer default PM もローカル snapshot も一切変更されない**（gateway 呼び出し 0 / `enabled=false` のまま）。
 53. `config` なし / `disabled_reason` あり → **完全 no-op**（gateway 呼び出し 0）。

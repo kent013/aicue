@@ -1,3 +1,33 @@
+Round 13 の Critical 2 / Warning 1 を全て対応した。**Critical 1 は私の説明の誤り**で、指摘どおりだった。
+
+1) **P2/P4 の同値性説明の訂正**（P2/P4 を再生成）:
+   - **P2 の DoD から「挙動不変」の主張を撤回**。P2 導入で結論が変わる cohort を **A〜I で全列挙**した:
+     **cohort C**（`active/trialing` + `trial_ends_at <= now` + `has_payment_method=false`）= **現行 許可 → P2 遮断**、
+     **cohort D**（`past_due` + trial 未終了 or PM 有り）= **現行 遮断 → P2 許可**。他は不変。
+     `plan_code === null`（cohort I）は移行 OR が保存し **P4 で反転**。
+   - 「P2 の唯一の結論変更は past_due」「P4 分類2が反転の目的」を**削除**し、C/D を **P2 の成果物として DoD・分類表・
+     テストに載せた**。**施策一覧の P2 行も訂正**。
+   - 実データ露出も接地: `has_payment_method` は aigenba 既定 `false` だが **既存行は backfill で `true`**
+     （AI-CUE の subscription 生成は `newSubscription()->checkout()`(mode=subscription) のみ = PM 収集必須 = 事実値 true）
+     → **P2 デプロイ時点の cohort C は空**。`recordPaymentMethodSnapshot()` は monotonic なので backfill 値は保存される。
+   - **P4 の判定変更は移行 OR 1 行の削除（= cohort I の反転）だけ**と明示。backfill は **entitlement を PHP で評価して
+     ID 集合を確定 → その集合で UPDATE**（P2 の `deriveEntitlement()` と同一定義）にしたので **D22 の双方向 ID 集合一致が
+     機械的に成立**する。
+2) **stale 境界を排他に統一**: sweeper を **`< threshold`** へ。`staleThresholdAt()` 直上に契約を明記
+   （`live: >= threshold` / `stale: < threshold` = **補集合**）。
+3) **未決事項を本文の決定へ昇格**（P6 / P8a を再生成）。決定は **v2 原則で機械的に導出**した（aigenba verbatim /
+   移植しないなら「AI-CUE に対象が存在しない（原則 4）」か「AGENTS.md 抵触（原則 2）」を根拠に明記）。
+   **「機能的に不要」「意味論が崩れる」といった私の設計判断は根拠から外した**。
+
+機械確認: v1 の発明（EffectivePlan / NoPlan / isDeclared / debt / is_active=false / PlanCode 3 case）の生きた参照は 0、
+「〜でよいか」「openQuestion」「要確認」も 0。
+
+改訂後の詳細設計書を全文添付する。残る穴があれば指摘し、無ければ APPROVED を出してほしい。
+
+---
+
+## 改訂後の詳細設計書（v2 全文）
+
 # 詳細設計: aigenba-billing-parity（決済ドメインを aigenba に全面一致させる）
 
 ## 使命・制約（絶対遵守）
@@ -577,7 +607,7 @@ final class BillingPermissionService {
 | **移行 OR（`plan_code === null`）の消し忘れで P4 のゲート反転が効かない** | `hasActiveAccess()` の docblock に「P4 で削除」と削除条件（grandfathering backfill 完了）を明記し、`BillingAccessStateTest` に cohort I（`NoSubscription` + `plan_code=null` → **P2 は true**）を明示ケースとして置く。P4 はこの 1 行削除 + 期待反転の diff だけで済むことをテスト差分で確認する |
 | **`state()` が `plan_code` を見ないことの回帰**（将来の再発明） | `BillingEntitlementSingleSourceTest` で `plan_code` 読み出し allowlist を構造的に固定（`BillingAccess` は移行 OR の 1 箇所のみ許可し、P4 で allowlist からも外す） |
 | **stale 境界の重複で live 行が expire される**（Round 13 Critical 2） | 閾値を `BillingAccess::staleThresholdAt()` に単一出典化し、**live = `>=` / stale = `<`** の排他で統一。境界ちょうど（`created_at == staleThresholdAt(now())`）が `PendingCheckout` になることを `BillingAccessStateTest` で固定。P9 の sweeper は同 helper を `<` で読む |
-| **`state()` の checkout session クエリが gate 経路（多数の GET）で毎回走る** | verbatim どおり sub / free_plan_code を持つ org は分岐 1・2 で早期 return し、クエリ到達は sub 行なしの org のみ。**P2 時点では `billing_checkout_sessions` は writer 不在で 0 件**（**最初の writer は P8a**（`intent=setup_payment_method`）、**`subscription_start` 行の writer は P9**）。read 経路で **DB 書込をしない**契約もテストで固定（stale expire は sweeper の責務 = **P9 所管の `expireStaleCheckouts()`**） |
+| **`state()` の checkout session クエリが gate 経路（多数の GET）で毎回走る** | verbatim どおり sub / free_plan_code を持つ org は分岐 1・2 で早期 return し、クエリ到達は sub 行なしの org のみ。P2 では行 0 件（writer 不在）。read 経路で **DB 書込をしない**契約もテストで固定（stale expire は sweeper の責務 = P9 以降） |
 | `StripeWebhookProcessor` からの書込移設で webhook の順序逆転耐性・冪等が退行 | 既存 `WebhookEventSubscriptionInvariantTest` / `WebhookIdempotencyTest` を**無改変で維持**（不変条件 #7）。反映条件（active/trialing のみ・未知 Price は受理のみ・行不在時は period 更新 skip・終了契機は deleted のみ）をそのまま持ち込み、`SubscriptionSnapshotSyncTest` で列単位に固定 |
 | **rename 時に Stripe API 呼び出しが増える**（現行は customer 同期なし）= 外部副作用の新規発生 | job 化 + `stripe_id === null` no-op + `isDirty('name')` 限定 + fake 環境は `FakeStripeGateway::syncCustomerDetails()` で no-op。`OrganizationRenameStripeSyncTest` + `BillingSyncDispatchInvariantTest` で固定 |
 | `manageBilling` への直接付与 OR 追加で認可が緩む | 付与経路（route / UI / Action）を P2 に含めない = 直接付与行は生成されない。Policy 回帰テストで「付与ゼロなら結論は現行と同一」を固定。非メンバーは role null で早期 false（`manageApiKeys` と同型） |
@@ -2370,96 +2400,87 @@ config: `billing.purchase_resume_window_minutes` = 30（aigenba 既定値）。`
 
 ---
 
-### P9: サブスク checkout の冪等・着地 feedback + 請求先情報 + PM 流用（T1004）
+### P9: サブスク checkout の冪等・着地 feedback + 請求先情報
 
-前提（v2）: P1〜P8b がマージ済み。**`BillingCheckoutSession`（model + migration + Factory）・`CheckoutIntent`（`App\Enums\CheckoutIntent`: `SubscriptionStart` / `SetupPaymentMethod`）・`CheckoutSessionStatus`（`App\Enums\CheckoutSessionStatus`: `Pending` / `Completed` / `Failed` / `Expired`）は P2 で導入済み**（`BillingAccess::state()` の `PendingCheckout` / `ExpiredCheckout` が読むため前倒し = D25 v2）。**`billing_checkout_sessions` の最初の writer は P8a**（`startSetupCheckout` が `intent=SetupPaymentMethod` / `status=pending` の行を書く。P8a 本文「最初の writer は P8a になる（P2 との契約）」）。**P9 が新規に書くのは `intent=SubscriptionStart` の行**であり、P9 の冪等状態機械・dedup・feedback・sweeper はすべて **P8a の setup 行と同居する前提**で設計する。P2 の `state()` は **live pending を `created_at >= now()-1day` の in-memory 判定で見る**（`expires_at` 列は存在しない）。P8b までで `BillingDashboardDto` / `BillingPlansPageDto` / `Billing/Plans.svelte` / `BillingCustomerSynchronizer` / `SyncBillingCustomerDetails` / `StripeGatewayInterface` + `CashierStripeGateway` + `FakeStripeGateway` が揃っている。P8a までで **`AutoRechargeService`（`recordPreConsent` / `applySetupCompletion` / `autoEnableEligible` / `isAutoEnablePending` / `hasRecentCompletedSetup` / `reconsentRequiredFor`）・`SignupFundingChoice`（3 case）・`AutoRechargeSettingsDto`（`pendingAutoEnable` / `setupPending` を持つ aigenba verbatim shape）・`Contracts\AutoRechargeGatewayInterface`（8 メソッド）+ `CashierAutoRechargeGateway` + `Fakes\FakeAutoRechargeGateway`・`app/Jobs/Billing/*`・`config/billing.php` の `auto_recharge` ブロック（`consent_version='v1'`）**が揃っている。
+前提（v2）: P1〜P8b がマージ済み。**`BillingCheckoutSession`（model + migration + Factory）・`CheckoutIntent`（`App\Enums\CheckoutIntent`: `SubscriptionStart` / `SetupPaymentMethod`）・`CheckoutSessionStatus`（`App\Enums\CheckoutSessionStatus`: `Pending` / `Completed` / `Failed` / `Expired`）は P2 で導入済み**（`BillingAccess::state()` の `PendingCheckout` / `ExpiredCheckout` が読むため前倒し = D25 v2）。P2 の `state()` は **live pending を `created_at >= now()-1day` の in-memory 判定で見る**（`expires_at` 列は存在しない）。P8b までで `BillingDashboardDto` / `BillingPlansPageDto` / `Billing/Plans.svelte` / `BillingCustomerSynchronizer` / `SyncBillingCustomerDetails` / `StripeGatewayInterface` + `CashierStripeGateway` + `FakeStripeGateway` が揃っている。
 
-**P9 の担当は 4 つ**: (a) `attempt_token` による冪等状態機械を **`SubscriptionStart` 行の writer として配線**する、(b) 着地 feedback（`resolveBillingFeedback` + `Billing/Index` バナー）、(c) 請求先情報（`billing_contact_email` / `billing_contact_name`）、**(d) T1004 = サブスク決済カードのオートリチャージ流用**（D29(ii) で P8a から明示移譲。`ReuseSubscriptionPaymentMethodJob` / `applyReusedPaymentMethod` / `resolveSubscriptionPaymentMethod` / `hasRecentAutoRechargeFundedSignup` / `billing_checkout_sessions.{funding_choice, pm_reuse_dispatched_at}` / `settingsFor.setupPending` の (b) 条件 / 着地 flash 分岐 / `consent_version` の `'v2'` 改定）。
+**P9 の担当は 3 つだけ**: (a) `attempt_token` による冪等状態機械を `billing_checkout_sessions` の **writer として配線**する（P2 で行 0 件だったテーブルに初めて書き手が付く）、(b) 着地 feedback（`resolveBillingFeedback` + `Billing/Index` バナー）、(c) 請求先情報（`billing_contact_email` / `billing_contact_name`）。
 
-**DoD**: サブスク checkout が二重 subscription 作成を構造的に起こせない（`UNIQUE(organization_id, intent, attempt_token)` + org-wide live pending dedup + Stripe idempotency key + INSERT race の re-read 収束）。**`state()` / `startCheckout()` / 日次 sweeper が同一の live 判定（`created_at >= now()-1day`）を単一出典から共有し、stale pending が永久に再利用される経路が構造的に存在しない**（下記 C-1）。**webhook の遷移条件が一意**（`Completed` 以外は payload の判定結果へ遷移。`Completed` 終局。下記 C-2）。**T1004 一式が実装され**、`funding_choice=auto_recharge` の契約 checkout が**決済確定（`payment_status ∈ {paid, no_payment_required}`）のときだけ** `ReuseSubscriptionPaymentMethodJob` を dispatch し、`applyReusedPaymentMethod` が**適格性先行 fail-closed**（同意なし・失効・停止状態では customer default PM にもローカル snapshot にも一切触れない）で有効化する。**`consent_version` は `'v2'`**（= v1 同意は `reconsentRequiredFor` 経由で自動失効 → 再同意。fail-closed）。`billing_contact_*` は **CipherSweet 暗号化で保存**され、平文 DB 非保存・平文 where 不 hit が Feature/Architecture テストで固定される。**金銭の付与経路には一切触らない**（D7 維持: 付与は `invoice.paid`、`plan_code` 同期は `customer.subscription.*`）。**`EffectivePlan` は使わない**（判定源は `BillingAccess::state()` の `OnboardingBillingState`）。
+**DoD**: サブスク checkout が二重 subscription 作成を構造的に起こせない（`UNIQUE(organization_id, intent, attempt_token)` + org-wide live pending dedup + Stripe idempotency key + INSERT race の re-read 収束）。**`state()` / `startCheckout()` / 日次 sweeper が同一の live 判定（`created_at >= now()-1day`）を単一出典から共有し、stale pending が永久に再利用される経路が構造的に存在しない**（下記 C-1）。**webhook の遷移条件が一意**（`Completed` 以外は payload の判定結果へ遷移。`Completed` 終局。下記 C-2）で、状態図・実装契約・テストがすべて同一の条件を指す。`billing_contact_*` は **CipherSweet 暗号化で保存**され、平文 DB 非保存・平文 where 不 hit が Feature/Architecture テストで固定される。**金銭の付与経路には一切触らない**（D7 維持: 付与は `invoice.paid`、`plan_code` 同期は `customer.subscription.*`。本フェーズの追跡行は着地 feedback と冪等の真実源であって台帳の出典ではない）。**`EffectivePlan` は使わない**（判定源は `BillingAccess::state()` の `OnboardingBillingState`）。
 
-**token 型名の分離（交渉不可）**: チケット決済の `ticketAttemptToken` / `ticket_checkout_sessions.attempt_token` / Stripe key `purchase:{token}` は **P8b までで確定済みの別テーブル・別 key 空間**。P8a のカード登録は `billing_checkout_sessions` の **`intent=setup_payment_method`** + Stripe key `auto-recharge-setup:{token}`。P9 が導入するのは `subscriptionAttemptToken`（props / TS 型名）/ `billing_checkout_sessions.attempt_token`（**`intent=subscription_start` でスコープ**）/ Stripe key `sub_start:{token}`（aigenba verbatim の名前空間）。3 者を同一 DTO・同一 key 空間に混ぜない。
+**token 型名の分離（交渉不可）**: チケット決済の `ticketAttemptToken` / `ticket_checkout_sessions.attempt_token` / Stripe key `purchase:{token}` は **P8b までで確定済みの別テーブル・別 key 空間**。P9 が導入するのは `subscriptionAttemptToken`（props / TS 型名）/ `billing_checkout_sessions.attempt_token`（`intent=subscription_start` でスコープ）/ Stripe key `sub_start:{token}`（aigenba verbatim の名前空間）。両者を同一 DTO・同一列・同一 key 空間に混ぜない。
 
 #### 変更箇所
 
 | ファイル (AI-CUE) | 何をするか | 移植元 (aigenba) |
 |---|---|---|
-| `app/Models/Billing/BillingCheckoutSession.php`（改修。P2 導入分） | **live 判定の単一出典を置く**（C-1）。`// 境界は排他的に統一する:`<br>`//   live  : created_at >= staleThresholdAt($now)  （isLivePending / state() / dedup の SQL filter）`<br>`//   stale : created_at <  staleThresholdAt($now)  （sweeper の expireStaleCheckouts）`<br>`// 両者は補集合であり、境界時刻ちょうどの行が「live かつ Expired 化対象」になることはない。`<br>`public static function staleThresholdAt(CarbonImmutable $now): CarbonImmutable` = `$now->subDay()`（**aigenba の閾値をそのまま**）/ `isLivePending(CarbonImmutable $now): bool` = `status === CheckoutSessionStatus::Pending->value && ($created_at === null \|\| $created_at->greaterThanOrEqualTo(self::staleThresholdAt($now)))` / `isReplayablePending(CarbonImmutable $now): bool` = `isLivePending($now) && checkout_url !== null && checkout_url !== ''`。**additive 2 列の宿主化**: `@property string\|null $funding_choice` / `@property Carbon\|null $pm_reuse_dispatched_at` + `$fillable` へ `funding_choice`、`$casts` へ `'pm_reuse_dispatched_at' => 'datetime'`（**`pm_reuse_dispatched_at` は `$fillable` に入れない** = webhook の `forceFill` 専用 marker） | `/tmp/aigenba/app/Models/Billing/BillingCheckoutSession.php:23,35,49,67,96-104` + `BillingAccess.php:58` / `ReconcileSubscriptionSchedules.php:113` の `subDay()` を 1 箇所へ集約。AI-CUE 先例 `app/Models/Billing/TicketCheckoutSession.php:64-68` |
-| `database/migrations/2026_07_xx_xxxxxx_add_signup_funding_to_billing_checkout_sessions.php`（新規。**additive のみ**） | `funding_choice` = `string(16)->nullable()->after('plan_code')` / `pm_reuse_dispatched_at` = `timestamp()->nullable()->after('completed_at')`。**P2 所管テーブルへの additive 列追加のみ**（既存列・index・UNIQUE は触らない）。`down()` は `dropColumn(['funding_choice','pm_reuse_dispatched_at'])` | `/tmp/aigenba/database/migrations/2026_06_25_090200_add_signup_funding_to_billing_checkout_sessions.php:21`（`funding_choice` の列型 verbatim。`pack_count` / `topup_count` / `applied_trial_days` は原則 4 で非移植）+ `/tmp/aigenba/database/migrations/2026_07_09_140000_add_pm_reuse_dispatched_at_to_billing_checkout_sessions.php`（docblock ごと verbatim） |
-| `app/Services/Billing/BillingAccess.php`（改修） | `state()` の stale 判定を `$row->isLivePending($now)` 経由へ差し替える（`$now = CarbonImmutable::now()` を 1 回だけ取り、`$threshold` のローカル literal を撤去）。**挙動不変**（同じ `subDay()` 値）。P2 の分岐表・`BillingAccessStateTest` は**無変更で green** | `/tmp/aigenba/app/Services/Billing/BillingAccess.php:57-75` |
-| `app/Console/Commands/Billing/ReconcileSubscriptionSchedules.php`（改修） | **`expireStaleCheckouts()` を追加**（**境界は排他: `created_at < staleThresholdAt()`** = live 判定 `>=` の補集合）。`BillingCheckoutSession::query()->where('status', Pending)->where('created_at', '<', BillingCheckoutSession::staleThresholdAt(CarbonImmutable::now()))->update(['status' => Expired])`。**intent で絞らない**（verbatim。P8a の `SetupPaymentMethod` 行も対象）。Stripe 照会なし。`handle()` の集計行へ `expired={n}` を追加。既存 daily 登録（`routes/console.php:38`）に相乗り = **新 command も新 `Schedule::command()` 行も作らない** | `/tmp/aigenba/app/Console/Commands/Billing/ReconcileSubscriptionSchedules.php:112-121` |
-| `app/Services/Billing/SubscriptionService.php`（改修） | **`startCheckout()` を冪等マシンへ差し替える**（`SubscriptionCheckoutService` を新設しない = aigenba は本 Service に置いている）。シグネチャ: `startCheckout(Organization $org, User $user, Plan $plan, string $successUrl, string $cancelUrl, string $attemptToken, ?SignupFundingChoice $funding): CheckoutSessionDto`。`Cache::lock("billing:checkout:start:{$org->id}", 10)->block(5, …)`（**lock 名も verbatim**）。`assertCheckoutReady()` / `isReplayableCheckout()` / `replayCheckout()` / `isUniqueViolation()` / `attemptTokenIsForeign()` を実装。**行 INSERT に `'funding_choice' => $funding?->value` を含める**（T1004 の唯一の入力）。lock closure 先頭で `$now = CarbonImmutable::now()` を 1 回取り、段 2/3/4 の live 判定をすべて共有述語へ通す（C-1） | `/tmp/aigenba/app/Services/Billing/SubscriptionService.php:508-717,738,854,930-985` |
-| `app/DataTransferObjects/Billing/CheckoutSessionDto.php`（新規） | **verbatim**（`stripeSessionId` / `url` / `intent` / `planCode` + `toArray()` + `@phpstan-type CheckoutSessionShape`） | `/tmp/aigenba/app/DataTransferObjects/Billing/CheckoutSessionDto.php` |
-| `app/Services/Billing/Contracts/StripeGatewayInterface.php`（改修） | `createSubscriptionCheckout(Organization $org, string $stripePriceId, string $successUrl, string $cancelUrl, array $metadata, string $idempotencyKey): CreatedCheckoutSession`（戻り値は既存 `CreatedCheckoutSession` = session id の pin が webhook 照合に必須）。`expireCheckoutSession(string $stripeSessionId): string` を追加。**席引数は移植しない**（原則 4） | `/tmp/aigenba/app/Services/Billing/Contracts/StripeGatewayInterface.php:50,200` / AI-CUE `app/Services/Billing/TicketCheckoutGateway.php` |
-| `app/Services/Billing/CashierStripeGateway.php`（改修） | `newSubscription('default',…)->checkout()` をやめ `$org->stripe()->checkout->sessions->create($payload, ['idempotency_key' => $key])` 直呼びへ（**Cashier の `checkout()` ヘルパは per-request idempotency key を公開しない**）。`buildSubscriptionSessionPayload()` を public pure メソッドで切り出し、`subscription_data.metadata.{name,type}='default'` + **`payment_settings.save_default_payment_method='on_subscription'`**（**T1004 の第一候補 `subscription.default_payment_method` が埋まる前提**）を含める。`expireCheckoutSession()` を実装 | `/tmp/aigenba/app/Services/Billing/CashierStripeGateway.php:69-82` / AI-CUE `CashierTicketCheckoutGateway::buildSessionPayload()` |
-| `app/Services/Billing/Fakes/FakeStripeGateway.php`（改修） | 新シグネチャに追随。`CreatedCheckoutSession` を決定的に返し、**同一 `idempotencyKey` の再呼び出しで同一 sessionId** を返す。`expireCheckoutSession()` は既定 `'expired'`（テストが `'complete'` / throw を注入可） | `/tmp/aigenba/app/Services/Billing/Testing/StripeGatewayDuskFake.php` / AI-CUE `Fakes/FakeTicketCheckoutGateway.php` |
-| `app/Services/Billing/Contracts/AutoRechargeGatewayInterface.php`（改修。P8a 導入分） | **9 本目**として `resolveSubscriptionPaymentMethod(string $stripeSubscriptionId): ?string` を追加（`@return non-empty-string\|null`。docblock「解決順序: `subscription.default_payment_method` → `latest_invoice.payment_intent.payment_method`。双方 null なら null。空文字は返さない」を verbatim）。D31 の狭い gateway 規約は維持（`StripeGatewayInterface` には足さない） | `/tmp/aigenba/app/Services/Billing/Contracts/StripeGatewayInterface.php:286-294` |
-| `app/Services/Billing/CashierAutoRechargeGateway.php`（改修。P8a 導入分） | `resolveSubscriptionPaymentMethod()` = `Cashier::stripe()->subscriptions->retrieve($id, ['expand' => ['latest_invoice.payments.data.payment.payment_intent']])` → **`public static function resolvePaymentMethodFromSubscription(\Stripe\Subscription $subscription): ?string`**（多段解決の純関数として分離 = fixture で分岐を直接固定できる。verbatim） | `/tmp/aigenba/app/Services/Billing/CashierStripeGateway.php:930-975` |
-| `app/Services/Billing/Fakes/FakeAutoRechargeGateway.php`（改修。P8a 導入分） | `resolveSubscriptionPaymentMethod()` を決定的に実装（既知 prefix の subscription id に対して対の PM id を返し、未知は **null**（= 解決不能。空文字は返さない））。テストが「解決不能」「例外」を注入できる | `/tmp/aigenba/app/Services/Billing/Testing/StripeGatewayDuskFake.php:412-421` |
-| `app/Jobs/Billing/ReuseSubscriptionPaymentMethodJob.php`（新規） | **verbatim**（`public int $tries = 3` / `public int $backoff = 30` / `__construct(public readonly int $organizationId, public readonly string $stripeSubscriptionId)` / `handle(AutoRechargeGatewayInterface $gateway, AutoRechargeService $autoRecharge)`）。org 不在 → return / **軽量 guard `! $autoRecharge->isAutoEnablePending($org)` → Stripe retrieve 前に return** / PM 解決 null → `Log::warning('auto-recharge: subscription PM unresolved, skipping reuse', ['organization_id','stripe_subscription_id'])` + return（**PM・customer 情報はログに出さない**）/ それ以外 → `applyReusedPaymentMethod()`。docblock（T710 = 外向き Stripe API を webhook 同期処理から Job へ退避）ごと移植 | `/tmp/aigenba/app/Jobs/Billing/ReuseSubscriptionPaymentMethodJob.php`（gateway 型のみ D31 に合わせ `AutoRechargeGatewayInterface`） |
-| `app/Services/Billing/AutoRechargeService.php`（改修。P8a 導入分） | **`applyReusedPaymentMethod(Organization $org, string $paymentMethodId): bool` を追加（verbatim）**: `Assert::stringNotEmpty($paymentMethodId)` → `Cache::lock("billing:auto-recharge:{$org->id}")->block(10, …)` → **lock 内・TX 外で適格性先行確認**（`$config === null \|\| ! autoEnableEligible($config)` → `Log::info('auto-recharge: subscription PM reuse skipped (not eligible)', ['organization_id','reason'])` + `return false` = **Stripe にも DB にも触らない完全 no-op**）→ `gateway->setDefaultPaymentMethod()` → `DB::transaction`（`lockForUpdate` 再取得 → 不適格なら **`RuntimeException`（部分適用の顕在化。silent no-op にしない）** → snapshot + `enabled=true` + `failure_count=0`）→ `LockTimeoutException` は `RuntimeException` で Job retry へ → `$enabledNow` なら `notifyAutoEnabled()`（`report()` で握る）。**`hasRecentAutoRechargeFundedSignup(Organization $org): bool` を追加**: `intent=subscription_start` + `funding_choice=auto_recharge` + `status=completed` + **`pm_reuse_dispatched_at >= now()-{setup_pending_window_minutes}`**（`updated_at`/`completed_at` は使わない = 未決済 completed で窓が誤って開く）。**`settingsFor()` の `setupPending` を (b) 込みへ**: `$setupPending = ! $hasPm && (hasRecentCompletedSetup($org) \|\| ($pendingAutoEnable && hasRecentAutoRechargeFundedSignup($org)))` | `/tmp/aigenba/app/Services/Billing/AutoRechargeService.php:113-120,955-1025,1216-1228`（`intent=SignupFunding` → **`SubscriptionStart`** の 1 点のみ読み替え。`SignupFunding` intent は P2 が原則 4 で非移植のため） |
-| `config/billing.php`（改修。P8a 導入分） | `auto_recharge.consent_version` を **`'v1'` → `'v2'`**（D29-b）。**改定履歴コメントを verbatim で持ち込む**（「v1 = T1003 初版（カード登録経路のみ）/ v2 = T1004 有償契約でサブスク決済カードをオートリチャージへ流用することを明示」「提示条件の実質（…カードの取得手段）を変える変更では必ず version を上げること」）。他の値（`default_threshold=5` / `default_max=50` / `max_count=1000` / `max_failures=3` / `pending_expiry_hours=24` / `setup_pending_window_minutes=30`）は**不変** | `/tmp/aigenba/config/billing.php:31-47` |
-| `app/Exceptions/Billing/SubscriptionAttemptPlanMismatchException.php`（新規） | 同 token・別 plan の再送。Controller が `ValidationException::withMessages(['plan_code' => …])` = **422**（非 verbatim。根拠は N-1） | — |
-| `app/Exceptions/Billing/StaleCheckoutAttemptException.php` / `CheckoutInProgressException.php`（再利用） | **既存クラス**をサブスク側でも使う。新設しない | `/tmp/aigenba/app/Exceptions/Billing/StaleCheckoutAttemptException.php` |
-| `app/Http/Requests/Billing/BillingCheckoutRequest.php`（改修） | `subscription_attempt_token => ['required','ulid']`（`Str::ulid()` は大文字 Crockford base32 のため lowercase regex 不可 = aigenba のコメントごと移植）。**T1004**: `funding_choice => ['nullable','string', Rule::in(array_map(fn (SignupFundingChoice $c): string => $c->value, SignupFundingChoice::cases()))]` / `consent_version => ['required_if:funding_choice,'.SignupFundingChoice::AutoRecharge->value, 'string','max:16', Rule::in([$this->currentAutoRechargeConsentVersion()])]` + `messages()` の 2 文言 verbatim（`'consent_version.required_if' => '自動購入への同意が必要です。'` / `'consent_version.in' => '自動購入の同意内容が更新されています。ページを再読み込みして内容を確認してください。'`）。**`pack_count` / `topup_count` / `campaign_code` / `seats` は移植しない**（原則 4）。`ProhibitsProtectedKeys` は据置 | `/tmp/aigenba/app/Http/Controllers/Billing/BillingController.php:624-652`（`funding_choice` は AI-CUE の単一契約 route が Plans 経路（funding 非提示）と Onboarding 経路（funding 2 択 = P8a）の両方を宿すため **`required` → `nullable`**。null = 従来の契約 checkout = 流用しない） |
-| `app/Enums/Billing/BillingFeedbackKind.php`（新規） | **verbatim 5 case**（`PurchaseReceived` / `PurchaseProcessing` / `PurchaseAlreadyReceived` / `CheckoutRetryRequired` / `PortalReturned`） | `/tmp/aigenba/app/Enums/Billing/BillingFeedbackKind.php` |
+| `app/Models/Billing/BillingCheckoutSession.php`（改修。P2 導入分） | **live 判定の単一出典を置く**（C-1）。`// 境界は排他的に統一する（Codex Round 13 Critical）:
+//   live    : created_at >= staleThresholdAt($now)   （isLivePending / state() / dedup の SQL filter）
+//   stale   : created_at <  staleThresholdAt($now)    （sweeper の expireStaleCheckouts）
+// 両者は補集合であり、境界時刻ちょうどの行が「live かつ Expired 化対象」になることはない。
+public static function staleThresholdAt(CarbonImmutable $now): CarbonImmutable` = `$now->subDay()`（**aigenba の閾値をそのまま**）/ `isLivePending(CarbonImmutable $now): bool` = `status === CheckoutSessionStatus::Pending->value && ($created_at === null \|\| $created_at->greaterThanOrEqualTo(self::staleThresholdAt($now)))`（**`created_at === null` を live 扱いにするのは P2 `state()` の else 分岐と同一意味論**）/ `isReplayablePending(CarbonImmutable $now): bool` = `isLivePending($now) && checkout_url !== null && checkout_url !== ''`（P2 が verbatim 移植した無引数版に `$now` を足す。**P2 時点で呼び出し元は 0** のため P9 が唯一の caller） | `/tmp/aigenba/app/Models/Billing/BillingCheckoutSession.php:96-104`（`isReplayablePending`）+ `BillingAccess.php:58` / `ReconcileSubscriptionSchedules.php:113` の `subDay()` を 1 箇所へ集約。AI-CUE 先例 `app/Models/Billing/TicketCheckoutSession.php:64-68`（`isLivePending(CarbonImmutable $now)`） |
+| `app/Services/Billing/BillingAccess.php`（改修） | `state()` の stale 判定を `$row->isLivePending($now)` 経由へ差し替える（`$now = CarbonImmutable::now()` を 1 回だけ取り、`$threshold` のローカル literal を撤去）。**挙動不変**（同じ `subDay()` 値）。P2 の分岐表・`BillingAccessStateTest` は**無変更で green**。read 経路で DB 書込をしない契約も不変 | `/tmp/aigenba/app/Services/Billing/BillingAccess.php:57-75` |
+| `app/Console/Commands/Billing/ReconcileSubscriptionSchedules.php`（改修） | **`expireStaleCheckouts()` を追加**（aigenba verbatim。P2 の `state()` docblock が「実 DB の expired 化は日次 scheduler `billing:reconcile-schedules` に委ねる」と名指ししている**当の writer**。v2 P9 はこれを落としていたため C-1 が生じた）。`BillingCheckoutSession::query()->where('status', Pending)->where('created_at', '<=', BillingCheckoutSession::staleThresholdAt(CarbonImmutable::now()))->update(['status' => Expired])`。**intent で絞らない**（verbatim）。Stripe 照会は行わない（純 DB。Stripe 側は 24h で自動 expire 済み）。`handle()` の集計行へ `expired={n}` を追加。既存の `billing:reconcile-schedules` daily 登録に相乗りするため **新 command も新 `Schedule::command()` 行も作らない**（`routes/web.php` / `routes/console.php:38` は無変更） | `/tmp/aigenba/app/Console/Commands/Billing/ReconcileSubscriptionSchedules.php:112-121` |
+| `app/Services/Billing/SubscriptionService.php`（改修） | **`startCheckout()` を冪等マシンへ差し替える**（`SubscriptionCheckoutService` を新設しない = aigenba は本 Service に置いている）。シグネチャ: `startCheckout(Organization $org, User $user, Plan $plan, string $successUrl, string $cancelUrl, string $attemptToken): CheckoutSessionDto`。`Cache::lock("billing:checkout:start:{$org->id}", 10)->block(5, …)`（**lock 名も verbatim**）。`assertCheckoutReady()` / `isReplayableCheckout()` / `replayCheckout()` / `isUniqueViolation()` / `attemptTokenIsForeign()` を実装。**lock closure 先頭で `$now = CarbonImmutable::now()` を 1 回取り、段 2/3/4 の live 判定をすべて `BillingCheckoutSession` の共有述語へ通す**（C-1） | `/tmp/aigenba/app/Services/Billing/SubscriptionService.php:508-717,930-985` |
+| `app/DataTransferObjects/Billing/CheckoutSessionDto.php`（新規） | **verbatim**（`stripeSessionId` / `url` / `intent` / `planCode` + `toArray()` + `@phpstan-type CheckoutSessionShape`）。v1 の `SubscriptionCheckoutRedirect` は発明のため作らない | `/tmp/aigenba/app/DataTransferObjects/Billing/CheckoutSessionDto.php` |
+| `app/Services/Billing/Contracts/StripeGatewayInterface.php`（改修） | `createSubscriptionCheckout(Organization $org, string $stripePriceId, string $successUrl, string $cancelUrl, array $metadata, string $idempotencyKey): CreatedCheckoutSession` へ変更（戻り値 `ExternalBillingRedirect` → **既存 `CreatedCheckoutSession`** = session id の pin が webhook 照合に必須。新 DTO は作らない）。`expireCheckoutSession(string $stripeSessionId): string` を追加（**戻り値は AI-CUE の `TicketCheckoutGateway` と同型の string**。aigenba の `CheckoutSessionExpireResult` は AI-CUE に先例が無いため移植しない）。`createPortalSession` / `syncCustomerDetails` は据置。**席引数（`?string $seatPriceId` / `?int $seatQty`）は移植しない**（原則 4） | `/tmp/aigenba/app/Services/Billing/Contracts/StripeGatewayInterface.php:50,200` / AI-CUE `app/Services/Billing/TicketCheckoutGateway.php` |
+| `app/Services/Billing/CashierStripeGateway.php`（改修） | `newSubscription('default',…)->checkout()` をやめ `$org->stripe()->checkout->sessions->create($payload, ['idempotency_key' => $key])` 直呼びへ（**Cashier の `checkout()` ヘルパは per-request idempotency key を公開しない** = `CashierTicketCheckoutGateway` と同一理由・同一コメントを持ち込む）。`buildSubscriptionSessionPayload()` を public pure メソッドで切り出す。`expireCheckoutSession()` を実装 | `CashierTicketCheckoutGateway::buildSessionPayload()` |
+| `app/Services/Billing/Fakes/FakeStripeGateway.php`（改修） | 新シグネチャに追随。`CreatedCheckoutSession` を決定的に返し、**同一 `idempotencyKey` の再呼び出しで同一 sessionId を返す**（Stripe の idempotency 挙動を fake でも再現しないと冪等テストが本物にならない）。`expireCheckoutSession()` は既定 `'expired'` を返し、テストが `'complete'` / throw を注入できる | `/tmp/aigenba/app/Services/Billing/Testing/StripeGatewayDuskFake.php` / AI-CUE `app/Services/Billing/Fakes/FakeTicketCheckoutGateway.php` |
+| `app/Exceptions/Billing/SubscriptionAttemptPlanMismatchException.php`（新規） | 同 token・別 plan の再送。Controller が `ValidationException::withMessages(['plan_code' => …])` = **422** へ変換（**aigenba 非 verbatim**。根拠は「非 verbatim 点」表 N-1） | — |
+| `app/Exceptions/Billing/StaleCheckoutAttemptException.php`（再利用） | **既存クラス**（`app/Exceptions/Billing/StaleCheckoutAttemptException.php`）をサブスク側でも使う。新設しない | `/tmp/aigenba/app/Exceptions/Billing/StaleCheckoutAttemptException.php` |
+| `app/Exceptions/Billing/CheckoutInProgressException.php`（再利用） | 既存。lock timeout / expire 失敗 / `'complete'` 検出に使う | 同上 |
+| `app/Http/Requests/Billing/BillingCheckoutRequest.php`（改修） | `subscription_attempt_token => ['required','ulid']` を追加（`Str::ulid()` は大文字 Crockford base32 のため lowercase regex 不可 = aigenba のコメントごと移植）。`ProhibitsProtectedKeys` は据置 | `/tmp/aigenba/app/Http/Controllers/Billing/BillingController.php:549-552` |
+| `app/Enums/Billing/BillingFeedbackKind.php`（新規） | **verbatim 5 case**（`PurchaseReceived` / `PurchaseProcessing` / `PurchaseAlreadyReceived` / `CheckoutRetryRequired` / `PortalReturned`）。**v1 の `PurchasePaymentFailed` は発明のため作らない** | `/tmp/aigenba/app/Enums/Billing/BillingFeedbackKind.php` |
 | `app/DataTransferObjects/Billing/BillingFeedbackDto.php`（新規） | **verbatim**（`private __construct` + `simple(kind, message)` + `toArray(): BillingFeedbackShape` + `@phpstan-type SimpleBillingFeedbackKind`） | `/tmp/aigenba/app/DataTransferObjects/Billing/BillingFeedbackDto.php` |
 | `app/DataTransferObjects/Billing/BillingContactDto.php`（新規） | `email` / `name` / `fallbackEmail`（owner email）+ `toArray(): BillingContactShape` | `/tmp/aigenba/app/Models/Organization.php:119-138` の fallback 意味論 |
-| `app/Http/Controllers/Billing/BillingController.php`（改修） | `index` に private `resolveBillingFeedback(Request, Organization): ?BillingFeedbackDto`（**verbatim**）+ **`resolveAutoRechargeLanding(Request, Organization): ?RedirectResponse`（T1004 の `?session_id` 分岐のみ）** を追加。`checkout` を新 `startCheckout()` へ配線（404 → 認可 → **`recordPreConsent`** → 開始の順）。`portal` の return URL を `route('billing.index', ['portal' => 1])` へ。`plans` に `subscriptionAttemptToken` を載せる。`updateBillingContact` を追加 | `/tmp/aigenba/app/Http/Controllers/Billing/BillingController.php:195,235-265,318-393,540-610,657-684` |
-| `app/Services/Billing/StripeWebhookProcessor.php`（改修） | `CheckoutSessionCompleted` arm に `settleSubscriptionCheckout()` を**追加**（遷移条件は C-2 の 1 定義のみ）+ **T1004 dispatch 分岐**（`funding_choice=auto_recharge` + `payment_status ∈ {paid,no_payment_required}` + `subscriptionIdFrom($object) !== null` → `forceFill(['pm_reuse_dispatched_at' => CarbonImmutable::now()])->save()` → `ReuseSubscriptionPaymentMethodJob::dispatch($local->organization_id, $subscriptionId)`）+ private `subscriptionIdFrom(array $object): ?string`（`$object['subscription']` が array なら `['id']` を取る verbatim）。既存 `grantPurchasedTickets()` は**無改変** | `/tmp/aigenba/app/Http/Controllers/Billing/StripeWebhookController.php:447-470,508-526,1422-1433,1528-1541` |
-| `app/DataTransferObjects/Billing/BillingDashboardDto.php`（改修） | additive: `feedback: BillingFeedbackShape\|null` / `billingContact: BillingContactShape`。**`autoRecharge: AutoRechargeShape` は P8a 導入済み・無変更**（`setupPending` / `pendingAutoEnable` の shape は P8a で aigenba verbatim） | `/tmp/aigenba/app/DataTransferObjects/Billing/BillingDashboardDto.php` |
-| `app/DataTransferObjects/Billing/BillingPlansPageDto.php`（改修） | additive: `subscriptionAttemptToken: string`（render ごとの ULID） | `/tmp/aigenba/app/DataTransferObjects/Billing/BillingPlansDto.php` |
-| `app/DataTransferObjects/Onboarding/OnboardingCheckoutDto.php`（改修。P3 導入分） | additive: `subscriptionAttemptToken: string`（P3 本文が「`attemptToken` 同梱（P9）」と明示委譲済み。T1004 の POST が冪等 token を必要とする） | `/tmp/aigenba/resources/js/pages/Onboarding/Checkout.svelte:34`（props `attemptToken`） |
-| `resources/js/pages/Onboarding/Checkout.svelte`（改修。P3 導出 + P8a の funding 2 択） | 有償プランの submit body を `{plan_code, subscription_attempt_token, funding_choice, ...(funding_choice==='auto_recharge' ? {consent_version: consentTerms.consentVersion} : {})}` にして `billing.checkout` へ POST（aigenba の `signup-checkout` POST 相当）。**同意アクションは実行ボタンのクリック**（コメント verbatim）。**disabled でブロックしない**（禁止事項 #8 / D4） | `/tmp/aigenba/resources/js/pages/Onboarding/Checkout.svelte:190-251` |
-| `app/Models/Organization.php`（改修） | `checkoutSessions(): HasMany<BillingCheckoutSession, $this>` を追加（feedback / T1004 着地の org スコープ引きに必須）。`implements CipherSweetEncrypted` + `use UsesCipherSweet` + `configureCipherSweet()`。`routeNotificationForMail()` を `billing_contact_email` 正本 → owner email fallback へ。**両列とも `$fillable` 外** | `/tmp/aigenba/app/Models/Organization.php:119-138`（fallback 意味論のみ） |
-| `database/migrations/2026_07_xx_xxxxxx_add_billing_contact_columns_to_organizations_table.php`（新規） | `billing_contact_email` / `billing_contact_name` を **`text()->nullable()`**（CipherSweet ciphertext のため `string(255)` を使わない）。**blind index 列は作らない**（共有 `blind_indexes` morph テーブル） | `/tmp/aigenba/database/migrations/2026_04_14_011301_add_cashier_columns_to_organizations_table.php:16-17`（**列型は非 verbatim**） |
+| `app/Http/Controllers/Billing/BillingController.php`（改修） | `index` に private `resolveBillingFeedback(Request, Organization): ?BillingFeedbackDto` を追加（**verbatim**）。`checkout` を新 `startCheckout()` へ配線（404 → 認可 → 開始の順）。`portal` の return URL を `route('billing.index', ['portal' => 1])` へ。`plans` に `subscriptionAttemptToken` を載せる。`updateBillingContact` を追加 | `/tmp/aigenba/app/Http/Controllers/Billing/BillingController.php:195,318-393,540-610` |
+| `app/Models/Organization.php`（改修） | `checkoutSessions(): HasMany<BillingCheckoutSession, $this>` を追加（feedback の org スコープ引きに必須。aigenba `$organization->checkoutSessions()` と同名）。`implements CipherSweetEncrypted` + `use UsesCipherSweet` + `configureCipherSweet()`。`routeNotificationForMail()` を `billing_contact_email` 正本 → owner email fallback へ。**両列とも `$fillable` 外** | `/tmp/aigenba/app/Models/Organization.php:119-138`（fallback 意味論のみ。`$fillable` 掲載は移植しない） |
+| `database/migrations/2026_07_xx_xxxxxx_add_billing_contact_columns_to_organizations_table.php`（新規） | `billing_contact_email` / `billing_contact_name` を **`text()->nullable()`**（CipherSweet ciphertext のため `string(255)` を使わない。`inquiries` の先例と同一判断）。**blind index 列は作らない**（共有 `blind_indexes` morph テーブルを使う既存規約） | `/tmp/aigenba/database/migrations/2026_04_14_011301_add_cashier_columns_to_organizations_table.php:16-17`（**列型は非 verbatim**。aigenba は平文 `string`） |
 | `app/DataTransferObjects/Billing/UpdateBillingContactData.php`（新規） | **verbatim**（`fromRequest()` で `EmailNormalizer::normalize()` + `Assert::stringNotEmpty()`、name は空文字を null へ畳む） | `/tmp/aigenba/app/DataTransferObjects/Billing/UpdateBillingContactData.php` |
-| `app/Http/Requests/Billing/UpdateBillingContactRequest.php`（新規） | `billing_contact_email => ['required','email:rfc','max:255']` / `billing_contact_name => ['nullable','string','max:255']` + `protectedKeyMissingRules()`（**`array_merge`** = AI-CUE trait docblock の保護キー後勝ち merge） | `/tmp/aigenba/app/Http/Requests/Organizations/Billing/UpdateBillingContactRequest.php` |
-| `app/Actions/Billing/UpdateBillingContactAction.php`（新規） | **verbatim**（`DB::transaction` 内で両列代入 → **`save()` 前に `isDirty('billing_contact_email')` 判定** → `save()` → email dirty 時のみ `BillingCustomerSynchronizer::dispatchFor()`） | `/tmp/aigenba/app/Actions/Billing/UpdateBillingContactAction.php` |
+| `app/Http/Requests/Billing/UpdateBillingContactRequest.php`（新規） | `billing_contact_email => ['required','email:rfc','max:255']` / `billing_contact_name => ['nullable','string','max:255']` + `protectedKeyMissingRules()`。**`array_replace` ではなく `array_merge`**（AI-CUE の trait docblock が指定する保護キー後勝ち merge）。namespace は current-org スコープに合わせ `App\Http\Requests\Billing` | `/tmp/aigenba/app/Http/Requests/Organizations/Billing/UpdateBillingContactRequest.php` |
+| `app/Actions/Billing/UpdateBillingContactAction.php`（新規） | **verbatim**（`DB::transaction` 内で両列代入 → **`save()` 前に `isDirty('billing_contact_email')` 判定** → `save()` → email dirty 時のみ `BillingCustomerSynchronizer::dispatchFor()`。IV-2/3/5/6 の docblock ごと移植） | `/tmp/aigenba/app/Actions/Billing/UpdateBillingContactAction.php` |
+| `app/Services/Billing/StripeWebhookProcessor.php`（改修） | `CheckoutSessionCompleted` arm に `settleSubscriptionCheckout()` を**追加**する（遷移条件は C-2 の 1 定義のみ）。既存 `grantPurchasedTickets()` は **本体・purpose ガードとも無改変**（`metadata.purpose !== 'ticket_purchase'` は既に受理のみ = 相互排他が既に成立している） | `/tmp/aigenba/app/Http/Controllers/Billing/StripeWebhookController.php:447-470,1422-1433` |
+| `app/DataTransferObjects/Billing/BillingDashboardDto.php`（改修） | additive: `feedback: BillingFeedbackShape\|null` / `billingContact: BillingContactShape` | `/tmp/aigenba/app/DataTransferObjects/Billing/BillingDashboardDto.php` |
+| `app/DataTransferObjects/Billing/BillingPlansPageDto.php`（改修） | additive: `subscriptionAttemptToken: string`（render ごとの ULID） | `/tmp/aigenba/app/DataTransferObjects/Billing/BillingPlansDto.php` |
 | `resources/js/components/features/billing/BillingContactForm.svelte`（新規） | 請求先メール / 宛名の更新フォーム。`@lucide/svelte` の `Receipt`、DS token のみ | `/tmp/aigenba/resources/js/pages/Billing/_helpers/BillingContactForm.svelte` |
-| `resources/js/pages/Billing/Index.svelte`（改修） | `page.feedback` バナー（`kind` で variant 決定・**raw query を UI が見ない**）と `BillingContactForm` を T071 primitive 配下に追加。**`?highlight=auto-recharge` で P8a の `AutoRechargeCard` へスクロール/強調**（T1004 着地の主役化） | `/tmp/aigenba/resources/js/pages/Billing/Index.svelte` |
-| `resources/js/pages/Billing/Plans.svelte`（改修） | POST body を `{plan_code}` → `{plan_code, subscription_attempt_token}` へ（**funding_choice は載せない** = 契約変更経路に funding 提示は無い） | `/tmp/aigenba/resources/js/pages/Billing/Plans.svelte:117-119` |
-| `routes/web.php`（改修） | `PATCH /billing/contact` → `billing.contact.update`（課金ゲート allowlist 内・**route parameter なし** = current-org スコープ）。**T1004 は既存 `billing.checkout` に相乗り**（新 route なし） | — |
+| `resources/js/pages/Billing/Index.svelte`（改修） | `page.feedback` バナー（`kind` で variant 決定・**raw query を UI が見ない**）と `BillingContactForm` を T071 primitive 配下に追加 | `/tmp/aigenba/resources/js/pages/Billing/Index.svelte` |
+| `resources/js/pages/Billing/Plans.svelte`（改修） | POST body を `{plan_code}` → `{plan_code, subscription_attempt_token}` へ | `/tmp/aigenba/resources/js/pages/Billing/Plans.svelte:117-119` |
+| `routes/web.php`（改修） | `PATCH /billing/contact` → `billing.contact.update`（課金ゲート allowlist 内・**route parameter なし** = current-org スコープ） | — |
 
-**列を足す / 足さない点**: `billing_checkout_sessions` は **P2 で作成済み・P8a が `SetupPaymentMethod` 行の writer として先行**。P9 は **additive 2 列（`funding_choice` / `pm_reuse_dispatched_at`）のみ**を足す（P2 所管テーブルへの additive は許容）。**`expires_at` 列は追加しない**（live 判定は `status=Pending` + `created_at >= now()-1day` = `isLivePending()` が単一出典）。`organizations.billing_contact_*` を含め **P9 の migration は 2 本**。
+**migration を追加しない点**: `billing_checkout_sessions` は **P2 で作成済み**。P9 は列を足さない。特に **`expires_at` 列を追加しない**（v1 の「expires_at pin」は発明。aigenba にも P2 の `state()` にも存在せず、live 判定は `status=Pending` + `created_at >= now()-1day` = `isLivePending()` が単一出典として担う）。P9 が追加する migration は `organizations.billing_contact_*` の 1 本のみ。
 
-**非スコープ（P9 で持ち込まない）**: `SignupFunding` / `CreditPurchase` intent（対象機能が無い = 原則 4。T1004 は既存 `SubscriptionStart` + `funding_choice` 列で成立する）/ `seats`・`pack_count`・`topup_count`・`applied_campaign_id`・`applied_trial_days`・`credit_count`・`unit_amount`（P2 が原則 4 で非移植と決定済み）/ `?setup_session_id` 着地・`autoRechargeAutoConsent`（aigenba T1002 G4 = **カード登録 Checkout の着地** = D29(i) の「P8a = free（personal）経路の全部」所管。P9 へ移譲された T1004 の列挙に含まれない）/ `resolveOnboardingContinue`（`OnboardingReturnResolver` は P7 所管で `?session_id` 非依存に配線済み）/ `checkout.session.expired` の購読（`created_at` 閾値 + 日次 sweeper で決定的に扱えるため Stripe 照会を増やさない）/ `billing_contact_email` の NOT NULL 化・backfill（fallback が生きている限り不要）。
+**非スコープ（P9 で持ち込まない）**: `SignupFunding` / `CreditPurchase` intent（対象機能が無い = 原則 4）/ `seats`・`funding_choice`・`topup_count`・`applied_campaign_id`・`applied_trial_days`・`credit_count`・`pm_reuse_dispatched_at`（P2 が原則 4 で非移植と決定済み）/ `resolveAutoRechargeLanding`・`?setup_session_id` 着地（P8a は PM 流用 Job を持たない）/ `resolveOnboardingContinue`（`OnboardingReturnResolver` は P7 所管で `?session_id` 非依存に配線済み）/ `checkout.session.expired` の購読（`created_at` 閾値 + 日次 sweeper で決定的に扱えるため Stripe 照会を増やさない）/ `billing_contact_email` の NOT NULL 化・backfill（fallback が生きている限り不要）。
 
 #### 波及変更
 
-- **`BillingCheckoutSession` の writer 構成**: P8a（`intent=setup_payment_method`）+ P9（`intent=subscription_start`）の 2 writer になる。P9 の冪等マシンは **クエリを常に `intent=subscription_start` でスコープ**するため、段 2（同 token）/ 段 3（同 plan live pending dedup）/ 段 4（別 plan expire）に P8a の setup 行が混入しない（`UNIQUE(organization_id, intent, attempt_token)` の `intent` 軸が token 空間を分ける）。逆に **日次 sweeper は intent で絞らない**（verbatim）ため、P8a の stale な setup pending も `Expired` へ収束する。
-- **live 判定の単一出典化（C-1）が触る P2 資産**: `BillingCheckoutSession`（述語 3 本を追加）/ `BillingAccess::state()`（**挙動不変のリファクタ**）。P2 の migration・Factory・`BillingAccessStateTest` の期待は**変更しない**。P8a が固定した不変条件（「setup 行は `state()` の `PendingCheckout` に落ちない」）も**無変更で green**（P9 は `state()` の分岐を変えない）。**P9 が書く `subscription_start` の live pending 行は `PendingCheckout` の正当な対象**であり、これは P2 の分岐表どおりの意味である。
-- **P8a 資産への追記（P8a の既存挙動は不変）**: `AutoRechargeService`（**2 メソッド追加** + `settingsFor` の `setupPending` に (b) 条件を OR で追加。既存 (a) 条件と `pendingAutoEnable` の定義は不変）/ `Contracts\AutoRechargeGatewayInterface`（9 本目）+ `CashierAutoRechargeGateway` + `FakeAutoRechargeGateway`（`FakeExternalsServiceProvider` の bind は P8a のまま = **新 bind なし**）/ `config/billing.php`（`consent_version` v1 → v2）。**`AutoRechargeSettingsDto` は無変更**（P8a が aigenba verbatim の shape で導入済み = `pendingAutoEnable` / `setupPending` を保持）。
-- **`consent_version='v2'` の移行効果（data migration なし）**: P8a 期に記録された v1 同意行は `reconsentRequiredFor()` が **自動失効**と判定し、`autoEnableEligible()` = false → `pendingAutoEnable` / `setupPending` が false → 自動有効化は起きず**再同意 UI（P8a の `AutoRechargeCard`）へ落ちる**。**既に `enabled=true` の org は `requiresReconsent=true` になり自動購入が停止する**（fail-closed = aigenba の版管理契約そのもの。原則 3 により値も文言も verbatim）。backfill・救済スクリプトは作らない。
-- **既存 daily バッチへの相乗り**: `ReconcileSubscriptionSchedules`（`routes/console.php:38` で daily 登録済み）に `expireStaleCheckouts()` を追加。**新 command / 新 Schedule 行なし**。
+- **live 判定の単一出典化（C-1）が触る P2 資産**: `BillingCheckoutSession`（述語 3 本を追加。列は不変）/ `BillingAccess::state()`（**挙動不変のリファクタ**。同じ `subDay()` 値を述語経由で呼ぶだけ）。P2 の migration・Factory・`BillingAccessStateTest` の期待は**変更しない**。
+- **既存 daily バッチへの相乗り**: `ReconcileSubscriptionSchedules`（`billing:reconcile-schedules`。`routes/console.php:38` で daily 登録済み）に `expireStaleCheckouts()` を追加。**新 command / 新 Schedule 行なし**。`tests/Feature/Billing/ReconcileSubscriptionSchedulesTest.php` に stale expire ケースを追加（既存 2 工程の期待は不変）。
 - **TypeScript 型定義** `resources/js/types/billing.ts`:
   - 追加 `BillingFeedbackKind = 'purchase_received'|'purchase_processing'|'purchase_already_received'|'checkout_retry_required'|'portal_returned'`（**5 値**。PHP の `SimpleBillingFeedbackKind` と exact 対）/ `BillingFeedbackShape { readonly kind: BillingFeedbackKind; readonly message: string }` / `BillingContactShape { readonly email: string | null; readonly name: string | null; readonly fallbackEmail: string | null }`。
-  - `BillingDashboardProps` に `feedback` / `billingContact` を追加。`BillingPlansPageProps` に `subscriptionAttemptToken: string` を追加。`AutoRechargeShape` は **P8a のまま無変更**。
-  - `resources/js/types/onboarding.ts`（P3 産出）の `OnboardingCheckoutShape` に `subscriptionAttemptToken: string` を追加（`consentTerms` は P8a 追加済み）。`SignupFundingChoice` の TS literal union は **P8a 産出を再利用**（P9 で再定義しない）。
-- **Inertia props**: `Billing/Index` / `Billing/Plans` / `Onboarding/Checkout` の `page` shape 拡張（DTO `toArray()` 経由。`response()->json()` 直書きなし）。新規ページなし。
-- **DTO**: 新規 `CheckoutSessionDto` / `BillingFeedbackDto` / `BillingContactDto` / `UpdateBillingContactData`。改修 `BillingDashboardDto` / `BillingPlansPageDto` / `OnboardingCheckoutDto`。既存 `CreatedCheckoutSession` をサブスク側でも再利用。
-- **Factory**: P2 の `BillingCheckoutSessionFactory` に **`initiatedBy(User $user)` / `withAttempt(string $token, string $planCode)` / `stale()` / `fundingAutoRecharge()` / `pmReuseDispatched(?CarbonImmutable $at = null)`** を追加。`OrganizationFactory` に `withBillingContact(?string $email = null, ?string $name = null)` を追加（テストデータ手組み禁止）。P8a の `TicketAutoRechargeFactory`（同意 4 列の state）を**そのまま再利用**する。
-- **config**: `config/cashier.php` の購読集合は既存導出のまま（**case を増やさない** = `CheckoutSessionCompleted` は既存。`WebhookEventSubscriptionInvariantTest` は無変更で green）。**T1004 は新 webhook event を購読しない**。
-- **テストファイル（更新・削除しない）**: `tests/Feature/Billing/BillingPageTest.php`（Index props に `feedback` / `billingContact`）/ `BillingPlansPageTest.php`（`subscriptionAttemptToken`）/ `PortalConfigurationTest.php`（`?portal=1`）/ `ReconcileSubscriptionSchedulesTest.php`（stale expire ケース追加）/ `BillingCheckoutSessionModelTest.php`（live 述語 + 新 2 列の cast/fillable ケース追加）/ `WebhookIdempotencyTest.php`・`WebhookEventSubscriptionInvariantTest.php`（期待不変）/ `TicketPurchaseWebhookTest.php`・`TicketCheckoutTest.php`（**無改変で green**）/ `BillingAccessStateTest.php`（P2 の期待不変 + writer 経由ケース追加）/ **P8a 産出の `AutoRechargeServiceTest`・`AutoRechargePreConsentTest`・`AutoRechargeEndpointTest`（`consent_version` の期待を `'v1'` → `'v2'` へ更新。`setupPending` の既存 (a) ケースは不変）**/ `tests/js/support/autoRechargeProps.ts`（**無変更**）/ `tests/js/pages/Billing/Index.test.ts`・`Plans.test.ts`・`OnboardingCheckout.test.ts`。
-- **Architecture テストへの影響**: `MassAssignmentSafetyTest`（`billing_contact_*` / `pm_reuse_dispatched_at` は `$fillable` 外）/ `FormRequestProhibitedKeyTest`（新 FormRequest）/ `ManageRouteAuthGuardTest`（`billing.contact.update`）/ `BillingSyncDispatchInvariantTest`（`dispatchFor` の呼び出し元に `UpdateBillingContactAction` を追加）/ **P8a の `WebhookAsyncDispatchTest` 相当（webhook 同期処理から外向き Stripe API を撃たない）に `settleSubscriptionCheckout` を追加**（T1004 の Stripe 呼び出しは Job 側のみ）。新規 3 本は「テスト計画」§。
+  - `BillingDashboardProps` に `feedback: BillingFeedbackShape | null` / `billingContact: BillingContactShape` を追加。`BillingPlansPageProps` に `subscriptionAttemptToken: string` を追加。P8b が追加した `BillingStateValue` を Index の判定源として再利用（**`EffectivePlanShape` は存在しない**）。
+- **Inertia props**: `Billing/Index` / `Billing/Plans` の `page` shape 拡張（DTO `toArray()` 経由。`response()->json()` 直書きなし）。新規ページなし。
+- **DTO**: 新規 `CheckoutSessionDto` / `BillingFeedbackDto` / `BillingContactDto` / `UpdateBillingContactData`。改修 `BillingDashboardDto` / `BillingPlansPageDto`。既存 `CreatedCheckoutSession` をサブスク側でも再利用（新設しない）。`ExternalBillingRedirect` は `createPortalSession` の戻り値として据置。
+- **Factory**: P2 の `BillingCheckoutSessionFactory` に **`initiatedBy(User $user)` / `withAttempt(string $token, string $planCode)` / `stale()`**（`created_at` を閾値超へ倒す）を追加（P2 は `pending()` / `expired()` / `failed()` / `completed()` / `forOrganization()` まで）。`OrganizationFactory` に `withBillingContact(?string $email = null, ?string $name = null)` を追加（テストデータ手組み禁止）。
+- **config**: `config/cashier.php` の購読集合は `HandledStripeWebhookEvent` 由来の既存導出のまま（**case を増やさない** = `CheckoutSessionCompleted` は既存。`WebhookEventSubscriptionInvariantTest` は無変更で green）。
+- **テストファイル（更新・削除しない）**: `tests/Feature/Billing/BillingPageTest.php`（Index props に `feedback` / `billingContact`）/ `tests/Feature/Billing/BillingPlansPageTest.php`（`subscriptionAttemptToken`）/ `tests/Feature/Billing/PortalConfigurationTest.php`（return URL の `?portal=1`）/ `tests/Feature/Billing/ReconcileSubscriptionSchedulesTest.php`（stale expire ケース追加）/ `tests/Feature/Billing/BillingCheckoutSessionModelTest.php`（P2 導入。制約の期待不変 + live 述語の単体ケース追加）/ `tests/Feature/Billing/WebhookIdempotencyTest.php`・`WebhookEventSubscriptionInvariantTest.php`（期待不変）/ `tests/Feature/Billing/TicketPurchaseWebhookTest.php`・`TicketCheckoutTest.php`（**無改変で green** = ticket 経路が無改変であることの回帰）/ `tests/Feature/Billing/BillingAccessStateTest.php`（P2 の期待不変。P9 は **writer 経由でも同じ state に落ちる**ケースを追加）/ `tests/js/pages/Billing/Index.test.ts`・`Plans.test.ts`。
+- **Architecture テストへの影響**: `tests/Architecture/MassAssignmentSafetyTest.php`（`billing_contact_*` は `$fillable` 外）/ `tests/Architecture/FormRequestProhibitedKeyTest.php`（新 FormRequest が `protectedKeyMissingRules()` を張る）/ `tests/Architecture/ManageRouteAuthGuardTest.php`（`billing.contact.update`）/ `tests/Architecture/OrganizationRouteParamWebOnlyInvariantTest.php`（route param 無しのため対象外）/ `BillingSyncDispatchInvariantTest`（P2 導入。`dispatchFor` の呼び出し元に `UpdateBillingContactAction` を追加）。新規 2 本は「テスト計画」§。
 
 #### 主要な契約
 
 **ルート**（課金ゲート allowlist 内・route parameter を持たない current-org スコープ。current org 不在 / 非所属は認可より前に 404）
 
 ```
-GET   /billing            billing.index           BillingController@index      … 既存 (?session_id / ?portal / ?replayed / ?retry / ?highlight を解釈)
+GET   /billing            billing.index           BillingController@index      … 既存 (?session_id / ?portal / ?replayed / ?retry を解釈)
 GET   /billing/plans      billing.plans           BillingController@plans      … 既存 (subscriptionAttemptToken を発行)
-POST  /billing/checkout   billing.checkout        BillingController@checkout   … 既存 (body: {plan_code, subscription_attempt_token, funding_choice?, consent_version?})
+POST  /billing/checkout   billing.checkout        BillingController@checkout   … 既存 (body: {plan_code, subscription_attempt_token})
 POST  /billing/portal     billing.portal          BillingController@portal     … 既存 (return URL に ?portal=1)
 PATCH /billing/contact    billing.contact.update  BillingController@updateBillingContact  ← 新規 (manageBilling)
 ```
 
-**DB**
+**DB（P9 は `billing_checkout_sessions` に列を足さない。P2 の定義をそのまま使う）**
 
 ```sql
--- billing_checkout_sessions (P2 で作成。P8a が intent='setup_payment_method' 行の writer として先行済み。
---  P9 は intent='subscription_start' 行の writer + 下記 2 列の additive 追加のみ)
+-- billing_checkout_sessions (P2 で作成済み。P9 が初めての writer)
 id, organization_id FK cascade, initiated_by_user_id FK users nullOnDelete,
 intent varchar(32), plan_code varchar(32) null,
 stripe_session_id varchar UNIQUE, idempotency_key varchar(128) UNIQUE,
@@ -2467,10 +2488,8 @@ attempt_token varchar null, checkout_url varchar(2048) null,
 status varchar(16) default 'pending', completed_at timestamp null, timestamps
 UNIQUE (organization_id, intent, attempt_token)  -- 名: billing_checkout_sessions_org_intent_attempt_unique
 INDEX  (organization_id, intent, status) / INDEX (organization_id, intent, initiated_by_user_id, id)
-+ funding_choice varchar(16) null            -- P9 additive (T1004 の唯一の入力。SignupFundingChoice の値)
-+ pm_reuse_dispatched_at timestamp null      -- P9 additive (PM 流用 Job dispatch の永続マーカー)
 
--- organizations (additive)
+-- organizations (additive。P9 が追加する唯一の migration)
 billing_contact_email text null,  billing_contact_name text null   -- CipherSweet ciphertext
 ```
 
@@ -2508,26 +2527,26 @@ public function isReplayablePending(CarbonImmutable $now): bool
 |---|---|---|
 | `BillingAccess::state()`（P2） | `$now = CarbonImmutable::now()` を 1 回取り、pending 行を `$row->isLivePending($now)` で分類（live → `PendingCheckout` / stale → `hasExpired` 材料）。**read 経路で DB 書込をしない**（P2 verbatim） | 挙動不変（同じ `subDay()`） |
 | `SubscriptionService::startCheckout()` 段 2（同 token） | `isReplayableCheckout($row, $now)` = `status === Completed` **または** `$row->isReplayablePending($now)` | **stale pending の同 token 再送が死んだ `checkout_url` へ収束せず `StaleCheckoutAttemptException` → `?retry=1`** |
-| 同 段 3 / 段 4（live pending dedup / 別 plan expire。**`intent=subscription_start` スコープ**） | クエリに `->where('created_at', '>=', BillingCheckoutSession::staleThresholdAt($now))` を付す（SQL 側 live filter） | **stale pending が dedup に hit しない = 新 token で新規 Checkout が成立する** |
-| `ReconcileSubscriptionSchedules::expireStaleCheckouts()`（daily） | `->where('created_at', '<', BillingCheckoutSession::staleThresholdAt(CarbonImmutable::now()))->update(['status' => Expired])`（**intent で絞らない** = P8a の setup 行も収束させる） | stale 行を実 DB でも `Expired` へ収束 |
+| 同 段 3 / 段 4（live pending dedup / 別 plan expire） | クエリに `->where('created_at', '>=', BillingCheckoutSession::staleThresholdAt($now))` を付す（SQL 側 live filter） | **stale pending が dedup に hit しない = 新 token で新規 Checkout が成立する**（Codex Critical (1) の解消） |
+| `ReconcileSubscriptionSchedules::expireStaleCheckouts()`（daily） | `->where('created_at', '<', BillingCheckoutSession::staleThresholdAt(CarbonImmutable::now()))->update(['status' => Expired])` | stale 行を実 DB でも `Expired` へ収束（P2 の `state()` docblock が委譲先として名指ししている writer） |
 
-**成立する同値（テスト 14 / 21 で機械固定）**: 任意の org・任意時刻で
+**成立する同値（テスト 16 / 17 で機械固定）**: 任意の org・任意時刻で
 `state($org) === PendingCheckout` ⇔ `startCheckout()` が新規 Checkout を作らない（同 plan は段 3 の dedup、別 plan は段 4 の expire 経由）。
 `state($org) === ExpiredCheckout`（stale pending のみが理由） ⇒ **新 token の `startCheckout()` は新規 Checkout を作れる**。
-**「2 日後に新 token で新規 Checkout」が成立する**（日次 sweeper の実行有無に依存しない）。
+**「2 日後に新 token で新規 Checkout」が成立する**（日次 sweeper の実行有無に依存しない。sweeper は DB 表現の収束を早めるだけで、判定の正しさは述語が担う）。
 
 ##### 冪等状態機械の契約（要件 1-9）
 
 | # | 契約 | 実現 |
 |---|---|---|
-| 1 | **`organization_id` + `subscription_attempt_token` の UNIQUE** | `UNIQUE(organization_id, intent, attempt_token)`（P2）に **`intent='subscription_start'` を pin** して成立させる。`intent` はサブスク token 空間と **P8a のカード登録 token 空間（`setup_payment_method` / `auto-recharge-setup:{token}`）** を分ける軸であり、チケット token は**別テーブル**のため混線しない |
-| 2 | **`initiated_by_user_id` による actor scope** | 行作成時に `initiatedBy()->associate($user)` で**必ず非 null 記録**。**live pending dedup は org-wide のまま**（要件 4）— subscription は org 単位の singleton であり、actor scope にすると同 org の 2 人が同時に live Checkout を持てて**二重 subscription を許す**。actor scope が効くのは **token の所有者判定（要件 7）のみ** |
+| 1 | **`organization_id` + `subscription_attempt_token` の UNIQUE** | `UNIQUE(organization_id, intent, attempt_token)`（P2）に **`intent='subscription_start'` を pin** して成立させる。`intent` はサブスク token 空間とカード登録 token 空間（P8a の `SetupPaymentMethod`）を分ける軸であり、チケット token は**別テーブル**（`ticket_checkout_sessions`）のため混線しない |
+| 2 | **`initiated_by_user_id` による actor scope** | 行作成時に `initiatedBy()->associate($user)` で**必ず非 null 記録**（監査 + 要件 7 の引き）。**live pending dedup は org-wide のまま**（要件 4）— subscription は org 単位の singleton であり、actor scope にすると同 org の 2 人が同時に live Checkout を持てて**二重 subscription を許す**。actor scope が効くのは **token の所有者判定（要件 7）のみ** |
 | 3 | **`pending` / `completed` / `failed` / `expired`** | P2 の `CheckoutSessionStatus`（verbatim）。遷移は C-2 の 1 定義のみ |
-| 4 | **同 token 再送は既存 Checkout URL へ収束** | 同 token 行が `isReplayableCheckout($row, $now)` なら `replayCheckout()`: live pending → **保存済み `checkout_url`** / `Completed` → `url=null`。非 replayable（stale pending / `Failed` / `Expired`）→ `StaleCheckoutAttemptException`。**新規 Checkout を作らない** |
-| 5 | **Stripe idempotency key 対応** | Stripe へ渡す key は **`'sub_start:'.$attemptToken`**（aigenba verbatim の名前空間）。DB `idempotency_key` 列には**同値を保存**し UNIQUE を張る |
-| 6 | **plan code 不一致の token 再利用は 422** | 同 token 行の `plan_code !== $plan->code` → `SubscriptionAttemptPlanMismatchException` → **422**（`assertInvalid(['plan_code'])`）。**`isReplayableCheckout()` より前に判定する** |
-| 7 | **他 org・他 user の token は 404** | `attemptTokenIsForeign(string $token, Organization $org, User $user): bool` = `intent=subscription_start` かつ同 `attempt_token` の行が**存在し、かつ (org, initiated_by_user_id) が一致しない**とき true。Controller が **`Gate` より前に 404**（存在オラクル封じ） |
-| 8 | **success / cancel webhook との競合と再送** | `settleSubscriptionCheckout()` の遷移は C-2 の 1 定義（`Completed` 終局 = 再送 no-op / **`Failed`・`Expired` からの遅延成功は受理**）。cancel は Stripe から `completed` が来ない → 行は `Pending` のまま → 1 日経過で `state()` が `ExpiredCheckout` |
+| 4 | **同 token 再送は既存 Checkout URL へ収束** | 同 token 行が `isReplayableCheckout($row, $now)`（`Completed` **または** `isReplayablePending($now)`）なら `replayCheckout()`: live pending → **保存済み `checkout_url`** / `Completed` → `url=null`（受付済み着地）。非 replayable（stale pending / `Failed` / `Expired`）→ `StaleCheckoutAttemptException`。**新規 Checkout を作らない** |
+| 5 | **Stripe idempotency key 対応** | Stripe へ渡す key は **`'sub_start:'.$attemptToken`**（aigenba verbatim の名前空間。ticket 側 `purchase:{token}` と分離）。DB `idempotency_key` 列には**同値を保存**し UNIQUE を張る（Stripe 側 key と自 DB 行が 1:1。Stripe 作成成功 → DB 保存前の crash も、同 token 再試行が Stripe 側 idempotency で同一 session に収束しその時点で行が入る） |
+| 6 | **plan code 不一致の token 再利用は 422** | 同 token 行の `plan_code !== $plan->code` → `SubscriptionAttemptPlanMismatchException` → Controller が `ValidationException` = **422**（`assertInvalid(['plan_code'])`）。行は増えず Stripe 呼び出しも増えない。**`isReplayableCheckout()` より前に判定する**（plan 不一致は replay より優先） |
+| 7 | **他 org・他 user の token は 404** | `attemptTokenIsForeign(string $token, Organization $org, User $user): bool` = `intent=subscription_start` かつ同 `attempt_token` の行が**存在し、かつ (org, initiated_by_user_id) が一致しない**とき true。Controller が **`Gate` より前に 404**（403 にしない = 存在オラクル封じ）。token は render ごとの ULID = 未知 token は「行なし」として通常の新規発行へ落ちる |
+| 8 | **success / cancel webhook との競合と再送** | `settleSubscriptionCheckout()` の遷移は C-2 の 1 定義（`Completed` 終局 = 再送 no-op / **`Failed`・`Expired` からの遅延成功は受理**）。cancel（ユーザー離脱）は Stripe から `completed` が来ない → 行は `Pending` のまま → 1 日経過で `state()` が `ExpiredCheckout`（read no-write）、実 DB は日次 sweeper が `Expired` へ |
 | 9 | **tenant キーを payload から受け取らない Request 契約** | `BillingCheckoutRequest` / `UpdateBillingContactRequest` が `ProhibitsProtectedKeys`。`organization_id` / `initiated_by_user_id` / `plan_id` は `missing` = 存在するだけで **422** |
 
 ```php
@@ -2538,7 +2557,6 @@ public function isReplayablePending(CarbonImmutable $now): bool
 public function startCheckout(
     Organization $org, User $user, Plan $plan,
     string $successUrl, string $cancelUrl, string $attemptToken,
-    ?SignupFundingChoice $funding,   // T1004: 行の funding_choice に記録する (null = 従来の契約 checkout)
 ): CheckoutSessionDto;
 
 /** 要件 7: (org, user) スコープ外に同 token 行が在るか。true なら Controller が認可より前に 404 */
@@ -2552,16 +2570,16 @@ final readonly class CheckoutSessionDto {   // verbatim
 }
 ```
 
-`startCheckout()` の手順（`Cache::lock("billing:checkout:start:{$org->id}", 10)->block(5, …)` 内。`LockTimeoutException` は fail-closed で `CheckoutInProgressException('直前の操作が進行中です。数秒お待ちください。')`）:
+`startCheckout()` の手順（`Cache::lock("billing:checkout:start:{$org->id}", 10)->block(5, …)` 内。`LockTimeoutException` は fail-closed で `CheckoutInProgressException('直前の操作が進行中です。数秒お待ちください。')` = ロックなし実行へフォールバックしない）:
 
 | # | 段 | 挙動 |
 |---|---|---|
-| 0 | 事前 assert + 基準時刻 | `Assert::stringNotEmpty($attemptToken, '契約手続きトークンが不正です')` / `assertCheckoutReady($org)` / `assertPriceSynced($basePrice)` / `assertStripeBillablePlan($plan)`。**lock closure 先頭で `$now = CarbonImmutable::now()` を 1 回だけ取る** |
+| 0 | 事前 assert + 基準時刻 | `Assert::stringNotEmpty($attemptToken, '契約手続きトークンが不正です')` / `assertCheckoutReady($org)`（`stripeEmail()` の非空 + 形式）/ `assertPriceSynced($basePrice)` / `assertStripeBillablePlan($plan)`。**lock closure 先頭で `$now = CarbonImmutable::now()` を 1 回だけ取り、以降の live 判定は全てこの `$now`**（段間で閾値がずれない） |
 | 1 | 既存 subscription guard | `$org->subscription('default')` が `valid()` なら `'既に有効なサブスクリプションがあります。プラン変更をご利用ください。'`（`Assert::true`） |
-| 2 | **同 token 行**（`org` + `intent=subscription_start` + `attempt_token`。`latest('id')->first()`） | `plan_code !== $plan->code` → `SubscriptionAttemptPlanMismatchException`（**要件 6**）<br>`isReplayableCheckout($row, $now)` → `replayCheckout()`（**要件 4**）<br>それ以外（**stale pending 含む** / `Failed` / `Expired`）→ `StaleCheckoutAttemptException('契約手続きの有効期限が切れました。画面を再読み込みして再試行してください。')` |
-| 3 | **同 plan の live pending dedup**（`org` + `intent=subscription_start` + `plan_code` + `status=Pending` + **`created_at >= staleThresholdAt($now)`**。**org-wide**） | `CheckoutSessionDto(url: null, …)` → Controller が `back()->with('warning', '既に進行中の Checkout があります。数分お待ちください。')` |
-| 4 | **別 plan の live pending を expire**（同じ live filter・同じ intent スコープ） | `gateway->expireCheckoutSession()` が throw → `CheckoutInProgressException('前回の決済セッションの整理に失敗しました。 数分後に再試行してください。')` / `'complete'` → `CheckoutInProgressException('直前の決済が処理中です。数分お待ちください。')` / それ以外 → 行を `Expired` にして続行。**stale な別 plan 行は Stripe 側で既に expire 済みのため照会せず放置** |
-| 5 | Stripe 作成 → DB 記録 | `gateway->createSubscriptionCheckout(…, metadata: ['purpose' => 'subscription_start', 'org_ref' => (string) $org->id, 'plan_code' => $plan->code], idempotencyKey: 'sub_start:'.$attemptToken)` → `DB::transaction` で行 INSERT（`intent` / `plan_code` / **`funding_choice` = `$funding?->value`** / `stripe_session_id` / `idempotency_key` / `attempt_token` / `checkout_url` / `status=Pending` / `initiated_by_user_id`） |
+| 2 | **同 token 行**（`org` + `intent` + `attempt_token`。`latest('id')->first()`） | `plan_code !== $plan->code` → `SubscriptionAttemptPlanMismatchException`（**要件 6**）<br>`isReplayableCheckout($row, $now)` → `replayCheckout()`（**要件 4**: live pending → 既存 `checkout_url` / `Completed` → `url=null`）<br>それ以外（**stale pending 含む** / `Failed` / `Expired`）→ `StaleCheckoutAttemptException('契約手続きの有効期限が切れました。画面を再読み込みして再試行してください。')` |
+| 3 | **同 plan の live pending dedup**（`org` + `intent` + `plan_code` + `status=Pending` + **`created_at >= staleThresholdAt($now)`**。**org-wide**） | `CheckoutSessionDto(url: null, …)` を返す → Controller が `back()->with('warning', '既に進行中の Checkout があります。数分お待ちください。')`（**別 token でも live session は 1 本**）。**stale pending はここに hit しない**（C-1） |
+| 4 | **別 plan の live pending を expire**（同じ live filter） | `gateway->expireCheckoutSession()` が throw → `CheckoutInProgressException('前回の決済セッションの整理に失敗しました。 数分後に再試行してください。')`（local を上書きせず停止）/ `'complete'` → `CheckoutInProgressException('直前の決済が処理中です。数分お待ちください。')` / それ以外 → 行を `Expired` にして続行。**stale な別 plan 行は Stripe 側で既に expire 済みのため照会せず放置**（日次 sweeper が DB を収束させる = 無駄な外向き API を増やさない） |
+| 5 | Stripe 作成 → DB 記録 | `gateway->createSubscriptionCheckout(…, metadata: ['purpose' => 'subscription_start', 'org_ref' => (string) $org->id, 'plan_code' => $plan->code], idempotencyKey: 'sub_start:'.$attemptToken)` → `DB::transaction` で行 INSERT（`intent` / `plan_code` / `stripe_session_id` / `idempotency_key` / `attempt_token` / `checkout_url` / `status=Pending` / `initiated_by_user_id`） |
 | 6 | `UniqueConstraintViolationException` の re-read 収束 | `isUniqueViolation()`（SQLSTATE `23000`/`23505` + index 名 `billing_checkout_sessions_org_intent_attempt_unique` / SQLite は構成列名で一致）以外は rethrow。該当時は `(org, intent, attempt_token)` を再読込 → `isReplayableCheckout($row, $now)` なら `replayCheckout()` / でなければ `StaleCheckoutAttemptException`（**500 にしない**） |
 
 ##### C-2: webhook 状態遷移（要件 3 / 8。**遷移条件はこの 1 定義のみ**）
@@ -2570,7 +2588,7 @@ final readonly class CheckoutSessionDto {   // verbatim
 
 - `payment_status ∈ {paid, no_payment_required}` → `Completed` + `completed_at = now()`
 - `payment_status === 'unpaid'` → `Failed`
-- 上記以外（null 等）→ **遷移しない**（受理のみ）
+- 上記以外（null 等）→ **遷移しない**（受理のみ。非同期決済の未確定を成功にも失敗にも倒さない）
 
 ```
 Pending   ──paid|no_payment_required──▶ Completed (+completed_at)
@@ -2582,84 +2600,29 @@ Completed ──(任意の payload)─────────▶ Completed    �
 Pending   ──(段 4 の明示 expire / 日次 sweeper)──▶ Expired
 ```
 
-cancel / 離脱は**遷移を持たない**。`BillingAccess::state()` が C-1 の述語で `PendingCheckout` / `ExpiredCheckout` と読む（**read 経路で DB 書込をしない**）。**遅延成功を受理する根拠**: `Expired` / `Failed` は AI-CUE 側の都合で付く**ローカルな見立て**であり、決済の終局は Stripe が持つ。金銭の付与は `invoice.paid` が真実源（D7）なので本遷移は feedback と冪等の忠実性のみを回復する。
+cancel / 離脱は**遷移を持たない**（Stripe から completed が来ない = `Pending` のまま）。`BillingAccess::state()` が C-1 の述語で `PendingCheckout` / `ExpiredCheckout` と読む（**read 経路で DB 書込をしない**）。**遅延成功を受理する根拠**: `Expired` / `Failed` は AI-CUE 側の都合（別 plan 申込による expire / 日次 sweeper / 一時的な unpaid）で付く**ローカルな見立て**であり、決済の終局は Stripe が持つ。ローカル状態を理由に成立した決済の記録を拒むと、**着地 feedback が恒久的に `null`**（= 支払ったのに無言）になる。金銭の付与は `invoice.paid` が真実源（D7）なので本遷移は feedback と冪等の忠実性のみを回復し、台帳には触れない。
 
 ```php
 // StripeWebhookProcessor::settleSubscriptionCheckout(array $payload): void
 // (1) purpose ガード: metadata.purpose !== 'subscription_start' → 受理のみ / mode !== 'subscription' → 受理のみ
-//     (既存 grantPurchasedTickets の 'ticket_purchase' + mode=payment ガード / P8a の mode=setup 分岐と相互排他)
-// (2) 真実源は自 DB 行。行不在 → throw = retryable failure
+//     (既存 grantPurchasedTickets の 'ticket_purchase' + mode=payment ガードは無改変。相互に排他)
+// (2) 真実源は自 DB 行。行不在 → throw = retryable failure (crash 先着 webhook は再試行で収束)
 // (3) tenant キー不信: payload の customer / metadata.org_ref は照合のみ (不一致は throw)。org 解決には使わない
 // (4) 遷移は C-2 の 1 定義:
 //     if ($local->status === CheckoutSessionStatus::Completed->value) { return; }   // 終局 no-op
-//     $status = $this->stringAt($payload, 'data.object.payment_status');
+//     $status = $this->stringAt($object, 'payment_status');
 //     if (in_array($status, ['paid', 'no_payment_required'], true)) {
 //         $local->forceFill(['status' => Completed->value, 'completed_at' => CarbonImmutable::now()])->save();
 //     } elseif ($status === 'unpaid') {
 //         $local->forceFill(['status' => Failed->value])->save();
 //     }                                                                              // それ以外は受理のみ
-// (5) T1004 dispatch (下記 C-3)。チケット・プランの付与も plan_code 同期もここでは一切行わない (D7)。
+// チケット・プランの付与も plan_code 同期も**ここでは一切行わない** (D7: invoice.paid / customer.subscription.* が真実源)。
 ```
-
-##### C-3: T1004 サブスク決済カード流用（D29(ii) で P8a から移譲。aigenba verbatim）
-
-**入力**: P9 が書く `intent=subscription_start` + `funding_choice='auto_recharge'` の `BillingCheckoutSession` 行（= Onboarding/Checkout の funding 2 択で `auto_recharge` を選んだ有償契約）。**事前同意（`recordPreConsent`）は checkout POST 時に記録済み**（`enabled=false` + 同意 4 列）。**適格性の最終判定は Job → `applyReusedPaymentMethod` の fail-closed が担う**。
-
-**(1) dispatch 条件（webhook 同期処理。外向き Stripe API は撃たない = T710 invariant）**
-
-```php
-// StripeWebhookProcessor::settleSubscriptionCheckout の末尾 (C-2 の遷移で Completed になった呼び出しのみ)
-$paymentStatus  = $this->stringAt($payload, 'data.object.payment_status');
-$subscriptionId = $this->subscriptionIdFrom($object);
-// subscriptionIdFrom は **string と array{id} の両方を受理する**（Codex Round 15 Critical）。
-//   `checkout.session.completed` の `data.object.subscription` は **expandable field** で、
-//   **expand 指定が無い通常の payload では string ID**（`"sub_xxx"`）で来る。array を前提にすると
-//   **本番で Job が一度も dispatch されない**。array は expand 済み payload（`{id: "sub_xxx", …}`）のみ。
-if ($local->funding_choice === SignupFundingChoice::AutoRecharge->value
-    && ($paymentStatus === 'paid' || $paymentStatus === 'no_payment_required')
-    && $subscriptionId !== null) {
-    // dispatch の事実を session に永続化する — setupPending / 着地 flash の「自動的に有効になります」
-    // 表示を決済確定済みの契約に限定する出典 (未決済 completed への伝播防止)。
-    $local->forceFill(['pm_reuse_dispatched_at' => CarbonImmutable::now()])->save();
-    ReuseSubscriptionPaymentMethodJob::dispatch($local->organization_id, $subscriptionId);
-}
-```
-
-**決済未確定（`payment_status` が `paid` / `no_payment_required` 以外）では dispatch しない**（決済未確定の契約カードでオートリチャージを有効化しない = aigenba の top-up 付与ガードと同一基準）。**再送は C-2 の終局 no-op に従い dispatch されない**（marker の 30 分窓が再送で延びない。aigenba は再送でも dispatch するが Job の `isAutoEnablePending` guard により**結果は同一**であり、差分は窓の延長有無のみ = C-2 の一意化（N-5）から機械的に導かれる帰結）。
-
-**(2) `ReuseSubscriptionPaymentMethodJob`（`tries=3` / `backoff=30`。verbatim）**: org 不在 → return / **`! isAutoEnablePending($org)` → Stripe retrieve 前に return**（不要な外部 API の排除）/ `resolveSubscriptionPaymentMethod()` が null → `Log::warning`（org id + subscription id のみ）+ return（**詰まない**: 請求ページのカード登録 CTA で回復できる）/ それ以外 → `applyReusedPaymentMethod($org, $pm)`。
-
-**(3) `AutoRechargeService::applyReusedPaymentMethod(Organization $org, string $paymentMethodId): bool`（verbatim）**
-
-- setup 経路（`applySetupCompletion`）との違い: **ユーザーは「オートリチャージ用のカード登録」を明示していない**ため、**適格性（`autoEnableEligible`）を先に確認し、不適格なら customer default PM もローカル snapshot も一切変更しない完全 no-op**（fail-closed。`Log::info(reason: no_config|not_eligible)`）。
-- 適格 → `gateway->setDefaultPaymentMethod()`（Cashier 冪等実装。副作用は customer の `invoice_settings.default_payment_method` = **v2 同意文言で開示済み**）→ `DB::transaction` で `lockForUpdate` 再取得 → snapshot + `enabled=true` + `failure_count=0` → `return ! $wasEnabled`。
-- **TX 内で適格性が失われていたら `RuntimeException`**（「Stripe だけ変更済みの部分適用」を silent no-op にせず顕在化。Job retry で収束 / 継続不適格なら `failed_jobs` で検知）。
-- `updateSettings` / `applySetupCompletion` / `recordPreConsent` / `executeAttempt` と**同一 org lock**（`billing:auto-recharge:{org}`）で直列化 = lock 保持中に適格性が変化する経路は構造的に存在しない。`LockTimeoutException` は `RuntimeException` で Job retry へ（握り潰さない）。
-- `enabledNow` のときのみ `notifyAutoEnabled()`（通知失敗は `report()` で握り、Job を失敗させない = `applySetupCompletion` と同型）。
-
-**(4) 「処理中」表示の窓（`settingsFor().setupPending`。P8a の (a) に (b) を OR で追加）**
-
-```php
-$setupPending = ! $hasPm && (
-    $this->hasRecentCompletedSetup($org)                                   // (a) P8a: カード登録 Checkout 完了
-    || ($pendingAutoEnable && $this->hasRecentAutoRechargeFundedSignup($org))  // (b) T1004: PM 流用 Job の収束待ち
-);
-```
-`hasRecentAutoRechargeFundedSignup()` = `intent=subscription_start` + `funding_choice=auto_recharge` + `status=completed` + **`pm_reuse_dispatched_at >= now()->subMinutes(config('billing.auto_recharge.setup_pending_window_minutes'))`**（既定 30）。**基準は `pm_reuse_dispatched_at`**（`updated_at` / `completed_at` は完了後の別更新・未決済 completed で窓が誤って開くため使わない）。**(b) は `pendingAutoEnable=true` のときだけ**（v1 失効・再同意が必要な org で 30 分間カード登録 CTA / 再同意導線を隠さない）。
-
-**(5) 着地 flash（`resolveAutoRechargeLanding`。`?session_id` 分岐のみ）**
-
-`?session_id` を `$organization->checkoutSessions()` の **org スコープ**で引き、`intent=subscription_start` + `status=completed` + `funding_choice=auto_recharge` を検証できたときだけ **`billing.index?highlight=auto-recharge` への 303 + `with('info', …)`** へ変換する（それ以外の `session_id` は従来どおり `resolveBillingFeedback` に委ねる）。文言は 2 分岐（verbatim）:
-
-- `pm_reuse_dispatched_at !== null && isAutoEnablePending($org)` → `'お支払いを受け付けました。オートリチャージは、ご契約のお支払いカードで自動的に有効になります。反映されない場合は、この画面から設定できます。'`
-- それ以外（同意失効・未決済 completed 等） → `'お支払いを受け付けました。オートリチャージの設定はこの画面から確認できます。'`（**確定表現を避けた fail-closed な誘導文言**）
-
-**(6) 同意版（D29-b）**: `config('billing.auto_recharge.consent_version') = 'v2'`。`BillingCheckoutRequest` が **checkout 開始前に現行版との完全一致を検証**（不一致・欠落は 422 = `recordPreConsent` にも Stripe にも到達しない）。Controller は `Gate::authorize('manageBilling')` の後・`startCheckout()` の前に `recordPreConsent($org, $user, new AutoRechargeConsentDto($consentVersion))` を呼ぶ（`CheckoutInProgressException` → `back()->with('error', …)`）。**Checkout が後段で失敗・放棄されても同意 row は無害**（`enabled=false` = 課金は一切発生しない）。
 
 ##### Controller の実行順（要件 7 = セキュリティ不変条件 #2「不整合は認可より前に 404」）
 
 ```php
-public function checkout(BillingCheckoutRequest $request, SubscriptionService $subscriptions, AutoRechargeService $autoRecharge): SymfonyResponse|RedirectResponse
+public function checkout(BillingCheckoutRequest $request, SubscriptionService $subscriptions): SymfonyResponse|RedirectResponse
 {
     $organization = $this->resolveCurrentOrganization($request);
     $user = $request->user();  Assert::isInstanceOf($user, User::class);
@@ -2669,18 +2632,7 @@ public function checkout(BillingCheckoutRequest $request, SubscriptionService $s
     abort_if($subscriptions->attemptTokenIsForeign($attemptToken, $organization, $user), 404);
     // (2) 認可
     Gate::authorize('manageBilling', $organization);
-    // (3) T1004: funding=auto_recharge は事前同意 (enabled=false) を Checkout 開始前に記録する。
-    $fundingRaw = $request->validated('funding_choice');
-    $funding = is_string($fundingRaw) ? SignupFundingChoice::from($fundingRaw) : null;
-    if ($funding === SignupFundingChoice::AutoRecharge) {
-        $consentVersion = $request->validated('consent_version');  Assert::stringNotEmpty($consentVersion);
-        try {
-            $autoRecharge->recordPreConsent($organization, $user, new AutoRechargeConsentDto($consentVersion));
-        } catch (CheckoutInProgressException $e) {
-            return back()->with('error', $e->getMessage());
-        }
-    }
-    // (4) plan 解決 → 冪等開始
+    // (3) plan 解決 → 冪等開始
     $planCode = $request->validated('plan_code');  Assert::string($planCode);
     $plan = Plan::query()->where('code', $planCode)->where('is_active', true)->firstOrFail();
 
@@ -2690,7 +2642,6 @@ public function checkout(BillingCheckoutRequest $request, SubscriptionService $s
             route('billing.index').'?session_id={CHECKOUT_SESSION_ID}',
             route('billing.plans'),
             $attemptToken,
-            $funding,
         );
     } catch (SubscriptionAttemptPlanMismatchException $e) {
         throw ValidationException::withMessages(['plan_code' => $e->getMessage()]);   // 422
@@ -2710,16 +2661,14 @@ public function checkout(BillingCheckoutRequest $request, SubscriptionService $s
 }
 ```
 
-**禁止事項 #7**（`redirect()->intended()`）は使わない。**禁止事項 #8**: `Billing/Plans` / `Onboarding/Checkout` の申込ボタンは token / plan / 同意の状態で disabled にせず、押下時に上記のエラー・422 を表示する。
+**禁止事項 #7**（`redirect()->intended()`）は使わない。**禁止事項 #8**: `Billing/Plans` の申込ボタンは token / plan の状態で disabled にせず、押下時に上記のエラー・422 を表示する。
 
 ##### 着地 feedback（`resolveBillingFeedback`。verbatim。UI は raw query を見ない）
-
-`index` は **`resolveAutoRechargeLanding()` を先に評価**し（該当時は 303 = C-3(5)）、非該当なら以下の feedback を返す。
 
 | query | 条件 | kind / 文言 |
 |---|---|---|
 | `?portal` | **`session('error')` が文字列なら `null`**（成功偽装の抑止。aigenba F-2-03 verbatim） | `portal_returned` /「お支払い管理画面から戻りました。」 |
-| `?session_id=` | `$organization->checkoutSessions()->where('stripe_session_id', …)` で **org スコープ**（未知 / 他 org は `null` = 偽 success 排除）。**`intent !== subscription_start` も `null`**（fail-closed。P8a の `setup_payment_method` 行が同テーブルに実在するため必須） | `Completed` → `purchase_received` /「お支払いを受け付けました。プランへの反映には数分かかる場合があります。」<br>`Pending` → `purchase_processing` /「お支払いを確認しています。プラン反映までしばらくお待ちください。」<br>`Failed` / `Expired` → **`null`**（verbatim） |
+| `?session_id=` | `$organization->checkoutSessions()->where('stripe_session_id', …)` で **org スコープ**（未知 / 他 org は `null` = 偽 success 排除）。`intent !== subscription_start` も `null`（fail-closed） | `Completed` → `purchase_received` /「お支払いを受け付けました。プランへの反映には数分かかる場合があります。」<br>`Pending` → `purchase_processing` /「お支払いを確認しています。プラン反映までしばらくお待ちください。」<br>`Failed` / `Expired` → **`null`**（verbatim） |
 | `?replayed` | — | `purchase_already_received` /「この内容のお支払いは既に受け付け済みです。」 |
 | `?retry` | — | `checkout_retry_required` /「お手続きの有効期限が切れました。画面を再読み込みして再試行してください。」 |
 
@@ -2727,13 +2676,11 @@ public function checkout(BillingCheckoutRequest $request, SubscriptionService $s
 
 | # | 点 | aigenba | AI-CUE (P9) | 根拠 |
 |---|---|---|---|---|
-| N-1 | **同 token・別 plan** | `replayCheckout()` で**保存済み session の plan** の Checkout URL へ収束 | **422**（`SubscriptionAttemptPlanMismatchException`） | `Billing/Plans` は 1 render = 1 token のため「Starter を押して戻り Standard を押す」が同 token・別 plan として実在する。verbatim だと**押した plan と違う plan の Checkout に着地**する。AI-CUE 先例（`TicketCheckoutService:108-121`）とも整合。**ユーザー指示（P9 要件 6）による明示決定** |
-| N-2 | **`initiated_by_user_id` の actor scope** | subscription 経路は org スコープ（actor scope は `TicketService` = T905 R1/R2 Critical で採用済み） | **token 所有者判定（要件 7 の 404）にのみ actor scope を適用**。dedup は org-wide のまま | aigenba 自身が同一の replay 機構に対し T905 で下した結論を、P2 が移植済みの `initiated_by_user_id` 列に適用する。**dedup を actor scope にはしない**（subscription の org singleton 性を壊すため） |
-| N-3 | **`idempotency_key` 列の値** | `sprintf('sub_start:%d:%s:%d:%d', org, priceId, seatOverflow, floor5min(now))`（T680 で dedup 用途からは外れた**遺物**） | **Stripe へ渡した key と同値**（`'sub_start:'.$attemptToken`） | 5 分バケット key は同 org・同 price の別 token が同バケットに入ると UNIQUE 衝突し、`isUniqueViolation()` に拾われず **500** になる死角がある。**seat 引数は AI-CUE に存在しない**（原則 4）ため 5 分バケット式はそのままでは移植不能でもある |
-| N-4 | **live 判定の共有（C-1）** | 閾値 `subDay()` は `BillingAccess::state()` と `ReconcileSubscriptionSchedules::expireStaleCheckouts()` に**別々の literal** で置かれ、`startCheckout()` の dedup / replay は **`status=Pending` + URL のみ**で live を判定する | **`BillingCheckoutSession::staleThresholdAt()` / `isLivePending()` を単一出典にし、`state()` / `startCheckout()` の段 2・3・4 / sweeper の 4 経路が共有** | **Codex Critical (1)**。aigenba は daily sweeper に依存して整合を保つが、判定の正しさを sweeper の実行タイミングに依存させないために述語を共有する（値は `subDay()` のまま = 原則 3 を侵さない）。AI-CUE 先例 `TicketCheckoutSession::isLivePending(CarbonImmutable $now)` |
-| N-5 | **遅延成功の受理（C-2）** | `markLocalCheckoutCompleted()` は **`Pending` 以外は触らない**。`Failed` / `Expired` は終局 | **`Completed` 以外は payload の判定結果へ遷移**（`Failed` / `Expired` → `Completed` を受理）。**帰結として T1004 dispatch も「遷移が起きた呼び出し」限定**になる（再送で marker 窓が延びない。Job の `isAutoEnablePending` guard により**結果は同一**） | **Codex Critical (2)**。AI-CUE は**日次 sweeper が全 stale pending を `Expired` にする**ため verbatim だと「支払ったのに feedback が恒久 null」「決済済みなのに PM 流用が走らない」が現実に起きる。金銭は D7 の `invoice.paid` が真実源のため台帳は動かない。**aigenba へ報告し、先方が Pending-only を維持するなら差分として保持する**（原則 5 の運用） |
-
-**T1004 の読み替え 1 点（非 verbatim ではない）**: aigenba の `intent=SignupFunding` を **`intent=SubscriptionStart`** に読み替える（`hasRecentAutoRechargeFundedSignup` / dispatch 分岐 / 着地 flash）。`SignupFunding` intent は **P2 が原則 4 で非移植**（AI-CUE の契約 checkout は `SubscriptionStart` の 1 本）と決定済みであり、**新 intent を作らず `funding_choice` 列を additive に足すだけで T1004 が成立する**（D29 の根拠列に明記済み）。列名・値・窓・文言・fail-closed 条件はすべて verbatim。
+| N-1 | **同 token・別 plan** | `replayCheckout()` で**保存済み session の plan** の Checkout URL へ収束 | **422**（`SubscriptionAttemptPlanMismatchException`） | `Billing/Plans` は 1 render = 1 token のため「Starter を押して戻り Standard を押す」が同 token・別 plan として実在する。verbatim だと**押した plan と違う plan の Checkout に着地**する。AI-CUE 先例（`TicketCheckoutService:108-121`: 同 token・別 count は replay せず stale）とも整合。**ユーザー指示（P9 要件 6）による明示決定** |
+| N-2 | **`initiated_by_user_id` の actor scope** | subscription 経路は org スコープ（actor scope は `TicketService` = T905 R1/R2 Critical で採用済み） | **token 所有者判定（要件 7 の 404）にのみ actor scope を適用**。dedup は org-wide のまま | aigenba 自身が同一の replay 機構に対し T905 で下した結論（cross-user replay 防止）を、P2 が移植済みの `initiated_by_user_id` 列に適用する。**dedup を actor scope にはしない**（subscription の org singleton 性を壊すため） |
+| N-3 | **`idempotency_key` 列の値** | `sprintf('sub_start:%d:%s:%d:%d', org, priceId, seatOverflow, floor5min(now))`（T680 で dedup 用途からは外れた**遺物**） | **Stripe へ渡した key と同値**（`'sub_start:'.$attemptToken`） | 5 分バケット key は同 org・同 price の別 token が同バケットに入ると UNIQUE 衝突し、`isUniqueViolation()`（attempt_token 違反のみ replay）に拾われず **500** になる死角がある。attempt_token と 1:1 の key にすると衝突クラスが消え、列の意味が「Stripe に送った key」に一致する（要件 5）。**seat 引数は AI-CUE に存在しない**（原則 4）ため 5 分バケット式はそのままでは移植不能でもある |
+| N-4 | **live 判定の共有（C-1）** | 閾値 `subDay()` は `BillingAccess::state()` と `ReconcileSubscriptionSchedules::expireStaleCheckouts()` に**別々の literal** で置かれ、`startCheckout()` の dedup / replay は **`status=Pending` + URL のみ**で live を判定する（時間軸を持たない） | **`BillingCheckoutSession::staleThresholdAt()` / `isLivePending()` を単一出典にし、`state()` / `startCheckout()` の段 2・3・4 / sweeper の 4 経路が共有** | **Codex Critical (1)**。aigenba は「daily sweeper が実 DB を expired にする」ことに依存して整合を保っているが、v2 P9 は**その sweeper を移植対象から落としていた**ため、stale pending が dedup に永久 hit し「2 日後に新 token で新規 Checkout」が成立しない。sweeper を verbatim 復活させたうえで、**判定の正しさを sweeper の実行タイミングに依存させない**ために述語を共有する（値は `subDay()` のまま = 原則 3 を侵さない）。AI-CUE 先例 `TicketCheckoutSession::isLivePending(CarbonImmutable $now)` + `TicketCheckoutService:100-106` の「dedup 前に期限切れ pending を回収」と同形 |
+| N-5 | **遅延成功の受理（C-2）** | `markLocalCheckoutCompleted()` は **`Pending` 以外は触らない**（`StripeWebhookController.php:1427-1429`）。`Failed` / `Expired` は終局 | **`Completed` 以外は payload の判定結果へ遷移**（`Failed` / `Expired` → `Completed` を受理） | **Codex Critical (2)**。v2 P9 は状態図・テスト（旧 14/15）で `Failed`/`Expired` → `Completed` を要求しながら実装契約に aigenba verbatim の「Pending 以外は触らない」を併記しており、**自己矛盾**していた。**ユーザー指示により「遅延成功を受理する」側へ一意化**する。aigenba では expire 契機が seat/schedule 経路に偏り遅延成功の窓が狭いが、AI-CUE は**日次 sweeper が全 stale pending を `Expired` にする**ため verbatim だと「支払ったのに feedback が恒久 null」が現実に起きる。金銭は D7 の `invoice.paid` が真実源のため本遷移で台帳は動かない。**aigenba へ報告し、先方が Pending-only を維持するなら差分として保持する**（原則 5 の運用） |
 
 ##### PII（不変条件 #6。email だけでなく name も閉じる）
 
@@ -2754,6 +2701,7 @@ class Organization extends Model implements CipherSweetEncrypted, /* 既存 */
             ->addOptionalTextField('billing_contact_name')
             // 検索契約: 請求調査 (Stripe Dashboard の請求先メール → AI-CUE 組織の逆引き = 返金・
             // 二重課金の一次対応で唯一の特定経路) のため email のみ blind index 化する。
+            // Lowercase transformer で大文字小文字差を吸収 (値全体ハッシュ = 完全一致のみ)。
             ->addBlindIndex('billing_contact_email', new BlindIndex('organization_billing_contact_email_index', [new Lowercase]));
         // billing_contact_name は blind index を張らない (等値検索の要求が無い = 検索が必要な項目だけ whereBlind)。
     }
@@ -2766,12 +2714,12 @@ class Organization extends Model implements CipherSweetEncrypted, /* 既存 */
 }
 ```
 
-- **検索契約**: `billing_contact_email` の検索は **`Organization::whereBlind('billing_contact_email', 'organization_billing_contact_email_index', $value)` のみ**。保存値は `EmailNormalizer::normalize()` 済みのため検索入力も**同一正規化を通す**。
-- **`billing_contact_name` の検索は契約として存在しない**（blind index 行を作らない）。
-- **一意制約は張らない**（複数組織が同一請求先メールを持つのは正当）。
-- **cast**: `casts()` に `billing_contact_*` を**追加しない**（CipherSweet が row-level で暗号化/復号する。`encrypted` cast を重ねると二重暗号化）。
-- **soft delete**: `Organization` は `SoftDeletes` のため blind index 行は残る（hard delete しない）。
-- **更新経路**: `PATCH /billing/contact` → `Gate::authorize('manageBilling', $organization)` + **current-org scope**（route parameter を持たないため cross-org 指定が構造的に不能）→ `UpdateBillingContactAction`。
+- **検索契約**: `billing_contact_email` の検索は **`Organization::whereBlind('billing_contact_email', 'organization_billing_contact_email_index', $value)` のみ**。平文 `where('billing_contact_email', …)` は hit しない。保存値は `EmailNormalizer::normalize()` 済みのため検索入力も**同一正規化を通す**（`inquiries` と同じ規約。`users.email` の raw 保存規約とはここで意図的に異なる — `UpdateBillingContactData` が正規化を保証する）。
+- **`billing_contact_name` の検索は契約として存在しない**（blind index 行を作らない = 平文検索も blind 検索もできない）。
+- **一意制約は張らない**（複数組織が同一請求先メールを持つのは正当）。`blind_indexes` の `UNIQUE(indexable_type, indexable_id, name)` は 1 レコード 1 行の担保であり値の一意性ではない。
+- **cast**: `casts()` に `billing_contact_*` を**追加しない**（CipherSweet が row-level で暗号化/復号する。`encrypted` cast を重ねると二重暗号化になる。`User::two_factor_secret` の既存注記と同じ判断）。
+- **soft delete**: `Organization` は `SoftDeletes` のため blind index 行は残る（hard delete しない = `Inquiry` の「query builder 一括 delete 禁止」問題は発生しない）。
+- **更新経路**: `PATCH /billing/contact` → `Gate::authorize('manageBilling', $organization)` + **current-org scope**（`ResolvesCurrentOrganization`。route parameter を持たないため cross-org 指定が構造的に不能）→ `UpdateBillingContactAction`。
 
 ```php
 // App\Http\Controllers\Billing\BillingController
@@ -2791,151 +2739,114 @@ public function updateBillingContact(UpdateBillingContactRequest $request, Updat
 BillingFeedbackShape  = { kind: 'purchase_received'|'purchase_processing'|'purchase_already_received'
                                 |'checkout_retry_required'|'portal_returned',
                           message: string }
-BillingContactShape   = { email: string|null, name: string|null, fallbackEmail: string|null }  // fallbackEmail = owner email
-BillingDashboardShape = { …P8b の全項目 (billingState / plan / balance / quota), …P8a の autoRecharge (無変更),
-                          feedback: BillingFeedbackShape|null, billingContact: BillingContactShape }
+BillingContactShape   = { email: string|null, name: string|null, fallbackEmail: string|null }  // fallbackEmail = owner email (未設定時の実宛先を UI に明示)
+BillingDashboardShape = { …P8b の全項目 (billingState / plan / balance / quota), feedback: BillingFeedbackShape|null,
+                          billingContact: BillingContactShape }
 BillingPlansPageShape = { plans: list<PricingPlanShape>, billingState: BillingStateValue, currentPlanCode: string|null,
                           canManage: bool, subscriptionAttemptToken: string }
-OnboardingCheckoutShape = { …P3 の全項目, …P8a の consentTerms, subscriptionAttemptToken: string }
 ```
 
-**UI**: `Billing/Index.svelte` は `templates/PageContainer` / `molecules/PageHeaderSection` / `templates/PageContent`（T071 primitive）配下に feedback バナーと `BillingContactForm` を置く。DS token のみ（hex 直書き禁止）。アイコンは `@lucide/svelte`（`CircleCheck` / `Clock` / `Receipt`）。**判定源は `page.billingState`**。`EffectivePlan` は存在しない。
+**UI**: `Billing/Index.svelte` は `templates/PageContainer` / `molecules/PageHeaderSection` / `templates/PageContent`（T071 primitive）配下に feedback バナーと `BillingContactForm` を置く。DS token のみ（hex 直書き禁止）。アイコンは `@lucide/svelte`（`CircleCheck` / `Clock` / `Receipt`）。**判定源は `page.billingState`（`OnboardingBillingState` の値）**。`EffectivePlan` は存在しない。
 
 #### PHPStan 適合チェック
 
-- `BillingCheckoutSession::$status` / `$intent` / **`$funding_choice`** は **P2 verbatim の plain string 列**（enum cast ではない）。比較は `$row->status === CheckoutSessionStatus::Pending->value` / `$row->funding_choice === SignupFundingChoice::AutoRecharge->value` の**文字列比較**で書く（cast 前提の enum 比較は `alwaysFalse`）。
-- `BillingCheckoutSession::$created_at` / **`$pm_reuse_dispatched_at`** は `Carbon|null`（`'pm_reuse_dispatched_at' => 'datetime'` cast + `@property Carbon|null`）。`isLivePending()` は `=== null ||` で null を明示分岐（`?->` で握り潰さない）。`staleThresholdAt()` は `CarbonImmutable` を受けて返す純関数（`now()` を内部で呼ばない = テストが時刻を注入できる）。
-- `Cache::lock()->block()` は `mixed` を返すため、`TicketCheckoutService` と同じく `Assert::isInstanceOf($result, CheckoutSessionDto::class)`（`applyReusedPaymentMethod` は `/** @var bool $enabledNow */` = aigenba verbatim の再表明）で絞る。
+- `BillingCheckoutSession::$status` / `$intent` は **P2 verbatim の plain string 列 + `statusEnum()` / `intentEnum()`**（enum cast ではない）。比較は `$row->status === CheckoutSessionStatus::Pending->value` の**文字列比較**で書く（cast 前提で `=== CheckoutSessionStatus::Pending` と書くと `alwaysFalse`）。
+- `BillingCheckoutSession::$created_at` は `Carbon|null`（P2 の `@property`）。`isLivePending()` は `$this->created_at === null || $this->created_at->greaterThanOrEqualTo(...)` で null を明示分岐（`?->` で握り潰さない）。`staleThresholdAt()` は `CarbonImmutable` を受けて返す純関数（`now()` を内部で呼ばない = テストが時刻を注入できる）。
+- `Cache::lock()->block()` は `mixed` を返すため、`TicketCheckoutService` と同じく `Assert::isInstanceOf($result, CheckoutSessionDto::class)` で絞る（`@var` コメントでの黙らせをしない）。
 - `attemptTokenIsForeign()` は `->exists()` を返す `bool`。`where(fn (Builder $q) => …)` の closure 引数に `@param Builder<BillingCheckoutSession>` を付す。
-- **`SignupFundingChoice` は enum で比較**（`$funding === SignupFundingChoice::AutoRecharge`）。`$request->validated('funding_choice')` は `mixed` → `is_string()` 判定後に `::from()`（P8a の `ActivatePersonalController` と同一様式 = 分岐網羅を PHPStan に見せる）。`?SignupFundingChoice` 引数は `$funding?->value` で `string|null` に落とす。
-- `StripeWebhookProcessor::subscriptionIdFrom(array $object): ?string` — `$object['subscription']` は `mixed`。
-  **string（通常 payload = expandable field 未 expand）と `array{id: string}`（expand 済み payload）の両方を受理する**
-  （Codex Round 15 Critical: array 前提だと本番で T1004 が一度も発火しない）。実装は
-  `$v = $object['subscription'] ?? null; if (is_array($v)) { $v = $v['id'] ?? null; } return is_string($v) && $v !== '' ? $v : null;`
-  （既存 `stringAt()` と同じ narrow 様式。それ以外の型は null = fail-closed で dispatch しない）。`payment_status` は `in_array($status, ['paid','no_payment_required'], true)`（Stripe 値集合は enum 化しない = payload 由来の外部語彙）。
-- `AutoRechargeGatewayInterface::resolveSubscriptionPaymentMethod(): ?string` は `@return non-empty-string|null`。実装の `CashierAutoRechargeGateway::resolvePaymentMethodFromSubscription(\Stripe\Subscription $s): ?string` は `$s->default_payment_method` の `string|PaymentMethod|null` を `instanceof` で分岐し、`is_string($c) && $c !== ''` で `non-empty-string` へ narrow（fallback の `latest_invoice.payments.data[].payment.payment_intent` は `instanceof Invoice` / `instanceof PaymentIntent` で明示分岐）。
-- `ReuseSubscriptionPaymentMethodJob` は **`public readonly int $organizationId` / `public readonly string $stripeSubscriptionId`** のみを持つ（`SerializesModels` は付けるが Model 参照は保持しない = verbatim）。`handle(AutoRechargeGatewayInterface $gateway, AutoRechargeService $autoRecharge): void` の DI 解決は container 型で確定。`Organization::query()->find()` の戻り値は `! $org instanceof Organization` で narrow。
-- `Log::warning` / `Log::info` の context は `array<string, scalar|null>`。
-- `BillingFeedbackDto::toArray()` は `@phpstan-type SimpleBillingFeedbackKind` + `@return BillingFeedbackShape`。`$this->kind->value` は `string` に広がるため `/** @var SimpleBillingFeedbackKind $kindValue */` で literal union へ narrow（型の widen ではなく enum → literal の再表明）。
-- `resolveBillingFeedback()` / `resolveAutoRechargeLanding()` の `$request->query('session_id')` は `mixed` → `is_string($x) && $x !== ''` で narrow。`$request->session()->get('error')` も `is_string()` で判定（verbatim）。
-- `Organization::routeNotificationForMail(): ?string` — `EmailNormalizer::normalize(string): string` は非 null 引数を要求するため `is_string() && trim() !== ''` で narrow してから渡す（AI-CUE の既存 `EmailNormalizer` を改変しない）。
-- `UpdateBillingContactData::fromRequest()` は `$request->string(…)->toString()` + `Assert::stringNotEmpty()`、name は `mixed` を `is_string() && trim() !== ''` で narrow（verbatim）。
-- `StripeGatewayInterface::createSubscriptionCheckout()` の `array $metadata` は `@param array<string, string>`。`buildSubscriptionSessionPayload()` は `@return array{mode: 'subscription', customer: string, line_items: …, subscription_data: array{metadata: array<string, string>, payment_settings: array{save_default_payment_method: 'on_subscription'}}, success_url: string, cancel_url: string}` で固定。
-- `isUniqueViolation(QueryException $e)`: `$e->getCode()` は `mixed` → `in_array($e->getCode(), ['23000','23505'], true)`（strict 比較で型不一致は false）。**INSERT は `UniqueConstraintViolationException` で catch** し driver 差の判定は `isUniqueViolation()` に委ねる。
-- `ReconcileSubscriptionSchedules::expireStaleCheckouts()` の `->update()` 戻り値は `int`。
+- `BillingFeedbackDto::toArray()` は `@phpstan-type SimpleBillingFeedbackKind` + `@return BillingFeedbackShape`。`$this->kind->value` は `string` に広がるため、aigenba と同じく `/** @var SimpleBillingFeedbackKind $kindValue */` で literal union へ narrow（型の widen ではなく enum → literal の再表明）。
+- `resolveBillingFeedback()` の `$request->query('session_id')` は `mixed` → `is_string($x) && $x !== ''` で narrow してから使う。`$request->session()->get('error')` も `is_string()` で判定（verbatim）。
+- `Organization::routeNotificationForMail(): ?string` — `billing_contact_email` は `?string`。`EmailNormalizer::normalize(string): string` は非 null 引数を要求するため、`is_string() && trim() !== ''` で narrow してから渡す（aigenba の `normalize(?string)` シグネチャへ寄せない = AI-CUE の既存 `EmailNormalizer` を改変しない）。
+- `UpdateBillingContactData::fromRequest()` は `$request->string(…)->toString()` + `Assert::stringNotEmpty()`、name は `$request->input()` の `mixed` を `is_string() && trim() !== ''` で narrow（verbatim）。
+- `StripeGatewayInterface::createSubscriptionCheckout()` の `array $metadata` は `@param array<string, string>`。`CashierStripeGateway::buildSubscriptionSessionPayload()` は戻り値を `@return array{mode: 'subscription', customer: string, line_items: …, subscription_data: array{metadata: array<string, string>}, success_url: string, cancel_url: string}` で固定（`CashierTicketCheckoutGateway::buildSessionPayload()` と同様式）。
+- `isUniqueViolation(QueryException $e)`: `$e->getCode()` は `mixed`（`Throwable::getCode()` の宣言が緩い）→ `in_array($e->getCode(), ['23000','23505'], true)` の前に string 化しない（strict 比較で型不一致は false に落ちる）。**INSERT は `UniqueConstraintViolationException`（Laravel 11+ が `QueryException` を specialize）で catch し、driver 差の判定は `isUniqueViolation()` に委ねる**。
+- `ReconcileSubscriptionSchedules::expireStaleCheckouts()` の `->update()` 戻り値は `int`（集計出力に直接使える）。
+- webhook 側の `data_get()` の `mixed` は既存 `stringAt()` helper で narrow。`payment_status` は `in_array($status, ['paid','no_payment_required'], true)` で判定（Stripe 値集合は enum 化しない = payload 由来の外部語彙）。
 - 型を緩めた回避・baseline 化は行わない（禁止事項 2）。
 
 #### テスト計画
 
-**テストファースト**。`RefreshDatabase` グローバル + `--parallel`（個別 `DatabaseTransactions` 禁止）。テストデータは Factory のみ。時刻依存は `travelTo()` / Factory の `stale()` / `pmReuseDispatched()` state で固定。Stripe は `FakeStripeGateway` / `FakeAutoRechargeGateway` を bind（実 API を撃たない）。
+**テストファースト**。`RefreshDatabase` グローバル + `--parallel`（個別 `DatabaseTransactions` 禁止）。テストデータは Factory のみ。時刻依存は `travelTo()` / Factory の `stale()` state で固定する。
 
 新規 `tests/Feature/Billing/SubscriptionCheckoutIdempotencyTest.php`（**要件 1-7**）:
-1. 同一 `subscription_attempt_token` + 同一 plan の 2 連投で **`billing_checkout_sessions` が 1 行**、2 回目は**既存 `checkout_url` へ収束**し fake の作成呼び出しが **1 回**（要件 1 / 4）。
+1. 同一 `subscription_attempt_token` + 同一 plan の 2 連投で **`billing_checkout_sessions` が 1 行**、2 回目は**既存 `checkout_url` へ収束**し `FakeStripeGateway` の作成呼び出しが **1 回**（要件 1 / 4）。
 2. 同一 token + **別 plan_code** → **422**（`assertInvalid(['plan_code'])`）。行は増えず Stripe 呼び出しも増えない（要件 6 / N-1）。
-3. `idempotency_key === 'sub_start:'.$attempt_token`、かつ同 key の再呼び出しで fake が**同一 sessionId** を返す（要件 5）。ticket 側 `purchase:{token}` / **P8a の `auto-recharge-setup:{token}`** と**衝突しない**（key 空間分離）。
-4. **他 org の token** → **404**（`Gate` 到達前。`manageBilling` を持つ owner でも 404）。**同 org の他 user の token** → **404**（要件 7 / 2）。いずれも**行が作られない**。
-5. `completed()` 行の token 再送 → `billing.index?replayed=1`、Stripe 呼び出し 0（要件 4）。
-6. `expired()` / `failed()` 行の token 再送 → `billing.index?retry=1`。
-7. **別 token・同 plan の live pending** → `back()->with('warning')`、**新規行なし・Stripe 呼び出しなし**（org-wide dedup）。**同 org の別 user が別 token で申し込んでも 1 本に収束**（要件 2）。
-8. **別 token・別 plan の live pending**: `expireCheckoutSession` が `'complete'` → `CheckoutInProgressException` → `back()->with('error')`、**新規行なし**。throw → 停止し local 行は `Pending` のまま。`'expired'` → 旧行が `Expired` になり新規発行が続行。
-9. `UniqueConstraintViolationException` 注入（並行 race 模擬）→ **500 にならず** replay / stale へ収束。**attempt_token 以外の unique 違反は rethrow**。
+3. `idempotency_key === 'sub_start:'.$attempt_token`、かつ同 key の再呼び出しで fake が**同一 sessionId** を返す（要件 5）。ticket 側の `purchase:{token}` と**衝突しない**（key 空間分離）。
+4. **他 org の token** で POST → **404**（`Gate` 到達前。`manageBilling` を持つ owner でも 404）。**同 org の他 user の token** → **404**（要件 7 / 2）。いずれも**行が作られない**（silent fallthrough の回帰防止）。
+5. `completed()` 行の token 再送 → `billing.index?replayed=1` へ redirect、Stripe 呼び出し 0（要件 4）。
+6. `expired()` / `failed()` 行の token 再送 → `billing.index?retry=1`（`StaleCheckoutAttemptException` 経路）。
+7. **別 token・同 plan の live pending** → `back()->with('warning')`、**新規行なし・Stripe 呼び出しなし**（org-wide dedup = 二重 subscription の封じ）。**同 org の別 user が別 token で申し込んでも同じく 1 本に収束する**（actor scope を dedup に持ち込まないことの固定 = 要件 2）。
+8. **別 token・別 plan の live pending**: `expireCheckoutSession` が `'complete'` → `CheckoutInProgressException` → `back()->with('error')`、**新規行なし**。gateway が throw → 同じく停止し local 行は `Pending` のまま（上書きしない）。`'expired'` → 旧行が `Expired` になり新規発行が続行。
+9. `UniqueConstraintViolationException` 注入（並行 race 模擬）→ **500 にならず** replay / stale へ収束。**attempt_token 以外の unique 違反は rethrow**（`isUniqueViolation()` の識別子判定）。
 10. 既に `valid()` な subscription を持つ org → `'既に有効なサブスクリプションがあります。…'` で停止（行なし）。
-11. `initiated_by_user_id` が**必ず非 null** で記録される（要件 2）。
-11b. **P8a の `intent=setup_payment_method` 行が同 org に live pending で在っても**、段 2/3/4 に一切干渉しない（同 `attempt_token` の setup 行があっても subscription checkout は新規発行する = `intent` による token 空間分離の回帰）。
+11. `initiated_by_user_id` が**必ず非 null** で記録される（要件 2 の監査行）。
 
-新規 `tests/Feature/Billing/CheckoutStaleThresholdTest.php`（**C-1**）:
-12. **`created_at` を 2 日前にした pending 行があるとき、新 token の POST が新規 Checkout を作る**（行 2 行・Stripe 作成 1 回・`Inertia::location`）。**warning に落ちない**。
-13. 同 token + **stale pending** の再送 → **`?retry=1`**。`created_at` が**境界内**（23h59m 前）なら既存 URL へ replay（境界の両側を固定）。
-14. **`state()` と `startCheckout()` の同値**: `PendingCheckout` のとき新規作成しない / `ExpiredCheckout`（stale pending のみが理由）のとき新 token は新規作成できる、を `travelTo()` で 23h / 25h の 2 点固定。
-15. `billing:reconcile-schedules` 実行で **stale pending のみが `Expired`、live pending は `Pending` のまま**（`ReconcileSubscriptionSchedulesTest` に追加。既存 2 工程の期待は不変）。**stale な `setup_payment_method` 行も `Expired` になる**（intent 無しフィルタの verbatim）。**sweeper 未実行でも 12/13/14 が成立する**。
+新規 `tests/Feature/Billing/CheckoutStaleThresholdTest.php`（**C-1 = Codex Critical (1) の回帰**）:
+12. **`created_at` を 2 日前にした pending 行があるとき、新 token の POST が新規 Checkout を作る**（行が 2 行になり Stripe 作成 1 回、`Inertia::location` へ）。**warning に落ちない**（stale pending の永久再利用の封じ = 本 Critical の直接固定）。
+13. 同 token + **stale pending** の再送 → **`?retry=1`**（死んだ `checkout_url` へ収束しない）。`created_at` が閾値の**境界内**（23h59m 前）なら従来どおり既存 URL へ replay（境界の両側を固定）。
+14. **`state()` と `startCheckout()` の同値**: 同一 org・同一時刻で `BillingAccess::state()` が `PendingCheckout` を返すとき startCheckout は新規作成しない / `ExpiredCheckout`（stale pending のみが理由）を返すとき新 token は新規作成できる、を `travelTo()` で 23h / 25h の 2 点固定。
+15. `billing:reconcile-schedules` 実行で **stale pending のみが `Expired` になり、live pending は `Pending` のまま**（`tests/Feature/Billing/ReconcileSubscriptionSchedulesTest.php` に追加。既存 2 工程の期待は不変）。**sweeper 未実行でも 12/13/14 が成立する**（判定が sweeper に依存しないことの固定）。
 
 新規 `tests/Architecture/CheckoutLiveThresholdSingleSourceTest.php`（**C-1 の構造的封じ**）:
-16. `BillingAccess.php` / `SubscriptionService.php` / `ReconcileSubscriptionSchedules.php` のソースに **`subDay(` / `subDays(` が出現しない**（閾値 literal は `staleThresholdAt()` にのみ存在する）。
+16. `app/Services/Billing/BillingAccess.php` / `app/Services/Billing/SubscriptionService.php` / `app/Console/Commands/Billing/ReconcileSubscriptionSchedules.php` のソースに **`subDay(` / `subDays(` が出現しない**（閾値 literal は `BillingCheckoutSession::staleThresholdAt()` にのみ存在する = 閾値の再発明を機械検出）。
 
-新規 `tests/Feature/Billing/SubscriptionCheckoutWebhookRaceTest.php`（**要件 8 / C-2**）:
-17. `checkout.session.completed`（purpose=subscription_start / mode=subscription / payment_status=paid）→ 行 `Completed` + `completed_at`。**チケット付与も `plan_code` 書き換えも起きない**（`ticket_ledger_entries` 0 件 / `organizations.plan_code` 不変 = D7 境界）。
-18. 同一 event の**再送** → 冪等（`Completed` のまま `completed_at` 不変 = 終局 no-op）。
-19. **`Expired` 行への遅延 completed（paid）→ `Completed`** / **`Failed` 行への paid 再送 → `Completed`** / **`Completed` 行への unpaid → 遷移しない**。
-20. `payment_status=unpaid` → `Pending`→`Failed` / `Expired`→`Failed`。`payment_status=null` → **遷移しない**。
-21. **cancel 相当** → 行は `Pending` のまま。`created_at` を 2 日前にすると `state()` が **`ExpiredCheckout`** を返し、**新 token で新規 Checkout が作れる**。`state()` 実行で**行が書き換わらない**。
-22. 行不在の completed → throw = retryable failure（**silent 付与しない**）。
+新規 `tests/Feature/Billing/SubscriptionCheckoutWebhookRaceTest.php`（**要件 8 / C-2 = Codex Critical (2)**）:
+17. `checkout.session.completed`（purpose=subscription_start / mode=subscription / payment_status=paid）→ 行 `Completed` + `completed_at` 設定。**チケット付与も `plan_code` 書き換えも起きない**（`ticket_ledger_entries` 0 件 / `organizations.plan_code` 不変 = D7 境界の回帰）。
+18. 同一 event の **再送**（event_id 違いを含む）→ 冪等（行は `Completed` のまま `completed_at` も不変 = 終局 no-op）。
+19. **`Expired` 行への遅延 completed（paid）→ `Completed`**（C-2）。**`Failed` 行への同 session の paid 再送 → `Completed`**（C-2）。**`Completed` 行への unpaid → 遷移しない**（終局）。
+20. `payment_status=unpaid` → `Pending`→`Failed` / `Expired`→`Failed`。`payment_status=null` → **遷移しない**（受理のみ）。
+21. **cancel 相当**（ユーザー離脱 = completed が来ない）→ 行は `Pending` のまま。`created_at` を 2 日前にすると `BillingAccess::state()` が **`ExpiredCheckout`** を返し（C-1）、**新 token で新規 Checkout が作れる**。`state()` 実行で**行が書き換わらない**（read 経路 no-write）。
+22. 行不在の completed → throw = retryable failure（既存 `handle()` の catch で `failed` 記録。**silent 付与しない**）。
 23. `customer` / `metadata.org_ref` 不一致 → throw（tenant キー不信）。
-24. **purpose ディスパッチの排他**: `purpose=ticket_purchase` は `settleSubscriptionCheckout` に入らず既存 `grantPurchasedTickets` が動く（`TicketPurchaseWebhookTest` が**無改変で green**）。**`mode=setup`（P8a）も入らない**（`SetDefaultPaymentMethodJob` 分岐が従来どおり = `AutoRechargeWebhookTest` が無改変で green）。
-
-新規 `tests/Feature/Billing/SubscriptionPmReuseTest.php`（**T1004 = Codex Round 14 Critical (1)**。移植元 `/tmp/aigenba/tests/Feature/Billing/SubscriptionPmReuseTest.php`）:
-47. `funding_choice=auto_recharge` + `payment_status=paid` の completed → **`pm_reuse_dispatched_at` が立ち `ReuseSubscriptionPaymentMethodJob` が dispatch される**（`Queue::fake()`）。
-48. `payment_status` が `unpaid` / null → **dispatch されず marker も立たない**（契約未確定ガード）。
-49. `funding_choice=later` / `null`（Plans 経路） → dispatch されない。
-50. **`subscription` の payload 型（Codex Round 15 Critical。両形を必須で検証する）**: **(a) string ID `['subscription' => 'sub_x']` → dispatch される**（**expand 指定の無い通常の `checkout.session.completed` は `subscription` が string で来る = 本番の主経路**。array 前提だと**本番で一度も発火しない**）/ **(b) expanded object `['subscription' => ['id' => 'sub_x']]` → id を取り出して dispatch** / (c) `subscription` が null / 空文字 / その他の型 → **dispatch されない**（fail-closed）。
-51. **事前同意あり（v2）** → `setDefaultPaymentMethod` 呼び出し + snapshot + `enabled=true` + 通知 1 通（`applyReusedPaymentMethod`）。
-52. **中核 fail-closed**: 同意失効（v1 残存）では **customer default PM もローカル snapshot も一切変更されない**（gateway 呼び出し 0 / `enabled=false` のまま）。
-53. `config` なし / `disabled_reason` あり → **完全 no-op**（gateway 呼び出し 0）。
-54. 再実行（`enabled` 遷移済み）→ no-op で**通知も再送されない**。
-55. 空文字 PM → `InvalidArgumentException`（fail-fast）。
-56. **Job 一気通貫**（事前同意 → PM 解決 → `enabled=true`）/ **軽量 guard**（`isAutoEnablePending=false` なら `resolveSubscriptionPaymentMethod` を**呼ばない**）/ **PM 解決不能（null）→ no-op**（warning ログ + カード登録 CTA で回復可能）/ **org 不在は例外なしで return**。
-57. **部分適用の顕在化**: default PM 更新後に適格性が失われたら **`RuntimeException`**（silent no-op にしない）。
-58. **`setupPending`**: 契約完了 + 有効な事前同意の待機中 → **true** / 同意失効（v1）→ **false**（再同意フォールバック UI を隠さない）/ `funding=later` の契約完了 → **false** / dispatch から **30 分超で false**（`pm_reuse_dispatched_at` 基準の窓）/ **marker なし（未決済 completed）→ false**。
-59. **着地 flash**: `?session_id` が自 org の `subscription_start` + `completed` + `auto_recharge` 行 → **`?highlight=auto-recharge` へ 303**。marker あり + `isAutoEnablePending` → 「自動的に有効になります」/ それ以外 → 確定表現を避けた誘導文言。**他 org / `intent=setup_payment_method` の session_id は 303 しない**（IDOR 防御 = feedback と同じ org スコープ）。
-60. **同意 fail-closed（Request 層）**: `billing.checkout` に `funding_choice=auto_recharge` + `consent_version` 欠落 → **422**（`'自動購入への同意が必要です。'`）/ 旧版 `v1` → **422**（`'自動購入の同意内容が更新されています。…'`）。いずれも **`ticket_auto_recharges` 行も `billing_checkout_sessions` 行も増えず Stripe 呼び出し 0**（`recordPreConsent` 到達前）。
-61. **`consent_version='v2'` 改定の効果**: P8a 期の v1 同意行を持つ org は `pendingAutoEnable=false` / `requiresReconsent=true` になり、**PM 流用でも自動有効化されない**（`reconsentRequiredFor` による自動失効 = fail-closed）。
-62. **C-2 との結合**: `Expired` 行への遅延 completed（paid）でも **marker が立ち Job が dispatch される**（遅延成功が PM 流用へ届く）。**同一 event の再送では marker が更新されない**（終局 no-op）。
-63. **同意記録の順序**: `funding_choice=auto_recharge` の POST は **`recordPreConsent`（`enabled=false` + 同意 4 列） → `startCheckout`** の順で走り、Checkout 作成が失敗しても同意 row は残り**課金は発生しない**（`ticket_auto_recharge_attempts` 0 件）。
+24. **purpose ディスパッチの排他**: `purpose=ticket_purchase` の payload は `settleSubscriptionCheckout` に入らず既存 `grantPurchasedTickets` が従来どおり動く（`TicketPurchaseWebhookTest` が**無改変で green**）。
 
 新規 `tests/Feature/Billing/BillingFeedbackTest.php`:
-25. `?session_id=` が自 org の `Completed` 行 → `feedback.kind === 'purchase_received'`。`Pending` → `purchase_processing`。**`Failed` / `Expired` → `null`**（verbatim）。
-26. **他 org / 未知の `session_id`** → `null`（偽 success 排除）。**`intent=setup_payment_method`（P8a の実在行）→ `null`**（fail-closed）。
-27. `?portal` + `session('error')` あり → `null`。error 無し → `portal_returned`。
+25. `?session_id=` が自 org の `Completed` 行 → `page.feedback.kind === 'purchase_received'`。`Pending` → `purchase_processing`。**`Failed` / `Expired` → `feedback === null`**（verbatim）。
+26. **他 org / 未知の `session_id`** → `page.feedback === null`（偽 success 排除）。`intent=setup_payment_method` の行 → `null`（fail-closed）。
+27. `?portal` + `session('error')` あり → `null`（成功偽装の抑止）。error 無し → `portal_returned`。
 28. `?replayed` → `purchase_already_received` / `?retry` → `checkout_retry_required`。
-29. **C-2 との結合**: `Expired` 行が遅延 completed で `Completed` になった後の `?session_id` 着地が `purchase_received` を出す。
+29. **C-2 との結合**: `Expired` 行が遅延 completed で `Completed` になった後の `?session_id` 着地が `purchase_received` を出す（遅延成功が feedback へ届くことの固定）。
 
 新規 `tests/Feature/Billing/BillingContactPiiTest.php`（**不変条件 #6**）:
-30. `PATCH /billing/contact` 後、**`DB::table('organizations')` の生値が両列の平文と一致しない**。model 経由の読み出しは平文に復号される。
-31. **平文 where が hit しない**（`where('billing_contact_email', $plain)->exists()` が false）。`whereBlind(…)` が該当 org を引く。
-32. **`billing_contact_name` の blind index 行が存在しない**（検索契約の固定）。
-33. 大文字混じり入力 → 正規化後の小文字で `whereBlind` が hit。
+30. `PATCH /billing/contact` 後、**`DB::table('organizations')` の生値が `billing_contact_email` / `billing_contact_name` の平文と一致しない**（両方）。model 経由の読み出しは平文に復号される。
+31. **平文 where が hit しない**: `Organization::query()->where('billing_contact_email', $plain)->exists()` が false。`whereBlind('billing_contact_email', 'organization_billing_contact_email_index', $plain)` が該当 org を引く。
+32. **`billing_contact_name` の blind index 行が存在しない**（`blind_indexes` に name 系 index が 0 件 = 検索契約の固定）。
+33. 大文字混じり入力で保存 → 正規化後の小文字で `whereBlind` が hit（`EmailNormalizer` 経路の固定）。
 
 新規 `tests/Feature/Billing/UpdateBillingContactTest.php`:
-34. **email 変更時のみ** `SyncBillingCustomerDetails` が dispatch（`Queue::fake()`）。**name のみ変更では dispatch されない**。
-35. `stripe_id === null` の org では dispatch されない。transaction rollback で発火しない（`afterCommit`）。
-36. **認可**: member は 403 / 未ログインは redirect。**current-org scope**: org 切替後の PATCH が切替後 org のみを更新。
-37. **payload 契約**（要件 9 / 不変条件 #1）: `organization_id` / `initiated_by_user_id` / `plan_id` を混ぜると **422**。`billing_contact_email` 欠落 → 422。
+34. **email 変更時のみ** `SyncBillingCustomerDetails` job が dispatch される（`Queue::fake()`）。**name のみ変更では dispatch されない**（IV-5 / IV-6）。
+35. `stripe_id === null` の org では job が dispatch されない（`BillingCustomerSynchronizer` の no-op 契約）。transaction rollback で発火しない（`afterCommit`）。
+36. **認可**: member（非 owner/admin）は 403。未ログインは redirect。**current-org scope**: org 切替後の PATCH が切替後 org のみを更新する。
+37. **payload 契約**（要件 9 / 不変条件 #1）: `organization_id` / `initiated_by_user_id` / `plan_id` を body に混ぜると **422**（`ProhibitsProtectedKeys`）。`billing_contact_email` 欠落 → 422。
 38. `routeNotificationForMail()` が `billing_contact_email` 正本 → 未設定時に owner email へ fallback。
 
 新規 `tests/Architecture/BillingContactEncryptionInvariantTest.php`:
-39. `Organization` が `CipherSweetEncrypted` を実装し、`configureCipherSweet()` に**両列**が登録されている。
-40. `organizations.billing_contact_*` の列型が `text`。
-41. `billing_contact_*` が `$fillable` に無い。**`billing_checkout_sessions.pm_reuse_dispatched_at` も `$fillable` に無い**（webhook の `forceFill` 専用 marker）。
+39. `Organization` が `CipherSweetEncrypted` を実装し、`configureCipherSweet()` に `billing_contact_email` / `billing_contact_name` の**両方**が登録されている（列を足して暗号化を忘れる回帰の構造的封じ）。
+40. `organizations` の `billing_contact_*` 列型が `text`（`string(255)` への差し戻しで ciphertext が切れる回帰の封じ）。
+41. `billing_contact_*` が `$fillable` に無い。
 
-更新テスト:
-42. `BillingPageTest` 相当 — `subscription_attempt_token` 欠落 / 非 ULID → 422。Index props に `feedback` / `billingContact`。
-42b. **P8a 産出テストの期待更新（削除しない）**: `AutoRechargePreConsentTest` / `AutoRechargeEndpointTest` / `AutoRechargeServiceTest` の `consent_version` 期待を **`'v1'` → `'v2'`**（`setupPending` の (a) ケース・`pendingAutoEnable` の既存期待は不変）。
-42c. **webhook 同期処理の invariant**（P8a 産出）に `settleSubscriptionCheckout` を追加 — **外向き Stripe API を撃たない**（PM 解決は Job 側のみ）。
+更新 `tests/Feature/Billing/BillingPageTest.php` 相当:
+42. `subscription_attempt_token` 欠落 / 非 ULID → 422。
 
 JS（Vitest）:
-43. 新規 `tests/js/pages/Billing/BillingContactForm.test.ts` — 未入力でも **submit が disabled にならない**（禁止事項 #8）。押下時にサーバ 422 の `errors.billing_contact_email` が表示される。
-44. 更新 `tests/js/pages/Billing/Index.test.ts` — `feedback` の **5 kind** が対応バナーを描画し、`null` で何も描画しない。**raw query を参照しない**。`?highlight=auto-recharge` で `AutoRechargeCard` が強調される。
-45. 更新 `tests/js/pages/Billing/Plans.test.ts` — POST body に `subscription_attempt_token` が載る（**`funding_choice` は載らない**）。ボタンは常に enabled。422 が `plan_code` エラーとして表示される。
-45b. 更新 `tests/js/pages/OnboardingCheckout.test.ts` — 有償プランの POST body に **`subscription_attempt_token` + `funding_choice`**、`auto_recharge` 選択時のみ **`consent_version`** が載る。**同意ダイアログ未操作でも申込ボタンは enabled**（禁止事項 #8）。
+43. 新規 `tests/js/pages/Billing/BillingContactForm.test.ts` — 未入力でも **submit ボタンが disabled にならない**（禁止事項 #8）。押下時にサーバ 422 の `errors.billing_contact_email` が表示される。
+44. 更新 `tests/js/pages/Billing/Index.test.ts` — `feedback` の **5 kind** が対応バナーを描画し、`feedback: null` で何も描画しない。**raw query（`session_id` 等）を参照しない**。
+45. 更新 `tests/js/pages/Billing/Plans.test.ts` — POST body に `subscription_attempt_token` が載る。ボタンは常に enabled。422 が `plan_code` エラーとして表示される。
 46. 影響（無変更で green）: `tests/js/architecture/{page-shell-structure,ds-purity,atomic-import-graph,lucide-scoped-import}.test.ts`。
 
 #### リスク
 
 | リスク | 緩和 |
 |---|---|
-| **`CashierStripeGateway` が `newSubscription()->checkout()` を捨てることで Cashier の webhook が `subscriptions` 行を作れなくなる**（`subscription_data.metadata.{name,type}` 依存。落とすと**課金成立なのに subscription 行が無い** = `state()` が `NoSubscription` に落ち P4 後に締め出し） | `buildSubscriptionSessionPayload()` を public pure メソッドにし、**`metadata.name='default'` / `type='default'` + `payment_settings.save_default_payment_method='on_subscription'` を含むことを gateway ユニットテストの invariant として固定**（後者は T1004 の第一候補 PM が埋まる前提でもある）。テスト 17 で「completed webhook 後に `customer.subscription.created` が来ると `subscriptions` 行が作られる」ことを確認する。**この invariant テストが payload 変更の唯一の入口** |
-| **T1004 が「同意していない自動課金」を作る** | 3 段の fail-closed: (1) Request 層で `consent_version` の現行版一致を **checkout 開始前**に検証（テスト 60）/ (2) `recordPreConsent` は `enabled=false` の同意 row のみ（課金経路に触れない）/ (3) `applyReusedPaymentMethod` が **適格性先行**で不適格なら Stripe にも DB にも触らない完全 no-op（テスト 52 / 53）。さらに `consent_version='v2'` により **P8a 期の v1 同意は自動失効**（テスト 61）。同意文言・版番号・既定値は **aigenba verbatim**（原則 3） |
-| **決済未確定の契約カードでオートリチャージが有効になる** | dispatch 条件が `payment_status ∈ {paid, no_payment_required}` の allowlist（テスト 48）。**`pm_reuse_dispatched_at` は dispatch した事実のみを表す永続マーカー**であり、`setupPending` / 着地 flash の「自動的に有効になります」表示は**この marker + `isAutoEnablePending` の AND**（テスト 58 / 59）。`updated_at` / `completed_at` は窓の基準に使わない（verbatim） |
-| **PM 流用が「勝手にカードを既定にした」と受け取られる** | `setDefaultPaymentMethod` は T1000 の課金機構（customer default PM への off-session invoice 課金）の構造上の前提であり、**setup 経路と同一の副作用**。**v2 同意文言（契約のお支払いカードをオートリチャージにも使う）で開示済み**であり、開示の版管理が `consent_version` = aigenba の消費者保護契約そのもの。適格でない org には副作用が一切及ばない（テスト 52） |
-| **`applyReusedPaymentMethod` の部分適用**（Stripe だけ変更済み） | 適格性判定・Stripe 更新・DB 確定を**同一 org lock**（`billing:auto-recharge:{org}`）内で直列化し、TX 内で適格性が失われていたら **`RuntimeException` で顕在化**（silent no-op にしない。Job retry で収束 / 継続不適格は `failed_jobs` で検知）。テスト 57 |
-| **`consent_version` 改定で稼働中のオートリチャージが止まる** | **意図した fail-closed**（`reconsentRequiredFor` → `requiresReconsent=true` → `createAttemptLocked` が停止）。出口は P8a の `AutoRechargeCard` の再同意 1 クリック。**救済 backfill は書かない**（版の意味を無効化するため）。テスト 61 が停止と再同意導線の両方を固定 |
-| **live 判定の単一出典化が P2 の `state()` を壊す** | 変更は「同じ `subDay()` 値を述語経由で呼ぶ」だけで**挙動不変**。P2 の `BillingAccessStateTest` / 分岐表 / migration / Factory を**無変更で green** に保つことを DoD にする。テスト 16 の arch test が閾値 literal の再発明を機械検出 |
-| **日次 sweeper が P8a の `SetupPaymentMethod` 行を expire する** | aigenba verbatim（intent 無しフィルタ）。1 日以上前の pending は Stripe 側で既に expire 済みであり `Expired` 化は事実の追認。C-2 により**遅延成功は `Expired` からでも `Completed` へ受理される**ため決済を取りこぼさない。テスト 15 / 19 / 62 |
-| **C-2 の遷移緩和が「未決済を成功に見せる」** | 遷移条件は `payment_status` の allowlist のみ。**null / 未知値は遷移しない**。`Completed` は終局のため巻き戻しも起きない。テスト 19 / 20。金銭の付与は `invoice.paid`（D7） |
-| **P9 の writer が P8a の setup 行と混線する** | 冪等マシンのクエリは**常に `intent=subscription_start` スコープ**（`UNIQUE(organization_id, intent, attempt_token)` の `intent` 軸）。feedback / 着地 flash も `intent` 検証で fail-closed（テスト 11b / 26 / 59）。逆に **sweeper だけは intent 非スコープ**（verbatim）で setup 行も収束させる（テスト 15） |
-| **同 token・別 plan の 422 が aigenba からの逸脱**（N-1） | 逸脱は N-1 の 1 点に限定し、根拠を Service の docblock に明記。**aigenba へ報告し、先方が replay 継続を選ぶなら verbatim へ戻す**（原則 5）。テスト 2 がこの分岐の唯一の契約 |
-| **`idempotency_key` を attempt_token 由来に変えた差分**（N-3） | 当該列は aigenba でも T680 以降 dedup に使われていない遺物で**意味論の後退はない**（5 分バケット衝突による 500 の死角が消える）。seat 引数が無い以上 verbatim 式は移植不能。テスト 3 で「列値 == Stripe へ渡した key」を固定し差分を 1 箇所に閉じる |
-| **`Organization` への CipherSweet 導入が既存の org 検索・Filament を壊す** | 暗号化するのは新規 additive 2 列のみ。`name` / `slug` は平文のまま。既存行は null のため `addOptionalTextField` で素通し = backfill 不要 |
-| **`billing_contact_email` を Stripe へ同期することで PII が外部へ出る** | 現行 `syncStripeCustomerDetails()` が既に owner email を送っており送信先・内容は不変。**`billing_contact_name` は Stripe へ送らない**（aigenba IV-6 verbatim）。CipherSweet は保管時の保護であり境界は変わらない |
-| **feedback バナーが「成功」を偽装する** | `session_id` は**自 org の DB 行と照合できたときのみ** feedback を出し、行の `status` を文言の唯一の根拠にする（`Pending` は「確認しています」）。任意 query（`?replayed` / `?retry`）は状態を主張しない中立文言のみ |
-| **`Failed` 着地が無言**（aigenba verbatim の性質） | **既知の性質として意図的に継承する**（原則 5: 先回り修正しない = v1 で `PurchasePaymentFailed` を発明して parity を壊した失敗の再発防止）。出口は `Billing/Plans` からの新規 token 発行（1 クリック）で常に存在する（テスト 6 / 12 / 21）。**aigenba へ報告し、先方が文言を足したら取り込む** |
-| **live pending dedup の `expireCheckoutSession` 失敗で checkout が詰む** | fail-closed は二重 live session を作らないための **aigenba verbatim の意図的挙動**。出口は (a) 同 token 再送 → 元の `checkout_url`、(b) **1 日経過で新 token で再開**（C-1 により sweeper を待たない）。テスト 8 / 12 / 21 |
+| **`CashierStripeGateway` が `newSubscription()->checkout()` を捨てることで Cashier の webhook が `subscriptions` 行を作れなくなる**（Cashier は `subscription_data.metadata.{name,type}` を見て行を作る。落とすと**課金成立なのに subscription 行が無い** = `state()` が `NoSubscription` に落ち P4 後に締め出し） | `buildSubscriptionSessionPayload()` を public pure メソッドにし、**`subscription_data.metadata.name='default'` / `type='default'` を含むことを gateway ユニットテストの invariant として固定**（`CashierTicketCheckoutGateway::buildSessionPayload()` の promo/tax invariant と同じ様式）。加えてテスト 17 で「completed webhook 後に `customer.subscription.created` が来ると `subscriptions` 行が作られる」ことを確認する。**この invariant テストが payload 変更の唯一の入口** |
+| **live 判定の単一出典化が P2 の `state()` を壊す**（C-1 の refactor は P2 所管ファイルに触る） | 変更は「同じ `subDay()` 値を述語経由で呼ぶ」だけで**挙動不変**。P2 の `BillingAccessStateTest` / 分岐表 / migration / Factory を**無変更で green** に保つことを DoD にする（変更が要るなら refactor が誤り）。テスト 16 の arch test が閾値 literal の再発明を機械検出する |
+| **日次 sweeper が意図しない行を expire する**（`intent` で絞らないため P8a の `SetupPaymentMethod` 行も対象） | aigenba verbatim（同 command・同クエリ・intent 無しフィルタ）。1 日以上前の pending は Stripe 側で既に expire 済みであり、`Expired` 化は事実の追認にすぎない。C-2 により**遅延成功は `Expired` からでも `Completed` へ受理される**ため、sweeper が決済を取りこぼす経路は存在しない。テスト 15 / 19 で固定 |
+| **C-2 の遷移緩和が「未決済を成功に見せる」** | 遷移条件は `payment_status` のホワイトリスト（`paid` / `no_payment_required`）のみ。**null / 未知値は遷移しない**（受理のみ）。`Completed` は終局のため成功→失敗の巻き戻しも起きない。テスト 19 / 20 が 3 方向（昇格・据置・no-op）を固定。金銭の付与は `invoice.paid`（D7）のため本遷移が台帳へ波及しない |
+| **同 token・別 plan の 422 が aigenba からの逸脱**（原則 1 に対する例外） | 逸脱は N-1 の 1 点に限定し、根拠（1 render = 1 token 構造 + 押した plan と違う Checkout への着地 + AI-CUE の ticket 先例）を Service の docblock に明記する。**aigenba 側へ報告し、先方が replay 継続を選ぶなら verbatim へ戻す**（原則 5 の運用）。テスト 2 がこの分岐の唯一の契約 |
+| **`idempotency_key` を attempt_token 由来に変えたことで aigenba と差分が出る**（N-3） | 当該列は aigenba でも T680 以降 dedup に使われていない遺物であり、**意味論の後退はない**（むしろ 5 分バケット衝突による 500 の死角が消える）。seat 引数が AI-CUE に無い以上 verbatim 式は移植不能でもある。テスト 3 で「列値 == Stripe へ渡した key」を固定し、差分を 1 箇所に閉じる |
+| **`Organization` への CipherSweet 導入が既存の org 検索・Filament を壊す** | 暗号化するのは新規 additive 2 列のみ。`name` / `slug` は平文のまま（暗号化すると `slug` の route 解決・`unique` 制約・既存 `OrganizationFactory` が全滅する）。既存 org 行は `billing_contact_*` が null のため `addOptionalTextField` で素通し = backfill 不要 |
+| **`billing_contact_email` を Stripe へ同期することで PII が外部へ出る** | 元々 Stripe customer は課金主体として email を保持しており（現行 `syncStripeCustomerDetails()` が owner email を送っている）、送信先・送信内容は不変。**`billing_contact_name` は Stripe へ送らない**（aigenba IV-6 verbatim）ため PII 露出面は増えない。CipherSweet は保管時（自 DB）の保護であり、この境界は変わらない |
+| **feedback バナーが「成功」を偽装する**（webhook 未達で行が `Pending` のまま「受け付けました」と出る） | `session_id` は**自 org の DB 行と照合できたときのみ** feedback を出し、行の `status` を文言の唯一の根拠にする（`Pending` は「確認しています」= 確定表現を使わない）。任意 query（`?replayed` / `?retry`）は状態を主張しない中立文言のみに割り当てる |
+| **`Failed` 着地が無言**（aigenba verbatim のため「何も起きていない画面」に着地する） | **aigenba にある既知の性質として意図的に継承する**（原則 5: 先回り修正しない = v1 で `PurchasePaymentFailed` を発明して parity を壊した失敗の再発防止）。ユーザーの出口は `Billing/Plans` からの新規 token 発行（1 クリック）で常に存在し、恒久的に詰む経路は無いことをテスト 6 / 12 / 21 で固定する。**aigenba へ報告し、先方が文言を足したら取り込む** |
+| **live pending dedup の `expireCheckoutSession` 失敗で checkout が詰む** | fail-closed（新規作成せずエラー着地）は二重 live session を作らないための **aigenba verbatim の意図的挙動**。出口は (a) 同 token 再送 → 元の `checkout_url` へ収束、(b) **1 日経過で当該行が live でなくなり新 token で再開**（C-1 により sweeper の実行を待たずに成立）、の 2 本。テスト 8 / 12 / 21 で固定 |
+| **P2 が writer なしで導入した `billing_checkout_sessions` に、P9 の writer が `state()` の想定と食い違う行を書く** | P9 は列を足さず、live/stale の意味論を**同一述語**で共有する（C-1）。テスト 14 / 21 で **writer 経由で作った行が `state()` の期待どおりに読まれる**ことを end-to-end で固定する（P2 は Factory 直挿しでしか検証していない） |
