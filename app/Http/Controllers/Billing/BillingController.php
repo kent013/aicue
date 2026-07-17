@@ -5,18 +5,20 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Billing;
 
 use App\Enums\Billing\PlanPriceKind;
+use App\Exceptions\Billing\StripePriceNotSyncedException;
 use App\Http\Concerns\ResolvesCurrentOrganization;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Billing\BillingCheckoutRequest;
 use App\Models\Billing\Plan;
 use App\Models\User;
-use App\Services\Billing\SubscriptionCheckoutGateway;
+use App\Services\Billing\SubscriptionService;
 use App\Services\Billing\TicketLedgerService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
 use Inertia\Response;
+use InvalidArgumentException;
 use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 use Webmozart\Assert\Assert;
 
@@ -66,9 +68,9 @@ class BillingController extends Controller
 
     /**
      * Stripe Checkout を開始し、Checkout URL へリダイレクトする
-     * (戻り型に RedirectResponse を含むのは price 不在時の back() 分岐のため)
+     * (戻り型に RedirectResponse を含むのは price 不在 / 開始不可時の back() 分岐のため)
      */
-    public function checkout(BillingCheckoutRequest $request, SubscriptionCheckoutGateway $gateway): SymfonyResponse|RedirectResponse
+    public function checkout(BillingCheckoutRequest $request, SubscriptionService $subscriptions): SymfonyResponse|RedirectResponse
     {
         $organization = $this->resolveCurrentOrganization($request);
         Gate::authorize('manageBilling', $organization);
@@ -82,23 +84,31 @@ class BillingController extends Controller
             return back()->with('error', '選択したプランは現在お申し込みいただけません。');
         }
 
-        $redirect = $gateway->createSubscriptionCheckout(
-            $organization,
-            $price->stripe_price_id,
-            route('billing.index'),
-            route('billing.index'),
-        );
+        try {
+            $redirect = $subscriptions->startCheckout(
+                $organization,
+                $price,
+                route('billing.index'),
+                route('billing.index'),
+            );
+        } catch (StripePriceNotSyncedException) {
+            // production の sync 漏れ。500 にせず現行と同一文言で差し戻す
+            return back()->with('error', '選択したプランは現在お申し込みいただけません。');
+        } catch (InvalidArgumentException $e) {
+            // 既に有効なサブスクリプションがある (service 層の fail-closed ガード)
+            return back()->with('error', $e->getMessage());
+        }
 
         // 外部 URL への遷移は Inertia::location (full page redirect)
         return Inertia::location($redirect->url);
     }
 
     /** Stripe Customer Portal へリダイレクトする (支払い方法・解約の自己管理) */
-    public function portal(Request $request, SubscriptionCheckoutGateway $gateway): SymfonyResponse
+    public function portal(Request $request, SubscriptionService $subscriptions): SymfonyResponse
     {
         $organization = $this->resolveCurrentOrganization($request);
         Gate::authorize('manageBilling', $organization);
 
-        return Inertia::location($gateway->portalRedirect($organization, route('billing.index'))->url);
+        return Inertia::location($subscriptions->createPortalSession($organization, route('billing.index'))->url);
     }
 }

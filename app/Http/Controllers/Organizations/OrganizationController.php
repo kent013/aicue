@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Organizations;
 
+use App\Actions\Organizations\RenameOrganizationAction;
 use App\Enums\TwoFactorStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Organizations\StoreOrganizationRequest;
@@ -94,15 +95,21 @@ class OrganizationController extends Controller
         ]);
     }
 
-    /** 組織名の更新 */
-    public function update(UpdateOrganizationRequest $request, Organization $organization): RedirectResponse
-    {
+    /**
+     * 組織名の更新。
+     * 更新本体は RenameOrganizationAction (transaction + Stripe customer 同期の発火) に委譲する。
+     */
+    public function update(
+        UpdateOrganizationRequest $request,
+        Organization $organization,
+        RenameOrganizationAction $rename,
+    ): RedirectResponse {
         Gate::authorize('update', $organization);
 
         $name = $request->validated('name');
         Assert::string($name);
 
-        $organization->fill(['name' => $name])->save();
+        $rename->execute($organization, $name);
 
         return back()->with('success', '組織名を更新しました');
     }

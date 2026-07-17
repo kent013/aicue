@@ -8,6 +8,7 @@ use App\Enums\OrganizationRole;
 use App\Models\Organization;
 use App\Models\User;
 use App\Services\ApiKey\ApiKeyPermissionService;
+use App\Services\Billing\BillingPermissionService;
 
 /**
  * 組織の認可。判定は User::organizationRole() (laratrust_team_id 明示 =
@@ -33,10 +34,24 @@ class OrganizationPolicy
         return $user->organizationRole($organization)?->canManage() ?? false;
     }
 
-    /** 課金管理 (プラン変更 / Customer Portal): owner / admin */
+    /**
+     * 課金管理 (プラン変更 / Customer Portal): owner / admin を既定境界とし、加えて
+     * `manage-billing` を直接付与された一般メンバーにも許可する
+     * ({@see BillingPermissionService})。非メンバー (role null) は直接付与が残存しても不可。
+     */
     public function manageBilling(User $user, Organization $organization): bool
     {
-        return $user->organizationRole($organization)?->canManage() ?? false;
+        $role = $user->organizationRole($organization);
+
+        if ($role === null) {
+            return false;
+        }
+
+        if ($role->canManage()) {
+            return true;
+        }
+
+        return app(BillingPermissionService::class)->hasDirectPermission($user, $organization);
     }
 
     /**

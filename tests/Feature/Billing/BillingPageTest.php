@@ -3,8 +3,8 @@
 declare(strict_types=1);
 
 use App\Models\User;
-use App\Services\Billing\Fakes\FakeSubscriptionCheckoutGateway;
-use App\Services\Billing\SubscriptionCheckoutGateway;
+use App\Services\Billing\Contracts\StripeGatewayInterface;
+use App\Services\Billing\Fakes\FakeStripeGateway;
 use App\Services\Billing\TicketLedgerService;
 use Inertia\Testing\AssertableInertia as Assert;
 
@@ -98,7 +98,7 @@ test('current organization が無いユーザーは 404', function (): void {
 
 test('owner の checkout は fake gateway 経由で中立帰還 URL へ遷移する (happy path)', function (): void {
     [, $owner] = createOrganizationWithOwner();
-    $this->app->bind(SubscriptionCheckoutGateway::class, FakeSubscriptionCheckoutGateway::class);
+    $this->app->bind(StripeGatewayInterface::class, FakeStripeGateway::class);
 
     $response = $this->actingAs($owner)->post('/billing/checkout', ['plan_code' => 'standard']);
 
@@ -111,7 +111,7 @@ test('owner の checkout は fake gateway 経由で中立帰還 URL へ遷移す
 
 test('owner の portal は fake gateway 経由で中立帰還 URL へ遷移する (happy path)', function (): void {
     [, $owner] = createOrganizationWithOwner();
-    $this->app->bind(SubscriptionCheckoutGateway::class, FakeSubscriptionCheckoutGateway::class);
+    $this->app->bind(StripeGatewayInterface::class, FakeStripeGateway::class);
 
     $response = $this->actingAs($owner)->post('/billing/portal');
 

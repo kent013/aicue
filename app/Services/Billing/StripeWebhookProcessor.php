@@ -28,9 +28,10 @@ use Webmozart\Assert\Assert;
  *
  * 1. stripe_webhook_events に event_id UNIQUE で冪等記録 (二重処理 skip)
  * 2. type 別 handler:
- *    - customer.subscription.created/updated: organizations.plan_code と
- *      subscriptions.current_period_end を同期
- *    - customer.subscription.deleted: plan_code を解除
+ *    - customer.subscription.created/updated: payload → SubscriptionSnapshot を
+ *      SubscriptionService::applySubscriptionSnapshot へ渡して状態同期 +
+ *      recordPaymentMethodSnapshot で決済手段有無を記録
+ *    - customer.subscription.deleted: 同上 (terminated=true。plan_code 解除 + schedule クリア)
  *    - invoice.paid: プランの monthly_ticket_grant を月次付与 (+ 初回は signup grant)
  *    - invoice.payment_failed: 支払い失敗通知 (BillingNotificationDispatcher 経由の send-once)
  *    - charge.refunded: 買い切りチケットの返金逆仕訳 (clawback)
@@ -40,11 +41,13 @@ use Webmozart\Assert\Assert;
  *    MAX_PROCESSING_ATTEMPTS 到達後は処理せず skip (= 200 terminal-ack) して
  *    恒久失敗イベントの無限 500 ストームを打ち切る (運用は failure_reason で調査する)
  *
- * subscriptions テーブル自体の同期 (updateOrCreate) は Cashier の WebhookController
- * が行うため、ここではアプリ状態 (plan_code / チケット) だけを扱う。
+ * subscriptions **行の作成** (updateOrCreate) は Cashier の WebhookController が唯一の
+ * writer。本クラス (WebhookReceived listener) は Cashier のハンドラより先に走るため、
+ * 行が無い間の状態同期は no-op に落ちる (直後の updated で追随する)。ここで行を作ると
+ * Cashier 側の subscription_items 生成が永久に skip されるため作らない。
  *
  * plan_code 不変条件: `organizations.plan_code` は Stripe Price を持つ有償プランの
- * 契約 (active/trialing) 時のみ本クラスが set し、`customer.subscription.deleted` で
+ * 契約 (active/trialing) 時のみ SubscriptionService が set し、`customer.subscription.deleted` で
  * null に戻す状態キー。**null = 未契約 = 支払い不要の free tier**
  * (config/quota.php の fallback_plan が適用される)。BillingAccess はこの契約を
  * entitlement 判定の根拠にするため、支払い不要のプランを plan_code に載せる場合は
@@ -61,9 +64,6 @@ class StripeWebhookProcessor
      */
     public const int MAX_PROCESSING_ATTEMPTS = 8;
 
-    /** plan_code を同期する subscription status (それ以外では既存値を維持する) */
-    private const array ACTIVE_SUBSCRIPTION_STATUSES = ['active', 'trialing'];
-
     /** 月次付与の対象となる invoice billing_reason */
     private const array GRANTING_BILLING_REASONS = ['subscription_create', 'subscription_cycle'];
 
@@ -71,6 +71,7 @@ class StripeWebhookProcessor
         private readonly TicketLedgerService $tickets,
         private readonly BillingNotificationDispatcher $notifications,
         private readonly PersonalPlanService $personalPlan,
+        private readonly SubscriptionService $subscriptions,
     ) {}
 
     public function handle(WebhookReceived $event): void
@@ -173,8 +174,8 @@ class StripeWebhookProcessor
         // case を足したらここに arm を足す (handled ⊆ subscribed は invariant test が担保)
         match (HandledStripeWebhookEvent::tryFrom($type)) {
             HandledStripeWebhookEvent::SubscriptionCreated,
-            HandledStripeWebhookEvent::SubscriptionUpdated => $this->syncSubscriptionState($payload),
-            HandledStripeWebhookEvent::SubscriptionDeleted => $this->clearPlanCode($payload),
+            HandledStripeWebhookEvent::SubscriptionUpdated => $this->syncSubscriptionState($payload, terminated: false),
+            HandledStripeWebhookEvent::SubscriptionDeleted => $this->syncSubscriptionState($payload, terminated: true),
             HandledStripeWebhookEvent::InvoicePaid => $this->grantMonthlyTickets($payload),
             HandledStripeWebhookEvent::ChargeRefunded => $this->clawbackRefundedTickets($payload),
             HandledStripeWebhookEvent::InvoicePaymentFailed => $this->handleInvoicePaymentFailed($payload),
@@ -185,61 +186,115 @@ class StripeWebhookProcessor
     }
 
     /**
-     * customer.subscription.created/updated: plan_code 同期 + 次回更新日時の同期。
+     * customer.subscription.created/updated/deleted: payload → SubscriptionSnapshot の写像 +
+     * 組織解決 + 決済手段有無の抽出。**状態の書込は SubscriptionService に委譲する**
+     * (Processor は写像と呼び出し順序だけを持つ)。
+     *
+     * subscriptions 行自体の作成は Cashier の WebhookController が行う。WebhookReceived は
+     * Cashier の同期処理より先に発火するため、created イベント時点では行が無いことがある
+     * (best-effort: 直後の customer.subscription.updated / 次周期の更新で追随する)。
      *
      * @param  array<mixed>  $payload
+     * @param  bool  $terminated  customer.subscription.deleted のとき true (終了契機はこれのみ)
      */
-    private function syncSubscriptionState(array $payload): void
-    {
-        $this->syncPlanCode($payload);
-        $this->syncSubscriptionPeriod($payload);
-    }
-
-    /**
-     * subscription snapshot から organizations.plan_code を同期する。
-     * status が active / trialing のときだけ反映 (past_due 等の扱いはアプリ判断で拡張する)。
-     *
-     * @param  array<mixed>  $payload
-     */
-    private function syncPlanCode(array $payload): void
+    private function syncSubscriptionState(array $payload, bool $terminated): void
     {
         $organization = $this->resolveOrganization($payload);
         if ($organization === null) {
             return;
         }
 
-        $status = $this->stringAt($payload, 'data.object.status');
-        if (! in_array($status, self::ACTIVE_SUBSCRIPTION_STATUSES, true)) {
+        $stripeId = $this->stringAt($payload, 'data.object.id');
+        if ($stripeId === null) {
             return;
         }
 
-        $priceId = $this->stringAt($payload, 'data.object.items.data.0.price.id');
-        if ($priceId === null) {
-            return;
+        $snapshot = new SubscriptionSnapshot(
+            stripeId: $stripeId,
+            status: $this->stringAt($payload, 'data.object.status') ?? 'incomplete',
+            basePriceId: $this->stringAt($payload, 'data.object.items.data.0.price.id'),
+            baseQuantity: $this->intAt($payload, 'data.object.items.data.0.quantity'),
+            currentPeriodEnd: $this->periodEnd($payload),
+            trialEndsAt: $this->timestampToCarbon(data_get($payload, 'data.object.trial_end')),
+            endsAt: $this->timestampToCarbon(
+                data_get($payload, 'data.object.ended_at') ?? data_get($payload, 'data.object.cancel_at'),
+            ),
+        );
+
+        $this->subscriptions->applySubscriptionSnapshot($organization, $snapshot, terminated: $terminated);
+
+        if ($terminated) {
+            return; // 終了系では PM snapshot を記録しない (monotonic writer は契約中のみ)
         }
 
-        $plan = $this->planByStripePriceId($priceId);
-        if ($plan === null) {
-            return; // 未知の Price はアプリのプランに対応しない (受理のみ)
+        $subscription = Subscription::query()->where('stripe_id', $stripeId)->first();
+        if ($subscription instanceof Subscription) {
+            $this->subscriptions->recordPaymentMethodSnapshot(
+                $subscription,
+                $this->subscriptionHasPaymentMethod($payload),
+            );
         }
-
-        // plan_code は状態キー: webhook 同期でのみ明示代入する
-        $organization->plan_code = $plan->code;
-        $organization->save();
     }
 
     /**
+     * subscription object が決済手段を持つか (default_payment_method / default_source)。
+     * Stripe は string id か expanded object のいずれも取り得るため union helper で抽出する。
+     *
      * @param  array<mixed>  $payload
      */
-    private function clearPlanCode(array $payload): void
+    private function subscriptionHasPaymentMethod(array $payload): bool
     {
-        $organization = $this->resolveOrganization($payload);
-        if ($organization === null) {
-            return;
+        return $this->resolveStripeIdField(data_get($payload, 'data.object.default_payment_method')) !== null
+            || $this->resolveStripeIdField(data_get($payload, 'data.object.default_source')) !== null;
+    }
+
+    /**
+     * Stripe の id フィールド (string id または expanded object) から id を取り出す。
+     */
+    private function resolveStripeIdField(mixed $value): ?string
+    {
+        if (is_string($value)) {
+            return $value !== '' ? $value : null;
+        }
+        if (is_array($value)) {
+            $id = $value['id'] ?? null;
+
+            return is_string($id) && $id !== '' ? $id : null;
         }
 
-        $organization->plan_code = null;
-        $organization->save();
+        return null;
+    }
+
+    /**
+     * 次回更新日時 (renewal reminder = billing:send-billing-reminders の真実源)。
+     * 新 API (basil) は item 配下、旧 API は subscription top-level に持つため両系を fallback で拾う。
+     *
+     * @param  array<mixed>  $payload
+     */
+    private function periodEnd(array $payload): ?CarbonImmutable
+    {
+        return $this->timestampToCarbon(
+            data_get($payload, 'data.object.items.data.0.current_period_end')
+                ?? data_get($payload, 'data.object.current_period_end'),
+        );
+    }
+
+    /** Stripe の epoch 秒を CarbonImmutable にする (非 int / 非正数は null)。 */
+    private function timestampToCarbon(mixed $value): ?CarbonImmutable
+    {
+        return is_int($value) && $value > 0 ? CarbonImmutable::createFromTimestamp($value) : null;
+    }
+
+    /**
+     * payload から int 値を安全に取り出す (それ以外の型は null)。
+     *
+     * @param  array<mixed>  $payload
+     */
+    private function intAt(array $payload, string $path): ?int
+    {
+        $value = data_get($payload, $path);
+
+        return is_int($value) ? $value : null;
     }
 
     /**
@@ -309,35 +364,6 @@ class StripeWebhookProcessor
             "monthly:{$invoiceId}",
             "月次チケット付与 (plan: {$plan->code} / invoice: {$invoiceId})",
         );
-    }
-
-    /**
-     * subscription snapshot から subscriptions.current_period_end を同期する
-     * (renewal reminder = billing:send-billing-reminders の真実源)。
-     *
-     * subscriptions 行自体の作成は Cashier の WebhookController が行う。WebhookReceived は
-     * Cashier の同期処理より先に発火するため、created イベント時点では行が無いことがある
-     * (best-effort: 直後の customer.subscription.updated / 次周期の更新で追随する)。
-     *
-     * @param  array<mixed>  $payload
-     */
-    private function syncSubscriptionPeriod(array $payload): void
-    {
-        $stripeId = $this->stringAt($payload, 'data.object.id');
-        if ($stripeId === null) {
-            return;
-        }
-
-        // 新 API (basil) は item 配下、旧 API は subscription top-level に持つため両系を fallback で拾う
-        $periodEnd = data_get($payload, 'data.object.items.data.0.current_period_end')
-            ?? data_get($payload, 'data.object.current_period_end');
-        if (! is_int($periodEnd) || $periodEnd <= 0) {
-            return;
-        }
-
-        Subscription::query()
-            ->where('stripe_id', $stripeId)
-            ->update(['current_period_end' => CarbonImmutable::createFromTimestamp($periodEnd)]);
     }
 
     /**

@@ -7,9 +7,9 @@ namespace App\Providers;
 use App\Http\Controllers\Testing\GetFakeStorageObjectController;
 use App\Http\Controllers\Testing\PutFakeStorageObjectController;
 use App\Services\AI\Testing\CannedPromptFakeRegistrar;
-use App\Services\Billing\Fakes\FakeSubscriptionCheckoutGateway;
+use App\Services\Billing\Contracts\StripeGatewayInterface;
+use App\Services\Billing\Fakes\FakeStripeGateway;
 use App\Services\Billing\Fakes\FakeTicketCheckoutGateway;
-use App\Services\Billing\SubscriptionCheckoutGateway;
 use App\Services\Billing\TicketCheckoutGateway;
 use App\Services\Capture\Fakes\FakeTakeObjectStorage;
 use App\Services\Capture\TakeObjectStorage;
@@ -77,7 +77,7 @@ class FakeExternalsServiceProvider extends ServiceProvider
 
         // Stripe 到達点を fake へ rebind (課金状態の正本は BughuntBillingSeeder)
         $this->app->bind(TicketCheckoutGateway::class, FakeTicketCheckoutGateway::class);
-        $this->app->bind(SubscriptionCheckoutGateway::class, FakeSubscriptionCheckoutGateway::class);
+        $this->app->bind(StripeGatewayInterface::class, FakeStripeGateway::class);
     }
 
     /** LLM (Prism) fake (fake_llm + LLM_FAKE_ENVIRONMENTS。挙動不変) */

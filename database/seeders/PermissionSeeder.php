@@ -6,6 +6,7 @@ namespace Database\Seeders;
 
 use App\Models\Permission;
 use App\Services\ApiKey\ApiKeyPermissionService;
+use App\Services\Billing\BillingPermissionService;
 use Illuminate\Database\Seeder;
 
 /**
@@ -31,9 +32,9 @@ class PermissionSeeder extends Seeder
      * <!-- TEMPLATE-MARKER: アプリ固有の permission をここに追加する。
      *      例: ['name' => 'billing-manage', 'display_name' => '請求・プラン管理'] -->
      *
-     * `manage-api-keys` は Owner/Admin の既定境界の外にいる一般メンバーへ
-     * 個別付与するための permission ({@see ApiKeyPermissionService})。専用 Role には
-     * 紐付けない (flat 付与モデル) ため RolePermissionSeeder には登録しない。
+     * `manage-api-keys` / `manage-billing` は Owner/Admin の既定境界の外にいる一般メンバーへ
+     * 個別付与するための permission ({@see ApiKeyPermissionService} / {@see BillingPermissionService})。
+     * 専用 Role には紐付けない (flat 付与モデル) ため RolePermissionSeeder には登録しない。
      *
      * @return list<array{name: string, display_name: string}>
      */
@@ -41,6 +42,7 @@ class PermissionSeeder extends Seeder
     {
         return [
             ['name' => ApiKeyPermissionService::PERMISSION_MANAGE_API_KEYS, 'display_name' => 'API キー管理'],
+            ['name' => BillingPermissionService::PERMISSION_MANAGE_BILLING, 'display_name' => '請求・プラン管理'],
         ];
     }
 }

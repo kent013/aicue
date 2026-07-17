@@ -20,6 +20,8 @@ use Laravel\Cashier\Subscription as CashierSubscription;
  * - stripe_schedule_id / schedule_setup_status: Subscription Schedule の
  *   2 段 API call (create → update phases) の部分完了追跡
  *   (billing:reconcile-schedules が復旧する。ScheduleSetupStatus 参照)
+ * - has_payment_method: 決済手段が登録済みか (monotonic snapshot。true から false へ戻さない)。
+ *   SubscriptionService::deriveEntitlement が trial 終了後の遮断判定に使う
  *
  * schedule 列は状態キーのため markSchedule* / clearSchedule 経由でのみ変更する。
  *
@@ -27,6 +29,7 @@ use Laravel\Cashier\Subscription as CashierSubscription;
  * @property int $organization_id
  * @property string $stripe_id
  * @property string $stripe_status
+ * @property bool $has_payment_method
  * @property Carbon|null $current_period_end
  * @property string|null $stripe_schedule_id
  * @property ScheduleSetupStatus $schedule_setup_status
@@ -84,6 +87,7 @@ class Subscription extends CashierSubscription
     {
         return [
             'current_period_end' => 'datetime',
+            'has_payment_method' => 'boolean',
             'schedule_setup_status' => ScheduleSetupStatus::class,
         ];
     }

@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 use App\Prompts\ExampleSummaryPrompt;
 use App\Providers\FakeExternalsServiceProvider;
-use App\Services\Billing\CashierSubscriptionCheckoutGateway;
+use App\Services\Billing\CashierStripeGateway;
 use App\Services\Billing\CashierTicketCheckoutGateway;
-use App\Services\Billing\Fakes\FakeSubscriptionCheckoutGateway;
+use App\Services\Billing\Contracts\StripeGatewayInterface;
+use App\Services\Billing\Fakes\FakeStripeGateway;
 use App\Services\Billing\Fakes\FakeTicketCheckoutGateway;
-use App\Services\Billing\SubscriptionCheckoutGateway;
 use App\Services\Billing\TicketCheckoutGateway;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -32,7 +32,7 @@ afterEach(function (): void {
 test('既定 (flag=false) では両 gateway とも Cashier 実装に解決される', function (): void {
     expect(config('testing.fake_externals'))->toBeFalse();
     expect(app(TicketCheckoutGateway::class))->toBeInstanceOf(CashierTicketCheckoutGateway::class);
-    expect(app(SubscriptionCheckoutGateway::class))->toBeInstanceOf(CashierSubscriptionCheckoutGateway::class);
+    expect(app(StripeGatewayInterface::class))->toBeInstanceOf(CashierStripeGateway::class);
 });
 
 test('flag=true かつ allowlist 環境 (testing) では両 gateway が fake に解決される', function (): void {
@@ -40,7 +40,7 @@ test('flag=true かつ allowlist 環境 (testing) では両 gateway が fake に
     (new FakeExternalsServiceProvider($this->app))->register();
 
     expect(app(TicketCheckoutGateway::class))->toBeInstanceOf(FakeTicketCheckoutGateway::class);
-    expect(app(SubscriptionCheckoutGateway::class))->toBeInstanceOf(FakeSubscriptionCheckoutGateway::class);
+    expect(app(StripeGatewayInterface::class))->toBeInstanceOf(FakeStripeGateway::class);
 });
 
 test('flag=true でも allowlist 外の環境 (production) では fake に bind せず warning を出す', function (): void {
@@ -56,7 +56,7 @@ test('flag=true でも allowlist 外の環境 (production) では fake に bind 
     }
 
     expect(app(TicketCheckoutGateway::class))->toBeInstanceOf(CashierTicketCheckoutGateway::class);
-    expect(app(SubscriptionCheckoutGateway::class))->toBeInstanceOf(CashierSubscriptionCheckoutGateway::class);
+    expect(app(StripeGatewayInterface::class))->toBeInstanceOf(CashierStripeGateway::class);
     Log::shouldHaveReceived('warning')->once();
 });
 

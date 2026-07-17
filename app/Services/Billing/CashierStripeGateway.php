@@ -6,14 +6,15 @@ namespace App\Services\Billing;
 
 use App\DataTransferObjects\Billing\ExternalBillingRedirect;
 use App\Models\Organization;
+use App\Services\Billing\Contracts\StripeGatewayInterface;
 use Webmozart\Assert\Assert;
 
 /**
- * SubscriptionCheckoutGateway の Cashier (Stripe SDK) 実装。
+ * StripeGatewayInterface の Cashier (Stripe SDK) 実装。
  * ロジックは BillingController から移動 (挙動不変)。
  * PortalConfigurationSpec は同一名前空間 (App\Services\Billing) のため use 不要。
  */
-final class CashierSubscriptionCheckoutGateway implements SubscriptionCheckoutGateway
+final class CashierStripeGateway implements StripeGatewayInterface
 {
     public function createSubscriptionCheckout(
         Organization $organization,
@@ -34,7 +35,7 @@ final class CashierSubscriptionCheckoutGateway implements SubscriptionCheckoutGa
         return new ExternalBillingRedirect($url);
     }
 
-    public function portalRedirect(Organization $organization, string $returnUrl): ExternalBillingRedirect
+    public function createPortalSession(Organization $organization, string $returnUrl): ExternalBillingRedirect
     {
         // configuration id (billing:ensure-portal-configuration で生成) が設定されていれば
         // subscription_update 無効の spec 準拠 configuration で portal session を作る
@@ -43,5 +44,16 @@ final class CashierSubscriptionCheckoutGateway implements SubscriptionCheckoutGa
             $returnUrl,
             PortalConfigurationSpec::sessionOptions(config('cashier.portal_configuration_id')),
         ));
+    }
+
+    public function syncCustomerDetails(Organization $organization): void
+    {
+        // 実 Stripe では Cashier の Billable 同期をそのまま使う。stripe_id 未設定は no-op
+        // (Cashier 側も customer 不在では更新しないが、呼び出し前提を実装側でも明示)。
+        if ($organization->stripe_id === null) {
+            return;
+        }
+
+        $organization->syncStripeCustomerDetails();
     }
 }

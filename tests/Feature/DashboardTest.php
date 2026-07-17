@@ -423,7 +423,9 @@ test('Free (未契約) org: dashboard 200 + has_billing_access=true + 業務 rou
 
 test('有償契約 + 支払い不健全 org: has_billing_access=false + CTA 遷移先 200 (redirect loop なし)', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
-    contractPaidPlan($organization, status: 'past_due');
+    // P2 の判定モデル置換で past_due は cohort D として許可へ反転したため、
+    // 遮断側の不変条件 (redirect loop なし) は canceled (cohort G) で保持する。
+    contractPaidPlan($organization, status: 'canceled');
     Project::factory()->forOrganization($organization)->create();
 
     $this->actingAs($owner)->get('/dashboard')
@@ -434,6 +436,17 @@ test('有償契約 + 支払い不健全 org: has_billing_access=false + CTA 遷�
     // CTA 遷移先は課金ゲート外 (redirect loop なし不変条件)
     $this->actingAs($owner)->get('/purchase-tickets')->assertOk();
     $this->actingAs($owner)->get('/billing')->assertOk();
+});
+
+test('有償契約 + past_due org: has_billing_access=true (cohort D。dunning 中も利用継続)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    contractPaidPlan($organization, status: 'past_due');
+    Project::factory()->forOrganization($organization)->create();
+
+    $this->actingAs($owner)->get('/dashboard')
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('dashboard.billing.has_billing_access', true));
 });
 
 test('ゲストは /login へ redirect (既存挙動維持)', function (): void {
