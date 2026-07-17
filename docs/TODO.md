@@ -21,7 +21,6 @@
 
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
-| T072 | 決済parity P1: プラン基盤 | backend | PlanCode5case/marker/月次付与廃止(D28) | Critical | standalone | [設計](devnotes/20260717-0035-aigenba-billing-parity/) | 2026-07-17 02:12 |
 | T073 | 決済parity P2: サブスク層+判定モデル | backend | OnboardingBillingState/state()をverbatim移植 | Critical | standalone | [設計](devnotes/20260717-0035-aigenba-billing-parity/) | 2026-07-17 02:12 |
 | T074 | 決済parity P3: Onboarding導線 | frontend | checkout/activate-personal/billing-required | Critical | standalone | [設計](devnotes/20260717-0035-aigenba-billing-parity/) | 2026-07-17 02:12 |
 | T075 | 決済parity P4: ゲート反転+移行 | backend | 未契約遮断+grandfathering backfill | Critical | standalone | [設計](devnotes/20260717-0035-aigenba-billing-parity/) | 2026-07-17 02:12 |
