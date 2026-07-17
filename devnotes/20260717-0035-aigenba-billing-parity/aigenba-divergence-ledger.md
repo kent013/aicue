@@ -81,6 +81,8 @@
 | A-5 | `assertCheckoutReady()` 非移植 | AI-CUE の `Organization` に**請求先メール列が無く** Cashier 既定の `stripeEmail()` が常に null → 移植すると checkout/portal が**全 org で throw** する。**P9 で請求先列が入った後に再検討する** |
 | A-6 | `SubscriptionService` の schedule lifecycle / seat / signup funding / `changePlan` / `upgradeNow` / `isMutableState` を非移植 | 設計スコープ外（席・schedule 機構が無い） |
 | A-7 | `getStatus()` / `BillingStatusDto` を P2 で作らない | 呼び出し側 UI が P8b 所管 = **dead code を作らない** |
+| A-8 | aigenba の fallback 文言「現在パーソナルプランは選択できません」を非移植 | **D4（禁止事項 #8）とセット**。AI-CUE は disabled にせず**サーバ由来の `reasonLabel` を常時 caption 表示**するため、クライアント側の fallback 文言は不要（文言をフロントで組み立てない） |
+| A-9 | `Onboarding/Checkout.svelte` の `showAllPlans` / 折りたたみ確認画面を非移植 | `preselectFunding` が無い P3 では `showAllPlans` が常に true = **dead code**（intended バッジ・`?choose` は P7 所管） |
 
 ## C: 既存契約への適合（返さない。意味論は不変）
 
@@ -94,6 +96,9 @@
 | C-6 | `applySubscriptionSnapshot` が DTO を返さず `void` | 呼び出し元が戻り値未使用 = **dead code を作らない** |
 | C-7 | `tests/Architecture/MembershipWriteLockInventoryTest` に read 専用許可リストを追加 | AI-CUE 固有の arch guard。元は `role_user` への**言及自体**を read 含めて禁止していたが、`PersonalPlanService::eligibility()` の owner 在籍判定（**aigenba verbatim の read**）が抵触。不変条件（書き込みは必ずロック下）は維持し、**書き込み API 不含を別途強制**（負のコントロールで検証済み） |
 | C-8 | `Inertia::location()` を使わず素の `RedirectResponse` | AI-CUE では `Inertia::location()` は **Stripe への外部 full page redirect 専用**。内部遷移の意味論は同一 |
+| C-9 | `->map(...)->values()->all()` → **`array_values(...->all())`**（`OnboardingController::selectablePlans()`） | 設計の記述どおり `values()->all()` にすると larastan が `array<int, PlanDto>` に落とし `list<PlanDto>` の return type で **PHPStan level 10 が落ちる**。aigenba は inline `/** @var list<PlanDto> */` で上書きするが、**AGENTS.md 禁止事項 #1（型の上書き禁止）**に抵触。同一リポジトリの既存 precedent（`PricingService::listPublicPlans()`）と同作法へ。**意味論・集合は完全に不変** |
+| C-10 | `resources/js/pages/Onboarding/*` は `GuestLayout` ではなく **`AppLayout` + T071 primitive**（`PageContainer`/`PageHeader`/`PageContent`） | 両ページとも auth group 内のログイン後ページ。AI-CUE の外枠規約（arch テスト `page-shell-structure`）が parity に優先する |
+| C-11 | `PlanDto` は AI-CUE の実列のみ（`code`/`name`/`currentBaseAmount`/`isActive`） | 席・scenario/course limit・通貨は列が無い。`includedMonthlyTickets` は **D28 で廃止**。`toArray()` の 4 キー厳密一致をテストで固定し、後続フェーズの additive 追加に気づける形にした |
 
 ## D: ドメイン要件の差（返さない）
 
@@ -111,6 +116,13 @@
 | E-4 | `PlanSeeder` に legacy `free` 行を残置 | **P4（T075）で撤去（D11）** |
 
 ---
+
+## 乖離ではないと判定したもの（記録）
+
+| # | 事項 | 判定 |
+|---|---|---|
+| — | **有償プランの submit を P3 に含めた** | **乖離ではない**（設計の読み）。設計 L2413（P8a）が `Checkout.svelte` を「**P3 導出** + P8a の funding 2 択」の**改修**として記述しており、有償 submit が P3 に存在する前提。無ければ Starter/Standard 選択後の行き先が無く**詰み** = P3 の存在理由（導線を実在させる）と矛盾する。body は既存 `Billing/Index.svelte` と同一の `{plan_code}` のみで、token/funding は P8a/P9 が additive に足す |
+| — | **`PlanFactory` を新設しなかった** | **乖離ではない**。Plan の真実源は `PlanSeeder`（`TestCase::$seed = true` で毎テスト実走）で、既存テストも seeded 行を読む規約。必要な 2 ケース（base price あり=starter / なし=personal）は seed で揃うため**手組みデータは使っていない**。使わない Factory の新設は禁止事項 #7（不必要な複雑化） |
 
 ## 保留 / 判断待ち
 
