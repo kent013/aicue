@@ -16,6 +16,7 @@ enum InquirySource: string
     case Landing = 'landing';
     case Billing = 'billing';
     case Pricing = 'pricing';
+    case Onboarding = 'onboarding';
 
     public function label(): string
     {
@@ -23,6 +24,7 @@ enum InquirySource: string
             self::Landing => 'トップページ',
             self::Billing => '請求画面',
             self::Pricing => '料金プラン',
+            self::Onboarding => 'オンボーディング',
         };
     }
 
