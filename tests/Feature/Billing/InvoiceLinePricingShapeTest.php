@@ -30,6 +30,18 @@ function pricingShapeStandardBasePriceId(): string
     return $price->stripe_price_id;
 }
 
+/**
+ * standard プランの月次付与を有効化する (arrange)。
+ *
+ * D28 で月次付与は廃止され seed 既定の monthly_ticket_grant は全 tier 0 になった。
+ * 本テストの関心 (invoice line の price 形状解決) は月次付与の発火で観測するため、
+ * arrange で明示的に枚数を設定する。
+ */
+function pricingShapeEnableMonthlyGrant(): void
+{
+    Plan::query()->where('code', 'standard')->update(['monthly_ticket_grant' => 100]);
+}
+
 /** stripe customer を持つ組織を作る (WebhookIdempotencyTest とは独立の helper) */
 function pricingShapeStripeCustomer(string $stripeId): Organization
 {
@@ -63,6 +75,7 @@ function invoicePaidPayloadWithLine(string $eventId, string $customerId, array $
 
 test('新形状 (pricing.price_details.price) の invoice.paid で月次付与される', function (): void {
     $organization = pricingShapeStripeCustomer('cus_clover_create');
+    pricingShapeEnableMonthlyGrant();
 
     // 実イベントと同形状: price キーは null で届き pricing のみが price を持つ
     event(new WebhookReceived(invoicePaidPayloadWithLine('evt_clover_create', 'cus_clover_create', [
@@ -85,6 +98,7 @@ test('新形状 (pricing.price_details.price) の invoice.paid で月次付与�
 
 test('旧形状 (price.id) の invoice.paid でも月次付与される (後方互換)', function (): void {
     $organization = pricingShapeStripeCustomer('cus_legacy_create');
+    pricingShapeEnableMonthlyGrant();
 
     event(new WebhookReceived(invoicePaidPayloadWithLine('evt_legacy_create', 'cus_legacy_create', [
         'price' => ['id' => pricingShapeStandardBasePriceId()],
@@ -96,6 +110,7 @@ test('旧形状 (price.id) の invoice.paid でも月次付与される (後方�
 
 test('新形状の price が plan_prices に無ければ月次付与しない', function (): void {
     $organization = pricingShapeStripeCustomer('cus_clover_unknown');
+    pricingShapeEnableMonthlyGrant();
 
     event(new WebhookReceived(invoicePaidPayloadWithLine('evt_clover_unknown', 'cus_clover_unknown', [
         'price' => null,

@@ -35,6 +35,11 @@ use Webmozart\Assert\Assert;
  * plan_code は Stripe Price を持つ有償プランの契約 (active/trialing) 時のみ set され、
  * subscription.deleted で null に戻る。**null = 未契約 = 支払い不要の free tier**
  * (config/quota.php の fallback_plan が適用され、BillingAccess は業務 route を許可する)。
+ *
+ * free entitlement (パーソナルプラン) は plan_code ではなく free_plan_code 側で表現する
+ * (`subscriptions` テーブルは Stripe 実体のみを保持する invariant を守るため)。
+ * free_plan_code / free_plan_activated_at / personal_declared_* / signup_tickets_granted_at は
+ * いずれも状態キーのため $fillable 外 (PersonalPlanService の forceFill 経由でのみ書き込む)。
  */
 class Organization extends Model
 {
@@ -181,6 +186,12 @@ class Organization extends Model
             // 2FA 必須方針。セキュリティ方針キーのため $fillable 外
             // (OrganizationController::updateTwoFactorRequirement が forceFill で明示代入する)
             'two_factor_required' => 'boolean',
+            // free entitlement (パーソナルプラン) と初回付与マーカー。いずれも状態キーのため
+            // $fillable 外 (PersonalPlanService が forceFill で明示代入する)
+            'free_plan_activated_at' => 'immutable_datetime',
+            'personal_declared_at' => 'immutable_datetime',
+            'personal_declared_by_user_id' => 'integer',
+            'signup_tickets_granted_at' => 'immutable_datetime',
         ];
     }
 }

@@ -17,12 +17,20 @@ use Illuminate\Support\Str;
  * 要求して締め出していたこと (devnotes/20260713-1633-seeder-free-plan-billing)。
  */
 
-/** current base Price を持たない Free プランを 1 つ取得する */
+/**
+ * Free プラン (current base Price を持たない) を取得する。
+ *
+ * personal も Price を持たないため「Price 無しの最初の Plan」では対象が非決定になる。
+ * 本テストの関心は Free プラン組織のゲート素通りなので code で固定する。
+ */
 function seededFreePlan(): Plan
 {
-    return Plan::query()->get()
-        ->first(fn (Plan $p): bool => $p->currentPrice(PlanPriceKind::Base) === null)
-        ?? throw new RuntimeException('Free プラン (Price 無し) が seed されていない');
+    $plan = Plan::query()->where('code', 'free')->firstOrFail();
+    if ($plan->currentPrice(PlanPriceKind::Base) !== null) {
+        throw new RuntimeException('Free プランに Price が付いている (seed 不変条件の破れ)');
+    }
+
+    return $plan;
 }
 
 test('seeded Free 組織の全ロールが /projects に到達できる (F-C3 回帰)', function (OrganizationRole $role): void {

@@ -85,8 +85,11 @@ test('OrganizationMembershipService の書き込みメソッドは共通ロッ�
  * が OrganizationMembershipService (全経路ロック済み) と OrganizationProvisioningService
  * (新規組織生成時の creator への Owner 付与のみ = 既存組織の owner 集合は変えない bootstrap 例外)
  * 以外に現れないことを静的に強制し、未ロック経路の混入 (直列化の破れ) を検出する。
- * 現状 role_user を参照するアプリコードは上記サービスのみ (grep 済み) のため、
- * role_user への言及自体を許可リスト外で禁止する広め (read 含む) の guard で足りる。
+ *
+ * role_user を **読み取るだけ** のコード (判定クエリ) は owner 集合を変えないため直列化前提を
+ * 破らない。読み取り専用の参照は $readOnly に登録して許可し、そのファイルが Laratrust の
+ * 書き込み API (addRole/removeRole/syncRoles) を含まないことを別途強制する
+ * (= 読み取り許可が書き込みの抜け穴にならないようにする)。
  */
 test('org ロール割当 (role_user) の書き込みは既知のロック済みサービス経由のみ (owner 変更の直列化前提を守る)', function (): void {
     $appDir = dirname(__DIR__, 2).'/app';
@@ -94,11 +97,18 @@ test('org ロール割当 (role_user) の書き込みは既知のロック済み
         'Services/Organization/OrganizationMembershipService.php', // 全経路 lockForMembershipWrite 済み
         'Services/Organization/OrganizationProvisioningService.php', // 新規組織の creator への Owner 付与のみ
     ];
+    // role_user を読み取るだけ (owner 集合を変えない) のため許可するファイル。
+    // 下で「Laratrust 書き込み API を含まないこと」を強制する。
+    $readOnly = [
+        // eligibility(): 同一 user が owner として在籍する別 free personal org の存在判定
+        'Services/Billing/PersonalPlanService.php',
+    ];
 
     $iterator = new RecursiveIteratorIterator(
         new RecursiveDirectoryIterator($appDir, FilesystemIterator::SKIP_DOTS),
     );
     $offenders = [];
+    $readOnlyViolations = [];
     /** @var SplFileInfo $file */
     foreach ($iterator as $file) {
         if ($file->getExtension() !== 'php') {
@@ -109,11 +119,28 @@ test('org ロール割当 (role_user) の書き込みは既知のロック済み
             continue;
         }
         $contents = file_get_contents($file->getPathname()) ?: '';
+
+        // 読み取り専用許可: Laratrust の書き込み API を含まないことだけを強制する
+        // (含んでいたら「読み取りのみ」の前提が崩れているので違反として報告する)。
+        if (in_array($relative, $readOnly, true)) {
+            if (preg_match('/->(addRole|removeRole|syncRoles)\(/', $contents) === 1) {
+                $readOnlyViolations[] = $relative;
+            }
+
+            continue;
+        }
+
         // Laratrust API 経路 + role_user pivot への直接アクセスの双方を検出する。
         if (preg_match('/->(addRole|removeRole|syncRoles)\(|role_user/', $contents) === 1) {
             $offenders[] = $relative;
         }
     }
+
+    expect($readOnlyViolations)->toBe(
+        [],
+        '読み取り専用として許可した role_user 参照が Laratrust 書き込み API を含んでいます '
+        .'($readOnly から外し、ロック済みサービス経由へ移すこと)。',
+    );
 
     expect($offenders)->toBe(
         [],

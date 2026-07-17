@@ -25,7 +25,11 @@ final class PricingService
     private ?array $memoizedPlans = null;
 
     /**
-     * 公開プラン一覧 (sort_order 昇順)。価格は plan_prices current (kind=base)。
+     * 公開プラン一覧 (is_active=true のみ・sort_order 昇順)。
+     * 価格は plan_prices current (kind=base)。
+     *
+     * is_active フィルタはプラン公開制御の唯一の場所 (管理画面での非公開化が
+     * そのまま /pricing に効く)。
      *
      * @return list<PricingPlanDto>
      */
@@ -38,7 +42,9 @@ final class PricingService
         $quotaPlans = config('quota.plans');
         Assert::isArray($quotaPlans);
 
-        return $this->memoizedPlans = array_values(Plan::query()->orderBy('sort_order')->get()
+        return $this->memoizedPlans = array_values(Plan::query()
+            ->where('is_active', true)
+            ->orderBy('sort_order')->get()
             ->map(function (Plan $plan) use ($quotaPlans): PricingPlanDto {
                 $limits = $quotaPlans[$plan->code] ?? [];
                 Assert::isArray($limits);
@@ -48,7 +54,6 @@ final class PricingService
                     code: $plan->code,
                     name: $plan->name,
                     baseAmountJpy: $price?->amount,
-                    monthlyTicketGrant: $plan->monthly_ticket_grant,
                     maxProjects: self::intOrNull($limits, 'max_projects'),
                     maxMembers: self::intOrNull($limits, 'max_members'),
                     maxStorageGb: self::storageGb($limits),

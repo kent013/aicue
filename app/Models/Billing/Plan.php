@@ -19,6 +19,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string $name
  * @property int $monthly_ticket_grant
  * @property int $sort_order
+ * @property bool $is_active
  */
 class Plan extends Model
 {
@@ -28,6 +29,7 @@ class Plan extends Model
         'name',
         'monthly_ticket_grant',
         'sort_order',
+        'is_active',
     ];
 
     /**
@@ -55,6 +57,7 @@ class Plan extends Model
         return [
             'monthly_ticket_grant' => 'integer',
             'sort_order' => 'integer',
+            'is_active' => 'boolean',
         ];
     }
 }

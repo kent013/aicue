@@ -25,7 +25,6 @@
     interface Plan {
         code: string;
         name: string;
-        monthlyTicketGrant: number;
         price: PlanPrice | null;
     }
 
@@ -151,7 +150,7 @@
                                             {/if}
                                         </div>
                                         <p class="mt-1 text-caption text-text-secondary">
-                                            {formatPrice(plan.price)} ・ 月 {plan.monthlyTicketGrant} 枚のチケット付与
+                                            {formatPrice(plan.price)}
                                         </p>
                                     </div>
                                     {#if canManageBilling && plan.price !== null && plan.code !== currentPlanCode}
