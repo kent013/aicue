@@ -6,14 +6,14 @@ namespace App\Services\Billing\Fakes;
 
 use App\DataTransferObjects\Billing\ExternalBillingRedirect;
 use App\Models\Organization;
-use App\Services\Billing\SubscriptionCheckoutGateway;
+use App\Services\Billing\Contracts\StripeGatewayInterface;
 
 /**
- * SubscriptionCheckoutGateway の runtime fake (fake_externals 環境専用)。
+ * StripeGatewayInterface の runtime fake (fake_externals 環境専用)。
  * 契約は FakeTicketCheckoutGateway と同じ「中立帰還」。subscription 状態は変更しない
  * (active subscription の正本は BughuntBillingSeeder)。
  */
-final class FakeSubscriptionCheckoutGateway implements SubscriptionCheckoutGateway
+final class FakeStripeGateway implements StripeGatewayInterface
 {
     public function createSubscriptionCheckout(
         Organization $organization,
@@ -24,8 +24,13 @@ final class FakeSubscriptionCheckoutGateway implements SubscriptionCheckoutGatew
         return new ExternalBillingRedirect(FakeExternalUrl::neutralReturn($cancelUrl));
     }
 
-    public function portalRedirect(Organization $organization, string $returnUrl): ExternalBillingRedirect
+    public function createPortalSession(Organization $organization, string $returnUrl): ExternalBillingRedirect
     {
         return new ExternalBillingRedirect(FakeExternalUrl::neutralReturn($returnUrl));
+    }
+
+    public function syncCustomerDetails(Organization $organization): void
+    {
+        // no-op: fake 環境は実 Stripe を叩かない (実呼び出しの正本は CashierStripeGateway)。
     }
 }

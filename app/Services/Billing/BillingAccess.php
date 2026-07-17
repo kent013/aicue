@@ -4,49 +4,124 @@ declare(strict_types=1);
 
 namespace App\Services\Billing;
 
+use App\Enums\Billing\OnboardingBillingState;
+use App\Enums\CheckoutSessionStatus;
+use App\Models\Billing\BillingCheckoutSession;
+use App\Models\Billing\Subscription;
 use App\Models\Organization;
+use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Collection;
 
 /**
- * 組織が業務機能を利用してよいか (billing entitlement) の判定。
+ * Organization の課金状態を「流入制御目線」で判定する責務。
  *
  * **課金による利用可否の判定は必ず本クラスを経由する** (middleware / controller /
- * service での subscription 直参照は禁止)。判定基準を 1 クラスに閉じ込めることで、
- * アプリ側は本クラスの書き換えだけで gate 方針を変更できる。
+ * service での subscription 直参照は禁止)。OrganizationPolicy 等の user action 認可とは
+ * 責務分離する (Policy は user × organization、本 service は organization × subscription state)。
  *
- * AI-CUE の entitlement 方針 (テンプレート既定の「active subscription 必須」からの
- * 意図的な書き換え。devnotes/20260712-0927-bugfix-billing-free-access):
- *
- * - plan_code null (未契約) = fallback free プラン。**支払い不要 tier としてアクセス許可**。
- *   有償価値は別レイヤで gate 済み (チケット残高 = analyze/render、Quota = max_projects 等)
- * - plan_code 非 null = 有償プラン契約状態。subscription('default') が active / trialing の
- *   ときのみ許可 (past_due / canceled / incomplete / 行不在は fail-closed で不許可 =
- *   支払い健全性の担保のみが本ゲートの責務)
- *
- * 不変条件 (依存するデータモデル契約): `organizations.plan_code` は Stripe Price を持つ
- * 有償プランの契約時のみ StripeWebhookProcessor が set し、subscription.deleted で null に
- * 戻す。支払い不要のプランを plan_code に載せる場合は本判定とセットで見直すこと
- * (挙動は RequireActiveSubscriptionMiddlewareTest が固定する)。
- *
- * 注: 本メソッドは「subscription を持つか」ではなく「業務ルートを利用してよいか
- * (billing entitlement)」を返す。free 組織は subscription 無しで true になる。
+ * 利用可否は `SubscriptionState` 単体ではなく `SubscriptionService::deriveEntitlement` で
+ * 確定する (PM 有無 / trial 終了 / paused / past_due を合成)。
  */
 class BillingAccess
 {
-    /** アクセスを許可する Stripe subscription status (有償プラン契約時のみ参照) */
-    private const array GRANTING_STATUSES = ['active', 'trialing'];
+    public function __construct(
+        private readonly SubscriptionService $subscriptions,
+    ) {}
 
+    /**
+     * 組織が業務機能を利用してよいか (billing entitlement)。
+     *
+     * `state()->grantsAccess()` が本来の判定。これに加えて **移行 OR を 1 行持つ**:
+     * 現行の意図的な free 許可 (= `plan_code === null` の未契約組織) をそのまま通す。
+     *
+     * **この移行 OR は P4 (ゲート反転) で削除する**。削除条件は grandfathering backfill
+     * (`organizations.free_plan_code = 'personal'`) の完了で、backfill が `ActiveFreePlan` を
+     * 成立させることで既存の free 組織が `state()` 側で許可される。**本行を消すことが
+     * ゲート反転そのもの**であり、P4 はこの 1 行削除 + 期待反転の diff だけで済む。
+     */
     public function hasActiveAccess(Organization $organization): bool
     {
-        // 未契約 (plan_code null) = fallback free プラン。支払い不要 tier として許可
-        if ($organization->plan_code === null) {
+        if ($this->state($organization)->grantsAccess()) {
             return true;
         }
 
-        // 有償プラン契約状態: 支払い健全性 (active/trialing) を要求。
-        // 行不在 (webhook 順序逆転等) も fail-closed で不許可
-        $subscription = $organization->subscription('default');
+        return $organization->plan_code === null;
+    }
 
-        return $subscription !== null
-            && in_array($subscription->stripe_status, self::GRANTING_STATUSES, true);
+    /**
+     * 流入制御目線の課金状態。**`plan_code` を一切見ない** (entitlement は subscription /
+     * free_plan_code / checkout session から導出する)。
+     *
+     * 読み取り経路のため **DB 書き込みをしない**。stale な pending checkout は in-memory で
+     * expired 扱いにしてアクセス判定の整合性を保ち、実 DB の expired 化は sweeper に委ねる
+     * (require.subscription が付く多数の GET 経路で毎回 UPDATE が走る副作用を排除する)。
+     */
+    public function state(Organization $organization): OnboardingBillingState
+    {
+        $sub = $organization->subscription('default');
+        $entitled = $sub instanceof Subscription
+            && $this->subscriptions->deriveEntitlement($sub)->entitled;
+
+        // 利用可否は SubscriptionState 単体ではなく deriveEntitlement で確定する
+        // (SubscriptionState::grantsAccess を直接参照しない)。
+        if ($entitled) {
+            return OnboardingBillingState::Subscribed;
+        }
+
+        // 現在 entitled な Stripe subscription が「ない」(行の不在ではなく entitlement で判定。
+        // canceled 等の過去行が残っていてもよい = paid→free 経路) とき free entitlement を見る。
+        // 判定は定数比較 (未知値は fail-closed で通さない)。entitled subscription があれば上で
+        // Subscribed 優先 (free と併存しない invariant)。
+        if ($organization->free_plan_code === PersonalPlanService::FREE_PLAN_CODE) {
+            return OnboardingBillingState::ActiveFreePlan;
+        }
+
+        if ($sub instanceof Subscription) {
+            // 利用不可 (Inactive / Paused / trial 終了 & PM 無 / PM 無 past_due) は gate を通さない
+            // → ExpiredCheckout 扱い (未契約導線へ)。
+            return OnboardingBillingState::ExpiredCheckout;
+        }
+
+        $threshold = self::staleThresholdAt(CarbonImmutable::now());
+        /** @var Collection<int, BillingCheckoutSession> $pendingRows */
+        $pendingRows = BillingCheckoutSession::query()
+            ->where('organization_id', $organization->id)
+            ->where('status', CheckoutSessionStatus::Pending->value)
+            ->get(['id', 'created_at']);
+
+        $hasLivePending = false;
+        $hasStalePending = false;
+        foreach ($pendingRows as $row) {
+            if ($row->created_at !== null && $row->created_at->lessThan($threshold)) {
+                $hasStalePending = true;
+            } else {
+                $hasLivePending = true;
+            }
+        }
+
+        if ($hasLivePending) {
+            return OnboardingBillingState::PendingCheckout;
+        }
+
+        $hasExpired = $hasStalePending || BillingCheckoutSession::query()
+            ->where('organization_id', $organization->id)
+            ->whereIn('status', [
+                CheckoutSessionStatus::Expired->value,
+                CheckoutSessionStatus::Failed->value,
+            ])
+            ->exists();
+
+        return $hasExpired ? OnboardingBillingState::ExpiredCheckout : OnboardingBillingState::NoSubscription;
+    }
+
+    /**
+     * pending checkout の stale 境界 (単一出典)。
+     *
+     * **live = `created_at >= staleThresholdAt($now)` / stale = `created_at < staleThresholdAt($now)`**
+     * の排他で統一する。sweeper (実 DB の expire) も本 helper を `<` で読むこと。
+     */
+    public static function staleThresholdAt(CarbonImmutable $now): CarbonImmutable
+    {
+        return $now->subDay();
     }
 }

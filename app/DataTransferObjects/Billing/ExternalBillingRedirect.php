@@ -9,7 +9,7 @@ use Webmozart\Assert\Assert;
 /**
  * 課金系外部ページ (Stripe Checkout / Customer Portal) への遷移先。
  *
- * gateway (SubscriptionCheckoutGateway) の戻り値契約。Response 化
+ * gateway (Contracts\StripeGatewayInterface) の戻り値契約。Response 化
  * (Inertia::location) は Controller の責務で、gateway は URL のみ返す。
  */
 final readonly class ExternalBillingRedirect

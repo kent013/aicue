@@ -9,6 +9,7 @@ use App\Models\Organization;
 use App\Models\Project;
 use App\Models\User;
 use App\Services\Billing\BillingAccess;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Route as RoutingRoute;
 use Illuminate\Support\Facades\Route;
@@ -17,9 +18,16 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 /*
  * 課金ゲート (require-active-subscription)。
  * 判定は BillingAccess::hasActiveAccess のみ (billing entitlement):
- * - plan_code null (未契約) = fallback free プラン。支払い不要 tier として許可
- * - plan_code 非 null = 有償プラン契約状態。subscription('default') が active/trialing の
- *   ときのみ許可 (支払い不健全はブラウザなら billing へ redirect + 理由 flash、JSON なら 402)
+ * - plan_code null (未契約) = fallback free プラン。**移行 OR** で許可 (P4 で削除する 1 行)
+ * - それ以外は BillingAccess::state()->grantsAccess() =
+ *   SubscriptionService::deriveEntitlement による判定 (P2 で判定モデルを差し替え済み)。
+ *   遮断はブラウザなら billing へ redirect + 理由 flash、JSON なら 402
+ *
+ * P2 の判定モデル置換で結論が反転した cohort (設計の cohort 表):
+ * - C: active/trialing + trial 終了 + PM 無し = **遮断** (旧: status のみ見て許可)
+ * - D: past_due + (trial 未終了 or PM 有り) = **許可** (旧: past_due を一律遮断)
+ * 網羅は tests/Feature/Billing/BillingAccessStateTest.php (cohort A〜I) が固定する。
+ *
  * billing 系 route は gate group 外 (構造的 allowlist) で遮断中でも checkout に到達できる。
  */
 
@@ -59,6 +67,13 @@ test('有償契約 + active/trialing は業務 route に到達できる', functi
     $this->actingAs($owner)->get('/projects')->assertOk();
 })->with(['active', 'trialing']);
 
+test('有償契約 + past_due は業務 route に到達できる (cohort D。dunning 中も利用継続)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    contractPaidPlan($organization, status: 'past_due');
+
+    $this->actingAs($owner)->get('/projects')->assertOk();
+});
+
 test('有償契約 + 支払い不健全は billing へ redirect + 理由 flash', function (string $status): void {
     [$organization, $owner] = createOrganizationWithOwner();
     contractPaidPlan($organization, status: $status);
@@ -66,7 +81,20 @@ test('有償契約 + 支払い不健全は billing へ redirect + 理由 flash',
     $this->actingAs($owner)->get('/projects')
         ->assertRedirect(route('billing.index'))
         ->assertSessionHas('error', BILLING_BLOCKED_MESSAGE);
-})->with(['past_due', 'canceled', 'incomplete', 'unpaid']);
+})->with(['canceled', 'incomplete', 'unpaid', 'paused']);
+
+test('有償契約 + trial 終了 + PM 無しは遮断される (cohort C / E)', function (string $status): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $subscription = contractPaidPlan($organization, status: $status);
+    $subscription->forceFill([
+        'trial_ends_at' => CarbonImmutable::now()->subDay(),
+        'has_payment_method' => false,
+    ])->save();
+
+    $this->actingAs($owner)->get('/projects')
+        ->assertRedirect(route('billing.index'))
+        ->assertSessionHas('error', BILLING_BLOCKED_MESSAGE);
+})->with(['active', 'trialing', 'past_due']);
 
 test('有償契約 + subscription 行なしは fail-closed (webhook 順序逆転の防御)', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
@@ -78,7 +106,7 @@ test('有償契約 + subscription 行なしは fail-closed (webhook 順序逆転
 
 test('有償契約 + 支払い不健全の JSON は 402 + message 固定 (flash と同一文言。非 XHR の Accept: json も含む)', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
-    contractPaidPlan($organization, status: 'past_due');
+    contractPaidPlan($organization, status: 'canceled');
 
     // getJson は Accept: application/json のみ付与 (X-Requested-With なし) =
     // 「JSON を要求する非 XHR クライアント」のケースを踏む (wantsJson 経由で 402 になること)
@@ -89,7 +117,7 @@ test('有償契約 + 支払い不健全の JSON は 402 + message 固定 (flash 
 
 test('billing ページは遮断対象の組織でも到達できる (構造的 allowlist)', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
-    contractPaidPlan($organization, status: 'past_due');
+    contractPaidPlan($organization, status: 'canceled');
 
     $this->actingAs($owner)->get('/billing')->assertOk();
 });
@@ -106,26 +134,46 @@ test('free プランは Stripe Price を持たない (plan_code に free が入�
 
 // ── BillingAccess 単体マトリクス ──
 
-test('BillingAccess: plan_code null は常に許可、非 null は active/trialing のみ許可', function (): void {
+test('BillingAccess: plan_code null は移行 OR で許可 (P4 で削除) / 非 null は deriveEntitlement 判定', function (): void {
     $access = app(BillingAccess::class);
 
-    // 未契約 (free tier)
+    // cohort I: 未契約 (free tier) は移行 OR で許可
     [$freeOrg] = createOrganizationWithOwner();
     expect($access->hasActiveAccess($freeOrg))->toBeTrue();
 
-    // 未契約 + subscription 行だけある (webhook の plan_code 同期前) も許可 (fail-open は free 相当のみ)
+    // cohort I: 未契約 + subscription 行だけある (webhook の plan_code 同期前) も移行 OR で許可
     [$syncLagOrg] = createOrganizationWithOwner();
     createFakeSubscription($syncLagOrg, status: 'active');
     expect($access->hasActiveAccess($syncLagOrg))->toBeTrue();
 
-    // 有償契約状態: status マトリクス
-    foreach (['active' => true, 'trialing' => true, 'past_due' => false, 'canceled' => false, 'incomplete' => false] as $status => $expected) {
+    // 有償契約状態: status マトリクス (past_due = cohort D で許可へ反転済み)
+    $matrix = [
+        'active' => true,
+        'trialing' => true,
+        'past_due' => true,
+        'canceled' => false,
+        'incomplete' => false,
+        'unpaid' => false,
+        'incomplete_expired' => false,
+        'paused' => false,
+    ];
+    foreach ($matrix as $status => $expected) {
         [$organization] = createOrganizationWithOwner();
         contractPaidPlan($organization, status: $status);
         expect($access->hasActiveAccess($organization))->toBe($expected, "stripe_status={$status}");
     }
 
-    // 有償契約状態 + 行なし: fail-closed
+    // cohort C / E: trial 終了 + PM 無しは status に依らず遮断
+    foreach (['active', 'trialing', 'past_due'] as $status) {
+        [$organization] = createOrganizationWithOwner();
+        contractPaidPlan($organization, status: $status)->forceFill([
+            'trial_ends_at' => CarbonImmutable::now()->subDay(),
+            'has_payment_method' => false,
+        ])->save();
+        expect($access->hasActiveAccess($organization))->toBeFalse("trial ended + no PM: stripe_status={$status}");
+    }
+
+    // cohort H: 有償契約状態 + 行なしは fail-closed
     [$orphan] = createOrganizationWithOwner();
     $orphan->forceFill(['plan_code' => 'standard'])->save();
     expect($access->hasActiveAccess($orphan))->toBeFalse();
@@ -142,7 +190,7 @@ test('route bound organization が有償不健全なら redirect される (curr
     $gated = Organization::factory()->create(['slug' => 'gated-org']);
     $gated->users()->attach($owner);
     $owner->addRole(OrganizationRole::Member->value, $gated->laratrust_team_id);
-    contractPaidPlan($gated, status: 'past_due');
+    contractPaidPlan($gated, status: 'canceled'); // cohort G (past_due は cohort D で許可へ反転済み)
 
     Route::middleware(['web', 'auth', 'require-active-subscription'])
         ->get('/__gate-test/{organization:slug}', fn (Organization $organization) => response('ok'));
