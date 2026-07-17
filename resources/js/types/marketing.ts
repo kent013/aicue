@@ -23,7 +23,6 @@ export interface PricingPlanShape {
     readonly code: string;
     readonly name: string;
     readonly baseAmountJpy: number | null;
-    readonly monthlyTicketGrant: number;
     readonly maxProjects: number | null;
     readonly maxMembers: number | null;
     readonly maxStorageGb: number | null;

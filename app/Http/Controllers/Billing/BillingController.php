@@ -47,7 +47,6 @@ class BillingController extends Controller
                 return [
                     'code' => $plan->code,
                     'name' => $plan->name,
-                    'monthlyTicketGrant' => $plan->monthly_ticket_grant,
                     'price' => $price === null ? null : [
                         'unitAmount' => $price->amount,
                         'currency' => $price->currency,

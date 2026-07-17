@@ -7,6 +7,9 @@ namespace Database\Factories;
 use App\Models\CustomTeam;
 use App\Models\Organization;
 use App\Models\Team;
+use App\Models\User;
+use App\Services\Billing\PersonalPlanService;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Str;
 
@@ -52,5 +55,42 @@ class OrganizationFactory extends Factory
     public function personal(): static
     {
         return $this->state(fn () => ['is_personal' => true]);
+    }
+
+    /**
+     * パーソナルプラン (free) 有効化済みの組織 (declarer は自己申告した user)。
+     * PersonalPlanService::activate() の結果状態を Factory で再現する
+     * (partial unique index `organizations_personal_free_declarer_unique` の対象になる)。
+     */
+    public function freePersonal(User $declarer): static
+    {
+        return $this->state(fn (): array => [
+            'free_plan_code' => PersonalPlanService::FREE_PLAN_CODE,
+            'free_plan_activated_at' => CarbonImmutable::now(),
+            'personal_declared_at' => CarbonImmutable::now(),
+            'personal_declared_by_user_id' => $declarer->getKey(),
+        ]);
+    }
+
+    /**
+     * declarer 不在の free personal 組織 (自己申告の記録より前から free だった既存組織)。
+     * personal_declared_by_user_id が NULL のため partial unique index の対象外になる。
+     */
+    public function grandfathered(): static
+    {
+        return $this->state(fn (): array => [
+            'free_plan_code' => PersonalPlanService::FREE_PLAN_CODE,
+            'free_plan_activated_at' => CarbonImmutable::now(),
+            'personal_declared_at' => null,
+            'personal_declared_by_user_id' => null,
+        ]);
+    }
+
+    /** 初回無償チケット付与済み (org 単位 1 回マーカーが立っている) 組織 */
+    public function signupGranted(): static
+    {
+        return $this->state(fn (): array => [
+            'signup_tickets_granted_at' => CarbonImmutable::now(),
+        ]);
     }
 }

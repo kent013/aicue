@@ -36,6 +36,16 @@ return [
             'max_members' => 3,
             'max_storage_bytes' => 1 * 1024 * 1024 * 1024,      // 1 GiB (初期値。プラン設計で調整可能)
         ],
+        'personal' => [
+            'max_projects' => 1,
+            'max_members' => 3,                                 // PersonalPlanService::MAX_MEMBERS と一致させる
+            'max_storage_bytes' => 1 * 1024 * 1024 * 1024,      // 1 GiB (free の後継 = 実効 limits 不変)
+        ],
+        'starter' => [
+            'max_projects' => 1,
+            'max_members' => 3,
+            'max_storage_bytes' => 1 * 1024 * 1024 * 1024,      // 1 GiB (personal と同能力。差は基本料のみ)
+        ],
         'standard' => [
             'max_projects' => 10,
             'max_members' => 10,

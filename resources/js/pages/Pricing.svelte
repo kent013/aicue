@@ -9,7 +9,7 @@
     import type { PricingPageProps, PricingPlanShape } from "@/types/marketing";
 
     /**
-     * 公開料金表 (/pricing)。プラン基本料 (free / standard) + 共通チケット制の説明 +
+     * 公開料金表 (/pricing)。プラン基本料 (公開プランは props で供給) + 共通チケット制の説明 +
      * チケット傾斜料金表 + FAQ。title / description はサーバ SEO が正本のため
      * svelte:head は付けない。
      */
@@ -26,7 +26,6 @@
     const formatLimit = (v: number | null): string => (v === null ? "無制限" : String(v));
 
     const buildFeatures = (plan: PricingPlanShape): PricingFeature[] => [
-        { text: `月 ${plan.monthlyTicketGrant} 枚のチケット付与` },
         { text: `プロジェクト ${formatLimit(plan.maxProjects)}` },
         { text: `メンバー ${formatLimit(plan.maxMembers)} 名` },
         {

@@ -22,12 +22,18 @@ test('owner は /billing でプラン一覧・残高・管理フラグを見ら�
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->component('Billing/Index')
-            ->has('plans', 2)
+            // sort_order 昇順 (free 0 / personal 1 / starter 2 / standard 3)
+            ->has('plans', 4)
             ->where('plans.0.code', 'free')
             ->where('plans.0.price', null)
-            ->where('plans.1.code', 'standard')
-            ->where('plans.1.monthlyTicketGrant', 100)
-            ->has('plans.1.price', fn (Assert $price) => $price
+            ->where('plans.1.code', 'personal')
+            ->where('plans.1.price', null) // activate 経由の無料プラン = Price 無し
+            ->where('plans.2.code', 'starter')
+            ->has('plans.2.price', fn (Assert $price) => $price
+                ->where('unitAmount', 980)
+                ->where('currency', 'jpy'))
+            ->where('plans.3.code', 'standard')
+            ->has('plans.3.price', fn (Assert $price) => $price
                 ->where('unitAmount', 4980)
                 ->where('currency', 'jpy'))
             ->where('currentPlanCode', null)

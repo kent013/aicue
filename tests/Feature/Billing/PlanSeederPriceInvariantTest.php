@@ -19,6 +19,24 @@ test('有償プラン standard は current base Price を持つ (seed 不変条�
     expect($standard->currentPrice(PlanPriceKind::Base))->not->toBeNull();
 });
 
+test('有償プラン starter は current base Price を持つ (seed 不変条件)', function (): void {
+    $starter = Plan::query()->where('code', 'starter')->firstOrFail();
+
+    expect($starter->currentPrice(PlanPriceKind::Base))->not->toBeNull();
+});
+
+test('personal プランは Stripe Price を持たない (activate 経由の無料プラン)', function (): void {
+    $personal = Plan::query()->where('code', 'personal')->firstOrFail();
+
+    expect($personal->currentPrice(PlanPriceKind::Base))->toBeNull();
+    expect($personal->prices()->count())->toBe(0);
+});
+
+test('全プランの monthly_ticket_grant が 0 (D28: 月次付与は廃止)', function (): void {
+    expect(Plan::query()->pluck('monthly_ticket_grant', 'code')->all())
+        ->toEqual(['free' => 0, 'personal' => 0, 'starter' => 0, 'standard' => 0]);
+});
+
 test('free プランは Stripe Price を持たない (Checkout 対象外の未契約既定)', function (): void {
     $free = Plan::query()->where('code', 'free')->firstOrFail();
 

@@ -12,12 +12,17 @@ use App\Support\Billing\StripePriceLookupKeys;
 /*
  * billing:verify-stripe-prices (fixture / Stripe Catalog / plan_prices の整合検証)。
  * Stripe API は呼ばない: StripePriceCatalogClient をモックして検証する。
- * fixture 側の期待値は stripe/fixtures/plan_standard.json (unit_amount=4980) に一致させる。
+ * fixture 側の期待値は stripe/fixtures/plan_{starter,standard}.json (unit_amount=980 / 4980) に一致させる。
  */
 
 function verifyStandardBaseLookupKey(): string
 {
     return StripePriceLookupKeys::key('standard', PlanPriceKind::Base);
+}
+
+function verifyStarterBaseLookupKey(): string
+{
+    return StripePriceLookupKeys::key('starter', PlanPriceKind::Base);
 }
 
 function verifyEntry(string $lookupKey, string $stripePriceId, int $unitAmount, string $currency = 'jpy'): StripePriceCatalogEntry
@@ -32,9 +37,14 @@ function verifyEntry(string $lookupKey, string $stripePriceId, int $unitAmount, 
     );
 }
 
-/** plan_prices (current) を Stripe live id と fixture の金額に揃える */
+/** plan_prices (current) を Stripe live id と fixture の金額に揃える (宣言済み全 lookup_key) */
 function alignPlanPricesToStripe(): void
 {
+    PlanPrice::query()
+        ->where('lookup_key', verifyStarterBaseLookupKey())
+        ->where('is_current', true)
+        ->update(['stripe_price_id' => 'price_live_starter_base', 'amount' => 980]);
+
     PlanPrice::query()
         ->where('lookup_key', verifyStandardBaseLookupKey())
         ->where('is_current', true)
@@ -42,13 +52,19 @@ function alignPlanPricesToStripe(): void
 }
 
 /**
+ * 宣言済み全 lookup_key が fixture (starter 980 / standard 4980) と一致する map。
+ *
  * @return array<string, StripePriceCatalogEntry>
  */
 function happyStripeEntries(): array
 {
-    $lookupKey = verifyStandardBaseLookupKey();
+    $starterKey = verifyStarterBaseLookupKey();
+    $standardKey = verifyStandardBaseLookupKey();
 
-    return [$lookupKey => verifyEntry($lookupKey, 'price_live_standard_base', 4980)];
+    return [
+        $starterKey => verifyEntry($starterKey, 'price_live_starter_base', 980),
+        $standardKey => verifyEntry($standardKey, 'price_live_standard_base', 4980),
+    ];
 }
 
 beforeEach(function (): void {
@@ -114,7 +130,8 @@ test('fixture spec が Stripe Catalog と不一致なら失敗する', function 
     $lookupKey = verifyStandardBaseLookupKey();
     // fixture は 4980 だが Stripe が 30000 = matchesSpec 不一致。
     // plan_prices.amount も合わせて (d) でなく (a) を単独発火させる
-    $entries = [$lookupKey => verifyEntry($lookupKey, 'price_live_standard_base', 30000)];
+    $entries = happyStripeEntries();
+    $entries[$lookupKey] = verifyEntry($lookupKey, 'price_live_standard_base', 30000);
     PlanPrice::query()->where('lookup_key', $lookupKey)->where('is_current', true)->update(['amount' => 30000]);
     $this->mock(StripePriceCatalogClient::class, function ($mock) use ($entries): void {
         $mock->shouldReceive('fetchByLookupKeys')->once()->andReturn($entries);

@@ -7,6 +7,7 @@ namespace App\Actions\Fortify;
 use App\Models\User;
 use App\Rules\MatchesInvitationEmail;
 use App\Rules\UniqueEncryptedEmail;
+use App\Services\Billing\PersonalPlanService;
 use App\Services\Billing\TicketLedgerService;
 use App\Services\Organization\OrganizationMembershipService;
 use App\Services\Organization\OrganizationProvisioningService;
@@ -39,6 +40,7 @@ class CreateNewUser implements CreatesNewUsers
         private readonly OrganizationProvisioningService $provisioning,
         private readonly OrganizationMembershipService $membership,
         private readonly TicketLedgerService $tickets,
+        private readonly PersonalPlanService $personalPlan,
     ) {}
 
     /**
@@ -103,7 +105,17 @@ class CreateNewUser implements CreatesNewUsers
                     // 冪等性は idempotency_key + 部分 UNIQUE index が DB レベルで保証する。
                     // 招待経由 (join) は個人組織を作らず所属組織の残高を共有するため、ここでは付与しない
                     // (招待 N 人 = N×10 の増幅を避ける)。
-                    $this->tickets->grantSignupGrant($organization);
+                    //
+                    // 移行期規約: 付与契機は登録時のまま維持しつつ、org 単位 1 回マーカー
+                    // (organizations.signup_tickets_granted_at) を同一 tx で先取する。マーカーを
+                    // 先取できたときのみ付与することで、free 有効化 (PersonalPlanService::activate)
+                    // 経路との二重付与を防ぐ (マーカー先取と付与が同一 tx = 原子的)。
+                    $organizationId = $organization->getKey();
+                    Assert::integer($organizationId, 'Organization の主キーは整数を想定しています');
+
+                    if ($this->personalPlan->claimSignupGrantMarker($organization)) {
+                        $this->tickets->grantSignupGrant($organization, "signup_grant:org:{$organizationId}");
+                    }
                 }
 
                 return $user;

@@ -19,7 +19,6 @@ namespace App\DataTransferObjects\Marketing;
  *   code: string,
  *   name: string,
  *   baseAmountJpy: int|null,
- *   monthlyTicketGrant: int,
  *   maxProjects: int|null,
  *   maxMembers: int|null,
  *   maxStorageGb: int|null
@@ -31,7 +30,6 @@ final readonly class PricingPlanDto
         public string $code,
         public string $name,
         public ?int $baseAmountJpy,
-        public int $monthlyTicketGrant,
         public ?int $maxProjects,
         public ?int $maxMembers,
         public ?int $maxStorageGb,
@@ -46,7 +44,6 @@ final readonly class PricingPlanDto
             'code' => $this->code,
             'name' => $this->name,
             'baseAmountJpy' => $this->baseAmountJpy,
-            'monthlyTicketGrant' => $this->monthlyTicketGrant,
             'maxProjects' => $this->maxProjects,
             'maxMembers' => $this->maxMembers,
             'maxStorageGb' => $this->maxStorageGb,

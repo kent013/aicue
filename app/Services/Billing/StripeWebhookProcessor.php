@@ -70,6 +70,7 @@ class StripeWebhookProcessor
     public function __construct(
         private readonly TicketLedgerService $tickets,
         private readonly BillingNotificationDispatcher $notifications,
+        private readonly PersonalPlanService $personalPlan,
     ) {}
 
     public function handle(WebhookReceived $event): void
@@ -263,11 +264,29 @@ class StripeWebhookProcessor
             return; // サブスク以外の請求 (one-time 等) では付与しない
         }
 
-        // 初回 signup grant (「まず触れる」導線)。冪等キーは org スコープ (grantSignupGrant 内部で生成) のため
-        // subscription id は不要。1 組織 1 回の不変条件は idempotency_key + 部分 UNIQUE index が保証する。
+        // 初回 signup grant (「まず触れる」導線)。冪等キーは org スコープのため subscription id は不要。
+        // 1 組織 1 回の不変条件は idempotency_key + 部分 UNIQUE index が保証する。
         // (通常は登録時に付与済のため、ここは非個人組織のサブスク等に対する no-op ないし 1 回付与の安全網)
         if ($billingReason === 'subscription_create') {
-            $this->tickets->grantSignupGrant($organization);
+            $organizationId = $organization->getKey();
+            Assert::integer($organizationId, 'Organization の主キーは整数を想定しています');
+
+            // 移行期規約 (CreateNewUser / PersonalPlanService::activate と同一): org 行ロック下の
+            // 単一 transaction で「marker の条件付き先取 → 先取できたときのみ付与」を原子的に行う。
+            // marker (organizations.signup_tickets_granted_at) が付与の唯一の真実源であるため:
+            //  - marker を立てないと、「登録経由でない org (追加組織) が初回契約で付与を受ける」経路で
+            //    付与済みなのに marker が NULL のまま残り、後続の activate() が claim に成功して
+            //    granted=true を返すのに ledger の org スコープ UNIQUE が実 insert を止める
+            //    (= 残高は動かないのに「付与した」と応答する) 不整合が生じる。
+            //  - 逆に marker だけ先に commit されて付与が失敗すると、marker が立っているため
+            //    再送でも二度と付与されない (= 付与の取りこぼしが恒久化する)。よって同一 tx に閉じる。
+            DB::transaction(function () use ($organizationId): void {
+                $locked = Organization::query()->lockForUpdate()->findOrFail($organizationId);
+
+                if ($this->personalPlan->claimSignupGrantMarker($locked)) {
+                    $this->tickets->grantSignupGrant($locked, "signup_grant:org:{$organizationId}");
+                }
+            });
         }
 
         $plan = $this->resolveInvoicePlan($payload, $organization);

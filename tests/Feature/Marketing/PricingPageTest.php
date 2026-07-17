@@ -14,36 +14,45 @@ use Webmozart\Assert\Assert as WebmozartAssert;
  * (価格改定コミットでこのテストの修正を不要にする)。
  */
 
-/** seed 済み standard プランの current base 額 */
-function seededStandardBaseAmount(): int
+/** seed 済みプランの current base 額 */
+function seededBaseAmount(string $code): int
 {
-    $price = Plan::query()->where('code', 'standard')->firstOrFail()
+    $price = Plan::query()->where('code', $code)->firstOrFail()
         ->currentPrice(PlanPriceKind::Base);
-    WebmozartAssert::notNull($price, 'standard プランの current base price が未 seed');
+    WebmozartAssert::notNull($price, "{$code} プランの current base price が未 seed");
 
     return $price->amount;
 }
 
-test('guest は plans (free/standard) と quota limits 反映の能力値を受け取る', function (): void {
-    $standardAmount = seededStandardBaseAmount();
+test('guest は plans (free/personal/starter/standard) と quota limits 反映の能力値を受け取る', function (): void {
+    $starterAmount = seededBaseAmount('starter');
+    $standardAmount = seededBaseAmount('standard');
 
     $this->get('/pricing')
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->component('Pricing')
-            ->has('page.plans', 2)
+            ->has('page.plans', 4) // sort_order 昇順 (free 0 / personal 1 / starter 2 / standard 3)
             ->where('page.plans.0.code', 'free')
             ->where('page.plans.0.baseAmountJpy', null)
-            ->where('page.plans.0.monthlyTicketGrant', 10)
             ->where('page.plans.0.maxProjects', 1)
             ->where('page.plans.0.maxMembers', 3)
             ->where('page.plans.0.maxStorageGb', 1) // GiB 切り捨て規則 (intdiv(bytes, 1024**3))
-            ->where('page.plans.1.code', 'standard')
-            ->where('page.plans.1.baseAmountJpy', $standardAmount)
-            ->where('page.plans.1.monthlyTicketGrant', 100)
-            ->where('page.plans.1.maxProjects', 10)
-            ->where('page.plans.1.maxMembers', 10)
-            ->where('page.plans.1.maxStorageGb', 50)
+            ->where('page.plans.1.code', 'personal')
+            ->where('page.plans.1.baseAmountJpy', null) // Price 無し = 無料表示契約
+            ->where('page.plans.1.maxProjects', 1)
+            ->where('page.plans.1.maxMembers', 3)
+            ->where('page.plans.1.maxStorageGb', 1)
+            ->where('page.plans.2.code', 'starter')
+            ->where('page.plans.2.baseAmountJpy', $starterAmount)
+            ->where('page.plans.2.maxProjects', 1)
+            ->where('page.plans.2.maxMembers', 3)
+            ->where('page.plans.2.maxStorageGb', 1)
+            ->where('page.plans.3.code', 'standard')
+            ->where('page.plans.3.baseAmountJpy', $standardAmount)
+            ->where('page.plans.3.maxProjects', 10)
+            ->where('page.plans.3.maxMembers', 10)
+            ->where('page.plans.3.maxStorageGb', 50)
             ->where('page.isAuthenticated', false));
 });
 

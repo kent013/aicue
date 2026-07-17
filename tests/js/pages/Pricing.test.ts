@@ -14,7 +14,6 @@ const basePage: PricingPageProps = {
             code: "free",
             name: "Free",
             baseAmountJpy: null,
-            monthlyTicketGrant: 10,
             maxProjects: 1,
             maxMembers: 3,
             maxStorageGb: 1,
@@ -23,7 +22,6 @@ const basePage: PricingPageProps = {
             code: "standard",
             name: "Standard",
             baseAmountJpy: 4980,
-            monthlyTicketGrant: 100,
             maxProjects: 10,
             maxMembers: 10,
             maxStorageGb: 50,
@@ -59,7 +57,6 @@ describe("Pricing", () => {
         const standardCard = screen.getByTestId("pricing-plan-standard");
         expect(standardCard).toHaveTextContent("¥4,980");
         expect(standardCard).toHaveTextContent("基本料金");
-        expect(standardCard).toHaveTextContent("月 100 枚のチケット付与");
         expect(standardCard).toHaveTextContent("ストレージ 50 GB");
     });
 

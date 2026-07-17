@@ -83,12 +83,17 @@ class TicketLedgerService
      * (invoice.paid, billing_reason=subscription_create) の双方から呼ばれる。
      * 枚数は config('billing.signup_grant_tickets')、期限は now + config('billing.signup_grant_expiry_days') 日。
      *
-     * **1 組織につき高々 1 回**の不変条件は、冪等キー `signup_grant:org:{orgId}` の UNIQUE と、
+     * **1 組織につき高々 1 回**の不変条件は、冪等キー ($idempotencyKey) の UNIQUE と、
      * ticket_ledger_entries の部分 UNIQUE index (organization_id WHERE idempotency_key LIKE 'signup_grant:%')
      * が DB レベルで原子的に保証する。旧キー (signup_grant:{subId}) 行が既にある組織でも、部分 index が
      * 同一述語でカバーするため insertOrIgnore が二重付与を弾く (アプリ層の存在チェックは不要)。
+     *
+     * $idempotencyKey は経路を表す `signup_grant:` 接頭辞付きのキーを呼び出し側が渡す
+     * (登録経路 = `signup_grant:org:{orgId}` / free 有効化 = `signup_grant:personal:{orgId}`)。
+     * 部分 UNIQUE index が述語 `LIKE 'signup_grant:%'` で経路を跨いで org 生涯 1 回に閉じるため、
+     * キーの違いは監査上の由来表現であって二重付与の窓にはならない。
      */
-    public function grantSignupGrant(Organization $organization): void
+    public function grantSignupGrant(Organization $organization, string $idempotencyKey): void
     {
         $count = config('billing.signup_grant_tickets');
         Assert::integer($count, 'config billing.signup_grant_tickets は整数で設定してください');
@@ -98,14 +103,11 @@ class TicketLedgerService
         Assert::integer($expiryDays, 'config billing.signup_grant_expiry_days は整数で設定してください');
         Assert::greaterThan($expiryDays, 0, 'signup_grant_expiry_days は 1 以上で設定してください');
 
-        $organizationId = $organization->getKey();
-        Assert::integer($organizationId, 'Organization の主キーは整数を想定しています');
-
         $this->grantMonthly(
             $organization,
             $count,
             CarbonImmutable::now()->addDays($expiryDays),
-            "signup_grant:org:{$organizationId}",
+            $idempotencyKey,
             '初回 signup grant',
         );
     }

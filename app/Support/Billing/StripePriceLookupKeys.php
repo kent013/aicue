@@ -22,11 +22,13 @@ final class StripePriceLookupKeys
 {
     /**
      * Checkout 経路を持つプラン → 価格 kind の宣言。
-     * free (未契約の既定) は Checkout を持たないため含めない。
+     * free (未契約の既定) と personal (activate 経由の無料プラン = Checkout を
+     * 通らない) は Price を持たないため含めない。
      *
      * @var array<string, list<PlanPriceKind>>
      */
     private const CATALOG = [
+        'starter' => [PlanPriceKind::Base],
         'standard' => [PlanPriceKind::Base],
     ];
 

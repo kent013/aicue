@@ -1,0 +1,41 @@
+{
+  "_meta": {
+    "template_version": 0
+  },
+  "fixtures": [
+    {
+      "name": "starter_product",
+      "path": "/v1/products",
+      "method": "post",
+      "params": {
+        "name": "Starter プラン",
+        "description": "Starter プラン (月額)",
+        "metadata": {
+          "plan_code": "starter",
+          "managed_by": "app"
+        }
+      }
+    },
+    {
+      "name": "starter_base_price",
+      "path": "/v1/prices",
+      "method": "post",
+      "params": {
+        "currency": "jpy",
+        "unit_amount": 980,
+        "product": "${starter_product:id}",
+        "lookup_key": "app_starter_base",
+        "nickname": "Starter 基本料 (月額)",
+        "recurring": {
+          "interval": "month",
+          "interval_count": 1
+        },
+        "metadata": {
+          "plan_code": "starter",
+          "kind": "base",
+          "managed_by": "app"
+        }
+      }
+    }
+  ]
+}

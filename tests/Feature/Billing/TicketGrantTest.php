@@ -84,9 +84,9 @@ test('grantSignupGrant は config の枚数・期限で org スコープキー�
     config()->set('billing.signup_grant_tickets', 10);
     config()->set('billing.signup_grant_expiry_days', 30);
 
-    // 冪等キーは org スコープ (signup_grant:org:{id}) を内部生成する。二重呼び出しでも 1 行のみ。
-    grantService()->grantSignupGrant($organization);
-    grantService()->grantSignupGrant($organization);
+    // 冪等キーは呼び出し側が渡す (org スコープ = signup_grant:org:{id})。二重呼び出しでも 1 行のみ。
+    grantService()->grantSignupGrant($organization, "signup_grant:org:{$organization->id}");
+    grantService()->grantSignupGrant($organization, "signup_grant:org:{$organization->id}");
 
     expect(grantService()->balance($organization))->toBe(10);
     expect($organization->ticketLedgerEntries()->count())->toBe(1);
@@ -105,7 +105,7 @@ test('grantSignupGrant は config が不正 (0 以下) なら停止する', func
     [$organization] = createOrganizationWithOwner();
     config()->set('billing.signup_grant_tickets', 0);
 
-    expect(fn () => grantService()->grantSignupGrant($organization))
+    expect(fn () => grantService()->grantSignupGrant($organization, "signup_grant:org:{$organization->id}"))
         ->toThrow(InvalidArgumentException::class);
 });
 
@@ -114,7 +114,7 @@ test('1 組織に signup_grant は異なるキーでも高々 1 回しか計上�
     $svc = grantService();
 
     // 1 回目: 公開ユースケース経由 (org スコープキー signup_grant:org:{id})
-    $svc->grantSignupGrant($organization);
+    $svc->grantSignupGrant($organization, "signup_grant:org:{$organization->id}");
 
     // 2 回目: 旧キー形式を直接投入 → 部分 UNIQUE index (organization_id WHERE idempotency_key
     // LIKE 'signup_grant:%') が別キーでも弾く (ON CONFLICT DO NOTHING)。

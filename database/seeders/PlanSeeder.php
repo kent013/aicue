@@ -15,10 +15,13 @@ use Illuminate\Support\Carbon;
  *
  * - 能力はチケット付与数 (monthly_ticket_grant) と config/quota.php の limits の
  *   「値」で表現する (プラン名でのコード分岐は禁止 = docs 07 ガイド §4)
+ * - 月次付与は廃止 (D28)。全 tier の monthly_ticket_grant は 0 で、チケットは
+ *   signup grant と都度購入で供給する (列とコード経路は残すため運用上の再開は可能)
  * - 価格の真実源は plan_prices (DB snapshot)。ここでは bootstrap 行
  *   (stripe_price_id=price_test_* / livemode=false / synced_at=null) を投入し、
  *   実運用では `billing:sync-stripe-prices` が Stripe Catalog の実 Price ID へ上書きする
- * - free プランは Stripe Price を持たない (Checkout 対象外。未契約の既定)。
+ * - free / personal プランは Stripe Price を持たない (Checkout 対象外。
+ *   personal は activate 経由の無料プランで requiresStripeCheckout()=false)。
  *   これは BillingAccess の entitlement 判定の前提でもある: plan_code は Stripe Price →
  *   Plan 解決 (StripeWebhookProcessor) でのみ set されるため、Price を持たない free が
  *   plan_code に載る経路はない (null = 未契約 = 支払い不要の free tier)。free に Price を
@@ -35,31 +38,44 @@ class PlanSeeder extends Seeder
      * @var array<string, array<string, int>>
      */
     private const PRICE_AMOUNTS = [
+        'starter' => ['base' => 980],
         'standard' => ['base' => 4980],
     ];
 
     public function run(): void
     {
-        // free は Checkout を持たないため plan_prices は作らない
-        Plan::query()->updateOrCreate(
-            ['code' => 'free'],
-            [
-                'name' => 'Free',
-                'monthly_ticket_grant' => 10,
-                'sort_order' => 0,
-            ],
-        );
-
-        Plan::query()->updateOrCreate(
-            ['code' => 'standard'],
-            [
-                'name' => 'Standard',
-                'monthly_ticket_grant' => 100,
-                'sort_order' => 1,
-            ],
-        );
+        // free / personal は Checkout を持たないため plan_prices は作らない
+        // (free は後継 personal への移行が完了するまでの残置)
+        $this->upsertPlan('free', 'Free', 0);
+        $this->upsertPlan('personal', 'Personal', 1);
+        $this->upsertPlan('starter', 'Starter', 2);
+        $this->upsertPlan('standard', 'Standard', 3);
 
         $this->seedPlanPrices();
+    }
+
+    /**
+     * プラン行を投入する (D28: monthly_ticket_grant は全 tier 0)。
+     *
+     * is_active は属性配列に入れず新規作成時のみ true を確定する。運用者が管理画面で
+     * 変更した公開状態を seed 再実行で踏み潰さないため (公開制御の唯一の場所は
+     * PricingService::listPublicPlans() の is_active フィルタ)。
+     */
+    private function upsertPlan(string $code, string $name, int $sortOrder): void
+    {
+        $plan = Plan::query()->updateOrCreate(
+            ['code' => $code],
+            [
+                'name' => $name,
+                'monthly_ticket_grant' => 0,
+                'sort_order' => $sortOrder,
+            ],
+        );
+
+        if ($plan->wasRecentlyCreated) {
+            $plan->is_active = true;
+            $plan->save();
+        }
     }
 
     /**

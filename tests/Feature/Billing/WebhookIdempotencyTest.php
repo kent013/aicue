@@ -38,6 +38,18 @@ function billingStandardBasePriceId(): string
 }
 
 /**
+ * standard プランの月次付与を有効化する (arrange)。
+ *
+ * D28 で月次付与は廃止され seed 既定の monthly_ticket_grant は全 tier 0 になった。
+ * 列とコード経路 (StripeWebhookProcessor::grantMonthlyTickets) は運用上の再開のため
+ * 残しているので、その経路を検証する test は arrange で明示的に枚数を設定する。
+ */
+function enableStandardMonthlyGrant(int $count = 100): void
+{
+    Plan::query()->where('code', 'standard')->update(['monthly_ticket_grant' => $count]);
+}
+
+/**
  * @return array<string, mixed>
  */
 function invoicePaidPayload(string $eventId = 'evt_invoice_paid_1'): array
@@ -85,6 +97,7 @@ function subscriptionPayload(string $type, string $status, string $eventId): arr
 
 test('同一 event_id の invoice.paid を 2 回発火しても付与は 1 回だけ', function (): void {
     $organization = billingStripeCustomer();
+    enableStandardMonthlyGrant();
 
     // listener 配線 (AppServiceProvider) ごと検証するため event() で発火する
     event(new WebhookReceived(invoicePaidPayload()));
@@ -101,6 +114,7 @@ test('同一 event_id の invoice.paid を 2 回発火しても付与は 1 回�
 
 test('event_id が異なれば別イベントとして処理される (invoice id が違えば別付与)', function (): void {
     $organization = billingStripeCustomer();
+    enableStandardMonthlyGrant();
 
     $first = invoicePaidPayload('evt_1');
     $second = invoicePaidPayload('evt_2');
@@ -115,6 +129,7 @@ test('event_id が異なれば別イベントとして処理される (invoice i
 
 test('event_id が異なっても同一 invoice の再通知は idempotency_key で二重付与しない', function (): void {
     $organization = billingStripeCustomer();
+    enableStandardMonthlyGrant();
 
     // Stripe が同一 invoice を別 event_id で再通知するケース (event_id 冪等では防げない)
     event(new WebhookReceived(invoicePaidPayload('evt_dup_a')));
@@ -127,6 +142,7 @@ test('event_id が異なっても同一 invoice の再通知は idempotency_key 
 
 test('billing_reason=subscription_create の invoice.paid は月次付与に加えて signup grant を冪等付与する', function (): void {
     $organization = billingStripeCustomer();
+    enableStandardMonthlyGrant();
 
     $payload = invoicePaidPayload('evt_signup_1');
     $payload['data']['object']['billing_reason'] = 'subscription_create';
@@ -135,7 +151,7 @@ test('billing_reason=subscription_create の invoice.paid は月次付与に加�
 
     // 月次 100 + signup grant (config billing.signup_grant_tickets = 10)
     expect(app(TicketLedgerService::class)->balance($organization))->toBe(110);
-    // 冪等キーは org スコープ (grantSignupGrant 内部生成)。subscription id には依存しない。
+    // 冪等キーは org スコープ (呼び出し側が渡す)。subscription id には依存しない。
     $signup = $organization->ticketLedgerEntries()
         ->where('idempotency_key', "signup_grant:org:{$organization->id}")
         ->firstOrFail();
@@ -152,6 +168,7 @@ test('billing_reason=subscription_create の invoice.paid は月次付与に加�
 
 test('subscription id が無くても org スコープキーで signup grant を付与する', function (): void {
     $organization = billingStripeCustomer();
+    enableStandardMonthlyGrant();
 
     // subscription id を含まない subscription_create の invoice.paid。
     // org スコープキー (signup_grant:org:{id}) は subscription id に依存しないため付与される。
@@ -167,6 +184,23 @@ test('subscription id が無くても org スコープキーで signup grant を
             ->where('idempotency_key', 'like', 'signup_grant:%')
             ->count(),
     )->toBe(1);
+});
+
+test('seed 既定 (D28: monthly_ticket_grant=0) では invoice.paid で月次付与行が作られない', function (): void {
+    $organization = billingStripeCustomer();
+    // arrange 無し = seed 既定 (全 tier 0)。grantMonthlyTickets の guard で付与が走らない。
+
+    $payload = invoicePaidPayload('evt_d28_no_monthly');
+    $payload['data']['object']['billing_reason'] = 'subscription_create';
+
+    event(new WebhookReceived($payload));
+
+    expect($organization->ticketLedgerEntries()
+        ->where('idempotency_key', 'like', 'monthly:%')->count())->toBe(0);
+    // signup grant のみが計上される (残高は config の付与枚数と一致)
+    expect(app(TicketLedgerService::class)->balance($organization))
+        ->toBe(config('billing.signup_grant_tickets'));
+    expect($organization->ticketLedgerEntries()->count())->toBe(1);
 });
 
 test('customer.subscription.updated で organizations.plan_code が同期される', function (): void {
@@ -206,6 +240,7 @@ test('customer.subscription.deleted で plan_code が解除される', function 
 
 test('billing_reason がサブスク以外の invoice.paid では付与しない', function (): void {
     $organization = billingStripeCustomer();
+    enableStandardMonthlyGrant();
     $payload = invoicePaidPayload('evt_manual_invoice');
     $payload['data']['object']['billing_reason'] = 'manual';
 
@@ -219,6 +254,7 @@ test('billing_reason がサブスク以外の invoice.paid では付与しない
 
 test('未知の customer のイベントは受理のみで何も変更しない', function (): void {
     $organization = billingStripeCustomer();
+    enableStandardMonthlyGrant();
     $payload = invoicePaidPayload('evt_unknown_customer');
     $payload['data']['object']['customer'] = 'cus_other';
 
@@ -253,6 +289,7 @@ function failedWebhookRecord(string $eventId, int $attempts): StripeWebhookEvent
 
 test('処理失敗時は failed + failure_reason を記録して再 throw する (Stripe 再送を促す)', function (): void {
     billingStripeCustomer();
+    enableStandardMonthlyGrant();
     $this->mock(TicketLedgerService::class)
         ->shouldReceive('grantMonthly')
         ->andThrow(new RuntimeException('付与処理の一時故障'));
@@ -268,6 +305,7 @@ test('処理失敗時は failed + failure_reason を記録して再 throw する
 
 test('failed の再送で attempts が増え、成功すれば failure_reason が消える', function (): void {
     $organization = billingStripeCustomer();
+    enableStandardMonthlyGrant();
     failedWebhookRecord('evt_retry_ok', 2);
 
     // Stripe 再送: failed→received 復帰 (attempts+1) して再処理 → 成功
@@ -282,6 +320,7 @@ test('failed の再送で attempts が増え、成功すれば failure_reason �
 
 test('attempts が上限到達済みの failed は terminal-ack (処理せず例外も投げない)', function (): void {
     $organization = billingStripeCustomer();
+    enableStandardMonthlyGrant();
     failedWebhookRecord('evt_terminal', StripeWebhookProcessor::MAX_PROCESSING_ATTEMPTS);
 
     // 再送されても claim が null を返し、処理も再 throw もしない (= Cashier が 200 を返す)

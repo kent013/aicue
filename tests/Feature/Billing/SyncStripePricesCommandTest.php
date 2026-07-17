@@ -18,6 +18,11 @@ function syncStandardBaseLookupKey(): string
     return StripePriceLookupKeys::key('standard', PlanPriceKind::Base);
 }
 
+function syncStarterBaseLookupKey(): string
+{
+    return StripePriceLookupKeys::key('starter', PlanPriceKind::Base);
+}
+
 /**
  * @param  array<string, int|string>  $overrides
  */
@@ -40,14 +45,20 @@ function syncEntry(string $lookupKey, string $stripePriceId, array $overrides = 
 
 /**
  * 宣言済み全 lookup_key の live エントリ map。
+ * コマンドは宣言済み lookup_key が 1 つでも欠けると fail-fast するため、
+ * 全宣言 (starter / standard) を揃える。
  *
  * @return array<string, StripePriceCatalogEntry>
  */
 function allSyncEntries(): array
 {
-    $lookupKey = syncStandardBaseLookupKey();
+    $starterKey = syncStarterBaseLookupKey();
+    $standardKey = syncStandardBaseLookupKey();
 
-    return [$lookupKey => syncEntry($lookupKey, 'price_live_standard_base')];
+    return [
+        $starterKey => syncEntry($starterKey, 'price_live_starter_base', ['unitAmount' => 980]),
+        $standardKey => syncEntry($standardKey, 'price_live_standard_base'),
+    ];
 }
 
 beforeEach(function (): void {
@@ -88,7 +99,8 @@ test('lookup_key が Stripe Catalog に無ければ失敗し plan_prices は不�
 
 test('通貨が CASHIER_CURRENCY と不一致なら失敗する', function (): void {
     $lookupKey = syncStandardBaseLookupKey();
-    $entries = [$lookupKey => syncEntry($lookupKey, 'price_live_standard_base', ['currency' => 'usd'])];
+    $entries = allSyncEntries();
+    $entries[$lookupKey] = syncEntry($lookupKey, 'price_live_standard_base', ['currency' => 'usd']);
 
     $this->mock(StripePriceCatalogClient::class, function ($mock) use ($entries): void {
         $mock->shouldReceive('fetchByLookupKeys')->once()->andReturn($entries);
