@@ -16,6 +16,9 @@ use App\Http\Controllers\DebugLoginController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\Marketing\PricingController;
 use App\Http\Controllers\NotificationController;
+use App\Http\Controllers\Onboarding\ActivatePersonalController;
+use App\Http\Controllers\Onboarding\BillingRequiredController;
+use App\Http\Controllers\Onboarding\OnboardingController;
 use App\Http\Controllers\Organizations\InvitationAcceptanceController;
 use App\Http\Controllers\Organizations\OrganizationApiKeyController;
 use App\Http\Controllers\Organizations\OrganizationController;
@@ -309,6 +312,24 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         ->name('billing.checkout');
     Route::post('/billing/portal', [BillingController::class, 'portal'])
         ->name('billing.portal');
+
+    /*
+    | 課金オンボーディング (current org スコープ)。登録直後の Plan 選択 +
+    | 未契約 manageBilling なし member 向け説明画面。billing.* と同じく課金ゲート
+    | (require-active-subscription) の外に置く = 未契約組織が導線に到達できることを保証する
+    | (ゲート内に入れると「契約するための画面が契約してないと見られない」詰みになる)。
+    | 組織解決は billing.* と同一 (route parameter なし = URL の org ≠ current org が
+    | 構造的に発生しない)。認可は Controller 冒頭の Gate::authorize が担う。
+    | MCP/CLI 導入ガイド (organizations.onboarding.{mcp,cli}) とは別責務・別 name。
+    */
+    Route::get('/onboarding/checkout', [OnboardingController::class, 'show'])
+        ->name('onboarding.checkout');
+    // Personal (free) の有効化 (Stripe checkout を通らない。自己申告チェック必須)
+    Route::post('/onboarding/activate-personal', ActivatePersonalController::class)
+        ->middleware('throttle:10,1')
+        ->name('onboarding.activate-personal');
+    Route::get('/billing-required', [BillingRequiredController::class, 'show'])
+        ->name('onboarding.billing-required');
 
     /*
     | チケットスポット購入 (current org スコープ)。billing.* と同じく課金ゲート

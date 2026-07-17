@@ -209,6 +209,7 @@ return [
         'abilities.*' => '権限',
         // --- 課金 ---
         'plan_code' => 'プラン',
+        'declaration' => '個人利用の確認',
         'count' => '購入枚数',
         'attempt_token' => '操作トークン',
         // --- プロジェクト・マニュアル ---

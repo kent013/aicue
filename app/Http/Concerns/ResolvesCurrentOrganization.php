@@ -33,6 +33,31 @@ trait ResolvesCurrentOrganization
     }
 
     /**
+     * current org 解決 + 在籍 guard。current org が未設定なら 404、解決できても
+     * **ユーザーがその org に非所属なら 404** (`current_organization_id` が退会後も
+     * 残存する不整合を、**認可より前に** 存在しないリソースとして落とす = 不変条件 #2。
+     * 403 で org の存在を漏らさない)。
+     *
+     * 組織 route (`/organizations/{organization:slug}/...`) では
+     * MembershipScopedOrganizationBinder の route binding がこの層を担う。本メソッドは
+     * その責務を current-org スコープ (URL に org セグメントを持たない route) へ写した受け皿。
+     */
+    private function resolveMemberCurrentOrganization(Request $request): Organization
+    {
+        $organization = $this->resolveCurrentOrganization($request);
+
+        $user = $request->user();
+        Assert::isInstanceOf($user, User::class);
+
+        abort_unless(
+            $organization->users()->whereKey($user->getKey())->exists(),
+            404,
+        );
+
+        return $organization;
+    }
+
+    /**
      * URL 整合 guard (D2 不変条件): URL 上の {project} が current org に属さなければ
      * **認可より前に 404** (403 で存在を漏らさない / cross-org は 404)。
      * 所属確認は relation (Organization::projects = CustomTeam 経由) のみで行う (直 fetch 禁止)。
