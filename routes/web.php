@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Admin\UserManagementController;
 use App\Http\Controllers\Auth\ConfirmRecentAuthController;
+use App\Http\Controllers\Auth\SessionStatusController;
 use App\Http\Controllers\Auth\SocialAuthController;
 use App\Http\Controllers\Billing\BillingController;
 use App\Http\Controllers\Billing\TicketPurchaseController;
@@ -135,6 +136,18 @@ Route::middleware(NoIndex::class)->group(function (): void {
     Route::view('/privacy', 'legal.privacy')->name('legal.privacy');
     Route::view('/commerce-disclosure', 'legal.commerce-disclosure')->name('legal.commerce-disclosure');
 });
+
+/*
+|--------------------------------------------------------------------------
+| セッション有効性の軽量プローブ (bfcache 秘匿・再検証)
+|--------------------------------------------------------------------------
+| auth グループの **外**に置く。未認証でも 200 + { authenticated: false } を返し、
+| クライアント guard (resources/js/lib/bfcache-guard.ts) が「セッション無効」と
+| 「endpoint 不在 / 通信障害」を明示 boolean で区別できるようにする。
+| 2FA 強制ゲートは RequireTwoFactorForEnforcedOrganizations::ALLOWED_ROUTE_NAMES で
+| 明示的に免除している (免除しないと 2FA 強制中に秘匿が解除できず reload ループになる)。
+*/
+Route::get('/session/status', SessionStatusController::class)->name('session.status');
 
 /*
 |--------------------------------------------------------------------------

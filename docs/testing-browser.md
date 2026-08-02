@@ -20,16 +20,34 @@ pest-plugin-browser はテストプロセス**自身の** HttpKernel を Playwri
 ## 実行
 
 ```bash
-composer test:browser                  # 全 Browser テスト (既定 --processes=1 直列)
-composer test:browser -- --filter=...  # pest 引数の追加
+composer test:browser                  # 全 Browser テスト × 全レーン (既定 --processes=1 直列)
+composer test:browser -- --filter=...  # pest 引数の追加 (両レーンへ渡る)
 BROWSER_TEST_PROCESSES=3 composer test:browser  # 並列数の上書き
+BROWSER_TEST_LANES=webkit composer test:browser # レーン限定 (chromium / webkit)
 ```
 
 `composer test:browser` は `scripts/run-browser-test.sh` 経由で
 `vendor/bin/pest -c phpunit.browser.xml` を呼ぶ。`composer test` (Feature pgsql lane) と
 同一 lock file (`storage/framework/testing/test.lock`) の flock で相互排他し、
-共有する pgsql テスト DB / chromium 資源の奪い合いを防ぐ。並列数を未指定 (= nproc) に
-すると chromium の同時起動で環境がハングし得るため既定 1 に固定している。
+共有する pgsql テスト DB / ブラウザ資源の奪い合いを防ぐ。並列数を未指定 (= nproc) に
+すると同時起動で環境がハングし得るため既定 1 に固定している。
+
+### ブラウザレーン (Chromium + WebKit)
+
+`composer test:browser` は **Chromium レーン → WebKit レーンの順で 2 回** pest を実行し、
+**どちらかが失敗したら非ゼロで終わる** (先頭レーンの失敗で後続を飛ばさない)。
+pest-plugin-browser の `--browser chrome` / `--browser safari` (= Playwright webkit) に対応する。
+
+WebKit レーンは飾りではなく、iOS Safari (撮影 PWA の主戦場) に最も近い engine での回帰である。
+**実行時間を理由に WebKit レーンを落とさないこと**。
+
+ただし **bfcache 復元そのものはどちらのレーンでも再現できない** (実測):
+Playwright は自動化インスペクタを接続した状態でブラウザを起動するため、
+`no-store` の無い公開ページ間ですら「戻る」で復元されない。
+そのため `tests/Browser/AuthenticatedPageBfcacheTest.php` のシナリオ 2〜4 は
+**毎回ハーネスの再現能力を実測して skip** する (skip は合格ではなく「担保されていない」の表明)。
+再現できる環境では `pageshow.persisted === true` を観測できない限り**失敗する**
+正のコントロールが効く。保証範囲の全体像は `docs/supported-browsers.md`。
 
 pest 終了後に orphan 化した `playwright run-server` (node) はスクリプトが実行前後に掃除する。
 
@@ -38,8 +56,12 @@ pest 終了後に orphan 化した `playwright run-server` (node) はスクリ�
 - **DB は Feature lane と同じ worktree 固有 pgsql テスト DB** (`<slug>_test_<worktree-hash>`)。
   `scripts/ci/ensure-test-db.php` が冪等に作成し、`tests/bootstrap.php` の単一点ガードが
   dev DB への接続を Laravel boot 前に fail-closed で拒否する (phpunit.xml と同一機構)。
-- chromium は Playwright が独自 DL する: `pnpm exec playwright install chromium`
-  (Linux で依存ライブラリも入れる場合は `--with-deps`)。system chromedriver は不要。
+- ブラウザは Playwright が独自 DL する: **`pnpm exec playwright install chromium webkit`**。
+  system chromedriver は不要。
+  **WebKit は Linux で共有ライブラリ群 (gstreamer / gtk-4 / libwoff2 等) を要求する**ため、
+  devcontainer では **`sudo pnpm exec playwright install-deps webkit`**
+  (または `playwright install --with-deps webkit`) を一度実行する。未導入だと WebKit レーンが
+  "Host system is missing dependencies to run browsers" で全 fail する。
 - 実ブラウザは `public/build` のビルド済アセットを読むため、UI 変更後は
   **`pnpm build` を先に実行する**こと (`withoutVite()` は Browser lane に適用されない)。
 

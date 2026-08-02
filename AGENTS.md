@@ -191,3 +191,13 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
    (bytes_used + bytes_pending) 経由のみ。予約 (`take_upload_reservations`) の状態遷移は
    pending→verifying (claim)→completed/released の CAS で行い、直接 UPDATE を書かない。
    運用契約 (media queue worker / 孤児掃除 cron) は `docs/architecture.md` §撮影 PWA
+3. **サポート対象ブラウザと bfcache の扱い**: 「どのブラウザで何をどこまで保証しているか」の
+   正本は **`docs/supported-browsers.md`**。撮影 PWA の主戦場は iOS Safari であり、Safari は
+   `Cache-Control: no-store` でも bfcache に格納しうるため、認証済み画面は
+   サーバ側 no-store baseline (`NoStoreCacheHeadersForAuthenticatedPages`) と
+   クライアント側の bfcache 秘匿・再検証 (`resources/js/lib/bfcache-guard.ts` +
+   `session.status` プローブ) の **セット**で守る。
+   bfcache guard / 秘匿スタイル / プローブ endpoint に手を入れたら、
+   `docs/supported-browsers.md` の**実機受入確認の再確認条件**に従って再確認する。
+   Browser テストは **Chromium + WebKit の 2 レーン**が契約 (`docs/testing-browser.md`)。
+   実行時間を理由に WebKit レーンを落とさない (復元シナリオの恒久回帰が消えるため)
