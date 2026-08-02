@@ -63,8 +63,28 @@ function bughuntGateBraceWindow(string $source, string $name): string
 }
 
 /**
+ * `local ...` 行が「副作用を持たない引数束縛」かを判定する。
+ *
+ * bash の `local x="$(cmd)"` / `local x=`cmd`` / `local x=$(< <(cmd))` は **コマンドを実行する**。
+ * `local` を一律で前置きとみなすと、gate より前に任意コマンドを差し込めてしまい
+ * 「gate が最初の実効文」の保証が silent hole になる (impl-review R1 Critical)。
+ * したがって command substitution / process substitution / backtick を含む `local` は
+ * **実効文として扱う** (= gate より前にあれば fail させる)。
+ */
+function bughuntGateIsInertLocal(string $trimmed): bool
+{
+    if (preg_match('/^local\s/', $trimmed) !== 1) {
+        return false;
+    }
+
+    // $(...) / `...` / <(...) / >(...) はいずれもコマンドを起動する。
+    return preg_match('/\$\(|`|<\(|>\(/', $trimmed) !== 1;
+}
+
+/**
  * 関数窓から「最初の実効文」を返す。関数定義行・`{`・コメント・空行・引数束縛のみの
  * `local ...` 宣言は読み飛ばす (= 副作用を持たない前置き)。
+ * ただしコマンド置換を含む `local` は副作用を持つため読み飛ばさない。
  *
  * aigenba 版の「gate が特定の呼び出しより前に現れる」より強く、「gate が最初の実効文である」
  * ことを直接固定する (AI-CUE の cmd_teardown は aigenba と本体構造が異なり、
@@ -80,8 +100,8 @@ function bughuntGateFirstEffectiveStatement(string $window): string
         if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*\(\)\s*\{?$/', $trimmed) === 1) {
             continue; // 関数定義行
         }
-        if (preg_match('/^local\s/', $trimmed) === 1) {
-            continue; // 引数束縛 (副作用なし)
+        if (bughuntGateIsInertLocal($trimmed)) {
+            continue; // 引数束縛のみ (副作用なし)
         }
 
         return $trimmed;
@@ -221,6 +241,33 @@ test('負のコントロール: gate が副作用の後ろに落ちた配線を�
     SH;
     expect(bughuntGateFirstEffectiveStatement(bughuntGateFunctionWindow($good, 'cmd_provision')))
         ->toMatch('/^require_orchestrator\s+"provision"/');
+});
+
+test('負のコントロール: コマンド置換を含む local を gate より前に置いた配線を検出する', function (): void {
+    // `local x="$(cmd)"` は cmd を実行する = 副作用。gate の前に置けてはならない。
+    $broken = <<<'SH'
+    cmd_provision() {
+        local shard=$1 run_id=$2
+        local db="$(dropdb --if-exists app_dev)"
+        require_orchestrator "provision"
+    }
+    cmd_teardown() {
+        :
+    }
+    SH;
+    $first = bughuntGateFirstEffectiveStatement(bughuntGateFunctionWindow($broken, 'cmd_provision'));
+    expect($first)->toBe('local db="$(dropdb --if-exists app_dev)"');
+    expect($first)->not->toMatch('/^require_orchestrator/');
+
+    // backtick / process substitution も同様に実効文として扱う。
+    foreach (['local db=`shard_db 0`', 'local fd=<(psql -c "drop database app_dev")'] as $line) {
+        expect(bughuntGateIsInertLocal($line))->toBeFalse("コマンド起動を含む local を前置き扱いした: {$line}");
+    }
+
+    // 正のコントロール: 純粋な引数束縛は前置き扱いのまま (実スクリプトの現行形)。
+    foreach (['local shard=$1 run_id=$2', 'local n=$1 hold=${2:-}', 'local run_id=$1 drop_db=${2:-}'] as $line) {
+        expect(bughuntGateIsInertLocal($line))->toBeTrue("純粋な引数束縛を実効文扱いした: {$line}");
+    }
 });
 
 test('負のコントロール: default-deny を fail-open にした require_orchestrator を検出する', function (): void {

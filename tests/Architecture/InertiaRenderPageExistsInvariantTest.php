@@ -181,6 +181,24 @@ function inertiaLiteralValue(string $raw): ?string
 }
 
 /**
+ * PHP のクラス名・関数名は case-insensitive なので、`inertia::render` / `INERTIA::render` /
+ * `\INERTIA(...)` も実際に facade / helper を呼ぶ。厳密一致で判定すると走査をすり抜けて
+ * **黙って穴が開く**ため、識別子比較は全て case 無視で行う (impl-review R1 Warning)。
+ */
+function inertiaIsIdentifier(string $text, string $expected): bool
+{
+    return strcasecmp($text, $expected) === 0;
+}
+
+/**
+ * `Inertia\Inertia` (FQCN / qualified) を指す名前か。case 無視。
+ */
+function inertiaIsFacadeName(string $text): bool
+{
+    return str_ends_with(strtolower($text), 'inertia\\inertia');
+}
+
+/**
  * 1 ファイル分の PHP ソースを token 走査し、Inertia ページ参照を収集する (純関数)。
  *
  * @return array{
@@ -208,7 +226,7 @@ function inertiaCollectFromSource(string $source, string $relative): array
         // 走査は正準形 `Inertia::render` を前提にする。FQCN (`\Inertia\Inertia::render`) /
         // qualified / alias import (`use Inertia\Inertia as X`) が増えると silent hole になる。
         if ($token->is([T_NAME_FULLY_QUALIFIED, T_NAME_QUALIFIED])
-            && str_ends_with($token->text, 'Inertia\\Inertia')) {
+            && inertiaIsFacadeName($token->text)) {
             $colonIndex = inertiaNextSignificant($tokens, $i + 1);
             if ($colonIndex !== null && $tokens[$colonIndex]->is(T_DOUBLE_COLON)) {
                 $nonCanonical[] = "{$relative}:{$token->line} ({$token->text}:: 形は正準形 Inertia:: に統一)";
@@ -220,7 +238,7 @@ function inertiaCollectFromSource(string $source, string $relative): array
             $nameIndex = inertiaNextSignificant($tokens, $i + 1);
             if ($nameIndex !== null
                 && $tokens[$nameIndex]->is([T_NAME_QUALIFIED, T_NAME_FULLY_QUALIFIED, T_STRING])
-                && str_ends_with($tokens[$nameIndex]->text, 'Inertia\\Inertia')) {
+                && inertiaIsFacadeName($tokens[$nameIndex]->text)) {
                 $asIndex = inertiaNextSignificant($tokens, $nameIndex + 1);
                 if ($asIndex !== null && $tokens[$asIndex]->is(T_AS)) {
                     $nonCanonical[] = "{$relative}:{$token->line} (use Inertia\\Inertia as ... の alias import 禁止)";
@@ -231,15 +249,15 @@ function inertiaCollectFromSource(string $source, string $relative): array
         }
 
         // ---- Route::inertia 検出 (ページ名が走査対象外になるため禁止) ----
-        $isRouteFacade = ($token->is(T_STRING) && $token->text === 'Route')
+        $isRouteFacade = ($token->is(T_STRING) && inertiaIsIdentifier($token->text, 'Route'))
             || ($token->is([T_NAME_FULLY_QUALIFIED, T_NAME_QUALIFIED])
-                && str_ends_with($token->text, 'Facades\\Route'));
+                && str_ends_with(strtolower($token->text), 'facades\\route'));
         if ($isRouteFacade) {
             $colonIndex = inertiaNextSignificant($tokens, $i + 1);
             if ($colonIndex !== null && $tokens[$colonIndex]->is(T_DOUBLE_COLON)) {
                 $methodIndex = inertiaNextSignificant($tokens, $colonIndex + 1);
                 if ($methodIndex !== null && $tokens[$methodIndex]->is(T_STRING)
-                    && $tokens[$methodIndex]->text === 'inertia') {
+                    && inertiaIsIdentifier($tokens[$methodIndex]->text, 'inertia')) {
                     $routeInertia[] = "{$relative}:{$token->line}";
 
                     continue;
@@ -250,28 +268,29 @@ function inertiaCollectFromSource(string $source, string $relative): array
         $callKind = null;
         $openIndex = null;
 
-        // ---- Inertia::render( 検出 ----
-        if ($token->is(T_STRING) && $token->text === 'Inertia') {
+        // ---- Inertia::render( 検出 (識別子は case 無視) ----
+        if ($token->is(T_STRING) && inertiaIsIdentifier($token->text, 'Inertia')) {
             $colonIndex = inertiaNextSignificant($tokens, $i + 1);
-            if ($colonIndex === null || ! $tokens[$colonIndex]->is(T_DOUBLE_COLON)) {
-                continue;
+            // `::` が続かない場合は helper 呼び出し `Inertia(...)` の可能性があるため下へ落とす
+            // (case 無視判定にした結果、helper 名と facade 名が同一 token になりうるため)。
+            if ($colonIndex !== null && $tokens[$colonIndex]->is(T_DOUBLE_COLON)) {
+                $methodIndex = inertiaNextSignificant($tokens, $colonIndex + 1);
+                if ($methodIndex === null || ! $tokens[$methodIndex]->is(T_STRING)
+                    || ! inertiaIsIdentifier($tokens[$methodIndex]->text, 'render')) {
+                    continue; // Inertia::share() / Inertia::class 等はページ参照ではない
+                }
+                $parenIndex = inertiaNextSignificant($tokens, $methodIndex + 1);
+                if ($parenIndex === null || $tokens[$parenIndex]->text !== '(') {
+                    continue;
+                }
+                $callKind = 'Inertia::render';
+                $openIndex = $parenIndex;
             }
-            $methodIndex = inertiaNextSignificant($tokens, $colonIndex + 1);
-            if ($methodIndex === null || ! $tokens[$methodIndex]->is(T_STRING)
-                || $tokens[$methodIndex]->text !== 'render') {
-                continue;
-            }
-            $parenIndex = inertiaNextSignificant($tokens, $methodIndex + 1);
-            if ($parenIndex === null || $tokens[$parenIndex]->text !== '(') {
-                continue;
-            }
-            $callKind = 'Inertia::render';
-            $openIndex = $parenIndex;
         }
 
-        // ---- inertia( / \inertia( helper 検出 ----
-        $isHelperName = ($token->is(T_STRING) && $token->text === 'inertia')
-            || ($token->is(T_NAME_FULLY_QUALIFIED) && $token->text === '\\inertia');
+        // ---- inertia( / \inertia( helper 検出 (case 無視) ----
+        $isHelperName = ($token->is(T_STRING) && inertiaIsIdentifier($token->text, 'inertia'))
+            || ($token->is(T_NAME_FULLY_QUALIFIED) && inertiaIsIdentifier($token->text, '\\inertia'));
         if ($callKind === null && $isHelperName) {
             $prevIndex = inertiaPrevSignificant($tokens, $i - 1);
             if ($prevIndex !== null) {
@@ -467,6 +486,71 @@ test('正のコントロール: 実在するページ名の literal は検出し
     $refs = inertiaCollectFromSource($fixture, 'fixture.php');
     expect(array_column($refs['literals'], 'page'))->toBe(['Dashboard']);
     expect(is_file(inertiaPageComponentPath('Dashboard')))->toBeTrue();
+});
+
+/*
+ * 負のコントロール: PHP の識別子は case-insensitive なので、大文字小文字を変えた呼び出しも
+ * 実際に facade / helper を呼ぶ。厳密一致で判定していると走査をすり抜けて黙って穴が開く
+ * (impl-review R1 Warning)。
+ */
+test('負のコントロール: case 違いの Inertia 呼び出しも走査対象になる', function (): void {
+    $fixture = <<<'PHP'
+    <?php
+    use Inertia\Inertia;
+    class FixtureController {
+        public function lowerFacade() {
+            return inertia::render('Totally/Missing/Lower');
+        }
+        public function upperHelper() {
+            return Inertia('Totally/Missing/Upper');
+        }
+        public function upperRender() {
+            return Inertia::RENDER('Totally/Missing/Render');
+        }
+    }
+    PHP;
+
+    $refs = inertiaCollectFromSource($fixture, 'fixture.php');
+    expect(array_column($refs['literals'], 'page'))->toBe([
+        'Totally/Missing/Lower',
+        'Totally/Missing/Upper',
+        'Totally/Missing/Render',
+    ]);
+    foreach ($refs['literals'] as $ref) {
+        expect(is_file(inertiaPageComponentPath($ref['page'])))->toBeFalse();
+    }
+
+    // Route::inertia / FQCN の非正準形も case 違いで見逃さない。
+    $routeInertia = <<<'PHP'
+    <?php
+    ROUTE::Inertia('/static', 'Static/Page');
+    PHP;
+    expect(inertiaCollectFromSource($routeInertia, 'fixture.php')['routeInertia'])->toHaveCount(1);
+
+    $fqcn = <<<'PHP'
+    <?php
+    return \inertia\inertia::render('Dashboard', []);
+    PHP;
+    expect(inertiaCollectFromSource($fqcn, 'fixture.php')['nonCanonical'])->toHaveCount(1);
+});
+
+test('正のコントロール: Inertia:: の非 render メソッドはページ参照として拾わない', function (): void {
+    $fixture = <<<'PHP'
+    <?php
+    use Inertia\Inertia;
+    class FixtureServiceProvider {
+        public function boot() {
+            Inertia::share('appName', 'AI-CUE');
+            Inertia::version(fn () => 'v1');
+            $class = Inertia::class;
+        }
+    }
+    PHP;
+
+    $refs = inertiaCollectFromSource($fixture, 'fixture.php');
+    expect($refs['literals'])->toBe([]);
+    expect($refs['dynamics'])->toBe([]);
+    expect($refs['nonCanonical'])->toBe([]);
 });
 
 test('負のコントロール: 非 literal / Route::inertia / 非正準形を検出する', function (): void {

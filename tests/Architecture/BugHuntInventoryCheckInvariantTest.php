@@ -73,6 +73,22 @@ function bhicRemoveSandbox(string $sandbox): void
 }
 
 /**
+ * python3 の存在を **前提条件として固定**する (skip しない)。
+ *
+ * bug-hunt-inventory-check.sh は route:list の突合に `python3 -c` を使う (AGENTS.md §bug-hunt:
+ * 「Python ツールは stdlib のみ」)。python3 が無い環境ではスクリプト自体が動かないため、
+ * skip して green にすると「exit code 規約が未検証のまま合格」になる (impl-review R1 Warning)。
+ * 環境不備は skip ではなく fail として顕在化させる。
+ */
+function bhicRequirePython3(): void
+{
+    expect((new Process(['which', 'python3']))->run())->toBe(
+        0,
+        'python3 が PATH に無い。bug-hunt-inventory-check.sh は python3 必須 (環境不備を skip で隠さない)'
+    );
+}
+
+/**
  * sandbox 内でスクリプトを走らせ [exitCode, output] を返す。
  *
  * @return array{0: int|null, 1: string}
@@ -112,9 +128,7 @@ test('インベントリ正本が .claude/skills/app-bug-hunt/{screens,operation
 });
 
 test('exit code 規約 0=一致 / 3=ドリフト を実走で満たすこと (sandbox / DB 不使用)', function (): void {
-    if ((new Process(['which', 'python3']))->run() !== 0) {
-        $this->markTestSkipped('python3 が PATH に無いため exit code 実走検証を skip');
-    }
+    bhicRequirePython3();
 
     $screens = "# screens\n\n| ルート名 | URI |\n|---|---|\n| dashboard | /dashboard |\n";
     $operations = "# operations\n\n| ルート名 | 操作 |\n|---|---|\n| projects.store | 作成 |\n";
@@ -138,9 +152,7 @@ test('exit code 規約 0=一致 / 3=ドリフト を実走で満たすこと (sa
  * gate が空振り (常に 0) でないことをここで担保する。
  */
 test('負のコントロール: 未追記ルートがあれば exit 3 (ドリフト) になること', function (): void {
-    if ((new Process(['which', 'python3']))->run() !== 0) {
-        $this->markTestSkipped('python3 が PATH に無いため exit code 実走検証を skip');
-    }
+    bhicRequirePython3();
 
     $screens = "# screens\n\n| ルート名 | URI |\n|---|---|\n| dashboard | /dashboard |\n";
     $operations = "# operations\n\n| ルート名 | 操作 |\n|---|---|\n| projects.store | 作成 |\n";
@@ -175,9 +187,7 @@ test('負のコントロール: 未追記ルートがあれば exit 3 (ドリフ
 });
 
 test('負のコントロール: route:list 取得に失敗したとき exit 0 (fail-open) を返さないこと', function (): void {
-    if ((new Process(['which', 'python3']))->run() !== 0) {
-        $this->markTestSkipped('python3 が PATH に無いため exit code 実走検証を skip');
-    }
+    bhicRequirePython3();
 
     $sandbox = bhicMakeSandbox(
         [['method' => 'GET|HEAD', 'uri' => 'dashboard', 'middleware' => ['web'], 'name' => 'dashboard']],
