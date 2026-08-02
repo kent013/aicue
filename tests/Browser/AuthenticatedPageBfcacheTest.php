@@ -23,9 +23,12 @@ use Pest\Browser\Playwright\Playwright;
 | レーンの位置づけ (docs/supported-browsers.md):
 |   - 復元シナリオ (2/3/4) の正本は **WebKit レーン**。Chromium は `no-store` ページを
 |     bfcache から evict するため、そもそも復元を再現できない。
-|   - **ただし実測結果**: Playwright は自動化インスペクタを接続した状態でブラウザを起動する
-|     ため、**Chromium / WebKit のどちらも bfcache 復元を行わない** (`no-store` の無い公開
-|     ページ間ですら復元されないことを実測)。復元シナリオはこのハーネスでは成立しない。
+|   - **ただし実測結果**: **Chromium / WebKit のどちらのレーンでも bfcache 復元が起きない**
+|     (`no-store` の無い公開ページ間ですら復元されないことを実測)。
+|     Chromium の原因は特定済みで、**Playwright が既定の起動スイッチに
+|     `--disable-back-forward-cache` を渡している**ため (pest-plugin-browser が launch-options を
+|     ハードコードしており外せない)。WebKit 側の原因は未特定。
+|     詳細と対処方針は docs/supported-browsers.md。復元シナリオはこのハーネスでは成立しない。
 |   - そのため 2/3/4 は **ハーネスの bfcache 再現能力を毎回実測**し、再現できない環境では
 |     skip する (= その環境では**自動回帰で担保されていない**ことを出力に明示する)。
 |     再現できる環境では下記の正のコントロールが厳格に効く。
@@ -80,8 +83,9 @@ function bfcacheSkipUnlessRestoreIsReproducible(): void
 
     test()->markTestSkipped(
         "このハーネス (lane={$lane}) は bfcache 復元を再現できない "
-        .'(Playwright は自動化インスペクタ接続下でブラウザを起動するため、'
-        .'no-store の無い公開ページですら「戻る」で復元されないことを実測)。'
+        .'(no-store の無い公開ページですら「戻る」で復元されないことを実測。'
+        .'Chromium は Playwright 既定の --disable-back-forward-cache が原因、'
+        .'WebKit は原因未特定。docs/supported-browsers.md 参照)。'
         .'=> このシナリオは自動回帰で担保されていない。分岐ロジックは '
         .'tests/js/lib/bfcache-guard.test.ts が、実機挙動は docs/supported-browsers.md の '
         .'実機受入確認が受け持つ。',

@@ -47,6 +47,19 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
   未登録 param の出現は `RouteBindingTypeConstraintInventoryTest` が fail させる
   (未知 param を数値と推測しない)。実挙動 (非適合 → 404) は
   `tests/Feature/Routing/RouteBindingTypeConstraintTest` が pgsql 実接続で固定する
+- **`MANUALLY_RESOLVED` (IV-9(a) の免除)**: controller が implicit binding を使わず
+  手動解決する param は action 引数が string になるため、**「param 名 + route identity」の
+  両方**で免除登録する (param 名だけの免除は同名 param を使う将来 route を丸ごと素通りさせる)。
+  免除しても pattern の型制約と PK 型検査は効き続ける。現在の登録は
+  `{notification}` × `notifications.open` / `notifications.read` のみ
+  (cross-user 404 = 存在オラクル封じのため `$user->notifications()` 経由で解決する)
+- **route identity の規約**: route name を第一とし、name 無し route は
+  `method:uri` signature (method は昇順ソート・暗黙の `HEAD` は除外)。
+  **Livewire の endpoint prefix (`livewire-<APP_KEY 由来 8 桁ハッシュ>`) は `livewire/` へ
+  正規化**してから identity にする (正規化しないと APP_KEY ごとに inventory が壊れる)
+- **`NON_MODEL` は実 route 走査の結果だけを登録する**: 現在は `intent` / `provider` /
+  `userId` の 3 件。routes に現れない param を残すと IV-2 (逆方向検査) が
+  陳腐化した登録として fail させる
 
 ## ドメインモデル (テンプレート同梱)
 

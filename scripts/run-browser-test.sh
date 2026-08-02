@@ -9,7 +9,9 @@
 #     (上書きは BROWSER_TEST_PROCESSES=N。2 以上でのみ parallel runner を使う。理由は下記)。
 #   - **Chromium / WebKit の 2 レーンを実行する契約**。bfcache 復元シナリオ
 #     (tests/Browser/AuthenticatedPageBfcacheTest.php) は Chromium では再現できず
-#     (no-store ページを bfcache から evict するため)、WebKit レーンが正本になる。
+#     (Playwright 既定の --disable-back-forward-cache で bfcache 自体が無効。
+#      仮に有効化しても no-store ページは cookie 変更で evict される)、
+#     WebKit レーンが正本になる (ただし WebKit も現状は復元せず skip。原因未特定)。
 #     実行時間を理由に WebKit を落とすことはしない (落とすと恒久自動回帰が消える)。
 #     レーンの意味と保証範囲は docs/supported-browsers.md。
 #     レーン限定実行は BROWSER_TEST_LANES="chromium" のように上書きする。

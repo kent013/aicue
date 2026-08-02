@@ -265,7 +265,7 @@ function routeBindingExternalViolations(array $routes, array $external, array $t
  * @param  array<string, class-string<Model>>  $bigint
  * @param  array<string, class-string<Model>>  $uuid
  * @param  array<string, list<string>>  $allowedFields
- * @param  array<string, string>  $manuallyResolved
+ * @param  array<string, array{routes: list<string>, reason: string}>  $manuallyResolved
  * @return list<string>
  */
 function routeBindingResolutionViolations(
@@ -286,8 +286,12 @@ function routeBindingResolutionViolations(
 
             $identity = routeBindingIdentity($route);
 
-            // (a) action 引数の型
-            if (! array_key_exists($param, $manuallyResolved)) {
+            // (a) action 引数の型。
+            // 免除は「param 名 + route identity」の両方が一致したときのみ (param 名だけの
+            // 免除にすると同名 param を使う将来 route が丸ごと素通りする)。
+            $isManuallyResolvedHere = in_array($identity, $manuallyResolved[$param]['routes'] ?? [], true);
+
+            if (! $isManuallyResolvedHere) {
                 $signature = null;
                 foreach ($route->signatureParameters() as $parameter) {
                     if ($parameter->getName() === $param) {
@@ -499,12 +503,21 @@ it('IV-9: BIGINT/UUID param の binding 解決が宣言と一致する', functio
     expect($violations)->toBe([], implode(' / ', $violations));
 });
 
-it('IV-9 補: MANUALLY_RESOLVED は BIGINT/UUID 宣言済み param にのみ理由付きで登録される', function (): void {
+it('IV-9 補: MANUALLY_RESOLVED は BIGINT/UUID 宣言済み param に route identity + 理由付きで登録される', function (): void {
     $typed = [...array_keys(RouteBindingTypes::BIGINT), ...array_keys(RouteBindingTypes::UUID)];
+    $identities = array_map(routeBindingIdentity(...), routeBindingAllRoutes());
 
-    foreach (RouteBindingTypes::MANUALLY_RESOLVED as $param => $reason) {
+    foreach (RouteBindingTypes::MANUALLY_RESOLVED as $param => $entry) {
         expect(in_array($param, $typed, true))->toBeTrue("{$param} は BIGINT/UUID に宣言されていない");
-        expect(trim($reason))->not->toBe('', "{$param} の手動解決理由を記述すること");
+        expect(trim($entry['reason']))->not->toBe('', "{$param} の手動解決理由を記述すること");
+        expect($entry['routes'])->not->toBe([], "{$param} の免除対象 route identity を列挙すること");
+
+        foreach ($entry['routes'] as $identity) {
+            // 陳腐化した免除 (削除済み route への登録) を残さない
+            expect(in_array($identity, $identities, true))->toBeTrue(
+                "MANUALLY_RESOLVED[{$param}] の route identity '{$identity}' が実在しない",
+            );
+        }
     }
 });
 
@@ -570,6 +583,24 @@ it('負のコントロール IV-9(a): モデル型 typehint 無しの {user} は
         RouteBindingTypes::UUID,
         RouteBindingTypes::ALLOWED_BINDING_FIELDS,
         [],
+    );
+
+    expect($violations)->not->toBe([]);
+});
+
+it('負のコントロール IV-9(a): MANUALLY_RESOLVED 未登録 route の同名 param は免除されない', function (): void {
+    // 免除済み param ({notification}) を **別の route** で typehint 無しに使うケース。
+    // param 名だけの免除だとこれが素通りしてしまうため、identity 単位であることを固定する。
+    $router = routeBindingFixtureRouter();
+    $router->post('/fixture/notifications/{notification}/archive', static fn (string $notification): string => $notification)
+        ->name('fixture.notifications.archive');
+
+    $violations = routeBindingResolutionViolations(
+        array_values($router->getRoutes()->getRoutes()),
+        RouteBindingTypes::BIGINT,
+        RouteBindingTypes::UUID,
+        RouteBindingTypes::ALLOWED_BINDING_FIELDS,
+        RouteBindingTypes::MANUALLY_RESOLVED,
     );
 
     expect($violations)->not->toBe([]);

@@ -82,14 +82,23 @@ final class RouteBindingTypes
      * (action 引数は string になるため)。除外しても pattern の型制約 (IV-3 / IV-4) と
      * 手動解決先の PK 型 (IV-9(c)) は引き続き検証されるため、22P02 / 22003 防御は落ちない。
      *
-     * **除外は param ごとに理由を書いて登録する**(暗黙の素通しを作らない)。
+     * **除外は「param 名 + route identity」単位**で登録する (impl-review R1 Warning)。
+     * param 名だけで除外すると、将来同名 param を使う**別 route が丸ごと免除**され
+     * deny-by-default の穴になる。列挙されていない route で同じ param が現れたら
+     * IV-9(a) は通常どおり fail する。
      *
-     * @var array<string, string> param 名 => 手動解決している理由
+     * route identity の規約は `routeBindingIdentity()` と同じ (name 優先 / 無ければ
+     * `method:uri`)。identity の実在は IV-9 補が検証する (陳腐化した登録を残さない)。
+     *
+     * @var array<string, array{routes: list<string>, reason: string}>
      */
     public const MANUALLY_RESOLVED = [
         // NotificationController は $request->user()->notifications() 経由で解決する
         // (他ユーザーの通知 id は「存在しない」と同じ 404 = 存在オラクル封じ)。
-        'notification' => 'cross-user 404 のため controller が $user->notifications() 経由で解決する',
+        'notification' => [
+            'routes' => ['notifications.open', 'notifications.read'],
+            'reason' => 'cross-user 404 のため controller が $user->notifications() 経由で解決する',
+        ],
     ];
 
     /**

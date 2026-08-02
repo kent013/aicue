@@ -32,10 +32,20 @@ bfcache 周りの設計判断はすべてこの前提から来ている
 
 ### bfcache 復元が自動回帰でカバーできていない理由 (実測)
 
-**Playwright は自動化インスペクタを接続した状態でブラウザを起動するため、Chromium /
-WebKit のどちらも「戻る」で bfcache 復元を行わない**。
+**Chromium / WebKit のどちらのレーンでも「戻る」で bfcache 復元が起きない**。
 `Cache-Control: no-store` の付かない公開ページ間ですら、戻ると JS 実行コンテキストごと
 作り直される (= 通常の再取得) ことを実測している。
+
+原因はレーンごとに異なり、**片方は原因が特定できている**:
+
+| レーン | 原因 | 状態 |
+|--------|------|------|
+| **Chromium** | **Playwright が既定の起動スイッチに `--disable-back-forward-cache` を渡している** (`playwright-core` の chromium switches に固定で含まれる。playwright 1.61.1 で確認)。`no-store` による evict 以前に、**bfcache 機構そのものがブラウザ起動時点で無効**になっている | **原因特定済み**。`launch` に `ignoreDefaultArgs: ['--disable-back-forward-cache']` を渡せば有効化できるが、`pest-plugin-browser` (`Playwright/Client.php::connectTo()`) が launch-options を **ハードコード**しており、プラグイン側の対応か vendor patch が要る |
+| **WebKit** | **未特定**。Playwright の WebKit ビルド / automation セッションで page cache が使われない可能性があるが、確証は取れていない | **要調査**。復元シナリオの正本レーンなのでここが本丸 |
+
+> 「Playwright は自動化インスペクタを接続しているから bfcache が効かない」という説明は
+> **Chromium については誤り**である (原因は上記の起動スイッチ)。誤った原因を残すと
+> 対処の方向を誤らせるため、判明した事実だけを書く。
 
 そのため `tests/Browser/AuthenticatedPageBfcacheTest.php` のシナリオ 2〜4 は、
 **ハーネスの bfcache 再現能力を毎回実測**し、再現できない環境では理由付きで skip する。
@@ -64,8 +74,10 @@ vitest のユニットテスト (分岐ロジック) と実機受入確認 (未�
 ## 未対応事項 (誤読を防ぐため明示列挙する)
 
 - **どちらのレーンも bfcache 復元そのものを再現していない** (上記「実測」節)。
-  Chromium は加えて、cookie 変更時に CCNS (`Cache-Control: no-store`) ページを
-  bfcache から evict する仕様でもある。
+  Chromium は Playwright の起動スイッチで bfcache 自体が無効。仮に有効化しても、
+  cookie 変更時に CCNS (`Cache-Control: no-store`) ページを bfcache から evict する仕様のため
+  **シナリオ 4 (ログアウト後の復元) は Chromium では原理的に再現できない**
+  (シナリオ 2・3 は有効化すれば再現しうる)。
 - **Playwright WebKit ≠ 実機 iOS Safari**。bfcache 挙動・PWA standalone モード・
   iOS 固有の WebKit ビルド差がある。WebKit レーンの green を
   **「iOS Safari 対応を実証した」と言い換えない**。
@@ -76,7 +88,7 @@ vitest のユニットテスト (分岐ロジック) と実機受入確認 (未�
 
 | 目標 | 現状 |
 |------|------|
-| **bfcache 復元シナリオの恒久自動回帰** (Playwright 側が bfcache を無効化しない構成、または別ハーネス) | **未達** — 現状は分岐ロジックの vitest のみ |
+| **bfcache 復元シナリオの恒久自動回帰** (Chromium: `--disable-back-forward-cache` を外せる launch-options 経路 / WebKit: page cache が効かない原因の特定、または別ハーネス) | **未達** — 現状は分岐ロジックの vitest のみ |
 | iOS Safari 実機での受入確認を**定期的に**回す (再確認条件のトリガ運用) | 未着手 |
 | Android Chrome 実機での撮影フロー確認 | 未着手 |
 
