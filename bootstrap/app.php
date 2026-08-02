@@ -11,6 +11,7 @@ use App\Http\Middleware\EnsureProjectBelongsToCurrentOrganization;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\IdempotentRequest;
 use App\Http\Middleware\McpConsentOrganizationBinder;
+use App\Http\Middleware\NoStoreCacheHeadersForAuthenticatedPages;
 use App\Http\Middleware\RedirectToHttps;
 use App\Http\Middleware\RequireActiveSubscription;
 use App\Http\Middleware\RequireApiKeyAbility;
@@ -87,6 +88,10 @@ return Application::configure(basePath: dirname(__DIR__))
             // 未準拠者の disable は (1) が先に弾く)
             RequireTwoFactorForEnforcedOrganizations::class,
             BlockTwoFactorDisableForEnforcedOrganizations::class,
+            // 認証済み応答の no-store baseline。
+            // 契約: $next から返った (= 下流の) 応答を確認し、既に `no-store` を持つなら変更しない。
+            // (位置関係ではなくこの契約が正本。実効性は Feature テストが固定する)
+            NoStoreCacheHeadersForAuthenticatedPages::class,
         ]);
 
         // パスワード変更/リセット時に他デバイスのセッション・remember-me を確実に失効させるため、
