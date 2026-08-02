@@ -635,13 +635,6 @@ class StdinTwoPassTest(unittest.TestCase):
     修正前は 2 回目の read が空になり、annotate 出力が静かに 0 件になっていた。
     """
 
-    def _empty_globs_file(self):
-        import tempfile
-        f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
-        f.write("[]")
-        f.close()
-        return f.name
-
     def _run_stdin(self, findings, adj_lines):
         import contextlib, pathlib, tempfile
         payload = "\n".join(json.dumps(x, ensure_ascii=False) for x in findings) + "\n"
@@ -649,6 +642,10 @@ class StdinTwoPassTest(unittest.TestCase):
             ap = pathlib.Path(d) / "adj.jsonl"
             ap.write_text("\n".join(json.dumps(x, ensure_ascii=False) for x in adj_lines),
                           encoding="utf-8")
+            # 一時ファイルは TemporaryDirectory 配下に置き、テスト終了時に確実に回収する
+            # (delete=False の NamedTemporaryFile だと実行のたび /tmp に残留する。impl-review R1 Suggestion)
+            gp = pathlib.Path(d) / "changed-globs.json"
+            gp.write_text("[]", encoding="utf-8")
             out, err = io.StringIO(), io.StringIO()
             import sys as _sys
             old_stdin = _sys.stdin
@@ -657,7 +654,7 @@ class StdinTwoPassTest(unittest.TestCase):
                 with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
                     code = v.main(["-", "--adjudications", str(ap), "--annotate",
                                    "--run-id", "20260701-020000",
-                                   "--changed-globs-file", self._empty_globs_file()])
+                                   "--changed-globs-file", str(gp)])
             finally:
                 _sys.stdin = old_stdin
             recs = [json.loads(l) for l in out.getvalue().splitlines() if l.startswith("{")]
