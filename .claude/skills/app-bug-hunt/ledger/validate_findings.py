@@ -136,9 +136,14 @@ def validate_record(rec: dict) -> list:
     return errs
 
 
-def analyze(path) -> Report:
+def analyze(path, text=None) -> Report:
+    """text 指定時はそれを読む (stdin `-` + --annotate の 2-pass 用に親でバッファする)。"""
+    import io as _io
     rep = Report()
-    lines = sys.stdin if path == "-" else open(path, encoding="utf-8")
+    if text is not None:
+        lines = _io.StringIO(text)
+    else:
+        lines = sys.stdin if path == "-" else open(path, encoding="utf-8")
     with lines as fh:
         for lineno, raw in enumerate(fh, 1):
             raw = raw.strip()
@@ -194,7 +199,11 @@ import fnmatch
 
 ADJ_VERDICTS = {"false_positive", "intentional", "wont_fix"}
 SCOPE_KINDS = {"route_name", "screen_id", "path_glob"}
-COND_KEYS = {"viewport", "auth_role", "browser", "feature_flag", "precondition"}
+# mode/env は bug-hunt harness の第一級ディメンション (manifest.real_mode / 走行環境)。
+# fake 限定の偽陽性を real モードの実退行に誤適用しないための load-bearing な条件なので、
+# generic な precondition に潰さず governed key として持つ (spirux HARNESS-01 の教訓:
+# 旧 COND_KEYS に mode/env が無く schema drift → fail-closed で抑制が全面停止した)。
+COND_KEYS = {"viewport", "auth_role", "browser", "feature_flag", "precondition", "mode", "env"}
 ADJ_REQUIRED = [
     "adjudication_id", "species_key", "scope", "conditions", "symptom", "verdict",
     "rationale_ref", "source_finding_ids", "adjudicated_at_run", "adjudicated_at_commit",
@@ -324,9 +333,14 @@ def validate_adjudications(adjs: list) -> list:
     return errors
 
 
-def load_jsonl(path) -> list:
+def load_jsonl(path, text=None) -> list:
+    """text 指定時はファイルを開かずそれを parse する (stdin `-` 経路の 2-pass 用)。"""
     out = []
-    with open(path, encoding="utf-8") as fh:
+    if text is not None:
+        fh = text.splitlines()
+    else:
+        fh = open(path, encoding="utf-8")
+    try:
         for lineno, raw in enumerate(fh, 1):
             s = raw.strip()
             if not s or s.startswith("#"):
@@ -335,6 +349,9 @@ def load_jsonl(path) -> list:
                 out.append((lineno, json.loads(s), s))
             except json.JSONDecodeError:
                 out.append((lineno, None, s))
+    finally:
+        if text is None:
+            fh.close()
     return out
 
 
@@ -640,7 +657,10 @@ def main(argv=None) -> int:
     ap.add_argument("--changed-globs-file", help="JSON list of adjudication_ids treated as asset-changed (test/CI)")
     args = ap.parse_args(argv)
 
-    rep = analyze(args.path)
+    # stdin `-` は 1 度しか読めないため、annotate の 2-pass (analyze + findings 再読) 用に
+    # ここでバッファする (親フローの `cat shard-*/findings.jsonl | validate_findings.py -` 互換)。
+    stdin_text = sys.stdin.read() if args.path == "-" else None
+    rep = analyze(args.path, text=stdin_text)
     summary = to_summary(rep)
 
     adj_errors = []
@@ -653,7 +673,7 @@ def main(argv=None) -> int:
             changed_map = None
             if args.changed_globs_file:
                 changed_map = set(json.load(open(args.changed_globs_file, encoding="utf-8")))
-            findings = [a for _, a, _ in load_jsonl(args.path) if isinstance(a, dict)]
+            findings = [a for _, a, _ in load_jsonl(args.path, text=stdin_text) if isinstance(a, dict)]
             # fail-closed: registry に 1 件でも error (per-entry / cycle 等の global) があれば、
             # 壊れた台帳は**一切信頼しない**(抑制ゼロ=全 finding actionable のまま) + exit 1 で loud に失敗。
             # (line-based 除外だと lineno=0 の global error を落とせないため all-or-nothing にする。Codex impl-R2)
