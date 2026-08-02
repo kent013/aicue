@@ -28,6 +28,9 @@
 | T079 | 決済parity P8a: 裏チャージ | backend | オートリチャージ+リコンサイル | Medium | standalone | [設計](devnotes/20260717-0035-aigenba-billing-parity/) | 2026-07-17 02:12 |
 | T080 | 決済parity P8b: 課金UI parity | frontend | Plans/PlanCard/Pricing/per-bucket表示 | Medium | standalone | [設計](devnotes/20260717-0035-aigenba-billing-parity/) | 2026-07-17 02:12 |
 | T081 | 決済parity P9: checkout冪等+請求先+PM流用 | backend | 冪等マシン+contact暗号化+T1004 | Low | standalone | [設計](devnotes/20260717-0035-aigenba-billing-parity/) | 2026-07-17 02:12 |
+| T082 | aigenba整列 T-a: route binding+no-store | backend | 型付きPK404化+no-store+bfcache | Critical | standalone | [設計](devnotes/20260803-0053-aigenba-alignment/) | 2026-08-03 02:04 |
+| T083 | aigenba整列 T-b: bug-huntハーネス修復 | test | adjudication registry修復 | Critical | standalone | [設計](devnotes/20260803-0053-aigenba-alignment/) | 2026-08-03 02:04 |
+| T084 | aigenba整列 T-c: 汎用gate移植+文書整備 | test | Architecture/JS gate 7本+docs | Medium | standalone | [設計](devnotes/20260803-0053-aigenba-alignment/) | 2026-08-03 02:04 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
