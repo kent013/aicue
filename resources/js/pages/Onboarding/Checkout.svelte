@@ -61,6 +61,17 @@
     let submitting = $state(false);
     let declarationChecked = $state(false);
 
+    // P8a (D29(i)): 資金選択。既定は「オートリチャージを設定する」(おすすめ)。
+    // fundingChoices に含まれる値のみ選べる (サーバ確定の並び)。
+    const AUTO_RECHARGE = "auto_recharge";
+    const LATER = "later";
+    let fundingChoice = $state<string>(AUTO_RECHARGE);
+    const fundingChoiceError = $derived(
+        !submitting ? (serverErrors.consent_version ?? serverErrors.funding_choice ?? null) : null,
+    );
+    const consentTerms = $derived(pageData.consentTerms);
+    const formatYen = (v: number): string => new Intl.NumberFormat("ja-JP").format(v);
+
     // サーバ由来エラーを「発生したプラン」にキー付けし、別プランへ切替えると旧エラーが消える。
     let lastSubmittedPlanCode = $state<string | null>(null);
 
@@ -107,7 +118,14 @@
         lastSubmittedPlanCode = "personal";
         router.post(
             "/onboarding/activate-personal",
-            { declaration: declarationChecked ? "1" : "0" },
+            {
+                declaration: declarationChecked ? "1" : "0",
+                funding_choice: fundingChoice,
+                // auto_recharge のときだけ同意 version を送る (金額は送らない = サーバ再計算)。
+                ...(fundingChoice === AUTO_RECHARGE
+                    ? { consent_version: consentTerms.consentVersion }
+                    : {}),
+            },
             {
                 onStart: () => {
                     submitting = true;
@@ -227,6 +245,59 @@
                             error={declarationError}
                             testId="personal-declaration"
                         />
+
+                        <!-- P8a (D29(i)): チケットの補充方法の 2 択。既定は自動購入 (おすすめ) だが、
+                             「あとで決める」を選べば課金設定なしで始められる (opt-in を強制しない)。 -->
+                        <fieldset class="flex flex-col gap-2" data-testid="funding-choice">
+                            <legend class="text-caption font-medium text-text">
+                                チケットの補充方法
+                            </legend>
+                            {#each pageData.fundingChoices as choice (choice)}
+                                <label class="flex items-start gap-2">
+                                    <input
+                                        type="radio"
+                                        name="funding_choice"
+                                        value={choice}
+                                        checked={fundingChoice === choice}
+                                        onchange={() => {
+                                            fundingChoice = choice;
+                                        }}
+                                        class="mt-1 h-4 w-4 accent-primary"
+                                        data-testid={`funding-choice-${choice}`}
+                                    />
+                                    <span class="text-body text-text">
+                                        {#if choice === AUTO_RECHARGE}
+                                            残高が少なくなったら自動で購入する（おすすめ）
+                                        {:else}
+                                            あとで決める（無償チケットだけで始める）
+                                        {/if}
+                                    </span>
+                                </label>
+                            {/each}
+
+                            {#if fundingChoice === AUTO_RECHARGE}
+                                <div
+                                    class="rounded-sm border border-border p-3"
+                                    data-testid="funding-consent-terms"
+                                >
+                                    <p class="text-caption text-text-secondary">
+                                        残高が {consentTerms.thresholdCount} 枚を下回ると、登録済みのカードで不足分をまとめて購入し、{consentTerms.maxCount}
+                                        枚まで補充します。1 回の自動購入の上限額は ¥{formatYen(
+                                            consentTerms.maxAmountJpy,
+                                        )}（税込・1 枚あたり ¥{formatYen(consentTerms.unitAmountJpy)}）です。
+                                    </p>
+                                    <p class="mt-1 text-caption text-text-secondary">
+                                        次の画面でカードを登録します。登録しただけでは課金されません。設定はいつでも変更・停止できます。
+                                    </p>
+                                </div>
+                            {/if}
+
+                            {#if fundingChoiceError !== null}
+                                <p class="text-caption text-danger" data-testid="funding-choice-error">
+                                    {fundingChoiceError}
+                                </p>
+                            {/if}
+                        </fieldset>
 
                         <div>
                             <Button

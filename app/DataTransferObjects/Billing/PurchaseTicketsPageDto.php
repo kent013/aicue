@@ -19,7 +19,8 @@ namespace App\DataTransferObjects\Billing;
  *   balance: int,
  *   canManage: bool,
  *   attemptToken: string,
- *   purchased: bool
+ *   purchased: bool,
+ *   autoRechargeEnabled: bool
  * }
  */
 final readonly class PurchaseTicketsPageDto
@@ -36,6 +37,8 @@ final readonly class PurchaseTicketsPageDto
         public bool $canManage,
         public string $attemptToken,
         public bool $purchased,
+        /** P8a: オートリチャージが有効か (購入導線の案内文言の出し分けに使う。既定 false)。 */
+        public bool $autoRechargeEnabled = false,
     ) {}
 
     /**
@@ -55,6 +58,7 @@ final readonly class PurchaseTicketsPageDto
             'canManage' => $this->canManage,
             'attemptToken' => $this->attemptToken,
             'purchased' => $this->purchased,
+            'autoRechargeEnabled' => $this->autoRechargeEnabled,
         ];
     }
 }

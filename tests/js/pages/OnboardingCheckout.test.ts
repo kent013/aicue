@@ -40,6 +40,14 @@ const basePageData: OnboardingCheckoutShape = {
     personalEligibility: { eligible: true, reason: null, reasonLabel: null },
     signupGrantTickets: 10,
     intendedPlanCode: null,
+    consentTerms: {
+        thresholdCount: 5,
+        maxCount: 50,
+        maxAmountJpy: 3500,
+        unitAmountJpy: 70,
+        consentVersion: "v1",
+    },
+    fundingChoices: ["auto_recharge", "later"],
 };
 
 afterEach(() => {
@@ -120,7 +128,8 @@ describe("Onboarding/Checkout", () => {
         await fireEvent.click(submit);
         expect(routerPostMock).toHaveBeenCalledWith(
             "/onboarding/activate-personal",
-            { declaration: "0" },
+            // P8a: funding_choice の既定は auto_recharge (同意 version 同送。金額は送らない)
+            { declaration: "0", funding_choice: "auto_recharge", consent_version: "v1" },
             expect.anything(),
         );
     });
@@ -143,7 +152,7 @@ describe("Onboarding/Checkout", () => {
 
         expect(routerPostMock).toHaveBeenCalledWith(
             "/onboarding/activate-personal",
-            { declaration: "1" },
+            { declaration: "1", funding_choice: "auto_recharge", consent_version: "v1" },
             expect.anything(),
         );
     });
@@ -254,5 +263,42 @@ describe("Onboarding/Checkout", () => {
             "href",
             "/contact?source=onboarding",
         );
+    });
+
+    it("P8a: 資金選択の既定は auto_recharge で同意条件をサーバ確定値で提示する", async () => {
+        renderPage();
+        await choosePersonal();
+
+        const autoRecharge = screen.getByTestId("funding-choice-auto_recharge");
+        expect((autoRecharge as HTMLInputElement).checked).toBe(true);
+
+        const terms = screen.getByTestId("funding-consent-terms");
+        expect(terms).toHaveTextContent("残高が 5 枚を下回ると");
+        expect(terms).toHaveTextContent("50");
+        expect(terms).toHaveTextContent("¥3,500");
+        expect(terms).toHaveTextContent("¥70");
+    });
+
+    it("P8a: 「あとで決める」を選ぶと同意条件を隠し consent_version を送らない", async () => {
+        renderPage();
+        await choosePersonal();
+
+        await fireEvent.click(screen.getByTestId("funding-choice-later"));
+        expect(screen.queryByTestId("funding-consent-terms")).toBeNull();
+
+        await fireEvent.click(screen.getByTestId("personal-free-submit"));
+
+        expect(routerPostMock).toHaveBeenCalledWith(
+            "/onboarding/activate-personal",
+            { declaration: "0", funding_choice: "later" },
+            expect.anything(),
+        );
+    });
+
+    it("P8a: UI には tickets 選択肢を出さない (fundingChoices はサーバ確定の並び)", async () => {
+        renderPage();
+        await choosePersonal();
+
+        expect(screen.queryByTestId("funding-choice-tickets")).toBeNull();
     });
 });

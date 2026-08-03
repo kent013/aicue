@@ -41,4 +41,47 @@ return [
     */
     'ticket_low_balance_threshold' => (int) env('BILLING_TICKET_LOW_BALANCE_THRESHOLD', 5),
 
+    /*
+    |----------------------------------------------------------------------
+    | オートリチャージ (裏チャージ。P8a)
+    |----------------------------------------------------------------------
+    |
+    | **opt-in・既定 off**。ticket_auto_recharges に行が無い組織の挙動は完全に不変。
+    | 値は移植元 (aigenba) の既定値をそのまま採る。
+    |
+    | 同意文言バージョン (consent_version) の改定履歴:
+    |   v1 = 初版 (カード登録経路のみ = mode=setup Checkout で登録したカードを使う)
+    |
+    | 提示条件の実質 (開始残高・補充枚数・上限額の提示形式・停止方法・即時課金可能性・
+    | **カードの取得手段**) を変える改定では**必ず version を上げること**。
+    | 版を上げると reconsentRequiredFor 経由で既存同意が自動失効し、再同意まで
+    | 自動購入が停止する (fail-closed)。
+    | サブスク決済カードの流用 (P9 / T1004) を配線する際は v2 へ上げる。
+    */
+    'auto_recharge' => [
+        /* 残高がこの枚数を下回ると補充する (既定値。org ごとに設定で上書き) */
+        'default_threshold' => (int) env('BILLING_AUTO_RECHARGE_DEFAULT_THRESHOLD', 5),
+
+        /* 補充後の目標残高 (既定値) */
+        'default_max' => (int) env('BILLING_AUTO_RECHARGE_DEFAULT_MAX', 50),
+
+        /*
+        | max_count の上限。TicketVolumePrice::PURCHASE_MAX_COUNT と単一真実源で揃える
+        | (超過設定は tier 解決の Assert で例外死するため入口で拘束する)。
+        */
+        'max_count' => (int) env('BILLING_AUTO_RECHARGE_MAX_COUNT', 1000),
+
+        /* 連続課金失敗でオートリチャージを自動停止する回数 */
+        'max_failures' => (int) env('BILLING_AUTO_RECHARGE_MAX_FAILURES', 3),
+
+        /* pending attempt の期限 (時間)。超過でリコンサイルが終端する */
+        'pending_expiry_hours' => (int) env('BILLING_AUTO_RECHARGE_PENDING_EXPIRY_HOURS', 24),
+
+        /* setup Checkout 完了から PM snapshot 反映を待つ「処理中」表示の窓 (分) */
+        'setup_pending_window_minutes' => (int) env('BILLING_AUTO_RECHARGE_SETUP_PENDING_WINDOW_MINUTES', 30),
+
+        /* 現行の同意文言バージョン (上記の改定規約に従う) */
+        'consent_version' => env('BILLING_AUTO_RECHARGE_CONSENT_VERSION', 'v1'),
+    ],
+
 ];

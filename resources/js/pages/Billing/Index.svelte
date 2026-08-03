@@ -8,9 +8,14 @@
     import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
     import PageHeader from "@/components/molecules/PageHeader.svelte";
+    import AutoRechargeCard from "@/components/features/billing/AutoRechargeCard.svelte";
     import { CreditCard } from "@lucide/svelte";
     import type { SharedProps } from "@/lib/shared-props";
-    import type { BillingIndexPlan, BillingIndexPlanPrice } from "@/types/billing";
+    import type {
+        AutoRechargeProps,
+        BillingIndexPlan,
+        BillingIndexPlanPrice,
+    } from "@/types/billing";
 
     /**
      * 課金ページ (現在プラン / チケット残高 / プラン一覧)。
@@ -31,6 +36,10 @@
          * 非 null で届く (サーバが same-origin 内部 path に正規化済み)。
          */
         continueUrl?: string | null;
+        /** P8a: オートリチャージ設定 (常に非 null。既定は enabled=false の opt-in) */
+        autoRecharge: AutoRechargeProps;
+        /** P8a: カード登録 (mode=setup) 開始 POST の attempt_token (render 単位) */
+        autoRechargeSetupToken: string;
     }
 
     let {
@@ -39,6 +48,8 @@
         ticketBalance,
         canManageBilling,
         continueUrl = null,
+        autoRecharge,
+        autoRechargeSetupToken,
     }: Props = $props();
 
     const shared = $derived(page.props as unknown as SharedProps);
@@ -149,6 +160,18 @@
                     </p>
                 {/if}
             </Card>
+
+            <!--
+                P8a: オートリチャージ (裏チャージ) 設定カード。
+                差し込み位置と ?highlight=auto-recharge anchor は P8b (T080) 所管のため、
+                ここでは実体の追加に留める (P8b が後からマージされる前提)。
+            -->
+            <AutoRechargeCard
+                {autoRecharge}
+                updateUrl="/billing/auto-recharge"
+                setupUrl="/billing/auto-recharge/setup"
+                setupAttemptToken={autoRechargeSetupToken}
+            />
 
             <section>
                 <h2 class="text-h3">プラン一覧</h2>

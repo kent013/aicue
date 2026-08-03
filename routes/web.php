@@ -327,6 +327,18 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         ->name('billing.portal');
 
     /*
+    | オートリチャージ (裏チャージ。P8a)。**opt-in・既定 off**。
+    | current org スコープ (route parameter なし) で billing.* と同一の解決規約。
+    | 課金ゲート allowlist (require-active-subscription group の外) — 支払い不健全で
+    | 遮断中でも停止・カード更新に到達できることを保証する。
+    | 認可は Controller 冒頭の Gate::authorize('manageBilling')。
+    */
+    Route::post('/billing/auto-recharge', [BillingController::class, 'updateAutoRecharge'])
+        ->name('billing.auto-recharge.update');
+    Route::post('/billing/auto-recharge/setup', [BillingController::class, 'startAutoRechargeSetup'])
+        ->name('billing.auto-recharge.setup');
+
+    /*
     | 課金オンボーディング (current org スコープ)。登録直後の Plan 選択 +
     | 未契約 manageBilling なし member 向け説明画面。billing.* と同じく課金ゲート
     | (require-active-subscription) の外に置く = 未契約組織が導線に到達できることを保証する

@@ -212,6 +212,12 @@ return [
         'declaration' => '個人利用の確認',
         'count' => '購入枚数',
         'attempt_token' => '操作トークン',
+        // オートリチャージ (P8a)。'enabled' は 2 段階認証と同名キーのため
+        // UpdateAutoRechargeRequest::attributes() で個別に上書きする
+        'threshold_count' => 'リチャージ開始残高',
+        'max_count' => 'リチャージ後の残高',
+        'consent_version' => '自動購入への同意',
+        'funding_choice' => 'チケットの補充方法',
         // --- プロジェクト・マニュアル ---
         'description' => '説明',
         'note' => 'メモ',

@@ -10,6 +10,7 @@ use App\Enums\Billing\TicketLedgerKind;
 use App\Enums\Billing\TicketReservationStatus;
 use App\Enums\Billing\TicketSource;
 use App\Exceptions\Billing\InsufficientTicketsException;
+use App\Jobs\Billing\AutoRechargeTriggerJob;
 use App\Models\Billing\TicketLedgerEntry;
 use App\Models\Billing\TicketReservation;
 use App\Models\Organization;
@@ -154,6 +155,71 @@ class TicketLedgerService
             'payment_intent_id' => $paymentIntentId,
             'purchase_amount' => $purchaseAmount,
         ]);
+    }
+
+    /**
+     * P8a: オートリチャージ (off-session Invoice 課金) の冪等付与。
+     *
+     * D30 により `ticket_purchases` の両建ては作らない — 購入の正本は台帳のインライン列
+     * (`payment_intent_id` + `purchase_amount` + `stripe_invoice_id`) で、返金逆仕訳
+     * (clawbackPurchasedByPaymentIntent) がそのまま機能する。
+     *
+     * 冪等キーは `recharge:{invoiceId}` (UNIQUE)。webhook / 同期 pay / リコンサイルの
+     * どれが先に到達しても **1 invoice = 1 回付与**。
+     *
+     * $amount (実回収額) は customer credit balance 全額適用で 0 になり得るため 0 を許す。
+     */
+    public function grantAutoRecharge(
+        Organization $organization,
+        int $count,
+        string $stripeInvoiceId,
+        int $amount,
+        ?string $paymentIntentId,
+    ): void {
+        Assert::greaterThan($count, 0, 'grantAutoRecharge の count は正の整数のみ');
+        Assert::greaterThanEq($amount, 0, 'grantAutoRecharge の amount は 0 以上 (credit balance 全額適用で 0 は正当)');
+        Assert::stringNotEmpty($stripeInvoiceId);
+
+        $inserted = $this->insertIdempotent($organization, "recharge:{$stripeInvoiceId}", [
+            'delta' => $count,
+            'kind' => TicketLedgerKind::Grant->value,
+            'source' => TicketSource::Purchased->value,
+            'description' => "チケット自動購入 (invoice: {$stripeInvoiceId})",
+            'granted_at' => CarbonImmutable::now(),
+            'expires_at' => null,
+            'stripe_invoice_id' => $stripeInvoiceId,
+            'payment_intent_id' => $paymentIntentId,
+            'purchase_amount' => $amount,
+        ]);
+
+        if ($inserted === 0 && $paymentIntentId !== null) {
+            $this->backfillPaymentIntentId($organization, $stripeInvoiceId, $paymentIntentId);
+        }
+    }
+
+    /**
+     * 付与済み recharge 行への payment_intent_id の **null → 値の単調 backfill**。
+     *
+     * 背景: PI は webhook / 同期 pay / リコンサイルの到達順で欠落し得る (basil API では
+     * invoice に PI が直載りしないため)。PI が無いと返金逆仕訳
+     * (clawbackPurchasedByPaymentIntent) が引けず「返金したのにチケットが残る」穴が開く。
+     *
+     * **append-only 不変条件との関係**: 本メソッドは `WHERE payment_intent_id IS NULL` を
+     * 満たす行の当該 1 列のみを埋める (値 → 別値の上書き・delete は行わない)。金額・枚数・
+     * 冪等キーといった会計値は一切触らないため、監査痕跡としての append-only 性 (計上の
+     * 事後改竄をしない) は保たれる。ここだけが台帳への唯一の UPDATE 経路であり、
+     * Eloquent の append-only guard を迂回する Query Builder 直書きに閉じ込めてある。
+     */
+    private function backfillPaymentIntentId(
+        Organization $organization,
+        string $stripeInvoiceId,
+        string $paymentIntentId,
+    ): void {
+        DB::table('ticket_ledger_entries')
+            ->where('organization_id', $organization->getKey())
+            ->where('idempotency_key', "recharge:{$stripeInvoiceId}")
+            ->whereNull('payment_intent_id')
+            ->update(['payment_intent_id' => $paymentIntentId]);
     }
 
     /**
@@ -352,6 +418,21 @@ class TicketLedgerService
                 // 最外層 commit 成立後にのみ通知する (rollback 時は発火しない)
                 DB::afterCommit(fn () => $this->notifications->notifyTicketBalanceLow($organization, $after, $threshold));
             }
+
+            // P8a: オートリチャージ (裏チャージ) のトリガ点。**低残高通知と同居**させる
+            // (parity の名で既存の低残高通知を置き換えない)。
+            //
+            // AI-CUE の実効残高が減る唯一の消費イベントは reserve であり、commit は拘束 −amount と
+            // 台帳 −amount が相殺して balance 不変。よって移植元の commit ではなく reserve に置く
+            // (commit に置くと閾値クロスを取り逃す)。
+            //
+            // 閾値判定・pending 検査・数量確定は Job 側 (AutoRechargeService) が org 行ロック下で
+            // 再評価するため、ここでは条件を絞らない = 過剰 dispatch は無害
+            // (設定行なし org は Job 冒頭で即 return。既定 off の org には何も起きない)。
+            // afterCommit で rollback 時は発火しない。
+            $organizationId = $organization->getKey();
+            Assert::integer($organizationId);
+            DB::afterCommit(static fn () => AutoRechargeTriggerJob::dispatch($organizationId));
 
             return $reservation;
         });

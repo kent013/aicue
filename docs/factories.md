@@ -41,6 +41,8 @@
 | `Billing\TicketCheckoutSessionFactory` | Billing/TicketCheckoutSession | `forOrganization($org)`, `initiatedBy($user)`, `completed()`, `expired()`, `stale()` (pending のまま expires_at 過去) |
 | `Billing\TicketReservationFactory` | Billing/TicketReservation | `forOrganization($org)`, `legacy()` (P5 前の in-flight 予約 = `consume_*` null), `monthlyHold(?CarbonImmutable $consumeExpiresAt = null)`, `purchasedHold()`, `stale()` (reserved のまま TTL 超過) |
 | `Billing\BillingCheckoutSessionFactory` | Billing/BillingCheckoutSession | `withAttemptToken($token, ?$checkoutUrl)`, `initiatedBy(int $userId)`, `completed()`, `setupPaymentMethod()`, `expired()`, `failed()`, `stale()` (pending のまま created_at が stale 境界より過去) |
+| `Billing\TicketAutoRechargeFactory` | Billing/TicketAutoRecharge | `enabled()` (PM + 同意記録済み), `preConsented()` (事前同意のみ = pendingAutoEnable), `consentedMaxAmount(int $amount)` (価格改定 → 再同意シナリオ), `disabledByFailures()` |
+| `Billing\TicketAutoRechargeAttemptFactory` | Billing/TicketAutoRechargeAttempt | `withInvoice(?string $invoiceId = null)`, `paid()`, `failed()`, `canceled()` (既定は invoice 未作成の pending。**org あたり pending は DB partial unique で 1 件まで**) |
 
 Factory を持たないモデル (Role / Permission / Team 等) は seed 固定値
 または Service (`OrganizationProvisioningService` 等) 経由で作る。

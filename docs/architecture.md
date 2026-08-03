@@ -99,6 +99,8 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
 | `Billing/TicketCheckoutSession` | チケットスポット購入の Stripe Checkout Session 追跡 (attempt_token 冪等 + 単価 pin = webhook 金額照合の出典。status: pending/completed/expired) | Organization 従属 |
 | `Billing/BillingCheckoutSession` | サブスク契約 Stripe Checkout Session の追跡 (attempt_token 冪等。`BillingAccess::state()` の PendingCheckout / ExpiredCheckout の出典。status: pending/completed/failed/expired) | Organization 従属 |
 | `Billing/Subscription` | Cashier Subscription のテンプレート拡張 (current_period_end / has_payment_method / Subscription Schedule の部分完了追跡列) | Organization 従属 |
+| `Billing/TicketAutoRecharge` | オートリチャージ設定 (1 org 1 行。**既定 off の opt-in**。同意 snapshot 4 列 + 連続失敗状態。`max_count > threshold_count` は DB CHECK) | Organization 従属 |
+| `Billing/TicketAutoRechargeAttempt` | オートリチャージ試行の状態機械 (pending → paid / failed / canceled。quantity・unit_amount は起票時 pin = webhook 金額照合の出典。partial unique `tar_attempts_org_pending_unique` で org あたり pending は 1 件) | Organization 従属 |
 | `Billing/BillingNotification` | 請求通知の delivery record (通知台帳。(type, invoice_id) / (type, dedup_key) 複合 UNIQUE で send-once を構造保証) | Organization 従属 |
 
 ## 主要 Service (テンプレート同梱)
@@ -252,6 +254,56 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
 - **放棄 session の回収**: Stripe Checkout 自体の有効期限 (既定 24h) で Stripe 側が expire し、
   DB 行は checkout 開始時の期限切れ回収 (`status=pending AND expires_at <= now` → expired) で
   局所回収する (専用 cron は作らない)
+
+## チケット オートリチャージ (P8a) の運用契約
+
+**opt-in・既定 off**。`ticket_auto_recharges` に行が無い組織の課金挙動は完全に不変
+(`reserve` の低残高通知も含む)。残高が閾値を割ったら off-session の Stripe Invoice で
+自動購入する。
+
+- **経路**: `POST /billing/auto-recharge` (設定更新) / `POST /billing/auto-recharge/setup`
+  (カード登録 = Checkout mode=setup)。いずれも current org スコープ + `manageBilling`。
+  課金ゲート (`require-active-subscription`) の対象外 = 支払い不健全な組織でも停止・
+  カード更新に到達できる
+- **トリガ点は `reserve`** (移植元の `commit` ではない)。AI-CUE の実効残高が減る唯一の
+  消費イベントは `reserve` で、`commit` は拘束 −amount と台帳 −amount が相殺して balance
+  不変のため、`commit` に置くと閾値クロスを取り逃す。`TicketLedgerService::reserve` の
+  `DB::afterCommit` で既存の低残高通知と**同居**させる (parity の名で既存通知を削らない)
+- **閾値判定・数量確定は `availableTrueBalance()`** (表示用 `balance()` は clamp 済みで、
+  判定に使うと返金債務を隠して過剰補充する)。`quantity = min(max_count − 真値残高,
+  PURCHASE_MAX_COUNT)` を attempt 作成時に一度だけ確定し、以降 `attempt.quantity` が真実源
+- **二重課金防止 3 層**: (1) Stripe idempotency key `auto-recharge:{attempt_ulid}` で
+  invoice create / pay が同一 invoice に収束 → (2) partial unique
+  `tar_attempts_org_pending_unique` で org あたり pending attempt は同時 1 つ →
+  (3) 付与は台帳 `idempotency_key = recharge:{invoiceId}` UNIQUE。加えて **failed / canceled
+  への遷移は invoice 終端 (void/delete) 成功後のみ** = open invoice を残して終端しないため
+  遅延成功による二重課金が構造的に起きない
+- **並行制御**: 全ミューテータ (`updateSettings` / `recordPreConsent` / `applySetupCompletion` /
+  `executeAttempt`) が同一ロック `billing:auto-recharge:{orgId}` (TTL 180 秒) を取るため、
+  停止後課金と部分適用が構造的に起こらない。`createAttemptLocked` は `reserve` と同順で
+  `organizations` 行を `lockForUpdate` する (ロック順序の交差を作らない)
+- **SCA (authentication_required) は終端させない**: pending 維持 + 日次リマインダ
+  (dedup = JST date bucket)。`pending_expiry_hours` 超過でリコンサイルが failed 終端する
+- **再同意 (`reconsentRequiredFor`) は単一述語**: version 改定 ∨ 同意記録欠落 ∨ 上限超過 ∨
+  現行カタログ最大請求額 > 同意時金額。UI 表示 / 設定更新 / 自動有効化 / attempt 起票停止の
+  **4 箇所で共有**する。同意金額は必ずサーバ再計算 (client hidden の金額は受け取らない)
+- **同意文言バージョン (`config('billing.auto_recharge.consent_version')`)**: 提示条件の実質
+  (開始残高・補充枚数・上限額の提示形式・停止方法・即時課金可能性・**カードの取得手段**) を
+  変える改定では必ず version を上げる。上げると既存同意が自動失効し、再同意まで自動購入が
+  止まる (fail-closed)
+- **監視対象 (必須項目として登録する)**: **`php artisan billing:reconcile-auto-recharge`
+  (scheduler で `*/15 * * * *`・`onOneServer()` + `withoutOverlapping()`)**。
+  webhook が `MAX_PROCESSING_ATTEMPTS = 8` で恒久 drop した「課金済み・チケット未付与」を
+  回収する**唯一の**経路であり、停止・失敗が続くと資金回収済み・未付与が滞留する。
+  失敗は `onFailure` → `report()` で既存の運用アラート経路に載る (routes/console.php)。
+  **滞留の観測点**: `ticket_auto_recharge_attempts` の `status='pending'` 件数
+  (および `created_at` が `pending_expiry_hours` を超えた行の有無)
+- **terminal failure の運用手順**: `stripe_webhook_events.failure_reason` を確認したうえで、
+  復旧は手動付与ではなく `billing:reconcile-auto-recharge` の 1 回実行で行う
+  (Stripe 上 paid の invoice を検出して `recharge:{invoiceId}` 冪等で付与する)
+- **rollback**: 全変更が additive (新テーブル 2 + 列 1 + 新 route/Job/Command)。既定 off の
+  ため設定行が存在せず、コード revert で即時復帰できる。pending attempt が残る場合のみ
+  revert 前に `billing:reconcile-auto-recharge` を 1 回流して収束させる
 
 ## アプリ内通知センター (T008) の運用契約
 

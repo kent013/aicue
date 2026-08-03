@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Onboarding;
 
 use App\DataTransferObjects\Billing\PlanDto;
 use App\DataTransferObjects\Onboarding\OnboardingCheckoutDto;
+use App\Enums\Billing\SignupFundingChoice;
 use App\Enums\Inquiry\InquirySource;
 use App\Enums\PlanCode;
 use App\Http\Concerns\ResolvesCurrentOrganization;
@@ -13,6 +14,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Billing\Plan;
 use App\Models\Organization;
 use App\Models\User;
+use App\Services\Billing\AutoRechargeService;
 use App\Services\Billing\BillingAccess;
 use App\Services\Billing\PersonalPlanService;
 use App\Services\Billing\TicketPricingService;
@@ -41,6 +43,7 @@ final class OnboardingController extends Controller
         private readonly TicketPricingService $ticketPricing,
         private readonly ContactUrl $contactUrl,
         private readonly IntendedPlanResolver $intendedPlanResolver,
+        private readonly AutoRechargeService $autoRecharge,
     ) {}
 
     public function show(Request $request): Response|RedirectResponse
@@ -81,6 +84,15 @@ final class OnboardingController extends Controller
             signupGrantTickets: $this->ticketPricing->signupGrantTickets(),
             // peek = 残す (リロード耐性)。Enterprise / 未知値は正規化で null に倒れる。
             intendedPlanCode: $this->intendedPlanResolver->peekForOrganization($organization)?->value,
+            // P8a (D29(i)): 事前同意の提示条件。画面表示値と recordPreConsent の記録値は
+            // consentTermsFor() の単一計算源から出る (表示と記録の一致をテストで固定)。
+            consentTerms: $this->autoRecharge->consentTermsFor(),
+            // UI に出す資金選択は 2 択 (auto_recharge 既定 / later)。
+            // `tickets` は UI から出さない (enum・validation では受理継続)。
+            fundingChoices: [
+                SignupFundingChoice::AutoRecharge->value,
+                SignupFundingChoice::Later->value,
+            ],
         );
 
         return Inertia::render('Onboarding/Checkout', [

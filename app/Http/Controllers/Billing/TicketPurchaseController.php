@@ -13,6 +13,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Billing\TicketCheckoutRequest;
 use App\Models\Billing\TicketVolumePrice;
 use App\Models\User;
+use App\Services\Billing\AutoRechargeService;
 use App\Services\Billing\TicketCheckoutService;
 use App\Services\Billing\TicketLedgerService;
 use App\Services\Billing\TicketPricingService;
@@ -45,6 +46,7 @@ class TicketPurchaseController extends Controller
         TicketPricingService $pricing,
         TicketLedgerService $tickets,
         TicketCheckoutService $checkout,
+        AutoRechargeService $autoRecharge,
     ): Response {
         $organization = $this->resolveCurrentOrganization($request);
         Gate::authorize('view', $organization);
@@ -67,6 +69,9 @@ class TicketPurchaseController extends Controller
             canManage: $user->can('manageBilling', $organization),
             attemptToken: (string) Str::ulid(),
             purchased: $purchased,
+            // P8a: 有効なら「自動購入が設定済み」であることを購入導線でも示せるようにする
+            // (軽量な enabled 判定のみ。カタログ解決コストは払わない)。
+            autoRechargeEnabled: $autoRecharge->isEnabledFor($organization),
         );
 
         return Inertia::render('Billing/PurchaseTickets', ['page' => $dto->toArray()]);
