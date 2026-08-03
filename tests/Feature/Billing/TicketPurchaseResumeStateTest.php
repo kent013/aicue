@@ -14,8 +14,8 @@ use Tests\Support\FakeTicketCheckoutGateway;
  *
  * - live pending (自分が開始した決済待ち) があれば resume へ写像し、token を再利用する
  *   (ブラウザバック / bfcache 復帰で既存 replay 冪等が効く = 二重課金しない)
- * - 完了直後 (窓内) は completed。窓外は normal
- * - 非管理者には resume / completed を出さない (resumeUrl は Stripe 直リンクで gate を迂回する)
+ * - 完了 session は窓の内外を問わず normal (T088: aigenba F-5-02 追随で完了窓ロックを撤去)
+ * - 非管理者には resume を出さない (resumeUrl は Stripe 直リンクで gate を迂回する)
  * - 他 user の pending は resume しない (initiated_by_user_id スコープ)
  */
 
@@ -53,7 +53,11 @@ test('?fresh=1 は resume を捨てて normal + 別 token に倒す', function (
             ->where('page.ticketAttemptToken', fn (string $t): bool => $t !== $session->attempt_token));
 });
 
-test('窓内の完了 session は completed 状態 (resumeUrl は null)', function (): void {
+test('完了 session は窓内でも normal (T088: aigenba 追随で完了窓ロックを撤去)', function (): void {
+    // 旧実装は「直近 30 分の完了」を completed 状態としてフォームをロックしていた。
+    // aigenba は 2026-07-30 の bug-hunt (F-5-02) でこれを撤去済み — 完了通知は決済戻り着地の
+    // one-shot が担い、二重課金は POST の冪等が担保するため、フォームを塞ぐ必要がない。
+    // 塞ぐと「決済成功で戻った直後に、完了案内と『決済を続ける』が同時に出る」誤誘導も生む。
     [$organization, $owner] = createOrganizationWithOwner();
     TicketCheckoutSession::factory()
         ->forOrganization($organization)
@@ -64,12 +68,12 @@ test('窓内の完了 session は completed 状態 (resumeUrl は null)', functi
     $this->actingAs($owner)->get('/purchase-tickets')
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
-            ->where('page.formState', 'completed')
-            ->where('page.boundCount', 7)
+            ->where('page.formState', 'normal')
+            ->where('page.boundCount', null)
             ->where('page.resumeUrl', null));
 });
 
-test('窓外の完了 session は normal へ縮退する', function (): void {
+test('窓外の完了 session も normal のまま', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     TicketCheckoutSession::factory()
         ->forOrganization($organization)

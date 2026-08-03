@@ -113,17 +113,7 @@ class TicketCheckoutService
             ->latest('id')
             ->first();
 
-        if ($livePending !== null) {
-            return $livePending;
-        }
-
-        return TicketCheckoutSession::query()
-            ->where('organization_id', $organization->id)
-            ->where('initiated_by_user_id', $userId)
-            ->where('status', TicketCheckoutSessionStatus::Completed)
-            ->where('completed_at', '>', $now->subMinutes($windowMinutes))
-            ->latest('id')
-            ->first();
+        return $livePending;
     }
 
     private function startCheckoutLocked(

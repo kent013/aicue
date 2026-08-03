@@ -246,16 +246,14 @@ describe("Billing/PurchaseTickets", () => {
         expect(screen.getByTestId("purchase-fresh").hasAttribute("disabled")).toBe(false);
     });
 
-    it("formState=completed では完了バナーと「もう一度購入する」を出す", async () => {
-        render(PurchaseTickets, {
-            props: { page: { ...basePage, formState: "completed", boundCount: 7 } },
-        });
+    it("完了直後でも購入フォームを塞がない (T088: aigenba F-5-02 追随で completed 状態を撤去)", () => {
+        // 旧実装は直近の完了を completed 状態としてフォームをロックしていた。
+        // aigenba が撤去済み — 完了通知は決済戻り着地の one-shot が担い、
+        // 二重課金は POST の冪等が担保するため、フォームを塞ぐ必要がない。
+        render(PurchaseTickets, { props: { page: { ...basePage, formState: "normal" } } });
 
-        expect(screen.queryByTestId("purchase-form")).toBeNull();
-        expect(screen.getByTestId("purchase-completed-banner")).toBeInTheDocument();
-        expect(screen.getByTestId("purchase-bound-count")).toHaveTextContent("7 枚");
-
-        await fireEvent.click(screen.getByTestId("purchase-fresh"));
-        expect(routerGetMock).toHaveBeenCalledWith("/purchase-tickets?fresh=1");
+        expect(screen.getByTestId("purchase-form")).toBeInTheDocument();
+        expect(screen.queryByTestId("purchase-completed-banner")).toBeNull();
+        expect(screen.queryByTestId("purchase-completed")).toBeNull();
     });
 });

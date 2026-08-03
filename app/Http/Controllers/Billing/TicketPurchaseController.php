@@ -6,7 +6,6 @@ namespace App\Http\Controllers\Billing;
 
 use App\DataTransferObjects\Billing\PurchaseTicketsPageDto;
 use App\Enums\Billing\PurchaseFormState;
-use App\Enums\Billing\TicketCheckoutSessionStatus;
 use App\Exceptions\Billing\CheckoutInProgressException;
 use App\Exceptions\Billing\StaleCheckoutAttemptException;
 use App\Exceptions\Billing\TicketVolumeTierUnavailableException;
@@ -86,18 +85,12 @@ class TicketPurchaseController extends Controller
             : null;
 
         [$formState, $attemptToken, $boundCount, $resumeUrl] = match (true) {
-            $resumable instanceof TicketCheckoutSession
-                && $resumable->status === TicketCheckoutSessionStatus::Pending => [
-                    PurchaseFormState::Resume,
-                    $resumable->attempt_token,
-                    $resumable->ticket_count,
-                    $resumable->checkout_url,
-                ],
+            // resolveResumablePurchase は live pending のみを返す (T088 で完了窓を撤去)。
             $resumable instanceof TicketCheckoutSession => [
-                PurchaseFormState::Completed,
+                PurchaseFormState::Resume,
                 $resumable->attempt_token,
                 $resumable->ticket_count,
-                null,
+                $resumable->checkout_url,
             ],
             default => [PurchaseFormState::Normal, (string) Str::ulid(), null, null],
         };
