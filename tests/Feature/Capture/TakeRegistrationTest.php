@@ -399,7 +399,7 @@ test('確定 CAS と sweeper の競合: 予約が released 済みなら Take は
 
 test('claim 中 (verifying) の予約は bytesPending に計上され続け並行 upload-url が上限を超えない', function (): void {
     [$organization, $owner, $project, $manual, $cut] = registrationContext();
-    config()->set('quota.plans.free.max_storage_bytes', 1_000);
+    config()->set('quota.plans.personal.max_storage_bytes', 1_000);
     [$reservation] = reservationWithTicket($cut, ['size_bytes' => 800]);
     $reservation->forceFill(['status' => TakeUploadReservationStatus::Verifying])->save();
 

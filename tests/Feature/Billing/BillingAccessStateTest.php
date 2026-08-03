@@ -165,14 +165,15 @@ test('cohort G: 非 active 系 status は ExpiredCheckout + 遮断', function (s
         ->and(cohortBillingAccess()->hasActiveAccess($organization))->toBeFalse();
 })->with(['canceled', 'unpaid', 'incomplete', 'incomplete_expired']);
 
-test('cohort F/G: state() は plan_code を見ない (null でも同じ state。許可は移行 OR 由来)', function (string $status): void {
+test('cohort F/G: state() は plan_code を見ない (null でも同じ state。P4 後は許可もされない)', function (string $status): void {
     $organization = Organization::factory()->create(); // plan_code null
     cohortSubscription($organization, status: $status, hasPaymentMethod: true, trialEndsAt: null);
 
     expect($organization->plan_code)->toBeNull()
         ->and(cohortBillingAccess()->state($organization))->toBe(OnboardingBillingState::ExpiredCheckout)
-        // 移行 OR (P4 で削除) が cohort I として許可する
-        ->and(cohortBillingAccess()->hasActiveAccess($organization))->toBeTrue();
+        // P4 で移行 OR を削除したため、plan_code null であること自体は許可の理由にならない。
+        // 既存 org は backfill が free_plan_code='personal' を書いて ActiveFreePlan で許可される。
+        ->and(cohortBillingAccess()->hasActiveAccess($organization))->toBeFalse();
 })->with(['paused', 'canceled', 'unpaid', 'incomplete', 'incomplete_expired']);
 
 test('cohort H: subscription 行なし + checkout session なしは NoSubscription + 遮断', function (): void {
@@ -182,11 +183,14 @@ test('cohort H: subscription 行なし + checkout session なしは NoSubscripti
         ->and(cohortBillingAccess()->hasActiveAccess($organization))->toBeFalse();
 });
 
-test('cohort I: plan_code null は state が遮断側でも移行 OR で許可される', function (): void {
+test('cohort I: plan_code null + 無申告は P4 ゲート反転で遮断される (移行 OR 削除)', function (): void {
     $organization = Organization::factory()->create();
 
+    // P2 までは移行 OR (plan_code === null) が許可していた。P4 でその 1 行を削除したため、
+    // 「プランを選ばず Personal も申告していない org」は遮断される (= ゲート反転の実体)。
+    // 既存 org は backfill が ActiveFreePlan にするため締め出しは起きない。
     expect(cohortBillingAccess()->state($organization))->toBe(OnboardingBillingState::NoSubscription)
-        ->and(cohortBillingAccess()->hasActiveAccess($organization))->toBeTrue();
+        ->and(cohortBillingAccess()->hasActiveAccess($organization))->toBeFalse();
 });
 
 test('free_plan_code=personal は ActiveFreePlan + 許可 (declarer 有り)', function (): void {

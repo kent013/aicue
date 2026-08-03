@@ -422,7 +422,10 @@ test('Free (未契約) org: dashboard 200 + has_billing_access=true + 業務 rou
 });
 
 test('有償契約 + 支払い不健全 org: has_billing_access=false + CTA 遷移先 200 (redirect loop なし)', function (): void {
-    [$organization, $owner] = createOrganizationWithOwner();
+    // 有償 org は grandfatherFreePlan: false (backfill 対象は plan_code/free_plan_code とも
+    // NULL の org に閉じるため、有償 org に grandfather マーカーが付くのは非現実な fixture。
+    // 付くと state() の ActiveFreePlan が支払い健全性判定を覆い隠す)
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     // P2 の判定モデル置換で past_due は cohort D として許可へ反転したため、
     // 遮断側の不変条件 (redirect loop なし) は canceled (cohort G) で保持する。
     contractPaidPlan($organization, status: 'canceled');

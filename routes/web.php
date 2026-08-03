@@ -347,7 +347,7 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
     /*
     | チケットスポット購入 (current org スコープ)。billing.* と同じく課金ゲート
     | (require-active-subscription) の対象外 = 支払い不健全で遮断中の組織でも購入できる
-    | (free 組織はそもそも遮断されない = BillingAccess の entitlement 判定)。
+    | (無料枠は free_plan_code='personal' = ActiveFreePlan として BillingAccess が許可する)。
     | 閲覧は組織メンバー全員、Checkout 開始は manageBilling (owner / admin) のみ。
     */
     Route::get('/purchase-tickets', [TicketPurchaseController::class, 'show'])
@@ -376,7 +376,9 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
     /*
     | 組織配下の業務 route (課金ゲート対象)。BillingAccess の entitlement 判定で
     | 不許可 = 有償プラン契約中の支払い不健全のみ billing へ redirect + 理由 flash
-    | (JSON は 402)。free (未契約 = plan_code null) 組織は遮断されない。
+    | (JSON は 402)。未契約組織は onboarding へ遮断される (P4 ゲート反転)。無料枠は
+    | free_plan_code='personal' の明示申告で表現し、plan_code は判定に使わない。
+    | billing / purchase-tickets / notifications / onboarding は gate group 外の構造的 allowlist。
     | 新しい業務ドメインの route はこの group 内に追加すること。
     */
     Route::middleware(['require-active-subscription', 'project.in-current-org'])->group(function (): void {

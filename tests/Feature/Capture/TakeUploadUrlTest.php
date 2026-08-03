@@ -108,7 +108,7 @@ test('発行成功: pending 予約が作成され bytes_pending に計上、pres
 
 test('bytes_used + pending + size が上限を超えると 422 quota_exceeded (予約は作られない)', function (): void {
     [, $owner, $project, $manual, $cut] = uploadUrlContext();
-    config()->set('quota.plans.free.max_storage_bytes', 2_000);
+    config()->set('quota.plans.personal.max_storage_bytes', 2_000);
     Take::factory()->forCut($cut)->create(['size_bytes' => 1_000]);                 // bytes_used
     TakeUploadReservation::factory()->forCut($cut)->create(['size_bytes' => 500]);  // bytes_pending
     mockPresign();
@@ -125,7 +125,7 @@ test('bytes_used + pending + size が上限を超えると 422 quota_exceeded (�
 
 test('境界: 加算後合計 == limit は成功する', function (): void {
     [, $owner, $project, $manual, $cut] = uploadUrlContext();
-    config()->set('quota.plans.free.max_storage_bytes', 2_000);
+    config()->set('quota.plans.personal.max_storage_bytes', 2_000);
     Take::factory()->forCut($cut)->create(['size_bytes' => 1_000]);
     mockPresign();
 

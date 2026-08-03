@@ -87,8 +87,15 @@ test('(b) 新規未契約組織の owner は checkout へ遮断され activate-p
     $this->actingAs($owner)->post(route('onboarding.activate-personal'), ['declaration' => true])
         ->assertRedirect(route('dashboard'));
 
-    // 閉路が閉じている
-    $this->actingAs($owner)->get('/projects')->assertOk();
+    // 閉路が閉じている。
+    //
+    // `$owner->fresh()` が必要な理由 (製品挙動ではなくテスト固有の事情):
+    // middleware は `$user->currentOrganization` (Eloquent リレーション) で org を解決する。
+    // `actingAs($owner)` は**同一の User インスタンス**を全リクエストで使い回すため、
+    // activate-personal 前にロードされたリレーションが free_plan_code=NULL のままキャッシュされ、
+    // そのままだと有効化後も遮断されたように見える。本番は毎リクエストで session から
+    // user を解決し直すためこの問題は起きない。
+    $this->actingAs($owner->fresh())->get('/projects')->assertOk();
 });
 
 test('(b) manageBilling 非保持 member は billing-required へ遮断され着地できる', function (): void {

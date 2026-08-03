@@ -83,14 +83,17 @@ return new class extends Migration
             ->whereNull('plan_code')        // plan_code 非 null の org は反転で結論が変わらない
             ->whereNull('free_plan_code')   // 既に free entitlement を持つ org は対象外 (冪等)
             ->with('subscriptions')
+            // Collection の型パラメータを明示して $organization を Organization に確定させる
+            // (無指定だと mixed に落ち、getKey() の戻り値も mixed になって cast.int で落ちる)。
             ->chunkById(self::CHUNK, function (Collection $organizations) use ($subscriptions, &$targets): void {
+                /** @var Collection<int, Organization> $organizations */
                 foreach ($organizations as $organization) {
                     $subscription = $organization->subscription('default');
                     $entitled = $subscription instanceof Subscription
                         && $subscriptions->deriveEntitlement($subscription)->entitled;
 
                     if (! $entitled) {
-                        $targets[] = (int) $organization->getKey();
+                        $targets[] = $organization->id;
                     }
                 }
             });
