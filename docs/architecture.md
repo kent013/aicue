@@ -120,11 +120,18 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
 | `Manual/RenderJobService` | AI-CUE: レンダの状態機械 (trigger = ready→rendering + render 冪等 + 採用テイク/尺/残高 guard / triggerPreview = Organization 行ロックで org 同時 preview 上限を直列化 / failJob = 冪等失敗確定 / completeRenderIntoLockedManual = ロック済み前提メソッド / recoverStale・reconcileOutputs = cron 本体) |
 | `Manual/RenderPipeline` | AI-CUE: レンダパイプライン本体 (startJob→buildManifest→compose→upload→finalize)。チケット 2 フェーズ (予約冪等キー = render_jobs.ticket_reservation_id、complete + commit + succeeded を terminal tx で原子化)。version スナップショット固定 (§10.8-6) |
 | `Manual/CutSequencer` | AI-CUE: カット表示順 (step→配下 point) と表示ラベル (手順N/急所N-M) の導出 (読み取り専用) |
+| `Manual/ScenarioBookendBuilder` | AI-CUE: AI 生成シナリオの前後へ導入/総括カットを決定的に付与する純関数 (DB/ロックに触れない。呼び出しは `AnalysisPipeline::finalize` の terminal tx 内。総括の要点再掲は**今回生成の steps からのみ**抽出 = 再生成時に旧シナリオを総括しない) |
 | `Render/VideoComposer` (interface) + `Render/FfmpegVideoComposer` | AI-CUE: 動画合成の抽象 + ffmpeg v1 実装 (Process facade 経由・配列引数。filtergraph にはサーバ生成一時ファイル名と数値のみ = 字幕本文を直接埋めない) |
 | `Render/AssSubtitleWriter` | AI-CUE: ASS 字幕生成の安全境界 (唯一の字幕テキスト出力点。リテラル \N/override tag/制御文字/zero-width の正規化 + mb 安全な長さ上限) |
 | `Render/RenderObjectStorage` | AI-CUE: レンダ出力 S3 操作の集約点 (download/upload/署名 URL/削除/prefix。DL 用 Content-Disposition は RFC 5987 + ASCII fallback + ヘッダ注入不能) |
 | `Auth/SocialAccountService` | ソーシャルログイン連携 |
 | `Billing/BillingAccess` | billing entitlement 判定。**`plan_code` は判定に一切使わない** (quota の解決キーでしかない)。`state()` が `Subscribed` (subscription が entitled) / `ActiveFreePlan` (`free_plan_code='personal'`) のいずれかなら許可、それ以外 (`NoSubscription` / `PendingCheckout` / `ExpiredCheckout`) は遮断する。かつては「plan_code null = 支払い不要 free tier は許可」だったが P4 のゲート反転で撤廃した (無料枠は明示申告へ)。**課金による利用可否の判定は本クラス経由のみ** (アプリは本クラスの差し替えで gate 方針を変更する)。適用は `require-active-subscription` middleware (業務 route group。billing / webhook は構造的 allowlist)。plan_code は Stripe Price を持つ有償プラン契約時のみ webhook が set する状態キー — 支払い不要プランを plan_code に載せる場合は本判定とセットで見直す (`RequireActiveSubscriptionMiddlewareTest` が固定) |
+| `Billing/SubscriptionService` | 契約 (Subscription) の状態管理。Stripe への I/O は Gateway 経由のみで、entitlement 導出 / webhook 受信時の状態同期 / **`attempt_token` 冪等の Checkout 開始** (`startCheckout`) に責務を絞る。§サブスク契約 Checkout の準拠実装 |
+| `Billing/PersonalPlanService` | Personal (無料) の適格性判定・有効化・退役。**free entitlement は `organizations.free_plan_code` で表現**し `subscriptions` は Stripe 実体のみという invariant を守る。farming 防止は DB partial unique (`organizations_personal_free_declarer_unique`) が hard invariant、owner 条件は eligibility の best-effort |
+| `Billing/AutoRechargeService` | オートリチャージの設定・同意・attempt 状態機械 (§チケット オートリチャージ の準拠実装。全ミューテータが同一ロックを取る) |
+| `Billing/BillingPermissionService` | 組織スコープ `manage-billing` permission の個別付与/剥奪 (既定境界 Owner/Admin は `OrganizationPolicy::manageBilling` がロール判定し、本 service の直接付与を OR で参照する) |
+| `Billing/BillingCustomerSynchronizer` | Stripe customer 同期 Job の dispatch 単一窓口。発火元は `RenameOrganizationAction` (組織名) と `UpdateBillingContactAction` (請求先メール) のみで、webhook ハンドラは通らない = Stripe→アプリ→Stripe の同期ループが構造的に起きない |
+| `Billing/PlanPriceService` | プラン価格のバージョニング (旧 current 無効化 + 新 current 差し込みを単一 tx。二重 current は生成列の部分 unique が最終ガード) |
 | `Billing/QuotaService` | quota の消費・検証 |
 | `Billing/StripeWebhookProcessor` | webhook の冪等処理 |
 | `Billing/BillingNotificationDispatcher` | 請求通知の冪等 dispatch 窓口 (通知台帳へ insertOrIgnore → 新規行のみ queue。**請求系通知の送信は本クラス経由のみ**) |
@@ -136,6 +143,11 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
 | `Billing/TicketCheckoutGateway` (interface) + `Billing/CashierTicketCheckoutGateway` | Stripe one-time Checkout の抽象 (mode=payment / card のみ / promo・tax なし = amount_subtotal 照合の前提。idempotency key 対応。テストは fake を bind) |
 | `Billing/TicketPricingService` | チケット価格の表示専用読み取り口 (傾斜表 / spot 単価 / signup grant 表示値。消費・購入経路と独立) |
 | `Marketing/PricingService` | 料金表 (/pricing) のプラン一覧構築 (plan_prices current + config/quota.php limits の値のみ参照) |
+| `Marketing/ContactUrl` | 問い合わせ CTA の宛先解決 (`config('services.marketing.contact_url')` で内部 route / 外部 URL / mailto を切替。未設定なら `/contact`。source attribution は呼び出し側が query で付与) |
+| `Onboarding/IntendedPlanResolver` | 「料金表で選んだプラン意図」を 料金表 → 登録 → Onboarding Checkout で一貫保持する (pending / org-scoped の 2 キー。put は有効値のみ・無効値は forget、peek は再正規化して残す) |
+| `Onboarding/OnboardingReturnResolver` | 課金ゲートで失われた「意図先 destination」を org-scoped session に保持し完了着地で復帰させる。**same-origin の内部相対 path のみ許可** (絶対 URL / protocol-relative は破棄 = open-redirect 防御) |
+| `Organization/CurrentOrganizationResolver` | current organization の「所属再確認つき」解決 + 自己修復 (読み出し時に pivot relation で所属を再確認 = dangling org を描画に出さない。書き込みは条件付き UPDATE の冪等 best-effort) |
+| `Dashboard/DashboardService` | ダッシュボードのサーバ集計 (読み取り専用・固定本数クエリ。集計は organization / project の relation 経由のみ = cross-org は構造的に不可) |
 | `OAuth/OauthSessionListService` | OAuth セッション一覧 (CLI セッション + legacy MCP token の併記) |
 | `VersionInfoService` | `/api/v1/version` の capability negotiation payload (semver fail-fast + CLI client id 解決) |
 | `Mcp/McpIdempotencyService` | MCP 書き込み tool の冪等 replay/store (`mcp_idempotency_keys`) |
@@ -229,6 +241,63 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
   | `DeleteRenderOutputsJob::handle` | 行ロックなし (読み取り検証 → tx 外 S3 削除 → CAS update の 3 段) |
 - ローカル/テストの検証: パイプラインの同期実行は `RenderPipeline::run()` の直接呼び出し +
   fake `VideoComposer` (container swap)、dispatch の検証は `Queue::fake()`
+
+## サブスク契約 Checkout とオンボーディング着地 (P7/P9) の運用契約
+
+課金ゲート反転 (P4) 後、未契約組織は業務 route group に入れない。**遮断された先の着地**と
+**契約の開始**を担うのが本節の経路。デプロイ順序の非交渉事項は
+`docs/billing-gate-inversion-runbook.md` が正本。
+
+- **経路 (すべて current org スコープ = route parameter を持たない)**:
+
+  | route | 画面 / 責務 | guard |
+  |---|---|---|
+  | GET `/onboarding/checkout` (`onboarding.checkout`) | `Onboarding/Checkout` — プラン選択 + Personal(無料)の自己申告 + 資金選択 | `view` 認可 + 離脱ガード (契約済み → `billing.index` / `manageBilling` なし → `onboarding.billing-required`) |
+  | GET `/billing-required` (`onboarding.billing-required`) | `Onboarding/BillingRequired` — 未契約 かつ `manageBilling` なし member への説明 (Owner 連絡先 + 問い合わせ導線) | `view` 認可 + 離脱ガード (利用可 → `dashboard` / `manageBilling` 保持 → `onboarding.checkout`) |
+  | POST `/onboarding/activate-personal` (`onboarding.activate-personal`) | Personal(無料)の即時有効化 (Stripe Checkout を通らない) | `manageBilling` + `throttle:10,1` |
+  | POST `/billing/checkout` (`billing.checkout`) | 有償プランの Stripe Checkout 開始 | `manageBilling` |
+  | PATCH `/billing/contact` (`billing.contact.update`) | 請求先連絡先の更新 | `manageBilling` |
+
+  いずれも `require-active-subscription` group の**外**にある構造的 allowlist
+  (`routes/web.php` の gate group コメントが正本)。ゲート内に入れると
+  「契約するための画面が契約していないと見られない」詰みになる。
+- **403 ではなく専用画面で受ける**: 権限のない member を 403 で突き放すと行き先のない
+  ループになるため、`onboarding.billing-required` を用意する。両画面が相互に離脱ガードを
+  持つことで「どちらにも留まれない往復」が構造的に起きない。
+- **Personal(無料)の付与は `PersonalPlanService::activate()` が単一の真実源**
+  (Controller は呼ぶだけ = 二重付与源を作らない)。適格性不成立は 500 でなく 422。
+  完了後は課金ゲートが保存した継続先 (`OnboardingReturnResolver`。same-origin 内部 path のみ)
+  へ戻す。**`redirect()->intended()` は使わない** (AGENTS.md 禁止事項 #7)。
+- **`?plan=` handoff (P7)**: `IntendedPlanResolver` が org スコープ session へ積み、canonical URL
+  へ 303 する (再読込・共有時に query が残らない)。以降は peek = 消費しない (リロード耐性)。
+  Enterprise / 未知値は正規化で null に倒れる (Checkout を通らないプランを選ばせない)。
+- **契約 Checkout の冪等状態機械 (P9)**: `SubscriptionService::startCheckout()` は
+  `attempt_token` 冪等マシン (段 0 事前 assert → 1 既存 subscription guard → 2 同 token 行 →
+  3 同 plan の live pending dedup (org-wide) → 4 別 plan の live pending を expire →
+  5 Stripe 作成 + DB 記録 → 6 UNIQUE 違反の re-read 収束)。
+  - クエリは常に `intent=subscription_start` にスコープする
+    (`UNIQUE(organization_id, intent, attempt_token)` の intent 軸が P8a のカード登録
+    token 空間と分ける)
+  - **同 token・別 plan は 422** (押した plan と違う Checkout に着地させない)。
+    **他 org / 他 user の token は Gate より前に 404** (存在オラクル封じ)
+  - Stripe idempotency key は `sub_start:{token}` (チケット `purchase:` / カード登録と別空間)
+  - live/stale の閾値は `BillingCheckoutSession::staleThresholdAt()` が単一出典で、
+    `BillingAccess::state()` / 段 2・3・4 / 日次 sweeper が共有する
+    (Architecture テストが literal の再発明を検出)
+- **着地 feedback (P9)**: `Inertia::location()` の full page redirect を跨いだ後、
+  `/billing` 着地で one-shot バナーを出す (`BillingFeedbackKind`: purchase_received /
+  purchase_processing / purchase_already_received / checkout_retry_required / portal_returned)。
+  org スコープ + intent 検証で **fail-closed**、UI は raw query を見ない。
+  `PurchaseFormState::Completed` 撤去後、**購入完了を伝える唯一の経路**。
+- **請求先連絡先 (P9)**: `organizations.billing_contact_email` / `billing_contact_name` は
+  両列とも CipherSweet 暗号化 (email のみ blind index。検索は `whereBlind`)。
+  `UpdateBillingContactAction` は **email が dirty のときだけ** Stripe 顧客へ同期する。
+- **サブスク決済カードの流用 (P9 / T1004)**: `mode=subscription` Checkout が
+  `payment_status ∈ {paid, no_payment_required}` で確定し、かつ資金選択が `auto_recharge` の
+  ときだけ `ReuseSubscriptionPaymentMethodJob` を dispatch する
+  (`pm_reuse_dispatched_at` が dispatch marker)。**webhook 同期処理から外向き Stripe API を
+  撃たない**不変条件のため Job へ退避する。`AutoRechargeService::applyReusedPaymentMethod` は
+  適格性先行の fail-closed (同意なし・失効・停止状態では Stripe にも DB にも触らない)。
 
 ## チケットスポット購入 (T007) の運用契約
 
@@ -347,7 +416,10 @@ doc/10 §10.3 / §10.8-4/-7 の実装 (T004)。routes は `/app/projects/{projec
 - **presigned 直アップロード**: `Capture/TakeUploadService` が Organization 行ロック tx 内で
   容量 Quota (`max_storage_bytes`。bytes_used + bytes_pending + 加算) を判定し
   `take_upload_reservations` (pending) を予約 → `Capture/TakeObjectStorage` が
-  **ChecksumSHA256 を署名条件に含む** presigned PUT URL + Crypt 封緘の検証専用チケットを発行。
+  **ChecksumSHA256 を署名条件に含む** presigned PUT URL + Crypt 封緘の検証専用チケットを発行
+  (封緘/開封は `Capture/UploadTicketCodec` に集約。AEAD で改竄検出し、復号失敗・shape 不正・
+  期限切れは null → 呼び出し側が 422 に変換。payload 種別キーで upload チケットと
+  download ACK の相互流用を防ぐ)。
   `Capture/TakeRegistrationService` がチケット検証 + 予約 claim (pending→verifying の原子的
   UPDATE) + HeadObject 三点照合 (size/content_type/checksum) + `(cut_id, client_take_id)` 冪等
   登録を行う (確定は verifying→completed の CAS = sweeper と競合しない)

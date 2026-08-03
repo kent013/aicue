@@ -8,10 +8,17 @@
 2. `settings.security` → 2FA 有効化 `two-factor.enable` → `two-factor.confirm`、リカバリコード再生成 `two-factor.regenerate-recovery-codes`(トーストは 1 つのみ, T026)、無効化 `two-factor.disable`。
 3. 機微操作前の再認証: `password.confirm`(confirm-password 画面)→ `password.confirm.store`、`recent-auth.confirm`/`recent-auth.status` → `recent-auth.password`。
 4. アカウント削除 `settings.account.destroy`(確認 → 実行)。
-5. 通知センター `notifications.index`(`/notifications`): 通知一覧・空状態の説明、既読化 `notifications.read` / 一括既読 `notifications.read-all` / 開封遷移 `notifications.open`。ブラウザタブ title が固有(「通知 | AI-CUE」)か(T034)。
+5. **bfcache 復元時の秘匿・再検証 (`session.status`)**: 認証済み画面 → 外部/別ページへ遷移 →
+   **ブラウザバック**で戻す。`resources/js/lib/bfcache-guard.ts` が pageshow 直後に
+   `GET /session/status` を叩き、`authenticated: false` なら中身を秘匿してログインへ倒す。
+   - ログアウト後に戻るボタンで認証済み画面が**中身の見える状態で復元されない**こと
+     (サーバ側 no-store とクライアント guard のセット。正本 `docs/supported-browsers.md`)。
+   - セッションが有効な場合は秘匿が**解除されて通常操作に戻れる**こと (白画面のまま
+     詰まないこと。H4)。**iOS Safari / WebKit レーンが主戦場**なので WebKit で必ず見る。
+6. 通知センター `notifications.index`(`/notifications`): 通知一覧・空状態の説明、既読化 `notifications.read` / 一括既読 `notifications.read-all` / 開封遷移 `notifications.open`。ブラウザタブ title が固有(「通知 | AI-CUE」)か(T034)。
 
 ## このストーリーで消化する screens / operations
-- screens: settings, settings.security, password.confirm, recent-auth.confirm, recent-auth.status, notifications.index
+- screens: settings, settings.security, password.confirm, recent-auth.confirm, recent-auth.status, notifications.index, session.status
 - operations: user-profile-information.update, user-password.update, two-factor.enable, two-factor.confirm, two-factor.disable, two-factor.regenerate-recovery-codes, password.confirm.store, recent-auth.password, settings.account.destroy, notifications.read, notifications.read-all, notifications.open
 
 ## 逸脱アイデア (--deviate 時)

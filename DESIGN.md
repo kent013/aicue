@@ -369,6 +369,45 @@ value(`text-h2`。weight でなく ramp 昇格で強調)+ 任意の subtext / Lu
 の anchor+inertia)と操作(`kind: "action"` = onclick)を型安全に出し分ける。`bordered`
 で破線枠サーフェス(`border-dashed`。drop 領域や明示的な空 region 向け)。
 
+### Breadcrumb
+
+実装: `components/molecules/Breadcrumb.svelte`。`BreadcrumbItem[]`(`@/types/components`)を
+`ChevronRight` 区切りで並べるパンくず。**`href` 省略の項目は現在位置**としてリンクにしない。
+atom 非依存(Lucide アイコンのみ)。単体で置かず、通常は PageHeaderSection 経由で出す。
+
+### PageHeader / PageHeaderSection
+
+実装: `components/molecules/PageHeaderSection.svelte`(full feature)と
+`components/molecules/PageHeader.svelte`(shorthand)。
+
+- **PageHeaderSection**: `title` / `breadcrumbs` / `description` / `icon`(Lucide 互換
+  `Component`)/ actions(`children` Snippet)を持つ詳細画面用ヘッダ。全幅バーは
+  PageContainer の padding を打ち消す**負マージン契約**で敷き、サイドバーのロゴブロックと
+  同じ高さに揃える。**パンくずは 2 件以上のときだけ出す**(1 件は h1 と二重提示になるため)。
+- **PageHeader**: breadcrumbs / actions を使わないルート画面用の薄いラッパー。
+  内部で PageHeaderSection を呼ぶだけ。**actions や breadcrumbs が要るなら
+  PageHeaderSection を直接使う**(PageHeader に prop を足さない)。
+- actions は children Snippet で渡す(旧 slot API は使わない)。
+
+### NotificationBell
+
+実装: `components/molecules/NotificationBell.svelte`。`/notifications` への Inertia link に
+未読数バッジを重ねた通知ベル。未読数は shared props(`notifications.unreadCount`)を親が渡す。
+**100 以上は `99+` に丸める**。v1 はドロップダウンを持たない最小構成(フォーカス管理・
+開閉状態を持たない)。**通知はこのベルが単一導線**で、サイドバー nav 項目に重複掲載しない。
+`data-testid` は既定 `notification-bell`(mobile は呼び出し側が `notification-bell-mobile`)。
+
+### PricingPlanCard
+
+実装: `components/molecules/PricingPlanCard.svelte`(仕様の真実は `PricingPlanCard.types.ts`)。
+料金プランカード。**DTO 非依存**(primitive props)で、feature 文言と CTA は呼び出し側が
+props / Snippet で供給する。
+
+- `priceAmount` が **null = 基本料金を持たない = 「無料」表示**(0 も防御的に同一表示)。
+- `priceCaption`(例: 「基本料金」)は表示価格が総額と誤解されるのを防ぐための価格直上の説明。
+- `isHighlighted` で `border-primary` の強調枠(現在のプラン等)。
+- `headerBadges`(header 右上)/ `footerCta`(card 下部)は Snippet 専用スロット。
+
 ### ApiKeyTabNav
 
 実装: `components/molecules/ApiKeyTabNav.svelte`。API キー管理ドメインのページ間

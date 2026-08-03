@@ -15,6 +15,7 @@
 | app/projects/{project}/manuals/{manual} | capture.manuals.show | S3 |
 | app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take}/playback | capture.takes.playback | S3 |
 | billing | billing.index | S5 |
+| billing-required | onboarding.billing-required | S2 |
 | billing/plans | billing.plans | S5 |
 | commerce-disclosure | legal.commerce-disclosure | S1 |
 | contact | contact | S1 |
@@ -27,6 +28,7 @@
 | login | login | S1 |
 | manage/users | manage.users.index | S4 |
 | notifications | notifications.index | S6 |
+| onboarding/checkout | onboarding.checkout | S1 |
 | organizations/create | organizations.create | S4 |
 | organizations/{organization:slug}/api-keys | organizations.api-keys.index | S4 |
 | organizations/{organization:slug}/api-keys/sessions | organizations.api-keys.sessions.index | S4 |
@@ -52,11 +54,34 @@
 | recent-auth/status | recent-auth.status | S6 |
 | register | register | S1 |
 | reset-password/{token} | password.reset | S1 |
+| session/status | session.status | S6 |
 | settings | settings | S6 |
 | settings/security | settings.security | S6 |
 | terms | legal.terms | S1 |
 | two-factor-challenge | two-factor.login | S1 |
 | user/confirm-password | password.confirm | S6 |
+
+**非 Inertia の GET (画面ではないが分母に載せているもの)**:
+`capture.csrf-cookie` (撮影 PWA の CSRF cookie 発行) と `session.status`
+(bfcache guard `resources/js/lib/bfcache-guard.ts` が pageshow 直後に叩く
+セッション有効性プローブ。auth グループの**外**にあり guest でも 200 +
+`authenticated: false`) は Inertia ページを返さないが、ブラウザ挙動の契約に
+直結するためインベントリに残す (S3 / S6 で観測する)。
+
+## 課金ゲート着地 (P4 ゲート反転) の画面遷移
+
+> 未契約組織は業務 route group に入れない (`require-active-subscription`)。遮断時の着地は
+> **`manageBilling` 保持者 → `onboarding.checkout` / 非保持者 → `onboarding.billing-required`**
+> (正本: `docs/billing-gate-inversion-runbook.md`、運用契約: `docs/architecture.md`
+> §サブスク契約 Checkout とオンボーディング着地)。
+
+- `onboarding.checkout` は**離脱ガード付き**: 契約済み (有効 sub / free personal) は
+  `billing.index` へ、`manageBilling` 非保持者は `onboarding.billing-required` へ逃がす。
+- `onboarding.billing-required` も同様に、利用可なら `dashboard`、`manageBilling` 保持者なら
+  `onboarding.checkout` へ逃がす。**どちらの画面も「行き先のない詰み」を作らないこと**が契約で、
+  ここでループ・403・空画面が出たら finding (H4/H10)。
+- `?plan=` は org スコープ session へ積んで canonical URL へ 303 する (query が残らない)。
+  リロードしても選択が消えない (peek) こと。
 
 ## ナビゲーション/レイアウト規約 (T069 左サイドバー、参照アプリ aigenba 準拠)
 
