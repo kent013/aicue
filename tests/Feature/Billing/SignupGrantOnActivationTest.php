@@ -268,6 +268,43 @@ test('invoice.paid では signup grant が走らない (D29 の回帰)', functio
     expect($organization->refresh()->signup_tickets_granted_at)->toBeNull();
 });
 
+test('subscription.created と invoice.paid(subscription_create) が両方来ても signup grant は高々 1 回', function (): void {
+    // 実運用では初回契約でこの 2 イベントが必ず両方届く (順序は Stripe 側の都合で前後する)。
+    // D29 で付与契機を created 単独へ寄せたため、順序に関わらず付与は 1 回でなければならない。
+    $createdFirst = activationGrantCustomer('cus_order_created_first');
+    $invoiceFirst = activationGrantCustomer('cus_order_invoice_first');
+
+    $invoicePaidPayload = fn (string $eventId, string $stripeId): array => [
+        'id' => $eventId,
+        'type' => 'invoice.paid',
+        'data' => [
+            'object' => [
+                'id' => 'in_'.$eventId,
+                'customer' => $stripeId,
+                'billing_reason' => 'subscription_create',
+            ],
+        ],
+    ];
+
+    // 順序 A: created → invoice.paid
+    event(new WebhookReceived(subscriptionCreatedPayload('evt_a_created', 'sub_order_a', 'cus_order_created_first')));
+    event(new WebhookReceived($invoicePaidPayload('evt_a_invoice', 'cus_order_created_first')));
+
+    expect(activationSignupEntries($createdFirst))->toHaveCount(1);
+    expect(activationSignupEntries($createdFirst)->first()?->idempotency_key)->toBe('signup_grant:sub_order_a');
+    expect(activationBalance($createdFirst))->toBe(config()->integer('billing.signup_grant_tickets'));
+
+    // 順序 B: invoice.paid → created (invoice.paid は marker も立てない = created が唯一の契機)
+    event(new WebhookReceived($invoicePaidPayload('evt_b_invoice', 'cus_order_invoice_first')));
+    expect($invoiceFirst->refresh()->signup_tickets_granted_at)->toBeNull();
+
+    event(new WebhookReceived(subscriptionCreatedPayload('evt_b_created', 'sub_order_b', 'cus_order_invoice_first')));
+
+    expect(activationSignupEntries($invoiceFirst))->toHaveCount(1);
+    expect(activationSignupEntries($invoiceFirst)->first()?->idempotency_key)->toBe('signup_grant:sub_order_b');
+    expect(activationBalance($invoiceFirst))->toBe(config()->integer('billing.signup_grant_tickets'));
+});
+
 test('移行期に旧鍵で付与済みの org を activate しても再付与されない', function (): void {
     $organization = activationGrantCustomer();
     $owner = $organization->users()->firstOrFail();
