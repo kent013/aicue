@@ -22,7 +22,6 @@
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
 | T085 | bfcache 実復元の iOS 実機受入確認 | test | Playwright 不可のため実機で確認+記録 | High | standalone | [設計](devnotes/20260803-0053-aigenba-alignment/) | 2026-08-03 03:10 |
-| T081 | 決済parity P9: checkout冪等+請求先+PM流用 | backend | 冪等マシン+contact暗号化+T1004 | Low | standalone | [設計](devnotes/20260717-0035-aigenba-billing-parity/) | 2026-07-17 02:12 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
