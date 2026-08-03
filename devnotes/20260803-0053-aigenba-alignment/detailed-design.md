@@ -1096,38 +1096,60 @@ LP・login・SEO 等の公開ページでは guard を初期化しない
 | 3 | **未ログアウトでの復元** | 表示が正しく**戻る**こと（= 誤検知しない） |
 | 4 | **ログアウト後の復元** | **PII が出ない**こと（= 本来の目的） |
 
-### 完了条件（design-review R1 Critical への対応）
+### 完了条件（**2026-08-03 に実測で再定義**。旧条件は実現不能と判明）
 
-**核心リスクは iOS Safari 系 bfcache であり、Chromium 主体では安全性を証明できない。**
-Chromium は `no-store` のページを bfcache から evict するため、**シナリオ 4 がそもそも空振りする**。
-したがって完了条件を次の優先順で定める。
+> **重要**: 本節は R1〜R2 で定めた「WebKit レーンで実 bfcache 復元を恒久自動回帰にする」を
+> **実装後の実測により再定義したもの**である。経緯は下記 §実測による設計前提の否認。
 
 | 区分 | 完了条件 | 内容 |
 |---|---|---|
-| **必須（実装完了条件）** | **WebKit レーンの追加** | `pnpm exec playwright install webkit` + `scripts/run-browser-test.sh` の対応。**恒久的な自動回帰**としてシナリオ 2・4 を成立させる |
-| **補完（WebKit の代替ではない）** | iOS 実機受入確認 | **PWA standalone 差異**の確認。**日時・端末・OS バージョン・結果**を devnotes に記録する |
-| 部分検証 | Chromium レーン | 「秘匿属性が `pagehide` で付く」「`pageshow` でプローブが走る」の確認。**これを全体の証明として扱わない** |
+| **必須（実装完了条件）** | **guard の状態機械を恒久自動回帰で固定する** | (1) **vitest** で分岐（`persisted` 有無 / 秘匿属性 有無 / プローブ成功・失敗・エラー / 再試行）を固定 (2) **Browser E2E** で「`pagehide` で実描画が止まる」「合成 `PageTransitionEvent('pageshow', {persisted:true})` でプローブが走り状態遷移する」を**実ブラウザ上で**固定 (3) 通常遷移で秘匿が**誤発火しない**ことを固定 |
+| **必須** | **ブラウザ自身の bfcache 復元経路が自動検証されていないことを明示する** | 該当シナリオは**skip し、skip が「担保されていない」の表明であって合格ではない**ことをテストと `docs/supported-browsers.md` に書く。**空振りを green と偽らない** |
+| **補完（自動回帰の代替ではない）** | iOS 実機受入確認 | 実 bfcache 復元経路と PWA standalone 差異の確認。**日時・端末・OS バージョン・結果**を devnotes に記録する。**再確認条件**: `bfcache-guard.ts` / 秘匿スタイル / プローブ endpoint の変更時 |
 
-> **R1 からの変更（design-review R2 Critical）**: R1 では「WebKit が成立しなければ実機確認で完了」と
-> したが、これは**セキュリティ不変条件を恒久的な自動回帰テストなしで完了扱いにできる**構造であり、
-> 概念設計 Round 3 Critical（bug-hunt を完了条件にした誤り）と**同型の誤り**だった。
-> **WebKit レーンを必須**とし、実機確認は**補完**に降格した。
+#### 実測による設計前提の否認（2026-08-03）
 
-**正のコントロール（design-review R2 Warning）**: 「WebKit なら再現できる見込み」では
-成功条件にならない。**シナリオ 2・4 は `pageshow.persisted === true` を実際に観測できた場合のみ有効**とし、
-**観測できなければテストを失敗させる**（空振りを green にしない）。
+R1〜R2 の条件は「WebKit なら bfcache 復元を再現できる」という**未検証の前提**に立っていた。
+アプリに触れない単独スクリプトで実測したところ、**前提は誤りだった**:
+
+| 条件 | `pageshow.persisted` |
+|---|---|
+| chromium 既定 | `false` |
+| chromium + `ignoreDefaultArgs: ['--disable-back-forward-cache']` | **`false`** |
+| chromium + 上記 + `--enable-features=BackForwardCache,BackForwardCacheNoTimeEviction` | **`false`** |
+| webkit 既定 | `false` |
+| CDP を外す構成 | **起動不能**（Playwright はブラウザ駆動に CDP が必須） |
+
+**根本原因**: Chromium は **DevTools/CDP セッション接続中に bfcache を無効化する**。
+Playwright は常時 CDP を張るため、フラグ設定では回避できない。
+playwright-core 1.61.1 は既定スイッチに `--disable-back-forward-cache` も含むが、
+**それを外しても復元しない**（= フラグは根本原因ではない）。
+
+**したがって「Playwright で実 bfcache 復元を自動検証する」は設定の問題ではなく原理的に不可能**であり、
+これを必須完了条件に据え続けると **達成不能な条件で緩和策を永久に塞ぐ**ことになる。
+
+**再定義の考え方**: 「担保しない」のではなく、**担保できる境界を正確に引き直す**。
+
+| 対象 | 自動回帰で担保 |
+|---|---|
+| guard の状態機械（分岐・遷移・誤発火しないこと） | **担保する**（vitest 19 ケース + 実ブラウザ E2E 2 ケース） |
+| ブラウザ自身が bfcache から復元する経路 | **担保しない**（不可能）。skip で明示し、iOS 実機受入確認で補完する |
+
+これは概念設計 R3 / 詳細 R2 で潰した「**恒久自動回帰なしに完了扱いする**」構造とは異なる。
+機構は恒久的に固定されており、**固定できない範囲を隠さず明示している**点が違いである。
 
 さらに、分岐ロジック自体は **vitest のユニットテストで固定**する（施策 6）。
 E2E は統合挙動の確認に絞る（`pageshow(persisted)` 分岐は E2E 単体だと不安定なため）。
 
-### fail-first の置き場所（design-review R2 Warning）
+### fail-first の置き場所（2026-08-03 に再定義）
 
-Chromium では施策 4 適用後に bfcache 復元が起きなくなるため、**シナリオ 4 の fail-first を
-Chromium で再現できない**。したがって:
+**Playwright ではどのブラウザでも bfcache 復元を再現できない**ため、
+シナリオ 4 の fail-first を Browser E2E で取ることは**できない**。したがって:
 
-1. **WebKit レーンで fail-first を確認**する（第一）
-2. 併せて **guard の vitest で「秘匿しなければ復元後に旧 DOM が可視のまま」という負のコントロール**を
-   先行させ、秘匿ロジックの必要性をユニット層で先に固定する（施策 6）
+1. **guard の vitest で「秘匿ロジックを外すと `pagehide` 後に秘匿属性が付かない」負のコントロール**を
+   先行させ、秘匿ロジックの必要性をユニット層で固定する（施策 6）
+2. Browser E2E は**合成 `PageTransitionEvent`** で状態遷移の fail-first を取る
+   （実 bfcache 復元ではないが、guard の配線が無ければ落ちる）
 
 ### リスク
 
@@ -1411,3 +1433,80 @@ pnpm lint / pnpm typecheck / pnpm test / pnpm build
 composer test:browser                                    # T-a のみ
 cd .claude/skills/app-bug-hunt && python3 -m unittest discover -s ledger -p 'test_*.py'   # T-b
 ```
+
+---
+
+# 実装で判明した設計の訂正（2026-08-03。設計者による事後反映）
+
+実装 (T082/T083/T084) と Codex 実装レビューで、**設計書の記述が実データと食い違う点**が判明した。
+実装側は理由を添えて調整済みだが、**正本である本設計書への反映は設計者の責務**なので以下に記録する。
+
+## D-1【設計の抜け】`routes/api.php` の `whereNumber` が global pattern を弱い制約で上書きする
+
+- **設計**: 施策 1 は `routes/web.php` の `whereUuid('notification')` 削除のみ指示していた。
+- **実装**: `routes/api.php` の `->whereNumber('project')` / `->whereNumber('item')` 計 6 箇所も削除した。
+- **判定: 実装が正しい。設計の抜けだった。**
+  `whereNumber` は route 個別 `where` として **global pattern を上書き**し、
+  Laravel の `whereNumber` は `[0-9]+` を当てる。これは**桁あふれ 22003 を防げない弱い制約**であり、
+  施策 1 で `[0-9]{1,18}` にした意味が当該 route だけ失われる。
+  施策 2 の IV-3（`BIGINT_PATTERN` との一致）も fail する。
+  思考原則 #3「後方互換の並走を残さない」からも `whereUuid` と同じ扱いが正しい。
+
+## D-2【設計の誤り】`NON_MODEL` の初期値に実在しない param が含まれていた
+
+- **設計**: `NON_MODEL = ['ability','action','bucket','intent','provider','resource','userId']`
+- **実装**: `['intent','provider','userId']` に縮小。
+- **判定: 実装が正しい。**
+  `ability` / `action` / `bucket` / `resource` は **実 route param として存在しない**
+  （私が route ファイルを grep した際に**コメント文字列**を拾っていた）。
+  実在しない param を登録すると IV-2（逆方向 = 陳腐化検出）が必ず fail する。
+  **実データが設計に優先する**。
+
+## D-3【設計に無い機構の追加】`MANUALLY_RESOLVED`（IV-9(a) の限定的免除）
+
+- **背景**: `{notification}` は `NotificationController` が `$request->user()->notifications()` 経由で
+  **手動解決**するため、action 引数が `string $notification` になる。
+  設計どおり IV-9(a)（action 引数が宣言モデル型であること）を素直に実装すると
+  `notifications.open` / `notifications.read` が**必ず fail** する。
+  controller を implicit binding に変えると **cross-user 404（存在オラクル封じ）が壊れる**ため変えられない。
+- **実装**: 「param ごとに理由を書いて登録した場合のみ IV-9(a) を免除する」allowlist を新設。
+  impl-review R1 の指摘を受け、免除は **param 名単位ではなく route identity 単位**に限定された
+  （param 名単位だと将来 `{notification}` を使う別 route が丸ごと免除される deny-by-default の穴になる）。
+  IV-3 / IV-4 の pattern 検査と IV-9(c) の PK 型検査は**引き続き適用**される。
+  「`MANUALLY_RESOLVED` は `BIGINT`/`UUID` 宣言済み param にのみ理由付きで登録できる」ことも別テストで固定。
+- **判定: 妥当。設計に反映する。**
+  IV-9 は「宣言と実解決経路の一致」を見る検査であり、
+  **手動解決という第 3 の解決方式**を設計時に想定していなかったのが漏れ。
+  免除ではなく「解決方式の宣言」として位置づけるのが正しい。
+
+## D-4【設計の不備】Livewire route identity が環境依存で壊れる
+
+- **設計**: 「name 無し route は `method:uri` signature」（HTTP method 昇順ソート・暗黙 HEAD 除外）
+- **実装**: Livewire の CSS/JS モジュール route は uri prefix が **APP_KEY 由来ハッシュ**
+  （dev は `livewire-18f43797` / testing は `livewire-038bc0e2` と**実際に異なる**）。
+  そのままだと `EXTERNAL` の登録値が環境依存で壊れるため、gate 側で
+  `livewire-<hash>/` → `livewire/` の **prefix 正規化のみ**を行い、
+  `'GET:livewire/css/{component}.css'` 等の安定 identity で登録した。
+- **判定: 妥当。設計に反映する。** identity の同一性（path 構造 + method）は維持されている。
+
+## D-5【設計の予想が外れた（無害）】ケース 6 は実装前から 404 だった
+
+- **設計**: ケース 6（`{oauthSession}` に非適合値）を「現状 500 で fail」と予想していた。
+- **実測**: **実装前から 404 で green**（`oauth_sessions.id` が uuid 型ではないため 22P02 が起きない）。
+- **判定**: 監査時の「`{oauthSession}` は未防御の 500 経路」という記述は
+  **PK 型の推定に基づく誤り**だった（`HasUuids` trait の存在から uuid 列と推定したが、実列型が違った）。
+  ただし `{oauthSession}` を `UUID` 分類に置き制約を掛けること自体は**引き続き正しい**
+  （型宣言と実挙動を一致させ、将来の列型変更で崩れないようにするため）。
+  **実バグは bigint 側の 11 param（ケース 1・2・3・7 の計 14 データセットが実装前に赤）に実在した**。
+
+## D-6【施策 5 の現行値表の訂正】
+
+- **設計**: 既存 4 経路の期待完全値を `no-store` / `no-store, private` と記載。
+- **実測**: ソース側は設計どおり `no-store` を設定しているが、
+  **施策 4 の baseline 適用後の最終応答値**が `no-store, private` になる経路がある。
+  テストは実際の最終応答値をピンしている。
+- **判定**: テストが正しい。設計表は「ソースが設定する値」と「最終応答値」を区別していなかった。
+
+> **なお**: `ExistingNoStoreContractTest` は 4 経路中 3 経路（認証済み経路）では
+> baseline が付与する値と同値のため **untouched と上書きを判別できない**。
+> 真に untouched 契約を証明しているのは guest 経路である。この限界は実装側で文書化済み。
