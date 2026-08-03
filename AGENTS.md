@@ -198,13 +198,22 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
    (bytes_used + bytes_pending) 経由のみ。予約 (`take_upload_reservations`) の状態遷移は
    pending→verifying (claim)→completed/released の CAS で行い、直接 UPDATE を書かない。
    運用契約 (media queue worker / 孤児掃除 cron) は `docs/architecture.md` §撮影 PWA
-3. **サポート対象ブラウザと bfcache の扱い**: 「どのブラウザで何をどこまで保証しているか」の
-   正本は **`docs/supported-browsers.md`**。撮影 PWA の主戦場は iOS Safari であり、Safari は
-   `Cache-Control: no-store` でも bfcache に格納しうるため、認証済み画面は
-   サーバ側 no-store baseline (`NoStoreCacheHeadersForAuthenticatedPages`) と
-   クライアント側の bfcache 秘匿・再検証 (`resources/js/lib/bfcache-guard.ts` +
-   `session.status` プローブ) の **セット**で守る。
-   bfcache guard / 秘匿スタイル / プローブ endpoint に手を入れたら、
+3. **サポート対象ブラウザと履歴復元の扱い**: 「どのブラウザで何をどこまで保証しているか」の
+   正本は **`docs/supported-browsers.md`**。**Inertia が描画する認証済み画面**が
+   ログアウト後に復元される経路は 3 本あり、**3 枚セット**で守る
+   (Filament `/admin` など非 Inertia 面は本規約の対象外):
+   (A) サーバ no-store baseline (`NoStoreCacheHeadersForAuthenticatedPages`)、
+   (B) クライアント bfcache 秘匿・再検証 (`resources/js/lib/bfcache-guard.ts` +
+       `session.status` プローブ。撮影 PWA の主戦場 iOS Safari は
+       `Cache-Control: no-store` でも bfcache に格納しうるため必須)、
+   (C) Inertia history 暗号化 + ログアウト時の履歴鍵破棄
+       (`bootstrap/app.php` の `Inertia\Middleware\EncryptHistory` +
+        `App\Http\Responses\Fortify\LogoutResponse` の `Inertia::clearHistory()`)。
+   (C) の保証条件は「**`clearHistory: true` を含む Inertia page をクライアントが適用したタブ**」。
+   ログアウト着地 route を非 Inertia 化しない (`InertiaHistoryGuardTest` が固定) /
+   ログアウト導線を非 Inertia 経路 (JSON 204 完結の XHR 等) で新設しない
+   (`tests/js/architecture/logout-call-site-inventory.test.ts` が deny-by-default で固定)。
+   (B) の guard / 秘匿スタイル / プローブ endpoint に**挙動変更**を入れたら、
    `docs/supported-browsers.md` の**実機受入確認の再確認条件**に従って再確認する。
    Browser テストは **Chromium + WebKit の 2 レーン**が契約 (`docs/testing-browser.md`)。
    実行時間を理由に WebKit レーンを落とさない (復元シナリオの恒久回帰が消えるため)
