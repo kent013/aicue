@@ -21,7 +21,6 @@
 
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
-| T075 | 決済parity P4: ゲート反転+移行 | backend | 未契約遮断+grandfathering backfill | Critical | standalone | [設計](devnotes/20260717-0035-aigenba-billing-parity/) | 2026-07-17 02:12 |
 | T076 | 決済parity P5: 残高会計精緻化 | backend | per-bucket会計(clamp verbatim)+消費優先 | High | standalone | [設計](devnotes/20260717-0035-aigenba-billing-parity/) | 2026-07-17 02:12 |
 | T077 | 決済parity P6: grant契機変更 | backend | 有効化時付与へ+LP文言修正 | High | standalone | [設計](devnotes/20260717-0035-aigenba-billing-parity/) | 2026-07-17 02:12 |
 | T078 | 決済parity P7: 新規登録経路 | backend | IntendedPlanResolver+?plan=handoff | Medium | standalone | [設計](devnotes/20260717-0035-aigenba-billing-parity/) | 2026-07-17 02:12 |
