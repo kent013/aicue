@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\Billing\BillingFeedbackKind;
 use App\Enums\Billing\OnboardingBillingState;
 use App\Enums\CheckoutIntent;
 use App\Enums\CheckoutSessionStatus;
@@ -47,7 +48,7 @@ test('2 日前の stale pending があっても新 token の POST は新規 Chec
     expect($fake->expired)->toHaveCount(0);
 });
 
-test('同 token + stale pending の再送は ?retry=1、境界内 (23h59m) なら既存 URL へ replay する', function (): void {
+test('同 token + stale pending の再送は checkout_retry_required、境界内 (23h59m) なら既存 URL へ replay する', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
 
     // (a) stale (25h 前) → retry
@@ -61,7 +62,9 @@ test('同 token + stale pending の再送は ?retry=1、境界内 (23h59m) な�
     $this->actingAs($owner)->post('/billing/checkout', [
         'plan_code' => 'standard',
         'subscription_attempt_token' => $staleToken,
-    ])->assertRedirect('/billing?retry=1');
+    ])
+        ->assertRedirect('/billing')
+        ->assertSessionHas(BillingFeedbackKind::FLASH_KEY, BillingFeedbackKind::CheckoutRetryRequired->value);
 
     // (b) 境界内 (23h59m 前) → replay (既存 checkout_url)
     [$org2, $owner2] = createOrganizationWithOwner('境界内組織');
