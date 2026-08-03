@@ -106,6 +106,9 @@ Open リストは [TODO.md](TODO.md) を参照。
 | T090 | 契約中組織のプラン変更経路を in-app swap で新設 (bug-hunt F-3-01) | backend | 2026-08-04 05:42 |
 | T091 | AI 解析の時間 budget 是正と provider 例外の有界リトライ (bug-hunt F-1-01) | backend | 2026-08-04 05:42 |
 | T094 | 課金 UI の入力 UX 規約を横断是正 (bug-hunt F-3-02/F-3-03/F-3-05) | frontend | 2026-08-04 05:42 |
+| T092 | 認証ファネルの離脱導線を修復 (踏破不能 CTA 撤去 + AuthLayout footer 規約化。bug-hunt F-2-01/F-2-02) | frontend | 2026-08-04 07:05 |
+| T093 | /billing 着地 feedback を one-shot 化 (303 で query を畳み flash 化。bug-hunt F-3-04) | backend | 2026-08-04 07:05 |
+| T095 | 2FA 手動セットアップキー表示と flash→toast 配線の規約化 (bug-hunt F-4-02。F-1-02 は誤検知と確定し修正せず) | frontend | 2026-08-04 07:05 |
 
 
 ## Obsoleted

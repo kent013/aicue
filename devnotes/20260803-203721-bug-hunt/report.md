@@ -157,7 +157,7 @@
 | F-3-02 (M) | 請求先メールが `type="email"` のため native (英語) validation が先に発火し、日本語のサーバ検証 UX に到達しない (`BillingContactForm.svelte:87`) | shard 報告のみ (コード位置は確認) |
 | F-3-03 (M/H12) | member (manageBilling なし) のオートリチャージ入力欄が実質 readonly なのに通常入力欄と同じ見た目 | shard 報告のみ (原因未特定) |
 | F-3-05 (M) | オートリチャージの範囲エラーが値を直しても消えない stale-invalid。`inputError` が `$state` で `ensureValidRange()` (押下時のみ) からしか更新されない一方、`rangeError` は `$derived` (`AutoRechargeCard.svelte:46,84,161-163`) | **確定**。T041/T044 で確立した stale-invalid 解消パターンから、新規実装の本カードだけが外れている |
-| F-1-02 (L) | 動画マニュアル削除後のリダイレクト先に成功 flash が出ない (一覧からの消失のみ) | shard 報告のみ |
+| F-1-02 (L) | 動画マニュアル削除後のリダイレクト先に成功 flash が出ない (一覧からの消失のみ) | **【2026-08-04 追記: 誤検知と確定】** T095 の実装フェーズで、**現行コードのまま** Browser テスト (Chromium / WebKit 両レーン) を走らせたところ着地マーカーと同一時間窓で `toast-success` が可視になり PASS した。success toast は 4 秒で auto-dismiss するため、bug-hunt driver の snapshot がその窓の後に来ていたことによる観測 artifact。`ledger/adjudications.jsonl` の **A-001** に false_positive として登録済み (4-gate 一致を実測確認)。**コード修正は行っていない** |
 
 ## 要確認 (仕様確認待ち。バグと断定しない)
 
