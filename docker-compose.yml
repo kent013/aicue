@@ -1,58 +1,67 @@
 services:
-  app:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-    volumes:
-      - .:/workspace:cached
-      # vendor / node_modules は named volume (bind mount より高速 & ホストと分離)
-      - node_modules:/workspace/node_modules
-      - vendor:/workspace/vendor
-    command: sleep infinity
-    environment:
-      # コンテナ内では実 env が .env より優先されるため、devcontainer は pgsql、
-      # ホスト直実行は .env の sqlite 既定、と環境ごとに自然に切り替わる。
-      - DB_CONNECTION=pgsql
-      - DB_HOST=db
-      - DB_PORT=5432
-      - DB_DATABASE=app
-      - DB_USERNAME=postgres
-      # tracked file から実 credential を排除する (ドナー T-SEC-14 由来)。
-      # ${...:?msg} は未設定 OR 空文字で fail-fast。dev 既定値は .env に POSTGRES_PASSWORD=postgres。
-      - "DB_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env (dev default: postgres)}"
-    depends_on:
-      - db
-    networks:
-      - app-network
+    app:
+        build:
+            context: .
+            dockerfile: docker/Dockerfile
+        # OrbStack / シェルの表示名を aicue にする (既定はサービス名 app 由来)
+        hostname: aicue
+        container_name: aicue
+        volumes:
+            - .:/workspace:cached
+            # vendor / node_modules は named volume (bind mount より高速 & ホストと分離)
+            - node_modules:/workspace/node_modules
+            - vendor:/workspace/vendor
+        command: sleep infinity
+        # Valet が aicue.test → 127.0.0.1:8002 を固定プロキシするため、ホスト側 8002 を publish する。
+        # コンテナ内 serve はデフォルト 8001 のまま (host 8001 は spirux が使用中なのでホスト側だけずらす)。
+        # loopback bind で共用 LAN への漏洩を防ぐ (ドナー T-SEC-14 由来)。
+        ports:
+            - "127.0.0.1:8002:8001"
+        environment:
+            # コンテナ内では実 env が .env より優先されるため、devcontainer は pgsql、
+            # ホスト直実行は .env の sqlite 既定、と環境ごとに自然に切り替わる。
+            - DB_CONNECTION=pgsql
+            - DB_HOST=db
+            - DB_PORT=5432
+            - DB_DATABASE=app
+            - DB_USERNAME=postgres
+            # tracked file から実 credential を排除する (ドナー T-SEC-14 由来)。
+            # ${...:?msg} は未設定 OR 空文字で fail-fast。dev 既定値は .env に POSTGRES_PASSWORD=postgres。
+            - "DB_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env (dev default: postgres)}"
+        depends_on:
+            - db
+        networks:
+            - app-network
 
-  db:
-    image: postgres:18-alpine
-    restart: unless-stopped
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    environment:
-      - POSTGRES_USER=postgres
-      - "POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env (dev default: postgres)}"
-      - POSTGRES_DB=app
-    networks:
-      - app-network
+    db:
+        image: postgres:18-alpine
+        restart: unless-stopped
+        volumes:
+            - postgres-data:/var/lib/postgresql/data
+        environment:
+            - POSTGRES_USER=postgres
+            - "POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env (dev default: postgres)}"
+            - POSTGRES_DB=app
+        networks:
+            - app-network
 
-  mailpit:
-    image: axllent/mailpit:latest
-    restart: unless-stopped
-    ports:
-      # 共用 LAN への漏洩防止のため loopback bind (ドナー T-SEC-14 由来)。
-      # devcontainer 内からは service 名 mailpit:8025 / mailpit:1025 で到達できる。
-      - "127.0.0.1:8025:8025"
-      - "127.0.0.1:1025:1025"
-    networks:
-      - app-network
+    mailpit:
+        image: axllent/mailpit:latest
+        restart: unless-stopped
+        ports:
+            # 共用 LAN への漏洩防止のため loopback bind (ドナー T-SEC-14 由来)。
+            # devcontainer 内からは service 名 mailpit:8025 / mailpit:1025 で到達できる。
+            # host 側は他プロジェクトの mailpit (既定 8025/1025) と衝突しないよう aicue 専用にずらす。
+            - "127.0.0.1:8026:8025"
+            - "127.0.0.1:1026:1025"
+        networks:
+            - app-network
 
 volumes:
-  postgres-data:
-  node_modules:
-  vendor:
+    postgres-data:
+    node_modules:
+    vendor:
 
 networks:
-  app-network:
-    driver: bridge
+    app-network:
+        driver: bridge

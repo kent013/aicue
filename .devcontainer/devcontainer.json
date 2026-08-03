@@ -1,5 +1,5 @@
 {
-    "name": "app",
+    "name": "aicue",
     "dockerComposeFile": "../docker-compose.yml",
     "service": "app",
     "workspaceFolder": "/workspace",
@@ -109,6 +109,6 @@
         }
     },
     "forwardPorts": [8001, 5432, 5173],
-    "postCreateCommand": "echo 'Dev Container ready! Run ./init.sh to set up the app.'",
+    "postCreateCommand": "curl -fsSL https://herdr.dev/install.sh | sh; echo 'Dev Container ready! Run ./init.sh to set up the app.'",
     "remoteUser": "vscode"
 }
