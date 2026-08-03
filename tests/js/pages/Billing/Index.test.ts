@@ -10,7 +10,7 @@ const { routerPostMock, pageState } = vi.hoisted(() => ({
 
 vi.mock("@inertiajs/svelte", async (importOriginal) => ({
     ...(await importOriginal<typeof import("@inertiajs/svelte")>()),
-    router: { post: routerPostMock },
+    router: { post: routerPostMock, patch: vi.fn() },
     page: pageState,
 }));
 
@@ -55,11 +55,13 @@ const basePage: BillingDashboardProps = {
         pendingAutoEnable: false,
         disabledReason: null,
         failureCount: 0,
-        consentVersion: "v1",
+        consentVersion: "v2",
         baseUnitAmountJpy: 100,
         tiers: [{ minCount: 1, unitAmount: 100 }],
     },
     autoRechargeSetupToken: "01j0000000000000000000test",
+    feedback: null,
+    billingContact: { email: null, name: null, fallbackEmail: "owner@example.test" },
 };
 
 afterEach(() => {
@@ -142,5 +144,49 @@ describe("Billing/Index", () => {
         render(Index, { props: { page: basePage } });
 
         expect(screen.getByTestId("auto-recharge-card")).toBeInTheDocument();
+    });
+});
+
+describe("Billing/Index — 着地 feedback (P9)", () => {
+    // T088 で PurchaseFormState::Completed を撤去したため、この one-shot が
+    // 「購入完了をユーザーに知らせる唯一の経路」になっている。
+    it.each([
+        ["purchase_received", "お支払いを受け付けました。"],
+        ["purchase_processing", "お支払いを確認しています。"],
+        ["purchase_already_received", "既に受け付け済みです。"],
+        ["checkout_retry_required", "有効期限が切れました。"],
+        ["portal_returned", "お支払い管理画面から戻りました。"],
+    ] as const)("kind=%s のバナーをサーバ文言で描画する", (kind, message) => {
+        render(Index, { props: { page: { ...basePage, feedback: { kind, message } } } });
+
+        expect(screen.getByTestId("billing-feedback")).toHaveTextContent(message);
+        expect(screen.getByTestId(`billing-feedback-${kind}`)).toBeInTheDocument();
+    });
+
+    it("feedback=null では何も描画しない (リロードで消える one-shot)", () => {
+        render(Index, { props: { page: basePage } });
+
+        expect(screen.queryByTestId("billing-feedback")).toBeNull();
+    });
+
+    it("raw query を参照しない (?session_id があっても feedback=null なら描画しない)", () => {
+        window.history.replaceState({}, "", "/billing?session_id=cs_test&replayed=1");
+        render(Index, { props: { page: basePage } });
+
+        expect(screen.queryByTestId("billing-feedback")).toBeNull();
+        window.history.replaceState({}, "", "/billing");
+    });
+
+    it("?highlight=auto-recharge でオートリチャージカードを強調する", async () => {
+        window.history.replaceState({}, "", "/billing?highlight=auto-recharge");
+        render(Index, { props: { page: basePage } });
+
+        await vi.waitFor(() => {
+            expect(screen.getByTestId("auto-recharge-card")).toHaveAttribute(
+                "data-highlighted",
+                "true",
+            );
+        });
+        window.history.replaceState({}, "", "/billing");
     });
 });

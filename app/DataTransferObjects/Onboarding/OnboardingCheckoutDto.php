@@ -28,7 +28,8 @@ use App\DataTransferObjects\Billing\PlanDto;
  *   signupGrantTickets: int,
  *   intendedPlanCode: string|null,
  *   consentTerms: AutoRechargeConsentTermsShape,
- *   fundingChoices: list<string>
+ *   fundingChoices: list<string>,
+ *   subscriptionAttemptToken: string
  * }
  */
 final readonly class OnboardingCheckoutDto
@@ -46,6 +47,11 @@ final readonly class OnboardingCheckoutDto
         public string $recommendedPlanCode,
         public string $defaultPlanCode,
         public string $contactUrl,
+        /**
+         * P9: 有償プランの契約 checkout 開始 POST が使う冪等 token (render 単位の ULID)。
+         * **既定値を持たない** (渡し忘れの空 token を front へ出さない)。
+         */
+        public string $subscriptionAttemptToken,
         public ?PersonalPlanEligibilityDto $personalEligibility = null,
         public int $signupGrantTickets = 10,
         public ?string $intendedPlanCode = null,
@@ -81,6 +87,7 @@ final readonly class OnboardingCheckoutDto
             'intendedPlanCode' => $this->intendedPlanCode,
             'consentTerms' => ($this->consentTerms ?? new AutoRechargeConsentTermsDto(0, 0, 0, 0, ''))->toArray(),
             'fundingChoices' => $this->fundingChoices,
+            'subscriptionAttemptToken' => $this->subscriptionAttemptToken,
         ];
     }
 }

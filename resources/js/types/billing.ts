@@ -61,6 +61,31 @@ export interface PurchaseTicketsPageProps {
     readonly newPurchaseUrl: string;
 }
 
+/**
+ * PHP: BillingFeedbackDto の SimpleBillingFeedbackKind と exact 対 (5 値)。
+ * UI は raw query を見ず、この kind でバナー variant を決める。
+ */
+export type BillingFeedbackKind =
+    | "purchase_received"
+    | "purchase_processing"
+    | "purchase_already_received"
+    | "checkout_retry_required"
+    | "portal_returned";
+
+/** PHP: BillingFeedbackDto (BillingFeedbackShape) と対 */
+export interface BillingFeedbackShape {
+    readonly kind: BillingFeedbackKind;
+    readonly message: string;
+}
+
+/** PHP: BillingContactDto (BillingContactShape) と対 */
+export interface BillingContactShape {
+    readonly email: string | null;
+    readonly name: string | null;
+    /** 未設定時に実際の通知宛先になる owner email */
+    readonly fallbackEmail: string | null;
+}
+
 /** PHP: BillingPlansPageDto (BillingPlansPageShape) と対 */
 export interface BillingPlansPageProps {
     readonly plans: readonly PricingPlanShape[];
@@ -68,6 +93,8 @@ export interface BillingPlansPageProps {
     readonly currentPlanCode: string | null;
     readonly billingState: BillingStateValue;
     readonly canManage: boolean;
+    /** 契約 checkout の冪等 token (チケット購入 / カード登録とは別 key 空間) */
+    readonly subscriptionAttemptToken: string;
 }
 
 /** PHP: BillingDashboardDto (BillingDashboardShape) と対 */
@@ -87,6 +114,13 @@ export interface BillingDashboardProps {
     readonly autoRecharge: AutoRechargeProps;
     /** P8a: カード登録 (mode=setup) 開始 POST の attempt_token (render 単位) */
     readonly autoRechargeSetupToken: string;
+    /**
+     * P9: 決済戻り着地の one-shot フィードバック。該当しない着地では null。
+     * **購入完了をユーザーに知らせる唯一の経路**なので、null と分岐を落とさないこと。
+     */
+    readonly feedback: BillingFeedbackShape | null;
+    /** P9: 請求先連絡先 (未設定なら fallbackEmail が実際の宛先) */
+    readonly billingContact: BillingContactShape;
 }
 
 /**

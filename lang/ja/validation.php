@@ -212,6 +212,9 @@ return [
         'declaration' => '個人利用の確認',
         'count' => '購入枚数',
         'attempt_token' => '操作トークン',
+        'subscription_attempt_token' => '契約手続きトークン',
+        'billing_contact_email' => '請求先メールアドレス',
+        'billing_contact_name' => '請求先の宛名',
         // オートリチャージ (P8a)。'enabled' は 2 段階認証と同名キーのため
         // UpdateAutoRechargeRequest::attributes() で個別に上書きする
         'threshold_count' => 'リチャージ開始残高',

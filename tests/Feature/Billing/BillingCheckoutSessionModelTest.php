@@ -7,7 +7,9 @@ use App\Enums\CheckoutSessionStatus;
 use App\Models\Billing\BillingCheckoutSession;
 use App\Models\Organization;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Carbon;
 
 /*
  * BillingCheckoutSession (state() の PendingCheckout / ExpiredCheckout の真実源) の
@@ -43,13 +45,13 @@ test('completed / expired / failed state が statusEnum に反映される', fun
 test('isReplayablePending は pending かつ checkout_url が生存しているときだけ true', function (): void {
     $replayable = BillingCheckoutSession::factory()->withAttemptToken('token-live')->create();
 
-    expect($replayable->isReplayablePending())->toBeTrue();
+    expect($replayable->isReplayablePending(CarbonImmutable::now()))->toBeTrue();
 });
 
 test('isReplayablePending は checkout_url が null / 空なら false', function (?string $url): void {
     $session = BillingCheckoutSession::factory()->create(['checkout_url' => $url]);
 
-    expect($session->isReplayablePending())->toBeFalse();
+    expect($session->isReplayablePending(CarbonImmutable::now()))->toBeFalse();
 })->with([null, '']);
 
 test('isReplayablePending は pending 以外なら checkout_url があっても false', function (string $state): void {
@@ -58,7 +60,7 @@ test('isReplayablePending は pending 以外なら checkout_url があっても 
         ->{$state}()
         ->create();
 
-    expect($session->isReplayablePending())->toBeFalse();
+    expect($session->isReplayablePending(CarbonImmutable::now()))->toBeFalse();
 })->with(['completed', 'expired', 'failed']);
 
 test('initiatedBy / organization の関連が引ける', function (): void {
@@ -128,4 +130,39 @@ test('tenant / actor キーは mass-assign できない (明示代入のみ)', f
     expect($session->getFillable())
         ->not->toContain('organization_id')
         ->not->toContain('initiated_by_user_id');
+});
+
+test('isLivePending は created_at が stale 境界より新しいときだけ true (境界の両側を固定)', function (): void {
+    // created_at の永続化は秒精度 (Eloquent の date format) のため基準時刻も秒に丸める。
+    $now = CarbonImmutable::now()->startOfSecond();
+
+    $live = BillingCheckoutSession::factory()->create(['created_at' => $now->subHours(23)]);
+    $boundary = BillingCheckoutSession::factory()->create([
+        'created_at' => BillingCheckoutSession::staleThresholdAt($now),
+    ]);
+    $stale = BillingCheckoutSession::factory()->create(['created_at' => $now->subHours(25)]);
+
+    expect($live->isLivePending($now))->toBeTrue();
+    // 境界時刻ちょうどは live 側 (live/stale は補集合であり両方に属する行は存在しない)
+    expect($boundary->isLivePending($now))->toBeTrue();
+    expect($stale->isLivePending($now))->toBeFalse();
+});
+
+test('created_at が null の行は live 扱い (state() の else 分岐と同一)', function (): void {
+    $session = BillingCheckoutSession::factory()->create();
+    $session->created_at = null;
+
+    expect($session->isLivePending(CarbonImmutable::now()))->toBeTrue();
+});
+
+test('P9 の additive 2 列: funding_choice は fillable、pm_reuse_dispatched_at は datetime cast かつ fillable 外', function (): void {
+    $session = BillingCheckoutSession::factory()
+        ->fundingAutoRecharge()
+        ->pmReuseDispatched()
+        ->create();
+
+    expect($session->funding_choice)->toBe('auto_recharge');
+    expect($session->refresh()->pm_reuse_dispatched_at)->toBeInstanceOf(Carbon::class);
+    expect($session->getFillable())->toContain('funding_choice');
+    expect($session->getFillable())->not->toContain('pm_reuse_dispatched_at');
 });

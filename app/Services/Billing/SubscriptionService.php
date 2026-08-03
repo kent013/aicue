@@ -4,22 +4,38 @@ declare(strict_types=1);
 
 namespace App\Services\Billing;
 
+use App\DataTransferObjects\Billing\CheckoutSessionDto;
 use App\DataTransferObjects\Billing\ExternalBillingRedirect;
 use App\DataTransferObjects\Billing\SubscriptionEntitlementDto;
 use App\Enums\Billing\EntitlementDeniedReason;
 use App\Enums\Billing\PlanPriceKind;
 use App\Enums\Billing\ScheduleSetupStatus;
+use App\Enums\Billing\SignupFundingChoice;
 use App\Enums\Billing\SubscriptionState;
+use App\Enums\CheckoutIntent;
+use App\Enums\CheckoutSessionStatus;
 use App\Enums\PlanCode;
+use App\Exceptions\Billing\CheckoutInProgressException;
+use App\Exceptions\Billing\StaleCheckoutAttemptException;
 use App\Exceptions\Billing\StripePriceNotSyncedException;
+use App\Exceptions\Billing\SubscriptionAttemptPlanMismatchException;
+use App\Models\Billing\BillingCheckoutSession;
 use App\Models\Billing\Plan;
 use App\Models\Billing\PlanPrice;
 use App\Models\Billing\Subscription;
 use App\Models\Organization;
+use App\Models\User;
 use App\Services\Billing\Contracts\StripeGatewayInterface;
 use Carbon\CarbonImmutable;
+use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\QueryException;
+use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 use Webmozart\Assert\Assert;
 
 /**
@@ -224,40 +240,331 @@ class SubscriptionService
     }
 
     /**
-     * Stripe Checkout (サブスク契約) を開始し、遷移先 (hosted Checkout URL) を返す。
+     * P9: Stripe Checkout (サブスク契約) を **冪等状態機械** として開始する。
      *
-     * checkout session の冪等状態機械 (attempt token / billing_checkout_sessions) は
-     * 本フェーズのスコープ外 (後続フェーズで本メソッドに配線する)。
+     * クエリは常に `intent=subscription_start` でスコープする (`UNIQUE(organization_id,
+     * intent, attempt_token)` の intent 軸が P8a のカード登録 token 空間と分ける)。
+     * live 判定は `BillingCheckoutSession` の述語 (C-1) だけを使い、独自の日付比較を書かない。
      *
+     * 段 0: 事前 assert + 基準時刻 / 段 1: 既存 subscription guard /
+     * 段 2: 同 token 行 (別 plan → 422 / replayable → 再生 / それ以外 → stale) /
+     * 段 3: 同 plan の live pending dedup (org-wide) / 段 4: 別 plan の live pending を expire /
+     * 段 5: Stripe 作成 → DB 記録 / 段 6: UNIQUE 違反の re-read 収束 (500 にしない)。
+     *
+     * @param  SignupFundingChoice|null  $funding  T1004: 行の funding_choice に記録する
+     *                                             (null = 従来の契約 checkout = PM 流用しない)
+     *
+     * @throws SubscriptionAttemptPlanMismatchException 同 token・別 plan の再送 (Controller が 422)
+     * @throws StaleCheckoutAttemptException 期限切れ / 終端済み token の再送
+     * @throws CheckoutInProgressException lock 競合 / 別 plan session の整理失敗 / 決済処理中
      * @throws StripePriceNotSyncedException production runtime で未 sync の Price のとき
      * @throws ValidationException Stripe 決済対象外のプランのとき (422)
      * @throws \InvalidArgumentException 既に有効なサブスクリプションがあるとき
      */
     public function startCheckout(
         Organization $org,
+        User $user,
+        Plan $plan,
+        string $successUrl,
+        string $cancelUrl,
+        string $attemptToken,
+        ?SignupFundingChoice $funding,
+    ): CheckoutSessionDto {
+        // 段 0: 事前 assert (lock を取る前に確定できる guard は先に倒す)
+        Assert::stringNotEmpty($attemptToken, '契約手続きトークンが不正です');
+        $this->assertCheckoutReady($org);
+
+        $basePrice = $plan->currentPrice(PlanPriceKind::Base);
+        Assert::isInstanceOf($basePrice, PlanPrice::class, '基本 Price 未設定のプランです');
+        $this->assertPriceSynced($basePrice);
+        $this->assertStripeBillablePlan($plan);
+
+        try {
+            $result = Cache::lock("billing:checkout:start:{$org->id}", 10)->block(
+                5,
+                fn (): CheckoutSessionDto => $this->startCheckoutLocked(
+                    $org, $user, $plan, $basePrice, $successUrl, $cancelUrl, $attemptToken, $funding,
+                ),
+            );
+            // Cache::lock()->block() は mixed を返すため型を絞る (TicketCheckoutService と同型)。
+            Assert::isInstanceOf($result, CheckoutSessionDto::class);
+
+            return $result;
+        } catch (LockTimeoutException $e) {
+            // fail-closed: ロックなし実行へフォールバックしない (二重 subscription を作らない)
+            throw new CheckoutInProgressException('直前の操作が進行中です。数秒お待ちください。', previous: $e);
+        }
+    }
+
+    /**
+     * 要件 7: (org, user) スコープ外に同 token 行が在るか。
+     * true なら Controller が **Gate より前に 404** を返す (存在オラクル封じ)。
+     */
+    public function attemptTokenIsForeign(string $attemptToken, Organization $org, User $user): bool
+    {
+        if ($attemptToken === '') {
+            return false;
+        }
+
+        return BillingCheckoutSession::query()
+            ->where('intent', CheckoutIntent::SubscriptionStart->value)
+            ->where('attempt_token', $attemptToken)
+            ->where(function (Builder $q) use ($org, $user): void {
+                /** @var Builder<BillingCheckoutSession> $q */
+                $q->where('organization_id', '!=', $org->getKey())
+                    ->orWhereNull('initiated_by_user_id')
+                    ->orWhere('initiated_by_user_id', '!=', $user->getKey());
+            })
+            ->exists();
+    }
+
+    /**
+     * 指定 session id の自 org 行が Completed か (Controller の `?replayed=1` 分岐の判定源)。
+     */
+    public function isAttemptCompleted(Organization $org, string $stripeSessionId): bool
+    {
+        return BillingCheckoutSession::query()
+            ->where('organization_id', $org->getKey())
+            ->where('intent', CheckoutIntent::SubscriptionStart->value)
+            ->where('stripe_session_id', $stripeSessionId)
+            ->where('status', CheckoutSessionStatus::Completed->value)
+            ->exists();
+    }
+
+    private function startCheckoutLocked(
+        Organization $org,
+        User $user,
+        Plan $plan,
         PlanPrice $basePrice,
         string $successUrl,
         string $cancelUrl,
-    ): ExternalBillingRedirect {
-        // production runtime guard
-        $this->assertPriceSynced($basePrice);
+        string $attemptToken,
+        ?SignupFundingChoice $funding,
+    ): CheckoutSessionDto {
+        // lock closure 先頭で基準時刻を 1 回だけ取り、段 2/3/4 の live 判定を共有述語へ通す (C-1)。
+        $now = CarbonImmutable::now();
+        $threshold = BillingCheckoutSession::staleThresholdAt($now);
 
-        $plan = $basePrice->plan;
-        Assert::isInstanceOf($plan, Plan::class);
-        $this->assertStripeBillablePlan($plan);
-
+        // 段 1: 既存 subscription guard
         $existing = $org->subscription('default');
         Assert::true(
             ! $existing instanceof Subscription || ! $existing->valid(),
             '既に有効なサブスクリプションがあります。プラン変更をご利用ください。'
         );
 
-        return $this->gateway->createSubscriptionCheckout(
+        // 段 2: 同 token 行 (intent=subscription_start スコープ)
+        $sameAttempt = $this->subscriptionAttemptQuery($org)
+            ->where('attempt_token', $attemptToken)
+            ->latest('id')
+            ->first();
+
+        if ($sameAttempt instanceof BillingCheckoutSession) {
+            // 要件 6 (N-1): plan 不一致は replay より **前** に判定する。
+            if ($sameAttempt->plan_code !== $plan->code) {
+                throw new SubscriptionAttemptPlanMismatchException(
+                    'お手続きの内容が変わりました。画面を再読み込みして選び直してください。',
+                );
+            }
+            if ($this->isReplayableCheckout($sameAttempt, $now)) {
+                return $this->replayCheckout($sameAttempt);
+            }
+
+            throw new StaleCheckoutAttemptException(
+                '契約手続きの有効期限が切れました。画面を再読み込みして再試行してください。',
+            );
+        }
+
+        // 段 3: 同 plan の live pending dedup (**org-wide**。subscription は org 単位の singleton
+        // であり、actor scope にすると同 org の 2 人が同時に live Checkout を持てて二重契約を許す)。
+        $pending = $this->subscriptionAttemptQuery($org)
+            ->where('plan_code', $plan->code)
+            ->where('status', CheckoutSessionStatus::Pending->value)
+            ->where('created_at', '>=', $threshold)
+            ->latest('id')
+            ->first();
+
+        if ($pending instanceof BillingCheckoutSession) {
+            return new CheckoutSessionDto(
+                stripeSessionId: $pending->stripe_session_id,
+                url: null,
+                intent: CheckoutIntent::SubscriptionStart->value,
+                planCode: $plan->code,
+            );
+        }
+
+        // 段 4: 別 plan の live pending を expire する (stale な別 plan 行は Stripe 側で既に
+        // expire 済みのため照会せず放置する = 無駄な外部 API を撃たない)。
+        $otherPlanPending = $this->subscriptionAttemptQuery($org)
+            ->where('status', CheckoutSessionStatus::Pending->value)
+            ->where('created_at', '>=', $threshold)
+            ->where(function (Builder $q) use ($plan): void {
+                /** @var Builder<BillingCheckoutSession> $q */
+                $q->whereNull('plan_code')->orWhere('plan_code', '!=', $plan->code);
+            })
+            ->get();
+
+        foreach ($otherPlanPending as $row) {
+            // Stripe 側 expire 失敗時は local を上書きせず停止する (remote session が open のまま
+            // 新規 Checkout を作ると別 plan で二重完了しうる)。
+            try {
+                $expireResult = $this->gateway->expireCheckoutSession($row->stripe_session_id);
+            } catch (Throwable $e) {
+                Log::warning('startCheckout: failed to expire old pending, stopping', [
+                    'organization_id' => $org->getKey(),
+                    'stripe_session_id' => $row->stripe_session_id,
+                ]);
+
+                throw new CheckoutInProgressException(
+                    '前回の決済セッションの整理に失敗しました。 数分後に再試行してください。',
+                    previous: $e,
+                );
+            }
+
+            if ($expireResult === 'complete') {
+                // 決済完了済 (= webhook 未着)。新規 Checkout を作らず caller に通知する。
+                throw new CheckoutInProgressException('直前の決済が処理中です。数分お待ちください。');
+            }
+
+            $row->status = CheckoutSessionStatus::Expired->value;
+            $row->save();
+        }
+
+        // 段 5: Stripe 作成 → DB 記録。metadata は照合専用 (認可・org 解決には使わない)。
+        $created = $this->gateway->createSubscriptionCheckout(
             $org,
             $basePrice->stripe_price_id,
             $successUrl,
             $cancelUrl,
+            [
+                'purpose' => 'subscription_start',
+                'org_ref' => (string) $org->id,
+                'plan_code' => $plan->code,
+            ],
+            'sub_start:'.$attemptToken,
         );
+
+        try {
+            // 失敗 INSERT が PostgreSQL で外側 transaction を abort させないよう savepoint で囲む。
+            DB::transaction(function () use ($org, $user, $plan, $created, $attemptToken, $funding): void {
+                $session = new BillingCheckoutSession;
+                // tenant / actor キーは relation / 明示代入 (mass assignment しない)
+                $session->organization()->associate($org);
+                $session->initiated_by_user_id = $user->id;
+                $session->fill([
+                    'intent' => CheckoutIntent::SubscriptionStart->value,
+                    'plan_code' => $plan->code,
+                    'funding_choice' => $funding?->value,
+                    'stripe_session_id' => $created->sessionId,
+                    'idempotency_key' => 'sub_start:'.$attemptToken,
+                    'attempt_token' => $attemptToken,
+                    'checkout_url' => $created->url,
+                    'status' => CheckoutSessionStatus::Pending->value,
+                ]);
+                $session->save();
+            });
+        } catch (UniqueConstraintViolationException $e) {
+            // 段 6: 並行 race。unique(org, intent, attempt_token) 違反 → 既存を再読込して収束する
+            // (attempt_token 以外の unique 違反は rethrow = 500 に落として調査対象にする)。
+            if (! $this->isUniqueViolation($e)) {
+                throw $e;
+            }
+
+            $row = $this->subscriptionAttemptQuery($org)
+                ->where('attempt_token', $attemptToken)
+                ->latest('id')
+                ->first();
+
+            if ($row instanceof BillingCheckoutSession && $this->isReplayableCheckout($row, CarbonImmutable::now())) {
+                return $this->replayCheckout($row);
+            }
+
+            throw new StaleCheckoutAttemptException(
+                '契約手続きの有効期限が切れました。画面を再読み込みして再試行してください。',
+            );
+        }
+
+        return new CheckoutSessionDto(
+            stripeSessionId: $created->sessionId,
+            url: $created->url,
+            intent: CheckoutIntent::SubscriptionStart->value,
+            planCode: $plan->code,
+        );
+    }
+
+    /**
+     * `intent=subscription_start` に pin した org スコープのクエリ
+     * (P8a の `setup_payment_method` 行を段 2/3/4 に混入させない唯一の出典)。
+     *
+     * @return Builder<BillingCheckoutSession>
+     */
+    private function subscriptionAttemptQuery(Organization $org): Builder
+    {
+        return BillingCheckoutSession::query()
+            ->where('organization_id', $org->getKey())
+            ->where('intent', CheckoutIntent::SubscriptionStart->value);
+    }
+
+    /**
+     * 同 attempt_token の既存 session が冪等再生可能か。
+     * **stale pending は replay しない** (死んだ checkout_url へ収束させない = C-1)。
+     */
+    private function isReplayableCheckout(BillingCheckoutSession $session, CarbonImmutable $now): bool
+    {
+        if ($session->status === CheckoutSessionStatus::Completed->value) {
+            return true;
+        }
+
+        return $session->isReplayablePending($now);
+    }
+
+    /**
+     * replayable な既存 session を冪等再生する。
+     *  - Pending → 同じ checkout_url に戻す
+     *  - Completed → url=null (Controller が「受付済み」フィードバックを出す)
+     */
+    private function replayCheckout(BillingCheckoutSession $session): CheckoutSessionDto
+    {
+        $url = $session->status === CheckoutSessionStatus::Pending->value
+            ? $session->checkout_url
+            : null;
+
+        return new CheckoutSessionDto(
+            stripeSessionId: $session->stripe_session_id,
+            url: $url,
+            intent: CheckoutIntent::SubscriptionStart->value,
+            planCode: $session->plan_code,
+        );
+    }
+
+    /**
+     * QueryException が attempt_token unique 制約違反か判定する (driver 差を吸収)。
+     *
+     * SQLSTATE は driver で異なる (MySQL/SQLite=23000, PostgreSQL=23505) ため両方許容し、
+     * 識別子で attempt_token unique 違反だけを拾う (他制約を replay 分岐へ誤って流さない)。
+     * MySQL/PostgreSQL は index 名、SQLite は構成列名で一致を見る。
+     */
+    private function isUniqueViolation(QueryException $e): bool
+    {
+        if (! in_array($e->getCode(), ['23000', '23505'], true)) {
+            return false;
+        }
+
+        $message = $e->getMessage();
+
+        return str_contains($message, 'billing_checkout_sessions_org_intent_attempt_unique')
+            || (str_contains($message, 'billing_checkout_sessions.organization_id')
+                && str_contains($message, 'attempt_token'));
+    }
+
+    /**
+     * 契約開始前の事前検証: 請求先メールが解決できること
+     * (billing_contact_email 正本 → owner email fallback)。
+     */
+    public function assertCheckoutReady(Organization $org): void
+    {
+        $email = $org->billingContactEmail();
+        Assert::stringNotEmpty($email, '請求先メールが未設定です');
+        Assert::regex($email, '/^[^@\s]+@[^@\s]+\.[^@\s]+$/', '請求先メールの形式が不正です');
     }
 
     /** Stripe Customer Portal セッション (支払い方法・解約の自己管理) の遷移先を返す。 */

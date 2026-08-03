@@ -5,6 +5,8 @@ declare(strict_types=1);
 use App\Models\User;
 use App\Services\Billing\Contracts\StripeGatewayInterface;
 use App\Services\Billing\Fakes\FakeStripeGateway;
+use Illuminate\Support\Str;
+use Inertia\Testing\AssertableInertia;
 use Inertia\Testing\AssertableInertia as Assert;
 
 /*
@@ -90,12 +92,35 @@ test('current organization が無いユーザーは 404', function (): void {
     $this->actingAs($user)->get('/billing/plans')->assertNotFound();
 });
 
-test('POST /billing/checkout は plan_code のみで成立する (attempt token を要求しない)', function (): void {
+test('POST /billing/checkout は plan_code + subscription_attempt_token で成立する (P9 の冪等 token 必須)', function (): void {
     [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     $this->app->bind(StripeGatewayInterface::class, FakeStripeGateway::class);
 
-    $response = $this->actingAs($owner)->post('/billing/checkout', ['plan_code' => 'standard']);
+    $response = $this->actingAs($owner)->post('/billing/checkout', [
+        'plan_code' => 'standard',
+        'subscription_attempt_token' => (string) Str::ulid(),
+    ]);
 
     $response->assertStatus(302);
     expect($response->headers->get('Location'))->toContain('fake_external=stripe');
+});
+
+test('Billing/Plans の props に render 単位の subscriptionAttemptToken が載る', function (): void {
+    [, $owner] = createOrganizationWithOwner();
+
+    $first = null;
+    $this->actingAs($owner)->get('/billing/plans')->assertOk()->assertInertia(
+        function (AssertableInertia $page) use (&$first): void {
+            $token = $page->toArray()['props']['page']['subscriptionAttemptToken'];
+            expect($token)->toBeString()->not->toBe('');
+            $first = $token;
+        },
+    );
+
+    // render ごとに新しい token (1 render = 1 token)
+    $this->actingAs($owner)->get('/billing/plans')->assertOk()->assertInertia(
+        function (AssertableInertia $page) use ($first): void {
+            expect($page->toArray()['props']['page']['subscriptionAttemptToken'])->not->toBe($first);
+        },
+    );
 });

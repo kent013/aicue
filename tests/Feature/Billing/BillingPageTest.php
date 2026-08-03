@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Services\Billing\Contracts\StripeGatewayInterface;
 use App\Services\Billing\Fakes\FakeStripeGateway;
 use App\Services\Billing\TicketLedgerService;
+use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
 
 /*
@@ -64,7 +65,10 @@ test('member は checkout を開始できない (403)', function (): void {
     $member->forceFill(['current_organization_id' => $organization->id])->save();
 
     $this->actingAs($member)
-        ->post('/billing/checkout', ['plan_code' => 'standard'])
+        ->post('/billing/checkout', [
+            'plan_code' => 'standard',
+            'subscription_attempt_token' => (string) Str::ulid(),
+        ])
         ->assertForbidden();
 });
 
@@ -80,7 +84,10 @@ test('未知の plan_code の checkout は 422 (Stripe には到達しない)', 
     [, $owner] = createOrganizationWithOwner();
 
     $this->actingAs($owner)
-        ->post('/billing/checkout', ['plan_code' => 'no-such-plan'])
+        ->post('/billing/checkout', [
+            'plan_code' => 'no-such-plan',
+            'subscription_attempt_token' => (string) Str::ulid(),
+        ])
         ->assertSessionHasErrors('plan_code');
 });
 
@@ -90,6 +97,7 @@ test('checkout payload で organization_id 等の保護キーは 422', function 
     $this->actingAs($owner)
         ->post('/billing/checkout', [
             'plan_code' => 'standard',
+            'subscription_attempt_token' => (string) Str::ulid(),
             'organization_id' => $organization->id,
         ])
         ->assertSessionHasErrors('organization_id');
@@ -105,12 +113,16 @@ test('owner の checkout は fake gateway 経由で中立帰還 URL へ遷移す
     [, $owner] = createOrganizationWithOwner();
     $this->app->bind(StripeGatewayInterface::class, FakeStripeGateway::class);
 
-    $response = $this->actingAs($owner)->post('/billing/checkout', ['plan_code' => 'standard']);
+    $response = $this->actingAs($owner)->post('/billing/checkout', [
+        'plan_code' => 'standard',
+        'subscription_attempt_token' => (string) Str::ulid(),
+    ]);
 
-    // 非 Inertia リクエストでは Inertia::location は 302 redirect を返す
+    // 非 Inertia リクエストでは Inertia::location は 302 redirect を返す。
+    // P9: cancel URL は /billing/plans (fake gateway は cancel URL ベースの中立帰還)。
     $response->assertStatus(302);
     $location = $response->headers->get('Location');
-    expect($location)->toContain('/billing')
+    expect($location)->toContain('/billing/plans')
         ->and($location)->toContain('fake_external=stripe');
 });
 

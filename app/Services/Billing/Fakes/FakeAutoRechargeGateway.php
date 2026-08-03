@@ -77,4 +77,15 @@ final class FakeAutoRechargeGateway implements AutoRechargeGatewayInterface
     {
         // no-op: fake 環境は Stripe customer を更新しない。
     }
+
+    public function resolveSubscriptionPaymentMethod(string $stripeSubscriptionId): ?string
+    {
+        // 既知 prefix (fake が発行する subscription id) にのみ対の PM id を返し、
+        // 未知の id は **null** (= 解決不能) にする。空文字は返さない。
+        if (! str_starts_with($stripeSubscriptionId, 'sub_bughuntfake_')) {
+            return null;
+        }
+
+        return 'pm_bughuntfake_'.substr(hash('sha256', $stripeSubscriptionId), 0, 20);
+    }
 }

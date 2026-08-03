@@ -10,6 +10,7 @@ use App\DataTransferObjects\Billing\AutoRechargeSettingsDto;
 use App\Enums\Billing\AutoRechargeAttemptStatus;
 use App\Enums\Billing\AutoRechargeDisabledReason;
 use App\Enums\Billing\BillingNotificationType;
+use App\Enums\Billing\SignupFundingChoice;
 use App\Enums\CheckoutIntent;
 use App\Enums\CheckoutSessionStatus;
 use App\Exceptions\Billing\CheckoutInProgressException;
@@ -115,9 +116,15 @@ final class AutoRechargeService
             && $config->stripe_payment_method_id === null
             && $this->autoEnableEligible($config);
 
-        // 「処理中」判定 = setup Checkout 完了済みだが PM snapshot 未反映。
-        // (P9 の signup-funding 契約経由の PM 流用は本フェーズでは配線されない。)
-        $setupPending = ! $hasPm && $this->hasRecentCompletedSetup($organization);
+        // 「処理中」判定:
+        //  (a) P8a: カード登録 (mode=setup) Checkout 完了済みだが PM snapshot 未反映
+        //  (b) P9/T1004: funding=auto_recharge の有償契約が決済確定し、PM 流用 Job の収束待ち
+        // (b) は **pendingAutoEnable=true のときだけ** 効かせる (v1 失効・再同意が必要な org で
+        // 30 分間カード登録 CTA / 再同意導線を隠さないため)。
+        $setupPending = ! $hasPm && (
+            $this->hasRecentCompletedSetup($organization)
+            || ($pendingAutoEnable && $this->hasRecentAutoRechargeFundedSignup($organization))
+        );
 
         return new AutoRechargeSettingsDto(
             enabled: $config !== null && $config->enabled,
@@ -947,6 +954,84 @@ final class AutoRechargeService
     }
 
     /**
+     * P9 (T1004): サブスク決済カードをオートリチャージへ流用する。
+     *
+     * setup 経路 (`applySetupCompletion`) との違い: **ユーザーは「オートリチャージ用のカード登録」を
+     * 明示していない**ため、適格性 (`autoEnableEligible`) を**先に**確認し、不適格なら
+     * customer default PM もローカル snapshot も一切変更しない完全 no-op にする (fail-closed)。
+     *
+     * 適格時の副作用 (customer の `invoice_settings.default_payment_method` 更新) は
+     * v2 同意文言 (契約のお支払いカードをオートリチャージにも使う) で開示済み。
+     * updateSettings / applySetupCompletion / recordPreConsent / executeAttempt と
+     * **同一 org lock** で直列化するため、lock 保持中に適格性が変化する経路は構造的に存在しない。
+     *
+     * @return bool 今回の呼び出しで enabled に遷移したか
+     */
+    public function applyReusedPaymentMethod(Organization $organization, string $paymentMethodId): bool
+    {
+        Assert::stringNotEmpty($paymentMethodId); // fake/将来呼び出しの空文字混入防御
+
+        $lock = Cache::lock($this->lockName($organization), self::LOCK_TTL_SECONDS);
+
+        try {
+            /** @var bool $enabledNow */
+            $enabledNow = $lock->block(10, function () use ($organization, $paymentMethodId): bool {
+                // 適格性の先行確認 (lock 内・TX 外): 不適格なら Stripe にも DB にも触らない。
+                $config = $this->configFor($organization);
+                if ($config === null || ! $this->autoEnableEligible($config)) {
+                    Log::info('auto-recharge: subscription PM reuse skipped (not eligible)', [
+                        'organization_id' => $this->orgId($organization),
+                        'reason' => $config === null ? 'no_config' : 'not_eligible',
+                    ]);
+
+                    return false;
+                }
+
+                // 適格 → default PM を設定 (Cashier 冪等実装) してから有効化を確定する。
+                $this->gateway->setDefaultPaymentMethod($organization, $paymentMethodId);
+
+                return DB::transaction(function () use ($organization, $paymentMethodId): bool {
+                    $config = $this->lockedConfigFor($organization);
+                    // ここで不適格になる経路は上記 lock 直列化により到達不能のはず。到達した場合は
+                    // 「Stripe だけ変更済みの部分適用」なので silent no-op にせず例外で顕在化させる
+                    // (Job retry → 適格なら収束 / 不適格が続くなら failed_jobs で検知)。
+                    if ($config === null || ! $this->autoEnableEligible($config)) {
+                        throw new RuntimeException(
+                            'auto-recharge PM reuse: eligibility lost after default PM update (org '
+                            .$this->orgId($organization).') — partial application detected',
+                        );
+                    }
+
+                    $wasEnabled = $config->enabled;
+                    $config->stripe_payment_method_id = $paymentMethodId;
+                    $config->enabled = true;
+                    $config->failure_count = 0;
+                    $config->save();
+
+                    return ! $wasEnabled;
+                });
+            });
+        } catch (LockTimeoutException $e) {
+            // webhook Job (tries=3, backoff=30) の再試行に乗せる (握り潰さない)。
+            throw new RuntimeException(
+                'auto-recharge PM reuse lock busy for org '.$this->orgId($organization),
+                previous: $e,
+            );
+        }
+
+        if ($enabledNow) {
+            // 通知失敗で Job を失敗させない (applySetupCompletion と同型)。
+            try {
+                $this->notifyAutoEnabled($organization, $paymentMethodId);
+            } catch (Throwable $e) {
+                report($e);
+            }
+        }
+
+        return $enabledNow;
+    }
+
+    /**
      * 有効な事前同意が待機中か (= PM が届けば自動有効化される状態。settingsFor の
      * pendingAutoEnable と同一定義の共通判定)。
      */
@@ -1189,6 +1274,25 @@ final class AutoRechargeService
             ->where('intent', CheckoutIntent::SetupPaymentMethod->value)
             ->where('status', CheckoutSessionStatus::Completed->value)
             ->where('updated_at', '>=', CarbonImmutable::now()->subMinutes($windowMinutes))
+            ->exists();
+    }
+
+    /**
+     * P9 (T1004): 「PM 流用 Job の収束待ち」の窓に入っているか。
+     *
+     * 基準は **`pm_reuse_dispatched_at`** (dispatch した事実の永続マーカー)。
+     * `updated_at` / `completed_at` は完了後の別更新・未決済 completed で窓が誤って開くため使わない。
+     */
+    private function hasRecentAutoRechargeFundedSignup(Organization $organization): bool
+    {
+        $windowMinutes = config()->integer('billing.auto_recharge.setup_pending_window_minutes');
+
+        return BillingCheckoutSession::query()
+            ->where('organization_id', $organization->getKey())
+            ->where('intent', CheckoutIntent::SubscriptionStart->value)
+            ->where('funding_choice', SignupFundingChoice::AutoRecharge->value)
+            ->where('status', CheckoutSessionStatus::Completed->value)
+            ->where('pm_reuse_dispatched_at', '>=', CarbonImmutable::now()->subMinutes($windowMinutes))
             ->exists();
     }
 

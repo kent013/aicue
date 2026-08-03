@@ -55,6 +55,15 @@ final class FakeAutoRechargeGateway implements AutoRechargeGatewayInterface
     /** true にすると terminateInvoice が throw する (終端失敗 → pending 維持の再現)。 */
     public bool $failOnTerminate = false;
 
+    /** @var list<string> resolveSubscriptionPaymentMethod を要求された subscription id (T1004) */
+    public array $resolvedSubscriptions = [];
+
+    /** resolveSubscriptionPaymentMethod の返り値 (null = 解決不能)。 */
+    public ?string $subscriptionPaymentMethodId = 'pm_test_subscription';
+
+    /** true にすると resolveSubscriptionPaymentMethod が throw する。 */
+    public bool $failOnResolveSubscriptionPaymentMethod = false;
+
     /** createSetupCheckout が返す url (null = 進行中 replay の再現)。 */
     public ?string $setupUrl = 'https://checkout.stripe.test/c/setup/cs_setup_test';
 
@@ -179,6 +188,17 @@ final class FakeAutoRechargeGateway implements AutoRechargeGatewayInterface
             'paymentMethodId' => $paymentMethodId,
         ];
         $this->defaultPaymentMethod = new DefaultPaymentMethodDto($paymentMethodId, 'visa', '4242');
+    }
+
+    public function resolveSubscriptionPaymentMethod(string $stripeSubscriptionId): ?string
+    {
+        $this->resolvedSubscriptions[] = $stripeSubscriptionId;
+
+        if ($this->failOnResolveSubscriptionPaymentMethod) {
+            throw new RuntimeException('fake gateway: resolveSubscriptionPaymentMethod failed');
+        }
+
+        return $this->subscriptionPaymentMethodId;
     }
 
     /** 有効化 fail-closed を通過させる (default PM ありの状態を注入する)。 */

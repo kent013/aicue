@@ -45,9 +45,10 @@ const basePageData: OnboardingCheckoutShape = {
         maxCount: 50,
         maxAmountJpy: 3500,
         unitAmountJpy: 70,
-        consentVersion: "v1",
+        consentVersion: "v2",
     },
     fundingChoices: ["auto_recharge", "later"],
+    subscriptionAttemptToken: "01JQ0000000000000000000000",
 };
 
 afterEach(() => {
@@ -129,7 +130,7 @@ describe("Onboarding/Checkout", () => {
         expect(routerPostMock).toHaveBeenCalledWith(
             "/onboarding/activate-personal",
             // P8a: funding_choice の既定は auto_recharge (同意 version 同送。金額は送らない)
-            { declaration: "0", funding_choice: "auto_recharge", consent_version: "v1" },
+            { declaration: "0", funding_choice: "auto_recharge", consent_version: "v2" },
             expect.anything(),
         );
     });
@@ -152,7 +153,7 @@ describe("Onboarding/Checkout", () => {
 
         expect(routerPostMock).toHaveBeenCalledWith(
             "/onboarding/activate-personal",
-            { declaration: "1", funding_choice: "auto_recharge", consent_version: "v1" },
+            { declaration: "1", funding_choice: "auto_recharge", consent_version: "v2" },
             expect.anything(),
         );
     });
@@ -209,18 +210,68 @@ describe("Onboarding/Checkout", () => {
         expect(routerPostMock).toHaveBeenCalledTimes(1);
     });
 
-    it("有償プランは plan_code のみを課金 checkout に送る", async () => {
+    it("有償プランは plan_code + 冪等 token + funding_choice を課金 checkout に送る (既定は auto_recharge = consent_version 同梱)", async () => {
         renderPage();
 
         await fireEvent.click(screen.getByTestId("select-plan-starter"));
         expect(screen.queryByTestId("personal-free-step")).not.toBeInTheDocument();
 
-        await fireEvent.click(screen.getByTestId("paid-plan-submit"));
+        // 同意ダイアログ未操作でも申込ボタンは押せる (禁止事項 #8)。
+        const submit = screen.getByTestId("paid-plan-submit");
+        expect(submit).not.toBeDisabled();
+
+        await fireEvent.click(submit);
         expect(routerPostMock).toHaveBeenCalledWith(
             "/billing/checkout",
-            { plan_code: "starter" },
+            {
+                plan_code: "starter",
+                subscription_attempt_token: "01JQ0000000000000000000000",
+                funding_choice: "auto_recharge",
+                consent_version: "v2",
+            },
             expect.anything(),
         );
+    });
+
+    it("P9 (v2 開示): 有償契約枝は「契約のお支払いカードをオートリチャージにも使う」と明示する", async () => {
+        renderPage();
+
+        await fireEvent.click(screen.getByTestId("select-plan-starter"));
+
+        // consent_version='v2' に上げた根拠 = カードの取得手段の開示。文言が無ければ開示は成立しない。
+        const cardSource = screen.getByTestId("funding-consent-card-source");
+        expect(cardSource).toHaveTextContent("そのお支払いカードをオートリチャージにも使います");
+        // カード登録経路 (v1) の文言を有償枝で出さない (事実と異なる説明の防止)。
+        expect(cardSource).not.toHaveTextContent("次の画面でカードを登録します");
+
+        expect(screen.getByTestId("paid-plan-submit-note")).toHaveTextContent(
+            "お支払いの完了後、オートリチャージが自動で有効になります",
+        );
+    });
+
+    it("P9 (v2 開示): 無償 (personal) 枝はカード登録経路の文言を保つ", async () => {
+        renderPage();
+        await choosePersonal();
+
+        const cardSource = screen.getByTestId("funding-consent-card-source");
+        expect(cardSource).toHaveTextContent("次の画面でカードを登録します");
+        expect(cardSource).not.toHaveTextContent("そのお支払いカードをオートリチャージにも使います");
+    });
+
+    it("funding_choice=later では consent_version を送らない", async () => {
+        renderPage();
+
+        await fireEvent.click(screen.getByTestId("select-plan-starter"));
+        await fireEvent.click(screen.getByTestId("funding-choice-later"));
+        await fireEvent.click(screen.getByTestId("paid-plan-submit"));
+
+        const [, payload] = routerPostMock.mock.calls.at(-1) as [string, Record<string, unknown>];
+        expect(payload).toEqual({
+            plan_code: "starter",
+            subscription_attempt_token: "01JQ0000000000000000000000",
+            funding_choice: "later",
+        });
+        expect(payload).not.toHaveProperty("consent_version");
     });
 
     it("無償プラン (personal) は有償 checkout へ送らない (Stripe checkout へ混入させない)", async () => {

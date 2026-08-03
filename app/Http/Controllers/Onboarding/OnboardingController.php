@@ -23,6 +23,7 @@ use App\Services\Onboarding\IntendedPlanResolver;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 use Webmozart\Assert\Assert;
@@ -93,6 +94,8 @@ final class OnboardingController extends Controller
                 SignupFundingChoice::AutoRecharge->value,
                 SignupFundingChoice::Later->value,
             ],
+            // P9: 有償プラン契約 POST の冪等 token (render 単位の ULID)。
+            subscriptionAttemptToken: (string) Str::ulid(),
         );
 
         return Inertia::render('Onboarding/Checkout', [

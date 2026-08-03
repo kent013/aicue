@@ -328,6 +328,10 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         ->name('billing.checkout');
     Route::post('/billing/portal', [BillingController::class, 'portal'])
         ->name('billing.portal');
+    // P9: 請求先連絡先 (メール / 宛名)。current org スコープ (route parameter なし)。
+    // 認可は Controller 冒頭の Gate::authorize('manageBilling')。
+    Route::patch('/billing/contact', [BillingController::class, 'updateBillingContact'])
+        ->name('billing.contact.update');
 
     /*
     | オートリチャージ (裏チャージ。P8a)。**opt-in・既定 off**。

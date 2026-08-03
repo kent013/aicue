@@ -14,7 +14,9 @@
 
     /**
      * プラン比較 (/billing/plans)。閲覧は組織メンバー全員、変更は manageBilling のみ。
-     * 変更は既存の Stripe Checkout (POST /billing/checkout。body は plan_code のみ) へ委譲する。
+     * 変更は既存の Stripe Checkout (POST /billing/checkout) へ委譲する。body は plan_code +
+     * subscription_attempt_token (冪等 token。funding_choice は載せない = 契約変更経路に
+     * 資金選択の提示は無い)。
      *
      * 変更できないプランでも CTA は enabled のまま描画し、理由は caption + 押下時 Alert で
      * 伝える (DESIGN.md / 禁止事項 #8)。
@@ -77,7 +79,7 @@
         if (planCode === null || submitting) return;
         router.post(
             "/billing/checkout",
-            { plan_code: planCode },
+            { plan_code: planCode, subscription_attempt_token: page.subscriptionAttemptToken },
             {
                 onStart: () => {
                     submitting = true;
