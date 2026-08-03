@@ -188,12 +188,26 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
 ### AI 解析ジョブの運用契約
 
 - 解析ジョブ (`RunManualAnalysis`) は専用 queue connection **`database-analysis`**
-  (queue=analysis、retry_after=1560) で流れる。**本番/ステージングの worker プロセス定義・
+  (queue=analysis、retry_after=1680) で流れる。**本番/ステージングの worker プロセス定義・
   デプロイ手順・監視対象に `php artisan queue:work database-analysis` を必須項目として登録する**
   (専用 worker が居ないとジョブは滞留する。queued 滞留は `analysis:recover-stale-jobs` cron が
   30 分で failJob するため、滞留 = 監視で気づける)
-- 時間 budget の連鎖 `job timeout (1,380s) < retry_after (1,560s) < 予約 TTL (1,800s) ≤ stale 閾値 (1,800s)`
-  は `AnalysisTimeBudgetInvariantTest` が CI 固定する
+- 時間 budget の連鎖 `job timeout (1,560s) < retry_after (1,680s) < 予約 TTL (1,800s) ≤ stale 閾値 (1,800s)`
+  は `AnalysisTimeBudgetInvariantTest` が CI 固定する。内訳は
+  `deadline D (1,080s = 3 × client timeout) + client timeout C (360s) + finalize 予算 (30s) + 安全余白 (90s)`。
+  **D (`manual.analysis_deadline_seconds`) は `AnalysisPipeline` が各 LLM 試行の開始前に検査する
+  ソフト予算**であり、走行中の呼び出しは中断しない (中断は C が担う)。ハード上限は worker の
+  `$timeout` (SIGALRM)
+- **LLM 呼び出しの実効タイムアウトは `resources/prompts/*.yaml` の `client_options.timeout`** である。
+  この値は `config/prism.php` の `request_timeout` (30s) を **上書きする**
+  (prism-prompt の `Prompt::resolveClientOptions()` → Prism の `Anthropic::client()` の
+  `withOptions()` が Guzzle option を後勝ちで書き換えるため)。解析の timeout を調整するときは
+  `config/prism.php` ではなく prompt YAML を見ること
+- LLM 呼び出しの有界リトライ対象は **JSON 検証失敗 + transient な provider/connection 例外**
+  (`ConnectionException` / 529 / 408・500・502・503・504)。429・413・その他は fail-fast で
+  理由別のユーザー文言を `analysis_jobs.error` に残す。リトライは `startJob` (reserve) の後・
+  `finalize` (commit) の前に閉じており予約行に触れないため、チケット 2 フェーズ
+  (冪等キー = `analysis_jobs.ticket_reservation_id`) は再試行回数に依らず高々 1 回ずつ成立する
 - ローカル/テストの検証: パイプラインの同期実行は `AnalysisPipeline::run()` の直接呼び出し、
   dispatch の検証は `Queue::fake()` (sync ドライバの自動実行には依存しない)
 

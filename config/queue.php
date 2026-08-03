@@ -44,7 +44,7 @@ return [
             'after_commit' => false,
         ],
 
-        // AI 解析専用 (RunManualAnalysis)。retry_after は job timeout (1,380s) より長く
+        // AI 解析専用 (RunManualAnalysis)。retry_after は job timeout (1,560s) より長く
         // 予約 TTL (1,800s) より短い (AnalysisTimeBudgetInvariantTest が連鎖を固定)。
         // 運用契約: worker は `php artisan queue:work database-analysis` を必須登録
         // (docs/architecture.md。滞留は analysis:recover-stale-jobs cron が回収)
@@ -53,7 +53,7 @@ return [
             'connection' => env('DB_QUEUE_CONNECTION'),
             'table' => env('DB_QUEUE_TABLE', 'jobs'),
             'queue' => 'analysis',
-            'retry_after' => 1560,
+            'retry_after' => 1680,
             'after_commit' => false,
         ],
 

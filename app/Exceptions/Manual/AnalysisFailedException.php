@@ -29,4 +29,19 @@ final class AnalysisFailedException extends RuntimeException
     {
         return new self('手順書が大きすぎます。分割してアップロードしてください。');
     }
+
+    /** パイプラインの実時間 deadline 超過 / provider の応答が client timeout を超えた */
+    public static function timedOut(): self
+    {
+        return new self(
+            '解析が時間内に終わりませんでした。手順書を分割して短くするか、'
+            .'しばらく時間をおいて再実行してください。'
+        );
+    }
+
+    /** provider の混雑 (429 / 529 / 500・502・503・504)。入力を変えても解決しないため待つ以外の行動がない */
+    public static function providerBusy(): self
+    {
+        return new self('AI が混み合っています。しばらく時間をおいて再実行してください。');
+    }
 }

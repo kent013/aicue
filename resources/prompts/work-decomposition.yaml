@@ -1,13 +1,21 @@
 # 作業分解プロンプト (AI 解析 2 段目。doc/10 §10.4 / doc/03 §3.3)。
 # 統一 JSON (untrusted 由来。UserInput 経由) から「作業分解表」を作る。
 # max_tokens: 16000 は token budget の出力予約 (AnalysisTokenBudgetInvariantTest が固定)。
-# client_options.timeout: 120 は時間 budget の前提値 (AnalysisTimeBudgetInvariantTest が固定)。
+# client_options.timeout: 360 は時間 budget の 1 呼び出し上限 C
+# (AnalysisTimeBudgetInvariantTest / AnalysisTokenBudgetInvariantTest が固定)。
+#
+# 360 秒の根拠 (保証値ではなく運用上限):
+#   claude-sonnet-4-5-20250929 に max_tokens=16000 を飽和生成させた実測が 273.9 秒
+#   (2026-08-04 JST, 非ストリーミング, 58.4 token/s)。その約 1.31 倍を上限とした。
+# 注意: この値は config/prism.php の request_timeout (30s) を **上書きする**。
+#   prism-prompt の Prompt::resolveClientOptions() → Prism の
+#   Anthropic::client() の withOptions() が Guzzle の timeout を後勝ちで書き換えるため。
 name: work-decomposition
 provider: anthropic
 model: claude-sonnet-4-5-20250929
 max_tokens: 16000
 client_options:
-  timeout: 120
+  timeout: 360
 
 system_prompt: |
   {{ \Kent013\PrismPrompt\Values\DefensiveInstructions::forUserInputJa() }}

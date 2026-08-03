@@ -23,11 +23,17 @@ use App\Services\Manual\AnalysisJobService;
 use App\Services\Manual\AnalysisPipeline;
 use App\Services\Manual\ScenarioService;
 use Carbon\CarbonImmutable;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Kent013\PrismPrompt\Prompt;
 use Kent013\PrismPrompt\Testing\TextResponseFake;
+use Prism\Prism\Exceptions\PrismProviderOverloadedException;
+use Prism\Prism\Exceptions\PrismRateLimitedException;
+use Prism\Prism\Exceptions\PrismRequestTooLargeException;
+use Tests\Support\PrismHttpExceptionFactory;
+use Tests\Support\ThrowingPromptFake;
 
 /*
  * AI 解析パイプライン (AnalysisPipeline::run の直接呼び出し。§10.8-1 / 概念設計 §4-5):
@@ -113,15 +119,46 @@ function scenarioFixture(): string
     ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
 }
 
-/** 成功 3 段の Prompt fake を張る */
-function fakeSuccessfulLlm(): void
+/**
+ * 成功 3 段の応答 script (ThrowingPromptFake に例外と混ぜて渡す)。
+ *
+ * @return list<TextResponseFake>
+ */
+function successfulLlmScript(): array
 {
-    Prompt::fake([
+    return [
         TextResponseFake::make()->withText(extractFixture()),
         TextResponseFake::make()->withText(decompositionFixture()),
         TextResponseFake::make()->withText(scenarioFixture()),
-    ]);
+    ];
 }
+
+/** 成功 3 段の Prompt fake を張る */
+function fakeSuccessfulLlm(): void
+{
+    Prompt::fake(successfulLlmScript());
+}
+
+/**
+ * 例外を混ぜた script で ThrowingPromptFake を install する (installFake = 公開注入点)。
+ *
+ * @param  list<TextResponseFake|Throwable>  $script
+ * @param  ?Closure(int):void  $onAttempt
+ */
+function installThrowingLlm(array $script, ?Closure $onAttempt = null): ThrowingPromptFake
+{
+    $fake = new ThrowingPromptFake($script, $onAttempt);
+    Prompt::installFake($fake);
+
+    return $fake;
+}
+
+/** 施策 4 のユーザー向け文言 (analysis_jobs.error の回帰固定) */
+const ANALYSIS_TIMED_OUT_MESSAGE = '解析が時間内に終わりませんでした。手順書を分割して短くするか、しばらく時間をおいて再実行してください。';
+
+const ANALYSIS_PROVIDER_BUSY_MESSAGE = 'AI が混み合っています。しばらく時間をおいて再実行してください。';
+
+const ANALYSIS_GENERIC_FAILURE_MESSAGE = '解析に失敗しました。時間をおいて再実行してください。';
 
 test('成功パス: cuts materialize / ready / version+1 / succeeded / committed / スナップショット保存', function (): void {
     [$organization, , , $manual, $document, $job] = pipelineContext();
@@ -401,4 +438,308 @@ test('バイト上限超過の SOP は failed (分割を促す文言)', function
     $job->refresh();
     expect($job->status)->toBe(JobStatus::Failed);
     expect($job->error)->toBe('手順書が大きすぎます。分割してアップロードしてください。');
+});
+
+/*
+ * ─────────────────────────────────────────────────────────────────────
+ * T091: transient な provider/connection 例外の有界リトライ + 実時間 deadline
+ * (概念設計 devnotes/20260804-0021-analysis-provider-retry)
+ * ─────────────────────────────────────────────────────────────────────
+ */
+
+test('(A) transient: ConnectionException ×1 → 2 回目成功で succeeded (予約は 1 件 Committed)', function (): void {
+    [, , , , , $job] = pipelineContext();
+    $fake = installThrowingLlm([
+        new ConnectionException('cURL error 28: Operation timed out'),
+        ...successfulLlmScript(),
+    ]);
+
+    app(AnalysisPipeline::class)->run($job->id);
+
+    expect($job->refresh()->status)->toBe(JobStatus::Succeeded);
+    expect($fake->attemptCount())->toBe(4); // extract ×2 (1 失敗 + 1 成功) + decompose + generate
+    expect(TicketReservation::query()->count())->toBe(1);
+    expect($job->ticketReservation?->status)->toBe(TicketReservationStatus::Committed);
+});
+
+test('(A) transient: 529 overloaded ×1 → 2 回目成功で succeeded', function (): void {
+    [, , , , , $job] = pipelineContext();
+    installThrowingLlm([
+        PrismProviderOverloadedException::make('anthropic'),
+        ...successfulLlmScript(),
+    ]);
+
+    app(AnalysisPipeline::class)->run($job->id);
+
+    expect($job->refresh()->status)->toBe(JobStatus::Succeeded);
+});
+
+test('(A) transient: generic PrismException (previous 503) ×1 → 2 回目成功で succeeded', function (): void {
+    [, , , , , $job] = pipelineContext();
+    installThrowingLlm([
+        PrismHttpExceptionFactory::withStatus(503),
+        ...successfulLlmScript(),
+    ]);
+
+    app(AnalysisPipeline::class)->run($job->id);
+
+    expect($job->refresh()->status)->toBe(JobStatus::Succeeded);
+});
+
+test('(A) transient: ConnectionException ×3 (試行上限) → failed + timeout 文言 + 予約 Released', function (): void {
+    [, , , , , $job] = pipelineContext();
+    $fake = installThrowingLlm([
+        new ConnectionException('x'),
+        new ConnectionException('x'),
+        new ConnectionException('x'),
+    ]);
+
+    app(AnalysisPipeline::class)->run($job->id);
+
+    $job->refresh();
+    expect($job->status)->toBe(JobStatus::Failed);
+    expect($job->error)->toBe(ANALYSIS_TIMED_OUT_MESSAGE);
+    expect($fake->attemptCount())->toBe(3); // 1 + analysis_llm_max_retries
+    expect($job->ticketReservation?->status)->toBe(TicketReservationStatus::Released);
+    expect(TicketReservation::query()->where('status', TicketReservationStatus::Committed)->count())->toBe(0);
+});
+
+test('(A) transient: 503 ×3 (試行上限) → failed + providerBusy 文言 + 予約 Released', function (): void {
+    [, , , , , $job] = pipelineContext();
+    $fake = installThrowingLlm([
+        PrismHttpExceptionFactory::withStatus(503),
+        PrismHttpExceptionFactory::withStatus(503),
+        PrismHttpExceptionFactory::withStatus(503),
+    ]);
+
+    app(AnalysisPipeline::class)->run($job->id);
+
+    $job->refresh();
+    expect($job->status)->toBe(JobStatus::Failed);
+    expect($job->error)->toBe(ANALYSIS_PROVIDER_BUSY_MESSAGE);
+    expect($fake->attemptCount())->toBe(3);
+    expect($job->ticketReservation?->status)->toBe(TicketReservationStatus::Released);
+});
+
+test('(A) transient: generic PrismException (previous 408) ×3 → failed + timeout 文言', function (): void {
+    // 408 は retryable かつ「時間切れ」系 (混雑系 500/502/503/504 とは文言が分かれる)
+    [, , , , , $job] = pipelineContext();
+    $fake = installThrowingLlm([
+        PrismHttpExceptionFactory::withStatus(408),
+        PrismHttpExceptionFactory::withStatus(408),
+        PrismHttpExceptionFactory::withStatus(408),
+    ]);
+
+    app(AnalysisPipeline::class)->run($job->id);
+
+    $job->refresh();
+    expect($job->status)->toBe(JobStatus::Failed);
+    expect($job->error)->toBe(ANALYSIS_TIMED_OUT_MESSAGE);
+    expect($fake->attemptCount())->toBe(3); // 再試行された
+});
+
+test('(B) 非 retryable: 429 rate limited は 1 回で failed (providerBusy 文言)', function (): void {
+    [, , , , , $job] = pipelineContext();
+    $fake = installThrowingLlm([PrismRateLimitedException::make()]);
+
+    app(AnalysisPipeline::class)->run($job->id);
+
+    $job->refresh();
+    expect($job->status)->toBe(JobStatus::Failed);
+    expect($job->error)->toBe(ANALYSIS_PROVIDER_BUSY_MESSAGE);
+    expect($fake->attemptCount())->toBe(1); // リトライしない
+});
+
+test('(B) 非 retryable: 413 request too large は 1 回で failed (分割を促す文言)', function (): void {
+    [, , , , , $job] = pipelineContext();
+    $fake = installThrowingLlm([PrismRequestTooLargeException::make('anthropic')]);
+
+    app(AnalysisPipeline::class)->run($job->id);
+
+    $job->refresh();
+    expect($job->status)->toBe(JobStatus::Failed);
+    expect($job->error)->toBe('手順書が大きすぎます。分割してアップロードしてください。');
+    expect($fake->attemptCount())->toBe(1);
+});
+
+test('(B) 非 retryable: generic PrismException (previous 400) は 1 回で failed (汎用文言)', function (): void {
+    [, , , , , $job] = pipelineContext();
+    $fake = installThrowingLlm([PrismHttpExceptionFactory::withStatus(400)]);
+
+    app(AnalysisPipeline::class)->run($job->id);
+
+    $job->refresh();
+    expect($job->status)->toBe(JobStatus::Failed);
+    expect($job->error)->toBe(ANALYSIS_GENERIC_FAILURE_MESSAGE);
+    expect($fake->attemptCount())->toBe(1);
+});
+
+test('(B) 非 retryable: previous 無しの PrismException は 1 回で failed (status 判定不能 = fail-fast)', function (): void {
+    [, , , , , $job] = pipelineContext();
+    $fake = installThrowingLlm([PrismHttpExceptionFactory::withoutPrevious()]);
+
+    app(AnalysisPipeline::class)->run($job->id);
+
+    $job->refresh();
+    expect($job->status)->toBe(JobStatus::Failed);
+    expect($job->error)->toBe(ANALYSIS_GENERIC_FAILURE_MESSAGE);
+    expect($fake->attemptCount())->toBe(1);
+});
+
+test('(C) deadline 0 なら LLM を 1 回も呼ばずに failed + timeout 文言 + 予約 Released', function (): void {
+    config()->set('manual.analysis_deadline_seconds', 0);
+    [, , , , , $job] = pipelineContext();
+    $fake = installThrowingLlm(successfulLlmScript());
+
+    app(AnalysisPipeline::class)->run($job->id);
+
+    $job->refresh();
+    expect($job->status)->toBe(JobStatus::Failed);
+    expect($job->error)->toBe(ANALYSIS_TIMED_OUT_MESSAGE);
+    expect($fake->attemptCount())->toBe(0); // 試行を開始しない
+    expect($job->ticketReservation?->status)->toBe(TicketReservationStatus::Released);
+});
+
+test('(C) deadline 直前でもフル試行が許される (残り時間を client timeout に反映しない)', function (): void {
+    // D + C モデルの固定: 残り 1 秒でも試行を「開始」する (開始可否だけを deadline が決める)
+    $this->travelTo(CarbonImmutable::parse('2026-08-04 00:00:00'));
+    config()->set('manual.analysis_deadline_seconds', 1);
+    [, , , , , $job] = pipelineContext();
+    installThrowingLlm(successfulLlmScript()); // 時計を進めない = deadline 前のまま
+
+    app(AnalysisPipeline::class)->run($job->id);
+
+    expect($job->refresh()->status)->toBe(JobStatus::Succeeded);
+});
+
+test('(C) リトライ中に deadline を超えたら試行上限より手前で打ち切る', function (): void {
+    $this->travelTo(CarbonImmutable::parse('2026-08-04 00:00:00'));
+    config()->set('manual.analysis_deadline_seconds', 100);
+    [, , , , , $job] = pipelineContext();
+    $fake = installThrowingLlm(
+        script: [
+            new ConnectionException('x'),
+            new ConnectionException('x'),
+            new ConnectionException('x'),
+        ],
+        onAttempt: function (int $attempt): void {
+            $this->travel(60)->seconds();
+        },
+    );
+
+    app(AnalysisPipeline::class)->run($job->id);
+
+    $job->refresh();
+    expect($job->status)->toBe(JobStatus::Failed);
+    expect($job->error)->toBe(ANALYSIS_TIMED_OUT_MESSAGE);
+    // 2 回目の試行後に仮想時計が deadline (100s) を超えるため 3 回目は開始されない
+    expect($fake->attemptCount())->toBe(2);
+});
+
+test('(D) 会計: リトライして succeeded でも予約 1 件・commit 1 件のみ (二重課金なし)', function (): void {
+    [$organization, , , , , $job] = pipelineContext();
+    installThrowingLlm([
+        new ConnectionException('x'),
+        PrismHttpExceptionFactory::withStatus(502),
+        ...successfulLlmScript(),
+    ]);
+
+    app(AnalysisPipeline::class)->run($job->id);
+
+    $job->refresh();
+    expect($job->status)->toBe(JobStatus::Succeeded);
+    // 予約の冪等キー (analysis_jobs.ticket_reservation_id) はリトライで増えない
+    expect(TicketReservation::query()->count())->toBe(1);
+    $reservation = $job->ticketReservation;
+    expect($reservation?->status)->toBe(TicketReservationStatus::Committed);
+    expect(TicketLedgerEntry::query()
+        ->where('reservation_id', $reservation?->getKey())
+        ->where('kind', TicketLedgerKind::ReserveCommit)
+        ->count())->toBe(1);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(0);
+});
+
+test('(D) 会計: リトライして failed なら予約は Released で commit は 0 件 (課金済み failed なし)', function (): void {
+    [$organization, , , , , $job] = pipelineContext();
+    installThrowingLlm([
+        new ConnectionException('x'),
+        new ConnectionException('x'),
+        new ConnectionException('x'),
+    ]);
+
+    app(AnalysisPipeline::class)->run($job->id);
+
+    $job->refresh();
+    expect($job->status)->toBe(JobStatus::Failed);
+    expect(TicketReservation::query()->count())->toBe(1);
+    expect($job->ticketReservation?->status)->toBe(TicketReservationStatus::Released);
+    expect(TicketLedgerEntry::query()->where('kind', TicketLedgerKind::ReserveCommit)->count())->toBe(0);
+    // 解放されているので残高は戻る
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(1);
+});
+
+test('(D) 強制終了 (commit 前): failed() を呼べなくても recoverStale が予約を Released へ収束させる', function (): void {
+    $this->travelTo(CarbonImmutable::parse('2026-08-04 00:00:00'));
+    [$organization, , , , , $job] = pipelineContext();
+    $reservation = app(TicketLedgerService::class)->reserve($organization, 1);
+    $job->ticketReservation()->associate($reservation);
+    $job->status = JobStatus::Running;
+    $job->save();
+
+    // SIGALRM で failed() 自体が失敗したケース = cron だけが収束させる
+    $this->travelTo(CarbonImmutable::parse('2026-08-04 00:31:00'));
+    app(AnalysisJobService::class)->recoverStale();
+
+    expect($job->refresh()->status)->toBe(JobStatus::Failed);
+    expect($reservation->refresh()->status)->toBe(TicketReservationStatus::Released);
+});
+
+test('(D) 強制終了 (commit 後): failJob は terminal guard で no-op、予約は Committed のまま', function (): void {
+    [, , , , , $job] = pipelineContext();
+    fakeSuccessfulLlm();
+    app(AnalysisPipeline::class)->run($job->id);
+    expect($job->refresh()->status)->toBe(JobStatus::Succeeded);
+
+    // RunManualAnalysis::failed() 相当 (SIGALRM kill 後の最終防衛線)
+    expect(app(AnalysisJobService::class)->failJob($job, '解析が中断されました。再実行してください。'))->toBeFalse();
+
+    $job->refresh();
+    expect($job->status)->toBe(JobStatus::Succeeded);
+    expect($job->ticketReservation?->status)->toBe(TicketReservationStatus::Committed);
+});
+
+test('(D) 強制終了: failJob → recoverStale → releaseStale の順でも最終会計状態は Released', function (): void {
+    $this->travelTo(CarbonImmutable::parse('2026-08-04 00:00:00'));
+    [$organization, , , , , $job] = pipelineContext();
+    $reservation = app(TicketLedgerService::class)->reserve($organization, 1);
+    $job->ticketReservation()->associate($reservation);
+    $job->status = JobStatus::Running;
+    $job->save();
+    $this->travelTo(CarbonImmutable::parse('2026-08-04 00:31:00'));
+
+    app(AnalysisJobService::class)->failJob($job, '解析が中断されました。再実行してください。');
+    app(AnalysisJobService::class)->recoverStale();
+    app(TicketLedgerService::class)->releaseStale();
+
+    expect($job->refresh()->status)->toBe(JobStatus::Failed);
+    expect($reservation->refresh()->status)->toBe(TicketReservationStatus::Released);
+    expect(TicketLedgerEntry::query()->where('kind', TicketLedgerKind::ReserveCommit)->count())->toBe(0);
+});
+
+test('(D) 強制終了: releaseStale → recoverStale → failJob の逆順でも最終会計状態は同じ', function (): void {
+    $this->travelTo(CarbonImmutable::parse('2026-08-04 00:00:00'));
+    [$organization, , , , , $job] = pipelineContext();
+    $reservation = app(TicketLedgerService::class)->reserve($organization, 1);
+    $job->ticketReservation()->associate($reservation);
+    $job->status = JobStatus::Running;
+    $job->save();
+    $this->travelTo(CarbonImmutable::parse('2026-08-04 00:31:00'));
+
+    app(TicketLedgerService::class)->releaseStale();
+    app(AnalysisJobService::class)->recoverStale();
+    app(AnalysisJobService::class)->failJob($job, '解析が中断されました。再実行してください。');
+
+    expect($job->refresh()->status)->toBe(JobStatus::Failed);
+    expect($reservation->refresh()->status)->toBe(TicketReservationStatus::Released);
+    expect(TicketLedgerEntry::query()->where('kind', TicketLedgerKind::ReserveCommit)->count())->toBe(0);
 });

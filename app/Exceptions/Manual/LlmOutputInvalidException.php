@@ -9,8 +9,9 @@ use RuntimeException;
 
 /**
  * LLM 出力 JSON の検証失敗 (有界リトライのトリガー。§10.7-2)。
- * AnalysisPipeline::withBoundedRetry がこの例外のみリトライし、
- * 上限到達で failJob (ユーザー向け文言) へ落とす。
+ * AnalysisPipeline::withBoundedRetry の retryable 集合に含まれ (transient な
+ * provider/connection 例外と同じ扱い)、試行上限または実時間 deadline の到達で
+ * failJob (ユーザー向け文言) へ落とす。
  */
 final class LlmOutputInvalidException extends RuntimeException
 {

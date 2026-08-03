@@ -24,8 +24,16 @@ use App\Prompts\SopExtractPrompt;
 use App\Prompts\WorkDecompositionPrompt;
 use App\Services\Billing\TicketLedgerService;
 use App\Services\Notification\NotificationCenterService;
+use Carbon\CarbonImmutable;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use LogicException;
+use Prism\Prism\Exceptions\PrismException;
+use Prism\Prism\Exceptions\PrismProviderOverloadedException;
+use Prism\Prism\Exceptions\PrismRateLimitedException;
+use Prism\Prism\Exceptions\PrismRequestTooLargeException;
 use Throwable;
 use Webmozart\Assert\Assert;
 
@@ -34,13 +42,34 @@ use Webmozart\Assert\Assert;
  *
  * - チケット 2 フェーズ: startJob で reserve (冪等キー = analysis_jobs.ticket_reservation_id)、
  *   terminal tx (finalize) で materialize + commit + succeeded を原子化
- *   (無課金 succeeded / 課金済み failed を構造的に排除)
- * - LLM 出力の有界リトライ: JSON 検証失敗 (LlmOutputInvalidException) のみ最大
- *   config manual.analysis_llm_max_retries 回再試行
+ *   (無課金 succeeded / 課金済み failed を構造的に排除)。
+ *   リトライは各段の内側 (startJob の後・finalize の前) に閉じており予約行に触れないため、
+ *   何回再試行しても reserve/commit/release は高々 1 回ずつ
+ * - LLM 呼び出しの有界リトライ: JSON 検証失敗 (LlmOutputInvalidException) と transient な
+ *   provider/connection 例外を、config manual.analysis_llm_max_retries 回まで再試行する
+ *   (打ち切り条件は「試行回数 ∧ 実時間 deadline」。isTransient() は deny-by-default)
  * - 失敗は catch → AnalysisJobService::failJob (行ロック + terminal guard で冪等)
  */
 class AnalysisPipeline
 {
+    /**
+     * transient と断定できる provider 側 HTTP status のうち「時間切れ」系
+     * (generic PrismException 経由で来る。文言は timedOut)。
+     */
+    private const TIMED_OUT_HTTP_STATUS = 408;
+
+    /**
+     * transient と断定できる provider 側 HTTP status のうち「混雑」系
+     * (generic PrismException 経由で来る。文言は providerBusy)。
+     * 429/413/529 は専用例外型で来るため、ここには含めない。
+     *
+     * retryable 集合 = TIMED_OUT_HTTP_STATUS ∪ PROVIDER_BUSY_HTTP_STATUSES と定義し、
+     * isTransient() と userMessageFor() が同じ定数を読む (status 解釈を二重管理しない)。
+     *
+     * @var list<int>
+     */
+    private const PROVIDER_BUSY_HTTP_STATUSES = [500, 502, 503, 504];
+
     public function __construct(
         private readonly AnalysisJobService $jobs,
         private readonly ScenarioService $scenarios,
@@ -52,7 +81,16 @@ class AnalysisPipeline
 
     public function run(int $analysisJobId): void
     {
+        // T0 = run() 入口。実時間 deadline (ソフト予算) は **メソッドの第 1 文**で確定させる
+        // (findOrFail / startJob も deadline の内側に入る = 設計の T0 定義と一致させる)。
+        // deadline は各 LLM 試行の「開始可否」だけを決め、走行中の呼び出しは中断しない
+        // (中断は prompt YAML の client_options.timeout)。
+        // ハード上限は RunManualAnalysis::$timeout (worker の SIGALRM)。
+        $deadline = CarbonImmutable::now()
+            ->addSeconds(config()->integer('manual.analysis_deadline_seconds'));
+
         $job = AnalysisJob::query()->findOrFail($analysisJobId);
+
         try {
             if (! $this->startJob($job)) {
                 return; // 重複配送 / stale 回復後の遅延配送 → no-op
@@ -61,9 +99,9 @@ class AnalysisPipeline
             Assert::notNull($document, 'trigger が必ず associate している');
 
             $text = $this->extractor->extract($document);
-            $extracted = $this->runExtractStep($job, $document, $text);
-            $decomposition = $this->runDecomposeStep($job, $extracted);
-            $generated = $this->runGenerateStep($job, $decomposition);
+            $extracted = $this->runExtractStep($job, $document, $text, $deadline);
+            $decomposition = $this->runDecomposeStep($job, $extracted, $deadline);
+            $generated = $this->runGenerateStep($job, $decomposition, $deadline);
             if ($this->finalize($job, $generated)) {
                 // succeeded 到達時のみ・terminal tx の commit 後に通知 (stale 先勝ち false は通知しない)
                 $this->notifications->notifyAnalysisFinished($job->refresh());
@@ -124,9 +162,15 @@ class AnalysisPipeline
     }
 
     /** extract 段: 統一 JSON 化 + extracted_json 保存 (write-only 監査スナップショット) */
-    private function runExtractStep(AnalysisJob $job, SourceDocument $document, ExtractedText $text): ExtractedSopData
-    {
+    private function runExtractStep(
+        AnalysisJob $job,
+        SourceDocument $document,
+        ExtractedText $text,
+        CarbonImmutable $deadline,
+    ): ExtractedSopData {
         $extracted = $this->withBoundedRetry(
+            $deadline,
+            AnalysisStep::Extract,
             fn (): ExtractedSopData => ExtractedSopData::fromLlmText(
                 SopExtractPrompt::make($text->text)->executeSync(),
             ),
@@ -140,9 +184,14 @@ class AnalysisPipeline
     }
 
     /** decompose 段: 作業分解表 + result_json 保存 (write-only 監査スナップショット) */
-    private function runDecomposeStep(AnalysisJob $job, ExtractedSopData $extracted): WorkDecompositionData
-    {
+    private function runDecomposeStep(
+        AnalysisJob $job,
+        ExtractedSopData $extracted,
+        CarbonImmutable $deadline,
+    ): WorkDecompositionData {
         $decomposition = $this->withBoundedRetry(
+            $deadline,
+            AnalysisStep::Decompose,
             fn (): WorkDecompositionData => WorkDecompositionData::fromLlmText(
                 WorkDecompositionPrompt::make($extracted->toJsonString())->executeSync(),
             ),
@@ -157,9 +206,14 @@ class AnalysisPipeline
     }
 
     /** generate 段: カット群生成 */
-    private function runGenerateStep(AnalysisJob $job, WorkDecompositionData $decomposition): GeneratedScenarioData
-    {
+    private function runGenerateStep(
+        AnalysisJob $job,
+        WorkDecompositionData $decomposition,
+        CarbonImmutable $deadline,
+    ): GeneratedScenarioData {
         $generated = $this->withBoundedRetry(
+            $deadline,
+            AnalysisStep::Generate,
             fn (): GeneratedScenarioData => GeneratedScenarioData::fromLlmText(
                 ScenarioGenerationPrompt::make($decomposition->toJsonString())->executeSync(),
             ),
@@ -233,25 +287,101 @@ class AnalysisPipeline
     }
 
     /**
-     * LLM 段の共通有界リトライ (JSON 検証失敗のみ。長さ・provider 例外はリトライしない)。
+     * LLM 段の共通有界リトライ。
+     *
+     * 打ち切り条件は 2 つ:
+     *  (a) 試行回数 (config manual.analysis_llm_max_retries。計 1+N 試行)
+     *  (b) 実時間 deadline (config manual.analysis_deadline_seconds)
+     *
+     * deadline の判定は **「deadline を過ぎたか」の真偽のみ**で行い、残り時間を
+     * client timeout へ反映しない。これは意図的である: deadline の 1 秒前に開始した
+     * 試行にも client timeout の全体 (C) を許すことで、job の worst-case を
+     * 「D + C」という単純な形に閉じている (概念設計 §時間 budget)。
+     * 残り時間を timeout に渡す実装へ変えるとこのモデルが壊れる。
      *
      * @template T
      *
      * @param  callable(): T  $attempt
      * @return T
      */
-    private function withBoundedRetry(callable $attempt): mixed
+    private function withBoundedRetry(CarbonImmutable $deadline, AnalysisStep $step, callable $attempt): mixed
     {
         $maxRetries = config()->integer('manual.analysis_llm_max_retries');
         for ($tryCount = 0; ; $tryCount++) {
+            if (CarbonImmutable::now()->greaterThanOrEqualTo($deadline)) {
+                throw AnalysisFailedException::timedOut();
+            }
             try {
                 return $attempt();
-            } catch (LlmOutputInvalidException $exception) {
-                if ($tryCount >= $maxRetries) {
-                    throw $exception; // 計 (1 + maxRetries) 試行で打ち切り → failJob
+            } catch (Throwable $exception) {
+                if ($tryCount >= $maxRetries || ! $this->isTransient($exception)) {
+                    throw $exception; // 打ち切り → run() の catch → failJob
                 }
+                Log::warning('AI 解析の LLM 呼び出しを再試行します', [
+                    'step' => $step->value,
+                    'attempt' => $tryCount + 1,
+                    'max_attempts' => $maxRetries + 1,
+                    'exception' => $exception::class,
+                ]);
             }
         }
+    }
+
+    /**
+     * 再試行してよい例外か (deny-by-default)。
+     *
+     * 写像の根拠 (vendor 実装より):
+     * - cURL 28/6/7/35/52 → Guzzle ConnectException → Illuminate ConnectionException
+     * - HTTP 429/529/413 は Prism の専用例外型
+     * - それ以外の HTTP エラーは generic PrismException だが、previous に
+     *   Illuminate\Http\Client\RequestException を保持するので status を型安全に読める
+     *
+     * 判定順は **retryable を先・deny を後**にする。deny 側を先に置くと、将来
+     * 「retryable な型が deny 型の派生になる」変更が入ったときに黙って非 retry 化するため。
+     * deny 側は同じ理由で `::class` の厳密比較にしている (派生型を巻き込まない)。
+     */
+    private function isTransient(Throwable $exception): bool
+    {
+        // (1) retryable と断定できる型を先に許可する
+        if ($exception instanceof LlmOutputInvalidException
+            || $exception instanceof ConnectionException
+            || $exception instanceof PrismProviderOverloadedException) {
+            return true;
+        }
+
+        // (2) 決定論的 (再試行しても同じ結果) を厳密比較で deny する
+        if ($exception::class === PrismRateLimitedException::class
+            || $exception::class === PrismRequestTooLargeException::class) {
+            return false;
+        }
+
+        // (3) generic PrismException は previous の HTTP status で判定する
+        $status = $this->extractHttpStatus($exception);
+
+        return $status === self::TIMED_OUT_HTTP_STATUS
+            || ($status !== null && in_array($status, self::PROVIDER_BUSY_HTTP_STATUSES, true));
+    }
+
+    /**
+     * generic PrismException が保持する provider 側 HTTP status を型安全に取り出す。
+     * 取得できない場合は null (= 判定不能 → fail-fast)。
+     *
+     * `PrismException::providerRequestErrorWithDetails()` は previous に
+     * Illuminate\Http\Client\RequestException を渡すため、そこから status を読む
+     * (`getCode()` は他 factory で 0 になるため多義的で使わない)。
+     */
+    private function extractHttpStatus(Throwable $exception): ?int
+    {
+        if (! $exception instanceof PrismException) {
+            return null;
+        }
+
+        $previous = $exception->getPrevious();
+        if (! $previous instanceof RequestException) {
+            return null;
+        }
+
+        return $previous->response->status();
     }
 
     /**
@@ -283,13 +413,32 @@ class AnalysisPipeline
         return $organization;
     }
 
-    /** ユーザー向けエラー文言 (内部詳細を error 列に漏らさない) */
+    /**
+     * ユーザー向けエラー文言 (内部詳細を error 列に漏らさない)。
+     * 理由ごとに「次に取れる行動」が変わるため分岐する (H4)。
+     *
+     * HTTP status の取り出しは isTransient() と同じ extractHttpStatus() を使う
+     * (retryable 判定と文言分岐で status の解釈を二重管理しない)。
+     */
     private function userMessageFor(Throwable $exception): string
     {
+        $status = $this->extractHttpStatus($exception); // 二重呼び出しを避けて一度だけ取る
+
         return match (true) {
             $exception instanceof AnalysisFailedException,
             $exception instanceof InsufficientTicketsException => $exception->getMessage(),
             $exception instanceof LlmOutputInvalidException => $exception->userMessage(),
+            // provider 応答が client timeout を超えた (cURL 28 等)
+            $exception instanceof ConnectionException => AnalysisFailedException::timedOut()->getMessage(),
+            // provider 混雑 (429 / 529)
+            $exception instanceof PrismRateLimitedException,
+            $exception instanceof PrismProviderOverloadedException => AnalysisFailedException::providerBusy()->getMessage(),
+            // 入力過大 (413) は既存の「分割してアップロード」文言を再利用する
+            $exception instanceof PrismRequestTooLargeException => AnalysisFailedException::tooLarge()->getMessage(),
+            // generic PrismException: previous の HTTP status で理由を分ける
+            // (status 集合は isTransient() と同じ定数を読む = 将来の drift を構造的に防ぐ)
+            $status === self::TIMED_OUT_HTTP_STATUS => AnalysisFailedException::timedOut()->getMessage(),
+            $status !== null && in_array($status, self::PROVIDER_BUSY_HTTP_STATUSES, true) => AnalysisFailedException::providerBusy()->getMessage(),
             default => '解析に失敗しました。時間をおいて再実行してください。',
         };
     }
