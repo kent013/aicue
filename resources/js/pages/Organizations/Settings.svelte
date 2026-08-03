@@ -180,7 +180,7 @@
             <Card padding="lg">
                 <h2 class="text-h3">組織名</h2>
                 {#if canManage}
-                    <form onsubmit={submitName} class="mt-4 flex flex-col gap-4">
+                    <form novalidate onsubmit={submitName} class="mt-4 flex flex-col gap-4">
                         <FormField label="組織名" id="organization-name" error={nameForm.errors.name}>
                             {#snippet children({ id, describedBy, invalid })}
                                 <Input
@@ -286,7 +286,7 @@
                             {/if}
                         </p>
                     {/if}
-                    <form onsubmit={openTransferDialog} class="flex flex-col gap-4">
+                    <form novalidate onsubmit={openTransferDialog} class="flex flex-col gap-4">
                         <FormField
                             label="移譲先のメンバー"
                             id="transfer-target"

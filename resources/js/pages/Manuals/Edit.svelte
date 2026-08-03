@@ -80,7 +80,7 @@
             <div class="max-w-2xl">
             <Card padding="lg">
                 <h2 class="text-h3">基本情報</h2>
-                <form onsubmit={submit} class="mt-4 flex flex-col gap-4">
+                <form novalidate onsubmit={submit} class="mt-4 flex flex-col gap-4">
                     <FormField label="タイトル" id="manual-title" error={form.errors.title} required>
                         {#snippet children({ id, describedBy, invalid })}
                             <Input

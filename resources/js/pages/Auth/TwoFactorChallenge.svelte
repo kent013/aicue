@@ -50,7 +50,7 @@
         testId="two-factor-tabs"
     />
 
-    <form onsubmit={submit} class="mt-6 flex flex-col gap-4">
+    <form novalidate onsubmit={submit} class="mt-6 flex flex-col gap-4">
         {#if mode === "recovery"}
             <div
                 id="two-factor-panel-recovery"

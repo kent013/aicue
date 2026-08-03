@@ -192,6 +192,21 @@ children snippet として記述する。Input の `type` は text 系に限定�
 (入力 atom は最小責務に保つ)。パスワード入力は素の `Input type="password"` ではなく
 PasswordInput molecule を使う。
 
+- **`type` は入力補助であって検証手段ではない**。`email` / `tel` / `url` / `number` 等は
+  モバイルキーボード・autofill・スクリーンリーダーの型アナウンスのために付ける。
+  検証の正本はサーバ(日本語)と押下時の client エラーで、native constraint validation には
+  依存しない(form 側で `novalidate`。§Do's and Don'ts)。`inputmode` は restProps で透過する
+- **readonly は「編集できない」ことを面で示す**(`Input` / `Textarea` の `readonly` prop)。
+  `bg-neutral` + `cursor-default`。ただし **disabled と同じ見た目にしない** — readonly の値は
+  生きている(送信される・選択してコピーできる・フォーカスできる)ので、文字色は `text-text` の
+  ままにし focus ring も維持する。disabled は `text-text-secondary` + `cursor-not-allowed` +
+  フォーカス不可。`<select>` は HTML 仕様上 readonly を持たない(編集させないなら値を
+  読み取り表示にする)
+- 「編集させない値」の表現は 2 通り。**そのフォームの送信対象に含む / コピーさせたい**なら
+  readonly input(例: 招待 email の prefill、権限が無い閲覧者への設定値提示)、
+  **編集手段自体を出さない**なら読み取り表示(`<dl>` 等。例: 請求先情報カードの非管理者表示)。
+  readonly input を選んだ場合、上記の見た目が付くことは atom が保証する
+
 ### Checkbox
 
 実装: `components/atoms/Checkbox.svelte`。インラインラベル(右側)とエラー表示
@@ -306,6 +321,18 @@ Laravel flash の取り込みは `lib/stores/flash-to-toast.ts` の `consumeFlas
 `{ id, describedBy, invalid }` を渡すので、呼び出し側はそれを入力 atom へ流し込む。
 `required` は `*`(danger 色、`aria-hidden`)をラベルに付与する。フォームの入力欄は
 本 molecule 経由で組む(AGENTS.md 実装規約)。
+
+- **押下時に出した client エラーは、その後の入力に追随させる**(stale invalid を残さない)。
+  ボタンを disabled にしない(§Do's and Don'ts / AGENTS.md 禁止事項 8)代わりに押下時にエラーを
+  出すのだから、そのエラーは常に「今の入力」を説明していなければならない — 有効に戻ったら消え、
+  無効の理由が変わったら文言も変わる。押下前には出さない。
+  **canonical なのはこの不変条件であって実装形ではない**。実装は
+  **「提示を開始したかの boolean」+ 文言は `$derived`** で組むのが既定(文言を `$state` で
+  持つと同期漏れが起きる。`$effect` での状態同期はしない = Svelte 公式の指針)。
+  先行実装(`Billing/PurchaseTickets.svelte` / `Organizations/Settings.svelte`)は `$effect` に
+  よる連動クリアで**同じ不変条件を満たしており、そのまま許容する**(動いている仕組みを
+  churn させない)。**新規は `$derived` 形で書く**
+- サーバ由来の errors(`form.errors.*`)はこの追随の対象外。入力の変更で消さない
 
 ### DangerZone
 
@@ -441,6 +468,10 @@ active)はページ側が組み立てる(どのタブを出すか・URL は呼�
   押下時に何が足りないかをエラー表示する(例: 利用規約同意チェック。
   disabled はユーザーに「なぜ押せないか」を伝えられない)
 - ページ内で素の `<input>` / `<table>` / リンク風 `<a>` 手書きをしない(対応する atom/molecule を使う)
+- **native の constraint validation に検証を任せない**。`<form>` には `novalidate` を付け、
+  検証文言はサーバ(日本語)と押下時の client エラーに一本化する。
+  native validation は submit より先に発火してブラウザロケール依存の文言で送信を止めるため、
+  日本語 UI の検証経路に到達できなくなる(`tests/js/architecture/form-novalidate.test.ts` が機械検証)
 
 ## 色の意味的割り当てルール
 

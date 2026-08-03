@@ -30,7 +30,7 @@
     }
 </script>
 
-<form onsubmit={submit} class="flex flex-col gap-3" data-testid="source-document-upload">
+<form novalidate onsubmit={submit} class="flex flex-col gap-3" data-testid="source-document-upload">
     <FormField
         label={hasDocument ? "手順書を差し替える" : "手順書 (SOP) をアップロード"}
         id="source-document"

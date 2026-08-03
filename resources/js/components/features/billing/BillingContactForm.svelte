@@ -67,6 +67,7 @@
 
     {#if canManage}
         <form
+            novalidate
             class="mt-4 flex flex-col gap-4"
             data-testid="billing-contact-form"
             onsubmit={(event) => {

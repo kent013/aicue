@@ -32,7 +32,7 @@
         />
         <PageContent>
             <Card padding="lg">
-                <form onsubmit={submit} class="flex flex-col gap-4">
+                <form novalidate onsubmit={submit} class="flex flex-col gap-4">
                     <FormField label="組織名" id="organization-name" error={form.errors.name} required>
                         {#snippet children({ id, describedBy, invalid })}
                             <Input

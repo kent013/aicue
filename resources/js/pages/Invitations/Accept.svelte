@@ -37,7 +37,7 @@
         />
         <PageContent>
             <Card padding="lg">
-                <form onsubmit={submit}>
+                <form novalidate onsubmit={submit}>
                     <Button type="submit" loading={form.processing} testId="accept-invitation-button">
                         招待を受諾する
                     </Button>

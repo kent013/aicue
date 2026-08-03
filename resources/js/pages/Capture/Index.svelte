@@ -58,6 +58,7 @@
         <PageContent>
             <div class="flex flex-col gap-2 sm:flex-row">
                 <form
+                    novalidate
                     class="flex min-w-0 flex-1 items-center gap-2"
                     onsubmit={(event) => {
                         event.preventDefault();

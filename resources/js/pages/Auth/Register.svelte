@@ -82,7 +82,7 @@
 </script>
 
 <AuthLayout title="アカウント登録" {appName}>
-    <form onsubmit={submit} class="flex flex-col gap-4">
+    <form novalidate onsubmit={submit} class="flex flex-col gap-4">
         <FormField label="名前" id="name" error={form.errors.name}>
             {#snippet children({ id, describedBy, invalid })}
                 <Input

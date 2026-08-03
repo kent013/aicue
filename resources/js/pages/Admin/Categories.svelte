@@ -127,7 +127,7 @@
             <div class="flex min-w-0 flex-col gap-10">
                 <Card padding="lg">
                     <h2 class="text-h3">カテゴリを追加</h2>
-                    <form onsubmit={submitAddCategory} class="mt-4 flex items-start gap-2">
+                    <form novalidate onsubmit={submitAddCategory} class="mt-4 flex items-start gap-2">
                         <div class="grow">
                             <FormField
                                 label="カテゴリ名"
@@ -228,7 +228,7 @@
             processing={editCategoryForm.processing}
             testId="edit-category-modal"
         >
-            <form onsubmit={submitEditCategory} class="flex flex-col gap-4">
+            <form novalidate onsubmit={submitEditCategory} class="flex flex-col gap-4">
                 <FormField
                     label="カテゴリ名"
                     id="edit-category-name"

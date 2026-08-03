@@ -89,7 +89,7 @@
 </script>
 
 <Modal bind:open title="動画マニュアルを複製" size="sm" processing={form.processing} testId="duplicate-manual-dialog">
-    <form id="duplicate-manual-form" onsubmit={onFormSubmit} class="flex flex-col gap-4">
+    <form novalidate id="duplicate-manual-form" onsubmit={onFormSubmit} class="flex flex-col gap-4">
         <p class="text-caption text-text-secondary">
             シナリオ（カット）を引き継いだ新しい動画マニュアルを作成します。撮影データ・手順書（SOP）は引き継がれません。
         </p>

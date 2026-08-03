@@ -124,4 +124,67 @@ describe("AutoRechargeCard", () => {
         // エラー時は同意パネルを開かない
         expect(screen.queryByTestId("auto-recharge-consent")).toBeNull();
     });
+
+    it("押下前は範囲エラーを出さない (禁止事項 #8 の契約: 押下時に初めて提示する)", async () => {
+        renderCard({ hasPaymentMethod: true });
+
+        await fireEvent.input(screen.getByTestId("auto-recharge-max-input"), {
+            target: { value: "0" },
+        });
+
+        expect(screen.queryByTestId("auto-recharge-range-error")).toBeNull();
+    });
+
+    it("押下後に値を有効へ直すと範囲エラーが消える (F-3-05: stale invalid を残さない)", async () => {
+        renderCard({ hasPaymentMethod: true });
+
+        const maxInput = screen.getByTestId("auto-recharge-max-input");
+        await fireEvent.input(maxInput, { target: { value: "0" } });
+        await fireEvent.click(screen.getByTestId("auto-recharge-enable"));
+        expect(screen.getByTestId("auto-recharge-range-error")).not.toBeNull();
+
+        // 値を有効な組み合わせへ直す → 表示中のエラーは現在の入力に追随して消える
+        await fireEvent.input(maxInput, { target: { value: "50" } });
+        expect(screen.queryByTestId("auto-recharge-range-error")).toBeNull();
+    });
+
+    it("無効のまま別の無効理由に変えると文言が現在の理由へ追随する", async () => {
+        renderCard({ hasPaymentMethod: true });
+
+        const maxInput = screen.getByTestId("auto-recharge-max-input");
+        // 範囲外 (minCount 未満)
+        await fireEvent.input(maxInput, { target: { value: "0" } });
+        await fireEvent.click(screen.getByTestId("auto-recharge-enable"));
+        expect(screen.getByTestId("auto-recharge-range-error").textContent).toContain(
+            "リチャージ後の残高は",
+        );
+
+        // 開始残高 (既定 5) 以下 = 大小関係の違反へ理由が変わる
+        await fireEvent.input(maxInput, { target: { value: "5" } });
+        expect(screen.getByTestId("auto-recharge-range-error").textContent).toContain(
+            "開始残高より大きい値",
+        );
+    });
+
+    it("canManage=false では両入力が readonly かつ muted になる (F-3-03)", () => {
+        renderCard({ canManage: false, hasPaymentMethod: true });
+
+        for (const testId of ["auto-recharge-threshold-input", "auto-recharge-max-input"]) {
+            const input = screen.getByTestId(testId);
+            expect(input).toHaveAttribute("readonly");
+            const tokens = input.className.split(/\s+/);
+            expect(tokens).toContain("bg-neutral");
+            expect(tokens).toContain("cursor-default");
+        }
+    });
+
+    it("canManage=true では入力は readonly でない (非退行)", () => {
+        renderCard({ canManage: true, hasPaymentMethod: true });
+
+        for (const testId of ["auto-recharge-threshold-input", "auto-recharge-max-input"]) {
+            const input = screen.getByTestId(testId);
+            expect(input).not.toHaveAttribute("readonly");
+            expect(input.className.split(/\s+/)).toContain("bg-surface");
+        }
+    });
 });
