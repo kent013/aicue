@@ -645,7 +645,23 @@ class TicketLedgerService
             ->where('consume_expires_at', '<=', $now);
     }
 
-    /** 生きている (未失効の) monthly 付与のうち最短の失効時刻。無期限のみなら null */
+    /**
+     * 生きている (未失効の) monthly 付与のうち最短の失効時刻。無期限のみなら null。
+     *
+     * **既知窓 (設計上の残余リスク。変更は設計改訂事項)**: 消費境界を 1 値で固定するため、
+     * 生きた有限期限 monthly grant が 2 本以上あり期限が異なると、消費行の expires_at が実際の
+     * 供給元と一致しない。最短期限の到達時に消費行が grant より多く落ちて over-grant が残り
+     * (最大 `amount − 最短期限バケットの残高` 枚)、最短期限を跨ぐ長時間ジョブの commit は残高が
+     * 潤沢でも ReleasedExpired (no-charge) になる。窓を閉じるには expiry 粒度の分割配賦
+     * (consume_monthly_amount) が要るが、これは v1 の発明として設計で撤回済み。
+     *
+     * **現行は構造的に到達不能**: D28 で全 tier の monthly_ticket_grant = 0
+     * (PlanSeederPriceInvariantTest が pin) のため、有限期限の monthly は org 生涯 1 回の
+     * signup grant のみ。BughuntBillingSeeder の 100 枚は無期限で本メソッドの対象外。
+     * **Filament PlanResource で monthly_ticket_grant を 1 以上へ戻すと窓が開く** ので、
+     * その際は本メソッドの契約から見直すこと。挙動は TicketBalanceAccountingTest の
+     * 「[既知窓]」2 本が機械的に固定している。
+     */
     private function nearestMonthlyExpiry(Organization $organization, CarbonImmutable $now): ?CarbonImmutable
     {
         $value = TicketLedgerEntry::query()

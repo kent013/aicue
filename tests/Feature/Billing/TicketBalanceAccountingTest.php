@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\DataTransferObjects\Billing\TicketBalanceDto;
+use App\Enums\Billing\TicketCommitResult;
 use App\Enums\Billing\TicketLedgerKind;
 use App\Enums\Billing\TicketSource;
 use App\Models\Billing\TicketLedgerEntry;
@@ -144,4 +145,67 @@ test('availableTrueBalance は per-source clamp 後の合算で常に 0 以上',
     accountingService()->grantMonthly($organization, 10, CarbonImmutable::now()->addDays(30), 'monthly:true', '月次付与');
 
     expect(accountingService()->availableTrueBalance($organization))->toBe(10);
+});
+
+/*
+ * ── 既知窓 (aigenba verbatim を維持した結果の設計上の残余リスク) ───────────────────
+ *
+ * reserve は消費境界に `nearestMonthlyExpiry` (= 生きた monthly grant の最短期限) を 1 値で固定する
+ * (設計書 P5「reserve」節。分割配賦 consume_monthly_amount は v1 の発明として撤回済み)。
+ * このため **生きた有限期限 monthly grant が 2 本以上あり期限が異なる**とき、消費行の expires_at が
+ * 実際の供給元と一致せず、
+ *   (a) 最短期限の到達時に消費行が grant より多く落ちて over-grant が残る
+ *   (b) 最短期限を跨ぐ長時間ジョブの commit が ReleasedExpired になり、残高が潤沢でも no-charge になる
+ * が起きる。aigenba は amount=1 固定のためズレが最大 1 枚だったが、AI-CUE の amount 一般化で
+ * 最大 `amount - (最短期限バケットの残高)` 枚まで増幅する。
+ *
+ * **現行の AI-CUE では構造的に到達不能**: D28 により全 tier の monthly_ticket_grant は 0
+ * (PlanSeederPriceInvariantTest が pin) で、有限期限の monthly は org 生涯 1 回の signup grant のみ。
+ * BughuntBillingSeeder の 100 枚は無期限 (expires_at IS NULL) で nearestMonthlyExpiry の対象外。
+ * よって「生きた有限期限 monthly が 2 本」は Filament PlanResource で monthly_ticket_grant を
+ * 戻したときにだけ成立する。
+ *
+ * 以下 2 本は**現行挙動を機械的に固定して窓を可視化する**ための pin テストであり、
+ * 「正しい会計」を主張するものではない (正値はコメントに併記する)。窓を閉じるには expiry 粒度の
+ * 配賦が要り、それは設計の撤回済み案の復活 = 設計改訂事項なので本タスクでは変更しない。
+ */
+
+test('[既知窓] 生きた monthly 期限が複数あると消費行が最短期限に固定され失効時に over-grant が残る', function (): void {
+    [$organization] = createOrganizationWithOwner();
+    $nearExpiry = CarbonImmutable::now()->addDays(10);
+    $farExpiry = CarbonImmutable::now()->addDays(30);
+    // 最短期限バケットは 1 枚しか供給できないが、reserve(3) はこの期限を消費境界に採る
+    accountingService()->grantMonthly($organization, 1, $nearExpiry, 'monthly:window-near', '月次付与 (近い期限)');
+    accountingService()->grantMonthly($organization, 100, $farExpiry, 'monthly:window-far', '月次付与 (遠い期限)');
+
+    $reservation = accountingService()->reserve($organization, 3);
+    expect($reservation->consume_expires_at?->toIso8601String())->toBe($nearExpiry->toIso8601String());
+    accountingService()->commit($reservation);
+
+    // 失効前は正しい (1 + 100 - 3)
+    expect(accountingService()->balance($organization)->monthlyRemaining)->toBe(98);
+
+    // 最短期限の到達で +1 と -3 が同時に落ちる。会計上の正値は 98 (遠い期限バケットから 2 枚消費済) だが、
+    // 単一 consume_expires_at では 100 になる = 2 枚の over-grant が残る (aigenba verbatim の既知窓)
+    $this->travelTo($nearExpiry->addMinute());
+    expect(accountingService()->balance($organization)->monthlyRemaining)->toBe(100);
+});
+
+test('[既知窓] 最短 monthly 期限を跨ぐ commit は残高が潤沢でも ReleasedExpired で no-charge になる', function (): void {
+    [$organization] = createOrganizationWithOwner();
+    $nearExpiry = CarbonImmutable::now()->addMinutes(10);
+    $farExpiry = CarbonImmutable::now()->addDays(30);
+    accountingService()->grantMonthly($organization, 1, $nearExpiry, 'monthly:cross-near', '月次付与 (近い期限)');
+    accountingService()->grantMonthly($organization, 100, $farExpiry, 'monthly:cross-far', '月次付与 (遠い期限)');
+
+    $reservation = accountingService()->reserve($organization, 3);
+    $this->travelTo($nearExpiry->addMinute());
+
+    // 遠い期限バケットに 100 枚生きているが、hold の境界は最短期限に固定済のため決定的 no-charge になる
+    expect(accountingService()->commit($reservation))->toBe(TicketCommitResult::ReleasedExpired);
+    expect(TicketLedgerEntry::query()
+        ->where('organization_id', $organization->getKey())
+        ->where('kind', TicketLedgerKind::ReserveCommit)
+        ->count())->toBe(0);
+    expect(accountingService()->balance($organization)->monthlyRemaining)->toBe(100);
 });
