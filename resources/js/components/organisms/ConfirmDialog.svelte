@@ -7,6 +7,7 @@
         open = $bindable(false),
         title,
         message,
+        banner,
         confirmLabel = "確認",
         cancelLabel = "キャンセル",
         confirmVariant = "primary",
@@ -34,6 +35,9 @@
 </script>
 
 <Modal bind:open={() => open, setOpen} {title} size="sm" {processing} {testId}>
+    {#if banner}
+        {@render banner()}
+    {/if}
     <p>{message}</p>
     {#snippet footer()}
         <Button variant="ghost" onclick={handleCancel} disabled={processing}>

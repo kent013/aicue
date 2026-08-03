@@ -1,9 +1,43 @@
-import type { PurchaseTierShape } from "@/types/marketing";
+import type { PricingPlanShape, PurchaseTierShape } from "@/types/marketing";
 
 /**
  * 課金ページの Inertia props。
  * PHP 側 DTO (App\DataTransferObjects\Billing\*) の @phpstan-type shape と exact 対。
  */
+
+/**
+ * PHP: OnboardingBillingState (backed enum) の value 集合と exact 対。
+ * 分岐退行を型で検知するため union を明示する (string にしない)。
+ */
+export type BillingStateValue =
+    | "no_subscription"
+    | "pending_checkout"
+    | "expired_checkout"
+    | "subscribed"
+    | "active_free_plan";
+
+/**
+ * PHP: TicketBalanceDto (TicketBalanceShape) と対。
+ * per-source の**表示値** (clamp 済み)。UI はこの値をそのまま描画し、再計算・clamp しない。
+ * 債務 (負残高) の概念は持たない = 債務行を UI に足さないこと。
+ */
+export interface TicketBalanceShape {
+    readonly monthlyRemaining: number;
+    readonly purchasedRemaining: number;
+    readonly totalAvailable: number;
+    readonly activeReservations: number;
+    readonly nextExpireAt: string | null;
+}
+
+/** PHP: QuotaLimitsDto (QuotaLimitsShape) と対 (null = 無制限) */
+export interface QuotaLimitsShape {
+    readonly maxProjects: number | null;
+    readonly maxMembers: number | null;
+    readonly maxStorageGb: number | null;
+}
+
+/** 購入フォームの状態 (PHP: PurchaseFormState) */
+export type PurchaseFormStateValue = "normal" | "resume" | "completed";
 
 /** PHP: PurchaseTicketsPageDto (PurchaseTicketsPageShape) と対 */
 export interface PurchaseTicketsPageProps {
@@ -11,30 +45,38 @@ export interface PurchaseTicketsPageProps {
     readonly minCount: number;
     readonly maxCount: number;
     readonly defaultCount: number;
-    readonly balance: number;
+    readonly balance: TicketBalanceShape;
     readonly canManage: boolean;
-    readonly attemptToken: string;
+    /** チケット決済専用の attempt token (サブスク checkout 用とは別 key 空間) */
+    readonly ticketAttemptToken: string;
     readonly purchased: boolean;
     /** P8a: オートリチャージが有効か (既定 false) */
     readonly autoRechargeEnabled: boolean;
+    readonly formState: PurchaseFormStateValue;
+    /** resume / completed で確定している枚数 (normal は null) */
+    readonly boundCount: number | null;
+    /** resume の「決済を続ける」遷移先 (Stripe Checkout URL) */
+    readonly resumeUrl: string | null;
+    /** 「新しく購入し直す」= ?fresh=1 の自画面 URL */
+    readonly newPurchaseUrl: string;
 }
 
-/** Billing/Index (課金ページ) の Inertia props */
-export interface BillingIndexPlanPrice {
-    readonly unitAmount: number;
-    readonly currency: string;
-}
-
-export interface BillingIndexPlan {
-    readonly code: string;
-    readonly name: string;
-    readonly price: BillingIndexPlanPrice | null;
-}
-
-export interface BillingIndexProps {
-    readonly plans: readonly BillingIndexPlan[];
+/** PHP: BillingPlansPageDto (BillingPlansPageShape) と対 */
+export interface BillingPlansPageProps {
+    readonly plans: readonly PricingPlanShape[];
+    /** 表示用の現在プラン code (gate 判定には使わない) */
     readonly currentPlanCode: string | null;
-    readonly ticketBalance: number;
+    readonly billingState: BillingStateValue;
+    readonly canManage: boolean;
+}
+
+/** PHP: BillingDashboardDto (BillingDashboardShape) と対 */
+export interface BillingDashboardProps {
+    readonly plan: PricingPlanShape | null;
+    readonly billingState: BillingStateValue;
+    readonly currentPeriodEnd: string | null;
+    readonly balance: TicketBalanceShape;
+    readonly quotas: QuotaLimitsShape;
     readonly canManageBilling: boolean;
     /**
      * 課金ゲートで中断された「元の画面」への復帰先 (same-origin 内部 path)。

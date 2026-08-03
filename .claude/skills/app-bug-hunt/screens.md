@@ -15,6 +15,7 @@
 | app/projects/{project}/manuals/{manual} | capture.manuals.show | S3 |
 | app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take}/playback | capture.takes.playback | S3 |
 | billing | billing.index | S5 |
+| billing/plans | billing.plans | S5 |
 | commerce-disclosure | legal.commerce-disclosure | S1 |
 | contact | contact | S1 |
 | contact/thanks | contact.thanks | S1 |

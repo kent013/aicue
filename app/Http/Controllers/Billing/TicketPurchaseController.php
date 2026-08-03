@@ -5,12 +5,15 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Billing;
 
 use App\DataTransferObjects\Billing\PurchaseTicketsPageDto;
+use App\Enums\Billing\PurchaseFormState;
+use App\Enums\Billing\TicketCheckoutSessionStatus;
 use App\Exceptions\Billing\CheckoutInProgressException;
 use App\Exceptions\Billing\StaleCheckoutAttemptException;
 use App\Exceptions\Billing\TicketVolumeTierUnavailableException;
 use App\Http\Concerns\ResolvesCurrentOrganization;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Billing\TicketCheckoutRequest;
+use App\Models\Billing\TicketCheckoutSession;
 use App\Models\Billing\TicketVolumePrice;
 use App\Models\User;
 use App\Services\Billing\AutoRechargeService;
@@ -40,7 +43,13 @@ class TicketPurchaseController extends Controller
     /** 購入画面の枚数入力の初期値 */
     private const int DEFAULT_COUNT = 10;
 
-    /** 購入画面 (attempt_token は render ごとに ULID 発行) */
+    /**
+     * 購入画面。
+     *
+     * P8b (tc-5): attempt_token は毎 render ULID ではなく、**自分が開始した復帰可能な購入**が
+     * あればその session の token を再利用する (ブラウザバック / bfcache で既存 replay 冪等が
+     * 効き、二重課金にならない)。`?fresh=1` は明示的に新規購入 (別 token) へ倒す。
+     */
     public function show(
         Request $request,
         TicketPricingService $pricing,
@@ -60,15 +69,48 @@ class TicketPurchaseController extends Controller
         $purchased = $request->boolean('purchased')
             && $checkout->confirmsPurchaseReturn($organization, is_string($sessionId) ? $sessionId : null);
 
+        $canManage = $user->can('manageBilling', $organization);
+
+        // manageBilling を持たない閲覧者には resume / completed を出さない
+        // (resumeUrl は外部 Stripe Checkout 直リンクで purchase gate を迂回しうる)。
+        $resumable = ($canManage && ! $request->boolean('fresh'))
+            ? $checkout->resolveResumablePurchase(
+                $organization,
+                $user->id,
+                config()->integer('billing.purchase_resume_window_minutes'),
+            )
+            : null;
+
+        [$formState, $attemptToken, $boundCount, $resumeUrl] = match (true) {
+            $resumable instanceof TicketCheckoutSession
+                && $resumable->status === TicketCheckoutSessionStatus::Pending => [
+                    PurchaseFormState::Resume,
+                    $resumable->attempt_token,
+                    $resumable->ticket_count,
+                    $resumable->checkout_url,
+                ],
+            $resumable instanceof TicketCheckoutSession => [
+                PurchaseFormState::Completed,
+                $resumable->attempt_token,
+                $resumable->ticket_count,
+                null,
+            ],
+            default => [PurchaseFormState::Normal, (string) Str::ulid(), null, null],
+        };
+
         $dto = new PurchaseTicketsPageDto(
             tiers: $pricing->volumeTiersForDisplay(),
             minCount: TicketVolumePrice::PURCHASE_MIN_COUNT,
             maxCount: TicketVolumePrice::PURCHASE_MAX_COUNT,
             defaultCount: self::DEFAULT_COUNT,
-            balance: $tickets->balance($organization)->totalAvailable(),
-            canManage: $user->can('manageBilling', $organization),
-            attemptToken: (string) Str::ulid(),
+            balance: $tickets->balance($organization),
+            canManage: $canManage,
+            ticketAttemptToken: $attemptToken,
             purchased: $purchased,
+            formState: $formState,
+            boundCount: $boundCount,
+            resumeUrl: $resumeUrl,
+            newPurchaseUrl: route('billing.tickets.show', ['fresh' => 1]),
             // P8a: 有効なら「自動購入が設定済み」であることを購入導線でも示せるようにする
             // (軽量な enabled 判定のみ。カタログ解決コストは払わない)。
             autoRechargeEnabled: $autoRecharge->isEnabledFor($organization),

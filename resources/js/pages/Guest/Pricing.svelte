@@ -25,6 +25,11 @@
     const formatYen = (v: number): string => new Intl.NumberFormat("ja-JP").format(v);
     const formatLimit = (v: number | null): string => (v === null ? "無制限" : String(v));
 
+    // 三層構成: 「個人でご利用の方」(personal 無料バナー) と「法人でご利用の方」(カードグリッド) +
+    // 大規模利用バナー。personal は個人用であることを強調するためグリッドから分離する。
+    const personalPlan = $derived(page.plans.find((plan) => plan.code === "personal") ?? null);
+    const corporatePlans = $derived(page.plans.filter((plan) => plan.code !== "personal"));
+
     const buildFeatures = (plan: PricingPlanShape): PricingFeature[] => [
         { text: `プロジェクト ${formatLimit(plan.maxProjects)}` },
         { text: `メンバー ${formatLimit(plan.maxMembers)} 名` },
@@ -50,7 +55,7 @@
     const faqs = $derived([
         {
             q: "無料で試せますか？",
-            a: `はい。Personal プランは基本料金なしでご利用いただけます。さらにプランを有効化すると初回 1 回だけチケット ${page.signupGrantTickets} 枚 (${page.signupGrantExpiryDays} 日間有効) が無料でついてくるので、AI 解析から動画の完成までを実際にお試しいただけます。`,
+            a: `パーソナルプランは基本料金無料でご利用いただけます。さらにプランを有効化すると初回 1 回だけチケット ${page.signupGrantTickets} 枚 (${page.signupGrantExpiryDays} 日間有効) が無料でついてくるので、AI 解析から動画の完成までを実際にお試しいただけます。`,
         },
         {
             q: "チケットは何に使いますか？",
@@ -86,7 +91,7 @@
         <div class="text-center">
             <h1 class="text-h1 text-text">料金プラン</h1>
             <p class="mt-3 text-body text-text-secondary">
-                無料で始めて、必要になったらチームで広げる。シンプルな 2 プランです。
+                個人から法人まで、規模や利用量に合わせて選べるプランをご用意しています。
             </p>
         </div>
 
@@ -106,9 +111,48 @@
             </p>
         </div>
 
-        <!-- プランカード -->
-        <div class="mx-auto mt-10 grid max-w-3xl gap-4 sm:grid-cols-2" data-testid="pricing-plan-grid">
-            {#each page.plans as plan (plan.code)}
+        {#if personalPlan !== null}
+            <!-- 個人でご利用の方: Personal (無料) は個人用であることを強調する専用バナー。 -->
+            <div class="mx-auto mt-10 max-w-3xl">
+                <h2 class="text-h3 text-text-secondary">個人でご利用の方</h2>
+                <div
+                    class="mt-3 flex flex-col gap-4 rounded-lg border border-primary/30 bg-primary-soft p-6 sm:flex-row sm:items-center sm:justify-between"
+                    data-testid="personal-banner"
+                >
+                    <div>
+                        <p class="flex flex-wrap items-baseline gap-x-3">
+                            <span class="text-h3 text-text">{personalPlan.name}</span>
+                            <span class="text-h2 text-text">無料</span>
+                        </p>
+                        <p class="mt-1 text-body text-text-secondary">
+                            基本料金はかからず、AI 解析・動画レンダに使うチケット代だけでご利用いただけます。
+                            プロジェクト {formatLimit(personalPlan.maxProjects)}・メンバー
+                            {formatLimit(personalPlan.maxMembers)} 名・ストレージ
+                            {personalPlan.maxStorageGb === null
+                                ? "無制限"
+                                : `${personalPlan.maxStorageGb} GB`}。
+                        </p>
+                    </div>
+                    <div class="flex shrink-0 flex-col items-center gap-1">
+                        {#if page.isAuthenticated}
+                            <Button href="/billing/plans" inertia>プランを変更</Button>
+                        {:else}
+                            <Button href={`/register?plan=${encodeURIComponent(personalPlan.code)}`}>
+                                基本料金無料で始める
+                            </Button>
+                        {/if}
+                        <p class="text-caption text-text-secondary" data-testid="personal-click-trigger">
+                            カード登録なしで開始・まずは無料チケット {page.signupGrantTickets} 枚から
+                        </p>
+                    </div>
+                </div>
+            </div>
+        {/if}
+
+        <!-- 法人でご利用の方: personal を除いたプランカード -->
+        <h2 class="mx-auto mt-8 max-w-3xl text-h3 text-text-secondary">法人でご利用の方</h2>
+        <div class="mx-auto mt-3 grid max-w-3xl gap-4 sm:grid-cols-2" data-testid="pricing-plan-grid">
+            {#each corporatePlans as plan (plan.code)}
                 <PricingPlanCard
                     name={plan.name}
                     priceAmount={plan.baseAmountJpy}
@@ -118,7 +162,7 @@
                 >
                     {#snippet footerCta()}
                         {#if page.isAuthenticated}
-                            <Button href="/billing" fullWidth inertia>プランを変更</Button>
+                            <Button href="/billing/plans" fullWidth inertia>プランを変更</Button>
                         {:else}
                             <Button href={`/register?plan=${encodeURIComponent(plan.code)}`} fullWidth>
                                 このプランで始める

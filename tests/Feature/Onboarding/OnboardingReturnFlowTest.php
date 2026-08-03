@@ -86,12 +86,12 @@ test('billing.index は契約成立時に continueUrl を 1 回だけ出す', fu
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->component('Billing/Index')
-            ->where('continueUrl', '/projects'));
+            ->where('page.continueUrl', '/projects'));
 
     // 1 回限り: リロードでは CTA が残らない
     $this->actingAs($owner)->get('/billing')
         ->assertOk()
-        ->assertInertia(fn (Assert $page) => $page->where('continueUrl', null));
+        ->assertInertia(fn (Assert $page) => $page->where('page.continueUrl', null));
 });
 
 test('billing.index は未契約 (grantsAccess 不成立) では continueUrl を出さず return_to も消さない', function (): void {
@@ -100,7 +100,7 @@ test('billing.index は未契約 (grantsAccess 不成立) では continueUrl を
 
     $this->actingAs($owner)->get('/billing')
         ->assertOk()
-        ->assertInertia(fn (Assert $page) => $page->where('continueUrl', null));
+        ->assertInertia(fn (Assert $page) => $page->where('page.continueUrl', null));
 
     expect(session(OnboardingReturnResolver::orgKey($organization)))->toBe('/projects');
 });
@@ -112,5 +112,5 @@ test('改ざんされた return_to (外部 URL) は continueUrl に出ない (op
 
     $this->actingAs($owner)->get('/billing')
         ->assertOk()
-        ->assertInertia(fn (Assert $page) => $page->where('continueUrl', null));
+        ->assertInertia(fn (Assert $page) => $page->where('page.continueUrl', null));
 });

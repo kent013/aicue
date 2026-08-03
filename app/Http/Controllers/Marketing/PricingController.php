@@ -70,7 +70,7 @@ class PricingController extends Controller
                 ]),
         );
 
-        return Inertia::render('Pricing', [
+        return Inertia::render('Guest/Pricing', [
             'page' => $dto->toArray(),
         ]);
     }

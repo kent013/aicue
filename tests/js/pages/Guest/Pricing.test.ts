@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/svelte";
-import Pricing from "@/pages/Pricing.svelte";
+import Pricing from "@/pages/Guest/Pricing.svelte";
 import type { PricingPageProps } from "@/types/marketing";
 
 /*
@@ -52,17 +52,30 @@ const basePage: PricingPageProps = {
 };
 
 describe("Pricing", () => {
-    it("プランカード 2 枚を描画し personal は「無料」、standard は月額を表示する", () => {
+    it("三層構成 (個人バナー / 法人グリッド / 大規模利用バナー) を描画する", () => {
         render(Pricing, { props: { page: basePage } });
 
-        const freeCard = screen.getByTestId("pricing-plan-personal");
-        expect(freeCard).toHaveTextContent("無料");
-        expect(freeCard).not.toHaveTextContent("¥");
+        // personal はグリッドから分離した専用バナー (個人利用専用であることを強調)
+        const personalBanner = screen.getByTestId("personal-banner");
+        expect(personalBanner).toHaveTextContent("Personal");
+        expect(personalBanner).toHaveTextContent("無料");
+        expect(screen.queryByTestId("pricing-plan-personal")).toBeNull();
 
+        // 法人グリッドは personal を除いた残り
+        const grid = screen.getByTestId("pricing-plan-grid");
+        expect(grid).not.toHaveTextContent("Personal");
         const standardCard = screen.getByTestId("pricing-plan-standard");
         expect(standardCard).toHaveTextContent("¥4,980");
         expect(standardCard).toHaveTextContent("基本料金");
         expect(standardCard).toHaveTextContent("ストレージ 50 GB");
+
+        expect(screen.getByTestId("pricing-enterprise-banner")).toBeInTheDocument();
+    });
+
+    it("D28: プラン表記に「月 N 枚のチケット付与」を含まない", () => {
+        const { container } = render(Pricing, { props: { page: basePage } });
+
+        expect(container.textContent ?? "").not.toMatch(/月\s*\d+\s*枚のチケット付与/);
     });
 
     it("チケット帯 (X〜Y 枚 / 最終段 X 枚以上) と signup grant 注記を描画する", () => {
@@ -92,7 +105,7 @@ describe("Pricing", () => {
         await fireEvent.click(question);
         expect(question).toHaveAttribute("aria-expanded", "true");
         expect(
-            screen.getByText(/Personal プランは基本料金なしでご利用いただけます/),
+            screen.getByText(/パーソナルプランは基本料金無料でご利用いただけます/),
         ).toBeInTheDocument();
 
         await fireEvent.click(question);
@@ -101,15 +114,15 @@ describe("Pricing", () => {
 
     it("未認証は登録 CTA、認証済みはプラン変更 CTA を出す", () => {
         const { unmount } = render(Pricing, { props: { page: basePage } });
-        const ctas = screen.getAllByRole("link", { name: "このプランで始める" });
-        expect(ctas).toHaveLength(2);
-        // P7: 料金表 → /register?plan={code} で選択意図を handoff する。
+        // personal はバナー CTA、法人プランはカード CTA (P7: /register?plan={code} で handoff)
+        const personalCta = screen.getByRole("link", { name: "基本料金無料で始める" });
+        const gridCtas = screen.getAllByRole("link", { name: "このプランで始める" });
+        expect(gridCtas).toHaveLength(1);
         // 期待値は PlanCode allowlist に実在する code のみ (normalizeRaw が null 化しない値)。
-        expect(ctas.map((cta) => new URL((cta as HTMLAnchorElement).href).search)).toEqual([
-            "?plan=personal",
-            "?plan=standard",
-        ]);
-        for (const cta of ctas) {
+        expect(
+            [personalCta, ...gridCtas].map((cta) => new URL((cta as HTMLAnchorElement).href).search),
+        ).toEqual(["?plan=personal", "?plan=standard"]);
+        for (const cta of [personalCta, ...gridCtas]) {
             expect(new URL((cta as HTMLAnchorElement).href).pathname).toBe("/register");
         }
         unmount();

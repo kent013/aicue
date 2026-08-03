@@ -5,6 +5,11 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Billing;
 
 use App\DataTransferObjects\Billing\AutoRechargeConsentDto;
+use App\DataTransferObjects\Billing\BillingDashboardDto;
+use App\DataTransferObjects\Billing\BillingPlansPageDto;
+use App\DataTransferObjects\Billing\QuotaLimitsDto;
+use App\DataTransferObjects\Marketing\PricingPlanDto;
+use App\Enums\Billing\OnboardingBillingState;
 use App\Enums\Billing\PlanPriceKind;
 use App\Enums\CheckoutIntent;
 use App\Enums\CheckoutSessionStatus;
@@ -17,12 +22,15 @@ use App\Http\Requests\Billing\StartAutoRechargeSetupRequest;
 use App\Http\Requests\Billing\UpdateAutoRechargeRequest;
 use App\Models\Billing\BillingCheckoutSession;
 use App\Models\Billing\Plan;
+use App\Models\Billing\Subscription;
 use App\Models\Organization;
 use App\Models\User;
 use App\Services\Billing\AutoRechargeService;
 use App\Services\Billing\BillingAccess;
+use App\Services\Billing\QuotaService;
 use App\Services\Billing\SubscriptionService;
 use App\Services\Billing\TicketLedgerService;
+use App\Services\Marketing\PricingService;
 use App\Services\Onboarding\IntendedPlanResolver;
 use App\Services\Onboarding\OnboardingReturnResolver;
 use Illuminate\Http\RedirectResponse;
@@ -54,9 +62,18 @@ class BillingController extends Controller
         private readonly AutoRechargeService $autoRecharge,
     ) {}
 
-    /** 課金ページ (現在プラン / チケット残高 / プラン一覧 / オートリチャージ設定) */
-    public function index(Request $request, TicketLedgerService $tickets): Response|RedirectResponse
-    {
+    /**
+     * 課金ダッシュボード (現在プラン / per-bucket チケット残高 / quota 上限 / 導線)。
+     *
+     * P8b (bs-14): プラン一覧は /billing/plans へ移設し、ここは請求ダッシュボードに寄せる。
+     * props は BillingDashboardDto の 1 本 (禁止事項 #4)。
+     */
+    public function index(
+        Request $request,
+        TicketLedgerService $tickets,
+        QuotaService $quota,
+        PricingService $pricing,
+    ): Response|RedirectResponse {
         $organization = $this->resolveCurrentOrganization($request);
         Gate::authorize('view', $organization);
 
@@ -71,37 +88,82 @@ class BillingController extends Controller
             return $landing;
         }
 
-        $plans = Plan::query()->orderBy('sort_order')->get()
-            ->map(function (Plan $plan): array {
-                $price = $plan->currentPrice(PlanPriceKind::Base);
-
-                return [
-                    'code' => $plan->code,
-                    'name' => $plan->name,
-                    'price' => $price === null ? null : [
-                        'unitAmount' => $price->amount,
-                        'currency' => $price->currency,
-                    ],
-                ];
-            })
-            ->values()
-            ->all();
-
         $canManageBilling = $user->can('manageBilling', $organization);
+        $subscription = $organization->subscription('default');
 
-        return Inertia::render('Billing/Index', [
-            'plans' => $plans,
-            'currentPlanCode' => $organization->plan_code,
-            'ticketBalance' => $tickets->balance($organization)->totalAvailable(),
-            'canManageBilling' => $canManageBilling,
-            'continueUrl' => $this->resolveOnboardingContinue($organization),
+        $dto = new BillingDashboardDto(
+            plan: $this->resolveCurrentPlan($organization, $pricing),
+            billingState: $this->access->state($organization),
+            currentPeriodEnd: $subscription instanceof Subscription
+                ? $subscription->current_period_end?->toIso8601String()
+                : null,
+            balance: $tickets->balance($organization),
+            quotas: QuotaLimitsDto::fromLimits($quota->limits($organization)),
+            canManageBilling: $canManageBilling,
+            continueUrl: $this->resolveOnboardingContinue($organization),
             // P8a: オートリチャージ設定カード。subscription 有無に依存せず常に非 null
             // (無料パーソナル含む全プランが対象。**既定は enabled=false の opt-in**)。
-            'autoRecharge' => $this->autoRecharge->settingsFor($organization, $canManageBilling)->toArray(),
+            autoRecharge: $this->autoRecharge->settingsFor($organization, $canManageBilling),
             // カード登録開始 POST の attempt_token (render 単位。setup は課金を伴わないため
             // 購入導線のようなサーバ側安定化は不要 — 同一 token の再送は台帳 unique で冪等)。
-            'autoRechargeSetupToken' => strtolower((string) Str::ulid()),
-        ]);
+            autoRechargeSetupToken: strtolower((string) Str::ulid()),
+        );
+
+        return Inertia::render('Billing/Index', ['page' => $dto->toArray()]);
+    }
+
+    /**
+     * プラン比較ページ (P8b / bs-6)。閲覧は組織メンバー全員、変更は manageBilling のみ。
+     *
+     * プラン台帳 → DTO の mapper は公開料金表と共有する (新 DTO を発明しない)。
+     */
+    public function plans(Request $request, PricingService $pricing): Response
+    {
+        $organization = $this->resolveCurrentOrganization($request);
+        Gate::authorize('view', $organization);
+
+        $user = $request->user();
+        Assert::isInstanceOf($user, User::class);
+
+        $dto = new BillingPlansPageDto(
+            plans: $pricing->listPublicPlans(),
+            currentPlanCode: $this->resolveCurrentPlanCode($organization),
+            billingState: $this->access->state($organization),
+            canManage: $user->can('manageBilling', $organization),
+        );
+
+        return Inertia::render('Billing/Plans', ['page' => $dto->toArray()]);
+    }
+
+    /**
+     * 表示用の現在プラン code。
+     *
+     * ActiveFreePlan は free_plan_code が正 (canceled サブスク行が残る paid→free 経路で
+     * plan_code に旧 paid が残るため)。**表示専用**であり gate 判定には使わない
+     * (判定は BillingAccess::state() 一本)。
+     */
+    private function resolveCurrentPlanCode(Organization $organization): ?string
+    {
+        return $this->access->state($organization) === OnboardingBillingState::ActiveFreePlan
+            ? $organization->free_plan_code
+            : $organization->plan_code;
+    }
+
+    /** 表示用の現在プラン (台帳に無い code / 未契約は null)。 */
+    private function resolveCurrentPlan(Organization $organization, PricingService $pricing): ?PricingPlanDto
+    {
+        $code = $this->resolveCurrentPlanCode($organization);
+        if ($code === null) {
+            return null;
+        }
+
+        foreach ($pricing->listPublicPlans() as $plan) {
+            if ($plan->code === $code) {
+                return $plan;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -275,11 +337,22 @@ class BillingController extends Controller
         return $continue;
     }
 
-    /** Stripe Customer Portal へリダイレクトする (支払い方法・解約の自己管理) */
-    public function portal(Request $request, SubscriptionService $subscriptions): SymfonyResponse
+    /**
+     * Stripe Customer Portal へリダイレクトする (支払い方法・解約の自己管理)。
+     *
+     * P8b (bs-11): Portal は Stripe customer + サブスク前提。free personal
+     * (canceled サブスク行が残る paid→free を含む = billingState で判定) / 未契約 org は
+     * Cashier の assertCustomerExists() 例外 (= 500) に到達させず error flash で back する。
+     */
+    public function portal(Request $request, SubscriptionService $subscriptions): SymfonyResponse|RedirectResponse
     {
         $organization = $this->resolveCurrentOrganization($request);
         Gate::authorize('manageBilling', $organization);
+
+        if ($this->access->state($organization) === OnboardingBillingState::ActiveFreePlan
+            || ! $organization->subscription('default') instanceof Subscription) {
+            return back()->with('error', 'お支払い管理画面は有償プラン契約後にご利用いただけます。');
+        }
 
         return Inertia::location($subscriptions->createPortalSession($organization, route('billing.index'))->url);
     }
