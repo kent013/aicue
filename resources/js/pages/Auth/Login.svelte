@@ -30,7 +30,7 @@
 </script>
 
 <AuthLayout title="ログイン" {appName}>
-    <form onsubmit={submit} class="flex flex-col gap-4">
+    <form novalidate onsubmit={submit} class="flex flex-col gap-4">
         <FormField label="メールアドレス" id="email" error={form.errors.email}>
             {#snippet children({ id, describedBy, invalid })}
                 <Input

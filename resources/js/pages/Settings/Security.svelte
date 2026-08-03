@@ -362,7 +362,7 @@
                                 {@html qrSvg}
                             </div>
                         {/if}
-                        <form onsubmit={confirmTwoFactor} class="flex flex-col gap-4">
+                        <form novalidate onsubmit={confirmTwoFactor} class="flex flex-col gap-4">
                             <FormField
                                 label="認証コード"
                                 id="two-factor-code"

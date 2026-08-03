@@ -160,7 +160,7 @@
             <Card padding="lg">
                 <h2 class="text-h3">プロフィール</h2>
                 <p class="mt-1 text-caption text-text-secondary">名前とメールアドレスを更新します。</p>
-                <form onsubmit={submitProfile} class="mt-4 flex flex-col gap-4">
+                <form novalidate onsubmit={submitProfile} class="mt-4 flex flex-col gap-4">
                     <FormField label="名前" id="profile-name" error={profileForm.errors.name}>
                         {#snippet children({ id, describedBy, invalid })}
                             <Input
@@ -200,7 +200,7 @@
                 <p class="mt-1 text-caption text-text-secondary">
                     現在のパスワードを確認のうえ、新しいパスワードに変更します。
                 </p>
-                <form onsubmit={submitPassword} class="mt-4 flex flex-col gap-4">
+                <form novalidate onsubmit={submitPassword} class="mt-4 flex flex-col gap-4">
                     <FormField
                         label="現在のパスワード"
                         id="current-password"

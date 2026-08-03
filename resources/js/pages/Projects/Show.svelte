@@ -341,6 +341,7 @@
 
                 <!-- フィルタ (カテゴリ / 状態 / キーワード)。GET クエリで manuals のみ部分更新する -->
                 <form
+                    novalidate
                     onsubmit={applyManualFilters}
                     class="mt-4 flex flex-wrap items-end gap-3"
                     data-testid="manual-filter-form"
@@ -555,6 +556,7 @@
 
                     <!-- 追加フォーム -->
                     <form
+                        novalidate
                         onsubmit={submitAddMember}
                         class="mt-6 flex flex-col gap-4"
                         data-testid="project-member-add-form"
@@ -665,7 +667,7 @@
             {#if canManage}
                 <Card padding="lg">
                     <h2 class="text-h3">アイテムを追加</h2>
-                    <form onsubmit={submitAdd} class="mt-4 flex flex-col gap-4">
+                    <form novalidate onsubmit={submitAdd} class="mt-4 flex flex-col gap-4">
                         <FormField label="名前" id="item-name" error={addForm.errors.name} required>
                             {#snippet children({ id, describedBy, invalid })}
                                 <Input
@@ -717,7 +719,7 @@
             processing={editForm.processing}
             testId="edit-item-modal"
         >
-            <form onsubmit={submitEdit} class="flex flex-col gap-4">
+            <form novalidate onsubmit={submitEdit} class="flex flex-col gap-4">
                 <FormField label="名前" id="edit-item-name" error={editForm.errors.name} required>
                     {#snippet children({ id, describedBy, invalid })}
                         <Input

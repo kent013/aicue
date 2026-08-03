@@ -46,7 +46,7 @@
         メールが届かない場合は、再送信できます。
     </p>
 
-    <form onsubmit={resend} class="flex flex-col gap-3">
+    <form novalidate onsubmit={resend} class="flex flex-col gap-3">
         <Button type="submit" loading={form.processing} fullWidth>認証メールを再送信</Button>
         {#if continueUrl !== null}
             <Button

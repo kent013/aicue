@@ -374,7 +374,7 @@
                     <p class="mt-1 text-caption text-text-secondary">
                         招待メールを送信します。招待の有効期限は 7 日間です。
                     </p>
-                    <form onsubmit={submitInvite} class="mt-4 flex flex-col gap-4">
+                    <form novalidate onsubmit={submitInvite} class="mt-4 flex flex-col gap-4">
                         <FormField
                             label="メールアドレス"
                             id="invite-email"
@@ -483,7 +483,7 @@
             title="メンバーの 2FA を解除"
             testId="reset-two-factor-modal"
         >
-            <form onsubmit={submitResetTwoFactor} class="flex flex-col gap-4">
+            <form novalidate onsubmit={submitResetTwoFactor} class="flex flex-col gap-4">
                 <p class="text-body">
                     {resetTwoFactorTarget?.name ?? ""} さんの 2 段階認証を解除します。
                     解除はこのアカウント全体に及び、本人へセキュリティ通知が送信されます。

@@ -42,8 +42,13 @@
     let maxText = $derived(String(autoRecharge.maxCount));
     let submitting = $state(false);
     let showConsent = $state(false);
-    /** 押下時に初めて出す入力エラー (disabled でブロックしない代わりの提示点) */
-    let inputError = $state<string | null>(null);
+    /**
+     * 押下時に初めてエラーを提示する (disabled でブロックしない = 禁止事項 #8) が、
+     * 一度提示したら以後は現在の入力に追随させる (stale invalid を残さない = DESIGN.md §FormField)。
+     * 文言そのものを state で持たず「提示を開始したか」だけを持つことで、
+     * rangeError との同期漏れが構造的に起きない ($effect による状態同期を避ける)。
+     */
+    let inputErrorShown = $state(false);
     /** サーバ 422 の可視化 (flash toast は errors bag を運ばないため silent failure を防ぐ) */
     let serverError = $state<string | null>(null);
 
@@ -93,6 +98,9 @@
         }
         return null;
     });
+
+    /** 表示中の入力エラー。提示開始後は rangeError に完全追随する (有効化で消え、理由が変われば文言も変わる) */
+    const inputError = $derived(inputErrorShown ? rangeError : null);
 
     // 適用単価: Max 枚をまとめ買いした場合の tier 単価 (同意文言の上限額と同じ計算)。
     const appliedUnit = $derived.by<number>(() => {
@@ -148,7 +156,7 @@
             },
             onSuccess: () => {
                 serverError = null;
-                inputError = null;
+                inputErrorShown = false;
                 showConsent = false;
             },
             onFinish: () => {
@@ -159,7 +167,7 @@
 
     /** 入力値の妥当性を押下時に確定する (disabled でブロックしない = 禁止事項 #8)。 */
     function ensureValidRange(): boolean {
-        inputError = rangeError;
+        inputErrorShown = true;
         return rangeError === null;
     }
 
@@ -207,7 +215,8 @@
     /** 停止は常に成立させる (入力値が壊れていても現在値で送る = ワンクリック停止の保証)。 */
     function handleDisable(): void {
         if (submitting) return;
-        inputError = null;
+        // 停止は入力値が壊れていても成立させる契約なので、提示自体を畳む
+        inputErrorShown = false;
         const threshold = parsedThreshold ?? autoRecharge.thresholdCount;
         const max =
             parsedMax !== null && parsedMax > threshold ? parsedMax : autoRecharge.maxCount;

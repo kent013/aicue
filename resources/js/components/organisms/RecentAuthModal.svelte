@@ -99,7 +99,7 @@
         </div>
 
         {#if passwordSet}
-            <form onsubmit={submitPassword} class="flex flex-col gap-3">
+            <form novalidate onsubmit={submitPassword} class="flex flex-col gap-3">
                 <FormField label="現在のパスワード" id="recent-auth-password" error={error}>
                     {#snippet children({ id, describedBy, invalid })}
                         <Input

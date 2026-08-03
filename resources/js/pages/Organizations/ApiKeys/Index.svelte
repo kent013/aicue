@@ -249,7 +249,7 @@
         </div>
 
         <Modal bind:open={issueModalOpen} title="API キーを発行" testId="issue-api-key-modal">
-            <form onsubmit={submitIssue} class="flex flex-col gap-4">
+            <form novalidate onsubmit={submitIssue} class="flex flex-col gap-4">
                 <FormField label="キー名" id="api-key-name" error={issueForm.errors.name}>
                     {#snippet children({ id, describedBy, invalid })}
                         <Input

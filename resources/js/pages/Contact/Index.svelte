@@ -97,7 +97,7 @@
         </p>
 
         <Card padding="lg" class="mt-6">
-            <form onsubmit={submit} class="flex flex-col gap-4" data-testid="contact-form">
+            <form novalidate onsubmit={submit} class="flex flex-col gap-4" data-testid="contact-form">
                 <FormField label="お問い合わせ種別" id="type" required error={form.errors.type}>
                     {#snippet children({ id, describedBy, invalid })}
                         <Select

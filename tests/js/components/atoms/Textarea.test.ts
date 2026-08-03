@@ -41,6 +41,18 @@ describe("Textarea", () => {
         expect(textarea.className).toContain("border-border-strong");
     });
 
+    // 入力系 atom 横断で同じ規約が成立していることの固定 (DESIGN.md §Input / Textarea / Select)
+    it("readonly で native 属性と muted な面が付く (Input と同じ規約)", () => {
+        render(Textarea, { props: { readonly: true, testId: "ta" } });
+
+        const textarea = screen.getByTestId("ta");
+        expect(textarea).toHaveAttribute("readonly");
+        const tokens = textarea.className.split(/\s+/);
+        expect(tokens).toContain("bg-neutral");
+        expect(tokens).toContain("cursor-default");
+        expect(tokens).toContain("text-text");
+    });
+
     it("disabled と aria-describedby (restProps) を透過する", () => {
         render(Textarea, {
             props: { disabled: true, "aria-describedby": "memo-error", testId: "ta" },
