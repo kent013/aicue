@@ -12,8 +12,15 @@ return [
     // AI 解析 1 回のチケット消費 (doc/10 §10.5 COST_ANALYSIS)
     'analysis_ticket_cost' => 1,
 
-    // LLM 出力 JSON の検証失敗時の有界リトライ回数 (§10.7-2。計 1+N 試行)
+    // LLM 呼び出しの有界リトライ回数 (§10.7-2。計 1+N 試行)。JSON 検証失敗と transient な
+    // provider/connection 例外の両方に適用する (AnalysisPipeline::withBoundedRetry)
     'analysis_llm_max_retries' => 2,
+
+    // AI 解析パイプライン全体の実時間 deadline (秒)。AnalysisPipeline::run() 入口を T0 とし、
+    // 各 LLM 試行の「開始可否」だけを決めるソフト予算 (走行中の呼び出しは中断しない)。
+    // 値 = 3 段 × prompt YAML の client_options.timeout (360s) = 全段にフル ceiling の
+    // 1 回を許す最小値。ハード上限は RunManualAnalysis::$timeout (SIGALRM)。
+    'analysis_deadline_seconds' => 1080,
 
     // LLM 入力上限 (UTF-8 bytes)。token budget 導出: context 200,000 - 出力予約 16,000
     // - 固定プロンプト 4,000 = 180,000 token。byte-fallback BPE では token 数 <= バイト数が

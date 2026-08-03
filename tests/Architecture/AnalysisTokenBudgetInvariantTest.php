@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Symfony\Component\Yaml\Yaml;
+use Tests\Support\AnalysisBudget;
 
 /**
  * AI 解析の LLM 入力上限 (config manual.analysis_max_text_bytes) の token budget 算術を
@@ -27,12 +28,13 @@ const INPUT_BUDGET_TOKENS = MODEL_CONTEXT_TOKENS - OUTPUT_RESERVE_TOKENS - PROMP
 
 /**
  * 解析パイプラインの 3 プロンプト (施策 8)。
+ * 正本は Tests\Support\AnalysisBudget::PROMPT_NAMES (時間 budget 側と二重管理しない)。
  *
  * @return list<string>
  */
 function analysisPromptNames(): array
 {
-    return ['sop-extract', 'work-decomposition', 'scenario-generation'];
+    return AnalysisBudget::PROMPT_NAMES;
 }
 
 test('LLM 入力バイト上限が入力 token budget を超えない (分割上界: token数<=バイト数)', function (): void {
@@ -51,13 +53,13 @@ test('解析プロンプト YAML の max_tokens は出力予約と一致する',
     }
 });
 
-test('解析プロンプト YAML の client timeout は時間 budget の前提値 (120 秒) と一致する', function (): void {
-    // AnalysisTimeBudgetInvariantTest の worst-case 計算 (3 段 × 試行 × 120s) と対
-    foreach (analysisPromptNames() as $name) {
-        $yaml = Yaml::parseFile(resource_path("prompts/{$name}.yaml"));
-        expect($yaml)->toBeArray();
-        expect($yaml['client_options']['timeout'] ?? null)
-            ->toBe(120, "{$name}.yaml の client_options.timeout が 120 と不一致");
+test('解析プロンプト YAML の client timeout は時間 budget の仕様値 C と一致する', function (): void {
+    // AnalysisTimeBudgetInvariantTest の worst-case 計算 (D = 3C / T >= D + C + M1 + S) と対
+    foreach (AnalysisBudget::clientTimeoutSecondsFromYaml() as $name => $timeout) {
+        expect($timeout)->toBe(
+            AnalysisBudget::CLIENT_TIMEOUT_SECONDS,
+            "{$name}.yaml の client_options.timeout が時間 budget の C と不一致",
+        );
     }
 });
 
