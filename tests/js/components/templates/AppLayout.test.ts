@@ -4,6 +4,8 @@ import { createRawSnippet } from "svelte";
 import { page } from "@inertiajs/svelte";
 import AppLayout from "@/components/templates/AppLayout.svelte";
 import type { AuthUser, CurrentOrganization } from "@/lib/shared-props";
+import { resetFlashConsumption } from "@/lib/stores/flash-to-toast";
+import { addToast, clearToasts } from "@/lib/stores/toast";
 
 // router をモックし page state は実物を使う (テスト毎に props を差し替える)
 const { routerMock } = vi.hoisted(() => ({
@@ -71,6 +73,8 @@ afterEach(() => {
     cleanup();
     routerMock.post.mockReset();
     localStorage.clear();
+    clearToasts();
+    resetFlashConsumption();
     setPageProps({});
 });
 
@@ -298,6 +302,26 @@ describe("templates/AppLayout", () => {
 
         await fireEvent.keyDown(document, { key: "Escape" });
         expect(screen.queryByTestId("app-user-menu")).toBeNull();
+    });
+
+    // --- toast の消去境界 (T095 / DESIGN.md §Toast) ---
+
+    it("layout の初期化で既存 toast を破棄し、当該 visit の flash を表示する", async () => {
+        // 遷移前ページで積まれた toast は layout の再初期化で消え、着地応答の flash が新規に出る。
+        // 消去責務は ToastContainer.onDestroy ではなく layout 初期化にある (順序が決定的)。
+        addToast("error", "前のページのエラー");
+        setPageProps({
+            auth: { user: authUser() },
+            notifications: { unreadCount: 0 },
+            currentOrganization: org(),
+            flash: { success: "動画マニュアルを削除しました", visitKey: "visit-1" },
+        });
+        renderApp();
+
+        expect(await screen.findByTestId("toast-success")).toHaveTextContent(
+            "動画マニュアルを削除しました",
+        );
+        expect(screen.queryByText("前のページのエラー")).toBeNull();
     });
 
     it("サイドバー折りたたみ状態を localStorage から復元する", () => {

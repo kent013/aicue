@@ -87,7 +87,8 @@ test('owner は API キーを失効できる (revoked_at + SecurityEvent)', func
     $this->actingAs($owner)
         ->withSession(['recent_auth_at' => time()])
         ->delete("/organizations/{$organization->slug}/api-keys/{$apiKey->id}")
-        ->assertRedirect();
+        ->assertRedirect()
+        ->assertSessionHas('success'); // 破壊的操作の flash 規約 (着地先で toast 化される)
 
     expect($apiKey->refresh()->isRevoked())->toBeTrue();
     expect(SecurityAuditEvent::query()->where('event_type', 'api_key_revoked')->exists())->toBeTrue();

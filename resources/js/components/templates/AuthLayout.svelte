@@ -3,6 +3,7 @@
     import { page } from "@inertiajs/svelte";
     import ToastContainer from "@/components/organisms/ToastContainer.svelte";
     import { consumeFlash, type FlashPayload } from "@/lib/stores/flash-to-toast";
+    import { clearToasts } from "@/lib/stores/toast";
 
     /**
      * 認証画面 (login / register / reset 等) 用レイアウト。
@@ -19,6 +20,10 @@
     }
 
     let { title, appName, children, footer }: Props = $props();
+
+    // 消去境界 (DESIGN.md §Toast): layout の初期化時に既存 toast を破棄してから
+    // 当該 visit の flash を消費する。初期化時の 1 回のみ ($effect に載せない)。
+    clearToasts();
 
     $effect(() => {
         consumeFlash(page.props.flash as FlashPayload | undefined);

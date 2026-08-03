@@ -40,6 +40,23 @@ describe("ToastContainer", () => {
         expect(screen.getByTestId("toast-warning")).toBeInTheDocument();
     });
 
+    it("unmount → 再 mount しても toast は残る (消去責務は container に無い)", async () => {
+        // 消去境界は layout の初期化に一本化してある (DESIGN.md §Toast)。container が
+        // unmount で clearToasts() すると、着地先で flash を表示する契約の成否が
+        // Svelte の破棄/フラッシュ順に依存してしまう。
+        const first = render(ToastContainer);
+        addToast("success", "リダイレクト前に積んだ通知");
+        expect(await screen.findByTestId("toast-success")).toBeInTheDocument();
+
+        first.unmount();
+        expect(get(toasts)).toHaveLength(1);
+
+        render(ToastContainer);
+        expect(await screen.findByTestId("toast-success")).toHaveTextContent(
+            "リダイレクト前に積んだ通知",
+        );
+    });
+
     it("閉じるボタンで toast が消える", async () => {
         render(ToastContainer);
         addToast("error", "手動で閉じる");

@@ -29,6 +29,8 @@ test('step-up 済みならアカウントを削除でき、関連データが掃
         ->delete('/settings/account');
 
     $response->assertRedirect('/');
+    // 破壊的操作の flash 規約: 着地先 (未認証面 = GuestLayout) で toast として表示される
+    $response->assertSessionHas('success', 'アカウントを削除しました');
     $this->assertGuest();
     expect(User::query()->whereKey($user->id)->exists())->toBeFalse();
     expect(SocialAccount::query()->whereKey($social->id)->exists())->toBeFalse();

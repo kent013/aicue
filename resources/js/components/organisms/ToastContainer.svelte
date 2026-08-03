@@ -1,10 +1,15 @@
 <script lang="ts">
-    import { onDestroy } from "svelte";
     import { CircleCheck, CircleX, Info, TriangleAlert, X } from "@lucide/svelte";
-    import { clearToasts, dismissToast, toasts, type ToastType } from "@/lib/stores/toast";
+    import { dismissToast, toasts, type ToastType } from "@/lib/stores/toast";
 
     // toast ストアは singleton。本 component はアプリで 1 箇所のみ mount すること
     // (複数 mount すると同一 toast が重複描画される)。
+    //
+    // 消去境界は layout の初期化に一本化してある (DESIGN.md §Toast)。本 component は
+    // AppLayout / AuthLayout / GuestLayout の中に置かれ **layout が再初期化される遷移で
+    // 毎回 unmount される**ため、ここで clearToasts() すると境界が二重になり、かつ
+    // 「着地先で flash を表示する」契約の成否が Svelte の破棄/フラッシュ順に依存する。
+    // 自動消去タイマーは dismissToast が clearTimeout + timers.delete するため残らない。
 
     /** type 別アイコン (Lucide) */
     const TYPE_ICONS = {
@@ -21,9 +26,6 @@
         warning: { border: "border-warning", icon: "text-warning" },
         error: { border: "border-danger", icon: "text-danger" },
     } as const satisfies Record<ToastType, { border: string; icon: string }>;
-
-    // unmount 時 (SPA 全体破棄等の稀ケース) に残存タイマーを解除する (リーク防止)
-    onDestroy(() => clearToasts());
 </script>
 
 <!-- 上部中央 fixed。複数 toast は縦 stack 表示する -->
