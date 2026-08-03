@@ -33,7 +33,12 @@ use Illuminate\Support\Facades\DB;
  * paid 成立時に 1 回だけ付与される)。
  *
  * 冪等 (`whereNull('free_plan_code')` ガード)。末尾の残余 0 件検証が違反すれば throw し、
- * デプロイを中断してゲートを反転させない。down() は「どの org が migration 起因か」を
+ * デプロイを中断してゲートを反転させない。
+ *
+ * **順序は運用契約であってコードでは強制されていない** (`docs/billing-gate-inversion-runbook.md`)。
+ * 「migrate 完走 → 新コード活性化」の順を守らないと、backfill 前に反転コードが動いた時間だけ
+ * 既存組織が遮断される。実行時ガード (完了マーカーを BillingAccess が確認する) は、一度きりの
+ * 移行のために恒久コードへ常設チェックを足すことになるため採らなかった (思考原則 #2/#3)。down() は「どの org が migration 起因か」を
  * 識別できないため意図的に no-op (旧コードは free_plan_code を見ないため無害に無視される)。
  */
 return new class extends Migration
@@ -51,6 +56,13 @@ return new class extends Migration
                 // migration はアプリ定数に依存させない (drift は invariant テストが固定する)
                 'free_plan_code' => 'personal',
                 'free_plan_activated_at' => $now,
+                // declarer-less であることを「前提」ではなく **データで構成的に固定**する。
+                // 母集団は free_plan_code IS NULL なので通常この 2 列は既に NULL だが、
+                // 明示的に NULL を書くことで「grandfathered = 申告者なし」を後から機械判定できる
+                // (declarer 有り = 本人申告、declarer NULL = 移行由来)。partial unique index は
+                // declarer 非 NULL 行のみを対象とするため NULL 化で index に触れない。
+                'personal_declared_by_user_id' => null,
+                'personal_declared_at' => null,
                 'updated_at' => $now,
             ]);
         }

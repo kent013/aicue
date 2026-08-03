@@ -374,10 +374,11 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         ->name('notifications.read');
 
     /*
-    | 組織配下の業務 route (課金ゲート対象)。BillingAccess の entitlement 判定で
-    | 不許可 = 有償プラン契約中の支払い不健全のみ billing へ redirect + 理由 flash
-    | (JSON は 402)。未契約組織は onboarding へ遮断される (P4 ゲート反転)。無料枠は
-    | free_plan_code='personal' の明示申告で表現し、plan_code は判定に使わない。
+    | 組織配下の業務 route (課金ゲート対象)。BillingAccess::state() が許可しない組織は
+    | onboarding へ遮断される (manageBilling 保持者は onboarding.checkout、非保持者は
+    | onboarding.billing-required)。middleware は error flash を積まない = 遮断理由は
+    | 着地ページが持つ。JSON/XHR は 402。無料枠は free_plan_code='personal' の
+    | 明示申告 (ActiveFreePlan) で表現し、plan_code は判定に使わない。
     | billing / purchase-tickets / notifications / onboarding は gate group 外の構造的 allowlist。
     | 新しい業務ドメインの route はこの group 内に追加すること。
     */
