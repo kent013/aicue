@@ -8,11 +8,10 @@ use App\Enums\Billing\BillingFeedbackKind;
 
 /**
  * P9: /billing 着地時のフィードバック。
- * Controller が query (session_id / portal / replayed / retry) を解釈して構築し、
+ * Controller は着地 hop が積んだ one-shot flash (kind) からのみ構築し、
  * UI は raw query を見ずにこの DTO のみを描画する。
  *
- * @phpstan-type SimpleBillingFeedbackKind 'purchase_received'|'purchase_processing'|'purchase_already_received'|'checkout_retry_required'|'portal_returned'
- * @phpstan-type BillingFeedbackShape array{kind: SimpleBillingFeedbackKind, message: string}
+ * @phpstan-type BillingFeedbackShape array{kind: value-of<BillingFeedbackKind>, message: string}
  */
 final readonly class BillingFeedbackDto
 {
@@ -21,12 +20,10 @@ final readonly class BillingFeedbackDto
         public string $message,
     ) {}
 
-    /**
-     * CTA を持たない通常フィードバック (purchase_received / processing / already / retry / portal)。
-     */
-    public static function simple(BillingFeedbackKind $kind, string $message): self
+    /** kind から確定文言を引いて組み立てる (文言の出典は enum 一本)。 */
+    public static function fromKind(BillingFeedbackKind $kind): self
     {
-        return new self($kind, $message);
+        return new self($kind, $kind->message());
     }
 
     /**
@@ -34,11 +31,8 @@ final readonly class BillingFeedbackDto
      */
     public function toArray(): array
     {
-        /** @var SimpleBillingFeedbackKind $kindValue */
-        $kindValue = $this->kind->value;
-
         return [
-            'kind' => $kindValue,
+            'kind' => $this->kind->value,
             'message' => $this->message,
         ];
     }

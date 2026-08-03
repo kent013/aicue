@@ -340,6 +340,22 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
   purchase_processing / purchase_already_received / checkout_retry_required / portal_returned)。
   org スコープ + intent 検証で **fail-closed**、UI は raw query を見ない。
   `PurchaseFormState::Completed` 撤去後、**購入完了を伝える唯一の経路**。
+  - **one-shot の定義**: 「サーバが同じ状態を再主張しない」こと。着地 query
+    (`?session_id` / `?portal`) を認識したら **feedback の有無に関わらず canonical `/billing` へ
+    303** で畳み、kind は `BillingFeedbackKind::FLASH_KEY` の session flash
+    (次の 1 リクエストのみ生存) で運ぶ。着地 URL が履歴に残らないため、リロード・戻る・
+    ブックマークでバナーが復活しない (bfcache による DOM 復元まで禁じる契約ではない)。
+    アプリ自身が出す `checkout_retry_required` / `purchase_already_received` は
+    query を経由せず発行側で直接 flash する (着地 query を発明しない)。
+  - **着地の優先順位** (先着が redirect を返したら後段は評価しない):
+    `?setup_session_id` (P8a) → `?session_id` かつ funding=auto_recharge (T1004) →
+    `?session_id` / `?portal` (feedback) → 通常 render。
+    着地判定は **DTO 構築より前**に置く (`resolveOnboardingContinue()` が return_to を
+    消費するため、hop する request で DTO を組むと復帰先を無音で失う)。
+  - **副作用境界**: 着地は **GET で DB を書かない** (状態遷移は webhook の管轄)。
+    canonical URL の構築は 3 着地共通のヘルパ 1 箇所で、`highlight` のみ引き継ぐ。
+    error flash がある着地では feedback を出さず error を次 render へ keep する
+    (成功と失敗を同時に出さない)。
 - **請求先連絡先 (P9)**: `organizations.billing_contact_email` / `billing_contact_name` は
   両列とも CipherSweet 暗号化 (email のみ blind index。検索は `whereBlind`)。
   `UpdateBillingContactAction` は **email が dirty のときだけ** Stripe 顧客へ同期する。

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Enums\Billing\AutoRechargeDisabledReason;
+use App\Enums\Billing\BillingFeedbackKind;
 use App\Enums\Billing\BillingNotificationType;
 use App\Enums\Billing\SignupFundingChoice;
 use App\Enums\CheckoutSessionStatus;
@@ -386,7 +387,7 @@ test('着地 flash: marker なし / 同意失効では確定表現を避けた�
         ->assertSessionHas('info', 'お支払いを受け付けました。オートリチャージの設定はこの画面から確認できます。');
 });
 
-test('着地 flash: 他 org / setup_payment_method の session_id は 303 しない (IDOR 防御)', function (bool $otherOrg): void {
+test('着地 flash: 他 org / setup_payment_method の session_id は T1004 着地にならない (IDOR 防御)', function (bool $otherOrg): void {
     [$organization, $owner] = createOrganizationWithOwner();
     [$foreign] = createOrganizationWithOwner('他組織');
 
@@ -396,9 +397,13 @@ test('着地 flash: 他 org / setup_payment_method の session_id は 303 しな
         ->fundingAutoRecharge();
     $session = ($otherOrg ? $factory : $factory->setupPaymentMethod())->create();
 
+    // F-3-04 以降、?session_id は P9 の feedback 着地として canonical へ畳まれる (303)。
+    // 守る不変条件は「T1004 の highlight 着地にならない / 成功文言を出さない」こと。
     $this->actingAs($owner)
         ->get('/billing?session_id='.$session->stripe_session_id)
-        ->assertOk();
+        ->assertRedirect('/billing')
+        ->assertSessionMissing('info')
+        ->assertSessionMissing(BillingFeedbackKind::FLASH_KEY);
 })->with(['他 org' => [true], 'setup_payment_method' => [false]]);
 
 test('同意 fail-closed (Request 層): consent_version 欠落 / 旧版は 422 で行も Stripe 呼び出しも増えない', function (?string $consentVersion, string $expectedMessage): void {

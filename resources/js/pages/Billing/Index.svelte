@@ -41,7 +41,11 @@
     /**
      * P9: 決済戻り着地の one-shot フィードバック。**raw query は一切見ない** —
      * kind → variant の写像だけを持ち、文言はサーバ確定値をそのまま描画する。
-     * 一度表示したら消える (リロードで query が落ちれば feedback は null で届く)。
+     *
+     * one-shot はサーバが担保する: 着地 query は canonical URL へ 303 で畳まれ、
+     * feedback は次の 1 リクエストだけ生きる session flash で届く。
+     * したがってリロード / 戻る / ブックマークでは feedback=null になりバナーは復活しない
+     * (クライアント側の URL scrub は行わない)。
      */
     const FEEDBACK_VARIANTS = {
         purchase_received: "success",

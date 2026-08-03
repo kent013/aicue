@@ -82,6 +82,14 @@ class BillingController extends Controller
      *
      * P8b (bs-14): プラン一覧は /billing/plans へ移設し、ここは請求ダッシュボードに寄せる。
      * props は BillingDashboardDto の 1 本 (禁止事項 #4)。
+     *
+     * **着地 (landing) の優先順位** — 先着が redirect を返したら後段は評価しない:
+     *   1. `?setup_session_id` … P8a カード登録の戻り
+     *   2. `?session_id` かつ funding=auto_recharge の完了行 … T1004 (→ ?highlight=auto-recharge)
+     *   3. `?session_id` / `?portal` … P9 着地 feedback (本 one-shot バナー)
+     *   4. 着地 query 無し … 通常 render
+     * いずれも **DTO 構築より前**に置く: resolveOnboardingContinue() は return_to を
+     * peek + forget (消費) するため、hop する request で DTO を組むと復帰先を無音で失う。
      */
     public function index(
         Request $request,
@@ -110,6 +118,12 @@ class BillingController extends Controller
             return $autoRechargeLanding;
         }
 
+        // P9: 決済戻り着地 (?session_id / ?portal) を canonical URL へ畳む (one-shot の担保)。
+        $feedbackLanding = $this->resolveBillingFeedbackLanding($request, $organization);
+        if ($feedbackLanding !== null) {
+            return $feedbackLanding;
+        }
+
         $canManageBilling = $user->can('manageBilling', $organization);
         $subscription = $organization->subscription('default');
 
@@ -129,8 +143,8 @@ class BillingController extends Controller
             // カード登録開始 POST の attempt_token (render 単位。setup は課金を伴わないため
             // 購入導線のようなサーバ側安定化は不要 — 同一 token の再送は台帳 unique で冪等)。
             autoRechargeSetupToken: strtolower((string) Str::ulid()),
-            // P9: 決済戻り着地の one-shot フィードバック (query 解釈済み)。
-            feedback: $this->resolveBillingFeedback($request, $organization),
+            // P9: 着地 hop が積んだ one-shot フィードバック (flash = 次の 1 render のみ生存)。
+            feedback: $this->resolveFlashedFeedback($request),
             // P9: 請求先連絡先 (未設定なら owner email が実際の宛先)。
             billingContact: BillingContactDto::fromOrganization($organization),
         );
@@ -263,7 +277,8 @@ class BillingController extends Controller
             // 同 token・別 plan (1 render 1 token のため「戻って別プランを押す」で実在する)
             throw ValidationException::withMessages(['plan_code' => $e->getMessage()]);
         } catch (StaleCheckoutAttemptException) {
-            return redirect()->route('billing.index', ['retry' => 1]);
+            // 着地 query は発明しない: 自前 redirect なので最初から one-shot flash に載せる。
+            return $this->redirectWithFeedback(BillingFeedbackKind::CheckoutRetryRequired);
         } catch (CheckoutInProgressException $e) {
             return back()->with('error', $e->getMessage());
         } catch (StripePriceNotSyncedException) {
@@ -277,7 +292,7 @@ class BillingController extends Controller
         if ($result->url === null) {
             // url=null は「新規 Checkout を作らなかった」= 受付済み replay か live pending dedup。
             return $subscriptions->isAttemptCompleted($organization, $result->stripeSessionId)
-                ? redirect()->route('billing.index', ['replayed' => 1])
+                ? $this->redirectWithFeedback(BillingFeedbackKind::PurchaseAlreadyReceived)
                 : back()->with('warning', '既に進行中の Checkout があります。数分お待ちください。');
         }
 
@@ -441,6 +456,43 @@ class BillingController extends Controller
     }
 
     /**
+     * 着地 hop を跨いで **保持する** query (着地 query は畳んで落とす)。
+     *
+     * `highlight` は「どのカードへスクロールするか」だけを表す**副作用のない anchor**で、
+     * 状態を主張しないためリロードで再適用されても嘘にならない = 保持してよい。
+     * 逆に**状態を主張する query (`session_id` / `portal` / `setup_session_id`) は保持しない**
+     * — 保持すると one-shot 契約が壊れる。query を追加する人はこの基準で振り分けること。
+     *
+     * @var list<string>
+     */
+    private const PRESERVED_LANDING_QUERY = ['highlight'];
+
+    /**
+     * 着地 query を畳んだ canonical `/billing` への 303 を返す。
+     *
+     * `/billing` の着地 3 系統 (setup_session_id / T1004 / feedback) が**共通で使う**
+     * 唯一の canonical URL 構築点。着地 query (`setup_session_id` / `session_id` / `portal`) は
+     * 引き継がず、`PRESERVED_LANDING_QUERY` に載っている query だけを引き継ぐ。
+     *
+     * **flash には触れない** (純粋な URL 構築)。flash の扱いは各着地の判断
+     * (T1004 は「成功着地で error を延命しない」を明示的に選んでいる)。
+     *
+     * @param  array<string, string>  $extra  呼び出し側が立てる query (保持分より優先)
+     */
+    private function canonicalBillingRedirect(Request $request, array $extra = []): RedirectResponse
+    {
+        $preserved = [];
+        foreach (self::PRESERVED_LANDING_QUERY as $key) {
+            $value = $request->query($key);
+            if (is_string($value) && $value !== '') {
+                $preserved[$key] = $value;
+            }
+        }
+
+        return redirect()->route('billing.index', [...$preserved, ...$extra], 303);
+    }
+
+    /**
      * カード登録着地 (`?setup_session_id=...`) を検証して 303 + flash に倒す。
      *
      * - session id は**自 org の SetupPaymentMethod 台帳行**に一致する場合のみ成功文言を出す
@@ -464,14 +516,14 @@ class BillingController extends Controller
 
         if ($session === null) {
             // 未追跡 session — 成功文言は出さず canonical URL へ倒すだけ (query を残さない)。
-            return redirect()->route('billing.index', [], 303);
+            return $this->canonicalBillingRedirect($request);
         }
 
         $message = $session->status === CheckoutSessionStatus::Completed->value
             ? 'お支払いカードを登録しました。'
             : 'お支払いカードの登録を受け付けました。反映まで少しお待ちください。';
 
-        return redirect()->route('billing.index', [], 303)->with('success', $message);
+        return $this->canonicalBillingRedirect($request)->with('success', $message);
     }
 
     /**
@@ -507,81 +559,108 @@ class BillingController extends Controller
 
         // reflash() はしない: 成功着地で直前の error flash まで延命すると
         // 「成功と失敗が同時に出る」着地を作るため (feedback は本 info 文言だけを主張する)。
-        return redirect()
-            ->route('billing.index', ['highlight' => 'auto-recharge'], 303)
+        return $this->canonicalBillingRedirect($request, ['highlight' => 'auto-recharge'])
             ->with('info', $message);
     }
 
     /**
-     * P9: /billing 着地時の query を解釈してフィードバックを構築する (one-shot)。
+     * P9: 決済戻り着地 (`?session_id` / `?portal`) を検証して canonical URL へ 303 + flash に畳む。
      *
-     * UI は raw query を見ず、この DTO のみを描画する。`session_id` は **org スコープ relation**
-     * 経由でのみ引くため、他 org の session_id を付けても feedback は出ない (偽 success 排除)。
-     * さらに **intent !== subscription_start は null** に倒す (fail-closed。P8a の
-     * `setup_payment_method` 行が同一テーブルに実在するため必須)。
+     * **one-shot の担保はここ** (bug-hunt F-3-04)。着地 query を URL から落とし、kind は
+     * `BillingFeedbackKind::FLASH_KEY` の session flash (次の 1 リクエストのみ生存) で運ぶ。
+     * 着地 URL が履歴に残らないため、リロード / 戻る / ブックマークでバナーが復活しない。
+     *
+     * 契約:
+     * - 着地 query を認識したら **feedback の有無に関わらず必ず 303** する (query を残さない)
+     * - `session_id` は **org スコープ relation** 経由でのみ引く (他 org の id で成功偽装しない)
+     * - **intent !== subscription_start は無言** (P8a の setup_payment_method 行が
+     *   同一テーブルに実在するため必須。fail-closed)
+     * - Failed / Expired も無言 (状態を主張しない。出口は Plans からの新規 token 発行)
+     * - error flash がある着地では feedback を出さず、error だけを次 render へ keep する
+     *   (成功と失敗を同時に出さない)
+     * - **GET で DB を書かない** (状態遷移は webhook の管轄)
+     *
+     * 着地判定は **キーの存在**で行う (値の妥当性では判定しない)。`?session_id=` (空) や
+     * `?session_id[]=` (配列) でも canonical へ畳む = 「バナーは出ないが query は残る」を作らない。
      */
-    private function resolveBillingFeedback(Request $request, Organization $organization): ?BillingFeedbackDto
+    private function resolveBillingFeedbackLanding(Request $request, Organization $organization): ?RedirectResponse
     {
-        if ($request->query('portal') !== null) {
-            // error flash がある着地では成功偽装を抑止するため portal_returned を出さない。
-            if (is_string($request->session()->get('error'))) {
-                return null;
-            }
+        // (1) 着地判定 — 着地 query キーが無ければ素通し (通常 render)。
+        //     InputBag::has() を使うのは「キーはあるが値が空/配列」も着地として畳むため。
+        $isPortalReturn = $request->query->has('portal');
+        $isCheckoutReturn = $request->query->has('session_id');
 
-            return BillingFeedbackDto::simple(
-                BillingFeedbackKind::PortalReturned,
-                'お支払い管理画面から戻りました。',
-            );
-        }
-
-        $sessionId = $request->query('session_id');
-        if (is_string($sessionId) && $sessionId !== '') {
-            $session = $organization->checkoutSessions()
-                ->where('stripe_session_id', $sessionId)
-                ->first();
-
-            // 未知 / 別 org の session_id (手動付与) は feedback を出さない。
-            if (! $session instanceof BillingCheckoutSession) {
-                return null;
-            }
-            // intent 検証で fail-closed (カード登録の着地に購入文言を出さない)。
-            if ($session->intent !== CheckoutIntent::SubscriptionStart->value) {
-                return null;
-            }
-
-            if ($session->status === CheckoutSessionStatus::Completed->value) {
-                return BillingFeedbackDto::simple(
-                    BillingFeedbackKind::PurchaseReceived,
-                    'お支払いを受け付けました。プランへの反映には数分かかる場合があります。',
-                );
-            }
-
-            if ($session->status === CheckoutSessionStatus::Pending->value) {
-                return BillingFeedbackDto::simple(
-                    BillingFeedbackKind::PurchaseProcessing,
-                    'お支払いを確認しています。プラン反映までしばらくお待ちください。',
-                );
-            }
-
-            // Failed / Expired は無言 (状態を主張しない。出口は Plans からの新規 token 発行)。
+        if (! $isPortalReturn && ! $isCheckoutReturn) {
             return null;
         }
 
-        if ($request->query('replayed') !== null) {
-            return BillingFeedbackDto::simple(
-                BillingFeedbackKind::PurchaseAlreadyReceived,
-                'この内容のお支払いは既に受け付け済みです。',
-            );
+        // (2) error flash がある着地では成功偽装を抑止する。hop で error を消さないよう keep する
+        //     (型に依存しないよう has() で判定する)。
+        if ($request->session()->has('error')) {
+            $request->session()->keep(['error']);
+
+            return $this->canonicalBillingRedirect($request);
         }
 
-        if ($request->query('retry') !== null) {
-            return BillingFeedbackDto::simple(
-                BillingFeedbackKind::CheckoutRetryRequired,
-                'お手続きの有効期限が切れました。画面を再読み込みして再試行してください。',
-            );
+        // (3) kind 解決 (portal 優先。値は自分が発行した形だけを認める = fail-closed)。
+        //     canonical 判定 (キー存在) と kind 判定 (値の妥当性) は分離する。
+        $sessionId = $request->query('session_id');
+        $kind = match (true) {
+            // portal() が渡す return_url は route('billing.index', ['portal' => 1]) の 1 形だけ。
+            // ?portal[]=x / ?portal=forged / 値なしは状態を主張しない (畳むだけ)。
+            $isPortalReturn => $request->query('portal') === '1' ? BillingFeedbackKind::PortalReturned : null,
+            // 空文字 / 配列など string でない値は無言 (fail-closed)。畳むことだけはする。
+            is_string($sessionId) && $sessionId !== '' => $this->resolveCheckoutReturnKind($organization, $sessionId),
+            default => null,
+        };
+
+        // (4) 303 — kind が無くても canonical へ倒す (URL に着地 query を残さない)。
+        $redirect = $this->canonicalBillingRedirect($request);
+
+        return $kind === null ? $redirect : $redirect->with(BillingFeedbackKind::FLASH_KEY, $kind->value);
+    }
+
+    /**
+     * 自 org の `subscription_start` 行の状態から着地 kind を決める (fail-closed)。
+     * 未知 / 他 org / intent 不一致 / Failed / Expired はすべて null (無言)。
+     */
+    private function resolveCheckoutReturnKind(Organization $organization, string $sessionId): ?BillingFeedbackKind
+    {
+        $session = $organization->checkoutSessions()
+            ->where('stripe_session_id', $sessionId)
+            ->first();
+
+        if (! $session instanceof BillingCheckoutSession
+            || $session->intent !== CheckoutIntent::SubscriptionStart->value) {
+            return null;
         }
 
-        return null;
+        return match ($session->status) {
+            CheckoutSessionStatus::Completed->value => BillingFeedbackKind::PurchaseReceived,
+            CheckoutSessionStatus::Pending->value => BillingFeedbackKind::PurchaseProcessing,
+            default => null,
+        };
+    }
+
+    /**
+     * 着地 hop が積んだ feedback flash を DTO 化する (未知値・欠落は null = fail-closed)。
+     * flash なので **次の render では自動的に消える** = one-shot。
+     */
+    private function resolveFlashedFeedback(Request $request): ?BillingFeedbackDto
+    {
+        $raw = $request->session()->get(BillingFeedbackKind::FLASH_KEY);
+        $kind = is_string($raw) ? BillingFeedbackKind::tryFrom($raw) : null;
+
+        return $kind === null ? null : BillingFeedbackDto::fromKind($kind);
+    }
+
+    /**
+     * 自前 redirect で /billing の one-shot feedback を出す (query を経由しない)。
+     * Inertia の POST 応答は middleware が 302 → 303 に変換する。
+     */
+    private function redirectWithFeedback(BillingFeedbackKind $kind): RedirectResponse
+    {
+        return redirect()->route('billing.index')->with(BillingFeedbackKind::FLASH_KEY, $kind->value);
     }
 
     /**

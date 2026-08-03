@@ -62,7 +62,7 @@ export interface PurchaseTicketsPageProps {
 }
 
 /**
- * PHP: BillingFeedbackDto の SimpleBillingFeedbackKind と exact 対 (5 値)。
+ * PHP: App\Enums\Billing\BillingFeedbackKind と exact 対 (5 値)。
  * UI は raw query を見ず、この kind でバナー variant を決める。
  */
 export type BillingFeedbackKind =

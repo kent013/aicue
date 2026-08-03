@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\DataTransferObjects\Billing\CreatedCheckoutSession;
 use App\DataTransferObjects\Billing\ExternalBillingRedirect;
+use App\Enums\Billing\BillingFeedbackKind;
 use App\Enums\Billing\SubscriptionSwapOutcome;
 use App\Enums\CheckoutIntent;
 use App\Enums\CheckoutSessionStatus;
@@ -149,7 +150,7 @@ test('同 org の他 user の token も 404 (token 所有者判定は actor ス�
     expect(subCheckoutFake()->created)->toHaveCount(0);
 });
 
-test('completed 行の token 再送は ?replayed=1 へ倒し Stripe を呼ばない', function (): void {
+test('completed 行の token 再送は purchase_already_received を flash して /billing へ倒し Stripe を呼ばない', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $token = subAttemptToken();
 
@@ -163,12 +164,14 @@ test('completed 行の token 再送は ?replayed=1 へ倒し Stripe を呼ばな
     $this->actingAs($owner)->post('/billing/checkout', [
         'plan_code' => 'standard',
         'subscription_attempt_token' => $token,
-    ])->assertRedirect('/billing?replayed=1');
+    ])
+        ->assertRedirect('/billing')
+        ->assertSessionHas(BillingFeedbackKind::FLASH_KEY, BillingFeedbackKind::PurchaseAlreadyReceived->value);
 
     expect(subCheckoutFake()->created)->toHaveCount(0);
 });
 
-test('expired / failed 行の token 再送は ?retry=1 へ倒す', function (string $state): void {
+test('expired / failed 行の token 再送は checkout_retry_required を flash して /billing へ倒す', function (string $state): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $token = subAttemptToken();
 
@@ -182,7 +185,9 @@ test('expired / failed 行の token 再送は ?retry=1 へ倒す', function (str
     $this->actingAs($owner)->post('/billing/checkout', [
         'plan_code' => 'standard',
         'subscription_attempt_token' => $token,
-    ])->assertRedirect('/billing?retry=1');
+    ])
+        ->assertRedirect('/billing')
+        ->assertSessionHas(BillingFeedbackKind::FLASH_KEY, BillingFeedbackKind::CheckoutRetryRequired->value);
 
     expect(subCheckoutFake()->created)->toHaveCount(0);
 })->with(['expired', 'failed']);
@@ -414,7 +419,7 @@ test('並行 race: INSERT 直前に同 token 行が割り込んでも 500 にな
         ->count())->toBe(1);
 });
 
-test('並行 race: 先着行が stale pending なら replay せず ?retry=1 へ倒す', function (): void {
+test('並行 race: 先着行が stale pending なら replay せず checkout_retry_required を flash する', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $token = subAttemptToken();
 
@@ -484,7 +489,8 @@ test('並行 race: 先着行が stale pending なら replay せず ?retry=1 へ�
             'plan_code' => 'standard',
             'subscription_attempt_token' => $token,
         ])
-        ->assertRedirect('/billing?retry=1');
+        ->assertRedirect('/billing')
+        ->assertSessionHas(BillingFeedbackKind::FLASH_KEY, BillingFeedbackKind::CheckoutRetryRequired->value);
 });
 
 test('attempt_token 以外の unique 違反 (stripe_session_id) は rethrow する (replay へ流さない)', function (): void {
