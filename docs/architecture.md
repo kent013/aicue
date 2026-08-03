@@ -286,6 +286,16 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
 - **`?plan=` handoff (P7)**: `IntendedPlanResolver` が org スコープ session へ積み、canonical URL
   へ 303 する (再読込・共有時に query が残らない)。以降は peek = 消費しない (リロード耐性)。
   Enterprise / 未知値は正規化で null に倒れる (Checkout を通らないプランを選ばせない)。
+- **`onboarding.checkout` はメール認証済みが前提** (`['auth','verified']` group 配下)。
+  未検証メールのまま到達できると `PersonalPlanService::activate()` の無料チケット付与と
+  Stripe Checkout の入口が開き、使い捨てアドレスで無料枠を刈れるため、この配置は意図的である
+  (`OnboardingCheckoutEmailVerificationGuardTest` が固定)。
+  したがって **verify notice 画面 (`Auth/VerifyEmail`) に checkout へ進む CTA は置かない** —
+  表示条件 (membership) と踏破条件 (verified) が食い違う恒常的に無効な導線になる
+  (bug-hunt F-2-01)。プラン意図の継続は認証**後**に `VerifyEmailResponse` が
+  `EmailVerificationContinuation::resolveUrl()` で解決して着地させる。画面へ渡すのは
+  URL ではなく `continuesToCheckout` (継続の有無) のみで、認証後の着地を予告する文言に使う。
+  認証前にプランを見たい需要は公開面 (`/pricing`) が満たす。
 - **契約 Checkout の冪等状態機械 (P9)**: `SubscriptionService::startCheckout()` は
   `attempt_token` 冪等マシン (段 0 事前 assert → 1 既存 subscription guard → 2 同 token 行 →
   3 同 plan の live pending dedup (org-wide) → 4 別 plan の live pending を expire →

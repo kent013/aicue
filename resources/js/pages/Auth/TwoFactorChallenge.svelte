@@ -2,6 +2,7 @@
     import { useForm } from "@inertiajs/svelte";
     import Button from "@/components/atoms/Button.svelte";
     import Input from "@/components/atoms/Input.svelte";
+    import TextLink from "@/components/atoms/TextLink.svelte";
     import FormField from "@/components/molecules/FormField.svelte";
     import Tabs from "@/components/molecules/Tabs.svelte";
     import AuthLayout from "@/components/templates/AuthLayout.svelte";
@@ -106,4 +107,12 @@
 
         <Button type="submit" loading={form.processing} fullWidth>認証する</Button>
     </form>
+
+    {#snippet footer()}
+        <p>
+            認証コードもリカバリコードも使えない場合は
+            <TextLink href="/login">ログインをやり直す</TextLink>
+            か、組織の管理者に 2 要素認証のリセットを依頼してください。
+        </p>
+    {/snippet}
 </AuthLayout>

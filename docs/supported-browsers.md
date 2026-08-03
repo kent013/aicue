@@ -16,7 +16,8 @@ AI-CUE が「どのブラウザで、どのレベルまで動作を保証して�
 `Inertia::clearHistory()` はサーバ session にフラグを積むだけで、`sessionStorage` の
 履歴暗号鍵が実際に消えるのは `page.set()` 冒頭の `history.clear()` が走った瞬間だからである
 (受信ではなく適用。通信断や JS 例外で適用前に中断すれば鍵は残る)。
-アプリの `/logout` 導線は 2 箇所 (`AppLayout.svelte` / `pages/Auth/VerifyEmail.svelte`) で
+アプリの `/logout` 導線は 3 箇所 (`AppLayout.svelte` / `pages/Auth/VerifyEmail.svelte` /
+`pages/Auth/ConfirmRecentAuth.svelte`) で
 いずれも `router.post` = Inertia visit のため、正常完了時にこの条件を満たす
 (この不変条件は `tests/js/architecture/logout-call-site-inventory.test.ts` が固定する)。
 **ログアウト導線を非 Inertia 経路 (JSON 204 で完結する XHR 等) で新設すると、
@@ -109,7 +110,7 @@ vitest のユニットテスト (分岐ロジック) と実機受入確認 (未�
 - **経路 C は「`clearHistory: true` を含む Inertia page をクライアントが適用したタブ」のみを保証する**
   (受信ではなく適用)。JSON 204 で完結するログアウト (Fortify 既定の `wantsJson()` 分岐) では、
   次の Inertia page を適用するまでクライアントの履歴暗号鍵は残る。
-  現行の `/logout` 導線は 2 箇所ともに Inertia visit のため実運用では条件を満たすが、
+  現行の `/logout` 導線は 3 箇所ともに Inertia visit のため実運用では条件を満たすが、
   非 Inertia のログアウト導線を新設すると保証が外れる
   (`tests/js/architecture/logout-call-site-inventory.test.ts` が deny-by-default で固定)。
 - **上記を満たしたタブ以外は保証外**。Inertia の履歴暗号鍵は

@@ -235,10 +235,12 @@ class FortifyServiceProvider extends ServiceProvider
         Fortify::verifyEmailView(static function (Request $request): InertiaResponse {
             $user = $request->user();
 
-            // 登録由来の継続導線 (「あとで認証する」)。session には組織 id のみ保持し、
-            // membership 確認を通ったときだけ URL 化する (IDOR 防御)。
+            // 認証前に onboarding.checkout へ進ませる CTA は出さない (route は
+            // ['auth','verified'] 配下 = 未認証は必ず差し戻される)。継続が実在するときだけ
+            // 「認証後にプラン選択へ進む」ことを予告する説明を出す (bug-hunt F-2-01)。
+            // service は継続の有無までを返し、画面語彙への写像はここで行う。
             return Inertia::render('Auth/VerifyEmail', [
-                'continueUrl' => EmailVerificationContinuation::resolveUrl(
+                'continuesToCheckout' => EmailVerificationContinuation::hasContinuation(
                     $user instanceof User ? $user : null,
                     $request->session(),
                 ),
