@@ -8,6 +8,11 @@ use App\Enums\Billing\BillingNotificationType;
 use App\Enums\Billing\HandledStripeWebhookEvent;
 use App\Enums\Billing\TicketCheckoutSessionStatus;
 use App\Enums\Billing\WebhookEventStatus;
+use App\Enums\CheckoutIntent;
+use App\Enums\CheckoutSessionStatus;
+use App\Jobs\Billing\HandleAutoRechargeChargeFailureJob;
+use App\Jobs\Billing\SetDefaultPaymentMethodJob;
+use App\Models\Billing\BillingCheckoutSession;
 use App\Models\Billing\Plan;
 use App\Models\Billing\PlanPrice;
 use App\Models\Billing\StripeWebhookEvent;
@@ -72,6 +77,7 @@ class StripeWebhookProcessor
         private readonly TicketLedgerService $tickets,
         private readonly BillingNotificationDispatcher $notifications,
         private readonly SubscriptionService $subscriptions,
+        private readonly AutoRechargeService $autoRecharge,
     ) {}
 
     public function handle(WebhookReceived $event): void
@@ -173,6 +179,8 @@ class StripeWebhookProcessor
         // 処理イベント集合の単一出典は HandledStripeWebhookEvent (購読集合の導出元)。
         // case を足したらここに arm を足す (handled ⊆ subscribed は invariant test が担保)
         match (HandledStripeWebhookEvent::tryFrom($type)) {
+            // P6 (T077): created / updated / deleted を 3 arm へ分割し、created のみ
+            // signup grant を発火させる (syncSubscriptionState が enum で契機を判別する)。
             HandledStripeWebhookEvent::SubscriptionCreated => $this->syncSubscriptionState(
                 $payload,
                 HandledStripeWebhookEvent::SubscriptionCreated,
@@ -185,11 +193,13 @@ class StripeWebhookProcessor
                 $payload,
                 HandledStripeWebhookEvent::SubscriptionDeleted,
             ),
-            HandledStripeWebhookEvent::InvoicePaid => $this->grantMonthlyTickets($payload),
+            // P8a (T079): invoice.paid は metadata.purpose で auto_recharge を分岐してから
+            // 従来の月次付与経路へ委譲する (handleInvoicePaid が内部で振り分ける)。
+            HandledStripeWebhookEvent::InvoicePaid => $this->handleInvoicePaid($payload),
             HandledStripeWebhookEvent::ChargeRefunded => $this->clawbackRefundedTickets($payload),
             HandledStripeWebhookEvent::InvoicePaymentFailed => $this->handleInvoicePaymentFailed($payload),
             // チケットスポット購入の冪等付与 (T007。真実源は ticket_checkout_sessions 行)
-            HandledStripeWebhookEvent::CheckoutSessionCompleted => $this->grantPurchasedTickets($payload),
+            HandledStripeWebhookEvent::CheckoutSessionCompleted => $this->handleCheckoutSessionCompleted($payload),
             null => null, // 未対応 type は受理のみ (processed として記録)
         };
     }
@@ -320,6 +330,79 @@ class StripeWebhookProcessor
     }
 
     /**
+     * invoice.paid の振り分け。
+     *
+     * P8a: `metadata.purpose === 'auto_recharge'` の invoice は**オートリチャージの付与経路**へ
+     * 振る (billing_reason='manual' のため既存 GRANTING_BILLING_REASONS allowlist では月次付与に
+     * 混入しないが、分岐を明示して意図を固定する)。それ以外は従来どおり月次付与。
+     *
+     * @param  array<mixed>  $payload
+     */
+    private function handleInvoicePaid(array $payload): void
+    {
+        if ($this->stringAt($payload, 'data.object.metadata.purpose') === 'auto_recharge') {
+            $this->recordAutoRechargePaid($payload);
+
+            return;
+        }
+
+        $this->grantMonthlyTickets($payload);
+    }
+
+    /**
+     * P8a: オートリチャージ invoice の paid 確定 (冪等付与 + attempt paid 遷移)。
+     *
+     * **metadata は照合専用**で org 解決・認可には使わない (tenant キー不信 / 不変条件 #1)。
+     * org は attempt 行 (自 DB) の relation から解決し、payload の customer と突き合わせる。
+     * 付与は `recharge:{invoiceId}` の ledger UNIQUE で冪等 (webhook 再送・同期 pay・
+     * リコンサイルのどれが先でも 1 回)。
+     *
+     * @param  array<mixed>  $payload
+     */
+    private function recordAutoRechargePaid(array $payload): void
+    {
+        $attemptUlid = $this->stringAt($payload, 'data.object.metadata.recharge_attempt_ulid');
+        $invoiceId = $this->stringAt($payload, 'data.object.id');
+        if ($attemptUlid === null || $invoiceId === null) {
+            throw new RuntimeException('invoice.paid (auto_recharge): metadata.recharge_attempt_ulid / invoice id 欠落');
+        }
+
+        $attempt = $this->autoRecharge->findAttemptByUlid($attemptUlid);
+        if ($attempt === null) {
+            // 自 DB 行が真実源。crash 先着 webhook は Stripe の再送で本経路に収束する (retryable)。
+            throw new RuntimeException("invoice.paid (auto_recharge): 未追跡 attempt {$attemptUlid} (DB 行なし、再送待ち)");
+        }
+
+        $organization = $attempt->organization;
+        Assert::isInstanceOf($organization, Organization::class);
+
+        // customer 照合 (tenant キー不信の fail-closed。metadata.organization_id は認可に使わない)
+        $customerId = $this->stringAt($payload, 'data.object.customer');
+        if ($customerId === null || $organization->stripe_id !== $customerId) {
+            throw new RuntimeException("invoice.paid (auto_recharge): customer 照合不一致 (attempt {$attemptUlid})");
+        }
+        // attempt に pin 済みの invoice と一致すること (別 invoice の混入を弾く)
+        if ($attempt->stripe_invoice_id !== null && $attempt->stripe_invoice_id !== $invoiceId) {
+            throw new RuntimeException("invoice.paid (auto_recharge): invoice 照合不一致 (attempt {$attemptUlid})");
+        }
+
+        $amountPaid = data_get($payload, 'data.object.amount_paid');
+        $amountDue = data_get($payload, 'data.object.amount_due');
+        if (! is_int($amountPaid) || ! is_int($amountDue)) {
+            throw new RuntimeException("invoice.paid (auto_recharge): amount 欠落 (invoice {$invoiceId})");
+        }
+
+        $this->autoRecharge->recordSuccessfulCharge(
+            $organization,
+            $attempt,
+            $invoiceId,
+            $amountPaid,
+            $amountDue,
+            $this->resolveStripeIdField(data_get($payload, 'data.object.payment_intent')),
+        );
+    }
+
+    /**
      * invoice.paid: 契約プランの monthly_ticket_grant を月次付与する。
      *
      * **signup grant には一切関与しない (P6/D29)**。初回無償チケットの付与契機は
@@ -382,6 +465,19 @@ class StripeWebhookProcessor
             'attempt_count' => data_get($payload, 'data.object.attempt_count'),
         ]);
 
+        // P8a: オートリチャージ invoice の失敗は専用 Job へ振る (SCA 判定に外向き Stripe API が
+        // 要るため webhook 同期処理では判定しない)。汎用の支払い失敗通知は送らない
+        // (専用の失敗 / SCA 通知が Job 経由で出る)。
+        if ($this->stringAt($payload, 'data.object.metadata.purpose') === 'auto_recharge') {
+            $attemptUlid = $this->stringAt($payload, 'data.object.metadata.recharge_attempt_ulid');
+            $attempt = $attemptUlid === null ? null : $this->autoRecharge->findPendingAttemptByUlid($attemptUlid);
+            if ($attempt !== null) {
+                HandleAutoRechargeChargeFailureJob::dispatch($attempt->id);
+            }
+
+            return;
+        }
+
         if ($invoiceId === null || $organization === null) {
             return;
         }
@@ -420,6 +516,73 @@ class StripeWebhookProcessor
      * - 付与は TicketLedgerService::grantPurchased (idempotency_key purchase:{sessionId}
      *   UNIQUE) で冪等。event_id 違い再送でも二重付与しない
      *
+     * @param  array<mixed>  $payload
+     */
+    private function handleCheckoutSessionCompleted(array $payload): void
+    {
+        // P8a: オートリチャージ用カード登録 (mode=setup) の着地。真実源は自 DB 行
+        // (billing_checkout_sessions の intent=setup_payment_method)。
+        if ($this->stringAt($payload, 'data.object.mode') === 'setup') {
+            $this->completeAutoRechargeSetup($payload);
+
+            return;
+        }
+
+        $this->grantPurchasedTickets($payload);
+    }
+
+    /**
+     * P8a: mode=setup Checkout の完了。台帳行を completed 化し、PM の default 設定 +
+     * 事前同意の自動有効化を Job へ退避する (外向き Stripe API は webhook 同期処理で叩かない)。
+     *
+     * @param  array<mixed>  $payload
+     */
+    private function completeAutoRechargeSetup(array $payload): void
+    {
+        if ($this->stringAt($payload, 'data.object.metadata.purpose') !== 'auto_recharge_setup') {
+            return; // 他 purpose の setup session は受理のみ
+        }
+
+        $sessionId = $this->stringAt($payload, 'data.object.id');
+        if ($sessionId === null) {
+            throw new RuntimeException('checkout.session.completed: session id 欠落 (auto_recharge_setup)');
+        }
+
+        // 真実源は自 DB 行 (crash 先着 webhook は Stripe の再送で収束する = retryable)
+        $session = BillingCheckoutSession::query()
+            ->where('stripe_session_id', $sessionId)
+            ->where('intent', CheckoutIntent::SetupPaymentMethod->value)
+            ->first();
+        if ($session === null) {
+            throw new RuntimeException("auto-recharge setup webhook: 未追跡 session {$sessionId} (DB 行なし、再送待ち)");
+        }
+
+        $organization = $session->organization;
+        Assert::isInstanceOf($organization, Organization::class);
+
+        // tenant キー不信: payload の customer は照合のみ (org 解決は DB 行 → relation)
+        $customerId = $this->stringAt($payload, 'data.object.customer');
+        if ($customerId === null || $organization->stripe_id !== $customerId) {
+            throw new RuntimeException("auto-recharge setup webhook: customer 照合不一致 (session {$sessionId})");
+        }
+
+        $setupIntentId = $this->resolveStripeIdField(data_get($payload, 'data.object.setup_intent'));
+        if ($setupIntentId === null) {
+            throw new RuntimeException("auto-recharge setup webhook: setup_intent 欠落 (session {$sessionId})");
+        }
+
+        if ($session->status !== CheckoutSessionStatus::Completed->value) {
+            $session->status = CheckoutSessionStatus::Completed->value;
+            $session->completed_at = now();
+            $session->save();
+        }
+
+        $organizationId = $organization->getKey();
+        Assert::integer($organizationId);
+        SetDefaultPaymentMethodJob::dispatch($organizationId, $setupIntentId);
+    }
+
+    /**
      * @param  array<mixed>  $payload
      */
     private function grantPurchasedTickets(array $payload): void

@@ -1,3 +1,5 @@
+import type { AutoRechargeConsentTerms } from "@/types/billing";
+
 /**
  * 課金オンボーディング (Onboarding/Checkout・Onboarding/BillingRequired) の Inertia props。
  * PHP 側 DTO (App\DataTransferObjects\Onboarding\* / App\DataTransferObjects\Billing\PlanDto) の
@@ -40,6 +42,10 @@ export interface OnboardingCheckoutShape {
      * `plans` への包含は保証しない = 該当 code があるときだけ preselect する。
      */
     readonly intendedPlanCode: string | null;
+    /** P8a (D29(i)): オートリチャージ事前同意の提示条件 (表示値 = 記録値の単一計算源) */
+    readonly consentTerms: AutoRechargeConsentTerms;
+    /** 画面に出す資金選択の並び (enum 値。`tickets` は UI に出さない) */
+    readonly fundingChoices: readonly string[];
 }
 
 /** PHP: BillingRequiredDto (BillingRequiredShape) と対 */

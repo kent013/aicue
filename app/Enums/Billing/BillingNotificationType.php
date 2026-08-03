@@ -16,4 +16,10 @@ enum BillingNotificationType: string
 {
     case PaymentFailed = 'payment_failed';
     case RenewalReminder = 'renewal_reminder';
+
+    /* P8a: オートリチャージ (裏チャージ) 系。すべて reminder 経路 (type, dedup_key) で冪等管理する。 */
+    case AutoRechargeFailed = 'auto_recharge_failed';
+    case AutoRechargeDisabled = 'auto_recharge_disabled';
+    case AutoRechargeActionRequired = 'auto_recharge_action_required';
+    case AutoRechargeEnabled = 'auto_recharge_enabled';
 }

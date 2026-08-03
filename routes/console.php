@@ -39,6 +39,27 @@ Schedule::command('billing:reconcile-schedules')->daily();
 
 /*
 |--------------------------------------------------------------------------
+| 課金 cron (オートリチャージ / P8a)
+|--------------------------------------------------------------------------
+| reconcile-auto-recharge: pending attempt の回収 (課金済み回収 / 再実行 / SCA リマインド /
+| 期限切れ終端 / 取りこぼし起票)。
+|
+| **監視対象 (必須)**: webhook が MAX_PROCESSING_ATTEMPTS=8 で恒久 drop した
+| 「課金済み・付与なし」を回収する**唯一の**経路であり、停止すると資金回収済み・チケット
+| 未付与が滞留する。AI-CUE の運用アラート経路は report() のみのため、onFailure をそこへ繋ぐ。
+| 滞留の観測点は ticket_auto_recharge_attempts.status='pending' の件数
+| (docs/architecture.md の監視対象リストを参照)。
+*/
+Schedule::command('billing:reconcile-auto-recharge')
+    ->everyFifteenMinutes()
+    ->onOneServer()
+    ->withoutOverlapping()
+    ->onFailure(static fn () => report(new RuntimeException(
+        'billing:reconcile-auto-recharge 失敗 — 資金回収済み・チケット未付与が滞留する可能性',
+    )));
+
+/*
+|--------------------------------------------------------------------------
 | 問い合わせ (Inquiry) retention purge
 |--------------------------------------------------------------------------
 | 保持期限 (config legal.inquiry_retention_days) を超過した spam / closed を日次で削除する。

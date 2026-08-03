@@ -40,6 +40,7 @@ const basePage: PurchaseTicketsPageProps = {
     canManage: true,
     attemptToken: "01J0000000000000000000TEST",
     purchased: false,
+    autoRechargeEnabled: false,
 };
 
 afterEach(() => {

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\DataTransferObjects\Onboarding;
 
+use App\DataTransferObjects\Billing\AutoRechargeConsentTermsDto;
 use App\DataTransferObjects\Billing\PersonalPlanEligibilityDto;
 use App\DataTransferObjects\Billing\PlanDto;
 
@@ -16,6 +17,7 @@ use App\DataTransferObjects\Billing\PlanDto;
  *
  * @phpstan-import-type PlanDtoShape from PlanDto
  * @phpstan-import-type PersonalPlanEligibilityShape from PersonalPlanEligibilityDto
+ * @phpstan-import-type AutoRechargeConsentTermsShape from AutoRechargeConsentTermsDto
  *
  * @phpstan-type OnboardingCheckoutShape array{
  *   plans: list<PlanDtoShape>,
@@ -24,7 +26,9 @@ use App\DataTransferObjects\Billing\PlanDto;
  *   contactUrl: string,
  *   personalEligibility: PersonalPlanEligibilityShape|null,
  *   signupGrantTickets: int,
- *   intendedPlanCode: string|null
+ *   intendedPlanCode: string|null,
+ *   consentTerms: AutoRechargeConsentTermsShape,
+ *   fundingChoices: list<string>
  * }
  */
 final readonly class OnboardingCheckoutDto
@@ -45,6 +49,18 @@ final readonly class OnboardingCheckoutDto
         public ?PersonalPlanEligibilityDto $personalEligibility = null,
         public int $signupGrantTickets = 10,
         public ?string $intendedPlanCode = null,
+        /**
+         * P8a (D29(i)): オートリチャージ事前同意の提示条件。表示値と記録値の単一計算源
+         * (AutoRechargeService::consentTermsFor)。
+         */
+        public ?AutoRechargeConsentTermsDto $consentTerms = null,
+        /**
+         * 画面に出す資金選択の並び (enum 値)。`tickets` は UI から出さない
+         * (validation では引き続き受理する)。
+         *
+         * @var list<string>
+         */
+        public array $fundingChoices = [],
     ) {}
 
     /**
@@ -63,6 +79,8 @@ final readonly class OnboardingCheckoutDto
             'personalEligibility' => $this->personalEligibility?->toArray(),
             'signupGrantTickets' => $this->signupGrantTickets,
             'intendedPlanCode' => $this->intendedPlanCode,
+            'consentTerms' => ($this->consentTerms ?? new AutoRechargeConsentTermsDto(0, 0, 0, 0, ''))->toArray(),
+            'fundingChoices' => $this->fundingChoices,
         ];
     }
 }
