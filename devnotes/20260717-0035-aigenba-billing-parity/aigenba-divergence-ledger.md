@@ -110,10 +110,12 @@
 
 | # | 乖離 | 退役予定 |
 |---|---|---|
-| E-1 | `hasActiveAccess()` の移行 OR（`\|\| $org->plan_code === null`） | **P4（T075）で 1 行削除** |
-| E-2 | `claimSignupGrantMarker()` を移行期は **public**（aigenba は `activate()` 内 private）（**D13**） | **P6（T077）で private へ戻す** |
-| E-3 | `invoice.paid`（`billing_reason=subscription_create`）経路の marker claim + grant | **P6（T077）で付与契機が `customer.subscription.created` へ移る（D29）ため退役** |
-| E-4 | `PlanSeeder` に legacy `free` 行を残置 | **P4（T075）で撤去（D11）** |
+| E-1 | `hasActiveAccess()` の移行 OR（`\|\| $org->plan_code === null`） | **✅ 退役済（T075 / 2026-08-03）**。1 行削除しゲート反転を完了 |
+| E-2 | `claimSignupGrantMarker()` を移行期は **public**（aigenba は `activate()` 内 private）（**D13**） | **✅ 退役済（T077 / 2026-08-03）**。private へ戻した |
+| E-3 | `invoice.paid`（`billing_reason=subscription_create`）経路の marker claim + grant | **✅ 退役済（T077 / 2026-08-03）**。付与契機が `customer.subscription.created` へ移り（D29）当該ブロックを撤去 |
+| E-4 | `PlanSeeder` に legacy `free` 行を残置 | **✅ 退役済（T075 / 2026-08-03）**。data migration で撤去し `fallback_plan` を `personal` へ（D11） |
+
+> **E 区分はすべて退役完了（2026-08-03）**。移行期の一時措置は残っていない。
 
 ---
 
@@ -130,3 +132,37 @@
 |---|---|---|
 | ? | **月次チケット付与の廃止（D28）** | **乖離ではない**（aigenba に**揃える**変更）。aigenba は施策8/v3 で全 tier `included_monthly_tickets = 0` = 廃止済み。AI-CUE も追随した |
 | ? | **返金債務が回収されない経路** | **CLOSED**。aigenba 側の実行検証で**指摘は不成立**と判定（私の再現手順が消費優先 monthly→purchased と矛盾していた）。`aigenba-handoff.md` 参照 |
+
+---
+
+## 追記: P5〜P9 実装で確定した乖離（2026-08-03）
+
+決済 parity の全フェーズ（P1〜P9 = T072〜T081）がマージ完了した時点での追加分。
+
+### B: aigenba へ返すべき乖離（**追加**）
+
+#### B-5. オートリチャージの適用単価が同意上限を超えうる
+
+| | |
+|---|---|
+| **aigenba** | 実請求の単価を `resolveVolumeTier($quantity)`（実際に買う枚数）で解決する（`app/Services/Billing/AutoRechargeService.php:466`）。一方、同意上限の計算は `resolveVolumeTier($max)` 基準（同 `:197` / `:302` / `:1198`、`AutoRechargeConsentTermsDto.php:27`）|
+| **AI-CUE** | **実請求も `max_count` 基準へ統一**した（T079） |
+| **理由** | 逐減単価表のもとで部分補充（`quantity < max_count`）が起きると、**実請求が同意上限を超える**。実測: tier `1=>¥100 / 20=>¥80 / 50=>¥70 …` で `max_count=50` の同意上限は ¥70×50 = **¥3,500** だが、48 枚補充の verbatim 実請求は ¥80×48 = **¥3,840**（¥340 超過）|
+| **確度** | **高**（AI-CUE の実 tier 表で数値検証済み。aigenba の価格表も同一構成であることを確認）。ただし **aigenba 上での実行再現は未実施** |
+| **状態** | **`HANDOFF-TO-AIGENBA.md` の F-6 として返却済み**（最優先項目として先頭に配置）|
+
+### 「乖離ではない」= aigenba へ追随した変更（記録）
+
+| # | 事項 | 判定 |
+|---|---|---|
+| — | **`PurchaseFormState` の `Completed` 撤去（T088）** | **乖離ではない（aigenba に追随した）**。設計 L2142 は「aigenba verbatim（Normal\|Resume\|Completed）」としていたが、**設計作成（2026-07-17）より後の 2026-07-30 に aigenba が bug-hunt F-5-02 で `Completed` を撤去**していた。理由は「完了通知は決済戻り着地の one-shot が担い、二重課金は POST 冪等が担保する」。窓内ロックは購入フォームを不必要に塞ぎ、決済成功直後に「完了」と「決済を続ける」が同時提示される誤誘導も生む（T080 の Codex レビューも独立に指摘）。**設計が古くなっていた事例**として記録する |
+
+> **教訓**: 「aigenba verbatim」と書かれた設計項目でも、**設計作成後に aigenba 側が変更している可能性がある**。
+> 実装時に移植元の現物を確認する運用（本作業では各エージェントに `/tmp/aigenba` の参照を指示）が有効だった。
+
+### C: 既存契約への適合（追加）
+
+| # | 乖離 | 詳細 |
+|---|---|---|
+| C-12 | `TicketCommitResult` / `TicketBalanceDto` の導入（P5） | aigenba verbatim。ただし `debt` フィールドは持たない（AI-CUE に返金債務の概念が無い）|
+| C-13 | `MANUALLY_RESOLVED`（route binding の解決方式宣言）| **P5 とは無関係**（T082 由来）。`{notification}` を controller が手動解決するため IV-9(a) の対象外と宣言する仕組み |
