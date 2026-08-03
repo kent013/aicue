@@ -122,6 +122,83 @@ run_id 日時から経過算出) / 再導出ゲート / high・critical は know
   `observed_conditions{viewport,auth_role,...}` / `symptom_tokens[...]` を記録するとよい (無ければ安全側=
   no match/ambiguous で actionable のまま)。
 
+### 運用ガード (a) `species_key` の 4 セグメント規約
+
+`species_key` は **必ず 4 セグメント**（`failure_class:resource_type:operation:tenant_relation`）。
+finding 側と同じ規約で、adjudication 側も validator が `_SPECIES_RE` で強制する。
+
+```
+misleading_copy:billing:starter-consent            # ← invalid (3 セグメント)
+misleading_copy:billing:read:self                  # ← valid
+```
+
+実例根拠: 削除した旧 seed の A-004〜A-007 は 3 セグメントで書かれており
+`bad species_key` で invalid だった（`data_loss:api-rest:put-full-replace` など）。
+**registry が 1 件でも invalid なら fail-closed で registry 全体が無効になる**ため、
+3 セグメントの 1 行が抑制機構を全面停止させる。書くときは 4 要素を機械的に組むこと。
+
+### 運用ガード (b) governed `COND_KEYS` と `mode` / `env` を含める理由
+
+`conditions` に書けるキーは validator の `COND_KEYS` に限定される（未知キーは
+`bad condition key` で invalid = fail-closed）:
+
+| key | 意味 |
+|---|---|
+| `viewport` | 観測ビューポート（例 `<=389px`, `768`） |
+| `auth_role` | 認証ロール（例 `member`, `guest`） |
+| `browser` | ブラウザ（例 `chromium`, `webkit`） |
+| `feature_flag` | フラグ状態 |
+| `precondition` | 上記に当てはまらない前提条件（自由文） |
+| `mode` | bug-hunt harness のモード（`fake` / `real`。manifest の real_mode） |
+| `env` | 走行環境（例 `bughunt`, `dev`） |
+
+`mode` / `env` は **generic な `precondition` に潰さない**。bug-hunt harness の第一級ディメンション
+であり、「fake mode 限定の偽陽性」を real モードの実退行に誤適用しないための **load-bearing な条件**
+だからである（`precondition` の自由文に落とすと文字列一致でしか効かず、条件として機能しない）。
+根拠となった事故: spirux HARNESS-01 — 旧 `COND_KEYS` に `mode` / `env` が無く schema drift が起き、
+`conditions.mode` を持つエントリが `bad condition key` で invalid → fail-closed で抑制が全面停止した。
+AI-CUE でも同じ状態で、2026-08-02 の監査時に旧 A-008 が `bad condition key: 'mode'` で fail していた。
+
+### 運用ガード (c) 新規 adjudication の登録手順
+
+1. **どの run で** — `adjudicated_at_run` に実 run_id（`YYYYMMDD-HHMMSS`）、
+   `adjudicated_at_commit` にその run の commit を書く。`source_finding_ids` は
+   その run の実 finding id（歴史的な事象のみ `F-historical-*` を許す）。
+2. **何を根拠に** — `rationale_ref` は非空。**実コードの file:line か AGENTS.md アンカーか
+   テスト名**を指す（本文は複製しない）。裏取りは設計文書 / 実コード / テストの三点で行い、
+   取れないものは登録しない（「要確認」のまま残す方が安全）。
+3. **`watch_globs` に何を書くか** — その判定を無効化しうる**実在ファイル**のパス。
+   - 実在しないパスは書かない（invalidation が永久に発火せず、判定が腐ったまま抑制し続ける）。
+   - AI-CUE の実 path 規約に従う（Svelte ページは **小文字** `resources/js/pages/`。
+     大文字 `Pages/` は case-sensitive CI で解決不能かつ AI-CUE に存在しない）。
+   - 過広禁止（`app/**` 等は validator が拒否）。判定の根拠になったファイルだけを列挙する。
+4. `species_key` は (a)、`conditions` は (b) の規約に従う。`symptom.required_tokens` は
+   distinctive に、`known_tokens` は実語彙で書く。
+5. 追記後は必ず検証する（invalid が 1 件でもあれば registry 全体が無効になる）:
+   ```bash
+   python3 validate_findings.py ledger/example.findings.jsonl --adjudications ledger/adjudications.jsonl
+   python3 -m unittest discover -s ledger -p 'test_*.py'
+   ```
+6. 人間可読の申し送り（「過去 run で SPEC / DOC と確定した事象を再起票しない」）は
+   機械 registry の対として `.claude/skills/app-bug-hunt/spec-ledger.md` に書く。
+
+### 運用ガード (d) spirux 由来 18 件 (A-001〜A-018) を削除した理由
+
+2026-08-02 に旧 seed 18 件を**全削除して seed を空にした**。
+
+- 18 件は **AI-CUE に実在しない資産**を指していた:
+  `.claude/skills/spirux-bug-hunt/operations.md`（A-012）/ `/api/v1/personas/*`・
+  `app/Http/Controllers/Api/V1/PersonaController.php`（A-005 / A-006）/
+  大文字 `resources/js/Pages/Billing/Index.svelte`（A-004 / A-008〜A-011。AI-CUE は小文字 `pages/`）/
+  `app/Filament/Resources/OrganizationResource.php`（A-018。AI-CUE に Filament admin は無い）。
+- `watch_globs` が実在しないパスを指すため **invalidation が永久に発火しない** =
+  他アプリの偽陽性判定を AI-CUE の実退行に誤適用し続けるリスクだけが残る。
+- **実効的な抑制件数は 0 → 0 で不変**。削除時点で validator は 5 件の error
+  （A-004〜A-007 の 3 セグメント `species_key`、A-008 の `bad condition key: 'mode'`）を出しており、
+  fail-closed により 18 件すべてが無効だった。
+- したがってこの変更は**機能削除ではなく、機構を使える状態に戻す**もの。
+  今後は上記 (c) の手順で AI-CUE の実 run から積み上げる。
+
 ## スコープ（Finding 台帳でやらないこと）
 - pcov（実装到達カバレッジ）/ capture-recapture / 3軸ダッシュボード / Boundary Matrix 完備は**やらない**。
 - 操作到達カバレッジ = この台帳 + `operations.md` 機構実行数 + graph TESTED_BY を同一 run_id で突合（pcov 不要）。

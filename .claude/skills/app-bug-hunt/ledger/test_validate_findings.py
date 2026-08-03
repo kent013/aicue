@@ -504,25 +504,33 @@ class SpeciesTokenHyphenTest(unittest.TestCase):
         self.assertIsNone(v._ADJ_SPECIES_KEY_RE.match("other:x:y"))
 
 
-class NewFlashAdjudicationsTest(unittest.TestCase):
-    """T937: 新規 A-015..A-018 が validator を通り、真退行 (novel token) は ambiguous に逃げる。"""
+class FlashAdjudicationBehaviourTest(unittest.TestCase):
+    """flash 系 adjudication が意図どおり fire し、真退行 (novel token) は ambiguous に逃げる。
 
-    def _load_new(self):
-        import os
-        here = os.path.dirname(__file__)
-        path = os.path.join(here, "adjudications.jsonl")
-        by_id = {}
-        for lineno, adj, raw in v.load_jsonl(path):
-            if isinstance(adj, dict):
-                by_id[adj.get("adjudication_id")] = (lineno, adj, raw)
-        return by_id
+    旧 `NewFlashAdjudicationsTest` は同梱 seed の A-015..A-018 を直接読んでいたが、
+    seed は spirux 由来 (実在しない資産を指す) のため削除された (README 運用ガード (d))。
+    固定したい振る舞いはデータではなく機構なので、fixture をテスト内に持つ形へ移した。
+    """
 
-    def test_new_entries_each_valid(self):
-        by_id = self._load_new()
-        for aid in ("A-015", "A-016", "A-017", "A-018"):
-            self.assertIn(aid, by_id, aid)
-            errs = v.validate_adjudications([by_id[aid]])
-            self.assertEqual(errs, [], f"{aid}: {errs}")
+    def _adj(self):
+        return adj(
+            adjudication_id="A-015",
+            species_key="claimed_success_no_change:organization:update:self",
+            scope={"scope_kind": "screen_id", "scope_value": "Organizations/Settings.name-update"},
+            conditions={},
+            symptom={"required_tokens": ["flash", "成功", "トースト"],
+                     "known_tokens": ["update", "保存", "フィードバック", "組織",
+                                      "organization", "toast", "success"]},
+            verdict="false_positive",
+            rationale_ref="AGENTS.md#mutation-success-flash-implemented ; "
+                          "tests/Architecture/MutationRedirectFlashTest.php",
+            source_finding_ids=["F-3-01"],
+            watch_globs=["app/Http/Controllers/OrganizationController.php",
+                         "resources/js/lib/stores/toast.ts"],
+        )
+
+    def test_entry_is_valid(self):
+        self.assertEqual(v.validate_adjudications(_adjs(self._adj())), [])
 
     def _finding(self, tokens):
         return {
@@ -538,23 +546,148 @@ class NewFlashAdjudicationsTest(unittest.TestCase):
         }
 
     def test_benign_flash_finding_is_known_accepted(self):
-        by_id = self._load_new()
-        adj = by_id["A-015"][1]
         f = self._finding(["flash", "成功", "トースト", "update"])
-        res = v.match_finding(f, adj, run_id="20260701-020000", changed=False, unresolvable=False)
+        res = v.match_finding(f, self._adj(), run_id="20260701-020000",
+                              changed=False, unresolvable=False)
         self.assertIsNotNone(res)
         self.assertEqual(res["adjudication_status"], "known_accepted", res)
 
     def test_dataloss_novel_token_escapes_to_ambiguous(self):
         # 「保存が反映されない」= 真退行の novel token → known_accepted せず ambiguous
-        by_id = self._load_new()
-        adj = by_id["A-015"][1]
         f = self._finding(["flash", "成功", "トースト", "反映されない"])
-        res = v.match_finding(f, adj, run_id="20260701-020000", changed=False, unresolvable=False)
+        res = v.match_finding(f, self._adj(), run_id="20260701-020000",
+                              changed=False, unresolvable=False)
         self.assertIsNotNone(res)
         self.assertEqual(res["adjudication_status"], "ambiguous", res)
         self.assertEqual(res["adjudication_ambiguity_reason"], "new_signal", res)
 
+
+class GovernedConditionKeysTest(unittest.TestCase):
+    """mode / env は governed COND_KEYS (generic な precondition に潰さない)。
+
+    spirux HARNESS-01: 旧 COND_KEYS に mode/env が無く schema drift →
+    `bad condition key: 'mode'` で fail-closed → 抑制が全面停止した。
+    """
+
+    def test_mode_and_env_are_governed_keys(self):
+        self.assertIn("mode", v.COND_KEYS)
+        self.assertIn("env", v.COND_KEYS)
+
+    def test_adjudication_with_mode_condition_is_valid(self):
+        self.assertEqual(v.validate_adjudications(_adjs(adj(conditions={"mode": "fake"}))), [])
+
+    def test_adjudication_with_env_condition_is_valid(self):
+        self.assertEqual(v.validate_adjudications(_adjs(adj(conditions={"env": "bughunt"}))), [])
+
+    def test_adjudication_with_mode_and_env_is_valid(self):
+        self.assertEqual(
+            v.validate_adjudications(_adjs(adj(conditions={"mode": "fake", "env": "bughunt"}))), [])
+
+    def test_unknown_condition_key_still_rejected(self):
+        errs = v.validate_adjudications(_adjs(adj(conditions={"bogus": "x"})))
+        self.assertTrue(any("condition key" in m for _, _, ms in errs for m in ms))
+
+    def test_mode_condition_gates_matching(self):
+        # fake 限定の偽陽性が real モードの finding に誤適用されないこと (load-bearing な理由)
+        conds = {"mode": "fake"}
+        hit = find(observed_conditions={"mode": "fake"})
+        miss = find(observed_conditions={"mode": "real"})
+        unobserved = find(observed_conditions={})
+        self.assertIsNone(v.conditions_status(conds, hit))
+        self.assertEqual(v.conditions_status(conds, miss), "condition_mismatch:mode")
+        self.assertEqual(v.conditions_status(conds, unobserved), "condition_unverified:mode")
+
+    def test_unspecified_mode_prevents_overbroad_application(self):
+        # finding が mode を観測しているのに adj が指定していない → 過広適用防止 (安全側)
+        self.assertEqual(v.conditions_status({}, find(observed_conditions={"mode": "real"})),
+                         "condition_unspecified:mode")
+
+
+class EmptySeedRegistryTest(unittest.TestCase):
+    """seed は空 (spirux 由来 18 件を削除)。空 registry でも valid / exit 0 であること。"""
+
+    def _seed_path(self):
+        import os
+        return os.path.join(os.path.dirname(__file__), "adjudications.jsonl")
+
+    def test_seed_has_no_entries(self):
+        entries = [a for _, a, _ in v.load_jsonl(self._seed_path()) if a is not None]
+        self.assertEqual(entries, [])
+
+    def test_empty_registry_reports_zero_and_exits_zero(self):
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
+            code = v.main([self._example_findings(), "--adjudications", self._seed_path(), "--json"])
+        self.assertEqual(code, 0)
+        summary = json.loads(buf.getvalue())
+        self.assertEqual(summary["adjudications_total"], 0)
+        self.assertEqual(summary["adjudications_invalid"], 0)
+
+    def _example_findings(self):
+        import os
+        return os.path.join(os.path.dirname(__file__), "example.findings.jsonl")
+
+
+class StdinTwoPassTest(unittest.TestCase):
+    """stdin `-` は 1 度しか読めない。--annotate の 2-pass で findings が落ちない回帰テスト。
+
+    修正前は 2 回目の read が空になり、annotate 出力が静かに 0 件になっていた。
+    """
+
+    def _run_stdin(self, findings, adj_lines):
+        import contextlib, pathlib, tempfile
+        payload = "\n".join(json.dumps(x, ensure_ascii=False) for x in findings) + "\n"
+        with tempfile.TemporaryDirectory() as d:
+            ap = pathlib.Path(d) / "adj.jsonl"
+            ap.write_text("\n".join(json.dumps(x, ensure_ascii=False) for x in adj_lines),
+                          encoding="utf-8")
+            # 一時ファイルは TemporaryDirectory 配下に置き、テスト終了時に確実に回収する
+            # (delete=False の NamedTemporaryFile だと実行のたび /tmp に残留する。impl-review R1 Suggestion)
+            gp = pathlib.Path(d) / "changed-globs.json"
+            gp.write_text("[]", encoding="utf-8")
+            out, err = io.StringIO(), io.StringIO()
+            import sys as _sys
+            old_stdin = _sys.stdin
+            _sys.stdin = io.StringIO(payload)
+            try:
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    code = v.main(["-", "--adjudications", str(ap), "--annotate",
+                                   "--run-id", "20260701-020000",
+                                   "--changed-globs-file", str(gp)])
+            finally:
+                _sys.stdin = old_stdin
+            recs = [json.loads(l) for l in out.getvalue().splitlines() if l.startswith("{")]
+            return code, recs
+
+    def test_annotate_from_stdin_does_not_drop_findings(self):
+        findings = [find(finding_id="F-1"), find(finding_id="F-2")]
+        code, recs = self._run_stdin(findings, [adj()])
+        self.assertEqual(code, 0)
+        self.assertEqual(len(recs), 2, recs)  # 修正前は 0 件になっていた
+        self.assertEqual([r["finding_id"] for r in recs], ["F-1", "F-2"])
+        self.assertTrue(all("adjudication_status" in r for r in recs), recs)
+
+    def test_analyze_from_stdin_counts_findings(self):
+        # analyze 側 (1-pass 目) も stdin バッファ経由で総数を数えられること
+        import contextlib
+        payload = json.dumps(rec(finding_id="F-1")) + "\n" + json.dumps(rec(finding_id="F-2")) + "\n"
+        import sys as _sys
+        old_stdin = _sys.stdin
+        _sys.stdin = io.StringIO(payload)
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
+                code = v.main(["-", "--json"])
+        finally:
+            _sys.stdin = old_stdin
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(buf.getvalue())["total"], 2)
+
+    def test_load_jsonl_accepts_text(self):
+        text = json.dumps({"a": 1}) + "\n# comment\n\n" + json.dumps({"b": 2})
+        got = [o for _, o, _ in v.load_jsonl("/nonexistent/path.jsonl", text=text)]
+        self.assertEqual(got, [{"a": 1}, {"b": 2}])
 
 
 if __name__ == "__main__":

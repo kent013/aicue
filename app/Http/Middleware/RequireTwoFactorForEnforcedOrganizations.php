@@ -47,6 +47,10 @@ final class RequireTwoFactorForEnforcedOrganizations
         'two-factor.secret-key' => '手動入力キー表示 (設定ページの fetch)',
         'two-factor.recovery-codes' => 'リカバリコード表示 (設定完了直後の保存)',
         'two-factor.regenerate-recovery-codes' => 'リカバリコード再生成',
+        // 応答は { authenticated: bool } のみ (PII も操作も含まない) ため、ゲート中に
+        // 200 を返しても情報露出にならない。逆に遮断すると bfcache 復元後の guard が
+        // 「プローブ失敗」に倒れ、秘匿が解除できないまま再試行ループになる
+        'session.status' => 'bfcache 復元時のセッション有効性プローブ (秘匿解除の唯一の判定源)',
         'recent-auth.confirm' => '機微操作前の step-up 画面 (2FA 設定動線が要求し得る)',
         'recent-auth.status' => 'step-up 状態の確認 (XHR precheck)',
         'recent-auth.password' => 'password による step-up 完了',

@@ -33,6 +33,8 @@ use Illuminate\Support\Facades\Route;
 | tests/Architecture/ApiGuardAllowlistInvariantTest が deny-by-default で固定する。
 | route 名規約: `api.v1.{resource}.{action}`。パラメータ付き route は
 | tests/Architecture/NestedRouteIdorDefenseTest の inventory に防御モードを登録する。
+| binding param の型制約 (旧 ->whereNumber) は App\Http\Routing\RouteBindingTypes に集約
+| (route 個別の where は書かない。18 桁上限で 22P02 / 22003 の両方を塞ぐ)。
 | MCP エンドポイント (/api/v1/mcp) は routes/ai.php で登録される。
 */
 
@@ -63,11 +65,9 @@ Route::prefix('v1')
         Route::get('/projects', [ProjectController::class, 'index'])
             ->name('api.v1.projects.index');
         Route::get('/projects/{project}', [ProjectController::class, 'show'])
-            ->whereNumber('project')
             ->name('api.v1.projects.show');
 
         Route::get('/projects/{project}/items', [ItemController::class, 'index'])
-            ->whereNumber('project')
             ->name('api.v1.projects.items.index');
     });
 
@@ -76,14 +76,9 @@ Route::prefix('v1')
     ->middleware(['auth:api-key,api-oauth', 'throttle:api-write', 'resolve.api-actor', 'api-key.ability:write', 'idempotent'])
     ->group(function (): void {
         Route::post('/projects/{project}/items', [ItemController::class, 'store'])
-            ->whereNumber('project')
             ->name('api.v1.projects.items.store');
         Route::patch('/projects/{project}/items/{item}', [ItemController::class, 'update'])
-            ->whereNumber('project')
-            ->whereNumber('item')
             ->name('api.v1.projects.items.update');
         Route::delete('/projects/{project}/items/{item}', [ItemController::class, 'destroy'])
-            ->whereNumber('project')
-            ->whereNumber('item')
             ->name('api.v1.projects.items.destroy');
     });

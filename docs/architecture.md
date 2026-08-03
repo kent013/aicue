@@ -22,6 +22,45 @@ Prompts (LLM 呼び出し factory。prompt 本文は resources/prompts/*.yaml)
 DataTransferObjects / Http/Resources (応答形の単一定義)
 ```
 
+## route binding の型制約 (ドメイン制約: route key は最大 18 桁)
+
+`app/Http/Routing/RouteBindingTypes` が **全 binding param の型 inventory (単一 SoT)**。
+`AppServiceProvider::boot` が inventory 駆動で `Route::pattern` を適用する
+(route 個別の `->whereNumber()` / `->whereUuid()` は書かない)。
+
+- **なぜ必要か**: pgsql は型不一致の比較で `22P02` (invalid_text_representation)、
+  bigint 範囲外で `22003` (numeric_value_out_of_range) を投げる。非適合セグメント
+  (`/projects/abc`) が implicit binding に届くと QueryException → **404 ではなく生 500**。
+  型制約に合致しない URL は route にマッチしない = 404 になり、`SubstituteBindings` へ
+  到達しないためクエリ自体が発行されない
+- **ドメイン制約 (重要)**: `BIGINT_PATTERN` は **`[0-9]{1,18}`**。
+  DB の bigint が許容する 19 桁 ID を**意図的に排除**し、
+  **「AI-CUE の route key は最大 18 桁」**と定める。`[0-9]+` だと桁あふれが regex を
+  通過して 22003 → 500 が残るため、**桁数だけで範囲内を保証する**
+  (PHP_INT_MAX = 9223372036854775807 は 19 桁 / 18 桁の最大値は必ず範囲内)。
+  実 ID が 10^18 に達することは無いため運用上の制約にならないが、
+  「適合値の挙動は不変」ではない点に注意。値自体は Architecture テストが pin する
+- **5 分類 (deny-by-default)**: `BIGINT` / `UUID` (param => モデルの map。pattern 適用) /
+  `CUSTOM_BINDER` (`{organization}`。`{organization:slug}` 併用のため pattern を適用せず
+  `MembershipScopedOrganizationBinder` が入力正規化を担う) / `NON_MODEL` / `EXTERNAL`
+  (vendor route が持ち込む param を route identity ごとに登録)。
+  未登録 param の出現は `RouteBindingTypeConstraintInventoryTest` が fail させる
+  (未知 param を数値と推測しない)。実挙動 (非適合 → 404) は
+  `tests/Feature/Routing/RouteBindingTypeConstraintTest` が pgsql 実接続で固定する
+- **`MANUALLY_RESOLVED` (IV-9(a) の免除)**: controller が implicit binding を使わず
+  手動解決する param は action 引数が string になるため、**「param 名 + route identity」の
+  両方**で免除登録する (param 名だけの免除は同名 param を使う将来 route を丸ごと素通りさせる)。
+  免除しても pattern の型制約と PK 型検査は効き続ける。現在の登録は
+  `{notification}` × `notifications.open` / `notifications.read` のみ
+  (cross-user 404 = 存在オラクル封じのため `$user->notifications()` 経由で解決する)
+- **route identity の規約**: route name を第一とし、name 無し route は
+  `method:uri` signature (method は昇順ソート・暗黙の `HEAD` は除外)。
+  **Livewire の endpoint prefix (`livewire-<APP_KEY 由来 8 桁ハッシュ>`) は `livewire/` へ
+  正規化**してから identity にする (正規化しないと APP_KEY ごとに inventory が壊れる)
+- **`NON_MODEL` は実 route 走査の結果だけを登録する**: 現在は `intent` / `provider` /
+  `userId` の 3 件。routes に現れない param を残すと IV-2 (逆方向検査) が
+  陳腐化した登録として fail させる
+
 ## ドメインモデル (テンプレート同梱)
 
 | Model | 役割 | tenancy |

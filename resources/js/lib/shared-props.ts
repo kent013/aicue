@@ -38,6 +38,21 @@ export interface CurrentOrganization {
     canManageApiKeys: boolean;
 }
 
+/**
+ * 共有 props が認証済みユーザー (auth.user) を持つか。
+ *
+ * bfcache guard のように「認証済みページでのみ作動させたい」機構が、page.props を
+ * 直接掘らずに済むようにする単一判定点。型は backend (HandleInertiaRequests) が真実だが、
+ * 実行時は unknown として保守的に検査する。
+ */
+export function hasAuthenticatedUser(props: unknown): boolean {
+    if (typeof props !== "object" || props === null) return false;
+    const auth = (props as { auth?: unknown }).auth;
+    if (typeof auth !== "object" || auth === null) return false;
+    const user = (auth as { user?: unknown }).user;
+    return typeof user === "object" && user !== null;
+}
+
 export interface SharedProps {
     appName: string;
     auth: { user: AuthUser | null };
