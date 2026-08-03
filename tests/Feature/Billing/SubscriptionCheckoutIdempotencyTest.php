@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\DataTransferObjects\Billing\CreatedCheckoutSession;
 use App\DataTransferObjects\Billing\ExternalBillingRedirect;
+use App\Enums\Billing\SubscriptionSwapOutcome;
 use App\Enums\CheckoutIntent;
 use App\Enums\CheckoutSessionStatus;
 use App\Models\Billing\BillingCheckoutSession;
@@ -371,6 +372,14 @@ test('並行 race: INSERT 直前に同 token 行が割り込んでも 500 にな
             return $created;
         }
 
+        public function swapSubscriptionPrices(
+            Organization $organization,
+            string $basePriceId,
+            string $idempotencyKey,
+        ): SubscriptionSwapOutcome {
+            return $this->inner->swapSubscriptionPrices($organization, $basePriceId, $idempotencyKey);
+        }
+
         public function expireCheckoutSession(string $stripeSessionId): string
         {
             return $this->inner->expireCheckoutSession($stripeSessionId);
@@ -441,6 +450,14 @@ test('並行 race: 先着行が stale pending なら replay せず ?retry=1 へ�
                 ]);
 
             return $created;
+        }
+
+        public function swapSubscriptionPrices(
+            Organization $organization,
+            string $basePriceId,
+            string $idempotencyKey,
+        ): SubscriptionSwapOutcome {
+            return $this->inner->swapSubscriptionPrices($organization, $basePriceId, $idempotencyKey);
         }
 
         public function expireCheckoutSession(string $stripeSessionId): string

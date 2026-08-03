@@ -312,7 +312,8 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         ->name('organizations.onboarding.cli');
 
     /*
-    | 課金 (current org スコープ)。プラン変更は Stripe Checkout / Customer Portal 経由のみ。
+    | 課金 (current org スコープ)。新規契約は Stripe Checkout、契約中プランの変更は
+    | in-app swap (billing.plan.change)、解約・支払い方法は Customer Portal。
     | Stripe webhook ルート (POST /stripe/webhook) は Cashier が自動登録する
     | (CSRF 除外は bootstrap/app.php の validateCsrfTokens except 'stripe/*')。
     | billing / webhook / 組織管理系は課金ゲート (require-active-subscription) の
@@ -326,6 +327,12 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         ->name('billing.plans');
     Route::post('/billing/checkout', [BillingController::class, 'checkout'])
         ->name('billing.checkout');
+    // F-3-01: 契約中プランの変更 (in-app swap)。有効な subscription を**持つ**組織の経路で、
+    // 持たない組織の billing.checkout と排他。Portal の subscription_update は無効のまま
+    // (プラン変更はアプリが所有する = PortalConfigurationSpec の宣言どおり)。
+    // 課金ゲート allowlist に置く理由: billing.* と同じく「支払い状態の是正」に到達させるため。
+    Route::post('/billing/plan', [BillingController::class, 'changePlan'])
+        ->name('billing.plan.change');
     Route::post('/billing/portal', [BillingController::class, 'portal'])
         ->name('billing.portal');
     // P9: 請求先連絡先 (メール / 宛名)。current org スコープ (route parameter なし)。

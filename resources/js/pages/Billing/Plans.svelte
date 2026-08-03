@@ -14,9 +14,13 @@
 
     /**
      * プラン比較 (/billing/plans)。閲覧は組織メンバー全員、変更は manageBilling のみ。
-     * 変更は既存の Stripe Checkout (POST /billing/checkout) へ委譲する。body は plan_code +
-     * subscription_attempt_token (冪等 token。funding_choice は載せない = 契約変更経路に
-     * 資金選択の提示は無い)。
+     *
+     * 送信先はサーバが決めた `hasChangeableSubscription` (= `Subscription::valid()`) で分岐する:
+     * - 有効な契約あり → POST /billing/plan (in-app swap)。body は plan_code +
+     *   current_plan_code (stale 検知の期待値) + plan_change_token (冪等 token)
+     * - 契約なし → 従来の POST /billing/checkout。body は plan_code +
+     *   subscription_attempt_token (funding_choice は載せない)
+     * 判定述語がサーバと同一なので「押したら循環エラー」にならない。
      *
      * 変更できないプランでも CTA は enabled のまま描画し、理由は caption + 押下時 Alert で
      * 伝える (DESIGN.md / 禁止事項 #8)。
@@ -30,10 +34,11 @@
     const shared = $derived(inertiaPage.props as unknown as SharedProps);
     const appName = $derived(shared.appName ?? "");
 
-    // サーバ validation エラー (旧タブからの送信・未同期プラン等) は dialog 内に出す。
+    // サーバ validation エラー (旧タブからの送信・未同期プラン等) は dialog 内に出す
+    // (3 キーのいずれか = 最初に見つかったもの)。
     const planCodeError = $derived.by<string | null>(() => {
         const errors = inertiaPage.props.errors as Record<string, string> | undefined;
-        return errors?.plan_code ?? null;
+        return errors?.plan_code ?? errors?.current_plan_code ?? errors?.plan_change_token ?? null;
     });
 
     const formatLimit = (value: number | null): string => (value === null ? "無制限" : String(value));
@@ -65,6 +70,33 @@
     const planNameOf = (code: string): string =>
         page.plans.find((plan) => plan.code === code)?.name ?? code;
 
+    const targetPlan = $derived(page.plans.find((plan) => plan.code === confirmingPlanCode) ?? null);
+    const currentPlanAmount = $derived(
+        page.plans.find((plan) => plan.code === page.currentPlanCode)?.baseAmountJpy ?? null,
+    );
+    // 金額比較は**文言の出し分けにのみ**使う (可否判定はサーバ)。
+    const isDowngrade = $derived(
+        page.hasChangeableSubscription &&
+            targetPlan !== null &&
+            currentPlanAmount !== null &&
+            (targetPlan.baseAmountJpy ?? 0) < currentPlanAmount,
+    );
+
+    const confirmMessage = $derived.by<string>(() => {
+        const name = targetPlan?.name ?? planNameOf(confirmingPlanCode ?? "");
+        if (!page.hasChangeableSubscription) {
+            return `プランを「${name}」に変更します。よろしいですか？お支払い手続きの画面 (Stripe) に移動します。`;
+        }
+        const base =
+            `プランを「${name}」に変更します。変更は Stripe 側に即時反映され` +
+            `(画面表示への反映は数分かかる場合があります)、差額は日割りで次回のご請求に調整されます。`;
+        return isDowngrade
+            ? base +
+                  "新しいプランの上限 (プロジェクト数・メンバー数・保存容量) を超えている場合、" +
+                  "既存のデータは削除されませんが、上限内に収まるまで新規作成とアップロードができません。"
+            : base;
+    });
+
     function openConfirm(planCode: string): void {
         confirmingPlanCode = planCode;
         confirmOpen = true;
@@ -77,9 +109,22 @@
     function submitPlanChange(): void {
         const planCode = confirmingPlanCode;
         if (planCode === null || submitting) return;
+
+        // 有効な契約がある組織は in-app swap、無い組織は従来の Checkout。
+        // 判定述語はサーバ (Subscription::valid()) と同一なので循環エラーにならない。
+        const url = page.hasChangeableSubscription ? "/billing/plan" : "/billing/checkout";
+        const payload = page.hasChangeableSubscription
+            ? {
+                  plan_code: planCode,
+                  // 表示用 currentPlanCode ではなく競合制御用の期待値を送る
+                  current_plan_code: page.planChangeExpectedPlanCode,
+                  plan_change_token: page.planChangeToken,
+              }
+            : { plan_code: planCode, subscription_attempt_token: page.subscriptionAttemptToken };
+
         router.post(
-            "/billing/checkout",
-            { plan_code: planCode, subscription_attempt_token: page.subscriptionAttemptToken },
+            url,
+            payload,
             {
                 onStart: () => {
                     submitting = true;
@@ -125,7 +170,7 @@
 <ConfirmDialog
     bind:open={confirmOpen}
     title="プラン変更の確認"
-    message={`プランを「${planNameOf(confirmingPlanCode ?? "")}」に変更します。よろしいですか？お支払い手続きの画面 (Stripe) に移動します。`}
+    message={confirmMessage}
     confirmLabel="変更する"
     processing={submitting}
     onConfirm={submitPlanChange}

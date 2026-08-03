@@ -16,15 +16,20 @@ use App\DataTransferObjects\Marketing\PricingPlanDto;
 use App\Enums\Billing\BillingFeedbackKind;
 use App\Enums\Billing\OnboardingBillingState;
 use App\Enums\Billing\SignupFundingChoice;
+use App\Enums\Billing\SubscriptionSwapOutcome;
 use App\Enums\CheckoutIntent;
 use App\Enums\CheckoutSessionStatus;
 use App\Exceptions\Billing\CheckoutInProgressException;
+use App\Exceptions\Billing\PlanChangeFailedException;
+use App\Exceptions\Billing\PlanChangeNotAllowedException;
 use App\Exceptions\Billing\StaleCheckoutAttemptException;
+use App\Exceptions\Billing\StalePlanChangeException;
 use App\Exceptions\Billing\StripePriceNotSyncedException;
 use App\Exceptions\Billing\SubscriptionAttemptPlanMismatchException;
 use App\Http\Concerns\ResolvesCurrentOrganization;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Billing\BillingCheckoutRequest;
+use App\Http\Requests\Billing\ChangePlanRequest;
 use App\Http\Requests\Billing\StartAutoRechargeSetupRequest;
 use App\Http\Requests\Billing\UpdateAutoRechargeRequest;
 use App\Http\Requests\Billing\UpdateBillingContactRequest;
@@ -55,8 +60,9 @@ use Webmozart\Assert\Assert;
 /**
  * 課金画面 (current org スコープ)。
  *
- * - プラン変更は Stripe Checkout / Customer Portal 経由のみ (アプリは plan_code を
- *   直接書かない。organizations.plan_code は webhook で同期される)
+ * - 新規契約は Stripe Checkout、契約中プランの変更は in-app swap (`changePlan`)、
+ *   解約・支払い方法は Customer Portal。いずれもアプリは plan_code を直接書かない
+ *   (organizations.plan_code は webhook で同期される)
  * - 閲覧は組織メンバー全員、Checkout / Portal / オートリチャージ設定は
  *   manageBilling (owner / admin) のみ
  */
@@ -145,6 +151,8 @@ class BillingController extends Controller
         $user = $request->user();
         Assert::isInstanceOf($user, User::class);
 
+        $subscription = $organization->subscription('default');
+
         $dto = new BillingPlansPageDto(
             plans: $pricing->listPublicPlans(),
             currentPlanCode: $this->resolveCurrentPlanCode($organization),
@@ -152,6 +160,11 @@ class BillingController extends Controller
             canManage: $user->can('manageBilling', $organization),
             // P9: 契約 checkout の冪等 token (画面 render ごとに固定 = 1 render 1 token)。
             subscriptionAttemptToken: (string) Str::ulid(),
+            // F-3-01: startCheckout 段 1 の guard と同一述語 (valid()) で経路を分ける
+            hasChangeableSubscription: $subscription instanceof Subscription && $subscription->valid(),
+            planChangeToken: (string) Str::ulid(),
+            // 競合制御の期待値は projection ではなく列そのもの (currentPlanCode と別物)
+            planChangeExpectedPlanCode: $organization->plan_code,
         );
 
         return Inertia::render('Billing/Plans', ['page' => $dto->toArray()]);
@@ -274,6 +287,67 @@ class BillingController extends Controller
 
         // 外部 URL への遷移は Inertia::location (full page redirect)
         return Inertia::location($result->url);
+    }
+
+    /**
+     * F-3-01: 契約中プランの変更 (in-app swap)。`checkout()` と排他の経路。
+     *
+     * 実行順: (1) 認可 → (2) 契約の存在確認 (無ければ 422 で新規契約導線へ) →
+     * (3) plan 解決 → (4) Service へ委譲。**アプリは plan_code を直接書かない**
+     * (反映は webhook 同期)。
+     *
+     * ボタンを disabled にはしない (禁止事項 #8) ため、ここで返す error flash / 422 が
+     * 押下時のフィードバックになる。
+     */
+    public function changePlan(
+        ChangePlanRequest $request,
+        SubscriptionService $subscriptions,
+    ): RedirectResponse {
+        $organization = $this->resolveCurrentOrganization($request);
+        Gate::authorize('manageBilling', $organization);
+
+        $subscription = $organization->subscription('default');
+        if (! $subscription instanceof Subscription || ! $subscription->valid()) {
+            // 未契約 / 失効済みは 500 (service 内 guard) に到達させず 422 で新規契約導線へ倒す。
+            throw ValidationException::withMessages([
+                'plan_code' => '有効なご契約がないため変更できません。プランのお申し込みからお手続きください。',
+            ]);
+        }
+
+        $planCode = $request->validated('plan_code');
+        Assert::string($planCode);
+        $plan = Plan::query()->where('code', $planCode)->where('is_active', true)->firstOrFail();
+
+        $token = $request->validated('plan_change_token');
+        Assert::string($token);
+        $expected = $request->validated('current_plan_code');
+        Assert::nullOrString($expected);
+
+        try {
+            $outcome = $subscriptions->changePlan($organization, $plan, $token, $expected);
+        } catch (StalePlanChangeException) {
+            // 競合検知。errors.plan_code は Plans.svelte の確認 modal 内 Alert に出て、
+            // redirect-back で props (currentPlanCode) も最新化される。
+            throw ValidationException::withMessages([
+                'plan_code' => 'プランが別の操作で変更されました。最新の内容をご確認のうえ、必要であれば改めて変更してください。',
+            ]);
+        } catch (StripePriceNotSyncedException) {
+            // production の sync 漏れ。500 にせず checkout と同一文言で差し戻す
+            return back()->with('error', '選択したプランは現在お申し込みいただけません。');
+        } catch (PlanChangeNotAllowedException|PlanChangeFailedException|CheckoutInProgressException $e) {
+            // 業務拒否 (NotAllowed) / 外部障害 (Failed) / lock 競合のみを利用者向け文言に変換する。
+            // **`InvalidArgumentException` は catch しない** — Assert 由来の前提違反・設定不備は
+            // 500 に落として調査対象にする (内部文言を flash に載せない)。
+            return back()->with('error', $e->getMessage());
+        }
+
+        // accepted までを成功とし、projection (plan_code) の追随は webhook が担うことを文言で表す。
+        return redirect()->route('billing.index')->with(
+            'success',
+            $outcome === SubscriptionSwapOutcome::Applied
+                ? 'プラン変更を受け付けました。反映まで数分かかる場合があります。'
+                : 'このプランへの変更は受付済みです。反映まで数分かかる場合があります。',
+        );
     }
 
     /**

@@ -6,6 +6,8 @@ namespace App\Services\Billing\Contracts;
 
 use App\DataTransferObjects\Billing\CreatedCheckoutSession;
 use App\DataTransferObjects\Billing\ExternalBillingRedirect;
+use App\Enums\Billing\SubscriptionSwapOutcome;
+use App\Exceptions\Billing\PlanChangeFailedException;
 use App\Models\Organization;
 
 /**
@@ -34,6 +36,32 @@ interface StripeGatewayInterface
         array $metadata,
         string $idempotencyKey,
     ): CreatedCheckoutSession;
+
+    /**
+     * 契約中 subscription の base Price を差し替える (プラン変更 = Stripe Subscription Update)。
+     *
+     * 実装は **remote の現在 Price と照合し、既に対象 Price なら update を送らない**
+     * (`AlreadyOnTargetPrice`)。ローカル列 (`subscriptions.stripe_price` /
+     * `organizations.plan_code`) は webhook 同期のためラグがあり判定に使えない。
+     *
+     * $idempotencyKey は Stripe へそのまま渡す (`change-plan:{token}:{planCode}`)。
+     *
+     * **Stripe SDK の object も例外も本 interface の外へ出さない**。API 障害
+     * (`\Stripe\Exception\ApiErrorException`) と想定外の subscription 構成は、実装側で
+     * `PlanChangeFailedException` (利用者向け文言 + 診断用 reason) に変換して throw する。
+     *
+     * ただし **前提違反 (呼び出し規約の破り) と実装バグは変換しない**:
+     * 契約行の不在 (`Assert::isInstanceOf` → `InvalidArgumentException`) や `TypeError` は
+     * fail-fast でそのまま外へ出す (呼び出し側 = Service が段 1 で契約の存在を保証済みのため、
+     * ここに到達するのは実装不備)。
+     *
+     * @throws PlanChangeFailedException Stripe API 障害 / 想定外の subscription 構成
+     */
+    public function swapSubscriptionPrices(
+        Organization $organization,
+        string $basePriceId,
+        string $idempotencyKey,
+    ): SubscriptionSwapOutcome;
 
     /**
      * Stripe 側 Checkout Session を expire する (別 plan の live pending 整理)。

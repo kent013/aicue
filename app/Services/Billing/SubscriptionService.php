@@ -12,11 +12,15 @@ use App\Enums\Billing\PlanPriceKind;
 use App\Enums\Billing\ScheduleSetupStatus;
 use App\Enums\Billing\SignupFundingChoice;
 use App\Enums\Billing\SubscriptionState;
+use App\Enums\Billing\SubscriptionSwapOutcome;
 use App\Enums\CheckoutIntent;
 use App\Enums\CheckoutSessionStatus;
 use App\Enums\PlanCode;
 use App\Exceptions\Billing\CheckoutInProgressException;
+use App\Exceptions\Billing\PlanChangeFailedException;
+use App\Exceptions\Billing\PlanChangeNotAllowedException;
 use App\Exceptions\Billing\StaleCheckoutAttemptException;
+use App\Exceptions\Billing\StalePlanChangeException;
 use App\Exceptions\Billing\StripePriceNotSyncedException;
 use App\Exceptions\Billing\SubscriptionAttemptPlanMismatchException;
 use App\Models\Billing\BillingCheckoutSession;
@@ -554,6 +558,155 @@ class SubscriptionService
         return str_contains($message, 'billing_checkout_sessions_org_intent_attempt_unique')
             || (str_contains($message, 'billing_checkout_sessions.organization_id')
                 && str_contains($message, 'attempt_token'));
+    }
+
+    /**
+     * 契約中プランの **即時 swap** (Stripe Subscription Update)。
+     *
+     * `startCheckout` (新規契約) と排他の経路。有効な subscription が**ある**組織はこちら、
+     * **ない**組織は `startCheckout` を通る (段 1 の guard が両者の境界)。
+     *
+     * 冪等は 2 層:
+     *  1. **同一 render の二重送信** → Stripe idempotency key `change-plan:{token}:{planCode}`
+     *     (`$planChangeToken` は画面 render ごとに 1 個。DB 行は作らない)
+     *  2. **別 render からの再操作 / key 期限切れ後の再操作** → gateway の remote Price 照合
+     *     (`AlreadyOnTargetPrice` = update を送らない)
+     *
+     * 本メソッドは **DB を書かない**。`organizations.plan_code` の追随は webhook
+     * (`applySubscriptionSnapshot`) が唯一の writer である契約を維持する。
+     *
+     * 段 0: 事前 assert (Price / プラン種別) / 段 1: 契約の再読込と存在 guard /
+     * 段 2: 変更可能 state 判定 / 段 3: schedule 管理下の拒否 /
+     * 段 4: stale UI 検知 (**要求先が local の現在プランと違うときだけ**) / 段 5: Stripe swap。
+     *
+     * **local の `organizations.plan_code` で「もう目標プランだから成功」と返さない**:
+     * この列は webhook 遅延を持つ projection であり、remote が別 Price のままの可能性がある
+     * (「受付済み」と嘘をつくことになる)。**同一プラン判定は gateway の remote 照合に一本化**し、
+     * `Applied` / `AlreadyOnTargetPrice` は remote の事実で決める。
+     *
+     * stale 検知は **要求先 ≠ local 現在プラン** のときだけ行う。要求先 = local 現在プランの
+     * ケース (反映待ち中の再操作 / 古い画面からの再送) を stale で誤拒否しないため。
+     * **state / schedule 判定はさらに前**に置く: grace period (解約予約中) の契約は
+     * `plan_code` が旧プランのまま残るため、後段で「変更できない契約なのに成功扱い」に
+     * ならないようにする。
+     *
+     * @param  string  $planChangeToken  画面 render ごとの ULID (idempotency key の素)
+     * @param  string|null  $expectedCurrentPlanCode  画面 render 時点の現在プラン (**UX 用の
+     *                                                stale 検知専用**。認可・対象決定には使わない。
+     *                                                未知 Price 等で null になりうるため nullable)
+     *
+     * @throws StalePlanChangeException 画面が古い (別操作でプランが変わっていた)
+     * @throws CheckoutInProgressException lock 競合
+     * @throws PlanChangeFailedException Stripe 由来の失敗 / 想定外の subscription 構成
+     *                                   (gateway が変換済み。本 Service は log して rethrow)
+     * @throws StripePriceNotSyncedException production runtime で未 sync の Price のとき
+     * @throws ValidationException Stripe 決済対象外のプランのとき (422)
+     * @throws PlanChangeNotAllowedException 契約が無い / 変更できない状態 / schedule 管理下のとき
+     *                                       (**業務上の拒否**。Controller が error flash に変換する。
+     *                                       前提違反の `InvalidArgumentException` とは区別する)
+     */
+    public function changePlan(
+        Organization $org,
+        Plan $plan,
+        string $planChangeToken,
+        ?string $expectedCurrentPlanCode,
+    ): SubscriptionSwapOutcome {
+        // 段 0: lock を取る前に確定できる guard は先に倒す。
+        // **順序が重要**: 決済対象外プラン (personal / enterprise) は先に 422 へ倒す。
+        // 後段の Assert は「Stripe 決済対象プランなのに base Price が無い」= 設定不備であり、
+        // 変換せず 500 に落として調査対象にする (利用者操作では到達しない)。
+        $this->assertStripeBillablePlan($plan);
+
+        $basePrice = $plan->currentPrice(PlanPriceKind::Base);
+        Assert::isInstanceOf($basePrice, PlanPrice::class, '基本 Price 未設定のプランです');
+        $this->assertPriceSynced($basePrice);
+        // token は FormRequest が 'ulid' で検証済み。空到達は実装不備 = fail-fast。
+        Assert::stringNotEmpty($planChangeToken, 'プラン変更トークンが不正です');
+
+        try {
+            $outcome = Cache::lock("billing:plan-change:{$org->id}", 10)->block(
+                5,
+                fn (): SubscriptionSwapOutcome => $this->changePlanLocked(
+                    $org, $plan, $basePrice, $planChangeToken, $expectedCurrentPlanCode,
+                ),
+            );
+            // Cache::lock()->block() は mixed を返すため型を絞る (startCheckout と同型)
+            Assert::isInstanceOf($outcome, SubscriptionSwapOutcome::class);
+
+            return $outcome;
+        } catch (LockTimeoutException $e) {
+            // fail-closed: ロックなし実行へフォールバックしない (二重 swap を作らない)
+            throw new CheckoutInProgressException('直前の操作が進行中です。数秒お待ちください。', previous: $e);
+        }
+    }
+
+    private function changePlanLocked(
+        Organization $org,
+        Plan $plan,
+        PlanPrice $basePrice,
+        string $planChangeToken,
+        ?string $expectedCurrentPlanCode,
+    ): SubscriptionSwapOutcome {
+        // 段 1: lock 内で DB から読み直す (Cashier の subscription() は relation cache を
+        // 返しうるため refresh する。org 側も plan_code の最新を読む)
+        $org->refresh();
+        $sub = $org->subscription('default');
+        if (! $sub instanceof Subscription || ! $sub->valid()) {
+            throw new PlanChangeNotAllowedException('変更できる契約がありません。プランのお申し込みからお手続きください。');
+        }
+        $sub->refresh();
+
+        // 段 2: 変更可能 state (Active のみ)。past_due / paused / inactive (解約予約中の
+        // grace period 契約を含む) は Stripe 側 mutation がエラーになり得るため、
+        // **他のどの判定よりも先に**理由付きでクリーンに拒否する (押下時エラー = 禁止事項 #8)。
+        $state = SubscriptionState::fromSubscription($sub);
+        if ($state !== SubscriptionState::Active) {
+            throw new PlanChangeNotAllowedException(match ($state) {
+                SubscriptionState::PastDue => 'お支払いが確認できていないため、プランを変更できません。お支払い方法をご確認ください。',
+                SubscriptionState::Paused => 'ご契約が一時停止中のため、プランを変更できません。お支払い方法を登録してください。',
+                SubscriptionState::UpgradeRecovery => 'ご契約の同期処理中です。数分お待ちのうえ再度お試しください。',
+                default => 'ご契約が有効でないため、プランを変更できません。',
+            });
+        }
+
+        // 段 3: schedule 管理下は拒否。AI-CUE は schedule を作らないが、
+        // billing:reconcile-schedules が remote から復元しうる (手動 Dashboard 操作等)。
+        // schedule 管理下の直接 swap は Stripe 側と衝突するため触らない。
+        if ($sub->stripe_schedule_id !== null) {
+            throw new PlanChangeNotAllowedException('予約済みのプラン変更があります。反映後に再度お試しください。');
+        }
+
+        // 段 4: stale UI 検知。**要求先が local の現在プランと違うとき**だけ評価する
+        // (要求先 = local 現在プランなら「反映待ち中の再操作」= 古い画面でも拒否しない)。
+        // null 同士の一致も許容する (未知 Price 等で plan_code が null の画面)。
+        if ($org->plan_code !== $plan->code && $org->plan_code !== $expectedCurrentPlanCode) {
+            throw new StalePlanChangeException(
+                expectedPlanCode: $expectedCurrentPlanCode,
+                actualPlanCode: $org->plan_code,
+                requestedPlanCode: $plan->code,
+            );
+        }
+
+        // 段 5: Stripe へ swap。**同一プラン判定は remote の事実で行う** (local projection では
+        // 判定しない)。gateway が既存 item id 解決と同じ 1 回の read で照合し、
+        // 既に対象 Price なら update を送らず AlreadyOnTargetPrice を返す。
+        // gateway は Stripe SDK の例外を外へ出さない契約なので、ここで扱うのは
+        // PlanChangeFailedException だけ (診断は reason を log に落として rethrow)。
+        try {
+            return $this->gateway->swapSubscriptionPrices(
+                $org,
+                $basePrice->stripe_price_id,
+                "change-plan:{$planChangeToken}:{$plan->code}",
+            );
+        } catch (PlanChangeFailedException $e) {
+            Log::error('changePlan: swap failed', [
+                'organization_id' => $org->getKey(),
+                'plan_code' => $plan->code,
+                'reason' => $e->reason, // 診断用 (利用者向け文言は getMessage())
+            ]);
+
+            throw $e;
+        }
     }
 
     /**

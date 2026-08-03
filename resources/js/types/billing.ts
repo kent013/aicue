@@ -95,6 +95,15 @@ export interface BillingPlansPageProps {
     readonly canManage: boolean;
     /** 契約 checkout の冪等 token (チケット購入 / カード登録とは別 key 空間) */
     readonly subscriptionAttemptToken: string;
+    /** 有効な契約があるか (true = プラン変更経路 / false = 新規契約 checkout 経路) */
+    readonly hasChangeableSubscription: boolean;
+    /** プラン変更 POST の冪等 token (契約 checkout とは別 key 空間) */
+    readonly planChangeToken: string;
+    /**
+     * stale UI 検知の期待値 (= サーバの organizations.plan_code)。
+     * 表示用の currentPlanCode とは別物なので、この値をそのまま送る。
+     */
+    readonly planChangeExpectedPlanCode: string | null;
 }
 
 /** PHP: BillingDashboardDto (BillingDashboardShape) と対 */

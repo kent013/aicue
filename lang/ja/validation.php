@@ -213,6 +213,8 @@ return [
         'count' => '購入枚数',
         'attempt_token' => '操作トークン',
         'subscription_attempt_token' => '契約手続きトークン',
+        'current_plan_code' => '現在のプラン',
+        'plan_change_token' => 'プラン変更トークン',
         'billing_contact_email' => '請求先メールアドレス',
         'billing_contact_name' => '請求先の宛名',
         // オートリチャージ (P8a)。'enabled' は 2 段階認証と同名キーのため
