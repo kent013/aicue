@@ -134,7 +134,7 @@
             <a href="/dashboard" class="text-text-secondary hover:text-primary">ダッシュボード</a>
         {:else}
             <a href="/login" class="text-text-secondary hover:text-primary">ログイン</a>
-            <a href="/register" class="text-primary hover:text-primary-hover">無料で始める</a>
+            <a href="/pricing" class="text-primary hover:text-primary-hover">無料で始める</a>
         {/if}
     {/snippet}
 
@@ -157,7 +157,7 @@
                         <LayoutDashboard class="size-5" aria-hidden="true" /> ダッシュボードへ
                     </Button>
                 {:else}
-                    <Button href="/register" size="lg" testId="hero-register">無料で始める</Button>
+                    <Button href="/pricing" size="lg" inertia testId="hero-register">無料で始める</Button>
                 {/if}
                 <Button href="#how" size="lg" variant="ghost">
                     仕組みを見る <ArrowRight class="size-4" aria-hidden="true" />
@@ -355,7 +355,7 @@
                     <LayoutDashboard class="size-5" aria-hidden="true" /> ダッシュボードへ
                 </Button>
             {:else}
-                <Button href="/register" size="lg">無料で始める</Button>
+                <Button href="/pricing" size="lg" inertia>無料で始める</Button>
             {/if}
             <Button href="/pricing" size="lg" variant="ghost" inertia>
                 料金プランを見る <ArrowRight class="size-4" aria-hidden="true" />

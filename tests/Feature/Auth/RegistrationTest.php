@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Models\User;
 use App\Services\Billing\TicketLedgerService;
+use App\Services\Onboarding\IntendedPlanResolver;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 
@@ -31,6 +32,11 @@ test('登録できる (同意の証跡が記録される)', function (): void {
 
     // [分岐 B 固定] 通常登録では現在組織が個人組織に確定する (招待成立分岐と排他)
     expect($user->current_organization_id)->toBe($personalOrg->id);
+
+    // P7: plan 意図なしの登録では org-scoped key を作らない。verify 継続導線 (組織 id) は張る。
+    expect(session(IntendedPlanResolver::PENDING_KEY))->toBeNull();
+    expect(session(IntendedPlanResolver::orgKey($personalOrg)))->toBeNull();
+    expect(session('verify_continue_organization_id'))->toBe($personalOrg->id);
 });
 
 test('登録 POST は非本番で api.pwnedpasswords.com を呼ばない (F-4-01 非退行)', function (): void {

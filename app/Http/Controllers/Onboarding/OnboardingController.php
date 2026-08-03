@@ -17,6 +17,7 @@ use App\Services\Billing\BillingAccess;
 use App\Services\Billing\PersonalPlanService;
 use App\Services\Billing\TicketPricingService;
 use App\Services\Marketing\ContactUrl;
+use App\Services\Onboarding\IntendedPlanResolver;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -39,6 +40,7 @@ final class OnboardingController extends Controller
         private readonly PersonalPlanService $personalPlan,
         private readonly TicketPricingService $ticketPricing,
         private readonly ContactUrl $contactUrl,
+        private readonly IntendedPlanResolver $intendedPlanResolver,
     ) {}
 
     public function show(Request $request): Response|RedirectResponse
@@ -61,6 +63,15 @@ final class OnboardingController extends Controller
             return new RedirectResponse(route('onboarding.billing-required'));
         }
 
+        // ?plan= が来ていたら org-scoped に積み (Resolver 規約: 有効→put / 無効→forget)、
+        // canonical URL へ 303 する (再読込・共有時に query が残らない)。
+        // 不在なら session を破壊しない (= リロード耐性のため後段で peek する)。
+        if ($request->has('plan')) {
+            $this->intendedPlanResolver->rememberForOrganizationFromQuery($request, $organization);
+
+            return new RedirectResponse(route('onboarding.checkout'), 303);
+        }
+
         $dto = new OnboardingCheckoutDto(
             plans: $this->selectablePlans(),
             recommendedPlanCode: PlanCode::Standard->value,
@@ -68,6 +79,8 @@ final class OnboardingController extends Controller
             contactUrl: $this->contactUrl->resolveForSource(InquirySource::Onboarding),
             personalEligibility: $this->personalPlan->eligibility($organization, $user),
             signupGrantTickets: $this->ticketPricing->signupGrantTickets(),
+            // peek = 残す (リロード耐性)。Enterprise / 未知値は正規化で null に倒れる。
+            intendedPlanCode: $this->intendedPlanResolver->peekForOrganization($organization)?->value,
         );
 
         return Inertia::render('Onboarding/Checkout', [

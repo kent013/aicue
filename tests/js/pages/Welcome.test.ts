@@ -59,6 +59,31 @@ describe("Welcome (LP)", () => {
         );
     });
 
+    it("D16: 「無料で始める」CTA 3 箇所はすべて /pricing を指し LP に /register 直リンクが無い", () => {
+        const { container } = render(Welcome, { props: baseProps });
+
+        const ctas = screen.getAllByRole("link", { name: "無料で始める" });
+        expect(ctas).toHaveLength(3);
+        for (const cta of ctas) {
+            expect(new URL((cta as HTMLAnchorElement).href).pathname).toBe("/pricing");
+        }
+
+        // hero / pricing-cta の個別固定 (testId と section 単位)
+        expect(new URL((screen.getByTestId("hero-register") as HTMLAnchorElement).href).pathname).toBe(
+            "/pricing",
+        );
+        expect(
+            new URL(
+                (within(screen.getByTestId("landing-pricing-cta")).getByRole("link", {
+                    name: "無料で始める",
+                }) as HTMLAnchorElement).href,
+            ).pathname,
+        ).toBe("/pricing");
+
+        // LP から /register への直リンクは 1 本も無い (料金表を必ず経由する)
+        expect(container.querySelectorAll('a[href^="/register"]')).toHaveLength(0);
+    });
+
     it("問い合わせリンクは内部宛先では同タブ、外部宛先では新規タブで開く", () => {
         const { unmount } = render(Welcome, { props: baseProps });
         const internal = screen.getByTestId("landing-contact-link");

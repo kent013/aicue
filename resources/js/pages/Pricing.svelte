@@ -120,7 +120,9 @@
                         {#if page.isAuthenticated}
                             <Button href="/billing" fullWidth inertia>プランを変更</Button>
                         {:else}
-                            <Button href="/register" fullWidth>このプランで始める</Button>
+                            <Button href={`/register?plan=${encodeURIComponent(plan.code)}`} fullWidth>
+                                このプランで始める
+                            </Button>
                         {/if}
                     {/snippet}
                 </PricingPlanCard>

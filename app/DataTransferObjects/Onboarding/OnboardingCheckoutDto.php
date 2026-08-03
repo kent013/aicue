@@ -23,7 +23,8 @@ use App\DataTransferObjects\Billing\PlanDto;
  *   defaultPlanCode: string,
  *   contactUrl: string,
  *   personalEligibility: PersonalPlanEligibilityShape|null,
- *   signupGrantTickets: int
+ *   signupGrantTickets: int,
+ *   intendedPlanCode: string|null
  * }
  */
 final readonly class OnboardingCheckoutDto
@@ -32,6 +33,9 @@ final readonly class OnboardingCheckoutDto
      * @param  list<PlanDto>  $plans  is_active=true ∧ Checkout 対象 code のみ。sort_order 昇順
      * @param  PersonalPlanEligibilityDto|null  $personalEligibility  Personal (free) の選択可否 + 不可理由
      * @param  int  $signupGrantTickets  無料開始 callout 用 (初回無償チケット枚数)
+     * @param  string|null  $intendedPlanCode  料金表 `?plan=` 由来の選択意図 (allowlist 照合済。
+     *                                         `plans` への包含は保証しない = フロントは該当 code が
+     *                                         あるときだけ preselect する)
      */
     public function __construct(
         public array $plans,
@@ -40,6 +44,7 @@ final readonly class OnboardingCheckoutDto
         public string $contactUrl,
         public ?PersonalPlanEligibilityDto $personalEligibility = null,
         public int $signupGrantTickets = 10,
+        public ?string $intendedPlanCode = null,
     ) {}
 
     /**
@@ -57,6 +62,7 @@ final readonly class OnboardingCheckoutDto
             'contactUrl' => $this->contactUrl,
             'personalEligibility' => $this->personalEligibility?->toArray(),
             'signupGrantTickets' => $this->signupGrantTickets,
+            'intendedPlanCode' => $this->intendedPlanCode,
         ];
     }
 }

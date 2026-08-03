@@ -95,7 +95,16 @@ describe("Pricing", () => {
 
     it("未認証は登録 CTA、認証済みはプラン変更 CTA を出す", () => {
         const { unmount } = render(Pricing, { props: { page: basePage } });
-        expect(screen.getAllByRole("link", { name: "このプランで始める" })).toHaveLength(2);
+        const ctas = screen.getAllByRole("link", { name: "このプランで始める" });
+        expect(ctas).toHaveLength(2);
+        // P7: 料金表 → /register?plan={code} で選択意図を handoff する
+        expect(ctas.map((cta) => new URL((cta as HTMLAnchorElement).href).search)).toEqual([
+            "?plan=free",
+            "?plan=standard",
+        ]);
+        for (const cta of ctas) {
+            expect(new URL((cta as HTMLAnchorElement).href).pathname).toBe("/register");
+        }
         unmount();
 
         render(Pricing, {

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Models\SocialAccount;
 use App\Models\User;
+use App\Services\Onboarding\IntendedPlanResolver;
 use Laravel\Socialite\Contracts\Provider;
 use Laravel\Socialite\Contracts\User as SocialiteUserContract;
 use Laravel\Socialite\Facades\Socialite;
@@ -95,6 +96,86 @@ test('連携済みアカウントは login intent でログインできる', fun
 
     $response->assertRedirect(route('dashboard'));
     $this->assertAuthenticatedAs($user);
+});
+
+test('P7: SSO register 開始は ?plan= を pending に積む (allowlist 照合済み)', function (): void {
+    $driver = Mockery::mock(Provider::class);
+    $driver->shouldReceive('redirect')->andReturn(redirect('https://accounts.google.com/oauth'));
+    Socialite::shouldReceive('driver')->with('google')->andReturn($driver);
+
+    $this->get('/auth/google/redirect/register?terms_accepted=1&plan=standard')
+        ->assertRedirect('https://accounts.google.com/oauth');
+
+    expect(session(IntendedPlanResolver::PENDING_KEY))->toBe('standard');
+});
+
+test('P7: SSO register 開始で plan 不在・Enterprise・未知値は stale pending を消す', function (string $query): void {
+    $driver = Mockery::mock(Provider::class);
+    $driver->shouldReceive('redirect')->andReturn(redirect('https://accounts.google.com/oauth'));
+    Socialite::shouldReceive('driver')->with('google')->andReturn($driver);
+
+    session([IntendedPlanResolver::PENDING_KEY => 'business']);
+
+    $this->get('/auth/google/redirect/register?terms_accepted=1'.$query);
+
+    expect(session(IntendedPlanResolver::PENDING_KEY))->toBeNull();
+})->with([
+    'plan 不在' => [''],
+    'enterprise' => ['&plan=enterprise'],
+    '未知値' => ['&plan=foo'],
+]);
+
+test('P7: SSO login 開始は pending を forget する', function (): void {
+    $driver = Mockery::mock(Provider::class);
+    $driver->shouldReceive('redirect')->andReturn(redirect('https://accounts.google.com/oauth'));
+    Socialite::shouldReceive('driver')->with('google')->andReturn($driver);
+
+    session([IntendedPlanResolver::PENDING_KEY => 'standard']);
+
+    $this->get('/auth/google/redirect/login');
+
+    expect(session(IntendedPlanResolver::PENDING_KEY))->toBeNull();
+});
+
+test('P7: SSO register 成立で pending が個人組織へ promote される', function (): void {
+    $this->withSession([
+        'social_auth_intent' => 'register',
+        IntendedPlanResolver::PENDING_KEY => 'standard',
+    ]);
+    fakeSocialiteCallback(fakeSocialiteUser('g-p7', 'sso-plan@example.com'));
+
+    $this->get('/auth/google/callback')->assertRedirect(route('dashboard'));
+
+    $user = User::whereBlind('email', 'email_index', 'sso-plan@example.com')->firstOrFail();
+    $personalOrg = $user->organizations()->where('is_personal', true)->firstOrFail();
+
+    expect(session(IntendedPlanResolver::PENDING_KEY))->toBeNull();
+    expect(session(IntendedPlanResolver::orgKey($personalOrg)))->toBe('standard');
+});
+
+test('P7: SSO register 拒否分岐 (email 衝突) は pending を残さない', function (): void {
+    User::factory()->create(['email' => 'victim-p7@example.com']);
+    $this->withSession([
+        'social_auth_intent' => 'register',
+        IntendedPlanResolver::PENDING_KEY => 'standard',
+    ]);
+    fakeSocialiteCallback(fakeSocialiteUser('g-p7-reject', 'victim-p7@example.com'));
+
+    $this->get('/auth/google/callback')->assertRedirect(route('register'));
+
+    expect(session(IntendedPlanResolver::PENDING_KEY))->toBeNull();
+});
+
+test('P7: SSO login の未連携拒否分岐も pending を残さない', function (): void {
+    $this->withSession([
+        'social_auth_intent' => 'login',
+        IntendedPlanResolver::PENDING_KEY => 'standard',
+    ]);
+    fakeSocialiteCallback(fakeSocialiteUser('g-p7-login', 'unknown-p7@example.com'));
+
+    $this->get('/auth/google/callback')->assertRedirect(route('login'));
+
+    expect(session(IntendedPlanResolver::PENDING_KEY))->toBeNull();
 });
 
 test('無効なプロバイダは 404', function (): void {

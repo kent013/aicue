@@ -11,6 +11,7 @@ use App\Http\Requests\Onboarding\ActivatePersonalRequest;
 use App\Models\User;
 use App\Services\Billing\PersonalPlanService;
 use App\Services\Billing\TicketPricingService;
+use App\Services\Onboarding\OnboardingReturnResolver;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
@@ -30,6 +31,7 @@ final class ActivatePersonalController extends Controller
     public function __construct(
         private readonly PersonalPlanService $personalPlan,
         private readonly TicketPricingService $ticketPricing,
+        private readonly OnboardingReturnResolver $returnResolver,
     ) {}
 
     public function __invoke(ActivatePersonalRequest $request): RedirectResponse
@@ -54,6 +56,12 @@ final class ActivatePersonalController extends Controller
             )
             : 'パーソナルプラン（無料）を開始しました。';
 
-        return redirect()->route('dashboard')->with('success', $message);
+        // 課金ゲートで保存された「やりたかった destination」があればそこへ復帰する。
+        // 値は org-scoped session に保持した same-origin 内部 path のみ (peek で再正規化)。
+        // `redirect()->intended()` は使わない (禁止事項 #7。ログイン直後フロー専用)。
+        $continue = $this->returnResolver->peekForOrganization($organization);
+        $this->returnResolver->forgetForOrganization($organization);
+
+        return redirect()->to($continue ?? route('dashboard'))->with('success', $message);
     }
 }

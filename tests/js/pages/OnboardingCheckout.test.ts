@@ -39,6 +39,7 @@ const basePageData: OnboardingCheckoutShape = {
     contactUrl: "/contact?source=onboarding",
     personalEligibility: { eligible: true, reason: null, reasonLabel: null },
     signupGrantTickets: 10,
+    intendedPlanCode: null,
 };
 
 afterEach(() => {
@@ -85,6 +86,19 @@ describe("Onboarding/Checkout", () => {
 
         expect(screen.getByTestId("plan-card-personal")).toHaveClass("border-primary");
         expect(screen.getByTestId("plan-card-starter")).not.toHaveClass("border-primary");
+    });
+
+    it("intendedPlanCode が plans にあるときは defaultPlanCode より優先して強調する (P7)", () => {
+        renderPage({ intendedPlanCode: "standard" });
+
+        expect(screen.getByTestId("plan-card-standard")).toHaveClass("border-primary");
+        expect(screen.getByTestId("plan-card-starter")).not.toHaveClass("border-primary");
+    });
+
+    it("intendedPlanCode が plans に無いときは defaultPlanCode に戻る (P7)", () => {
+        renderPage({ intendedPlanCode: "business" });
+
+        expect(screen.getByTestId("plan-card-starter")).toHaveClass("border-primary");
     });
 
     it("月次付与は廃止済のため「月 N 枚」表記を出さない (D28)", async () => {

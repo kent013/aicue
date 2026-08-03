@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Models\Organization;
 use App\Models\User;
 use App\Security\RecentAuthState;
 use App\Services\Auth\SocialAccountService;
+use App\Services\Onboarding\IntendedPlanResolver;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -30,6 +32,10 @@ class SocialAuthController extends Controller
 {
     private const INTENTS = ['login', 'register', 'link', 'step-up'];
 
+    public function __construct(
+        private readonly IntendedPlanResolver $intendedPlanResolver,
+    ) {}
+
     public function redirect(Request $request, string $provider, string $intent): RedirectResponse|SymfonyRedirectResponse
     {
         $this->ensureProviderEnabled($provider);
@@ -43,6 +49,15 @@ class SocialAuthController extends Controller
         if ($intent === 'register' && $request->query('terms_accepted') !== '1') {
             return redirect()->route('register')
                 ->withErrors(['terms_accepted' => '利用規約への同意が必要です。']);
+        }
+
+        // 料金表由来のプラン意図。register 開始では ?plan= を pending に書き換え (不在は forget)、
+        // login 開始では常に forget する (前回中断の stale pending を次の登録へ持ち越さない)。
+        // link / step-up は登録経路ではないため触らない。
+        if ($intent === 'register') {
+            $this->intendedPlanResolver->rememberPendingFromQuery($request);
+        } elseif ($intent === 'login') {
+            $this->intendedPlanResolver->forgetPending();
         }
 
         $request->session()->put('social_auth_intent', $intent);
@@ -100,6 +115,8 @@ class SocialAuthController extends Controller
 
         if ($intent === 'login') {
             // 未連携: 自動登録はしない (明示的な register 経由を要求)
+            $this->intendedPlanResolver->forgetPending();
+
             return redirect()->route('login')->withErrors([
                 'email' => 'このアカウントは登録されていません。新規登録からやり直してください。',
             ]);
@@ -109,6 +126,9 @@ class SocialAuthController extends Controller
         // 同一 email の既存ユーザーがいる場合は中立メッセージで弾く。
         $email = $socialiteUser->getEmail();
         if (is_string($email) && User::whereBlind('email', 'email_index', $email)->exists()) {
+            // 登録拒否分岐: stale pending を残さない。
+            $this->intendedPlanResolver->forgetPending();
+
             return redirect()->route('register')->withErrors([
                 'email' => 'このメールアドレスではアカウントを作成できません。',
             ]);
@@ -117,6 +137,15 @@ class SocialAuthController extends Controller
         $user = $service->register($provider, $socialiteUser);
         Auth::login($user, remember: true);
         $request->session()->regenerate();
+
+        // pending → 個人組織へ移送 (pending は必ず forget で消費される)。
+        // 個人組織が無い (= 招待経由等) 場合は promote 対象が存在しないため pending だけ落とす。
+        $personalOrganization = $user->organizations()->where('is_personal', true)->first();
+        if ($personalOrganization instanceof Organization) {
+            $this->intendedPlanResolver->promotePendingToOrganization($personalOrganization);
+        } else {
+            $this->intendedPlanResolver->forgetPending();
+        }
 
         return redirect()->route('dashboard');
     }

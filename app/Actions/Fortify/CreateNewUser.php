@@ -9,6 +9,7 @@ use App\Rules\MatchesInvitationEmail;
 use App\Rules\UniqueEncryptedEmail;
 use App\Services\Billing\PersonalPlanService;
 use App\Services\Billing\TicketLedgerService;
+use App\Services\Onboarding\IntendedPlanResolver;
 use App\Services\Organization\OrganizationMembershipService;
 use App\Services\Organization\OrganizationProvisioningService;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -33,6 +34,10 @@ use Webmozart\Assert\Assert;
  *   解決し、招待 email との一致を MatchesInvitationEmail rule で検証する。受諾可能なら本
  *   transaction 内で招待組織へ参加し、個人組織の自動生成はスキップする (招待組織を主所属に
  *   する)。受諾不能 (失効/取消/受諾済/不一致/既メンバー) なら個人組織生成へ fallback する。
+ * - 料金表由来のプラン意図 (`intended_plan`) は validation rules に足さない (無効値でも登録は
+ *   通す = 422 で止めない)。値は IntendedPlanResolver が PlanCode allowlist に照合し、
+ *   不在 / 無効 / 改ざんはすべて pending forget に倒す (stale pending の誤 promote 防止)。
+ *   pending → org-scoped への移送は RegisterResponse が行う。
  */
 class CreateNewUser implements CreatesNewUsers
 {
@@ -41,6 +46,7 @@ class CreateNewUser implements CreatesNewUsers
         private readonly OrganizationMembershipService $membership,
         private readonly TicketLedgerService $tickets,
         private readonly PersonalPlanService $personalPlan,
+        private readonly IntendedPlanResolver $intendedPlanResolver,
     ) {}
 
     /**
@@ -69,6 +75,10 @@ class CreateNewUser implements CreatesNewUsers
         ], [
             'terms_accepted.accepted' => '利用規約への同意が必要です。',
         ])->validate();
+
+        // 料金表 → /register?plan= のプラン意図を pending に書き込む (常に書き換える規約)。
+        // validate 通過後・tx 前に 1 回だけ呼ぶ (422 で止めた入力の意図は保持しない)。
+        $this->intendedPlanResolver->rememberPendingFromForm($input);
 
         $name = $validated['name'];
         $email = $validated['email'];
