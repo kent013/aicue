@@ -10,14 +10,23 @@
 > 本文書には載せない。
 >
 > **確度の書き方**: aigenba 側の実コード (`/tmp/aigenba` の working copy、2026-08-02 時点) を読んで
-> 確認した事実と、未検証の推測を分けて書く。**実行による再現はしていない**。
+> 確認した事実と、未検証の推測を分けて書く。
+>
+> **【2026-08-03 追記】実行検証を実施した。** 初版は「実行による再現はしていない」状態だったが、
+> **前回の handoff (`../20260717-0035-aigenba-billing-parity/aigenba-handoff.md`) が先方検証で
+> 「指摘は不成立」と判定され、その原因が「コード読解だけで断定し、手順の内部矛盾に気づけなかった」
+> ことだった**教訓を踏まえ、渡す前に各項目を実際に走らせて確認した。
+> 結果は末尾 **§実行検証の結果 (2026-08-03)** にまとめ、各項目の確度もそれに合わせて更新した。
+> **F-2 は「バグの指摘」から「意図の確認依頼」へ性格を変えた**。実行して見たところ、
+> AI-CUE 版を移植すると分母が 28/143 ≒ 20% 動くことが分かり、**どちらが正しいかは aigenba の設計意図次第**で
+> 提案側が決められないと判断したため (§実行検証 F-2 に経緯を全部残した)。
 
 ## 採否結果 (受け手 = aigenba 側が記入する)
 
 | # | 差分 | 種別 | 提案の要旨 | 採否 (adopt / reject / defer) | 判断日 | 備考 |
 |---|---|---|---|---|---|---|
 | F-1 | bug-hunt シェルの 3 段 DB guard + xtrace 秘匿 | 安全性 | 破壊操作の直前に DB 名 regex / role を hard-deny。`set -x` 下で API key を trace に出さない | | | |
-| F-2 | `correlate.py` のヘッダ列 index 動的決定 + backtick 剥がし | 正確性 | 列構成の違う節を**誤 join せず skip** する。backtick 付き route 名が分母から静かに落ちるのを防ぐ | | | |
+| F-2 | `correlate.py` のヘッダ列 index 動的決定 + backtick 剥がし | 正確性 / **要意図確認** | 列構成の違う節の扱い。**移植すると分母が 28/143 ≒ 20% 動く**ため、まず「route 名を持たない操作を分母に入れたいか」を確認したい (§実行検証 F-2) | | | |
 | F-3 | ~~`audit-gate` のテスト~~ | — | **取り下げ (前提誤り)**。下記 F-3 節参照。**aigenba 側の対応は不要** | — | 2026-08-02 | 提案側で撤回 |
 | F-4 | bfcache の秘匿・再検証 (Safari を含む) | 安全性 | aigenba は Safari bfcache を「別施策」としているが、**installable PWA を持つ以上同じ穴がある** | | | |
 | F-5 | `validate_findings.py` の `import io` 位置 / `open()` の context manager 化 | 可読性・資源解放 | AI-CUE は**整列優先で意図的に見送った**。aigenba が直したら AI-CUE も追随する | | | |
@@ -96,3 +105,105 @@ aigenba は `EcosystemEnum` から `pypi` を意図的に除外し「Python ecos
    `../20260717-0035-aigenba-billing-parity/aigenba-divergence-ledger.md` に
    「返したが reject された乖離」として記録する。
 4. **defer** は再検討の契機 (条件・時期) を備考に書く。
+
+---
+
+# 実行検証の結果 (2026-08-03)
+
+初版はコード読解のみだった。**前回 handoff が「コード読解だけで断定し、手順の内部矛盾に
+気づけなかった」ために不成立となった**教訓から、渡す前に実際に走らせて確認した。
+検証対象は `/tmp/aigenba` の working copy (2026-08-02 時点) で、**aigenba 側には一切書き込んでいない**。
+
+## F-1 — **確認済み (確度: 高)**。実証あり
+
+| 検証 | 方法 | 結果 |
+|---|---|---|
+| guard 関数の不在 | `grep -cE 'guard_shard_db_name\|guard_bughunt_runtime\|guard_admin_provision\|secret_xtrace'` | **0 件** |
+| 破壊操作の直呼び | `bug-hunt-shard.sh` を読む | `createdb "${db}"` (L444) / `migrate:fresh --seed --force` (L448) を DB 名 guard 無しで実行 |
+| xtrace 露出 | **同形の最小再現スクリプトを実行** (`handoff-f1-xtrace-repro.sh`) | aigenba L526 と同形 `real_llm_env+=("ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}")` は `set -x` 下で **キーが trace に 1 回出力される**。AI-CUE の `secret_xtrace_off`/`restore` で囲んだ形は **0 回** |
+| xtrace 対策の有無 | `grep -nE 'set -x\|set \+x\|BASH_XTRACEFD\|xtrace'` | aigenba 側は **該当なし** (対策が存在しない) |
+
+> **実害の性質**: 「めったに起きない」ではなく「**障害調査で `bash -x` を使った時に起きる**」。
+> 露出先は CI ログ・端末履歴。
+
+## F-2 — **判断を保留。aigenba 側の意図を確認したい (提案側では決められない)**
+
+初版は「将来 6 列節を持つと誤 join する」、本追記の初稿では「現時点のバグではない」と書いたが、
+**どちらも正確でなかった**。実測を段階的に詰めた結果を経緯ごと残す。
+
+| 段階 | 何を見たか | 結論 |
+|---|---|---|
+| 1 | 現行 `operations.md` を aigenba parser に通す | 143 エントリ。例外なし・空キーなし → 「壊れている」ようには見えない |
+| 2 | AI-CUE 形式の fixture を食わせる | 壊れたが、**これは不公平な検証**だった (列構成が違うのだから当然。**この結果は根拠にしない**) |
+| 3 | aigenba 自身の形式で「将来 5 列節を足したら」を検証 | **壊れる**。ヘッダ行をデータとして拾い (`join key: 'method'`)、`'POST'` を join キーにして story/区分 が 1 つずれる。**静かに誤る** |
+| 4 | **ヘッダ行を全種類 列挙** | `route name \| 操作 \| story \| 区分` が大半だが、**L190 に `\| 操作 \| 内容 \| story \| 区分 \|` が実在**する (col0 が route 名ではない) |
+| 5 | L190 節の行が `ops` に入っているか | **入っている。28 件** (`admin.login` / `admin.guard.boundary` / `admin.organizations.crud` …)。ドット区切りで route 名に似ているため、機械的な「route 名らしさ」検査では**検出できない** |
+
+### ここが判断の分かれ目 (だから断定しない)
+
+L190 の節は**意図的にそう書かれている**。節の前文が明言している:
+
+> Filament の書き込みは **Livewire アクション (`livewire-*`)** 経由で発火し名前付き REST ルートを持たない。
+> よって本節は「UI で実行すべき admin 操作」を機能単位で列挙する (**route 名でなく操作で数える**)。
+
+- **aigenba の現行実装**: これら 28 件を他と同じく `ops` に入れる → `route:list` とは join できないが、
+  「操作として数える」意図には沿う。
+- **AI-CUE 版を移植した場合**: `name` ヘッダを認識できない表は **skip** するため、**この 28 件が分母から消える**。
+
+つまり AI-CUE 版は**この節に関しては「改善」ではなく「挙動の変更」**であり、
+**28 / 143 ≒ 20% の分母が動く**。どちらが正しいかは
+**「Livewire 由来で route 名を持たない操作を、operation-reach の分母に入れたいか」という aigenba の設計意図**次第で、
+**提案側 (AI-CUE) が決められることではない**。
+
+### 改訂した提案
+
+1. **まず確認してほしい**: L190 節の 28 件を operation-reach の**分母に入れたい**のか、
+   それとも「route:list と join できない幽霊エントリ」として**外したい**のか。
+2. **外したいなら** AI-CUE 版のヘッダ駆動が有効 (skip される)。
+   **入れたいなら** AI-CUE 版をそのまま移植すると**分母が縮む**ので、
+   「route 名を持たない節」を明示フラグで分母に含める仕組みが別途要る。
+3. **段階 3 で確認した「列構成の違う節を将来足すと静かに壊れる」点は、意図に関係なく成立する**。
+   ここだけ先に入れるのも一案 (ヘッダ駆動 + 認識できない表は skip)。
+4. backtick 剥がしは独立した小改善で、副作用が無いので単独採用できる。
+
+> **前回 handoff の教訓の適用**: 前回は「コード読解だけで断定」して不成立になった。
+> 今回は実行して見たが、**見えた事実 (28 件が入る) から「バグである」と断定するのは飛躍**だと判断した。
+> **事実を渡し、判断は仕様を持つ側に委ねる**。
+
+## F-4 — **確度を上方修正 (根拠が初版より強い)**
+
+初版は「aigenba も PWA を持つなら同じ穴がある」と**推測**で書いたが、実測で裏が取れた。
+
+| 検証 | 結果 |
+|---|---|
+| installable PWA か | **Yes**。`public/site.webmanifest` が `display: "standalone"` / icons 3 種 / `start_url: "/"` → **iOS Safari の standalone 起動が実在の対象** |
+| no-store baseline の有無 | **あり** (`NoStoreCacheHeadersForAuthenticatedPages` / `NoStoreCacheHeadersForTwoFactor`)。= サーバ側は対策済み |
+| **bfcache 復元が実際に起きるか** | **起きる。aigenba 自身が実測済み**。`resources/js/pages/Billing/PurchaseTickets.svelte:52-84` に bug-hunt 20260619 の **F-5-01** 対応として `pageshow(persisted=true)` ハンドラが実装されている |
+| その handler の目的 | **状態同期**(ブラウザが復元した input 値を Svelte の `$derived` へ取り込む)。**PII 秘匿ではない** |
+
+> **これが重要**: aigenba は「bfcache 復元が自アプリで実際に起きる」ことを **bug-hunt で経験済み**
+> (F-5-01)。つまり F-4 は理論上の懸念ではなく、**既に観測されている挙動の別の帰結**である。
+> `no-store` は Firefox/Chrome には効くが **Safari は `no-store` でも bfcache へ格納しうる**ため、
+> installable PWA (standalone = iOS Safari) を持つ以上、**ログアウト後の戻るで PII が復元される経路**が残る。
+>
+> **なお AI-CUE 側の実装で判明した重要な制約**: **Playwright ではこの経路を自動検証できない**
+> (Chromium は CDP 接続中に bfcache を無効化する。`--disable-back-forward-cache` を外しても復元しない)。
+> 実測データは [`bfcache-playwright-probe-result.md`](./bfcache-playwright-probe-result.md)。
+> **aigenba 側で同じ検証を試す前に読むことを勧める** (同じ袋小路に入らないため)。
+
+## F-5 — **確認済み (確度: 高)**
+
+| 検証 | 結果 |
+|---|---|
+| `import io` の位置 | `validate_findings.py:142` で **関数内** `import io as _io` |
+| `open()` の扱い | L147 / L344 とも **context manager でない** (`fh = open(path, ...)`) |
+
+> AI-CUE 側は**整列優先で意図的に同じ形を維持**している (ここで AI-CUE だけ直すと新たな乖離になるため)。
+> **aigenba が直したら AI-CUE も追随する**。優先度は低い。
+
+## 検証していないこと (正直に書く)
+
+- aigenba のテストスイート・bug-hunt 実走行は**実行していない**。読み取りと最小再現のみ。
+- F-1 の guard 不在が **実際に事故を起こしたか**は未確認。影響は「起きたときの被害」側にある。
+- F-4 の「ログアウト後の戻るで PII が出る」ことを **aigenba 上で再現してはいない**
+  (Playwright で再現できないことが判明しているため、実機が要る)。
