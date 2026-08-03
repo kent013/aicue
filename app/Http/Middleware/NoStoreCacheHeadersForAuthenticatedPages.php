@@ -21,6 +21,12 @@ use Symfony\Component\HttpFoundation\Response;
  * クライアント側の bfcache 秘匿・再検証 (resources/js/lib/bfcache-guard.ts) と
  * **セットで** 主便益を達成する。対象ブラウザは docs/supported-browsers.md。
  *
+ * さらに Inertia SPA のクライアント履歴復元 (popstate) はサーバへリクエストが飛ばないため
+ * 本 middleware も bfcache guard も発火しない。その経路は Inertia 公式機構
+ * (bootstrap/app.php の Inertia\Middleware\EncryptHistory +
+ * App\Http\Responses\Fortify\LogoutResponse の Inertia::clearHistory()) が担当する
+ * (bug-hunt F-4-01)。**3 経路 × 3 枚の網の全体像は docs/supported-browsers.md が正本**。
+ *
  * 適用判定は route 列挙ではなく「認証済みか」で行う (path 列挙は一般認証画面を
  * 取りこぼす)。guest / 公開ページ (login・LP・SEO) は対象外のままにし bfcache /
  * 共有キャッシュの恩恵を維持する。認証済み画面は Inertia SPA でアプリ内の戻る/進むは

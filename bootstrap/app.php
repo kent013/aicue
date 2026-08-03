@@ -30,6 +30,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Inertia\Middleware\EncryptHistory;
 use Symfony\Component\HttpFoundation\Response;
 
 return Application::configure(basePath: dirname(__DIR__))
@@ -92,6 +93,21 @@ return Application::configure(basePath: dirname(__DIR__))
             // 契約: $next から返った (= 下流の) 応答を確認し、既に `no-store` を持つなら変更しない。
             // (位置関係ではなくこの契約が正本。実効性は Feature テストが固定する)
             NoStoreCacheHeadersForAuthenticatedPages::class,
+            // Inertia の履歴 state を AES-GCM で暗号化する (Inertia 公式のグローバル適用手順)。
+            // ログアウト時に LogoutResponse が Inertia::clearHistory() で鍵を捨てるため、
+            // ログアウト後の「戻る」は復号に失敗し、**コンポーネントを描画しないまま**
+            // サーバへ再問い合わせ → /login に倒れる (bug-hunt F-4-01)。
+            //
+            // Inertia 面の認証済み画面が復元されうる経路と担当 (docs/supported-browsers.md が正本):
+            //   A: HTTP/disk/proxy cache + Chrome/Firefox の bfcache → NoStoreCacheHeaders...
+            //   B: Safari の真の bfcache (pagehide/pageshow)        → resources/js/lib/bfcache-guard.ts
+            //   C: Inertia SPA の history 復元 (popstate)           → 本 middleware + Inertia::clearHistory()
+            //
+            // 認証済み route への限定適用にしない: 認証済み route は ['auth','verified'] グループの
+            // 外にも複数あり (招待受諾 POST 等)、限定適用は inventory ドリフトを生む。
+            // 公開ページの履歴も暗号化されるが PII は無く、コストはログアウト前エントリの
+            // 再取得と remember/scroll 喪失に限られる。
+            EncryptHistory::class,
         ]);
 
         // パスワード変更/リセット時に他デバイスのセッション・remember-me を確実に失効させるため、

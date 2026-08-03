@@ -10,6 +10,7 @@ use App\Actions\Fortify\UpdateUserPassword;
 use App\Actions\Fortify\UpdateUserProfileInformation;
 use App\Http\Responses\Fortify\EnumerationSafePasswordResetLinkResponse;
 use App\Http\Responses\Fortify\LoginResponse;
+use App\Http\Responses\Fortify\LogoutResponse;
 use App\Http\Responses\Fortify\PasswordResetResponse;
 use App\Http\Responses\Fortify\PasswordUpdatedResponse;
 use App\Http\Responses\Fortify\ProfileUpdatedResponse;
@@ -37,6 +38,7 @@ use Laravel\Fortify\Actions\RedirectIfTwoFactorAuthenticatable;
 use Laravel\Fortify\Contracts\EmailVerificationNotificationSentResponse as EmailVerificationNotificationSentResponseContract;
 use Laravel\Fortify\Contracts\FailedPasswordResetLinkRequestResponse as FailedPasswordResetLinkRequestResponseContract;
 use Laravel\Fortify\Contracts\LoginResponse as LoginResponseContract;
+use Laravel\Fortify\Contracts\LogoutResponse as LogoutResponseContract;
 use Laravel\Fortify\Contracts\PasswordResetResponse as PasswordResetResponseContract;
 use Laravel\Fortify\Contracts\PasswordUpdateResponse as PasswordUpdateResponseContract;
 use Laravel\Fortify\Contracts\ProfileInformationUpdatedResponse as ProfileInformationUpdatedResponseContract;
@@ -101,6 +103,9 @@ class FortifyServiceProvider extends ServiceProvider
         // Fortify は constructor に status を渡して make するため bind (非 singleton)
         $this->app->bind(SuccessfulPasswordResetLinkRequestResponseContract::class, EnumerationSafePasswordResetLinkResponse::class);
         $this->app->bind(FailedPasswordResetLinkRequestResponseContract::class, EnumerationSafePasswordResetLinkResponse::class);
+        // ログアウト着地で Inertia::clearHistory() を発火させる (bug-hunt F-4-01)。
+        // 着地 route を固定する理由と順序の前提は LogoutResponse の docblock を参照。
+        $this->app->singleton(LogoutResponseContract::class, LogoutResponse::class);
     }
 
     public function boot(): void

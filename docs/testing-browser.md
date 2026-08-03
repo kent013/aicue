@@ -49,6 +49,17 @@ Playwright は自動化インスペクタを接続した状態でブラウザを
 再現できる環境では `pageshow.persisted === true` を観測できない限り**失敗する**
 正のコントロールが効く。保証範囲の全体像は `docs/supported-browsers.md`。
 
+**一方 Inertia SPA のクライアント履歴復元 (`popstate`) は両レーンで再現できる。**
+これは bfcache とは無関係の Inertia 内部機構 (history 暗号化 + `clearHistory`) であり、
+ブラウザの page cache を必要としないためである。
+`tests/Browser/InertiaHistoryRestoreAfterLogoutTest.php` は
+**skip 判定を持たない恒久回帰**で、ログアウト後の「戻る」で PII が一度も DOM に出現せず
+`/login` に倒れることを Chromium / WebKit の両レーンで固定する
+(空振り防止の正のコントロール: history state が `ArrayBuffer` であること /
+一連の操作で JS 実行コンテキストが生存していること)。
+bfcache 側 (`AuthenticatedPageBfcacheTest`) と同じファイルに混ぜないのは、
+**再現可否が正反対**で「担保されていない」ことの表明が薄まるため。
+
 pest 終了後に orphan 化した `playwright run-server` (node) はスクリプトが実行前後に掃除する。
 
 ### 前提

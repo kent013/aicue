@@ -29,6 +29,20 @@
  *
  * 秘匿は DOM 表示に限定する (属性付与 + CSS)。DOM ツリーの破棄・再構築はしない。
  * 見た目 (オーバーレイ / 非表示) のスタイルは resources/css/app.css 側に置く (DS token 経由)。
+ *
+ * **担当範囲**: 本 guard が守るのは **Safari の真の bfcache 復元 (pagehide/pageshow)** だけ。
+ * Inertia SPA のクライアント履歴復元 (popstate) は本 guard を発火させないため、
+ * そちらは Inertia 公式機構 (bootstrap/app.php の EncryptHistory +
+ * LogoutResponse の Inertia::clearHistory()) が担当する (bug-hunt F-4-01)。
+ * ここに popstate フックを足さないこと — 同一問題の二重実装になる。
+ *
+ * なお Inertia も pageshow(persisted) で history を復号し直すが、それは**非同期**であり、
+ * 復元 DOM は既に描画されている。「検証完了まで秘匿する」という本 guard の要件は
+ * pagehide で**同期的に**秘匿属性を立てる本実装でしか満たせない (公式機構に pagehide は無い)。
+ * ログアウト後の真の bfcache 復元では両者が同時に走るが、着地はどちらも /login で一致する
+ * (guard の hard navigation が Inertia の XHR 再訪問を打ち切るだけ)。
+ *
+ * 3 経路 × 3 枚の網の全体像は docs/supported-browsers.md が正本。
  */
 
 /** documentElement に付ける秘匿属性 = bfcache 復元マーカー兼 CSS スイッチ。 */
