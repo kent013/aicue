@@ -32,8 +32,13 @@ use Illuminate\Support\Facades\Log;
  *
  * AppServiceProvider::boot の `Route::bind('organization', self::class)` から、Laravel の
  * class binding 規約 (RouteBinding::createClassBinding、既定メソッド名 `bind`) で呼ばれる。
+ *
+ * `{organization}` は RouteBindingTypes::CUSTOM_BINDER 分類 (= Route::pattern による宣言的
+ * 型制約を掛けられない。`{organization:slug}` を併用するため)。NormalizesRouteBindingInput は
+ * その分類を型で宣言する marker で、入力正規化の実効性の正本は Feature テスト
+ * (tests/Feature/Routing/RouteBindingTypeConstraintTest の異常系) である。
  */
-final class MembershipScopedOrganizationBinder
+final class MembershipScopedOrganizationBinder implements NormalizesRouteBindingInput
 {
     /**
      * binding field の allowlist。route 定義側の `{organization:xxx}` 誤指定を

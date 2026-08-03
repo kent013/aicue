@@ -8,3 +8,69 @@
 @source '../**/*.svelte';
 
 /* DS tokens は tokens.css に集約。ここにはアプリ固有の animation 専用 token のみ置く。 */
+
+/* ===== bfcache 秘匿オーバーレイ (resources/js/lib/bfcache-guard.ts が制御) =====
+   documentElement の秘匿属性 (data-bfcache-hidden) が bfcache 復元マーカー兼スイッチ。
+   秘匿は「表示を止める」だけに限定し、DOM ツリー・media stream・未送信フォーム状態・
+   Inertia 履歴は一切壊さない (visibility は要素を残したまま描画だけ止める)。
+   色は DS token (tokens.css) 経由。hex は書かない。 */
+
+#bfcache-guard-overlay {
+    display: none;
+}
+
+html[data-bfcache-hidden] > body > *:not(#bfcache-guard-overlay) {
+    visibility: hidden;
+}
+
+html[data-bfcache-hidden] > body > #bfcache-guard-overlay {
+    visibility: visible;
+    display: flex;
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background-color: var(--color-neutral);
+    color: var(--color-text);
+}
+
+.bfcache-guard__panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    max-width: 480px;
+    text-align: center;
+}
+
+/* 既定は「確認中」表示。失敗時のみ失敗文言 + 再試行ボタンへ切り替える
+   (押せない状態で放置しない = DESIGN.md の禁止事項 #8 の精神)。 */
+#bfcache-guard-overlay [data-bfcache-guard-failure],
+#bfcache-guard-overlay .bfcache-guard__retry {
+    display: none;
+}
+
+html[data-bfcache-hidden='retry'] #bfcache-guard-overlay [data-bfcache-guard-verifying] {
+    display: none;
+}
+
+html[data-bfcache-hidden='retry'] #bfcache-guard-overlay [data-bfcache-guard-failure] {
+    display: block;
+}
+
+html[data-bfcache-hidden='retry'] #bfcache-guard-overlay .bfcache-guard__retry {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    padding: 0 16px;
+    border-radius: var(--radius-md);
+    background-color: var(--color-primary);
+    color: var(--color-surface);
+}
+
+html[data-bfcache-hidden='retry'] #bfcache-guard-overlay .bfcache-guard__retry:hover {
+    background-color: var(--color-primary-hover);
+}

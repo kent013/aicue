@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Admin\UserManagementController;
 use App\Http\Controllers\Auth\ConfirmRecentAuthController;
+use App\Http\Controllers\Auth\SessionStatusController;
 use App\Http\Controllers\Auth\SocialAuthController;
 use App\Http\Controllers\Billing\BillingController;
 use App\Http\Controllers\Billing\TicketPurchaseController;
@@ -135,6 +136,18 @@ Route::middleware(NoIndex::class)->group(function (): void {
     Route::view('/privacy', 'legal.privacy')->name('legal.privacy');
     Route::view('/commerce-disclosure', 'legal.commerce-disclosure')->name('legal.commerce-disclosure');
 });
+
+/*
+|--------------------------------------------------------------------------
+| セッション有効性の軽量プローブ (bfcache 秘匿・再検証)
+|--------------------------------------------------------------------------
+| auth グループの **外**に置く。未認証でも 200 + { authenticated: false } を返し、
+| クライアント guard (resources/js/lib/bfcache-guard.ts) が「セッション無効」と
+| 「endpoint 不在 / 通信障害」を明示 boolean で区別できるようにする。
+| 2FA 強制ゲートは RequireTwoFactorForEnforcedOrganizations::ALLOWED_ROUTE_NAMES で
+| 明示的に免除している (免除しないと 2FA 強制中に秘匿が解除できず reload ループになる)。
+*/
+Route::get('/session/status', SessionStatusController::class)->name('session.status');
 
 /*
 |--------------------------------------------------------------------------
@@ -347,7 +360,8 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
     | 受け皿として必要)。{notification} は implicit binding を使わず controller が
     | $request->user()->notifications() 経由で解決する (cross-user は構造的に 404 =
     | 存在オラクル封じ。1 param のため NestedRouteIdorDefenseTest の inventory 対象外)。
-    | whereUuid は不正形式 id を route 不一致 = 404 に落とす (pgsql uuid 比較の 22P02 防止)。
+    | 型制約は RouteBindingTypes に集約 ({notification} は UUID 分類 = Route::pattern で
+    | 不正形式 id を route 不一致 = 404 に落とす。pgsql uuid 比較の 22P02 防止)。
     | open は POST + 303 (GET にしない = prefetch による意図しない既読化防止)。
     */
     Route::get('/notifications', [NotificationController::class, 'index'])
@@ -355,10 +369,8 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
     Route::post('/notifications/read-all', [NotificationController::class, 'readAll'])
         ->name('notifications.read-all');
     Route::post('/notifications/{notification}/open', [NotificationController::class, 'open'])
-        ->whereUuid('notification')
         ->name('notifications.open');
     Route::post('/notifications/{notification}/read', [NotificationController::class, 'read'])
-        ->whereUuid('notification')
         ->name('notifications.read');
 
     /*

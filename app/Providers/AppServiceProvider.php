@@ -7,6 +7,7 @@ namespace App\Providers;
 use App\Auth\EncryptedUserProvider;
 use App\Auth\Guards\ApiKeyGuard;
 use App\Http\Routing\MembershipScopedOrganizationBinder;
+use App\Http\Routing\RouteBindingTypes;
 use App\Listeners\Audit\RejectNonCriticalAudit;
 use App\Listeners\Auth\StampRecentAuthOnLogin;
 use App\Listeners\Billing\MarkBillingNotificationDelivered;
@@ -152,6 +153,20 @@ class AppServiceProvider extends ServiceProvider
         // (非メンバー・不在 slug/id は等しく 404 = テナント存在秘匿。
         // tests/Architecture/OrganizationRouteParamWebOnlyInvariantTest が適用境界を pin)
         Route::bind('organization', MembershipScopedOrganizationBinder::class);
+
+        // route binding 型制約 (RouteBindingTypes が単一 SoT)。
+        // 非適合セグメントは route にマッチしない = 404 になり、SubstituteBindings へ
+        // 到達しないため pgsql 22P02 / 22003 (→ 生 500) が構造的に起きない。
+        // CUSTOM_BINDER (= {organization}) は binder 側が正規化するため pattern を適用しない
+        // ({organization:slug} を併用しており数値制約は掛けられない)。
+        // 分類の網羅と適用は tests/Architecture/RouteBindingTypeConstraintInventoryTest が
+        // deny-by-default で固定する。
+        foreach (array_keys(RouteBindingTypes::BIGINT) as $param) {
+            Route::pattern($param, RouteBindingTypes::BIGINT_PATTERN);
+        }
+        foreach (array_keys(RouteBindingTypes::UUID) as $param) {
+            Route::pattern($param, RouteBindingTypes::UUID_PATTERN);
+        }
 
         // パスワード強度ポリシーの SSOT は App\Support\PasswordPolicy (min12 + mixedCase +
         // numbers。HIBP 漏洩照合 uncompromised はテスト実行時のみ除外)。

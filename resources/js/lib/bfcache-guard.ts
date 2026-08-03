@@ -1,0 +1,252 @@
+/**
+ * bfcache 秘匿・再検証 guard (詳細設計 施策 6 / P3-b)。
+ *
+ * 問題: Safari (撮影 PWA の主要プラットフォーム) は `Cache-Control: no-store` でも
+ * ページを bfcache に格納しうる。ログアウト後に「戻る」で認証済み画面が復元されると
+ * PII が再表示される。サーバ側の no-store baseline
+ * (NoStoreCacheHeadersForAuthenticatedPages) だけでは塞げない。
+ *
+ * 方針: 「復元後に検証」ではなく **検証完了まで復元内容を秘匿**する。
+ * 復元してから非同期検証すると、検証完了までの間 復元済みの古い DOM が表示され PII が
+ * 一瞬露出する (「無効なら遷移する」は「再表示しない」と同義ではない)。
+ *
+ * ただし hard reload は常用しない。撮影中の media stream・未送信フォーム・Inertia 履歴を
+ * 破棄してしまい、撮影 PWA という使命に直撃するため。有効なら **秘匿を外すだけ**にする。
+ *
+ * | # | 契機                | 動作                                                        |
+ * |---|---------------------|-------------------------------------------------------------|
+ * | 1 | pagehide            | documentElement に秘匿属性を同期付与 (この DOM ごと bfcache へ) |
+ * | 2 | pageshow (属性あり) | 秘匿のまま軽量プローブ (/session/status)                      |
+ * | 3 | セッション有効       | 秘匿属性を外すだけ (DOM / フォーム / Inertia 履歴は温存)       |
+ * | 4 | セッション無効       | login へ hard navigation (遷移先は固定の相対パス)             |
+ * | 5 | プローブ失敗         | 秘匿維持 + 再試行ボタン表示 (自動再試行はしない)              |
+ * | 6 | 再試行押下           | 現在 URL を hard reload (サーバに再判定させる)                |
+ *
+ * 復元マーカーは **documentElement の秘匿属性そのもの**。sessionStorage は使わない
+ * (タブ単位で共有されるため、ページ A の pagehide が立てたフラグを通常遷移先のページ B が
+ * 読んで誤って秘匿・プローブする)。属性なら bfcache 復元時だけ DOM ごと戻り、通常遷移では
+ * サーバから来た新しい HTML に存在しない = 本質的に履歴エントリ単位のマーカーになる。
+ *
+ * 秘匿は DOM 表示に限定する (属性付与 + CSS)。DOM ツリーの破棄・再構築はしない。
+ * 見た目 (オーバーレイ / 非表示) のスタイルは resources/css/app.css 側に置く (DS token 経由)。
+ */
+
+/** documentElement に付ける秘匿属性 = bfcache 復元マーカー兼 CSS スイッチ。 */
+export const BFCACHE_HIDDEN_ATTRIBUTE = "data-bfcache-hidden";
+
+/** 秘匿属性の値 (状態遷移を一意に表す)。 */
+export const BFCACHE_STATE_PENDING = "pending";
+export const BFCACHE_STATE_VERIFYING = "verifying";
+export const BFCACHE_STATE_RETRY = "retry";
+
+/** プローブ endpoint。サーバ側は routes/web.php の `session.status` (auth グループ外)。 */
+export const SESSION_STATUS_PATH = "/session/status";
+
+/** セッション無効時の遷移先。任意 URL は受け取らない (固定の相対パスのみ)。 */
+export const LOGIN_PATH = "/login";
+
+export const BFCACHE_OVERLAY_ID = "bfcache-guard-overlay";
+export const BFCACHE_RETRY_BUTTON_ID = "bfcache-guard-retry";
+
+/** プローブが必要とする最小 Response 契約 (テスト差替のため fetch 全体に依存しない)。 */
+export interface ProbeResponseLike {
+    ok: boolean;
+    headers: { get(name: string): string | null };
+    json(): Promise<unknown>;
+}
+
+export type ProbeFetch = (input: string, init: RequestInit) => Promise<ProbeResponseLike>;
+
+/** guard が使う window の最小契約 (jsdom は実 navigation を持たないため差替可能にする)。 */
+export interface GuardWindow {
+    addEventListener(type: string, listener: (event: Event) => void): void;
+    removeEventListener(type: string, listener: (event: Event) => void): void;
+    location: { replace(url: string): void; reload(): void };
+}
+
+export interface BfcacheGuardDeps {
+    doc?: Document;
+    win?: GuardWindow;
+    fetchImpl?: ProbeFetch;
+    /**
+     * 認証済みページか (Inertia 共有 props の `auth.user` を起点にする)。
+     * 公開ページ (LP / login / SEO) では秘匿もプローブも行わない。
+     */
+    isAuthenticated?: () => boolean;
+}
+
+/** プローブの判定結果。`failed` は「セッション無効」ではなく「判定不能」。 */
+export type SessionProbeOutcome = "authenticated" | "unauthenticated" | "failed";
+
+/** Content-Type の media type 判定 (charset 等のパラメータは許容する)。 */
+export function isJsonMediaType(contentType: string | null): boolean {
+    if (contentType === null) return false;
+    const mediaType = contentType.split(";")[0]?.trim().toLowerCase() ?? "";
+    return mediaType === "application/json";
+}
+
+/**
+ * プローブ応答の shape 厳密判定。top-level に boolean の `authenticated` を持つ
+ * plain object のみ受理する (data ラップ・型違いは判定不能として弾く)。
+ */
+export function readAuthenticatedFlag(payload: unknown): boolean | null {
+    if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+        return null;
+    }
+    const value = (payload as Record<string, unknown>).authenticated;
+    return typeof value === "boolean" ? value : null;
+}
+
+/**
+ * セッション有効性を問い合わせる。
+ * (1) response.ok (2) Content-Type が JSON (3) JSON shape が厳密 — の全てを満たした時のみ
+ * 結果を採用し、1 つでも崩れたら `failed` (秘匿維持) に倒す。
+ */
+export async function probeSessionStatus(
+    fetchImpl: ProbeFetch,
+    url: string = SESSION_STATUS_PATH,
+): Promise<SessionProbeOutcome> {
+    try {
+        const response = await fetchImpl(url, {
+            credentials: "same-origin",
+            cache: "no-store",
+            headers: { Accept: "application/json" },
+        });
+
+        if (!response.ok) return "failed";
+        if (!isJsonMediaType(response.headers.get("Content-Type"))) return "failed";
+
+        const authenticated = readAuthenticatedFlag(await response.json());
+        if (authenticated === null) return "failed";
+
+        return authenticated ? "authenticated" : "unauthenticated";
+    } catch {
+        return "failed";
+    }
+}
+
+/**
+ * 秘匿オーバーレイを (無ければ) 生成する。Atomic Design 階層には component を足さない
+ * (app 起動時のグローバル要素 + CSS で完結させる = atoms/molecules の責務ではない)。
+ */
+function ensureOverlay(doc: Document): HTMLElement {
+    const existing = doc.getElementById(BFCACHE_OVERLAY_ID);
+    if (existing !== null) return existing;
+
+    const overlay = doc.createElement("div");
+    overlay.id = BFCACHE_OVERLAY_ID;
+    overlay.setAttribute("role", "status");
+    overlay.setAttribute("aria-live", "polite");
+    overlay.dataset.testid = BFCACHE_OVERLAY_ID;
+
+    const panel = doc.createElement("div");
+    panel.className = "bfcache-guard__panel";
+
+    const verifying = doc.createElement("p");
+    verifying.className = "text-body";
+    verifying.dataset.bfcacheGuardVerifying = "";
+    verifying.textContent = "セッションを確認しています…";
+
+    const failure = doc.createElement("p");
+    failure.className = "text-body";
+    failure.dataset.bfcacheGuardFailure = "";
+    failure.textContent =
+        "セッションを確認できませんでした。通信状況を確認して、もう一度お試しください。";
+
+    const retry = doc.createElement("button");
+    retry.type = "button";
+    retry.id = BFCACHE_RETRY_BUTTON_ID;
+    retry.className = "bfcache-guard__retry";
+    retry.dataset.testid = BFCACHE_RETRY_BUTTON_ID;
+    retry.textContent = "再試行";
+
+    panel.append(verifying, failure, retry);
+    overlay.append(panel);
+    doc.body.append(overlay);
+
+    return overlay;
+}
+
+function setHiddenState(doc: Document, state: string): void {
+    doc.documentElement.setAttribute(BFCACHE_HIDDEN_ATTRIBUTE, state);
+}
+
+function clearHiddenState(doc: Document): void {
+    doc.documentElement.removeAttribute(BFCACHE_HIDDEN_ATTRIBUTE);
+}
+
+function isHidden(doc: Document): boolean {
+    return doc.documentElement.hasAttribute(BFCACHE_HIDDEN_ATTRIBUTE);
+}
+
+/**
+ * pagehide 時に秘匿すべきか。`PageTransitionEvent.persisted` が使える環境では
+ * bfcache 対象 (persisted) のときだけ秘匿し、通常遷移のちらつきを避ける。
+ * 取得できない環境では安全側 (秘匿する) へ倒す
+ * (通常遷移では直後に新しい Document へ移るため実害はほぼ無い)。
+ */
+function shouldHideOnPageHide(event: Event): boolean {
+    const persisted: unknown = (event as PageTransitionEvent).persisted;
+    return typeof persisted === "boolean" ? persisted : true;
+}
+
+/**
+ * guard を登録し、購読解除 disposer を返す (HMR / テストの二重登録防止)。
+ *
+ * 秘匿・プローブは `isAuthenticated()` が true のページでのみ作動する
+ * (公開ページでは不要なちらつき・プローブを起こさない)。
+ */
+export function registerBfcacheGuard(deps: BfcacheGuardDeps = {}): () => void {
+    const doc = deps.doc ?? document;
+    const win = deps.win ?? window;
+    const fetchImpl: ProbeFetch =
+        deps.fetchImpl ?? ((input, init) => fetch(input, init) as Promise<ProbeResponseLike>);
+    const isAuthenticated = deps.isAuthenticated ?? (() => false);
+
+    const overlay = ensureOverlay(doc);
+    const retryButton = overlay.querySelector<HTMLButtonElement>(`#${BFCACHE_RETRY_BUTTON_ID}`);
+
+    const onRetry = (): void => {
+        // 自動再試行はしない。押下時に現在 URL を hard reload し、サーバに再判定させる。
+        win.location.reload();
+    };
+    retryButton?.addEventListener("click", onRetry);
+
+    const verify = async (): Promise<void> => {
+        setHiddenState(doc, BFCACHE_STATE_VERIFYING);
+
+        const outcome = await probeSessionStatus(fetchImpl, SESSION_STATUS_PATH);
+        if (outcome === "authenticated") {
+            clearHiddenState(doc);
+            return;
+        }
+        if (outcome === "unauthenticated") {
+            // 秘匿したまま login へ。replace で秘匿済み履歴エントリを残さない。
+            win.location.replace(LOGIN_PATH);
+            return;
+        }
+        setHiddenState(doc, BFCACHE_STATE_RETRY);
+    };
+
+    const onPageHide = (event: Event): void => {
+        if (!isAuthenticated()) return;
+        if (!shouldHideOnPageHide(event)) return;
+        setHiddenState(doc, BFCACHE_STATE_PENDING);
+    };
+
+    const onPageShow = (): void => {
+        // 復元マーカーは秘匿属性そのもの。通常ロードではサーバ由来の新しい HTML に
+        // 属性が無いため、ここで抜ける。
+        if (!isHidden(doc)) return;
+        void verify();
+    };
+
+    win.addEventListener("pagehide", onPageHide);
+    win.addEventListener("pageshow", onPageShow);
+
+    return () => {
+        win.removeEventListener("pagehide", onPageHide);
+        win.removeEventListener("pageshow", onPageShow);
+        retryButton?.removeEventListener("click", onRetry);
+    };
+}
