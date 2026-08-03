@@ -88,6 +88,44 @@ class TicketCheckoutService
             ->exists();
     }
 
+    /**
+     * P8b (tc-5): 購入画面の状態機械が読む「復帰可能な購入」を解決する。
+     *
+     * 2 段取得 (会計には一切触れない):
+     *   (1) live pending (Pending / expires_at 未来 / checkout_url 非空) の最新 → resume
+     *   (2) 窓内 completed (completed_at > now - window) の最新 → completed
+     *   (3) いずれも無ければ null → normal
+     *
+     * いずれも organization_id + initiated_by_user_id スコープ。resumeUrl は Stripe Checkout の
+     * 直リンクで購入 gate を迂回しうるため、他 user の session を絶対に露出させない。
+     */
+    public function resolveResumablePurchase(Organization $organization, int $userId, int $windowMinutes): ?TicketCheckoutSession
+    {
+        $now = CarbonImmutable::now();
+
+        // live pending の定義は model の単一出典 (scopeLivePending ≡ isLivePending) を使う。
+        // checkout_url 非空は「replay 先の URL が実在する」= resume 固有の追加条件。
+        $livePending = TicketCheckoutSession::query()
+            ->where('organization_id', $organization->id)
+            ->where('initiated_by_user_id', $userId)
+            ->livePending($now)
+            ->where('checkout_url', '<>', '')
+            ->latest('id')
+            ->first();
+
+        if ($livePending !== null) {
+            return $livePending;
+        }
+
+        return TicketCheckoutSession::query()
+            ->where('organization_id', $organization->id)
+            ->where('initiated_by_user_id', $userId)
+            ->where('status', TicketCheckoutSessionStatus::Completed)
+            ->where('completed_at', '>', $now->subMinutes($windowMinutes))
+            ->latest('id')
+            ->first();
+    }
+
     private function startCheckoutLocked(
         Organization $organization,
         User $user,

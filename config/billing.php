@@ -42,6 +42,14 @@ return [
     'ticket_low_balance_threshold' => (int) env('BILLING_TICKET_LOW_BALANCE_THRESHOLD', 5),
 
     /*
+    | 購入画面の resume / completed 表示窓 (分。P8b / tc-5)。
+    | この窓内に「自分が開始した」live pending / 完了 session があれば、購入画面は
+    | 新しい attempt_token を発行せず既存 session へ復帰導線を出す (ブラウザバック /
+    | bfcache 復帰で既存 replay 冪等が効く = 二重課金しない)。既定 30 は移植元と同値。
+    */
+    'purchase_resume_window_minutes' => (int) env('BILLING_PURCHASE_RESUME_WINDOW_MINUTES', 30),
+
+    /*
     |----------------------------------------------------------------------
     | オートリチャージ (裏チャージ。P8a)
     |----------------------------------------------------------------------

@@ -36,7 +36,7 @@ test('guest は login へ redirect される', function (): void {
     $this->post('/purchase-tickets/checkout', checkoutPayload())->assertRedirect('/login');
 });
 
-test('owner は購入画面で tiers / 残高 / canManage / attemptToken を受け取る', function (): void {
+test('owner は購入画面で tiers / per-bucket 残高 / canManage / ticketAttemptToken を受け取る', function (): void {
     [, $owner] = createOrganizationWithOwner();
 
     $this->actingAs($owner)->get('/purchase-tickets')
@@ -49,10 +49,14 @@ test('owner は購入画面で tiers / 残高 / canManage / attemptToken を受�
             ->where('page.minCount', 1)
             ->where('page.maxCount', 1000)
             ->where('page.defaultCount', 10)
-            ->where('page.balance', 0)
+            ->where('page.balance.totalAvailable', 0)
+            ->where('page.balance.monthlyRemaining', 0)
+            ->where('page.balance.purchasedRemaining', 0)
+            ->where('page.balance.nextExpireAt', null)
             ->where('page.canManage', true)
             ->where('page.purchased', false)
-            ->has('page.attemptToken'));
+            ->where('page.formState', 'normal')
+            ->has('page.ticketAttemptToken'));
 });
 
 test('fake_external marker query は purchased 表示に転用されない (アプリ非解釈)', function (): void {

@@ -1,3 +1,5 @@
+import type { Snippet } from "svelte";
+
 /**
  * ConfirmDialog organism の仕様の真実。意味論は DESIGN.md §Components > ConfirmDialog を参照。
  */
@@ -15,6 +17,11 @@ export interface ConfirmDialogProps {
     title: string;
     /** 確認メッセージ本文 */
     message: string;
+    /**
+     * message の直上に描画する任意スロット (サーバ validation エラーの Alert 等)。
+     * 未指定なら描画されない = 既存の出力は不変。
+     */
+    banner?: Snippet;
     confirmLabel?: string;
     cancelLabel?: string;
     /** 既定 primary。irreversible / destructive な操作は danger を指定する */

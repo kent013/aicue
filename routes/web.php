@@ -321,6 +321,9 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
     */
     Route::get('/billing', [BillingController::class, 'index'])
         ->name('billing.index');
+    // P8b (bs-6): プラン比較。閲覧は組織メンバー全員 (変更操作のみ manageBilling)。
+    Route::get('/billing/plans', [BillingController::class, 'plans'])
+        ->name('billing.plans');
     Route::post('/billing/checkout', [BillingController::class, 'checkout'])
         ->name('billing.checkout');
     Route::post('/billing/portal', [BillingController::class, 'portal'])

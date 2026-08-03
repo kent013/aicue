@@ -24,6 +24,8 @@
         isHighlighted?: boolean;
         features: PricingFeature[];
         testId?: string;
+        /** header 右上専用 (現在のプラン等の Badge)。未指定時の出力は不変 */
+        headerBadges?: Snippet;
         /** card footer 下部 CTA 専用 */
         footerCta: Snippet;
     }
@@ -36,6 +38,7 @@
         isHighlighted = false,
         features,
         testId,
+        headerBadges,
         footerCta,
     }: Props = $props();
 
@@ -45,7 +48,14 @@
 </script>
 
 <div class="flex flex-col rounded-lg border bg-surface p-5 {borderClass}" data-testid={testId}>
-    <h3 class="text-h3 text-text">{name}</h3>
+    <div class="flex flex-wrap items-center gap-2">
+        <h3 class="shrink-0 text-h3 text-text">{name}</h3>
+        {#if headerBadges}
+            <div class="ml-auto flex max-w-full min-w-0 flex-wrap justify-end gap-2">
+                {@render headerBadges()}
+            </div>
+        {/if}
+    </div>
     {#if priceCaption !== undefined && !isFree}
         <!-- 表示価格が総額と誤解されるのを防ぐ (例: 基本料金)。 -->
         <p class="mt-3 text-caption text-text-secondary" data-testid="price-caption">

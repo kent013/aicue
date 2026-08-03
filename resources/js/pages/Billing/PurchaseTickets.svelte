@@ -1,6 +1,6 @@
 <script lang="ts">
     import { page as inertiaPage, router } from "@inertiajs/svelte";
-    import { CircleCheck, ShoppingCart, Ticket } from "@lucide/svelte";
+    import { CircleCheck, ExternalLink, ShoppingCart, Ticket } from "@lucide/svelte";
     import Alert from "@/components/atoms/Alert.svelte";
     import Button from "@/components/atoms/Button.svelte";
     import Card from "@/components/atoms/Card.svelte";
@@ -10,8 +10,10 @@
     import AppLayout from "@/components/templates/AppLayout.svelte";
     import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
+    import { formatDate } from "@/lib/date-format";
     import type { SharedProps } from "@/lib/shared-props";
     import type { PurchaseTicketsPageProps } from "@/types/billing";
+    import { parseTicketCount } from "./ticketCount";
 
     /**
      * チケット購入画面 (current org スコープ)。
@@ -20,6 +22,9 @@
      *   Inertia::location が Stripe Checkout へ full page redirect する
      * - 送信ボタンは disabled にしない (不正値は押下時にエラー表示 + サーバ validation の二重防御)
      * - canManage=false のメンバーには購入依頼の案内を表示 (残高・料金表は表示 = 透明性維持)
+     * - formState (P8b): normal のみ購入フォームを描画する。resume / completed では
+     *   フォームを描画せず確定枚数を読み取りテキストで示し、明示的な CTA に置き換える
+     *   (disabled にはしない = 禁止事項 #8)
      */
     interface Props {
         page: PurchaseTicketsPageProps;
@@ -39,13 +44,8 @@
     let clientError = $state<string | null>(null);
 
     // 生入力を整数として厳格に解釈する (clamp / floor の暗黙補正をしない)。
-    // input[type=number] の bind:value は number を返すことがあるため String 経由で正規化する
-    const parsedCount = $derived.by<number | null>(() => {
-        const trimmed = String(countText).trim();
-        if (!/^\d+$/.test(trimmed)) return null;
-        const n = Number(trimmed);
-        return Number.isSafeInteger(n) ? n : null;
-    });
+    // 解釈規則は pages/Billing/ticketCount.ts が単一出典。
+    const parsedCount = $derived.by<number | null>(() => parseTicketCount(countText));
 
     const isValidCount = $derived(
         parsedCount !== null && parsedCount >= page.minCount && parsedCount <= page.maxCount,
@@ -101,7 +101,7 @@
         }
         router.post(
             "/purchase-tickets/checkout",
-            { count: parsedCount, attempt_token: page.attemptToken },
+            { count: parsedCount, attempt_token: page.ticketAttemptToken },
             {
                 onStart: () => {
                     submitting = true;
@@ -111,6 +111,17 @@
                 },
             },
         );
+    }
+
+    // resume: 進行中の Stripe Checkout (外部 URL) へ遷移する
+    function continueCheckout(): void {
+        if (page.resumeUrl === null) return;
+        window.location.href = page.resumeUrl;
+    }
+
+    // 「新しく購入し直す」= ?fresh=1 で新しい attempt_token を強制発行する
+    function startFreshPurchase(): void {
+        router.get(page.newPurchaseUrl);
     }
 </script>
 
@@ -129,19 +140,91 @@
                     決済の確認後、残高に反映されます (通常数秒〜数分)。反映はページの再読み込みでご確認いただけます。
                 </Alert>
             {/if}
+
+            {#if page.formState === "resume"}
+                <Alert type="warning" title="決済手続きが進行中です" testId="purchase-resume-banner">
+                    前回の決済を続けるか、新しく購入し直してください。
+                </Alert>
+            {:else if page.formState === "completed"}
+                <Alert type="success" title="直前のご購入を受け付けています" testId="purchase-completed-banner">
+                    決済の確認後、残高に反映されます。続けて購入する場合は「もう一度購入する」からお進みください。
+                </Alert>
+            {/if}
+
             <Card padding="lg" testId="purchase-balance">
                 <div class="flex items-center gap-3">
                     <Ticket class="size-5 text-primary" aria-hidden="true" />
                     <div>
-                        <h2 class="text-h3">現在の残高</h2>
+                        <h2 class="text-h3">今すぐ使える残高</h2>
                         <p class="mt-1 text-body" data-testid="purchase-balance-count">
-                            {page.balance.toLocaleString("ja-JP")} 枚
+                            {page.balance.totalAvailable.toLocaleString("ja-JP")} 枚
                         </p>
                     </div>
                 </div>
+                <dl class="mt-4 grid gap-4 border-t border-border pt-4 sm:grid-cols-2">
+                    <div>
+                        <dt class="text-caption text-text-secondary">プラン付与残</dt>
+                        <dd class="mt-1 text-h3 text-text" data-testid="balance-monthly">
+                            {page.balance.monthlyRemaining.toLocaleString("ja-JP")} 枚
+                        </dd>
+                        <p class="text-caption text-text-secondary">
+                            プラン付与・初回特典分の残り（有効期限あり）
+                        </p>
+                    </div>
+                    <div>
+                        <dt class="text-caption text-text-secondary">購入済み残</dt>
+                        <dd class="mt-1 text-h3 text-text" data-testid="balance-purchased">
+                            {page.balance.purchasedRemaining.toLocaleString("ja-JP")} 枚
+                        </dd>
+                        <p
+                            class="inline-flex items-center gap-1 text-caption text-text-secondary"
+                            data-testid="purchased-bucket-caption"
+                        >
+                            <CircleCheck class="size-3.5" aria-hidden="true" />
+                            追加購入した分の残り。購入したチケットに有効期限はありません。
+                        </p>
+                    </div>
+                </dl>
+                {#if page.balance.nextExpireAt !== null}
+                    <p class="mt-3 text-caption text-text-secondary" data-testid="balance-next-expire">
+                        次の失効: {formatDate(page.balance.nextExpireAt, "—")}
+                    </p>
+                {/if}
             </Card>
 
-            {#if page.canManage}
+            {#if !page.canManage}
+                <Alert type="info" testId="purchase-role-note">
+                    チケットの購入は組織のオーナーまたは管理者が行えます。管理者に購入を依頼してください。
+                </Alert>
+            {:else if page.formState === "resume"}
+                <Card padding="lg" testId="purchase-resume">
+                    <h2 class="text-h3">進行中のお手続き</h2>
+                    <p class="mt-2 text-body" data-testid="purchase-bound-count">
+                        購入枚数 {(page.boundCount ?? 0).toLocaleString("ja-JP")} 枚
+                    </p>
+                    <div class="mt-6 flex flex-wrap gap-3">
+                        <Button onclick={continueCheckout} testId="purchase-resume-continue">
+                            <ExternalLink class="size-4" aria-hidden="true" />
+                            決済を続ける
+                        </Button>
+                        <Button variant="ghost" onclick={startFreshPurchase} testId="purchase-fresh">
+                            新しく購入し直す
+                        </Button>
+                    </div>
+                </Card>
+            {:else if page.formState === "completed"}
+                <Card padding="lg" testId="purchase-completed">
+                    <h2 class="text-h3">直前のご購入</h2>
+                    <p class="mt-2 text-body" data-testid="purchase-bound-count">
+                        購入枚数 {(page.boundCount ?? 0).toLocaleString("ja-JP")} 枚
+                    </p>
+                    <div class="mt-6">
+                        <Button onclick={startFreshPurchase} testId="purchase-fresh">
+                            もう一度購入する
+                        </Button>
+                    </div>
+                </Card>
+            {:else}
                 <Card padding="lg" testId="purchase-form">
                     <h2 class="text-h3">購入枚数</h2>
                     <div class="mt-4 flex max-w-xs flex-col gap-2">
@@ -185,10 +268,6 @@
                         Stripe の決済画面に移動します。決済確認後にチケットが付与されます。
                     </p>
                 </Card>
-            {:else}
-                <Alert type="info" testId="purchase-role-note">
-                    チケットの購入は組織のオーナーまたは管理者が行えます。管理者に購入を依頼してください。
-                </Alert>
             {/if}
 
             <section>
@@ -206,10 +285,6 @@
                         {/each}
                     </ul>
                 {/if}
-                <p class="mt-2 inline-flex items-center gap-1 text-caption text-text-secondary">
-                    <CircleCheck class="size-3.5" aria-hidden="true" />
-                    購入したチケットに有効期限はありません。
-                </p>
             </section>
             </div>
         </PageContent>

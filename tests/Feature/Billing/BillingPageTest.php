@@ -14,7 +14,8 @@ use Inertia\Testing\AssertableInertia as Assert;
  * 認可・validation 失敗経路のみ検証する)。
  */
 
-test('owner は /billing でプラン一覧・残高・管理フラグを見られる', function (): void {
+test('owner は /billing で現在プラン・per-bucket 残高・quota・管理フラグを見られる', function (): void {
+    // P8b: プラン一覧は /billing/plans へ移設 (期待は BillingPlansPageTest が持つ)。
     [$organization, $owner] = createOrganizationWithOwner();
     app(TicketLedgerService::class)->grant($organization, 10, '初期付与');
 
@@ -22,21 +23,27 @@ test('owner は /billing でプラン一覧・残高・管理フラグを見ら�
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->component('Billing/Index')
-            // sort_order 昇順 (personal 1 / starter 2 / standard 3。free 行は D11 で撤去済み)
-            ->has('plans', 3)
-            ->where('plans.0.code', 'personal')
-            ->where('plans.0.price', null) // activate 経由の無料プラン = Price 無し
-            ->where('plans.1.code', 'starter')
-            ->has('plans.1.price', fn (Assert $price) => $price
-                ->where('unitAmount', 980)
-                ->where('currency', 'jpy'))
-            ->where('plans.2.code', 'standard')
-            ->has('plans.2.price', fn (Assert $price) => $price
-                ->where('unitAmount', 4980)
-                ->where('currency', 'jpy'))
-            ->where('currentPlanCode', null)
-            ->where('ticketBalance', 10)
-            ->where('canManageBilling', true));
+            ->missing('plans') // インラインのプラン一覧は撤去済み
+            ->where('page.plan.code', 'personal') // ActiveFreePlan = free_plan_code が正
+            ->where('page.billingState', 'active_free_plan')
+            ->where('page.currentPeriodEnd', null)
+            ->where('page.balance.totalAvailable', 10)
+            ->where('page.balance.monthlyRemaining', 0)
+            ->where('page.balance.purchasedRemaining', 10)
+            ->where('page.quotas.maxProjects', 1)
+            ->where('page.quotas.maxMembers', 3)
+            ->where('page.quotas.maxStorageGb', 1)
+            ->where('page.canManageBilling', true));
+});
+
+test('未契約 org の /billing では現在プランが null で届く', function (): void {
+    [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+
+    $this->actingAs($owner)->get('/billing')
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('page.plan', null)
+            ->where('page.billingState', 'no_subscription'));
 });
 
 test('member も閲覧できるが管理フラグは false', function (): void {
@@ -48,7 +55,7 @@ test('member も閲覧できるが管理フラグは false', function (): void {
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->component('Billing/Index')
-            ->where('canManageBilling', false));
+            ->where('page.canManageBilling', false));
 });
 
 test('member は checkout を開始できない (403)', function (): void {
@@ -108,7 +115,10 @@ test('owner の checkout は fake gateway 経由で中立帰還 URL へ遷移す
 });
 
 test('owner の portal は fake gateway 経由で中立帰還 URL へ遷移する (happy path)', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    // P8b (bs-11): portal は有償サブスク前提の事前ガードを通る必要がある
+    // (未契約 / ActiveFreePlan の遮断は BillingPortalGuardTest が固定)。
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    contractPaidPlan($organization);
     $this->app->bind(StripeGatewayInterface::class, FakeStripeGateway::class);
 
     $response = $this->actingAs($owner)->post('/billing/portal');

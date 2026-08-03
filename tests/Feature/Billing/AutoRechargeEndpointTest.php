@@ -175,10 +175,10 @@ test('課金ページ props に autoRecharge が常に含まれる (既定 off)'
 
     $props = $response->viewData('page')['props'];
 
-    expect($props)->toHaveKey('autoRecharge')
-        ->and($props['autoRecharge']['enabled'])->toBeFalse()
-        ->and($props['autoRecharge']['canManage'])->toBeTrue()
-        ->and($props)->toHaveKey('autoRechargeSetupToken');
+    expect($props['page'])->toHaveKey('autoRecharge')
+        ->and($props['page']['autoRecharge']['enabled'])->toBeFalse()
+        ->and($props['page']['autoRecharge']['canManage'])->toBeTrue()
+        ->and($props['page'])->toHaveKey('autoRechargeSetupToken');
 });
 
 test('member でも autoRecharge props は届くが canManage=false (閲覧は全員)', function (): void {
@@ -190,7 +190,7 @@ test('member でも autoRecharge props は届くが canManage=false (閲覧は�
         ->get('/billing')
         ->assertOk();
 
-    expect($response->viewData('page')['props']['autoRecharge']['canManage'])->toBeFalse();
+    expect($response->viewData('page')['props']['page']['autoRecharge']['canManage'])->toBeFalse();
 });
 
 test('setup 台帳行があっても BillingAccess::state() は PendingCheckout にならない (P2 契約の回帰)', function (): void {

@@ -27,5 +27,5 @@ it('renders the public pricing page as an indexable Inertia stub', function (): 
     // 公開ページなので noindex を付けない。
     expect($response->headers->get('X-Robots-Tag'))->toBeNull();
 
-    $response->assertInertia(fn (Assert $page) => $page->component('Pricing'));
+    $response->assertInertia(fn (Assert $page) => $page->component('Guest/Pricing'));
 });

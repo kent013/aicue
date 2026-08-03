@@ -52,4 +52,29 @@ describe("PricingPlanCard", () => {
         expect(screen.getByTestId("price-caption")).toHaveTextContent("基本料金");
         expect(card).toHaveTextContent("特典 A");
     });
+
+    it("headerBadges を渡すと header 行に描画する", () => {
+        const headerBadges = createRawSnippet(() => ({
+            render: () => "<span data-testid='badge-slot'>現在のプラン</span>",
+        }));
+        render(PricingPlanCard, {
+            props: {
+                name: "テストプラン",
+                priceAmount: 4980,
+                features: [{ text: "特典 A" }],
+                testId: "plan-card",
+                headerBadges,
+                footerCta,
+            },
+        });
+
+        expect(screen.getByTestId("badge-slot")).toHaveTextContent("現在のプラン");
+    });
+
+    it("headerBadges 未指定でも既存出力は不変 (回帰)", () => {
+        renderCard(4980);
+
+        expect(screen.queryByTestId("badge-slot")).toBeNull();
+        expect(screen.getByTestId("plan-card")).toHaveTextContent("テストプラン");
+    });
 });

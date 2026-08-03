@@ -5,8 +5,9 @@ import type { PurchaseTicketsPageProps } from "@/types/billing";
 
 // router.post をモックする。page (Inertia store) も hoisted fake でモックし、
 // props.errors を注入して serverErrors 経路を検証できるようにする (既定は空 = 従来挙動)。
-const { routerPostMock, pageState } = vi.hoisted(() => ({
+const { routerPostMock, routerGetMock, pageState } = vi.hoisted(() => ({
     routerPostMock: vi.fn(),
+    routerGetMock: vi.fn(),
     pageState: { props: {} as Record<string, unknown> },
 }));
 
@@ -14,6 +15,7 @@ vi.mock("@inertiajs/svelte", async (importOriginal) => ({
     ...(await importOriginal<typeof import("@inertiajs/svelte")>()),
     router: {
         post: routerPostMock,
+        get: routerGetMock,
     },
     page: pageState,
 }));
@@ -36,16 +38,27 @@ const basePage: PurchaseTicketsPageProps = {
     minCount: 1,
     maxCount: 1000,
     defaultCount: 10,
-    balance: 3,
+    balance: {
+        monthlyRemaining: 1,
+        purchasedRemaining: 2,
+        totalAvailable: 3,
+        activeReservations: 0,
+        nextExpireAt: null,
+    },
     canManage: true,
-    attemptToken: "01J0000000000000000000TEST",
+    ticketAttemptToken: "01J0000000000000000000TEST",
     purchased: false,
     autoRechargeEnabled: false,
+    formState: "normal",
+    boundCount: null,
+    resumeUrl: null,
+    newPurchaseUrl: "/purchase-tickets?fresh=1",
 };
 
 afterEach(() => {
     cleanup();
     routerPostMock.mockReset();
+    routerGetMock.mockReset();
     pageState.props = {}; // errors 注入をリセット (テスト間の汚染防止)
 });
 
@@ -59,6 +72,8 @@ describe("Billing/PurchaseTickets", () => {
         render(PurchaseTickets, { props: { page: basePage } });
 
         expect(screen.getByTestId("purchase-balance-count")).toHaveTextContent("3 枚");
+        expect(screen.getByTestId("balance-monthly")).toHaveTextContent("1 枚");
+        expect(screen.getByTestId("balance-purchased")).toHaveTextContent("2 枚");
         expect(screen.getByTestId("purchase-tier-table")).toHaveTextContent("1〜19 枚");
         expect(screen.getByTestId("purchase-total")).toHaveTextContent(
             "単価 ¥100 × 10 枚 = 合計 ¥1,000",
@@ -188,5 +203,59 @@ describe("Billing/PurchaseTickets", () => {
         expect(screen.getByTestId("purchase-success-banner")).toHaveTextContent(
             "決済の確認後、残高に反映されます",
         );
+    });
+
+    it("「有効期限はありません」は購入済みバケツの caption 位置に出る (誤読防止)", () => {
+        render(PurchaseTickets, { props: { page: basePage } });
+
+        expect(screen.getByTestId("purchased-bucket-caption")).toHaveTextContent(
+            "購入したチケットに有効期限はありません",
+        );
+    });
+
+    it("nextExpireAt があれば次の失効を表示する", () => {
+        render(PurchaseTickets, {
+            props: {
+                page: {
+                    ...basePage,
+                    balance: { ...basePage.balance, nextExpireAt: "2026-09-01T00:00:00+09:00" },
+                },
+            },
+        });
+
+        expect(screen.getByTestId("balance-next-expire")).toHaveTextContent("次の失効");
+    });
+
+    it("formState=resume では購入フォームを描画せず確定枚数と 2 種の CTA を出す", () => {
+        render(PurchaseTickets, {
+            props: {
+                page: {
+                    ...basePage,
+                    formState: "resume",
+                    boundCount: 42,
+                    resumeUrl: "https://checkout.stripe.test/c/pay/cs_test_1",
+                },
+            },
+        });
+
+        expect(screen.queryByTestId("purchase-form")).toBeNull();
+        expect(screen.getByTestId("purchase-resume-banner")).toBeInTheDocument();
+        expect(screen.getByTestId("purchase-bound-count")).toHaveTextContent("42 枚");
+        expect(screen.getByTestId("purchase-resume-continue")).toBeInTheDocument();
+        // disabled にはしない (禁止事項 #8)
+        expect(screen.getByTestId("purchase-fresh").hasAttribute("disabled")).toBe(false);
+    });
+
+    it("formState=completed では完了バナーと「もう一度購入する」を出す", async () => {
+        render(PurchaseTickets, {
+            props: { page: { ...basePage, formState: "completed", boundCount: 7 } },
+        });
+
+        expect(screen.queryByTestId("purchase-form")).toBeNull();
+        expect(screen.getByTestId("purchase-completed-banner")).toBeInTheDocument();
+        expect(screen.getByTestId("purchase-bound-count")).toHaveTextContent("7 枚");
+
+        await fireEvent.click(screen.getByTestId("purchase-fresh"));
+        expect(routerGetMock).toHaveBeenCalledWith("/purchase-tickets?fresh=1");
     });
 });

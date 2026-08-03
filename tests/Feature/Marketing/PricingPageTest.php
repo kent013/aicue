@@ -31,7 +31,7 @@ test('guest は plans (personal/starter/standard) と quota limits 反映の能�
     $this->get('/pricing')
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
-            ->component('Pricing')
+            ->component('Guest/Pricing')
             ->has('page.plans', 3) // sort_order 昇順 (personal 1 / starter 2 / standard 3。free 行は D11 で撤去済み)
             ->where('page.plans.0.code', 'personal')
             ->where('page.plans.0.baseAmountJpy', null) // Price 無し = 無料表示契約

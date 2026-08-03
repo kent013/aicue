@@ -169,6 +169,8 @@ test('(d) 遮断先および課金系 route は gate group 外で再遮断され
 })->with([
     'onboarding.checkout' => 'onboarding.checkout',
     'billing.index' => 'billing.index',
+    // P8b (bs-6): プラン比較も課金導線。未契約 org が再遮断されると契約手段を失う。
+    'billing.plans' => 'billing.plans',
     'billing.tickets.show' => 'billing.tickets.show',
     'notifications.index' => 'notifications.index',
 ]);
