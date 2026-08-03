@@ -11,34 +11,44 @@ use Database\Seeders\ManualTestSeeder;
 use Illuminate\Support\Str;
 
 /*
- * F-C3 回帰: ManualTestSeeder が生成する Free (Stripe Price 無し) プラン組織の全ロールが、
- * 課金ゲート (require-active-subscription) を素通りして中核業務 route に到達できることを固定する。
- * 根本原因は seeder が Free にも plan_code='free' を載せ、BillingAccess が active subscription を
+ * F-C3 回帰: ManualTestSeeder が生成する無料プラン組織の全ロールが、課金ゲート
+ * (require-active-subscription) を通過して中核業務 route に到達できることを固定する。
+ * 根本原因は seeder が無料プランにも plan_code を載せ、BillingAccess が active subscription を
  * 要求して締め出していたこと (devnotes/20260713-1633-seeder-free-plan-billing)。
+ *
+ * **P4 (T075) のゲート反転後**: 無料枠は「plan_code が null であること」ではなく
+ * `organizations.free_plan_code = 'personal'` の明示申告 (ActiveFreePlan) で表現する。
+ * `plans` の `free` 行は D11 で撤去され、後継は `personal`。
+ * ManualTestSeeder は当該組織を `PersonalPlanService::activate()` で有効化するため、
+ * 本テストが固定する「無料プラン組織は業務 route に到達できる」不変条件は反転後も生きている
+ * (通過の根拠が『素通り』から『ActiveFreePlan として許可』へ変わっただけ)。
  */
 
 /**
- * Free プラン (current base Price を持たない) を取得する。
+ * 無料プラン (current base Price を持たない) を取得する。
  *
- * personal も Price を持たないため「Price 無しの最初の Plan」では対象が非決定になる。
- * 本テストの関心は Free プラン組織のゲート素通りなので code で固定する。
+ * P4 で free 行が撤去されたため後継の personal を code で固定する
+ * (starter 以降は Price を持つので「Price 無しの最初の Plan」でも一意だが、
+ *  seed 構成の変化で非決定にならないよう code 指定を維持する)。
  */
 function seededFreePlan(): Plan
 {
-    $plan = Plan::query()->where('code', 'free')->firstOrFail();
+    $plan = Plan::query()->where('code', 'personal')->firstOrFail();
     if ($plan->currentPrice(PlanPriceKind::Base) !== null) {
-        throw new RuntimeException('Free プランに Price が付いている (seed 不変条件の破れ)');
+        throw new RuntimeException('無料プランに Price が付いている (seed 不変条件の破れ)');
     }
 
     return $plan;
 }
 
-test('seeded Free 組織の全ロールが /projects に到達できる (F-C3 回帰)', function (OrganizationRole $role): void {
+test('seeded 無料プラン組織の全ロールが /projects に到達できる (F-C3 回帰)', function (OrganizationRole $role): void {
     $this->seed(ManualTestSeeder::class);
 
     $plan = seededFreePlan();
     $organization = Organization::query()->where('name', "{$plan->name}プラン組織")->firstOrFail();
-    expect($organization->plan_code)->toBeNull(); // seeder が不変条件を守っている
+    // seeder が不変条件を守っている: plan_code は載せず、無料枠は free_plan_code の明示申告で表現する
+    expect($organization->plan_code)->toBeNull()
+        ->and($organization->free_plan_code)->toBe($plan->code);
 
     $email = Str::afterLast($role->value, '_')."-{$plan->code}@example.com";
     $user = User::whereBlind('email', 'email_index', $email)->firstOrFail();
