@@ -102,6 +102,10 @@ Open リストは [TODO.md](TODO.md) を参照。
 | T080 | 決済parity P8b: 課金UI parity。Billing/Plans 新設 (PlanCard は D4/禁止事項#8 に従い常時 enabled + 押下時に理由表示)、PurchaseTickets を per-bucket 表示 + 状態機械へ、Billing/Index を BillingDashboardDto 1 props へ整理しプラン一覧は /billing/plans へ分離、Pricing を Guest/Pricing へ移動し三層構成へ、portal ボタンの事前ガード。feedback/billingContact は P9 所管として非着手 (D25) | frontend | 2026-08-03 |
 | T088 | PurchaseFormState を aigenba 現行へ追随。設計 (07-17 作成) は Completed を「aigenba verbatim」としていたが、aigenba は 07-30 の bug-hunt (F-5-02) で撤去済みだった。完了通知は決済戻り着地の one-shot が担い二重課金は POST 冪等が担保するため。窓内ロックは購入フォームを不必要に塞ぎ、決済成功直後に「完了」と「決済を続ける」が同時提示される誤誘導も生む (T080 の Codex レビューでも独立に指摘) | frontend | 2026-08-03 |
 | T081 | 決済parity P9: checkout冪等+着地feedback+請求先+PM流用。subscription_start スコープの 6 段冪等マシン (同 token 別 plan は 422 / 他 org token は Gate 前に 404 / UNIQUE 違反は re-read で replay へ収束)、live 判定の単一出典化 + Architecture テストで literal 再発明を検出、日次 sweeper で stale 収束、one-shot feedback (intent 検証で fail-closed)、請求先 email/name を CipherSweet 暗号化 (email に blind index)、支払い方法流用 (T1004)、同意版 v2。**これで決済 parity 全 9 フェーズ完了** | backend | 2026-08-03 |
+| T089 | ログアウト後の Inertia 履歴からの PII 復元を塞ぐ (EncryptHistory + clearHistory。bug-hunt F-4-01) | backend | 2026-08-04 05:42 |
+| T090 | 契約中組織のプラン変更経路を in-app swap で新設 (bug-hunt F-3-01) | backend | 2026-08-04 05:42 |
+| T091 | AI 解析の時間 budget 是正と provider 例外の有界リトライ (bug-hunt F-1-01) | backend | 2026-08-04 05:42 |
+| T094 | 課金 UI の入力 UX 規約を横断是正 (bug-hunt F-3-02/F-3-03/F-3-05) | frontend | 2026-08-04 05:42 |
 
 
 ## Obsoleted

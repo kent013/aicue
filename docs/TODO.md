@@ -22,12 +22,8 @@
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
 | T085 | bfcache 実復元の iOS 実機受入確認 | test | Playwright 不可のため実機で確認+記録 | High | standalone | [設計](devnotes/20260803-0053-aigenba-alignment/) | 2026-08-03 03:10 |
-| T089 | ログアウト後の Inertia 履歴からの PII 復元を塞ぐ | backend | ログアウト後の戻るで PII 復元を塞ぐ | Critical | standalone | [設計](devnotes/20260804-0021-logout-history-pii-guard/) | 2026-08-04 01:22 |
-| T090 | 契約中組織のプラン変更経路 (in-app swap) | backend | 契約中のプラン変更を in-app swap で提供 | Critical | standalone | [設計](devnotes/20260804-0021-plan-change-path/) | 2026-08-04 01:22 |
-| T091 | AI 解析の時間 budget 是正と provider 例外の有界リトライ | backend | 解析の timeout 是正と有界リトライ | High | standalone | [設計](devnotes/20260804-0021-analysis-provider-retry/) | 2026-08-04 01:22 |
 | T092 | 認証ファネルの離脱導線修復 | frontend | 踏破不能な CTA 撤去と離脱導線の規約化 | High | incremental | [設計](devnotes/20260804-0021-auth-funnel-exits/) | 2026-08-04 01:22 |
 | T093 | /billing 着地 feedback の one-shot 化 | backend | 着地 query を畳み feedback を flash 化 | High | standalone | [設計](devnotes/20260804-0021-billing-feedback-oneshot/) | 2026-08-04 01:22 |
-| T094 | 課金 UI の入力 UX 規約の是正 | frontend | 入力エラー追随と readonly 表示の規約化 | Medium | standalone | [設計](devnotes/20260804-0021-billing-input-ux/) | 2026-08-04 01:22 |
 | T095 | 2FA 手動キー表示と破壊的操作の成功 toast 補完 | frontend | 2FA 手動キー表示と削除系 toast 補完 | Medium | incremental | [設計](devnotes/20260804-0021-ux-small-gaps/) | 2026-08-04 01:22 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
