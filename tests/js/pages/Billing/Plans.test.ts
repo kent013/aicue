@@ -43,6 +43,29 @@ const basePage: BillingPlansPageProps = {
     billingState: "active_free_plan",
     canManage: true,
     subscriptionAttemptToken: "01JQ0000000000000000000000",
+    hasChangeableSubscription: false,
+    planChangeToken: "01JQ1111111111111111111111",
+    planChangeExpectedPlanCode: null,
+};
+
+/** 有効な契約がある組織 (starter 契約中 → in-app swap 経路) の props */
+const contractedPage: BillingPlansPageProps = {
+    ...basePage,
+    plans: [
+        ...basePage.plans,
+        {
+            code: "starter",
+            name: "Starter",
+            baseAmountJpy: 980,
+            maxProjects: 3,
+            maxMembers: 5,
+            maxStorageGb: 10,
+        },
+    ],
+    currentPlanCode: "starter",
+    billingState: "subscribed",
+    hasChangeableSubscription: true,
+    planChangeExpectedPlanCode: "starter",
 };
 
 afterEach(() => {
@@ -89,6 +112,77 @@ describe("Billing/Plans", () => {
 
         expect(screen.getByTestId("plan-change-error")).toHaveTextContent(
             "選択したプランは現在お申し込みいただけません。",
+        );
+    });
+
+    it("有効な契約があるときは /billing/plan へ swap payload を POST する", async () => {
+        render(Plans, { props: { page: contractedPage } });
+
+        await fireEvent.click(screen.getByTestId("plan-change-standard"));
+        await screen.findByTestId("plan-change-confirm");
+        await fireEvent.click(screen.getByText("変更する"));
+
+        const [url, payload] = routerPostMock.mock.calls[0] as [string, Record<string, unknown>];
+        expect(url).toBe("/billing/plan");
+        expect(payload).toEqual({
+            plan_code: "standard",
+            current_plan_code: "starter",
+            plan_change_token: "01JQ1111111111111111111111",
+        });
+        expect(payload).not.toHaveProperty("subscription_attempt_token");
+    });
+
+    it("current_plan_code は表示用 currentPlanCode ではなく planChangeExpectedPlanCode を送る", async () => {
+        // grace period 契約では表示用 (personal) と競合制御値 (starter) が食い違う
+        render(Plans, {
+            props: {
+                page: {
+                    ...contractedPage,
+                    currentPlanCode: "personal",
+                    planChangeExpectedPlanCode: "starter",
+                },
+            },
+        });
+
+        await fireEvent.click(screen.getByTestId("plan-change-standard"));
+        await screen.findByTestId("plan-change-confirm");
+        await fireEvent.click(screen.getByText("変更する"));
+
+        const [, payload] = routerPostMock.mock.calls[0] as [string, Record<string, unknown>];
+        expect(payload.current_plan_code).toBe("starter");
+    });
+
+    it("downgrade の確認ダイアログは上限低下を告知し、upgrade では出さない", async () => {
+        const downgrading = {
+            ...contractedPage,
+            currentPlanCode: "standard",
+            planChangeExpectedPlanCode: "standard",
+        };
+        render(Plans, { props: { page: downgrading } });
+
+        await fireEvent.click(screen.getByTestId("plan-change-starter"));
+        const dialog = await screen.findByTestId("plan-change-confirm");
+        expect(dialog).toHaveTextContent("上限内に収まるまで新規作成とアップロードができません");
+        cleanup();
+
+        render(Plans, { props: { page: contractedPage } });
+        await fireEvent.click(screen.getByTestId("plan-change-standard"));
+        const upgradeDialog = await screen.findByTestId("plan-change-confirm");
+        expect(upgradeDialog).not.toHaveTextContent(
+            "上限内に収まるまで新規作成とアップロードができません",
+        );
+        expect(upgradeDialog).toHaveTextContent("日割り");
+    });
+
+    it("errors.current_plan_code だけでも dialog にサーバ文言を描画する", async () => {
+        pageState.props = { errors: { current_plan_code: "プランが別の操作で変更されました。" } };
+        render(Plans, { props: { page: contractedPage } });
+
+        await fireEvent.click(screen.getByTestId("plan-change-standard"));
+        await screen.findByTestId("plan-change-confirm");
+
+        expect(screen.getByTestId("plan-change-error")).toHaveTextContent(
+            "プランが別の操作で変更されました。",
         );
     });
 

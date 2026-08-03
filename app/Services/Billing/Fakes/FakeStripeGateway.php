@@ -6,6 +6,7 @@ namespace App\Services\Billing\Fakes;
 
 use App\DataTransferObjects\Billing\CreatedCheckoutSession;
 use App\DataTransferObjects\Billing\ExternalBillingRedirect;
+use App\Enums\Billing\SubscriptionSwapOutcome;
 use App\Models\Organization;
 use App\Services\Billing\Contracts\StripeGatewayInterface;
 use Carbon\CarbonImmutable;
@@ -35,6 +36,17 @@ final class FakeStripeGateway implements StripeGatewayInterface
             url: FakeExternalUrl::neutralReturn($cancelUrl),
             expiresAt: CarbonImmutable::now()->addDay(), // Stripe hosted checkout の既定 24h
         );
+    }
+
+    public function swapSubscriptionPrices(
+        Organization $organization,
+        string $basePriceId,
+        string $idempotencyKey,
+    ): SubscriptionSwapOutcome {
+        // 中立帰還: 実 Stripe を叩かず、subscription 状態も変えない
+        // (active subscription の正本は BughuntBillingSeeder。反映は webhook が担うが
+        //  fake 環境では webhook が発火しないため、画面は「反映待ち」までを観測する)。
+        return SubscriptionSwapOutcome::Applied;
     }
 
     public function expireCheckoutSession(string $stripeSessionId): string

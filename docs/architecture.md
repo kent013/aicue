@@ -137,7 +137,7 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
 | `Billing/BillingNotificationDispatcher` | 請求通知の冪等 dispatch 窓口 (通知台帳へ insertOrIgnore → 新規行のみ queue。**請求系通知の送信は本クラス経由のみ**) |
 | `Billing/StripeScheduleGateway` | Subscription Schedule API の集約 gateway (create/update/release/retrieve。テストは mock 差替) |
 | `Billing/StripePriceCatalogClient` | Stripe Price Catalog への read-only adapter (`prices.list` の lookup_keys で現行 active Price を解決。価格カタログ as-code の sync/verify コマンドが利用) |
-| `Billing/PortalConfigurationSpec` | Customer Portal の許可機能ポリシー固定真実源 (subscription_update 無効化。`billing:ensure-portal-configuration` が生成/検証) |
+| `Billing/PortalConfigurationSpec` | Customer Portal の許可機能ポリシー固定真実源 (subscription_update 無効化。`billing:ensure-portal-configuration` が生成/検証)。プラン変更はアプリが所有する (`SubscriptionService::changePlan`) |
 | `Billing/TicketLedgerService` | チケットの reserve/commit/release と冪等付与 (grantMonthly/grantSignupGrant/grantPurchased)・返金逆仕訳 (clawback) |
 | `Billing/TicketCheckoutService` | チケットスポット購入の冪等 Checkout 開始 (org 単位 Cache::lock 直列化 + attempt_token 冪等 + live pending dedup + INSERT unique 違反の re-read 収束。二重課金防止の冪等マシン) |
 | `Billing/TicketCheckoutGateway` (interface) + `Billing/CashierTicketCheckoutGateway` | Stripe one-time Checkout の抽象 (mode=payment / card のみ / promo・tax なし = amount_subtotal 照合の前提。idempotency key 対応。テストは fake を bind) |
@@ -256,6 +256,7 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
   | GET `/billing-required` (`onboarding.billing-required`) | `Onboarding/BillingRequired` — 未契約 かつ `manageBilling` なし member への説明 (Owner 連絡先 + 問い合わせ導線) | `view` 認可 + 離脱ガード (利用可 → `dashboard` / `manageBilling` 保持 → `onboarding.checkout`) |
   | POST `/onboarding/activate-personal` (`onboarding.activate-personal`) | Personal(無料)の即時有効化 (Stripe Checkout を通らない) | `manageBilling` + `throttle:10,1` |
   | POST `/billing/checkout` (`billing.checkout`) | 有償プランの Stripe Checkout 開始 | `manageBilling` |
+  | POST `/billing/plan` (`billing.plan.change`) | 契約中プランの in-app swap (プラン変更) | `manageBilling` |
   | PATCH `/billing/contact` (`billing.contact.update`) | 請求先連絡先の更新 | `manageBilling` |
 
   いずれも `require-active-subscription` group の**外**にある構造的 allowlist
@@ -284,6 +285,32 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
   - live/stale の閾値は `BillingCheckoutSession::staleThresholdAt()` が単一出典で、
     `BillingAccess::state()` / 段 2・3・4 / 日次 sweeper が共有する
     (Architecture テストが literal の再発明を検出)
+- **契約中プランの変更 (in-app swap / F-3-01)**: `POST /billing/plan` (`billing.plan.change`) →
+  `SubscriptionService::changePlan()`。**有効な subscription を持つ組織専用**の経路で、
+  持たない組織の `billing.checkout` と `Subscription::valid()` を境に排他
+  (どちらの CTA も `/billing/plans` から出るが、送信先はサーバが決めた
+  `hasChangeableSubscription` で分かれる)。
+  - guard 順: 契約再読込 → **変更可能 state (Active のみ)** → schedule 管理下の拒否 →
+    stale UI 検知 (`current_plan_code`。UX 専用。**要求先 ≠ local 現在プランのときだけ**評価) →
+    Stripe swap。
+    **`organizations.plan_code` が既に目標プランでも「受付済み」で早期 return しない** —
+    この列は webhook 遅延を持つ projection なので、同一プラン判定は
+    **gateway の remote 照合に一本化**する (`Applied` / `AlreadyOnTargetPrice` は remote の事実)。
+    **state / schedule 判定は最前段**に置く — grace period (解約予約中) の契約は
+    `plan_code` が旧プランのまま残るため、後段で「変更できない契約なのに成功扱い」に
+    ならないようにする
+  - stale 検知の期待値は **`organizations.plan_code` そのもの**
+    (`planChangeExpectedPlanCode` prop)。表示用の `currentPlanCode`
+    (ActiveFreePlan では `free_plan_code` を返す projection) とは別物で、混ぜると
+    grace period 契約で恒常 422 になる
+  - Stripe への更新は `proration_behavior=create_prorations` (日割りは**次回請求に反映**。
+    `always_invoice` は使わない = 即時請求の与信失敗遷移を持ち込まない)
+  - 冪等は 2 層: 同一 render の二重送信は idempotency key `change-plan:{token}:{planCode}`、
+    別 render からの再操作は **gateway の remote Price 照合** (`AlreadyOnTargetPrice` =
+    update を送らない)
+  - **`organizations.plan_code` は書かない**。反映 (projection_synced) は
+    `customer.subscription.updated` → `applySubscriptionSnapshot` が唯一の writer
+  - Customer Portal の `subscription_update` は **無効のまま** (プラン変更はアプリが所有する)
 - **着地 feedback (P9)**: `Inertia::location()` の full page redirect を跨いだ後、
   `/billing` 着地で one-shot バナーを出す (`BillingFeedbackKind`: purchase_received /
   purchase_processing / purchase_already_received / checkout_retry_required / portal_returned)。

@@ -9,6 +9,7 @@
 | method | route | name | story | 区分 |
 |---|---|---|---|---|
 | POST | billing/checkout | billing.checkout | S5 | 通常 |
+| POST | billing/plan | billing.plan.change | S5 | 通常 |
 | POST | billing/portal | billing.portal | S5 | 通常 |
 | POST | billing/auto-recharge | billing.auto-recharge.update | S5 | 通常 |
 | POST | billing/auto-recharge/setup | billing.auto-recharge.setup | S5 | 通常 |
@@ -87,7 +88,7 @@ gate group コメントが正本)。ここが 402/リダイレクトで詰むと
 いないと開けない」= 詰み finding (H4)。
 
 - `billing.auto-recharge.update` / `billing.auto-recharge.setup` / `billing.contact.update` /
-  `billing.checkout` / `billing.tickets.checkout` の認可は Controller 冒頭の
+  `billing.checkout` / `billing.plan.change` / `billing.tickets.checkout` の認可は Controller 冒頭の
   `Gate::authorize('manageBilling')` (owner / admin)。member は 403、他組織はそもそも
   current org スコープ (route parameter なし) で構造的に到達不能。
 - `onboarding.activate-personal` は `throttle:10,1` 付き。連打時に 429 が UX として

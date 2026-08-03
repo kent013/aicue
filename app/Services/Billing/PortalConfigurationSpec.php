@@ -8,8 +8,9 @@ namespace App\Services\Billing;
  * Customer Portal Configuration の許可機能ポリシー (コード上の固定真実源)。
  *
  * 核心: subscription_update を無効化し、Portal からの out-of-band プラン変更を構造的に封じる。
- * プラン変更はアプリ側 (Checkout / Subscription Schedule) が所有しており、Portal で直接変更
- * されると plan_code / schedule 整合が壊れるため。env はこの spec から生成された
+ * プラン変更はアプリ側 (新規契約 = Checkout / 契約中の変更 = `SubscriptionService::changePlan`)
+ * が所有しており、Portal で直接変更されると plan_code / schedule 整合が壊れるため。
+ * env はこの spec から生成された
  * configuration id を保持するのみで、ポリシー切替先ではない。
  *
  * 公式 API ref: POST /v1/billing_portal/configurations の features 集合に対応。

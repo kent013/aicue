@@ -105,6 +105,52 @@ test('POST /billing/checkout は plan_code + subscription_attempt_token で成�
     expect($response->headers->get('Location'))->toContain('fake_external=stripe');
 });
 
+test('有償契約中の org では hasChangeableSubscription=true と競合制御用 props が載る', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    contractPaidPlan($organization);
+
+    $this->actingAs($owner)->get('/billing/plans')
+        ->assertOk()
+        ->assertInertia(function (AssertableInertia $page) use ($organization): void {
+            $props = $page->toArray()['props']['page'];
+            expect($props['hasChangeableSubscription'])->toBeTrue();
+            expect($props['planChangeToken'])->toBeString()->not->toBe('');
+            expect($props['planChangeExpectedPlanCode'])->toBe($organization->fresh()?->plan_code);
+        });
+});
+
+test('grace period 契約では表示用 currentPlanCode と競合制御用 planChangeExpectedPlanCode が分かれる', function (): void {
+    // free_plan_code='personal' (ActiveFreePlan) かつ plan_code='standard' の解約予約中契約。
+    // 表示用 (projection) を競合制御に使うと恒常 422 (stale) の詰みになるため別物であることを固定する。
+    [$organization, $owner] = createOrganizationWithOwner();
+    $organization->forceFill(['plan_code' => 'standard'])->save();
+    $subscription = createFakeSubscription($organization, status: 'canceled');
+    $subscription->forceFill(['ends_at' => now()->addDays(10)])->save();
+
+    $this->actingAs($owner)->get('/billing/plans')
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('page.currentPlanCode', 'personal')
+            ->where('page.planChangeExpectedPlanCode', 'standard')
+            ->where('page.hasChangeableSubscription', true));
+});
+
+test('未契約 org / 期間終了済み契約の org は hasChangeableSubscription=false', function (): void {
+    // 述語は startCheckout 段 1 と同一の Subscription::valid()。Cashier の valid() は
+    // 「ends_at が過去」= ended() のときだけ false になる (canceled + ends_at=null は active 扱い)。
+    [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    $this->actingAs($owner)->get('/billing/plans')
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page->where('page.hasChangeableSubscription', false));
+
+    [$organization2, $owner2] = createOrganizationWithOwner();
+    $ended = createFakeSubscription($organization2, status: 'canceled');
+    $ended->forceFill(['ends_at' => now()->subDay()])->save();
+    $this->actingAs($owner2)->get('/billing/plans')
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page->where('page.hasChangeableSubscription', false));
+});
+
 test('Billing/Plans の props に render 単位の subscriptionAttemptToken が載る', function (): void {
     [, $owner] = createOrganizationWithOwner();
 

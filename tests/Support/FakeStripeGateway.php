@@ -6,6 +6,7 @@ namespace Tests\Support;
 
 use App\DataTransferObjects\Billing\CreatedCheckoutSession;
 use App\DataTransferObjects\Billing\ExternalBillingRedirect;
+use App\Enums\Billing\SubscriptionSwapOutcome;
 use App\Models\Organization;
 use App\Services\Billing\Contracts\StripeGatewayInterface;
 use Carbon\CarbonImmutable;
@@ -17,6 +18,7 @@ use RuntimeException;
  * - createSubscriptionCheckout: 呼び出しを記録し、idempotency key から決定的な
  *   session id / URL を返す (Stripe の idempotency replay と同じ収束特性を再現)
  * - expireCheckoutSession: 呼び出しを記録し、$expireResult を返す ($failOnExpire で throw)
+ * - swapSubscriptionPrices: 呼び出しを記録し、$swapOutcome を返す (プラン変更 = 実 Stripe に出ない)
  */
 final class FakeStripeGateway implements StripeGatewayInterface
 {
@@ -37,6 +39,12 @@ final class FakeStripeGateway implements StripeGatewayInterface
 
     /** @var list<int> syncCustomerDetails を呼ばれた org id */
     public array $synced = [];
+
+    /** @var list<array{organizationId: int, basePriceId: string, idempotencyKey: string}> swap 呼び出し */
+    public array $swapped = [];
+
+    /** swapSubscriptionPrices の返り値 (remote 照合結果の再現) */
+    public SubscriptionSwapOutcome $swapOutcome = SubscriptionSwapOutcome::Applied;
 
     public function createSubscriptionCheckout(
         Organization $organization,
@@ -66,6 +74,20 @@ final class FakeStripeGateway implements StripeGatewayInterface
             url: "https://checkout.stripe.test/c/pay/cs_test_{$token}",
             expiresAt: CarbonImmutable::now()->addDay(),
         );
+    }
+
+    public function swapSubscriptionPrices(
+        Organization $organization,
+        string $basePriceId,
+        string $idempotencyKey,
+    ): SubscriptionSwapOutcome {
+        $this->swapped[] = [
+            'organizationId' => (int) $organization->getKey(),
+            'basePriceId' => $basePriceId,
+            'idempotencyKey' => $idempotencyKey,
+        ];
+
+        return $this->swapOutcome;
     }
 
     public function expireCheckoutSession(string $stripeSessionId): string
