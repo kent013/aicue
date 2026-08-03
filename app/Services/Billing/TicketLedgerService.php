@@ -94,22 +94,29 @@ class TicketLedgerService
     /**
      * 初回 signup grant (「まず触れる」導線の無償チケット)。
      *
-     * 通常登録の完了時 (個人組織生成直後) と、Stripe サブスク作成の支払い確定時
-     * (invoice.paid, billing_reason=subscription_create) の双方から呼ばれる。
+     * 付与契機は**プラン有効化時のみ** (P6/F2): free = PersonalPlanService::activate /
+     * paid = customer.subscription.created (SubscriptionService::grantSignupInitialTickets)。
+     * 登録 (CreateNewUser) と invoice.paid はこの経路を呼ばない。
      * 枚数は config('billing.signup_grant_tickets')、期限は now + config('billing.signup_grant_expiry_days') 日。
      *
-     * **1 組織につき高々 1 回**の不変条件は、冪等キー ($idempotencyKey) の UNIQUE と、
+     * **1 組織につき高々 1 回**の不変条件は、呼び出し側が先取する marker
+     * (organizations.signup_tickets_granted_at) を主とし、冪等キー ($idempotencyKey) の UNIQUE と
      * ticket_ledger_entries の部分 UNIQUE index (organization_id WHERE idempotency_key LIKE 'signup_grant:%')
-     * が DB レベルで原子的に保証する。旧キー (signup_grant:{subId}) 行が既にある組織でも、部分 index が
-     * 同一述語でカバーするため insertOrIgnore が二重付与を弾く (アプリ層の存在チェックは不要)。
+     * が DB レベルで原子的に保証する (保険)。旧キー (signup_grant:org:{orgId}) 行が既にある組織でも、
+     * 部分 index が同一述語でカバーするため insertOrIgnore が二重付与を弾く (アプリ層の存在チェックは不要)。
      *
      * $idempotencyKey は経路を表す `signup_grant:` 接頭辞付きのキーを呼び出し側が渡す
-     * (登録経路 = `signup_grant:org:{orgId}` / free 有効化 = `signup_grant:personal:{orgId}`)。
+     * (free 有効化 = `signup_grant:personal:{orgId}` / paid = `signup_grant:{stripeSubId}`)。
      * 部分 UNIQUE index が述語 `LIKE 'signup_grant:%'` で経路を跨いで org 生涯 1 回に閉じるため、
      * キーの違いは監査上の由来表現であって二重付与の窓にはならない。
      */
     public function grantSignupGrant(Organization $organization, string $idempotencyKey): void
     {
+        // 接頭辞は部分 UNIQUE index の述語 (LIKE 'signup_grant:%') と対応する契約。外れたキーで
+        // 付与すると「org 生涯 1 回」の DB 保証をすり抜けるため fail-closed で停止する。
+        Assert::stringNotEmpty($idempotencyKey);
+        Assert::startsWith($idempotencyKey, 'signup_grant:', 'signup grant の冪等キーは signup_grant: で始めてください');
+
         $count = config('billing.signup_grant_tickets');
         Assert::integer($count, 'config billing.signup_grant_tickets は整数で設定してください');
         Assert::greaterThan($count, 0, 'signup_grant_tickets は 1 以上で設定してください');

@@ -346,8 +346,8 @@
     <section class="rounded-lg bg-surface px-6 py-14 text-center" data-testid="landing-pricing-cta">
         <h2 class="text-h2 text-text">無料で始められます。</h2>
         <p class="mx-auto mt-3 max-w-2xl text-body text-text-secondary">
-            Free プランで今すぐ試せます。新規登録でチケット {page.signupGrantTickets} 枚が無料
-            (AI 解析 1 枚・動画レンダ 3 枚を消費)。
+            Personal プラン (無料) で今すぐ試せます。プランを有効化すると、初回 1 回だけチケット
+            {page.signupGrantTickets} 枚が無料でついてきます (AI 解析 1 枚・動画レンダ 3 枚を消費)。
         </p>
         <div class="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
             {#if page.isAuthenticated}

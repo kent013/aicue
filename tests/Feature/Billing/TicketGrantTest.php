@@ -79,20 +79,20 @@ test('期限内の付与は reserve → commit で消費できる', function ():
     expect(grantService()->balance($organization)->totalAvailable())->toBe(7);
 });
 
-test('grantSignupGrant は config の枚数・期限で org スコープキーで冪等付与する', function (): void {
+test('grantSignupGrant は config の枚数・期限で free 有効化キーで冪等付与する', function (): void {
     [$organization] = createOrganizationWithOwner();
     config()->set('billing.signup_grant_tickets', 10);
     config()->set('billing.signup_grant_expiry_days', 30);
 
-    // 冪等キーは呼び出し側が渡す (org スコープ = signup_grant:org:{id})。二重呼び出しでも 1 行のみ。
-    grantService()->grantSignupGrant($organization, "signup_grant:org:{$organization->id}");
-    grantService()->grantSignupGrant($organization, "signup_grant:org:{$organization->id}");
+    // 冪等キーは呼び出し側が渡す (free 有効化 = signup_grant:personal:{id})。二重呼び出しでも 1 行のみ。
+    grantService()->grantSignupGrant($organization, "signup_grant:personal:{$organization->id}");
+    grantService()->grantSignupGrant($organization, "signup_grant:personal:{$organization->id}");
 
     expect(grantService()->balance($organization)->totalAvailable())->toBe(10);
     expect($organization->ticketLedgerEntries()->count())->toBe(1);
     $entry = $organization->ticketLedgerEntries()->firstOrFail();
     expect($entry->source)->toBe(TicketSource::Monthly);
-    expect($entry->idempotency_key)->toBe("signup_grant:org:{$organization->id}");
+    expect($entry->idempotency_key)->toBe("signup_grant:personal:{$organization->id}");
     expect($entry->expires_at?->toDateString())
         ->toBe(CarbonImmutable::now()->addDays(30)->toDateString());
 
@@ -105,7 +105,16 @@ test('grantSignupGrant は config が不正 (0 以下) なら停止する', func
     [$organization] = createOrganizationWithOwner();
     config()->set('billing.signup_grant_tickets', 0);
 
-    expect(fn () => grantService()->grantSignupGrant($organization, "signup_grant:org:{$organization->id}"))
+    expect(fn () => grantService()->grantSignupGrant($organization, "signup_grant:personal:{$organization->id}"))
+        ->toThrow(InvalidArgumentException::class);
+});
+
+test('grantSignupGrant は signup_grant: 接頭辞のないキーを拒否する', function (): void {
+    [$organization] = createOrganizationWithOwner();
+
+    // 接頭辞は部分 UNIQUE index の述語 (LIKE 'signup_grant:%') と対応する契約。
+    // 外れたキーで付与すると「org 生涯 1 回」の DB 保証をすり抜けるため停止する。
+    expect(fn () => grantService()->grantSignupGrant($organization, "monthly:{$organization->id}"))
         ->toThrow(InvalidArgumentException::class);
 });
 
@@ -113,8 +122,13 @@ test('1 組織に signup_grant は異なるキーでも高々 1 回しか計上�
     [$organization] = createOrganizationWithOwner();
     $svc = grantService();
 
-    // 1 回目: 公開ユースケース経由 (org スコープキー signup_grant:org:{id})
-    $svc->grantSignupGrant($organization, "signup_grant:org:{$organization->id}");
+    // 1 回目: free 有効化経路のキー (signup_grant:personal:{id})
+    $svc->grantSignupGrant($organization, "signup_grant:personal:{$organization->id}");
+
+    // paid 経路のキー (signup_grant:{stripeSubId}) でも部分 UNIQUE index が弾く
+    $svc->grantSignupGrant($organization, 'signup_grant:sub_x');
+    expect($organization->ticketLedgerEntries()
+        ->where('idempotency_key', 'like', 'signup_grant:%')->count())->toBe(1);
 
     // 2 回目: 旧キー形式を直接投入 → 部分 UNIQUE index (organization_id WHERE idempotency_key
     // LIKE 'signup_grant:%') が別キーでも弾く (ON CONFLICT DO NOTHING)。

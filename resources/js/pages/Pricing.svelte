@@ -50,7 +50,7 @@
     const faqs = $derived([
         {
             q: "無料で試せますか？",
-            a: `はい。Free プランは基本料金なしでご利用いただけます。さらに新規登録でチケット ${page.signupGrantTickets} 枚 (${page.signupGrantExpiryDays} 日間有効) が無料でついてくるので、AI 解析から動画の完成までを実際にお試しいただけます。`,
+            a: `はい。Personal プランは基本料金なしでご利用いただけます。さらにプランを有効化すると初回 1 回だけチケット ${page.signupGrantTickets} 枚 (${page.signupGrantExpiryDays} 日間有効) が無料でついてくるので、AI 解析から動画の完成までを実際にお試しいただけます。`,
         },
         {
             q: "チケットは何に使いますか？",
@@ -166,7 +166,8 @@
                 class="mt-4 rounded-lg border border-primary/30 bg-primary-soft px-4 py-3 text-center text-body text-text"
                 data-testid="signup-grant-note"
             >
-                新規登録でチケット {page.signupGrantTickets} 枚が無料でついてきます (付与から {page.signupGrantExpiryDays}
+                プランを有効化すると、初回 1 回だけチケット {page.signupGrantTickets} 枚が無料でついてきます (付与から
+                {page.signupGrantExpiryDays}
                 日間有効)
             </p>
             {#if tierRows.length > 0}

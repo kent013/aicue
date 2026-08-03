@@ -57,6 +57,10 @@ final class TicketPricingService
     /**
      * 初回 signup grant の枚数 (config billing.signup_grant_tickets)。
      * TicketLedgerService::grantSignupGrant と同じ config key を読む表示用の口。
+     *
+     * **付与契機はプラン有効化時** (free = PersonalPlanService::activate /
+     * paid = customer.subscription.created) で org 生涯 1 回 (P6/F2)。
+     * 「signup」は登録時付与だった頃の名残の命名であり、契機を表さない。
      */
     public function signupGrantTickets(): int
     {

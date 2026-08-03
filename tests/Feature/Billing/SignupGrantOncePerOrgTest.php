@@ -6,7 +6,6 @@ use App\Models\Organization;
 use App\Models\User;
 use App\Services\Billing\PersonalPlanService;
 use App\Services\Billing\TicketLedgerService;
-use App\Services\Organization\OrganizationProvisioningService;
 use Carbon\CarbonImmutable;
 use Laravel\Cashier\Events\WebhookReceived;
 
@@ -20,13 +19,15 @@ use Laravel\Cashier\Events\WebhookReceived;
 | (organization_id WHERE idempotency_key LIKE 'signup_grant:%') が経路・キー種別を跨いで
 | org 生涯 1 行に閉じる。
 |
-| **移行期規約 (P6 まで)**: 付与契機は登録時 (CreateNewUser) のまま維持し、同一 tx で
-| マーカーを先取する。free 有効化 (PersonalPlanService::activate) は先取できたときのみ付与する。
+| **P6 以降の付与契機**: free = PersonalPlanService::activate()、
+| paid = customer.subscription.created (SubscriptionService::grantSignupInitialTickets)。
+| 登録 (CreateNewUser) と invoice.paid は付与にも marker にも関与しない。
 */
 
 function grantOnceCustomer(string $stripeId = 'cus_grant_once'): Organization
 {
-    [$organization] = createOrganizationWithOwner();
+    // 未契約 (無料枠の自己申告もまだ) の組織 = activate() の対象になれる状態
+    [$organization] = createOrganizationWithOwner('テスト組織', grandfatherFreePlan: false);
     // stripe_id は Cashier customer column (状態キー)。テストでは明示代入する
     $organization->stripe_id = $stripeId;
     $organization->save();
@@ -35,21 +36,24 @@ function grantOnceCustomer(string $stripeId = 'cus_grant_once'): Organization
 }
 
 /**
- * 初回契約の invoice.paid (billing_reason=subscription_create)。
- * signup grant は plan 解決より前に走るため lines は不要 (月次付与は plan なしで no-op)。
+ * paid サブスク成立 (customer.subscription.created)。
+ * signup grant に必要なのは data.object.id (sub id) と data.object.customer のみ。
  *
  * @return array<string, mixed>
  */
-function grantOnceInvoicePaidPayload(string $eventId = 'evt_grant_once', string $stripeId = 'cus_grant_once'): array
-{
+function grantOnceSubscriptionCreatedPayload(
+    string $eventId = 'evt_grant_once',
+    string $stripeId = 'cus_grant_once',
+    string $stripeSubId = 'sub_grant_once',
+): array {
     return [
         'id' => $eventId,
-        'type' => 'invoice.paid',
+        'type' => 'customer.subscription.created',
         'data' => [
             'object' => [
-                'id' => 'in_grant_once',
+                'id' => $stripeSubId,
                 'customer' => $stripeId,
-                'billing_reason' => 'subscription_create',
+                'status' => 'active',
             ],
         ],
     ];
@@ -62,7 +66,7 @@ function grantOnceSignupEntryCount(Organization $organization): int
         ->count();
 }
 
-test('移行期: 登録時に付与され、同一 tx でマーカーも立つ', function (): void {
+test('登録では付与もマーカーも起きない (付与契機はプラン有効化時)', function (): void {
     $this->post('/register', [
         'name' => '山田 太郎',
         'email' => 'grant-once@example.com',
@@ -73,17 +77,12 @@ test('移行期: 登録時に付与され、同一 tx でマーカーも立つ',
     $user = User::whereBlind('email', 'email_index', 'grant-once@example.com')->firstOrFail();
     $organization = $user->organizations()->where('is_personal', true)->firstOrFail();
 
-    // 付与契機・枚数は不変 (現行挙動)
-    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())
-        ->toBe(config()->integer('billing.signup_grant_tickets'));
-    expect($organization->ticketLedgerEntries()->firstOrFail()->idempotency_key)
-        ->toBe("signup_grant:org:{$organization->id}");
-
-    // 移行期に追加される唯一の効果: マーカーが同時に立つ
-    expect($organization->signup_tickets_granted_at)->not->toBeNull();
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(0);
+    expect(grantOnceSignupEntryCount($organization))->toBe(0);
+    expect($organization->signup_tickets_granted_at)->toBeNull();
 });
 
-test('移行期: 登録済み (マーカー済み) の組織を activate しても再付与されない', function (): void {
+test('登録後に Personal を有効化すると 1 回だけ付与される (再 activate は付与しない)', function (): void {
     $this->post('/register', [
         'name' => '鈴木 花子',
         'email' => 'grant-once-2@example.com',
@@ -93,25 +92,35 @@ test('移行期: 登録済み (マーカー済み) の組織を activate して�
 
     $user = User::whereBlind('email', 'email_index', 'grant-once-2@example.com')->firstOrFail();
     $organization = $user->organizations()->where('is_personal', true)->firstOrFail();
-    $balanceBefore = app(TicketLedgerService::class)->balance($organization)->totalAvailable();
 
-    $result = app(PersonalPlanService::class)->activate($organization, $user);
+    $first = app(PersonalPlanService::class)->activate($organization, $user);
+    expect($first->granted)->toBeTrue();
+    expect($organization->ticketLedgerEntries()->firstOrFail()->idempotency_key)
+        ->toBe("signup_grant:personal:{$organization->id}");
+    $balanceAfterFirst = app(TicketLedgerService::class)->balance($organization)->totalAvailable();
+    expect($balanceAfterFirst)->toBe(config()->integer('billing.signup_grant_tickets'));
 
-    expect($result->granted)->toBeFalse();
-    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe($balanceBefore);
+    $second = app(PersonalPlanService::class)->activate($organization->refresh(), $user);
+
+    expect($second->granted)->toBeFalse();
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe($balanceAfterFirst);
     expect(grantOnceSignupEntryCount($organization))->toBe(1);
 });
 
-test('マーカー済み組織への直接 claim は先取できない (条件付き UPDATE の 0 件)', function (): void {
-    $owner = User::factory()->create();
-    $organization = app(OrganizationProvisioningService::class)->provision($owner, 'マーカー済み組織');
+test('マーカー済み組織は activate でも先取できない (条件付き UPDATE の 0 件)', function (): void {
+    $organization = grantOnceCustomer('cus_marked');
+    $owner = $organization->users()->firstOrFail();
 
-    expect(app(PersonalPlanService::class)->claimSignupGrantMarker($organization))->toBeTrue();
-    // 2 回目は既にマーカーが立っているため先取できない (= 付与しない)
-    expect(app(PersonalPlanService::class)->claimSignupGrantMarker($organization))->toBeFalse();
+    // マーカーだけを先に立てた状態 (= 既に付与契機が走った org 相当)
+    $organization->forceFill(['signup_tickets_granted_at' => CarbonImmutable::now()])->save();
+
+    $result = app(PersonalPlanService::class)->activate($organization->refresh(), $owner);
+
+    expect($result->granted)->toBeFalse();
+    expect(grantOnceSignupEntryCount($organization))->toBe(0);
 });
 
-test('free 有効化済みの組織に paid webhook (subscription_create) が来ても二重付与しない', function (): void {
+test('free 有効化済みの組織に paid webhook (subscription.created) が来ても二重付与しない', function (): void {
     $organization = grantOnceCustomer();
     $owner = $organization->users()->firstOrFail();
 
@@ -119,9 +128,9 @@ test('free 有効化済みの組織に paid webhook (subscription_create) が来
     expect(grantOnceSignupEntryCount($organization))->toBe(1);
     $balanceBefore = app(TicketLedgerService::class)->balance($organization)->totalAvailable();
 
-    event(new WebhookReceived(grantOnceInvoicePaidPayload()));
+    event(new WebhookReceived(grantOnceSubscriptionCreatedPayload()));
 
-    // 部分 UNIQUE index が経路 (signup_grant:personal:% ↔ signup_grant:org:%) を跨いで弾く
+    // marker が主・部分 UNIQUE index (signup_grant:personal:% ↔ signup_grant:sub_%) が保険
     expect(grantOnceSignupEntryCount($organization))->toBe(1);
     expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe($balanceBefore);
 });
@@ -130,12 +139,12 @@ test('paid webhook で付与済みの組織を free 有効化しても二重付�
     $organization = grantOnceCustomer();
     $owner = $organization->users()->firstOrFail();
 
-    event(new WebhookReceived(grantOnceInvoicePaidPayload()));
+    event(new WebhookReceived(grantOnceSubscriptionCreatedPayload()));
     expect(grantOnceSignupEntryCount($organization))->toBe(1);
     $balanceBefore = app(TicketLedgerService::class)->balance($organization)->totalAvailable();
 
-    // paid webhook 経路も移行期規約 (marker 先取できたときのみ付与) に従うため、webhook 時点で
-    // マーカーが立つ。よって後続の activate はマーカーを先取できず granted=false になる
+    // paid webhook 経路も同型の claim パターン (marker 先取できたときのみ付与) に従うため、
+    // webhook 時点でマーカーが立つ。よって後続の activate は先取できず granted=false になる
     // (= 真実源であるマーカーと付与実績が一致する)。
     expect($organization->refresh()->signup_tickets_granted_at)->not->toBeNull();
 
@@ -152,7 +161,7 @@ test('登録経由でない組織の初回契約 (paid webhook) でもマーカ�
     expect($organization->signup_tickets_granted_at)->toBeNull();
     expect(grantOnceSignupEntryCount($organization))->toBe(0);
 
-    event(new WebhookReceived(grantOnceInvoicePaidPayload()));
+    event(new WebhookReceived(grantOnceSubscriptionCreatedPayload()));
 
     // 付与が起きたなら、その事実がマーカーにも反映されていること (marker = 付与の唯一の真実源)
     expect(grantOnceSignupEntryCount($organization))->toBe(1);
@@ -174,7 +183,7 @@ test('paid webhook: 付与が失敗したら marker も rollback される (mark
 
     // webhook 処理は例外を握って failed 記録する契約のため、ここでは例外の有無を問わない
     try {
-        event(new WebhookReceived(grantOnceInvoicePaidPayload()));
+        event(new WebhookReceived(grantOnceSubscriptionCreatedPayload()));
     } catch (Throwable) {
         // 冪等マシンの failed 記録経路。marker の原子性が本テストの関心
     }
@@ -188,7 +197,8 @@ test('backfill migration: 付与履歴のある組織はマーカーが立ち、
     $granted = grantOnceCustomer('cus_backfill_granted');
     $notGranted = Organization::factory()->create();
 
-    // 既存の付与履歴を作る (サービス経由。台帳は append-only)
+    // 既存の付与履歴を作る (サービス経由。台帳は append-only)。
+    // 旧鍵 (signup_grant:org:{id}) = P6 以前に登録経路で付与された移行期データ相当。
     $grantedAt = CarbonImmutable::parse('2026-05-01 09:00:00');
     $this->travelTo($grantedAt);
     app(TicketLedgerService::class)->grantSignupGrant($granted, "signup_grant:org:{$granted->id}");

@@ -35,7 +35,46 @@ class SubscriptionService
 
     public function __construct(
         private readonly StripeGatewayInterface $gateway,
+        private readonly TicketLedgerService $tickets,
     ) {}
+
+    /**
+     * paid サブスク成立 (customer.subscription.created) 時の初回無償チケット付与。
+     *
+     * 付与は「org 単位で生涯 1 回」: 真実源は `organizations.signup_tickets_granted_at` で、
+     * org 行 lock 下の条件付き UPDATE を先取できた経路のみ grant する
+     * (free 有効化経路 PersonalPlanService::activate と共用の真実源・同型の claim パターン)。
+     * 解約→再契約 (別 subscription id) でも marker が立っているため再付与されない。
+     *
+     * claim と grant は同一 transaction に閉じる。grant が失敗したら marker ごと rollback され、
+     * 「marker だけ立って永久に付与されない org」を作らない。
+     *
+     * 冪等キー `signup_grant:{stripeSubId}` は監査上の由来表現であり、二重付与の防波堤は
+     * marker (主) と ticket_ledger_entries の部分 UNIQUE index
+     * (organization_id WHERE idempotency_key LIKE 'signup_grant:%') (保険) の二重防御。
+     *
+     * subscription 行側の marker は持たない (D30): AI-CUE では subscriptions 行の作成は Cashier の
+     * WebhookController が担い、本経路 (WebhookReceived listener) はそれより先に走るため
+     * created 時点で行が存在せず、列を足しても恒久 NULL にしかならない。
+     */
+    public function grantSignupInitialTickets(Organization $org, string $stripeSubId): void
+    {
+        Assert::stringNotEmpty($stripeSubId);
+
+        DB::transaction(function () use ($org, $stripeSubId): void {
+            // org 行 lock で free 有効化経路 (PersonalPlanService::activate) との付与競合を直列化。
+            DB::table('organizations')->where('id', $org->getKey())->lockForUpdate()->get();
+
+            $claimed = DB::table('organizations')
+                ->where('id', $org->getKey())
+                ->whereNull('signup_tickets_granted_at')
+                ->update(['signup_tickets_granted_at' => CarbonImmutable::now()]);
+
+            if ($claimed === 1) {
+                $this->tickets->grantSignupGrant($org, 'signup_grant:'.$stripeSubId);
+            }
+        });
+    }
 
     /**
      * subscription の利用可否 (entitlement) を確定する **唯一の経路**。

@@ -24,11 +24,12 @@ test('登録できる (同意の証跡が記録される)', function (): void {
     expect($user->terms_accepted_at)->not->toBeNull();
     expect($user->consent_version)->toBe(config()->string('legal.consent_version'));
 
-    // LP が約束する「新規登録で無償チケット」を個人組織へ付与する。
-    // 固定値ではなく config 由来値を期待に使う (設定変更後も意味が一貫する)。
+    // P6/F2: 登録では初回無償チケットを付与しない (付与契機はプラン有効化時 =
+    // free は PersonalPlanService::activate / paid は customer.subscription.created)。
+    // marker も立てない (marker だけ立つと永久に付与されない org になる)。
     $personalOrg = $user->organizations()->where('is_personal', true)->firstOrFail();
-    expect(app(TicketLedgerService::class)->balance($personalOrg)->totalAvailable())
-        ->toBe(config()->integer('billing.signup_grant_tickets'));
+    expect(app(TicketLedgerService::class)->balance($personalOrg)->totalAvailable())->toBe(0);
+    expect($personalOrg->signup_tickets_granted_at)->toBeNull();
 
     // [分岐 B 固定] 通常登録では現在組織が個人組織に確定する (招待成立分岐と排他)
     expect($user->current_organization_id)->toBe($personalOrg->id);
