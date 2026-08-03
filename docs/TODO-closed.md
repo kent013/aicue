@@ -94,6 +94,7 @@ Open リストは [TODO.md](TODO.md) を参照。
 | T083 | aigenba整列 T-b: bug-huntハーネス修復。adjudication registry の fail-closed 機能停止を解消 (COND_KEYS に mode/env を governed key として追加・stdin 2-pass 修正・spirux 由来 18 件の棚卸しと運用ガード固定・spec-ledger 新設)。repo 自身の赤 test_seed_registry_is_valid が green に復帰 | test | 2026-08-03 |
 | T084 | aigenba整列 T-c: 汎用gate移植+文書整備。Architecture gate 6 本 (PhpstanWrapper/BughuntOrchestratorGate/BugHuntInventoryCheck/BugHuntSkill/BughuntEnvExampleContract/InertiaRenderPageExists) + JS gate 1 本 (pages-path-case-invariant) を AI-CUE の SoT に合わせて再設計移植、capability-catalog / pnpm-GVS runbook / worktree-isolation-strategy / aigenba-handoff (F-1〜F-5) を新設 | test | 2026-08-03 |
 | T075 | 決済parity P4: ゲート反転+grandfathering移行。BillingAccess の移行 OR 1 行を削除し state()->grantsAccess() 一本へ / RequireActiveSubscription を aigenba verbatim (manageBilling の有無で onboarding.checkout / billing-required へ分岐・JSON 402 維持) / declarer-less grandfathering backfill (SQL 述語でなく deriveEntitlement を PHP 評価。D22 の集合同値を構成的に担保) / free 行の撤去 (D11)。既存 org の締め出しゼロ (backfill が ActiveFreePlan にする)、plan_code 非 null の結論は不変。デプロイ順序は docs/billing-gate-inversion-runbook.md の運用契約 (コードでは強制していない) | backend | 2026-08-03 |
+| T086 | bug-hunt coverage の既存赤を解消。test_correlate の join キー検査が行単位で name != URL を要求しており、単一セグメント route (Route::post('logout',...)->name('logout')) を偽陽性で落としていた(65 行中 1 行)。検出したい failure mode (URL 列を join キーにする) では全行が一致するため集約判定へ変更。負のコントロールで 58/58 一致を検出できることを確認済み | test | 2026-08-03 |
 
 
 ## Obsoleted
