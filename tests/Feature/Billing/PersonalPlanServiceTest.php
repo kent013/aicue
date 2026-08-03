@@ -29,7 +29,7 @@ function personalPlanService(): PersonalPlanService
 
 function personalPlanBalance(Organization $organization): int
 {
-    return app(TicketLedgerService::class)->balance($organization);
+    return app(TicketLedgerService::class)->balance($organization)->totalAvailable();
 }
 
 function signupGrantEntryCount(Organization $organization): int

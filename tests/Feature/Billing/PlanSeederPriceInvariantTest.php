@@ -32,7 +32,20 @@ test('personal プランは Stripe Price を持たない (activate 経由の無�
     expect($personal->prices()->count())->toBe(0);
 });
 
-test('全プランの monthly_ticket_grant が 0 (D28: 月次付与は廃止)', function (): void {
+/*
+ * 本テストは D28 (月次付与の廃止) を pin するだけでなく、**P5 の会計上の既知窓が
+ * 到達不能であることの根拠**でもある。
+ *
+ * TicketLedgerService::nearestMonthlyExpiry() は「生きた有限期限 monthly grant が
+ * 2 本以上あり期限が異なる」場合に消費行の expires_at を実際の供給元と一致させられない。
+ * 現行はこの前提が構造的に成立しない: monthly source の書き手は grantMonthly() のみで、
+ * 定期付与経路 (StripeWebhookProcessor::grantMonthlyTickets) は monthly_ticket_grant <= 0 で
+ * early return するため、残る経路は org 生涯 1 回の signup grant だけになる。
+ *
+ * **ここを 1 以上に変えると窓が開く**。変更する場合は nearestMonthlyExpiry() の契約と
+ * TicketBalanceAccountingTest の「[既知窓]」2 本を必ず見直すこと。
+ */
+test('全プランの monthly_ticket_grant が 0 (D28: 月次付与は廃止。P5 の既知窓の到達不能性もここが担保する)', function (): void {
     expect(Plan::query()->pluck('monthly_ticket_grant', 'code')->all())
         ->toEqual(['personal' => 0, 'starter' => 0, 'standard' => 0]);
 });

@@ -218,7 +218,7 @@ class DashboardService
 
     private function billingSummary(Organization $organization): BillingSummaryData
     {
-        $balance = $this->tickets->balance($organization);
+        $balance = $this->tickets->balance($organization)->totalAvailable();
         $used = $this->storage->occupiedBytes($organization);
         $limit = $this->quota->limits($organization)[QuotaKey::MaxStorageBytes->value] ?? null;
         $percent = ($limit === null || $limit <= 0)

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Services\Billing;
 
+use App\DataTransferObjects\Billing\TicketBalanceDto;
+use App\Enums\Billing\TicketCommitResult;
 use App\Enums\Billing\TicketLedgerKind;
 use App\Enums\Billing\TicketReservationStatus;
 use App\Enums\Billing\TicketSource;
@@ -13,7 +15,10 @@ use App\Models\Billing\TicketReservation;
 use App\Models\Organization;
 use App\Services\Notification\NotificationCenterService;
 use Carbon\CarbonImmutable;
+use Carbon\CarbonInterface;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use LogicException;
 use RuntimeException;
 use Webmozart\Assert\Assert;
@@ -21,13 +26,23 @@ use Webmozart\Assert\Assert;
 /**
  * チケット台帳 (2 フェーズ消費プリミティブ) の唯一の窓口。
  *
- * - 残高 = SUM(未失効 ledger.delta) − SUM(active 予約.amount)。直接デクリメントは書かない
- * - 消費を伴う処理は必ず reserve → (成功) commit / (失敗) release
+ * - 残高は **出所 (source) ごとのバケット会計**。バケットは
+ *   monthly (`source = 'monthly'`) と purchased (`source = 'purchased' OR source IS NULL`) の 2 つ。
+ *   `source IS NULL` 行 (P5 以前の消費行 / 手動 grant / adjustment / release) は
+ *   purchased へ畳む (いずれも無期限で寿命特性が一致。両バケットから落とすと過去消費が
+ *   帳消しになり over-grant する)
+ * - 各バケットは `expires_at IS NULL OR expires_at > now` の行のみ合算する。消費行 (reserve_commit)
+ *   は**消費した grant と同じ expires_at を載せる**ため、失効時に +grant と −consume が同時に
+ *   合算から落ちる (「全額失効」近似が無い)
+ * - 直接デクリメントは書かない。消費を伴う処理は必ず reserve → (成功) commit / (失敗) release
  * - 全操作 transaction + organizations 行ロック (lockForUpdate) で残高判定の
  *   TOCTOU を防止する (並行 reserve のオーバーセル防止)
- * - reserve TTL 超過は billing:release-stale-reservations cron (releaseStale) が解放する
+ * - reserve TTL 超過と失効 monthly hold は billing:release-stale-reservations cron
+ *   (releaseStale) が解放する
  * - webhook 由来の付与 (grantMonthly / grantSignupGrant / grantPurchased) と
  *   返金逆仕訳 (clawback) は idempotency_key UNIQUE の冪等 insert で二重計上を防ぐ
+ * - commit は **commit-wins**: reserve TTL 超過や stale releaser 先着でも生存 hold は課金する
+ *   (二重課金は `consume:{reservationId}` の UNIQUE が防ぐ。課金の真実源は台帳)
  */
 class TicketLedgerService
 {
@@ -217,35 +232,75 @@ class TicketLedgerService
     }
 
     /**
-     * 利用可能残高 (= 未失効の台帳合計 − reserved 予約合計)。
+     * 表示用の per-source 残高。
      *
-     * 期限付き付与は expires_at 到達で合算から外れる。消費 (reserve_commit / clawback) 行は
-     * 期限を持たず残るため、失効は「未消費分も含めた全額失効」として保守的に働く
-     * (失効前に消費した分だけ残高が下振れし得るが、over-grant にはならない)。
-     * バケット (出所×期限) 単位の厳密な失効会計が必要な派生アプリは
-     * source / expires_at 列を使って balance を差し替えること。
+     * monthlyRemaining / purchasedRemaining は出所ごとの生残高を max(…, 0) で clamp した
+     * **表示値** (hold は控除しない)。activeReservations は Reserved 予約の拘束枚数
+     * (SUM(amount)。legacy 行も計上する保守側)。
+     *
+     * **判定 (与信・閾値) には使わないこと** — clamp が返金逆仕訳による負残高を隠すため、
+     * 判定に使うと誤判定する。判定は availableTrueBalance() を使う。
      */
-    public function balance(Organization $organization): int
+    public function balance(Organization $organization): TicketBalanceDto
     {
-        $ledgerTotal = (int) TicketLedgerEntry::query()
-            ->where('organization_id', $organization->getKey())
-            ->where(function ($query): void {
-                $query->whereNull('expires_at')
-                    ->orWhere('expires_at', '>', CarbonImmutable::now());
-            })
-            ->sum('delta');
+        $now = CarbonImmutable::now();
 
-        $reserved = (int) TicketReservation::query()
+        $monthly = $this->sumBalance($organization, TicketSource::Monthly, $now);
+        $purchased = $this->sumBalance($organization, TicketSource::Purchased, $now);
+
+        // 拘束「枚数」。sumActiveHolds と完全に同一条件で集計する (与信の単一真実源)。
+        // reserve TTL 切れでも Reserved は枠を保持し (commit-wins と対称)、失効 monthly hold のみ
+        // 除外する。expires_at>now ガードは付けない (30 分超ジョブ中の同枠二重予約 = オーバーセル防止)
+        $activeReservations = (int) TicketReservation::query()
             ->where('organization_id', $organization->getKey())
             ->where('status', TicketReservationStatus::Reserved)
+            ->whereNot(fn (Builder $query) => $this->expiredMonthlyHoldCondition($query, $now))
             ->sum('amount');
 
-        return $ledgerTotal - $reserved;
+        $nextExpire = TicketLedgerEntry::query()
+            ->where('organization_id', $organization->getKey())
+            ->where('delta', '>', 0)
+            ->whereNotNull('expires_at')
+            ->where('expires_at', '>', $now)
+            ->orderBy('expires_at')
+            ->value('expires_at');
+
+        return new TicketBalanceDto(
+            monthlyRemaining: max($monthly, 0),
+            purchasedRemaining: max($purchased, 0),
+            activeReservations: $activeReservations,
+            nextExpireAt: $nextExpire instanceof CarbonInterface
+                ? CarbonImmutable::instance($nextExpire)->toIso8601String()
+                : null,
+        );
+    }
+
+    /**
+     * 与信・判定用の真値残高。出所ごとに「生残高 (負許容) − active 予約」を max(…, 0) して
+     * から合算するため **戻り値は常に 0 以上**。monthly の余剰が purchased の負 (返金債務) を
+     * 埋めない / その逆もしない真値判定で、reserve() の availableMonthly + availablePurchased と
+     * 同一意味論。
+     *
+     * **この契約 (非負性 + per-source clamp 後の合算) には P8a のオートリチャージが依存する** —
+     * 閾値判定と数量確定 (quantity = max_count − balance) の双方がこの真値を使い、非負性が
+     * quantity <= max_count (同意上限の不変条件) の根拠になる。変更時は P8a 側の契約も見直すこと。
+     *
+     * UI 表示には balance() を使うこと (表示 DTO は clamp 済みで、判定に使うと負残高で誤判定する)。
+     */
+    public function availableTrueBalance(Organization $organization): int
+    {
+        $now = CarbonImmutable::now();
+        [$availableMonthly, $availablePurchased] = $this->availableBySource($organization, $now);
+
+        return $availableMonthly + $availablePurchased;
     }
 
     /**
      * チケットを予約する (2 フェーズ消費の前半)。
-     * 残高不足は InsufficientTicketsException。
+     *
+     * 消費優先順位は monthly (期限付き = 先に失効する) → purchased (無期限)。予約時に
+     * 「どの出所をどの期限で消費するか」を consume_source / consume_expires_at へ固定し、
+     * commit は再探索しない。残高不足は InsufficientTicketsException。
      */
     public function reserve(Organization $organization, int $amount): TicketReservation
     {
@@ -255,24 +310,41 @@ class TicketLedgerService
             // 残高判定の直列化点: organizations 行ロックで並行 reserve の TOCTOU を防ぐ
             $this->lockOrganizationRow($organization);
 
-            $balance = $this->balance($organization);
-            if ($balance < $amount) {
-                throw InsufficientTicketsException::forReserve($amount, $balance);
+            $now = CarbonImmutable::now();
+            [$availableMonthly, $availablePurchased] = $this->availableBySource($organization, $now);
+
+            // 予約行は単一 consume_source を持つ (source ごとの分割配賦をしない) ため、実際に
+            // 賄える容量は **max 側**。sum 形にすると「どちらの source も単独では amount を
+            // 賄えない」ケースで選んだ source を超過消費し、clamp がそれを隠して最大 amount−1 枚の
+            // タダ配りになる (aigenba は amount=1 固定のため sum 形と max 形が同値)
+            $capacity = max($availableMonthly, $availablePurchased);
+            if ($capacity < $amount) {
+                throw InsufficientTicketsException::forReserve($amount, $capacity);
             }
+
+            $consumeSource = $availableMonthly >= $amount ? TicketSource::Monthly : TicketSource::Purchased;
+            // monthly は最短の生きた月次期限を境界にする。AI-CUE には無期限 monthly grant
+            // (BughuntBillingSeeder / monthly_ticket_grant を戻した場合の invoice.paid) が実在するため
+            // null を許容する (null = 無期限 monthly からの消費 = 失効しない hold)
+            $consumeExpiresAt = $consumeSource === TicketSource::Monthly
+                ? $this->nearestMonthlyExpiry($organization, $now)
+                : null;
 
             $reservation = new TicketReservation;
             // 所有権・状態キーは明示代入 (mass assignment しない)
             $reservation->organization()->associate($organization);
             $reservation->amount = $amount;
             $reservation->status = TicketReservationStatus::Reserved;
-            $reservation->expires_at = CarbonImmutable::now()->addMinutes(self::RESERVATION_TTL_MINUTES);
+            $reservation->expires_at = $now->addMinutes(self::RESERVATION_TTL_MINUTES);
+            $reservation->consume_source = $consumeSource;
+            $reservation->consume_expires_at = $consumeExpiresAt;
             $reservation->save();
 
-            // 残高低下の閾値クロス検知。クロス判定を reserve に置く理由: balance() は
-            // 「有効台帳合計 − Reserved 拘束」であり、実効残高が減る唯一の消費イベントは reserve
-            // (Reserved→Committed の commit は拘束 -amount と台帳 -amount が相殺し balance() 不変)。
-            // reserve は org 行ロック下で直列化済みのため、並行 reserve でもクロスを観測するのは
-            // ちょうど 1 回 (release/grant で回復して再度跨げば再通知される = 仕様)
+            // 残高低下の閾値クロス検知。クロス判定を reserve に置く理由: 実効残高が減る唯一の
+            // 消費イベントは reserve (Reserved→Committed の commit は拘束 -amount と台帳 -amount が
+            // 相殺し実効残高は不変)。reserve は org 行ロック下で直列化済みのため、並行 reserve でも
+            // クロスを観測するのはちょうど 1 回 (release/grant で回復して再度跨げば再通知 = 仕様)
+            $balance = $availableMonthly + $availablePurchased; // = availableTrueBalance と同一意味論
             $threshold = config()->integer('billing.ticket_low_balance_threshold');
             $after = $balance - $amount;
             if ($balance >= $threshold && $after < $threshold) {
@@ -285,28 +357,97 @@ class TicketLedgerService
         });
     }
 
-    /** 予約を確定する (台帳に負 delta を記録し、予約を committed にする) */
-    public function commit(TicketReservation $reservation): void
+    /**
+     * 予約を確定する (台帳に負 delta を記録し、予約を committed にする)。
+     *
+     * **commit-wins**: 完了時は必ず課金する。reserve TTL 超過 (30 分超ジョブ) でも、stale releaser
+     * が先着で Released 化していても、生存 hold は消費行を計上して確定する (status は一方向遷移を
+     * 壊さないため Released のまま据え置き、課金は台帳が真実源)。reserve TTL は「reserve 入口の
+     * 二重起動防止」専用と再定義し、二重課金は `consume:{reservationId}` の UNIQUE が防ぐ。
+     *
+     * 例外は失効 monthly hold (consume_expires_at 経過) のみで、これは課金せず Released に倒して
+     * ReleasedExpired を返す (stale job の実行タイミングに依らず決定的 no-charge)。
+     * **戻り値は可観測性のためのもので、呼び出し側は分岐に使わない**。
+     */
+    public function commit(TicketReservation $reservation): TicketCommitResult
     {
-        DB::transaction(function () use ($reservation): void {
-            $locked = $this->lockReservationRow($reservation);
+        $result = DB::transaction(function () use ($reservation): TicketCommitResult {
+            // status guard を撤去 (commit-wins)。行ロックは維持する
+            $locked = $this->lockReservationRow($reservation, requireReserved: false);
+
+            if ($locked->status === TicketReservationStatus::Committed) {
+                return TicketCommitResult::AlreadyCommitted; // 冪等 no-op
+            }
+
             $organization = $locked->organization;
             Assert::isInstanceOf($organization, Organization::class);
             $this->lockOrganizationRow($organization);
 
-            $this->appendEntry(
-                $organization,
-                -$locked->amount,
-                TicketLedgerKind::ReserveCommit,
-                $locked,
-                "予約 {$locked->id} の消費確定",
-            );
+            $now = CarbonImmutable::now();
 
-            $locked->status = TicketReservationStatus::Committed;
-            $locked->save();
+            if ($this->isExpiredMonthlyHold($locked, $now)) {
+                if ($locked->status === TicketReservationStatus::Reserved) {
+                    $locked->status = TicketReservationStatus::Released;
+                    $locked->save();
+                    Log::warning('ticket commit: monthly hold expired at commit, released without charge', [
+                        'reservation_id' => $locked->id,
+                        'organization_id' => $locked->organization_id,
+                        'consume_expires_at' => $locked->consume_expires_at?->toIso8601String(),
+                        'committed_at' => $now->toIso8601String(),
+                    ]);
+                } else {
+                    // stale releaser が先に Released 化済 (= 消費行は元々無い)。可観測性のため記録
+                    Log::info('ticket commit: monthly hold already released as expired, no charge', [
+                        'reservation_id' => $locked->id,
+                        'organization_id' => $locked->organization_id,
+                    ]);
+                }
+
+                return TicketCommitResult::ReleasedExpired; // 台帳行を書かない (決定的 no-charge)
+            }
+
+            $source = $locked->consume_source ?? TicketSource::Monthly; // legacy 既定
+            $expiresAt = $this->consumeExpiresAtFor($locked, $source);
+
+            // 消費行に「消費した grant と同じ expires_at」を載せる。バケット失効時に
+            // +grant と −consume が同時に合算から落ちる (「全額失効」近似の解消)
+            $inserted = $this->insertIdempotent($organization, "consume:{$locked->id}", [
+                'delta' => -$locked->amount,
+                'kind' => TicketLedgerKind::ReserveCommit->value,
+                'source' => $source->value,
+                'reservation_id' => $locked->getKey(),
+                'description' => "予約 {$locked->id} の消費確定",
+                'granted_at' => null,
+                'expires_at' => $expiresAt,
+            ]);
+
+            if ($inserted === 0) {
+                // Committed を返すのに消費行が書かれなかった = 既存 consume 行が存在。冪等としては
+                // 正しい (二重課金しない) が、不整合検知のため可観測化する
+                Log::warning('ticket commit: consume ledger already existed, no consume entry written', [
+                    'reservation_id' => $locked->id,
+                    'organization_id' => $locked->organization_id,
+                ]);
+            }
+
+            if ($locked->status === TicketReservationStatus::Reserved) {
+                $locked->status = TicketReservationStatus::Committed;
+                $locked->save();
+            } else {
+                // stale releaser に先着 Released された生存予約。commit-wins で課金済。
+                // 一方向遷移 (Released→Committed) を壊さず status は据え置き、課金は台帳で確定
+                Log::info('ticket commit: released-then-charged (stale release before completion)', [
+                    'reservation_id' => $locked->id,
+                    'organization_id' => $locked->organization_id,
+                ]);
+            }
+
+            return TicketCommitResult::Committed;
         });
 
         $reservation->refresh();
+
+        return $result;
     }
 
     /** 予約を解放する (残高拘束を解く。台帳には監査用の 0 行を残す) */
@@ -334,16 +475,24 @@ class TicketLedgerService
     }
 
     /**
-     * TTL (expires_at) 超過の reserved 予約を解放する
-     * (routes/console.php の billing:release-stale-reservations が 5 分毎に実行)。
+     * TTL (expires_at) 超過、または失効 monthly hold (consume_expires_at 経過) の reserved 予約を
+     * 解放する (routes/console.php の billing:release-stale-reservations が 5 分毎に実行)。
+     *
+     * 失効 monthly hold を含めるのは、消費元の grant が既に失効している hold を拘束として
+     * 残すと翌期間の残高を侵食するため (commit-wins も当該 hold は no-charge にする)。
      *
      * @return int 解放した予約数
      */
     public function releaseStale(): int
     {
+        $now = CarbonImmutable::now();
+
         $staleIds = TicketReservation::query()
             ->where('status', TicketReservationStatus::Reserved)
-            ->where('expires_at', '<=', CarbonImmutable::now())
+            ->where(function (Builder $query) use ($now): void {
+                $query->where('expires_at', '<=', $now)
+                    ->orWhere(fn (Builder $expired) => $this->expiredMonthlyHoldCondition($expired, $now));
+            })
             ->pluck('id');
 
         $released = 0;
@@ -373,21 +522,183 @@ class TicketLedgerService
             ->firstOrFail();
     }
 
-    /** 予約行をロックして reserved 状態であることを検証する (一方向遷移の強制) */
-    private function lockReservationRow(TicketReservation $reservation): TicketReservation
+    /**
+     * 予約行をロックする。
+     *
+     * $requireReserved = true (既定) は reserved 状態を検証する (release の一方向遷移の強制)。
+     * commit は commit-wins のため false で呼び、status 検査を行わない
+     * (二重課金は consume:{id} の UNIQUE が防ぐ)。
+     */
+    private function lockReservationRow(TicketReservation $reservation, bool $requireReserved = true): TicketReservation
     {
         $locked = TicketReservation::query()
             ->whereKey($reservation->getKey())
             ->lockForUpdate()
             ->firstOrFail();
 
-        if ($locked->status !== TicketReservationStatus::Reserved) {
+        if ($requireReserved && $locked->status !== TicketReservationStatus::Reserved) {
             throw new LogicException(
                 "予約 {$locked->id} は reserved ではありません (status: {$locked->status->value})",
             );
         }
 
         return $locked;
+    }
+
+    /**
+     * 出所ごとの利用可能枚数 (生残高 − active hold を出所ごとに clamp)。
+     *
+     * monthly の余剰が purchased の負 (返金債務) を埋めない / その逆もしない。
+     * reserve() / availableTrueBalance() の単一定義点。
+     *
+     * @return array{int, int} [availableMonthly, availablePurchased]
+     */
+    private function availableBySource(Organization $organization, CarbonImmutable $now): array
+    {
+        $monthly = $this->sumBalance($organization, TicketSource::Monthly, $now);
+        $purchased = $this->sumBalance($organization, TicketSource::Purchased, $now);
+
+        return [
+            max($monthly - $this->sumActiveHolds($organization, TicketSource::Monthly, $now), 0),
+            max($purchased - $this->sumActiveHolds($organization, TicketSource::Purchased, $now), 0),
+        ];
+    }
+
+    /**
+     * 出所バケットの生残高 (未失効行の delta 合計。負を許容)。
+     *
+     * purchased バケットは `source IS NULL` 行を畳み込む。AI-CUE の台帳には出所を持たない行
+     * (P5 以前の消費行 / 手動 grant / adjustment / release) が既存し、台帳は append-only で
+     * backfill できないため。両バケットから落とすと過去消費が帳消しになり over-grant する
+     * (null 行はいずれも無期限で purchased と寿命特性が一致する)。
+     */
+    private function sumBalance(Organization $organization, TicketSource $source, CarbonImmutable $now): int
+    {
+        return (int) TicketLedgerEntry::query()
+            ->where('organization_id', $organization->getKey())
+            ->where(function (Builder $query) use ($source): void {
+                $query->where('source', $source);
+                if ($source === TicketSource::Purchased) {
+                    $query->orWhereNull('source');
+                }
+            })
+            ->where(function (Builder $query) use ($now): void {
+                $query->whereNull('expires_at')->orWhere('expires_at', '>', $now);
+            })
+            ->sum('delta');
+    }
+
+    /**
+     * 当該出所を消費する active hold の拘束枚数。
+     *
+     * reserve TTL 切れ (expires_at <= now) でも Reserved である限り枠を保持する: commit-wins は
+     * TTL 超過でも課金するため、与信側で枠を再開放すると 30 分超ジョブ中に同じ枠が二重予約され
+     * 両方 commit でオーバーセルになる。枠の解放は releaseStale の Released 化に委ねる。
+     * 失効 monthly hold のみ除外する (grant 自体が消えており commit-wins も no-charge のため)。
+     *
+     * legacy 行 (consume_source = null) はどちらの出所にも計上されない (aigenba verbatim)。
+     * その結果 legacy 行が reserve を拘束しない窓が TTL 30 分だけ開くが、balance() の
+     * activeReservations は legacy も計上するため表示は保守側になる。
+     */
+    private function sumActiveHolds(Organization $organization, TicketSource $source, CarbonImmutable $now): int
+    {
+        return (int) TicketReservation::query()
+            ->where('organization_id', $organization->getKey())
+            ->where('status', TicketReservationStatus::Reserved)
+            ->where('consume_source', $source)
+            ->whereNot(fn (Builder $query) => $this->expiredMonthlyHoldCondition($query, $now))
+            ->sum('amount');
+    }
+
+    /**
+     * 「失効 monthly hold」の PHP 述語。query 版 expiredMonthlyHoldCondition と同一定義を共有し、
+     * commit / hold 集計 / releaseStale の判定を揃える。
+     *
+     * legacy 行 (consume_source = null) は先頭で false になる。
+     * consume_source = monthly かつ consume_expires_at = null は「無期限 monthly からの消費」で、
+     * 失効しない (AI-CUE には無期限 monthly grant が実在するため空き枝をここに割り当てる)。
+     */
+    private function isExpiredMonthlyHold(TicketReservation $reservation, CarbonImmutable $now): bool
+    {
+        if ($reservation->consume_source !== TicketSource::Monthly) {
+            return false;
+        }
+        if ($reservation->consume_expires_at === null) {
+            return false;
+        }
+
+        return $reservation->consume_expires_at->lessThanOrEqualTo($now);
+    }
+
+    /**
+     * query 版「失効 monthly hold」条件。isExpiredMonthlyHold と同一定義。
+     *
+     * whereNotNull で確定 boolean にする (NULL 伝播で whereNot が 3 値論理 NULL になり
+     * legacy 行が誤って除外される事故を防ぐ)。
+     *
+     * @param  Builder<TicketReservation>  $query
+     */
+    private function expiredMonthlyHoldCondition(Builder $query, CarbonImmutable $now): void
+    {
+        $query->where('consume_source', TicketSource::Monthly->value)
+            ->whereNotNull('consume_expires_at')
+            ->where('consume_expires_at', '<=', $now);
+    }
+
+    /**
+     * 生きている (未失効の) monthly 付与のうち最短の失効時刻。無期限のみなら null。
+     *
+     * **既知窓 (設計上の残余リスク。変更は設計改訂事項)**: 消費境界を 1 値で固定するため、
+     * 生きた有限期限 monthly grant が 2 本以上あり期限が異なると、消費行の expires_at が実際の
+     * 供給元と一致しない。最短期限の到達時に消費行が grant より多く落ちて over-grant が残り
+     * (最大 `amount − 最短期限バケットの残高` 枚)、最短期限を跨ぐ長時間ジョブの commit は残高が
+     * 潤沢でも ReleasedExpired (no-charge) になる。窓を閉じるには expiry 粒度の分割配賦
+     * (consume_monthly_amount) が要るが、これは v1 の発明として設計で撤回済み。
+     *
+     * **現行は構造的に到達不能**: D28 で全 tier の monthly_ticket_grant = 0
+     * (PlanSeederPriceInvariantTest が pin) のため、有限期限の monthly は org 生涯 1 回の
+     * signup grant のみ。BughuntBillingSeeder の 100 枚は無期限で本メソッドの対象外。
+     * **Filament PlanResource で monthly_ticket_grant を 1 以上へ戻すと窓が開く** ので、
+     * その際は本メソッドの契約から見直すこと。挙動は TicketBalanceAccountingTest の
+     * 「[既知窓]」2 本が機械的に固定している。
+     */
+    private function nearestMonthlyExpiry(Organization $organization, CarbonImmutable $now): ?CarbonImmutable
+    {
+        $value = TicketLedgerEntry::query()
+            ->where('organization_id', $organization->getKey())
+            ->where('source', TicketSource::Monthly)
+            ->where('delta', '>', 0)
+            ->whereNotNull('expires_at')
+            ->where('expires_at', '>', $now)
+            ->orderBy('expires_at')
+            ->value('expires_at');
+
+        return $value instanceof CarbonInterface ? CarbonImmutable::instance($value) : null;
+    }
+
+    /**
+     * 消費行に載せる失効境界。
+     *
+     * monthly は予約時に固定した consume_expires_at をそのまま使う (再探索しない。
+     * null = 無期限 monthly)。legacy 行 (consume_source = null → monthly 既定) は予約 TTL を
+     * 境界として一回限り採用し、null-expiry の不滅ゴーストを作らない。purchased は無期限 (null)。
+     */
+    private function consumeExpiresAtFor(TicketReservation $reservation, TicketSource $source): ?CarbonImmutable
+    {
+        if ($source !== TicketSource::Monthly) {
+            return null;
+        }
+
+        if ($reservation->consume_source === null) {
+            Log::warning('ticket commit: legacy reservation without consume_source', [
+                'reservation_id' => $reservation->id,
+                'organization_id' => $reservation->organization_id,
+            ]);
+
+            return $reservation->expires_at;
+        }
+
+        return $reservation->consume_expires_at;
     }
 
     /**
@@ -400,8 +711,9 @@ class TicketLedgerService
      * insert のみ (update/delete なし) なので append-only 不変条件は保たれる。
      *
      * @param  array<string, mixed>  $attributes  DB 期待型へ正規化済みの列値 (enum は ->value、日時は Carbon 可)
+     * @return int 実際に挿入された行数 (0 = 冪等 skip)
      */
-    private function insertIdempotent(Organization $organization, string $idempotencyKey, array $attributes): void
+    private function insertIdempotent(Organization $organization, string $idempotencyKey, array $attributes): int
     {
         $now = CarbonImmutable::now();
         $row = [
@@ -418,7 +730,7 @@ class TicketLedgerService
             $row,
         );
 
-        DB::table('ticket_ledger_entries')->insertOrIgnore($row);
+        return DB::table('ticket_ledger_entries')->insertOrIgnore($row);
     }
 
     /**

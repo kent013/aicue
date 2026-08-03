@@ -291,7 +291,9 @@ class RenderPipeline
                 $this->jobs->completeRenderIntoLockedManual($lockedManual, $result);
 
                 // ロック 3: reservation/org 行 (TicketLedgerService::commit 内部)。
-                // 非 Reserved は LogicException → terminal tx 全体 rollback → failJob
+                // commit-wins: TTL 超過や stale releaser 先着 (Released) でも生存 hold は課金する
+                // (二重課金は consume:{id} の UNIQUE が防ぐ)。失効 monthly hold のみ no-charge。
+                // 戻り値 (TicketCommitResult) は可観測性のためのもので分岐には使わない
                 $reservation = $locked->ticketReservation;
                 Assert::notNull($reservation, 'startJob が必ず予約を付けている');
                 $this->tickets->commit($reservation);

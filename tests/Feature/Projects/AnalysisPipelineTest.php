@@ -3,12 +3,14 @@
 declare(strict_types=1);
 
 use App\DataTransferObjects\Manual\Analysis\GeneratedScenarioData;
+use App\Enums\Billing\TicketLedgerKind;
 use App\Enums\Billing\TicketReservationStatus;
 use App\Enums\Manual\CutType;
 use App\Enums\Manual\JobStatus;
 use App\Enums\Manual\ShotType;
 use App\Enums\Manual\VideoManualStatus;
 use App\Models\AnalysisJob;
+use App\Models\Billing\TicketLedgerEntry;
 use App\Models\Billing\TicketReservation;
 use App\Models\Cut;
 use App\Models\Organization;
@@ -163,7 +165,7 @@ test('成功パス: cuts materialize / ready / version+1 / succeeded / committed
     $reservation = $job->ticketReservation;
     expect($reservation)->not->toBeNull();
     expect($reservation->status)->toBe(TicketReservationStatus::Committed);
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(0);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(0);
     expect(TicketReservation::query()->count())->toBe(1);
 
     // 監査スナップショット
@@ -322,7 +324,10 @@ test('インターリーブ (b): pipeline 先勝ち (succeeded) 後の failJob �
     expect($job->ticketReservation?->status)->toBe(TicketReservationStatus::Committed);
 });
 
-test('インターリーブ (d): commit は Reserved のみ → terminal tx 全体 rollback (cuts 不変)', function (): void {
+test('インターリーブ (d): stale releaser 先着でも finalize は完走し課金される (commit-wins)', function (): void {
+    // P5 commit-wins: 守るべき不変条件は「succeeded ∧ released の非共存」ではなく
+    // 「succeeded ∧ 無課金 (= 成果物を渡してタダ乗り) の非共存」。予約 status が Released でも
+    // 台帳に消費行が立てば課金は成立する (課金の真実源は台帳。status は一方向遷移を壊さない)
     [$organization, , , $manual, , $job] = pipelineContext();
     $reservation = app(TicketLedgerService::class)->reserve($organization, 1);
     $job->ticketReservation()->associate($reservation);
@@ -333,16 +338,18 @@ test('インターリーブ (d): commit は Reserved のみ → terminal tx 全�
 
     $generated = GeneratedScenarioData::fromLlmText(scenarioFixture());
     $finalize = new ReflectionMethod(AnalysisPipeline::class, 'finalize');
-    expect(fn () => $finalize->invoke(app(AnalysisPipeline::class), $job, $generated))
-        ->toThrow(LogicException::class);
+    $finalize->invoke(app(AnalysisPipeline::class), $job, $generated);
 
-    // terminal tx 全体が rollback: materialize も succeeded も残らない
     $job->refresh();
-    expect($job->status)->toBe(JobStatus::Running);
-    expect($manual->refresh()->cuts()->count())->toBe(0);
-    expect($manual->status)->toBe(VideoManualStatus::Analyzing);
-    // 非共存: 課金 (committed) は発生していない
-    expect(TicketReservation::query()->where('status', TicketReservationStatus::Committed)->count())->toBe(0);
+    expect($job->status)->toBe(JobStatus::Succeeded);
+    expect($manual->refresh()->cuts()->count())->toBeGreaterThan(0);
+    // 非共存: succeeded なのに無課金、にはならない (消費行が立っている)
+    expect(TicketLedgerEntry::query()
+        ->where('reservation_id', $reservation->getKey())
+        ->where('kind', TicketLedgerKind::ReserveCommit)
+        ->count())->toBe(1);
+    // 一方向遷移は壊さない (Released → Committed へは戻さない)
+    expect($reservation->refresh()->status)->toBe(TicketReservationStatus::Released);
 });
 
 test('materialize は analyzing 以外で呼ぶと LogicException (defensive 二層目)', function (): void {

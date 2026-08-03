@@ -89,7 +89,7 @@ test('kind=render の回収は manual を rendering→ready へ復帰・予約 R
     expect($job->refresh()->status)->toBe(JobStatus::Failed);
     expect($manual->refresh()->status)->toBe(VideoManualStatus::Ready);
     expect($reservation->refresh()->status)->toBe(TicketReservationStatus::Released);
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(3); // 拘束解放
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(3); // 拘束解放
 });
 
 test('kind=preview の回収は manual status を触らない', function (): void {

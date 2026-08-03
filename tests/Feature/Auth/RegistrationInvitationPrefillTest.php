@@ -175,7 +175,7 @@ test('GET で active prefill 後 POST 前に revoke されても登録は成立�
 
     // 個人組織が生成され signup grant 済み
     $personalOrg = $user->organizations()->where('is_personal', true)->firstOrFail();
-    expect(app(TicketLedgerService::class)->balance($personalOrg))
+    expect(app(TicketLedgerService::class)->balance($personalOrg)->totalAvailable())
         ->toBe(config()->integer('billing.signup_grant_tickets'));
 
     // current_organization_id は個人組織側 (招待組織側でない)

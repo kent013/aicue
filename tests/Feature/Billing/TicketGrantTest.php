@@ -25,7 +25,7 @@ test('grantMonthly は同一 idempotency_key の再実行で二重付与しな�
     grantService()->grantMonthly($organization, 100, null, 'monthly:in_1', '月次付与');
     grantService()->grantMonthly($organization, 100, null, 'monthly:in_1', '月次付与');
 
-    expect(grantService()->balance($organization))->toBe(100);
+    expect(grantService()->balance($organization)->totalAvailable())->toBe(100);
     expect($organization->ticketLedgerEntries()->count())->toBe(1);
     $entry = $organization->ticketLedgerEntries()->firstOrFail();
     expect($entry->kind)->toBe(TicketLedgerKind::Grant);
@@ -40,7 +40,7 @@ test('idempotency_key が異なれば別付与として計上される', functio
     grantService()->grantMonthly($organization, 100, null, 'monthly:in_1', '月次付与');
     grantService()->grantMonthly($organization, 100, null, 'monthly:in_2', '月次付与');
 
-    expect(grantService()->balance($organization))->toBe(200);
+    expect(grantService()->balance($organization)->totalAvailable())->toBe(200);
 });
 
 test('期限付き付与は expires_at 到達で残高から外れる', function (): void {
@@ -55,12 +55,12 @@ test('期限付き付与は expires_at 到達で残高から外れる', function
     );
     grantService()->grantMonthly($organization, 5, null, 'monthly:in_perm', '無期限付与');
 
-    expect(grantService()->balance($organization))->toBe(15);
+    expect(grantService()->balance($organization)->totalAvailable())->toBe(15);
 
     $this->travel(31)->days();
 
     // 期限付き 10 枚だけが失効し、無期限 5 枚が残る
-    expect(grantService()->balance($organization))->toBe(5);
+    expect(grantService()->balance($organization)->totalAvailable())->toBe(5);
 });
 
 test('期限内の付与は reserve → commit で消費できる', function (): void {
@@ -76,7 +76,7 @@ test('期限内の付与は reserve → commit で消費できる', function ():
     $reservation = grantService()->reserve($organization, 3);
     grantService()->commit($reservation);
 
-    expect(grantService()->balance($organization))->toBe(7);
+    expect(grantService()->balance($organization)->totalAvailable())->toBe(7);
 });
 
 test('grantSignupGrant は config の枚数・期限で org スコープキーで冪等付与する', function (): void {
@@ -88,7 +88,7 @@ test('grantSignupGrant は config の枚数・期限で org スコープキー�
     grantService()->grantSignupGrant($organization, "signup_grant:org:{$organization->id}");
     grantService()->grantSignupGrant($organization, "signup_grant:org:{$organization->id}");
 
-    expect(grantService()->balance($organization))->toBe(10);
+    expect(grantService()->balance($organization)->totalAvailable())->toBe(10);
     expect($organization->ticketLedgerEntries()->count())->toBe(1);
     $entry = $organization->ticketLedgerEntries()->firstOrFail();
     expect($entry->source)->toBe(TicketSource::Monthly);
@@ -98,7 +98,7 @@ test('grantSignupGrant は config の枚数・期限で org スコープキー�
 
     // 期限到達で失効する
     $this->travel(31)->days();
-    expect(grantService()->balance($organization))->toBe(0);
+    expect(grantService()->balance($organization)->totalAvailable())->toBe(0);
 });
 
 test('grantSignupGrant は config が不正 (0 以下) なら停止する', function (): void {
@@ -133,7 +133,7 @@ test('1 組織に signup_grant は異なるキーでも高々 1 回しか計上�
 
     expect($organization->ticketLedgerEntries()
         ->where('idempotency_key', 'like', 'signup_grant:%')->count())->toBe(1);
-    expect($svc->balance($organization))->toBe(config('billing.signup_grant_tickets'));
+    expect($svc->balance($organization)->totalAvailable())->toBe(config('billing.signup_grant_tickets'));
 });
 
 test('grantPurchased は checkout session id で冪等付与し、返金正本キーを記録する', function (): void {
@@ -142,7 +142,7 @@ test('grantPurchased は checkout session id で冪等付与し、返金正本�
     grantService()->grantPurchased($organization, 10, 'cs_1', 'pi_1', 5000);
     grantService()->grantPurchased($organization, 10, 'cs_1', 'pi_1', 5000); // 再送
 
-    expect(grantService()->balance($organization))->toBe(10);
+    expect(grantService()->balance($organization)->totalAvailable())->toBe(10);
     expect($organization->ticketLedgerEntries()->count())->toBe(1);
     $entry = $organization->ticketLedgerEntries()->firstOrFail();
     expect($entry->source)->toBe(TicketSource::Purchased);

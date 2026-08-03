@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\DataTransferObjects\Manual\Render\ComposedLocalVideo;
 use App\DataTransferObjects\Manual\Render\RenderClipSource;
 use App\DataTransferObjects\Manual\Render\RenderManifest;
+use App\Enums\Billing\TicketLedgerKind;
 use App\Enums\Billing\TicketReservationStatus;
 use App\Enums\Manual\JobStatus;
 use App\Enums\Manual\MaterialType;
@@ -13,6 +14,7 @@ use App\Enums\Manual\RenderKind;
 use App\Enums\Manual\VideoManualStatus;
 use App\Exceptions\Manual\RenderCompositionException;
 use App\Jobs\Manual\DeleteRenderOutputsJob;
+use App\Models\Billing\TicketLedgerEntry;
 use App\Models\Billing\TicketReservation;
 use App\Models\Cut;
 use App\Models\Organization;
@@ -33,7 +35,7 @@ use Illuminate\Support\Facades\Storage;
  * レンダパイプライン (RenderPipeline::run の直接呼び出し。§10.8-1/-6/-8 / 概念設計 §5):
  * - 成功パス: complete + commit + succeeded の原子化 (terminal tx)
  * - version 固定 (preview トリガー後の編集は scenario_version_changed で fail)
- * - チケット 2 フェーズ (再利用 / TTL 付け替え / 失敗 release / commit は Reserved のみ /
+ * - チケット 2 フェーズ (再利用 / TTL 付け替え / 失敗 release / commit-wins /
  *   preview は台帳・予約が一切動かない)
  * - stale 先勝ち・失敗後始末 (S3 に出力を残さない)・世代交代の削除 job dispatch
  */
@@ -140,7 +142,7 @@ test('成功パス: ready→rendering→published / cut_length_ms・total_length
     $reservation = $job->ticketReservation;
     expect($reservation)->not->toBeNull();
     expect($reservation?->status)->toBe(TicketReservationStatus::Committed);
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(0);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(0);
 
     // マニフェスト: 採用テイクの S3 素材がローカルへ供給されている
     expect($fake->lastManifest?->kind)->toBe(RenderKind::Render);
@@ -161,7 +163,7 @@ test('preview 成功: manual status 不変・台帳/予約とも一切動かな�
     expect(Storage::disk('s3')->exists((string) $previewJob->output_path))->toBeTrue();
     expect($manual->refresh()->status)->toBe(VideoManualStatus::Ready);
     expect(TicketReservation::query()->count())->toBe(0);
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(0);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(0);
     expect($fake->lastManifest?->kind)->toBe(RenderKind::Preview);
 });
 
@@ -329,7 +331,10 @@ test('stale 先勝ち: compose 中に failJob された pipeline は succeeded/c
     expect(Storage::disk('s3')->exists($expectedKey))->toBeFalse();
 });
 
-test('commit は Reserved のみ: finalize 直前に released なら rollback + failed (完成扱いにしない)', function (): void {
+test('finalize 直前に released でも commit-wins で完走し課金される (無課金 succeeded を作らない)', function (): void {
+    // P5 commit-wins: 守る不変条件は「succeeded ∧ released の非共存」ではなく
+    // 「succeeded ∧ 無課金 (= 成果物を渡してタダ乗り) の非共存」。予約 status が Released でも
+    // 台帳に消費行が立てば課金は成立する (課金の真実源は台帳。status は一方向遷移を壊さない)
     [, , , $manual, $cut, $job, $fake] = renderPipelineContext();
     $fake->duringCompose = function () use ($job): void {
         // finalize 前に予約が releaseStale cron で解放される競合を細工
@@ -342,17 +347,19 @@ test('commit は Reserved のみ: finalize 直前に released なら rollback + 
     app(RenderPipeline::class)->run($job->id);
 
     $job->refresh();
-    expect($job->status)->toBe(JobStatus::Failed);
-    // terminal tx 全体 rollback: manual は published にならず ready へ復帰 (failJob 経由)
+    expect($job->status)->toBe(JobStatus::Succeeded);
     $manual->refresh();
-    expect($manual->status)->toBe(VideoManualStatus::Ready);
-    expect($manual->total_length_ms)->toBeNull();
-    expect($cut->refresh()->cut_length_ms)->toBeNull();
-    // 非共存: 課金 (committed) は発生していない
-    expect(TicketReservation::query()->where('status', TicketReservationStatus::Committed)->count())->toBe(0);
-    // アップロード済み出力は後始末で削除される
-    $expectedKey = "projects/{$manual->project_id}/manuals/{$manual->id}/renders/v2-{$job->id}.mp4";
-    expect(Storage::disk('s3')->exists($expectedKey))->toBeFalse();
+    expect($manual->status)->toBe(VideoManualStatus::Published);
+    expect($cut->refresh()->cut_length_ms)->not->toBeNull();
+    // 非共存: succeeded なのに無課金、にはならない (消費行が立っている)
+    $reservation = $job->ticketReservation;
+    expect($reservation)->not->toBeNull();
+    expect(TicketLedgerEntry::query()
+        ->where('reservation_id', $reservation?->getKey())
+        ->where('kind', TicketLedgerKind::ReserveCommit)
+        ->count())->toBe(1);
+    // 一方向遷移は壊さない (Released → Committed へは戻さない)
+    expect($reservation?->refresh()->status)->toBe(TicketReservationStatus::Released);
 });
 
 test('世代交代: 再レンダ成功で旧 job id の DeleteRenderOutputsJob が dispatch される', function (): void {

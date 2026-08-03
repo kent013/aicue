@@ -104,7 +104,7 @@ test('同一 event_id の invoice.paid を 2 回発火しても付与は 1 回�
     event(new WebhookReceived(invoicePaidPayload()));
 
     // standard プランの monthly_ticket_grant (100) が 1 回だけ付与される
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(100);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(100);
     expect($organization->ticketLedgerEntries()->count())->toBe(1);
     expect(StripeWebhookEvent::query()->count())->toBe(1);
     $record = StripeWebhookEvent::query()->firstOrFail();
@@ -123,7 +123,7 @@ test('event_id が異なれば別イベントとして処理される (invoice i
     event(new WebhookReceived($first));
     event(new WebhookReceived($second));
 
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(200);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(200);
     expect(StripeWebhookEvent::query()->count())->toBe(2);
 });
 
@@ -135,7 +135,7 @@ test('event_id が異なっても同一 invoice の再通知は idempotency_key 
     event(new WebhookReceived(invoicePaidPayload('evt_dup_a')));
     event(new WebhookReceived(invoicePaidPayload('evt_dup_b')));
 
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(100);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(100);
     expect($organization->ticketLedgerEntries()->count())->toBe(1);
     expect(StripeWebhookEvent::query()->count())->toBe(2);
 });
@@ -150,7 +150,7 @@ test('billing_reason=subscription_create の invoice.paid は月次付与に加�
     event(new WebhookReceived($payload));
 
     // 月次 100 + signup grant (config billing.signup_grant_tickets = 10)
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(110);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(110);
     // 冪等キーは org スコープ (呼び出し側が渡す)。subscription id には依存しない。
     $signup = $organization->ticketLedgerEntries()
         ->where('idempotency_key', "signup_grant:org:{$organization->id}")
@@ -163,7 +163,7 @@ test('billing_reason=subscription_create の invoice.paid は月次付与に加�
     $retry['id'] = 'evt_signup_2';
     event(new WebhookReceived($retry));
 
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(110);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(110);
 });
 
 test('subscription id が無くても org スコープキーで signup grant を付与する', function (): void {
@@ -178,7 +178,7 @@ test('subscription id が無くても org スコープキーで signup grant を
     event(new WebhookReceived($payload));
 
     // 月次 100 + signup grant 10
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(110);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(110);
     expect(
         $organization->ticketLedgerEntries()
             ->where('idempotency_key', 'like', 'signup_grant:%')
@@ -198,7 +198,7 @@ test('seed 既定 (D28: monthly_ticket_grant=0) では invoice.paid で月次付
     expect($organization->ticketLedgerEntries()
         ->where('idempotency_key', 'like', 'monthly:%')->count())->toBe(0);
     // signup grant のみが計上される (残高は config の付与枚数と一致)
-    expect(app(TicketLedgerService::class)->balance($organization))
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())
         ->toBe(config('billing.signup_grant_tickets'));
     expect($organization->ticketLedgerEntries()->count())->toBe(1);
 });
@@ -246,7 +246,7 @@ test('billing_reason がサブスク以外の invoice.paid では付与しない
 
     event(new WebhookReceived($payload));
 
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(0);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(0);
     // 受理自体は冪等記録される (processed)
     $record = StripeWebhookEvent::query()->firstOrFail();
     expect($record->status)->toBe(WebhookEventStatus::Processed);
@@ -260,7 +260,7 @@ test('未知の customer のイベントは受理のみで何も変更しない'
 
     event(new WebhookReceived($payload));
 
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(0);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(0);
     expect(StripeWebhookEvent::query()->count())->toBe(1);
 });
 
@@ -315,7 +315,7 @@ test('failed の再送で attempts が増え、成功すれば failure_reason �
     expect($record->status)->toBe(WebhookEventStatus::Processed);
     expect($record->attempts)->toBe(3);
     expect($record->failure_reason)->toBeNull();
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(100);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(100);
 });
 
 test('attempts が上限到達済みの failed は terminal-ack (処理せず例外も投げない)', function (): void {
@@ -329,5 +329,5 @@ test('attempts が上限到達済みの failed は terminal-ack (処理せず例
     $record = StripeWebhookEvent::query()->where('event_id', 'evt_terminal')->firstOrFail();
     expect($record->status)->toBe(WebhookEventStatus::Failed); // failed のまま (運用調査用に保持)
     expect($record->attempts)->toBe(StripeWebhookProcessor::MAX_PROCESSING_ATTEMPTS);
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(0); // 付与されない
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(0); // 付与されない
 });

@@ -251,7 +251,7 @@ test('preview: ready で 201 (manual status 不変・チケット非消費・ver
     expect($manual->refresh()->status)->toBe(VideoManualStatus::Ready);
     // チケット非消費: 台帳・予約とも無変化 (残高 0 でも通る)
     expect(TicketReservation::query()->count())->toBe(0);
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(0);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(0);
     Queue::assertPushed(RunManualRender::class, fn (RunManualRender $pushed): bool => $pushed->renderJobId === $job->id);
 });
 

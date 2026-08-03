@@ -384,7 +384,7 @@ test('招待経由登録では個人組織を作らず signup grant を付与し
     // 個人組織は生成されない
     expect($user->organizations()->where('is_personal', true)->exists())->toBeFalse();
     // 招待組織の残高に signup grant は乗らない (owner の付与ぶんも招待組織には走っていない)
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(0);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(0);
     expect(
         $organization->ticketLedgerEntries()
             ->where('idempotency_key', 'like', 'signup_grant:%')
