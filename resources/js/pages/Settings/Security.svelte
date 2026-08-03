@@ -1,11 +1,13 @@
 <script lang="ts">
     import { tick } from "svelte";
     import { page, router } from "@inertiajs/svelte";
+    import Alert from "@/components/atoms/Alert.svelte";
     import Badge from "@/components/atoms/Badge.svelte";
     import Button from "@/components/atoms/Button.svelte";
     import Card from "@/components/atoms/Card.svelte";
     import Input from "@/components/atoms/Input.svelte";
     import TextLink from "@/components/atoms/TextLink.svelte";
+    import CodeSnippet from "@/components/molecules/CodeSnippet.svelte";
     import FormField from "@/components/molecules/FormField.svelte";
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
     import RecentAuthModal from "@/components/organisms/RecentAuthModal.svelte";
@@ -77,7 +79,15 @@
     /** QR 確認待ち (有効化開始済みだが未確認) */
     let confirming = $state(false);
     let enabling = $state(false);
+    /**
+     * enrollment 素材。QR と手動セットアップキーは独立に失敗しうる
+     * (片方でも enrollment は続行できる = カメラ不可端末 / QR 非対応アプリ / 支援技術利用者を詰ませない)。
+     */
     let qrSvg = $state<string | null>(null);
+    let setupKey = $state<string | null>(null);
+    /** 両方の取得に失敗した = enrollment を続行できない (再試行導線を出す) */
+    let enrollmentAssetsFailed = $state(false);
+    let loadingEnrollmentAssets = $state(false);
     let recoveryCodes = $state<string[]>([]);
     let loadingRecoveryCodes = $state(false);
     /** 新コード一覧へのフォーカス移動用 (再生成成功時に再保管を促す) */
@@ -106,13 +116,71 @@
         return (await response.json()) as T;
     }
 
-    async function loadQrCode(): Promise<void> {
+    /**
+     * JSON レスポンスから非空文字列の field を取り出す。
+     * fetchJson の generic は型 assertion にすぎないため shape は信用せず narrowing する
+     * (不正 shape は通信失敗と同じ「その手段が使えない」に畳む)。
+     */
+    function readStringField(payload: unknown, key: string): string | null {
+        if (typeof payload !== "object" || payload === null) return null;
+        const value = (payload as Record<string, unknown>)[key];
+        return typeof value === "string" && value.trim() !== "" ? value : null;
+    }
+
+    /** 単一 endpoint から文字列 field を取得する (通信失敗 / HTTP 失敗 / 不正 shape はすべて null)。
+        表示文言も再試行導線も同一のため種別は区別しない。秘密が絡む経路なので console にも出さない。 */
+    async function fetchStringField(url: string, key: string): Promise<string | null> {
         try {
-            const data = await fetchJson<{ svg: string }>("/user/two-factor-qr-code");
-            qrSvg = data.svg;
+            return readStringField(await fetchJson<unknown>(url), key);
         } catch {
-            addToast("error", "QR コードの取得に失敗しました。再読み込みしてください。");
+            return null;
         }
+    }
+
+    /**
+     * 取得世代。**後着優先**の判定に使う。
+     * 破棄 (reset) と取得開始で進み、解決時に世代が変わっていれば結果を捨てる。
+     * これが無いと (a) confirm/disable 成功で消したはずの secret が、遅れて解決した
+     * fetch で再格納される (= サーバの新しい secret とは違うキーを認証アプリに登録させてしまう)
+     * (b) 古い run が loading を握り続けて再有効化が始まらない、の 2 つの競合が起きる。
+     */
+    let enrollmentGeneration = 0;
+
+    /**
+     * enrollment 素材 (QR + 手動セットアップキー) を取得する。
+     * 2 つは独立に扱い、片方が取れれば enrollment を続行できる。
+     * 両方失敗したときだけ「取得失敗 (再試行可)」として提示する。
+     */
+    async function loadEnrollmentAssets(): Promise<void> {
+        const generation = ++enrollmentGeneration;
+        loadingEnrollmentAssets = true;
+
+        const [qr, secret] = await Promise.all([
+            fetchStringField("/user/two-factor-qr-code", "svg"),
+            fetchStringField("/user/two-factor-secret-key", "secretKey"),
+        ]);
+
+        // 世代が進んでいる = 破棄済み or 新しい取得が走っている。結果も loading も触らない
+        // (finally で戻すと古い run が新しい run の loading を消してしまう)
+        if (generation !== enrollmentGeneration) return;
+
+        qrSvg = qr;
+        setupKey = secret;
+        enrollmentAssetsFailed = qr === null && secret === null;
+        loadingEnrollmentAssets = false;
+    }
+
+    /**
+     * enrollment 素材を画面から破棄する (開始時 / confirm 成功時 / 無効化成功時に呼ぶ)。
+     * 世代を進めることで、進行中の取得結果が後から再格納されるのを防ぐ。
+     * TOTP secret の残置時間を enrollment 中に限定する目的も兼ねる。
+     */
+    function resetEnrollmentAssets(): void {
+        enrollmentGeneration += 1;
+        qrSvg = null;
+        setupKey = null;
+        enrollmentAssetsFailed = false;
+        loadingEnrollmentAssets = false;
     }
 
     /**
@@ -201,6 +269,8 @@
     }
 
     function enableTwoFactor(): void {
+        // 再試行時に前回の素材・エラーを持ち越さない
+        resetEnrollmentAssets();
         router.post(
             "/user/two-factor-authentication",
             {},
@@ -211,7 +281,7 @@
                 },
                 onSuccess: () => {
                     confirming = true;
-                    void loadQrCode();
+                    void loadEnrollmentAssets();
                 },
                 onFinish: () => {
                     enabling = false;
@@ -228,7 +298,7 @@
             errorBag: CONFIRM_TWO_FACTOR_ERROR_BAG,
             onSuccess: () => {
                 confirming = false;
-                qrSvg = null;
+                resetEnrollmentAssets();
                 confirmForm.reset();
                 showRecoveryCodes();
             },
@@ -249,7 +319,7 @@
                 onSuccess: () => {
                     disableDialogOpen = false;
                     confirming = false;
-                    qrSvg = null;
+                    resetEnrollmentAssets();
                     recoveryCodes = [];
                 },
                 onFinish: () => {
@@ -353,14 +423,66 @@
                 {:else if confirming}
                     <div class="mt-4 flex flex-col gap-4">
                         <p class="text-body text-text-secondary">
-                            認証アプリで以下の QR コードを読み取り、表示されたコードを入力して設定を完了してください。
+                            認証アプリで QR コードを読み取るか、セットアップキーを手動入力し、表示されたコードを入力して設定を完了してください。
                         </p>
-                        {#if qrSvg}
-                            <!-- QR はサーバ提供の SVG をそのまま描画する -->
-                            <div class="self-start rounded-md border border-border bg-surface p-4">
-                                <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-                                {@html qrSvg}
-                            </div>
+                        {#if loadingEnrollmentAssets}
+                            <!-- 取得中に「表示できませんでした」を先出ししない (失敗前に失敗文言を出さない) -->
+                            <p
+                                class="text-caption text-text-secondary"
+                                aria-busy="true"
+                                data-testid="enrollment-assets-loading"
+                            >
+                                認証アプリ設定用の情報を読み込んでいます…
+                            </p>
+                        {:else if enrollmentAssetsFailed}
+                            <Alert
+                                type="danger"
+                                title="設定情報を取得できませんでした"
+                                testId="enrollment-assets-error"
+                            >
+                                QR コードとセットアップキーのどちらも取得できませんでした。
+                                {#snippet action()}
+                                    <Button
+                                        variant="ghost"
+                                        onclick={() => void loadEnrollmentAssets()}
+                                        loading={loadingEnrollmentAssets}
+                                        testId="retry-enrollment-assets-button"
+                                    >
+                                        再試行
+                                    </Button>
+                                {/snippet}
+                            </Alert>
+                        {:else}
+                            {#if qrSvg}
+                                <!-- QR はサーバ提供の SVG をそのまま描画する。svg 文字列に属性を注入せず、
+                                     wrapper を role="img" にしてアクセシブルネームを与える (H14) -->
+                                <div
+                                    role="img"
+                                    aria-label="2 要素認証の設定用 QR コード"
+                                    class="self-start rounded-md border border-border bg-surface p-4"
+                                    data-testid="two-factor-qr"
+                                >
+                                    <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+                                    {@html qrSvg}
+                                </div>
+                            {:else}
+                                <Alert type="warning" testId="qr-unavailable">
+                                    QR コードを表示できませんでした。下のセットアップキーを認証アプリに手動入力してください。
+                                </Alert>
+                            {/if}
+
+                            {#if setupKey}
+                                <div class="flex flex-col gap-2">
+                                    <p class="text-caption text-text-secondary">
+                                        QR コードを読み取れない場合は、次のセットアップキーを認証アプリに手動入力してください。
+                                    </p>
+                                    <CodeSnippet code={setupKey} testId="two-factor-setup-key" />
+                                </div>
+                            {:else}
+                                <Alert type="warning" testId="setup-key-unavailable">
+                                    セットアップキーを表示できませんでした。上の QR コードを認証アプリで読み取ってください。
+                                </Alert>
+                            {/if}
                         {/if}
                         <form novalidate onsubmit={confirmTwoFactor} class="flex flex-col gap-4">
                             <FormField

@@ -1,13 +1,20 @@
 <script lang="ts">
     import type { Snippet } from "svelte";
+    import { page } from "@inertiajs/svelte";
     import { Menu, X } from "@lucide/svelte";
     import Button from "@/components/atoms/Button.svelte";
+    import ToastContainer from "@/components/organisms/ToastContainer.svelte";
+    import { consumeFlash, type FlashPayload } from "@/lib/stores/flash-to-toast";
+    import { clearToasts } from "@/lib/stores/toast";
 
     /**
      * 未認証公開ページ (LP / Pricing / Contact / Legal) 用レイアウト。
      * ヘッダーのナビとフッターのリンク群は snippet で差し込む。
      * nav は「単純なリンク群 (<a>)」を想定する契約: 広幅ナビと狭幅パネルで二重に
      * @render するため、状態を持つ要素・複雑な構造を snippet に入れないこと。
+     *
+     * Laravel flash は consumeFlash で toast に変換する (visitKey で de-dup)。
+     * これが無いと settings.account.destroy の成功メッセージが誰にも消費されずに捨てられる。
      */
     interface Props {
         appName: string;
@@ -17,6 +24,17 @@
     }
 
     let { appName, children, nav, footerLinks }: Props = $props();
+
+    // 消去境界 (DESIGN.md §Toast): layout の初期化時に既存 toast を破棄してから
+    // 当該 visit の flash を消費する。初期化時の 1 回のみ ($effect に載せると
+    // partial reload 等の再評価で client 側 toast まで巻き込む)。
+    // 未認証面では加えて「認証済み文脈の toast (氏名・組織名を含みうる) を持ち越さない」
+    // 役割も持つ。境界は操作 (ログアウト) ではなく着地に置く (経路の列挙漏れを構造的に防ぐ)。
+    clearToasts();
+
+    $effect(() => {
+        consumeFlash(page.props.flash as FlashPayload | undefined);
+    });
 
     // 狭幅 (sm 未満) のハンバーガー開閉。sm 以上は広幅ナビ表示のため未使用。
     let menuOpen = $state(false);
@@ -53,6 +71,8 @@
         if (target instanceof Element && target.closest("#guest-nav-panel a")) closeMenu();
     }
 </script>
+
+<ToastContainer />
 
 <svelte:window onkeydown={handleKeydown} onclick={handleWindowClick} />
 

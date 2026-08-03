@@ -26,6 +26,7 @@
     import SidebarUserMenu from "@/components/templates/_helpers/SidebarUserMenu.svelte";
     import type { SharedProps } from "@/lib/shared-props";
     import { consumeFlash } from "@/lib/stores/flash-to-toast";
+    import { clearToasts } from "@/lib/stores/toast";
 
     /**
      * 認証済み画面用レイアウト (左サイドバー型。参照アプリ aigenba 準拠)。
@@ -43,6 +44,10 @@
 
     // shared props は backend (HandleInertiaRequests) が真実。lib/shared-props.ts の型で読む
     const shared = $derived(page.props as unknown as SharedProps);
+
+    // 消去境界 (DESIGN.md §Toast): layout の初期化時に既存 toast を破棄してから
+    // 当該 visit の flash を消費する。初期化時の 1 回のみ ($effect に載せない)。
+    clearToasts();
 
     $effect(() => {
         consumeFlash(shared.flash);

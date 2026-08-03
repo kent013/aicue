@@ -49,7 +49,8 @@ test('owner は recent-auth 済みならセッションを失効でき、配下 
 
     $this->actingAs($owner)->withSession(['recent_auth_at' => time()])
         ->delete("/organizations/{$organization->slug}/api-keys/sessions/{$session->id}")
-        ->assertStatus(302);
+        ->assertStatus(302)
+        ->assertSessionHas('success'); // 破壊的操作の flash 規約 (着地先で toast 化される)
 
     expect(OauthSession::query()->findOrFail($session->id)->isRevoked())->toBeTrue();
 

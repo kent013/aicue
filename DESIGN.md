@@ -297,7 +297,12 @@ padding を制御する箱用)/ `sm` / `md`(既定)/ `lg`。
 Laravel flash の取り込みは `lib/stores/flash-to-toast.ts` の `consumeFlash`(visitKey で de-dup)。
 
 - 上部中央 fixed(`top-6 left-1/2 -translate-x-1/2 z-50`)に縦 stack 表示。アプリで 1 箇所のみ mount する
+  (mount するのは layout: AppLayout / AuthLayout / GuestLayout の 3 種。ページ側では mount しない)
 - 自動消去: **success / info / warning = 4 秒、error = 手動閉じのみ**
+- 消去境界: **layout(AppLayout / AuthLayout / GuestLayout)の初期化時に既存 toast を破棄**してから
+  当該 visit の flash を消費する。= **layout が再初期化される遷移**では toast を持ち越さない
+  (認証済み文脈の toast を未認証面へ出さない)。`preserveState` の visit / partial reload は
+  layout を再初期化しないため toast は残る。別タブの既表示 toast の即時消去は保証しない
 - 各 toast は `bg-surface` + type 別 border / アイコン色(success / primary(info)/ warning / danger)。
   アイコンは CircleCheck / Info / TriangleAlert / CircleX(@lucide/svelte)
 - a11y: `role="status"`(error のみ `role="alert"`)
