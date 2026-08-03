@@ -8,6 +8,7 @@ use App\Enums\Billing\OnboardingBillingState;
 use App\Models\Organization;
 use App\Models\User;
 use App\Services\Billing\BillingAccess;
+use App\Services\Onboarding\OnboardingReturnResolver;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -54,6 +55,7 @@ final class RequireActiveSubscription
 
     public function __construct(
         private readonly BillingAccess $access,
+        private readonly OnboardingReturnResolver $returnResolver,
     ) {}
 
     /**
@@ -85,13 +87,25 @@ final class RequireActiveSubscription
             );
         }
 
+        $canManage = Gate::forUser($user)->allows('manageBilling', $organization);
+
+        // manageBilling 保持 (= 自分で契約できる) かつ safe method (GET/HEAD) の意図遷移の
+        // ときだけ「やりたかった destination」を org-scoped session に保存する。契約完了着地で
+        // 復帰導線に使う。POST は意図遷移ではない (元 path 復元に意味がない) ため保存しない。
+        // XHR/JSON はここに到達しない (直前の 402 abort で除外済み = 判定を二重化しない)。
+        // open-redirect は normalizePath が same-origin 内部 path のみ許可して防ぐ。
+        $isSafe = in_array($request->getMethod(), ['GET', 'HEAD'], true);
+        if ($canManage && $isSafe) {
+            $this->returnResolver->rememberForOrganization($organization, '/'.ltrim($request->path(), '/'));
+        }
+
         // 直前 hop で積まれた flash (例: 招待受諾の success) が、この gate-redirect の
         // 1 hop で消費され失われないよう延命する。
         $request->session()->reflash();
 
         // 遮断理由は着地ページが持つ (middleware は error flash を積まない)。
         return redirect()->route(
-            Gate::forUser($user)->allows('manageBilling', $organization)
+            $canManage
                 ? 'onboarding.checkout'          // 自分で契約できる = プラン選択へ
                 : 'onboarding.billing-required', // 契約権限なし = 説明画面へ
         );

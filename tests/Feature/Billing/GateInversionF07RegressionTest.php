@@ -84,8 +84,10 @@ test('(b) 新規未契約組織の owner は checkout へ遮断され activate-p
         ->assertOk()
         ->assertInertia(fn ($page) => $page->component('Onboarding/Checkout'));
 
+    // P7: 遮断時に元 path (/projects) が org-scoped session に積まれているため、
+    // 有効化の成功着地は dashboard ではなく「やりたかった画面」へ復帰する。
     $this->actingAs($owner)->post(route('onboarding.activate-personal'), ['declaration' => true])
-        ->assertRedirect(route('dashboard'));
+        ->assertRedirect('/projects');
 
     // 閉路が閉じている。
     //

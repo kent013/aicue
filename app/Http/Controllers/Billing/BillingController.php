@@ -10,9 +10,13 @@ use App\Http\Concerns\ResolvesCurrentOrganization;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Billing\BillingCheckoutRequest;
 use App\Models\Billing\Plan;
+use App\Models\Organization;
 use App\Models\User;
+use App\Services\Billing\BillingAccess;
 use App\Services\Billing\SubscriptionService;
 use App\Services\Billing\TicketLedgerService;
+use App\Services\Onboarding\IntendedPlanResolver;
+use App\Services\Onboarding\OnboardingReturnResolver;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -32,6 +36,12 @@ use Webmozart\Assert\Assert;
 class BillingController extends Controller
 {
     use ResolvesCurrentOrganization;
+
+    public function __construct(
+        private readonly BillingAccess $access,
+        private readonly IntendedPlanResolver $intendedPlanResolver,
+        private readonly OnboardingReturnResolver $returnResolver,
+    ) {}
 
     /** 課金ページ (現在プラン / チケット残高 / プラン一覧) */
     public function index(Request $request, TicketLedgerService $tickets): Response
@@ -63,6 +73,7 @@ class BillingController extends Controller
             'currentPlanCode' => $organization->plan_code,
             'ticketBalance' => $tickets->balance($organization)->totalAvailable(),
             'canManageBilling' => $user->can('manageBilling', $organization),
+            'continueUrl' => $this->resolveOnboardingContinue($organization),
         ]);
     }
 
@@ -99,8 +110,35 @@ class BillingController extends Controller
             return back()->with('error', $e->getMessage());
         }
 
+        // 契約開始が成立したのでプラン意図を消費する (checkout URL 取得後・遷移前)。
+        // price 不在 / 開始不可の back() 経路では forget しない = 意図を維持して再試行できる。
+        $this->intendedPlanResolver->forgetForOrganization($organization);
+
         // 外部 URL への遷移は Inertia::location (full page redirect)
         return Inertia::location($redirect->url);
+    }
+
+    /**
+     * 契約成立着地でのみ「元の画面に戻る」導線を出す (1 回限り = リロードで CTA が残らない)。
+     *
+     * 判定は BillingAccess::state()->grantsAccess() 一本 (subscription 直参照も
+     * `?session_id` 依存もしない)。未契約 org では peek すらせず return_to を維持する
+     * (契約前に消費すると本来の復帰先が失われる)。
+     */
+    private function resolveOnboardingContinue(Organization $organization): ?string
+    {
+        if (! $this->access->state($organization)->grantsAccess()) {
+            return null;
+        }
+
+        $continue = $this->returnResolver->peekForOrganization($organization);
+        if ($continue === null) {
+            return null;
+        }
+
+        $this->returnResolver->forgetForOrganization($organization);
+
+        return $continue;
     }
 
     /** Stripe Customer Portal へリダイレクトする (支払い方法・解約の自己管理) */

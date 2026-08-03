@@ -40,12 +40,18 @@
     const appName = $derived(shared.appName ?? "");
     const serverErrors = $derived((inertiaPage.props.errors ?? {}) as Record<string, string>);
 
-    // defaultPlanCode は plans への包含を保証しない (コード値) ため、plans にある場合のみ
-    // preselect し、無ければ先頭 plan を強調する (決定的挙動)。
-    const computeInitialPlan = (data: OnboardingCheckoutShape): string | null =>
-        data.plans.some((p) => p.code === data.defaultPlanCode)
+    // 料金表由来の intendedPlanCode → defaultPlanCode → 先頭 plan の順で preselect する。
+    // どちらも plans への包含を保証しない (コード値) ため、plans にある場合のみ採用する
+    // (決定的挙動)。
+    const computeInitialPlan = (data: OnboardingCheckoutShape): string | null => {
+        const intended = data.intendedPlanCode;
+        if (intended !== null && data.plans.some((p) => p.code === intended)) {
+            return intended;
+        }
+        return data.plans.some((p) => p.code === data.defaultPlanCode)
             ? data.defaultPlanCode
             : (data.plans[0]?.code ?? null);
+    };
 
     let chosenPlanCode = $state<string | null>(null);
     // 強調するカード = ユーザーが選んだもの。未選択なら props から導出した既定。

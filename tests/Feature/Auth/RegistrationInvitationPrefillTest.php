@@ -6,6 +6,7 @@ use App\Models\Organization;
 use App\Models\OrganizationInvitation;
 use App\Models\User;
 use App\Services\Billing\TicketLedgerService;
+use App\Services\Onboarding\IntendedPlanResolver;
 use App\Services\Organization\OrganizationMembershipService;
 use Illuminate\Session\ArraySessionHandler;
 use Illuminate\Session\Store as SessionStore;
@@ -183,4 +184,33 @@ test('GET で active prefill 後 POST 前に revoke されても登録は成立�
 
     // session の invitation_token は登録確定で forget されている
     $response->assertSessionMissing('invitation_token');
+
+    // P7: 個人組織 fallback 分岐では継続導線を張り、plan 意図なしなら org key は作らない
+    expect(session('verify_continue_organization_id'))->toBe($personalOrg->id);
+    expect(session(IntendedPlanResolver::orgKey($personalOrg)))->toBeNull();
+});
+
+test('P7: 招待受諾成立の登録では pending を消費せず継続導線も張らない', function (): void {
+    [, $token, $email, $organization] = makeInvitationWithToken('accepted-invitee@example.com');
+
+    session([IntendedPlanResolver::PENDING_KEY => 'standard']);
+
+    $response = $this->withSession(['invitation_token' => $token])->post('/register', [
+        'name' => '招待 花子',
+        'email' => $email,
+        'password' => 'SecurePass1234',
+        'terms_accepted' => '1',
+        'intended_plan' => 'starter',
+    ]);
+
+    $response->assertRedirect(route('verification.notice'));
+
+    $user = User::whereBlind('email', 'email_index', $email)->firstOrFail();
+    expect($organization->users()->whereKey($user->getKey())->exists())->toBeTrue();
+    expect($user->organizations()->where('is_personal', true)->exists())->toBeFalse();
+
+    // pending は forget され、招待組織の org key は作られない (promote 対象が存在しない)
+    expect(session(IntendedPlanResolver::PENDING_KEY))->toBeNull();
+    expect(session(IntendedPlanResolver::orgKey($organization)))->toBeNull();
+    $response->assertSessionMissing('verify_continue_organization_id');
 });

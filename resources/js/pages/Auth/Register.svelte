@@ -9,14 +9,22 @@
     import PasswordInput from "@/components/molecules/PasswordInput.svelte";
     import AuthLayout from "@/components/templates/AuthLayout.svelte";
     import { providerLabel } from "@/lib/social";
+    import type { PlanCode } from "@/types/Auth";
 
     interface Props {
         appName?: string;
         socialProviders?: string[];
         invitationEmail?: string | null;
+        /** 料金表 `/register?plan=` 由来の選択意図 (サーバで allowlist 照合済み) */
+        intendedPlan?: PlanCode | null;
     }
 
-    let { appName, socialProviders = [], invitationEmail = null }: Props = $props();
+    let {
+        appName,
+        socialProviders = [],
+        invitationEmail = null,
+        intendedPlan = null,
+    }: Props = $props();
 
     // 招待リンク経由 (invitationEmail あり) は招待先 email を初期値にし、以降 readonly で固定する。
     // readonly は UX 上の "誘導" に過ぎない: devtools で外して別 email を POST しても、サーバの
@@ -24,11 +32,14 @@
     // prefill + readonly は「正しい値を先に入れて手入力ミスを防ぐ」ためのものでセキュリティ境界ではない。
     const isInvited = $derived(invitationEmail != null && invitationEmail !== "");
 
+    // intended_plan は null でも **常に送信**する: サーバの resolver は「キー不在 = 意図なし」
+    // として stale pending を forget するため、送らないと前回の意図が残り続ける。
     const form = useForm({
         name: "",
         email: invitationEmail ?? "",
         password: "",
         terms_accepted: false,
+        intended_plan: intendedPlan,
     });
 
     /**
@@ -58,9 +69,14 @@
         }
     }
 
+    // SSO 登録にもプラン意図を伝播する (意図なしなら付けない = pending は forget される)。
+    const planParam = $derived(
+        intendedPlan === null ? "" : `&plan=${encodeURIComponent(intendedPlan)}`,
+    );
+
     const ssoHref = $derived((provider: string) =>
         form.terms_accepted
-            ? `/auth/${provider}/redirect/register?terms_accepted=1`
+            ? `/auth/${provider}/redirect/register?terms_accepted=1${planParam}`
             : `/auth/${provider}/redirect/register`,
     );
 </script>

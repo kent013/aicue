@@ -17,7 +17,11 @@ use App\Http\Responses\Fortify\RecoveryCodesGeneratedResponse;
 use App\Http\Responses\Fortify\RegisterResponse;
 use App\Http\Responses\Fortify\TwoFactorDisabledResponse;
 use App\Http\Responses\Fortify\VerificationNotificationSentResponse;
+use App\Http\Responses\Fortify\VerifyEmailResponse;
+use App\Models\User;
+use App\Services\Onboarding\IntendedPlanResolver;
 use App\Services\Organization\OrganizationMembershipService;
+use App\Support\Auth\EmailVerificationContinuation;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Http\RedirectResponse;
@@ -40,6 +44,7 @@ use Laravel\Fortify\Contracts\RecoveryCodesGeneratedResponse as RecoveryCodesGen
 use Laravel\Fortify\Contracts\RegisterResponse as RegisterResponseContract;
 use Laravel\Fortify\Contracts\SuccessfulPasswordResetLinkRequestResponse as SuccessfulPasswordResetLinkRequestResponseContract;
 use Laravel\Fortify\Contracts\TwoFactorDisabledResponse as TwoFactorDisabledResponseContract;
+use Laravel\Fortify\Contracts\VerifyEmailResponse as VerifyEmailResponseContract;
 use Laravel\Fortify\Fortify;
 use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 
@@ -81,6 +86,8 @@ class FortifyServiceProvider extends ServiceProvider
         // 挙動の意図は各 Response クラスの docblock を参照。
         $this->app->singleton(LoginResponseContract::class, LoginResponse::class);
         $this->app->singleton(RegisterResponseContract::class, RegisterResponse::class);
+        // verify 完了着地: continuation があれば onboarding.checkout、無ければ Fortify 既定と同値。
+        $this->app->singleton(VerifyEmailResponseContract::class, VerifyEmailResponse::class);
         $this->app->singleton(TwoFactorDisabledResponseContract::class, TwoFactorDisabledResponse::class);
         $this->app->singleton(RecoveryCodesGeneratedResponseContract::class, RecoveryCodesGeneratedResponse::class);
         $this->app->singleton(EmailVerificationNotificationSentResponseContract::class, VerificationNotificationSentResponse::class);
@@ -188,6 +195,10 @@ class FortifyServiceProvider extends ServiceProvider
             $response = Inertia::render('Auth/Register', [
                 'socialProviders' => array_keys(config()->array('template.social_providers')),
                 'invitationEmail' => $invitationEmail,
+                // 料金表 → /register?plan={code} のプラン意図。ユーザー入力のため
+                // resolver の allowlist 照合に一本化する (Provider 側で分岐を書かない)。
+                // 未知値 / 配列 / Enterprise はすべて null (= 意図なし) に倒れる。
+                'intendedPlan' => IntendedPlanResolver::normalizeRaw($request->query('plan'))?->value,
             ])->toResponse($request);
 
             // PII (招待先 email) を含む応答を HTTP キャッシュ (共有/中間プロキシ/ブラウザの
@@ -216,7 +227,18 @@ class FortifyServiceProvider extends ServiceProvider
             ]);
         });
 
-        Fortify::verifyEmailView(static fn (): InertiaResponse => Inertia::render('Auth/VerifyEmail'));
+        Fortify::verifyEmailView(static function (Request $request): InertiaResponse {
+            $user = $request->user();
+
+            // 登録由来の継続導線 (「あとで認証する」)。session には組織 id のみ保持し、
+            // membership 確認を通ったときだけ URL 化する (IDOR 防御)。
+            return Inertia::render('Auth/VerifyEmail', [
+                'continueUrl' => EmailVerificationContinuation::resolveUrl(
+                    $user instanceof User ? $user : null,
+                    $request->session(),
+                ),
+            ]);
+        });
 
         // password.confirm (Fortify 生 step-up) は generic recent-auth に置換済み。
         // ただし fortify.views=true の間は GET /user/confirm-password が Fortify により

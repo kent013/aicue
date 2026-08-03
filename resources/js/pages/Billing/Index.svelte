@@ -10,6 +10,7 @@
     import PageHeader from "@/components/molecules/PageHeader.svelte";
     import { CreditCard } from "@lucide/svelte";
     import type { SharedProps } from "@/lib/shared-props";
+    import type { BillingIndexPlan, BillingIndexPlanPrice } from "@/types/billing";
 
     /**
      * 課金ページ (現在プラン / チケット残高 / プラン一覧)。
@@ -17,25 +18,28 @@
      * (POST → Inertia::location で Stripe へ full page redirect)。
      * manageBilling 権限 (owner / admin) が無いメンバーは閲覧のみ。
      */
-    interface PlanPrice {
-        unitAmount: number;
-        currency: string;
-    }
-
-    interface Plan {
-        code: string;
-        name: string;
-        price: PlanPrice | null;
-    }
+    type PlanPrice = BillingIndexPlanPrice;
+    type Plan = BillingIndexPlan;
 
     interface Props {
         plans: Plan[];
         currentPlanCode: string | null;
         ticketBalance: number;
         canManageBilling: boolean;
+        /**
+         * 課金ゲートで中断された「元の画面」への復帰先。契約成立着地でのみ 1 回だけ
+         * 非 null で届く (サーバが same-origin 内部 path に正規化済み)。
+         */
+        continueUrl?: string | null;
     }
 
-    let { plans, currentPlanCode, ticketBalance, canManageBilling }: Props = $props();
+    let {
+        plans,
+        currentPlanCode,
+        ticketBalance,
+        canManageBilling,
+        continueUrl = null,
+    }: Props = $props();
 
     const shared = $derived(page.props as unknown as SharedProps);
     const appName = $derived(shared.appName ?? "");
@@ -96,6 +100,17 @@
         />
         <PageContent>
             <div class="flex flex-col gap-10">
+            {#if continueUrl !== null}
+                <Card padding="lg" testId="billing-continue">
+                    <p class="text-body">お手続きが完了しました。中断していた画面に戻れます。</p>
+                    <div class="mt-4">
+                        <Button href={continueUrl} inertia testId="billing-continue-link">
+                            元の画面に戻る
+                        </Button>
+                    </div>
+                </Card>
+            {/if}
+
             <Card padding="lg" testId="billing-summary">
                 <div class="flex flex-wrap items-start justify-between gap-4">
                     <div>

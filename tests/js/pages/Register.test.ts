@@ -50,6 +50,32 @@ describe("Auth/Register", () => {
         expect(screen.queryByText("利用規約への同意が必要です。")).toBeNull();
     });
 
+    it("P7: intendedPlan があると SSO リンクに plan を伝播する (同意チェック後のみ)", async () => {
+        render(Register, {
+            props: { appName: "My App", socialProviders: ["google"], intendedPlan: "standard" },
+        });
+
+        const ssoLink = screen.getByTestId("sso-register-google");
+        // 同意前は同意フローを優先 (plan も付けない = 既存挙動を変えない)
+        expect(ssoLink.getAttribute("href")).toBe("/auth/google/redirect/register");
+
+        await fireEvent.click(screen.getByTestId("terms-checkbox"));
+
+        expect(ssoLink.getAttribute("href")).toBe(
+            "/auth/google/redirect/register?terms_accepted=1&plan=standard",
+        );
+    });
+
+    it("P7: intendedPlan が null なら SSO リンクに plan を付けない", async () => {
+        render(Register, { props: { appName: "My App", socialProviders: ["google"] } });
+
+        await fireEvent.click(screen.getByTestId("terms-checkbox"));
+
+        expect(screen.getByTestId("sso-register-google").getAttribute("href")).toBe(
+            "/auth/google/redirect/register?terms_accepted=1",
+        );
+    });
+
     it("invitationEmail props あり → email 欄が readonly で招待 email を prefill し補足文言を表示する", () => {
         render(Register, {
             props: {

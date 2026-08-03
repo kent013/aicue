@@ -4,15 +4,20 @@ import Pricing from "@/pages/Pricing.svelte";
 import type { PricingPageProps } from "@/types/marketing";
 
 /*
- * 公開料金表。free (baseAmountJpy=null) の「無料」表示・standard の月額表示・
+ * 公開料金表。personal (baseAmountJpy=null) の「無料」表示・standard の月額表示・
  * チケット帯変換・FAQ 開閉・disabled 不使用を固定する。
+ *
+ * plan code は `plans` テーブルの seed 値 (personal / starter / standard) と対でなければ
+ * ならない (`tests/Feature/Marketing/PricingPageTest.php` が実データ側を pin)。
+ * `free` 行は D11 で撤去済みのため fixture にも置かない (P7 の `?plan=` handoff は
+ * PlanCode allowlist 照合であり、到達しない code を期待値に固定すると空振りする)。
  */
 
 const basePage: PricingPageProps = {
     plans: [
         {
-            code: "free",
-            name: "Free",
+            code: "personal",
+            name: "Personal",
             baseAmountJpy: null,
             maxProjects: 1,
             maxMembers: 3,
@@ -47,10 +52,10 @@ const basePage: PricingPageProps = {
 };
 
 describe("Pricing", () => {
-    it("プランカード 2 枚を描画し free は「無料」、standard は月額を表示する", () => {
+    it("プランカード 2 枚を描画し personal は「無料」、standard は月額を表示する", () => {
         render(Pricing, { props: { page: basePage } });
 
-        const freeCard = screen.getByTestId("pricing-plan-free");
+        const freeCard = screen.getByTestId("pricing-plan-personal");
         expect(freeCard).toHaveTextContent("無料");
         expect(freeCard).not.toHaveTextContent("¥");
 
@@ -95,7 +100,17 @@ describe("Pricing", () => {
 
     it("未認証は登録 CTA、認証済みはプラン変更 CTA を出す", () => {
         const { unmount } = render(Pricing, { props: { page: basePage } });
-        expect(screen.getAllByRole("link", { name: "このプランで始める" })).toHaveLength(2);
+        const ctas = screen.getAllByRole("link", { name: "このプランで始める" });
+        expect(ctas).toHaveLength(2);
+        // P7: 料金表 → /register?plan={code} で選択意図を handoff する。
+        // 期待値は PlanCode allowlist に実在する code のみ (normalizeRaw が null 化しない値)。
+        expect(ctas.map((cta) => new URL((cta as HTMLAnchorElement).href).search)).toEqual([
+            "?plan=personal",
+            "?plan=standard",
+        ]);
+        for (const cta of ctas) {
+            expect(new URL((cta as HTMLAnchorElement).href).pathname).toBe("/register");
+        }
         unmount();
 
         render(Pricing, {

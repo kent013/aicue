@@ -35,6 +35,11 @@ export interface OnboardingCheckoutShape {
     readonly personalEligibility: PersonalPlanEligibilityShape | null;
     /** 新規登録特典の無償チケット枚数 (無料開始 callout 用) */
     readonly signupGrantTickets: number;
+    /**
+     * 料金表 `?plan=` 由来の選択意図 (サーバで allowlist 照合済み)。
+     * `plans` への包含は保証しない = 該当 code があるときだけ preselect する。
+     */
+    readonly intendedPlanCode: string | null;
 }
 
 /** PHP: BillingRequiredDto (BillingRequiredShape) と対 */
