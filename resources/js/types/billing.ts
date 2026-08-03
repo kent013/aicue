@@ -37,7 +37,7 @@ export interface QuotaLimitsShape {
 }
 
 /** 購入フォームの状態 (PHP: PurchaseFormState) */
-export type PurchaseFormStateValue = "normal" | "resume" | "completed";
+export type PurchaseFormStateValue = "normal" | "resume";
 
 /** PHP: PurchaseTicketsPageDto (PurchaseTicketsPageShape) と対 */
 export interface PurchaseTicketsPageProps {
@@ -53,7 +53,7 @@ export interface PurchaseTicketsPageProps {
     /** P8a: オートリチャージが有効か (既定 false) */
     readonly autoRechargeEnabled: boolean;
     readonly formState: PurchaseFormStateValue;
-    /** resume / completed で確定している枚数 (normal は null) */
+    /** resume で確定している枚数 (normal は null) */
     readonly boundCount: number | null;
     /** resume の「決済を続ける」遷移先 (Stripe Checkout URL) */
     readonly resumeUrl: string | null;

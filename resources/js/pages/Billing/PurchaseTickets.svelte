@@ -22,7 +22,7 @@
      *   Inertia::location が Stripe Checkout へ full page redirect する
      * - 送信ボタンは disabled にしない (不正値は押下時にエラー表示 + サーバ validation の二重防御)
      * - canManage=false のメンバーには購入依頼の案内を表示 (残高・料金表は表示 = 透明性維持)
-     * - formState (P8b): normal のみ購入フォームを描画する。resume / completed では
+     * - formState (P8b): normal のみ購入フォームを描画する。resume では
      *   フォームを描画せず確定枚数を読み取りテキストで示し、明示的な CTA に置き換える
      *   (disabled にはしない = 禁止事項 #8)
      */
@@ -145,10 +145,6 @@
                 <Alert type="warning" title="決済手続きが進行中です" testId="purchase-resume-banner">
                     前回の決済を続けるか、新しく購入し直してください。
                 </Alert>
-            {:else if page.formState === "completed"}
-                <Alert type="success" title="直前のご購入を受け付けています" testId="purchase-completed-banner">
-                    決済の確認後、残高に反映されます。続けて購入する場合は「もう一度購入する」からお進みください。
-                </Alert>
             {/if}
 
             <Card padding="lg" testId="purchase-balance">
@@ -209,18 +205,6 @@
                         </Button>
                         <Button variant="ghost" onclick={startFreshPurchase} testId="purchase-fresh">
                             新しく購入し直す
-                        </Button>
-                    </div>
-                </Card>
-            {:else if page.formState === "completed"}
-                <Card padding="lg" testId="purchase-completed">
-                    <h2 class="text-h3">直前のご購入</h2>
-                    <p class="mt-2 text-body" data-testid="purchase-bound-count">
-                        購入枚数 {(page.boundCount ?? 0).toLocaleString("ja-JP")} 枚
-                    </p>
-                    <div class="mt-6">
-                        <Button onclick={startFreshPurchase} testId="purchase-fresh">
-                            もう一度購入する
                         </Button>
                     </div>
                 </Card>
