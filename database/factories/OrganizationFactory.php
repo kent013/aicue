@@ -86,6 +86,20 @@ class OrganizationFactory extends Factory
         ]);
     }
 
+    /**
+     * P9: 請求先連絡先を設定済みの組織。
+     *
+     * 両列とも $fillable 外 (PII) だが Factory の state は forceFill 相当で通る。
+     * email は保存時と同じ正規化 (小文字化) を通す — blind index の検索契約と揃える。
+     */
+    public function withBillingContact(?string $email = null, ?string $name = null): static
+    {
+        return $this->state(fn (): array => [
+            'billing_contact_email' => Str::lower(trim($email ?? fake()->unique()->safeEmail())),
+            'billing_contact_name' => $name,
+        ]);
+    }
+
     /** 初回無償チケット付与済み (org 単位 1 回マーカーが立っている) 組織 */
     public function signupGranted(): static
     {

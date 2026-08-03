@@ -228,7 +228,7 @@ test('live pending checkout (created_at が stale 境界ちょうど) は Pendin
     $organization = cohortPaidOrganization();
     BillingCheckoutSession::factory()->create([
         'organization_id' => $organization->getKey(),
-        'created_at' => BillingAccess::staleThresholdAt(CarbonImmutable::now()),
+        'created_at' => BillingCheckoutSession::staleThresholdAt(CarbonImmutable::now()),
     ]);
 
     expect(cohortBillingAccess()->state($organization))->toBe(OnboardingBillingState::PendingCheckout)
@@ -240,7 +240,7 @@ test('stale pending checkout (境界の 1 秒前) は ExpiredCheckout', function
     $organization = cohortPaidOrganization();
     BillingCheckoutSession::factory()->create([
         'organization_id' => $organization->getKey(),
-        'created_at' => BillingAccess::staleThresholdAt(CarbonImmutable::now())->subSecond(),
+        'created_at' => BillingCheckoutSession::staleThresholdAt(CarbonImmutable::now())->subSecond(),
     ]);
 
     expect(cohortBillingAccess()->state($organization))->toBe(OnboardingBillingState::ExpiredCheckout);

@@ -2,6 +2,8 @@
     import { onMount } from "svelte";
     import { page as inertiaPage, router } from "@inertiajs/svelte";
     import { CreditCard } from "@lucide/svelte";
+    import Alert from "@/components/atoms/Alert.svelte";
+    import type { AlertType } from "@/components/atoms/Alert.svelte";
     import Button from "@/components/atoms/Button.svelte";
     import Card from "@/components/atoms/Card.svelte";
     import TextLink from "@/components/atoms/TextLink.svelte";
@@ -10,9 +12,10 @@
     import PageContent from "@/components/templates/PageContent.svelte";
     import PageHeader from "@/components/molecules/PageHeader.svelte";
     import AutoRechargeCard from "@/components/features/billing/AutoRechargeCard.svelte";
+    import BillingContactForm from "@/components/features/billing/BillingContactForm.svelte";
     import { formatDate } from "@/lib/date-format";
     import type { SharedProps } from "@/lib/shared-props";
-    import type { BillingDashboardProps } from "@/types/billing";
+    import type { BillingDashboardProps, BillingFeedbackKind } from "@/types/billing";
 
     /**
      * 課金ダッシュボード (/billing)。現在のプラン / per-bucket チケット残高 / 現行 quota 上限 /
@@ -34,6 +37,23 @@
     const isFreePlan = $derived(page.billingState === "active_free_plan");
 
     let portalProcessing = $state(false);
+
+    /**
+     * P9: 決済戻り着地の one-shot フィードバック。**raw query は一切見ない** —
+     * kind → variant の写像だけを持ち、文言はサーバ確定値をそのまま描画する。
+     * 一度表示したら消える (リロードで query が落ちれば feedback は null で届く)。
+     */
+    const FEEDBACK_VARIANTS = {
+        purchase_received: "success",
+        purchase_processing: "info",
+        purchase_already_received: "info",
+        checkout_retry_required: "warning",
+        portal_returned: "info",
+    } as const satisfies Record<BillingFeedbackKind, AlertType>;
+
+    const feedbackVariant = $derived(
+        page.feedback === null ? null : FEEDBACK_VARIANTS[page.feedback.kind],
+    );
 
     const formatYen = (amount: number | null): string =>
         amount === null ? "—" : new Intl.NumberFormat("ja-JP").format(amount);
@@ -59,9 +79,9 @@
     onMount(() => {
         const params = new URLSearchParams(window.location.search);
         if (params.get("highlight") === "auto-recharge") {
-            document
-                .querySelector('[data-testid="auto-recharge-card"]')
-                ?.scrollIntoView({ behavior: "smooth" });
+            const card = document.querySelector('[data-testid="auto-recharge-card"]');
+            card?.scrollIntoView({ behavior: "smooth" });
+            card?.setAttribute("data-highlighted", "true");
         }
     });
 </script>
@@ -76,6 +96,14 @@
         />
         <PageContent>
             <div class="flex flex-col gap-10">
+                {#if page.feedback !== null && feedbackVariant !== null}
+                    <Alert type={feedbackVariant} testId="billing-feedback">
+                        <span data-testid={`billing-feedback-${page.feedback.kind}`}>
+                            {page.feedback.message}
+                        </span>
+                    </Alert>
+                {/if}
+
                 {#if page.continueUrl !== null}
                     <Card padding="lg" testId="billing-continue">
                         <p class="text-body">お手続きが完了しました。中断していた画面に戻れます。</p>
@@ -192,6 +220,13 @@
                     updateUrl="/billing/auto-recharge"
                     setupUrl="/billing/auto-recharge/setup"
                     setupAttemptToken={page.autoRechargeSetupToken}
+                />
+
+                <!-- P9: 請求先情報 (請求通知の宛先。未設定時は owner email へ fallback)。 -->
+                <BillingContactForm
+                    billingContact={page.billingContact}
+                    updateUrl="/billing/contact"
+                    canManage={page.canManageBilling}
                 />
 
                 <Card padding="lg" testId="billing-quotas">

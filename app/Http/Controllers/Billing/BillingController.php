@@ -4,22 +4,30 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Billing;
 
+use App\Actions\Billing\UpdateBillingContactAction;
 use App\DataTransferObjects\Billing\AutoRechargeConsentDto;
+use App\DataTransferObjects\Billing\BillingContactDto;
 use App\DataTransferObjects\Billing\BillingDashboardDto;
+use App\DataTransferObjects\Billing\BillingFeedbackDto;
 use App\DataTransferObjects\Billing\BillingPlansPageDto;
 use App\DataTransferObjects\Billing\QuotaLimitsDto;
+use App\DataTransferObjects\Billing\UpdateBillingContactData;
 use App\DataTransferObjects\Marketing\PricingPlanDto;
+use App\Enums\Billing\BillingFeedbackKind;
 use App\Enums\Billing\OnboardingBillingState;
-use App\Enums\Billing\PlanPriceKind;
+use App\Enums\Billing\SignupFundingChoice;
 use App\Enums\CheckoutIntent;
 use App\Enums\CheckoutSessionStatus;
 use App\Exceptions\Billing\CheckoutInProgressException;
+use App\Exceptions\Billing\StaleCheckoutAttemptException;
 use App\Exceptions\Billing\StripePriceNotSyncedException;
+use App\Exceptions\Billing\SubscriptionAttemptPlanMismatchException;
 use App\Http\Concerns\ResolvesCurrentOrganization;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Billing\BillingCheckoutRequest;
 use App\Http\Requests\Billing\StartAutoRechargeSetupRequest;
 use App\Http\Requests\Billing\UpdateAutoRechargeRequest;
+use App\Http\Requests\Billing\UpdateBillingContactRequest;
 use App\Models\Billing\BillingCheckoutSession;
 use App\Models\Billing\Plan;
 use App\Models\Billing\Subscription;
@@ -37,6 +45,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 use InvalidArgumentException;
@@ -88,6 +97,13 @@ class BillingController extends Controller
             return $landing;
         }
 
+        // T1004: funding=auto_recharge の契約完了着地は ?highlight=auto-recharge へ 303 + flash
+        // (オートリチャージ設定への導線を成功着地の主役にする)。非該当なら通常 feedback へ委ねる。
+        $autoRechargeLanding = $this->resolveAutoRechargeLanding($request, $organization);
+        if ($autoRechargeLanding !== null) {
+            return $autoRechargeLanding;
+        }
+
         $canManageBilling = $user->can('manageBilling', $organization);
         $subscription = $organization->subscription('default');
 
@@ -107,6 +123,10 @@ class BillingController extends Controller
             // カード登録開始 POST の attempt_token (render 単位。setup は課金を伴わないため
             // 購入導線のようなサーバ側安定化は不要 — 同一 token の再送は台帳 unique で冪等)。
             autoRechargeSetupToken: strtolower((string) Str::ulid()),
+            // P9: 決済戻り着地の one-shot フィードバック (query 解釈済み)。
+            feedback: $this->resolveBillingFeedback($request, $organization),
+            // P9: 請求先連絡先 (未設定なら owner email が実際の宛先)。
+            billingContact: BillingContactDto::fromOrganization($organization),
         );
 
         return Inertia::render('Billing/Index', ['page' => $dto->toArray()]);
@@ -130,6 +150,8 @@ class BillingController extends Controller
             currentPlanCode: $this->resolveCurrentPlanCode($organization),
             billingState: $this->access->state($organization),
             canManage: $user->can('manageBilling', $organization),
+            // P9: 契約 checkout の冪等 token (画面 render ごとに固定 = 1 render 1 token)。
+            subscriptionAttemptToken: (string) Str::ulid(),
         );
 
         return Inertia::render('Billing/Plans', ['page' => $dto->toArray()]);
@@ -167,44 +189,108 @@ class BillingController extends Controller
     }
 
     /**
-     * Stripe Checkout を開始し、Checkout URL へリダイレクトする
-     * (戻り型に RedirectResponse を含むのは price 不在 / 開始不可時の back() 分岐のため)
+     * P9: Stripe Checkout (サブスク契約) を **冪等** に開始し、Checkout URL へリダイレクトする。
+     *
+     * 実行順は不変条件 #2 (「不整合は認可より前に 404」) に従う:
+     * (1) 他 org / 他 user の token は Gate より前に 404 (403 にしない = 存在オラクル封じ)
+     * (2) 認可 (3) T1004 の事前同意記録 (4) plan 解決 → 冪等開始。
+     *
+     * ボタンを disabled にはしない (禁止事項 #8) ため、ここで返すエラー・422 が
+     * 押下時のフィードバックになる。
      */
-    public function checkout(BillingCheckoutRequest $request, SubscriptionService $subscriptions): SymfonyResponse|RedirectResponse
-    {
+    public function checkout(
+        BillingCheckoutRequest $request,
+        SubscriptionService $subscriptions,
+        AutoRechargeService $autoRecharge,
+    ): SymfonyResponse|RedirectResponse {
         $organization = $this->resolveCurrentOrganization($request);
+
+        $user = $request->user();
+        Assert::isInstanceOf($user, User::class);
+
+        $attemptToken = $request->validated('subscription_attempt_token');
+        Assert::string($attemptToken);
+
+        // (1) 他 org / 他 user の token は 404 (Gate より前 = 存在オラクル封じ)
+        abort_if($subscriptions->attemptTokenIsForeign($attemptToken, $organization, $user), 404);
+
+        // (2) 認可
         Gate::authorize('manageBilling', $organization);
 
-        $planCode = $request->validated('plan_code');
-        Assert::string($planCode);
-        $plan = Plan::query()->where('code', $planCode)->firstOrFail();
-
-        $price = $plan->currentPrice(PlanPriceKind::Base);
-        if ($price === null) {
-            return back()->with('error', '選択したプランは現在お申し込みいただけません。');
+        // (3) T1004: funding=auto_recharge は事前同意 (enabled=false) を Checkout 開始前に記録する。
+        //     Checkout が後段で失敗・放棄されても同意 row は無害 (enabled=false = 課金は発生しない)。
+        $fundingRaw = $request->validated('funding_choice');
+        $funding = is_string($fundingRaw) ? SignupFundingChoice::from($fundingRaw) : null;
+        if ($funding === SignupFundingChoice::AutoRecharge) {
+            $consentVersion = $request->validated('consent_version');
+            Assert::stringNotEmpty($consentVersion);
+            try {
+                $autoRecharge->recordPreConsent($organization, $user, new AutoRechargeConsentDto($consentVersion));
+            } catch (CheckoutInProgressException $e) {
+                return back()->with('error', $e->getMessage());
+            }
         }
 
+        // (4) plan 解決 → 冪等開始
+        $planCode = $request->validated('plan_code');
+        Assert::string($planCode);
+        $plan = Plan::query()->where('code', $planCode)->where('is_active', true)->firstOrFail();
+
         try {
-            $redirect = $subscriptions->startCheckout(
+            $result = $subscriptions->startCheckout(
                 $organization,
-                $price,
-                route('billing.index'),
-                route('billing.index'),
+                $user,
+                $plan,
+                route('billing.index').'?session_id={CHECKOUT_SESSION_ID}',
+                route('billing.plans'),
+                $attemptToken,
+                $funding,
             );
+        } catch (SubscriptionAttemptPlanMismatchException $e) {
+            // 同 token・別 plan (1 render 1 token のため「戻って別プランを押す」で実在する)
+            throw ValidationException::withMessages(['plan_code' => $e->getMessage()]);
+        } catch (StaleCheckoutAttemptException) {
+            return redirect()->route('billing.index', ['retry' => 1]);
+        } catch (CheckoutInProgressException $e) {
+            return back()->with('error', $e->getMessage());
         } catch (StripePriceNotSyncedException) {
             // production の sync 漏れ。500 にせず現行と同一文言で差し戻す
             return back()->with('error', '選択したプランは現在お申し込みいただけません。');
         } catch (InvalidArgumentException $e) {
-            // 既に有効なサブスクリプションがある (service 層の fail-closed ガード)
+            // 既に有効なサブスクリプションがある / Price 未設定 (service 層の fail-closed ガード)
             return back()->with('error', $e->getMessage());
         }
 
+        if ($result->url === null) {
+            // url=null は「新規 Checkout を作らなかった」= 受付済み replay か live pending dedup。
+            return $subscriptions->isAttemptCompleted($organization, $result->stripeSessionId)
+                ? redirect()->route('billing.index', ['replayed' => 1])
+                : back()->with('warning', '既に進行中の Checkout があります。数分お待ちください。');
+        }
+
         // 契約開始が成立したのでプラン意図を消費する (checkout URL 取得後・遷移前)。
-        // price 不在 / 開始不可の back() 経路では forget しない = 意図を維持して再試行できる。
+        // 開始不可の back() 経路では forget しない = 意図を維持して再試行できる。
         $this->intendedPlanResolver->forgetForOrganization($organization);
 
         // 外部 URL への遷移は Inertia::location (full page redirect)
-        return Inertia::location($redirect->url);
+        return Inertia::location($result->url);
+    }
+
+    /**
+     * P9: 請求先連絡先 (メール / 宛名) の更新。current-org スコープ
+     * (route parameter を持たないため cross-org 指定が構造的に不能)。
+     */
+    public function updateBillingContact(
+        UpdateBillingContactRequest $request,
+        UpdateBillingContactAction $action,
+    ): RedirectResponse {
+        $organization = $this->resolveCurrentOrganization($request);
+        Gate::authorize('manageBilling', $organization);
+
+        $action->execute($organization, UpdateBillingContactData::fromRequest($request));
+
+        // 操作系 POST/PATCH は back() で完結させる (禁止事項 #7)
+        return back()->with('info', '請求先情報を更新しました。');
     }
 
     /**
@@ -315,6 +401,117 @@ class BillingController extends Controller
     }
 
     /**
+     * P9 (T1004): funding=auto_recharge の契約完了着地を `?highlight=auto-recharge` へ 303 する。
+     *
+     * 自 org の `subscription_start` + `completed` + `funding_choice=auto_recharge` を検証できた
+     * ときだけ変換する (他 org / `setup_payment_method` の session_id は素通し = IDOR 防御)。
+     * 文言は「実際に PM 流用 Job が dispatch 済み (= 決済確定) かつ有効な事前同意が待機中」の
+     * ときだけ確定表現にし、それ以外は fail-closed な誘導文言に落とす。
+     */
+    private function resolveAutoRechargeLanding(Request $request, Organization $organization): ?RedirectResponse
+    {
+        $sessionId = $request->query('session_id');
+        if (! is_string($sessionId) || $sessionId === '') {
+            return null;
+        }
+
+        $session = $organization->checkoutSessions()
+            ->where('stripe_session_id', $sessionId)
+            ->first();
+
+        if (! $session instanceof BillingCheckoutSession
+            || $session->intent !== CheckoutIntent::SubscriptionStart->value
+            || $session->status !== CheckoutSessionStatus::Completed->value
+            || $session->funding_choice !== SignupFundingChoice::AutoRecharge->value) {
+            return null; // それ以外は従来どおり resolveBillingFeedback に委ねる
+        }
+
+        $message = $session->pm_reuse_dispatched_at !== null
+            && $this->autoRecharge->isAutoEnablePending($organization)
+            ? 'お支払いを受け付けました。オートリチャージは、ご契約のお支払いカードで自動的に有効になります。反映されない場合は、この画面から設定できます。'
+            : 'お支払いを受け付けました。オートリチャージの設定はこの画面から確認できます。';
+
+        // 前段が積んだ flash を 303 の 1 hop を跨いで着地 render まで生存させる。
+        $request->session()->reflash();
+
+        return redirect()
+            ->route('billing.index', ['highlight' => 'auto-recharge'], 303)
+            ->with('info', $message);
+    }
+
+    /**
+     * P9: /billing 着地時の query を解釈してフィードバックを構築する (one-shot)。
+     *
+     * UI は raw query を見ず、この DTO のみを描画する。`session_id` は **org スコープ relation**
+     * 経由でのみ引くため、他 org の session_id を付けても feedback は出ない (偽 success 排除)。
+     * さらに **intent !== subscription_start は null** に倒す (fail-closed。P8a の
+     * `setup_payment_method` 行が同一テーブルに実在するため必須)。
+     */
+    private function resolveBillingFeedback(Request $request, Organization $organization): ?BillingFeedbackDto
+    {
+        if ($request->query('portal') !== null) {
+            // error flash がある着地では成功偽装を抑止するため portal_returned を出さない。
+            if (is_string($request->session()->get('error'))) {
+                return null;
+            }
+
+            return BillingFeedbackDto::simple(
+                BillingFeedbackKind::PortalReturned,
+                'お支払い管理画面から戻りました。',
+            );
+        }
+
+        $sessionId = $request->query('session_id');
+        if (is_string($sessionId) && $sessionId !== '') {
+            $session = $organization->checkoutSessions()
+                ->where('stripe_session_id', $sessionId)
+                ->first();
+
+            // 未知 / 別 org の session_id (手動付与) は feedback を出さない。
+            if (! $session instanceof BillingCheckoutSession) {
+                return null;
+            }
+            // intent 検証で fail-closed (カード登録の着地に購入文言を出さない)。
+            if ($session->intent !== CheckoutIntent::SubscriptionStart->value) {
+                return null;
+            }
+
+            if ($session->status === CheckoutSessionStatus::Completed->value) {
+                return BillingFeedbackDto::simple(
+                    BillingFeedbackKind::PurchaseReceived,
+                    'お支払いを受け付けました。プランへの反映には数分かかる場合があります。',
+                );
+            }
+
+            if ($session->status === CheckoutSessionStatus::Pending->value) {
+                return BillingFeedbackDto::simple(
+                    BillingFeedbackKind::PurchaseProcessing,
+                    'お支払いを確認しています。プラン反映までしばらくお待ちください。',
+                );
+            }
+
+            // Failed / Expired は無言 (状態を主張しない。出口は Plans からの新規 token 発行)。
+            return null;
+        }
+
+        if ($request->query('replayed') !== null) {
+            return BillingFeedbackDto::simple(
+                BillingFeedbackKind::PurchaseAlreadyReceived,
+                'この内容のお支払いは既に受け付け済みです。',
+            );
+        }
+
+        if ($request->query('retry') !== null) {
+            return BillingFeedbackDto::simple(
+                BillingFeedbackKind::CheckoutRetryRequired,
+                'お手続きの有効期限が切れました。画面を再読み込みして再試行してください。',
+            );
+        }
+
+        return null;
+    }
+
+    /**
      * 契約成立着地でのみ「元の画面に戻る」導線を出す (1 回限り = リロードで CTA が残らない)。
      *
      * 判定は BillingAccess::state()->grantsAccess() 一本 (subscription 直参照も
@@ -354,6 +551,9 @@ class BillingController extends Controller
             return back()->with('error', 'お支払い管理画面は有償プラン契約後にご利用いただけます。');
         }
 
-        return Inertia::location($subscriptions->createPortalSession($organization, route('billing.index'))->url);
+        // 戻り着地で `portal_returned` feedback を出すため ?portal=1 を付ける (UI は raw query を見ない)。
+        return Inertia::location(
+            $subscriptions->createPortalSession($organization, route('billing.index', ['portal' => 1]))->url,
+        );
     }
 }

@@ -88,4 +88,14 @@ interface AutoRechargeGatewayInterface
      * 既 attach の PM は attach を skip する冪等実装。
      */
     public function setDefaultPaymentMethod(Organization $organization, string $paymentMethodId): void;
+
+    /**
+     * P9 (T1004): サブスクリプションの決済に使われた payment_method id を解決する。
+     *
+     * 解決順序: `subscription.default_payment_method` →
+     * `latest_invoice.payment_intent.payment_method`。双方 null なら null。空文字は返さない。
+     *
+     * @return non-empty-string|null
+     */
+    public function resolveSubscriptionPaymentMethod(string $stripeSubscriptionId): ?string;
 }

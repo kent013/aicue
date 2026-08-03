@@ -14,7 +14,7 @@ use App\Enums\Billing\OnboardingBillingState;
  * 現行 quota 上限 / 導線」に絞る。plan は表示用の解決結果 (ActiveFreePlan なら
  * free_plan_code、それ以外は plan_code。gate 判定には使わない)。
  *
- * P9 は本 DTO へ additive に feedback / billingContact を足す (placeholder は先置きしない)。
+ * P9: 着地 feedback (one-shot) と請求先連絡先を additive に足した。
  *
  * TS 側は resources/js/types/billing.ts の BillingDashboardProps と exact 対で保守する。
  *
@@ -22,6 +22,8 @@ use App\Enums\Billing\OnboardingBillingState;
  * @phpstan-import-type TicketBalanceShape from TicketBalanceDto
  * @phpstan-import-type QuotaLimitsShape from QuotaLimitsDto
  * @phpstan-import-type AutoRechargeShape from AutoRechargeSettingsDto
+ * @phpstan-import-type BillingFeedbackShape from BillingFeedbackDto
+ * @phpstan-import-type BillingContactShape from BillingContactDto
  *
  * @phpstan-type BillingDashboardShape array{
  *   plan: PricingPlanShape|null,
@@ -32,7 +34,9 @@ use App\Enums\Billing\OnboardingBillingState;
  *   canManageBilling: bool,
  *   continueUrl: string|null,
  *   autoRecharge: AutoRechargeShape,
- *   autoRechargeSetupToken: string
+ *   autoRechargeSetupToken: string,
+ *   feedback: BillingFeedbackShape|null,
+ *   billingContact: BillingContactShape
  * }
  */
 final readonly class BillingDashboardDto
@@ -53,6 +57,14 @@ final readonly class BillingDashboardDto
         public AutoRechargeSettingsDto $autoRecharge,
         /** P8a: カード登録 (mode=setup) 開始 POST の attempt_token (render 単位) */
         public string $autoRechargeSetupToken,
+        /**
+         * P9: 決済戻り着地の one-shot フィードバック (query を解釈済み。UI は raw query を見ない)。
+         * T088 で PurchaseFormState::Completed を撤去したため、**購入完了をユーザーに知らせる
+         * 唯一の経路**がこれ。該当しない着地では null。
+         */
+        public ?BillingFeedbackDto $feedback = null,
+        /** P9: 請求先連絡先 (未設定時は fallbackEmail = owner email が実際の宛先) */
+        public ?BillingContactDto $billingContact = null,
     ) {}
 
     /**
@@ -70,6 +82,8 @@ final readonly class BillingDashboardDto
             'continueUrl' => $this->continueUrl,
             'autoRecharge' => $this->autoRecharge->toArray(),
             'autoRechargeSetupToken' => $this->autoRechargeSetupToken,
+            'feedback' => $this->feedback?->toArray(),
+            'billingContact' => ($this->billingContact ?? new BillingContactDto(null, null, null))->toArray(),
         ];
     }
 }

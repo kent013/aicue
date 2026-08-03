@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Console\Commands\Billing;
 
 use App\Enums\Billing\ScheduleSetupStatus;
+use App\Enums\CheckoutSessionStatus;
+use App\Models\Billing\BillingCheckoutSession;
 use App\Models\Billing\Subscription;
 use App\Services\Billing\StripeScheduleGateway;
 use Carbon\CarbonImmutable;
@@ -43,20 +45,44 @@ class ReconcileSubscriptionSchedules extends Command
     /** remote 消失で None へ reset した件数。 */
     private int $reset = 0;
 
+    /** stale pending から Expired へ収束させた checkout session の件数 (P9)。 */
+    private int $expired = 0;
+
     public function handle(StripeScheduleGateway $gateway): int
     {
         // 同一プロセス内での再呼び出し (scheduler / テスト) で前回値が累積しないようリセットする。
         $this->restored = 0;
         $this->promoted = 0;
         $this->reset = 0;
+        $this->expired = 0;
 
         $this->retryMissing($gateway);
         $this->retryPartial($gateway);
+        $this->expireStaleCheckouts();
 
         // 無言成功ではなく処理件数を出力する (scheduler ログでの観測用)。
-        $this->info("reconcile-schedules: restored={$this->restored} promoted={$this->promoted} reset={$this->reset}");
+        $this->info("reconcile-schedules: restored={$this->restored} promoted={$this->promoted} reset={$this->reset} expired={$this->expired}");
 
         return self::SUCCESS;
+    }
+
+    /**
+     * 工程 3 (P9): stale な pending checkout session を実 DB でも Expired へ収束させる。
+     *
+     * 境界は live 判定 (`created_at >= staleThresholdAt`) の **補集合** (`<`) であり、
+     * 閾値は BillingCheckoutSession::staleThresholdAt() の単一出典を読む (C-1)。
+     *
+     * **intent で絞らない** — P8a の `setup_payment_method` 行も対象にする
+     * (1 日以上前の pending は Stripe 側で既に expire 済みであり Expired 化は事実の追認。
+     * 遅延成功は webhook の C-2 遷移で Expired からでも Completed へ受理される)。
+     * Stripe 照会は行わない (created_at 閾値で決定的に扱える)。
+     */
+    private function expireStaleCheckouts(): void
+    {
+        $this->expired = BillingCheckoutSession::query()
+            ->where('status', CheckoutSessionStatus::Pending->value)
+            ->where('created_at', '<', BillingCheckoutSession::staleThresholdAt(CarbonImmutable::now()))
+            ->update(['status' => CheckoutSessionStatus::Expired->value]);
     }
 
     /**

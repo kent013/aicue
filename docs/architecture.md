@@ -67,7 +67,7 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
 |---|---|---|
 | `User` | エンドユーザー。PII (email/name) は CipherSweet 暗号化 | 複数 Organization に所属 |
 | `AdminUser` | 運営管理者 (Filament 専用 guard)。エンドユーザーと別テーブル | tenant 外 |
-| `Organization` | テナント境界。課金・quota・API キーの単位 | ルート |
+| `Organization` | テナント境界。課金・quota・API キーの単位。請求先連絡先 (`billing_contact_email` / `billing_contact_name`) は PII のため CipherSweet 暗号化 (email のみ blind index。検索は `whereBlind`) | ルート |
 | `Team` (laratrust) | Laratrust のロールスコープ。Organization と 1:1 | Organization 従属 |
 | `CustomTeam` | 組織内のチーム。各組織に Default Team がちょうど 1 つ | Organization 従属 |
 | `Project` | 作業単位。CustomTeam (通常は Default Team) 配下 | Organization → CustomTeam 従属 |
@@ -97,7 +97,7 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
 | `Billing/TicketLedgerEntry` / `Billing/TicketReservation` | チケット台帳 (reserve→commit/release の 2 フェーズ。期限付き付与・idempotency_key 冪等付与・返金 clawback) | Organization 従属 |
 | `Billing/TicketVolumePrice` | スポット購入の数量逐減 (volume tier) 単価の Stripe Price snapshot | tenant 外 (マスタ) |
 | `Billing/TicketCheckoutSession` | チケットスポット購入の Stripe Checkout Session 追跡 (attempt_token 冪等 + 単価 pin = webhook 金額照合の出典。status: pending/completed/expired) | Organization 従属 |
-| `Billing/BillingCheckoutSession` | サブスク契約 Stripe Checkout Session の追跡 (attempt_token 冪等。`BillingAccess::state()` の PendingCheckout / ExpiredCheckout の出典。status: pending/completed/failed/expired) | Organization 従属 |
+| `Billing/BillingCheckoutSession` | サブスク契約 / カード登録 Stripe Checkout Session の追跡 (attempt_token 冪等。`BillingAccess::state()` の PendingCheckout / ExpiredCheckout の出典。status: pending/completed/failed/expired)。**live/stale の判定は本モデルの `staleThresholdAt()` / `isLivePending()` が単一出典**で、`BillingAccess::state()` / `SubscriptionService::startCheckout()` / 日次 sweeper が共有する | Organization 従属 |
 | `Billing/Subscription` | Cashier Subscription のテンプレート拡張 (current_period_end / has_payment_method / Subscription Schedule の部分完了追跡列) | Organization 従属 |
 | `Billing/TicketAutoRecharge` | オートリチャージ設定 (1 org 1 行。**既定 off の opt-in**。同意 snapshot 4 列 + 連続失敗状態。`max_count > threshold_count` は DB CHECK) | Organization 従属 |
 | `Billing/TicketAutoRechargeAttempt` | オートリチャージ試行の状態機械 (pending → paid / failed / canceled。quantity・unit_amount は起票時 pin = webhook 金額照合の出典。partial unique `tar_attempts_org_pending_unique` で org あたり pending は 1 件) | Organization 従属 |

@@ -59,12 +59,12 @@ return [
     |
     | 同意文言バージョン (consent_version) の改定履歴:
     |   v1 = 初版 (カード登録経路のみ = mode=setup Checkout で登録したカードを使う)
+    |   v2 = P9 / T1004: 有償契約でサブスク決済カードをオートリチャージへ流用することを明示
     |
     | 提示条件の実質 (開始残高・補充枚数・上限額の提示形式・停止方法・即時課金可能性・
     | **カードの取得手段**) を変える改定では**必ず version を上げること**。
     | 版を上げると reconsentRequiredFor 経由で既存同意が自動失効し、再同意まで
-    | 自動購入が停止する (fail-closed)。
-    | サブスク決済カードの流用 (P9 / T1004) を配線する際は v2 へ上げる。
+    | 自動購入が停止する (fail-closed)。**救済 backfill は書かない** (版の意味が無効化されるため)。
     */
     'auto_recharge' => [
         /* 残高がこの枚数を下回ると補充する (既定値。org ごとに設定で上書き) */
@@ -89,7 +89,7 @@ return [
         'setup_pending_window_minutes' => (int) env('BILLING_AUTO_RECHARGE_SETUP_PENDING_WINDOW_MINUTES', 30),
 
         /* 現行の同意文言バージョン (上記の改定規約に従う) */
-        'consent_version' => env('BILLING_AUTO_RECHARGE_CONSENT_VERSION', 'v1'),
+        'consent_version' => env('BILLING_AUTO_RECHARGE_CONSENT_VERSION', 'v2'),
     ],
 
 ];

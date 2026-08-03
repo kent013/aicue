@@ -6,11 +6,13 @@ namespace App\Services\Billing;
 
 use App\Enums\Billing\BillingNotificationType;
 use App\Enums\Billing\HandledStripeWebhookEvent;
+use App\Enums\Billing\SignupFundingChoice;
 use App\Enums\Billing\TicketCheckoutSessionStatus;
 use App\Enums\Billing\WebhookEventStatus;
 use App\Enums\CheckoutIntent;
 use App\Enums\CheckoutSessionStatus;
 use App\Jobs\Billing\HandleAutoRechargeChargeFailureJob;
+use App\Jobs\Billing\ReuseSubscriptionPaymentMethodJob;
 use App\Jobs\Billing\SetDefaultPaymentMethodJob;
 use App\Models\Billing\BillingCheckoutSession;
 use App\Models\Billing\Plan;
@@ -528,7 +530,118 @@ class StripeWebhookProcessor
             return;
         }
 
+        // P9: サブスク契約 Checkout (mode=subscription / purpose=subscription_start) の着地。
+        // 真実源は自 DB 行 (billing_checkout_sessions の intent=subscription_start)。
+        // 金銭の付与経路には一切触らない (付与は invoice.paid / plan_code 同期は
+        // customer.subscription.* が真実源)。
+        if ($this->stringAt($payload, 'data.object.metadata.purpose') === 'subscription_start') {
+            $this->settleSubscriptionCheckout($payload);
+
+            return;
+        }
+
         $this->grantPurchasedTickets($payload);
+    }
+
+    /**
+     * P9 (C-2): サブスク契約 Checkout の状態確定。**遷移条件はこの 1 定義のみ**。
+     *
+     * `status !== Completed` の行だけを payload の `payment_status` が確定した結果へ遷移させる。
+     * `Completed` は終局 (再送・後続 payload は no-op = 冪等)。
+     *   - paid / no_payment_required → Completed (+ completed_at)
+     *   - unpaid                     → Failed
+     *   - 上記以外 (null 等)         → 遷移しない (受理のみ)
+     *
+     * `Failed` / `Expired` からの遅延成功も受理する: これらは AI-CUE 側の都合で付く
+     * **ローカルな見立て** (日次 sweeper が全 stale pending を Expired にする) であり、
+     * 決済の終局は Stripe が持つ。金銭の付与は invoice.paid が真実源のため台帳は動かない。
+     *
+     * @param  array<mixed>  $payload
+     */
+    private function settleSubscriptionCheckout(array $payload): void
+    {
+        // (1) purpose ガード (呼び出し元で済) + mode ガード: mode≠subscription は受理のみ
+        //     (既存 grantPurchasedTickets の mode=payment / P8a の mode=setup と相互排他)。
+        if ($this->stringAt($payload, 'data.object.mode') !== 'subscription') {
+            return;
+        }
+
+        $sessionId = $this->stringAt($payload, 'data.object.id');
+        if ($sessionId === null) {
+            throw new RuntimeException('checkout.session.completed: session id 欠落 (subscription_start)');
+        }
+
+        // (2) 真実源は自 DB 行。行不在は retryable failure (crash 先着 webhook は Stripe の
+        //     再送で本経路に収束する)。
+        $local = BillingCheckoutSession::query()
+            ->where('stripe_session_id', $sessionId)
+            ->where('intent', CheckoutIntent::SubscriptionStart->value)
+            ->first();
+        if ($local === null) {
+            throw new RuntimeException("subscription checkout webhook: 未追跡 session {$sessionId} (DB 行なし、再送待ち)");
+        }
+
+        $organization = $local->organization;
+        Assert::isInstanceOf($organization, Organization::class);
+
+        // (3) tenant キー不信: payload の customer / metadata.org_ref は照合のみ (org 解決には使わない)
+        $customerId = $this->stringAt($payload, 'data.object.customer');
+        if ($customerId === null || $organization->stripe_id !== $customerId) {
+            throw new RuntimeException("subscription checkout webhook: customer 照合不一致 (session {$sessionId})");
+        }
+        $metaOrgRef = $this->stringAt($payload, 'data.object.metadata.org_ref');
+        if ($metaOrgRef !== (string) $organization->id) {
+            throw new RuntimeException("subscription checkout webhook: metadata org_ref 照合不一致 (session {$sessionId})");
+        }
+
+        // (4) 遷移 (C-2 の 1 定義)
+        if ($local->status === CheckoutSessionStatus::Completed->value) {
+            return; // 終局 no-op (冪等)
+        }
+
+        $paymentStatus = $this->stringAt($payload, 'data.object.payment_status');
+        if (in_array($paymentStatus, ['paid', 'no_payment_required'], true)) {
+            $local->forceFill([
+                'status' => CheckoutSessionStatus::Completed->value,
+                'completed_at' => CarbonImmutable::now(),
+            ])->save();
+        } elseif ($paymentStatus === 'unpaid') {
+            $local->forceFill(['status' => CheckoutSessionStatus::Failed->value])->save();
+
+            return;
+        } else {
+            return; // 未知値 / 欠落は遷移しない (受理のみ = fail-closed)
+        }
+
+        // (5) T1004: 決済確定 + funding=auto_recharge のときだけ PM 流用 Job を dispatch する。
+        //     dispatch の事実を session に永続化する — setupPending / 着地 flash の
+        //     「自動的に有効になります」表示を決済確定済みの契約に限定する出典
+        //     (未決済 completed への伝播防止)。再送は (4) の終局 no-op で到達しない。
+        $subscriptionId = $this->subscriptionIdFrom($payload);
+        if ($local->funding_choice === SignupFundingChoice::AutoRecharge->value && $subscriptionId !== null) {
+            $local->forceFill(['pm_reuse_dispatched_at' => CarbonImmutable::now()])->save();
+            ReuseSubscriptionPaymentMethodJob::dispatch($local->organization_id, $subscriptionId);
+        }
+    }
+
+    /**
+     * `checkout.session.completed` の `data.object.subscription` から subscription id を取る。
+     *
+     * **string と array{id} の両方を受理する**: 当該フィールドは expandable で、
+     * expand 指定の無い通常の payload では **string ID** (`"sub_xxx"`) で来る。
+     * array を前提にすると本番で Job が一度も dispatch されない。
+     * それ以外の型 / 空文字は null (fail-closed = dispatch しない)。
+     *
+     * @param  array<mixed>  $payload
+     */
+    private function subscriptionIdFrom(array $payload): ?string
+    {
+        $value = data_get($payload, 'data.object.subscription');
+        if (is_array($value)) {
+            $value = $value['id'] ?? null;
+        }
+
+        return is_string($value) && $value !== '' ? $value : null;
     }
 
     /**

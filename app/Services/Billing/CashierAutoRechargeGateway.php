@@ -15,6 +15,8 @@ use Stripe\Exception\CardException;
 use Stripe\Exception\InvalidRequestException;
 use Stripe\Invoice;
 use Stripe\PaymentIntent;
+use Stripe\PaymentMethod as StripePaymentMethod;
+use Stripe\Subscription as StripeSubscription;
 use Webmozart\Assert\Assert;
 
 /**
@@ -228,7 +230,7 @@ final class CashierAutoRechargeGateway implements AutoRechargeGatewayInterface
         $setupIntent = Cashier::stripe()->setupIntents->retrieve($setupIntentId);
         $paymentMethod = $setupIntent->payment_method;
 
-        if ($paymentMethod instanceof \Stripe\PaymentMethod) {
+        if ($paymentMethod instanceof StripePaymentMethod) {
             return $paymentMethod->id;
         }
 
@@ -243,6 +245,61 @@ final class CashierAutoRechargeGateway implements AutoRechargeGatewayInterface
         // しない / invoice_settings.default_payment_method 設定 / pm_type・pm_last_four snapshot」まで
         // 面倒を見る冪等実装。Stripe 側状態の取得・更新をここに一元化する。
         $organization->updateDefaultPaymentMethod($paymentMethodId);
+    }
+
+    public function resolveSubscriptionPaymentMethod(string $stripeSubscriptionId): ?string
+    {
+        // basil API では Invoice に payment_intent が直載りしない (retrieveInvoiceState と同じ理由)。
+        // fallback は payments.data[].payment.payment_intent を expand して解決する。
+        $subscription = Cashier::stripe()->subscriptions->retrieve(
+            $stripeSubscriptionId,
+            ['expand' => ['latest_invoice.payments.data.payment.payment_intent']],
+        );
+
+        return self::resolvePaymentMethodFromSubscription($subscription);
+    }
+
+    /**
+     * P9 (T1004): Stripe Subscription オブジェクトから決済 PM を多段解決する純関数
+     * (テスト可能に分離 — `\Stripe\Subscription::constructFrom()` fixture で分岐を直接固定する)。
+     *
+     * @return non-empty-string|null
+     */
+    public static function resolvePaymentMethodFromSubscription(StripeSubscription $subscription): ?string
+    {
+        // 第一候補: subscription.default_payment_method
+        // (`payment_settings.save_default_payment_method='on_subscription'` で埋まる前提)。
+        $candidate = $subscription->default_payment_method;
+        if ($candidate instanceof StripePaymentMethod) {
+            $candidate = $candidate->id;
+        }
+        if (is_string($candidate) && $candidate !== '') {
+            return $candidate;
+        }
+
+        // 第二候補: latest_invoice の InvoicePayment 経由 (basil API — Invoice に payment_intent は
+        // 直載りしないため payments.data[].payment.payment_intent から辿る)。
+        $invoice = $subscription->latest_invoice;
+        $payments = $invoice instanceof Invoice ? $invoice->payments : null;
+        if ($payments !== null) {
+            foreach ($payments->data as $invoicePayment) {
+                $paymentIntent = $invoicePayment->payment->payment_intent ?? null;
+                if (! $paymentIntent instanceof PaymentIntent) {
+                    continue;
+                }
+
+                $fallback = $paymentIntent->payment_method;
+                if ($fallback instanceof StripePaymentMethod) {
+                    $fallback = $fallback->id;
+                }
+                // 空文字は null 扱い (PHPDoc の non-empty-string|null を runtime でも保証)。
+                if (is_string($fallback) && $fallback !== '') {
+                    return $fallback;
+                }
+            }
+        }
+
+        return null;
     }
 
     /**

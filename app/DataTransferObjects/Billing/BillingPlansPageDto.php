@@ -22,7 +22,8 @@ use App\Enums\Billing\OnboardingBillingState;
  *   plans: list<PricingPlanShape>,
  *   currentPlanCode: string|null,
  *   billingState: string,
- *   canManage: bool
+ *   canManage: bool,
+ *   subscriptionAttemptToken: string
  * }
  */
 final readonly class BillingPlansPageDto
@@ -35,6 +36,12 @@ final readonly class BillingPlansPageDto
         public ?string $currentPlanCode,
         public OnboardingBillingState $billingState,
         public bool $canManage,
+        /**
+         * P9: 契約 checkout 開始 POST の冪等 token (画面 render ごとに固定される ULID)。
+         * チケット購入の `ticketAttemptToken` / カード登録の `autoRechargeSetupToken` とは
+         * **別 key 空間** (混ぜない)。
+         */
+        public string $subscriptionAttemptToken = '',
     ) {}
 
     /**
@@ -50,6 +57,7 @@ final readonly class BillingPlansPageDto
             'currentPlanCode' => $this->currentPlanCode,
             'billingState' => $this->billingState->value,
             'canManage' => $this->canManage,
+            'subscriptionAttemptToken' => $this->subscriptionAttemptToken,
         ];
     }
 }

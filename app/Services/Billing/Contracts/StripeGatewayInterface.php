@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Billing\Contracts;
 
+use App\DataTransferObjects\Billing\CreatedCheckoutSession;
 use App\DataTransferObjects\Billing\ExternalBillingRedirect;
 use App\Models\Organization;
 
@@ -17,14 +18,29 @@ use App\Models\Organization;
 interface StripeGatewayInterface
 {
     /**
-     * subscription (type=default) の hosted Checkout Session を作り遷移先を返す。
+     * subscription (type=default) の hosted Checkout Session を作り snapshot を返す。
+     *
+     * 戻り値に session id を含むのは **webhook 照合の pin** に必須のため
+     * (billing_checkout_sessions.stripe_session_id が真実源になる)。
+     * $idempotencyKey は Stripe へそのまま渡す (`sub_start:{attemptToken}`)。
+     *
+     * @param  array<string, string>  $metadata  照合専用 (認可・org 解決には使わない)
      */
     public function createSubscriptionCheckout(
         Organization $organization,
         string $stripePriceId,
         string $successUrl,
         string $cancelUrl,
-    ): ExternalBillingRedirect;
+        array $metadata,
+        string $idempotencyKey,
+    ): CreatedCheckoutSession;
+
+    /**
+     * Stripe 側 Checkout Session を expire する (別 plan の live pending 整理)。
+     *
+     * @return string expire 後の session status ('expired'|'complete'|...)
+     */
+    public function expireCheckoutSession(string $stripeSessionId): string;
 
     /**
      * Customer Portal セッションを作り遷移先を返す

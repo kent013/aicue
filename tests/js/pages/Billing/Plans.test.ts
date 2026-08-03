@@ -15,7 +15,8 @@ vi.mock("@inertiajs/svelte", async (importOriginal) => ({
 }));
 
 /*
- * プラン比較ページ。確認ダイアログ経由で POST /billing/checkout に plan_code のみを送る。
+ * プラン比較ページ。確認ダイアログ経由で POST /billing/checkout に plan_code +
+ * subscription_attempt_token を送る (funding_choice は載せない)。
  * サーバ validation エラー時は dialog を開いたままサーバ文言を出す。
  */
 
@@ -41,6 +42,7 @@ const basePage: BillingPlansPageProps = {
     currentPlanCode: "personal",
     billingState: "active_free_plan",
     canManage: true,
+    subscriptionAttemptToken: "01JQ0000000000000000000000",
 };
 
 afterEach(() => {
@@ -59,7 +61,7 @@ describe("Billing/Plans", () => {
         expect(screen.getByTestId("plan-current-badge-personal")).toHaveTextContent("現在のプラン");
     });
 
-    it("「このプランへ変更」→ 確認 → plan_code のみを POST する", async () => {
+    it("「このプランへ変更」→ 確認 → plan_code + 冪等 token を POST する (funding_choice は載せない)", async () => {
         render(Plans, { props: { page: basePage } });
 
         await fireEvent.click(screen.getByTestId("plan-change-standard"));
@@ -71,7 +73,11 @@ describe("Billing/Plans", () => {
         expect(routerPostMock).toHaveBeenCalledTimes(1);
         const [url, payload] = routerPostMock.mock.calls[0] as [string, Record<string, unknown>];
         expect(url).toBe("/billing/checkout");
-        expect(payload).toEqual({ plan_code: "standard" });
+        expect(payload).toEqual({
+            plan_code: "standard",
+            subscription_attempt_token: "01JQ0000000000000000000000",
+        });
+        expect(payload).not.toHaveProperty("funding_choice");
     });
 
     it("errors.plan_code があるとき dialog にサーバ文言を描画する", async () => {

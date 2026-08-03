@@ -81,20 +81,22 @@ class BillingAccess
             return OnboardingBillingState::ExpiredCheckout;
         }
 
-        $threshold = self::staleThresholdAt(CarbonImmutable::now());
+        // live/stale の判定は BillingCheckoutSession の述語だけが定義する (P9 C-1)。
+        // 閾値 literal をここに再発明しない (CheckoutLiveThresholdSingleSourceTest が機械検出)。
+        $now = CarbonImmutable::now();
         /** @var Collection<int, BillingCheckoutSession> $pendingRows */
         $pendingRows = BillingCheckoutSession::query()
             ->where('organization_id', $organization->id)
             ->where('status', CheckoutSessionStatus::Pending->value)
-            ->get(['id', 'created_at']);
+            ->get(['id', 'status', 'created_at']);
 
         $hasLivePending = false;
         $hasStalePending = false;
         foreach ($pendingRows as $row) {
-            if ($row->created_at !== null && $row->created_at->lessThan($threshold)) {
-                $hasStalePending = true;
-            } else {
+            if ($row->isLivePending($now)) {
                 $hasLivePending = true;
+            } else {
+                $hasStalePending = true;
             }
         }
 
@@ -111,16 +113,5 @@ class BillingAccess
             ->exists();
 
         return $hasExpired ? OnboardingBillingState::ExpiredCheckout : OnboardingBillingState::NoSubscription;
-    }
-
-    /**
-     * pending checkout の stale 境界 (単一出典)。
-     *
-     * **live = `created_at >= staleThresholdAt($now)` / stale = `created_at < staleThresholdAt($now)`**
-     * の排他で統一する。sweeper (実 DB の expire) も本 helper を `<` で読むこと。
-     */
-    public static function staleThresholdAt(CarbonImmutable $now): CarbonImmutable
-    {
-        return $now->subDay();
     }
 }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\OrganizationRole;
+use App\Models\Billing\BillingCheckoutSession;
 use App\Models\Billing\OrganizationQuota;
 use App\Models\Billing\Plan;
 use App\Models\Billing\TicketLedgerEntry;
@@ -21,6 +22,11 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Notifications\Notification;
 use Illuminate\Notifications\RoutesNotifications;
 use Laravel\Cashier\Billable;
+use ParagonIE\CipherSweet\BlindIndex;
+use ParagonIE\CipherSweet\EncryptedRow;
+use ParagonIE\CipherSweet\Transformation\Lowercase;
+use Spatie\LaravelCipherSweet\Concerns\UsesCipherSweet;
+use Spatie\LaravelCipherSweet\Contracts\CipherSweetEncrypted;
 use Webmozart\Assert\Assert;
 
 /**
@@ -40,17 +46,51 @@ use Webmozart\Assert\Assert;
  * (`subscriptions` テーブルは Stripe 実体のみを保持する invariant を守るため)。
  * free_plan_code / free_plan_activated_at / personal_declared_* / signup_tickets_granted_at は
  * いずれも状態キーのため $fillable 外 (PersonalPlanService の forceFill 経由でのみ書き込む)。
+ *
+ * P9: 請求先連絡先 (billing_contact_email / billing_contact_name) は PII のため
+ * **両列とも CipherSweet で暗号化**する (セキュリティ不変条件 #6)。平文 where は hit しないため
+ * email の検索は `whereBlind('billing_contact_email', 'organization_billing_contact_email_index', …)`
+ * のみ (保存値は EmailNormalizer 正規化済みのため検索入力も同一正規化を通すこと)。
+ * 両列とも $fillable 外 (UpdateBillingContactAction が明示代入する)。
+ *
+ * @property string|null $billing_contact_email
+ * @property string|null $billing_contact_name
  */
-class Organization extends Model
+class Organization extends Model implements CipherSweetEncrypted
 {
     /** @use HasFactory<OrganizationFactory> */
-    use Billable, HasFactory, RoutesNotifications, SoftDeletes;
+    use Billable, HasFactory, RoutesNotifications, SoftDeletes, UsesCipherSweet;
 
-    /** @var list<string> */
+    /**
+     * billing_contact_* は含めない (UpdateBillingContactAction が明示代入する)。
+     *
+     * @var list<string>
+     */
     protected $fillable = [
         'name',
         'slug',
     ];
+
+    /**
+     * 請求先連絡先の暗号化設定 (不変条件 #6)。
+     *
+     * 両列とも nullable のため `addOptionalTextField` を使う
+     * (`addField` は null で fieldNotOptional 例外になる = Inquiry の先例)。
+     */
+    public static function configureCipherSweet(EncryptedRow $encryptedRow): void
+    {
+        $encryptedRow
+            ->addOptionalTextField('billing_contact_email')
+            ->addOptionalTextField('billing_contact_name')
+            // 検索契約: 請求調査 (Stripe Dashboard の請求先メール → AI-CUE 組織の逆引き =
+            // 返金・二重課金の一次対応で唯一の特定経路) のため email のみ blind index 化する。
+            ->addBlindIndex(
+                'billing_contact_email',
+                new BlindIndex('organization_billing_contact_email_index', [new Lowercase]),
+            );
+        // billing_contact_name は blind index を張らない
+        // (等値検索の要求が無い = 検索が必要な項目だけ whereBlind)。
+    }
 
     /**
      * @return BelongsTo<Team, $this>
@@ -163,14 +203,51 @@ class Organization extends Model
     }
 
     /**
+     * サブスク契約 / カード登録 Checkout の追跡行 (P2 で導入。P9 の着地 feedback /
+     * T1004 の着地 flash が **org スコープ**で引くために必要)。
+     *
+     * @return HasMany<BillingCheckoutSession, $this>
+     */
+    public function checkoutSessions(): HasMany
+    {
+        return $this->hasMany(BillingCheckoutSession::class);
+    }
+
+    /**
      * 請求通知の宛先 (BillingNotificationDispatcher が組織宛に notify する)。
-     * テンプレートは請求先メール列を持たないため Owner メンバーの email に送る。
-     * Owner を解決できない場合は null (dispatcher が failed(missing_billing_recipient)
+     *
+     * P9: `billing_contact_email` が正本で、未設定なら Owner メンバーの email へ fallback する。
+     * Owner も解決できない場合は null (dispatcher が failed(missing_billing_recipient)
      * として確定し queued 滞留を防ぐ)。
-     * 派生アプリは billing_contact_email 等の正本列を追加して本メソッドを上書きする。
      */
     public function routeNotificationForMail(Notification $notification): ?string
     {
+        return $this->billingContactEmail();
+    }
+
+    /**
+     * Stripe customer に同期する請求先メール (Cashier の syncStripeCustomerDetails が読む)。
+     *
+     * Organization は `email` 列を持たないため Cashier 既定では null になる。請求先の正本を
+     * 明示して「請求書が届く先」を Stripe 側と一致させる。**宛名 (billing_contact_name) は
+     * Stripe へ送らない** (`stripeName()` は組織名のまま = 送信内容の境界を広げない)。
+     */
+    public function stripeEmail(): ?string
+    {
+        return $this->billingContactEmail();
+    }
+
+    /**
+     * 請求関連の宛先メール (billing_contact_email 正本 → owner email fallback)。
+     * 通知宛先と checkout 事前検証 (SubscriptionService::assertCheckoutReady) の共通出典。
+     */
+    public function billingContactEmail(): ?string
+    {
+        $contact = $this->billing_contact_email;
+        if (is_string($contact) && trim($contact) !== '') {
+            return $contact;
+        }
+
         /** @var User|null $owner */
         $owner = $this->users()
             ->get()

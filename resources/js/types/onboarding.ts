@@ -46,6 +46,8 @@ export interface OnboardingCheckoutShape {
     readonly consentTerms: AutoRechargeConsentTerms;
     /** 画面に出す資金選択の並び (enum 値。`tickets` は UI に出さない) */
     readonly fundingChoices: readonly string[];
+    /** P9: 有償プラン契約 POST の冪等 token (render 単位の ULID) */
+    readonly subscriptionAttemptToken: string;
 }
 
 /** PHP: BillingRequiredDto (BillingRequiredShape) と対 */

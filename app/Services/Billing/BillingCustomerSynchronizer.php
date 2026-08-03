@@ -10,7 +10,8 @@ use App\Models\Organization;
 /**
  * Stripe customer 同期 job の dispatch を集約する単一窓口 (IV-2)。
  *
- * 同期を発火するのは `RenameOrganizationAction` のみ (請求先連絡先の更新経路は P9)。
+ * 同期を発火するのは `RenameOrganizationAction` (組織名) と `UpdateBillingContactAction`
+ * (請求先メール。宛名は Stripe へ送らない) のみ。
  * webhook ハンドラはこの経路を通らないため、Stripe→アプリ→Stripe の同期ループは構造的に発生しない。
  */
 final class BillingCustomerSynchronizer
