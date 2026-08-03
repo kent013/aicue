@@ -63,7 +63,7 @@ class TicketPurchaseController extends Controller
             minCount: TicketVolumePrice::PURCHASE_MIN_COUNT,
             maxCount: TicketVolumePrice::PURCHASE_MAX_COUNT,
             defaultCount: self::DEFAULT_COUNT,
-            balance: $tickets->balance($organization),
+            balance: $tickets->balance($organization)->totalAvailable(),
             canManage: $user->can('manageBilling', $organization),
             attemptToken: (string) Str::ulid(),
             purchased: $purchased,

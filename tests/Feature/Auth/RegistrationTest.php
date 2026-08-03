@@ -26,7 +26,7 @@ test('登録できる (同意の証跡が記録される)', function (): void {
     // LP が約束する「新規登録で無償チケット」を個人組織へ付与する。
     // 固定値ではなく config 由来値を期待に使う (設定変更後も意味が一貫する)。
     $personalOrg = $user->organizations()->where('is_personal', true)->firstOrFail();
-    expect(app(TicketLedgerService::class)->balance($personalOrg))
+    expect(app(TicketLedgerService::class)->balance($personalOrg)->totalAvailable())
         ->toBe(config()->integer('billing.signup_grant_tickets'));
 
     // [分岐 B 固定] 通常登録では現在組織が個人組織に確定する (招待成立分岐と排他)

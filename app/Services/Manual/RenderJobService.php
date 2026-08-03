@@ -85,9 +85,11 @@ class RenderJobService
             $this->assertAllCutsHaveAdoptedReadyTakes($ordered);
             $this->assertTotalSourceDurationWithinLimit($ordered);
 
-            // 残高事前チェック (reserve はジョブ開始時 = §10.5。ここは fail-fast の入口ゲート)
+            // 残高事前チェック (reserve はジョブ開始時 = §10.5。ここは fail-fast の入口ゲート)。
+            // 判定は表示 clamp 済みの balance() ではなく真値 availableTrueBalance() を使う
+            // (返金債務で負に振れた出所を clamp が隠すと誤判定になる)
             $cost = config()->integer('manual.render_ticket_cost');
-            $balance = $this->tickets->balance($this->resolveOrganization($project));
+            $balance = $this->tickets->availableTrueBalance($this->resolveOrganization($project));
             if ($balance < $cost) {
                 throw InsufficientTicketsException::forReserve($cost, $balance);
             }

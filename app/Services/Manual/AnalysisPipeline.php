@@ -219,7 +219,9 @@ class AnalysisPipeline
             // ロック 3: reservation/org 行 (TicketLedgerService::commit 内部。savepoint)
             $reservation = $locked->ticketReservation;
             Assert::notNull($reservation, 'startJob が必ず予約を付けている');
-            // 非 Reserved は LogicException → terminal tx 全体 rollback (materialize も巻き戻る) → failJob
+            // commit-wins: TTL 超過や stale releaser 先着 (Released) でも生存 hold は課金する
+            // (二重課金は consume:{id} の UNIQUE が防ぐ)。失効 monthly hold のみ no-charge。
+            // 戻り値 (TicketCommitResult) は可観測性のためのもので分岐には使わない
             $this->tickets->commit($reservation);
 
             $locked->status = JobStatus::Succeeded;

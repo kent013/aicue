@@ -61,7 +61,7 @@ class BillingController extends Controller
         return Inertia::render('Billing/Index', [
             'plans' => $plans,
             'currentPlanCode' => $organization->plan_code,
-            'ticketBalance' => $tickets->balance($organization),
+            'ticketBalance' => $tickets->balance($organization)->totalAvailable(),
             'canManageBilling' => $user->can('manageBilling', $organization),
         ]);
     }

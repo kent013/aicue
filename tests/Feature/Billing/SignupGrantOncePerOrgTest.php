@@ -74,7 +74,7 @@ test('移行期: 登録時に付与され、同一 tx でマーカーも立つ',
     $organization = $user->organizations()->where('is_personal', true)->firstOrFail();
 
     // 付与契機・枚数は不変 (現行挙動)
-    expect(app(TicketLedgerService::class)->balance($organization))
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())
         ->toBe(config()->integer('billing.signup_grant_tickets'));
     expect($organization->ticketLedgerEntries()->firstOrFail()->idempotency_key)
         ->toBe("signup_grant:org:{$organization->id}");
@@ -93,12 +93,12 @@ test('移行期: 登録済み (マーカー済み) の組織を activate して�
 
     $user = User::whereBlind('email', 'email_index', 'grant-once-2@example.com')->firstOrFail();
     $organization = $user->organizations()->where('is_personal', true)->firstOrFail();
-    $balanceBefore = app(TicketLedgerService::class)->balance($organization);
+    $balanceBefore = app(TicketLedgerService::class)->balance($organization)->totalAvailable();
 
     $result = app(PersonalPlanService::class)->activate($organization, $user);
 
     expect($result->granted)->toBeFalse();
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe($balanceBefore);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe($balanceBefore);
     expect(grantOnceSignupEntryCount($organization))->toBe(1);
 });
 
@@ -117,13 +117,13 @@ test('free 有効化済みの組織に paid webhook (subscription_create) が来
 
     app(PersonalPlanService::class)->activate($organization, $owner);
     expect(grantOnceSignupEntryCount($organization))->toBe(1);
-    $balanceBefore = app(TicketLedgerService::class)->balance($organization);
+    $balanceBefore = app(TicketLedgerService::class)->balance($organization)->totalAvailable();
 
     event(new WebhookReceived(grantOnceInvoicePaidPayload()));
 
     // 部分 UNIQUE index が経路 (signup_grant:personal:% ↔ signup_grant:org:%) を跨いで弾く
     expect(grantOnceSignupEntryCount($organization))->toBe(1);
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe($balanceBefore);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe($balanceBefore);
 });
 
 test('paid webhook で付与済みの組織を free 有効化しても二重付与しない (逆順)', function (): void {
@@ -132,7 +132,7 @@ test('paid webhook で付与済みの組織を free 有効化しても二重付�
 
     event(new WebhookReceived(grantOnceInvoicePaidPayload()));
     expect(grantOnceSignupEntryCount($organization))->toBe(1);
-    $balanceBefore = app(TicketLedgerService::class)->balance($organization);
+    $balanceBefore = app(TicketLedgerService::class)->balance($organization)->totalAvailable();
 
     // paid webhook 経路も移行期規約 (marker 先取できたときのみ付与) に従うため、webhook 時点で
     // マーカーが立つ。よって後続の activate はマーカーを先取できず granted=false になる
@@ -143,7 +143,7 @@ test('paid webhook で付与済みの組織を free 有効化しても二重付�
 
     expect($result->granted)->toBeFalse();
     expect(grantOnceSignupEntryCount($organization))->toBe(1);
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe($balanceBefore);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe($balanceBefore);
 });
 
 test('登録経由でない組織の初回契約 (paid webhook) でもマーカーが立つ (付与実績と真実源が一致する)', function (): void {

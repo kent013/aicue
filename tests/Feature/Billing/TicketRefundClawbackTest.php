@@ -139,12 +139,17 @@ test('既消費分は取り戻せず残高が負まで振れるが、reserve は
     // 2 枚消費 (reserve → commit)
     $reservation = clawbackService()->reserve($organization, 2);
     clawbackService()->commit($reservation);
-    expect(clawbackService()->balance($organization))->toBe(3);
+    expect(clawbackService()->balance($organization)->totalAvailable())->toBe(3);
 
     // 全額返金 → target 5 逆仕訳 → 5 - 2 - 5 = -2 (既消費分は取り戻せない)
     event(new WebhookReceived(chargeRefundedPayload('evt_neg', 'pi_neg', 2500)));
 
-    expect(clawbackService()->balance($organization))->toBe(-2);
+    // P5 per-source clamp: 表示・与信からは債務を遮蔽する (purchasedRemaining = max(-2, 0))
+    expect(clawbackService()->balance($organization)->purchasedRemaining)->toBe(0);
+    expect(clawbackService()->balance($organization)->totalAvailable())->toBe(0);
+    expect(clawbackService()->availableTrueBalance($organization))->toBe(0);
+    // 台帳では債務が保全され、次回購入で一度だけ自然回収される (clamp は表示・与信のみに効く)
+    expect(purchasedNet($organization))->toBe(-2);
     expect(fn () => clawbackService()->reserve($organization, 1))
         ->toThrow(InsufficientTicketsException::class);
 });

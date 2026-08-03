@@ -84,7 +84,7 @@ test('正常系: pending 行 + paid payload で残高が増え行が completed �
 
     event(new WebhookReceived(paidTicketPayload($organization)));
 
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(30);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(30);
     expect($session->refresh()->status)->toBe(TicketCheckoutSessionStatus::Completed);
     expect($session->completed_at)->not->toBeNull();
 
@@ -103,7 +103,7 @@ test('同一 event_id の再送は claim skip で二重付与しない', functio
     event(new WebhookReceived(paidTicketPayload($organization)));
     event(new WebhookReceived(paidTicketPayload($organization)));
 
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(30);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(30);
     expect($organization->ticketLedgerEntries()->count())->toBe(1);
 });
 
@@ -113,7 +113,7 @@ test('event_id 違いの同一 session 再送は台帳 idempotency_key で二重
     event(new WebhookReceived(paidTicketPayload($organization, 'evt_a')));
     event(new WebhookReceived(paidTicketPayload($organization, 'evt_b')));
 
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(30);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(30);
     expect($organization->ticketLedgerEntries()->count())->toBe(1);
 });
 
@@ -128,7 +128,7 @@ test('DB 行なし (crash 先着) は failed になり、行記録後の再送�
 
     $record = StripeWebhookEvent::query()->firstOrFail();
     expect($record->status)->toBe(WebhookEventStatus::Failed);
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(0);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(0);
 
     // (2) 同一 attempt の再試行が DB 行を記録 (Stripe idempotency key で同一 session に収束)
     TicketCheckoutSession::factory()
@@ -144,7 +144,7 @@ test('DB 行なし (crash 先着) は failed になり、行記録後の再送�
     // (3) Stripe の event 再送 (failed→received 復帰) で一度だけ付与
     event(new WebhookReceived(paidTicketPayload($organization)));
 
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(30);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(30);
     expect($organization->ticketLedgerEntries()->count())->toBe(1);
     expect($record->refresh()->status)->toBe(WebhookEventStatus::Processed);
 });
@@ -160,7 +160,7 @@ test('照合不一致・未決済は failed + 付与なし (fail-closed)', funct
     expect(fn () => event(new WebhookReceived($payload)))
         ->toThrow(RuntimeException::class, $messagePart);
 
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(0);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(0);
     expect($session->refresh()->status)->toBe(TicketCheckoutSessionStatus::Pending);
     expect(StripeWebhookEvent::query()->firstOrFail()->status)->toBe(WebhookEventStatus::Failed);
 })->with([
@@ -181,7 +181,7 @@ test('purpose 外・mode 外は受理のみ (processed) で付与しない', fun
 
     event(new WebhookReceived($payload));
 
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(0);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(0);
     expect($session->refresh()->status)->toBe(TicketCheckoutSessionStatus::Pending);
     expect(StripeWebhookEvent::query()->firstOrFail()->status)->toBe(WebhookEventStatus::Processed);
 })->with([
@@ -199,7 +199,7 @@ test('expired 行への遅延 completed webhook でも付与し completed 化す
 
     event(new WebhookReceived(paidTicketPayload($organization)));
 
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(30);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(30);
     expect($session->refresh()->status)->toBe(TicketCheckoutSessionStatus::Completed);
     expect($session->completed_at)->not->toBeNull();
 });
@@ -223,7 +223,7 @@ test('attempts 上限到達の checkout.session.completed は terminal-ack + rep
     // 例外は投げられない (terminal-ack = 200) + 付与されない
     event(new WebhookReceived(paidTicketPayload($organization, 'evt_terminal_1')));
 
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(0);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(0);
     expect($record->refresh()->status)->toBe(WebhookEventStatus::Failed);
     expect($record->attempts)->toBe(StripeWebhookProcessor::MAX_PROCESSING_ATTEMPTS);
     $handler->shouldHaveReceived('report')->once();
@@ -253,7 +253,7 @@ test('付与後の charge.refunded (payment_intent 一致) で既存 clawback �
     [$organization] = ticketPurchaseFixture();
 
     event(new WebhookReceived(paidTicketPayload($organization)));
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(30);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(30);
 
     // 全額返金 → 全枚数逆仕訳 (既存 charge.refunded → clawbackPurchasedByPaymentIntent 経路)
     event(new WebhookReceived([
@@ -268,5 +268,5 @@ test('付与後の charge.refunded (payment_intent 一致) で既存 clawback �
         ],
     ]));
 
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(0);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(0);
 });

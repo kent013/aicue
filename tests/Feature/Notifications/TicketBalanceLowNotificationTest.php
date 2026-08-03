@@ -85,7 +85,7 @@ test('複数 pending 予約: 跨いだ 2 件目の reserve でのみ発火。com
     $ledger->commit($second);
     $ledger->commit($first);
     expect(lowBalanceNotificationCountFor($owner))->toBe(1);
-    expect($ledger->balance($organization))->toBe(2);
+    expect($ledger->balance($organization)->totalAvailable())->toBe(2);
 });
 
 test('release で閾値以上へ回復 → 再度跨ぐ reserve で再通知される', function (): void {
@@ -114,7 +114,7 @@ test('rollback される外側 tx 内の reserve は通知されない (afterCom
     }
 
     expect(lowBalanceNotificationCountFor($owner))->toBe(0);
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(10); // reserve ごと巻き戻る
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(10); // reserve ごと巻き戻る
 });
 
 test('grant で回復して再度跨ぐ場合も再通知される', function (): void {

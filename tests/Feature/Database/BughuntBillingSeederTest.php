@@ -47,7 +47,7 @@ test('guard 不成立 (既定の testing env / 非 bughunt DB 名) では no-op'
     $this->seed(BughuntBillingSeeder::class);
 
     expect(Subscription::query()->count())->toBe(0);
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(0);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(0);
 });
 
 test('fake_externals=true でも env=testing のままなら no-op (flag 単独では点火しない)', function (): void {
@@ -58,7 +58,7 @@ test('fake_externals=true でも env=testing のままなら no-op (flag 単独�
     $this->seed(BughuntBillingSeeder::class);
 
     expect(Subscription::query()->count())->toBe(0);
-    expect(app(TicketLedgerService::class)->balance($organization))->toBe(0);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(0);
 });
 
 test('guard 成立時: standard 組織のみ active sub + チケット 100 を付与し、再実行しても増えない (冪等)', function (): void {
@@ -80,11 +80,11 @@ test('guard 成立時: standard 組織のみ active sub + チケット 100 を�
     // standard 組織: active subscription (課金ゲート通過) + チケット 100
     expect(app(BillingAccess::class)->hasActiveAccess($standardOrg))->toBeTrue();
     expect($standardOrg->subscriptions()->count())->toBe(1);
-    expect($tickets->balance($standardOrg))->toBe(100);
+    expect($tickets->balance($standardOrg)->totalAvailable())->toBe(100);
 
     // free 組織: subscription もチケットも付与されない (課金なし経路の温存)
     expect($freeOrg->subscriptions()->count())->toBe(0);
-    expect($tickets->balance($freeOrg))->toBe(0);
+    expect($tickets->balance($freeOrg)->totalAvailable())->toBe(0);
 });
 
 test('既存 subscription が past_due でも再実行で active に回復する (行は増えない)', function (): void {
