@@ -259,7 +259,14 @@ backfill 不要・非正規状態 (未割当 / stale pivot) の可視化と修�
   `app/Http/Controllers/Admin/UserManagementController.php`
 - 設計: `devnotes/20260711-1009-admin-console/` (概念設計 D1/D2/D6・詳細設計 施策 1〜7)
 
-## D9 ✅ BillingAccess の entitlement 判定への書き換え (free tier は課金ゲートを通す)
+## D9 ✅→解消 BillingAccess の entitlement 判定への書き換え (free tier は課金ゲートを通す)
+
+> **【解消 / 2026-08-03 (T075 = 決済 parity P4)】** 本乖離は**ゲート反転で解消した**。
+> 「free tier (= `plan_code` null) は課金ゲートを通す」という扱いをやめ、無料枠は
+> `organizations.free_plan_code = 'personal'` の**明示申告** (`ActiveFreePlan`) で表現するようになった。
+> `plan_code` は entitlement 判定に一切使わない (quota の解決キーのみ)。
+> 既存組織は grandfathering backfill が `free_plan_code` を書くため締め出しは発生しない。
+> 設計: `devnotes/20260717-0035-aigenba-billing-parity/` §P4。**記録は削除せず経緯として残す**。
 
 | 観点 | テンプレート | 本アプリ |
 |---|---|---|

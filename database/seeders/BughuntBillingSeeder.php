@@ -8,8 +8,11 @@ use App\Enums\Billing\PlanPriceKind;
 use App\Models\Billing\Plan;
 use App\Models\Billing\Subscription;
 use App\Models\Organization;
+use App\Services\Billing\PersonalPlanService;
 use App\Services\Billing\TicketLedgerService;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\DB;
 
 /**
  * bug-hunt env 専用: 有料プラン組織に active subscription + 初期チケットを付与する。
@@ -18,8 +21,13 @@ use Illuminate\Database\Seeder;
  * 有料プラン組織で true にし、業務ルート (/projects, /app) を bug-hunt で走行可能にする。
  * チケット消費系ジャーニー (AI 解析 / レンダ) のため初期残高も付与する。
  *
- * ★ free 組織には何も付与しない: 「課金なし経路」(billing redirect / 残高ゼロ) を
+ * ★ 無料組織には subscription もチケットも付与しない: 「課金なし経路」(残高ゼロ) を
  *   bug-hunt 環境内に温存し、課金ゲート系バグの検出能力を落とさない (概念設計 施策 4)。
+ *   ただし課金ゲートは plan_code を見ず free entitlement を要求するため、未契約
+ *   (plan_code NULL) の組織には declarer-less な free entitlement
+ *   (free_plan_code='personal' / personal_declared_by_user_id NULL) を立てる
+ *   = grandfathering backfill 後の本番状態と同型の fixture にする。
+ *   初回無償チケットは発火させない (signup_tickets_granted_at に触れない = 残高ゼロを温存)。
  *
  * 三重 fail-secure (BughuntOAuthSeeder と同一): (1) config('testing.fake_externals') === true、
  * (2) app()->environment('bughunt.local')、(3) DB 名 ^bug_hunt(_[1-8])?$。
@@ -49,6 +57,8 @@ class BughuntBillingSeeder extends Seeder
             return;
         }
 
+        $this->grandfatherUncontractedOrganizations();
+
         $paidPlanCodes = $this->paidPlanCodes();
         if ($paidPlanCodes === []) {
             $this->command->warn('BughuntBillingSeeder: 有料プランが無いため skip。先に PlanSeeder を流すこと。');
@@ -70,6 +80,29 @@ class BughuntBillingSeeder extends Seeder
         }
 
         $this->command->info("BughuntBillingSeeder: {$organizations->count()} 組織に active subscription + チケット".self::INITIAL_TICKET_GRANT.' 枚を付与。');
+    }
+
+    /**
+     * 未契約 (plan_code NULL) かつ free entitlement を持たない組織に declarer-less な
+     * free entitlement を立てる (= grandfathering backfill 後の本番状態と同型)。
+     *
+     * declarer NULL のため partial unique index `organizations_personal_free_declarer_unique`
+     * の対象外 = 1 user が複数組織を持っていても衝突しない。冪等 (whereNull ガード)。
+     */
+    private function grandfatherUncontractedOrganizations(): void
+    {
+        $now = CarbonImmutable::now();
+
+        $count = DB::table('organizations')
+            ->whereNull('plan_code')
+            ->whereNull('free_plan_code')
+            ->update([
+                'free_plan_code' => PersonalPlanService::FREE_PLAN_CODE,
+                'free_plan_activated_at' => $now,
+                'updated_at' => $now,
+            ]);
+
+        $this->command->info("BughuntBillingSeeder: 未契約 {$count} 組織に declarer-less な free entitlement を付与。");
     }
 
     /**

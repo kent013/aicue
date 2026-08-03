@@ -31,7 +31,7 @@ test('current org 不在なら 404', function (): void {
 });
 
 test('current org に非所属なら 404 (認可より前 = 403 で存在を漏らさない)', function (): void {
-    [$organization] = createOrganizationWithOwner();
+    [$organization] = createOrganizationWithOwner(grandfatherFreePlan: false);
     $outsider = User::factory()->create();
     $outsider->forceFill(['current_organization_id' => $organization->id])->save();
 
@@ -41,7 +41,7 @@ test('current org に非所属なら 404 (認可より前 = 403 で存在を漏�
 });
 
 test('manageBilling なし member は 403', function (): void {
-    [$organization] = createOrganizationWithOwner();
+    [$organization] = createOrganizationWithOwner(grandfatherFreePlan: false);
     $member = attachOrganizationMember($organization);
     $member->forceFill(['current_organization_id' => $organization->id])->save();
 
@@ -51,7 +51,7 @@ test('manageBilling なし member は 403', function (): void {
 });
 
 test('declaration 未チェックは redirect-back + errors.declaration (有効化されない)', function (): void {
-    [$organization, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
 
     $this->actingAs($owner)
         ->post('/onboarding/activate-personal', ['declaration' => false])
@@ -61,7 +61,7 @@ test('declaration 未チェックは redirect-back + errors.declaration (有効�
 });
 
 test('declaration 欠落の XHR は 422', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
 
     $this->actingAs($owner)
         ->postJson('/onboarding/activate-personal', [])
@@ -70,7 +70,7 @@ test('declaration 欠落の XHR は 422', function (): void {
 });
 
 test('保護キーを payload に混ぜると 422 (mass-assignment 入口防御)', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
 
     $this->actingAs($owner)
         ->postJson('/onboarding/activate-personal', [
@@ -82,7 +82,7 @@ test('保護キーを payload に混ぜると 422 (mass-assignment 入口防御)
 });
 
 test('成功すると free entitlement が確定し dashboard へ redirect + 枚数入り flash', function (): void {
-    [$organization, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     $tickets = app(TicketPricingService::class)->signupGrantTickets();
 
     $this->actingAs($owner)
@@ -110,7 +110,7 @@ test('成功すると free entitlement が確定し dashboard へ redirect + 枚
 });
 
 test('二重 POST は冪等 (2 回目は付与なしの文言 + signup_grant は 1 行のまま)', function (): void {
-    [$organization, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
 
     $this->actingAs($owner)->post('/onboarding/activate-personal', activatePersonalPayload());
     $this->actingAs($owner)
@@ -125,7 +125,7 @@ test('二重 POST は冪等 (2 回目は付与なしの文言 + signup_grant は
 });
 
 test('付与マーカー済みの org は granted=false の文言で有効化される', function (): void {
-    [$organization, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     $organization->forceFill(['signup_tickets_granted_at' => now()])->save();
 
     $this->actingAs($owner)
@@ -140,7 +140,7 @@ test('付与マーカー済みの org は granted=false の文言で有効化さ
 });
 
 test('既に free personal org を持つ user は errors.plan_code (500 にしない)', function (): void {
-    [$organization, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     Organization::factory()->freePersonal($owner)->create();
 
     $this->actingAs($owner)
@@ -153,7 +153,7 @@ test('既に free personal org を持つ user は errors.plan_code (500 にし�
 });
 
 test('メンバー超過の org は errors.plan_code (XHR は 422)', function (): void {
-    [$organization, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     // MAX_MEMBERS = 3 を超える (owner + 3 名 = 4 名)
     for ($i = 0; $i < 3; $i++) {
         attachOrganizationMember($organization);
@@ -173,7 +173,7 @@ test('メンバー超過の org は errors.plan_code (XHR は 422)', function ()
 });
 
 test('有効な有償契約がある org は errors.plan_code', function (): void {
-    [$organization, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     contractPaidPlan($organization, status: 'active');
 
     $this->actingAs($owner)
@@ -186,7 +186,7 @@ test('有効な有償契約がある org は errors.plan_code', function (): voi
 });
 
 test('throttle:10,1 が効く (11 回目は 429)', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
 
     for ($i = 0; $i < 10; $i++) {
         $this->actingAs($owner)

@@ -25,21 +25,16 @@ return [
     /*
     | plan_code が未設定 (未契約) の組織に適用するプラン。
     */
-    'fallback_plan' => 'free',
+    'fallback_plan' => 'personal',
 
     /*
     | plan_code → limits。プラン追加時は PlanSeeder と合わせてここに limits を定義する。
     */
     'plans' => [
-        'free' => [
-            'max_projects' => 1,
-            'max_members' => 3,
-            'max_storage_bytes' => 1 * 1024 * 1024 * 1024,      // 1 GiB (初期値。プラン設計で調整可能)
-        ],
         'personal' => [
             'max_projects' => 1,
             'max_members' => 3,                                 // PersonalPlanService::MAX_MEMBERS と一致させる
-            'max_storage_bytes' => 1 * 1024 * 1024 * 1024,      // 1 GiB (free の後継 = 実効 limits 不変)
+            'max_storage_bytes' => 1 * 1024 * 1024 * 1024,      // 1 GiB (旧 free の後継 = 実効 limits 不変)
         ],
         'starter' => [
             'max_projects' => 1,

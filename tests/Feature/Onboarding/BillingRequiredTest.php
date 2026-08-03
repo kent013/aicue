@@ -17,7 +17,7 @@ use Inertia\Testing\AssertableInertia as Assert;
 /** ExpiredCheckout (plan_code 非 null + entitled でない sub) の組織 + owner。 */
 function billingRequiredExpiredOrganization(): array
 {
-    [$organization, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     contractPaidPlan($organization, status: 'canceled');
 
     return [$organization->fresh(), $owner];
@@ -30,7 +30,7 @@ test('current org 不在なら 404', function (): void {
 });
 
 test('current org に非所属なら 404 (403 で存在を漏らさない)', function (): void {
-    [$organization] = createOrganizationWithOwner();
+    [$organization] = createOrganizationWithOwner(grandfatherFreePlan: false);
     $outsider = User::factory()->create();
     $outsider->forceFill(['current_organization_id' => $organization->id])->save();
 
@@ -53,7 +53,7 @@ test('ExpiredCheckout の一般 member には Owner 連絡先付きで 200 rende
 });
 
 test('離脱ガード: 有効 subscription を持つ member は dashboard へ', function (): void {
-    [$organization] = createOrganizationWithOwner();
+    [$organization] = createOrganizationWithOwner(grandfatherFreePlan: false);
     contractPaidPlan($organization, status: 'active');
     $member = attachOrganizationMember($organization);
     $member->forceFill(['current_organization_id' => $organization->id])->save();
@@ -63,7 +63,7 @@ test('離脱ガード: 有効 subscription を持つ member は dashboard へ', 
 });
 
 test('離脱ガード: ActiveFreePlan (free_plan_code=personal) の member は dashboard へ', function (): void {
-    [$organization, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     $organization->forceFill([
         'free_plan_code' => 'personal',
         'free_plan_activated_at' => now(),
@@ -85,7 +85,7 @@ test('離脱ガード: manageBilling 保持者は checkout へ (自分で手続�
 });
 
 test('未契約 org (plan_code IS NULL) の一般 member も 200 render される — P4 の grandfathering backfill 後は ActiveFreePlan → dashboard へ変わる', function (): void {
-    [$organization] = createOrganizationWithOwner();
+    [$organization] = createOrganizationWithOwner(grandfatherFreePlan: false);
     $member = attachOrganizationMember($organization);
     $member->forceFill(['current_organization_id' => $organization->id])->save();
 

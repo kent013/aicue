@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Middleware;
 
+use App\Enums\Billing\OnboardingBillingState;
 use App\Models\Organization;
 use App\Models\User;
 use App\Services\Billing\BillingAccess;
@@ -14,18 +15,20 @@ use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * 課金ゲート: BillingAccess の entitlement 判定で不許可
- * (= 有償プラン契約中の支払い不健全) の組織の業務 route アクセスを遮断し、
- * 理由 flash とともに billing へ誘導する middleware。alias: `require-active-subscription`。
+ * 課金ゲート: BillingAccess の entitlement 判定で不許可 (= 未契約、または有償プラン契約中の
+ * 支払い不健全) の組織の業務 route アクセスを遮断し、onboarding へ誘導する middleware。
+ * alias: `require-active-subscription`。
  *
- * - 判定は BillingAccess::hasActiveAccess のみ (subscription 直参照禁止。
- *   アプリは BillingAccess の差し替えで gate 方針を変更する)。
- *   plan_code null (未契約 = free tier) は許可されるため本 middleware を素通りする
- * - 遮断時: ブラウザは billing へ redirect + 理由 flash (error)、
- *   JSON/XHR は 402 Payment Required (同一文言)
- * - allowlist: billing (index/checkout/portal)・Stripe webhook・組織管理系 route には
- *   本 middleware を適用しない (route 側で group に含めない構造的 allowlist。
- *   遮断中でも checkout / Customer Portal に到達できることを保証する)
+ * - 判定は BillingAccess::state()->grantsAccess() のみ (subscription 直参照禁止。
+ *   plan_code は見ない = 無料枠は free_plan_code='personal' の ActiveFreePlan で表現する)
+ * - 遮断時: ブラウザは onboarding へ redirect (manageBilling 保持者は自分で契約できるので
+ *   onboarding.checkout、非保持者は説明画面 onboarding.billing-required)。**遮断理由の flash は
+ *   積まない** — 理由は着地ページ (Onboarding/Checkout・Onboarding/BillingRequired) が持つ
+ * - JSON/XHR は 402 Payment Required (文言は state で 2 分岐)
+ * - allowlist: billing (index/checkout/portal)・onboarding (checkout/activate-personal/
+ *   billing-required)・Stripe webhook・組織管理系 route には本 middleware を適用しない
+ *   (route 側で group に含めない構造的 allowlist。遮断中でも契約導線 / Customer Portal に
+ *   到達できることを保証する = 「契約するための画面が契約してないと見られない」詰みの防止)
  *
  * 対象 organization の解決:
  *   1. route に `{organization}` binding があればそれを使う。その際、非メンバー /
@@ -39,11 +42,15 @@ use Symfony\Component\HttpFoundation\Response;
 final class RequireActiveSubscription
 {
     /**
-     * 遮断理由 (ブラウザ flash / JSON 402 で同一文言。H1: 説明なしリダイレクト対策)。
-     * 判定変更後に遮断されるのは「有償プラン契約中の支払い不健全」のみのため、
-     * free 組織を誤解させる旧文言 (「有効なサブスクリプションがありません」) は廃止。
+     * JSON/XHR の 402 文言 (ブラウザ経路の理由提示は着地ページが担う)。
+     *
+     * BLOCKED_MESSAGE は「有償契約 + 支払い不健全」(= ExpiredCheckout) の既存契約文言で不変。
+     * NO_PLAN_MESSAGE はゲート反転で新たに生まれた遮断事由 (未契約 = NoSubscription /
+     * PendingCheckout) 専用。
      */
     private const string BLOCKED_MESSAGE = 'サブスクリプションのお支払いが確認できないため、ご利用を一時停止しています。お支払い方法をご確認ください。';
+
+    private const string NO_PLAN_MESSAGE = 'ご利用にはプランの選択が必要です。';
 
     public function __construct(
         private readonly BillingAccess $access,
@@ -65,22 +72,29 @@ final class RequireActiveSubscription
             return $next($request);
         }
 
-        if ($this->access->hasActiveAccess($organization)) {
+        $state = $this->access->state($organization);
+        if ($state->grantsAccess()) {
             return $next($request);
         }
 
-        // JSON/XHR は 402、ブラウザは billing へ誘導 (理由 flash 付き。文言は両経路で統一)
+        // JSON/XHR は 402 (文言は遮断事由で 2 分岐)
         if ($request->expectsJson()) {
-            abort(Response::HTTP_PAYMENT_REQUIRED, self::BLOCKED_MESSAGE);
+            abort(
+                Response::HTTP_PAYMENT_REQUIRED,
+                $state === OnboardingBillingState::ExpiredCheckout ? self::BLOCKED_MESSAGE : self::NO_PLAN_MESSAGE,
+            );
         }
 
         // 直前 hop で積まれた flash (例: 招待受諾の success) が、この gate-redirect の
-        // 1 hop で消費され失われないよう延命する。with('error', ...) は新規 flash の
-        // 積み込みで両立する (key 衝突時は本 middleware の error が優先される —
-        // 遮断理由の提示が最優先の情報のため許容)
+        // 1 hop で消費され失われないよう延命する。
         $request->session()->reflash();
 
-        return redirect()->route('billing.index')->with('error', self::BLOCKED_MESSAGE);
+        // 遮断理由は着地ページが持つ (middleware は error flash を積まない)。
+        return redirect()->route(
+            Gate::forUser($user)->allows('manageBilling', $organization)
+                ? 'onboarding.checkout'          // 自分で契約できる = プラン選択へ
+                : 'onboarding.billing-required', // 契約権限なし = 説明画面へ
+        );
     }
 
     /**

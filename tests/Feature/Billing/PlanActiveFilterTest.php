@@ -18,10 +18,9 @@ test('is_active=false の Plan は /pricing の props に出ない', function ()
     $this->get('/pricing')
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
-            ->has('page.plans', 3)
-            ->where('page.plans.0.code', 'free')
-            ->where('page.plans.1.code', 'personal')
-            ->where('page.plans.2.code', 'starter'));
+            ->has('page.plans', 2)
+            ->where('page.plans.0.code', 'personal')
+            ->where('page.plans.1.code', 'starter'));
 });
 
 test('is_active=true に戻した Plan は /pricing の props に出る', function (): void {
@@ -31,12 +30,12 @@ test('is_active=true に戻した Plan は /pricing の props に出る', functi
     $this->get('/pricing')
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
-            ->has('page.plans', 4)
-            ->where('page.plans.3.code', 'standard'));
+            ->has('page.plans', 3)
+            ->where('page.plans.2.code', 'standard'));
 });
 
 test('seed 直後は全プランが is_active=true (公開方針)', function (): void {
     expect(Plan::query()->where('is_active', false)->count())->toBe(0);
     expect(Plan::query()->where('is_active', true)->pluck('code')->all())
-        ->toEqualCanonicalizing(['free', 'personal', 'starter', 'standard']);
+        ->toEqualCanonicalizing(['personal', 'starter', 'standard']);
 });

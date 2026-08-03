@@ -22,7 +22,7 @@ use Inertia\Testing\AssertableInertia as Assert;
 /** ExpiredCheckout (plan_code 非 null + entitled でない sub) の組織 + owner。 */
 function expiredCheckoutOrganizationWithOwner(): array
 {
-    [$organization, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     contractPaidPlan($organization, status: 'canceled');
 
     return [$organization->fresh(), $owner];
@@ -35,7 +35,7 @@ test('current org 不在なら 404 (組織の有無を露出しない)', functio
 });
 
 test('current org に非所属なら 404 (403 で存在を漏らさない)', function (): void {
-    [$organization] = createOrganizationWithOwner();
+    [$organization] = createOrganizationWithOwner(grandfatherFreePlan: false);
     // current_organization_id が退会後も残存する不整合を再現する
     $outsider = User::factory()->create();
     $outsider->forceFill(['current_organization_id' => $organization->id])->save();
@@ -79,7 +79,7 @@ test('ExpiredCheckout + manageBilling なし member は billing-required へ red
 });
 
 test('Subscribed は manageBilling でも billing.index へ redirect', function (): void {
-    [$organization, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     contractPaidPlan($organization, status: 'active');
 
     $this->actingAs($owner)->get('/onboarding/checkout')
@@ -87,7 +87,7 @@ test('Subscribed は manageBilling でも billing.index へ redirect', function 
 });
 
 test('Subscribed の non-manager member は billing-required ではなく billing.index へ (判定順序の固定)', function (): void {
-    [$organization] = createOrganizationWithOwner();
+    [$organization] = createOrganizationWithOwner(grandfatherFreePlan: false);
     contractPaidPlan($organization, status: 'active');
     $member = attachOrganizationMember($organization);
     $member->forceFill(['current_organization_id' => $organization->id])->save();
@@ -97,7 +97,7 @@ test('Subscribed の non-manager member は billing-required ではなく billin
 });
 
 test('ActiveFreePlan (free_plan_code=personal) は billing.index へ redirect', function (): void {
-    [$organization, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     $organization->forceFill(['plan_code' => 'standard'])->save(); // 移行 OR を経由しないことの明示
     contractPaidPlan($organization, status: 'canceled');
     $organization->forceFill([
@@ -111,17 +111,19 @@ test('ActiveFreePlan (free_plan_code=personal) は billing.index へ redirect', 
         ->assertRedirect(route('billing.index'));
 });
 
-test('未契約 org (plan_code IS NULL) は移行 OR により billing.index へ redirect する — P4 の移行 OR 削除で 200 render へ変わる', function (): void {
-    [$organization, $owner] = createOrganizationWithOwner();
+test('未契約 org (plan_code IS NULL) は checkout を 200 で render する (P4 ゲート反転後)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
 
     expect($organization->plan_code)->toBeNull()
         ->and($organization->free_plan_code)->toBeNull();
 
-    // P3 の事実: hasActiveAccess() の移行 OR (plan_code === null) が true を返すため
-    // checkout は画面として到達しない。P4 で OR の 1 行を消すと 200 render へ反転する
-    // (期待の更新は P4 のテスト計画。本テストは削除せず更新する)。
+    // P3 時点では hasActiveAccess() の移行 OR (plan_code === null) が true を返すため
+    // checkout は画面として到達せず billing.index へ redirect していた。
+    // P4 で OR の 1 行を削除した結果、未契約 org は state()=NoSubscription で
+    // grantsAccess()=false となり、checkout が本来の着地点として 200 render される。
+    // (テストは削除せず期待を反転させた = P4 のテスト計画どおり)
     $this->actingAs($owner)->get('/onboarding/checkout')
-        ->assertRedirect(route('billing.index'));
+        ->assertOk();
 });
 
 test('is_active=false に落とした Plan は pageData.plans に出ない (露出規則の固定)', function (): void {

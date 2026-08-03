@@ -41,7 +41,7 @@ function signupGrantEntryCount(Organization $organization): int
 
 describe('eligibility', function (): void {
     test('有効な有償契約 (active/trialing) がある組織は HasEntitledSubscription で不可', function (): void {
-        [$organization, $owner] = createOrganizationWithOwner();
+        [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
         createFakeSubscription($organization, status: 'active');
 
         $eligibility = personalPlanService()->eligibility($organization, $owner);
@@ -51,14 +51,14 @@ describe('eligibility', function (): void {
     });
 
     test('canceled サブスク行が残る組織は選択できる (paid → free 経路)', function (): void {
-        [$organization, $owner] = createOrganizationWithOwner();
+        [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
         createFakeSubscription($organization, status: 'canceled');
 
         expect(personalPlanService()->eligibility($organization, $owner)->eligible)->toBeTrue();
     });
 
     test('在籍 4 名の組織は TooManyMembers で不可 (キャップ 3 名)', function (): void {
-        [$organization, $owner] = createOrganizationWithOwner();
+        [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
         attachOrganizationMember($organization, OrganizationRole::Member);
         attachOrganizationMember($organization, OrganizationRole::Member);
 
@@ -74,7 +74,7 @@ describe('eligibility', function (): void {
     });
 
     test('同一 user が declarer の free personal 組織を既に持つ場合は AlreadyHasFreePersonalOrg で不可', function (): void {
-        [$first, $owner] = createOrganizationWithOwner('1 つ目の組織');
+        [$first, $owner] = createOrganizationWithOwner('1 つ目の組織', grandfatherFreePlan: false);
         personalPlanService()->activate($first, $owner);
 
         $second = app(OrganizationProvisioningService::class)->provision($owner, '2 つ目の組織');
@@ -86,7 +86,7 @@ describe('eligibility', function (): void {
 
     test('declarer ではないが owner として在籍する free personal 組織があれば不可', function (): void {
         // 既存 free 組織: declarer は別 user、対象 user は owner として在籍する
-        [$freeOrg, $declarer] = createOrganizationWithOwner('既存 free 組織');
+        [$freeOrg, $declarer] = createOrganizationWithOwner('既存 free 組織', grandfatherFreePlan: false);
         personalPlanService()->activate($freeOrg, $declarer);
 
         $otherOwner = attachOrganizationMember($freeOrg, OrganizationRole::Owner);
@@ -111,7 +111,7 @@ describe('eligibility', function (): void {
 
 describe('activate', function (): void {
     test('free_plan_code / 自己申告の監査列 / マーカーが立ち、初回チケットが 1 回だけ付与される', function (): void {
-        [$organization, $owner] = createOrganizationWithOwner();
+        [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
         $expected = config()->integer('billing.signup_grant_tickets');
 
         $result = personalPlanService()->activate($organization, $owner);
@@ -132,7 +132,7 @@ describe('activate', function (): void {
     });
 
     test('同一組織の再 activate は granted=false で残高不変 (マーカー先取が 0 件)', function (): void {
-        [$organization, $owner] = createOrganizationWithOwner();
+        [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
         $expected = config()->integer('billing.signup_grant_tickets');
 
         personalPlanService()->activate($organization, $owner);
@@ -156,7 +156,7 @@ describe('activate', function (): void {
     });
 
     test('eligibility 不可の組織は PersonalPlanNotEligibleException で拒否され、付与されない', function (): void {
-        [$organization, $owner] = createOrganizationWithOwner();
+        [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
         createFakeSubscription($organization, status: 'active');
 
         expect(fn () => personalPlanService()->activate($organization, $owner))
@@ -172,7 +172,7 @@ describe('activate', function (): void {
         // 並行 activate の窓 = 「eligibility は通ったが DB の partial unique index が拒否する」状態。
         // 先着 org を soft delete することで、eligibility の Organization::query() からは
         // 見えない (default scope) が index は declarer 枠を握ったままの状態を決定論的に作る。
-        [$first, $owner] = createOrganizationWithOwner('先着の組織');
+        [$first, $owner] = createOrganizationWithOwner('先着の組織', grandfatherFreePlan: false);
         personalPlanService()->activate($first, $owner);
         $first->delete();
 
@@ -201,7 +201,7 @@ describe('activate', function (): void {
 
 describe('retireForPaidSubscription', function (): void {
     test('free_plan_code を null 化し、自己申告の監査列は残す (冪等)', function (): void {
-        [$organization, $owner] = createOrganizationWithOwner();
+        [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
         personalPlanService()->activate($organization, $owner);
 
         personalPlanService()->retireForPaidSubscription($organization->refresh());
@@ -218,7 +218,7 @@ describe('retireForPaidSubscription', function (): void {
     });
 
     test('退役で declarer 枠が解放され、同一 user が別組織を free 化できる', function (): void {
-        [$first, $owner] = createOrganizationWithOwner('1 つ目の組織');
+        [$first, $owner] = createOrganizationWithOwner('1 つ目の組織', grandfatherFreePlan: false);
         personalPlanService()->activate($first, $owner);
         personalPlanService()->retireForPaidSubscription($first->refresh());
 

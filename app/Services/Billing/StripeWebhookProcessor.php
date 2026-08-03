@@ -48,10 +48,9 @@ use Webmozart\Assert\Assert;
  *
  * plan_code 不変条件: `organizations.plan_code` は Stripe Price を持つ有償プランの
  * 契約 (active/trialing) 時のみ SubscriptionService が set し、`customer.subscription.deleted` で
- * null に戻す状態キー。**null = 未契約 = 支払い不要の free tier**
- * (config/quota.php の fallback_plan が適用される)。BillingAccess はこの契約を
- * entitlement 判定の根拠にするため、支払い不要のプランを plan_code に載せる場合は
- * BillingAccess とセットで見直すこと (RequireActiveSubscriptionMiddlewareTest が固定)。
+ * null に戻す状態キー。**用途は quota の解決のみ** (null = config/quota.php の fallback_plan が
+ * 適用される、それだけの意味)。利用可否 (entitlement) は plan_code を一切見ず
+ * BillingAccess::state() が決める (無料枠は organizations.free_plan_code='personal')。
  */
 class StripeWebhookProcessor
 {

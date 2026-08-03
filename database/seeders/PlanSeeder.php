@@ -20,13 +20,10 @@ use Illuminate\Support\Carbon;
  * - 価格の真実源は plan_prices (DB snapshot)。ここでは bootstrap 行
  *   (stripe_price_id=price_test_* / livemode=false / synced_at=null) を投入し、
  *   実運用では `billing:sync-stripe-prices` が Stripe Catalog の実 Price ID へ上書きする
- * - free / personal プランは Stripe Price を持たない (Checkout 対象外。
- *   personal は activate 経由の無料プランで requiresStripeCheckout()=false)。
- *   これは BillingAccess の entitlement 判定の前提でもある: plan_code は Stripe Price →
- *   Plan 解決 (StripeWebhookProcessor) でのみ set されるため、Price を持たない free が
- *   plan_code に載る経路はない (null = 未契約 = 支払い不要の free tier)。free に Price を
- *   持たせる場合は BillingAccess とセットで見直すこと
- *   (RequireActiveSubscriptionMiddlewareTest が固定)
+ * - personal プランは Stripe Price を持たない (Checkout 対象外。activate 経由の無料プランで
+ *   requiresStripeCheckout()=false)。free entitlement は organizations.free_plan_code='personal'
+ *   で表現する。plan_code は entitlement 判定に使わない (quota 解決キーであり、利用可否は
+ *   BillingAccess::state() が決める)
  */
 class PlanSeeder extends Seeder
 {
@@ -44,9 +41,7 @@ class PlanSeeder extends Seeder
 
     public function run(): void
     {
-        // free / personal は Checkout を持たないため plan_prices は作らない
-        // (free は後継 personal への移行が完了するまでの残置)
-        $this->upsertPlan('free', 'Free', 0);
+        // personal は Checkout を持たないため plan_prices は作らない
         $this->upsertPlan('personal', 'Personal', 1);
         $this->upsertPlan('starter', 'Starter', 2);
         $this->upsertPlan('standard', 'Standard', 3);

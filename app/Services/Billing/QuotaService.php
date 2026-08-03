@@ -12,7 +12,8 @@ use Webmozart\Assert\Assert;
 /**
  * 多次元 Quota の唯一の判定窓口 (docs 07 ガイド §4)。
  *
- * - 既定値: config/quota.php の plan_code → limits map (plan_code null は fallback_plan)
+ * - 既定値: config/quota.php の plan_code → limits map
+ *   (plan_code null は fallback_plan = personal)
  * - override: organization_quotas.limits が key 単位で既定値を上書きする
  * - チェックは本 Service 経由のみ (コントローラに直書きしない)。超過は
  *   QuotaExceededException (web では back + error flash に変換される)

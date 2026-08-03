@@ -34,12 +34,9 @@ test('personal プランは Stripe Price を持たない (activate 経由の無�
 
 test('全プランの monthly_ticket_grant が 0 (D28: 月次付与は廃止)', function (): void {
     expect(Plan::query()->pluck('monthly_ticket_grant', 'code')->all())
-        ->toEqual(['free' => 0, 'personal' => 0, 'starter' => 0, 'standard' => 0]);
+        ->toEqual(['personal' => 0, 'starter' => 0, 'standard' => 0]);
 });
 
-test('free プランは Stripe Price を持たない (Checkout 対象外の未契約既定)', function (): void {
-    $free = Plan::query()->where('code', 'free')->firstOrFail();
-
-    expect($free->currentPrice(PlanPriceKind::Base))->toBeNull();
-    expect($free->prices()->count())->toBe(0);
+test('free プラン行は撤去済み (D11: 後継は personal。未契約の既定は free_plan_code で表現する)', function (): void {
+    expect(Plan::query()->where('code', 'free')->exists())->toBeFalse();
 });

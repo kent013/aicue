@@ -14,28 +14,28 @@ use App\Services\Billing\QuotaService;
 
 test('加算後合計が上限以下なら通る (境界: current + addition == limit は許可)', function (): void {
     [$organization] = createOrganizationWithOwner();
-    config()->set('quota.plans.free.max_storage_bytes', 1_000);
+    config()->set('quota.plans.personal.max_storage_bytes', 1_000);
 
     app(QuotaService::class)->checkAddition($organization, QuotaKey::MaxStorageBytes, current: 400, addition: 600);
 })->throwsNoExceptions();
 
 test('加算後合計が上限を超えると QuotaExceededException', function (): void {
     [$organization] = createOrganizationWithOwner();
-    config()->set('quota.plans.free.max_storage_bytes', 1_000);
+    config()->set('quota.plans.personal.max_storage_bytes', 1_000);
 
     app(QuotaService::class)->checkAddition($organization, QuotaKey::MaxStorageBytes, current: 400, addition: 601);
 })->throws(QuotaExceededException::class);
 
 test('limits に key が無ければ無制限として通る', function (): void {
     [$organization] = createOrganizationWithOwner();
-    config()->set('quota.plans.free', ['max_projects' => 1, 'max_members' => 3]);
+    config()->set('quota.plans.personal', ['max_projects' => 1, 'max_members' => 3]);
 
     app(QuotaService::class)->checkAddition($organization, QuotaKey::MaxStorageBytes, current: PHP_INT_MAX - 1, addition: 1);
 })->throwsNoExceptions();
 
 test('organization_quotas の override が checkAddition にも反映される', function (): void {
     [$organization] = createOrganizationWithOwner();
-    config()->set('quota.plans.free.max_storage_bytes', 1_000);
+    config()->set('quota.plans.personal.max_storage_bytes', 1_000);
     $organization->quota()->create(['limits' => ['max_storage_bytes' => 2_000]]);
     $organization = $organization->fresh();
     assert($organization !== null);
@@ -45,14 +45,14 @@ test('organization_quotas の override が checkAddition にも反映される',
 
 test('int overflow (current + addition が PHP_INT_MAX 超) は超過として拒否する', function (): void {
     [$organization] = createOrganizationWithOwner();
-    config()->set('quota.plans.free.max_storage_bytes', 1_000);
+    config()->set('quota.plans.personal.max_storage_bytes', 1_000);
 
     app(QuotaService::class)->checkAddition($organization, QuotaKey::MaxStorageBytes, current: PHP_INT_MAX, addition: 1);
 })->throws(QuotaExceededException::class);
 
 test('負の current / addition は事前条件違反 (無制限プランでも検査される)', function (): void {
     [$organization] = createOrganizationWithOwner();
-    config()->set('quota.plans.free', ['max_projects' => 1]);
+    config()->set('quota.plans.personal', ['max_projects' => 1]);
 
     expect(fn () => app(QuotaService::class)->checkAddition($organization, QuotaKey::MaxStorageBytes, current: -1, addition: 0))
         ->toThrow(InvalidArgumentException::class);

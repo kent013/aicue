@@ -59,32 +59,41 @@ test('Free (未契約) 組織は撮影 PWA (/app) に到達できる (F-07 再�
 });
 
 // ── 有償プラン契約状態の支払い健全性 gate (fail-closed は plan_code 非 null に限定) ──
+//
+// 有償 org は grandfatherFreePlan: false で作る。P4 の backfill 対象は
+// 「plan_code IS NULL ∧ free_plan_code IS NULL ∧ ¬entitled」に閉じており、有償 org に
+// grandfather マーカーが付くことは本番では起こらないため (付くと state() の解決順 2 番目
+// = ActiveFreePlan が有償の支払い健全性判定を覆い隠す非現実な fixture になる)。
+// **アサーションは P4 前後で 1 件も変えていない** (DoD (3): plan_code 非 null の結論は不変)。
 
 test('有償契約 + active/trialing は業務 route に到達できる', function (string $status): void {
-    [$organization, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     contractPaidPlan($organization, status: $status);
 
     $this->actingAs($owner)->get('/projects')->assertOk();
 })->with(['active', 'trialing']);
 
 test('有償契約 + past_due は業務 route に到達できる (cohort D。dunning 中も利用継続)', function (): void {
-    [$organization, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     contractPaidPlan($organization, status: 'past_due');
 
     $this->actingAs($owner)->get('/projects')->assertOk();
 });
 
 test('有償契約 + 支払い不健全は billing へ redirect + 理由 flash', function (string $status): void {
-    [$organization, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     contractPaidPlan($organization, status: $status);
 
+    // P4: 遮断先は billing.index から onboarding.checkout へ (manageBilling 保持者)。
+    // middleware は error flash を積まない (遮断理由は着地ページが持つ = aigenba 方式)。
+    // **遮断されるという結論自体は P4 前後で不変** (DoD (3))。
     $this->actingAs($owner)->get('/projects')
-        ->assertRedirect(route('billing.index'))
-        ->assertSessionHas('error', BILLING_BLOCKED_MESSAGE);
+        ->assertRedirect(route('onboarding.checkout'))
+        ->assertSessionMissing('error');
 })->with(['canceled', 'incomplete', 'unpaid', 'paused']);
 
 test('有償契約 + trial 終了 + PM 無しは遮断される (cohort C / E)', function (string $status): void {
-    [$organization, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     $subscription = contractPaidPlan($organization, status: $status);
     $subscription->forceFill([
         'trial_ends_at' => CarbonImmutable::now()->subDay(),
@@ -92,20 +101,20 @@ test('有償契約 + trial 終了 + PM 無しは遮断される (cohort C / E)',
     ])->save();
 
     $this->actingAs($owner)->get('/projects')
-        ->assertRedirect(route('billing.index'))
-        ->assertSessionHas('error', BILLING_BLOCKED_MESSAGE);
+        ->assertRedirect(route('onboarding.checkout'))
+        ->assertSessionMissing('error');
 })->with(['active', 'trialing', 'past_due']);
 
 test('有償契約 + subscription 行なしは fail-closed (webhook 順序逆転の防御)', function (): void {
-    [$organization, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     $organization->forceFill(['plan_code' => 'standard'])->save(); // 行はあえて作らない
 
     $this->actingAs($owner)->get('/projects')
-        ->assertRedirect(route('billing.index'));
+        ->assertRedirect(route('onboarding.checkout'));
 });
 
 test('有償契約 + 支払い不健全の JSON は 402 + message 固定 (flash と同一文言。非 XHR の Accept: json も含む)', function (): void {
-    [$organization, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     contractPaidPlan($organization, status: 'canceled');
 
     // getJson は Accept: application/json のみ付与 (X-Requested-With なし) =
@@ -116,7 +125,7 @@ test('有償契約 + 支払い不健全の JSON は 402 + message 固定 (flash 
 });
 
 test('billing ページは遮断対象の組織でも到達できる (構造的 allowlist)', function (): void {
-    [$organization, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     contractPaidPlan($organization, status: 'canceled');
 
     $this->actingAs($owner)->get('/billing')->assertOk();
@@ -134,15 +143,21 @@ test('free プランは Stripe Price を持たない (plan_code に free が入�
 
 // ── BillingAccess 単体マトリクス ──
 
-test('BillingAccess: plan_code null は移行 OR で許可 (P4 で削除) / 非 null は deriveEntitlement 判定', function (): void {
+test('BillingAccess: plan_code null は許可の理由にならない (P4 で移行 OR 削除) / 非 null は deriveEntitlement 判定', function (): void {
     $access = app(BillingAccess::class);
 
-    // cohort I: 未契約 (free tier) は移行 OR で許可
-    [$freeOrg] = createOrganizationWithOwner();
-    expect($access->hasActiveAccess($freeOrg))->toBeTrue();
+    // cohort I: 未契約 + 無申告は遮断 (P4 のゲート反転。移行 OR を削除した結果)
+    [$freeOrg] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    expect($access->hasActiveAccess($freeOrg))->toBeFalse();
 
-    // cohort I: 未契約 + subscription 行だけある (webhook の plan_code 同期前) も移行 OR で許可
-    [$syncLagOrg] = createOrganizationWithOwner();
+    // 既存 org は backfill が free_plan_code='personal' を書くため ActiveFreePlan で許可される
+    // (= 締め出しゼロ。P4 の正味の変更は「新規発生する未契約 org が遮断される」ことだけ)
+    [$grandfathered] = createOrganizationWithOwner();
+    expect($access->hasActiveAccess($grandfathered))->toBeTrue();
+
+    // cohort I: 未契約 + subscription 行だけある (webhook の plan_code 同期前)。
+    // entitled な行があれば state()=Subscribed で許可される (plan_code は判定に使わない)
+    [$syncLagOrg] = createOrganizationWithOwner(grandfatherFreePlan: false);
     createFakeSubscription($syncLagOrg, status: 'active');
     expect($access->hasActiveAccess($syncLagOrg))->toBeTrue();
 
@@ -158,14 +173,14 @@ test('BillingAccess: plan_code null は移行 OR で許可 (P4 で削除) / 非 
         'paused' => false,
     ];
     foreach ($matrix as $status => $expected) {
-        [$organization] = createOrganizationWithOwner();
+        [$organization] = createOrganizationWithOwner(grandfatherFreePlan: false);
         contractPaidPlan($organization, status: $status);
         expect($access->hasActiveAccess($organization))->toBe($expected, "stripe_status={$status}");
     }
 
     // cohort C / E: trial 終了 + PM 無しは status に依らず遮断
     foreach (['active', 'trialing', 'past_due'] as $status) {
-        [$organization] = createOrganizationWithOwner();
+        [$organization] = createOrganizationWithOwner(grandfatherFreePlan: false);
         contractPaidPlan($organization, status: $status)->forceFill([
             'trial_ends_at' => CarbonImmutable::now()->subDay(),
             'has_payment_method' => false,
@@ -174,7 +189,7 @@ test('BillingAccess: plan_code null は移行 OR で許可 (P4 で削除) / 非 
     }
 
     // cohort H: 有償契約状態 + 行なしは fail-closed
-    [$orphan] = createOrganizationWithOwner();
+    [$orphan] = createOrganizationWithOwner(grandfatherFreePlan: false);
     $orphan->forceFill(['plan_code' => 'standard'])->save();
     expect($access->hasActiveAccess($orphan))->toBeFalse();
 });
@@ -186,7 +201,7 @@ test('BillingAccess: plan_code null は移行 OR で許可 (P4 で削除) / 非 
 
 test('route bound organization が有償不健全なら redirect される (current org より route 優先)', function (): void {
     // current org は Free (許可)、route の org は有償不健全 (両方 owner が同一メンバー)
-    [, $owner] = createOrganizationWithOwner();
+    [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     $gated = Organization::factory()->create(['slug' => 'gated-org']);
     $gated->users()->attach($owner);
     $owner->addRole(OrganizationRole::Member->value, $gated->laratrust_team_id);
@@ -195,8 +210,10 @@ test('route bound organization が有償不健全なら redirect される (curr
     Route::middleware(['web', 'auth', 'require-active-subscription'])
         ->get('/__gate-test/{organization:slug}', fn (Organization $organization) => response('ok'));
 
+    // route の org では owner は Member ロール = manageBilling を持たないため、
+    // P4 の分岐は billing-required 側へ倒れる (契約できる人へ連絡を促す着地ページ)。
     $this->actingAs($owner)->get('/__gate-test/gated-org')
-        ->assertRedirect(route('billing.index'));
+        ->assertRedirect(route('onboarding.billing-required'));
 });
 
 test('非メンバーが binder を通過しても middleware が 404 に倒す (binder 回帰の defense-in-depth)', function (): void {

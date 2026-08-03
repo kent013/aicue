@@ -78,7 +78,7 @@ test('override で上限を上げると超過していた作成が可能にな�
 test('limits に無い key は無制限として通る', function (): void {
     [$organization] = createOrganizationWithOwner();
     // fallback_plan (free) の limits から max_projects を外し「limits に無い key」を作る
-    config()->set('quota.plans.free', ['max_members' => 3]);
+    config()->set('quota.plans.personal', ['max_members' => 3]);
 
     app(QuotaService::class)->check($organization, QuotaKey::MaxProjects, 9999);
 })->throwsNoExceptions();
