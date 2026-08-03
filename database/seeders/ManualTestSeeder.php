@@ -10,6 +10,7 @@ use App\Models\Billing\Plan;
 use App\Models\Organization;
 use App\Models\User;
 use App\Services\Billing\PersonalPlanService;
+use App\Services\Billing\TicketLedgerService;
 use App\Services\Organization\OrganizationProvisioningService;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Str;
@@ -26,6 +27,9 @@ use Illuminate\Support\Str;
 class ManualTestSeeder extends Seeder
 {
     private const PASSWORD = 'password123';
+
+    /** 手動テスト用に各組織へ付与するチケット枚数 (撮影アップロード等が枚数不足で詰まらない量) */
+    private const TEST_TICKETS = 100;
 
     public function run(): void
     {
@@ -146,8 +150,18 @@ class ManualTestSeeder extends Seeder
             return $organization;
         }
 
-        // 無料プラン: marker + 初回無償チケット付与も activate 内で org 生涯 1 回だけ走る
+        // 無料プラン: marker + 初回無償チケット付与も activate 内で org 生涯 1 回だけ走る。
+        // P4 のゲート反転後、手動テスト環境の組織が締め出されないために必須。
         app(PersonalPlanService::class)->activate($organization, $owner);
+
+        // 手動テストで撮影アップロード等が枚数不足で詰まらないよう、台帳の正窓口経由で
+        // テスト用チケットを付与する (直接 delta を書かず TicketLedgerService::grant を通す)。
+        // activate の初回無償付与とは別枠で、手動テストが回る量を上乗せする。
+        app(TicketLedgerService::class)->grant(
+            $organization,
+            self::TEST_TICKETS,
+            'ManualTestSeeder テスト用付与',
+        );
 
         return $organization->refresh();
     }
