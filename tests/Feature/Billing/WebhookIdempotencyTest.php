@@ -140,50 +140,53 @@ test('event_id が異なっても同一 invoice の再通知は idempotency_key 
     expect(StripeWebhookEvent::query()->count())->toBe(2);
 });
 
-test('billing_reason=subscription_create の invoice.paid は月次付与に加えて signup grant を冪等付与する', function (): void {
+test('customer.subscription.created は signup grant を冪等付与する (P6/D29 の契機)', function (): void {
     $organization = billingStripeCustomer();
-    enableStandardMonthlyGrant();
 
-    $payload = invoicePaidPayload('evt_signup_1');
-    $payload['data']['object']['billing_reason'] = 'subscription_create';
+    $payload = subscriptionPayload('customer.subscription.created', 'active', 'evt_signup_1');
 
     event(new WebhookReceived($payload));
 
-    // 月次 100 + signup grant (config billing.signup_grant_tickets = 10)
-    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(110);
-    // 冪等キーは org スコープ (呼び出し側が渡す)。subscription id には依存しない。
+    // signup grant (config billing.signup_grant_tickets = 10) のみ。月次付与は invoice.paid の責務。
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())
+        ->toBe(config()->integer('billing.signup_grant_tickets'));
+    // 冪等キーは stripe subscription id 由来 (aigenba verbatim)
     $signup = $organization->ticketLedgerEntries()
-        ->where('idempotency_key', "signup_grant:org:{$organization->id}")
+        ->where('idempotency_key', 'signup_grant:sub_test_1')
         ->firstOrFail();
     expect($signup->delta)->toBe(config('billing.signup_grant_tickets'));
     expect($signup->expires_at)->not->toBeNull();
+    // marker が付与の真実源として立つ
+    expect($organization->refresh()->signup_tickets_granted_at)->not->toBeNull();
 
-    // 別 event_id での再通知でも signup grant は 1 回だけ (idempotency_key 冪等)
+    // 別 event_id での再通知でも signup grant は 1 回だけ (marker + idempotency_key 冪等)
     $retry = $payload;
     $retry['id'] = 'evt_signup_2';
     event(new WebhookReceived($retry));
 
-    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(110);
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())
+        ->toBe(config()->integer('billing.signup_grant_tickets'));
+    expect($organization->ticketLedgerEntries()
+        ->where('idempotency_key', 'like', 'signup_grant:%')->count())->toBe(1);
 });
 
-test('subscription id が無くても org スコープキーで signup grant を付与する', function (): void {
+test('billing_reason=subscription_create の invoice.paid は月次付与のみで signup grant を走らせない (D29)', function (): void {
     $organization = billingStripeCustomer();
     enableStandardMonthlyGrant();
 
-    // subscription id を含まない subscription_create の invoice.paid。
-    // org スコープキー (signup_grant:org:{id}) は subscription id に依存しないため付与される。
-    $payload = invoicePaidPayload('evt_signup_nosub');
+    $payload = invoicePaidPayload('evt_signup_via_invoice');
     $payload['data']['object']['billing_reason'] = 'subscription_create';
 
     event(new WebhookReceived($payload));
 
-    // 月次 100 + signup grant 10
-    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(110);
+    // 月次 100 のみ (signup grant は customer.subscription.created の責務)
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(100);
     expect(
         $organization->ticketLedgerEntries()
             ->where('idempotency_key', 'like', 'signup_grant:%')
             ->count(),
-    )->toBe(1);
+    )->toBe(0);
+    expect($organization->refresh()->signup_tickets_granted_at)->toBeNull();
 });
 
 test('seed 既定 (D28: monthly_ticket_grant=0) では invoice.paid で月次付与行が作られない', function (): void {
@@ -197,10 +200,9 @@ test('seed 既定 (D28: monthly_ticket_grant=0) では invoice.paid で月次付
 
     expect($organization->ticketLedgerEntries()
         ->where('idempotency_key', 'like', 'monthly:%')->count())->toBe(0);
-    // signup grant のみが計上される (残高は config の付与枚数と一致)
-    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())
-        ->toBe(config('billing.signup_grant_tickets'));
-    expect($organization->ticketLedgerEntries()->count())->toBe(1);
+    // signup grant も走らない (D29) ため台帳行は 1 行も作られない
+    expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(0);
+    expect($organization->ticketLedgerEntries()->count())->toBe(0);
 });
 
 test('customer.subscription.updated で organizations.plan_code が同期される', function (): void {

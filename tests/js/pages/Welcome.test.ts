@@ -41,7 +41,7 @@ describe("Welcome (LP)", () => {
         expect(screen.getByRole("heading", { name: "自動で動画に合成" })).toBeInTheDocument();
 
         expect(screen.getByTestId("landing-pricing-cta")).toHaveTextContent(
-            "新規登録でチケット 10 枚が無料",
+            "初回 1 回だけチケット 10 枚が無料",
         );
         expect(screen.getByRole("link", { name: /料金プランを見る/ })).toBeInTheDocument();
     });

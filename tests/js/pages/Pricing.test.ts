@@ -75,10 +75,11 @@ describe("Pricing", () => {
         expect(table).toHaveTextContent("500 枚以上");
         expect(table).toHaveTextContent("¥50 ／ 枚");
 
-        // 招待経由 (所属組織の残高を共有) は LP CTA の対象外。付与は個人組織を作る
-        // 「新規登録」時に走るため、文言も「新規登録で」で挙動と整合させる。
+        // P6/F2: 付与契機はプラン有効化時 (free = Personal 有効化 / paid = サブスク成立) で
+        // org 生涯 1 回。登録しただけでは付与されないため、文言も「プランを有効化すると、
+        // 初回 1 回だけ」で挙動と整合させる。
         expect(screen.getByTestId("signup-grant-note")).toHaveTextContent(
-            "新規登録でチケット 10 枚が無料でついてきます (付与から 30 日間有効)",
+            "プランを有効化すると、初回 1 回だけチケット 10 枚が無料でついてきます (付与から 30 日間有効)",
         );
     });
 
@@ -91,7 +92,7 @@ describe("Pricing", () => {
         await fireEvent.click(question);
         expect(question).toHaveAttribute("aria-expanded", "true");
         expect(
-            screen.getByText(/Free プランは基本料金なしでご利用いただけます/),
+            screen.getByText(/Personal プランは基本料金なしでご利用いただけます/),
         ).toBeInTheDocument();
 
         await fireEvent.click(question);

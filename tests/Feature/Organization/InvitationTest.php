@@ -383,7 +383,8 @@ test('招待経由登録では個人組織を作らず signup grant を付与し
     $user = User::whereBlind('email', 'email_index', 'nofree@example.com')->firstOrFail();
     // 個人組織は生成されない
     expect($user->organizations()->where('is_personal', true)->exists())->toBeFalse();
-    // 招待組織の残高に signup grant は乗らない (owner の付与ぶんも招待組織には走っていない)
+    // 招待組織の残高に signup grant は乗らない
+    // (P6/F2: 付与契機はプラン有効化時であり、登録では誰にも付与されない)
     expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(0);
     expect(
         $organization->ticketLedgerEntries()

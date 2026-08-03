@@ -7,8 +7,6 @@ namespace App\Actions\Fortify;
 use App\Models\User;
 use App\Rules\MatchesInvitationEmail;
 use App\Rules\UniqueEncryptedEmail;
-use App\Services\Billing\PersonalPlanService;
-use App\Services\Billing\TicketLedgerService;
 use App\Services\Onboarding\IntendedPlanResolver;
 use App\Services\Organization\OrganizationMembershipService;
 use App\Services\Organization\OrganizationProvisioningService;
@@ -44,8 +42,6 @@ class CreateNewUser implements CreatesNewUsers
     public function __construct(
         private readonly OrganizationProvisioningService $provisioning,
         private readonly OrganizationMembershipService $membership,
-        private readonly TicketLedgerService $tickets,
-        private readonly PersonalPlanService $personalPlan,
         private readonly IntendedPlanResolver $intendedPlanResolver,
     ) {}
 
@@ -107,25 +103,14 @@ class CreateNewUser implements CreatesNewUsers
 
                 if ($joined === null) {
                     // 個人用組織を同一 transaction 内で原子的に生成する
-                    // (user だけ存在し組織なしの中間状態を作らない)
-                    $organization = $this->provisioning->provisionPersonalOrganization($user);
-
-                    // 初回 signup grant (無償 10 枚 / 30 日)。LP が約束する「新規登録で 10 枚」を実現する。
-                    // grantSignupGrant は純粋な ledger insert (通知・イベント・外部 I/O なし) のため登録 tx 内で完結し、
-                    // 冪等性は idempotency_key + 部分 UNIQUE index が DB レベルで保証する。
-                    // 招待経由 (join) は個人組織を作らず所属組織の残高を共有するため、ここでは付与しない
-                    // (招待 N 人 = N×10 の増幅を避ける)。
+                    // (user だけ存在し組織なしの中間状態を作らない)。
                     //
-                    // 移行期規約: 付与契機は登録時のまま維持しつつ、org 単位 1 回マーカー
-                    // (organizations.signup_tickets_granted_at) を同一 tx で先取する。マーカーを
-                    // 先取できたときのみ付与することで、free 有効化 (PersonalPlanService::activate)
-                    // 経路との二重付与を防ぐ (マーカー先取と付与が同一 tx = 原子的)。
-                    $organizationId = $organization->getKey();
-                    Assert::integer($organizationId, 'Organization の主キーは整数を想定しています');
-
-                    if ($this->personalPlan->claimSignupGrantMarker($organization)) {
-                        $this->tickets->grantSignupGrant($organization, "signup_grant:org:{$organizationId}");
-                    }
+                    // 初回 signup grant はここでは付与しない (P6/F2)。付与契機はプラン有効化時
+                    // (free = PersonalPlanService::activate / paid = customer.subscription.created)
+                    // であり、marker (organizations.signup_tickets_granted_at) の先取と付与は
+                    // その経路の同一 tx に閉じている。**marker 設定だけをここに残してはならない**
+                    // (付与されない marker 済み org = 永久に付与を受けられない org になる)。
+                    $this->provisioning->provisionPersonalOrganization($user);
                 }
 
                 return $user;

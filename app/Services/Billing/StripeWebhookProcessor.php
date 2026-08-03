@@ -30,9 +30,11 @@ use Webmozart\Assert\Assert;
  * 2. type 別 handler:
  *    - customer.subscription.created/updated: payload → SubscriptionSnapshot を
  *      SubscriptionService::applySubscriptionSnapshot へ渡して状態同期 +
- *      recordPaymentMethodSnapshot で決済手段有無を記録
+ *      recordPaymentMethodSnapshot で決済手段有無を記録。
+ *      **created のみ**、状態同期のあとに初回無償チケット (signup grant) を
+ *      SubscriptionService::grantSignupInitialTickets で付与する (P6/F2 の paid 側付与契機)
  *    - customer.subscription.deleted: 同上 (terminated=true。plan_code 解除 + schedule クリア)
- *    - invoice.paid: プランの monthly_ticket_grant を月次付与 (+ 初回は signup grant)
+ *    - invoice.paid: プランの monthly_ticket_grant を月次付与 (signup grant には関与しない)
  *    - invoice.payment_failed: 支払い失敗通知 (BillingNotificationDispatcher 経由の send-once)
  *    - charge.refunded: 買い切りチケットの返金逆仕訳 (clawback)
  * 3. 失敗時は status=failed + failure_reason 記録 + report して再 throw (Cashier 既定どおり
@@ -69,7 +71,6 @@ class StripeWebhookProcessor
     public function __construct(
         private readonly TicketLedgerService $tickets,
         private readonly BillingNotificationDispatcher $notifications,
-        private readonly PersonalPlanService $personalPlan,
         private readonly SubscriptionService $subscriptions,
     ) {}
 
@@ -172,9 +173,18 @@ class StripeWebhookProcessor
         // 処理イベント集合の単一出典は HandledStripeWebhookEvent (購読集合の導出元)。
         // case を足したらここに arm を足す (handled ⊆ subscribed は invariant test が担保)
         match (HandledStripeWebhookEvent::tryFrom($type)) {
-            HandledStripeWebhookEvent::SubscriptionCreated,
-            HandledStripeWebhookEvent::SubscriptionUpdated => $this->syncSubscriptionState($payload, terminated: false),
-            HandledStripeWebhookEvent::SubscriptionDeleted => $this->syncSubscriptionState($payload, terminated: true),
+            HandledStripeWebhookEvent::SubscriptionCreated => $this->syncSubscriptionState(
+                $payload,
+                HandledStripeWebhookEvent::SubscriptionCreated,
+            ),
+            HandledStripeWebhookEvent::SubscriptionUpdated => $this->syncSubscriptionState(
+                $payload,
+                HandledStripeWebhookEvent::SubscriptionUpdated,
+            ),
+            HandledStripeWebhookEvent::SubscriptionDeleted => $this->syncSubscriptionState(
+                $payload,
+                HandledStripeWebhookEvent::SubscriptionDeleted,
+            ),
             HandledStripeWebhookEvent::InvoicePaid => $this->grantMonthlyTickets($payload),
             HandledStripeWebhookEvent::ChargeRefunded => $this->clawbackRefundedTickets($payload),
             HandledStripeWebhookEvent::InvoicePaymentFailed => $this->handleInvoicePaymentFailed($payload),
@@ -193,16 +203,24 @@ class StripeWebhookProcessor
      * Cashier の同期処理より先に発火するため、created イベント時点では行が無いことがある
      * (best-effort: 直後の customer.subscription.updated / 次周期の更新で追随する)。
      *
+     * `customer.subscription.created` では状態同期のあとに初回無償チケット
+     * (signup grant) を付与する (P6/F2)。付与の可否判定・冪等性は SubscriptionService が持つ。
+     *
      * @param  array<mixed>  $payload
-     * @param  bool  $terminated  customer.subscription.deleted のとき true (終了契機はこれのみ)
+     * @param  HandledStripeWebhookEvent  $event  created / updated / deleted のいずれか
+     *                                            (deleted のみ terminated = 終了契機)
      */
-    private function syncSubscriptionState(array $payload, bool $terminated): void
+    private function syncSubscriptionState(array $payload, HandledStripeWebhookEvent $event): void
     {
+        $terminated = $event === HandledStripeWebhookEvent::SubscriptionDeleted;
+
         $organization = $this->resolveOrganization($payload);
         if ($organization === null) {
             return;
         }
 
+        // sub id は subscription object 本体の必須フィールド。取れない payload は fail-closed
+        // (状態同期も signup grant も行わない)。
         $stripeId = $this->stringAt($payload, 'data.object.id');
         if ($stripeId === null) {
             return;
@@ -221,6 +239,11 @@ class StripeWebhookProcessor
         );
 
         $this->subscriptions->applySubscriptionSnapshot($organization, $snapshot, terminated: $terminated);
+
+        // 初回無償チケットの付与契機 (paid 側)。順序 (snapshot → grant) は aigenba verbatim。
+        if ($event === HandledStripeWebhookEvent::SubscriptionCreated) {
+            $this->subscriptions->grantSignupInitialTickets($organization, $stripeId);
+        }
 
         if ($terminated) {
             return; // 終了系では PM snapshot を記録しない (monotonic writer は契約中のみ)
@@ -298,11 +321,13 @@ class StripeWebhookProcessor
 
     /**
      * invoice.paid: 契約プランの monthly_ticket_grant を月次付与する。
-     * 初回 (billing_reason=subscription_create) はあわせて signup grant を付与する。
+     *
+     * **signup grant には一切関与しない (P6/D29)**。初回無償チケットの付与契機は
+     * プラン有効化時 (free = PersonalPlanService::activate / paid =
+     * customer.subscription.created) のみ。
      *
      * 冪等性は claim() の event_id UNIQUE に加え、台帳の idempotency_key
-     * (monthly:{invoiceId} / signup_grant:{subscriptionId}) が保証する
-     * (event_id 違いの同一 invoice 再通知でも二重付与しない)。
+     * (monthly:{invoiceId}) が保証する (event_id 違いの同一 invoice 再通知でも二重付与しない)。
      *
      * @param  array<mixed>  $payload
      */
@@ -316,31 +341,6 @@ class StripeWebhookProcessor
         $billingReason = $this->stringAt($payload, 'data.object.billing_reason');
         if (! in_array($billingReason, self::GRANTING_BILLING_REASONS, true)) {
             return; // サブスク以外の請求 (one-time 等) では付与しない
-        }
-
-        // 初回 signup grant (「まず触れる」導線)。冪等キーは org スコープのため subscription id は不要。
-        // 1 組織 1 回の不変条件は idempotency_key + 部分 UNIQUE index が保証する。
-        // (通常は登録時に付与済のため、ここは非個人組織のサブスク等に対する no-op ないし 1 回付与の安全網)
-        if ($billingReason === 'subscription_create') {
-            $organizationId = $organization->getKey();
-            Assert::integer($organizationId, 'Organization の主キーは整数を想定しています');
-
-            // 移行期規約 (CreateNewUser / PersonalPlanService::activate と同一): org 行ロック下の
-            // 単一 transaction で「marker の条件付き先取 → 先取できたときのみ付与」を原子的に行う。
-            // marker (organizations.signup_tickets_granted_at) が付与の唯一の真実源であるため:
-            //  - marker を立てないと、「登録経由でない org (追加組織) が初回契約で付与を受ける」経路で
-            //    付与済みなのに marker が NULL のまま残り、後続の activate() が claim に成功して
-            //    granted=true を返すのに ledger の org スコープ UNIQUE が実 insert を止める
-            //    (= 残高は動かないのに「付与した」と応答する) 不整合が生じる。
-            //  - 逆に marker だけ先に commit されて付与が失敗すると、marker が立っているため
-            //    再送でも二度と付与されない (= 付与の取りこぼしが恒久化する)。よって同一 tx に閉じる。
-            DB::transaction(function () use ($organizationId): void {
-                $locked = Organization::query()->lockForUpdate()->findOrFail($organizationId);
-
-                if ($this->personalPlan->claimSignupGrantMarker($locked)) {
-                    $this->tickets->grantSignupGrant($locked, "signup_grant:org:{$organizationId}");
-                }
-            });
         }
 
         $plan = $this->resolveInvoicePlan($payload, $organization);

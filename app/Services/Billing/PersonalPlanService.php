@@ -116,12 +116,13 @@ final class PersonalPlanService
      * 初回付与マーカー (`signup_tickets_granted_at`) を条件付き UPDATE で先取する。
      * 先取できた (= この呼び出しが org 生涯で初回) ときのみ true。
      *
-     * **移行期専用の public API**: signup grant の付与契機が登録時 (CreateNewUser) のままの間、
-     * 登録経路からも marker を立てる必要があるため public にしている。付与契機を activate へ
-     * 移す P6 で private へ戻す (詳細設計 D13)。呼び出し側は org 行 lockForUpdate 下・付与と
-     * 同一 transaction で使うこと (先取と付与が原子的でないと二重付与の窓ができる)。
+     * **private (D13)**: 移行期に登録経路 (CreateNewUser) から marker を立てるため一時的に
+     * public にしていたが、P6 で付与契機が activate / customer.subscription.created へ移ったため
+     * 本クラス内へ戻した。呼び出しは org 行 lockForUpdate 下・付与と同一 transaction であること
+     * (先取と付与が原子的でないと二重付与の窓ができる)。paid 経路の同型実装は
+     * SubscriptionService::grantSignupInitialTickets が持つ。
      */
-    public function claimSignupGrantMarker(Organization $org, ?CarbonImmutable $now = null): bool
+    private function claimSignupGrantMarker(Organization $org, ?CarbonImmutable $now = null): bool
     {
         $claimed = DB::table('organizations')
             ->where('id', $org->getKey())
