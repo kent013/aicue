@@ -168,15 +168,26 @@ class LoadOperationsTest(unittest.TestCase):
         ops = C.load_operations(str(REAL_OPERATIONS))
         if not ops:
             self.skipTest("operations.md はスケルトン (データ行なし)。route:list から生成後に有効化される")
-        for name, info in ops.items():
-            # join キー (name 列) が同じ行の URL 列 (load_operations は 'operation' に格納) と一致しないこと。
-            # 一致していれば URL 列を誤って join キーにしている (fix-gate #3 違反)。
-            self.assertNotEqual(
-                name, info.get("operation"),
-                f"join キー '{name}' が URL 列と一致 = name 列でなく URL 列を拾っている (fix-gate #3 違反)",
-            )
+
+        for name in ops:
             # route 名は通常ドット区切り (resource.action)。少なくとも空でないこと。
             self.assertTrue(name.strip(), "空の join キーが混入している")
+
+        # join キー (name 列) と URL 列 (load_operations は 'operation' に格納) の一致を
+        # **集約で**判定する。
+        #
+        # 検出したい failure mode は「load_operations が name 列でなく URL 列を join キーに
+        # している」ことであり、それが起きると **全行が一致する**。
+        # 一方、単一セグメント route は route 名と URL が正当に同値になる
+        # (Laravel の `Route::post('logout', ...)->name('logout')` 等)。
+        # 行単位の assertNotEqual だとこの正当なケースを偽陽性で落とすため、
+        # 「**全行が一致していないこと**」を条件にする (検出力は維持される)。
+        matched = [name for name, info in ops.items() if name == info.get("operation")]
+        self.assertNotEqual(
+            len(matched), len(ops),
+            "全 {} 行で join キーが URL 列と一致 = name 列でなく URL 列を拾っている "
+            "(fix-gate #3 違反)".format(len(ops)),
+        )
 
 
 class TestedByIndexTest(unittest.TestCase):
