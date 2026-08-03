@@ -111,8 +111,11 @@ class Organization extends Model
     }
 
     /**
-     * 現在の契約プラン (plan_code → plans.code。null = 未契約 = 支払い不要の free tier。
-     * quota は config/quota.php の fallback_plan、業務 route は BillingAccess が許可する)。
+     * 現在の契約プラン (plan_code → plans.code)。
+     *
+     * plan_code は **quota 解決キー** であり利用可否 (entitlement) には使わない
+     * (null = config/quota.php の fallback_plan が効く、それだけの意味)。業務 route の
+     * 利用可否は BillingAccess::state() が決める (無料枠は free_plan_code='personal')。
      *
      * @return BelongsTo<Plan, $this>
      */

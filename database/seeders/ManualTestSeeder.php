@@ -9,6 +9,7 @@ use App\Enums\OrganizationRole;
 use App\Models\Billing\Plan;
 use App\Models\Organization;
 use App\Models\User;
+use App\Services\Billing\PersonalPlanService;
 use App\Services\Organization\OrganizationProvisioningService;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Str;
@@ -20,7 +21,7 @@ use Illuminate\Support\Str;
  *
  * 実行: php artisan db:seed --class=ManualTestSeeder
  * 全ユーザーのパスワード: password123
- * email 規則: {role}-{plan_code}@example.com (例: owner-free@example.com)
+ * email 規則: {role}-{plan_code}@example.com (例: owner-personal@example.com)
  */
 class ManualTestSeeder extends Seeder
 {
@@ -122,12 +123,14 @@ class ManualTestSeeder extends Seeder
      * 組織生成は provisioning 経由 (Default Team パターンの不変条件を担保する唯一の窓口)。
      *
      * plan_code の不変条件を尊重する: 「plan_code は Stripe Price を持つ有償プランの契約状態でのみ
-     * set される」(Model/StripeWebhookProcessor/BillingAccess の docblock が定める)。
+     * set される」(Model/StripeWebhookProcessor の docblock が定める)。
      * よって有償プラン (current base Price あり) のときのみ plan_code を forceFill し、あわせて
      * active な Cashier subscription 行を投入する (plan_code 非 null ⇔ 契約行あり を seed でも満たす)。
-     * Free (Price 無し) は plan_code を null のまま = 未契約 = 支払い不要 tier として BillingAccess が許可する。
+     * 無料プラン (Price 無し) は plan_code を null のまま PersonalPlanService::activate() で
+     * free entitlement (free_plan_code='personal' / declarer = owner) を立てる。課金ゲートは
+     * plan_code を見ないため、activate しないと手動テスト環境の無料組織が締め出される。
      *
-     * 有償/Free の判定は Plan の「値」(current base Price の有無) からのみ導出し、プラン名 (code) の
+     * 有償/無料の判定は Plan の「値」(current base Price の有無) からのみ導出し、プラン名 (code) の
      * 文字列比較はしない (AGENTS.md ドメイン規約)。
      */
     private function createOrganization(User $owner, Plan $plan): Organization
@@ -139,15 +142,20 @@ class ManualTestSeeder extends Seeder
         if ($plan->currentPrice(PlanPriceKind::Base) !== null) {
             $organization->forceFill(['plan_code' => $plan->code])->save();
             $this->attachFakeActiveSubscription($organization);
+
+            return $organization;
         }
 
-        return $organization;
+        // 無料プラン: marker + 初回無償チケット付与も activate 内で org 生涯 1 回だけ走る
+        app(PersonalPlanService::class)->activate($organization, $owner);
+
+        return $organization->refresh();
     }
 
     /**
      * 手動テスト用に active な Cashier subscription 行を直接投入する (Stripe API 非到達)。
-     * BillingAccess は plan_code 非 null の組織に active/trialing subscription を要求するため、
-     * plan_code を載せた有償組織は本行が無いと課金ゲートで締め出される。
+     * 課金ゲート (BillingAccess::state()) は entitled な subscription か free entitlement を
+     * 要求するため、有償組織は本行が無いと締め出される。
      * subscription('default') が active を返すための最小カラムのみを設定する。
      *
      * メソッド単体で冪等: 既に default subscription があれば作らない (run() の冪等 guard に依存せず、

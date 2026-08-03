@@ -10,8 +10,10 @@ use App\Models\Project;
 use App\Models\User;
 use App\Providers\FakeExternalsServiceProvider;
 use App\Services\AI\Testing\CannedPromptFakeRegistrar;
+use App\Services\Billing\PersonalPlanService;
 use App\Services\Organization\OrganizationProvisioningService;
 use App\Services\Storage\Fakes\FakeObjectStore;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Vite;
@@ -118,16 +120,28 @@ pest()->extend(TestCase::class)
  * Owner 付きの組織を provisioning 経由で生成する (Default Team 込み)。
  * owner の current_organization_id はこの組織になる。
  *
- * 生成される組織は Free (未契約 = plan_code null) — 業務 route は free でも通る
- * (BillingAccess の entitlement 判定)。有償プラン契約状態を検証するテストは
- * contractPaidPlan() を併用する (RequireActiveSubscriptionMiddlewareTest 参照)。
+ * 既定では grandfathering backfill 相当 (`free_plan_code='personal'` / declarer NULL) を付与し、
+ * 課金ゲート (require-active-subscription) を `ActiveFreePlan` で通る既存組織を再現する。
+ * PersonalPlanService::activate() は**呼ばない** (signup grant が発火して残高期待が壊れ、
+ * declarer の partial unique index にも触れるため)。
+ *
+ * `$grandfatherFreePlan: false` は真の未契約組織 (free_plan_code NULL = 業務 route が
+ * onboarding へ遮断される) を作る。ゲート / onboarding のテストで使う。
+ * 有償プラン契約状態を検証するテストは contractPaidPlan() を併用する。
  *
  * @return array{Organization, User} [organization, owner]
  */
-function createOrganizationWithOwner(string $name = 'テスト組織'): array
+function createOrganizationWithOwner(string $name = 'テスト組織', bool $grandfatherFreePlan = true): array
 {
     $owner = User::factory()->create();
     $organization = app(OrganizationProvisioningService::class)->provision($owner, $name);
+
+    if ($grandfatherFreePlan) {
+        $organization->forceFill([
+            'free_plan_code' => PersonalPlanService::FREE_PLAN_CODE,
+            'free_plan_activated_at' => CarbonImmutable::now(),
+        ])->save();
+    }
 
     return [$organization, $owner];
 }

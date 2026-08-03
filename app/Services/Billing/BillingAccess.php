@@ -21,6 +21,12 @@ use Illuminate\Database\Eloquent\Collection;
  *
  * 利用可否は `SubscriptionState` 単体ではなく `SubscriptionService::deriveEntitlement` で
  * 確定する (PM 有無 / trial 終了 / paused / past_due を合成)。
+ *
+ * **`plan_code` は entitlement 判定に一切使わない** (quota の解決キーでしかない)。かつては
+ * 「plan_code null = fallback free プラン = 支払い不要 tier として許可」していたが
+ * (devnotes/20260712-0927-bugfix-billing-free-access。歴史として保持する)、ゲート反転で
+ * 無料枠は `organizations.free_plan_code = 'personal'` の明示申告 (`ActiveFreePlan`) として
+ * 表現するようになった。plan_code が null であること自体は許可の理由にならない。
  */
 class BillingAccess
 {
@@ -31,21 +37,14 @@ class BillingAccess
     /**
      * 組織が業務機能を利用してよいか (billing entitlement)。
      *
-     * `state()->grantsAccess()` が本来の判定。これに加えて **移行 OR を 1 行持つ**:
-     * 現行の意図的な free 許可 (= `plan_code === null` の未契約組織) をそのまま通す。
-     *
-     * **この移行 OR は P4 (ゲート反転) で削除する**。削除条件は grandfathering backfill
-     * (`organizations.free_plan_code = 'personal'`) の完了で、backfill が `ActiveFreePlan` を
-     * 成立させることで既存の free 組織が `state()` 側で許可される。**本行を消すことが
-     * ゲート反転そのもの**であり、P4 はこの 1 行削除 + 期待反転の diff だけで済む。
+     * 判定は `state()->grantsAccess()` の一本 (= 無料枠は `ActiveFreePlan`、有償は
+     * `Subscribed` でのみ許可)。移行 OR (`plan_code === null` を通す 1 行) はゲート反転で
+     * 削除済み — 既存の未契約組織は grandfathering backfill が `free_plan_code = 'personal'`
+     * を書いて `ActiveFreePlan` として許可されるため、締め出しは発生しない。
      */
     public function hasActiveAccess(Organization $organization): bool
     {
-        if ($this->state($organization)->grantsAccess()) {
-            return true;
-        }
-
-        return $organization->plan_code === null;
+        return $this->state($organization)->grantsAccess();
     }
 
     /**
