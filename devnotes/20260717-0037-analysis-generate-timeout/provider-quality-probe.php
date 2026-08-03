@@ -21,11 +21,12 @@ declare(strict_types=1);
 
 use App\DataTransferObjects\Manual\Analysis\GeneratedScenarioData;
 use App\Prompts\ScenarioGenerationPrompt;
+use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Support\Facades\DB;
 
 require __DIR__.'/../../vendor/autoload.php';
 $app = require_once __DIR__.'/../../bootstrap/app.php';
-$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+$app->make(Kernel::class)->bootstrap();
 
 // 公式ドキュメントから取得した単価 (USD / 1M tokens)。取得日 2026-07-17。
 // 出典: platform.claude.com/docs/en/about-claude/pricing.md,
@@ -68,7 +69,7 @@ $outDir = __DIR__.'/probe-outputs';
 $results = [];
 foreach ($targets as [$provider, $model]) {
     $label = "$provider:$model";
-    printf("--- %s ... ", $label);
+    printf('--- %s ... ', $label);
 
     $logIdBefore = (int) (DB::table('llm_call_logs')->max('id') ?? 0);
     $prompt = ScenarioGenerationPrompt::make($decomposition);

@@ -11,29 +11,32 @@ use Database\Seeders\ManualTestSeeder;
 use Illuminate\Support\Str;
 
 /*
- * F-C3 回帰: ManualTestSeeder が生成する Free (Stripe Price 無し) プラン組織の全ロールが、
+ * F-C3 回帰: ManualTestSeeder が生成する無料 (Stripe Price 無し) プラン組織の全ロールが、
  * 課金ゲート (require-active-subscription) を素通りして中核業務 route に到達できることを固定する。
- * 根本原因は seeder が Free にも plan_code='free' を載せ、BillingAccess が active subscription を
+ * 根本原因は seeder が無料プランにも plan_code を載せ、BillingAccess が active subscription を
  * 要求して締め出していたこと (devnotes/20260713-1633-seeder-free-plan-billing)。
+ *
+ * P4 (T075) で plans から 'free' 行が撤去され、無料枠は organizations.free_plan_code='personal'
+ * の明示申告になった。よって本テストの対象プランは 'free' → 'personal' へ読み替える
+ * (関心は「Price 無しプラン組織がゲートを素通りできるか」であり、プラン名ではない)。
  */
 
 /**
- * Free プラン (current base Price を持たない) を取得する。
+ * 無料プラン (current base Price を持たない) を取得する。
  *
- * personal も Price を持たないため「Price 無しの最初の Plan」では対象が非決定になる。
- * 本テストの関心は Free プラン組織のゲート素通りなので code で固定する。
+ * 「Price 無しの最初の Plan」では対象が非決定になりうるため code で固定する。
  */
 function seededFreePlan(): Plan
 {
-    $plan = Plan::query()->where('code', 'free')->firstOrFail();
+    $plan = Plan::query()->where('code', 'personal')->firstOrFail();
     if ($plan->currentPrice(PlanPriceKind::Base) !== null) {
-        throw new RuntimeException('Free プランに Price が付いている (seed 不変条件の破れ)');
+        throw new RuntimeException('無料プランに Price が付いている (seed 不変条件の破れ)');
     }
 
     return $plan;
 }
 
-test('seeded Free 組織の全ロールが /projects に到達できる (F-C3 回帰)', function (OrganizationRole $role): void {
+test('seeded 無料プラン組織の全ロールが /projects に到達できる (F-C3 回帰)', function (OrganizationRole $role): void {
     $this->seed(ManualTestSeeder::class);
 
     $plan = seededFreePlan();
