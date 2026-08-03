@@ -9,6 +9,7 @@ use App\Models\Organization;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Database\Factories\Billing\TicketCheckoutSessionFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -66,6 +67,21 @@ class TicketCheckoutSession extends Model
     {
         return $this->status === TicketCheckoutSessionStatus::Pending
             && $this->expires_at->greaterThan($now);
+    }
+
+    /**
+     * Scope: live pending (isLivePending と同一定義) に絞る。
+     *
+     * 行判定 (isLivePending) と SQL 判定の定義が乖離しないよう、live pending の意味論は
+     * 本 model の 2 メソッドに閉じる (Service 側で status / expires_at を直書きしない)。
+     * 等価性は TicketCheckoutSessionLivePendingTest が固定する。
+     *
+     * @param  Builder<TicketCheckoutSession>  $query
+     */
+    public function scopeLivePending(Builder $query, CarbonImmutable $now): void
+    {
+        $query->where('status', TicketCheckoutSessionStatus::Pending)
+            ->where('expires_at', '>', $now);
     }
 
     /**

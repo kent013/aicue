@@ -73,7 +73,11 @@ class TicketPurchaseController extends Controller
 
         // manageBilling を持たない閲覧者には resume / completed を出さない
         // (resumeUrl は外部 Stripe Checkout 直リンクで purchase gate を迂回しうる)。
-        $resumable = ($canManage && ! $request->boolean('fresh'))
+        // 決済成功着地 ($purchased = 自 org の session_id 照合済み) では resume / completed へ
+        // 写像しない: webhook 未達の一瞬は当該 session がまだ live pending のため、成功バナーと
+        // 「決済を続ける」(支払い済み Checkout への直リンク) が同時に出て誤誘導になる
+        // (着地 feedback の統合は P9 所管。それまでは成功バナーを優先する fail-safe)。
+        $resumable = ($canManage && ! $purchased && ! $request->boolean('fresh'))
             ? $checkout->resolveResumablePurchase(
                 $organization,
                 $user->id,

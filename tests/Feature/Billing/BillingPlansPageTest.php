@@ -56,6 +56,22 @@ test('有償契約中の org では plan_code が currentPlanCode', function ():
             ->where('page.currentPlanCode', 'standard'));
 });
 
+test('未契約 (NoSubscription) org でも 200 で到達できる (課金ゲート allowlist)', function (): void {
+    // /billing/plans は require-active-subscription group の外に置く構造的 allowlist。
+    // ここが崩れると「未契約 org がプラン比較から契約できない」詰みになる
+    // (gate group 外であること自体は GateInversionF07RegressionTest (d) が固定)。
+    [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+
+    $this->actingAs($owner)->get('/billing/plans')
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('Billing/Plans')
+            ->has('page.plans', 3)
+            ->where('page.billingState', 'no_subscription')
+            ->where('page.currentPlanCode', null)
+            ->where('page.canManage', true));
+});
+
 test('member も閲覧できるが canManage=false', function (): void {
     [$organization] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization);

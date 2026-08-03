@@ -103,11 +103,12 @@ class TicketCheckoutService
     {
         $now = CarbonImmutable::now();
 
+        // live pending の定義は model の単一出典 (scopeLivePending ≡ isLivePending) を使う。
+        // checkout_url 非空は「replay 先の URL が実在する」= resume 固有の追加条件。
         $livePending = TicketCheckoutSession::query()
             ->where('organization_id', $organization->id)
             ->where('initiated_by_user_id', $userId)
-            ->where('status', TicketCheckoutSessionStatus::Pending)
-            ->where('expires_at', '>', $now)
+            ->livePending($now)
             ->where('checkout_url', '<>', '')
             ->latest('id')
             ->first();

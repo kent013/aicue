@@ -99,6 +99,25 @@ test('期限切れ pending は resume しない (normal)', function (): void {
             ->where('page.resumeUrl', null));
 });
 
+test('決済成功着地 (?purchased=1 + 自 org の session_id) では resume を出さない', function (): void {
+    // webhook 未達の一瞬は当該 session がまだ live pending。成功バナーと「決済を続ける」
+    // (支払い済み Checkout への直リンク) の同時表示は誤誘導になるため成功着地を優先する。
+    [$organization, $owner] = createOrganizationWithOwner();
+    $session = TicketCheckoutSession::factory()
+        ->forOrganization($organization)
+        ->initiatedBy($owner)
+        ->create(['ticket_count' => 12]);
+
+    $this->actingAs($owner)
+        ->get('/purchase-tickets?purchased=1&session_id='.$session->stripe_session_id)
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('page.purchased', true)
+            ->where('page.formState', 'normal')
+            ->where('page.boundCount', null)
+            ->where('page.resumeUrl', null));
+});
+
 test('非管理者 (member) には live pending があっても resume を出さない', function (): void {
     [$organization] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization);

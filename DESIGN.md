@@ -273,6 +273,8 @@ padding を制御する箱用)/ `sm` / `md`(既定)/ `lg`。
 - footer は Button atom(cancel=`ghost` / confirm=`confirmVariant`、processing 中は loading)
 - confirm で自動 close しない(処理完了後に呼び出し側が `open=false` にする)。
   cancel / ESC / overlay / X は `onCancel` を発火して close
+- `banner?: Snippet` は message 直上の任意スロット(サーバ validation エラーの Alert 等)。
+  未指定なら描画されない(既存の出力は不変)
 
 ### Toast
 
