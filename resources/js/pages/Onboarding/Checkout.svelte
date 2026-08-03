@@ -255,7 +255,7 @@
                             testId="personal-declaration"
                         />
 
-                        {@render fundingChoiceSection()}
+                        {@render fundingChoiceSection(false)}
 
                         <div>
                             <Button
@@ -278,7 +278,7 @@
                             </Alert>
                         {/if}
 
-                        {@render fundingChoiceSection()}
+                        {@render fundingChoiceSection(true)}
 
                         <div>
                             <Button
@@ -286,10 +286,17 @@
                                 loading={submitting}
                                 testId="paid-plan-submit"
                             >
-                                この内容で契約を進める
+                                {fundingChoice === AUTO_RECHARGE
+                                    ? "自動購入に同意して契約を進める"
+                                    : "この内容で契約を進める"}
                             </Button>
-                            <p class="mt-2 text-caption text-text-secondary">
-                                次の画面で決済に進みます。
+                            <p
+                                class="mt-2 text-caption text-text-secondary"
+                                data-testid="paid-plan-submit-note"
+                            >
+                                {fundingChoice === AUTO_RECHARGE
+                                    ? "次の画面で決済に進みます。お支払いの完了後、オートリチャージが自動で有効になります。いつでも停止できます。"
+                                    : "次の画面で決済に進みます。"}
                             </p>
                         </div>
                     </div>
@@ -309,9 +316,12 @@
     </PageContainer>
 </AppLayout>
 
-{#snippet fundingChoiceSection()}
+{#snippet fundingChoiceSection(paidPlan: boolean)}
                     <!-- P8a (D29(i)): チケットの補充方法の 2 択。既定は自動購入 (おすすめ) だが、
-                         「あとで決める」を選べば課金設定なしで始められる (opt-in を強制しない)。 -->
+                         「あとで決める」を選べば課金設定なしで始められる (opt-in を強制しない)。
+                         P9 (T1004 / consent_version=v2): 有償契約枝では「カードの取得手段」が
+                         カード登録ではなく **契約のお支払いカードの流用** に変わるため、開示文言も
+                         枝ごとに分ける (版を上げた開示の実体がここにある)。 -->
                     <fieldset class="flex flex-col gap-2" data-testid="funding-choice">
                         <legend class="text-caption font-medium text-text">
                             チケットの補充方法
@@ -350,8 +360,17 @@
                                         consentTerms.maxAmountJpy,
                                     )}（税込・1 枚あたり ¥{formatYen(consentTerms.unitAmountJpy)}）です。
                                 </p>
-                                <p class="mt-1 text-caption text-text-secondary">
-                                    次の画面でカードを登録します。登録しただけでは課金されません。設定はいつでも変更・停止できます。
+                                <p
+                                    class="mt-1 text-caption text-text-secondary"
+                                    data-testid="funding-consent-card-source"
+                                >
+                                    {#if paidPlan}
+                                        お支払いは Stripe で行い、<strong
+                                            >そのお支払いカードをオートリチャージにも使います</strong
+                                        >。設定はいつでも変更・停止できます。
+                                    {:else}
+                                        次の画面でカードを登録します。登録しただけでは課金されません。設定はいつでも変更・停止できます。
+                                    {/if}
                                 </p>
                             </div>
                         {/if}

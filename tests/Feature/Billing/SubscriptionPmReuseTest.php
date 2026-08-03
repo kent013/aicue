@@ -231,6 +231,34 @@ test('再実行 (enabled 遷移済み) は no-op で通知も再送されない'
     expect(pmReuseNotificationCount($organization))->toBe(1);
 });
 
+test('部分適用の顕在化: default PM 更新後に適格性が失われたら RuntimeException (silent no-op にしない)', function (): void {
+    [$organization] = createOrganizationWithOwner();
+    $config = TicketAutoRecharge::factory()->for($organization)->preConsented()->create();
+
+    // Stripe 側 (customer default PM) だけ更新済みで、DB 確定の直前に適格性が失われた状況を作る。
+    // applyReusedPaymentMethod が gateway に触れるのは setDefaultPaymentMethod のみ。
+    $gateway = Mockery::mock(AutoRechargeGatewayInterface::class);
+    $gateway->shouldReceive('setDefaultPaymentMethod')
+        ->once()
+        ->andReturnUsing(function () use ($config): void {
+            $config->forceFill(['disabled_reason' => AutoRechargeDisabledReason::User])->save();
+        });
+    app()->instance(AutoRechargeGatewayInterface::class, $gateway);
+
+    /** @var AutoRechargeService $service */
+    $service = app(AutoRechargeService::class);
+
+    // silent no-op ではなく例外で顕在化する (Job retry で収束 / 継続不適格は failed_jobs で検知)。
+    expect(fn (): bool => $service->applyReusedPaymentMethod($organization, 'pm_reused_partial'))
+        ->toThrow(RuntimeException::class);
+
+    // 例外で TX が rollback されるため、ローカル snapshot は一切書かれていない。
+    $config->refresh();
+    expect($config->enabled)->toBeFalse();
+    expect($config->stripe_payment_method_id)->toBeNull();
+    expect(pmReuseNotificationCount($organization))->toBe(0);
+});
+
 test('空文字 PM は fail-fast (InvalidArgumentException)', function (): void {
     [$organization] = createOrganizationWithOwner();
     TicketAutoRecharge::factory()->for($organization)->preConsented()->create();

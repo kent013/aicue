@@ -62,9 +62,12 @@ final readonly class BillingDashboardDto
          * T088 で PurchaseFormState::Completed を撤去したため、**購入完了をユーザーに知らせる
          * 唯一の経路**がこれ。該当しない着地では null。
          */
-        public ?BillingFeedbackDto $feedback = null,
-        /** P9: 請求先連絡先 (未設定時は fallbackEmail = owner email が実際の宛先) */
-        public ?BillingContactDto $billingContact = null,
+        public ?BillingFeedbackDto $feedback,
+        /**
+         * P9: 請求先連絡先 (未設定時は fallbackEmail = owner email が実際の宛先)。
+         * **既定値を持たない** — 渡し忘れを型検査で落とす (silent に空表示へ倒さない)。
+         */
+        public BillingContactDto $billingContact,
     ) {}
 
     /**
@@ -83,7 +86,7 @@ final readonly class BillingDashboardDto
             'autoRecharge' => $this->autoRecharge->toArray(),
             'autoRechargeSetupToken' => $this->autoRechargeSetupToken,
             'feedback' => $this->feedback?->toArray(),
-            'billingContact' => ($this->billingContact ?? new BillingContactDto(null, null, null))->toArray(),
+            'billingContact' => $this->billingContact->toArray(),
         ];
     }
 }

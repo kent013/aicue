@@ -39,9 +39,10 @@ final readonly class BillingPlansPageDto
         /**
          * P9: 契約 checkout 開始 POST の冪等 token (画面 render ごとに固定される ULID)。
          * チケット購入の `ticketAttemptToken` / カード登録の `autoRechargeSetupToken` とは
-         * **別 key 空間** (混ぜない)。
+         * **別 key 空間** (混ぜない)。**既定値を持たない** — 渡し忘れると空 token が front へ出て
+         * POST が 422 になる silent failure を作らないため。
          */
-        public string $subscriptionAttemptToken = '',
+        public string $subscriptionAttemptToken,
     ) {}
 
     /**

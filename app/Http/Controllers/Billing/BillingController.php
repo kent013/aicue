@@ -431,9 +431,8 @@ class BillingController extends Controller
             ? 'お支払いを受け付けました。オートリチャージは、ご契約のお支払いカードで自動的に有効になります。反映されない場合は、この画面から設定できます。'
             : 'お支払いを受け付けました。オートリチャージの設定はこの画面から確認できます。';
 
-        // 前段が積んだ flash を 303 の 1 hop を跨いで着地 render まで生存させる。
-        $request->session()->reflash();
-
+        // reflash() はしない: 成功着地で直前の error flash まで延命すると
+        // 「成功と失敗が同時に出る」着地を作るため (feedback は本 info 文言だけを主張する)。
         return redirect()
             ->route('billing.index', ['highlight' => 'auto-recharge'], 303)
             ->with('info', $message);

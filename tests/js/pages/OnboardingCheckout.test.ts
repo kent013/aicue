@@ -233,6 +233,31 @@ describe("Onboarding/Checkout", () => {
         );
     });
 
+    it("P9 (v2 開示): 有償契約枝は「契約のお支払いカードをオートリチャージにも使う」と明示する", async () => {
+        renderPage();
+
+        await fireEvent.click(screen.getByTestId("select-plan-starter"));
+
+        // consent_version='v2' に上げた根拠 = カードの取得手段の開示。文言が無ければ開示は成立しない。
+        const cardSource = screen.getByTestId("funding-consent-card-source");
+        expect(cardSource).toHaveTextContent("そのお支払いカードをオートリチャージにも使います");
+        // カード登録経路 (v1) の文言を有償枝で出さない (事実と異なる説明の防止)。
+        expect(cardSource).not.toHaveTextContent("次の画面でカードを登録します");
+
+        expect(screen.getByTestId("paid-plan-submit-note")).toHaveTextContent(
+            "お支払いの完了後、オートリチャージが自動で有効になります",
+        );
+    });
+
+    it("P9 (v2 開示): 無償 (personal) 枝はカード登録経路の文言を保つ", async () => {
+        renderPage();
+        await choosePersonal();
+
+        const cardSource = screen.getByTestId("funding-consent-card-source");
+        expect(cardSource).toHaveTextContent("次の画面でカードを登録します");
+        expect(cardSource).not.toHaveTextContent("そのお支払いカードをオートリチャージにも使います");
+    });
+
     it("funding_choice=later では consent_version を送らない", async () => {
         renderPage();
 

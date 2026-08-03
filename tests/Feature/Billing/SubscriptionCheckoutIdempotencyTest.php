@@ -2,10 +2,15 @@
 
 declare(strict_types=1);
 
+use App\DataTransferObjects\Billing\CreatedCheckoutSession;
+use App\DataTransferObjects\Billing\ExternalBillingRedirect;
 use App\Enums\CheckoutIntent;
 use App\Enums\CheckoutSessionStatus;
 use App\Models\Billing\BillingCheckoutSession;
+use App\Models\Organization;
+use App\Models\User;
 use App\Services\Billing\Contracts\StripeGatewayInterface;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Str;
 use Tests\Support\FakeStripeGateway;
 
@@ -319,6 +324,170 @@ test('既に valid な subscription を持つ org は行を作らず error flash
         ->assertSessionHas('error', '既に有効なサブスクリプションがあります。プラン変更をご利用ください。');
 
     expect(BillingCheckoutSession::query()->where('organization_id', $organization->id)->exists())->toBeFalse();
+});
+
+test('並行 race: INSERT 直前に同 token 行が割り込んでも 500 にならず replay へ収束する (実 driver の UNIQUE)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $token = subAttemptToken();
+
+    // 「Stripe 作成に成功した直後、DB INSERT の直前に別プロセスが同じ (org, intent, attempt_token)
+    //  を先に commit した」を実 DB の UNIQUE で再現する (例外の自作注入ではない = isUniqueViolation()
+    //  の判定文字列が実 driver (pgsql) の制約名と一致することまで固定する)。
+    $racing = new class($organization, $owner) implements StripeGatewayInterface
+    {
+        public FakeStripeGateway $inner;
+
+        public function __construct(
+            private readonly Organization $organization,
+            private readonly User $owner,
+        ) {
+            $this->inner = new FakeStripeGateway;
+        }
+
+        public function createSubscriptionCheckout(
+            Organization $organization,
+            string $stripePriceId,
+            string $successUrl,
+            string $cancelUrl,
+            array $metadata,
+            string $idempotencyKey,
+        ): CreatedCheckoutSession {
+            $created = $this->inner->createSubscriptionCheckout(
+                $organization, $stripePriceId, $successUrl, $cancelUrl, $metadata, $idempotencyKey,
+            );
+
+            // 先着プロセスの行 (別 session id・同 attempt_token) を commit しておく。
+            $token = (string) str_replace('sub_start:', '', $idempotencyKey);
+            BillingCheckoutSession::factory()
+                ->for($this->organization)
+                ->initiatedBy((int) $this->owner->getKey())
+                ->withAttempt($token, 'standard')
+                ->create([
+                    'stripe_session_id' => 'cs_test_winner_'.$token,
+                    'idempotency_key' => 'sub_start:winner:'.$token,
+                    'checkout_url' => 'https://checkout.stripe.test/c/pay/cs_test_winner',
+                ]);
+
+            return $created;
+        }
+
+        public function expireCheckoutSession(string $stripeSessionId): string
+        {
+            return $this->inner->expireCheckoutSession($stripeSessionId);
+        }
+
+        public function createPortalSession(
+            Organization $organization,
+            string $returnUrl,
+        ): ExternalBillingRedirect {
+            return $this->inner->createPortalSession($organization, $returnUrl);
+        }
+
+        public function syncCustomerDetails(Organization $organization): void
+        {
+            $this->inner->syncCustomerDetails($organization);
+        }
+    };
+    $this->app->singleton(StripeGatewayInterface::class, fn (): StripeGatewayInterface => $racing);
+
+    $response = $this->actingAs($owner)->post('/billing/checkout', [
+        'plan_code' => 'standard',
+        'subscription_attempt_token' => $token,
+    ]);
+
+    // 500 に落ちず、先着行の checkout_url へ収束する (re-read replay)。
+    $response->assertStatus(302);
+    $response->assertRedirect('https://checkout.stripe.test/c/pay/cs_test_winner');
+
+    expect(BillingCheckoutSession::query()
+        ->where('organization_id', $organization->id)
+        ->where('intent', CheckoutIntent::SubscriptionStart->value)
+        ->count())->toBe(1);
+});
+
+test('並行 race: 先着行が stale pending なら replay せず ?retry=1 へ倒す', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $token = subAttemptToken();
+
+    $racing = new class($organization) implements StripeGatewayInterface
+    {
+        public FakeStripeGateway $inner;
+
+        public function __construct(private readonly Organization $organization)
+        {
+            $this->inner = new FakeStripeGateway;
+        }
+
+        public function createSubscriptionCheckout(
+            Organization $organization,
+            string $stripePriceId,
+            string $successUrl,
+            string $cancelUrl,
+            array $metadata,
+            string $idempotencyKey,
+        ): CreatedCheckoutSession {
+            $created = $this->inner->createSubscriptionCheckout(
+                $organization, $stripePriceId, $successUrl, $cancelUrl, $metadata, $idempotencyKey,
+            );
+
+            $token = (string) str_replace('sub_start:', '', $idempotencyKey);
+            BillingCheckoutSession::factory()
+                ->for($this->organization)
+                ->withAttempt($token, 'standard')
+                ->stale()
+                ->create([
+                    'stripe_session_id' => 'cs_test_stale_'.$token,
+                    'idempotency_key' => 'sub_start:stale:'.$token,
+                ]);
+
+            return $created;
+        }
+
+        public function expireCheckoutSession(string $stripeSessionId): string
+        {
+            return $this->inner->expireCheckoutSession($stripeSessionId);
+        }
+
+        public function createPortalSession(
+            Organization $organization,
+            string $returnUrl,
+        ): ExternalBillingRedirect {
+            return $this->inner->createPortalSession($organization, $returnUrl);
+        }
+
+        public function syncCustomerDetails(Organization $organization): void
+        {
+            $this->inner->syncCustomerDetails($organization);
+        }
+    };
+    $this->app->singleton(StripeGatewayInterface::class, fn (): StripeGatewayInterface => $racing);
+
+    $this->actingAs($owner)
+        ->post('/billing/checkout', [
+            'plan_code' => 'standard',
+            'subscription_attempt_token' => $token,
+        ])
+        ->assertRedirect('/billing?retry=1');
+});
+
+test('attempt_token 以外の unique 違反 (stripe_session_id) は rethrow する (replay へ流さない)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $token = subAttemptToken();
+
+    // fake は idempotency key から session id を決定するため、同じ session id を持つ別 attempt の
+    // 行を先に置いておくと stripe_session_id の UNIQUE に当たる (attempt_token 制約ではない)。
+    $conflictingSessionId = 'cs_test_'.substr(hash('sha256', 'sub_start:'.$token), 0, 32);
+    BillingCheckoutSession::factory()
+        ->for($organization)
+        ->withAttempt(subAttemptToken(), 'starter')
+        ->create(['stripe_session_id' => $conflictingSessionId]);
+
+    $this->withoutExceptionHandling();
+
+    expect(fn () => $this->actingAs($owner)->post('/billing/checkout', [
+        'plan_code' => 'standard',
+        'subscription_attempt_token' => $token,
+    ]))->toThrow(UniqueConstraintViolationException::class);
 });
 
 test('subscription_attempt_token の欠落 / 非 ULID は 422', function (mixed $token): void {

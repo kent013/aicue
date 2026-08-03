@@ -47,6 +47,11 @@ final readonly class OnboardingCheckoutDto
         public string $recommendedPlanCode,
         public string $defaultPlanCode,
         public string $contactUrl,
+        /**
+         * P9: 有償プランの契約 checkout 開始 POST が使う冪等 token (render 単位の ULID)。
+         * **既定値を持たない** (渡し忘れの空 token を front へ出さない)。
+         */
+        public string $subscriptionAttemptToken,
         public ?PersonalPlanEligibilityDto $personalEligibility = null,
         public int $signupGrantTickets = 10,
         public ?string $intendedPlanCode = null,
@@ -62,10 +67,6 @@ final readonly class OnboardingCheckoutDto
          * @var list<string>
          */
         public array $fundingChoices = [],
-        /**
-         * P9: 有償プランの契約 checkout 開始 POST が使う冪等 token (render 単位の ULID)。
-         */
-        public string $subscriptionAttemptToken = '',
     ) {}
 
     /**
