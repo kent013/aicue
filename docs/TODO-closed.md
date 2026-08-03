@@ -99,6 +99,7 @@ Open リストは [TODO.md](TODO.md) を参照。
 | T078 | 決済parity P7: 新規登録経路。IntendedPlanResolver / continuation / ?plan= handoff + verify ソフトゲート継続。?plan= は allowlist 照合し未知値は安全側へ倒す (セキュリティ不変条件 #1) | backend | 2026-08-03 |
 | T077 | 決済parity P6: grant契機変更。signup grant を customer.subscription.created / free activate へ移設 (F2)。invoice.paid (subscription_create) 経路を退役 (D29)、claimSignupGrantMarker を private へ戻す (D13)、LP/Pricing 文言修正。org 生涯 1 回は marker + 部分 UNIQUE index の二重防御でテスト固定 | backend | 2026-08-03 |
 | T079 | 決済parity P8a: 裏チャージ (オートリチャージ opt-in・既定 off) + リコンサイル。閾値判定は availableTrueBalance() 基準。**適用単価を currentTierFor(max_count) へ変更** — verbatim の currentTierFor(quantity) だと部分補充時に同意上限を超過するため (実測: max_count=50 の同意上限 ¥3,500 に対し 48 枚補充が ¥3,840)。aigenba にも同欠陥があり handoff F-6 として返却済み | backend | 2026-08-03 |
+| T080 | 決済parity P8b: 課金UI parity。Billing/Plans 新設 (PlanCard は D4/禁止事項#8 に従い常時 enabled + 押下時に理由表示)、PurchaseTickets を per-bucket 表示 + 状態機械へ、Billing/Index を BillingDashboardDto 1 props へ整理しプラン一覧は /billing/plans へ分離、Pricing を Guest/Pricing へ移動し三層構成へ、portal ボタンの事前ガード。feedback/billingContact は P9 所管として非着手 (D25) | frontend | 2026-08-03 |
 
 
 ## Obsoleted
