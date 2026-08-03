@@ -97,6 +97,8 @@ Open リストは [TODO.md](TODO.md) を参照。
 | T086 | bug-hunt coverage の既存赤を解消。test_correlate の join キー検査が行単位で name != URL を要求しており、単一セグメント route (Route::post('logout',...)->name('logout')) を偽陽性で落としていた(65 行中 1 行)。検出したい failure mode (URL 列を join キーにする) では全行が一致するため集約判定へ変更。負のコントロールで 58/58 一致を検出できることを確認済み | test | 2026-08-03 |
 | T076 | 決済parity P5: 残高会計精緻化。per-source clamp / 消費優先 (monthly→purchased) / commit-wins を aigenba verbatim 移植。additive 2 列 (consume_source / consume_expires_at) + TicketBalanceDto + TicketCommitResult。availableTrueBalance() を新設し P8a の閾値判定が依存する契約として docblock に明記。nearestMonthlyExpiry の既知窓は D28 (monthly_ticket_grant 全 tier 0) により構造的に到達不能で、PlanSeederPriceInvariantTest が逆方向にも参照を張って担保 | backend | 2026-08-03 |
 | T078 | 決済parity P7: 新規登録経路。IntendedPlanResolver / continuation / ?plan= handoff + verify ソフトゲート継続。?plan= は allowlist 照合し未知値は安全側へ倒す (セキュリティ不変条件 #1) | backend | 2026-08-03 |
+| T077 | 決済parity P6: grant契機変更。signup grant を customer.subscription.created / free activate へ移設 (F2)。invoice.paid (subscription_create) 経路を退役 (D29)、claimSignupGrantMarker を private へ戻す (D13)、LP/Pricing 文言修正。org 生涯 1 回は marker + 部分 UNIQUE index の二重防御でテスト固定 | backend | 2026-08-03 |
+| T079 | 決済parity P8a: 裏チャージ (オートリチャージ opt-in・既定 off) + リコンサイル。閾値判定は availableTrueBalance() 基準。**適用単価を currentTierFor(max_count) へ変更** — verbatim の currentTierFor(quantity) だと部分補充時に同意上限を超過するため (実測: max_count=50 の同意上限 ¥3,500 に対し 48 枚補充が ¥3,840)。aigenba にも同欠陥があり handoff F-6 として返却済み | backend | 2026-08-03 |
 
 
 ## Obsoleted
