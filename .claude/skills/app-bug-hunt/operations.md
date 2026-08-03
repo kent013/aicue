@@ -10,7 +10,11 @@
 |---|---|---|---|---|
 | POST | billing/checkout | billing.checkout | S5 | 通常 |
 | POST | billing/portal | billing.portal | S5 | 通常 |
+| POST | billing/auto-recharge | billing.auto-recharge.update | S5 | 通常 |
+| POST | billing/auto-recharge/setup | billing.auto-recharge.setup | S5 | 通常 |
+| PATCH | billing/contact | billing.contact.update | S5 | 通常 |
 | POST | purchase-tickets/checkout | billing.tickets.checkout | S5 | 通常 |
+| POST | onboarding/activate-personal | onboarding.activate-personal | S1 | 通常 |
 | POST | notifications/read-all | notifications.read-all | S6 | 通常 |
 | POST | notifications/{notification}/open | notifications.open | S6 | 通常 |
 | POST | notifications/{notification}/read | notifications.read | S6 | 通常 |
@@ -73,3 +77,19 @@
 | PUT | user/password | user-password.update | S6 | 通常 |
 | PUT | user/profile-information | user-profile-information.update | S6 | 通常 |
 | POST | email/verification-notification | verification.send | S1 | 通常 |
+
+## 課金ゲート allowlist と認可 (P4 反転後、要検出)
+
+`billing.*` / `billing.tickets.*` / `billing.auto-recharge.*` / `billing.contact.update` /
+`onboarding.*` / `notifications.*` は **`require-active-subscription` group の外**にある構造的
+allowlist で、未契約・支払い不健全な組織でも到達できなければならない (`routes/web.php` の
+gate group コメントが正本)。ここが 402/リダイレクトで詰むと「契約するための画面が契約して
+いないと開けない」= 詰み finding (H4)。
+
+- `billing.auto-recharge.update` / `billing.auto-recharge.setup` / `billing.contact.update` /
+  `billing.checkout` / `billing.tickets.checkout` の認可は Controller 冒頭の
+  `Gate::authorize('manageBilling')` (owner / admin)。member は 403、他組織はそもそも
+  current org スコープ (route parameter なし) で構造的に到達不能。
+- `onboarding.activate-personal` は `throttle:10,1` 付き。連打時に 429 が UX として
+  説明されるか (無反応にならないか) を見る。
+- 二重課金の観点は S5 の逸脱アイデア参照 (`attempt_token` 冪等 / live pending dedup)。

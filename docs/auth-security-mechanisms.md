@@ -9,7 +9,8 @@
 
 1. **機微操作の再認証 (recent-auth / step-up)** — Critical Action の直前に「直近の再認証」を要求する。
 2. **組織 2FA 強制 (enforced two-factor)** — 組織が 2FA を必須化した場合の未準拠ユーザーゲート + self-disable 禁止。
-3. **セキュリティヘッダ / 本番ハードニング層** — baseline セキュリティヘッダと production 起動時 / デプロイ前の fail-fast。
+3. **セキュリティヘッダ / 本番ハードニング層** — baseline セキュリティヘッダ、認証済み応答の
+   `no-store` baseline、production 起動時 / デプロイ前の fail-fast。
 
 MCP / CLI の OAuth 認可については [docs/mcp-oauth.md](mcp-oauth.md)、公開面の全体像は
 [docs/architecture.md](architecture.md) を参照。
@@ -109,7 +110,7 @@ Fortify 生の `password.confirm` (password 専用・3h 窓) を置き換え、S
 
 ## 3. セキュリティヘッダ / 本番ハードニング層
 
-**実装**: `app/Http/Middleware/{SecurityHeaders,RedirectToHttps,NoIndex,LocalOnly}.php`, `app/Support/{ProductionEnvGuard,TrustedHostsConfigValidator}.php`, `app/Console/Commands/ProductionPreflightCommand.php`, `config/{security,trusted_hosts}.php`
+**実装**: `app/Http/Middleware/{SecurityHeaders,NoStoreCacheHeadersForAuthenticatedPages,RedirectToHttps,NoIndex,LocalOnly}.php`, `app/Support/{ProductionEnvGuard,TrustedHostsConfigValidator}.php`, `app/Console/Commands/ProductionPreflightCommand.php`, `config/{security,trusted_hosts}.php`
 
 ### baseline セキュリティヘッダ (`SecurityHeaders`)
 
@@ -123,6 +124,28 @@ web group に append され、`config/security.php` 駆動で以下を送出す�
 - **`.well-known/oauth-*` の例外**: OAuth / MCP discovery metadata は client が programmatic fetch する JSON のため、
   フル baseline を当てず `security.metadata_headers` の最小 subset (nosniff + no-referrer) のみ適用して early return する
   (HSTS は `security.metadata_hsts_enabled` が true のときだけ)。この最小 subset の後付け配線は `routes/ai.php` 側。
+
+### 認証済み応答の no-store baseline (`NoStoreCacheHeadersForAuthenticatedPages`)
+
+ログアウト後のブラウザ「戻る」で認証済み画面 (PII を含む) が bfcache から再表示されるのを
+防ぐ baseline。**適用判定は route 列挙ではなく「認証済みか」**で行う (path 列挙は一般認証画面を
+取りこぼす)。guest / 公開ページ (login・LP・SEO) は対象外のままにして bfcache と共有キャッシュの
+恩恵を維持する。
+
+- リクエスト時点 **または** 応答時点のどちらかで認証済みなら `Cache-Control: no-store, private`
+  を付与する (logout POST の redirect、login POST の応答をどちらも保護側に倒す)。
+- 既に `no-store` を持つ応答 (recent-auth 409 / 2FA 409 / 署名 URL redirect 等、内側で明示された
+  より厳格な値) は書き換えない = **directive が縮む方向の上書きをしない**。
+- session を持たないリクエスト (`routes/web.php` の stateless block) は stateless 公開配信のため
+  対象外。
+- **Safari は `no-store` でも bfcache に格納しうる**ため本 middleware だけでは足りない。
+  撮影 PWA の主戦場が iOS Safari である以上、クライアント側の bfcache 秘匿・再検証
+  (`resources/js/lib/bfcache-guard.ts` + `session.status` プローブ) と**セット**で守る契約
+  (正本は `docs/supported-browsers.md`、Browser テストのレーン契約は `docs/testing-browser.md`)。
+- `session.status` プローブ (`app/Http/Controllers/Auth/SessionStatusController.php`) は
+  **auth グループの外**に置く。auth 配下だと未認証時に 302/401 になり、guard 側で
+  「セッション無効」と「endpoint 不在 / ネットワーク障害」を区別しにくくなるため、guest でも
+  200 + `authenticated: false` を返して判定を boolean 一本にする。
 
 ### その他のハードニング middleware
 
@@ -162,6 +185,9 @@ web group に append され、`config/security.php` 駆動で以下を送出す�
 | `app/Http/Middleware/RequireRecentAuth.php` | `recent-auth` alias。機微操作 route の step-up ゲート (409 / 302 出し分け) |
 | `app/Http/Controllers/Auth/ConfirmRecentAuthController.php` | confirm 画面 (`show`) / precheck (`status`) / password satisfier (`confirmPassword`) |
 | `app/Listeners/Auth/StampRecentAuthOnLogin.php` | fresh login を recent-auth 成立として stamp (recaller 除外) |
+| `app/Http/Middleware/NoStoreCacheHeadersForAuthenticatedPages.php` | 認証済み応答の `no-store` baseline (bfcache 由来の PII 再表示防止) |
+| `app/Http/Controllers/Auth/SessionStatusController.php` | セッション有効性の軽量プローブ (`session.status`)。auth グループの外・guest でも 200 |
+| `resources/js/lib/bfcache-guard.ts` | bfcache 復元時のクライアント側秘匿・再検証 (Safari 対策。正本は `docs/supported-browsers.md`) |
 | `app/Http/Middleware/RequireTwoFactorForEnforcedOrganizations.php` | 2FA 未準拠ユーザーの全画面ゲート (allowlist 外を 302 / 409) |
 | `app/Http/Middleware/BlockTwoFactorDisableForEnforcedOrganizations.php` | 準拠ユーザーの self-disable 到達を弾く (422 / back) |
 | `app/Enums/TwoFactorStatus.php` | Fortify 2 カラムから導出する 3 値状態機械 (Disabled / Pending / Enabled) |

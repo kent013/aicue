@@ -208,3 +208,13 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
    `docs/supported-browsers.md` の**実機受入確認の再確認条件**に従って再確認する。
    Browser テストは **Chromium + WebKit の 2 レーン**が契約 (`docs/testing-browser.md`)。
    実行時間を理由に WebKit レーンを落とさない (復元シナリオの恒久回帰が消えるため)
+4. **課金ゲート (P4 反転) の route 配置規約**: 新しい業務ドメインの route は
+   `routes/web.php` の `require-active-subscription` group **の中**に追加する。
+   group の外に置いてよいのは「契約するために未契約組織が到達できなければならない導線」
+   (`billing.*` / `billing.tickets.*` / `billing.auto-recharge.*` / `billing.contact.update` /
+   `onboarding.*` / `notifications.*`) だけで、これは**構造的 allowlist** として
+   `routes/web.php` のコメントに明記する。遮断時の着地は `manageBilling` 保持者 →
+   `onboarding.checkout` / 非保持者 → `onboarding.billing-required` で、**403 で突き放さず
+   専用画面で受ける** (行き先のない詰みを作らない)。運用契約は `docs/architecture.md`
+   §サブスク契約 Checkout とオンボーディング着地、デプロイ順序は
+   `docs/billing-gate-inversion-runbook.md`
