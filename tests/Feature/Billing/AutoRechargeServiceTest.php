@@ -423,3 +423,32 @@ test('card_declined の同期 pay 失敗は invoice を終端して failed に�
         ->and($attempt->failure_code)->toBe('card_declined')
         ->and($gateway->terminated)->toHaveCount(1);
 });
+
+test('部分補充でも 1 回の請求額が同意上限を超えない (適用単価は同意した Max 枚の tier で pin する)', function (): void {
+    [$organization, $owner, $gateway, $service] = autoRechargeSetup();
+    $gateway->withDefaultPaymentMethod();
+    $service->updateSettings($organization, $owner, true, 5, 50, new AutoRechargeConsentDto(
+        config()->string('billing.auto_recharge.consent_version'),
+    ));
+
+    $config = TicketAutoRecharge::query()->where('organization_id', $organization->id)->firstOrFail();
+    $consentedAmount = $config->consented_max_amount;
+    expect($consentedAmount)->not->toBeNull();
+
+    // 逐減単価表は「数量が少ないほど単価が高い」ため、総額は数量に対して単調ではない。
+    // この前提が崩れるとテストが空振りするため fixture 側で明示的に pin する。
+    expect(TicketVolumePrice::currentTierFor(48)->unitAmount * 48)
+        ->toBeGreaterThan($consentedAmount);
+
+    grantTickets($organization, 2); // 真値残高 2 (< 閾値 5) → quantity 48 (< max 50)
+
+    $attempt = $service->maybeCreateAttempt($organization);
+    expect($attempt)->not->toBeNull();
+    expect($attempt->quantity)->toBe(48)
+        // 適用単価は quantity ではなく同意した max_count の tier (UI 表示の「1 枚あたり」と一致)
+        ->and($attempt->unit_amount)->toBe(TicketVolumePrice::currentTierFor(50)->unitAmount)
+        ->and($attempt->stripe_price_id)->toBe(TicketVolumePrice::currentTierFor(50)->stripePriceId);
+
+    // hard invariant: 実請求額 (attempt に pin した単価 × 数量) は同意上限を超えない
+    expect($attempt->unit_amount * $attempt->quantity)->toBeLessThanOrEqual($consentedAmount);
+});

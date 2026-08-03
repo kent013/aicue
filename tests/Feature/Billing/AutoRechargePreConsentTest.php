@@ -261,3 +261,49 @@ test('onboarding checkout の props に consentTerms / fundingChoices が届く 
     expect($pageData['fundingChoices'])->toBe(['auto_recharge', 'later'])
         ->and($pageData['consentTerms'])->toBe($this->service->consentTermsFor()->toArray());
 });
+
+test('事前同意後に enabled=false の設定保存をしても自動有効化の適格性は失われない', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+
+    $this->service->recordPreConsent(
+        $organization,
+        $owner,
+        new AutoRechargeConsentDto(config()->string('billing.auto_recharge.consent_version')),
+    );
+
+    // カード未登録時の「設定を保存」(enabled=false の upsert)。停止操作ではないため
+    // disabled_reason=user を立てない = カード登録完了時の自動有効化が生き残る。
+    $this->service->updateSettings(
+        $organization,
+        $owner,
+        enabled: false,
+        threshold: 3,
+        max: 40,
+        consent: null,
+    );
+
+    $config = TicketAutoRecharge::query()->where('organization_id', $organization->id)->firstOrFail();
+    expect($config->enabled)->toBeFalse()
+        ->and($config->disabled_reason)->toBeNull()
+        ->and($config->threshold_count)->toBe(3)
+        ->and($config->max_count)->toBe(40);
+
+    expect($this->service->isAutoEnablePending($organization))->toBeTrue();
+    expect($this->service->applySetupCompletion($organization, 'pm_after_draft_save'))->toBeTrue();
+});
+
+test('稼働中からの停止は disabled_reason=user を立てる (自動有効化で勝手に復活しない)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $this->gateway->withDefaultPaymentMethod();
+
+    $this->service->updateSettings($organization, $owner, true, 5, 50, new AutoRechargeConsentDto(
+        config()->string('billing.auto_recharge.consent_version'),
+    ));
+    $this->service->updateSettings($organization, $owner, false, 5, 50, null);
+
+    $config = TicketAutoRecharge::query()->where('organization_id', $organization->id)->firstOrFail();
+    expect($config->enabled)->toBeFalse()
+        ->and($config->disabled_reason)->toBe(AutoRechargeDisabledReason::User);
+
+    expect($this->service->isAutoEnablePending($organization))->toBeFalse();
+});

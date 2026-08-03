@@ -203,7 +203,12 @@ final class AutoRechargeService
                         if ($config?->stripe_payment_method_id === null) {
                             $attrs['stripe_payment_method_id'] = $this->gateway->getDefaultPaymentMethodState($organization)->paymentMethodId;
                         }
-                    } else {
+                    } elseif ($config?->enabled === true) {
+                        // **停止操作のときだけ** User を刻む (稼働中 → 停止の遷移)。
+                        // カード未登録時の「設定を保存」(enabled=false の upsert) で刻むと、
+                        // 事前同意済み行 (disabled_reason=null) が自動有効化の適格性
+                        // (autoEnableEligible) を失い、カード登録完了しても有効にならない。
+                        // 非遷移の保存では既存の理由 (payment_failures 等) をそのまま保つ。
                         $attrs['disabled_reason'] = AutoRechargeDisabledReason::User;
                     }
 
@@ -429,7 +434,9 @@ final class AutoRechargeService
 
                 // quantity はこの一点で確定し、以降 attempt.quantity が真実源。
                 // availableTrueBalance は構造的に >= 0 (per-source max(...,0)) のため
-                // quantity <= max_count (= 同意上限の不変条件)。
+                // quantity <= max_count。これが同意上限の不変条件になるのは、下の tier pin
+                // (単価を max_count の tier に固定) と**セット**のときのみ (単価を quantity で
+                // 引き直すと総額が同意上限を超え得る)。
                 $quantity = min($config->max_count - $balance, TicketVolumePrice::PURCHASE_MAX_COUNT);
                 Assert::greaterThan($quantity, 0);
 
@@ -448,7 +455,15 @@ final class AutoRechargeService
                     return null;
                 }
 
-                $tier = TicketVolumePrice::currentTierFor($quantity);
+                // 適用単価は **quantity ではなく同意した max_count の tier** で pin する。
+                // 逐減単価表では単価が数量に対して減少するため総額 (q × unit(q)) は数量に単調でなく、
+                // quantity < max_count のとき単価が上がって **同意上限額 (unit(max) × max) を超過し得る**
+                // (既定 threshold=5 / max=50 でも quantity=46..49 は 1 段上の単価に落ちる)。
+                // 同意時 tier で pin すれば実請求額 = quantity × unit(max) <= max_count × unit(max)
+                // = consented_max_amount が **単価表の形状に依存せず無条件で成立**する。
+                // UI (AutoRechargeCard の「1 枚あたり」表示) も同じ Max 枚 tier 単価を提示しており、
+                // 表示・同意・実請求の 3 者がこれで一致する。
+                $tier = TicketVolumePrice::currentTierFor($config->max_count);
 
                 $attempt = new TicketAutoRechargeAttempt;
                 $attempt->organization()->associate($locked);
@@ -679,7 +694,11 @@ final class AutoRechargeService
             'transitionToTerminal は failed / canceled のみ',
         );
 
-        return DB::transaction(function () use ($attempt, $terminal): bool {
+        // 自動停止の通知は **commit 後**に送る (TX 内で送ると通知系の例外で状態遷移ごと
+        // ロールバックし、invoice 終端済みなのに attempt が pending に戻る = 収束先が変わる)。
+        $disabledOrganization = null;
+
+        $transitioned = DB::transaction(function () use ($attempt, $terminal, &$disabledOrganization): bool {
             $updated = TicketAutoRechargeAttempt::query()
                 ->whereKey($attempt->id)
                 ->where('status', AutoRechargeAttemptStatus::Pending->value)
@@ -706,7 +725,7 @@ final class AutoRechargeService
                         $config->disabled_reason = AutoRechargeDisabledReason::PaymentFailures;
                         $organization = $config->organization;
                         Assert::isInstanceOf($organization, Organization::class);
-                        $this->notifyDisabled($organization, $attempt);
+                        $disabledOrganization = $organization;
                     }
                     $config->save();
                 }
@@ -714,6 +733,17 @@ final class AutoRechargeService
 
             return true;
         });
+
+        if ($disabledOrganization instanceof Organization) {
+            // 通知失敗で確定済みの停止をなかったことにしない (dedup は attempt 単位)。
+            try {
+                $this->notifyDisabled($disabledOrganization, $attempt);
+            } catch (Throwable $e) {
+                report($e);
+            }
+        }
+
+        return $transitioned;
     }
 
     // ------------------------------------------------------------------
