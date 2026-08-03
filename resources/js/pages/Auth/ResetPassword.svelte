@@ -2,6 +2,7 @@
     import { useForm } from "@inertiajs/svelte";
     import Button from "@/components/atoms/Button.svelte";
     import Input from "@/components/atoms/Input.svelte";
+    import TextLink from "@/components/atoms/TextLink.svelte";
     import FormField from "@/components/molecules/FormField.svelte";
     import PasswordInput from "@/components/molecules/PasswordInput.svelte";
     import AuthLayout from "@/components/templates/AuthLayout.svelte";
@@ -56,4 +57,15 @@
 
         <Button type="submit" loading={form.processing} fullWidth>パスワードをリセット</Button>
     </form>
+
+    {#snippet footer()}
+        <p>
+            リンクの有効期限が切れている場合は
+            <TextLink href="/forgot-password">新しいリセットリンクをリクエスト</TextLink>
+            できます。
+        </p>
+        <p class="mt-1">
+            <TextLink href="/login">ログインに戻る</TextLink>
+        </p>
+    {/snippet}
 </AuthLayout>

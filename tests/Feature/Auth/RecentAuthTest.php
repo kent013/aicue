@@ -169,6 +169,34 @@ test('confirm 画面は passwordSet / availableProviders / canSatisfy を返す'
             ->where('availableProviders.0.reauthUrl', route('social.redirect', ['provider' => 'google', 'intent' => 'step-up'])));
 });
 
+test('password 未設定かつ利用可能な再認証 provider が無いユーザーは canSatisfy=false', function (): void {
+    // 「SSO 専用ユーザー」ではなく「password 未設定 かつ 利用可能な再認証 provider なし」という
+    // **状態**。provider が生きている通常の SSO ユーザー (canSatisfy=true) と混同しない。
+    // この状態の confirm 画面が案内する回復手順は RecentAuthPasswordRecoveryTest が端まで固定する。
+    $user = User::factory()->ssoOnly()->create();
+
+    $this->actingAs($user)->get('/recent-auth/confirm')
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Auth/ConfirmRecentAuth')
+            ->where('passwordSet', false)
+            ->where('availableProviders', [])
+            ->where('canSatisfy', false));
+});
+
+test('ログイン済みユーザーは GET /forgot-password のフォームに到達できない (guest ゲート)', function (): void {
+    // Fortify は /forgot-password を `guest` middleware 付きで登録している。認証済み画面
+    // (ConfirmRecentAuth 等) から /forgot-password へリンクすると RedirectIfAuthenticated に
+    // 弾かれてフォームに到達しない = 踏破不能 CTA になる、という根拠を仕様として固定する。
+    // redirect 先は RedirectIfAuthenticated::defaultRedirectUri() 依存のため pin しない。
+    $user = User::factory()->create();
+
+    $response = $this->actingAs($user)->get('/forgot-password');
+
+    expect($response->isRedirect())->toBeTrue();
+    $response->assertStatus(302);
+});
+
 test('status は鮮度と satisfier 情報を返す (no-store)', function (): void {
     $user = User::factory()->create();
 

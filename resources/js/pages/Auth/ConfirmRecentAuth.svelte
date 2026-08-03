@@ -1,7 +1,8 @@
 <script lang="ts">
-    import { useForm } from "@inertiajs/svelte";
+    import { router, useForm } from "@inertiajs/svelte";
     import Button from "@/components/atoms/Button.svelte";
     import FormError from "@/components/atoms/FormError.svelte";
+    import TextLink from "@/components/atoms/TextLink.svelte";
     import Divider from "@/components/molecules/Divider.svelte";
     import FormField from "@/components/molecules/FormField.svelte";
     import PasswordInput from "@/components/molecules/PasswordInput.svelte";
@@ -15,7 +16,9 @@
      * intended URL へ戻る (server 側 redirect()->intended)。
      * - password 設定済みユーザー: password 再入力フォーム (POST /recent-auth/password)
      * - 再SSO 可能な provider: reauthUrl (/auth/{provider}/redirect/step-up) で再認証
-     * - canSatisfy=false: 回復導線 (パスワードリセット) を案内
+     * - canSatisfy=false: 回復手順 (ログアウト → guest としてパスワード再設定) を案内。
+     *   /forgot-password へ直接リンクしない — Fortify が `guest` middleware 付きで登録しており
+     *   ログイン済みの本画面ユーザーはフォームに到達できない (踏破不能 CTA。bug-hunt F-2-01 と同 species)
      */
     interface Props {
         appName?: string;
@@ -35,9 +38,26 @@
         password: "",
     });
 
+    let loggingOut = $state(false);
+
     function submit(event: SubmitEvent): void {
         event.preventDefault();
         form.post("/recent-auth/password");
+    }
+
+    function logout(): void {
+        router.post(
+            "/logout",
+            {},
+            {
+                onStart: () => {
+                    loggingOut = true;
+                },
+                onFinish: () => {
+                    loggingOut = false;
+                },
+            },
+        );
     }
 </script>
 
@@ -84,10 +104,20 @@
 
     {#if !canSatisfy}
         <div class="mt-6 flex flex-col gap-3 text-caption text-text-secondary">
-            <p>この操作を続けるための再認証手段が設定されていません。パスワードを設定すると再認証できます。</p>
-            <Button href="/forgot-password" variant="ghost" fullWidth>
-                パスワードを設定して再認証する
+            <p>
+                この操作を続けるための再認証手段が設定されていません。
+                いったんログアウトし、ログイン画面の「パスワードをお忘れの方」から
+                パスワードを設定すると再認証できるようになります。
+            </p>
+            <Button variant="ghost" onclick={logout} loading={loggingOut} fullWidth>
+                ログアウトする
             </Button>
         </div>
     {/if}
+
+    {#snippet footer()}
+        <p>
+            <TextLink href="/dashboard">この操作を中止してダッシュボードへ戻る</TextLink>
+        </p>
+    {/snippet}
 </AuthLayout>

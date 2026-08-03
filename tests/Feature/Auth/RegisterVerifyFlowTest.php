@@ -10,11 +10,15 @@ use Illuminate\Support\Facades\URL;
 use Inertia\Testing\AssertableInertia;
 
 /**
- * P7: メール/パスワード登録 → verification.notice ソフトゲート。
+ * P7: メール/パスワード登録 → verification.notice。
  *
  * EmailVerificationContinuation が session に personal org id を保持し、
- * /email/verify の二次 CTA (continueUrl) と verify 完了後の checkout 復帰を支える。
- * session 値は membership 確認 (relation 経由 fetch) を通らない限り URL 化されない。
+ * verify 完了後の checkout 復帰を支える。
+ * session 値は membership 確認 (relation 経由 fetch) を通らない限り継続として成立しない。
+ *
+ * 認証**前**に onboarding.checkout へ進む CTA は出さない (bug-hunt F-2-01)。
+ * route が ['auth','verified'] 配下 = 未認証は必ず差し戻されるため、画面へは
+ * URL を渡さず「継続が実在するか」だけを continuesToCheckout として渡す。
  */
 beforeEach(function (): void {
     Http::fake(['https://api.pwnedpasswords.com/range/*' => Http::response('', 200)]);
@@ -47,7 +51,7 @@ test('登録 POST は verification.notice へ redirect し personal org id を s
     expect(session('verify_continue_organization_id'))->toBe($personalOrg->id);
 });
 
-test('登録後の /email/verify GET は continueUrl に onboarding.checkout を返す', function (): void {
+test('登録後の /email/verify GET は continuesToCheckout=true を返し URL を渡さない', function (): void {
     Notification::fake();
     $payload = ($this->validPayload)();
     $this->post('/register', $payload);
@@ -56,10 +60,11 @@ test('登録後の /email/verify GET は continueUrl に onboarding.checkout を
         ->assertOk()
         ->assertInertia(fn (AssertableInertia $page) => $page
             ->component('Auth/VerifyEmail')
-            ->where('continueUrl', route('onboarding.checkout')));
+            ->where('continuesToCheckout', true)
+            ->missing('continueUrl'));
 });
 
-test('continuation なしで /email/verify を直接開くと continueUrl は null', function (): void {
+test('continuation なしで /email/verify を直接開くと continuesToCheckout は false', function (): void {
     $user = User::factory()->unverified()->create();
 
     $this->actingAs($user)
@@ -67,10 +72,11 @@ test('continuation なしで /email/verify を直接開くと continueUrl は nu
         ->assertOk()
         ->assertInertia(fn (AssertableInertia $page) => $page
             ->component('Auth/VerifyEmail')
-            ->where('continueUrl', null));
+            ->where('continuesToCheckout', false)
+            ->missing('continueUrl'));
 });
 
-test('session に他人の organization id が混入しても continueUrl は null (membership 確認)', function (): void {
+test('session に他人の organization id が混入しても continuesToCheckout は false (membership 確認)', function (): void {
     $otherOrg = Organization::factory()->create();
     $user = User::factory()->unverified()->create();
 
@@ -78,17 +84,21 @@ test('session に他人の organization id が混入しても continueUrl は nu
         ->withSession(['verify_continue_organization_id' => $otherOrg->id])
         ->get('/email/verify')
         ->assertOk()
-        ->assertInertia(fn (AssertableInertia $page) => $page->where('continueUrl', null));
+        ->assertInertia(fn (AssertableInertia $page) => $page
+            ->where('continuesToCheckout', false)
+            ->missing('continueUrl'));
 });
 
-test('session 値が int でない場合は continueUrl は null (値汚染防御)', function (): void {
+test('session 値が int でない場合は continuesToCheckout は false (値汚染防御)', function (): void {
     $user = User::factory()->unverified()->create();
 
     $this->actingAs($user)
         ->withSession(['verify_continue_organization_id' => 'not-an-int'])
         ->get('/email/verify')
         ->assertOk()
-        ->assertInertia(fn (AssertableInertia $page) => $page->where('continueUrl', null));
+        ->assertInertia(fn (AssertableInertia $page) => $page
+            ->where('continuesToCheckout', false)
+            ->missing('continueUrl'));
 });
 
 test('verify 完了で onboarding.checkout へ redirect し continuation が消える', function (): void {

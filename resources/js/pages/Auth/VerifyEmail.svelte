@@ -6,13 +6,14 @@
     interface Props {
         appName?: string;
         /**
-         * 登録由来の継続導線 (プラン選択へ進む)。サーバが membership 確認を通ったときだけ
-         * 非 null で届く。null のときは二次 CTA を出さない。
+         * 登録由来の継続 (認証完了後に onboarding.checkout へ着地する) が実在するか。
+         * true のときだけ「認証後にプラン選択へ進む」ことを予告する。
+         * 認証前に checkout へ遷移する CTA は出さない (verified ゲートで必ず弾かれるため)。
          */
-        continueUrl?: string | null;
+        continuesToCheckout: boolean;
     }
 
-    let { appName, continueUrl = null }: Props = $props();
+    let { appName, continuesToCheckout }: Props = $props();
 
     const form = useForm({});
 
@@ -46,18 +47,14 @@
         メールが届かない場合は、再送信できます。
     </p>
 
+    {#if continuesToCheckout}
+        <p class="mb-6 text-body text-text-secondary" data-testid="verify-email-checkout-note">
+            メール認証が完了すると、そのままプラン選択に進みます。
+        </p>
+    {/if}
+
     <form novalidate onsubmit={resend} class="flex flex-col gap-3">
         <Button type="submit" loading={form.processing} fullWidth>認証メールを再送信</Button>
-        {#if continueUrl !== null}
-            <Button
-                variant="ghost"
-                onclick={() => router.visit(continueUrl)}
-                fullWidth
-                testId="verify-email-continue"
-            >
-                あとで認証する（プラン選択へ進む）
-            </Button>
-        {/if}
         <Button variant="ghost" onclick={logout} loading={loggingOut} fullWidth>
             ログアウト
         </Button>

@@ -21,12 +21,15 @@ const JS_ROOT = path.resolve(__dirname, "../../../resources/js");
 
 /**
  * `/logout` を参照してよいファイル (resources/js からの相対パス)。
- * 現状 2 箇所あり、いずれも router.post = Inertia visit
- * (AppLayout: 通常画面のユーザーメニュー / VerifyEmail: メール認証待ち画面の離脱導線)。
+ * 現状 3 箇所あり、いずれも router.post = Inertia visit
+ * (AppLayout: 通常画面のユーザーメニュー / VerifyEmail: メール認証待ち画面の離脱導線 /
+ *  ConfirmRecentAuth: 再認証手段が無いユーザーの回復導線 = ログアウトして guest として
+ *  パスワードを再設定する。/forgot-password は guest middleware 付きで直リンクできない)。
  */
 const LOGOUT_CALL_SITE_INVENTORY: readonly string[] = [
   "components/templates/AppLayout.svelte",
   "pages/Auth/VerifyEmail.svelte",
+  "pages/Auth/ConfirmRecentAuth.svelte",
 ] as const;
 
 const LOGOUT_PATH_PATTERN = /["'`]\/logout["'`]/;

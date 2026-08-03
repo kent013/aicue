@@ -4,12 +4,18 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 /*
- * page-shell-structure — 認証ページ外枠の aigenba parity を構造保証する Architecture テスト。
+ * page-shell-structure — ページ外枠テンプレートの構造契約を集約する Architecture テスト。
  *
- * 契約: `AppLayout` を import するページ (ログイン後シェルを使う認証ページ) は、aigenba の統一外枠
+ * 契約 1 (AppLayout): `AppLayout` を import するページ (ログイン後シェルを使う認証ページ) は、
+ * aigenba の統一外枠
  *   <AppLayout><PageContainer><PageHeader|PageHeaderSection><PageContent>…
  * に従い、layout primitive を import かつ使用する。これにより外枠(padding/見出し/中央寄せ max-w-7xl)が
  * primitive に一元化され、ページ独自の外枠ドリフトを構造的に防ぐ。
+ *
+ * 契約 2 (AuthLayout の離脱導線): `AuthLayout` を import するページは、**その手順を完了できない
+ * ユーザーが別の入口へ抜けられる導線**を `{#snippet footer()}` に 1 つ以上持ち、`TextLink` atom で
+ * 表現する (DESIGN.md §Do's and Don'ts)。認証ファネルはアプリ最初の関門であり、ここでの行き止まりは
+ * 価値提供の入口をそのまま失う (bug-hunt F-2-02)。例外は AUTH_EXIT_ALLOWLIST に理由付きで登録する。
  *
  * 運用規約(機械強制でない・レビュー観点): 本文標準は上記外枠。ALLOWLIST 追加は理由必須。
  * (旧 page-content-usage.test.ts をリネーム。AdminMenuNav 等の廃止 import は deprecated-imports.test.ts。)
@@ -26,6 +32,17 @@ const PAGECONTENT_ALLOWLIST: ReadonlyArray<{ path: string; reason: string }> = [
     },
 ];
 const PAGECONTENT_ALLOWLIST_PATHS = new Set(PAGECONTENT_ALLOWLIST.map((e) => e.path));
+
+/** AuthLayout ページの離脱導線契約の除外 allowlist。追加は理由必須(reason 非空)。 */
+const AUTH_EXIT_ALLOWLIST: ReadonlyArray<{ path: string; reason: string }> = [
+    {
+        path: "Auth/VerifyEmail.svelte",
+        reason:
+            "離脱導線は本文の『ログアウト』(POST 遷移) が担う。footer の TextLink では表現できない。" +
+            "未検証状態で到達できる別入口が無いため、代替リンクを置くと新たな行き止まりを作る。",
+    },
+];
+const AUTH_EXIT_ALLOWLIST_PATHS = new Set(AUTH_EXIT_ALLOWLIST.map((e) => e.path));
 
 const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -59,6 +76,27 @@ function importIdentifier(src: string, importPath: string): string | null {
 /** 識別子の通常開始タグが使われているか (タグ名境界まで)。 */
 const usesTag = (src: string, ident: string): boolean =>
     new RegExp(`<${escapeRegExp(ident)}(?:\\s|/?>)`).test(src);
+
+/**
+ * footer snippet 本体を取り出す (先頭の {/snippet} まで)。
+ * - 定義が 0 個 → null (= 契約違反として報告)
+ * - 定義が 2 個以上 / 本体に snippet が入れ子 → "抽出器が現実に追いつけていない" 印として
+ *   例外を投げる (fail-closed。黙って pass させない)
+ */
+function footerSnippetBody(src: string): string | null {
+    const matches = [...src.matchAll(/\{#snippet\s+footer\s*\(\s*\)\s*\}([\s\S]*?)\{\/snippet\}/g)];
+    if (matches.length === 0) return null;
+    if (matches.length > 1) {
+        throw new Error("footer snippet の定義が複数あります。抽出器の前提が崩れています。");
+    }
+    const body = matches[0][1];
+    if (/\{#snippet\b/.test(body)) {
+        throw new Error(
+            "footer snippet に snippet が入れ子です。抽出器を AST 方式へ更新してください。",
+        );
+    }
+    return body;
+}
 
 describe("architecture/page-shell-structure", () => {
     it("PAGECONTENT_ALLOWLIST の各エントリは理由(reason)必須", () => {
@@ -108,5 +146,58 @@ describe("architecture/page-shell-structure", () => {
             { missingContainer, missingHeader, missingContent, paddingFalse },
             msg,
         ).toEqual({ missingContainer: [], missingHeader: [], missingContent: [], paddingFalse: [] });
+    });
+
+    it("AUTH_EXIT_ALLOWLIST の各エントリは理由(reason)必須 / path 重複なし", () => {
+        for (const e of AUTH_EXIT_ALLOWLIST) {
+            expect(e.reason.trim(), `allowlist "${e.path}" は理由必須`).not.toBe("");
+        }
+        // path 重複は編集ミスの兆候
+        expect(AUTH_EXIT_ALLOWLIST_PATHS.size).toBe(AUTH_EXIT_ALLOWLIST.length);
+    });
+
+    it("AUTH_EXIT_ALLOWLIST の各エントリは実在し AuthLayout を使うページである (死蔵 entry 検出)", async () => {
+        for (const e of AUTH_EXIT_ALLOWLIST) {
+            const abs = path.join(PAGES_DIR, e.path);
+            const src = stripComments(await fs.readFile(abs, "utf8"));
+            expect(
+                importIdentifier(src, "@/components/templates/AuthLayout.svelte"),
+                `allowlist "${e.path}" は AuthLayout ページではない (entry が死蔵または typo)`,
+            ).not.toBeNull();
+        }
+    });
+
+    it("AuthLayout ページは footer snippet に TextLink の離脱導線を持つ", async () => {
+        const files = await sveltePages(PAGES_DIR);
+        const missingFooter: string[] = [];
+        const footerWithoutLink: string[] = [];
+
+        for (const file of files) {
+            const rel = path.relative(PAGES_DIR, file).replace(/\\/g, "/");
+            const src = stripComments(await fs.readFile(file, "utf8"));
+            if (!importIdentifier(src, "@/components/templates/AuthLayout.svelte")) continue;
+            if (AUTH_EXIT_ALLOWLIST_PATHS.has(rel)) continue;
+
+            const body = footerSnippetBody(src);
+            if (body === null) {
+                missingFooter.push(rel);
+                continue;
+            }
+            const link = importIdentifier(src, "@/components/atoms/TextLink.svelte");
+            if (!link || !usesTag(body, link)) footerWithoutLink.push(rel);
+        }
+
+        const msg = [
+            missingFooter.length &&
+                `AuthLayout ページに footer snippet が無い:\n  - ${missingFooter.join("\n  - ")}`,
+            footerWithoutLink.length &&
+                `footer に TextLink の離脱導線が無い:\n  - ${footerWithoutLink.join("\n  - ")}`,
+        ]
+            .filter(Boolean)
+            .join("\n\n");
+        expect({ missingFooter, footerWithoutLink }, msg).toEqual({
+            missingFooter: [],
+            footerWithoutLink: [],
+        });
     });
 });
