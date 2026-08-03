@@ -14,11 +14,12 @@ declare(strict_types=1);
  */
 
 use App\DataTransferObjects\Manual\Analysis\GeneratedScenarioData;
+use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Support\Facades\DB;
 
 require __DIR__.'/../../vendor/autoload.php';
 $app = require_once __DIR__.'/../../bootstrap/app.php';
-$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+$app->make(Kernel::class)->bootstrap();
 
 $truth = json_decode((string) DB::table('analysis_jobs')->where('id', 1)->value('result_json'), true);
 $truthSteps = $truth['steps'] ?? [];
