@@ -1,0 +1,98 @@
+[
+    {
+        "label": "anthropic:claude-sonnet-4-5-20250929",
+        "durationSec": 166.6,
+        "finish": "stop",
+        "inTok": 5921,
+        "outTok": 15185,
+        "cost": 0.245538,
+        "cutCount": 35,
+        "pointCount": 53,
+        "parseError": null,
+        "error": null
+    },
+    {
+        "label": "anthropic:claude-sonnet-5",
+        "durationSec": 124.4,
+        "finish": "length",
+        "inTok": 6245,
+        "outTok": 16000,
+        "cost": 0.17249,
+        "cutCount": null,
+        "pointCount": null,
+        "parseError": "App\\Exceptions\\Manual\\LlmOutputInvalidException: AI の応答を解釈できませんでした。再実行してください。(invalid_json: JSON としてパースできません: Syntax error)",
+        "error": null
+    },
+    {
+        "label": "anthropic:claude-haiku-4-5-20251001",
+        "durationSec": 75.5,
+        "finish": "stop",
+        "inTok": 5921,
+        "outTok": 14414,
+        "cost": 0.077991,
+        "cutCount": 35,
+        "pointCount": 52,
+        "parseError": null,
+        "error": null
+    },
+    {
+        "label": "gemini:gemini-3.1-flash-lite",
+        "durationSec": 14.6,
+        "finish": "stop",
+        "inTok": 7173,
+        "outTok": 5257,
+        "cost": 0.00967875,
+        "cutCount": 24,
+        "pointCount": 18,
+        "parseError": null,
+        "error": null
+    },
+    {
+        "label": "gemini:gemini-3-flash-preview",
+        "durationSec": 59.2,
+        "finish": "length",
+        "inTok": 7173,
+        "outTok": 10516,
+        "cost": 0.0351345,
+        "cutCount": null,
+        "pointCount": null,
+        "parseError": "App\\Exceptions\\Manual\\LlmOutputInvalidException: AI の応答を解釈できませんでした。再実行してください。(invalid_json: JSON としてパースできません: Control character error, po",
+        "error": null
+    },
+    {
+        "label": "gemini:gemini-3.5-flash",
+        "durationSec": 45.8,
+        "finish": "length",
+        "inTok": 7173,
+        "outTok": 8016,
+        "cost": 0.0829035,
+        "cutCount": null,
+        "pointCount": null,
+        "parseError": "App\\Exceptions\\Manual\\LlmOutputInvalidException: AI の応答を解釈できませんでした。再実行してください。(invalid_json: JSON としてパースできません: Syntax error)",
+        "error": null
+    },
+    {
+        "label": "openai:gpt-5.6-luna",
+        "durationSec": 38.6,
+        "finish": "stop",
+        "inTok": 4695,
+        "outTok": 8886,
+        "cost": 0.058011,
+        "cutCount": 35,
+        "pointCount": 55,
+        "parseError": null,
+        "error": null
+    },
+    {
+        "label": "openai:gpt-5.4-nano",
+        "durationSec": 48,
+        "finish": "stop",
+        "inTok": 4695,
+        "outTok": 8671,
+        "cost": 0.01177775,
+        "cutCount": 34,
+        "pointCount": 23,
+        "parseError": null,
+        "error": null
+    }
+]
