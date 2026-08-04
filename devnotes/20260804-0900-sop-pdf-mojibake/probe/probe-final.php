@@ -79,9 +79,9 @@ foreach (['AS_作業手順書.pdf', 'AW_作業手順書 (1).pdf', 'AP_オペレ�
 show('正当な日本語', "作業手順書\n1. ネジを締める (トルク 5Nm)\n2. カバーを取り付ける\n安全: 保護メガネ着用");
 show('日本語(型番多め)', "SOP-1234 Rev.2 部品 A-9981 を 12.5mm まで挿入\nBOLT M6x20 x4 本 締付 5.0Nm");
 show('英語', "Work Instruction\n1. Tighten the screw to 5Nm.\n2. Attach the cover plate.");
-show('ドイツ語', "Arbeitsanweisung: Schraube mit 5Nm anziehen. Größe prüfen. Für Straße. Öl. Weiß.");
-show('フランス語', "Mode opératoire: Serrer la vis à 5 Nm. Vérifier la référence arrière. Côté.");
-show('人工 SJIS 化け', (string) mb_convert_encoding((string) mb_convert_encoding("作業手順書 ネジを締める 安全確認", 'CP932', 'UTF-8'), 'UTF-8', 'CP1252'));
+show('ドイツ語', 'Arbeitsanweisung: Schraube mit 5Nm anziehen. Größe prüfen. Für Straße. Öl. Weiß.');
+show('フランス語', 'Mode opératoire: Serrer la vis à 5 Nm. Vérifier la référence arrière. Côté.');
+show('人工 SJIS 化け', (string) mb_convert_encoding((string) mb_convert_encoding('作業手順書 ネジを締める 安全確認', 'CP932', 'UTF-8'), 'UTF-8', 'CP1252'));
 
 // AS の OCR 層日本語が保存されるか
 $as = (new PdfParser)->parseFile($dir.'/AS_作業手順書.pdf')->getText();

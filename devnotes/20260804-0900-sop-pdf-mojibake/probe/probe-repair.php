@@ -116,7 +116,7 @@ show('日本語 (型番多め)', "SOP-1234 Rev.2 部品 A-9981 を 12.5mm まで
 show('英語', "Work Instruction\n1. Tighten the screw to 5Nm.\n2. Attach the cover plate.");
 show('ドイツ語', "Arbeitsanweisung\n1. Schraube mit 5Nm anziehen. Größe prüfen. Für Straße. Öl.");
 show('フランス語', "Mode opératoire\n1. Serrer la vis à 5 Nm. Vérifier la référence arrière.");
-show('SJIS 化けの人工再現', (string) mb_convert_encoding((string) mb_convert_encoding("作業手順書 ネジを締める 安全確認", 'CP932', 'UTF-8'), 'UTF-8', 'CP1252'));
+show('SJIS 化けの人工再現', (string) mb_convert_encoding((string) mb_convert_encoding('作業手順書 ネジを締める 安全確認', 'CP932', 'UTF-8'), 'UTF-8', 'CP1252'));
 
 // AS: OCR 層由来の正規日本語が保存されているか
 [$rep] = repair($as);
