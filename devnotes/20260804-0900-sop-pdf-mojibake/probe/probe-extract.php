@@ -47,7 +47,8 @@ foreach ($files as $file) {
     try {
         $text = (new PdfParser)->parseFile($file)->getText();
     } catch (Throwable $e) {
-        echo "  EXCEPTION: ".get_class($e).': '.$e->getMessage()."\n";
+        echo '  EXCEPTION: '.get_class($e).': '.$e->getMessage()."\n";
+
         continue;
     }
     $trimmed = trim(preg_replace('/\s+/u', ' ', $text) ?? $text);
@@ -67,11 +68,13 @@ foreach ($files as $file) {
         $bytes = @mb_convert_encoding($trimmed, 'CP1252', 'UTF-8');
         if (! is_string($bytes)) {
             echo "  [$target] CP1252 化に失敗\n";
+
             continue;
         }
         $restored = @mb_convert_encoding($bytes, 'UTF-8', $target);
         if (! is_string($restored) || ! mb_check_encoding($restored, 'UTF-8')) {
             echo "  [$target] 復元不可\n";
+
             continue;
         }
         $rc = classify($restored);
