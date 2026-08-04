@@ -109,6 +109,9 @@ Open リストは [TODO.md](TODO.md) を参照。
 | T092 | 認証ファネルの離脱導線を修復 (踏破不能 CTA 撤去 + AuthLayout footer 規約化。bug-hunt F-2-01/F-2-02) | frontend | 2026-08-04 07:05 |
 | T093 | /billing 着地 feedback を one-shot 化 (303 で query を畳み flash 化。bug-hunt F-3-04) | backend | 2026-08-04 07:05 |
 | T095 | 2FA 手動セットアップキー表示と flash→toast 配線の規約化 (bug-hunt F-4-02。F-1-02 は誤検知と確定し修正せず) | frontend | 2026-08-04 07:05 |
+| T096 | SOP PDF の SJIS 化けを区間単位で復元し日本語本文ゲートで壊れた SOP を LLM に渡さない (bug-hunt 由来の新規発見。設計の誤変換 2 系統を実装時に是正) | backend | 2026-08-04 17:20 |
+| T097 | T089/T090 の残存リスク 6 論点を確定し恒久文書へ固定 + 最小実装 (別タブは許容 / 期限切れは clearHistory で塞ぐ / proration 維持 / 超過の認知導線 / Portal 無効維持 / Plan Factory) | general | 2026-08-04 17:20 |
+| T098 | bug-hunt driver に一過性フィードバック捕捉 (feedback probe) を追加し spec-ledger に F-1-02 の申し送りを登録 | test | 2026-08-04 17:20 |
 
 
 ## Obsoleted
