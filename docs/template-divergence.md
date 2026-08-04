@@ -303,3 +303,70 @@ AI-CUE は「Free プランで今すぐ試せます」を掲げる freemium 設�
   `app/Http/Middleware/RequireActiveSubscription.php` /
   `app/DataTransferObjects/Dashboard/BillingSummaryData.php`
 - 設計: `devnotes/20260712-0927-bugfix-billing-free-access/` (概念設計 + 詳細設計 施策 1〜5)
+
+## D10 ✅ テストレーンのグローバルロック (worktree-local flock を残さず削除)
+
+| 観点 | テンプレート(正典 = spirux 形) | 本アプリ |
+|---|---|---|
+| worktree-local flock | 残す (グローバルロックとの二重ロック) | **削除する** (グローバルロックが厳密に包含するため。思考原則 3) |
+| lock file 名 | `/tmp/spirux-global-test.lock` (repo 名固定) | `/tmp/global-test-lane-<uid>.d/lock` (slug 非依存 + UID 分離 + 0700 / 所有者 / symlink 検証) |
+| heartbeat | 常時 30 秒 | **待機中のみ** (保持中はテストランナー自身が喋る。CI は無競合なので 1 行も出ない) |
+| 再入ガード | owner-pid 一致 | **nonce 一致** (sidecar の 1 行目と env の突き合わせ。PID 再利用の穴を持たない) |
+| 検証スイートの置き場 | devnotes 常駐 | **`scripts/verify-global-test-lock.sh` へ昇格 + Architecture テスト + CI ゲート** (禁止事項 1) |
+| bug-hunt | (正典に記述なし) | 対象外。非干渉は保証せず best-effort の pre-flight guard のみ (残余リスクとして受容) |
+
+### なぜ正当な差分か (logic-driven)
+
+aicue の実装は必ず worktree で行う (AGENTS.md §worktree 運用ルール) ため、
+**同一マシン上で複数のテストレーンが同時に走るのが常態**である。実在するハザードは
+(H1) Browser lane の playwright 掃除が `pgrep -f` で**マシン全体**を走査して他レーンの
+run-server を kill する、(H2) PostgreSQL サーバという単一共有資源の奪い合い、
+(H3) devcontainer の CPU/メモリ枯渇によるタイムアウト由来の偽赤、
+(H4) `flock -n` が待たずに死ぬためエージェントがリトライループを回す、の 4 つで、
+**いずれも作用域はマシン (コンテナ) 全体**である。
+
+ロックの作用域は守るべき資源の作用域と一致していなければならない。したがって
+worktree-local ロックは 1 つも新しい事象を防がない (グローバルロックのスコープが
+厳密に包含する)。残せば有害な `flock -n` (H4) をそのまま温存することになるため、
+**同じ変更で削除する**。lock 名に slug を入れないのは `AppNameHardcodeTest` が
+`scripts/` へのアプリ slug 直書きを禁じていること、および**このロックは repo を
+またいで共有されて正しい** (同一マシンの PostgreSQL と CPU は repo をまたいで 1 つ) ため。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「ブロッキング取得 / 待機中の heartbeat / 再入ガード / ロック fd の非継承」の 4 要件は
+> 正典と同一。差分はいずれも**同じ不変条件をより強い機構で保証する**方向である。
+> 加えて aicue は「ロック保持期間 = 取得 〜 **専用プロセスグループが空になった後**」
+> (親の生存期間でも直接の子の終了時点でもない) を非交渉の契約として追加している。
+
+- 並行挙動 (層 1): `scripts/verify-global-test-lock.sh` (C01〜C24)。CI の `php` job で毎回走る
+- 構造的不変条件 (層 2): `tests/Architecture/GlobalTestLockInventoryTest.php`。
+  composer.json / package.json の `test*` script は明示 exemption (`test:ui` / `test:watch`) 以外
+  **deny-by-default でロック経由必須**。旧 `test.lock` / `app-vitest-*` / `flock -n` / `exec` /
+  lane 自前の `trap ... EXIT` / `GLOBAL_TEST_LOCK_DIR` 設定の残存を検出する
+- **層 2 から層 1 を実行してはならない** (非交渉): 層 2 は `composer test` の内側 =
+  ロック保持中に走るため、自己競合する
+
+### 保証しないこと (明示)
+
+- SIGKILL / 親のクラッシュ / コンテナ強制停止 (trap が走らない)。この場合も flock は OS が
+  解放し、残留 sidecar は次の取得者がアトミックに上書きするため「ロックリーク」と
+  「stale nonce による誤再入」は防ぐが、**残存子孫と次レーンの併走は防げない**
+- 自ら `setsid()` / `setpgid()` で専用プロセスグループを離脱した子孫
+- 規約に参加しないプロセス (bug-hunt / 未移植リポジトリ / 手打ちの `vendor/bin/pest` / 他ツール)
+- 別 UID のプロセスとの H2 / H3 競合
+
+### スコープ外の観測 (次に触る人への申し送り)
+
+bug-hunt 自身の `.claude/bug-hunt.lock` は **worktree-local** なので、別 worktree からの
+bug-hunt 同時起動は `playwright-cli kill-all` で相互破壊しうる。本設計では触っていない
+(bug-hunt 側 = orchestrator と N 体の subagent worker にまたがる security-sensitive な
+スクリプトの改造になり、スコープに対して過大)。同種の課題として記録に残す。
+
+### 関連
+
+- 実装: `scripts/global-test-lock.sh` / `scripts/with-global-test-lock.sh` /
+  `scripts/verify-global-test-lock.sh` / `scripts/run-test.sh` /
+  `scripts/run-browser-test.sh` / `scripts/run-vitest.sh` / `package.json`
+- 設計: `devnotes/20260804-2319-global-test-lock/` (概念設計 Round 6 / 詳細設計 Round 5)
+- c2c 台帳: `global-test-lock` (origin: spirux:T1109/T1110、テンプレ昇格承認済み)
