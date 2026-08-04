@@ -79,7 +79,7 @@
 | A-3 | `CheckoutIntent` の `CreditPurchase` / `SignupFunding` case を非移植 | チケット決済は AI-CUE では**別テーブル**（`ticket_checkout_sessions`）が担う。campaign 機構が無い |
 | A-4 | `SubscriptionSnapshot` に `currentPeriodStart` を持たない + period 巻き戻し guard 非移植 | **`subscriptions.current_period_start` 列が AI-CUE に無い** |
 | A-5 | `assertCheckoutReady()` 非移植 | AI-CUE の `Organization` に**請求先メール列が無く** Cashier 既定の `stripeEmail()` が常に null → 移植すると checkout/portal が**全 org で throw** する。**P9 で請求先列が入った後に再検討する** |
-| A-6 | `SubscriptionService` の schedule lifecycle / seat / signup funding / `changePlan` / `upgradeNow` / `isMutableState` を非移植 | 設計スコープ外（席・schedule 機構が無い） |
+| A-6 | `SubscriptionService` の schedule lifecycle / seat / signup funding / `upgradeNow` / `isMutableState` を非移植（**`changePlan` は T090 で移植済み**） | 席・schedule 機構が無いため。ただし **`changePlan` を落とす根拠は成立していなかった**（席にも schedule にも依存しない）ので、T090 で `SubscriptionService::changePlan()` として実装した |
 | A-7 | `getStatus()` / `BillingStatusDto` を P2 で作らない | 呼び出し側 UI が P8b 所管 = **dead code を作らない** |
 | A-8 | aigenba の fallback 文言「現在パーソナルプランは選択できません」を非移植 | **D4（禁止事項 #8）とセット**。AI-CUE は disabled にせず**サーバ由来の `reasonLabel` を常時 caption 表示**するため、クライアント側の fallback 文言は不要（文言をフロントで組み立てない） |
 | A-9 | `Onboarding/Checkout.svelte` の `showAllPlans` / 折りたたみ確認画面を非移植 | `preselectFunding` が無い P3 では `showAllPlans` が常に true = **dead code**（intended バッジ・`?choose` は P7 所管） |

@@ -8,9 +8,12 @@ AI-CUE が「どのブラウザで、どのレベルまで動作を保証して�
 
 | 経路 | 担当 | 何を保証するか |
 |------|------|----------------|
-| A: HTTP / disk / proxy cache、Chrome・Firefox の bfcache | `NoStoreCacheHeadersForAuthenticatedPages` | `no-store, private` により格納拒否 / cookie 変更時 evict |
-| B: Safari の真の bfcache (`pagehide` / `pageshow`) | `resources/js/lib/bfcache-guard.ts` + `session.status` プローブ | **描画前に同期秘匿**し、セッション有効なら秘匿解除のみ (hard reload しない) |
-| C: Inertia SPA のクライアント履歴復元 (`popstate`) | `Inertia\Middleware\EncryptHistory` (web グループ) + `App\Http\Responses\Fortify\LogoutResponse` の `Inertia::clearHistory()` | ログアウト後は復号不能 → **コンポーネントを描画しないまま**再問い合わせ → `/login` |
+| A: HTTP / disk / proxy cache、Chrome・Firefox の bfcache | `App\Http\Middleware\NoStoreCacheHeadersForAuthenticatedPages` | `no-store, private` により格納拒否 / cookie 変更時 evict |
+| B: Safari の真の bfcache (`pagehide` / `pageshow`) | `resources/js/lib/bfcache-guard.ts` + `session.status` プローブ (`App\Http\Controllers\Auth\SessionStatusController`) | **描画前に同期秘匿**し、セッション有効なら秘匿解除のみ (hard reload しない) |
+| C: Inertia SPA のクライアント履歴復元 (`popstate`) | `Inertia\Middleware\EncryptHistory` (web グループ) + `Inertia::clearHistory()` の発行契機 2 つ: **ログアウト** (`App\Http\Responses\Fortify\LogoutResponse`) と **認証失敗** (`bootstrap/app.php` の `AuthenticationException` render callback) | 発行契機の後は復号不能 → **コンポーネントを描画しないまま**再問い合わせ → `/login` |
+
+> 経路 B / C の実装は上表の参照点が正本 (将来の差分レビューで担当実装を辿れるよう、
+> 本書では実装ファイルを名指しする)。
 
 経路 C の保証条件は「**`clearHistory: true` を含む Inertia page をクライアントが適用したタブ**」。
 `Inertia::clearHistory()` はサーバ session にフラグを積むだけで、`sessionStorage` の
@@ -22,6 +25,22 @@ AI-CUE が「どのブラウザで、どのレベルまで動作を保証して�
 (この不変条件は `tests/js/architecture/logout-call-site-inventory.test.ts` が固定する)。
 **ログアウト導線を非 Inertia 経路 (JSON 204 で完結する XHR 等) で新設すると、
 この条件が崩れて経路 C の保証が外れる。**
+
+`clearHistory` の発行契機は**ログアウトだけではない**。セッション期限切れと
+他デバイスからの強制ログアウトはどちらも `AuthenticationException` として現れ、
+`bootstrap/app.php` の render callback がそこでもフラグを積む
+(着地の `/login` が Inertia 応答なので確実に消費される)。
+これが保証するのは「**認証失敗を契機に、以後の戻るによる復元を無効化する**」ことであり、
+**過去に遡って無効化するものではない** (保証範囲と保証外は「未対応事項」節に対で書く)。
+
+> **観測上の注意**: `clearHistory` の効果は `sessionStorage` の `historyKey` が
+> **空になること**ではなく、**旧鍵が破棄されて別の鍵に入れ替わること**である。
+> `EncryptHistory` は guest 面 (`/login`) にもグローバル適用されるため、Inertia は
+> 鍵を消した直後に着地ページ用の新しい鍵を採番して書き戻す (実測)。
+> 効いているかを確かめるときは **null 判定ではなく「非 null かつ旧鍵と不一致」**を見ること
+> (`tests/Browser/InertiaHistoryRestoreAfterLogoutTest.php` がこの形で固定している)。
+> ここで固定できるのは**挙動契約** (鍵が入れ替わり、戻っても過去の PII が描画されない) であって、
+> 「旧鍵が二度と手に入らない」ことの暗号学的証明ではない。保証をこれより広く書かないこと。
 
 「対応している」という言葉を検証レベルと切り離さないこと。
 本書では **Current (実際に回っている検証)** と **Target (到達目標)** を分けて書く。
@@ -113,14 +132,37 @@ vitest のユニットテスト (分岐ロジック) と実機受入確認 (未�
   現行の `/logout` 導線は 3 箇所ともに Inertia visit のため実運用では条件を満たすが、
   非 Inertia のログアウト導線を新設すると保証が外れる
   (`tests/js/architecture/logout-call-site-inventory.test.ts` が deny-by-default で固定)。
-- **上記を満たしたタブ以外は保証外**。Inertia の履歴暗号鍵は
-  `sessionStorage` = タブ単位のため、同一ブラウザの**別タブ**に残った履歴は復号できてしまう。
-  すなわち **別タブでは、現在表示されていない過去の PII が履歴から再表示され得る**
+  ただし **204 で完結したタブも、次に認証を要する Inertia visit を行った時点**で
+  認証失敗契機の `clearHistory` により鍵を失う (保証条件そのものは不変。残存が縮んだだけ)。
+- **別タブに残る Inertia 履歴は保証外 (判断済みで受容する)**。Inertia の履歴暗号鍵は
+  `sessionStorage` = タブ単位のため、同一ブラウザの**別タブ**に残った履歴は復号できてしまう
   (例: タブ B でメンバー一覧を見た後に公開ページへ遷移 → タブ A でログアウト →
-  端末を引き継いだ第三者がタブ B で「戻る」)。塞ぐには全タブへのセッション失効伝播
-  (BroadcastChannel 等) が要るため本件では扱わない。**既知の残存リスク**。
-- **セッション期限切れ / 他デバイスからの強制ログアウトは経路 C の保証外**。
-  ブラウザに `clearHistory` が届かないため鍵が残り、履歴は復号できる。
+  端末を引き継いだ第三者がタブ B で「戻る」)。
+  **塞がない理由**は「自前機構が要るから」ではなく、以下の 3 点:
+  1. 鍵だけ捨てても**そのタブが今表示している PII は消えない**ため効果が薄い
+     (別タブの脅威の主部は「戻るで出る過去の PII」ではなく「今出ている PII」)。
+  2. 効果を出すには別タブの document を落とす必要があり、それは**回収可能な撮影成果を破棄する**。
+     テイクのアップロードは presigned URL で S3 へ直接送るため、セッションが切れていても
+     アップロードは継続でき再ログイン後に finalize できる。撮影を落とさないことは使命に直結する。
+  3. 下記「認証失敗契機の `clearHistory`」により、別タブも**次にサーバと話した時点で**鍵を失う。
+     残る露出は「二度と触られない放置タブ」に限られる。
+  **運用上の補完**: 共有端末では「使い終わったらブラウザを閉じる」運用を案内する
+  (ブラウザセッションが終われば `sessionStorage` ごと消える)。
+  **再検討条件**: セッション失効の push 経路 (Reverb / Echo 等) を別目的で導入したとき /
+  「全デバイスからログアウト」を UI 機能として提供するとき /
+  bug-hunt・実機受入確認で複数タブ運用が実際に観測されたとき。
+- **セッション期限切れ / 他デバイスからの強制ログアウトは、
+  「アプリが認証失敗を検知した以降」の戻るについて保証する** (限定保証)。
+  `bootstrap/app.php` の `AuthenticationException` render callback が `Inertia::clearHistory()` を
+  積み、着地の `/login` (Inertia 応答) が消費する。契約は
+  `tests/Feature/Security/InertiaHistoryGuardTest.php` が固定する。
+  **保証しない範囲**: そのタブが**一度もサーバと話さないまま**戻る場合。
+  このときタブは表示中の画面自体に PII を出しており、塞ぐには push か polling が要るため
+  扱わない (別タブと同じ判断)。
+  **`popstate` ごとの `session.status` プローブは採らない**:
+  (1) 表示中の PII は塞げないため目的を達しない、
+  (2) 通常の戻る/進むに毎回ネットワーク往復と秘匿オーバーレイが入り、プローブ失敗時は
+      「再試行」で操作が塞がれる (現場の不安定な回線で**新しい詰み**を作る)。
 - **非 Inertia 面 (Filament `/admin`) は経路 B / C の保証外**。独自 middleware stack を持ち
   web グループを経由せず、Inertia でも描画されない。
 - **非セキュアコンテキスト (`http://` の LAN IP 等) では経路 C が degrade する**。

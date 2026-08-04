@@ -10,7 +10,7 @@ use App\DataTransferObjects\Billing\BillingContactDto;
 use App\DataTransferObjects\Billing\BillingDashboardDto;
 use App\DataTransferObjects\Billing\BillingFeedbackDto;
 use App\DataTransferObjects\Billing\BillingPlansPageDto;
-use App\DataTransferObjects\Billing\QuotaLimitsDto;
+use App\DataTransferObjects\Billing\QuotaStatusDto;
 use App\DataTransferObjects\Billing\UpdateBillingContactData;
 use App\DataTransferObjects\Marketing\PricingPlanDto;
 use App\Enums\Billing\BillingFeedbackKind;
@@ -43,6 +43,7 @@ use App\Services\Billing\BillingAccess;
 use App\Services\Billing\QuotaService;
 use App\Services\Billing\SubscriptionService;
 use App\Services\Billing\TicketLedgerService;
+use App\Services\Capture\StorageUsageService;
 use App\Services\Marketing\PricingService;
 use App\Services\Onboarding\IntendedPlanResolver;
 use App\Services\Onboarding\OnboardingReturnResolver;
@@ -96,6 +97,7 @@ class BillingController extends Controller
         TicketLedgerService $tickets,
         QuotaService $quota,
         PricingService $pricing,
+        StorageUsageService $storage,
     ): Response|RedirectResponse {
         $organization = $this->resolveCurrentOrganization($request);
         Gate::authorize('view', $organization);
@@ -134,7 +136,14 @@ class BillingController extends Controller
                 ? $subscription->current_period_end?->toIso8601String()
                 : null,
             balance: $tickets->balance($organization),
-            quotas: QuotaLimitsDto::fromLimits($quota->limits($organization)),
+            // 使用量の数え方は「実際に止まる判定」と同じ経路に揃える
+            // (プロジェクト数 = ProjectService::create の判定、容量 = checkAddition に渡す占有量)。
+            // 新しい集計機構やキャッシュは作らない (二重帳簿禁止)。
+            quotas: QuotaStatusDto::build(
+                $quota->limits($organization),
+                $organization->projects()->count(),
+                $storage->occupiedBytes($organization),
+            ),
             canManageBilling: $canManageBilling,
             continueUrl: $this->resolveOnboardingContinue($organization),
             // P8a: オートリチャージ設定カード。subscription 有無に依存せず常に非 null

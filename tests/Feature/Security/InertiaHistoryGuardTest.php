@@ -2,6 +2,9 @@
 
 declare(strict_types=1);
 
+use App\Models\User;
+use App\Support\Http\AdminPanelPath;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Testing\TestResponse;
 
 /*
@@ -12,6 +15,10 @@ use Illuminate\Testing\TestResponse;
  *    `encryptHistory: true` が載る (認証済み / 公開の区別なくグローバル適用)。
  *  - ログアウト応答は Inertia::clearHistory() を発火し、**着地の Inertia 応答**の page に
  *    `clearHistory: true` が載る (着地が非 Inertia 化するとフラグが宙に浮き防御が消える)。
+ *  - **認証失敗 (AuthenticationException) も clearHistory の発行契機である**
+ *    (bootstrap/app.php の render callback)。セッション期限切れ / 他デバイスからの
+ *    強制ログアウトは「利用者が明示的に終わらせた」契機を持たないため、ログアウト応答だけでは
+ *    履歴鍵が残る。積むのは `expectsJson()` 偽 かつ `hasSession()` 真 のときだけ。
  *  - 通常の応答には `clearHistory` が載らない (負のコントロール)。
  *
  * 目的は「ログアウト後の戻る」で Inertia のクライアント履歴から認証済み画面 (PII) が
@@ -141,6 +148,89 @@ test('JSON ログアウトでもフラグは積まれ、次の Inertia 応答で
     [, $owner] = createOrganizationWithOwner();
 
     $this->actingAs($owner)->postJson('/logout')->assertNoContent();
+
+    expect(inertiaPagePayload($this->get(route('home'))))->toHaveKey('clearHistory', true);
+});
+
+/*
+|--------------------------------------------------------------------------
+| 認証失敗 (AuthenticationException) を契機とする clearHistory (T089-b)
+|--------------------------------------------------------------------------
+|
+| ログアウト応答 (LogoutResponse) が拾えるのは「利用者が明示的に終わらせた」契機だけで、
+| セッション期限切れと、パスワード変更による他デバイスの強制ログアウト
+| (Auth::logoutOtherDevices → web グループの AuthenticateSession) は拾えない。
+| どちらも AuthenticationException として現れるため、bootstrap/app.php の render callback で
+| Inertia::clearHistory() を積み、着地の /login (Inertia 応答) に消費させる。
+|
+| 保証するのは「**認証失敗を契機に、以後の戻るによる復元を無効化する**」ことであり、
+| 過去に遡って無効化するものではない (docs/supported-browsers.md が正本)。
+|
+| フラグは session に積まれ、消費は**次の Inertia 応答**なので、テストは
+| **302 を自動追従させず、別リクエストとして着地を叩く**形でリダイレクト境界ごと固定する
+| (既存のログアウト系テストと同じ書き方)。
+*/
+
+test('未認証 guest の認証失敗でも、着地の Inertia 応答に clearHistory が載る', function (): void {
+    // セッション期限切れ後のリクエストと同じ形 (guest が auth 保護 route を踏む)。
+    $response = $this->get('/dashboard');
+    $response->assertRedirect(route('login'));
+
+    // 別リクエストとして着地を叩く (302 を自動追従させない = 境界そのものを固定する)。
+    $landing = $this->get(route('login'));
+
+    $landing->assertOk();
+    expect(inertiaPagePayload($landing))->toHaveKey('clearHistory', true);
+});
+
+test('他デバイスからの強制ログアウト (AuthenticateSession) で clearHistory が積まれる', function (): void {
+    // 再現手順は tests/Feature/Auth/PasswordUpdateSessionInvalidationTest と同型:
+    // 旧 password_hash を持つセッションのまま保護 route を踏むと AuthenticateSession が logout する。
+    $user = User::factory()->create();
+    $oldHash = $user->getAuthPassword();
+
+    $user->forceFill(['password' => Hash::make('NewPassword12345')])->save();
+
+    $this->actingAs($user)
+        ->withSession(['password_hash_web' => $oldHash])
+        ->get('/dashboard')
+        ->assertRedirect('/login');
+
+    expect(inertiaPagePayload($this->get(route('login'))))->toHaveKey('clearHistory', true);
+});
+
+test('guest が /login を直接開いてもフラグは積まれない (負のコントロール)', function (): void {
+    // 「guest 向け Inertia 応答すべてに clearHistory を載せる」代案は却下済み。
+    // 匿名回遊の戻るが毎回サーバ再取得になり、認証と無関係のトラフィックを恒久的に劣化させる。
+    expect(inertiaPagePayload($this->get(route('login'))))->not->toHaveKey('clearHistory');
+});
+
+test('expectsJson の 401 ではフラグを積まない (負のコントロール)', function (): void {
+    // API / MCP など Inertia 応答が返らない経路で積むと、フラグが宙に浮いて
+    // 後続の無関係な Inertia 応答で消費される。
+    $this->getJson('/dashboard')->assertUnauthorized();
+
+    expect(inertiaPagePayload($this->get(route('home'))))->not->toHaveKey('clearHistory');
+});
+
+test('認証失敗で積まれたフラグは次の Inertia 応答で 1 度だけ消費される', function (): void {
+    // 素の auth 保護 route で発生させる (3rd party の実装差分に契約を依存させない)。
+    $this->get('/dashboard')->assertRedirect(route('login'));
+
+    expect(inertiaPagePayload($this->get(route('home'))))->toHaveKey('clearHistory', true);
+    // pull 済みなので 2 度目には載らない (無関係なページで履歴が飛ぶ事故を防ぐ)。
+    expect(inertiaPagePayload($this->get(route('home'))))->not->toHaveKey('clearHistory');
+});
+
+test('非 Inertia 面 (/admin) の認証失敗でもフラグは積まれる (安全側の偽陽性)', function (): void {
+    // ※ これは**契約テストではなく docblock の主張の裏付け**である。
+    //   bootstrap/app.php の callback は guards() で面を判別しない (Filament の Authenticate は
+    //   override により guards が [] になり、実装詳細に依存する判別になるため)。その結果
+    //   /admin の認証失敗でもフラグが積まれるが、影響は「Inertia 面の履歴が 1 度だけ
+    //   再キーされる」ことだけなので安全側の偽陽性として許容している。
+    //   **Filament の認証失敗の実装が変わったら、本テストと bootstrap/app.php の docblock を
+    //   一緒に更新すること** (テストだけ直して docblock を放置しない)。
+    $this->get('/'.AdminPanelPath::resolve());
 
     expect(inertiaPagePayload($this->get(route('home'))))->toHaveKey('clearHistory', true);
 });

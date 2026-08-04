@@ -32,9 +32,25 @@
  *
  * **担当範囲**: 本 guard が守るのは **Safari の真の bfcache 復元 (pagehide/pageshow)** だけ。
  * Inertia SPA のクライアント履歴復元 (popstate) は本 guard を発火させないため、
- * そちらは Inertia 公式機構 (bootstrap/app.php の EncryptHistory +
- * LogoutResponse の Inertia::clearHistory()) が担当する (bug-hunt F-4-01)。
- * ここに popstate フックを足さないこと — 同一問題の二重実装になる。
+ * そちらは Inertia 公式機構 (bootstrap/app.php の EncryptHistory + Inertia::clearHistory() の
+ * 発行契機 2 つ = LogoutResponse と bootstrap/app.php の AuthenticationException callback)
+ * が担当する (bug-hunt F-4-01)。
+ *
+ * **ここに popstate フックを足さないこと。** 二重実装になるから、だけではない。
+ * 「popstate のたびに /session/status をプローブして、無効なら秘匿する」案は
+ * 技術的には成立する (popstate リスナは Inertia の非同期 swap より先に同期実行できる) が、
+ * 設計フェーズで**却下済み**である:
+ *   1. **目的を達しない**。塞げるのは履歴の過去 PII だけで、そのタブが**表示中**の PII は残る
+ *      (セッションが切れたタブは既に認証済み DOM を描画したままである)。
+ *   2. **通常の戻る/進むを毎回ネットワーク往復 + 秘匿オーバーレイで塞ぐ**。本 guard は
+ *      プローブ失敗を「秘匿維持 + 再試行ボタン」に倒す設計 (fail-closed) なので、
+ *      現場の不安定な回線では**通常の戻る操作が再試行画面で塞がれる = 新しい詰み**になる。
+ *      撮影 PWA (/app/*) の戻るは主要導線であり、ここを重くするのは使命に反する。
+ * セッション終了後の履歴復元は「認証失敗を契機にサーバが clearHistory を出す」側で塞ぐ
+ * (docs/supported-browsers.md が正本)。
+ *
+ * ※ 本 docblock の更新は**挙動変更ではない**ため、docs/supported-browsers.md の
+ *   「実機受入確認の再確認条件」のトリガには当たらない (トリガは挙動変更に限る)。
  *
  * なお Inertia も pageshow(persisted) で history を復号し直すが、それは**非同期**であり、
  * 復元 DOM は既に描画されている。「検証完了まで秘匿する」という本 guard の要件は

@@ -64,6 +64,19 @@ test('max_projects 超過でプロジェクト作成が拒否され error flash 
     expect($organization->projects()->count())->toBe(1);
 });
 
+test('quota 超過の error flash に回復先の画面名が含まれる', function (): void {
+    // 失敗するのは撮影・プロジェクト作成の現場であり、そこから「どこを見れば現状と上限が
+    // 分かるか」が示されないと詰みになる (/billing は課金ゲートの allowlist 内で到達できる)。
+    [$organization, $owner] = createOrganizationWithOwner();
+    Project::factory()->forOrganization($organization)->create();
+
+    $this->actingAs($owner)
+        ->from('/projects/create')
+        ->post('/projects', ['name' => '2 つ目']);
+
+    expect(session('error'))->toBeString()->toContain('「お支払い」画面');
+});
+
 test('override で上限を上げると超過していた作成が可能になる', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     Project::factory()->forOrganization($organization)->create();

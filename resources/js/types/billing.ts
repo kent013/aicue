@@ -29,11 +29,20 @@ export interface TicketBalanceShape {
     readonly nextExpireAt: string | null;
 }
 
-/** PHP: QuotaLimitsDto (QuotaLimitsShape) と対 (null = 無制限) */
-export interface QuotaLimitsShape {
+/**
+ * PHP: QuotaStatusDto (QuotaStatusShape) と対 (上限の null = 無制限)。
+ *
+ * exceededLabels は「使用量 > 上限」の**厳密超過**次元の表示名だけを含む
+ * (上限ちょうどは正常状態なので含まない)。空配列 = 超過なし。
+ * メンバー数は上限のみで使用量・超過を持たない (quota として未強制のため)。
+ */
+export interface QuotaStatusShape {
     readonly maxProjects: number | null;
     readonly maxMembers: number | null;
     readonly maxStorageGb: number | null;
+    readonly projectsUsed: number;
+    readonly storageUsedBytes: number;
+    readonly exceededLabels: readonly string[];
 }
 
 /** 購入フォームの状態 (PHP: PurchaseFormState) */
@@ -112,7 +121,7 @@ export interface BillingDashboardProps {
     readonly billingState: BillingStateValue;
     readonly currentPeriodEnd: string | null;
     readonly balance: TicketBalanceShape;
-    readonly quotas: QuotaLimitsShape;
+    readonly quotas: QuotaStatusShape;
     readonly canManageBilling: boolean;
     /**
      * 課金ゲートで中断された「元の画面」への復帰先 (same-origin 内部 path)。

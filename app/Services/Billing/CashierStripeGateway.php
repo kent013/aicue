@@ -93,7 +93,10 @@ class CashierStripeGateway implements StripeGatewayInterface
      * invariant (gateway 単体テストで固定):
      * - **既存 item id を指定**して price を差し替える (id 無指定は item の二重化を招く)
      * - `proration_behavior = create_prorations` — 日割り明細を作り、**次回請求に反映**する
-     *   (`always_invoice` にしない = 即時請求 → 与信失敗の状態遷移を呼び込まない)
+     *   (`always_invoice` にしない = 即時請求 → 与信失敗の状態遷移を呼び込まない)。
+     *   **この方針は確定済み**。切り替えに必要な作業一式 (state 機械 / webhook / UI /
+     *   ロールバック意味論) は `docs/architecture.md` の「契約中プランの変更」節を参照
+     *   (ここに複製しない = 二重管理を作らない)
      * - `billing_cycle_anchor` / `trial_end` / `payment_behavior` は **送らない**
      *   (即時請求・trial 再開の誘発を構造的に避ける)
      *

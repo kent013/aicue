@@ -37,7 +37,14 @@ const basePage: BillingDashboardProps = {
         activeReservations: 0,
         nextExpireAt: null,
     },
-    quotas: { maxProjects: 1, maxMembers: 3, maxStorageGb: 1 },
+    quotas: {
+        maxProjects: 1,
+        maxMembers: 3,
+        maxStorageGb: 1,
+        projectsUsed: 1,
+        storageUsedBytes: 1024 ** 2,
+        exceededLabels: [],
+    },
     canManageBilling: true,
     continueUrl: null,
     autoRecharge: {
@@ -132,12 +139,55 @@ describe("Billing/Index", () => {
         expect(screen.getByTestId("no-plan-note")).toHaveTextContent("まだプランに契約していません");
     });
 
-    it("quota 上限 (プロジェクト / メンバー / ストレージ) を描画する", () => {
+    it("quota を「使用量 / 上限」で描画する (メンバーは上限のみ)", () => {
         render(Index, { props: { page: basePage } });
 
-        expect(screen.getByTestId("quota-max-projects")).toHaveTextContent("1");
+        expect(screen.getByTestId("quota-max-projects")).toHaveTextContent("1 / 1");
+        // メンバー数は quota として強制されていないため使用量を出さない
         expect(screen.getByTestId("quota-max-members")).toHaveTextContent("3");
-        expect(screen.getByTestId("quota-max-storage")).toHaveTextContent("1 GB");
+        expect(screen.getByTestId("quota-max-storage")).toHaveTextContent("1.0 MB / 1 GB");
+    });
+
+    it("上限が null なら「無制限」と併記する", () => {
+        render(Index, {
+            props: {
+                page: {
+                    ...basePage,
+                    quotas: {
+                        ...basePage.quotas,
+                        maxProjects: null,
+                        maxMembers: null,
+                        maxStorageGb: null,
+                    },
+                },
+            },
+        });
+
+        expect(screen.getByTestId("quota-max-projects")).toHaveTextContent("1 / 無制限");
+        expect(screen.getByTestId("quota-max-members")).toHaveTextContent("無制限");
+        expect(screen.getByTestId("quota-max-storage")).toHaveTextContent("1.0 MB / 無制限");
+    });
+
+    it("exceededLabels が空なら超過 Alert を出さない", () => {
+        render(Index, { props: { page: basePage } });
+
+        expect(screen.queryByTestId("quota-exceeded-alert")).toBeNull();
+    });
+
+    it("exceededLabels が非空なら超過 Alert に次元名と結果を出す", () => {
+        render(Index, {
+            props: {
+                page: {
+                    ...basePage,
+                    quotas: { ...basePage.quotas, exceededLabels: ["プロジェクト数", "保存容量"] },
+                },
+            },
+        });
+
+        const alert = screen.getByTestId("quota-exceeded-alert");
+        expect(alert).toHaveTextContent("プロジェクト数・保存容量");
+        expect(alert).toHaveTextContent("既存のデータは削除されませんが");
+        expect(alert).toHaveTextContent("上限内に収まるまでできません");
     });
 
     it("auto-recharge カードの差し込み位置を持つ (実体は P8a 所管)", () => {

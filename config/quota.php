@@ -28,7 +28,12 @@ return [
     'fallback_plan' => 'personal',
 
     /*
-    | plan_code → limits。プラン追加時は PlanSeeder と合わせてここに limits を定義する。
+    | plan_code → limits。プラン追加時は PlanSeeder と合わせてここに limits を定義する
+    | (定義漏れは無制限扱いになる。tests/Feature/Billing/PlanQuotaCoverageTest が検出する)。
+    |
+    | 注意: max_members は現在**強制されていない** (QuotaService::check の呼び出し元が無い)。
+    | 表示上の目安であり、増員をブロックしない (実際に止まるのは max_projects と
+    | max_storage_bytes の 2 次元だけ)。詳細は App\Enums\QuotaKey の docblock。
     */
     'plans' => [
         'personal' => [

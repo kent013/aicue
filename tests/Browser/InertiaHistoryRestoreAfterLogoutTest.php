@@ -202,3 +202,122 @@ test('ログイン中の戻るは従来どおり client-side で完結する (�
     $page->assertScript('window.__inertiaHistoryProbe', 'alive');
     $page->assertSee($owner->name)->assertNoJavaScriptErrors();
 });
+
+/**
+ * ブラウザ側で **JSON 204 のログアウト**を行う (画面遷移を起こさない = 履歴鍵を残したまま)。
+ *
+ * 実運用のログアウト導線 (router.post) は着地の Inertia page を適用して鍵を捨てるが、
+ * ここでは「セッションだけ切れて、そのタブは何も知らない」状態
+ * (= 期限切れ / 他デバイスからの強制ログアウトと同じ形) を決定的に作る。
+ *
+ * ※ tests/Browser/AuthenticatedPageBfcacheTest.php の bfcacheLogoutInBrowser() と同型だが、
+ *   Pest のグローバル関数は再宣言できないため本ファイル専用の名前で持つ。
+ */
+function inertiaHistoryLogoutWithoutNavigation(PendingAwaitablePage $page): void
+{
+    $authenticated = $page->script(<<<'JS'
+        (async () => {
+            const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]*)/);
+            const token = match ? decodeURIComponent(match[1]) : '';
+            await fetch('/logout', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    'X-XSRF-TOKEN': token,
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Accept': 'application/json',
+                },
+            });
+            const status = await fetch('/session/status', {
+                credentials: 'same-origin',
+                cache: 'no-store',
+                headers: { 'Accept': 'application/json' },
+            }).then((response) => response.json());
+            return status.authenticated;
+        })()
+    JS);
+
+    expect($authenticated)->toBeFalse('前提条件失敗: ブラウザ側のログアウトでセッションが無効化されていない');
+}
+
+test('セッションが切れたタブは次の Inertia visit で履歴鍵が入れ替わり、戻っても PII が出ない', function (): void {
+    // T089-b: 認証失敗 (AuthenticationException) 契機の Inertia::clearHistory() を
+    // 実ブラウザで一気通貫に固定する。JSON 204 のログアウトで「セッションだけ切れて
+    // 画面遷移していないタブ」を作り、次の Inertia visit で **履歴鍵が旧鍵から入れ替わり、
+    // かつ戻っても過去の PII が描画されない**ことを観測する。
+    // (テストが示せるのはこの 2 つの挙動契約までで、「旧鍵が二度と手に入らない」ことの
+    //  暗号学的証明ではない。文書側もこの範囲を超えた表現をしないこと。)
+    [, $owner] = createOrganizationWithOwner();
+    $this->actingAs($owner);
+
+    $page = visit('/dashboard');
+    $page->assertSee($owner->name);
+
+    // 正のコントロール (1): 認証済み履歴が暗号化されている = 捨てるべき鍵が存在する
+    inertiaHistoryWaitUntil(
+        $page,
+        'window.history.state?.page instanceof ArrayBuffer',
+        'history state が暗号化されていない (EncryptHistory 未適用、または crypto.subtle 不在)',
+    );
+
+    // JS 実行コンテキストの生存マーカー (フルリロードで消える)
+    $page->script("window.__inertiaHistoryProbe = 'alive'; true");
+
+    // 捨てられるべき「認証済み履歴を復号できる鍵」の実値を控える。
+    // ※ null 判定ではなく **値の変化** を見るのが本テストの肝。理由は下の「本丸 (1)」。
+    $keyBefore = $page->script("window.sessionStorage.getItem('historyKey')");
+    expect($keyBefore)->toBeString();
+
+    inertiaHistoryLogoutWithoutNavigation($page);
+
+    // 正のコントロール (2): 204 直後は鍵が **同一のまま** = このタブはまだ何も知らない
+    // (= このあと鍵が入れ替わることに意味がある)
+    expect($page->script("window.sessionStorage.getItem('historyKey')"))
+        ->toBe($keyBefore, '204 ログアウト直後に履歴鍵が既に変わっている (前提が崩れ、以降の観測が空振りする)');
+
+    // Inertia Link (Dashboard.svelte の TextLink「通知を確認」) で Inertia visit を起こす。
+    // 認証が切れているのでサーバは /login へ倒し、その Inertia 応答が clearHistory を消費する。
+    // 文言は Dashboard.svelte 由来 (testId 未付与)。変わったら本テストを追随させること。
+    $page->click('通知を確認');
+    inertiaHistoryWaitUntil(
+        $page,
+        "window.location.pathname === '/login'",
+        'セッション切れの Inertia visit で /login に倒れない',
+    );
+
+    // 本丸 (1): **履歴鍵が旧鍵から入れ替わっている** = 以降の「戻る」で過去エントリを復号できない。
+    //
+    // ここを `historyKey === null` で書いてはいけない。EncryptHistory は guest 面
+    // (/login) にもグローバル適用されるため、Inertia は clearHistory で鍵を消した直後に
+    // **着地ページ用の新しい鍵を即座に採番して sessionStorage へ書き戻す**
+    // (実測: 鍵は常に非 null のまま、値だけが入れ替わる。
+    //  devnotes/20260804-0900-t089-t090-residual-risk/probe-history-key-behavior.md)。
+    // したがって固定すべきは「鍵の欄が空になること」ではなく
+    // 「**現在の履歴鍵が旧鍵から変わっていること**」である。
+    // null も「旧鍵ではない」を満たしてしまうので、**非 null との合わせ技**にして
+    // 「新しい鍵へ入れ替わる」という文書上の主張までを固定する。
+    $keyEscaped = json_encode($keyBefore, JSON_THROW_ON_ERROR);
+    inertiaHistoryWaitUntil(
+        $page,
+        "window.sessionStorage.getItem('historyKey') !== null"
+        ." && window.sessionStorage.getItem('historyKey') !== {$keyEscaped}",
+        '/login 着地後も旧履歴鍵が残っている (clearHistory が消費されていない)',
+    );
+
+    // 「戻る」の前に瞬間露出の監視を仕込む (終状態の assertDontSee では取り逃す)
+    inertiaHistoryWatchForPii($page, $owner->name);
+
+    $page->back();
+
+    inertiaHistoryWaitUntil(
+        $page,
+        "window.location.pathname === '/login'",
+        'セッション切れ後の戻るで /login に倒れない',
+    );
+
+    // 本丸 (2): 復元 → login までの間、PII が **一度も** 描画されていない
+    $page->assertScript('window.__piiSeen', false);
+    // same-document で完結している (= 本当に SPA 履歴復元経路を通った)
+    $page->assertScript('window.__inertiaHistoryProbe', 'alive');
+    $page->assertDontSee($owner->name)->assertNoJavaScriptErrors();
+});
