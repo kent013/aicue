@@ -604,21 +604,25 @@ class GovernedConditionKeysTest(unittest.TestCase):
 
 
 class EmptySeedRegistryTest(unittest.TestCase):
-    """seed は空 (spirux 由来 18 件を削除)。空 registry でも valid / exit 0 であること。"""
+    """**空の** registry でも valid / exit 0 であること (fail-closed で全面停止しない)。
 
-    def _seed_path(self):
-        import os
-        return os.path.join(os.path.dirname(__file__), "adjudications.jsonl")
-
-    def test_seed_has_no_entries(self):
-        entries = [a for _, a, _ in v.load_jsonl(self._seed_path()) if a is not None]
-        self.assertEqual(entries, [])
+    かつては同梱 seed (`adjudications.jsonl`) が空である前提でそのファイルを使っていたが、
+    AI-CUE の実 run 由来の裁定 (A-001) が登録されて前提が崩れた。守りたい不変条件は
+    「registry が空でも validator が落ちない」ことなので、**空ファイルを都度作って**検証する。
+    同梱 seed 自体の妥当性は `AdjudicationBackwardCompatTest::test_seed_registry_is_valid` が見る。
+    """
 
     def test_empty_registry_reports_zero_and_exits_zero(self):
         import contextlib
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
-            code = v.main([self._example_findings(), "--adjudications", self._seed_path(), "--json"])
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            empty = os.path.join(tmp, "adjudications.jsonl")
+            with open(empty, "w", encoding="utf-8"):
+                pass
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
+                code = v.main([self._example_findings(), "--adjudications", empty, "--json"])
         self.assertEqual(code, 0)
         summary = json.loads(buf.getvalue())
         self.assertEqual(summary["adjudications_total"], 0)

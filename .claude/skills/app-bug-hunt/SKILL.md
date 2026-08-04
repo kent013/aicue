@@ -237,6 +237,9 @@ for r in json.load(sys.stdin):
    対応するボタン/フォームが UI に見つからない operation は、それ自体を finding 候補として記録する。
 1. `playwright-cli snapshot` で現在地と要素 ref を確認 → カードの「操作」を実行。
 2. 遷移を伴う操作の後は再 snapshot して testid / テキスト出現を確認する (Inertia+Svelte は描画が非同期)。
+2b. **一過性フィードバック (toast 等) は事後 snapshot では観測できない。** 書き込み操作は
+   **直前に記録器を仕込み直後に読む** (§一過性フィードバックの観測)。「事後 snapshot に無い」を
+   根拠にフィードバック欠落を主張してはならない。
 3. カードの「期待」と照合 + 下の**横断ヒューリスティクス**を毎ステップ通す。
 4. `playwright-cli console`(error) と `playwright-cli requests`(4xx/5xx、外部ドメイン) を確認。
 5. 異常を見たら: `playwright-cli screenshot` で証跡保存 → finding 記録 → **finding は停止信号ではない**。
@@ -246,6 +249,74 @@ for r in json.load(sys.stdin):
 7. skip した場合は必ず skip として記録する。無言の skip は禁止。
 8. **走行中に突然の 401/ログイン失敗が出たら、アプリバグと断定する前に DB 生存確認**
    (`tmp/bug-hunt/shard-0-cmd.sh db-check`)。空なら `reseed` してやり直し、環境ハザードとして記録。
+
+### 一過性フィードバックの観測 (feedback probe)
+
+**成功 toast は 4 秒で自動消滅する** (`resources/js/lib/stores/toast.ts` の `AUTO_DISMISS_MS`。
+error だけは消えない)。「コピー完了」表示は 2 秒 (`resources/js/components/molecules/CodeSnippet.svelte`)。
+driver の観測は「操作 → 事後 snapshot」の 1 点サンプリングで、Bash 1 往復ぶん (数百 ms〜数秒、
+並列 shard ではさらに遅延) 後ろにずれる。したがって **事後 snapshot に無いことは「出なかった」の
+証拠にならない** (run 20260803-203721 の F-1-02 が誤検知になった機序。spec-ledger.md 参照)。
+
+そこで **操作の直前に記録器を仕込み、直後に読む**。記録器は ARIA live region
+(`role="status"` / `role="alert"`) の出現・変化を記録するので、**消えた後でも読める**。
+
+```bash
+# 設置 (arm) と読み出しは同じ 1 コマンド (冪等)。--raw で JSON だけを受け取る
+playwright-cli --raw eval "$(cat "$(git rev-parse --show-toplevel)/.claude/skills/app-bug-hunt/probes/feedback-probe.js")"
+```
+
+**呼ぶタイミング**:
+- `open` / `goto` / `reload` / `go-back` / `go-forward` の**直後**に 1 回 (= arm)。
+- **各書き込み操作の直後**に 1 回 (= 読み出し)。この呼び出しが次の操作の arm を兼ねるので、
+  操作を続ける限り **1 操作 = probe 1 コール**で済む。
+- arm を忘れた場合や document が置換された場合は、次の読み出しが `installed_now:true` を返す。
+  **arm 漏れは黙って「フィードバック無し」にはならず、必ず「未検証」に倒れる** (下表 3 行目)。
+  逆に言えば **`installed_now:false` を得られていない操作について H7 陰性を主張してはならない**。
+
+**判定 (これを守ること)**:
+
+| 記録器の戻り値 | 解釈 | 行動 |
+|---|---|---|
+| `installed_now:false` かつ (`seen` の `visible:true` entry または `present_new`) に**操作結果を伝える文言**がある | 観測窓が連続し、ユーザーに見える変化を捕捉した | フィードバックあり → finding にしない |
+| `installed_now:false` かつ どちらにも無い (`pending:0` かつ `errors:0`) | 操作の全区間で記録器が生きていた = **本当に出なかった** | H7 finding 候補 |
+| `installed_now:true` | 途中で document が置換され記録器が失われた (基線も無い) | **肯定証拠のみ採用**: `present_new` または直後の `snapshot` に**操作結果を伝える文言**があれば「フィードバックあり」と結論してよい。無い場合は **未検証** (finding にしない)。基線が無いので常駐 live region も `present_new` に混ざる = 陰性判断には使えない |
+| `pending > 0` | 可視性判定が未解決 | probe をもう 1 回だけ叩き、**1 回目と 2 回目の応答を統合**して判定する (統合規則は下記)。2 回目も `pending > 0` なら**未検証** |
+| `errors > 0` | 可視判定そのものが例外で解決できなかった entry がある (`seen[].error`) | **陰性判断に使えない**。肯定証拠 (`visible:true` + 結果文言) があれば「フィードバックあり」でよいが、無ければ **未検証** (H7 finding にしない)。`visible:false` は「不可視だった」ではなく「判定不能」である |
+
+- **複数応答の統合規則** (再 probe したときは必ずこれで畳む):
+  `seen` / `present_new` は**和集合** (1 回目の `present_new` は基線更新で 2 回目には
+  `present_preexisting` に落ちるので、2 回目だけを見ると証拠を失う)。
+  一方 **`installed_now` / `errors` は「いずれかの応答で真 / 非 0 なら操作全体でそう」と扱う**
+  (`errors` は drain 単位の件数なので、2 回目が `errors:0` でも 1 回目の判定不能は消えない)。
+  **陰性 (H7 起票) を主張してよいのは、統合後に `installed_now` が全て false、
+  `errors` の合計が 0、最終応答の `pending` が 0 のときだけ。**
+- **`visible:false` / `visible:"gone"` は証拠に数えない** (返るのは診断のため)。
+- **件数ではなく本文で判定する**: `role="status"` は進捗表示にも使われうる
+  (`resources/js/components/atoms/Spinner.svelte` は `label` 指定時に `role="status"`)。
+  ローディング/進捗は「操作結果のフィードバック」ではない。
+  判定の目安 (最小辞書。網羅列挙ではない):
+  - **結果文言 (単独で採用してよい)**: 「〜しました」「完了」「成功」/
+    失敗系「〜できません」「失敗」「エラー」
+  - **文脈依存語 (単独では採用しない)**: 「削除」「変更」「保存」「作成」「更新」「送信」「招待」。
+    これらはボタン名・見出しにも出るので、**`role="status"` / `role="alert"` の中**か
+    **フィードバック用 testid (`toast-*` 等) の中**にある場合だけ採用する。
+    probe の `seen` / `present_new` は定義上 live region の中なのでこの制限に自動で適合する。
+    制限が効くのは `installed_now:true` 時に `snapshot` を肯定証拠に使う経路である。
+  - **数えない**: 「読み込み中」「処理中」「Loading」など進捗・状態表示、
+    および操作前から出ていた常駐 Alert (基線で `present_preexisting` に落ちる)
+- **H7 の「結果フィードバックが無い」は `installed_now:false` かつ `pending:0` かつ `errors:0` の
+  操作にのみ適用する。** `installed_now:true` / `pending>0` 継続 / `errors>0` で肯定証拠も得られなかった操作は
+  **`H7 未検証` として shard-report に件数と操作名を必ず出す** (無言の skip は禁止 = 走行プロトコル 7)。
+  この件数が run ごとに増えていくなら、probe 方式ではなく**導線側の観測設計**を見直す信号とする。
+  再実行は 1 回まで。**非冪等な破壊操作 (削除等) は再実行せず未検証のまま記録する。**
+- probe が空でも「**視覚的**フィードバックが無い」とまでは言えない (live region を持たない
+  一過性 UI は記録されない)。H14 (a11y) に格上げしてよいのは、snapshot / DOM 調査で
+  **視覚的な一過性フィードバックの存在を別途確認でき、かつ live region が無い**と示せた場合だけ。
+- **probe の結果を `findings.jsonl` の `symptom_tokens` に入れてはならない。**
+  `ledger/validate_findings.py` の `has_new_signal()` は symptom_tokens の新語で
+  adjudication を `ambiguous` に倒すため、probe 由来の語を混ぜると**既存 adjudication の
+  downrank が無効化される**。probe 出力は report.md の証跡欄に書く。
 
 ### 横断ヒューリスティクス (毎ステップ適用)
 
@@ -261,6 +332,9 @@ for r in json.load(sys.stdin):
 | H8 | 空状態 (0 件) で説明・次アクションがない | Low |
 | H9 | 権限外データの表示・操作 (IDOR 含む。他組織/他プロジェクトのリソース) | Critical |
 | H10 | 文言・件数・状態が直前の操作結果と矛盾 (例: 作成したのに一覧に出ない) | High |
+
+> **H7 の前提条件**: 「結果フィードバックが無い」の判定には **feedback probe の陰性所見**が必須
+> (§一過性フィードバックの観測)。事後 snapshot に無いことを根拠に H7 を起票しない。
 
 **UI/UX ヒューリスティクス (H11-H14、視覚/操作品質。snapshot + screenshot で観察)**
 
@@ -288,7 +362,9 @@ for r in json.load(sys.stdin):
 - 期待: / 実際:
 - 阻害されたユーザージョブ: (このバグでユーザーが達成できなくなった目的。使命接続の必須欄)
 - 改善アクション候補: (どう直せばユーザーが目的を達成できるか)
-- 証跡: screenshots/F-xx.png, console: ..., network: ...
+- 証跡: screenshots/F-xx.png, console: ..., network: ...,
+  feedback-probe: `installed_now=false seen=0(visible:true) present_new=0 pending=0 errors=0`
+  (フィードバック欠落を主張する finding では**必須**)
 - 推定原因: (code-review-graph で当たりを付ける。5 分で見つからなければ「未調査」)
 - 関連既知情報: (devnotes/TODO.md に同種の記録があれば参照。regression かどうかが重要)
 ```
@@ -322,6 +398,7 @@ findings.jsonl は分類の正本。同じ説明文を両方に書かない)。
 - 操作カバレッジ: 実行 n / operations.md 対象 m (未実行を列挙、skip は理由必須)
 - UI/UX 検証: 視覚破綻(H11) / アフォーダンス・状態(H12) / レスポンシブ(H13: resize した画面と viewport) / a11y 基礎(H14) の所見
 - findings: Critical x / High y / Medium z / Low w / 要確認 v (UI/UX = H11-H14 由来は H 番号を併記)
+- H7 未検証 (観測窓が途切れ肯定証拠も得られなかった操作): n 件 (操作名を列挙)
 (以下 finding 詳細を severity 降順で)
 ```
 

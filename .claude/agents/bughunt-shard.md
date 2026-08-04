@@ -53,6 +53,9 @@ playwright-cli click  <ref>                         # snapshot で得た ref を
 playwright-cli type   "<text>" / fill <ref> "<text>" / press Enter
 playwright-cli goto <url> / go-back / reload
 playwright-cli console / requests                   # console error / network (4xx/5xx・外部ドメイン) 確認
+playwright-cli --raw eval "$(cat "$(git rev-parse --show-toplevel)/.claude/skills/app-bug-hunt/probes/feedback-probe.js")"
+                                                    # 一過性フィードバック記録器 (toast は 4 秒で消える)。
+                                                    # 呼ぶタイミングと判定は SKILL.md §一過性フィードバックの観測 が正本
 playwright-cli resize <w> <h>                        # レスポンシブ確認 (mobile 375 667 / tablet 768 1024)
 playwright-cli screenshot shot.png                   # 証跡。異常時に必ず残す
 playwright-cli close                                 # 走行終了時に自セッションを閉じる
@@ -70,8 +73,8 @@ playwright-cli close                                 # 走行終了時に自セ�
 ## 走行手順
 
 1. スキル正本 `.claude/skills/app-bug-hunt/SKILL.md` と、割り当てられた `stories/S*.md` を読む。
-   走行プロトコル・横断ヒューリスティクス (H1-H14)・finding フォーマット・逐次レポート書き出し規約は
-   すべて SKILL.md / stories に従う (本ファイルは差分のみ)。
+   走行プロトコル・**feedback probe 規約**・横断ヒューリスティクス (H1-H14)・finding フォーマット・
+   逐次レポート書き出し規約はすべて SKILL.md / stories に従う (本ファイルは差分のみ)。
 2. **Phase 1 (インベントリ鮮度確認) はスキップ** — 親が 1 回だけ行う。screens.md / operations.md / stories は
    **読み取りのみ** (気づきは自 report の「インベントリ修正提案」節に書く)。
 3. 開始時に `tmp/bug-hunt/shard-{i}-cmd.sh db-check` で DB 名と User::count() を確認してから走行。
