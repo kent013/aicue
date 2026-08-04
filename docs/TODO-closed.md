@@ -112,6 +112,7 @@ Open リストは [TODO.md](TODO.md) を参照。
 | T096 | SOP PDF の SJIS 化けを区間単位で復元し日本語本文ゲートで壊れた SOP を LLM に渡さない (bug-hunt 由来の新規発見。設計の誤変換 2 系統を実装時に是正) | backend | 2026-08-04 17:20 |
 | T097 | T089/T090 の残存リスク 6 論点を確定し恒久文書へ固定 + 最小実装 (別タブは許容 / 期限切れは clearHistory で塞ぐ / proration 維持 / 超過の認知導線 / Portal 無効維持 / Plan Factory) | general | 2026-08-04 17:20 |
 | T098 | bug-hunt driver に一過性フィードバック捕捉 (feedback probe) を追加し spec-ledger に F-1-02 の申し送りを登録 | test | 2026-08-04 17:20 |
+| T099 | テストレーンのグローバルロック (cross-worktree 直列化)。4 レーンを `scripts/global-test-lock.sh` のブロッキング取得へ一本化し旧 worktree-local flock を削除。層 1 (`scripts/verify-global-test-lock.sh` C01〜C24) + 層 2 (`GlobalTestLockInventoryTest`) + CI ゲートで恒久化 | infrastructure | 2026-08-05 00:56 |
 
 
 ## Obsoleted
