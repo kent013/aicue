@@ -40,6 +40,10 @@ jobs:
         run: vendor/bin/pint --test
       - name: PHPStan
         run: composer phpstan
+      # グローバルテストロックの並行挙動ゲート (層 1)。
+      # 実ロックには触れず、mktemp -d の scratch 上で待機・シグナル収束・fd 非継承などを検証する。
+      - name: Verify global test lock
+        run: bash scripts/verify-global-test-lock.sh
       - name: Pest
         run: composer test
 

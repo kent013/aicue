@@ -1,30 +1,26 @@
 #!/usr/bin/env bash
 #
-# scripts/run-vitest.sh — workspace 単位で vitest を排他実行する。
+# scripts/run-vitest.sh — vitest をグローバルテストロック配下で実行する。
 #
-# 同一 workspace で vitest を二重起動すると .vite/ cache と coverage 出力先が
-# 同時に書かれて壊れることがある。flock(1) で workspace 派生キーの lock を握り、
-# 既に走っている場合は待たずに exit 1 で即終了する。
+# 旧実装は workspace realpath 由来の key で worktree ごとに別ロックを取り (= cross-worktree
+# 排他ゼロ)、かつ非ブロッキング取得で待たずに即エラー終了していた。両方ともグローバルロックへ
+# 置き換えた (排他は scripts/global-test-lock.sh に一本化)。
 #
-# 注意: lock は workspace 配下ではなく ${TMPDIR:-/tmp} 配下に置く(run-test.sh と同じ理由)。
+# JS レーンは DB もポートも掴まないが、Browser lane と CPU を奪い合うと
+# タイムアウト由来の偽赤を作るため対象に含める (方針判断。成功条件と見直し条件は
+# devnotes/20260804-2319-global-test-lock/conceptual-design.md)。
+#
+# **exec は使わない**: exec は fd 7 を閉じてロックを即解放してしまう
+# (旧実装の `exec pnpm exec vitest run` は fd 9 を vitest へ継承させることで偶然
+#  ロックを保っていたが、それは orphan による lock leak と表裏一体の形だった)。
 
 set -euo pipefail
+cd "$(dirname "$0")/.."
 
-WORKSPACE="$(cd "$(dirname "$0")/.." && pwd)"
-LOCK_DIR="${TMPDIR:-/tmp}"
-LOCK_KEY="$(printf '%s' "$WORKSPACE" | shasum -a 256 | cut -c1-16)"
-LOCK_FILE="$LOCK_DIR/app-vitest-${LOCK_KEY}.lock"
+# shellcheck source=scripts/global-test-lock.sh
+. "$(pwd)/scripts/global-test-lock.sh"
+global_test_lock_acquire "pnpm test"
 
-# flock(1) が無い環境 (素の macOS 等) では排他なしで実行する (devcontainer/Linux では排他あり)
-if command -v flock >/dev/null 2>&1; then
-    exec 9>"$LOCK_FILE"
-    if ! flock -n 9; then
-        echo "ERROR: vitest is already running in this workspace." >&2
-        echo "       workspace: $WORKSPACE" >&2
-        echo "       lock file: $LOCK_FILE" >&2
-        exit 1
-    fi
-fi
-
-cd "$WORKSPACE"
-exec pnpm exec vitest run "$@"
+status=0
+global_test_lock_run pnpm exec vitest run "$@" || status=$?
+exit "${status}"

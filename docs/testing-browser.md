@@ -27,10 +27,18 @@ BROWSER_TEST_LANES=webkit composer test:browser # レーン限定 (chromium / we
 ```
 
 `composer test:browser` は `scripts/run-browser-test.sh` 経由で
-`vendor/bin/pest -c phpunit.browser.xml` を呼ぶ。`composer test` (Feature pgsql lane) と
-同一 lock file (`storage/framework/testing/test.lock`) の flock で相互排他し、
-共有する pgsql テスト DB / ブラウザ資源の奪い合いを防ぐ。並列数を未指定 (= nproc) に
+`vendor/bin/pest -c phpunit.browser.xml` を呼ぶ。排他は **グローバルテストロック**
+(`scripts/global-test-lock.sh` / `/tmp/global-test-lane-<uid>.d/lock`) に一本化されており、
+`composer test` / `pnpm test` / `pnpm test:packages` を含む全テストレーンと
+**同一 UID・同一マシン単位**で相互排他する (worktree をまたぐ)。旧 worktree-local な
+flock は cross-worktree の相互破壊を防げないため廃止した。先行レーンがいる場合は
+**待つ** (旧実装は待たずに即エラー終了していた)。並列数を未指定 (= nproc) に
 すると同時起動で環境がハングし得るため既定 1 に固定している。
+
+Browser lane は起動時に bug-hunt 環境のポート (`127.0.0.1:8010..8018`) を
+best-effort で覗き、listen していれば **ロックを取る前に** fail-fast する。
+bug-hunt はロック規約に参加しない (意図的に隔離された 8 並列基盤) ため、
+非干渉は保証しない — TOCTOU のある guard であり、失敗モードが偽赤に留まる範囲で受容している。
 
 ### ブラウザレーン (Chromium + WebKit)
 
@@ -159,5 +167,29 @@ Browser の役割は UI / ユーザーフロー回帰に限定する。
   「canned response の追加」を参照。
 - **orphan playwright run-server**: `scripts/run-browser-test.sh` が pest 終了後に掃除するが、
   残った場合は `pkill -f 'playwright/cli.js run-server'`。
-- **`composer test` と同時実行できない**: 仕様 (同一 pgsql テスト DB を共有するため
-  test.lock で排他)。先行する test の終了を待つ。
+- **他のテストレーンと同時実行できない**: 仕様 (グローバルテストロックで
+  同一 UID・同一マシン単位に直列化している)。**エラーにはならず待つ**ので、
+  待機の heartbeat が出ている間はそのまま待てばよい。
+- **bug-hunt が走行中で起動できない**: `scripts/bug-hunt-shard.sh teardown` で
+  bug-hunt 環境を落としてから再実行する。
+
+## グローバルテストロックの手動復旧 runbook
+
+排他の正本は `flock` **一点**であり、ロックは OS がプロセス消滅時に必ず解放する。
+したがって「ロックが取れないまま永久に詰まる」ことは、保持者が実際に生きている場合しか起きない。
+
+- **誰が握っているか調べる**: `cat /tmp/global-test-lane-$(id -u).d/owner`
+  (sidecar。1 行目 = nonce、以降 `pid=` / `lane=` / `worktree=` / `since=` の key=value)。
+  待機中の heartbeat は 30 秒ごとにこの内容を stderr へ出す。
+- **保持者を止める**: 上記 `pid=` のプロセスへ `kill -TERM <pid>`。ライブラリが
+  専用プロセスグループへシグナルを転送し、猶予 30 秒を過ぎたら SIGKILL する。
+  **グループが空になるまでロックは解放されない**(残党と次のレーンを併走させないため)。
+  空にならない場合は `still holding the lock: ... has survivors after SIGKILL` の警告に
+  残存 pid が出るので、それを調べる (SIGKILL を生き延びるのは stuck IO = D state だけ)。
+- **sidecar が残っているが誰も走っていない**: SIGKILL / クラッシュで trap が走らなかった場合に起きる。
+  **何もしなくてよい** — sidecar は排他の正本ではなく、次の取得者がアトミックに上書きする。
+  手で消す必要はない (消しても害はない)。
+- **ロックファイルを消さない**: `lock` を `rm` しても排他は直らない (既存の保持者は
+  inode 側のロックを持ち続ける)。保持者プロセスを止めるのが唯一の正しい手順。
+- **並行挙動を疑うとき**: `bash scripts/verify-global-test-lock.sh` (実ロックには触れない。
+  C01〜C24 の並行挙動を実プロセスで検証する)。

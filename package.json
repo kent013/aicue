@@ -12,10 +12,10 @@
         "typecheck": "tsc --noEmit",
         "test": "bash scripts/run-vitest.sh",
         "test:ui": "vitest --ui",
-        "test:coverage": "vitest --coverage",
+        "test:coverage": "bash scripts/with-global-test-lock.sh pnpm exec vitest run --coverage",
         "test:watch": "vitest --watch",
         "build:packages": "pnpm -F \"./packages/*\" build",
-        "test:packages": "pnpm -F \"./packages/*\" test"
+        "test:packages": "bash scripts/with-global-test-lock.sh pnpm -F \"./packages/*\" test"
     },
     "dependencies": {
         "@inertiajs/svelte": "^3.0.0",

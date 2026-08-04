@@ -32,8 +32,21 @@
 
 複数 worktree で `composer test` が同時に走ると、`RefreshDatabase` の `migrate:fresh` と
 paratest の per-worker DB が衝突して**不可解な failure**になる。DB 名を worktree path の hash で
-分けることで、別 worktree のテストは互いに止めない (同一 worktree 内の二重起動だけは
-`scripts/run-test.sh` の flock で直列化する)。
+分けることで、**DB 名の取り合いは構造的に起きない**。
+
+ただし分離できるのは名前空間だけで、**PostgreSQL サーバ・実ブラウザ・CPU/メモリは
+マシン全体で 1 つ**である。そこで 2 層構造にしている:
+
+| 層 | 何を分けるか | 機構 |
+|---|---|---|
+| **リソース名前空間** | テスト DB 名 (`<slug>_test_<worktree-hash>`) | `TestDatabaseEnv` の hash 導出 (worktree ごと) |
+| **実行そのもの** | テストレーンの同時実行 | `scripts/global-test-lock.sh` のグローバルロック (`/tmp/global-test-lane-<uid>.d/lock` = **同一 UID・同一マシン**単位。worktree をまたいで直列化する) |
+
+グローバルロックは**ブロッキング取得**なので、後発レーンはエラーにならず待つ。
+対象は `composer test` / `composer test:browser` / `pnpm test` / `pnpm test:packages`
+(+ `pnpm test:coverage`)。旧 worktree-local な flock はスコープが厳密に包含されるため廃止した
+(後方互換の並走を残さない)。並行挙動は `scripts/verify-global-test-lock.sh`、
+構造的不変条件は `tests/Architecture/GlobalTestLockInventoryTest.php` が固定する。
 
 **dev DB 防御は分離とは別レイヤで多重化されている** (AGENTS.md 禁止事項 #3):
 `TestDatabaseEnv` の allowlist (`<slug>_test_` + 8 桁 hash + paratest token のみ) と dev DB denylist を
