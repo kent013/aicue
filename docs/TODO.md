@@ -22,6 +22,9 @@
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
 | T085 | bfcache 実復元の iOS 実機受入確認 | test | Playwright 不可のため実機で確認+記録 | High | standalone | [設計](devnotes/20260803-0053-aigenba-alignment/) | 2026-08-03 03:10 |
+| T096 | SOP PDF の文字化けが LLM に素通りする問題の是正 | backend | SJIS 化けの復元と日本語本文ゲート | Critical | standalone | [設計](devnotes/20260804-0900-sop-pdf-mojibake/) | 2026-08-04 09:46 |
+| T097 | T089/T090 の残存リスク 6 論点の確定と最小実装 | general | 未確定 6 論点を決定し恒久文書へ固定 | High | standalone | [設計](devnotes/20260804-0900-t089-t090-residual-risk/) | 2026-08-04 09:46 |
+| T098 | bug-hunt driver に一過性フィードバック捕捉を追加 | test | toast 誤検知を probe で構造的に防ぐ | Medium | standalone | [設計](devnotes/20260804-0900-bughunt-toast-capture/) | 2026-08-04 09:46 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
