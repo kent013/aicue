@@ -50,11 +50,23 @@ use Laravel\Fortify\Contracts\LogoutResponse as LogoutResponseContract;
  * 「**`clearHistory: true` を含む Inertia page をクライアントが適用したタブ**」に限られる
  * (受信ではなく適用。通信断や JS 例外で適用前に中断すれば鍵は残る)。
  *
+ * **`clearHistory` の発行契機は本クラスだけではない。** セッション期限切れと
+ * 他デバイスからの強制ログアウトは「利用者が明示的に終わらせた」契機を持たないため
+ * 本クラスを通らないが、どちらも `AuthenticationException` として現れ、
+ * `bootstrap/app.php` の render callback が同じフラグを積む。
+ * その結果、上記 204 経路の残存リスク (画面遷移しないまま戻る) も、
+ * **そのタブが次に認証を要する Inertia visit を行った時点で解消する**
+ * (一度もサーバと話さないまま戻る場合だけが残る)。保証範囲の正本は
+ * `docs/supported-browsers.md`。
+ *
  * このアプリでは実運用上その条件を満たす: `/logout` を叩く導線は
- * `AppLayout.svelte` (通常画面のユーザーメニュー) と `pages/Auth/VerifyEmail.svelte`
- * (メール認証待ち画面の離脱導線) の 2 箇所で、**いずれも `router.post('/logout')` =
+ * `AppLayout.svelte` (通常画面のユーザーメニュー) / `pages/Auth/VerifyEmail.svelte`
+ * (メール認証待ち画面の離脱導線) / `pages/Auth/ConfirmRecentAuth.svelte`
+ * (再認証画面の離脱導線) の 3 箇所で、**いずれも `router.post('/logout')` =
  * Inertia visit**。302 を XHR が追従し、**正常完了時に**着地の Inertia page を適用する。
- * JSON 204 経路はリポジトリ内では Browser テストの補助 (経路 B の再現) にしか使われていない。
+ * JSON 204 経路はリポジトリ内では Browser テストの補助にしか使われていない
+ * (「セッションだけ切れて、そのタブは何も知らない」状態を決定的に作るための道具として、
+ *  経路 B の bfcache 再現と、経路 C の認証失敗契機 clearHistory の再現の両方で使う)。
  * **ログアウト導線を非 Inertia 経路で新設すると経路 C の保証条件が崩れる**。
  * この「一本である」不変条件は
  * `tests/js/architecture/logout-call-site-inventory.test.ts` が deny-by-default で固定する。

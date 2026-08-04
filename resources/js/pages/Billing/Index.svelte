@@ -13,13 +13,15 @@
     import PageHeader from "@/components/molecules/PageHeader.svelte";
     import AutoRechargeCard from "@/components/features/billing/AutoRechargeCard.svelte";
     import BillingContactForm from "@/components/features/billing/BillingContactForm.svelte";
+    import { formatBytes } from "@/lib/format-bytes";
     import { formatDate } from "@/lib/date-format";
     import type { SharedProps } from "@/lib/shared-props";
     import type { BillingDashboardProps, BillingFeedbackKind } from "@/types/billing";
 
     /**
-     * 課金ダッシュボード (/billing)。現在のプラン / per-bucket チケット残高 / 現行 quota 上限 /
-     * オートリチャージ設定 と、プラン比較・チケット購入への導線を持つ。
+     * 課金ダッシュボード (/billing)。現在のプラン / per-bucket チケット残高 /
+     * quota の利用状況 (使用量 / 上限 + 超過警告) / オートリチャージ設定 と、
+     * プラン比較・チケット購入への導線を持つ。
      *
      * プラン一覧は /billing/plans (Billing/Plans.svelte) へ移設済み。
      * 支払い方法・解約は Customer Portal (POST → Inertia::location で Stripe へ) 経由。
@@ -234,16 +236,30 @@
                 />
 
                 <Card padding="lg" testId="billing-quotas">
-                    <h2 class="text-h3">現在のプランの上限</h2>
+                    <h2 class="text-h3">ご利用状況と上限</h2>
+
+                    {#if page.quotas.exceededLabels.length > 0}
+                        <Alert type="warning" class="mt-4" testId="quota-exceeded-alert">
+                            現在のプランの上限を超えている項目があります（{page.quotas.exceededLabels.join(
+                                "・",
+                            )}）。 既存のデータは削除されませんが、<strong
+                                >超えている項目に関わる操作</strong
+                            >
+                            （プロジェクト数ならプロジェクトの新規作成、保存容量なら動画のアップロード）が、上限内に収まるまでできません。
+                        </Alert>
+                    {/if}
+
                     <dl class="mt-4 grid gap-4 sm:grid-cols-3">
                         <div>
                             <dt class="text-caption text-text-secondary">プロジェクト</dt>
                             <dd class="mt-1 text-h3 text-text" data-testid="quota-max-projects">
-                                {formatLimit(page.quotas.maxProjects)}
+                                {page.quotas.projectsUsed} / {formatLimit(page.quotas.maxProjects)}
                             </dd>
                         </div>
                         <div>
-                            <dt class="text-caption text-text-secondary">メンバー</dt>
+                            <!-- メンバー数は quota として強制されていないため使用量を併記しない
+                                 (「超えると止まる」と読める表示をしない。QuotaKey の docblock 参照) -->
+                            <dt class="text-caption text-text-secondary">メンバー (上限)</dt>
                             <dd class="mt-1 text-h3 text-text" data-testid="quota-max-members">
                                 {formatLimit(page.quotas.maxMembers)}
                             </dd>
@@ -251,7 +267,8 @@
                         <div>
                             <dt class="text-caption text-text-secondary">ストレージ</dt>
                             <dd class="mt-1 text-h3 text-text" data-testid="quota-max-storage">
-                                {page.quotas.maxStorageGb === null
+                                {formatBytes(page.quotas.storageUsedBytes)} / {page.quotas
+                                    .maxStorageGb === null
                                     ? "無制限"
                                     : `${page.quotas.maxStorageGb} GB`}
                             </dd>

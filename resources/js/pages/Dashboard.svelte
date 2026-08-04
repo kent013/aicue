@@ -20,6 +20,7 @@
     import AppLayout from "@/components/templates/AppLayout.svelte";
     import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
+    import { formatBytes } from "@/lib/format-bytes";
     import type { SharedProps } from "@/lib/shared-props";
     import type { DashboardProps } from "@/types/dashboard";
     import { STATUS_TONES, VIDEO_MANUAL_STATUS_LABELS } from "@/types/manual";
@@ -42,13 +43,6 @@
     const isEditor = $derived(dashboard.role === "editor");
     const isShooter = $derived(dashboard.role === "shooter");
 
-    /** バイト数の可読表記 (残容量タイルの subtext 用) */
-    function formatBytes(bytes: number): string {
-        if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
-        if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
-        if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-        return `${bytes} B`;
-    }
 </script>
 
 {#snippet shootingCard()}

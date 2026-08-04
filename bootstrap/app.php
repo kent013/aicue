@@ -25,11 +25,13 @@ use App\Http\Middleware\VerifySnsSignature;
 use App\Http\Resources\Billing\InsufficientTicketsResource;
 use App\Http\Resources\Billing\QuotaExceededResource;
 use App\Support\Http\AdminPanelPath;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Inertia\Inertia;
 use Inertia\Middleware\EncryptHistory;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -174,6 +176,46 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );
+
+        /*
+         | セッション終了を検知した契機で Inertia の履歴暗号鍵を捨てさせる (経路 C の拡張)。
+         |
+         | ログアウト (App\Http\Responses\Fortify\LogoutResponse) は「利用者が明示的に
+         | 終わらせた」契機しか拾えない。セッション期限切れと、パスワード変更による
+         | 他デバイスの強制ログアウト (Auth::logoutOtherDevices → web グループの
+         | AuthenticateSession) は、どちらも AuthenticationException として現れる。
+         | ここでフラグを積むと、着地の /login (Inertia 応答) が
+         | session()->pull で消費し、そのタブの sessionStorage の履歴鍵が消える。
+         | = **認証失敗を契機に、以後の「戻る」による復元を無効化する**
+         |   (過去に遡って無効化するのではない。docs/supported-browsers.md が正本)。
+         |
+         | 応答自体は既定の unauthenticated() 処理に委ねる (**null を返して素通し**)。
+         | Handler::render() は renderViaCallbacks() を AuthenticationException の既定分岐より
+         | 先に呼び、callback が null を返せば既定処理へ進む (Laravel 12 実装)。
+         | この「null で素通し」に依存するため、**Laravel の major 更新時に再確認する**
+         | (壊れた場合は InertiaHistoryGuardTest が落ちる)。
+         |
+         | 積まない条件は 2 つだけ:
+         |   - expectsJson(): Inertia 応答が返らないためフラグが宙に浮く
+         |   - session 不在: そもそもフラグを置けない
+         | `api/*` の明示判定は**置かない**。api グループ (withRouting の api:) は
+         | StartSession を含まないため hasSession() が偽で既に抑止され、到達不能条件になる。
+         | guards() では面を判別しない (web の auth は [null]、AuthenticateSession は ['web']、
+         | Filament の Authenticate は override により [] になり、実装詳細に依存するため)。
+         | その結果 /admin の認証失敗でもフラグは積まれるが、**安全側の偽陽性として許容**する
+         | (影響は Inertia 面の履歴が 1 度だけ再キーされることだけ)。この偽陽性は
+         | InertiaHistoryGuardTest が仕様として固定しており、Filament の認証失敗の実装が
+         | 変わったら本コメントとテストを**一緒に**更新する。
+         */
+        $exceptions->render(function (AuthenticationException $exception, Request $request): ?Response {
+            if ($request->expectsJson() || ! $request->hasSession()) {
+                return null;
+            }
+
+            Inertia::clearHistory();
+
+            return null;
+        });
 
         // 課金系のドメイン例外は web では back + error flash に変換する
         // (API 経路では null を返して下の ApiExceptionRenderer に委ねる)

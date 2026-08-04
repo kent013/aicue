@@ -206,9 +206,11 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
    (B) クライアント bfcache 秘匿・再検証 (`resources/js/lib/bfcache-guard.ts` +
        `session.status` プローブ。撮影 PWA の主戦場 iOS Safari は
        `Cache-Control: no-store` でも bfcache に格納しうるため必須)、
-   (C) Inertia history 暗号化 + ログアウト時の履歴鍵破棄
+   (C) Inertia history 暗号化 + 履歴鍵破棄
        (`bootstrap/app.php` の `Inertia\Middleware\EncryptHistory` +
-        `App\Http\Responses\Fortify\LogoutResponse` の `Inertia::clearHistory()`)。
+        `Inertia::clearHistory()` の発行契機 2 つ =
+        `App\Http\Responses\Fortify\LogoutResponse` (ログアウト) と
+        `bootstrap/app.php` の `AuthenticationException` render callback (認証失敗))。
    (C) の保証条件は「**`clearHistory: true` を含む Inertia page をクライアントが適用したタブ**」。
    ログアウト着地 route を非 Inertia 化しない (`InertiaHistoryGuardTest` が固定) /
    ログアウト導線を非 Inertia 経路 (JSON 204 完結の XHR 等) で新設しない

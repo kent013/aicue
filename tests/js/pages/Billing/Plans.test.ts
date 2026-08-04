@@ -162,14 +162,17 @@ describe("Billing/Plans", () => {
 
         await fireEvent.click(screen.getByTestId("plan-change-starter"));
         const dialog = await screen.findByTestId("plan-change-confirm");
-        expect(dialog).toHaveTextContent("上限内に収まるまで新規作成とアップロードができません");
+        expect(dialog).toHaveTextContent("超えている項目に関わる操作が上限内に収まるまでできません");
+        // メンバー数は quota として未強制なので告知に含めない (起きないことを言わない)
+        expect(dialog).not.toHaveTextContent("メンバー数");
+        expect(dialog).toHaveTextContent("「お支払い」画面");
         cleanup();
 
         render(Plans, { props: { page: contractedPage } });
         await fireEvent.click(screen.getByTestId("plan-change-standard"));
         const upgradeDialog = await screen.findByTestId("plan-change-confirm");
         expect(upgradeDialog).not.toHaveTextContent(
-            "上限内に収まるまで新規作成とアップロードができません",
+            "超えている項目に関わる操作が上限内に収まるまでできません",
         );
         expect(upgradeDialog).toHaveTextContent("日割り");
     });

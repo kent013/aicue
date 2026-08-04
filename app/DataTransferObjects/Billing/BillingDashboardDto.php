@@ -11,7 +11,7 @@ use App\Enums\Billing\OnboardingBillingState;
  * 課金ダッシュボード (/billing) の Inertia page prop (P8b / bs-14)。
  *
  * プラン一覧は /billing/plans へ移設済み。ここは「現在のプラン / per-bucket 残高 /
- * 現行 quota 上限 / 導線」に絞る。plan は表示用の解決結果 (ActiveFreePlan なら
+ * 現在の quota 状態 (上限 + 使用量 + 超過次元) / 導線」に絞る。plan は表示用の解決結果 (ActiveFreePlan なら
  * free_plan_code、それ以外は plan_code。gate 判定には使わない)。
  *
  * P9: 着地 feedback (one-shot) と請求先連絡先を additive に足した。
@@ -20,7 +20,7 @@ use App\Enums\Billing\OnboardingBillingState;
  *
  * @phpstan-import-type PricingPlanShape from PricingPlanDto
  * @phpstan-import-type TicketBalanceShape from TicketBalanceDto
- * @phpstan-import-type QuotaLimitsShape from QuotaLimitsDto
+ * @phpstan-import-type QuotaStatusShape from QuotaStatusDto
  * @phpstan-import-type AutoRechargeShape from AutoRechargeSettingsDto
  * @phpstan-import-type BillingFeedbackShape from BillingFeedbackDto
  * @phpstan-import-type BillingContactShape from BillingContactDto
@@ -30,7 +30,7 @@ use App\Enums\Billing\OnboardingBillingState;
  *   billingState: string,
  *   currentPeriodEnd: string|null,
  *   balance: TicketBalanceShape,
- *   quotas: QuotaLimitsShape,
+ *   quotas: QuotaStatusShape,
  *   canManageBilling: bool,
  *   continueUrl: string|null,
  *   autoRecharge: AutoRechargeShape,
@@ -46,7 +46,7 @@ final readonly class BillingDashboardDto
         public OnboardingBillingState $billingState,
         public ?string $currentPeriodEnd,
         public TicketBalanceDto $balance,
-        public QuotaLimitsDto $quotas,
+        public QuotaStatusDto $quotas,
         public bool $canManageBilling,
         /**
          * 課金ゲートで中断された「元の画面」への復帰先。契約成立着地でのみ 1 回だけ非 null

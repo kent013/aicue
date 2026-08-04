@@ -328,13 +328,35 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
     (ActiveFreePlan では `free_plan_code` を返す projection) とは別物で、混ぜると
     grace period 契約で恒常 422 になる
   - Stripe への更新は `proration_behavior=create_prorations` (日割りは**次回請求に反映**。
-    `always_invoice` は使わない = 即時請求の与信失敗遷移を持ち込まない)
+    `always_invoice` は使わない = 即時請求の与信失敗遷移を持ち込まない)。
+    **この方針は確定済み**であり、切り替えに必要な作業一式は下記「proration 方針」を参照
+    (機械的な守り手は `tests/Unit/Billing/SubscriptionSwapPayloadInvariantTest`)
   - 冪等は 2 層: 同一 render の二重送信は idempotency key `change-plan:{token}:{planCode}`、
     別 render からの再操作は **gateway の remote Price 照合** (`AlreadyOnTargetPrice` =
     update を送らない)
   - **`organizations.plan_code` は書かない**。反映 (projection_synced) は
     `customer.subscription.updated` → `applySubscriptionSnapshot` が唯一の writer
-  - Customer Portal の `subscription_update` は **無効のまま** (プラン変更はアプリが所有する)
+  - Customer Portal の `subscription_update` は **無効のまま** (プラン変更はアプリが所有する)。
+    再開放に必要な条件は `App\Services\Billing\PortalConfigurationSpec` の docblock が正本
+  - **proration 方針** (確定): `create_prorations` を既定とし、日割り差額は次回請求に反映する。
+    `always_invoice` (即時徴収) へ切り替えるには以下が**セットで**必要であり、
+    「payload の 1 行」では終わらない:
+    1. `CashierStripeGateway::buildSwapPayload()` の変更 + payload invariant テストの更新
+    2. **状態機械の拡張**: `SubscriptionState` に `pending_update` 相当の表現が無い。
+       `incomplete` は現在 `Inactive` に畳まれ、`BillingAccess` → `require-active-subscription` で
+       **アプリ全体が遮断される**。「アップグレードしようとして与信に失敗しただけの利用者」を
+       ロックアウトしない state 設計が先に要る
+    3. **webhook の受け口**: `customer.subscription.pending_update_applied` / `..._expired` と、
+       プラン変更文脈での `invoice.payment_failed` の扱いが `StripeWebhookProcessor` に無い
+    4. **UI**: 3DS/SCA の確認導線がアプリに無い (決済 UI は Stripe hosted の Checkout / Portal のみ)。
+       要アクション状態を受ける画面が要る
+    5. **ロールバック意味論**: `pending_update` 期限切れで Stripe が巻き戻す挙動と
+       `organizations.plan_code` の projection を整合させる規約が要る
+
+    **再検討条件**: 日割り差額の回収遅延がキャッシュフロー上の問題であることを事業側が
+    数値で示したとき。上記 1〜5 を同一 TODO で扱う前提で再設計する
+    (**証拠なく金銭の挙動を反転させない**)。判断の経緯は
+    `devnotes/20260804-0900-t089-t090-residual-risk/` を参照
 - **着地 feedback (P9)**: `Inertia::location()` の full page redirect を跨いだ後、
   `/billing` 着地で one-shot バナーを出す (`BillingFeedbackKind`: purchase_received /
   purchase_processing / purchase_already_received / checkout_retry_required / portal_returned)。

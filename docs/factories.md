@@ -46,6 +46,13 @@
 
 Factory を持たないモデル (Role / Permission / Team 等) は seed 固定値
 または Service (`OrganizationProvisioningService` 等) 経由で作る。
+**`Billing\Plan` / `Billing\PlanPrice` も Factory を持たない** — これらは参照データであり、
+真実源は `PlanSeeder` + `config/quota.php` + `StripePriceLookupKeys` の三点セットである。
+Factory を足すとプラン定義の第 2 の真実源ができ、seeder と食い違う組み合わせ
+(quota 定義の無い plan_code、価格の無い有償プラン) をテストが作れてしまう。
+プラン依存の分岐を固定したいときは enum の写像テスト
+(`tests/Unit/Enums/PlanCodeTest.php`) と seeder の網羅テスト
+(`tests/Feature/Billing/PlanQuotaCoverageTest.php`) を使う。
 アプリ内通知 (`notifications` テーブル) は Eloquent 標準 `DatabaseNotification` を使うため
 新規モデル / Factory は作らない (テストでは `$user->notify(new ManualAnalyzedNotification(...))`
 の実発火で行を作る。`AnalysisJob` / `RenderJob` の `triggered_by` は nullable のため
