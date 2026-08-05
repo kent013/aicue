@@ -1,4 +1,4 @@
-import { ENV, BIN_NAME } from "../branding.js";
+import { ENV, KEYCHAIN_SERVICE } from "../branding.js";
 import { createRequire } from "node:module";
 import { ExitCode, exitWith } from "../exit-codes.js";
 import type { BackendStore } from "./backend.js";
@@ -6,7 +6,10 @@ import { deriveKeychainKey, type ItemKind } from "./key-derivation.js";
 
 const requireFromHere = createRequire(import.meta.url);
 
-const SERVICE = `${BIN_NAME}`;
+// 正本は branding.ts の KEYCHAIN_SERVICE。`profile:delete` は index 破損時に
+// このサービス名を手動清掃の案内として表示するため、案内と実際の保存先が
+// 同じ定数から来ることを構造的に保証する (定義の二重化を解消)。
+const SERVICE = KEYCHAIN_SERVICE;
 
 type EntryCtor = new (service: string, username: string) => {
     getPassword: () => string | null;
