@@ -481,3 +481,61 @@ laravel-claude-template の mirror が取得できた時点でテンプレ実装
   `resources/js/lib/document-title.ts` / `config/seo.php`
 - 設計: `devnotes/20260805-0101-architecture-gate-followup/`
 - c2c 台帳: `gate-document-title-coverage` / `page-title-frontend-contract`
+
+---
+
+## D13 ✅ SSO 登録ユーザーの password を保存しない (phantom password の撤去。前方修正のみ)
+
+| 観点 | テンプレート | 本アプリ |
+|---|---|---|
+| SSO 登録時の `users.password` | `Str::password(32)` をハッシュ化して保存 | **保存しない (null のまま)** |
+| `User::hasPassword()` の意味 | SSO-only ユーザーでも常に true (docblock 自身が「テンプレート標準では常に true」と明記) | 「password 経路が実際に使えるか」を返す |
+| 既存データの扱い | — | **遡及是正しない (前方修正のみ)** |
+
+### なぜ正当な差分か(logic-driven)
+
+本アプリは password 以外のログイン手段 (SSO / パスキー) を第一級に扱い、
+「**ログイン手段が 0 になる操作を止める**」ことを不変条件にしている
+(`EnsureLoginMethodRemains` / `LoginMethodInventory`。docs/auth-security-mechanisms.md §6)。
+この不変条件は `hasPassword()` が真実を返すことに依存する。
+
+phantom password (ランダム値) が入っていると:
+
+1. `LoginMethodInventory` が SSO-only ユーザーにも `password` を数え、
+   **唯一のパスキーを削除できてしまう** (guard が形骸化する)。
+2. recent-auth の `passwordSet` が true になり、SSO-only ユーザーの再認証モーダルが
+   **入力しても必ず失敗するパスワード欄**を出す (詰み画面)。
+
+`users.password` は migration が nullable で作られており
+(`0001_01_01_000000_create_users_table.php`)、`UserFactory::ssoOnly()` も
+`password => null` を前提にしている。つまりスキーマとテスト補助は既に「null を許す」側で、
+`Str::password(32)` だけが取り残されていた。
+
+### 射程 (既知の制約として残すもの)
+
+**前方修正のみ**。本変更**以前**に SSO 登録されたユーザーの phantom password はそのまま残り、
+そのユーザーに限り上記 1 / 2 の誤差が続く。遡及移行 (既存 SSO ユーザーの password を null 化) は
+**「password を先に登録してから SSO を連携したユーザーの実パスワードを消す」**危険があり、
+`password_changed` の監査証跡が無い時代のユーザーを機械的に判別できないため行わない。
+
+判別材料を今後蓄積するため、`UpdateUserPassword` から
+`SecurityEventType::PasswordChanged` を記録するようにした
+(enum に存在しながら記録経路が無かった。`/reset-password` 経路は
+`Illuminate\Auth\Events\PasswordReset` 経由で既に記録済み)。
+
+### 揃えている不変条件(これは保証し続ける)
+
+> 「`User::hasPassword()` は password 経路の可否を **fail-closed** で判定する」
+
+- `tests/Feature/Auth/SocialAuthTest.php`: SSO register 後の `password` が null /
+  `hasPassword()` が false / `email_verified_at` は従来どおり非 null (T105 との相互作用の回帰)
+- `tests/Feature/Auth/RecentAuthTest.php`: SSO 登録直後の `/recent-auth/status` が
+  `passwordSet: false` / `canSatisfy: true` (再SSO が satisfier)
+- `tests/Feature/Auth/LoginMethodInventoryTest.php`: `ssoOnly()` ユーザーの手段集合に
+  `password` が含まれない
+
+### 関連
+
+- 実装: `app/Services/Auth/SocialAccountService.php` / `app/Actions/Fortify/UpdateUserPassword.php` /
+  `app/Services/Auth/LoginMethodInventory.php`
+- 設計: `devnotes/20260805-1244-auth-method-and-passkey/` (施策 2)

@@ -24,9 +24,12 @@ use Illuminate\Contracts\Auth\Factory as AuthFactory;
  *
  * ⚠ 重要: 本 listener は「web guard の Login が全て credential-presentation である」前提に立つ。
  *   現行コードの web guard login は (1) Fortify password (2) Fortify TOTP (3) SSO
- *   Auth::login() の 3 種のみ。**将来 web guard に loginUsingId / impersonation /
- *   magic-link 等の非 credential login を追加する場合は、本 listener がそれらも fresh 扱いして
- *   しまうため必ず見直すこと**。
+ *   Auth::login() (4) passkey (PasskeyLoginController::store の $guard->login()) の 4 種のみ。
+ *   (4) は WebAuthn の user verification (生体 / PIN) を伴うため credential-presentation
+ *   として fresh 扱いしてよい (passkey login 可否そのものは PasskeyLoginPolicy が
+ *   ログイン成立前に判定する)。
+ *   **将来 web guard に loginUsingId / impersonation / magic-link 等の非 credential login を
+ *   追加する場合は、本 listener がそれらも fresh 扱いしてしまうため必ず見直すこと**。
  */
 final class StampRecentAuthOnLogin
 {

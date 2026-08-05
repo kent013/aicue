@@ -11,7 +11,6 @@ use App\Services\Auth\EmailTrust\EmailTrustPolicyResolver;
 use App\Services\Organization\OrganizationProvisioningService;
 use App\Services\Security\SecurityEventRecorder;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 use Laravel\Socialite\Contracts\User as SocialiteUser;
 
 /**
@@ -60,11 +59,17 @@ class SocialAccountService
                 ? now()
                 : null;
 
+            // SSO 登録は password を **持たない** (null のまま)。
+            // users.password は nullable であり、password 経路の可否は User::hasPassword() が
+            // fail-closed で判定する契約 (0001_01_01_000000_create_users_table.php)。
+            // ランダム値 (旧 Str::password(32)) を入れると hasPassword() が常に true になり、
+            // recent-auth の passwordSet と EnsureLoginMethodRemains の双方が形骸化する。
+            // **前方修正のみ**: 既存 SSO ユーザーの phantom password は遡及是正しない
+            // (password 登録後に SSO 連携したユーザーの実パスワード消失リスクのため)。
+            // → docs/template-divergence.md D13。
             $user = (new User([
                 'name' => $socialiteUser->getName() ?? $email,
                 'email' => $email,
-                // SSO 登録はパスワードを持たない (ランダム値をハッシュ化して保存)
-                'password' => Str::password(32),
             ]))->forceFill([
                 'terms_accepted_at' => now(),
                 'consent_version' => config()->string('legal.consent_version'),

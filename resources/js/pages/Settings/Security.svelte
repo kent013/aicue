@@ -11,12 +11,14 @@
     import FormField from "@/components/molecules/FormField.svelte";
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
     import RecentAuthModal from "@/components/organisms/RecentAuthModal.svelte";
+    import PasskeySection from "@/components/features/auth/PasskeySection.svelte";
     import PageHeader from "@/components/molecules/PageHeader.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
     import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
     import { Settings } from "@lucide/svelte";
     import { useForm } from "@inertiajs/svelte";
+    import type { PasskeyListItem } from "@/lib/passkeys";
     import { withRecentAuth, type RecentAuthStatus } from "@/lib/recent-auth";
     import type { SharedProps } from "@/lib/shared-props";
     import { providerLabel } from "@/lib/social";
@@ -25,13 +27,30 @@
     interface Props {
         socialProviders?: string[];
         linkedProviders?: string[];
+        passkeys?: PasskeyListItem[];
+        /** passkey での「ログイン」が許されるか (TOTP 有効時は false。再認証には使える) */
+        passkeyLoginAvailable?: boolean;
     }
 
-    let { socialProviders = [], linkedProviders = [] }: Props = $props();
+    let {
+        socialProviders = [],
+        linkedProviders = [],
+        passkeys = [],
+        passkeyLoginAvailable = false,
+    }: Props = $props();
 
     const shared = $derived(page.props as unknown as SharedProps);
     const appName = $derived(shared.appName ?? "");
     const twoFactorEnabled = $derived(shared.auth?.user?.twoFactorEnabled ?? false);
+
+    /**
+     * EnsureLoginMethodRemains はログイン手段が 0 になる削除を
+     * **302 + errors.login_method** で拒否する (Inertia に 422 JSON を返すと無言失敗するため)。
+     * ここで拾って PasskeySection に渡し、画面上で明示する。
+     */
+    const loginMethodError = $derived(
+        (page.props as unknown as { errors?: Record<string, string> }).errors?.login_method,
+    );
 
     /* ----------------------------------------------------------------
      * 2FA 管理
@@ -521,6 +540,14 @@
                 {/if}
             </Card>
 
+            <PasskeySection
+                {passkeys}
+                {passkeyLoginAvailable}
+                {twoFactorEnabled}
+                {loginMethodError}
+                guard={guardWithRecentAuth}
+            />
+
             <Card padding="lg">
                 <h2 class="text-h3">ソーシャルログイン連携</h2>
                 <p class="mt-1 text-caption text-text-secondary">
@@ -577,6 +604,7 @@
             passwordSet={recentAuthStatus?.passwordSet ?? false}
             availableProviders={recentAuthStatus?.availableProviders ?? []}
             canSatisfy={recentAuthStatus?.canSatisfy ?? true}
+            passkeyAvailable={recentAuthStatus?.passkeyAvailable ?? false}
             onConfirmed={resumePendingAction}
         />
         </PageContent>

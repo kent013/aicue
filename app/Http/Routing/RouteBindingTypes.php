@@ -121,7 +121,13 @@ final class RouteBindingTypes
      *
      * @var array<string, class-string>
      */
-    public const CUSTOM_BINDER = ['organization' => MembershipScopedOrganizationBinder::class];
+    public const CUSTOM_BINDER = [
+        'organization' => MembershipScopedOrganizationBinder::class,
+        // {passkey} は Fortify (vendor) が登録する route の param。app 側から
+        // Route::pattern を掛けると vendor の route 定義変更に追随できないため、
+        // binder が「認証ユーザー所有 + 数値正規化」を担う (他人の passkey は 404)。
+        'passkey' => SelfScopedPasskeyBinder::class,
+    ];
 
     /**
      * モデル binding ではない文字列 param。型制約の対象外。

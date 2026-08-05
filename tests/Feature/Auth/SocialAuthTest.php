@@ -217,3 +217,26 @@ test('P7: SSO login の未連携拒否分岐も pending を残さない', functi
 test('無効なプロバイダは 404', function (): void {
     $this->get('/auth/unknown/redirect/login')->assertNotFound();
 });
+
+/*
+ * T106 施策 2: SSO 登録の phantom password 是正 (前方修正のみ)。
+ *
+ * 旧実装は `Str::password(32)` をハッシュ化して保存していたため、SSO-only ユーザーでも
+ * `User::hasPassword()` が常に true を返していた (recent-auth の passwordSet と
+ * EnsureLoginMethodRemains の双方が形骸化する)。
+ * **既存ユーザーへの遡及是正は行わない** (password 登録後に SSO 連携したユーザーの
+ * 実パスワード消失リスクのため。docs/template-divergence.md D13)。
+ */
+test('T106: SSO register で作られた User は password を持たない', function (): void {
+    $this->withSession(['social_auth_intent' => 'register']);
+    fakeSocialiteCallback(fakeSocialiteUser('g-t106', 'sso-t106@example.com'));
+
+    $this->get('/auth/google/callback')->assertRedirect(route('dashboard'));
+
+    $user = User::whereBlind('email', 'email_index', 'sso-t106@example.com')->firstOrFail();
+
+    expect($user->getAttribute('password'))->toBeNull();
+    expect($user->hasPassword())->toBeFalse();
+    // 施策 1 (T105) との相互作用の回帰: email_verified_at は従来どおり立つ
+    expect($user->email_verified_at)->not->toBeNull();
+});

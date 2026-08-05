@@ -10,7 +10,8 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * recent-auth status の XHR 応答 ({ recent, passwordSet, availableProviders[], canSatisfy, confirmedAt })。
+ * recent-auth status の XHR 応答
+ * ({ recent, passwordSet, availableProviders[], passkeyAvailable, canSatisfy, confirmedAt })。
  * top-level (data ラップなし)、no-store は controller 側で付与。
  *
  * @property-read RecentAuthStatusDto $resource
@@ -25,6 +26,7 @@ final class RecentAuthStatusResource extends JsonResource
      *     recent: bool,
      *     passwordSet: bool,
      *     availableProviders: list<array{provider: string, capability: string, reauthUrl: string}>,
+     *     passkeyAvailable: bool,
      *     canSatisfy: bool,
      *     confirmedAt: int|null,
      * }
@@ -42,6 +44,7 @@ final class RecentAuthStatusResource extends JsonResource
                 ],
                 $this->resource->availableProviders,
             ),
+            'passkeyAvailable' => $this->resource->passkeyAvailable,
             'canSatisfy' => $this->resource->canSatisfy,
             'confirmedAt' => $this->resource->confirmedAt,
         ];

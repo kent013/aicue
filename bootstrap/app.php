@@ -7,11 +7,13 @@ use App\Http\Middleware\BlockTwoFactorDisableForEnforcedOrganizations;
 use App\Http\Middleware\BughuntCoverageMiddleware;
 use App\Http\Middleware\EnforceMcpTransport;
 use App\Http\Middleware\EnsureEmailIsVerifiedOrBack;
+use App\Http\Middleware\EnsureLoginMethodRemains;
 use App\Http\Middleware\EnsureProjectBelongsToCurrentOrganization;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\IdempotentRequest;
 use App\Http\Middleware\McpConsentOrganizationBinder;
 use App\Http\Middleware\NoStoreCacheHeadersForAuthenticatedPages;
+use App\Http\Middleware\NoStoreResponse;
 use App\Http\Middleware\RedirectToHttps;
 use App\Http\Middleware\RequireActiveSubscription;
 use App\Http\Middleware\RequireApiKeyAbility;
@@ -128,6 +130,13 @@ return Application::configure(basePath: dirname(__DIR__))
             'recent-auth' => RequireRecentAuth::class,
             // profile 更新の email 変更時のみ step-up を課す条件付きゲート
             'recent-auth.on-email-change' => RequireRecentAuthOnEmailChange::class,
+            // ログイン手段を減らす操作の関門 (投影後評価 + User 行ロックによる直列化)。
+            // 付与対象は LoginMethodRemovalRouteTest が deny-by-default で強制する
+            // (allowlist 外への付与も fail。$next を transaction 内で実行するため)
+            'ensure-login-method' => EnsureLoginMethodRemains::class,
+            // guest route の応答に no-store を保証する (認証済み baseline の対象外を補う)。
+            // 現在の付与先は passkey.login-options (WebAuthn challenge を載せる guest route)
+            'no-store' => NoStoreResponse::class,
             'require-active-subscription' => RequireActiveSubscription::class,
             // `verified` の web POST 向け代替。未認証時に back + error flash で元ページへ戻す
             // (context 別文言は EmailVerificationGateContext)。organizations.store /

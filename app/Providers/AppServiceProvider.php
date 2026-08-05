@@ -9,7 +9,9 @@ use App\Auth\Guards\ApiKeyGuard;
 use App\Http\Routing\MembershipScopedOrganizationBinder;
 use App\Http\Routing\RouteBindingTypes;
 use App\Listeners\Audit\RejectNonCriticalAudit;
+use App\Listeners\Auth\ClearRecentAuthOnPasskeyChange;
 use App\Listeners\Auth\StampRecentAuthOnLogin;
+use App\Listeners\Auth\StampRecentAuthOnPasskeyVerified;
 use App\Listeners\Billing\MarkBillingNotificationDelivered;
 use App\Listeners\Mail\FilterSuppressedRecipients;
 use App\Listeners\RecordLlmCallCost;
@@ -57,6 +59,9 @@ use Kent013\PrismPrompt\Events\PromptExecutionCompleted;
 use Kent013\PrismPrompt\Events\PromptExecutionFailed;
 use Laravel\Cashier\Cashier;
 use Laravel\Cashier\Events\WebhookReceived;
+use Laravel\Passkeys\Events\PasskeyDeleted;
+use Laravel\Passkeys\Events\PasskeyRegistered;
+use Laravel\Passkeys\Events\PasskeyVerified;
 use OwenIt\Auditing\Events\Auditing;
 use Stripe\Service\PriceService;
 use Webmozart\Assert\Assert;
@@ -190,6 +195,15 @@ class AppServiceProvider extends ServiceProvider
 
         // ログイン成功 → recent-auth スタンプ (機微操作 step-up の起点)
         Event::listen(Login::class, StampRecentAuthOnLogin::class);
+
+        // passkey 検証成立 → recent-auth satisfier (confirm 経路。login 経路では Login が後勝ち)。
+        // 本人性バインド (検証された credential が現在ログイン中ユーザーのものか) は listener 側。
+        Event::listen(PasskeyVerified::class, StampRecentAuthOnPasskeyVerified::class);
+
+        // credential 集合の変化 → recent-auth 失効 (2026-08-04 裁定 A)。
+        // パスキーは単独でログインできる強い資格のため、増減したら直前の本人確認を失効させる。
+        Event::listen(PasskeyRegistered::class, [ClearRecentAuthOnPasskeyChange::class, 'handleRegistered']);
+        Event::listen(PasskeyDeleted::class, [ClearRecentAuthOnPasskeyChange::class, 'handleDeleted']);
 
         // 通知送信完了 → 課金通知の配信済みマーク (renewal reminder 等の再送抑止)
         Event::listen(NotificationSent::class, MarkBillingNotificationDelivered::class);

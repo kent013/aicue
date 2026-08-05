@@ -7,6 +7,7 @@
     import FormField from "@/components/molecules/FormField.svelte";
     import Modal from "@/components/organisms/Modal.svelte";
     import { csrfToken } from "@/lib/csrf";
+    import { confirmWithPasskey, isPasskeySupported } from "@/lib/passkeys";
     import type { AvailableReauthProvider } from "@/lib/recent-auth";
     import { providerLabel } from "@/lib/social";
 
@@ -15,6 +16,8 @@
      * 「同一画面の再認証 (step-up) モーダル」。
      * - password 設定済みユーザー: パスワード再入力 → POST /recent-auth/password (XHR=204 成功)。
      * - 再SSO 可能な provider (availableProviders): reauthUrl へフルリダイレクト。
+     * - パスキー登録済み (passkeyAvailable): WebAuthn 検証 → POST /passkeys/confirm (204)。
+     *   TOTP 有効ユーザーでも **再認証には使える** (PasskeyLoginPolicy が縛るのはログインのみ)。
      * - canSatisfy=false (再認証手段なし): 回復導線 (パスワードリセット) を案内する。
      * 認可の最終ゲートは各操作の recent-auth middleware (本モーダルは UX 補助)。
      */
@@ -23,6 +26,12 @@
         passwordSet?: boolean;
         availableProviders?: AvailableReauthProvider[];
         canSatisfy?: boolean;
+        /**
+         * パスキーでの再認証を提示するか。**サーバの `/recent-auth/status` が単一の源**
+         * (`RecentAuthStatus.passkeyAvailable`)。呼び出し側が独自に判定しない
+         * — 画面ごとに判定を持つと passkey しか持たないユーザーが特定画面でだけ詰む。
+         */
+        passkeyAvailable?: boolean;
         /** password satisfier 成功時 (204)。呼び出し側が pending action を再開する */
         onConfirmed: () => void;
     }
@@ -32,8 +41,45 @@
         passwordSet = false,
         availableProviders = [],
         canSatisfy = true,
+        passkeyAvailable = false,
         onConfirmed,
     }: Props = $props();
+
+    const passkeySupported = isPasskeySupported();
+    let passkeySubmitting = $state(false);
+
+    /**
+     * **この端末で実行できる** satisfier があるか。
+     * `canSatisfy` は「アカウントに手段があるか」(サーバ判定) であり、
+     * パスキーしか無いユーザーが WebAuthn 非対応ブラウザで開くと
+     * 「手段はあるが、この端末では実行できない」= 説明の無い行き止まりになる。
+     * その状態を明示的に表現して回復導線を出す。
+     */
+    const executableHere = $derived(
+        passwordSet || availableProviders.length > 0 || (passkeyAvailable && passkeySupported),
+    );
+
+    async function submitPasskey(): Promise<void> {
+        if (passkeySubmitting) return;
+        passkeySubmitting = true;
+        error = "";
+        try {
+            const outcome = await confirmWithPasskey();
+            if (outcome.status === "ok") {
+                open = false;
+                onConfirmed();
+                return;
+            }
+            // キャンセルは失敗として騒がない (再試行導線を残す)
+            if (outcome.status === "cancelled") return;
+            error =
+                outcome.status === "unsupported"
+                    ? "このブラウザはパスキーに対応していません。"
+                    : outcome.message;
+        } finally {
+            passkeySubmitting = false;
+        }
+    }
 
     let password = $state("");
     let error = $state("");
@@ -45,6 +91,7 @@
             password = "";
             error = "";
             submitting = false;
+            passkeySubmitting = false;
         }
     });
 
@@ -121,8 +168,23 @@
             <FormError message={error} testId="recent-auth-error" />
         {/if}
 
-        {#if availableProviders.length > 0}
+        {#if passkeyAvailable && passkeySupported}
             {#if passwordSet}
+                <Divider label="または" />
+            {/if}
+            <Button
+                variant="ghost"
+                fullWidth
+                loading={passkeySubmitting}
+                onclick={() => void submitPasskey()}
+                testId="recent-auth-passkey"
+            >
+                パスキーで再認証
+            </Button>
+        {/if}
+
+        {#if availableProviders.length > 0}
+            {#if passwordSet || (passkeyAvailable && passkeySupported)}
                 <Divider label="または" />
             {/if}
             <div class="flex flex-col gap-2">
@@ -145,6 +207,17 @@
                 <Button href="/forgot-password" variant="ghost" fullWidth>
                     パスワードを設定して再認証する
                 </Button>
+            </div>
+        {:else if !executableHere}
+            <!-- アカウントには手段があるが、この端末では実行できない (パスキー非対応ブラウザ) -->
+            <div
+                class="flex flex-col gap-2 text-caption text-text-secondary"
+                data-testid="recent-auth-unsupported-here"
+            >
+                <p>
+                    このアカウントの再認証手段はパスキーのみですが、このブラウザはパスキーに対応していません。
+                    パスキーを登録した端末・ブラウザで開き直すと再認証できます。
+                </p>
             </div>
         {/if}
     </div>

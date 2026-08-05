@@ -95,6 +95,38 @@ bfcache 周りの設計判断はすべてこの前提から来ている
 **skip は合格ではない**。現時点で復元シナリオを担保しているのは
 vitest のユニットテスト (分岐ロジック) と実機受入確認 (未実施) だけである。
 
+### パスキー (WebAuthn) の保証範囲
+
+**自動テストで保証しているのは「ceremony に入る前の分岐」だけ**である。
+
+| 対象 | 保証手段 |
+|------|---------|
+| feature detection (`isPasskeySupported` / `canCreatePasskey`) | `tests/js/lib/passkeys.test.ts` (ユニット) |
+| キャンセル / タイムアウトを騒がず畳むこと | 同上 |
+| fetch のヘッダ契約 (`Accept: application/json` / CSRF) | 同上 |
+| route の到達制御・認可・throttle・no-store | `tests/Feature/Auth/PasskeyRouteAccessTest.php` |
+| **実 ceremony (認証器との往復)** | **自動化しない** — 下記 |
+
+**実 ceremony は自動化しない**。jsdom は WebAuthn を実装せず、Playwright の
+仮想認証器 (CDP `WebAuthn.addVirtualAuthenticator`) は Chromium 限定で、
+本アプリの主戦場である **iOS Safari では原理的に再現できない**。
+Chromium だけ緑にしても「iOS で使える」ことの証明にはならないため、
+**片肺の自動化で安心を買わない**判断をした。
+
+**非対応時のフォールバック契約** (現場端末は非対応 / 生体未設定が常態):
+
+- 非対応ブラウザ: ログイン画面にパスキーボタンを**出さない**。設定画面は理由を出す
+  (`passkey-unsupported`)。パスワード / ソーシャルログインの導線は常に残る。
+- 対応だがプラットフォーム認証器が使えない: 設定画面に理由を出す
+  (`passkey-not-creatable`)。**ボタンは disabled にしない** (押下時にエラーを出す。
+  AGENTS.md 禁止事項 8)。
+- ceremony 失敗 / キャンセル: ログイン画面はパスワード欄と SSO ボタンを残したまま
+  同画面にエラーを出す (回復導線を消さない)。
+
+**実機受入確認の対象に含める** (下記「再確認条件」と同じ運用)。確認シナリオ:
+iOS Safari で (1) 登録 → (2) ログアウト → (3) パスキーでログイン → (4) 設定画面で再認証 →
+(5) 削除、の 5 手。
+
 ### 実機受入確認の再確認条件
 
 一度きりの確認では陳腐化する。**以下のいずれかに挙動変更が入ったら再実施する**:
@@ -103,6 +135,7 @@ vitest のユニットテスト (分岐ロジック) と実機受入確認 (未�
 - `resources/css/app.css` の秘匿オーバーレイのスタイル (`#bfcache-guard-overlay` 周辺)
 - プローブ endpoint (`routes/web.php` の `session.status` /
   `App\Http\Controllers\Auth\SessionStatusController` / `SessionStatusResource`)
+- `resources/js/lib/passkeys.ts` (WebAuthn ラッパ本体。上記「パスキーの保証範囲」)
 
 **docblock / コメントのみの変更はトリガに当たらない** (挙動が変わっていないため)。
 不要な実機再確認を誘発しないよう、トリガは「挙動変更」に限る。

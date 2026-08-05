@@ -5,12 +5,17 @@ use App\Providers\FakeExternalsServiceProvider;
 use App\Providers\Filament\AdminPanelProvider;
 use App\Providers\FortifyServiceProvider;
 use App\Providers\McpPassportServiceProvider;
+use App\Providers\PasskeyServiceProvider;
 use App\Providers\SeoServiceProvider;
 
 return [
     AppServiceProvider::class,
     AdminPanelProvider::class,
     FortifyServiceProvider::class,
+    // passkey (laravel/passkeys) の app アダプタ。Fortify が feature flag で route を
+    // 登録するため **FortifyServiceProvider より後**に置く。ただし binder / middleware の
+    // 後付けは provider 順序に依存しないよう $app->booted() 内で最終上書きする
+    PasskeyServiceProvider::class,
     // Passport は composer.json の dont-discover で自動 discovery を無効化し、
     // grant / repository を差し替えた本 Provider を唯一の登録点にする (WP23)
     McpPassportServiceProvider::class,
