@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
 
 /*
- * プロフィール設定画面 (T025: 唯一オーナーのアカウント削除ガード)。
- * - soleOwnedOrganizations 非空 → 警告 + 各組織の /organizations/{slug}/settings リンク描画
+ * プロフィール設定画面 (T025: 唯一オーナーのアカウント削除ガード / T115: 退会時の課金ガード)。
+ * - accountDeletionBlockers 非空 → 警告 + action 別の導線 (移譲 / 解約 / 切替つき解約) 描画
  * - 空 → 警告非表示
  * - errors.account (string / string[] 両対応) → danger Alert 表示
  * - 警告と errors.account の同時表示 (両立)
@@ -11,8 +11,15 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
  * - 削除 (router.delete) の onError はダイアログを閉じる (押下後に理由が見える)
  */
 
-const { pageState, routerDeleteMock, routerReloadMock, routerPostMock, formHolder, formSeed } =
-    vi.hoisted(() => ({
+const {
+    pageState,
+    routerDeleteMock,
+    routerReloadMock,
+    routerPostMock,
+    routerVisitMock,
+    formHolder,
+    formSeed,
+} = vi.hoisted(() => ({
     pageState: {
         props: {} as Record<string, unknown>,
         url: "/settings",
@@ -20,6 +27,7 @@ const { pageState, routerDeleteMock, routerReloadMock, routerPostMock, formHolde
     routerDeleteMock: vi.fn(),
     routerReloadMock: vi.fn(),
     routerPostMock: vi.fn(),
+    routerVisitMock: vi.fn(),
     // useForm fake が捕捉する各 form の holder。初期データキーで二分岐する:
     //   "email" を持つ → profileForm (case 6 で put を検証)
     //   "current_password" を持つ → passwordForm (T042 S2 で put/errorBag を検証)
@@ -41,7 +49,12 @@ vi.mock("@inertiajs/svelte", async (importOriginal) => {
     const { reactiveUseForm } = await import("../support/reactiveUseForm.svelte");
     return {
         ...(await importOriginal<typeof import("@inertiajs/svelte")>()),
-        router: { delete: routerDeleteMock, reload: routerReloadMock, post: routerPostMock },
+        router: {
+            delete: routerDeleteMock,
+            reload: routerReloadMock,
+            post: routerPostMock,
+            visit: routerVisitMock,
+        },
         page: pageState,
         // useForm を fake に差し替え、form を holder に記録する。
         //   "current_password" を持つ → passwordForm: 反応的 double
@@ -170,30 +183,92 @@ afterEach(() => {
     routerDeleteMock.mockReset();
     routerReloadMock.mockReset();
     routerPostMock.mockReset();
+    routerVisitMock.mockReset();
 });
 
-describe("Settings/Index 唯一オーナー削除ガード", () => {
-    it("soleOwnedOrganizations 非空で警告と各組織の設定リンクを描画する", () => {
+describe("Settings/Index 退会ガード (blocker と次の一手)", () => {
+    it("transfer_ownership は各組織の設定リンクを描画する", () => {
         setProps({
-            soleOwnedOrganizations: [
-                { name: "現場A", slug: "genba-a" },
-                { name: "現場B", slug: "genba-b" },
+            accountDeletionBlockers: [
+                { name: "現場A", slug: "genba-a", actions: ["transfer_ownership"] },
+                { name: "現場B", slug: "genba-b", actions: ["transfer_ownership"] },
             ],
         });
         render(Index, { props: {} });
 
-        expect(screen.getByText("オーナー移譲が必要です")).toBeInTheDocument();
-        const linkA = screen.getByText("現場A の設定へ");
+        expect(screen.getByText("退会するには先に対応が必要です")).toBeInTheDocument();
+        const linkA = screen.getAllByText("オーナーを移譲する")[0];
         expect(linkA.getAttribute("href")).toMatch(/\/organizations\/genba-a\/settings$/);
-        const linkB = screen.getByText("現場B の設定へ");
+        const linkB = screen.getAllByText("オーナーを移譲する")[1];
         expect(linkB.getAttribute("href")).toMatch(/\/organizations\/genba-b\/settings$/);
+        expect(screen.getByText("現場A")).toBeInTheDocument();
+        expect(screen.getByText("現場B")).toBeInTheDocument();
     });
 
-    it("soleOwnedOrganizations が空なら警告を出さない", () => {
-        setProps({ soleOwnedOrganizations: [] });
+    it("open_billing は /billing への解約リンクを描画する", () => {
+        setProps({
+            accountDeletionBlockers: [
+                { name: "現場A", slug: "genba-a", actions: ["open_billing"] },
+            ],
+        });
         render(Index, { props: {} });
 
-        expect(screen.queryByText("オーナー移譲が必要です")).toBeNull();
+        const link = screen.getByText("サブスクリプションを解約する");
+        expect(link.getAttribute("href")).toMatch(/\/billing$/);
+    });
+
+    it("switch_organization_then_open_billing は切替 → 成功時のみ /billing へ進む", async () => {
+        setProps({
+            accountDeletionBlockers: [
+                {
+                    name: "現場B",
+                    slug: "genba-b",
+                    actions: ["switch_organization_then_open_billing"],
+                },
+            ],
+        });
+        render(Index, { props: {} });
+
+        await fireEvent.click(screen.getByTestId("switch-then-billing-button"));
+
+        await waitFor(() => expect(routerPostMock).toHaveBeenCalledTimes(1));
+        const call = routerPostMock.mock.calls.at(-1);
+        expect(call?.[0]).toBe("/organizations/genba-b/switch");
+        const options = call?.[2] as { onSuccess?: () => void; onError?: () => void };
+        // 成功するまで /billing へは進まない
+        expect(routerVisitMock).not.toHaveBeenCalled();
+        options.onSuccess?.();
+        expect(routerVisitMock).toHaveBeenCalledWith("/billing");
+    });
+
+    it("切替失敗 (onError) では /billing へ進まず失敗メッセージを出す", async () => {
+        setProps({
+            accountDeletionBlockers: [
+                {
+                    name: "現場B",
+                    slug: "genba-b",
+                    actions: ["switch_organization_then_open_billing"],
+                },
+            ],
+        });
+        render(Index, { props: {} });
+
+        await fireEvent.click(screen.getByTestId("switch-then-billing-button"));
+        await waitFor(() => expect(routerPostMock).toHaveBeenCalledTimes(1));
+        const options = routerPostMock.mock.calls.at(-1)?.[2] as { onError?: () => void };
+        options.onError?.();
+
+        await waitFor(() =>
+            expect(screen.getByTestId("switch-organization-error")).toBeInTheDocument(),
+        );
+        expect(routerVisitMock).not.toHaveBeenCalled();
+    });
+
+    it("accountDeletionBlockers が空なら警告を出さない", () => {
+        setProps({ accountDeletionBlockers: [] });
+        render(Index, { props: {} });
+
+        expect(screen.queryByText("退会するには先に対応が必要です")).toBeNull();
     });
 
     it("errors.account (string) を danger Alert で表示する", () => {
@@ -215,17 +290,23 @@ describe("Settings/Index 唯一オーナー削除ガード", () => {
 
     it("警告と errors.account を同時に表示できる", () => {
         setProps({
-            soleOwnedOrganizations: [{ name: "現場A", slug: "genba-a" }],
+            accountDeletionBlockers: [
+                { name: "現場A", slug: "genba-a", actions: ["transfer_ownership"] },
+            ],
             errors: { account: "削除できません" },
         });
         render(Index, { props: {} });
 
-        expect(screen.getByText("オーナー移譲が必要です")).toBeInTheDocument();
+        expect(screen.getByText("退会するには先に対応が必要です")).toBeInTheDocument();
         expect(screen.getByText("削除できません")).toBeInTheDocument();
     });
 
     it("削除ボタンは常に有効 (disabled 不使用)", () => {
-        setProps({ soleOwnedOrganizations: [{ name: "現場A", slug: "genba-a" }] });
+        setProps({
+            accountDeletionBlockers: [
+                { name: "現場A", slug: "genba-a", actions: ["transfer_ownership"] },
+            ],
+        });
         render(Index, { props: {} });
 
         const button = screen.getByTestId("delete-account-button");

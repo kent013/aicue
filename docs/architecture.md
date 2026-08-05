@@ -599,6 +599,44 @@ doc/10 §10.3 / §10.8-4/-7 の実装 (T004)。routes は `/app/projects/{projec
   再取得 1 回リトライ)。SW (`public/capture-sw.js`) は同一オリジン GET `/build/*` のみ
   stale-while-revalidate (アプリ応答・S3 は素通し)
 
+## 退会 (アカウント削除) の課金ガード (T115)
+
+- **不変条件**: 「**唯一 Owner** かつ (**他メンバーが残る** ∨ **生きた課金責務がある**) 組織」が
+  1 つでもあれば退会をブロックし、**次の一手を提示する** (押下時にエラー = 削除ボタンは
+  disabled にしない)。**通常のアプリ経路の**判定の権威は
+  `OrganizationMembershipService::deleteAccount()` のロック下再評価 (canonical 順序
+  users → organizations)。表示用の `/settings` props (`accountDeletionBlockers`) は
+  スナップショットに過ぎない
+- **「生きた課金責務」の定義**: `Services/Billing/AccountDeletionBillingGuard::hasLiveBillingObligation()`
+  = `SubscriptionState::fromSubscription()->grantsAccess()` (Active / UpgradeRecovery / PastDue)
+  **かつ `ends_at === null`**。`ends_at` 付き (期末解約予約済み) を**通す**のが要点で、ここを塞ぐと
+  「解約したのに退会できない」最長 1 課金周期の詰みが出る。`paused` / `canceled` / `unpaid` /
+  `incomplete*` も通す。**これは entitlement (利用可否) の判定ではない** (利用可否の窓口は
+  `BillingAccess` / `SubscriptionService::deriveEntitlement`)
+- **退会処理から決済事業者 API を呼ばない**原則 (自 DB と外部サービスの二重書き込みを避ける)。
+  固定しているのは `tests/Feature/Auth/AccountDeletionTest.php` の
+  「退会成功経路では決済事業者 API を呼ばない」「課金中でブロックされる経路でも決済事業者 API を
+  呼ばない (解約を代行しない)」の 2 本 (並べ替えに耐えるよう番号ではなく**テスト名**で参照する)
+- **予防 + 検知の 2 枚構成**: webhook トランザクションとの競合は排他しない
+  (subscription 行を作るのは Cashier の `WebhookController` = vendor 側で、自前 listener の
+  排他では覆えない)。検知は daily の `billing:detect-orphan-billing-organizations`
+  (Owner 不在かつ生きた課金責務が残る組織を 1 実行につき**集約して 1 回だけ** `report()`。
+  内容は件数と organization id のみ = PII 非出力。ガード導入前から存在する孤児も拾う)。
+  **監視対象**: 本コマンドの `report()`
+- **検知バッチの N+1 の判断記録**: `orphanBillingOrganizationIds()` は組織ごとに subscription を
+  引くが、入力が「Owner 不在の組織」= 通常 0 件の異常系集合のため許容する。件数が増えたら
+  exists subquery 化する
+- **決済事業者側データの運用注記**: 顧客データの消去は削除ではなく**非表示化 (redaction)** で、
+  非表示化は**作成から 90 日後のみ**・処理に**最大 30 日**を要する。**アプリからは自動化しない**
+  (退会経路から事業者 API を呼ばない原則と整合)。必要時は運用手順で実施する。
+  **外部仕様のため鵜呑みで固定しない**: 出典は c2c 台帳 feature `account-deletion-billing-guard`
+  の handover / 裁定 AG-033 (**確認日 2026-08-05**。一次情報は決済事業者 (Stripe) の公式
+  ドキュメントだが、**台帳側に一次情報の URL が pin されていない**)。数値を運用に効かせる前に
+  一次情報を引き直し、URL と確認日をここへ追記すること。事業者仕様変更時に更新する対象である
+- **決済手段の前提**: subscription Checkout は `payment_method_types` を指定せず Stripe
+  ダッシュボード設定に委ねている。**非同期決済 (コンビニ払い等) を有効化する場合、`incomplete` を
+  退会ガードで通過させている判断を再確認すること** (滞留時間が伸びるため)
+
 ## 管理メニュー (/manage/users・/projects/{project}/categories)
 
 doc/04 §4.2 の管理者専用画面 (T006)。書き込みは既存 endpoint を再利用し、GET 画面のみ新設。
