@@ -1,4 +1,3 @@
-import { ENV } from "../branding.js";
 import type { Dispatcher } from "undici";
 import type { CredentialStore } from "../credential/store.js";
 import { startLoopbackServer } from "./loopback-server.js";
@@ -22,7 +21,7 @@ import { writeOAuthToken, type OAuthTokenBundle } from "./token-store.js";
  * 5. `POST /oauth/token` (with code_verifier) and persist the token bundle
  *
  * The caller resolves `clientId` (from `/version`, `--client-id`, or
- * `${ENV.OAUTH_CLIENT_ID}`) — see `resolveCliOAuthClientId`.
+ * the `ENV.OAUTH_CLIENT_ID` env var) — see `resolveCliOAuthClientId`.
  */
 
 export type LoginResult = {

@@ -16,7 +16,6 @@
 //   - Per-profile `.salt` file removed; each file carries its own salt so
 //     keys are derived freshly from the user's master password + file salt.
 
-import { ENV } from "../branding.js";
 import {
     createCipheriv,
     createDecipheriv,
@@ -46,7 +45,7 @@ export const UXI2_MIN_LEN = UXI2_PREAMBLE_LEN; // empty plaintext is valid
  * The salt is not used by encryption itself (AES-GCM does not need a salt)
  * but is embedded in the header so that the same password can re-derive the
  * key on read without consulting any sidecar file. Callers that use a
- * directly-provided master key (e.g. `${ENV.CREDENTIAL_KEY}`) may pass any
+ * directly-provided master key (e.g. the `ENV.CREDENTIAL_KEY` env var) may pass any
  * 16B value; it will simply be stored verbatim.
  */
 export function encryptString(
@@ -73,7 +72,7 @@ export function encryptString(
     // AAD authenticates the bytes that AES-GCM does not otherwise cover:
     // magic (4) + version (1) + cipher_id (1) + salt (16). If any of these
     // are tampered with on disk (including when the caller is using a
-    // direct `${ENV.CREDENTIAL_KEY}` that would otherwise ignore the salt),
+    // direct `ENV.CREDENTIAL_KEY` that would otherwise ignore the salt),
     // GCM's auth tag check will fail on read and we exit 33. IV and
     // authTag themselves are implicitly covered by GCM and need no AAD.
     const aad = buildAad(salt);

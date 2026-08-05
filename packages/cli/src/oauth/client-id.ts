@@ -1,14 +1,14 @@
-import { ENV, BIN_NAME } from "../branding.js";
+import { ENV } from "../branding.js";
 import { fetchJsonValidated } from "../http/fetch-json.js";
 import { VersionResponseSchema } from "../http/schemas.js";
 import type { ResolvedConnectionOptions } from "../profile/context.js";
 
 /**
- * Resolve the public PKCE client id for `${BIN_NAME} login` (T715 Phase 3).
+ * Resolve the public PKCE client id for the CLI `login` command (T715 Phase 3).
  *
  * Resolution order (first hit wins):
  *   1. explicit `--client-id`
- *   2. `${ENV.OAUTH_CLIENT_ID}` env
+ *   2. the `ENV.OAUTH_CLIENT_ID` env var
  *   3. the server's `GET /version` → `cli_oauth_client_id`
  *
  * The version discovery is best-effort: a server that doesn't advertise the

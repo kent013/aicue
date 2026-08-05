@@ -70,6 +70,18 @@ bfcache 側 (`AuthenticatedPageBfcacheTest`) と同じファイルに混ぜな�
 
 pest 終了後に orphan 化した `playwright run-server` (node) はスクリプトが実行前後に掃除する。
 
+### CI での実行
+
+`.github/workflows/ci.yml` の `browser-tests` job が、**Chromium / WebKit の 2 レーンをそのまま**
+実行する (レーン限定も並列度上書きもしない)。job は postgres service +
+`pnpm build` + `pnpm exec playwright install --with-deps chromium webkit` を前提として
+`composer test:browser` を呼ぶ。CI 専用の起動経路は作らない (T099: CI が検証するものと
+開発者が走らせるものを同一に保つ)。
+
+workflow 側で `BROWSER_TEST_LANES` / `BROWSER_TEST_PROCESSES` を設定する退行は
+`tests/js/architecture/ci-workflow-inventory.test.ts` が、スクリプト側の契約は
+`scripts/run-browser-test.contract.test.ts` が deny-by-default で止める。
+
 ### 前提
 
 - **DB は Feature lane と同じ worktree 固有 pgsql テスト DB** (`<slug>_test_<worktree-hash>`)。

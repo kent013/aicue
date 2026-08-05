@@ -1,11 +1,10 @@
-import { BIN_NAME } from "../../branding.js";
 import { apiGet } from "../../api/client.js";
 import { MeResponseSchema } from "../../api/schemas.js";
 import { formatJson } from "../../output/json.js";
 import { ReadCommand } from "../base/ReadCommand.js";
 
 /**
- * `${BIN_NAME} whoami` — confirm the active API key resolves to an
+ * `whoami` — confirm the active API key resolves to an
  * organization on the configured API server.
  *
  * Output format is fixed at 4 lines of `key: value` pairs so downstream
