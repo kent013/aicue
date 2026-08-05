@@ -15,7 +15,7 @@ colors:
     text-secondary: "#52525B"
     success: "#15803D"
     warning: "#B45309"
-    danger: "#DC2626"
+    danger: "#B91C1C"
 typography:
     display:
         fontFamily: "Noto Sans JP, sans-serif"
@@ -101,9 +101,14 @@ tokens.css の値を差し替えて定義する**(制約体系=影なし・最�
   - tailwind: `text-success`, `bg-success`, `border-success`
 - **Warning(#B45309)**: 注意・確認が必要・保留。
   - tailwind: `text-warning`, `bg-warning`, `border-warning`
-- **Danger(#DC2626)**: 失敗・破壊的操作・エラー。Tertiary とは別物
+- **Danger(#B91C1C)**: 失敗・破壊的操作・エラー。Tertiary とは別物
   (Tertiary は前向きな強調、Danger は否定的なシグナル)。
   - tailwind: `text-danger`, `bg-danger`, `border-danger`
+
+状態色・アクセントは Tailwind の **-700 段**で揃える(`tertiary` teal-700 / `success` green-700 /
+`warning` amber-700 / `danger` red-700)。`neutral`(#F4F4F5)や `surface`(#FFFFFF)の上で
+**本文コントラスト 4.5:1** を確保するための下限であり、これより明るい段は使わない
+(`tests/js/architecture/contrast-invariant.test.ts` が機械検証する)。
 
 ソフト背景は状態色の opacity 修飾で表現する(`bg-success/10`, `bg-danger/10`,
 `bg-primary-soft` 等)。**新しい色トークンを足す前に opacity 修飾と atom 化で表現できないか

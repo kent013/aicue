@@ -462,7 +462,6 @@
                                     class="self-start rounded-md border border-border bg-surface p-4"
                                     data-testid="two-factor-qr"
                                 >
-                                    <!-- eslint-disable-next-line svelte/no-at-html-tags -->
                                     {@html qrSvg}
                                 </div>
                             {:else}

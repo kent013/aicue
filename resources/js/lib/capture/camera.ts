@@ -106,3 +106,18 @@ export function supportsPauseResume(): boolean {
         typeof window.MediaRecorder.prototype?.resume === "function"
     );
 }
+
+/**
+ * getUserMedia の video 制約を facingMode から組む (S6)。
+ *
+ * **呼出時点の facingMode を引数で受ける純関数**にしてある。
+ * component 側でクロージャから読む形に戻したり、結果をキャッシュしたりしないこと
+ * (flip 後の再取得で古い facing mode を使う後退になり、実機でしか気づけない)。
+ *
+ * ここに置く理由: 型専用 interface (`MediaTrackConstraints` = WebIDL dictionary) は
+ * 実行時グローバルではないため .svelte 側では ESLint no-undef を解決できない。
+ * .ts へ置けば tsc の型検査対象にもなる (eslint.config.js の globals 方針を参照)。
+ */
+export function videoConstraints(mode: FacingMode): MediaTrackConstraints {
+    return { facingMode: mode };
+}

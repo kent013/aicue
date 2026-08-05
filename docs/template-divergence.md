@@ -370,3 +370,60 @@ bug-hunt 同時起動は `playwright-cli kill-all` で相互破壊しうる。�
   `scripts/run-browser-test.sh` / `scripts/run-vitest.sh` / `package.json`
 - 設計: `devnotes/20260804-2319-global-test-lock/` (概念設計 Round 6 / 詳細設計 Round 5)
 - c2c 台帳: `global-test-lock` (origin: spirux:T1109/T1110、テンプレ昇格承認済み)
+
+---
+
+## D11 ✅ svelte-no-undef-gate を config 静的検査型で別実装 (同一不変条件・別実装)
+
+| 観点 | テンプレート | 本アプリ |
+|---|---|---|
+| gate 実装 | `tests/js/architecture/svelte-no-undef-gate.test.ts` (実装未確認 = mirror 未取得) | 同名ファイルを **ESLint `calculateConfigForFile()` による実効設定の静的検査**として独自実装 |
+
+### なぜ正当な差分か(logic-driven)
+
+c2c 台帳 `atomic-design-gates` の AG-023 裁定 (2026-08-05) で
+「aicue に svelte-no-undef-gate を補完する」ことは確定しているが、
+laravel-claude-template の mirror が本環境に無く、テンプレ実装を読めない。
+実装を待って不変条件を無防備のまま放置するより、
+**同じ不変条件を別実装で先に固定する**方が実害を早く閉じられる。
+
+### 揃えている不変条件(これは保証し続ける)
+
+> A. 「`resources/js` 配下の**全** `.svelte` で ESLint `no-undef` が error である」
+> B. 「その `languageOptions.globals` は**実行時グローバル**
+>    (`globals.browser` + `eslint.config.js` の `APP_RUNTIME_GLOBALS` 明示登録) と
+>    **完全一致**する — 型専用名を混ぜて no-undef を骨抜きにしない」
+> C. 「**lint 対象の全ファイル**
+>    (= `pnpm lint` = `eslint resources/js` の範囲 × `eslint.config.js` が `files` で
+>    対象にしている全拡張子: `.svelte` / `.js` / `.mjs` / `.cjs` / `.ts` / `.jsx` / `.tsx`) で
+>    `linterOptions.noInlineConfig` が true であり、inline の eslint-disable が効かない」
+
+`tests/js/architecture/svelte-no-undef-gate.test.ts` が
+ESLint 公開 API `calculateConfigForFile()` で実効設定を解決し、
+A/B を全 `.svelte` に、C を lint 対象全ファイルに適用して検査する。
+走査 0 件でも fail する (空振り防止)。
+検査ロジックは純関数 (`assertSvelteNoUndefConfig` / `assertNoInlineConfig`) に切り出し、
+正負のコントロールで検出器の実効性を固定している
+(ESLint の flat config マージ規則そのものは試験対象にしない)。
+
+**運用契約 1 (noInlineConfig 体制)**: ルールを黙らせる唯一の手段は
+`eslint.config.js` の file-scoped override。override を認めるのは
+(a) 抑制対象が具体的な 1 ファイル (または明示列挙) に閉じている
+(b) なぜ安全かがコード側コメントで説明されている
+(c) config 側に理由と再検討条件が書かれている — の 3 条件をすべて満たすときだけ。
+
+**運用契約 2 (宣言と検査範囲の一致)**: `pnpm lint` の対象を広げる
+(引数ディレクトリを増やす / 新しい拡張子を扱う) ときは、本 gate の
+`LINT_TARGET_EXTENSIONS` と走査ルートも**同一 PR で**広げること。
+宣言 (config コメント) と検査範囲が乖離すると「守っているつもりの穴」ができる。
+
+### 収束条件
+
+laravel-claude-template の mirror が取得できた時点でテンプレ実装と突き合わせ、
+実装を寄せられるなら本エントリを解消する。
+
+### 関連
+
+- 実装: `tests/js/architecture/svelte-no-undef-gate.test.ts`, `eslint.config.js`
+- 設計: `devnotes/20260805-0101-frontend-baseline-gates/detailed-design.md` 施策 4
+- 台帳: c2c `atomic-design-gates` AG-023 (2026-08-05 裁定), `eslint-svelte-ts-baseline`
