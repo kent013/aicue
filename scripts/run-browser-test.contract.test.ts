@@ -186,15 +186,15 @@ function runInSandbox(
         writeFileSync(join(sandbox, "artisan"), "<?php\n", "utf-8");
         writeFileSync(join(sandbox, "phpunit.browser.xml"), "<phpunit/>\n", "utf-8");
 
-        // php スタブ: 何もせず成功する。
+        // php スタブ: 何もせず即座に成功する。
         //
-        // **短い sleep を入れるのは必須**: global_test_lock_run は起動直後の子を
-        // `ps -o pgid= -p "$pid"` で probe して専用プロセスグループを確認する。
-        // 子が sub-millisecond で終わると ps が「そんな pid は無い」で非ゼロを返し、
-        // `set -euo pipefail` 下の代入が失敗してレーンごと落ちる。実運用の
-        // `php artisan config:clear` / `vendor/bin/pest` はミリ秒では終わらないため
-        // 顕在化しないが、スタブは現実の所要時間を最低限模す必要がある。
-        writeExecutable(join(sandbox, "bin/php"), "#!/usr/bin/env bash\nsleep 0.1\nexit 0\n");
+        // **意図的に sleep を入れない**: T104 は pgid probe の race (既に終了した pid に
+        // 対する ps の非ゼロが `set -euo pipefail` 下の代入へ伝播し、レーンごと落ちる)
+        // を回避するためここに `sleep 0.1` を置いていた。T112 で global-test-lock.sh 側を
+        // `|| pgid=""` で正しく直したので回避策は撤去した。
+        // **この「sleep が無いこと」自体が回帰テストである**: race が戻れば
+        // スタブが sub-millisecond で終わって本契約テストが落ちる。
+        writeExecutable(join(sandbox, "bin/php"), "#!/usr/bin/env bash\nexit 0\n");
 
         const callsPath = join(sandbox, "pest-calls.jsonl");
         const failing = options.failingLanes ?? [];
@@ -204,8 +204,7 @@ function runInSandbox(
             [
                 "#!/usr/bin/env bash",
                 "set -u",
-                // bin/php と同じ理由 (global_test_lock_run の ps probe との race 回避)
-                "sleep 0.1",
+                // bin/php と同じ理由で sleep は入れない (T112 で race を根治済み)
                 `CALLS="${callsPath}"`,
                 // argv を JSON 配列へ (jq に依存しない素朴なエスケープ: 実引数に " や \\ は現れない)
                 'out="["',

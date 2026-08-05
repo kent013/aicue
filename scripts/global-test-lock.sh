@@ -263,7 +263,12 @@ _gtl_probe_process_group() {
         sleep 0.3 &
         pid=$!
         [ "${prev}" = "1" ] || set +m
-        pgid="$(ps -o pgid= -p "${pid}" 2>/dev/null | tr -d ' ')"
+        # `|| pgid=""` が必須: 呼び出し元レーンは `set -euo pipefail` で動くため、
+        # ps の非ゼロ (probe 対象が先に終わった / ps 自体が不在) が代入へ伝播して
+        # **リトライにも _gtl_die にも到達せず、その場でレーンごと落ちる**。
+        # 空は下の判定が「取れなかった」として扱う (厳格判定はこの関数が担い続ける)。
+        pgid=""
+        pgid="$(ps -o pgid= -p "${pid}" 2>/dev/null | tr -d ' ')" || pgid=""
         kill "${pid}" 2>/dev/null || true
         wait "${pid}" 2>/dev/null || true
         [ "${pgid}" = "${pid}" ] && return 0
@@ -347,7 +352,13 @@ global_test_lock_run() {
     _GTL_CHILD_PGID="${_GTL_CHILD_PID}"           # set -m により PGID == PID (取得時に probe 済み)
 
     # best-effort 検証: 空 = 既に終了 (race) なので異常ではない。値が違うときだけ落とす。
-    pgid="$(ps -o pgid= -p "${_GTL_CHILD_PID}" 2>/dev/null | tr -d ' ')"
+    #
+    # `|| pgid=""` が必須: レーンは `set -euo pipefail` で動くため、既に終了した pid に
+    # 対する ps の非ゼロが代入へ伝播し、**直下の -n 判定に到達する前にレーンごと落ちる**
+    # (偽赤)。空を許容するという下の意図を成立させるために、代入の失敗をここで吸収する。
+    # 厳格判定は取得時 1 回の _gtl_probe_process_group が担う (ここは元から best-effort)。
+    pgid=""
+    pgid="$(ps -o pgid= -p "${_GTL_CHILD_PID}" 2>/dev/null | tr -d ' ')" || pgid=""
     if [ -n "${pgid}" ] && [ "${pgid}" != "${_GTL_CHILD_PID}" ]; then
         _gtl_die "専用プロセスグループを作れなかった (pid=${_GTL_CHILD_PID} pgid=${pgid})"
     fi
