@@ -90,6 +90,40 @@ it('detects dev databases including case/whitespace variants', function (string 
     'APP',
 ]);
 
+// bug-hunt 環境の DB は allowlist regex でも構造的に除外されるが、
+// 「絶対に触らない」意図を denylist にも明示する二重防御 (AGENTS.md §bug-hunt)。
+it('hard-denies bug-hunt databases', function (string $variant): void {
+    expect(TestDatabaseEnv::isDevDatabase($variant))->toBeTrue()
+        ->and(TestDatabaseEnv::isAllowedTestDatabase($variant))->toBeFalse();
+})->with([
+    'bug_hunt',
+    'bug_hunt_1',
+    'bug_hunt_8',
+    'BUG_HUNT_3',
+    ' bug_hunt_5 ',
+]);
+
+it('covers every bug-hunt shard database in the denylist', function (): void {
+    // shard は :8011..:8018 = bug_hunt_1..8 (scripts/bug-hunt-shard.sh)。取りこぼしを機械検出する。
+    $expected = ['app', 'bug_hunt'];
+    for ($i = 1; $i <= 8; $i++) {
+        $expected[] = "bug_hunt_{$i}";
+    }
+
+    expect(TestDatabaseEnv::DEV_DB_DENYLIST)->toBe($expected);
+});
+
+it('does not deny unrelated names that merely start with bug_hunt', function (): void {
+    expect(TestDatabaseEnv::isDevDatabase('bug_hunt_9'))->toBeFalse()
+        ->and(TestDatabaseEnv::isDevDatabase('bug_hunts'))->toBeFalse()
+        // allowlist に載らないので DROP 経路には到達しない (denylist は二重防御の側)
+        ->and(TestDatabaseEnv::isAllowedTestDatabase('bug_hunt_9'))->toBeFalse();
+});
+
+it('assertPgsqlTestDatabaseSafe throws on bug-hunt databases', function (): void {
+    TestDatabaseEnv::assertPgsqlTestDatabaseSafe('bug_hunt_3');
+})->throws(InvalidArgumentException::class);
+
 it('does not flag test databases as dev', function (): void {
     expect(TestDatabaseEnv::isDevDatabase('app_test_deadbeef'))->toBeFalse()
         ->and(TestDatabaseEnv::isDevDatabase('app_testx'))->toBeFalse();

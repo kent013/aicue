@@ -1,0 +1,66 @@
+# doc/reference/ の NFD 形 index entry (削除対象 manifest)
+#
+# 生成: git ls-files -s -z doc/reference | (NFC 正規化して自分自身と異なる path を抽出)
+# 形式: <blob-hash> <TAB> <NFD path>
+#
+e6b874481b46e270101dffde1143eb2feb53ce0c	doc/reference/mockups/UL/09_カテゴリによる絞り込み.png
+83efc519368495f2c004f0a7ccc1c8d688fe6460	doc/reference/mockups/UL/13_動画プレビュー.png
+164b2a6742ae1539c44d99f7de9af961ebf21a9c	doc/reference/mockups/UL/17_ファイルダウンロード　完了表示.png
+ac531e2c847db10e5b7eefa555f84da7e25ad755	doc/reference/mockups/動画アプリ/PC_動画メニュー/02_ログインページ.png
+9f24c410ef4f6fd9919a5520cf6e80d22088789d	doc/reference/mockups/動画アプリ/PC_動画メニュー/03_パスワード再設定用 メール送信画面.png
+033b54d07d66c96b1319e2bc55a343e7adaa0300	doc/reference/mockups/動画アプリ/PC_動画メニュー/04_パスワード再設定 メール送信完了.png
+df01c0f7a727ec091c280496564b7fa04808df57	doc/reference/mockups/動画アプリ/PC_動画メニュー/06_パスワード再設定用 メール送信画面.png
+664d36117ce27b872cd3b5ea6b0803b6e2fba56e	doc/reference/mockups/動画アプリ/PC_動画メニュー/07_パスワード再設定 メール送信完了.png
+e6b874481b46e270101dffde1143eb2feb53ce0c	doc/reference/mockups/動画アプリ/PC_動画メニュー/09_カテゴリによる絞り込み.png
+ec2847bf8c4c26a3b7892c829aa3ade0a2ae2570	doc/reference/mockups/動画アプリ/PC_動画メニュー/10_ユーザー自身が作成したタイトルのみを表示.png
+313d7b6a97ae387ad19693f9f92925f94991884a	doc/reference/mockups/動画アプリ/PC_動画メニュー/11_状態で絞り込み可能.png
+83efc519368495f2c004f0a7ccc1c8d688fe6460	doc/reference/mockups/動画アプリ/PC_動画メニュー/13_動画プレビュー.png
+def051f67c32f77a47a1766c6f59fa3d7ac20e33	doc/reference/mockups/動画アプリ/PC_動画メニュー/15_ファイルダウンロード.png
+2f796b9b1b75c125f800880acf031a185707dc51	doc/reference/mockups/動画アプリ/PC_動画メニュー/16_ファイルダウンロード.png
+164b2a6742ae1539c44d99f7de9af961ebf21a9c	doc/reference/mockups/動画アプリ/PC_動画メニュー/17_ファイルダウンロード　完了表示.png
+d3aafbfa73764cf3e91c0c60c2a503f5cc494ac3	doc/reference/mockups/動画アプリ/PC_動画メニュー/26_動画プレビュー.png
+5311aa396a5efd8d1235a52c0c6a4d034353b4d8	doc/reference/mockups/動画アプリ/PC_動画メニュー/27_ファイルダウンロード.png
+a4d575a5373739dac9f5d68d1c6383a2047dab4f	doc/reference/mockups/動画アプリ/PC_動画メニュー/28_ファイルダウンロード　完了表示.png
+71b38a8f3b304b70b9ff5ca958ef69944a83490a	doc/reference/mockups/動画アプリ/PC_動画メニュー/40_テイクプレビュー.png
+bd1485088a277143fd5275e0a9bb8ecdfdbedca0	doc/reference/mockups/動画アプリ/PC_動画メニュー/41_テイクプレビュー　動画アップロード後.png
+733244dc48bab80ea2439b45a52c67e815c1cdd8	doc/reference/mockups/動画アプリ/PC_動画メニュー/43_テイクプレビュー　削除アラート.png
+7767801a8e63f687208d0eec1a52fdef9be05375	doc/reference/mockups/動画アプリ/PC_動画メニュー/44_テイクプレビュー　削除後.png
+6a066c4b121ddb23fc964467670d08602ace9f96	doc/reference/mockups/動画アプリ/PC_動画メニュー/46_動画プレビュー.png
+ac531e2c847db10e5b7eefa555f84da7e25ad755	doc/reference/mockups/動画アプリ/PC_管理メニュー/01_ログインページ.png
+c76e7b3e47ad48050eb7d7a0032ae766ee5c2695	doc/reference/mockups/動画アプリ/PC_管理メニュー/03_ユーザー追加.png
+5b84d977e7ba06c951722dd96edb8dec8299a92b	doc/reference/mockups/動画アプリ/PC_管理メニュー/04_ユーザー追加 エラー画面.png
+0ef1487b3760342573c296d5e74ea4698949663a	doc/reference/mockups/動画アプリ/PC_管理メニュー/06_ユーザー追加 通常画面.png
+f6d26c854039894ab8997126da22d7944ee2d059	doc/reference/mockups/動画アプリ/PC_管理メニュー/10_カテゴリ管理.png
+f09bcc733f45e2e059751642c290c84bff1c1eb2	doc/reference/mockups/動画アプリ/PC_管理メニュー/11_カテゴリ管理　カテゴリ追加.png
+7ae861ccc62e79a2ec397e28c87838939c4554e9	doc/reference/mockups/動画アプリ/PC_管理メニュー/12_カテゴリ管理　エラー表記.png
+0d2ae38ae18fdee2b28bd2c8e3f64c7564b66bb0	doc/reference/mockups/動画アプリ/PC_管理メニュー/13_カテゴリ管理　追加表示.png
+66815307bf92bb308d1c019d95df1bf56720458d	doc/reference/mockups/動画アプリ/PC_管理メニュー/14_カテゴリ管理.png
+993c6afc6cf3fedfc4fda0b537d7e1a1ec53149e	doc/reference/mockups/動画アプリ/PC_管理メニュー/15_カテゴリ管理　更新表示.png
+598bff26a24c2b6bebf8f275a072461ab90a4691	doc/reference/mockups/動画アプリ/PC_管理メニュー/16_カテゴリ管理.png
+d0cd4a69c89b2703901cd555afebd6aa199737a0	doc/reference/mockups/動画アプリ/PC_管理メニュー/17_カテゴリ管理　削除表示.png
+59401bc1f4034f56b590d6e93a015ea1b7c001cf	doc/reference/mockups/動画アプリ/SP_アプリ/01.png
+398b1e8c988c3f9c6b88547b986bfff3bc8d9c49	doc/reference/mockups/動画アプリ/SP_アプリ/02.png
+42426d7298abdd42d851776de6417dced7f591a6	doc/reference/mockups/動画アプリ/SP_アプリ/03.png
+dffa8d883e0acff32f6be54fd2226651facea125	doc/reference/mockups/動画アプリ/SP_アプリ/05.png
+16128cc655aa1367355a4c40ab69db91d4c036a5	doc/reference/mockups/動画アプリ/SP_アプリ/06(08).png
+71b0ee4af8756359cbb5a99e8c88a4120ec01927	doc/reference/mockups/動画アプリ/SP_アプリ/09.png
+3845ef8800785372ed24069414aac76634da944b	doc/reference/mockups/動画アプリ/SP_アプリ/10.png
+1fd6769cf2fedb4e7c2c453a4bd7ba32f9f0fe74	doc/reference/mockups/動画アプリ/SP_アプリ/11.png
+96b20e3ecd0c723d46e759ee7a39ba302524c025	doc/reference/mockups/動画アプリ/SP_アプリ/12.png
+4d69f40e517e93521731dbb5d78dc0d245583432	doc/reference/mockups/動画アプリ/SP_アプリ/14.png
+2508331feecb1a64804385b56c77a55a0f82c128	doc/reference/mockups/動画アプリ/SP_アプリ/17.png
+47130ab19e78b995124da474946a239a8e399a6f	doc/reference/mockups/動画アプリ/SP_アプリ/18.png
+ff2e9addbe2e60727687cda52b9795d5446928f0	doc/reference/mockups/動画アプリ/SP_アプリ/19.png
+a05f8b86a78db3356abd586f996edd211d66f14b	doc/reference/mockups/動画アプリ/SP_アプリ/22.png
+ac531e2c847db10e5b7eefa555f84da7e25ad755	doc/reference/mockups/動画マニュアル_モック/P01_ログインページ.png
+889932fb7efe5c92e63f20100bd9265fc5e4ed77	doc/reference/mockups/動画マニュアル_モック/P09_カテゴリによる絞り込み.png
+47206d664a9bad416e0ef4c4c2827b54b2f3ec58	doc/reference/mockups/動画マニュアル_モック/P11_状態で絞り込み可能.png
+83efc519368495f2c004f0a7ccc1c8d688fe6460	doc/reference/mockups/動画マニュアル_モック/P13_動画プレビュー.png
+def051f67c32f77a47a1766c6f59fa3d7ac20e33	doc/reference/mockups/動画マニュアル_モック/P15_ファイルダウンロード.png
+2f796b9b1b75c125f800880acf031a185707dc51	doc/reference/mockups/動画マニュアル_モック/P16_ファイルダウンロード-1.png
+164b2a6742ae1539c44d99f7de9af961ebf21a9c	doc/reference/mockups/動画マニュアル_モック/P17_ファイルダウンロード　完了表示.png
+6a066c4b121ddb23fc964467670d08602ace9f96	doc/reference/mockups/画面/46_動画プレビュー.png
+f1a0740e0ee2c2cc4ef262400ccc22b2f2597672	doc/reference/scenarios/拘束板QR名盤交換/動画の構図のパターン例.docx
+
+# 注: pathspec ファイル (NUL 区切り) はバイナリなのでコミットしない。
+# 再生成: python3 devnotes/20260805-2017-todo-T114/nfc-nfd-index.py pathspec <out>

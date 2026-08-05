@@ -37,11 +37,25 @@ try {
 
 $stmt = $pdo->prepare('SELECT 1 FROM pg_database WHERE datname = :name');
 $stmt->execute(['name' => $base]);
-if ($stmt->fetchColumn() !== false) {
-    fwrite(STDERR, "ensure-test-db: base DB already exists: {$base}\n");
-    exit(0);
+$exists = $stmt->fetchColumn() !== false;
+
+// 出自 (worktree の realpath) を記録/更新する (非破壊の COMMENT ON DATABASE)。
+// 孤児 sweep (drop-test-db.php --orphans) の**分類材料**であって guard ではない。
+// 既存 DB でも必ず通す = 冪等 (ここを通さないと「ラベルの無い現役 DB」が生まれる)。
+$provenance = realpath($projectRoot);
+Assert::string($provenance, "projectRoot must resolve to a real path: {$projectRoot}");
+
+foreach (testDatabaseEnsurePlan($exists) as $action) {
+    match ($action) {
+        TestDatabaseEnsureAction::Create => $pdo->exec(pgsqlCreateDatabaseSql($base)),
+        TestDatabaseEnsureAction::StampProvenance => pgsqlStampProvenance(
+            static fn (string $sql): mixed => $pdo->exec($sql),
+            pgsqlCommentDatabaseSql($pdo, $base, $provenance),
+        ),
+    };
 }
 
-$pdo->exec(pgsqlCreateDatabaseSql($base));
-fwrite(STDERR, "ensure-test-db: created base DB: {$base}\n");
+fwrite(STDERR, $exists
+    ? "ensure-test-db: base DB already exists: {$base}\n"
+    : "ensure-test-db: created base DB: {$base}\n");
 exit(0);

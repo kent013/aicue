@@ -176,6 +176,20 @@
 - **orphan 化した worktree**(teardown を経ず破棄)は `git worktree prune` で整理。
   検証なしの強制削除は
   `git worktree remove --force .claude/worktrees/tasks/<task-id> && git worktree prune`
+- **強制撤去したときのテスト DB 回収**: `git worktree remove --force` で teardown を迂回すると
+  `drop-test-db.php` を通らず**孤児テスト DB が残る**。回収は
+  `php scripts/ci/drop-test-db.php --orphans`(既定 **dry-run**。列挙は SELECT のみ)。
+  分類は **`Protected → Live → Foreign → Orphan → Unlabeled`** の順で確定し、
+  **`Orphan` / `Unlabeled` も `--include-hash=<hash>` で 1 つずつ名指ししない限り 1 件も落ちない**
+  (一括フラグは意図的に用意していない)。
+  - ⚠️ **`--apply`(実 DROP)は LLM / エージェントが実行してはならない**。
+    **ユーザー自身が実行するか、ユーザーが明示的に承認した場合のみ**実行できる(禁止事項 3)。
+    LLM が用意してよいのは dry-run の出力までである
+  - 排他の適用範囲を誇張しない: `.setup.lock` が閉じるのは**同一クローンの協調スクリプト
+    (setup / teardown / sweep)間の TOCTOU だけ**。cross-clone は
+    `Foreign` 分類 + `--protect-hash` + 人間承認で守る
+  - 背景(NFC/NFD 重複で dirty チェックが常時失敗 → 迂回 → 孤児 DB の単調増加)と
+    恒久対策(`GitIndexNormalizationTest`)は `docs/worktree-isolation-strategy.md`
 - **テストレーンのグローバルロック (T099)**: `composer test` / `composer test:browser` /
   `pnpm test` / `pnpm test:packages` / `pnpm test:coverage` は**ホスト全体で 1 本ずつ**しか
   走らない (worktree 横断で直列化し、テスト DB とポートの衝突を構造的に防ぐ)

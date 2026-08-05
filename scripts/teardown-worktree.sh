@@ -74,6 +74,11 @@ if [[ -d "${WORKTREE_DIR}" ]]; then
         echo "${worktree_status}" >&2
         echo "先に commit / stash / clean してください" >&2
         echo "(依存変更 = package.json / pnpm-lock.yaml / composer.json / composer.lock も必ずコミット)" >&2
+        echo "" >&2
+        echo "⚠️  ここで git worktree remove --force を使って強制撤去すると、下の DB 回収 (drop-test-db.php)" >&2
+        echo "    を通らずテスト DB が孤児として残ります。強制撤去した場合は後で必ず回収してください:" >&2
+        echo "      php scripts/ci/drop-test-db.php --orphans          # dry-run で対象を確認" >&2
+        echo "      (実 DROP は --apply --confirm=<token> が必要。LLM は実行しないこと)" >&2
         exit 1
     fi
 else

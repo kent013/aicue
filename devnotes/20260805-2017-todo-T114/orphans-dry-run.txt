@@ -1,0 +1,58 @@
+== hash 対応表 (人間が cross-clone を判断するための材料) ==
+  018d63c6   (ラベルなし)                              Unlabeled
+  0b1513d9   (ラベルなし)                              Live
+  3a7d6b4e   (ラベルなし)                              Unlabeled
+  823cbbd2   (ラベルなし)                              Unlabeled
+  8af22c44   (ラベルなし)                              Live
+  91c7197b   (ラベルなし)                              Unlabeled
+  b4f0102e   (ラベルなし)                              Unlabeled
+
+== 保護 (--protect-hash) ==
+  (なし)
+
+== 所有元を確認できない hash (unlabeled) ==
+  018d63c6 3a7d6b4e 823cbbd2 91c7197b b4f0102e
+  → これらは本機能より前に作られた DB か、base が既に消えた worker のみの群です。
+     同一 PostgreSQL を共有する別クローン / 別チェックアウトがある場合、その生存 DB が
+     ここに含まれます。apply する前に、別チェックアウトが無いことを必ず確認してください。
+     落とすには --include-hash=<hash> で 1 つずつ明示してください
+     (一括指定のフラグは意図的に用意していません)。
+
+== 分類 ==
+  app                        skip   dev DB denylist (絶対に触らない)
+  postgres                   skip   allowlist 外 (テスト DB ではない)
+  app_test_018d63c6          keep   Unlabeled (provenance ラベルなし (落とすには --include-hash=018d63c6 が必要))
+  app_test_0b1513d9          keep   Live (生存 worktree の hash)
+  app_test_3a7d6b4e          keep   Unlabeled (provenance ラベルなし (落とすには --include-hash=3a7d6b4e が必要))
+  app_test_3a7d6b4e_test_1   keep   Unlabeled (provenance ラベルなし (落とすには --include-hash=3a7d6b4e が必要) (base の分類を継承))
+  app_test_3a7d6b4e_test_2   keep   Unlabeled (provenance ラベルなし (落とすには --include-hash=3a7d6b4e が必要) (base の分類を継承))
+  app_test_3a7d6b4e_test_3   keep   Unlabeled (provenance ラベルなし (落とすには --include-hash=3a7d6b4e が必要) (base の分類を継承))
+  app_test_3a7d6b4e_test_4   keep   Unlabeled (provenance ラベルなし (落とすには --include-hash=3a7d6b4e が必要) (base の分類を継承))
+  app_test_823cbbd2          keep   Unlabeled (provenance ラベルなし (落とすには --include-hash=823cbbd2 が必要))
+  app_test_823cbbd2_test_1   keep   Unlabeled (provenance ラベルなし (落とすには --include-hash=823cbbd2 が必要) (base の分類を継承))
+  app_test_823cbbd2_test_2   keep   Unlabeled (provenance ラベルなし (落とすには --include-hash=823cbbd2 が必要) (base の分類を継承))
+  app_test_823cbbd2_test_3   keep   Unlabeled (provenance ラベルなし (落とすには --include-hash=823cbbd2 が必要) (base の分類を継承))
+  app_test_823cbbd2_test_4   keep   Unlabeled (provenance ラベルなし (落とすには --include-hash=823cbbd2 が必要) (base の分類を継承))
+  app_test_8af22c44          keep   Live (生存 worktree の hash)
+  app_test_8af22c44_test_1   keep   Live (生存 worktree の hash (base の分類を継承))
+  app_test_8af22c44_test_2   keep   Live (生存 worktree の hash (base の分類を継承))
+  app_test_8af22c44_test_3   keep   Live (生存 worktree の hash (base の分類を継承))
+  app_test_8af22c44_test_4   keep   Live (生存 worktree の hash (base の分類を継承))
+  app_test_91c7197b          keep   Unlabeled (provenance ラベルなし (落とすには --include-hash=91c7197b が必要))
+  app_test_b4f0102e          keep   Unlabeled (provenance ラベルなし (落とすには --include-hash=b4f0102e が必要))
+  app_test_b4f0102e_test_1   keep   Unlabeled (provenance ラベルなし (落とすには --include-hash=b4f0102e が必要) (base の分類を継承))
+  app_test_b4f0102e_test_2   keep   Unlabeled (provenance ラベルなし (落とすには --include-hash=b4f0102e が必要) (base の分類を継承))
+  app_test_b4f0102e_test_3   keep   Unlabeled (provenance ラベルなし (落とすには --include-hash=b4f0102e が必要) (base の分類を継承))
+  app_test_b4f0102e_test_4   keep   Unlabeled (provenance ラベルなし (落とすには --include-hash=b4f0102e が必要) (base の分類を継承))
+
+== 集計 ==
+  DROP 対象: 0 (0.0 kB) / 保持: 23 / skip: 2
+  生存 worktree hash: 0b1513d9 8af22c44
+
+--confirm=25d3584ffabc3420317b0b1f705a5ea9e99010f61620b0100160254edded72e5
+  (token は classifier_version / drop_targets / live_hashes / protected / include_hashes の
+   canonical JSON から算出しています。--apply は lock 取得後に同じ入力を再計算して
+   token を照合し、一致した場合だけ実行します)
+
+⚠ --apply は LLM / エージェントが実行してはなりません。
+   ユーザー自身が実行するか、ユーザーが明示的に承認した場合のみ実行できます。
