@@ -155,6 +155,13 @@
   (`Gate::authorize` は dual guard 下で `ApiKey` を Policy に渡してしまい 500 になる)。
   OAuth CLI セッションは**組織メンバーなら誰でも開始できる**ため、
   組織メンバーであることは書き込み権限を意味しない(Policy が別途判定する)。
+- **エラーの優先順位は「actor 解決 → テナント境界 404 → ability 403 → Policy 403」**。
+  ability の 403 をテナント境界より先に返すと、read-only キーで write route を叩くだけで
+  「他組織に実在 = 403 / 不在 = 404」と分岐し、**project id の存在オラクル**になる
+  (監査サイクル 2 High-1)。actor 解決の失敗 (401 / `actor_not_resolvable` 403) は
+  **route binding より前**に返す — 不在 id に対しても 404 ではなく 401/403 になるが、
+  実在 id と不在 id で応答が同一なので存在は漏れない。
+  順序は `ProjectRouteCurrentOrgGuardTest` / `TenantBoundaryOrderingTest` が機械固定する。
 - rate limit は既存 4 バケット(api-read / api-write / api-status / api-mcp)に割り当てる。
   新バケットを増やすのは要件に明示的な根拠があるときだけ。
 - MCP tool: whoami / list-projects / show-project / list-items の雛形に倣う。書き込み tool は McpIdempotencyService 経由。
@@ -211,25 +218,39 @@ LLM を使う機能が要件に来たら、まず利用形態を分類する:
    なお `can:` middleware / `FormRequest::authorize()` / membership binder /
    `auth`・`verified`・`recent-auth`・`require-active-subscription`・`api-key.ability`
    middleware は**認可(層 3)として数えない**(数えると gate が形骸化する)
-9. **層 2 は FormRequest より前で閉じる**: controller の inline guard は
-   **FormRequest のバリデーションより後**に走る。inline guard だけに頼ると
-   「cross-org の実在リソース + 不正 payload = 422 / 不在リソース = 404」の差分が
-   **存在オラクル**になる。`{project}` を持つ route は
-   web = `project.in-current-org` / **API = `api.project-in-org`** middleware を必ず付け、
-   子リソースは `Route::scopeBindings()` で routing 層に解決させる
-   (`ProjectRouteCurrentOrgGuardTest` / `NestedRouteIdorDefenseTest` が強制)
+9. **層 2 は binding の直後で閉じる**: `SubstituteBindings` は**不在 id だけ**を 404 にする。
+   したがって binding とテナント境界 404 の間に 404 以外で短絡する middleware が 1 つでもあると、
+   「他組織に実在 = その短絡の応答 / 不在 = 404」という **1 bit の存在オラクル**になる。
+   監査サイクル 2 では 課金ゲート 302・verified 302・2FA 強制 302・
+   Inertia version mismatch 409・`api-key.ability` 403 のすべてがテナント境界より先に走っていた。
+   - **`SubstituteBindings` とテナント guard の間に短絡 middleware を置かない**。
+     実行順の正本は `bootstrap/app.php` の **priority list**(route の宣言順ではない)。
+     ⚠ Laravel の priority list は「載っている middleware 同士の相対順序」しか強制しないため、
+     間に挟まる web グループの middleware も guard より後として priority list に載せる必要がある
+   - API の順序契約: `resolve.api-actor` → `SubstituteBindings` → **`api.project-in-org`** →
+     `api-key.ability:*` → `idempotent`。**ability の 403 はテナント境界 404 より後**
+   - `{project}` を持つ route は web = `project.in-current-org` /
+     **API = `api.project-in-org`** middleware を必ず付ける
+   - 子リソースは `Route::scopeBindings()` で routing 層に解決させる。
+     scopeBindings に乗らない param は **implicit binding を使わず** controller が
+     owner-scoped relation から手動解決する(binding 段で解決しない = 不在 id と
+     実在の他テナント id が同じ経路を辿る = 分岐しない)
+   (`ProjectRouteCurrentOrgGuardTest` / `NestedRouteIdorDefenseTest` /
+   **`TenantBoundaryOrderingTest`** が強制)
 10. **テストなしの実装完了はない**(不変条件 1-9 はそれぞれ対応する Architecture/Feature
     テストに新リソースを登録して初めて「実装済み」)
 
 ### 新規 route(特に変更系)を足すときのチェックリスト
 
-1. **層 2(テナント境界)が FormRequest より前に閉じているか**を確認する。
+1. **層 2(テナント境界)が binding の直後で閉じているか**を確認する。
    controller の inline guard は **FormRequest の後**に走るため、それだけでは不十分。
    - `{project}` を持つ route → web は `project.in-current-org`、
      **API は `api.project-in-org`** middleware が付いていること
    - 子リソース(`{item}` 等)→ `Route::scopeBindings()` で routing 層に解決させること
-   - 確認方法: **cross-org の実在リソース + 不正 payload** を送って
+   - 確認方法 1: **cross-org の実在リソース + 不正 payload** を送って
      **404**(422 ではない)が返ること
+   - 確認方法 2: 後段の短絡が起きる状態(未契約組織 / メール未確認 / 2FA 強制未準拠)で
+     **cross-org の実在 id と 不在 id の応答が status/ヘッダ/body まで完全一致**すること
 2. ハンドラ冒頭(URL 整合 guard の**後**)に `Gate::authorize(...)` を置く。
    **REST API v1 では `Gate::forUser($this->apiActor($request)->user)->authorize(...)`**
    (dual guard では通過した guard が default に昇格し `Auth::user()` が `ApiKey` を返すため、
@@ -239,7 +260,15 @@ LLM を使う機能が要件に来たら、まず利用形態を分類する:
    当てはまる enum case が無ければ、それは**認可を足すべき route** である
    (特に `NoAuthorizableSubject` は「親テナントすら無い新規作成」限定。
    親テナントがある create は**対象外** = `Gate::authorize('create', [Model::class, $parent])` を書く)
-4. 2+param route なら `NestedRouteIdorDefenseTest` の inventory にも防御方式を登録する
+4. **1 個以上の param を持つ route**なら `NestedRouteIdorDefenseTest` の inventory に
+   **parameter 単位で**防御方式(`NestedRouteDefenseMode`)を登録する。
+   テナント親子でない param は `NonResourceParameter` / `PublicGlobalResource` を宣言し、
+   `NestedRouteDefenseInventory::nonTenantReasons()` に理由を書く(無記名の逃げ道は作らない)
+4b. **新しい middleware を足したら** `TenantBoundaryOrderingTest` の
+   `middlewareShortCircuitInventory()` に「短絡しうるか」を必ず分類する
+   (未分類は fail。疑わしきは `true` 側に倒す)。`SubstituteBindings` より前に置く
+   短絡 middleware は `preBindingShortCircuitInventory()` にも登録し、
+   「生 route parameter を読まない」ことを宣言する
 5. **認可の「内容」を Feature テストで固定する**(必須)。
    `ControllerAuthorizationGateTest` はトークン走査であり、
    **到達可能性(`if (false) { Gate::authorize(...); }` のような死んだ認可)は判定しない**。

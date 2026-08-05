@@ -16,19 +16,28 @@ use Illuminate\Support\Facades\Route;
 |
 | `/api` prefix 配下 (bootstrap/app.php の withRouting)。認証は dual guard
 | `auth:api-key,api-oauth` (組織スコープの API キー + OAuth user token。guard 順序は
-| api-key 先 = 自動化トラフィックが先に解決)。middleware の順序契約:
+| api-key 先 = 自動化トラフィックが先に解決)。middleware の順序契約
+| (**宣言順ではなく bootstrap/app.php の priority list が正本**):
 |
-|   auth:api-key,api-oauth → throttle:{bucket} → resolve.api-actor
-|     → api-key.ability:{ability} → api.project-in-org → (idempotent) → controller
+|   auth:api-key,api-oauth → throttle:{bucket}
+|     → resolve.api-actor            ← SubstituteBindings より前 (401/403)
+|     → SubstituteBindings
+|     → api.project-in-org           ← テナント境界 404
+|     → api-key.ability:{ability}    ← 403
+|     → (idempotent) → controller
 |
 | api.project-in-org (EnsureProjectBelongsToApiOrganization) は URL 上の {project} が
 | actor の組織に属さなければ 404 にする層 2a。**FormRequest より前**に走ることが本質で、
 | これが無いと「cross-org の実在 project + 不正 payload = 422 / 不在 project = 404」の
-| 差分が project の存在オラクルになる。順序契約は 2 点とも不可侵:
+| 差分が project の存在オラクルになる。順序契約は 3 点とも不可侵:
 |   - resolve.api-actor **より後** ('organization' attribute が前提。前に置くと全 project
 |     route が Assert 発火で 500)
+|   - api-key.ability:* **より前** (audit-cycle-2 High-1)。逆順だと read-only キーで
+|     write route を叩いたとき「他組織に実在 = 403 / 不在 = 404」と分岐し、
+|     ability 不足のキーだけで project id の存在を列挙できる存在オラクルになる
 |   - idempotent **より前** (cross-org リクエストで idempotency 行を作らせない)
-| 網羅性と順序は tests/Architecture/ProjectRouteCurrentOrgGuardTest が機械固定する。
+| 網羅性と順序は tests/Architecture/ProjectRouteCurrentOrgGuardTest と
+| tests/Architecture/TenantBoundaryOrderingTest が機械固定する。
 |
 | resolve.api-actor が両経路を ApiActorContext (request attribute 'api_actor') に
 | 正規化する (OAuth 経路の cli:use scope / session 束縛 / membership 再検証もここ)。
@@ -64,10 +73,10 @@ Route::prefix('v1')
             ->name('api.v1.me.session.revoke');
     });
 
-// 読み取り (read ability)
+// 読み取り (read ability)。テナント境界 404 (api.project-in-org) は ability 403 より **前**
 Route::prefix('v1')
-    ->middleware(['auth:api-key,api-oauth', 'throttle:api-read', 'resolve.api-actor', 'api-key.ability:read',
-        'api.project-in-org'])
+    ->middleware(['auth:api-key,api-oauth', 'throttle:api-read', 'resolve.api-actor',
+        'api.project-in-org', 'api-key.ability:read'])
     ->group(function (): void {
         Route::get('/me', [MeController::class, 'show'])
             ->name('api.v1.me');
@@ -81,10 +90,11 @@ Route::prefix('v1')
             ->name('api.v1.projects.items.index');
     });
 
-// 書き込み (write ability)。全 write エンドポイントに Idempotency-Key を配線する
+// 書き込み (write ability)。全 write エンドポイントに Idempotency-Key を配線する。
+// テナント境界 404 (api.project-in-org) は ability 403 より **前**
 Route::prefix('v1')
-    ->middleware(['auth:api-key,api-oauth', 'throttle:api-write', 'resolve.api-actor', 'api-key.ability:write',
-        'api.project-in-org', 'idempotent'])
+    ->middleware(['auth:api-key,api-oauth', 'throttle:api-write', 'resolve.api-actor',
+        'api.project-in-org', 'api-key.ability:write', 'idempotent'])
     ->group(function (): void {
         Route::post('/projects/{project}/items', [ItemController::class, 'store'])
             ->name('api.v1.projects.items.store');

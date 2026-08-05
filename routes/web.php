@@ -234,16 +234,26 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
     Route::delete('/organizations/{organization:slug}/invitations/{invitation}', [OrganizationInvitationController::class, 'destroy'])
         ->scopeBindings()
         ->name('organizations.invitations.revoke');
-    // {user} は URL 整合 guard で認可より前に 404 (NestedRouteIdorDefenseTest 登録済み)
-    Route::patch('/organizations/{organization:slug}/members/{user}', [OrganizationMemberController::class, 'update'])
-        ->name('organizations.members.update');
-    Route::delete('/organizations/{organization:slug}/members/{user}', [OrganizationMemberController::class, 'destroy'])
-        ->name('organizations.members.destroy');
-    // メンバーの 2FA リセット (ロックアウト救済。Owner/Admin + step-up + 理由必須。
-    // {user} は URL 整合 guard で認可より前に 404)
-    Route::delete('/organizations/{organization:slug}/members/{user}/two-factor', [OrganizationMemberController::class, 'resetTwoFactor'])
-        ->middleware('recent-auth')
-        ->name('organizations.members.two-factor.reset');
+    /*
+    | {user} は scopeBindings で $organization->users() 経由に解決する。
+    | 非メンバー / 不在 id は **binding 段で等しく 404** になり、recent-auth (302) を含む
+    | binding 後のどの短絡 middleware よりも前に閉じる (audit-cycle-2 High-1 横断)。
+    | implicit binding のままだと「不在 = binding 404 / 実在の非メンバー = 後段短絡の 302」と
+    | 分岐し、users.id の存在オラクルになっていた。
+    | controller の inline guard (resolveOrganizationMember) は二重防御として残す。
+    | 親 {organization:slug} は MembershipScopedOrganizationBinder が引き続き担当する
+    | (scopeBindings は子解決のみに作用)。
+    */
+    Route::scopeBindings()->group(function (): void {
+        Route::patch('/organizations/{organization:slug}/members/{user}', [OrganizationMemberController::class, 'update'])
+            ->name('organizations.members.update');
+        Route::delete('/organizations/{organization:slug}/members/{user}', [OrganizationMemberController::class, 'destroy'])
+            ->name('organizations.members.destroy');
+        // メンバーの 2FA リセット (ロックアウト救済。Owner/Admin + step-up + 理由必須)
+        Route::delete('/organizations/{organization:slug}/members/{user}/two-factor', [OrganizationMemberController::class, 'resetTwoFactor'])
+            ->middleware('recent-auth')
+            ->name('organizations.members.two-factor.reset');
+    });
     // 組織の 2FA 必須方針トグル (Owner 専権 + step-up)
     Route::patch('/organizations/{organization:slug}/two-factor-requirement', [OrganizationController::class, 'updateTwoFactorRequirement'])
         ->middleware('recent-auth')
@@ -410,9 +420,14 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         | プロジェクト (current org スコープ。URL に org / team セグメントを含めない =
         | Default Team パターンのルーティング仕様)。
         | {project} の URL 整合 guard ({project} ∈ current org) は 2 層:
-        | (1) project.in-current-org middleware — FormRequest の DB ルール (unique/exists) より
-        |     前に cross-org を 404 に落とす (存在オラクル防止。{project} を持たない route では
-        |     no-op のため group 一括付与。網羅性は ProjectRouteCurrentOrgGuardTest が固定)
+        | (1) project.in-current-org middleware — cross-org を 404 に落とす (存在オラクル防止)。
+        |     **実行位置は宣言順ではなく bootstrap/app.php の priority list が正本**で、
+        |     SubstituteBindings の**直後** = 課金ゲート 302・verified 302・2FA 強制 302・
+        |     Inertia version mismatch 409・FormRequest の DB ルールより前に走る。
+        |     間に 404 以外で短絡する middleware が入ると「他組織に実在 = その短絡の応答 /
+        |     不在 = 404」の存在オラクルが復活する (audit-cycle-2 High-1)。
+        |     {project} を持たない route では no-op のため group 一括付与。
+        |     網羅性は ProjectRouteCurrentOrgGuardTest、順序は TenantBoundaryOrderingTest が固定
         | (2) controller の inline guard (resolveOrganizationProject) — 二重防御
         */
         Route::get('/projects', [ProjectController::class, 'index'])
@@ -513,8 +528,15 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
                 ->name('projects.manuals.duplicate');
         });
 
-        // プロジェクトメンバー管理 (追加は payload の user_id、削除は URL の {user})。
-        // {user} は URL 整合 guard (org member か) で認可より前に 404 (NestedRouteIdorDefenseTest 登録済み)
+        /*
+        | プロジェクトメンバー管理 (追加は payload の user_id、削除は URL の {user})。
+        | destroy の {user} は **implicit binding を使わない** (controller が string で受け、
+        | 現在組織の users() から手動解決する)。{user} の意味的な親は {project} ではなく
+        | 現在組織であり、scopeBindings が要求する Project::users() は存在しないため。
+        | binding 段で解決されない = 不在 id も実在の非メンバーもまったく同じ経路を辿る
+        | (= 分岐しない = 存在オラクル不成立)。この性質は TenantBoundaryOrderingTest の
+        | 検査 3a が「binding 段で解決されないこと」として機械検証する。
+        */
         Route::post('/projects/{project}/members', [ProjectMemberController::class, 'store'])
             ->name('projects.members.store');
         Route::delete('/projects/{project}/members/{user}', [ProjectMemberController::class, 'destroy'])

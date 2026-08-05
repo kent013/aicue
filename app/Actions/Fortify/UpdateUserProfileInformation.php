@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Actions\Fortify;
 
+use App\Enums\SecurityEventType;
 use App\Models\User;
 use App\Notifications\EmailChangedSecurityNotification;
+use App\Services\Security\SecurityEventRecorder;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
@@ -22,6 +24,10 @@ use Webmozart\Assert\Assert;
  */
 class UpdateUserProfileInformation implements UpdatesUserProfileInformation
 {
+    public function __construct(
+        private readonly SecurityEventRecorder $recorder,
+    ) {}
+
     /**
      * @param  array<string, mixed>  $input
      */
@@ -56,6 +62,12 @@ class UpdateUserProfileInformation implements UpdatesUserProfileInformation
             'email' => $email,
             'email_verified_at' => null,
         ])->save();
+
+        // 監査証跡。SecurityEventType::EmailChanged は enum に存在しながら記録経路が
+        // 無かった (T108 S7 の SecurityEventCoverageTest が deny-by-default で検出)。
+        // 通知 (検知導線) と監査ログ (事後追跡) は同じ事象の両輪なので同じ場所で記録する。
+        // 平文 email は metadata に載せない (PII は CipherSweet 管理の users 側に閉じる)。
+        $this->recorder->record(SecurityEventType::EmailChanged, $user);
 
         // 旧アドレスへの on-demand セキュリティ通知 (アカウントを持たない宛先にも送れる経路)
         Notification::route('mail', $oldEmail)

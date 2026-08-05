@@ -22,6 +22,8 @@ use Throwable;
  * - TESTING_FAKE_LLM=false (LLM fake の本番混入防止)
  * - TESTING_FAKE_STORAGE=false (storage fake の本番混入防止)
  * - TrustHosts allowlist (Host header injection 防御の allowlist 非空・書式)
+ * - TrustProxies allowlist (client IP / X-Forwarded-Proto の信頼境界。未宣言・`*`・
+ *   REMOTE_ADDR・書式不正を拒否。プロキシ無し構成は `none` の明示宣言を要求する)
  */
 class ProductionEnvGuard
 {
@@ -108,6 +110,17 @@ class ProductionEnvGuard
         $rawWildcards = $this->stringList(config('trusted_hosts.raw_wildcard_suffixes', []), keepEmpty: true);
         try {
             (new TrustedHostsConfigValidator)->validateForProduction($exact, $wildcard, $rawWildcards);
+        } catch (Throwable $e) {
+            $errors[] = $e->getMessage();
+        }
+
+        // client IP の信頼境界 (TrustProxies allowlist) を起動時検証。
+        // 未宣言だと XFF 偽装 or hop 取りこぼしによる自己 DoS のどちらかに倒れるため、
+        // production では「hop を明示宣言する」ことを起動条件にする (audit-cycle-2 High-2)。
+        $proxies = $this->stringList(config('trustedproxy.proxies', []));
+        $rawProxies = $this->stringList(config('trustedproxy.raw_proxies', []), keepEmpty: true);
+        try {
+            (new TrustedProxiesConfigValidator)->validateForProduction($proxies, $rawProxies);
         } catch (Throwable $e) {
             $errors[] = $e->getMessage();
         }

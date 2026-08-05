@@ -8,6 +8,7 @@ use App\Models\Item;
 use App\Models\Organization;
 use App\Models\Project;
 use Tests\Support\OAuthTestHelpers;
+use Tests\Support\ResponseSignature;
 
 /*
  * REST API v1 Item の認可境界 (web 側 Projects\ItemController と同一の ItemPolicy 境界)。
@@ -339,4 +340,90 @@ test('403 は Idempotency-Key で再生されない (権限付与後の再送は
         ->assertCreated();
 
     expect($project->items()->count())->toBe(1);
+});
+
+/*
+ * --- ability 不足 × テナント境界 の優先順位 (audit-cycle-2 High-1 / T108 S1) ---
+ *
+ * ability (403 insufficient_ability) の判定が テナント境界 404 より **前** に走ると、
+ * 「他組織に実在する project = 403 / 不在 project id = 404」と分岐し、
+ * ability 不足のキーだけで project id の実在を 1 bit ずつ列挙できてしまう。
+ * 順序契約 (api.project-in-org < api-key.ability:*) を **応答の同一性** で固定する。
+ */
+
+test('read のみの API キーで write route を叩くと cross-org 実在 project と不在 id が完全に同一応答', function (): void {
+    [$organizationA] = createOrganizationWithOwner('組織A');
+    [$organizationB, $ownerB] = createOrganizationWithOwner('組織B');
+    $projectA = Project::factory()->forOrganization($organizationA)->create();
+    [, $plain] = issueApiKey($organizationB, $ownerB, ['read']);
+    $headers = itemAuthorizationBearer($plain);
+    $payload = ['name' => '越境'];
+
+    $crossOrg = $this->withHeaders($headers)
+        ->postJson("/api/v1/projects/{$projectA->id}/items", $payload);
+    $missing = $this->withHeaders($headers)
+        ->postJson('/api/v1/projects/999999999/items', $payload);
+
+    expect($crossOrg->getStatusCode())->toBe(404)
+        ->and($crossOrg->json('error.code'))->toBe('not_found')
+        ->and(ResponseSignature::of($crossOrg))->toBe(ResponseSignature::of($missing));
+});
+
+test('write のみの API キーで read route を叩いても cross-org 実在 project と不在 id は同一応答', function (): void {
+    [$organizationA] = createOrganizationWithOwner('組織A');
+    [$organizationB, $ownerB] = createOrganizationWithOwner('組織B');
+    $projectA = Project::factory()->forOrganization($organizationA)->create();
+    [, $plain] = issueApiKey($organizationB, $ownerB, ['write']);
+    $headers = itemAuthorizationBearer($plain);
+
+    $crossOrg = $this->withHeaders($headers)->getJson("/api/v1/projects/{$projectA->id}/items");
+    $missing = $this->withHeaders($headers)->getJson('/api/v1/projects/999999999/items');
+
+    expect($crossOrg->getStatusCode())->toBe(404)
+        ->and($crossOrg->json('error.code'))->toBe('not_found')
+        ->and(ResponseSignature::of($crossOrg))->toBe(ResponseSignature::of($missing));
+});
+
+test('自組織 project + ability 不足は 403 insufficient_ability のまま (エラー契約の維持)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+    [, $plain] = issueApiKey($organization, $owner, ['read']);
+
+    $this->withHeaders(itemAuthorizationBearer($plain))
+        ->postJson("/api/v1/projects/{$project->id}/items", ['name' => 'アイテム'])
+        ->assertForbidden()
+        ->assertJsonPath('error.code', 'insufficient_ability')
+        ->assertJsonPath('error.details.required_ability', 'write');
+});
+
+test('OAuth CLI トークン (read scope のみ) でも 3 ケースが同じ順序契約で成立する', function (): void {
+    [$organizationA] = createOrganizationWithOwner('組織A');
+    [$organizationB, $ownerB] = createOrganizationWithOwner('組織B');
+    $projectA = Project::factory()->forOrganization($organizationA)->create();
+    $projectB = Project::factory()->forOrganization($organizationB)->create();
+
+    $issued = OAuthTestHelpers::issueCliSessionTokens(
+        test: $this,
+        user: $ownerB,
+        organization: $organizationB,
+        client: OAuthTestHelpers::createMcpClient(name: 'Ordering CLI'),
+        scope: 'cli:use read',
+    );
+    $headers = ['Authorization' => 'Bearer '.$issued['access_token']];
+    $payload = ['name' => '越境'];
+
+    // (1) cross-org 実在 と (2) 不在 id が完全に同一
+    $crossOrg = $this->withHeaders($headers)
+        ->postJson("/api/v1/projects/{$projectA->id}/items", $payload);
+    $missing = $this->withHeaders($headers)
+        ->postJson('/api/v1/projects/999999999/items', $payload);
+
+    expect($crossOrg->getStatusCode())->toBe(404)
+        ->and(ResponseSignature::of($crossOrg))->toBe(ResponseSignature::of($missing));
+
+    // (3) 自組織 project では従来どおり 403 insufficient_ability
+    $this->withHeaders($headers)
+        ->postJson("/api/v1/projects/{$projectB->id}/items", $payload)
+        ->assertForbidden()
+        ->assertJsonPath('error.code', 'insufficient_ability');
 });

@@ -55,6 +55,25 @@ use Laravel\Passkeys\Passkeys;
  */
 final class PasskeyServiceProvider extends ServiceProvider
 {
+    /**
+     * throttle を後付けする passkey route。
+     *
+     * vendor (Fortify) の $passkeyMiddleware は $throttle を含まないため、
+     * passkey.destroy **だけ** throttle が付かない
+     * (vendor/laravel/fortify/routes/routes.php)。
+     * EnsureLoginMethodRemains が毎リクエスト DB::transaction + User 行 lockForUpdate を
+     * 取るため、認証済みユーザーが自分の User 行に無制限のロック競合を起こせる
+     * (audit-cycle-2 Medium-2)。他の passkey route と同じ 10/min に揃える。
+     *
+     * ThrottleRequests は Laravel の priority list に含まれ Authenticate より後に走るため、
+     * キーは user 単位になる (未認証 IP fallback には落ちない)。これは limiter 定義次第の
+     * **設計上の期待**なので、別ユーザー同士で bucket が共有されないことを
+     * PasskeyThrottleTest が振る舞いで固定する。
+     */
+    private const THROTTLE_ROUTE_NAMES = [
+        'passkey.destroy',
+    ];
+
     /** recent-auth を後付けする passkey route (credential 集合を触る管理経路) */
     private const RECENT_AUTH_ROUTE_NAMES = [
         'passkey.registration-options',
@@ -114,9 +133,15 @@ final class PasskeyServiceProvider extends ServiceProvider
         $routes = $app->make(Router::class)->getRoutes();
         $routes->refreshNameLookups();
 
-        // **順序が重要**: recent-auth を先に通し、その後で手段保持を検査する。
+        // **順序が重要**: throttle → recent-auth → 手段保持 の順に通す。
+        // throttle を先に並べることで、priority 適用後も ThrottleRequests が
+        // RequireRecentAuth より前になる (無制限のロック競合を最外周で止める)。
         // 逆順だと stale recent-auth のリクエストでも User 行ロックを取りに行ってしまう。
-        // PasskeyRouteProtectionTest が gatherMiddleware() 上の index 比較で固定する。
+        // PasskeyRouteProtectionTest が解決後のクラス列上の index 比較で固定する。
+        foreach (self::THROTTLE_ROUTE_NAMES as $name) {
+            self::appendMiddlewareIfMissing($routes, $name, 'throttle:passkeys');
+        }
+
         foreach (self::RECENT_AUTH_ROUTE_NAMES as $name) {
             self::appendMiddlewareIfMissing($routes, $name, 'recent-auth');
         }

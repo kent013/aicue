@@ -29,11 +29,13 @@ use App\Http\Resources\Billing\InsufficientTicketsResource;
 use App\Http\Resources\Billing\QuotaExceededResource;
 use App\Support\Http\AdminPanelPath;
 use Illuminate\Auth\AuthenticationException;
+use Illuminate\Auth\Middleware\EnsureEmailIsVerified;
 use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Middleware\SubstituteBindings;
 use Inertia\Inertia;
 use Inertia\Middleware\EncryptHistory;
 use Symfony\Component\HttpFoundation\Response;
@@ -46,12 +48,36 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        // HTTPS リダイレクトは最外周 (FORCE_HTTPS_REDIRECT で有効化。LB 終端構成では off)
-        $middleware->prepend(RedirectToHttps::class);
+        /*
+         | HTTPS リダイレクト (FORCE_HTTPS_REDIRECT で有効化。LB 終端構成では off)。
+         |
+         | **prepend にしない**: Middleware::getGlobalMiddleware() は
+         | array_merge($prepends, $global, $appends) を返すため、prepend すると
+         | TrustProxies **より前**に走り、$request->isSecure() が X-Forwarded-Proto を
+         | 見られない。LB 終端 + FORCE_HTTPS_REDIRECT=true で 308 の無限ループになる。
+         | append することで TrustProxies の後・route group より前で走る。
+         */
+        $middleware->append(RedirectToHttps::class);
 
-        // LB / reverse proxy 終端構成での X-Forwarded-* 信頼 (HTTPS 検出・client IP 復元)
+        /*
+         | LB / reverse proxy 終端構成での X-Forwarded-* 信頼 (HTTPS 検出・client IP 復元)。
+         |
+         | `at:` は **渡さない**。Laravel の TrustProxies は
+         |   $this->proxies() ?: config('trustedproxy.proxies')
+         | の順で解決し、`TrustProxies::at()` を呼ばなければ config へ落ちる
+         | (vendor/laravel/framework/src/Illuminate/Http/Middleware/TrustProxies.php)。
+         | withMiddleware の callback は config 読込より前に走るため `at:` に closure は渡せず
+         | (trustHosts と違い array|string|null のみ)、env 由来の allowlist は config 経由が唯一の道。
+         |
+         | かつて `at: '*'` だった。これは全アドレスを trusted proxy 扱いにするため
+         | $request->ip() が XFF 最左 = **クライアントが自由に書ける値**になり、
+         | IP ベースの rate limit / reCAPTCHA / 監査ログがすべて無効化されていた
+         | (audit-cycle-2 High-2)。
+         |
+         | 設定は TRUSTED_PROXIES (config/trustedproxy.php)。production で未宣言なら
+         | ProductionEnvGuard が起動時 fail-fast する。運用契約は docs/trusted-proxies-runbook.md。
+         */
         $middleware->trustProxies(
-            at: '*',
             headers: Request::HEADER_X_FORWARDED_FOR
                 | Request::HEADER_X_FORWARDED_HOST
                 | Request::HEADER_X_FORWARDED_PORT
@@ -145,12 +171,14 @@ return Application::configure(basePath: dirname(__DIR__))
             'verified.or-back' => EnsureEmailIsVerifiedOrBack::class,
             // web の {project} route の URL 整合 guard。cross-org の {project} を
             // FormRequest の DB ルール (unique/exists) より前に 404 へ落とす
-            // (存在オラクル防止。網羅性は ProjectRouteCurrentOrgGuardTest が固定)
+            // (存在オラクル防止。網羅性は ProjectRouteCurrentOrgGuardTest が固定)。
+            // **実行位置は上の priority list が正本** (SubstituteBindings 直後)。
             'project.in-current-org' => EnsureProjectBelongsToCurrentOrganization::class,
             // REST API v1 用の同等 guard (組織は API キー / OAuth token から確定するため
             // web セッションの current org とは解決元が違う = 別 alias)。
-            // resolve.api-actor より後・idempotent より前に置くこと (順序契約は
-            // routes/api.php と ProjectRouteCurrentOrgGuardTest)
+            // resolve.api-actor より後・api-key.ability より前・idempotent より前
+            // (順序契約は routes/api.php / ProjectRouteCurrentOrgGuardTest /
+            // TenantBoundaryOrderingTest。実行位置の正本は上の priority list)
             'api.project-in-org' => EnsureProjectBelongsToApiOrganization::class,
             'resolve.api-actor' => ResolveApiActor::class,
             'api-key.ability' => RequireApiKeyAbility::class,
@@ -168,6 +196,64 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->appendToPriorityList(
             AuthenticatesRequests::class,
             McpConsentOrganizationBinder::class,
+        );
+
+        /*
+         | テナント境界 404 の位置を priority list で確定させる (audit-cycle-2 High-1)。
+         |
+         | 不在 id は SubstituteBindings が 404 にする。したがって **binding より後・テナント
+         | guard より前**に 404 以外で短絡する middleware があると、「他組織に実在 = その短絡の
+         | 応答 / 不在 = 404」という 1 bit の存在オラクルになる (課金ゲート 402/302・
+         | verified 302・2FA 強制 302・Inertia version mismatch 409・ability 403 が該当した)。
+         |
+         | 対処は 2 段:
+         |   1. ResolveApiActor を **binding より前**へ。actor 解決失敗 (401/403) を
+         |      「不在 404 がまだ起きていない時点」で返す。同 middleware は route binding に
+         |      依存しない ($request->route(...) を読まない) ため前倒し可能。
+         |   2. テナント guard を **binding の直後**へ。以降のすべての短絡より前になる。
+         |
+         | 副作用: guard が 404 で短絡すると内側 (HandleInertiaRequests / SecurityHeaders /
+         | NoStoreCacheHeaders / EncryptHistory) は走らない。これは binding 失敗 404 と同じ
+         | 扱いであり、既存契約 (SecurityHeadersTest「binding 失敗 404 には Permissions-Policy が
+         | 一切付かない」) と一致する = 不在と cross-org が応答ヘッダまで同一になる。
+         |
+         | 適用順序: ApplicationBuilder は appends → prepends の順に反映するため、
+         | 鎖状 append (SubstituteBindings → API guard → web guard → …) の anchor は解決可能。
+         |
+         | ⚠ **priority list は「載っている middleware 同士の相対順序」しか強制しない**
+         | (SortedMiddleware::sortMiddleware は priority map に無い要素を一切動かさない)。
+         | したがって「guard を binding の直後に置く」には、現に両者の間に挟まっている
+         | web グループの middleware も **guard より後**として priority list に載せる必要がある。
+         | 載せずに guard だけ登録しても、guard は列の末尾に留まったまま何も動かない
+         | (実測で確認済み。この落とし穴が audit-cycle-2 High-1 の再発経路そのもの)。
+         | 下の web 鎖はそのための宣言であり、順序は §唯一の順序契約 と一致する。
+         | 実測は TenantBoundaryOrderingTest が解決後の middleware 列で固定する。
+         */
+        $middleware->appendToPriorityList(
+            SubstituteBindings::class,
+            EnsureProjectBelongsToApiOrganization::class,
+        );
+        $middleware->appendToPriorityList(
+            EnsureProjectBelongsToApiOrganization::class,
+            EnsureProjectBelongsToCurrentOrganization::class,
+        );
+        // テナント guard より後に走ることを確定させる web グループの鎖
+        // (guard を binding 直後まで引き上げるための「後続」宣言)。
+        foreach ([
+            [EnsureProjectBelongsToCurrentOrganization::class, HandleInertiaRequests::class],
+            [HandleInertiaRequests::class, SecurityHeaders::class],
+            [SecurityHeaders::class, RequireTwoFactorForEnforcedOrganizations::class],
+            [RequireTwoFactorForEnforcedOrganizations::class, BlockTwoFactorDisableForEnforcedOrganizations::class],
+            [BlockTwoFactorDisableForEnforcedOrganizations::class, NoStoreCacheHeadersForAuthenticatedPages::class],
+            [NoStoreCacheHeadersForAuthenticatedPages::class, EncryptHistory::class],
+            [EncryptHistory::class, EnsureEmailIsVerified::class],
+            [EnsureEmailIsVerified::class, RequireActiveSubscription::class],
+        ] as [$after, $append]) {
+            $middleware->appendToPriorityList($after, $append);
+        }
+        $middleware->prependToPriorityList(
+            SubstituteBindings::class,
+            ResolveApiActor::class,
         );
 
         // Stripe webhook は署名検証 (Cashier middleware)、SES/SNS webhook は

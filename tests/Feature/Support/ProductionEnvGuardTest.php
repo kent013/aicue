@@ -21,6 +21,8 @@ beforeEach(function (): void {
     config(['trusted_hosts.exact_hosts' => ['app.example.com']]);
     config(['trusted_hosts.wildcard_suffixes' => []]);
     config(['trusted_hosts.raw_wildcard_suffixes' => []]);
+    config(['trustedproxy.proxies' => ['10.0.0.0/8']]);
+    config(['trustedproxy.raw_proxies' => ['10.0.0.0/8']]);
 });
 
 test('全 production 必須項目が埋まっていれば violations は空', function (): void {
@@ -183,4 +185,64 @@ test('production:preflight は production で mail 設定不備 (MAIL_MAILER=log
     config(['mail.from.address' => 'noreply@app.example.com']);
     config(['app.url' => 'https://app.example.com']);
     $this->artisan('production:preflight')->assertFailed();
+});
+
+/*
+ * TrustProxies allowlist (client IP の信頼境界。audit-cycle-2 High-2 / T108 S5)。
+ * 未宣言のまま production を起動すると fail-fast するのは **意図した破壊的変更**。
+ */
+
+test('TRUSTED_PROXIES が未設定なら violation', function (): void {
+    config(['trustedproxy.proxies' => []]);
+    config(['trustedproxy.raw_proxies' => ['']]);
+    $errors = (new ProductionEnvGuard)->violations();
+    expect($errors)->toHaveCount(1);
+    expect($errors[0])->toContain('TRUSTED_PROXIES is not set');
+});
+
+test('TRUSTED_PROXIES に * が含まれるなら violation (XFF 偽装が通る)', function (): void {
+    config(['trustedproxy.proxies' => []]);
+    config(['trustedproxy.raw_proxies' => ['*']]);
+    $errors = (new ProductionEnvGuard)->violations();
+    expect($errors)->toHaveCount(1);
+    expect($errors[0])->toContain('Trusting every address');
+});
+
+test('TRUSTED_PROXIES に REMOTE_ADDR が含まれるなら violation', function (): void {
+    config(['trustedproxy.proxies' => ['REMOTE_ADDR']]);
+    config(['trustedproxy.raw_proxies' => ['REMOTE_ADDR']]);
+    $errors = (new ProductionEnvGuard)->violations();
+    expect($errors)->toHaveCount(1);
+    expect($errors[0])->toContain('REMOTE_ADDR');
+});
+
+test('TRUSTED_PROXIES に書式不正が含まれるなら violation (config 段の silent drop を表面化)', function (): void {
+    // config 段では落ちるので proxies には現れない = raw を見ないと検知できない
+    config(['trustedproxy.proxies' => ['10.0.0.0/8']]);
+    config(['trustedproxy.raw_proxies' => ['10.0.0.0/8', '999.999.999.999/99']]);
+    $errors = (new ProductionEnvGuard)->violations();
+    expect($errors)->toHaveCount(1);
+    expect($errors[0])->toContain('invalid value');
+});
+
+test('TRUSTED_PROXIES に none と他の値を併記したら violation (曖昧宣言)', function (): void {
+    config(['trustedproxy.proxies' => ['10.0.0.0/8']]);
+    config(['trustedproxy.raw_proxies' => ['none', '10.0.0.0/8']]);
+    $errors = (new ProductionEnvGuard)->violations();
+    expect($errors)->toHaveCount(1);
+    expect($errors[0])->toContain('must be declared alone');
+});
+
+test('TRUSTED_PROXIES=none 単独なら violations は空 (プロキシ無し構成の明示宣言)', function (): void {
+    config(['trustedproxy.proxies' => []]);
+    config(['trustedproxy.raw_proxies' => ['none']]);
+    expect((new ProductionEnvGuard)->violations())->toBe([]);
+});
+
+test('TRUSTED_PROXIES 未設定なら enforce() が起動を止める (production の fail-fast)', function (): void {
+    config(['trustedproxy.proxies' => []]);
+    config(['trustedproxy.raw_proxies' => ['']]);
+
+    expect(fn () => (new ProductionEnvGuard)->enforce())
+        ->toThrow(RuntimeException::class, 'TRUSTED_PROXIES is not set');
 });

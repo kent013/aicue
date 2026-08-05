@@ -99,6 +99,16 @@ final class RouteBindingTypes
             'routes' => ['notifications.open', 'notifications.read'],
             'reason' => 'cross-user 404 のため controller が $user->notifications() 経由で解決する',
         ],
+        // ProjectMemberController::destroy は現在組織の users() から解決する。
+        // implicit binding のままだと「不在 id = binding 404 / 実在の非メンバー = 後段短絡の
+        // 302」と分岐し users.id の存在オラクルになる (audit-cycle-2 High-1 横断)。
+        // {user} の意味的な親は {project} ではなく現在組織のため scopeBindings は採れない
+        // (Project::users() が存在しない。Project::members() は明示メンバーのみで意味が狭い)。
+        'user' => [
+            'routes' => ['projects.members.destroy'],
+            'reason' => '存在オラクル封じのため controller が $organization->users() 経由で解決する'
+                .' (binding 段で解決しないことが不在 id と実在の非メンバーを同一応答にする根拠)',
+        ],
     ];
 
     /**

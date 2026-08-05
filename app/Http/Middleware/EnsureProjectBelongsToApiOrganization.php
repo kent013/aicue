@@ -25,14 +25,20 @@ use Symfony\Component\HttpFoundation\Response;
  *  - API: API キー / OAuth token から確定した request attribute 'organization'
  *         (ApiKeyGuard / ResolveApiActor が注入。ResolvesApiOrganization::resolveOrganization)
  *
- * 順序契約: api グループ (SubstituteBindings) → auth → throttle → resolve.api-actor
- *           → api-key.ability → **api.project-in-org** → idempotent → controller
+ * 順序契約 (**宣言順ではなく bootstrap/app.php の priority list が正本**):
+ *   auth → throttle → resolve.api-actor → SubstituteBindings
+ *     → **api.project-in-org** → api-key.ability → idempotent → controller
  * `organization` attribute が前提のため **resolve.api-actor より後**、
+ * ability 不足時に cross-org の実在を 403 で漏らさないため **api-key.ability より前**、
  * cross-org リクエストで idempotency 行を作らせないため **idempotent より前**に置く。
+ * とりわけ **SubstituteBindings の直後**であることが本質で、間に 404 以外で短絡する
+ * middleware があると「他組織に実在 = その短絡の応答 / 不在 = binding の 404」という
+ * 1 bit の存在オラクルになる (audit-cycle-2 High-1)。
  * {project} を持たない route では no-op (group 一括付与を許容し、将来の route 追加時の
  * guard 漏れを防ぐ)。
  *
- * 網羅性と順序は tests/Architecture/ProjectRouteCurrentOrgGuardTest が deny-by-default で固定する。
+ * 網羅性と順序は tests/Architecture/ProjectRouteCurrentOrgGuardTest と
+ * tests/Architecture/TenantBoundaryOrderingTest が deny-by-default で固定する。
  * controller の inline guard は二重防御として残す (middleware の付け漏れ・
  * withoutMiddleware への最終防衛線)。
  */
