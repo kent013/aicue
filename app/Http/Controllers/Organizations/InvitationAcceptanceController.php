@@ -9,6 +9,7 @@ use App\Models\Organization;
 use App\Models\OrganizationInvitation;
 use App\Models\User;
 use App\Services\Organization\OrganizationMembershipService;
+use App\Support\Seo\SeoManager;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -33,8 +34,13 @@ class InvitationAcceptanceController extends Controller
      * - 未ログイン + 有効招待: token を session に fail-secure 保存し register へ誘導する
      *   (登録完了時に CreateNewUser が招待組織へ参加させる)
      * - ログイン済 + 有効招待: 受諾確認画面 (組織名 + 受諾ボタン) を表示する
+     *
+     * タイトル: route 既定は config('seo.app_titles')['invitations.accept'] =「組織への招待」。
+     * 無効分岐だけは同じ route で別ページ (Invitations/Invalid) を返すため、
+     * SeoManager::setPrivateTitle() で上書きする (config は route 名でしか引けない)。
+     * **理由・組織名は開示しない**既存の秘匿契約を守り、固有名にも組織名を混ぜない。
      */
-    public function show(Request $request): Response|RedirectResponse
+    public function show(Request $request, SeoManager $seo): Response|RedirectResponse
     {
         $token = $request->query('token');
         abort_unless(is_string($token) && $token !== '', 404);
@@ -45,6 +51,12 @@ class InvitationAcceptanceController extends Controller
 
         // 無効招待は理由非開示の専用ページへ (guest / auth 共通)
         if ($invitation === null || $invitation->isRevoked() || $invitation->isAccepted() || $invitation->isExpired()) {
+            // タブ title は h1「この招待リンクは使用できません」から指示語「この」を落とした形。
+            // SeoTitle::compose が ` | {サイト名}` を付けるため、タブ幅を圧迫しない範囲で見出しと揃える
+            // (config/seo.php の「h1 と一致させる」規約に対する意図的な短縮。
+            //  文言を変えるときは Invitations/Invalid.svelte の h1 も追随させる)。
+            $seo->setPrivateTitle('招待リンクは使用できません');
+
             return Inertia::render('Invitations/Invalid');
         }
 

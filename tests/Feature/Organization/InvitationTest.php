@@ -313,6 +313,57 @@ test('無効な招待リンクはログイン済みでも専用ページを返�
 });
 
 /*
+ * T101: 無効分岐は同じ route (invitations.accept) で別ページを返すため、config('seo.app_titles')
+ * (route 名でしか引けない) では表現できない。controller の SeoManager::setPrivateTitle() で
+ * 上書きする契約を仕様固定する。秘匿契約 (理由・組織名を出さない) はタイトルにも及ぶ。
+ *
+ * **有効/無効を 1 テスト内で連続 GET しない**: SeoManager は scoped 束縛で、
+ * forgetScopedInstances() を呼ぶのは queue worker と Octane だけ。Feature テストは
+ * 1 つの application インスタンスを複数リクエストで使い回すため、先行リクエストの
+ * setPrivateTitle が後続へ漏れる (php-fpm は毎リクエスト新しいコンテナ、Octane は
+ * リクエスト間で scoped を破棄するので本番挙動ではない = テスト実行形態固有の制約)。
+ * よって分岐ごとに独立したテストへ分け、それぞれ期待する固有名を直接固定する。
+ */
+test('無効な招待リンクは専用タイトルを返す (組織名は漏らさない)', function (): void {
+    $organizationName = '秘匿対象組織';
+    [$organization] = createOrganizationWithOwner($organizationName);
+
+    $invitation = OrganizationInvitation::factory()->forOrganization($organization)->revoked()->create();
+    $invitation->forceFill(['token_hash' => hash('sha256', 'invalid-title-token')])->save();
+
+    $this->get('/invitations/accept?token=invalid-title-token')
+        ->assertOk()
+        ->assertInertia(function (AssertableInertia $page) use ($organizationName): void {
+            $page->component('Invitations/Invalid');
+            $title = $page->toArray()['props']['title'] ?? null;
+            expect($title)->toBeString();
+            // 無効分岐の固有タイトル (h1 から指示語「この」を落とした形)。
+            // route 既定の「組織への招待」のままになる退行を落とす。
+            expect($title)->toStartWith('招待リンクは使用できません');
+            // 秘匿契約: タイトルにも組織名を混ぜない
+            expect($title)->not->toContain($organizationName);
+        });
+});
+
+test('有効な招待リンクの受諾確認画面は route 既定タイトルのまま', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $token = inviteAndCaptureToken($organization, $owner, 'valid-title@example.com', AdminConsoleRole::Admin);
+    $invitee = User::factory()->create();
+
+    $this->actingAs($invitee)
+        ->get('/invitations/accept?token='.$token)
+        ->assertOk()
+        ->assertInertia(function (AssertableInertia $page): void {
+            $page->component('Invitations/Accept');
+            $title = $page->toArray()['props']['title'] ?? null;
+            expect($title)->toBeString();
+            // config('seo.app_titles')['invitations.accept'] = 「組織への招待」。
+            // 無効分岐の上書きが有効分岐まで及ぶ退行を落とす。
+            expect($title)->toStartWith('組織への招待');
+        });
+});
+
+/*
  * register 経由の招待受諾 (session の invitation_token + email 照合)。
  */
 

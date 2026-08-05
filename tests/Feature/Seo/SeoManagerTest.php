@@ -108,4 +108,10 @@ it('resolveDocumentTitle: 未登録だったアプリ画面が固有 title を�
     'MCP 導入ガイド' => ['organizations.onboarding.mcp', 'MCP 導入ガイド'],
     // F-4-02 (T029 取りこぼし) 回帰防止: 通知一覧 (Notifications/Index.svelte h1「通知」)
     '通知' => ['notifications.index', '通知'],
+    // T101 DocumentTitleCoverageTest が検出した未網羅 4 件 (Inertia を render する GET named route)。
+    'プラン比較' => ['billing.plans', 'プラン比較'],
+    // 見出しが `ようこそ、{組織名}` の動的挨拶文のため、h1 ではなく機能を表す静的名を採る
+    'プランの選択' => ['onboarding.checkout', 'プランの選択'],
+    '課金手続き中です' => ['onboarding.billing-required', '課金手続き中です'],
+    '撮影するマニュアルを選ぶ' => ['capture.manuals.index', '撮影するマニュアルを選ぶ'],
 ]);

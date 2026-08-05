@@ -71,7 +71,7 @@ test('current でない履歴行は tier 解決の対象にならない', functi
         'unit_amount' => 120,
         'currency' => 'jpy',
         'livemode' => false,
-        'active_from' => CarbonImmutable::now()->subYear(),
+        'active_from' => CarbonImmutable::now()->subYearNoOverflow(),
         'active_to' => CarbonImmutable::now()->subDay(), // 履歴行 (is_current=false)
         'is_current' => false,
     ]);

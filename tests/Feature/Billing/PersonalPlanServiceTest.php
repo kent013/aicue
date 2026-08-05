@@ -146,7 +146,7 @@ describe('activate', function (): void {
     test('マーカー済み (backfill / paid 経験) の組織は付与なしで有効化のみ', function (): void {
         $owner = User::factory()->create();
         $organization = app(OrganizationProvisioningService::class)->provision($owner, 'マーカー済み組織');
-        $organization->forceFill(['signup_tickets_granted_at' => now()->subYear()])->save();
+        $organization->forceFill(['signup_tickets_granted_at' => now()->subYearNoOverflow()])->save();
 
         $result = personalPlanService()->activate($organization, $owner);
 

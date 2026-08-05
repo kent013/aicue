@@ -80,7 +80,7 @@ test('active + 既知 base price は plan_code を同期し subscription 行の 
     $subscription = createFakeSubscription($organization, status: 'incomplete');
     $subscription->forceFill(['stripe_id' => 'sub_snapshot_1'])->save();
 
-    $periodEnd = CarbonImmutable::now()->addMonth()->startOfSecond();
+    $periodEnd = CarbonImmutable::now()->addMonthNoOverflow()->startOfSecond();
     $trialEnd = CarbonImmutable::now()->addDays(3)->startOfSecond();
 
     snapshotSyncService()->applySubscriptionSnapshot($organization, snapshotSyncSnapshot(
@@ -168,7 +168,7 @@ test('subscription 行が無くても行を作らない (作成権威は Cashier
 test('period 欠落 snapshot は既存の current_period_end を維持する (reminder の真実源を壊さない)', function (): void {
     $organization = snapshotSyncOrganization();
     $subscription = createFakeSubscription($organization);
-    $existingPeriodEnd = CarbonImmutable::now()->addMonth()->startOfSecond();
+    $existingPeriodEnd = CarbonImmutable::now()->addMonthNoOverflow()->startOfSecond();
     $subscription->forceFill([
         'stripe_id' => 'sub_snapshot_1',
         'current_period_end' => $existingPeriodEnd,
@@ -278,7 +278,7 @@ test('customer.subscription.updated は snapshot 同期と PM 記録を配線す
                     'data' => [[
                         'price' => ['id' => snapshotSyncStandardPriceId()],
                         'quantity' => 1,
-                        'current_period_end' => CarbonImmutable::now()->addMonth()->getTimestamp(),
+                        'current_period_end' => CarbonImmutable::now()->addMonthNoOverflow()->getTimestamp(),
                     ]],
                 ],
             ],

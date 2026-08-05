@@ -100,7 +100,20 @@ return [
         'invitations.accept' => '組織への招待',
         // 課金
         'billing.index' => 'プランとお支払い',
+        // プラン比較 (billing.plans — Billing/Plans.svelte の見出し「プラン比較」)
+        'billing.plans' => 'プラン比較',
         'billing.tickets.show' => 'チケットを購入',
+        /*
+        | 課金オンボーディング (課金ゲートの着地先。未契約組織が「契約するために」
+        | 到達する導線なので、タブ識別性は詰み回避の一部。AGENTS.md ドメイン規約 4)。
+        | onboarding.checkout の画面見出しは `ようこそ、{組織名}` という動的な挨拶文で、
+        | タブ title としては組織名が幅を食い機能も伝わらないため、
+        | 機能を表す静的名を採る (billing.tickets.show と同じ判断)。
+        */
+        'onboarding.checkout' => 'プランの選択',
+        // 課金手続き待ち (onboarding.billing-required — Onboarding/BillingRequired.svelte
+        // の見出し「課金手続き中です」)
+        'onboarding.billing-required' => '課金手続き中です',
         // プロジェクト (show は controller が setPrivateTitle でプロジェクト名を供給)
         'projects.index' => 'プロジェクト',
         'projects.create' => 'プロジェクトの作成',
@@ -127,6 +140,12 @@ return [
         'organizations.onboarding.mcp' => 'MCP 導入ガイド',
         // 通知一覧 (notifications.index — Notifications/Index.svelte h1「通知」)
         'notifications.index' => '通知',
+        /*
+        | 撮影 PWA (/app/*)。manuals.show は controller が setPrivateTitle で
+        | マニュアル名を供給するため、静的名が必要なのは一覧 (index) のみ。
+        | スマホで複数タブ / ホーム画面から戻る現場ユースケースではタブ名が唯一の識別子。
+        */
+        'capture.manuals.index' => '撮影するマニュアルを選ぶ',
     ],
 
 ];

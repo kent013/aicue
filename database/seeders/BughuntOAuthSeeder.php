@@ -197,7 +197,7 @@ class BughuntOAuthSeeder extends Seeder
                 'revoked' => false,
                 'created_at' => now(),
                 'updated_at' => now(),
-                'expires_at' => now()->addYear(),
+                'expires_at' => now()->addYearNoOverflow(),
             ],
         );
     }
@@ -221,7 +221,7 @@ class BughuntOAuthSeeder extends Seeder
                 'revoked' => false,
                 'created_at' => now(),
                 'updated_at' => now(),
-                'expires_at' => now()->addYear(),
+                'expires_at' => now()->addYearNoOverflow(),
             ],
         );
     }

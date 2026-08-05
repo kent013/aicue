@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
-use RuntimeException;
 
 /**
  * ticket_ledger_entries に「1 組織 1 signup grant」を強制する部分 UNIQUE index を追加する。

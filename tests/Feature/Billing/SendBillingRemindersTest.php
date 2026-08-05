@@ -113,7 +113,7 @@ test('customer.subscription.updated webhook で current_period_end が同期さ�
     $subscription = createFakeSubscription($organization);
     expect($subscription->current_period_end)->toBeNull();
 
-    $periodEnd = now()->addMonth()->startOfSecond();
+    $periodEnd = now()->addMonthNoOverflow()->startOfSecond();
     app(StripeWebhookProcessor::class)->handle(new WebhookReceived([
         'id' => 'evt_sub_updated_period_1',
         'type' => 'customer.subscription.updated',
