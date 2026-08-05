@@ -55,7 +55,7 @@ argument-hint: "<topic> [conceptual_design_path]  例: /app-design permission-re
 
 - **全ての成果物は `devnotes/{YYYYMMDD-HHMM}-{topic}/` に保存**する
 - **Codexとの合議は「全CriticalとWarningが解消されるまで」繰り返す**（最大5ラウンド）
-- 概念設計レビューは **`gpt-5.4`**、詳細設計レビューは **`gpt-5.3-codex`** を使用
+- 概念設計レビュー・詳細設計レビューとも **`gpt-5.5`** を使用（reasoning effort で使い分ける）
 
 ---
 
@@ -110,7 +110,7 @@ devnotes/{YYYYMMDD-HHMM}-{topic}/
 
 `app-codex-review` スキルの**セッションモード**に従い、プロンプトファイルを作成してCodexに概念設計のレビューを依頼する。
 
-**model**: `gpt-5.4`
+**model**: `gpt-5.5`
 **reasoning**: `medium`
 **label**: `conceptual-review`
 
@@ -280,7 +280,7 @@ devnotes/{dir}/detailed-design.md
 
 `app-codex-review` スキルの**セッションモード**に従い、プロンプトファイルを作成してCodexにレビューを依頼する。
 
-**model**: `gpt-5.3-codex`
+**model**: `gpt-5.5`
 **reasoning**: `high`
 **label**: `design-review`
 
