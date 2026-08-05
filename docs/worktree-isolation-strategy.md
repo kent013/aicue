@@ -137,6 +137,23 @@ orphan 化した worktree (teardown を経ずに削除) は `git worktree prune`
 `scripts/ci/drop-test-db.php --orphans` が「生存 worktree に紐づかない孤児 DB」を
 **dry-run で列挙**する (§孤児テスト DB の回収)。
 
+### ⚠️ 是正コミットを既存チェックアウトへ取り込むときの注意 (1 回だけ必要な操作)
+
+**正規化非依存 FS では、この是正コミットを `pull` / `merge` した直後に
+`doc/reference/` の実体ファイルが 58 件消える。** git は index から落ちた NFD path を
+「削除されたファイル」として `unlink` するが、FS 上ではそれが NFC path と**同一の inode**
+だからである (実測: 実体 139 → 81 / `git status` に 58 件の ` D `)。
+
+**中身は失われていない** (blob は index にも object DB にも残っている)。取り込んだ直後に:
+
+```bash
+git checkout -- doc/reference     # index から復元する (139 件に戻り status が空になる)
+```
+
+を 1 度実行すればよい。以後は index に NFC entry しか無いので二度と起きない。
+**新規 clone / 新規 worktree では最初から発生しない** (実測: 是正後のコミットから
+checkout した worktree は dirty 0 行 / on-disk NFD path 0 件)。
+
 ## 孤児テスト DB の回収 (`drop-test-db.php --orphans`)
 
 DB 名の hash は worktree の realpath から算出されるため、**worktree が既に消えていると
