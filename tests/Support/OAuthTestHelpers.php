@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace Tests\Support;
 
+use App\Models\OauthSession;
 use App\Models\Organization;
 use App\Models\User;
 use Illuminate\Foundation\Testing\TestCase;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use Laravel\Passport\Client;
@@ -139,11 +142,12 @@ final class OAuthTestHelpers
     }
 
     /**
-     * authorize → consent → token exchange を 1 helper にまとめる。
+     * authorize → consent → token exchange を 1 helper にまとめる (Pest beforeEach 規約版)。
      *
-     * HTTP boundary を超えて access_token / refresh_token を取得する。
      * caller 側 TestCase の `user` / `org` / `client` / `pkce` / `redirectUri`
-     * プロパティを参照する (Pest beforeEach パターン)。
+     * プロパティを読み {@see self::exchangeForTokensUsing()} へ委譲する薄い adapter。
+     * beforeEach で文脈を組み立てない呼び出し側 (helper から helper を呼ぶ場合など) は
+     * 明示引数版を直接使うこと。
      *
      * `$scope` で要求 scope を差し替えられる (既定は MCP の 'mcp:use'。
      * CLI dual guard テストは 'cli:use read ...' を渡す)。
@@ -166,6 +170,36 @@ final class OAuthTestHelpers
         /** @var string $redirectUri */
         $redirectUri = $test->redirectUri;
 
+        return self::exchangeForTokensUsing(
+            test: $test,
+            user: $user,
+            organization: $org,
+            client: $client,
+            pkce: $pkce,
+            redirectUri: $redirectUri,
+            state: $state,
+            scope: $scope,
+        );
+    }
+
+    /**
+     * authorize → consent → token exchange の本体 (明示引数版)。
+     *
+     * HTTP boundary を超えて access_token / refresh_token を取得する。
+     *
+     * @param  array{code_verifier: string, code_challenge: string}  $pkce
+     * @return array{access_token: string, refresh_token: string}
+     */
+    public static function exchangeForTokensUsing(
+        TestCase $test,
+        User $user,
+        Organization $organization,
+        Client $client,
+        array $pkce,
+        string $redirectUri,
+        string $state = 'helper-state',
+        string $scope = 'mcp:use',
+    ): array {
         $test->actingAs($user);
 
         $test->get(self::buildAuthorizeUrl(
@@ -178,7 +212,7 @@ final class OAuthTestHelpers
 
         $approve = $test->post('/oauth/authorize', [
             'auth_token' => session('authToken'),
-            'organization_id' => $org->id,
+            'organization_id' => $organization->id,
         ]);
         $callback = self::parseCallbackParams($approve);
         $code = $callback['code'] ?? '';
@@ -198,5 +232,59 @@ final class OAuthTestHelpers
             'access_token' => (string) ($decoded['access_token'] ?? ''),
             'refresh_token' => (string) ($decoded['refresh_token'] ?? ''),
         ];
+    }
+
+    /**
+     * OAuth flow で token を取得し、CLI セッション行を作って access token に束縛する。
+     *
+     * REST API v1 の actor 解決 (resolve.api-actor) は
+     * 「cli:use scope + 有効な OauthSession に束縛された access token」を前提にする。
+     * CLI client の consent フローでの session 自動発行は WP25 のため、
+     * ここでは前提条件を DB 直接で満たす。
+     *
+     * global 関数ではなく静的メソッドに置く理由: global 関数は再宣言できず、
+     * 複数のテストファイルから同じ手順を使えない (Pest のファイル読み込み順に依存した
+     * 「たまたま使える」状態に頼らない)。
+     *
+     * @return array{access_token: string, refresh_token: string, session: OauthSession}
+     */
+    public static function issueCliSessionTokens(
+        TestCase $test,
+        User $user,
+        Organization $organization,
+        Client $client,
+        string $scope = 'cli:use read write session.revoke',
+        string $redirectUri = 'https://test.example/callback',
+    ): array {
+        $tokens = self::exchangeForTokensUsing(
+            test: $test,
+            user: $user,
+            organization: $organization,
+            client: $client,
+            pkce: self::generatePkcePair(),
+            redirectUri: $redirectUri,
+            scope: $scope,
+        );
+        expect($tokens['access_token'])->not->toBe('');
+
+        $tokenId = DB::table('oauth_access_tokens')
+            ->where('user_id', $user->id)
+            ->orderByDesc('created_at')
+            ->value('id');
+        expect($tokenId)->not->toBeNull();
+
+        /** @var OauthSession $session */
+        $session = OauthSession::factory()->cli()->create([
+            'user_id' => $user->id,
+            'organization_id' => $organization->id,
+            'client_id' => (string) $client->id,
+        ]);
+
+        DB::table('oauth_access_tokens')->where('id', $tokenId)->update(['session_id' => $session->id]);
+
+        // guard キャッシュを落として次リクエストで Bearer token を再解決させる
+        Auth::forgetGuards();
+
+        return [...$tokens, 'session' => $session];
     }
 }

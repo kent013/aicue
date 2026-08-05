@@ -5,7 +5,6 @@ declare(strict_types=1);
 use App\Models\OauthSession;
 use App\Models\Project;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\DB;
 use Tests\Support\OAuthTestHelpers;
 
 /*
@@ -24,40 +23,13 @@ beforeEach(function (): void {
     $this->redirectUri = 'https://test.example/callback';
 });
 
-/**
- * OAuth flow で token を取得し、CLI セッション行を作って access token に束縛する。
- * (CLI client の consent フローでの session 自動発行は WP25。ここでは actor 解決の
- * 前提条件を DB 直接で満たす)
- *
- * @return array{access_token: string, refresh_token: string, session: OauthSession}
- */
-function issueCliSessionTokens(object $test, string $scope = 'cli:use read write session.revoke'): array
-{
-    $tokens = OAuthTestHelpers::exchangeForTokens($test, scope: $scope);
-    expect($tokens['access_token'])->not->toBe('');
-
-    $tokenId = DB::table('oauth_access_tokens')
-        ->where('user_id', $test->user->id)
-        ->orderByDesc('created_at')
-        ->value('id');
-    expect($tokenId)->not->toBeNull();
-
-    /** @var OauthSession $session */
-    $session = OauthSession::factory()->cli()->create([
-        'user_id' => $test->user->id,
-        'organization_id' => $test->org->id,
-        'client_id' => (string) $test->client->id,
-    ]);
-
-    DB::table('oauth_access_tokens')->where('id', $tokenId)->update(['session_id' => $session->id]);
-
-    Auth::forgetGuards();
-
-    return [...$tokens, 'session' => $session];
-}
-
 test('OAuth user token は dual guard で GET /api/v1/me を叩ける (session セクション出し分け)', function (): void {
-    $issued = issueCliSessionTokens($this);
+    $issued = OAuthTestHelpers::issueCliSessionTokens(
+        test: $this,
+        user: $this->user,
+        organization: $this->org,
+        client: $this->client,
+    );
 
     $response = $this->withHeader('Authorization', 'Bearer '.$issued['access_token'])
         ->getJson('/api/v1/me');
@@ -103,7 +75,12 @@ test('cli:use はあるが session 未束縛の token は 401', function (): voi
 });
 
 test('session 失効後は同じ token が 401 になる (chain 失効)', function (): void {
-    $issued = issueCliSessionTokens($this);
+    $issued = OAuthTestHelpers::issueCliSessionTokens(
+        test: $this,
+        user: $this->user,
+        organization: $this->org,
+        client: $this->client,
+    );
     $issued['session']->revoke();
     Auth::forgetGuards();
 
@@ -113,7 +90,12 @@ test('session 失効後は同じ token が 401 になる (chain 失効)', functi
 });
 
 test('組織から外れた user の token は 401 (membership 毎リクエスト再検証)', function (): void {
-    $issued = issueCliSessionTokens($this);
+    $issued = OAuthTestHelpers::issueCliSessionTokens(
+        test: $this,
+        user: $this->user,
+        organization: $this->org,
+        client: $this->client,
+    );
     $this->org->users()->detach($this->user->id);
     Auth::forgetGuards();
 
@@ -123,7 +105,13 @@ test('組織から外れた user の token は 401 (membership 毎リクエス�
 });
 
 test('write scope の無い OAuth token は write endpoint で 403 insufficient_ability', function (): void {
-    $issued = issueCliSessionTokens($this, scope: 'cli:use read');
+    $issued = OAuthTestHelpers::issueCliSessionTokens(
+        test: $this,
+        user: $this->user,
+        organization: $this->org,
+        client: $this->client,
+        scope: 'cli:use read',
+    );
     $project = Project::factory()->forOrganization($this->org)->create();
 
     $this->withHeader('Authorization', 'Bearer '.$issued['access_token'])
@@ -134,7 +122,12 @@ test('write scope の無い OAuth token は write endpoint で 403 insufficient_
 });
 
 test('write scope 付き OAuth token は write endpoint を叩けて Idempotency-Key も機能する', function (): void {
-    $issued = issueCliSessionTokens($this);
+    $issued = OAuthTestHelpers::issueCliSessionTokens(
+        test: $this,
+        user: $this->user,
+        organization: $this->org,
+        client: $this->client,
+    );
     $project = Project::factory()->forOrganization($this->org)->create();
 
     $first = $this->withHeader('Authorization', 'Bearer '.$issued['access_token'])
@@ -153,7 +146,12 @@ test('write scope 付き OAuth token は write endpoint を叩けて Idempotency
 });
 
 test('DELETE /api/v1/me/session は自セッションを失効させ、以降の token を 401 にする', function (): void {
-    $issued = issueCliSessionTokens($this);
+    $issued = OAuthTestHelpers::issueCliSessionTokens(
+        test: $this,
+        user: $this->user,
+        organization: $this->org,
+        client: $this->client,
+    );
 
     $this->withHeader('Authorization', 'Bearer '.$issued['access_token'])
         ->deleteJson('/api/v1/me/session')
@@ -171,7 +169,13 @@ test('DELETE /api/v1/me/session は自セッションを失効させ、以降の
 });
 
 test('session.revoke scope の無い token は DELETE /me/session が 403', function (): void {
-    $issued = issueCliSessionTokens($this, scope: 'cli:use read');
+    $issued = OAuthTestHelpers::issueCliSessionTokens(
+        test: $this,
+        user: $this->user,
+        organization: $this->org,
+        client: $this->client,
+        scope: 'cli:use read',
+    );
 
     $this->withHeader('Authorization', 'Bearer '.$issued['access_token'])
         ->deleteJson('/api/v1/me/session')
@@ -190,7 +194,12 @@ test('API キー Bearer は DELETE /me/session を叩けない (guard 段 401)',
 });
 
 test('OauthSession::revoke は冪等 (再実行しても初回の失効時刻を保持)', function (): void {
-    $issued = issueCliSessionTokens($this);
+    $issued = OAuthTestHelpers::issueCliSessionTokens(
+        test: $this,
+        user: $this->user,
+        organization: $this->org,
+        client: $this->client,
+    );
     $session = $issued['session'];
 
     $session->revoke();

@@ -19,7 +19,16 @@ use Illuminate\Support\Facades\Route;
 | api-key 先 = 自動化トラフィックが先に解決)。middleware の順序契約:
 |
 |   auth:api-key,api-oauth → throttle:{bucket} → resolve.api-actor
-|     → api-key.ability:{ability} → (idempotent) → controller
+|     → api-key.ability:{ability} → api.project-in-org → (idempotent) → controller
+|
+| api.project-in-org (EnsureProjectBelongsToApiOrganization) は URL 上の {project} が
+| actor の組織に属さなければ 404 にする層 2a。**FormRequest より前**に走ることが本質で、
+| これが無いと「cross-org の実在 project + 不正 payload = 422 / 不在 project = 404」の
+| 差分が project の存在オラクルになる。順序契約は 2 点とも不可侵:
+|   - resolve.api-actor **より後** ('organization' attribute が前提。前に置くと全 project
+|     route が Assert 発火で 500)
+|   - idempotent **より前** (cross-org リクエストで idempotency 行を作らせない)
+| 網羅性と順序は tests/Architecture/ProjectRouteCurrentOrgGuardTest が機械固定する。
 |
 | resolve.api-actor が両経路を ApiActorContext (request attribute 'api_actor') に
 | 正規化する (OAuth 経路の cli:use scope / session 束縛 / membership 再検証もここ)。
@@ -57,7 +66,8 @@ Route::prefix('v1')
 
 // 読み取り (read ability)
 Route::prefix('v1')
-    ->middleware(['auth:api-key,api-oauth', 'throttle:api-read', 'resolve.api-actor', 'api-key.ability:read'])
+    ->middleware(['auth:api-key,api-oauth', 'throttle:api-read', 'resolve.api-actor', 'api-key.ability:read',
+        'api.project-in-org'])
     ->group(function (): void {
         Route::get('/me', [MeController::class, 'show'])
             ->name('api.v1.me');
@@ -73,12 +83,17 @@ Route::prefix('v1')
 
 // 書き込み (write ability)。全 write エンドポイントに Idempotency-Key を配線する
 Route::prefix('v1')
-    ->middleware(['auth:api-key,api-oauth', 'throttle:api-write', 'resolve.api-actor', 'api-key.ability:write', 'idempotent'])
+    ->middleware(['auth:api-key,api-oauth', 'throttle:api-write', 'resolve.api-actor', 'api-key.ability:write',
+        'api.project-in-org', 'idempotent'])
     ->group(function (): void {
         Route::post('/projects/{project}/items', [ItemController::class, 'store'])
             ->name('api.v1.projects.items.store');
-        Route::patch('/projects/{project}/items/{item}', [ItemController::class, 'update'])
-            ->name('api.v1.projects.items.update');
-        Route::delete('/projects/{project}/items/{item}', [ItemController::class, 'destroy'])
-            ->name('api.v1.projects.items.destroy');
+        // {item} ∈ {project} を **routing 層** (SubstituteBindings) で解決する。
+        // FormRequest より前に 404 が確定し、web 側 (routes/web.php) と同じ構造になる。
+        Route::scopeBindings()->group(function (): void {
+            Route::patch('/projects/{project}/items/{item}', [ItemController::class, 'update'])
+                ->name('api.v1.projects.items.update');
+            Route::delete('/projects/{project}/items/{item}', [ItemController::class, 'destroy'])
+                ->name('api.v1.projects.items.destroy');
+        });
     });

@@ -7,6 +7,7 @@ use App\Http\Middleware\BlockTwoFactorDisableForEnforcedOrganizations;
 use App\Http\Middleware\BughuntCoverageMiddleware;
 use App\Http\Middleware\EnforceMcpTransport;
 use App\Http\Middleware\EnsureEmailIsVerifiedOrBack;
+use App\Http\Middleware\EnsureProjectBelongsToApiOrganization;
 use App\Http\Middleware\EnsureProjectBelongsToCurrentOrganization;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\IdempotentRequest;
@@ -137,6 +138,11 @@ return Application::configure(basePath: dirname(__DIR__))
             // FormRequest の DB ルール (unique/exists) より前に 404 へ落とす
             // (存在オラクル防止。網羅性は ProjectRouteCurrentOrgGuardTest が固定)
             'project.in-current-org' => EnsureProjectBelongsToCurrentOrganization::class,
+            // REST API v1 用の同等 guard (組織は API キー / OAuth token から確定するため
+            // web セッションの current org とは解決元が違う = 別 alias)。
+            // resolve.api-actor より後・idempotent より前に置くこと (順序契約は
+            // routes/api.php と ProjectRouteCurrentOrgGuardTest)
+            'api.project-in-org' => EnsureProjectBelongsToApiOrganization::class,
             'resolve.api-actor' => ResolveApiActor::class,
             'api-key.ability' => RequireApiKeyAbility::class,
             'idempotent' => IdempotentRequest::class,

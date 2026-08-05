@@ -22,6 +22,45 @@ Prompts (LLM 呼び出し factory。prompt 本文は resources/prompts/*.yaml)
 DataTransferObjects / Http/Resources (応答形の単一定義)
 ```
 
+### 変更系 route の 3 層 (認証 → テナント境界 → 認可)
+
+状態を変える route (POST/PUT/PATCH/DELETE) は次の 3 層を**この順序で**通る。
+順序が本質で、層 2 と層 3 を入れ替えると cross-org が 404 ではなく 403 を返し、
+リソースの存在が漏れる (セキュリティ不変条件 2/3)。
+
+```
+リクエスト
+  ├─ [層1] 認証         auth / auth:api-key,api-oauth
+  │                     … ManageRouteAuthGuardTest / ApiGuardAllowlistInvariantTest
+  ├─ [層2a] テナント境界 (middleware / routing 層) ★FormRequest より前
+  │                     project.in-current-org (web) / api.project-in-org (API) /
+  │                     MembershipScopedOrganizationBinder / Route::scopeBindings()
+  │                     … ProjectRouteCurrentOrgGuardTest / NestedRouteIdorDefenseTest
+  │                                                       ← 不整合は 404
+  ├─ [FormRequest] バリデーション (422)  ※層2a より後・層2b より前
+  ├─ [層2b] テナント境界 (controller inline = 二重防御)
+  │                     resolveOrganizationProject / resolveProjectItem  ← 不整合は 404
+  └─ [層3] 認可         Gate::authorize / Gate::forUser(...)->authorize
+                        … ControllerAuthorizationGateTest               ← 不足は 403
+```
+
+- **層 2a が無いと FormRequest の 422 が存在オラクルになる**。inline guard (層 2b) は
+  FormRequest より**後**に走るため、「cross-org の実在リソース + 不正 payload = 422 /
+  不在リソース = 404」の差分でリソースの実在が漏れる。層 2b は二重防御として残す
+- **`ControllerAuthorizationGateTest`** (Architecture) が層 3 を deny-by-default で強制する。
+  合格条件は `Gate` ファサード 1 系統のみで、membership binder / `resolve*` 系 /
+  `auth`・`verified`・`recent-auth`・`require-active-subscription`・`api-key.ability`
+  middleware / `FormRequest::authorize()` は**認可として数えない** (数えると gate が形骸化する)。
+  `can:` middleware も受理しない (controller より前に走るため層 2 → 層 3 の順序を壊す)。
+  認可を持たない route は `App\Enums\Security\ControllerAuthorizationExemption` +
+  30 文字以上の具体的根拠付きで exemption inventory に登録する。
+  字句解析は `tests/Support/AuthorizationMarkerScanner` に切り出し、
+  解析器自体の positive/negative は `AuthorizationMarkerScannerTest` (Unit) が固定する
+- **REST API v1 の認可主体**は `ApiActorContext::$user`。dual guard は通過した guard を
+  default に昇格させるため `Auth::user()` は API キー経路で `ApiKey` を返す。
+  `Gate::authorize` を使うと Policy の `User $user` 型に対して TypeError = 500 になるので、
+  必ず `Gate::forUser($this->apiActor($request)->user)->authorize(...)` を使う
+
 ## route binding の型制約 (ドメイン制約: route key は最大 18 桁)
 
 `app/Http/Routing/RouteBindingTypes` が **全 binding param の型 inventory (単一 SoT)**。
