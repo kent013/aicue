@@ -10,7 +10,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { ExitCode, exitWith } from "../exit-codes.js";
-import { atomicWriteFile, atomicWriteFileBinary } from "./atomic-write.js";
+import { atomicWriteFile, atomicWriteFileBinary } from "../util/atomic-write.js";
 import type { BackendStore } from "./backend.js";
 import {
     decryptString,
