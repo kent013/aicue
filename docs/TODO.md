@@ -23,7 +23,6 @@
 |---|---|---|---|---|---|---|---|
 | T085 | bfcache 実復元の iOS 実機受入確認 | test | Playwright 不可のため実機で確認+記録 | High | standalone | [設計](devnotes/20260803-0053-aigenba-alignment/) | 2026-08-03 03:10 |
 | T110 | 認証手段変更のメール通知ポリシーの統一設計 | backend | passkey/2FA/SSO の増減通知を一貫したポリシーとして設計する(T108 S7 は監査ログのみで通知は見送り) | Low | standalone | [設計](devnotes/20260805-1550-security-audit-remediation/) | 2026-08-05 17:45 |
-| T115 | 退会時の課金ガード(課金中組織のオーナー退会をブロックし出口を提示する) | backend | 退会時の課金ガードと孤児検知 | Critical | incremental | [設計](devnotes/20260805-2315-account-deletion-billing-guard/) | 2026-08-05 23:56 |
 | T116 | ModelDirectFetchInvariantTest (直 find 禁止 gate) の追従 | test | 直 find 禁止 gate の deny-by-default 導入 | High | standalone | [設計](devnotes/20260805-2311-model-direct-fetch-gate/) | 2026-08-05 23:56 |
 | T117 | bug-hunt 並列枠数 cap を 8 → 4 に統一 (c2c 裁定 AG-048b 追従) | infrastructure | bug-hunt 並列 cap を 8→4 に統一 | Medium | incremental | [設計](devnotes/20260805-2314-bughunt-shard-cap-4/) | 2026-08-05 23:56 |
 
