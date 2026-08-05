@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-use App\Actions\Fortify\UpdateUserPassword;
 use App\Actions\Fortify\UpdateUserProfileInformation;
 use App\Console\Commands\ResetAdminMfaCommand;
 use App\Enums\SecurityEventType;
 use App\Http\Controllers\Organizations\OrganizationApiKeyController;
 use App\Http\Controllers\Organizations\OrganizationMemberController;
+use App\Services\Auth\PasswordCredentialService;
 use App\Services\Auth\SocialAccountService;
 use App\Services\Organization\OrganizationMembershipService;
 use Illuminate\Auth\Events\Failed;
@@ -65,9 +65,15 @@ function securityEventRecordingMap(): array
             'event' => PasswordReset::class,
             'covered_by' => 'tests/Feature/Security/SecurityAuditTrailCoverageTest.php',
         ],
+        // T107 で users.password 確定の単一窓口が PasswordCredentialService に統合された
+        // (変更 = PasswordChanged / 初回設定 = PasswordSet)
         SecurityEventType::PasswordChanged->value => [
-            'caller' => UpdateUserPassword::class,
+            'caller' => PasswordCredentialService::class,
             'covered_by' => 'tests/Feature/Auth/PasswordUpdateSessionInvalidationTest.php',
+        ],
+        SecurityEventType::PasswordSet->value => [
+            'caller' => PasswordCredentialService::class,
+            'covered_by' => 'tests/Feature/Settings/PasswordSetupTest.php',
         ],
         SecurityEventType::TwoFactorEnabled->value => [
             'event' => TwoFactorAuthenticationConfirmed::class,
