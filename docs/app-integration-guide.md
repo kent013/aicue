@@ -66,11 +66,13 @@
 | FormRequest(`ProhibitsProtectedKeys` + missing rule) | `app/Http/Requests/Projects/StoreItemRequest.php` / `UpdateItemRequest.php` |
 | nested route(Team セグメントなし = Default Team パターン) | `routes/web.php` の `/projects/{project}/items` 系 |
 | URL 整合 guard(認可より**前**に 404) | {project} ∈ current org は 2 層: `project.in-current-org` middleware(`app/Http/Middleware/EnsureProjectBelongsToCurrentOrganization.php`。FormRequest の DB ルールより**前**に cross-org を 404 に落とす = 存在オラクル防止。web の {project} route group に一括付与、網羅性は `tests/Architecture/ProjectRouteCurrentOrgGuardTest.php`)+ `app/Http/Concerns/ResolvesCurrentOrganization.php` の `resolveOrganizationProject()`(inline guard、二重防御)。{item} ∈ {project} は `routes/web.php` の `Route::scopeBindings()`(`$project->items()` 経由で解決) |
-| guard inventory への登録 | `tests/Architecture/NestedRouteIdorDefenseTest.php`(Web の `projects.items.update/destroy` = ScopeBindings、API の `api.v1.projects.items.update/destroy` = UrlIntegrityGuard) |
-| REST API v1 controller(Web と同じ FormRequest 再利用、org-scoped 解決) | `app/Http/Controllers/Api/V1/ItemController.php`(`ResolvesApiOrganization`) |
+| API 側の URL 整合 guard(認可より**前**に 404、**FormRequest より前**) | {project} ∈ actor の組織は 2 層: `api.project-in-org` middleware(`app/Http/Middleware/EnsureProjectBelongsToApiOrganization.php`。組織は API キー / OAuth token から確定。網羅性と middleware 順序契約は `tests/Architecture/ProjectRouteCurrentOrgGuardTest.php`)+ `ResolvesApiOrganization::resolveOrganizationProject()`(inline guard、二重防御)。{item} ∈ {project} は `routes/api.php` の `Route::scopeBindings()` |
+| guard inventory への登録 | `tests/Architecture/NestedRouteIdorDefenseTest.php`(Web の `projects.items.update/destroy`、API の `api.v1.projects.items.update/destroy` = いずれも ScopeBindings) |
+| 変更系 route の認可 gate | `tests/Architecture/ControllerAuthorizationGateTest.php`(POST/PUT/PATCH/DELETE は `Gate` を通るか exemption inventory に理由付き登録。§7 不変条件 8) |
+| REST API v1 controller(Web と同じ FormRequest 再利用、org-scoped 解決、`Gate::forUser` 認可) | `app/Http/Controllers/Api/V1/ItemController.php`(`ResolvesApiOrganization` + `ReadsApiActor`) |
 | API リソース(レスポンス整形) | `app/Http/Resources/Api/V1/ItemResource.php` |
 | API ルート(nested + dual guard + ability + idempotent) | `routes/api.php` の `api.v1.projects.items.{index,store,update,destroy}` |
-| API Feature テスト | `tests/Feature/Api/{ApiEndpointTest,ApiKeyTest,IdempotencyTest,OAuthDualGuardTest}.php` |
+| API Feature テスト | `tests/Feature/Api/{ApiEndpointTest,ApiKeyTest,IdempotencyTest,OAuthDualGuardTest}.php` + `tests/Feature/Api/V1/ItemAuthorizationTest.php`(認可境界 / cross-org 404 / 存在オラクル封じ) |
 | Policy(親 Policy へ委譲、直 fetch 禁止) | `app/Policies/ItemPolicy.php` → `app/Policies/ProjectPolicy.php` |
 | Service(transaction + 所有権キーの明示代入) | 親側の見本: `app/Services/Project/ProjectService.php`(Default Team 自動割当)。Item は単一 insert のため relation 経由で Controller 直書き |
 | Factory(親 Factory 連鎖) | `database/factories/ItemFactory.php`(project 未指定なら `ProjectFactory` 連鎖) |
@@ -145,6 +147,14 @@
 - REST API: nested route + flat ability。新リソースの ability は `{resource}:read` /
   `{resource}:write` / 動詞付き(`evaluations:run` 型)で定義し、ability 定義 1 箇所に追記。
 - すべての書き込みエンドポイントに Idempotency-Key を配線する(テンプレの middleware を使う)。
+- **API の権限境界は ability(トークンの能力)と Policy(actor の権限)の 2 段**。
+  ability 不足は `code: "insufficient_ability"`、Policy 不足は `code: "forbidden"` で返り、
+  クライアントは「トークン設定不足」と「権限不足」を判別できる。
+  認可の主体は `ApiActorContext::$user`(API キー = 発行者 / OAuth = トークン所有者)であり、
+  controller では `Gate::forUser($this->apiActor($request)->user)->authorize(...)` を使う
+  (`Gate::authorize` は dual guard 下で `ApiKey` を Policy に渡してしまい 500 になる)。
+  OAuth CLI セッションは**組織メンバーなら誰でも開始できる**ため、
+  組織メンバーであることは書き込み権限を意味しない(Policy が別途判定する)。
 - rate limit は既存 4 バケット(api-read / api-write / api-status / api-mcp)に割り当てる。
   新バケットを増やすのは要件に明示的な根拠があるときだけ。
 - MCP tool: whoami / list-projects / show-project / list-items の雛形に倣う。書き込み tool は McpIdempotencyService 経由。
@@ -191,8 +201,55 @@ LLM を使う機能が要件に来たら、まず利用形態を分類する:
    課金による利用可否の判定は `BillingAccess` 経由のみ(subscription 直参照の gate 分岐禁止。
    AI-CUE の判定は billing entitlement: `state()` が Subscribed / ActiveFreePlan なら許可。
    plan_code は判定に使わない — 無料枠は free_plan_code='personal' の明示申告)
-8. **テストなしの実装完了はない**(不変条件 1-7 はそれぞれ対応する Architecture/Feature
-   テストに新リソースを登録して初めて「実装済み」)
+8. **変更系 route は認可を通る**: POST/PUT/PATCH/DELETE のアプリ所有 route は
+   `Gate::authorize` / `Gate::forUser(...)->authorize` を持つか、
+   `tests/Architecture/ControllerAuthorizationGateTest.php` の exemption inventory に
+   `App\Enums\Security\ControllerAuthorizationExemption` + 具体的根拠(30 文字以上)付きで
+   登録する(deny-by-default で強制)。**層 2(テナント境界 = 404)と層 3(認可 = 403)の
+   順序は不可侵** — inline guard は必ず `Gate` より前に置く(逆にすると cross-org が
+   403 を返し、リソースの存在が漏れる)。
+   なお `can:` middleware / `FormRequest::authorize()` / membership binder /
+   `auth`・`verified`・`recent-auth`・`require-active-subscription`・`api-key.ability`
+   middleware は**認可(層 3)として数えない**(数えると gate が形骸化する)
+9. **層 2 は FormRequest より前で閉じる**: controller の inline guard は
+   **FormRequest のバリデーションより後**に走る。inline guard だけに頼ると
+   「cross-org の実在リソース + 不正 payload = 422 / 不在リソース = 404」の差分が
+   **存在オラクル**になる。`{project}` を持つ route は
+   web = `project.in-current-org` / **API = `api.project-in-org`** middleware を必ず付け、
+   子リソースは `Route::scopeBindings()` で routing 層に解決させる
+   (`ProjectRouteCurrentOrgGuardTest` / `NestedRouteIdorDefenseTest` が強制)
+10. **テストなしの実装完了はない**(不変条件 1-9 はそれぞれ対応する Architecture/Feature
+    テストに新リソースを登録して初めて「実装済み」)
+
+### 新規 route(特に変更系)を足すときのチェックリスト
+
+1. **層 2(テナント境界)が FormRequest より前に閉じているか**を確認する。
+   controller の inline guard は **FormRequest の後**に走るため、それだけでは不十分。
+   - `{project}` を持つ route → web は `project.in-current-org`、
+     **API は `api.project-in-org`** middleware が付いていること
+   - 子リソース(`{item}` 等)→ `Route::scopeBindings()` で routing 層に解決させること
+   - 確認方法: **cross-org の実在リソース + 不正 payload** を送って
+     **404**(422 ではない)が返ること
+2. ハンドラ冒頭(URL 整合 guard の**後**)に `Gate::authorize(...)` を置く。
+   **REST API v1 では `Gate::forUser($this->apiActor($request)->user)->authorize(...)`**
+   (dual guard では通過した guard が default に昇格し `Auth::user()` が `ApiKey` を返すため、
+   `Gate::authorize` は Policy の `User $user` 型に対して TypeError = 500 になる)
+3. 認可が不要なら `ControllerAuthorizationGateTest` の exemption inventory に
+   enum + 「**何が代わりに守っているか**」を 30 文字以上で登録する。
+   当てはまる enum case が無ければ、それは**認可を足すべき route** である
+   (特に `NoAuthorizableSubject` は「親テナントすら無い新規作成」限定。
+   親テナントがある create は**対象外** = `Gate::authorize('create', [Model::class, $parent])` を書く)
+4. 2+param route なら `NestedRouteIdorDefenseTest` の inventory にも防御方式を登録する
+5. **認可の「内容」を Feature テストで固定する**(必須)。
+   `ControllerAuthorizationGateTest` はトークン走査であり、
+   **到達可能性(`if (false) { Gate::authorize(...); }` のような死んだ認可)は判定しない**。
+   gate が守るのは「認可判断の入口が存在すること」だけで、
+   「権限の無い actor が実際に 403 になること」は Feature テストの責務
+   (見本: `tests/Feature/Api/V1/ItemAuthorizationTest.php`)。
+   この 2 層(入口 = Architecture / 実挙動 = Feature)はセットで維持する
+6. `composer test` で 3 つの gate
+   (`ControllerAuthorizationGateTest` / `NestedRouteIdorDefenseTest` /
+   `ProjectRouteCurrentOrgGuardTest`)が green であることを確認する
 
 ## 8. 設計ドキュメントの書き方(このテンプレ上の流儀)
 

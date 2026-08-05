@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Http\Controllers\Api\V1\Concerns\ReadsApiActor;
 use App\Http\Controllers\Api\V1\Concerns\ResolvesApiOrganization;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Projects\StoreItemRequest;
@@ -15,6 +16,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\Gate;
 use Webmozart\Assert\Assert;
 
 /**
@@ -23,9 +25,20 @@ use Webmozart\Assert\Assert;
  * FormRequest は web と同じ StoreItemRequest / UpdateItemRequest を再利用する
  * (ProhibitsProtectedKeys = project_id を payload で送ると 422)。
  * URL 整合 guard 2 段 ({project} ∈ org, {item} ∈ project) はいずれも認可より前に 404。
+ *
+ * 変更系 (store/update/destroy) の認可は `Gate::forUser(...)` 経由で、web 側
+ * {@see \App\Http\Controllers\Projects\ItemController} と同一の ItemPolicy 境界に揃える。
+ * ★`Gate::authorize` は使えない: dual guard (auth:api-key,api-oauth) は通過した guard を
+ *   default に昇格させるため、API キー経路では Auth::user() が App\Models\ApiKey を返し
+ *   ItemPolicy::create(User $user, ...) が TypeError = HTTP 500 になる。
+ *   認可主体は resolve.api-actor が解決済みの ApiActorContext::$user
+ *   (API キー = 発行者 / OAuth = トークン所有者。非 null 保証) を明示的に渡す。
+ * 契約は tests/Feature/Api/V1/ItemAuthorizationTest と
+ * tests/Architecture/ControllerAuthorizationGateTest が固定する。
  */
 class ItemController extends Controller
 {
+    use ReadsApiActor;
     use ResolvesApiOrganization;
 
     /** GET /api/v1/projects/{project}/items */
@@ -46,7 +59,10 @@ class ItemController extends Controller
     public function store(StoreItemRequest $request, Project $project): JsonResponse
     {
         $organization = $this->resolveOrganization($request);
+        // URL 整合 guard: 認可より前に 404 (cross-org を 403 で漏らさない)
         $this->resolveOrganizationProject($organization, $project);
+        Gate::forUser($this->apiActor($request)->user)
+            ->authorize('create', [Item::class, $project]);
 
         $name = $request->validated('name');
         Assert::string($name);
@@ -62,8 +78,10 @@ class ItemController extends Controller
     public function update(UpdateItemRequest $request, Project $project, Item $item): JsonResponse
     {
         $organization = $this->resolveOrganization($request);
+        // URL 整合 guard 2 段: いずれも認可より前に 404
         $this->resolveOrganizationProject($organization, $project);
         $this->resolveProjectItem($project, $item);
+        Gate::forUser($this->apiActor($request)->user)->authorize('update', $item);
 
         $name = $request->validated('name');
         Assert::string($name);
@@ -84,6 +102,7 @@ class ItemController extends Controller
         $organization = $this->resolveOrganization($request);
         $this->resolveOrganizationProject($organization, $project);
         $this->resolveProjectItem($project, $item);
+        Gate::forUser($this->apiActor($request)->user)->authorize('delete', $item);
 
         $item->delete();
 

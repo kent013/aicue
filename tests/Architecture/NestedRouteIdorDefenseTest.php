@@ -82,6 +82,11 @@ function nestedRouteIdorInventory(): array
         'capture.takes.adopt' => $s,
         'capture.takes.downloaded' => $s,
         'capture.takes.playback' => $s,
+        // REST API v1: {item} は $project->items() 経由 (scopeBindings)。
+        // {project} ∈ actor の組織は api.project-in-org middleware + controller inline guard の
+        // 2 層 (いずれも認可より前に 404。middleware は FormRequest より前に走る)
+        'api.v1.projects.items.update' => $s,
+        'api.v1.projects.items.destroy' => $s,
         // --- inline 親子整合 guard (authorize 前に 子∈親テナント を検査、不整合は 404) ---
         // OrganizationMemberController::resolveOrganizationMember (非 member は 404)
         'organizations.members.update' => $g,
@@ -89,10 +94,6 @@ function nestedRouteIdorInventory(): array
         'organizations.members.two-factor.reset' => $g,
         // ProjectMemberController::destroy (org 越境 {user} は 404)
         'projects.members.destroy' => $g,
-        // REST API v1: API キーの組織 relation からの org-scoped 解決
-        // (ResolvesApiOrganization。cross-org は認可より前に 404)
-        'api.v1.projects.items.update' => $g,
-        'api.v1.projects.items.destroy' => $g,
     ];
 }
 
