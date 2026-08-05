@@ -1,9 +1,12 @@
-# 後続 TODO (未起票): payload 由来 id の org 相対化 + `exists:` rule の見直し
+# 後続 TODO: payload 由来 id の org 相対化 + `exists:` rule の見直し
 
 `ModelDirectFetchInvariantTest` の `PayloadIdWithGlobalExistenceRuleDebt` 3 件が指す是正タスク。
-**本ファイルは `DirectFetchInventory` の `todoRef` が指す追跡先である** (gate が実在を機械検証する)。
 
-## なぜ TODO ID ではなくこのファイルなのか
+> **起票済み (2026-08-06)**: main へのマージ時に `aicue:T118` として `docs/TODO.md` へ登録し、
+> `DirectFetchInventory` の `todoRef` 3 箇所を `aicue:T118` へ置き換えた。
+> 以降の追跡先は本ファイルではなく `aicue:T118` である (本ファイルは起票内容の記録として残す)。
+
+## なぜ当初 TODO ID ではなくこのファイルだったのか
 
 T116 の実装セッションは `docs/TODO.md` の変更を禁止されている
 (TODO のクローズは別担当が直列で行うため、同一ファイルを触ると必ず競合する)。
