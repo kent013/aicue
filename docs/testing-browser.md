@@ -37,7 +37,8 @@ flock は cross-worktree の相互破壊を防げないため廃止した。先�
 
 Browser lane は起動時に bug-hunt 環境のポート (`127.0.0.1:8010..8018`) を
 best-effort で覗き、listen していれば **ロックを取る前に** fail-fast する。
-bug-hunt はロック規約に参加しない (意図的に隔離された 8 並列基盤) ため、
+bug-hunt はロック規約に参加しない (意図的に隔離された **4 並列**基盤。guard のポート範囲は
+残留 serve 検出のため cap と同期させず :8018 まで広く取る) ため、
 非干渉は保証しない — TOCTOU のある guard であり、失敗モードが偽赤に留まる範囲で受容している。
 
 ### ブラウザレーン (Chromium + WebKit)

@@ -27,7 +27,7 @@
 
 ## 並列 fan-out マップ (scripts/bug-hunt-shard.sh の stories_for_shard)
 
-固定マップは S3↔S7 の状態依存を shard-1 に閉じ込める。cap=8、`--parallel` は 2/4/6/8。
+固定マップは S3↔S7 の状態依存を shard-1 に閉じ込める。cap=4、`--parallel` は 2/4。
 S1..S7 は browser story。CLI/REST 面・管理画面など特殊 guard を要する面は subagent fan-out に含めず親が直列追走する
 (アプリが追加する場合は S8 以降として本 README とカードに記述する)。
 

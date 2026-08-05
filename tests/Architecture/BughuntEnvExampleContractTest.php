@@ -15,7 +15,7 @@ declare(strict_types=1);
  *                                  `${APP_NAME}` の自己参照はリテラル露出事故になる (実際に発生した)
  *   - APP_LOCALE=ja              : bug-hunt はユーザー向け文言 (日本語) の検証環境。en のままだと
  *                                  production と異なる文言を検証してしまう
- *   - DB_DATABASE=bug_hunt       : dev DB 隔離の核 (^bug_hunt(_[1-8])?$ のみ許可)
+ *   - DB_DATABASE=bug_hunt       : dev DB 隔離の核 (^bug_hunt(_[1-4])?$ のみ許可)
  *   - TESTING_FAKE_EXTERNALS=true: 決済等の外部を fake に落とす (実課金を踏まない)
  *   - ADMIN_MFA_REQUIRED=false   : true だと admin ログイン後 TOTP 強制で探索が詰む
  *
@@ -119,7 +119,7 @@ test('.env.bughunt.local.example の DB_DATABASE が shard script の DB 接頭�
     expect(preg_match('/^BUGHUNT_DB_PREFIX="\$\{BUGHUNT_DB_PREFIX:-([a-z_]+)\}"/m', $script, $prefix))->toBe(1);
     /** @var array{0: string, 1: string} $prefix */
 
-    // 乖離すると直列走行 (shard 0) の DB 名が guard regex (^bug_hunt(_[1-8])?$) を外れて abort する。
+    // 乖離すると直列走行 (shard 0) の DB 名が guard regex (^bug_hunt(_[1-4])?$) を外れて abort する。
     expect(trim($env[1], "\"'"))->toBe($prefix[1]);
 });
 

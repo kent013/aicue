@@ -15,7 +15,8 @@
 #     createdb は DB 名 regex 検証後に OWNER bughunt で実行。
 #
 # シャード i = (DB ${BUGHUNT_DB_PREFIX}[_{i}], serve :8010+i, APP_URL, レポート dir)。
-# shard 0 = 直列走行用 (DB ${BUGHUNT_DB_PREFIX} / :8010)。並列 = shard 1..8 (cap=8、--parallel は 2/4/6/8)。
+# shard 0 = 直列走行用 (DB ${BUGHUNT_DB_PREFIX} / :8010)。並列 = shard 1..4 (cap は BUGHUNT_SHARD_CAP。
+# --parallel は 2 以上 cap 以下の偶数)。
 #
 # 本スクリプトは機械的制御 (lock / provision / serve / 欠落検知 / teardown / DB guard) に専念する。
 # ブラウザ探索は claude -p でも MCP サーバでもなく、外側ハーネスが .claude/agents/bughunt-shard.md を
@@ -59,12 +60,18 @@ WORKSPACE="$(cd "$(dirname "$0")/.." && pwd)"
 cd "${WORKSPACE}"
 
 BASE_PORT=8010
+# 並列 shard の上限 (家系共通の標準形。c2c オーナー裁定 AG-048b で 4 に統一)。
+# ★ env で上書きしない (ハードコード)。SHARD_DB_RE は「触れてよい DB の allowlist」であり、
+#   外から広げられる余地を作ることはガードの緩和にあたる。
+# ★ 1 桁前提 (2..9)。ポート採番が BASE_PORT + N である以上 cap <= 9 は構造的制約。
+#   下の文字クラス導出 ([0-${CAP}]) もこの前提に依存する。self-test [a] が 1 桁性を assert する。
+BUGHUNT_SHARD_CAP=4
 # bug-hunt 専用 DB 接頭辞。dev DB (テンプレート slug の DB) とは別名にして隔離する。
 # この接頭辞と数値 suffix のみが SHARD_DB_RE に一致し、それ以外の DB 名は全 abort される。
 BUGHUNT_DB_PREFIX="${BUGHUNT_DB_PREFIX:-bug_hunt}"
 RUN_ID_RE='^[0-9]{8}-[0-9]{6}(-[0-9]+)?$'
-SHARD_RE='^[0-8]$'                 # 0 = 直列走行 (serial)、1..8 = 並列 shard (cap=8)
-SHARD_DB_RE="^${BUGHUNT_DB_PREFIX}(_[1-8])?$"  # ★ dev DB 防御の核。これ以外の DB 名は全 abort
+SHARD_RE="^[0-${BUGHUNT_SHARD_CAP}]$"   # 0 = 直列走行 (serial)、1..CAP = 並列 shard
+# ★ SHARD_DB_RE の代入はここではなく die() 定義直後 (BUGHUNT_DB_PREFIX の形式検証の後) に置く。
 
 # self-test 専用 sandbox (実資源に触れないための paths 差し替え)。
 if [[ -n "${BUGHUNT_SANDBOX:-}" ]]; then
@@ -83,6 +90,19 @@ fi
 
 is_dryrun() { [[ -n "${BUGHUNT_SELFTEST_DRYRUN:-}" ]]; }
 die() { local code=$1; shift; echo "error: $*" >&2; exit "${code}"; }
+
+# ★ prefix は SHARD_DB_RE にそのまま埋め込まれる。regex メタ文字が入ると allowlist が壊れるため
+#   (例: 'b.g_hunt' は 'bXg_hunt' にも一致してしまう)、埋め込む前に形を固定する
+#   (「別名の bug-hunt DB 群を選ぶ」既存の自由度は保つ)。
+[[ "${BUGHUNT_DB_PREFIX}" =~ ^[a-z][a-z0-9_]*$ ]] \
+    || die 1 "BUGHUNT_DB_PREFIX が不正: '${BUGHUNT_DB_PREFIX}' (^[a-z][a-z0-9_]*\$ のみ。regex メタ文字は allowlist を壊す)"
+
+# ★ 本スクリプトが createdb/dropdb/migrate してよい shard DB の **allowlist** (dev DB 防御の核)。
+#   cap と同期する。「残留も含めて bug-hunt DB を守る / 検出する」側 —
+#   tests/Support/Ci/TestDatabaseEnv::DEV_DB_DENYLIST と
+#   database/seeders/Concerns/DetectsBughuntDatabase::BUGHUNT_DB_REGEX — は **cap と同期させない**
+#   (狭めると過去 cap=8 期の残留 DB を守れなくなる)。方向が逆であることに注意。
+SHARD_DB_RE="^${BUGHUNT_DB_PREFIX}(_[1-${BUGHUNT_SHARD_CAP}])?$"
 
 # ファイルサイズ (bytes)。GNU stat (-c) と BSD stat (-f) の双方に対応し、無ければ wc -c に fallback。
 file_size() {
@@ -118,15 +138,19 @@ worker_logfile() { echo "${TMP_BASE}/worker-$1-$2.log"; }
 # --- 入力検証 -----------------------------------------------------------------
 
 validate_shard() {
-    [[ "${1:-}" =~ ${SHARD_RE} ]] || die 2 "invalid --shard: '${1:-}' (0..8 のみ、0=直列)"
+    [[ "${1:-}" =~ ${SHARD_RE} ]] || die 2 "invalid --shard: '${1:-}' (0..${BUGHUNT_SHARD_CAP} のみ、0=直列)"
 }
 
-# --parallel の受理値 (固定ストーリーマップを持つ N のみ)。cap=8。
+# --parallel の受理値: 2 以上 cap 以下の偶数 (固定ストーリーマップを持つ N のみ)。
+# 偶数制限は stories_for_shard の固定マップが偶数 N でしか定義されていないことに由来する。
+# ★ cap を上げる場合は stories_for_shard へのマップ追加が同一変更で必須。
+#   受理集合とマップ定義のずれは self-test [r] と BughuntShardCapInvariantTest が機械検出する。
+# ★ (( ... )) は結果 0 を非ゼロ終了として扱うため、必ず `|| return 1` を付け最後に明示 return 0 する。
 valid_parallel_n() {
-    case "${1:-}" in
-        2|4|6|8) return 0 ;;
-        *) return 1 ;;
-    esac
+    local n=${1:-}
+    [[ "${n}" =~ ^[0-9]+$ ]] || return 1
+    (( n >= 2 && n <= BUGHUNT_SHARD_CAP && n % 2 == 0 )) || return 1
+    return 0
 }
 
 validate_run_id() {
@@ -383,14 +407,18 @@ PY
 }
 
 manifest_valid_shards() {
-    # 不正 key (空白入り / パストラバーサル) を除外し有効 shard key (0..8) のみ出力。
+    # 不正 key (空白入り / パストラバーサル) を除外し有効 shard key (0..cap) のみ出力。
+    # 旧 run (cap=8 期) の manifest を読むと shard key cap+1.. は warning + skip になる。
     local mf; mf="$(manifest_path "$1")"
-    MF="${mf}" python3 - <<'PY'
+    MF="${mf}" CAP="${BUGHUNT_SHARD_CAP}" python3 - <<'PY'
 import json, os, re, sys
 with open(os.environ["MF"]) as f:
     data = json.load(f)
+cap = os.environ["CAP"]
+if not re.fullmatch(r"[2-9]", cap):
+    raise SystemExit(f"invalid BUGHUNT_SHARD_CAP for manifest parser: {cap!r}")
 for key in data.get("shards", {}):
-    if re.fullmatch(r"[0-8]", key):
+    if re.fullmatch(rf"[0-{cap}]", key):
         print(key)
     else:
         print(f"warning: manifest に不正な shard key {key!r} — skip", file=sys.stderr)
@@ -442,7 +470,7 @@ cmd_verify_run() {
     local run_id=$1 n
     require_manifest "${run_id}"
     n="$(manifest_get "${run_id}" - parallel)"
-    valid_parallel_n "${n}" || die 2 "verify-run: manifest の parallel が 2/4/6/8 でない (run-id 不整合): '${n}'"
+    valid_parallel_n "${n}" || die 2 "verify-run: manifest の parallel が 2..${BUGHUNT_SHARD_CAP} の偶数でない (run-id 不整合): '${n}'"
     local rc=0
     verify_reports "${run_id}" "${n}" || rc=$?
     echo "verify-run: run-id=${run_id} parallel=${n} exit=${rc} (manifest: $(manifest_path "${run_id}"))"
@@ -1009,7 +1037,7 @@ cmd_provision_all() {
     local n=$1 hold=${2:-}
     require_orchestrator "provision-all"
     assert_worktree_context
-    valid_parallel_n "${n}" || die 2 "--parallel は 2/4/6/8 のみ (固定ストーリーマップのため。cap=8)"
+    valid_parallel_n "${n}" || die 2 "--parallel は 2..${BUGHUNT_SHARD_CAP} の偶数のみ (固定ストーリーマップのため)"
 
     if [[ -z "${BUGHUNT_SANDBOX:-}" ]]; then
         mkdir -p "${WORKSPACE}/.claude"
@@ -1157,7 +1185,7 @@ reap_orphan_browser() {
 
 # --- ストーリー割り当て (固定マップ) -------------------------------------------
 # stories/ 配下の S1..S7 はテンプレートではスケルトン。アプリが route:list から生成する。
-# S3↔S7 の状態依存を shard-1 に閉じ込める既定マップ。cap=8 (N=8 は S1/S4 の独立 2nd pass)。
+# S3↔S7 の状態依存を shard-1 に閉じ込める既定マップ。N は 2 と cap(=4) のみ。
 stories_for_shard() {
     local shard=$1 n=$2
     case "${n}-${shard}" in
@@ -1167,20 +1195,6 @@ stories_for_shard() {
         4-4) echo "S6" ;;
         2-1) echo "S3 S7 S6" ;;
         2-2) echo "S1 S2 S4 S5" ;;
-        6-1) echo "S3 S7" ;;
-        6-2) echo "S1" ;;
-        6-3) echo "S2" ;;
-        6-4) echo "S4" ;;
-        6-5) echo "S5" ;;
-        6-6) echo "S6" ;;
-        8-1) echo "S3 S7" ;;
-        8-2) echo "S1" ;;
-        8-3) echo "S2" ;;
-        8-4) echo "S4" ;;
-        8-5) echo "S5" ;;
-        8-6) echo "S6" ;;
-        8-7) echo "S1" ;;
-        8-8) echo "S4" ;;
         *) die 1 "stories_for_shard: 未定義の組み合わせ N=${n} shard=${shard}" ;;
     esac
 }
@@ -1196,6 +1210,9 @@ cmd_self_test() {
     TMP_BASE="${sandbox}/tmp/bug-hunt"
     LOCK_FILE="${sandbox}/bug-hunt.lock"
     ENV_FILE="${sandbox}/.env.bughunt.local"
+    # self-test は環境非依存であるべき (外部 env の BUGHUNT_DB_PREFIX に影響されない)。
+    BUGHUNT_DB_PREFIX=bug_hunt
+    SHARD_DB_RE="^${BUGHUNT_DB_PREFIX}(_[1-${BUGHUNT_SHARD_CAP}])?$"
 
     cat > "${ENV_FILE}" <<'ENVEOF'
 APP_ENV=bughunt.local
@@ -1213,36 +1230,42 @@ ENVEOF
     expect_ok() { local fn=$1; shift; local rc=0; ( "${fn}" "$@" ) >/dev/null 2>&1 || rc=$?; [[ "${rc}" == 0 ]]; }
 
     echo "[a] 資源導出"
+    local rc
+    # cap は 1 桁 (2..9) であることが文字クラス導出 ([0-${CAP}]) の前提。
+    [[ "${BUGHUNT_SHARD_CAP}" =~ ^[2-9]$ ]] || t_fail "BUGHUNT_SHARD_CAP は 2..9 の 1 桁である必要がある (文字クラス導出の前提)"
+    # 不正な BUGHUNT_DB_PREFIX では引数解析より前に die 1 する (SHARD_DB_RE への escape なし埋め込み対策)。
+    rc=0; (BUGHUNT_DB_PREFIX='b.g_hunt' "${SCRIPT_PATH}" self-test) >/dev/null 2>&1 || rc=$?
+    [[ "${rc}" == 1 ]] || t_fail "不正な BUGHUNT_DB_PREFIX でスクリプトが起動してしまう (exit ${rc})"
     [[ "$(shard_db 0)" == "bug_hunt" ]] || t_fail "shard_db serial"
     [[ "$(shard_db 1)" == "bug_hunt_1" ]] || t_fail "shard_db"
-    [[ "$(shard_db 8)" == "bug_hunt_8" ]] || t_fail "shard_db cap=8"
+    [[ "$(shard_db 4)" == "bug_hunt_4" ]] || t_fail "shard_db cap"
     [[ "$(shard_port 0)" == "8010" ]] || t_fail "shard_port serial"
-    [[ "$(shard_port 4)" == "8014" ]] || t_fail "shard_port"
-    [[ "$(shard_port 8)" == "8018" ]] || t_fail "shard_port cap=8"
+    [[ "$(shard_port 4)" == "8014" ]] || t_fail "shard_port cap"
     [[ "$(shard_url 2)" == "http://127.0.0.1:8012" ]] || t_fail "shard_url"
     [[ "$(shard_profile_dir 1)" == "${TMP_BASE}/profile-1" ]] || t_fail "shard_profile_dir"
     [[ "$(shard_download_dir 1)" == "${TMP_BASE}/downloads-1" ]] || t_fail "shard_download_dir"
     [[ "$(shard_trace_dir 1)" == "${TMP_BASE}/trace-1" ]] || t_fail "shard_trace_dir"
     t_ok "derivations + per-shard resource uniqueness"
 
-    echo "[b] 範囲外 shard の拒否 (exit 2、cap=8)"
-    local bad good rc fp_before
-    for bad in 9 -1 x ""; do
+    echo "[b] 範囲外 shard の拒否 (exit 2、cap=${BUGHUNT_SHARD_CAP})"
+    local bad good fp_before
+    # ★ 5/8 = 旧 cap (=8) の残骸が通らないことを正のアサーションにする。
+    for bad in 5 8 9 -1 x ""; do
         rc=0; (validate_shard "${bad}") 2>/dev/null || rc=$?
         [[ "${rc}" == 2 ]] || t_fail "shard '${bad}' が exit ${rc} (expected 2)"
     done
-    for good in 0 4 8; do
+    for good in 0 1 4; do
         rc=0; (validate_shard "${good}") 2>/dev/null || rc=$?
         [[ "${rc}" == 0 ]] || t_fail "shard ${good} が拒否された"
     done
     t_ok "shard validation"
 
-    echo "[c] guard_shard_db_name: dev DB / 別名バリアントは全 abort、bug_hunt 系は通過 (cap=8)"
+    echo "[c] guard_shard_db_name: dev DB / 別名バリアント / cap 超過は全 abort、bug_hunt_1..4 は通過"
     local v
-    for v in app App ' app ' 'app ' bug_huntx bug_hunt2 bug_hunt_9 'bug_hunt;rm' myapp_dev ''; do
+    for v in app App ' app ' 'app ' bug_huntx bug_hunt2 bug_hunt_5 bug_hunt_8 bug_hunt_9 'bug_hunt;rm' myapp_dev ''; do
         expect_die guard_shard_db_name "${v}" || t_fail "guard_shard_db_name が '${v}' を abort しない"
     done
-    for v in bug_hunt bug_hunt_1 bug_hunt_4 bug_hunt_8; do
+    for v in bug_hunt bug_hunt_1 bug_hunt_4; do
         expect_ok guard_shard_db_name "${v}" || t_fail "guard_shard_db_name が '${v}' を拒否"
     done
     t_ok "shard db name deny"
@@ -1343,21 +1366,22 @@ ENVEOF
     [[ -z "$(manifest_get 20260615-150000 1 nope)" ]] || t_fail "manifest_get 欠損キーが空でない"
     t_ok "run-id allocation + manifest schema"
 
-    echo "[m] stories_for_shard 固定マップ (N=4/6/8: S1..S7 を網羅 / 未定義は abort)"
+    echo "[m] stories_for_shard 固定マップ (受理される全 N で S1..S7 を網羅 / 未定義は abort、cap=${BUGHUNT_SHARD_CAP})"
     [[ "$(stories_for_shard 1 4)" == "S3 S7" ]] || t_fail "4-1 map"
     [[ "$(stories_for_shard 4 4)" == "S6" ]] || t_fail "4-4 map"
     [[ "$(stories_for_shard 1 2)" == "S3 S7 S6" ]] || t_fail "2-1 map"
-    [[ "$(stories_for_shard 6 6)" == "S6" ]] || t_fail "6-6 map"
-    [[ "$(stories_for_shard 7 8)" == "S1" ]] || t_fail "8-7 map (2nd pass)"
-    [[ "$(stories_for_shard 8 8)" == "S4" ]] || t_fail "8-8 map (2nd pass)"
     local s mapped n2
-    for n2 in 4 6 8; do
+    for n2 in $(seq 2 "${BUGHUNT_SHARD_CAP}"); do
+        valid_parallel_n "${n2}" || continue
         mapped="$(for s in $(seq 1 "${n2}"); do stories_for_shard "${s}" "${n2}"; done | tr ' ' '\n' | sort -u | tr '\n' ' ')"
         [[ "${mapped}" == "S1 S2 S3 S4 S5 S6 S7 " ]] || t_fail "N=${n2} の story union が S1..S7 でない: '${mapped}'"
     done
-    rc=0; (stories_for_shard 1 3) 2>/dev/null || rc=$?
-    [[ "${rc}" == 1 ]] || t_fail "未定義 N=3 が abort しない (exit ${rc})"
-    t_ok "stories map (N=4/6/8)"
+    # ★ 旧 cap (=8) の残骸と奇数 N がマップから消えていること (die 1) を正のアサーションにする。
+    for n2 in 3 6 8; do
+        rc=0; (stories_for_shard 1 "${n2}") 2>/dev/null || rc=$?
+        [[ "${rc}" == 1 ]] || t_fail "未定義 N=${n2} が abort しない (exit ${rc})"
+    done
+    t_ok "stories map (受理される全 N = 2..${BUGHUNT_SHARD_CAP} の偶数)"
 
     echo "[n] manifest_valid_shards: 改ざん key (空白/トラバーサル) を除外"
     local tamper_mf; tamper_mf="$(manifest_path 20260615-160000)"
@@ -1389,16 +1413,35 @@ MFEOF
     [[ "$(manifest_get "${pa_run_id}" 1 stories)" == "S3 S7 S6" ]] || t_fail "provision-all: shard-1 stories 未記録"
     [[ "$(manifest_get "${pa_run_id}" 2 stories)" == "S1 S2 S4 S5" ]] || t_fail "provision-all: shard-2 stories 未記録"
     [[ ! -f "$(run_dir "${pa_run_id}")/child-pids" ]] || t_fail "provision-all が子を起動している (child-pids 検出)"
-    local pa8_log="${sandbox}/provision-all-8.log"
-    rc=0; ("${SCRIPT_PATH}" provision-all --parallel=8) > "${pa8_log}" 2>&1 || rc=$?
-    [[ "${rc}" == 0 ]] || t_fail "provision-all --parallel=8 (dryrun) が exit ${rc} (expected 0、cap=8)"
-    local pa8_run_id; pa8_run_id="$(sed -n 's/^run-id=//p' "${pa8_log}" | head -1)"
-    [[ "$(manifest_get "${pa8_run_id}" - parallel)" == "8" ]] || t_fail "provision-all --parallel=8: manifest parallel≠8"
-    [[ "$(manifest_get "${pa8_run_id}" 8 stories)" == "S4" ]] || t_fail "provision-all --parallel=8: shard-8 stories 未記録 (2nd pass S4)"
-    rc=0; ("${SCRIPT_PATH}" provision-all --parallel=3) >/dev/null 2>&1 || rc=$?
-    [[ "${rc}" == 2 ]] || t_fail "provision-all --parallel=3 が exit ${rc} (expected 2、未定義 N)"
+    local pa4_log="${sandbox}/provision-all-4.log"
+    rc=0; ("${SCRIPT_PATH}" provision-all --parallel=4) > "${pa4_log}" 2>&1 || rc=$?
+    [[ "${rc}" == 0 ]] || t_fail "provision-all --parallel=4 (dryrun) が exit ${rc} (expected 0、cap=${BUGHUNT_SHARD_CAP})"
+    local pa4_run_id; pa4_run_id="$(sed -n 's/^run-id=//p' "${pa4_log}" | head -1)"
+    [[ "$(manifest_get "${pa4_run_id}" - parallel)" == "4" ]] || t_fail "provision-all --parallel=4: manifest parallel≠4"
+    [[ "$(manifest_get "${pa4_run_id}" 4 stories)" == "S6" ]] || t_fail "provision-all --parallel=4: shard-4 stories 未記録"
+
+    # ★ 旧 cap の 6/8 が拒否されることが本施策の核。奇数・範囲外も併せて固定する。
+    local bad_n
+    for bad_n in 3 5 6 8 0 1; do
+        rc=0; ("${SCRIPT_PATH}" provision-all "--parallel=${bad_n}") >/dev/null 2>&1 || rc=$?
+        [[ "${rc}" == 2 ]] || t_fail "provision-all --parallel=${bad_n} が exit ${rc} (expected 2)"
+    done
+
+    # 受理される N すべてに完全なストーリーマップがあること (受理集合とマップのずれ検出)。
+    # ★ stories_for_shard は未定義時 die 1 する。command substitution の失敗が set -e で
+    #   self-test 全体を殺さないよう、rc を分離して受ける。
+    local n i stories srv_rc
+    for n in $(seq 2 "${BUGHUNT_SHARD_CAP}"); do
+        valid_parallel_n "${n}" || continue
+        for i in $(seq 1 "${n}"); do
+            srv_rc=0
+            stories="$(stories_for_shard "${i}" "${n}")" || srv_rc=$?
+            [[ "${srv_rc}" == 0 && -n "${stories}" ]] \
+                || t_fail "stories_for_shard 未定義: N=${n} shard=${i} (rc=${srv_rc})"
+        done
+    done
     unset BUGHUNT_SELFTEST_DRYRUN
-    t_ok "provision-all dryrun (cap=8 受理 / N=3 拒否)"
+    t_ok "provision-all dryrun (cap=${BUGHUNT_SHARD_CAP} 受理 / 旧 cap の 6・8 と奇数 N を拒否 / story map 完全)"
 
     echo "[s] provision-all は lock 排他 (保持中の lock 下では exit 1)"
     (
@@ -1944,7 +1987,7 @@ main() {
             validate_shard "${shard}"; validate_run_id "${run_id}"
             cmd_provision "${shard}" "${run_id}" ;;
         provision-all)
-            valid_parallel_n "${parallel}" || die 2 "--parallel は 2/4/6/8 のみ (固定ストーリーマップのため。cap=8)"
+            valid_parallel_n "${parallel}" || die 2 "--parallel は 2..${BUGHUNT_SHARD_CAP} の偶数のみ (固定ストーリーマップのため)"
             cmd_provision_all "${parallel}" "${hold_lock}" ;;
         reseed)
             validate_shard "${shard}"; validate_run_id "${run_id}"

@@ -24,7 +24,7 @@
     "finding_id": { "type": "string", "description": "report.md の F-xx と対応", "pattern": "^F-" },
     "run_id": { "type": "string", "minLength": 1 },
     "story_id": { "type": "string", "description": "app ストーリー S1..S8 等。逸脱は S3-dev 等。enum 化しない自由文字列 (fix-gate #4)", "minLength": 1 },
-    "shard_id": { "type": ["string", "integer", "null"], "description": "並列時のシャード番号 (0-8。直列は :8010 で shard 0、並列は :8011..8018 で shard 1..8)" },
+    "shard_id": { "type": ["string", "integer", "null"], "description": "並列時のシャード番号 (0-4。直列は :8010 で shard 0、並列は :8011..8014 で shard 1..4)。過去 run には範囲外の値が入りうるため型・値制約は課さない" },
     "capability_tag": { "type": "string", "description": "capability-catalog の id。未割当は 'unmapped'、tag 不能は 'unknown'", "minLength": 1 },
     "principal": { "type": "string", "description": "操作主体 (例 org_b_admin / guest / member_enforced_org)", "minLength": 1 },
     "tenant_relation": {

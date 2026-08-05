@@ -11,7 +11,7 @@ findings.jsonl を検証し、success/kill 判定に使う KPI を出力する�
 
 設計根拠: .claude/skills/app-bug-hunt/SKILL.md / coverage-audit.md
   (最小スキーマ / success-kill 基準)。app bug-hunt は直列 :8010 (shard 0) /
-  並列 :8011..8018 (shard 1..8) の専用 bughunt 環境で走る。
+  並列 :8011..8014 (shard 1..4) の専用 bughunt 環境で走る。
 """
 from __future__ import annotations
 

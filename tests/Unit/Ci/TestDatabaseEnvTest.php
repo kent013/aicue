@@ -103,8 +103,10 @@ it('hard-denies bug-hunt databases', function (string $variant): void {
     ' bug_hunt_5 ',
 ]);
 
-it('covers every bug-hunt shard database in the denylist', function (): void {
-    // shard は :8011..:8018 = bug_hunt_1..8 (scripts/bug-hunt-shard.sh)。取りこぼしを機械検出する。
+it('keeps the bug-hunt denylist wider than the current shard cap', function (): void {
+    // denylist は cap (=4) より広い 1..8 を**意図的に**維持する (過去 cap=8 期の残留 DB 保護)。
+    // cap と同期させないことをここで固定する (縮める改変 = 防御の後退)。
+    // 「cap より広い」という意図そのものは BughuntShardCapInvariantTest が別軸で固定する。
     $expected = ['app', 'bug_hunt'];
     for ($i = 1; $i <= 8; $i++) {
         $expected[] = "bug_hunt_{$i}";

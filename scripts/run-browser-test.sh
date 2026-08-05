@@ -43,8 +43,8 @@ LANES="${BROWSER_TEST_LANES:-chromium webkit}"
 # **ロック取得より前**に実行する。取得後に落とすと、先行レーンの終了を数分待ってから
 # 「bug-hunt が走っているので実行できません」と言うことになり、待ち時間が無駄になる。
 #
-# bug-hunt は本ロック規約に参加しない (意図的に隔離された並列実行基盤で、
-# global lock を被せると 8 並列が 1 直列に潰れる)。そのため bug-hunt の
+# bug-hunt は本ロック規約に参加しない (意図的に隔離された 4 並列基盤で、
+# global lock を被せると並列が 1 直列に潰れる)。そのため bug-hunt の
 # `playwright-cli kill-all` (@playwright/cli) が Browser lane の run-server を
 # 巻き込む可能性を **こちらからは証明できない**。
 #
@@ -55,6 +55,8 @@ LANES="${BROWSER_TEST_LANES:-chromium webkit}"
 #
 # 検知は bash の /dev/tcp のみを使う (ss/lsof/netstat の可用性と出力形式に依存しない)。
 # bug-hunt は 127.0.0.1:801N に明示 bind するので IPv4 loopback だけ見れば足りる。
+# ★ bug-hunt の並列 cap は 4 だが、本 guard は残留 serve の取りこぼしを避けるため :8018 まで
+#   広く見る (cap と同期させない。広い方が偽赤に倒れて安全)。
 # /dev/tcp が使えないシェルでは検査を skip して続行する (guard であって保証ではない)。
 bughunt_port_in_use() {
     local port
