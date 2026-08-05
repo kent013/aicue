@@ -92,7 +92,9 @@ function bughuntGateIsInertLocal(string $trimmed): bool
  */
 function bughuntGateFirstEffectiveStatement(string $window): string
 {
-    foreach (preg_split('/\R/', $window) ?: [] as $line) {
+    // `/u` は必須 (PcreUnicodeModifierGateTest): 非 UTF-8 モードの `\R` はバイト 0x85 (NEL)
+    // にも一致し、日本語コメントを文字途中で分断して行構造を壊す。
+    foreach (preg_split('/\R/u', $window) ?: [] as $line) {
         $trimmed = trim($line);
         if ($trimmed === '' || str_starts_with($trimmed, '#') || $trimmed === '{') {
             continue;

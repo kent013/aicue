@@ -104,7 +104,7 @@ function globalTestLockLaneViolations(array $scripts): array
         // **最終行 (= 実際に走るコマンド) が公式入口そのものであること**を要求し、
         // 同一行のシェル演算子で別コマンドを繋ぐことを禁止する。
         $lines = array_values(array_filter(
-            array_map(trim(...), preg_split('/\R/', $command) ?: []),
+            array_map(trim(...), preg_split('/\R/u', $command) ?: []),
             static fn (string $l): bool => $l !== '',
         ));
         $last = $lines === [] ? '' : $lines[count($lines) - 1];
@@ -143,7 +143,9 @@ function globalTestLockLaneViolations(array $scripts): array
  */
 function globalTestLockCodeLines(string $source): string
 {
-    $lines = preg_split('/\R/', $source) ?: [];
+    // `/u` は必須: 非 UTF-8 モードの `\R` はバイト 0x85 (NEL) にも一致し、日本語コメントを
+    // 文字途中で分断して「コメント断片がコードとして漏出する」(PcreUnicodeModifierGateTest)。
+    $lines = preg_split('/\R/u', $source) ?: [];
     $code = array_filter(
         $lines,
         static fn (string $line): bool => preg_match('/^\s*#/', $line) !== 1,

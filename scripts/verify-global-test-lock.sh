@@ -17,7 +17,7 @@
 # 使い方:
 #   bash scripts/verify-global-test-lock.sh
 #
-# 出力: 各ケースを C01..C24 の ID 付きで PASS / FAIL / SKIP 報告し、
+# 出力: 各ケースを C01..C26 の ID 付きで PASS / FAIL / SKIP 報告し、
 #       最後に集計を出す。FAIL が 1 つでもあれば非 0 で終了する。
 #       **skip 数を必ず出す** (偽グリーンを避けるため)。
 #
@@ -343,8 +343,29 @@ global_test_lock_run bash "$2" 2
 echo "SHOULD_NOT_REACH"
 EOF
 
+STRICTLANE="${WORK}/strict-lane.sh"
+cat >"${STRICTLANE}" <<'EOF'
+#!/usr/bin/env bash
+# 実レーン (scripts/run-test.sh / scripts/run-browser-test.sh) と同じ呼び出し条件を
+# 再現するフィクスチャ ($1=lib)。
+#
+# **この 2 条件が非交渉** (どちらかを崩すと race を再現できない):
+#   (1) `set -e` あり
+#   (2) global_test_lock_run を `|| ...` で受けない
+# with-global-test-lock.sh は `global_test_lock_run "$@" || status=$?` と書くため、
+# POSIX の規定で関数本体の -e が無効化され、代入失敗が致命傷にならない。
+# 一方 run-test.sh / run-browser-test.sh は裸で呼ぶので落ちる。
+set -euo pipefail
+# shellcheck source=/dev/null
+. "$1"
+global_test_lock_acquire "strict lane fixture"
+global_test_lock_run true
+echo "lane_ok=1"
+EOF
+
 chmod +x "${SLEEPER}" "${SPAWNER}" "${IGNORER}" "${FDCHECK}" "${PGIDCHECK}" \
-    "${REENTER}" "${MONITORCHECK}" "${HOOKLANE}" "${DOUBLEACQ}" "${ABNORMAL}" "${SURVIVOR}"
+    "${REENTER}" "${MONITORCHECK}" "${HOOKLANE}" "${DOUBLEACQ}" "${ABNORMAL}" "${SURVIVOR}" \
+    "${STRICTLANE}"
 
 # ---------------------------------------------------------------------------
 # C01: lock path の導出
@@ -1317,6 +1338,102 @@ case_c24() {
 }
 
 # ---------------------------------------------------------------------------
+# C25: sub-millisecond で終了する子でもレーンが落ちない (pgid probe の race 許容)
+#
+# 回帰の対象: `pgid="$(ps ...)"` が set -euo pipefail 下で **代入ごと** 失敗し、
+# 直下の「空 = race として許容」判定に到達せずレーンが落ちていた
+# (T104 が contract テストへ sleep 0.1 の回避策を入れる原因になった偽赤)。
+#
+# 1 回だけだと race が確率的に外れて偽グリーンになりうるので 20 回反復する。
+# ---------------------------------------------------------------------------
+case_c25() {
+    local id="C25" d i=0 rc fails=0
+    if [ "${HAVE_PS}" -eq 0 ]; then
+        t_skip "${id}" "ps 不在 (pgid probe そのものに到達しない)"
+        t_skip "${id}" "ps 不在 (best-effort probe の die 検査)"
+        return
+    fi
+    d="$(new_dir)"
+    : >"${WORK}/c25.err"
+    while [ "${i}" -lt 20 ]; do
+        i=$((i + 1))
+        rc=0
+        GLOBAL_TEST_LOCK_DIR="${d}" bash "${STRICTLANE}" "${LIB}" \
+            >"${WORK}/c25.out" 2>>"${WORK}/c25.err" || rc=$?
+        if [ "${rc}" -ne 0 ] || ! grep -q '^lane_ok=1$' "${WORK}/c25.out"; then
+            fails=$((fails + 1))
+        fi
+    done
+
+    if [ "${fails}" -eq 0 ]; then
+        t_ok "${id}" "即座に終了する子でもレーンが落ちない (20/20)"
+    else
+        t_fail "${id}" "pgid probe の race でレーンが落ちた (${fails}/20)"
+    fi
+    # best-effort probe が「値が違うときだけ落とす」契約を守っているか
+    # (空を不一致と誤判定して die していないこと)。
+    if grep -q '専用プロセスグループを作れなかった' "${WORK}/c25.err"; then
+        t_fail "${id}" "best-effort probe が空の pgid を不一致として die した"
+    else
+        t_ok "${id}" "best-effort probe が空の pgid で die しない"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# C26: ps が使えない環境ではロック取得が fail する (strict 検証が生きていることの正コントロール)
+#
+# `|| pgid=""` は best-effort probe の意図を成立させるだけで、厳格判定
+# (_gtl_probe_process_group の 3 回リトライ → 一度も取れなければ _gtl_die) を弱めない。
+#
+# **偽グリーン対策**: 単に PATH を空にすると flock / tr / stat など別コマンドの不在で
+# 先に落ち、「非ゼロ終了」だけを見ると通ってしまう。そこで
+#   (a) 一時 PATH ディレクトリに **必要なコマンドだけ** symlink し、ps だけを置かない
+#   (b) 終了コードに加えて **_gtl_probe_process_group 固有のメッセージ** が stderr に出ること
+#   (c) acquire に到達した証跡 (override lock dir の警告) が出ていること
+# の 3 点を満たして初めて PASS とする。
+# ---------------------------------------------------------------------------
+case_c26() {
+    local id="C26" d fake cmd src rc=0
+    if [ "${HAVE_PS}" -eq 0 ]; then
+        t_skip "${id}" "ps 不在 (ps 有り環境との対比が取れないため正コントロールにならない)"
+        return
+    fi
+    if [ "${HAVE_FLOCK}" -eq 0 ]; then
+        t_skip "${id}" "flock(1) 不在 (probe に到達しない)"
+        return
+    fi
+
+    d="$(new_dir)"
+    fake="${WORK}/c26-bin"
+    rm -rf "${fake}"
+    mkdir -p "${fake}"
+    # ps 以外の依存コマンドだけを通す。ここに ps を **置かない** ことが本ケースの本体。
+    for cmd in bash dirname id mkdir stat flock sleep tr rm mv date awk cat head; do
+        src="$(command -v "${cmd}" 2>/dev/null || true)"
+        [ -n "${src}" ] && ln -sfn "${src}" "${fake}/${cmd}"
+    done
+    if [ ! -e "${fake}/bash" ] || [ ! -e "${fake}/flock" ] || [ ! -e "${fake}/stat" ]; then
+        t_skip "${id}" "隔離 PATH に必要なコマンドを揃えられなかった"
+        return
+    fi
+
+    env -i "PATH=${fake}" "HOME=${HOME:-/tmp}" \
+        "GLOBAL_TEST_LOCK_DIR=${d}" \
+        "GLOBAL_TEST_LOCK_HEARTBEAT_SECS=${GLOBAL_TEST_LOCK_HEARTBEAT_SECS}" \
+        "GLOBAL_TEST_LOCK_GRACE_SECS=${GLOBAL_TEST_LOCK_GRACE_SECS}" \
+        "${fake}/bash" "${STRICTLANE}" "${LIB}" \
+        >"${WORK}/c26.out" 2>"${WORK}/c26.err" || rc=$?
+
+    if [ "${rc}" -ne 0 ] &&
+        grep -q 'job control で専用プロセスグループを作れない' "${WORK}/c26.err" &&
+        grep -q 'using override lock dir' "${WORK}/c26.err"; then
+        t_ok "${id}" "ps 不在ならロック取得が明示エラーで fail する (strict 検証は健在)"
+    else
+        t_fail "${id}" "ps 不在を素通し / 別要因で落ちた (rc=${rc}, err=$(tr '\n' ' ' <"${WORK}/c26.err" | head -c 200))"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # C11: 全ケース終了後に子孫プロセスが残らない (最後に実行する)
 # ---------------------------------------------------------------------------
 case_c11() {
@@ -1362,6 +1479,8 @@ main() {
     case_c22
     case_c23
     case_c24
+    case_c25
+    case_c26
     case_c11
 
     echo ""

@@ -28,7 +28,10 @@ function mailThemeDesignColors(): array
     expect($content)->toBeString();
     assert(is_string($content));
 
-    expect(preg_match('/\A---\R(.*?)\R---\R/s', $content, $matches))->toBe(1);
+    // `/u` は必須 (PcreUnicodeModifierGateTest): 非 UTF-8 モードの `\R` はバイト 0x85 (NEL)
+    // にも一致する。DESIGN.md は日本語を含むため、`/u` が無いと front matter の終端を
+    // 文字の途中で誤検出しうる。
+    expect(preg_match('/\A---\R(.*?)\R---\R/su', $content, $matches))->toBe(1);
 
     $front = Yaml::parse($matches[1]);
     expect($front)->toBeArray()->toHaveKey('colors');
