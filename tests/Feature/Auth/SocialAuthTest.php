@@ -55,9 +55,45 @@ test('SSO register で User + SocialAccount が作成されログインされる
     $this->assertAuthenticated();
 
     $user = User::whereBlind('email', 'email_index', 'sso@example.com')->firstOrFail();
+    // T105: google は email_trust=confirmed 宣言のため、trust policy 導入後も検証済みで作られる (挙動不変)
     expect($user->email_verified_at)->not->toBeNull();
     expect($user->terms_accepted_at)->not->toBeNull();
     expect($user->socialAccounts()->where('provider', 'google')->exists())->toBeTrue();
+
+    // verified ゲートを素通りして dashboard に到達できる (従来どおり)
+    $this->get(route('dashboard'))->assertOk();
+});
+
+test('T105: email_trust=unconfirmed の provider では SSO register が検証済みにしない', function (): void {
+    // nOAuth 対策の継ぎ目。confirmed を名乗れない provider は IdP の email 主張を信頼せず、
+    // アプリ側のメール到達確認 (/email/verify) を経てから検証済みにする。
+    config(['template.social_providers.google.email_trust' => 'unconfirmed']);
+
+    $this->withSession(['social_auth_intent' => 'register']);
+    fakeSocialiteCallback(fakeSocialiteUser('g-untrusted', 'untrusted@example.com'));
+
+    $this->get('/auth/google/callback')->assertRedirect(route('dashboard'));
+    $this->assertAuthenticated();
+
+    $user = User::whereBlind('email', 'email_index', 'untrusted@example.com')->firstOrFail();
+    expect($user->email_verified_at)->toBeNull();
+
+    // verified ゲートに落ちる (dashboard へ到達できない)
+    $this->get(route('dashboard'))->assertRedirect(route('verification.notice'));
+});
+
+test('T105: email_trust 未宣言の provider は fail-closed で検証済みにしない', function (): void {
+    // 宣言漏れ (SocialProviderTrustPolicyTest が CI で先に落とす) が万一すり抜けても、
+    // 実行時は Unconfirmed に倒れることを固定する。
+    config(['template.social_providers.google.email_trust' => null]);
+
+    $this->withSession(['social_auth_intent' => 'register']);
+    fakeSocialiteCallback(fakeSocialiteUser('g-undeclared', 'undeclared@example.com'));
+
+    $this->get('/auth/google/callback')->assertRedirect(route('dashboard'));
+
+    $user = User::whereBlind('email', 'email_index', 'undeclared@example.com')->firstOrFail();
+    expect($user->email_verified_at)->toBeNull();
 });
 
 test('SSO login は未連携アカウントを自動登録しない', function (): void {

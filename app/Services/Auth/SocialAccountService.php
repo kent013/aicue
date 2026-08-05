@@ -7,6 +7,7 @@ namespace App\Services\Auth;
 use App\Enums\SecurityEventType;
 use App\Models\SocialAccount;
 use App\Models\User;
+use App\Services\Auth\EmailTrust\EmailTrustPolicyResolver;
 use App\Services\Organization\OrganizationProvisioningService;
 use App\Services\Security\SecurityEventRecorder;
 use Illuminate\Support\Facades\DB;
@@ -27,6 +28,7 @@ class SocialAccountService
     public function __construct(
         private readonly SecurityEventRecorder $recorder,
         private readonly OrganizationProvisioningService $provisioning,
+        private readonly EmailTrustPolicyResolver $emailTrust,
     ) {}
 
     public function findLinkedUser(string $provider, SocialiteUser $socialiteUser): ?User
@@ -50,6 +52,14 @@ class SocialAccountService
                 throw new \RuntimeException('SSO プロバイダから email が取得できませんでした');
             }
 
+            // IdP が email 所有を検証している provider のみ検証済みとして扱う
+            // (nOAuth 対策の継ぎ目)。宣言は config('template.social_providers.*.email_trust') で、
+            // 未宣言は Unconfirmed に倒れる (fail-closed)。google は confirmed 宣言のため
+            // 従来どおり email_verified_at が立つ (挙動不変)。
+            $verifiedAt = $this->emailTrust->for($provider)->trustsEmail($socialiteUser)
+                ? now()
+                : null;
+
             $user = (new User([
                 'name' => $socialiteUser->getName() ?? $email,
                 'email' => $email,
@@ -58,8 +68,7 @@ class SocialAccountService
             ]))->forceFill([
                 'terms_accepted_at' => now(),
                 'consent_version' => config()->string('legal.consent_version'),
-                // IdP 側で検証済みの email として扱う
-                'email_verified_at' => now(),
+                'email_verified_at' => $verifiedAt,
             ]);
             $user->save();
 
