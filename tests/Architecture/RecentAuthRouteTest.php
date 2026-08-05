@@ -28,6 +28,8 @@ function recentAuthRequiredRouteNames(): array
         'organizations.api-keys.sessions.revoke',
         // アカウント削除
         'settings.account.destroy',
+        // パスワード初回設定 (認証手段を増やす操作。セッション奪取からの永続化を防ぐため step-up 必須)
+        'settings.password.store',
         // オーナー移譲
         'organizations.transfer-ownership',
         // 組織の 2FA 必須方針トグル (Owner 専権のセキュリティ方針変更)

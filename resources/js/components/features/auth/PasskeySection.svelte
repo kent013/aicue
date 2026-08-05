@@ -1,6 +1,7 @@
 <script lang="ts">
     import { router } from "@inertiajs/svelte";
     import { KeyRound } from "@lucide/svelte";
+    import { tick } from "svelte";
     import Alert from "@/components/atoms/Alert.svelte";
     import Badge from "@/components/atoms/Badge.svelte";
     import Button from "@/components/atoms/Button.svelte";
@@ -14,7 +15,6 @@
         isPasskeySupported,
         type PasskeyListItem,
     } from "@/lib/passkeys";
-    import { addToast } from "@/lib/stores/toast";
 
     /**
      * セキュリティ設定のパスキーカード。
@@ -22,6 +22,8 @@
      * 契約:
      * - 登録 / 削除は **recent-auth 必須**。precheck は呼び出し側 (page) が持つ `guard` に委譲する
      *   (再認証モーダルはページに 1 つだけ置き、二重モーダルを作らない)。
+     *   `guard` は precheck の結果を返す Promise であり、**precheck 区間も loading で覆う**
+     *   (待ち時間中の連打で ceremony が多重起動し pending action が上書きされるのを塞ぐ)。
      * - 登録は ceremony (fetch) → **Inertia `router.post`** で送る (transport 契約)。
      *   成功 flash はサーバ (`back()->with('success')`) を単一の源とし client 楽観 toast を出さない。
      * - 削除は ConfirmDialog → `router.delete`。ログイン手段が 0 になる場合サーバは
@@ -29,6 +31,9 @@
      *   (**無言失敗にしない**)。
      * - **必須条件未充足でボタンを disabled にしない** (AGENTS.md 禁止事項 8)。
      *   非対応端末でも押せて、押下時にエラーを出す。
+     * - **非フィールド起因の操作失敗は Alert** (DESIGN.md §Alert)。ceremony 失敗・端末非対応は
+     *   押したその場に残る Alert に出す (Toast は画面外へ飛ぶ一時通知であり、押下直後に
+     *   読ませたい失敗理由の提示先として使わない)。フィールド起因 (名前) だけが FormField。
      */
     interface Props {
         passkeys?: PasskeyListItem[];
@@ -37,8 +42,11 @@
         twoFactorEnabled?: boolean;
         /** EnsureLoginMethodRemains の拒否メッセージ ($page.props.errors.login_method) */
         loginMethodError?: string;
-        /** recent-auth precheck。fresh なら即実行、stale なら再認証モーダルを挟んで再開する */
-        guard: (action: () => void) => void;
+        /**
+         * recent-auth precheck。fresh なら即実行、stale なら再認証モーダルを挟んで再開する。
+         * 戻り値は実行した分岐 (precheck 区間を loading で覆うために待つ)。
+         */
+        guard: (action: () => void) => Promise<"fresh" | "stale" | "delegated">;
     }
 
     let {
@@ -56,59 +64,129 @@
     })();
 
     let newPasskeyName = $state("");
-    let nameError = $state("");
-    let registering = $state(false);
 
-    function registerPasskey(): void {
-        if (registering) return;
+    /**
+     * DESIGN.md §FormField: 押下時に出した client エラーは入力に追随させる
+     * (stale invalid を残さない)。新規は「提示開始 boolean + $derived 文言」で書く。
+     */
+    let nameErrorShown = $state(false);
+    /** サーバ由来 (422) のエラーは入力で消さない (DESIGN.md の例外規定) */
+    let serverNameError = $state<string | null>(null);
+    /** 非フィールド起因の操作失敗 (ceremony 失敗・端末非対応・登録 POST 失敗) */
+    let operationError = $state("");
+
+    const trimmedName = $derived(newPasskeyName.trim());
+    const clientNameError = $derived(
+        nameErrorShown && trimmedName === "" ? "パスキーの名前を入力してください。" : "",
+    );
+    const nameError = $derived(serverNameError ?? clientNameError);
+
+    /** ceremony ～ POST 完了まで (削除側と同じ作法で onStart/onFinish が握る) */
+    let registering = $state(false);
+    /** precheck (/recent-auth/status) 実行中。ceremony/POST 中は registering が覆う */
+    let prechecking = $state(false);
+    const busy = $derived(prechecking || registering);
+
+    /**
+     * ceremony → POST。`registering` は ceremony 開始時に立て、
+     * cancelled / unsupported / failed で終わったときだけ戻す
+     * (`finally` で一律解除すると POST 完了前に解除され、連打で ceremony が多重に走る)。
+     */
+    async function startCeremonyAndPost(capturedName: string): Promise<void> {
+        registering = true;
+
+        // ceremony は outcome を返す契約だが、想定外の throw (ラッパの前提崩れ・拡張機能の割込み等)
+        // でも loading を固定させない。**ボタンが押せないまま残ることが本施策で潰す詰みそのもの**。
+        let outcome: Awaited<ReturnType<typeof createPasskeyCredential>>;
+        try {
+            outcome = await createPasskeyCredential();
+        } catch {
+            operationError = "パスキーの登録を開始できませんでした。時間をおいて再度お試しください。";
+            registering = false;
+            return;
+        }
+
+        if (outcome.status === "cancelled") {
+            // キャンセルは失敗として騒がない (再試行導線を残す)
+            registering = false;
+            return;
+        }
+        if (outcome.status === "unsupported") {
+            operationError = "このブラウザはパスキーに対応していません。";
+            registering = false;
+            return;
+        }
+        if (outcome.status === "failed") {
+            operationError = outcome.message;
+            registering = false;
+            return;
+        }
+
+        router.post(
+            "/user/passkeys",
+            { name: capturedName, credential: outcome.value },
+            {
+                preserveScroll: true,
+                onStart: () => {
+                    registering = true;
+                },
+                onFinish: () => {
+                    registering = false;
+                },
+                onSuccess: () => {
+                    newPasskeyName = "";
+                    nameErrorShown = false;
+                },
+                onError: (errors) => {
+                    // フィールド起因は FormField へ、それ以外は Alert へ
+                    const nameMessage = (errors as Record<string, unknown>).name;
+                    serverNameError = typeof nameMessage === "string" ? nameMessage : null;
+                    if (serverNameError === null) {
+                        operationError =
+                            "パスキーの登録に失敗しました。時間をおいて再度お試しください。";
+                    }
+                },
+            },
+        );
+    }
+
+    async function registerPasskey(): Promise<void> {
+        if (busy) return;
+        operationError = "";
         // 非対応端末でも押下できる (disabled にしない)。押した結果として理由を出す。
         if (!supported) {
-            addToast(
-                "error",
-                "このブラウザはパスキーに対応していません。パスワードまたはソーシャルログインをご利用ください。",
-            );
+            operationError =
+                "このブラウザはパスキーに対応していません。パスワードまたはソーシャルログインをご利用ください。";
             return;
         }
-        const name = newPasskeyName.trim();
-        if (name === "") {
-            nameError = "パスキーの名前を入力してください。";
-            return;
-        }
-        nameError = "";
+        nameErrorShown = true;
+        serverNameError = null;
+        if (trimmedName === "") return; // 文言は $derived が出す
 
-        guard(() => {
-            void (async () => {
-                registering = true;
-                try {
-                    const outcome = await createPasskeyCredential();
-                    if (outcome.status === "cancelled") return;
-                    if (outcome.status === "unsupported") {
-                        addToast("error", "このブラウザはパスキーに対応していません。");
-                        return;
-                    }
-                    if (outcome.status === "failed") {
-                        addToast("error", outcome.message);
-                        return;
-                    }
-                    router.post(
-                        "/user/passkeys",
-                        { name, credential: outcome.value },
-                        {
-                            preserveScroll: true,
-                            onSuccess: () => {
-                                newPasskeyName = "";
-                            },
-                            onError: () => {
-                                addToast("error", "パスキーの登録に失敗しました。");
-                            },
-                        },
-                    );
-                } finally {
-                    registering = false;
-                }
-            })();
-        });
+        // 押下時点の名前を確定させる (再認証モーダルを挟む間に入力欄が編集されても揺れない)
+        const capturedName = trimmedName;
+
+        prechecking = true;
+        try {
+            // fresh なら guard の中で action (ceremony → POST) が走り、registering が引き継ぐ。
+            // stale / delegated ならモーダル側へ委譲されるので、ここで precheck を閉じてよい。
+            await guard(() => void startCeremonyAndPost(capturedName));
+        } finally {
+            prechecking = false;
+        }
     }
+
+    /* ---- ログイン手段保持 guard の拒否 Alert にフォーカスを移す (見落とさせない) ----
+       リカバリコード panel (Settings/Security) と同じ作法 (tabindex=-1 + bind:this + tick)。 */
+    let loginMethodAlert = $state<HTMLDivElement | null>(null);
+    let lastFocusedLoginMethodError = $state<string | undefined>(undefined);
+
+    $effect(() => {
+        const message = loginMethodError;
+        if (message === undefined || message === lastFocusedLoginMethodError) return;
+        lastFocusedLoginMethodError = message;
+        void tick().then(() => loginMethodAlert?.focus());
+    });
 
     let deleteTarget = $state<PasskeyListItem | null>(null);
     let deleteDialogOpen = $state(false);
@@ -122,7 +200,7 @@
     function confirmDelete(): void {
         const target = deleteTarget;
         if (target === null) return;
-        guard(() => {
+        void guard(() => {
             router.delete(`/user/passkeys/${target.id}`, {
                 preserveScroll: true,
                 onStart: () => {
@@ -159,16 +237,26 @@
 
     <div class="mt-4 flex flex-col gap-4">
         {#if loginMethodError}
-            <Alert type="danger" title="削除できません" testId="passkey-login-method-error">
-                {loginMethodError}
-                {#snippet action()}
-                    <div class="flex flex-wrap gap-3">
-                        <Button variant="ghost" href="/settings" testId="passkey-add-password">
-                            パスワードを設定する
-                        </Button>
-                    </div>
-                {/snippet}
-            </Alert>
+            <div bind:this={loginMethodAlert} tabindex="-1">
+                <Alert type="danger" title="削除できません" testId="passkey-login-method-error">
+                    {loginMethodError}
+                    このページの「ソーシャルログイン連携」から外部アカウントを連携するか、
+                    下のフォームから別のパスキーを登録することもできます。
+                    {#snippet action()}
+                        <div class="flex flex-wrap gap-3">
+                            <!--
+                              遷移先 /settings は password 未設定ユーザーには「パスワードを設定」
+                              フォームを出す (施策 7)。この Alert が出るのは「削除するとログイン手段が
+                              0 になる」= password を持たないユーザーだけなので
+                              (LoginMethodInventory の投影評価)、CTA は必ず踏破可能。
+                            -->
+                            <Button variant="ghost" href="/settings" testId="passkey-add-password">
+                                パスワードを設定する
+                            </Button>
+                        </div>
+                    {/snippet}
+                </Alert>
+            </div>
         {/if}
 
         {#if !passkeyLoginAvailable && twoFactorEnabled}
@@ -219,6 +307,9 @@
         {/if}
 
         <div class="flex flex-col gap-3">
+            {#if operationError}
+                <Alert type="danger" testId="passkey-operation-error">{operationError}</Alert>
+            {/if}
             <FormField label="パスキーの名前" id="passkey-name" error={nameError}>
                 {#snippet children({ id, describedBy, invalid })}
                     <Input
@@ -233,7 +324,11 @@
                 {/snippet}
             </FormField>
             <div>
-                <Button onclick={registerPasskey} loading={registering} testId="register-passkey-button">
+                <Button
+                    onclick={() => void registerPasskey()}
+                    loading={busy}
+                    testId="register-passkey-button"
+                >
                     パスキーを登録
                 </Button>
             </div>

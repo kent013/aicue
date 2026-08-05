@@ -113,9 +113,12 @@ final class EnsureLoginMethodRemains
      */
     private function reject(Request $request): Response
     {
+        // settingsUrl は持たせない (削除済み)。理由:
+        // - Inertia 経路は back()->withErrors() で message しか運ばず、URL はどのクライアントも消費していない
+        // - 指していた settings.security にはパスワード設定 UI が無く、フロントの遷移先 (/settings) とも
+        //   食い違っていた (phantom 契約)。踏破可能な CTA は画面側 (PasskeySection → /settings) が持つ
         $dto = new LoginMethodRequiredDto(
             message: 'この操作を行うと、ログインする手段がなくなります。先に別のログイン手段（パスワードの設定、ソーシャル連携、他のパスキー）を追加してください。',
-            settingsUrl: route('settings.security'),
         );
 
         if ($request->expectsJson()) {

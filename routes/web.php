@@ -44,6 +44,7 @@ use App\Http\Controllers\Seo\LlmsTxtController;
 use App\Http\Controllers\Seo\RobotsController;
 use App\Http\Controllers\Seo\SitemapController;
 use App\Http\Controllers\Settings\AccountController;
+use App\Http\Controllers\Settings\PasswordSetupController;
 use App\Http\Controllers\Settings\ProfileController;
 use App\Http\Controllers\Settings\SecurityController;
 use App\Http\Controllers\Webhooks\SesNotificationController;
@@ -184,6 +185,13 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         ->name('recent-auth.password');
 
     Route::get('/settings', [ProfileController::class, 'index'])->name('settings');
+
+    // パスワード**初回設定** (password 未設定ユーザー専用)。認証手段を増やす操作のため
+    // step-up (recent-auth) 必須。変更 (current_password 必須) は Fortify の PUT /user/password。
+    // EnsureLoginMethodRemains は付けない (手段を減らす操作の関門であり方向が逆)。
+    Route::post('/settings/password', [PasswordSetupController::class, 'store'])
+        ->middleware(['recent-auth', 'throttle:6,1'])
+        ->name('settings.password.store');
 
     // 2FA / ソーシャル連携 / パスキーの管理面 (passkey 一覧の組み立てに DI が要るため Controller)
     Route::get('/settings/security', SecurityController::class)->name('settings.security');

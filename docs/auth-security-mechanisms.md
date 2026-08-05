@@ -58,7 +58,8 @@ Fortify 生の `password.confirm` (password 専用・3h 窓) を置き換え、S
   両 UI (`RecentAuthModal` / `Auth/ConfirmRecentAuth`) は
   `passwordSet || availableProviders || (passkeyAvailable && passkeySupported)` を
   クライアント側で導出し、成立しない場合は**理由と回復導線を明示**する
-  (`recent-auth-unsupported-here` / `confirm-unsupported-here`)。password 未設定 (SSO-only) は password 経路を **fail-closed** で拒否し、
+  (実装は `components/molecules/RecentAuthRecoveryNotice.svelte` に集約。testId は
+  `recent-auth-unsupported-here` / 手段 0 は `recent-auth-recovery`)。password 未設定 (SSO-only) は password 経路を **fail-closed** で拒否し、
   再SSO へ誘導する。step-up 可能な provider は `config('template.social_providers.*.capability')` から解決 (未宣言は satisfier 不可)。
 - fresh login (`Login` event、web guard・非 recaller) は `StampRecentAuthOnLogin` が `method='login'` で自動 stamp する。
   ログイン直後の機微操作で「もう 1 回」の二重壁を消す。remember-me による自動復元 (`viaRemember()`) は fresh 扱いしない (fail-closed)。
@@ -324,7 +325,7 @@ allowlist で固定する (transport 契約の食い違いは**無言失敗**と
 | リクエスト種別 | 応答 |
 |--------------|------|
 | Inertia | `302` (Inertia が DELETE では 303 に変換) + `errors.login_method` |
-| 純 XHR (`Accept: application/json`) | `422` + `{ code: 'login_method_required', message, settingsUrl }` (`no-store`) |
+| 純 XHR (`Accept: application/json`) | `422` + `{ code: 'login_method_required', message }` (`no-store`) |
 | 通常フォーム | `back()->withErrors('login_method')` |
 
 **Inertia に 422 JSON を返さない** (protocol 違反で router が応答を解釈できず無言失敗する)。

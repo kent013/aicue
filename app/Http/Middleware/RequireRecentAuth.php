@@ -23,7 +23,9 @@ use Symfony\Component\HttpFoundation\Response;
  * 判定:
  *   1. `recent_auth_at` が鮮度ウィンドウ内 (RecentAuthWindow) → 通過
  *   2. XHR (expectsJson) または Inertia の非 GET → 409 + { code, message, redirect }(no-store)。
- *      クライアント (素 fetch / recent-auth precheck) が再認証後に元操作を再送
+ *      クライアント (素 fetch / recent-auth precheck) が再認証後に元操作を再送。
+ *      Inertia mutation のときだけ 302 分岐と同じ着地情報 (url.intended /
+ *      recent_auth.dropped_mutation) を残す (confirm 後に元画面へ戻すため)
  *   3. それ以外 (通常遷移) → 302 で recent-auth confirm 画面へ。元 URL を intended に保持
  */
 final class RequireRecentAuth
@@ -48,6 +50,17 @@ final class RequireRecentAuth
         // 機能するため対象外。409 に x-inertia-location / x-inertia-redirect ヘッダを付けない
         // こと (Inertia core の external redirect 信号と衝突するため)。
         if ($request->expectsJson() || $this->isInertiaMutation($request)) {
+            // Inertia mutation の 409 は、クライアント (lib/recent-auth.ts の単一ハンドラ) が
+            // confirm 画面へ visit する。302 分岐と同じ着地契約に揃えるため、元 URL と
+            // 「mutation body を落とした」flag をここでも残す (残さないと confirm 成功後に
+            // dashboard へ落ち、操作がサイレントに失われる)。
+            // 純 XHR (fetch + Accept: application/json) は**対象外**: クライアントが自前で
+            // pending action を再開するため、intended を書くと他フローの intended を汚す。
+            if ($this->isInertiaMutation($request)) {
+                $session->put('url.intended', $this->sameOriginRefererOrDashboard($request));
+                $session->put('recent_auth.dropped_mutation', true);
+            }
+
             return RecentAuthRequiredResource::make(new RecentAuthRequiredDto(
                 message: 'この操作には直近の再認証が必要です。',
                 redirect: $confirmUrl,

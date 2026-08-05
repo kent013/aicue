@@ -74,8 +74,14 @@ test('唯一の passkey の削除は純 XHR に 422 + login_method_required で�
 
     $response->assertStatus(422)
         ->assertHeader('Cache-Control', 'no-store, private')
-        ->assertJsonPath('code', 'login_method_required')
-        ->assertJsonPath('settingsUrl', route('settings.security'));
+        ->assertJsonPath('code', 'login_method_required');
+
+    // **キー集合を code / message に固定する** (T107 施策 8)。
+    // 旧 settingsUrl は誰も消費しておらず、指していた settings.security にパスワード設定 UI が
+    // 無かった (phantom 契約)。踏破可能な CTA は画面側 (PasskeySection → /settings) が持つ。
+    // ここで集合を固定して phantom contract の再追加を機械的に防ぐ。
+    expect(array_keys((array) $response->json()))->toEqualCanonicalizing(['code', 'message']);
+
     expect(Passkey::query()->whereKey($passkey->getKey())->exists())->toBeTrue();
 });
 
@@ -123,6 +129,12 @@ test('passkey が 2 件あれば 1 件削除できる', function (): void {
     expect($user->passkeys()->count())->toBe(1);
 });
 
+/*
+ * **CTA 踏破可能性の根拠** (T107 施策 8):
+ * login_method 拒否が起きるのは password 未設定ユーザーだけである。
+ * だから拒否 Alert の CTA (/settings) は必ず「パスワードを設定」フォームに着地する
+ * (password を持つユーザーにこの Alert は構造的に発生しない)。
+ */
 test('password があれば唯一の passkey を削除できる', function (): void {
     $user = User::factory()->create();
     $passkey = Passkey::factory()->for($user)->create();

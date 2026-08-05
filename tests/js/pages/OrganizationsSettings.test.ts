@@ -156,6 +156,7 @@ describe("Organizations/Settings オーナー移譲の確定フロー (F-12)", (
                             recent,
                             passwordSet: true,
                             availableProviders: [],
+                            passkeyAvailable: false,
                             canSatisfy: true,
                             confirmedAt: recent ? 1 : null,
                         }),
@@ -217,6 +218,68 @@ describe("Organizations/Settings オーナー移譲の確定フロー (F-12)", (
         });
         expect(routerPostSpy).not.toHaveBeenCalled();
     });
+
+    /*
+     * **passkey-only ユーザーがこの画面で詰まないこと** (監査 F-1 の回帰)。
+     * T106 では `passkeyAvailable` が本画面のモーダルへ未配線で、パスキーしか持たない
+     * ユーザーには「手段 0 + 事実に反する文言」だけが出ていた。props 契約を `status` 1 本に
+     * 統合したことで、サーバの status がそのままモーダルへ届く。
+     * 残り 4 画面は tests/js/architecture/recent-auth-modal-call-site-inventory.test.ts が担保する。
+     */
+    it("passkey-only + stale なら再認証モーダルにパスキー導線が出る (詰まない)", async () => {
+        vi.spyOn(router, "post").mockImplementation(() => {});
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockImplementation((input: RequestInfo | URL) => {
+                if (String(input).includes("/recent-auth/status")) {
+                    return Promise.resolve({
+                        ok: true,
+                        status: 200,
+                        json: () =>
+                            Promise.resolve({
+                                recent: false,
+                                passwordSet: false,
+                                availableProviders: [],
+                                passkeyAvailable: true,
+                                canSatisfy: true,
+                                confirmedAt: null,
+                            }),
+                    });
+                }
+                return Promise.reject(new Error(`unexpected fetch: ${String(input)}`));
+            }),
+        );
+        // WebAuthn 対応ブラウザを偽装する (非対応端末では回復導線に倒れるのが正)
+        Object.defineProperty(globalThis, "navigator", {
+            configurable: true,
+            value: { credentials: { create: vi.fn(), get: vi.fn() } },
+        });
+        Object.defineProperty(window, "PublicKeyCredential", {
+            configurable: true,
+            writable: true,
+            value: function PublicKeyCredentialStub() {
+                // instanceof 判定にのみ使う
+            },
+        });
+
+        render(Settings, { props: baseProps });
+
+        await fireEvent.change(screen.getByLabelText("移譲先のメンバー"), {
+            target: { value: "2" },
+        });
+        await fireEvent.click(screen.getByTestId("transfer-ownership-button"));
+        await fireEvent.click(screen.getByRole("button", { name: "移譲する" }));
+
+        await waitFor(() => {
+            expect(screen.getByTestId("recent-auth-passkey")).toBeInTheDocument();
+        });
+
+        Object.defineProperty(window, "PublicKeyCredential", {
+            configurable: true,
+            writable: true,
+            value: undefined,
+        });
+    });
 });
 
 describe("Organizations/Settings オーナー移譲の client error 自動解消 (T044)", () => {
@@ -242,6 +305,7 @@ describe("Organizations/Settings オーナー移譲の client error 自動解消
                             recent,
                             passwordSet: true,
                             availableProviders: [],
+                            passkeyAvailable: false,
                             canSatisfy: true,
                             confirmedAt: recent ? 1 : null,
                         }),

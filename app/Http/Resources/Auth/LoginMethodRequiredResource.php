@@ -9,7 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * ログイン手段保持 guard の拒否ボディ ({ code, message, settingsUrl })。
+ * ログイン手段保持 guard の拒否ボディ ({ code, message })。
  *
  * `response()->json()` 直接使用を避けるための JsonResource (禁止事項 4)。
  * no-store ヘッダは middleware 側で付与する。`data` ラップはしない (top-level)。
@@ -22,14 +22,13 @@ final class LoginMethodRequiredResource extends JsonResource
     public static $wrap = null;
 
     /**
-     * @return array{code: 'login_method_required', message: string, settingsUrl: string}
+     * @return array{code: 'login_method_required', message: string}
      */
     public function toArray(Request $request): array
     {
         return [
             'code' => LoginMethodRequiredDto::CODE,
             'message' => $this->resource->message,
-            'settingsUrl' => $this->resource->settingsUrl,
         ];
     }
 }

@@ -1,11 +1,13 @@
 <script lang="ts">
     import { router, useForm } from "@inertiajs/svelte";
+    import Alert from "@/components/atoms/Alert.svelte";
     import Button from "@/components/atoms/Button.svelte";
     import FormError from "@/components/atoms/FormError.svelte";
     import TextLink from "@/components/atoms/TextLink.svelte";
     import Divider from "@/components/molecules/Divider.svelte";
     import FormField from "@/components/molecules/FormField.svelte";
     import PasswordInput from "@/components/molecules/PasswordInput.svelte";
+    import RecentAuthRecoveryNotice from "@/components/molecules/RecentAuthRecoveryNotice.svelte";
     import AuthLayout from "@/components/templates/AuthLayout.svelte";
     import { confirmPasskeyCredential, isPasskeySupported } from "@/lib/passkeys";
     import type { AvailableReauthProvider } from "@/lib/recent-auth";
@@ -20,8 +22,8 @@
      * - パスキー登録済み (passkeyAvailable): WebAuthn 検証 (POST /passkeys/confirm、204)。
      *   **パスキーしか持たないユーザーをこの画面で詰ませない**ための導線
      * - canSatisfy=false: 回復手順 (ログアウト → guest としてパスワード再設定) を案内。
-     *   /forgot-password へ直接リンクしない — Fortify が `guest` middleware 付きで登録しており
-     *   ログイン済みの本画面ユーザーはフォームに到達できない (踏破不能 CTA。bug-hunt F-2-01 と同 species)
+     *   実装は molecules/RecentAuthRecoveryNotice に集約する (インラインモーダル側と共有。
+     *   分けて持つと片方だけ旧作法 = guest 限定の /forgot-password 直リンクが残る)
      */
     interface Props {
         appName?: string;
@@ -95,26 +97,9 @@
         password: "",
     });
 
-    let loggingOut = $state(false);
-
     function submit(event: SubmitEvent): void {
         event.preventDefault();
         form.post("/recent-auth/password");
-    }
-
-    function logout(): void {
-        router.post(
-            "/logout",
-            {},
-            {
-                onStart: () => {
-                    loggingOut = true;
-                },
-                onFinish: () => {
-                    loggingOut = false;
-                },
-            },
-        );
     }
 </script>
 
@@ -152,7 +137,9 @@
                 <Divider label="または" />
             {/if}
             {#if passkeyError}
-                <FormError message={passkeyError} testId="confirm-passkey-error" />
+                <!-- 非フィールド起因の操作失敗は Alert (DESIGN.md §Alert)。ceremony 失敗を
+                     password 欄のフィールドエラーとして出さない -->
+                <Alert type="danger" testId="confirm-passkey-error">{passkeyError}</Alert>
             {/if}
             <Button
                 variant="ghost"
@@ -180,31 +167,13 @@
     {/if}
 
     {#if !canSatisfy}
-        <div class="mt-6 flex flex-col gap-3 text-caption text-text-secondary">
-            <p>
-                この操作を続けるための再認証手段が設定されていません。
-                いったんログアウトし、ログイン画面の「パスワードをお忘れの方」から
-                パスワードを設定すると再認証できるようになります。
-            </p>
-            <Button variant="ghost" onclick={logout} loading={loggingOut} fullWidth>
-                ログアウトする
-            </Button>
+        <div class="mt-6">
+            <RecentAuthRecoveryNotice variant="no-satisfier" />
         </div>
     {:else if !executableHere}
         <!-- アカウントには手段があるが、この端末では実行できない (パスキー非対応ブラウザ) -->
-        <div
-            class="mt-6 flex flex-col gap-3 text-caption text-text-secondary"
-            data-testid="confirm-unsupported-here"
-        >
-            <p>
-                このアカウントの再認証手段はパスキーのみですが、このブラウザはパスキーに対応していません。
-                パスキーを登録した端末・ブラウザで開き直すと再認証できます。
-                その端末が使えない場合は、いったんログアウトし、ログイン画面の
-                「パスワードをお忘れの方」からパスワードを設定してください。
-            </p>
-            <Button variant="ghost" onclick={logout} loading={loggingOut} fullWidth>
-                ログアウトする
-            </Button>
+        <div class="mt-6">
+            <RecentAuthRecoveryNotice variant="not-executable-here" />
         </div>
     {/if}
 

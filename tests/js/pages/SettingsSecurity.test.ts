@@ -71,6 +71,7 @@ function stubFetchRoutes({
                     recent,
                     passwordSet: true,
                     availableProviders: [],
+                    passkeyAvailable: false,
                     canSatisfy: true,
                     confirmedAt: recent ? 1 : null,
                 }),

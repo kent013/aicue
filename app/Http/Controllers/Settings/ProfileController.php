@@ -34,6 +34,9 @@ class ProfileController extends Controller
                 ])
                 ->values()
                 ->all(),
+            // パスワードカードの出し分け。password 未設定ユーザーに current_password 必須の
+            // 変更フォームを出すと必ず失敗する (踏破不能 UI) ため、初回設定フォームへ切り替える。
+            'hasPassword' => $user->hasPassword(),
         ]);
     }
 }

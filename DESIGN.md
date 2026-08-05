@@ -225,6 +225,9 @@ PasswordInput molecule を使う。
 (`text-caption text-danger`。message が無ければ何も描画しない)。FormField / Checkbox から
 composition される前提の最小 atom。単体で使う場合、`aria-describedby` の配線は呼び出し側の
 責務。ページ常在の通知は Alert、一時通知は Toast を使う。
+**フィールドに紐づかない失敗(ceremony 失敗・端末非対応等)を FormError に流さない**
+(原因と提示先が食い違い、「パスキー失敗がパスワード欄の赤字として出る」species のバグになる)。
+非フィールド起因は Alert(§Alert)。
 
 ### Avatar
 
@@ -322,6 +325,10 @@ Laravel flash の取り込みは `lib/stores/flash-to-toast.ts` の `consumeFlas
   テーマ色を面塗りに使わない。中間 box なので `rounded-md`
 - `action` snippet(本文下の CTA)、`dismissible` + `onDismiss`(右上の X)を持つ
 - a11y: **danger のみ `role="alert"`(assertive)**、他は `role="status"`(polite)
+- **非フィールド起因の操作失敗は Alert**。フォームのフィールドに紐づかない失敗
+  (WebAuthn ceremony 失敗・端末非対応・ネットワーク失敗など)は、操作したその場に残る
+  Alert で出す。FormError は**フィールド単位**のエラー専用であり、Toast は「一時通知」なので、
+  押した直後に読ませたい失敗理由を画面外(上部中央)へ飛ばさない
 
 ### FormField
 
@@ -458,9 +465,36 @@ active)はページ側が組み立てる(どのタブを出すか・URL は呼�
 実装: `components/organisms/RecentAuthModal.svelte`(Modal の composition)。機微操作
 (API キー発行/失効・アカウント削除・オーナー移譲)の前に出す**同一画面の再認証(step-up)
 モーダル**。パスワード設定済みは再入力 → `POST /recent-auth/password`(成功は XHR 204)、
-再 SSO 可能な provider は `reauthUrl` へフルリダイレクト、再認証手段なし(`canSatisfy=false`)は
-回復導線(パスワード設定)を案内する。認可の最終ゲートは各操作の recent-auth middleware で、
-本モーダルは UX 補助。
+再 SSO 可能な provider は `reauthUrl` へフルリダイレクト、パスキー登録済みは WebAuthn 検証。
+認可の最終ゲートは各操作の recent-auth middleware で、本モーダルは UX 補助。
+
+- **props 契約は `status: RecentAuthStatus | null` の 1 本**(`bind:open` / `onConfirmed` を除く)。
+  `/recent-auth/status` の応答を field へ分解して手渡さない — field が増えるたびに配線漏れが
+  生まれる(T106 で `passkeyAvailable` を足した際、6 呼び出し中 5 箇所が未配線のまま出荷され
+  passkey-only ユーザーが 5 画面で詰んだ)。`tsc --noEmit` は `.svelte` テンプレートを型検査
+  しないため、強制点は `tests/js/architecture/recent-auth-modal-call-site-inventory.test.ts`
+  (deny-by-default。`status={recentAuthStatus}` の識別子・旧 prop 不在・`onStale` での代入まで検査)
+- `status === null` は**状態不明**として扱い、空表示や事実に反する文言を出さず再読み込み導線を出す
+- 再認証が成立しないユーザー(`canSatisfy=false` / この端末で実行不能)への回復導線は
+  **`molecules/RecentAuthRecoveryNotice` に集約**する(下記)
+
+### RecentAuthRecoveryNotice
+
+実装: `components/molecules/RecentAuthRecoveryNotice.svelte`。再認証(step-up)が**この場では
+成立しない**ユーザーに出す回復導線。全画面 confirm(`pages/Auth/ConfirmRecentAuth`)と
+インラインモーダル(`organisms/RecentAuthModal`)の**両方が使う唯一の実装**(分けて持つと
+片方だけ旧作法が残る)。
+
+- `variant`: `no-satisfier`(アカウントに手段が無い)/ `not-executable-here`(手段はあるが
+  この端末で実行できない = パスキー非対応ブラウザ)
+- **`/forgot-password` へ直接リンクしない**。Fortify が `guest` middleware 付きで登録しており
+  ログイン済みの本 UI 利用者はフォームに到達できない(踏破不能 CTA)。案内するのは
+  「ログアウト → guest としてパスワード再設定」の経路だけ。アプリ内の初回設定
+  (`POST /settings/password`)は recent-auth 必須なので、ここに来ているユーザーには使えない
+- ログアウトは **Inertia visit(`router.post`)**(経路 C の保証条件。
+  `tests/js/architecture/logout-call-site-inventory.test.ts` が inventory で固定)
+- molecule 配置は構造的制約: 呼び出し元の RecentAuthModal は organism であり、
+  atomic-import-graph 上 organism は features 層を import できない
 
 ## Do's and Don'ts
 

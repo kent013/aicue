@@ -20,7 +20,7 @@ AI-CUE が「どのブラウザで、どのレベルまで動作を保証して�
 履歴暗号鍵が実際に消えるのは `page.set()` 冒頭の `history.clear()` が走った瞬間だからである
 (受信ではなく適用。通信断や JS 例外で適用前に中断すれば鍵は残る)。
 アプリの `/logout` 導線は 3 箇所 (`AppLayout.svelte` / `pages/Auth/VerifyEmail.svelte` /
-`pages/Auth/ConfirmRecentAuth.svelte`) で
+`components/molecules/RecentAuthRecoveryNotice.svelte`) で
 いずれも `router.post` = Inertia visit のため、正常完了時にこの条件を満たす
 (この不変条件は `tests/js/architecture/logout-call-site-inventory.test.ts` が固定する)。
 **ログアウト導線を非 Inertia 経路 (JSON 204 で完結する XHR 等) で新設すると、
