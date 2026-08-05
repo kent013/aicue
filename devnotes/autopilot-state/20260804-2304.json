@@ -1,0 +1,118 @@
+{
+  "session_id": "20260804-2304",
+  "started_at": "20260804-2304",
+  "last_updated_at": "20260805-2010",
+  "ended_at": "20260805-2010",
+  "mode": "repeat",
+  "max_cycles": 10,
+  "audit_interval": 2,
+  "skip_consensus": false,
+  "args": {
+    "topic_or_todo_id": null,
+    "from": "survey"
+  },
+  "notes": [
+    {
+      "added_at": "20260804-2304",
+      "content": "起点は c2c inbox (aicue)。追従17+実装8 のうち実態検証で actionable と確定したものだけを対象。裁定待ち/レビュー要求は対象外。全バッチが片付くまで自走する。"
+    },
+    {
+      "added_at": "20260804-2304",
+      "content": "T085 (bfcache iOS 実機受入確認) は実機必須のため autopilot では着手しない。"
+    },
+    {
+      "added_at": "20260804-2310",
+      "content": "ユーザー指示: 最初に global-test-lock をやる。でないと worktree 並列実装でテストが競合して死ぬ。→ T099 として完了 (90cab75)。"
+    },
+    {
+      "added_at": "20260805-0010",
+      "content": "設計で前提訂正: aicue の pgsql テスト DB は worktree ごとに一意 (共有 DB の取り合いではない)。実ハザードは H1 cleanup_orphan_playwright のマシン全体 kill (破壊的・実証済み) / H2 単一 PG / H3 CPU 枯渇 / H4 flock -n。ロックスコープはマシン全体 x UID。"
+    },
+    {
+      "added_at": "20260805-0010",
+      "content": "main を origin へ push 済み。c2c へ dev-process-orchestration (implemented/t0) / billing-auto-recharge (implemented/v1) / global-test-lock (implemented/v1) を報告受理 (ledger c6f3a93 / 33f29fc / e2651ce)。append_event は verification と version が必須。"
+    },
+    {
+      "added_at": "20260805-1200",
+      "content": "環境制約: この devcontainer に PostgreSQL 無し (docker CLI 無し / 127.0.0.1:5432 closed / DB_HOST=db は未起動の compose サービス)。composer test の Feature テストは実行不可。バッチ5(認可)・6(auth/passkey) はローカル検証できないため DB 確保まで着手保留。"
+    },
+    {
+      "added_at": "20260805-1200",
+      "content": "前セッションのプロセス終了で3設計エージェントの報告が失われたが成果物は無事 (全て APPROVED)。T100/T101/T102 として登録し3並列で実装へ。c2c MCP は現在切断中のため status_reported は保留。"
+    },
+    {
+      "added_at": "20260805-1200",
+      "content": "既知の落とし穴: doc/reference/mockups/ の38ファイルが worktree で「削除」と見える (git に NFC/NFD 両方の名前が入り virtiofs 上で1ファイルに潰れる)。teardown-worktree.sh の dirty チェックが必ず fail するため T099 では git worktree remove --force で撤去した。別 TODO 化推奨。"
+    },
+    {
+      "added_at": "20260805-2010",
+      "content": "c2c MCP が切断されたままのため T099〜T114 の status_reported と差し戻し3件 (passkey×TOTP の新規agenda / laravel/passkeys 不在という事実の訂正 / Fortify 1.37 による t0 再定義) は未処理。再接続後に要実施。"
+    }
+  ],
+  "current_cycle": 4,
+  "current_phase": "phase-3",
+  "claiming_todo_id": null,
+  "status": "completed",
+  "cycles": [
+    {
+      "cycle": 1,
+      "phase_completed": "phase-4",
+      "designed_topic": "global-test-lock",
+      "design_tmp_dir": "devnotes/20260804-2319-global-test-lock",
+      "added_todo_ids": [
+        "T099"
+      ],
+      "implemented_todo_ids": [
+        "T099"
+      ],
+      "merge_commit": "90cab75",
+      "audit_report_path": null,
+      "error": null,
+      "started_at": "20260804-2310",
+      "ended_at": "20260805-0030"
+    },
+    {
+      "cycle": 2,
+      "phase_completed": "phase-2",
+      "designed_topic": "devtool-template-followup / architecture-gate-followup / frontend-baseline-gates",
+      "design_tmp_dir": "devnotes/20260805-0101-*",
+      "added_todo_ids": [
+        "T100",
+        "T101",
+        "T102"
+      ],
+      "implemented_todo_ids": [],
+      "merge_commit": null,
+      "audit_report_path": null,
+      "error": null,
+      "started_at": "20260805-1159",
+      "ended_at": null
+    },
+    {
+      "cycle": 3,
+      "phase_completed": "phase-4",
+      "designed_topic": "security-audit-remediation / ui-audit-remediation / audit-followup-maintenance",
+      "added_todo_ids": [
+        "T107",
+        "T108",
+        "T111",
+        "T112",
+        "T113",
+        "T114"
+      ],
+      "implemented_todo_ids": [
+        "T107",
+        "T108",
+        "T111",
+        "T112",
+        "T113",
+        "T114"
+      ],
+      "merge_commit": "b03bd84",
+      "audit_report_path": "devnotes/20260805-1600-audit-cycle-2/audit-report.md",
+      "error": null,
+      "started_at": "20260805-1600",
+      "ended_at": "20260805-2010"
+    }
+  ]
+}
