@@ -26,12 +26,22 @@
     }
     interface SettingsPageProps extends SharedProps {
         soleOwnedOrganizations?: SoleOwnedOrganization[];
+        /** password が設定済みか。欠落 = 状態不明 (既定値に倒さない。下記 passwordState 参照) */
+        hasPassword?: boolean;
         errors?: Record<string, string | string[]>;
     }
 
     const props = $derived(page.props as unknown as SettingsPageProps);
     const appName = $derived(props.appName ?? "");
     const soleOwnedOrganizations = $derived(props.soleOwnedOrganizations ?? []);
+
+    /**
+     * prop 欠落 (= 状態不明) を false に倒すと、password 設定済みユーザーに初回設定フォームを出す
+     * = 本批で潰している「状態不明を誤った UI に倒す」の再演になる。3 値で扱う。
+     */
+    const passwordState = $derived.by((): "set" | "unset" | "unknown" =>
+        typeof props.hasPassword === "boolean" ? (props.hasPassword ? "set" : "unset") : "unknown",
+    );
 
     // ブロック時にサーバーが返す errors.account を表示文字列へ正規化 (string | string[] 両対応)
     const accountError = $derived.by((): string | null => {
@@ -99,6 +109,23 @@
             onSuccess: () => {
                 passwordForm.reset();
             },
+        });
+    }
+
+    const passwordSetupForm = useForm({ password: "" });
+
+    function submitPasswordSetup(event: SubmitEvent): void {
+        event.preventDefault();
+        passwordSetupForm.clearErrors("password");
+        // 初回設定は recent-auth 必須 (サーバ側 middleware が最終ゲート)。
+        // stale なら再認証モーダルを挟んで再開する (他の機微操作と同じ precheck)。
+        guardWithRecentAuth(() => {
+            passwordSetupForm.post("/settings/password", {
+                preserveScroll: true,
+                onSuccess: () => {
+                    passwordSetupForm.reset();
+                },
+            });
         });
     }
 
@@ -196,47 +223,89 @@
             </Card>
 
             <Card padding="lg">
-                <h2 class="text-h3">パスワード変更</h2>
-                <p class="mt-1 text-caption text-text-secondary">
-                    現在のパスワードを確認のうえ、新しいパスワードに変更します。
-                </p>
-                <form novalidate onsubmit={submitPassword} class="mt-4 flex flex-col gap-4">
-                    <FormField
-                        label="現在のパスワード"
-                        id="current-password"
-                        error={passwordForm.errors.current_password}
-                    >
-                        {#snippet children({ id, describedBy, invalid })}
-                            <PasswordInput
-                                {id}
-                                bind:value={passwordForm.current_password}
-                                error={invalid}
-                                aria-describedby={describedBy}
-                                autocomplete="current-password"
-                            />
+                {#if passwordState === "unknown"}
+                    <h2 class="text-h3">パスワード</h2>
+                    <Alert type="warning" testId="password-state-unknown" class="mt-4">
+                        パスワードの設定状態を取得できませんでした。ページを再読み込みしてお試しください。
+                        {#snippet action()}
+                            <Button variant="ghost" onclick={() => router.reload()}>再読み込み</Button>
                         {/snippet}
-                    </FormField>
-                    <FormField
-                        label="新しいパスワード"
-                        id="new-password"
-                        error={passwordForm.errors.password}
-                    >
-                        {#snippet children({ id, describedBy, invalid })}
-                            <PasswordInput
-                                {id}
-                                bind:value={passwordForm.password}
-                                error={invalid}
-                                aria-describedby={describedBy}
-                                autocomplete="new-password"
-                            />
-                        {/snippet}
-                    </FormField>
-                    <div>
-                        <Button type="submit" loading={passwordForm.processing}>
-                            {passwordForm.processing ? "変更中…" : "パスワードを変更"}
-                        </Button>
-                    </div>
-                </form>
+                    </Alert>
+                {:else if passwordState === "set"}
+                    <h2 class="text-h3">パスワード変更</h2>
+                    <p class="mt-1 text-caption text-text-secondary">
+                        現在のパスワードを確認のうえ、新しいパスワードに変更します。
+                    </p>
+                    <form novalidate onsubmit={submitPassword} class="mt-4 flex flex-col gap-4">
+                        <FormField
+                            label="現在のパスワード"
+                            id="current-password"
+                            error={passwordForm.errors.current_password}
+                        >
+                            {#snippet children({ id, describedBy, invalid })}
+                                <PasswordInput
+                                    {id}
+                                    bind:value={passwordForm.current_password}
+                                    error={invalid}
+                                    aria-describedby={describedBy}
+                                    autocomplete="current-password"
+                                />
+                            {/snippet}
+                        </FormField>
+                        <FormField
+                            label="新しいパスワード"
+                            id="new-password"
+                            error={passwordForm.errors.password}
+                        >
+                            {#snippet children({ id, describedBy, invalid })}
+                                <PasswordInput
+                                    {id}
+                                    bind:value={passwordForm.password}
+                                    error={invalid}
+                                    aria-describedby={describedBy}
+                                    autocomplete="new-password"
+                                />
+                            {/snippet}
+                        </FormField>
+                        <div>
+                            <Button type="submit" loading={passwordForm.processing}>
+                                {passwordForm.processing ? "変更中…" : "パスワードを変更"}
+                            </Button>
+                        </div>
+                    </form>
+                {:else}
+                    <h2 class="text-h3">パスワードを設定</h2>
+                    <p class="mt-1 text-caption text-text-secondary">
+                        現在はパスキーまたはソーシャルログインでご利用中です。パスワードを設定すると、
+                        パスワードでもログインできるようになります (既存のログイン手段はそのまま使えます)。
+                    </p>
+                    <form novalidate onsubmit={submitPasswordSetup} class="mt-4 flex flex-col gap-4">
+                        <FormField
+                            label="新しいパスワード"
+                            id="new-password"
+                            error={passwordSetupForm.errors.password}
+                        >
+                            {#snippet children({ id, describedBy, invalid })}
+                                <PasswordInput
+                                    {id}
+                                    bind:value={passwordSetupForm.password}
+                                    error={invalid}
+                                    aria-describedby={describedBy}
+                                    autocomplete="new-password"
+                                />
+                            {/snippet}
+                        </FormField>
+                        <div>
+                            <Button
+                                type="submit"
+                                loading={passwordSetupForm.processing}
+                                testId="set-password-button"
+                            >
+                                {passwordSetupForm.processing ? "設定中…" : "パスワードを設定"}
+                            </Button>
+                        </div>
+                    </form>
+                {/if}
             </Card>
 
             <DangerZone
@@ -286,9 +355,7 @@
 
         <RecentAuthModal
             bind:open={recentAuthOpen}
-            passwordSet={recentAuthStatus?.passwordSet ?? false}
-            availableProviders={recentAuthStatus?.availableProviders ?? []}
-            canSatisfy={recentAuthStatus?.canSatisfy ?? true}
+            status={recentAuthStatus}
             onConfirmed={resumePendingAction}
         />
         </PageContent>

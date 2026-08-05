@@ -151,13 +151,17 @@ describe("Settings/Security パスキーカード", () => {
         expect(screen.getByTestId("register-passkey-button")).not.toBeDisabled();
     });
 
-    it("非対応ブラウザで登録を押すと理由をトーストで出す (無言失敗にしない)", async () => {
+    // 非フィールド起因の操作失敗は **Alert** (DESIGN.md §Alert)。押下直後に読ませたい失敗理由を
+    // 画面外へ飛ぶ toast に出さない。
+    it("非対応ブラウザで登録を押すと理由を Alert で出す (無言失敗にしない)", async () => {
         removePasskeySupport();
         render(Security, { props: {} });
 
         await fireEvent.click(screen.getByTestId("register-passkey-button"));
 
-        expect(addToastMock).toHaveBeenCalledWith("error", expect.stringContaining("対応していません"));
+        const alert = await screen.findByTestId("passkey-operation-error");
+        expect(alert).toHaveTextContent("対応していません");
+        expect(addToastMock).not.toHaveBeenCalled();
         expect(routerPostMock).not.toHaveBeenCalled();
     });
 
@@ -336,7 +340,7 @@ describe("パスキー登録の送信契約", () => {
         expect(addToastMock).not.toHaveBeenCalled();
     });
 
-    it("ceremony 失敗はエラーを出して POST しない", async () => {
+    it("ceremony 失敗は Alert に理由を出して POST しない", async () => {
         stubRecentAuth(true);
         createPasskeyCredentialMock.mockResolvedValue({
             status: "failed",
@@ -349,12 +353,9 @@ describe("パスキー登録の送信契約", () => {
         });
         await fireEvent.click(screen.getByTestId("register-passkey-button"));
 
-        await waitFor(() => {
-            expect(addToastMock).toHaveBeenCalledWith(
-                "error",
-                "パスキーの登録を開始できませんでした。",
-            );
-        });
+        const alert = await screen.findByTestId("passkey-operation-error");
+        expect(alert).toHaveTextContent("パスキーの登録を開始できませんでした。");
+        expect(addToastMock).not.toHaveBeenCalled();
         expect(routerPostMock).not.toHaveBeenCalled();
     });
 });
@@ -408,5 +409,209 @@ describe("再認証モーダル: この端末では実行できない状態", ()
             expect(screen.getByTestId("recent-auth-passkey")).toBeInTheDocument();
         });
         expect(screen.queryByTestId("recent-auth-unsupported-here")).toBeNull();
+    });
+});
+
+/*
+ * 名前エラーの canonical 形 (施策 10。DESIGN.md §FormField)。
+ * 押下時に代入するだけだと、その後の入力でエラーが消えず stale invalid が残る。
+ * 「提示開始 boolean + $derived 文言」にして入力へ追随させる。
+ */
+describe("パスキー名エラーの入力追随 (施策 10)", () => {
+    it("空で押下 → 文言が出る → 1 文字入力で消える → 再び空にすると戻る", async () => {
+        render(Security, { props: {} });
+        const input = screen.getByTestId("passkey-name-input");
+
+        await fireEvent.click(screen.getByTestId("register-passkey-button"));
+        expect(screen.getByText("パスキーの名前を入力してください。")).toBeInTheDocument();
+
+        await fireEvent.input(input, { target: { value: "あ" } });
+        await waitFor(() =>
+            expect(screen.queryByText("パスキーの名前を入力してください。")).toBeNull(),
+        );
+
+        await fireEvent.input(input, { target: { value: "" } });
+        await waitFor(() =>
+            expect(screen.getByText("パスキーの名前を入力してください。")).toBeInTheDocument(),
+        );
+    });
+
+    it("サーバ 422 の errors.name は FormField に出る (汎用トーストに潰さない)", async () => {
+        stubRecentAuth(true);
+        createPasskeyCredentialMock.mockResolvedValue({ status: "ok", value: CREDENTIAL_FIXTURE });
+        render(Security, { props: {} });
+
+        await fireEvent.input(screen.getByTestId("passkey-name-input"), {
+            target: { value: "現場用スマホ" },
+        });
+        await fireEvent.click(screen.getByTestId("register-passkey-button"));
+
+        await waitFor(() => expect(routerPostMock).toHaveBeenCalled());
+        const options = routerPostMock.mock.calls.at(-1)?.[2] as {
+            onError?: (errors: Record<string, string>) => void;
+        };
+        options.onError?.({ name: "その名前は既に使われています。" });
+
+        await waitFor(() =>
+            expect(screen.getByText("その名前は既に使われています。")).toBeInTheDocument(),
+        );
+        // フィールド起因なので Alert (非フィールド起因) には出さない
+        expect(screen.queryByTestId("passkey-operation-error")).toBeNull();
+        expect(addToastMock).not.toHaveBeenCalled();
+    });
+
+    it("フィールドに紐づかないサーバエラーは Alert に出る", async () => {
+        stubRecentAuth(true);
+        createPasskeyCredentialMock.mockResolvedValue({ status: "ok", value: CREDENTIAL_FIXTURE });
+        render(Security, { props: {} });
+
+        await fireEvent.input(screen.getByTestId("passkey-name-input"), {
+            target: { value: "現場用スマホ" },
+        });
+        await fireEvent.click(screen.getByTestId("register-passkey-button"));
+
+        await waitFor(() => expect(routerPostMock).toHaveBeenCalled());
+        const options = routerPostMock.mock.calls.at(-1)?.[2] as {
+            onError?: (errors: Record<string, string>) => void;
+        };
+        options.onError?.({ credential: "不正な credential です。" });
+
+        expect(await screen.findByTestId("passkey-operation-error")).toBeInTheDocument();
+    });
+});
+
+/*
+ * 登録フローの多重起動ガード (施策 11)。
+ * 現行は router.post を await していないため ceremony 直後に loading が解け、連打で
+ * ceremony が多重に走る。precheck (/recent-auth/status) の待ち時間も無防備だった。
+ */
+describe("パスキー登録フローの多重起動ガード (施策 11)", () => {
+    it("POST 中は登録ボタンが loading のまま (onFinish まで解除しない)", async () => {
+        stubRecentAuth(true);
+        createPasskeyCredentialMock.mockResolvedValue({ status: "ok", value: CREDENTIAL_FIXTURE });
+        // onStart だけ呼び onFinish は呼ばない = POST 継続中
+        routerPostMock.mockImplementation(
+            (_url: string, _data: unknown, options: { onStart?: () => void }) => {
+                options.onStart?.();
+            },
+        );
+        render(Security, { props: {} });
+
+        await fireEvent.input(screen.getByTestId("passkey-name-input"), {
+            target: { value: "現場用スマホ" },
+        });
+        await fireEvent.click(screen.getByTestId("register-passkey-button"));
+
+        await waitFor(() =>
+            expect(screen.getByTestId("register-passkey-button")).toHaveAttribute(
+                "aria-busy",
+                "true",
+            ),
+        );
+    });
+
+    it("precheck の解決待ち中に連打しても ceremony は 1 回しか始まらない", async () => {
+        // /recent-auth/status を保留させ、precheck 区間を開いたままにする
+        // 制御端を object に持つ (直接の局所変数だと TS が callback 内代入を追えず never に潰れる)
+        const pending: { resolve: (value: unknown) => void } = { resolve: () => {} };
+        fetchMock.mockImplementation((input: RequestInfo | URL) => {
+            if (String(input).includes("/recent-auth/status")) {
+                return new Promise((resolve) => {
+                    pending.resolve = resolve;
+                });
+            }
+            return Promise.resolve(jsonResponse(false, 500, {}));
+        });
+        createPasskeyCredentialMock.mockResolvedValue({ status: "ok", value: CREDENTIAL_FIXTURE });
+        render(Security, { props: {} });
+
+        await fireEvent.input(screen.getByTestId("passkey-name-input"), {
+            target: { value: "現場用スマホ" },
+        });
+        const button = screen.getByTestId("register-passkey-button");
+        await fireEvent.click(button);
+        await fireEvent.click(button);
+        await fireEvent.click(button);
+
+        expect(createPasskeyCredentialMock).not.toHaveBeenCalled();
+
+        pending.resolve(
+            jsonResponse(true, 200, {
+                recent: true,
+                passwordSet: true,
+                availableProviders: [],
+                passkeyAvailable: false,
+                canSatisfy: true,
+                confirmedAt: 1,
+            }),
+        );
+
+        await waitFor(() => expect(createPasskeyCredentialMock).toHaveBeenCalledTimes(1));
+        await waitFor(() => expect(routerPostMock).toHaveBeenCalledTimes(1));
+    });
+
+    it("ceremony が throw しても Alert を出して loading が固まらない", async () => {
+        stubRecentAuth(true);
+        createPasskeyCredentialMock.mockRejectedValue(new Error("unexpected"));
+        render(Security, { props: {} });
+
+        await fireEvent.input(screen.getByTestId("passkey-name-input"), {
+            target: { value: "現場用スマホ" },
+        });
+        await fireEvent.click(screen.getByTestId("register-passkey-button"));
+
+        expect(await screen.findByTestId("passkey-operation-error")).toBeInTheDocument();
+        await waitFor(() =>
+            expect(screen.getByTestId("register-passkey-button")).not.toHaveAttribute(
+                "aria-busy",
+                "true",
+            ),
+        );
+        expect(routerPostMock).not.toHaveBeenCalled();
+    });
+
+    it("stale でモーダルへ委譲した後にキャンセルしても登録ボタンが固まらない", async () => {
+        stubRecentAuth(false);
+        render(Security, { props: {} });
+
+        await fireEvent.input(screen.getByTestId("passkey-name-input"), {
+            target: { value: "現場用スマホ" },
+        });
+        await fireEvent.click(screen.getByTestId("register-passkey-button"));
+
+        await waitFor(() => expect(screen.getByTestId("recent-auth-modal")).toBeInTheDocument());
+        await fireEvent.click(screen.getByRole("button", { name: "キャンセル" }));
+
+        await waitFor(() =>
+            expect(screen.getByTestId("register-passkey-button")).not.toHaveAttribute(
+                "aria-busy",
+                "true",
+            ),
+        );
+        expect(screen.getByTestId("register-passkey-button")).not.toBeDisabled();
+    });
+});
+
+/*
+ * 踏破可能な CTA (施策 8)。この Alert が出るのは「削除するとログイン手段が 0 になる」=
+ * password を持たないユーザーだけなので、/settings は必ず初回設定フォームを出す。
+ */
+describe("ログイン手段保持 guard の CTA 踏破可能性 (施策 8)", () => {
+    it("CTA の遷移先は /settings (password 未設定なら初回設定フォームが出る)", () => {
+        setPageProps({ errors: { login_method: "この操作を行うと、ログインする手段がなくなります。" } });
+        render(Security, { props: { passkeys } });
+
+        const cta = screen.getByTestId("passkey-add-password");
+        expect(new URL((cta as HTMLAnchorElement).href).pathname).toBe("/settings");
+    });
+
+    it("拒否 Alert が現れたらフォーカスを移す (見落とさせない)", async () => {
+        setPageProps({ errors: { login_method: "この操作を行うと、ログインする手段がなくなります。" } });
+        render(Security, { props: { passkeys } });
+
+        await waitFor(() => {
+            const alert = screen.getByTestId("passkey-login-method-error");
+            expect(alert.closest('[tabindex="-1"]')).toBe(document.activeElement);
+        });
     });
 });

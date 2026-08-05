@@ -12,6 +12,7 @@ use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\SessionGuard;
 use Illuminate\Contracts\Auth\Factory as AuthFactory;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Inertia\Testing\AssertableInertia;
 use Laravel\Fortify\Features;
 use Laravel\Socialite\Contracts\Provider;
@@ -79,6 +80,76 @@ test('鮮度なしの Inertia mutation は 409 (302 にしない)', function ():
         ->delete('/settings/account');
 
     $response->assertStatus(409)->assertJsonPath('code', 'recent_auth_required');
+});
+
+/*
+ * 409 の着地契約 (T107 施策 4)。
+ *
+ * 409 を拾うクライアント (lib/recent-auth.ts の単一ハンドラ) は confirm 画面へ visit する。
+ * 302 分岐と同じ着地情報を残さないと、confirm 成功後に dashboard へ落ち、
+ * 「先ほどの操作は実行されていません」の案内も出ない = 操作のサイレント喪失になる。
+ */
+test('鮮度なしの Inertia mutation の 409 は url.intended と dropped_mutation を残す', function (): void {
+    $user = User::factory()->create();
+    $origin = config('app.url');
+
+    $this->actingAs($user)
+        ->withHeaders(['X-Inertia' => 'true', 'referer' => $origin.'/settings'])
+        ->delete('/settings/account')
+        ->assertStatus(409);
+
+    expect(session('url.intended'))->toBe($origin.'/settings');
+    expect(session('recent_auth.dropped_mutation'))->toBeTrue();
+});
+
+test('409 の intended も same-origin referer のみ採用する (open redirect 防止)', function (): void {
+    $user = User::factory()->create();
+
+    $this->actingAs($user)
+        ->withHeaders(['X-Inertia' => 'true', 'referer' => 'https://evil.example.com/phish'])
+        ->delete('/settings/account')
+        ->assertStatus(409);
+
+    expect(session('url.intended'))->toBe(route('dashboard'));
+});
+
+/*
+ * **純 XHR の 409 では intended を書き換えない**。クライアントが自前で pending action を
+ * 再開するため、書くと他フロー (ログイン直後の着地等) の intended を汚す。
+ */
+test('純 XHR の 409 は url.intended を書き換えない', function (): void {
+    $user = User::factory()->create();
+    $origin = config('app.url');
+
+    $this->actingAs($user)
+        ->withSession(['url.intended' => $origin.'/manuals'])
+        ->withHeaders(['referer' => $origin.'/settings'])
+        ->deleteJson('/settings/account')
+        ->assertStatus(409);
+
+    expect(session('url.intended'))->toBe($origin.'/manuals');
+    expect(session('recent_auth.dropped_mutation'))->toBeNull();
+});
+
+test('409 経路でも confirm 成功後は元画面へ戻り操作未実行の案内が出る', function (): void {
+    $user = User::factory()->create(['password' => Hash::make('current-password')]);
+    $origin = config('app.url');
+
+    $this->actingAs($user)
+        ->withHeaders(['X-Inertia' => 'true', 'referer' => $origin.'/settings'])
+        ->delete('/settings/account')
+        ->assertStatus(409);
+
+    $this->flushHeaders();
+
+    $this->actingAs($user)
+        ->withHeaders(['X-Inertia' => 'true'])
+        ->post('/recent-auth/password', ['password' => 'current-password'])
+        ->assertRedirect($origin.'/settings')
+        ->assertSessionHas('info');
+
+    // one-shot flag は消費済み (次回 step-up に持ち越さない)
+    expect(session('recent_auth.dropped_mutation'))->toBeNull();
 });
 
 test('stale な recent_auth_at (timeout 超過) はブロックされる', function (): void {

@@ -166,7 +166,7 @@ describe("Auth/ConfirmRecentAuth この端末では実行できない状態", ()
             },
         });
 
-        expect(screen.getByTestId("confirm-unsupported-here")).toBeInTheDocument();
+        expect(screen.getByTestId("recent-auth-unsupported-here")).toBeInTheDocument();
         expect(screen.getByRole("button", { name: "ログアウトする" })).toBeInTheDocument();
     });
 
@@ -180,7 +180,7 @@ describe("Auth/ConfirmRecentAuth この端末では実行できない状態", ()
             },
         });
 
-        expect(screen.queryByTestId("confirm-unsupported-here")).toBeNull();
+        expect(screen.queryByTestId("recent-auth-unsupported-here")).toBeNull();
         expect(screen.getByTestId("confirm-passkey-button")).toBeInTheDocument();
     });
 
@@ -196,7 +196,7 @@ describe("Auth/ConfirmRecentAuth この端末では実行できない状態", ()
             },
         });
 
-        expect(screen.queryByTestId("confirm-unsupported-here")).toBeNull();
+        expect(screen.queryByTestId("recent-auth-unsupported-here")).toBeNull();
         expect(screen.getByLabelText("現在のパスワード")).toBeInTheDocument();
     });
 });

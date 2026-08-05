@@ -68,8 +68,13 @@
     let recentAuthStatus = $state<RecentAuthStatus | null>(null);
     let pendingAction: (() => void) | null = null;
 
-    function guardWithRecentAuth(action: () => void): void {
-        void withRecentAuth({
+    /**
+     * precheck の結果 (fresh / stale / delegated) を **返す**。
+     * PasskeySection は precheck 区間 (`/recent-auth/status` の待ち時間) を自前の loading で
+     * 覆う必要があるため戻り値を待つ。結果に関心が無い呼び出し側は `void` で明示的に捨てる。
+     */
+    function guardWithRecentAuth(action: () => void): Promise<"fresh" | "stale" | "delegated"> {
+        return withRecentAuth({
             onFresh: action,
             onStale: (status) => {
                 recentAuthStatus = status;
@@ -223,7 +228,7 @@
      * GET も recent-auth 配線済みのため precheck を通す (stale なら再認証モーダル→再開)。
      */
     function showRecoveryCodes(): void {
-        guardWithRecentAuth(() => {
+        void guardWithRecentAuth(() => {
             void (async () => {
                 if (!(await loadRecoveryCodes())) {
                     addToast("error", "リカバリコードの取得に失敗しました。");
@@ -263,7 +268,7 @@
 
     /** 再生成は recent-auth 必須 (サーバが最終ゲート)。stale なら再認証モーダル→再開 */
     function regenerateRecoveryCodes(): void {
-        guardWithRecentAuth(() => {
+        void guardWithRecentAuth(() => {
             router.post(
                 "/user/two-factor-recovery-codes",
                 {},
@@ -601,10 +606,7 @@
 
         <RecentAuthModal
             bind:open={recentAuthOpen}
-            passwordSet={recentAuthStatus?.passwordSet ?? false}
-            availableProviders={recentAuthStatus?.availableProviders ?? []}
-            canSatisfy={recentAuthStatus?.canSatisfy ?? true}
-            passkeyAvailable={recentAuthStatus?.passkeyAvailable ?? false}
+            status={recentAuthStatus}
             onConfirmed={resumePendingAction}
         />
         </PageContent>

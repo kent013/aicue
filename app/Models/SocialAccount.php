@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use Database\Factories\SocialAccountFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -13,6 +15,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class SocialAccount extends Model
 {
+    /** @use HasFactory<SocialAccountFactory> */
+    use HasFactory;
+
     /** @var list<string> */
     protected $fillable = [
         'provider',

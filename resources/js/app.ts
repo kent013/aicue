@@ -3,6 +3,7 @@ import { hydrate, mount } from "svelte";
 import { resolvePage } from "./inertia";
 import { registerBfcacheGuard } from "./lib/bfcache-guard";
 import { registerDocumentTitleSync } from "./lib/document-title";
+import { registerRecentAuthRedirectHandler } from "./lib/recent-auth";
 import { hasAuthenticatedUser } from "./lib/shared-props";
 
 // SPA 遷移後の document.title 陳腐化を解消する。Svelte adapter には createInertiaApp の
@@ -23,6 +24,12 @@ if (typeof document !== "undefined") {
         isAuthenticated: () => hasAuthenticatedUser(page.props),
     });
     import.meta.hot?.dispose(disposeBfcacheGuard);
+
+    // recent-auth 鮮度切れの 409 (recent_auth_required) を confirm 画面へ着地させる単一ハンドラ。
+    // precheck (withRecentAuth) を通れない delegated 経路の受け皿であり、これが無いと
+    // 409 が Inertia の既定エラーモーダルに落ちて無言の行き止まりになる (詳細設計 施策 4)。
+    const disposeRecentAuthRedirect = registerRecentAuthRedirectHandler();
+    import.meta.hot?.dispose(disposeRecentAuthRedirect);
 }
 
 createInertiaApp({

@@ -17,6 +17,7 @@
 | `UserFactory` | User | `unverified()`, `ssoOnly()` (password null + 認証済み), `withTwoFactor()` (本物の TOTP secret + recovery codes + confirmed) |
 | `AdminUserFactory` | AdminUser | `withMfa()` |
 | `PasskeyFactory` | Passkey | — (`for($user)` で所有者を指定。WebAuthn ceremony を伴わない経路 = 削除 / 一覧 / 手段カウント / 認可 用の最小 credential。実 ceremony の検証は vendor の WebAuthn helper で credential を生成すること) |
+| `SocialAccountFactory` | SocialAccount | `provider(string)` (`for($user)` で所有者を指定。既定 provider は `google` = recent-auth の step-up satisfier として数えられる provider) |
 | `OrganizationFactory` | Organization | `personal()`, `freePersonal($declarer)`, `grandfathered()`, `signupGranted()`, `withBillingContact(?$email, ?$name)` (請求先連絡先。CipherSweet 暗号化列) |
 | `CustomTeamFactory` | CustomTeam | — |
 | `ProjectFactory` | Project | `forOrganization($org)` |

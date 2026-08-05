@@ -11,23 +11,28 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
  * - 削除 (router.delete) の onError はダイアログを閉じる (押下後に理由が見える)
  */
 
-const { pageState, routerDeleteMock, formHolder, formSeed } = vi.hoisted(() => ({
+const { pageState, routerDeleteMock, routerReloadMock, routerPostMock, formHolder, formSeed } =
+    vi.hoisted(() => ({
     pageState: {
         props: {} as Record<string, unknown>,
         url: "/settings",
     },
     routerDeleteMock: vi.fn(),
+    routerReloadMock: vi.fn(),
+    routerPostMock: vi.fn(),
     // useForm fake が捕捉する各 form の holder。初期データキーで二分岐する:
     //   "email" を持つ → profileForm (case 6 で put を検証)
     //   "current_password" を持つ → passwordForm (T042 S2 で put/errorBag を検証)
     formHolder: {
         profile: null as Record<string, unknown> | null,
         password: null as Record<string, unknown> | null,
+        // パスワード**初回設定** form (施策 7)。初期データが password 1 キーのみで判別する
+        passwordSetup: null as Record<string, unknown> | null,
     },
     // passwordForm の初期 errors シード。FormField は error があるときだけ
     // aria-describedby を生成するため、透過検証ケースだけがここに値を入れる。
     formSeed: { passwordErrors: {} as Record<string, string> },
-}));
+    }));
 
 vi.mock("@inertiajs/svelte", async (importOriginal) => {
     // password フォームは反応的 double を使う (clearErrors で errors が消える再描画、
@@ -36,7 +41,7 @@ vi.mock("@inertiajs/svelte", async (importOriginal) => {
     const { reactiveUseForm } = await import("../support/reactiveUseForm.svelte");
     return {
         ...(await importOriginal<typeof import("@inertiajs/svelte")>()),
-        router: { delete: routerDeleteMock },
+        router: { delete: routerDeleteMock, reload: routerReloadMock, post: routerPostMock },
         page: pageState,
         // useForm を fake に差し替え、form を holder に記録する。
         //   "current_password" を持つ → passwordForm: 反応的 double
@@ -62,6 +67,9 @@ vi.mock("@inertiajs/svelte", async (importOriginal) => {
             };
             if ("email" in initial) {
                 formHolder.profile = form;
+            } else if ("password" in initial) {
+                // password 1 キーのみ = 初回設定 form (変更 form は current_password を持つ)
+                formHolder.passwordSetup = form;
             }
             return form;
         },
@@ -71,10 +79,18 @@ vi.mock("@inertiajs/svelte", async (importOriginal) => {
 // eslint-disable-next-line import/first
 import Index from "@/pages/Settings/Index.svelte";
 
+/**
+ * 既定は **password 設定済み** (hasPassword: true)。パスワードカードは施策 7 で
+ * `hasPassword` による 3 値出し分け (set / unset / unknown) になったため、
+ * 変更フォームを見るケースは明示的に設定済みを渡す必要がある。
+ * `setProps({ hasPassword: false })` で初回設定フォーム、
+ * `setProps({ hasPassword: undefined })` で状態不明になる。
+ */
 function setProps(extra: Record<string, unknown> = {}): void {
     pageState.props = {
         appName: "AI-CUE",
         auth: { user: { id: 1, name: "テスト太郎", email: "taro@example.com" } },
+        hasPassword: true,
         ...extra,
     };
 }
@@ -92,6 +108,7 @@ function stubRecentAuthFresh(): void {
                         recent: true,
                         passwordSet: true,
                         availableProviders: [],
+                        passkeyAvailable: false,
                         canSatisfy: true,
                         confirmedAt: 1,
                     }),
@@ -118,6 +135,7 @@ function stubRecentAuthStaleThenConfirm(): void {
                             recent: false,
                             passwordSet: true,
                             availableProviders: [],
+                            passkeyAvailable: false,
                             canSatisfy: true,
                             confirmedAt: null,
                         }),
@@ -142,6 +160,7 @@ beforeEach(() => {
     setProps();
     formHolder.profile = null;
     formHolder.password = null;
+    formHolder.passwordSetup = null;
     formSeed.passwordErrors = {};
 });
 
@@ -149,6 +168,8 @@ afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
     routerDeleteMock.mockReset();
+    routerReloadMock.mockReset();
+    routerPostMock.mockReset();
 });
 
 describe("Settings/Index 唯一オーナー削除ガード", () => {
@@ -483,5 +504,92 @@ describe("Settings/Index パスワード変更の pending / エラークリア (
         const options = putMock.mock.calls.at(-1)?.[1] as { onSuccess?: () => void };
         options.onSuccess?.();
         expect(form?.reset as ReturnType<typeof vi.fn>).toHaveBeenCalledTimes(1);
+    });
+});
+
+/*
+ * パスワードカードの 3 値出し分け (施策 7)。
+ *
+ * password 未設定ユーザーに `current_password` 必須の変更フォームを出すと**必ず失敗する**
+ * (カード丸ごとが踏破不能 = 監査 F-2 と同 species)。初回設定フォームへ切り替える。
+ * prop 欠落 (状態不明) を false に倒すと、設定済みユーザーに初回設定フォームを出す
+ * = 「状態不明を誤った UI に倒す」の再演になるため 3 値で扱う。
+ */
+describe("Settings/Index パスワードカードの出し分け (施策 7)", () => {
+    /** recent-auth precheck を fresh に固定する (初回設定も step-up 必須) */
+    function stubFresh(): void {
+        stubRecentAuthFresh();
+    }
+
+    it("hasPassword=false なら初回設定フォームを出し「現在のパスワード」欄を描画しない", () => {
+        setProps({ hasPassword: false });
+        render(Index, { props: {} });
+
+        expect(screen.getByRole("heading", { name: "パスワードを設定" })).toBeInTheDocument();
+        expect(screen.queryByLabelText("現在のパスワード")).toBeNull();
+        expect(screen.getByLabelText("新しいパスワード")).toBeInTheDocument();
+    });
+
+    it("hasPassword=true なら従来どおり変更フォーム (現在のパスワード欄あり)", () => {
+        setProps({ hasPassword: true });
+        render(Index, { props: {} });
+
+        expect(screen.getByRole("heading", { name: "パスワード変更" })).toBeInTheDocument();
+        expect(screen.getByLabelText("現在のパスワード")).toBeInTheDocument();
+        expect(screen.queryByTestId("set-password-button")).toBeNull();
+    });
+
+    it("hasPassword 欠落 (状態不明) はどちらのフォームも出さず再読み込み導線を出す", async () => {
+        setProps({ hasPassword: undefined });
+        render(Index, { props: {} });
+
+        expect(screen.getByTestId("password-state-unknown")).toBeInTheDocument();
+        expect(screen.queryByLabelText("現在のパスワード")).toBeNull();
+        expect(screen.queryByTestId("set-password-button")).toBeNull();
+
+        await fireEvent.click(screen.getByRole("button", { name: "再読み込み" }));
+        expect(routerReloadMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("設定ボタンは常に活性 (必須条件未充足でも disabled にしない)", () => {
+        setProps({ hasPassword: false });
+        render(Index, { props: {} });
+
+        expect(screen.getByTestId("set-password-button")).not.toBeDisabled();
+    });
+
+    it("fresh なら /settings/password へ 1 回だけ post する", async () => {
+        setProps({ hasPassword: false });
+        stubFresh();
+        render(Index, { props: {} });
+
+        await fireEvent.input(screen.getByLabelText("新しいパスワード"), {
+            target: { value: "Str0ng-Passphrase!" },
+        });
+        await fireEvent.submit(
+            screen.getByTestId("set-password-button").closest("form") as HTMLFormElement,
+        );
+
+        const postMock = formHolder.passwordSetup?.post as ReturnType<typeof vi.fn>;
+        await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
+        expect(postMock.mock.calls.at(-1)?.[0]).toBe("/settings/password");
+    });
+
+    it("stale なら post せず再認証モーダルを開く (precheck)", async () => {
+        setProps({ hasPassword: false });
+        stubRecentAuthStaleThenConfirm();
+        render(Index, { props: {} });
+
+        await fireEvent.input(screen.getByLabelText("新しいパスワード"), {
+            target: { value: "Str0ng-Passphrase!" },
+        });
+        await fireEvent.submit(
+            screen.getByTestId("set-password-button").closest("form") as HTMLFormElement,
+        );
+
+        await waitFor(() =>
+            expect(screen.getByTestId("recent-auth-modal")).toBeInTheDocument(),
+        );
+        expect(formHolder.passwordSetup?.post as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
     });
 });

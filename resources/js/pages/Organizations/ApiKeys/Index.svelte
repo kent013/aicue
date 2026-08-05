@@ -302,9 +302,7 @@
 
         <RecentAuthModal
             bind:open={recentAuthOpen}
-            passwordSet={recentAuthStatus?.passwordSet ?? false}
-            availableProviders={recentAuthStatus?.availableProviders ?? []}
-            canSatisfy={recentAuthStatus?.canSatisfy ?? true}
+            status={recentAuthStatus}
             onConfirmed={resumePendingAction}
         />
         </PageContent>

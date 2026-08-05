@@ -95,6 +95,12 @@ function controllerAuthorizationExemptions(): array
             .'他人のアカウントへ到達する経路がコード上存在しない。'
             .'別軸の防御として recent-auth (step-up) middleware を必須にしている。'],
 
+        'settings.password.store' => [$selfScoped,
+            '対象は $request->user() 自身のパスワード初回設定のみ。route に他者を指せる parameter が'
+            .'無く、他人の credential へ到達する経路がコード上存在しない。'
+            .'別軸の防御として recent-auth (step-up) middleware を必須にし、password 設定済みの'
+            .'迂回は PasswordCredentialService が lock 下で fail-closed 拒否する。総当り防御は throttle:6,1。'],
+
         'recent-auth.password' => [$selfScoped,
             '自分の再認証鮮度 (RecentAuthState) の更新。route に他者を指せる parameter が無く、'
             .'認証そのものが主体判定であるため Policy による再判定に意味がない。'

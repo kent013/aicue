@@ -20,6 +20,5 @@ final readonly class LoginMethodRequiredDto
 
     public function __construct(
         public string $message,
-        public string $settingsUrl,
     ) {}
 }
