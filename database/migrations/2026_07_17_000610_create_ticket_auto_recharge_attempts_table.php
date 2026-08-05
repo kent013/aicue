@@ -6,7 +6,6 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
-use RuntimeException;
 
 /**
  * P8a: リチャージ試行の状態機械 (pending → paid | failed | canceled)。

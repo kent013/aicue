@@ -427,3 +427,57 @@ laravel-claude-template の mirror が取得できた時点でテンプレ実装
 - 実装: `tests/js/architecture/svelte-no-undef-gate.test.ts`, `eslint.config.js`
 - 設計: `devnotes/20260805-0101-frontend-baseline-gates/detailed-design.md` 施策 4
 - 台帳: c2c `atomic-design-gates` AG-023 (2026-08-05 裁定), `eslint-svelte-ts-baseline`
+
+---
+
+## D12 ✅ ページタイトル / description はサーバ単一 SoT (helper 経由必須の JS 契約は不採用)
+
+| 観点 | テンプレート | 本アプリ |
+|---|---|---|
+| `<title>` の供給 | ページ側が JS helper 経由で宣言する契約 (helper 経由必須を frontend gate で強制) | サーバが単一 SoT。`SeoManager::resolveDocumentTitle()` が Blade `<title>` と Inertia 共有 prop `title` の両方へ同じ文字列を流す |
+| `<meta name="description">` | ページ側 helper の守備範囲 | サーバのみ (`config('seo.default_description')` → `SeoMeta::$description` → `SeoRenderer::render()`)。認証配下 (`renderPrivate`) は**意図的に出さない** |
+| frontend gate の役割 | 「helper を経由していること」を強制 | 「クライアントに第二 SoT を作らせない」を強制 (`<svelte:head>` の `<title>` / `<meta name="description">` を禁止) |
+
+### なぜ正当な差分か(logic-driven)
+
+本アプリは **SEO ヘッドをサーバ描画に一本化している** (`app/Support/Seo/`)。
+クローラが読む正本はサーバが描画した `<head>` であり、title / canonical / og / JSON-LD は
+すべて `config/seo.php` を起点に組み立てる。この構造では、ページ固有名の供給点は
+`config('seo.app_titles')` (route 既定) と `SeoManager::setPrivateTitle()` (controller の
+動的上書き) の 2 つで完結し、**JS helper を挟む層が存在しない**。
+
+テンプレートの「helper 経由必須」契約は「ページ側が title の一次情報を持つ」前提の設計だが、
+本アプリでは title の一次情報は **controller / config** が持つ。同じ契約を移植すると
+一次情報が 2 箇所に分かれ、**フルロードと SPA 遷移でタイトルが食い違う**という
+テンプレートが防ごうとしたまさにその破綻を招く。よって helper 契約は不採用とし、
+同じ不変条件を「第二 SoT の禁止」という別の機構で保証する。
+
+### 揃えている不変条件(これは保証し続ける)
+
+> `<title>` の SoT はサーバ (`SeoManager::resolveDocumentTitle`) ただ 1 つであり、
+> **フルロードと SPA 遷移で一致する** (共有 prop `title` + `resources/js/lib/document-title.ts`)。
+> `<meta name="description">` は **サーバが生成する初回 HTML のみを SoT とし**、
+> クライアントから第二 SoT や重複タグを作らない。
+
+**title と description で射程が違う点に注意**: `HandleInertiaRequests::share()` が
+共有するのは `title` のみで、description に SPA 同期経路は無い。description の読み手は
+クローラであり、クローラが読むのは初回 HTML なので、SPA 遷移後の追従は保証しない
+(必要になったら共有 prop + クライアント反映機構 + テストを別途設計する)。
+
+どの機構でカバーするか:
+
+- **`DocumentTitleCoverageTest`** (Architecture): Inertia を render する GET named route が
+  必ずページ固有名を持つことを deny-by-default で強制する (未網羅は fail。
+  action を静的解決できない route は理由付き allowlist が必須)
+- **`tests/js/architecture/svelte-head-no-title.test.ts`**: `resources/js/pages/**/*.svelte` の
+  `<svelte:head>` に `<title>` / `<meta name="description">` を書かせない
+  (`<svelte:head>` 自体は preload hint 等のため許可)
+- **`tests/Feature/Seo/SeoManagerTest.php`**: 解決優先順位と各 route の固有 title を仕様固定
+
+### 関連
+
+- 実装: `app/Support/Seo/SeoManager.php` / `app/Support/Seo/SeoRenderer.php` /
+  `app/View/Composers/SeoComposer.php` / `app/Http/Middleware/HandleInertiaRequests.php` /
+  `resources/js/lib/document-title.ts` / `config/seo.php`
+- 設計: `devnotes/20260805-0101-architecture-gate-followup/`
+- c2c 台帳: `gate-document-title-coverage` / `page-title-frontend-contract`

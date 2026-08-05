@@ -59,6 +59,10 @@
 
 - `declare(strict_types=1)` + 日本語コメント。Controller は薄く(Service 委譲)、
   transaction は Service 内。保護キーは forceFill / relation で明示代入
+- 月 / 年 / 四半期の加減算は**暗黙 overflow メソッドを禁止**する。既定は
+  `addMonthNoOverflow` / `subYearNoOverflow` 等の `*NoOverflow`、overflow が要件なら
+  `*WithOverflow` を明示して意図をコードに残す(`addMonth()` は 1/31 → 3/3 と溢れる。
+  `CarbonOverflowArithmeticGateTest` が検出)
 - 新しいドメインリソースの追加手順は **Item リソースが見本**
   (`docs/app-integration-guide.md` §2 のチェックリスト)。
   新規モデル追加時は Factory の追加と `docs/architecture.md` / `docs/factories.md`
