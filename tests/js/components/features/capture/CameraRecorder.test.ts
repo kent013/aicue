@@ -964,6 +964,14 @@ describe("CameraRecorder", () => {
         // 段階1 は未検証で false → releaseCamera + getUserMedia 再取得
         await vi.waitFor(() => expect(getUserMediaMock).toHaveBeenCalledTimes(2));
         expect(live.stop).toHaveBeenCalled();
+
+        // 再取得の制約は **呼出時点の facingMode** (flip 後 = "user") を反映する。
+        // videoConstraints() を .ts へ移す際にクロージャ読みからキャッシュへ退行すると
+        // ここが落ちる (実機でしか気づけない後退を単体で止めるための characterization)。
+        const reacquireCall = (getUserMediaMock.mock.calls[1] as unknown[])[0] as {
+            video: MediaTrackConstraints;
+        };
+        expect(reacquireCall.video).toMatchObject({ facingMode: "user" });
     });
 
     it("カメラ反転 (新 facing のみ不可): 旧 facingMode へ復旧し onCameraUnavailable を呼ばない", async () => {

@@ -20,6 +20,7 @@
         nextFacingMode,
         preferredRecordingMimeType,
         supportsPauseResume,
+        videoConstraints,
     } from "@/lib/capture/camera";
     import type {
         CameraErrorClassification,
@@ -164,18 +165,15 @@
         return Math.max(0, raw);
     }
 
-    // --- getUserMedia の制約を facingMode から組む (S6) ---
-    function videoConstraints(): MediaTrackConstraints {
-        return { facingMode };
-    }
-
     // 副作用なしの取得 (classify 結果を返すだけ。onCameraUnavailable/error を呼ばない)。
     // 呼び出し前に stream=null であること (reacquire 前は releaseCamera 済み)。stream ??= のため
     // 既存 stream があれば再取得しない = flip の reacquire では releaseCamera() 後に呼ぶ。
     async function acquireStream(): Promise<CameraErrorClassification | { kind: "ok" }> {
         try {
             stream ??= await navigator.mediaDevices.getUserMedia({
-                video: videoConstraints(), // facingMode を反映 (現行の "environment" 直書きを置換)
+                // 呼出時点の facingMode を渡す (reacquireWithFacing が代入した直後の値を読む)。
+                // キャッシュ禁止 — キャッシュすると flip 後も旧カメラで取得してしまう。
+                video: videoConstraints(facingMode),
                 audio: true,
             });
         } catch (cause) {

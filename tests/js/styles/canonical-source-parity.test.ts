@@ -7,31 +7,15 @@ import {
     RADIUS_TOKENS,
     TYPOGRAPHY_RAMPS,
 } from "./inventory";
+// DESIGN.md 側のパーサは contrast-invariant と共有する (二重実装しない)。
+import { REPO_ROOT, designColors, designRamp, designRounded } from "./design-md";
 
 /**
  * DESIGN.md (canonical) ⇔ resources/css/tokens.css (実装写像) の双方向同期を機械検証する。
  * 片方だけ更新された PR をここで落とす (docs/design-system.md の同期契約)。
  */
 
-const ROOT = path.resolve(__dirname, "../../..");
-const designMd = fs.readFileSync(path.join(ROOT, "DESIGN.md"), "utf-8");
-const tokensCss = fs.readFileSync(path.join(ROOT, "resources/css/tokens.css"), "utf-8");
-
-const frontmatter = (() => {
-    const m = designMd.match(/^---\n([\s\S]*?)\n---/);
-    if (!m) throw new Error("DESIGN.md frontmatter not found");
-    return m[1];
-})();
-
-function designColors(): Map<string, string> {
-    const section = frontmatter.match(/^colors:\n((?: {4}\S[^\n]*\n)+)/m);
-    if (!section) throw new Error("DESIGN.md colors section not found");
-    const map = new Map<string, string>();
-    for (const line of section[1].matchAll(/^ {4}([a-z-]+): "(#[0-9A-Fa-f]{6})"$/gm)) {
-        map.set(line[1], line[2].toLowerCase());
-    }
-    return map;
-}
+const tokensCss = fs.readFileSync(path.join(REPO_ROOT, "resources/css/tokens.css"), "utf-8");
 
 function cssColorTokens(): Map<string, string> {
     const map = new Map<string, string>();
@@ -66,12 +50,8 @@ describe("canonical source parity: colors", () => {
 
 describe("canonical source parity: radius", () => {
     it("DESIGN.md rounded と tokens.css の --radius-* が一致する", () => {
-        const section = frontmatter.match(/^rounded:\n((?: {4}\S[^\n]*\n)+)/m);
-        expect(section).not.toBeNull();
-        const design = new Map<string, string>();
-        for (const m of section![1].matchAll(/^ {4}([a-z]+): (\d+px)$/gm)) {
-            design.set(m[1], m[2]);
-        }
+        // section 不在は designRounded() が例外で落とす (旧 expect(section).not.toBeNull() 相当)
+        const design = designRounded();
 
         const css = new Map<string, string>();
         for (const m of tokensCss.matchAll(/--radius-([a-z]+):\s*([^;]+);/g)) {
@@ -86,18 +66,6 @@ describe("canonical source parity: radius", () => {
 });
 
 describe("canonical source parity: typography ramp", () => {
-    function designRamp(name: string): Record<string, string> {
-        const m = frontmatter.match(
-            new RegExp(`^ {4}${name}:\\n((?: {8}\\S[^\\n]*\\n)+)`, "m"),
-        );
-        if (!m) throw new Error(`DESIGN.md typography ramp not found: ${name}`);
-        const props: Record<string, string> = {};
-        for (const line of m[1].matchAll(/^ {8}([a-zA-Z]+): "?([^"\n]+)"?$/gm)) {
-            props[line[1]] = line[2];
-        }
-        return props;
-    }
-
     function cssRamp(name: string): Record<string, string> {
         const m = tokensCss.match(new RegExp(`@utility text-${name} \\{([^}]+)\\}`));
         if (!m) throw new Error(`tokens.css @utility not found: text-${name}`);

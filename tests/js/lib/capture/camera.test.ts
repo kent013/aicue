@@ -6,6 +6,7 @@ import {
     preferredRecordingMimeType,
     supportsMediaRecorder,
     supportsPauseResume,
+    videoConstraints,
 } from "@/lib/capture/camera";
 
 /*
@@ -171,5 +172,26 @@ describe("supportsPauseResume", () => {
     it("MediaRecorder 自体が無ければ false", () => {
         vi.stubGlobal("MediaRecorder", undefined);
         expect(supportsPauseResume()).toBe(false);
+    });
+});
+
+/*
+ * videoConstraints: getUserMedia の video 制約を facingMode から組む純関数。
+ * .svelte 側のクロージャ読みから .ts の引数受け取りへ移した際の仕様固定
+ * (呼出時点の facingMode をそのまま反映する = キャッシュしない)。
+ */
+describe("videoConstraints", () => {
+    it("environment をそのまま facingMode に載せる", () => {
+        expect(videoConstraints("environment")).toEqual({ facingMode: "environment" });
+    });
+
+    it("user をそのまま facingMode に載せる", () => {
+        expect(videoConstraints("user")).toEqual({ facingMode: "user" });
+    });
+
+    it("呼び出しごとに引数を評価する (結果をキャッシュしない)", () => {
+        expect(videoConstraints("environment")).toEqual({ facingMode: "environment" });
+        expect(videoConstraints("user")).toEqual({ facingMode: "user" });
+        expect(videoConstraints("environment")).toEqual({ facingMode: "environment" });
     });
 });
