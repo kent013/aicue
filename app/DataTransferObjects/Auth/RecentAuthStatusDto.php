@@ -19,6 +19,10 @@ final readonly class RecentAuthStatusDto
         public bool $recent,
         public bool $passwordSet,
         public array $availableProviders,
+        // パスキーで再認証できるか (登録済み credential が 1 件以上あるか)。
+        // **ログイン可否 (PasskeyLoginPolicy) とは別**: TOTP 有効ユーザーは passkey で
+        // ログインできないが、再認証 (POST /passkeys/confirm) には使える。
+        public bool $passkeyAvailable,
         public bool $canSatisfy,
         // 契約: recent===true ⇒ confirmedAt は session の recent_auth_at (unix epoch 秒)。
         // recent===false (未設定 / stale) は一律 null で fail-closed に倒す。

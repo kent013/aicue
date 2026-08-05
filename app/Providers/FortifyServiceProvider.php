@@ -180,6 +180,18 @@ class FortifyServiceProvider extends ServiceProvider
 
             return Limit::perMinute(5)->by(is_scalar($loginId) ? (string) $loginId : $request->ip().'|2fa');
         });
+
+        // passkey (WebAuthn) endpoint。config/fortify.php の limiters.passkeys が
+        // この名前を指しており、未設定だと Fortify が throttle 自体を外す
+        // (= 未認証の challenge 発行 GET /passkeys/login/options が無制限になる)。
+        // 未認証の login-options を含むため、認証済みは user 単位・未認証は IP 単位で絞る。
+        RateLimiter::for('passkeys', function (Request $request) {
+            $identifier = $request->user()?->getAuthIdentifier();
+
+            return Limit::perMinute(10)->by(
+                is_scalar($identifier) ? 'passkey|'.$identifier : 'passkey|'.$request->ip(),
+            );
+        });
     }
 
     /**

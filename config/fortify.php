@@ -117,6 +117,11 @@ return [
     'limiters' => [
         'login' => 'login',
         'two-factor' => 'two-factor',
+        // passkey endpoint の絞り。**未設定だと FortifyServiceProvider::passkeyThrottleMiddleware()
+        // が null を返し、未認証の GET /passkeys/login/options が無制限**になる
+        // (毎回 random_bytes(32) + session 書き込みが走る)。
+        // limiter 本体は App\Providers\FortifyServiceProvider::configureRateLimiters()。
+        'passkeys' => 'passkeys',
     ],
 
     /*
@@ -166,6 +171,17 @@ return [
             // (auth.password_confirmed_at の充足) は現行未提供 (bug-hunt F-11)。
             'confirmPassword' => false,
         ]),
+
+        // パスキー (WebAuthn)。現場 PWA でパスワード入力を不要にする。
+        // **この 1 行が実質的なキルスイッチ**: 外すと passkey route が消え、
+        // PasskeyLoginPolicy が false を返して LoginMethodInventory も passkey を数えなくなる。
+        //
+        // confirmPassword=false の理由は 2FA と同一 — 本アプリは Fortify 標準の
+        // password.confirm (3h・パスワード限定) を撤去し generic recent-auth
+        // (15 分窓・パスワード or 再SSO) へ統一済みで、残すと SSO-only ユーザーが詰む。
+        // step-up は App\Providers\PasskeyServiceProvider が recent-auth を後付け配線する
+        // (PasskeyRouteProtectionTest / PasswordConfirmMiddlewareAbsenceTest が CI 固定)。
+        Features::passkeys(['confirmPassword' => false]),
     ],
 
 ];

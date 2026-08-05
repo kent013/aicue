@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use App\Enums\SecurityEventType;
+use App\Models\SecurityAuditEvent;
 use App\Models\User;
 use Illuminate\Auth\SessionGuard;
 use Illuminate\Support\Facades\Auth;
@@ -132,4 +134,44 @@ test('session driver が database でない場合は行削除をスキップし�
     ])->assertSessionHasNoErrors();
 
     expect(Hash::check('NewPassword12345', $user->fresh()->password))->toBeTrue();
+});
+
+/*
+ * T106 施策 2: パスワード変更の監査証跡。
+ *
+ * `SecurityEventType::PasswordChanged` は enum に存在しながら記録経路が無かった
+ * (`/reset-password` 経路のみ `Illuminate\Auth\Events\PasswordReset` 経由で記録されていた)。
+ * 「そのユーザーが自分でパスワードを設定したか」は、前方修正前に作られた
+ * legacy SSO ユーザーの phantom password (docs/template-divergence.md D13) を
+ * 将来判別する材料でもある。
+ */
+test('T106: パスワード変更が security_audit_events に記録される', function (): void {
+    $user = User::factory()->create(['password' => Hash::make('current-password')]);
+
+    $this->actingAs($user)->put('/user/password', [
+        'current_password' => 'current-password',
+        'password' => 'BrandNewPassw0rd!x',
+    ])->assertSessionHasNoErrors();
+
+    $event = SecurityAuditEvent::query()
+        ->where('event_type', SecurityEventType::PasswordChanged->value)
+        ->where('user_id', $user->getKey())
+        ->first();
+
+    expect($event)->not->toBeNull();
+});
+
+test('T106: パスワード変更が失敗したときは記録しない (fail-closed)', function (): void {
+    $user = User::factory()->create(['password' => Hash::make('current-password')]);
+
+    $this->actingAs($user)->put('/user/password', [
+        'current_password' => 'wrong-password',
+        'password' => 'BrandNewPassw0rd!x',
+    ])->assertSessionHasErrors();
+
+    expect(
+        SecurityAuditEvent::query()
+            ->where('event_type', SecurityEventType::PasswordChanged->value)
+            ->exists(),
+    )->toBeFalse();
 });

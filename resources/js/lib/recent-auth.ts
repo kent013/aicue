@@ -23,6 +23,12 @@ export interface RecentAuthStatus {
     recent: boolean;
     passwordSet: boolean;
     availableProviders: AvailableReauthProvider[];
+    /**
+     * パスキーで再認証できるか (登録済み credential が 1 件以上ある)。
+     * **ログイン可否とは別**: 2要素認証が有効なユーザーはパスキーでログインできないが、
+     * 再認証には使える。
+     */
+    passkeyAvailable: boolean;
     canSatisfy: boolean;
     confirmedAt: number | null;
 }
@@ -43,6 +49,7 @@ export async function fetchRecentAuthStatus(): Promise<RecentAuthStatus | null> 
             recent: body.recent,
             passwordSet: body.passwordSet ?? false,
             availableProviders: body.availableProviders ?? [],
+            passkeyAvailable: body.passkeyAvailable ?? false,
             canSatisfy: body.canSatisfy ?? false,
             confirmedAt: body.confirmedAt ?? null,
         };

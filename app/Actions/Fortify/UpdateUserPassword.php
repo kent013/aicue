@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Actions\Fortify;
 
+use App\Enums\SecurityEventType;
 use App\Models\User;
+use App\Services\Security\SecurityEventRecorder;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -17,6 +19,10 @@ use Webmozart\Assert\Assert;
 
 class UpdateUserPassword implements UpdatesUserPasswords
 {
+    public function __construct(
+        private readonly SecurityEventRecorder $recorder,
+    ) {}
+
     /**
      * パスワード変更の検証と反映、および他デバイスのセッション・remember-me の失効。
      *
@@ -40,6 +46,16 @@ class UpdateUserPassword implements UpdatesUserPasswords
         $user->forceFill([
             'password' => Hash::make($input['password']),
         ])->save();
+
+        // 「そのユーザーが自分でパスワードを設定したか」の監査証跡。
+        // SecurityEventType::PasswordChanged は enum に存在しながら記録経路が無かった
+        // (/reset-password 経路は Illuminate の PasswordReset イベント → RecordSecurityEvent が
+        //  既に購読済みのため本 Action だけが欠けていた)。
+        // 将来、前方修正前に作られた legacy SSO ユーザーの phantom password
+        // (docs/template-divergence.md D13) を判別する材料にもなる。
+        // Fortify の PasswordUpdatedViaController ではなく Action 直記録にするのは、
+        // vendor イベントの意味論 (「Fortify の Controller 経由」) に依存しないため。
+        $this->recorder->record(SecurityEventType::PasswordChanged, $user);
 
         // 現在デバイスを維持しつつ他デバイスを失効させる。logoutOtherDevices は password を
         // 再ハッシュし、現在デバイスの recaller (remember-me) を新ハッシュで再発行 (現在リクエストが

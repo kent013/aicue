@@ -45,11 +45,11 @@ use App\Http\Controllers\Seo\RobotsController;
 use App\Http\Controllers\Seo\SitemapController;
 use App\Http\Controllers\Settings\AccountController;
 use App\Http\Controllers\Settings\ProfileController;
+use App\Http\Controllers\Settings\SecurityController;
 use App\Http\Controllers\Webhooks\SesNotificationController;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\LocalOnly;
 use App\Http\Middleware\NoIndex;
-use App\Models\User;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
@@ -57,7 +57,6 @@ use Illuminate\Http\Response;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
-use Inertia\Inertia;
 
 // トップページ (SEO full 分類の参考実装。SeoManager へのメタ供給は HomeController)
 Route::get('/', HomeController::class)->name('home');
@@ -186,18 +185,8 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
 
     Route::get('/settings', [ProfileController::class, 'index'])->name('settings');
 
-    Route::get('/settings/security', function () {
-        // admin guard 追加で user() は User|AdminUser の union になるため narrowing する
-        $user = request()->user();
-        $linkedProviders = $user instanceof User
-            ? $user->socialAccounts()->pluck('provider')->all()
-            : [];
-
-        return Inertia::render('Settings/Security', [
-            'socialProviders' => array_keys(config()->array('template.social_providers')),
-            'linkedProviders' => $linkedProviders,
-        ]);
-    })->name('settings.security');
+    // 2FA / ソーシャル連携 / パスキーの管理面 (passkey 一覧の組み立てに DI が要るため Controller)
+    Route::get('/settings/security', SecurityController::class)->name('settings.security');
 
     // アカウント削除は step-up (recent-auth) 必須
     Route::delete('/settings/account', [AccountController::class, 'destroy'])

@@ -67,6 +67,10 @@ function documentTitleUnresolvableAllowlist(): array
         'two-factor.qr-code' => 'Fortify の 2FA QR (SVG/JSON) endpoint。ページを描画しない',
         'two-factor.secret-key' => 'Fortify の 2FA secret (JSON) endpoint。ページを描画しない',
         'two-factor.recovery-codes' => 'Fortify のリカバリコード (JSON) endpoint。ページを描画しない',
+        // --- passkey (WebAuthn) の options endpoint (JSON)。ceremony 用 challenge を返すのみ ---
+        'passkey.login-options' => 'WebAuthn ログイン options (JSON) endpoint。ページを描画しない',
+        'passkey.confirm-options' => 'WebAuthn 再認証 options (JSON) endpoint。ページを描画しない',
+        'passkey.registration-options' => 'WebAuthn 登録 options (JSON) endpoint。ページを描画しない',
         // --- Route::view の Blade スタブ (Inertia ではない。title は blade 側が持つ) ---
         'legal.terms' => 'Route::view の Blade スタブ (Inertia 非経由)。NoIndex middleware 付きの文面プレースホルダ',
         'legal.privacy' => 'Route::view の Blade スタブ (Inertia 非経由)。同上',

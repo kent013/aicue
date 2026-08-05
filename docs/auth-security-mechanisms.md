@@ -4,7 +4,7 @@
 
 ## 概要
 
-テンプレート共通のセキュリティ横断機構を 4 つ束ねて記述する。いずれも特定のドメインに属さず、
+テンプレート共通のセキュリティ横断機構を 6 つ束ねて記述する。いずれも特定のドメインに属さず、
 リクエスト / デプロイの横断層で動く。
 
 1. **機微操作の再認証 (recent-auth / step-up)** — Critical Action の直前に「直近の再認証」を要求する。
@@ -13,6 +13,9 @@
    `no-store` baseline、production 起動時 / デプロイ前の fail-fast。
 4. **SSO email の信頼方針 (email trust policy)** — IdP が主張する email を検証済みとして
    扱ってよいかを provider ごとに宣言し、宣言のないものは fail-closed に倒す。
+5. **パスキー (WebAuthn)** — Fortify + laravel/passkeys のログイン / 再認証 / 管理経路と、
+   アプリ側が被せる不変条件 (所有者スコープ binder・応答契約・TOTP との関係)。
+6. **ログイン手段保持 guard** — ログイン手段が 0 になる操作を、投影後評価と行ロックで止める。
 
 MCP / CLI の OAuth 認可については [docs/mcp-oauth.md](mcp-oauth.md)、公開面の全体像は
 [docs/architecture.md](architecture.md) を参照。
@@ -37,16 +40,33 @@ Fortify 生の `password.confirm` (password 専用・3h 窓) を置き換え、S
 ### 成立 (satisfier) と session state
 
 - session state の**唯一の writer** は `RecentAuthState`。satisfier 成立時に `recent_auth_at` /
-  `recent_auth_method` (`password` | `sso` | `login`) / `recent_auth_provider` を dedicated key に書く。
+  `recent_auth_method` (`password` | `sso` | `login` | `passkey`) / `recent_auth_provider` を dedicated key に書く。
   Fortify の `auth.password_confirmed_at` には**書かない** (意味汚染回避、横断標準は `recent_auth_at` が正本)。
 - 成立時は `session()->migrate(true)` で session ID を rotate する (OWASP: 権限上昇時の session fixation 対策)。
   `regenerate()` と違い **CSRF token は維持**するため、XHR モーダルや別タブの進行中フォームを壊さない。
-- satisfier は 2 経路: password 再入力 (`ConfirmRecentAuthController::confirmPassword`) と
-  再SSO (`SocialAuthController` の `intent=step-up`)。password 未設定 (SSO-only) は password 経路を **fail-closed** で拒否し、
+- satisfier は 3 経路: password 再入力 (`ConfirmRecentAuthController::confirmPassword`)、
+  再SSO (`SocialAuthController` の `intent=step-up`)、パスキー検証
+  (`StampRecentAuthOnPasskeyVerified`。`POST /passkeys/confirm`)。
+  **どの手段が使えるかはサーバの `/recent-auth/status` が単一の源** (`passwordSet` /
+  `availableProviders` / `passkeyAvailable`)。画面ごとに判定を持たせない
+  (持たせると passkey しか持たないユーザーが特定画面でだけ詰む)。
+  `canSatisfy` はこの 3 つの論理和であり、**パスキーは TOTP の有無に関係なく再認証に使える**
+  (`PasskeyLoginPolicy` が縛るのは login のみ)。
+- ⚠ **`canSatisfy` は「アカウントに手段があるか」であり「この端末で実行できるか」ではない**。
+  WebAuthn の feature detection はクライアントにしか無いため、パスキーしか持たないユーザーが
+  非対応ブラウザで開くと「手段はあるのに何も出ない」無言の行き止まりになりうる。
+  両 UI (`RecentAuthModal` / `Auth/ConfirmRecentAuth`) は
+  `passwordSet || availableProviders || (passkeyAvailable && passkeySupported)` を
+  クライアント側で導出し、成立しない場合は**理由と回復導線を明示**する
+  (`recent-auth-unsupported-here` / `confirm-unsupported-here`)。password 未設定 (SSO-only) は password 経路を **fail-closed** で拒否し、
   再SSO へ誘導する。step-up 可能な provider は `config('template.social_providers.*.capability')` から解決 (未宣言は satisfier 不可)。
 - fresh login (`Login` event、web guard・非 recaller) は `StampRecentAuthOnLogin` が `method='login'` で自動 stamp する。
   ログイン直後の機微操作で「もう 1 回」の二重壁を消す。remember-me による自動復元 (`viaRemember()`) は fresh 扱いしない (fail-closed)。
 - 認証要素変更 (password / email / 2FA / social link·unlink) 後は `RecentAuthState::clear()` で鮮度を失効させる。
+  **パスキーの登録 / 削除**は `ClearRecentAuthOnPasskeyChange` が実際に `clear()` を呼ぶ (2026-08-04 裁定 A。§5 参照)。
+- satisfier の集合 (= `RecentAuthState::confirm()` の呼び出し元) は
+  `tests/Architecture/RecentAuthRouteTest.php` の inventory が deny-by-default で固定する。
+  新しい satisfier を足すには inventory への登録が必須 (= step-up の成立条件が増えることを PR で必ず判断させる)。
 
 ### XHR / 画面応答の差 (`RequireRecentAuth`、alias `recent-auth`)
 
@@ -217,6 +237,112 @@ policy を interface にしてあるのは nOAuth 対策の**キルスイッチ*
 
 ---
 
+## 5. パスキー (WebAuthn)
+
+**実装**: `app/Providers/PasskeyServiceProvider.php`, `app/Models/Passkey.php`, `app/Http/Responses/Passkey/`, `app/Http/Routing/SelfScopedPasskeyBinder.php`, `app/Services/Auth/PasskeyLoginPolicy.php`, `app/Listeners/Auth/{ClearRecentAuthOnPasskeyChange,StampRecentAuthOnPasskeyVerified}.php`, `resources/js/lib/passkeys.ts`, `resources/js/components/features/auth/PasskeySection.svelte`
+
+route / controller / action / migration は **Fortify + laravel/passkeys が提供する**
+(`config/fortify.php` の `Features::passkeys(['confirmPassword' => false])` が唯一の有効化点 =
+**実質的なキルスイッチ**)。アプリ側 (`PasskeyServiceProvider`) は「vendor にアプリ固有の
+不変条件を被せる」ことだけを担う。
+
+### アプリが被せる 4 つの不変条件
+
+| # | 内容 | 理由 |
+|---|------|------|
+| 1 | **binder 差し替え** (`SelfScopedPasskeyBinder`) | vendor binder はグローバル id 解決 → controller の `abort_unless(..., 403)` に到達し **他人の passkey の存在が漏れる**。所有者スコープで解決し「他人」と「不在」を等しく 404 にする (セキュリティ不変条件 2)。非数値 / bigint 範囲外も 404 に倒す (pgsql 22P02 / 22003 の 500 化を防ぐ) |
+| 2 | **Response contract 上書き** (`app/Http/Responses/Passkey/`) | vendor 既定は `new JsonResponse(...)` の直返しで禁止事項 4 に触れる。加えて confirm 経路が書く `auth.password_confirmed_at` をここで**除去**する (recent-auth の「Fortify の鍵には書かない」契約を守る) |
+| 3 | **route middleware の後付け** | `recent-auth` (登録 / 削除)、`ensure-login-method` (削除)、`no-store` (guest の login-options)。順序は **recent-auth → ensure-login-method** (逆順だと stale なリクエストでも行ロックを取る) |
+| 4 | **login 認可** (`PasskeyLoginPolicy`) | TOTP confirmed ユーザーの passkey login を拒否する |
+
+配線は `$app->booted()` 内で最終上書きする (auto-discovery された
+`Laravel\Passkeys\PasskeysServiceProvider` との boot 順序が `bootstrap/providers.php` では
+保証されないため)。構成は `tests/Architecture/{PasskeyPackageContractTest,PasskeyRouteProtectionTest}.php` が固定する。
+
+### TOTP との関係 (c2c 未裁定に対する fail-closed 既定)
+
+vendor の `PasskeyLoginController::store()` は `$guard->login()` を直接呼び、Fortify の
+two-factor challenge を通らない。したがって **TOTP confirmed のユーザーは passkey login を
+拒否する** (assurance の後退を作らない)。判定は `PasskeyLoginPolicy` **1 箇所**に集約してあり、
+(a) vendor の login ゲート (b) `LoginMethodInventory` の passkey 判定 (c) Settings 画面の
+`passkeyLoginAvailable` prop が同時に反転する。裁定が出たらこのクラスだけを書き換える。
+
+**passkey は 2FA 準拠判定に算入しない**。2FA 必須組織の未準拠ユーザーは passkey を持っていても
+`RequireTwoFactorForEnforcedOrganizations` のゲートに掛かる。
+
+### credential 集合の変化 = recent-auth 失効 (2026-08-04 裁定 A)
+
+パスキーは単独でログインできる強い資格であり、集合が変わったら直前に済ませた本人確認は失効させる
+(家系統一原則)。`PasskeyRegistered` / `PasskeyDeleted` を `ClearRecentAuthOnPasskeyChange` が購読する。
+UX の実害は「登録直後のタップ 1 回」に限られる。
+**「登録直後の passkey を satisfier から除外する」強化オプションは裁定で見送り済み**
+(再検討条件: パスキーが 2FA 準拠判定に算入される時、または放置端末起点の実被害が観測された時)。
+
+### transport 契約 (client ↔ server)
+
+| operation | options 取得 | 送信 | 成功応答 |
+|-----------|-------------|------|---------|
+| 登録 | `fetch GET /user/passkeys/options` | Inertia `router.post('/user/passkeys')` | `back()->with('success')` |
+| 削除 | — | Inertia `router.delete('/user/passkeys/{id}')` | `back()->with('success')` |
+| 再認証 (インラインモーダル) | `fetch GET /passkeys/confirm/options` | `fetch POST /passkeys/confirm` | `204` + `no-store` |
+| 再認証 (全画面 confirm) | 同上 | Inertia `router.post('/passkeys/confirm')` | `redirect()->intended()` |
+| ログイン | `fetch GET /passkeys/login/options` | `fetch POST /passkeys/login` | JSON `{redirect}` |
+
+`@/lib/passkeys` の import 元は `tests/js/architecture/passkeys-import-isolation.test.ts` が
+allowlist で固定する (transport 契約の食い違いは**無言失敗**として現れるため)。
+
+### 運用上の注意
+
+- 設定は `APP_URL` から導出される (relying party id = ホスト、allowed origins = `[APP_URL]`)。
+  同一オリジン PWA 前提のため専用 env は持たない。
+- **`APP_KEY` をローテートすると user handle (`hash_hmac` の鍵が `APP_KEY`) が変わり、
+  登録済みパスキーが全件無効になる**。鍵ローテートを行う場合は
+  `PASSKEYS_USER_HANDLE_SECRET` 相当の固定値を `config/passkeys.php` に持たせる設計変更が必要。
+- 未認証の challenge 発行 (`GET /passkeys/login/options`) は `throttle:passkeys` (10/min) で絞る。
+  `config('fortify.limiters.passkeys')` が未設定だと Fortify が throttle を外し **無制限**になる。
+
+---
+
+## 6. ログイン手段保持 guard (`EnsureLoginMethodRemains`)
+
+**実装**: `app/Http/Middleware/EnsureLoginMethodRemains.php`, `app/Services/Auth/LoginMethodInventory.php`, `app/DataTransferObjects/Auth/{LoginMethodRemoval,LoginMethodSet}.php`
+
+ログイン手段を全部消して自分で締め出す事故は復旧コストが高く、現場を止める。
+手段を減らす操作の前に「実行後も最低 1 つ手段が残る」ことを保証する。
+
+- **評価するのは現在状態ではなく「操作が成功した後の投影状態」**。素朴に現在を数えると
+  削除対象自身が残存手段として数えられ、「唯一の passkey を削除できてしまう」= 意図と正反対になる。
+- **直列化規約 (TOCTOU 対策)**: middleware が (1) transaction を開き (2) 対象 User 行を
+  `lockForUpdate()` で取り (3) **ロック取得後に**投影を評価し (4) **同一 transaction 内で `$next()`**
+  を実行する。ロック取得順序は User → credential。
+- 手段の基準は「データが存在する」ではなく「**使える**」(`LoginMethodInventory`)。
+  config から外された provider や feature off の passkey は数えない (数えると guard が形骸化する)。
+- `canSatisfy` (recent-auth の step-up 成立可否) とは**別概念**。統合しないこと。
+
+### 応答契約 (transport で分岐)
+
+| リクエスト種別 | 応答 |
+|--------------|------|
+| Inertia | `302` (Inertia が DELETE では 303 に変換) + `errors.login_method` |
+| 純 XHR (`Accept: application/json`) | `422` + `{ code: 'login_method_required', message, settingsUrl }` (`no-store`) |
+| 通常フォーム | `back()->withErrors('login_method')` |
+
+**Inertia に 422 JSON を返さない** (protocol 違反で router が応答を解釈できず無言失敗する)。
+
+### 適用範囲の機械強制
+
+`tests/Architecture/LoginMethodRemovalRouteTest.php` が **両方向**で固定する。
+
+1. 認証系 URI 空間の破壊的 route は「guard 必須」か「理由付き免除」のどちらかに**必ず分類**される。
+2. **allowlist 外の route に付与してはならない** — `$next()` を transaction 内で実行するため、
+   streamed response / 外部 I/O / `afterCommit` でない queue dispatch を含む route に付けると
+   副作用範囲が急拡大する。
+
+将来 password 削除 / SSO 連携解除 route を追加するときも**必ずこの middleware を通す**
+(単一の直列化点。別経路を作ると TOCTOU が戻る)。
+
+---
+
 ## 関連ファイル
 
 | ファイル | 役割 |
@@ -228,6 +354,12 @@ policy を interface にしてあるのは nOAuth 対策の**キルスイッチ*
 | `app/Listeners/Auth/StampRecentAuthOnLogin.php` | fresh login を recent-auth 成立として stamp (recaller 除外) |
 | `app/Http/Middleware/NoStoreCacheHeadersForAuthenticatedPages.php` | 認証済み応答の `no-store` baseline (bfcache 由来の PII 再表示防止) |
 | `app/Http/Controllers/Auth/SessionStatusController.php` | セッション有効性の軽量プローブ (`session.status`)。auth グループの外・guest でも 200 |
+| `app/Providers/PasskeyServiceProvider.php` | laravel/passkeys の app アダプタ (binder / Response contract / middleware 後付け / login 認可) |
+| `app/Http/Routing/SelfScopedPasskeyBinder.php` | `{passkey}` を所有者スコープで解決 (他人 / 不在 / 不正型をすべて 404) |
+| `app/Services/Auth/PasskeyLoginPolicy.php` | passkey **ログイン**可否の単一判定点 (feature flag + TOTP) |
+| `app/Services/Auth/LoginMethodInventory.php` | 投影後のログイン手段集合 (`remainingAfter`) |
+| `app/Http/Middleware/EnsureLoginMethodRemains.php` | `ensure-login-method` alias。手段が 0 になる操作を投影後評価 + 行ロックで止める |
+| `app/Http/Middleware/NoStoreResponse.php` | `no-store` alias。guest route (passkey の login-options) の challenge をキャッシュさせない |
 | `resources/js/lib/bfcache-guard.ts` | bfcache 復元時のクライアント側秘匿・再検証 (Safari 対策。正本は `docs/supported-browsers.md`) |
 | `app/Http/Middleware/RequireTwoFactorForEnforcedOrganizations.php` | 2FA 未準拠ユーザーの全画面ゲート (allowlist 外を 302 / 409) |
 | `app/Http/Middleware/BlockTwoFactorDisableForEnforcedOrganizations.php` | 準拠ユーザーの self-disable 到達を弾く (422 / back) |

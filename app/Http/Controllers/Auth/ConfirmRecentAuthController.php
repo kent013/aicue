@@ -20,6 +20,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response as InertiaResponse;
+use Laravel\Fortify\Features;
 use Webmozart\Assert\Assert;
 
 /**
@@ -30,6 +31,9 @@ use Webmozart\Assert\Assert;
  *     SSO-only (password 未設定) は **fail-closed** で拒否。
  *   - 再SSO は SocialAuthController の step-up intent (`/auth/{provider}/redirect/step-up`)。
  *     成立時の鮮度更新はそちらで RecentAuthState 経由で行う。
+ *   - パスキー検証 (`POST /passkeys/confirm`)。成立時の鮮度更新は
+ *     StampRecentAuthOnPasskeyVerified が行う。**passkey しか持たないユーザーを
+ *     この画面で詰ませない**ため、passkeyAvailable は canSatisfy に算入する。
  *
  * `status` はクライアント主導モーダル (precheck) の UI 補助。最終 gate は RequireRecentAuth。
  */
@@ -56,6 +60,7 @@ final class ConfirmRecentAuthController extends Controller
                 ],
                 $status->availableProviders,
             ),
+            'passkeyAvailable' => $status->passkeyAvailable,
             'canSatisfy' => $status->canSatisfy,
         ]);
     }
@@ -153,7 +158,12 @@ final class ConfirmRecentAuthController extends Controller
             );
         }
 
-        $canSatisfy = $passwordSet || $providers !== [];
+        // パスキーは登録済みなら **TOTP の有無に関係なく** 再認証に使える
+        // (PasskeyLoginPolicy が縛るのは login のみ)。feature off では route ごと消えるため
+        // 手段として数えない (fail-closed)。
+        $passkeyAvailable = Features::enabled(Features::passkeys()) && $user->passkeys()->exists();
+
+        $canSatisfy = $passwordSet || $providers !== [] || $passkeyAvailable;
 
         $recentAuthAt = session()->get('recent_auth_at');
         $recent = RecentAuthWindow::isFresh($recentAuthAt);
@@ -165,6 +175,7 @@ final class ConfirmRecentAuthController extends Controller
             recent: $recent,
             passwordSet: $passwordSet,
             availableProviders: $providers,
+            passkeyAvailable: $passkeyAvailable,
             canSatisfy: $canSatisfy,
             confirmedAt: $confirmedAt,
         );

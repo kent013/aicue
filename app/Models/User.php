@@ -17,6 +17,8 @@ use Illuminate\Notifications\Notifiable;
 use Laratrust\Contracts\LaratrustUser;
 use Laratrust\Traits\HasRolesAndPermissions;
 use Laravel\Fortify\TwoFactorAuthenticatable;
+use Laravel\Passkeys\Contracts\PasskeyUser;
+use Laravel\Passkeys\PasskeyAuthenticatable;
 use Laravel\Passport\Contracts\OAuthenticatable;
 use Laravel\Passport\HasApiTokens;
 use ParagonIE\CipherSweet\BlindIndex;
@@ -25,13 +27,13 @@ use ParagonIE\CipherSweet\Transformation\Lowercase;
 use Spatie\LaravelCipherSweet\Concerns\UsesCipherSweet;
 use Spatie\LaravelCipherSweet\Contracts\CipherSweetEncrypted;
 
-class User extends Authenticatable implements CipherSweetEncrypted, LaratrustUser, MustVerifyEmail, OAuthenticatable
+class User extends Authenticatable implements CipherSweetEncrypted, LaratrustUser, MustVerifyEmail, OAuthenticatable, PasskeyUser
 {
     // Passport OAuth guard (mcp-oauth / api-oauth) が withAccessToken() / token() を要求する
     use HasApiTokens;
 
     /** @use HasFactory<UserFactory> */
-    use HasFactory, HasRolesAndPermissions, Notifiable, TwoFactorAuthenticatable, UsesCipherSweet;
+    use HasFactory, HasRolesAndPermissions, Notifiable, PasskeyAuthenticatable, TwoFactorAuthenticatable, UsesCipherSweet;
 
     /**
      * PII (email / name) は CipherSweet で暗号化するため、平文 where() では検索できない。
@@ -83,6 +85,20 @@ class User extends Authenticatable implements CipherSweetEncrypted, LaratrustUse
     {
         return $this->hasMany(SocialAccount::class);
     }
+
+    /*
+     * 登録済みパスキー (WebAuthn credential) の relation `passkeys()` は
+     * PasskeyAuthenticatable trait が供給する (実体クラスは
+     * PasskeyServiceProvider::register() の Passkeys::usePasskeyModel() で
+     * App\Models\Passkey に差し替え済み)。
+     *
+     * **app モデル型へ narrowing した override は置かない**: PasskeyUser interface が
+     * `HasMany<Laravel\Passkeys\Passkey, Model>` を宣言しており、HasMany の型引数は
+     * 不変 (covariant 宣言が無い) ため、narrowing は PHPStan level 10 の
+     * method.childReturnType になる。App\Models\Passkey 型が必要な箇所
+     * (SecurityController / SelfScopedPasskeyBinder) は Passkey モデルを
+     * user_id スコープで直接クエリする。
+     */
 
     /**
      * password が設定されているか (recent-auth の password satisfier 可否)。

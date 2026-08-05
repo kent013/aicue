@@ -3,13 +3,17 @@
 declare(strict_types=1);
 
 use App\Listeners\Auth\StampRecentAuthOnLogin;
+use App\Models\Passkey;
 use App\Models\SocialAccount;
 use App\Models\User;
 use App\Security\RecentAuthState;
+use App\Services\Auth\PasskeyLoginPolicy;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\SessionGuard;
 use Illuminate\Contracts\Auth\Factory as AuthFactory;
 use Illuminate\Support\Facades\DB;
+use Inertia\Testing\AssertableInertia;
+use Laravel\Fortify\Features;
 use Laravel\Socialite\Contracts\Provider;
 use Laravel\Socialite\Contracts\User as SocialiteUserContract;
 use Laravel\Socialite\Facades\Socialite;
@@ -393,4 +397,91 @@ test('SSO step-up: 他人のアカウントでの round-trip は成立しない 
     $response->assertRedirect(route('recent-auth.confirm'));
     $response->assertSessionHasErrors('password');
     expect(session('recent_auth_at'))->toBeNull();
+});
+
+/*
+ * T106 施策 2: SSO 登録ユーザーの passwordSet が実挙動と一致する。
+ * phantom password 是正前は password 経路が使えないのに passwordSet=true になっていた
+ * (= 確認モーダルがパスワード入力欄を出して詰む)。
+ */
+test('T106: SSO 登録直後のユーザーは passwordSet=false / canSatisfy=true (再SSO が satisfier)', function (): void {
+    $this->withSession(['social_auth_intent' => 'register']);
+    fakeStepUpSocialiteCallback('g-t106-status');
+
+    $this->get('/auth/google/callback')->assertRedirect(route('dashboard'));
+
+    $user = User::whereBlind('email', 'email_index', 'step-up@example.com')->firstOrFail();
+
+    $this->actingAs($user)->getJson('/recent-auth/status')
+        ->assertOk()
+        ->assertJsonPath('passwordSet', false)
+        ->assertJsonPath('canSatisfy', true);
+});
+
+/*
+ * T106 施策 5/6: パスキーは recent-auth の satisfier であり、status 契約に載る。
+ *
+ * **passkey しか持たないユーザーを confirm 画面で詰ませない**ことが目的。
+ * 画面側が独自に判定すると特定画面でだけ詰むため、サーバの status を単一の源にする。
+ */
+test('T106: パスキー登録済みなら status の passkeyAvailable が true', function (): void {
+    $user = User::factory()->create();
+    Passkey::factory()->for($user)->create();
+
+    $this->actingAs($user)->getJson('/recent-auth/status')
+        ->assertOk()
+        ->assertJsonPath('passkeyAvailable', true)
+        ->assertJsonPath('canSatisfy', true);
+});
+
+test('T106: passkey しか持たないユーザーでも canSatisfy=true (詰ませない)', function (): void {
+    $user = User::factory()->ssoOnly()->create();   // password なし / SSO 連携なし
+    Passkey::factory()->for($user)->create();
+
+    $this->actingAs($user)->getJson('/recent-auth/status')
+        ->assertOk()
+        ->assertJsonPath('passwordSet', false)
+        ->assertJsonPath('availableProviders', [])
+        ->assertJsonPath('passkeyAvailable', true)
+        ->assertJsonPath('canSatisfy', true);
+});
+
+test('T106: TOTP 有効でも passkey は再認証手段として数える (ログイン可否とは別)', function (): void {
+    $user = User::factory()->withTwoFactor()->create();
+    Passkey::factory()->for($user)->create();
+
+    // ログインには使えない
+    expect(app(PasskeyLoginPolicy::class)->allowsPasskeyLogin($user))->toBeFalse();
+
+    // 再認証には使える
+    $this->actingAs($user)->getJson('/recent-auth/status')
+        ->assertJsonPath('passkeyAvailable', true);
+});
+
+test('T106: passkeys feature off では passkeyAvailable が false (route ごと消えるため)', function (): void {
+    $user = User::factory()->ssoOnly()->create();
+    Passkey::factory()->for($user)->create();
+
+    config()->set(
+        'fortify.features',
+        array_values(array_filter(
+            config()->array('fortify.features'),
+            static fn (mixed $feature): bool => $feature !== Features::passkeys(),
+        )),
+    );
+
+    $this->actingAs($user)->getJson('/recent-auth/status')
+        ->assertJsonPath('passkeyAvailable', false)
+        ->assertJsonPath('canSatisfy', false);
+});
+
+test('T106: confirm 画面 (Inertia) にも passkeyAvailable が渡る', function (): void {
+    $user = User::factory()->ssoOnly()->create();
+    Passkey::factory()->for($user)->create();
+
+    $this->actingAs($user)->get(route('recent-auth.confirm'))
+        ->assertInertia(fn (AssertableInertia $page) => $page
+            ->component('Auth/ConfirmRecentAuth')
+            ->where('passkeyAvailable', true)
+            ->where('canSatisfy', true));
 });

@@ -121,6 +121,7 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
 | `Role` / `Permission` | Laratrust のロール・権限 (seed 固定) | Team スコープ |
 | `OrganizationInvitation` | 組織招待 (token は hash 保存) | Organization 従属 |
 | `SocialAccount` | ソーシャルログイン連携 | User 従属 |
+| `Passkey` | パスキー (WebAuthn credential)。vendor モデル (`Laravel\Passkeys\Passkey`) の app サブクラス。アカウント削除で cascade 削除。契約は [docs/auth-security-mechanisms.md](auth-security-mechanisms.md) §5 | User 従属 |
 | `ApiKey` | REST API / MCP 認証キー (組織スコープ、secret は hash 保存) | Organization 従属 |
 | `OauthSession` | OAuth セッション (CLI ログインの認可承認 1 回 = 1 行。token chain を集約、失効単位) | Organization / User 従属 |
 | `IdempotencyKey` | API 冪等キー (API キー actor / OAuth user actor 単位) | ApiKey または User 従属 |
@@ -163,7 +164,9 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
 | `Render/VideoComposer` (interface) + `Render/FfmpegVideoComposer` | AI-CUE: 動画合成の抽象 + ffmpeg v1 実装 (Process facade 経由・配列引数。filtergraph にはサーバ生成一時ファイル名と数値のみ = 字幕本文を直接埋めない) |
 | `Render/AssSubtitleWriter` | AI-CUE: ASS 字幕生成の安全境界 (唯一の字幕テキスト出力点。リテラル \N/override tag/制御文字/zero-width の正規化 + mb 安全な長さ上限) |
 | `Render/RenderObjectStorage` | AI-CUE: レンダ出力 S3 操作の集約点 (download/upload/署名 URL/削除/prefix。DL 用 Content-Disposition は RFC 5987 + ASCII fallback + ヘッダ注入不能) |
-| `Auth/SocialAccountService` | ソーシャルログイン連携。SSO 登録時の `email_verified_at` は `Auth/EmailTrust/EmailTrustPolicyResolver` (provider ごとの `email_trust` 宣言) 経由でのみ立てる (nOAuth 対策。契約は [docs/auth-security-mechanisms.md](auth-security-mechanisms.md) §4) |
+| `Auth/SocialAccountService` | ソーシャルログイン連携。SSO 登録時の `email_verified_at` は `Auth/EmailTrust/EmailTrustPolicyResolver` (provider ごとの `email_trust` 宣言) 経由でのみ立てる (nOAuth 対策。契約は [docs/auth-security-mechanisms.md](auth-security-mechanisms.md) §4)。**SSO 登録は password を持たない** (`hasPassword()` が fail-closed で判定できるようにする。前方修正のみ = 既存ユーザーの phantom password は遡及是正しない。[docs/template-divergence.md](template-divergence.md) D13) |
+| `Auth/LoginMethodInventory` | 「ログイン画面から本人がアカウントに入れる手段」の投影後集合。`EnsureLoginMethodRemains` が唯一の呼び出し点 (行ロック下で評価する契約) |
+| `Auth/PasskeyLoginPolicy` | passkey **ログイン**可否の単一判定点 (feature flag + TOTP)。vendor の login ゲート / inventory / UI prop が共有する |
 | `Billing/BillingAccess` | billing entitlement 判定。**`plan_code` は判定に一切使わない** (quota の解決キーでしかない)。`state()` が `Subscribed` (subscription が entitled) / `ActiveFreePlan` (`free_plan_code='personal'`) のいずれかなら許可、それ以外 (`NoSubscription` / `PendingCheckout` / `ExpiredCheckout`) は遮断する。かつては「plan_code null = 支払い不要 free tier は許可」だったが P4 のゲート反転で撤廃した (無料枠は明示申告へ)。**課金による利用可否の判定は本クラス経由のみ** (アプリは本クラスの差し替えで gate 方針を変更する)。適用は `require-active-subscription` middleware (業務 route group。billing / webhook は構造的 allowlist)。plan_code は Stripe Price を持つ有償プラン契約時のみ webhook が set する状態キー — 支払い不要プランを plan_code に載せる場合は本判定とセットで見直す (`RequireActiveSubscriptionMiddlewareTest` が固定) |
 | `Billing/SubscriptionService` | 契約 (Subscription) の状態管理。Stripe への I/O は Gateway 経由のみで、entitlement 導出 / webhook 受信時の状態同期 / **`attempt_token` 冪等の Checkout 開始** (`startCheckout`) に責務を絞る。§サブスク契約 Checkout の準拠実装 |
 | `Billing/PersonalPlanService` | Personal (無料) の適格性判定・有効化・退役。**free entitlement は `organizations.free_plan_code` で表現**し `subscriptions` は Stripe 実体のみという invariant を守る。farming 防止は DB partial unique (`organizations_personal_free_declarer_unique`) が hard invariant、owner 条件は eligibility の best-effort |
