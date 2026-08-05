@@ -22,6 +22,7 @@
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
 | T085 | bfcache 実復元の iOS 実機受入確認 | test | Playwright 不可のため実機で確認+記録 | High | standalone | [設計](devnotes/20260803-0053-aigenba-alignment/) | 2026-08-03 03:10 |
+| T108 | 存在オラクル(High-1)/trustProxies信頼境界(High-2)/passkey監査ログの是正 | backend | 監査サイクル2のHigh2件を是正 | High | standalone | [設計](devnotes/20260805-1550-security-audit-remediation/) | 2026-08-05 16:10 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
