@@ -85,3 +85,71 @@ function pgsqlDropDatabaseSql(string $name): string
 {
     return 'DROP DATABASE IF EXISTS '.pgsqlQuoteIdentifier($name).' WITH (FORCE)';
 }
+
+/**
+ * allowlist 検証済み DB 名に、出自 (worktree の realpath) を記録する COMMENT 文を生成する。
+ *
+ * 孤児 sweep (`drop-test-db.php --orphans`) が「削除済み worktree の残骸」と
+ * 「同一 PostgreSQL を共有する**別クローンの生存 DB**」を区別するための**分類材料**。
+ * **信頼境界ではない** (誰でも書き換えられるため単独では guard にならない)。
+ * 識別子は pgsqlQuoteIdentifier、リテラルは PDO::quote で組み立てる (独自連結はしない。
+ * provenance path に `'` が含まれうる)。非破壊 DDL なので ensure 側から実行してよい。
+ */
+function pgsqlCommentDatabaseSql(PDO $pdo, string $name, string $provenance): string
+{
+    return 'COMMENT ON DATABASE '.pgsqlQuoteIdentifier($name).' IS '.$pdo->quote($provenance);
+}
+
+/** ensure が行う操作。SQL 生成はしない (クォート責務は既存の SQL ビルダに残す)。 */
+enum TestDatabaseEnsureAction
+{
+    case Create;
+    case StampProvenance;
+}
+
+/**
+ * ensure が実行すべき action 列を返す (純関数。PDO にも SQL にも触れない)。
+ *
+ * **両分岐とも StampProvenance を含む**のが契約: 既存 DB のときに省くと
+ * 「ラベルの無い現役 DB」が生まれ、将来の孤児 sweep の分類材料が欠ける (= 冪等にする)。
+ *
+ * @return list<TestDatabaseEnsureAction>
+ *                                        $exists=false → [Create, StampProvenance] / $exists=true → [StampProvenance]
+ */
+function testDatabaseEnsurePlan(bool $exists): array
+{
+    return $exists
+        ? [TestDatabaseEnsureAction::StampProvenance]
+        : [TestDatabaseEnsureAction::Create, TestDatabaseEnsureAction::StampProvenance];
+}
+
+/**
+ * provenance ラベルを **best-effort** で実行する。`$exec` を注入するので PDO 無しでテストできる。
+ *
+ * fail-closed にしない理由: comment は分類材料であって必須ではない。ここで落とすと
+ * 権限設定の差でテスト実行そのものが止まり、**偽赤を増やす**。
+ * 「ラベルの無い DB がフラグ 1 つで一括 DROP される」危険の方は
+ * `--include-hash` の明示指定制 (一括フラグを用意しない) で構造的に潰してある。
+ *
+ * 例外だけでなく **`$exec` の戻り値 `false`** も失敗として扱う
+ * (`PDO::exec()` は ERRMODE 次第で例外ではなく false を返す)。
+ *
+ * @param  callable(string): mixed  $exec
+ * @return bool 成功したか (失敗時は false + stderr へ warning。例外は伝播させない)
+ */
+function pgsqlStampProvenance(callable $exec, string $sql): bool
+{
+    try {
+        if ($exec($sql) === false) {
+            fwrite(STDERR, "ensure-test-db: provenance コメントの記録に失敗 (best-effort / 続行)\n");
+
+            return false;
+        }
+
+        return true;
+    } catch (Throwable $e) {
+        fwrite(STDERR, "ensure-test-db: provenance コメントの記録に失敗 (best-effort / 続行): {$e->getMessage()}\n");
+
+        return false;
+    }
+}

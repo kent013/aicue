@@ -108,6 +108,69 @@ main 側を汚す経路が存在しないため、teardown 時の汚染検証 (f
 orphan 化した worktree (teardown を経ずに削除) は `git worktree prune` で整理する。
 検証なしの強制削除は `git worktree remove --force <path> && git worktree prune`。
 
+## teardown が常時失敗していた経路 (NFC/NFD) と恒久対策
+
+**症状**: `doc/reference/` に **NFC 形と NFD 形の index entry が両方**載っていた
+(index 197 に対し作業ツリーの実体 139)。正規化非依存 lookup の FS
+(macOS APFS / OrbStack の virtiofs 等) では 1 ファイルに潰れるため、
+新しい worktree を checkout すると「**削除済み扱いの entry**」と
+「**untracked 扱いのファイル**」が現れ、teardown の **(2) dirty チェックが必ず fail** した。
+
+**連鎖**: dirty チェックで止まる → **(4) の DB 回収に到達しない** →
+開発者は `git worktree remove --force` で迂回する → `drop-test-db.php` を通らない →
+**孤児テスト DB が単調増加**する (監査時点で 17 個 / 221.9 MB)。
+順序を入れ替えて DB 回収を先にするのは **誤り** — 「teardown が失敗したのに、
+まだ使っている worktree のテスト DB が消える」という別の事故になる。直すべきは原因の側。
+
+**恒久対策**: NFD 側 index entry 58 件を `git rm --cached` で除去し
+(落とす内容は残す NFC entry に**同一 blob**で保存されていることを実測で確認済み。
+作業ツリーのファイルは 1 つも消えていない)、再発を
+**`tests/Architecture/GitIndexNormalizationTest.php`** が deny-by-default で止める
+(index 全体を NFC 正規化して衝突が 0 件であること)。
+
+> `core.precomposeunicode = true` は **`.git/config` のローカル設定**であり、
+> clone した各人が設定しない限り効かない = **リポジトリの恒久対策にはならない**。
+> 各自 `true` にしておくと再発を緩和できる**補助情報**として扱い、
+> 受入条件にもロールバック手順にも含めない。恒久対策はあくまで上記ゲートである。
+
+**迂回されたときの回収経路**: それでも `--force` で強制撤去された場合に備え、
+`scripts/ci/drop-test-db.php --orphans` が「生存 worktree に紐づかない孤児 DB」を
+**dry-run で列挙**する (§孤児テスト DB の回収)。
+
+## 孤児テスト DB の回収 (`drop-test-db.php --orphans`)
+
+DB 名の hash は worktree の realpath から算出されるため、**worktree が既に消えていると
+hash を再現できない** = 従来の無引数 `drop-test-db.php` では孤児を回収できなかった。
+そこで出自を機械記録し、hash 単位で分類する:
+
+- `ensure-test-db.php` が base DB へ **`COMMENT ON DATABASE <base> IS '<worktree の realpath>'`**
+  を記録する (作成時・既存時の**両方** = 冪等。非破壊 DDL)。付与失敗は best-effort で無視する
+  (comment は分類材料であって必須ではない。ここで落とすとテスト前処理が権限差で止まり偽赤が増える)
+- `--orphans` は `pg_database` + `shobj_description` を **SELECT だけ**で列挙し、
+  **`Protected → Live → Foreign → Orphan → Unlabeled`** の順に評価して分類する。
+  `Live` (生存 worktree hash 突合) が `Foreign` / `Orphan` より**先**なので、
+  **comment を細工しても生存 DB は落とせない**
+- **削除可否を分類だけで自動決定しない**。`Orphan` も `Unlabeled` も
+  `--include-hash=<hash>` で人間が 1 つずつ名指ししない限り 1 件も落ちない
+  (一括フラグは**意図的に用意していない**)
+- `--apply` は `--confirm=<token>` 必須。token は
+  `classifier_version` / `drop_targets` / `live_hashes` / `protected` / `include_hashes` の
+  canonical JSON の SHA-256 で、apply は `.claude/worktrees/.setup.lock` 取得後に
+  判定入力を再取得して token を再計算し、一致したときだけ DROP する
+  (= 指紋ではなく **lock 下のスナップショット照合**)
+- **DROP DDL を実行するのは `drop-test-db.php` の 1 本のまま**。`--orphans` は
+  「どれを落とすかを決める入口」を足すだけで、`isDevDatabase()` /
+  `isAllowedTestDatabase()` / `pgsqlDropDatabaseSql()` は既存実装を共有する
+
+> **排他の適用範囲を誇張しない**: `.setup.lock` が閉じるのは
+> **同一クローンの協調スクリプト (setup / teardown / sweep) 間の TOCTOU だけ**である。
+> lock はファイルシステム上の 1 クローンに閉じており別クローンとは共有されない。
+> **cross-clone の防御は `Foreign` 分類 + `--protect-hash` + 人間承認**の 3 段で行う。
+
+> ⚠️ **`--apply` は LLM / エージェントが実行してはならない**。
+> ユーザー自身が実行するか、ユーザーが明示的に承認した場合のみ実行できる
+> (AGENTS.md 禁止事項 3)。
+
 ## worktree 内のコマンド規則 (2 層)
 
 | 層 | コマンド | 条件 |
