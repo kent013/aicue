@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Services\Organization;
 
+use App\DataTransferObjects\Organizations\AccountDeletionBlockerDto;
+use App\Enums\AccountDeletionBlockReason;
 use App\Enums\AdminConsoleRole;
 use App\Enums\OrganizationRole;
 use App\Enums\ProjectRole;
@@ -12,10 +14,12 @@ use App\Models\Organization;
 use App\Models\OrganizationInvitation;
 use App\Models\User;
 use App\Notifications\OrganizationInvitationNotification;
+use App\Services\Billing\AccountDeletionBillingGuard;
 use App\Services\Notification\NotificationCenterService;
 use App\Services\Project\DefaultProjectResolver;
 use App\Services\Security\SecurityEventRecorder;
 use Illuminate\Contracts\Session\Session;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -39,6 +43,7 @@ class OrganizationMembershipService
         private readonly SecurityEventRecorder $recorder,
         private readonly DefaultProjectResolver $defaultProjects,
         private readonly NotificationCenterService $notifications,
+        private readonly AccountDeletionBillingGuard $billingGuard,
     ) {}
 
     /**
@@ -520,30 +525,86 @@ class OrganizationMembershipService
     }
 
     /**
-     * 削除するとその組織を Owner 不在で残す組織 (= 削除ブロック対象)。
-     * 述語: $user が Owner かつ 他に Owner がいない かつ 他に 1 人以上メンバーが残る。
-     * 個人組織のように $user が唯一メンバーの組織は「孤児化するメンバーが居ない」ため対象外。
+     * 退会をブロックしている組織と理由。
      *
-     * 読み取り専用判定 (ロックしない。表示スナップショット用)。権威判定は deleteAccount が
-     * ロック下で再評価する。
+     * 述語:
+     *   soleOwned(user, org) := user が Owner かつ 他に Owner がいない
+     *   reasons:
+     *     - OwnerlessMembers : 他メンバーが 1 人以上残る (孤児化するメンバーが居る)
+     *     - ActiveBilling    : 生きた課金責務が残る (AccountDeletionBillingGuard)
+     *   blocked := soleOwned かつ reasons が非空
      *
-     * @return Collection<int, Organization>
+     * 個人組織 (自分だけがメンバー) でも **課金責務があれば blocker になる**。
+     * 退会後の組織は Owner 不在で存続し (User 削除では organizations 行は消えない)、
+     * アプリには組織削除も解約の主体も無いため、課金が宙づりになるため。
+     *
+     * 読み取り専用判定 (ロックしない。表示スナップショット用)。**通常のアプリ経路の**権威判定は
+     * deleteAccount がロック下で再評価する。課金状態の読み取りを組織行ロック取得**後**に行うのは
+     * membership 側の race を封じるためであり、**Cashier (vendor) の WebhookController が
+     * subscription 行を作る経路との完全排他ではない**。漏れは daily の
+     * billing:detect-orphan-billing-organizations が second layer として拾う。
+     *
+     * 性能: **先に「唯一 Owner の組織」へ絞ってから課金を引く** (逆にすると全所属組織で
+     * 課金クエリが走る)。
+     *
+     * @return Collection<int, AccountDeletionBlockerDto>
      */
     public function organizationsBlockingDeletion(User $user): Collection
     {
+        $currentOrganizationId = $user->current_organization_id;
+
         return $user->organizations()
             ->withCount('users')
             ->get()
-            ->filter(function (Organization $organization) use ($user): bool {
+            ->filter(fn (Organization $organization): bool => $user->organizationRole($organization) === OrganizationRole::Owner
+                && ! $this->hasAnotherOwner($organization, $user))
+            ->map(function (Organization $organization) use ($currentOrganizationId): ?AccountDeletionBlockerDto {
                 // withCount('users') 派生属性。PHPStan は型を知らないため integerish で narrowing。
                 $usersCount = $organization->getAttribute('users_count');
                 Assert::integerish($usersCount);
 
-                return $user->organizationRole($organization) === OrganizationRole::Owner
-                    && (int) $usersCount > 1
-                    && ! $this->hasAnotherOwner($organization, $user);
+                $reasons = [];
+                if ((int) $usersCount > 1) {
+                    $reasons[] = AccountDeletionBlockReason::OwnerlessMembers;
+                }
+                if ($this->billingGuard->hasLiveBillingObligation($organization)) {
+                    $reasons[] = AccountDeletionBlockReason::ActiveBilling;
+                }
+                if ($reasons === []) {
+                    return null;
+                }
+
+                return AccountDeletionBlockerDto::build(
+                    $organization,
+                    $reasons,
+                    $organization->getKey() === $currentOrganizationId,
+                );
             })
+            // PHPStan level 10 では引数無し filter() が ?Dto → Dto に narrow しきらないため明示する
+            ->filter(fn (?AccountDeletionBlockerDto $blocker): bool => $blocker !== null)
             ->values();
+    }
+
+    /**
+     * Owner が 1 人も居ない組織 (通常は 0 件。異常系の検知用)。
+     * 読み取り専用でロックしない。role_user は laratrust_team_id で突き合わせる
+     * (権限判定は常に team を明示する不変条件)。
+     *
+     * 列名の対応: Laratrust の pivot は role_user でその team 列は team_id、
+     * organizations 側は laratrust_team_id (先例: PersonalPlanService)。
+     *
+     * @return Collection<int, Organization>
+     */
+    public function organizationsWithoutOwner(): Collection
+    {
+        return Organization::query()
+            ->whereDoesntHave('users', function (Builder $query): void {
+                $query->whereHas('roles', function (Builder $roleQuery): void {
+                    $roleQuery->where('name', OrganizationRole::Owner->value)
+                        ->whereColumn('role_user.team_id', 'organizations.laratrust_team_id');
+                });
+            })
+            ->get();
     }
 
     /**
@@ -580,7 +641,8 @@ class OrganizationMembershipService
 
     /**
      * アカウント削除。ガードと削除を同一トランザクション + 行ロックで直列化する。
-     * 削除するとその組織を Owner 不在で残す組織があれば拒否する (孤児化防止・最終権威)。
+     * 削除するとその組織を Owner 不在で残す組織があれば拒否する
+     * (メンバーの孤児化防止 + 課金責務の宙づり防止・最終権威)。
      *
      * 直列化の仕組み (owner 判定は role_user を読むが role_user を直接ロックはしない):
      * 組織の owner 集合を変える書き込み経路 (changeRole / transferOwnership / removeMember /
@@ -602,7 +664,7 @@ class OrganizationMembershipService
      *
      * @param  (\Closure(): void)|null  $beforeDelete  例外を投げないこと (投げると削除全体が rollback)
      *
-     * @throws ValidationException 唯一 Owner かつ他メンバーが残る組織がある
+     * @throws ValidationException 唯一 Owner かつ (他メンバーが残る ∨ 生きた課金責務がある) 組織がある
      */
     public function deleteAccount(User $user, ?\Closure $beforeDelete = null): void
     {
@@ -632,9 +694,15 @@ class OrganizationMembershipService
             Assert::isInstanceOf($freshUser, User::class);
             $blockers = $this->organizationsBlockingDeletion($freshUser);
             if ($blockers->isNotEmpty()) {
-                $names = $blockers->pluck('name')->implode('、');
+                // Inertia の resolveValidationErrors() は field ごとに先頭 1 件しかクライアントへ
+                // 渡さない (withAllErrors=false 既定) ため、要約を 1 本にまとめる。
+                // 組織ごとの詳細・導線は redirect back 後に再評価される props が持つ。
+                $requirements = $blockers
+                    ->map(fn (AccountDeletionBlockerDto $blocker): string => $blocker->requirementLabel())
+                    ->implode('、');
+
                 throw ValidationException::withMessages([
-                    'account' => ["次の組織のオーナーであるため削除できません。先にオーナーを移譲してください: {$names}"],
+                    'account' => ["次の対応が完了するまで退会できません: {$requirements}"],
                 ]);
             }
 

@@ -2,10 +2,12 @@
 
 declare(strict_types=1);
 
+use App\Services\Billing\AccountDeletionBillingGuard;
 use App\Services\Billing\TicketLedgerService;
 use App\Services\Capture\StaleUploadReservationSweeper;
 use App\Services\Manual\AnalysisJobService;
 use App\Services\Manual\RenderJobService;
+use App\Services\Organization\OrganizationMembershipService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -36,6 +38,43 @@ Schedule::command('billing:release-stale-reservations')->everyFiveMinutes();
 */
 Schedule::command('billing:send-billing-reminders')->daily()->onOneServer()->withoutOverlapping();
 Schedule::command('billing:reconcile-schedules')->daily();
+
+/*
+|--------------------------------------------------------------------------
+| 課金孤児の検知 (退会ガードの second layer)
+|--------------------------------------------------------------------------
+| 退会ガード (AccountDeletionBillingGuard) は通常経路を止めるが、webhook トランザクションと
+| 同時刻に退会が commit される競合までは排他しない (subscription 行を作るのは Cashier の
+| WebhookController = vendor 側で、自前 listener の排他では覆えないため)。
+| 予防で漏れた分と、本機能より前から存在する孤児組織を daily で検知する。
+|
+| 報告契約 (通知洪水を作らない):
+|   - 1 実行につき **集約して 1 回だけ** report() する
+|   - 内容は **件数と organization id のみ** (組織名・メール等の PII を載せない)
+|   - 未解消なら翌日も同じ内容で再報告する (抑制状態を持たない = 冪等な観測)
+|
+| **監視対象**: 本コマンドの report()。
+*/
+Artisan::command('billing:detect-orphan-billing-organizations', function (
+    OrganizationMembershipService $membership,
+    AccountDeletionBillingGuard $guard,
+) {
+    $ids = $guard->orphanBillingOrganizationIds($membership->organizationsWithoutOwner());
+    if ($ids === []) {
+        $this->info('課金孤児なし');
+
+        return;
+    }
+
+    $this->warn(count($ids).' 件の課金孤児組織を検出しました');
+    // RuntimeException は import しない (本ファイルは namespace 宣言が無く global 解決される。
+    // 非複合 use は NoNonCompoundGlobalUseTest が禁止する)。
+    report(new RuntimeException(
+        'Owner 不在かつ課金中の組織を検出: count='.count($ids).' ids='.implode(',', $ids),
+    ));
+})->purpose('Owner 不在かつ生きた課金責務がある組織 (課金孤児) を検知して報告する');
+
+Schedule::command('billing:detect-orphan-billing-organizations')->daily()->onOneServer();
 
 /*
 |--------------------------------------------------------------------------
