@@ -46,7 +46,11 @@
    (`ProhibitsProtectedKeys` + `MassAssignmentSafetyTest`)
 2. **子は親に属する**: nested route の不整合は**認可より前に 404**
    (`NestedRouteIdorDefenseTest` の inventory に登録必須)
-3. **cross-org 不可**: 組織を跨ぐ read/write をしない(relation / org-scoped 解決経由のみ)
+3. **cross-org 不可**: 組織を跨ぐ read/write をしない(relation / org-scoped 解決経由のみ)。
+   **クラス起点の主キー同一性クエリ**(`User::find($payloadId)` /
+   `User::query()->where('id', …)` / `DB::table('users')->where('id', …)`)は
+   deny-by-default で分類が要る(`ModelDirectFetchInvariantTest` + `DirectFetchInventory`。
+   route parameter 由来の id は `NestedRouteIdorDefenseTest` の担当で母集団が交わらない)
 4. **untrusted 文字列は UserInput 型経由でのみ prompt に入れる**
 5. **権限判定は常に `laratrust_team_id` を明示**(strict_check=true)
 6. **PII(email/name)は CipherSweet**。検索は `whereBlind()`(平文 where は hit しない)

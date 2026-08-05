@@ -44,6 +44,11 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
                         … ControllerAuthorizationGateTest               ← 不足は 403
 ```
 
+route parameter を経由しない id (POST payload / MCP tool 引数 / token claim / queue payload) は
+上記のどの層にも現れないため、**クラス起点の主キー同一性クエリ**を別 gate で deny-by-default に
+分類する (`ModelDirectFetchInvariantTest` + `tests/Support/Security/DirectFetchInventory`)。
+`NestedRouteIdorDefenseTest` (route parameter 由来) とは母集団が素で交わらない。
+
 - **層 2a が無いと FormRequest の 422 が存在オラクルになる**。inline guard (層 2b) は
   FormRequest より**後**に走るため、「cross-org の実在リソース + 不正 payload = 422 /
   不在リソース = 404」の差分でリソースの実在が漏れる。層 2b は二重防御として残す

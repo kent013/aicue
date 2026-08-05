@@ -199,7 +199,15 @@ LLM を使う機能が要件に来たら、まず利用形態を分類する:
 2. **子は親に属する**: nested route の子リソースは URL 上の親/テナントに属することを
    構造的に保証し、不整合は**認可より前に 404**(403 で存在を漏らさない)
 3. **cross-org 不可**: いかなる経路でも組織を跨いだ read/write が起きない
-   (Service 層 + DB CHECK の多層。直 fetch せず relation/Builder スコープ経由)
+   (Service 層 + DB CHECK の多層。直 fetch せず relation/Builder スコープ経由)。
+   「直 fetch しない」は `ModelDirectFetchInvariantTest` が機械強制する:
+   **クラス起点 (`User::` / `new User` / `DB::table('users')`) の主キー同一性クエリ**は
+   `tests/Support/Security/DirectFetchInventory` へ `DirectFetchJustification` +
+   30 文字以上の具体的根拠 + case ごとの構造化 field を登録しない限り fail する。
+   **新しい id 受け口 (POST payload / MCP tool 引数 / token claim / queue payload) を足すときは、
+   まず relation 起点 (`$organization->users()->whereKey($id)`) で書けないかを検討する**
+   (書けるなら候補にすら上がらない)。route parameter 由来の id は
+   `NestedRouteIdorDefenseTest` の担当で母集団が交わらない
 4. **untrusted 文字列は安全処理を経てのみ prompt に入る**(UserInput 型強制)
 5. **権限判定は常に呼び出し側組織の team スコープに束縛**(team 明示 + strict_check=true)
 6. **任意 class の逆シリアライズを許さない**(cache serializable_classes は既定 false。
