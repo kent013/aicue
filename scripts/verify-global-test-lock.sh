@@ -1093,6 +1093,8 @@ sys.stdout.flush()
 time.sleep(120)
 PY
 
+    # 候補ポート列挙は「bind できるポートを 1 つ探す」ための fixture であり、bug-hunt の
+    # 並列 cap (=4) とは無関係。cap と同期させない (狭めると bind 候補が減るだけで、意味が無い)。
     for port in 8010 8011 8012 8013 8014 8015 8016 8017 8018; do
         python3 "${listener}" "${port}" >"${WORK}/c19.listen" 2>/dev/null &
         lpid=$!

@@ -202,7 +202,7 @@ hash を再現できない** = 従来の無引数 `drop-test-db.php` では孤�
 
 `.claude/skills/app-bug-hunt/` は **worktree から走ることを既定**とし、
 `scripts/bughunt-worktree-hook.sh` の PreToolUse ガードが main 直叩きを早期に止める。
-bughunt 環境の DB (`bug_hunt(_1..8)`) は本書のテスト DB 分離とは**別系統の隔離**で、
+bughunt 環境の DB (`bug_hunt(_1..4)`) は本書のテスト DB 分離とは**別系統の隔離**で、
 `scripts/bug-hunt-shard.sh` の用途別 wrapper (`env -i` + DB 名 regex + role guard) が担う
 (AGENTS.md §bug-hunt)。
 

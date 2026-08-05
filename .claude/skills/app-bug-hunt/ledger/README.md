@@ -21,9 +21,10 @@ bug-hunt の全体像・運用は `.claude/skills/app-bug-hunt/SKILL.md` と `co
 LLM 探索的バグハントは dev `app` から物理隔離された専用 bughunt 環境で走る:
 
 - **直列**: shard 0 / `:8010`
-- **並列**: shard 1..8 / `:8011..8018`（各 shard 独立 DB `bug_hunt_1..8`）
+- **並列**: shard 1..4 / `:8011..8014`（各 shard 独立 DB `bug_hunt_1..4`）
 - 外部依存は `TESTING_BROWSER_FAKES`（`config('testing.browser_fakes')`）で宣言的に fake 化。
-- `shard_id` フィールドに 0-8 を記録する（直列=0、並列=1..8）。
+- `shard_id` フィールドに 0-4 を記録する（直列=0、並列=1..4）。
+- 過去 run の findings には 0-4 の範囲外の `shard_id` が入りうる（履歴は書き換えない）。
 
 ## ユーザーストーリー（story_id）
 `story_id` は **enum 化しない自由文字列**（逸脱ストーリーを S3-dev 等で表現できるように）。app の標準ストーリー:

@@ -1,6 +1,6 @@
 ---
 name: app-bug-hunt
-description: このアプリの LLM 探索的バグハント。専用 bughunt 環境 (直列 :8010 / 並列 shard :8011..8018) に対し隔離ブラウザ (Bash 駆動の @playwright/cli) でユーザーストーリーを実走し、UX破綻・詰み・認可漏れ (IDOR) を発見してレポートする (修正はしない)。テンプレート同梱のオプトイン基盤 (未使用時は完全 no-op)。
+description: このアプリの LLM 探索的バグハント。専用 bughunt 環境 (直列 :8010 / 並列 shard :8011..8014) に対し隔離ブラウザ (Bash 駆動の @playwright/cli) でユーザーストーリーを実走し、UX破綻・詰み・認可漏れ (IDOR) を発見してレポートする (修正はしない)。テンプレート同梱のオプトイン基盤 (未使用時は完全 no-op)。
 user-invocable: true
 argument-hint: "省略時は --all --coverage --parallel --deviate --real-llm 相当 (既定=全ストーリー並列+コードカバレッジ+逸脱+実LLM接続)。絞るなら [S1..S7 ...] [--no-deviate] [--keep-db] [--fake-llm] 例: /app-bug-hunt, /app-bug-hunt S3"
 ---
@@ -38,7 +38,7 @@ screens.md (画面 = GET×inertia) と operations.md (全書き込み操作 = �
 | --all | No | 全ストーリーを実行 (S7 は S3 の状態を前提にするため S3 の後)。既定に含まれる |
 | --coverage | No | serve を pcov 付き php で起動しコード到達カバレッジ (C3) を収集する。既定に含まれる。pcov 未導入環境では middleware が no-op で安全に続行 |
 | --no-coverage | No | カバレッジ計装を省く (既定の --coverage を打ち消す) |
-| --parallel[=N] | No | 並列シャード実行 (N=2/4/6/8、cap=8、既定 4)。既定に含まれる。親はインベントリ確認 → `provision-all` → `bughunt-shard` subagent を Workflow で N 体 fan-out → `verify-run` → 統合レポート |
+| --parallel[=N] | No | 並列シャード実行 (N=2/4、cap=4、既定 4)。既定に含まれる。親はインベントリ確認 → `provision-all` → `bughunt-shard` subagent を Workflow で N 体 fan-out → `verify-run` → 統合レポート |
 | --deviate | No | 各ストーリー末尾の「逸脱アイデア」も実行する。既定に含まれる |
 | --no-deviate | No | 逸脱探索を省く |
 | --real-llm | No | LLM を実 Anthropic API に接続して走行する (既定)。親リポジトリ `.env` の `ANTHROPIC_API_KEY` が必須で、未設定なら provision が fail-fast する。生成内容・所要時間は run ごとに非決定的 |
@@ -95,7 +95,7 @@ npx --yes playwright install chromium
 1. **インベントリ鮮度確認** (Phase 1 と同一) を親で 1 回。子は Phase 1 をスキップ。
 2. `BUGHUNT_ORCHESTRATOR=1 scripts/bug-hunt-shard.sh provision-all --parallel={N} [--coverage] --hold-lock` を
    **run_in_background で常駐**させる (lock を fan-out 全期間保持 = 2 run 並走防止)。STDOUT の
-   `run-id={ts}` を控える。shard 1..N の DB (`bug_hunt_{i}`) / serve (:8011..8018) / wrapper を用意。
+   `run-id={ts}` を控える。shard 1..N の DB (`bug_hunt_{i}`) / serve (:8011..8014) / wrapper を用意。
    > **`BUGHUNT_ORCHESTRATOR=1` は必須** (B-HARNESS-01): provision / provision-all / teardown は
    > このトークンが無いと拒否される (default-deny)。**親だけが export** し、fan-out する
    > `bughunt-shard` subagent には**渡さない** (worker の自走復旧による共有 worktree 破壊を機械的に防ぐ)。
@@ -123,7 +123,7 @@ npx --yes playwright install chromium
    詳細スキーマは `ledger/README.md`。
 
 ストーリー割り当ては固定マップ (`scripts/bug-hunt-shard.sh` の `stories_for_shard`。S3→S7 の状態依存を shard-1 に
-閉じ込める。cap=8、`--parallel` は 2/4/6/8)。N=8 は S1/S4 の独立 2nd pass で埋め、統合レポートが route×症状で dedupe する。
+閉じ込める。cap=4、`--parallel` は 2/4)。統合レポートが route×症状で dedupe する。
 
 ### 隔離と権限
 

@@ -137,6 +137,8 @@ function writeExecutable(path: string, content: string): void {
 
 /**
  * bug-hunt 併走の pre-flight guard (127.0.0.1:8010..8018) と同じ検査をテスト側でも行う。
+ * ★ bug-hunt の並列 cap は 4 だが、guard 側と同じく残留 serve 検出のためポート範囲は
+ *   cap と同期させず :8018 まで広く取る (広い方が偽赤に倒れて安全)。
  * listen していたら **明示メッセージで fail** させる (silent skip にしない =
  * 「担保されていない」を隠さない)。docs/testing-browser.md が併走を既に非推奨としている。
  */

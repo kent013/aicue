@@ -38,6 +38,11 @@ final class TestDatabaseEnv
      * `bug_hunt*` は allowlist regex でも構造的に除外されるが、
      * 「bug-hunt 環境の DB は絶対に触らない」(AGENTS.md §bug-hunt の dev DB 防御) という
      * 意図をコードに残す二重防御として明示列挙する。
+     *
+     * ★ bug-hunt の並列 cap は 4 (`scripts/bug-hunt-shard.sh` の `BUGHUNT_SHARD_CAP`) だが、
+     *   本 denylist は**守る側**なので cap と同期させない。過去 cap=8 期に作られ得る
+     *   残留 DB (`bug_hunt_5`..`bug_hunt_8`) を保護し続けるため、意図的に cap より広い。
+     *   縮めると防御が後退する (`BughuntShardCapInvariantTest` が値を固定している)。
      */
     public const DEV_DB_DENYLIST = [
         'app',

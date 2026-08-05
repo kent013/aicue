@@ -8,8 +8,8 @@ C3 middleware (BughuntCoverageMiddleware) が per-request で書き出す JSONL 
 
 HONEST 注記: 本環境は pcov 未導入のため実 coverage は取得できない。
 本スクリプトは pcov 非依存の純ロジック (入力は C3 出力形の JSON) であり、
-テストは fixture の shard を union して検証する。app の shard は 0-8
-(直列 shard-0 :8010 / 並列 shard-1..8 :8011..8018)。
+テストは fixture の shard を union して検証する。app の shard は 0-4
+(直列 shard-0 :8010 / 並列 shard-1..4 :8011..8014)。
 
 依存は標準ライブラリのみ (json, argparse, glob, sys, pathlib, dataclasses)。
 
@@ -220,7 +220,7 @@ def _run_id_matches(path: str, run_id: str) -> bool:
 
 
 def merge_shards(paths: list[str], *, run_id: str = "", only: str | None = None) -> MergeResult:
-    """複数 shard を union merge。covered = ∪, all = ∪ (shard 0-8 union)。
+    """複数 shard を union merge。covered = ∪, all = ∪ (shard 0-4 union)。
 
     only 指定時は file が only prefix で始まるものだけ残す (既定 app/ 限定運用)。
     """
