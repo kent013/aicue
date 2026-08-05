@@ -26,6 +26,15 @@ export type CredentialLocation =
  */
 export type ProfileDeletionPlan = {
     name: string;
+    /**
+     * 計画時に観測した `api_url` の**生値**。TOCTOU ガードの状態識別子。
+     *
+     * `credentials` はここからの派生であり、状態の同一性判定には使えない:
+     * `unlocatable` の `reason` は複数の api_url が同じ文字列へ潰れる
+     * (`ftp://a` と `ftp://b` はどちらも "Unsupported protocol: ftp:")。
+     * `located` の `origin` も path 違いを吸収する。
+     */
+    apiUrl: string | undefined;
     credentials: CredentialLocation;
     wasDefault: boolean;
     /** 削除と同じ save で付け替える先 (無ければ null)。 */
@@ -86,6 +95,7 @@ export function planProfileDeletion(
 
     return {
         name,
+        apiUrl: entry.api_url,
         credentials: locateCredentials(entry.api_url),
         wasDefault,
         nextDefault:
@@ -104,6 +114,10 @@ function plansMatch(a: ProfileDeletionPlan, b: ProfileDeletionPlan): boolean {
     if (a.clearDefault !== b.clearDefault) return false;
     if (a.wasDefault !== b.wasDefault) return false;
     if (a.nextDefault !== b.nextDefault) return false;
+    // 状態識別子は **api_url の生値**。派生値 (origin / reason) は多対一なので
+    // ここを緩めると「確認待ちの間に config が変わっても消してしまう」経路が残る。
+    if (a.apiUrl !== b.apiUrl) return false;
+    // 以下は派生値の整合確認 (api_url が同じなら必ず一致するはずの不変条件)。
     if (a.credentials.kind !== b.credentials.kind) return false;
     if (
         a.credentials.kind === "located"

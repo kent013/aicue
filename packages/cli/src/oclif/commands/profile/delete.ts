@@ -37,9 +37,12 @@ export default class ProfileDelete extends ProfileCommand {
     public async run(): Promise<void> {
         const { args, flags } = await this.parse(ProfileDelete);
         this.latchCiFlag(flags.ci);
-        const { writer, store } = await this.resolveContext(flags);
+        // 名前検証は **resolveContext より前**。config / credential の初期化が
+        // 失敗しうる状態でも、不正な名前は必ず exit 13 で落ちる
+        // (設計書 §実装順序 の 1 番目)。
         const name = args.name;
         assertProfileName(name);
+        const { writer, store } = await this.resolveContext(flags);
 
         // 事前検証は **確認プロンプトより前**。ここで
         // profile 不在 (11) / default 競合 (10) が確定する。

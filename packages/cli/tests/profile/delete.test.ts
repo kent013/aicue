@@ -15,7 +15,7 @@ import {
     resetGlobalMasterKeyRegistryForTests,
 } from "../../src/credential/master-key-registry.js";
 import { CredentialStore } from "../../src/credential/store.js";
-import { ExitCode } from "../../src/exit-codes.js";
+import { ExitCode, type ExitCodeValue } from "../../src/exit-codes.js";
 import {
     deleteOAuthToken,
     readOAuthToken,
@@ -224,6 +224,39 @@ function silenceStderr(): void {
     vi.spyOn(console, "error").mockImplementation(() => {});
 }
 
+/**
+ * `as` cast を使わずに例外の型と exit code を検証する。
+ * (`instanceof` で実際に narrowing する = TS 規約「ad-hoc な as cast を
+ * 新規導入しない」に合わせる)
+ */
+function expectProfileResolutionError(
+    thrown: unknown,
+    exitCode: ExitCodeValue,
+): void {
+    expect(thrown).toBeInstanceOf(ProfileResolutionError);
+    if (!(thrown instanceof ProfileResolutionError)) throw thrown;
+    expect(thrown.exitCode).toBe(exitCode);
+}
+
+function expectCredentialStoreError(
+    thrown: unknown,
+    exitCode: ExitCodeValue,
+): void {
+    expect(thrown).toBeInstanceOf(CredentialStoreError);
+    if (!(thrown instanceof CredentialStoreError)) throw thrown;
+    expect(thrown.exitCode).toBe(exitCode);
+}
+
+/** 例外を捕らえて返す (throw されなければ null)。 */
+function captureThrow(fn: () => void): unknown {
+    try {
+        fn();
+    } catch (e) {
+        return e;
+    }
+    return null;
+}
+
 // ---------------------------------------------------------------------------
 // 1 / 2 / 4 / 5: backend 横断
 // ---------------------------------------------------------------------------
@@ -364,14 +397,10 @@ describe("default_profile transitions", () => {
         await writeApiKey(h, ORIGIN_A, "prod", "prod-secret");
         const before = readFileSync(h.configPath, "utf-8");
 
-        let thrown: unknown = null;
-        try {
-            planProfileDeletion(h.writer, "prod", { clearDefault: false });
-        } catch (e) {
-            thrown = e;
-        }
-        expect(thrown).toBeInstanceOf(ProfileResolutionError);
-        expect((thrown as ProfileResolutionError).exitCode).toBe(
+        expectProfileResolutionError(
+            captureThrow(() => {
+                planProfileDeletion(h.writer, "prod", { clearDefault: false });
+            }),
             ExitCode.ProfileConflict,
         );
         // config も credential も変わらない (計画フェーズは副作用ゼロ)。
@@ -519,17 +548,15 @@ describe("壊れた profile / 破損 index", () => {
         h.primary.write(ORIGIN_A, "prod", "meta", "index", "{not json");
         silenceStderr();
 
-        let thrown: unknown = null;
-        try {
-            executeProfileDeletion(
-                { writer: h.writer, store: h.store },
-                planProfileDeletion(h.writer, "prod", { clearDefault: true }),
-            );
-        } catch (e) {
-            thrown = e;
-        }
-        expect(thrown).toBeInstanceOf(CredentialStoreError);
-        expect((thrown as CredentialStoreError).exitCode).toBe(
+        expectCredentialStoreError(
+            captureThrow(() => {
+                executeProfileDeletion(
+                    { writer: h.writer, store: h.store },
+                    planProfileDeletion(h.writer, "prod", {
+                        clearDefault: true,
+                    }),
+                );
+            }),
             ExitCode.CredentialStoreFailure,
         );
         // config を消すと api_url を失い、keychain の秘密が到達不能になる。
@@ -666,17 +693,91 @@ describe("確認待ち中の config 変更 (TOCTOU ガード)", () => {
         });
         h.writer.deleteProfile("prod", { clearDefault: true });
 
-        let thrown: unknown = null;
-        try {
-            executeProfileDeletion({ writer: h.writer, store: h.store }, plan);
-        } catch (e) {
-            thrown = e;
-        }
-        expect(thrown).toBeInstanceOf(ProfileResolutionError);
-        expect((thrown as ProfileResolutionError).exitCode).toBe(
+        expectProfileResolutionError(
+            captureThrow(() => {
+                executeProfileDeletion(
+                    { writer: h.writer, store: h.store },
+                    plan,
+                );
+            }),
             ExitCode.ProfileNotFound,
         );
         expect(h.store.read(ORIGIN_A, "prod", "apikey", "")).toBe("secret-a");
+    });
+
+    it("g. 同じ reason になる別 api_url へ変わっても競合終了する", () => {
+        // ftp://a と ftp://b はどちらも canonicalOrigin が
+        // "Unsupported protocol: ftp:" を投げる = reason が同一に潰れる。
+        // 状態識別子として reason を使うとこの書き替えを見逃す。
+        const h = setupHarness("file-plaintext", {
+            profiles: {
+                broken: { api_url: "ftp://a.example.com" },
+                staging: { api_url: API_URL_A },
+            },
+            defaultProfile: "staging",
+        });
+        const plan = planProfileDeletion(h.writer, "broken", {
+            clearDefault: false,
+        });
+        seedConfig(h.configPath, {
+            profiles: {
+                broken: { api_url: "ftp://b.example.com" },
+                staging: { api_url: API_URL_A },
+            },
+            defaultProfile: "staging",
+        });
+        silenceStderr();
+
+        expect(() =>
+            executeProfileDeletion({ writer: h.writer, store: h.store }, plan),
+        ).toThrow(ProfileResolutionError);
+        expect(h.writer.get("broken")).toBeDefined();
+    });
+
+    it("h. 同じ origin になる別 api_url (path 違い) でも競合終了する", () => {
+        const h = setupHarness("file-plaintext", {
+            profiles: { prod: { api_url: "https://a.example.com/v1" } },
+            defaultProfile: "prod",
+        });
+        const plan = planProfileDeletion(h.writer, "prod", {
+            clearDefault: true,
+        });
+        seedConfig(h.configPath, {
+            profiles: { prod: { api_url: "https://a.example.com/v2" } },
+            defaultProfile: "prod",
+        });
+
+        expect(() =>
+            executeProfileDeletion({ writer: h.writer, store: h.store }, plan),
+        ).toThrow(ProfileResolutionError);
+        expect(h.writer.get("prod")).toBeDefined();
+    });
+
+    it("f. unlocatable 同士でも理由が変われば競合終了する", () => {
+        const h = setupHarness("file-plaintext", {
+            profiles: { broken: {}, staging: { api_url: API_URL_A } },
+            defaultProfile: "staging",
+        });
+        const plan = planProfileDeletion(h.writer, "broken", {
+            clearDefault: false,
+        });
+        expect(plan.credentials.kind).toBe("unlocatable");
+
+        // api_url 未設定 -> 非 http(s) スキーム。どちらも unlocatable だが、
+        // credential の在り処に関する前提は変わっている。
+        seedConfig(h.configPath, {
+            profiles: {
+                broken: { api_url: "ftp://x.example.com" },
+                staging: { api_url: API_URL_A },
+            },
+            defaultProfile: "staging",
+        });
+        silenceStderr();
+
+        expect(() =>
+            executeProfileDeletion({ writer: h.writer, store: h.store }, plan),
+        ).toThrow(ProfileResolutionError);
+        expect(h.writer.get("broken")).toBeDefined();
     });
 
     it("e. 何も変わっていなければ正常に削除される (誤検知しない)", async () => {
@@ -845,14 +946,10 @@ describe("planProfileDeletion の事前検証", () => {
             profiles: { prod: { api_url: API_URL_A } },
             defaultProfile: "prod",
         });
-        let thrown: unknown = null;
-        try {
-            planProfileDeletion(h.writer, "ghost", { clearDefault: true });
-        } catch (e) {
-            thrown = e;
-        }
-        expect(thrown).toBeInstanceOf(ProfileResolutionError);
-        expect((thrown as ProfileResolutionError).exitCode).toBe(
+        expectProfileResolutionError(
+            captureThrow(() => {
+                planProfileDeletion(h.writer, "ghost", { clearDefault: true });
+            }),
             ExitCode.ProfileNotFound,
         );
     });
@@ -893,5 +990,52 @@ describe("OAuth token の破棄経路", () => {
         // deleteOAuthToken を明示的に呼ぶと消える = 削除経路が必要とする理由。
         deleteOAuthToken(h.store, ORIGIN_A, "prod");
         expect(readOAuthToken(h.store, ORIGIN_A, "prod")).toBeNull();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// CredentialStore の active backend 不変条件
+// ---------------------------------------------------------------------------
+
+describe("purgeProfile の complete 判定は active backend に従う", () => {
+    it("keychain 候補があっても利用不能なら file backend として完遂する", async () => {
+        // beforeEach で DISABLE_KEYCHAIN=1 のまま keychain 候補を注入する。
+        // isAvailable() が false なので primary は file backend になる。
+        const tmp = makeTmp();
+        const configPath = join(tmp, "config.yaml");
+        const credDir = join(tmp, "credentials");
+        seedConfig(configPath, {
+            profiles: {
+                prod: { api_url: API_URL_A },
+                staging: { api_url: API_URL_A },
+            },
+            defaultProfile: "prod",
+        });
+        setGlobalAllowPlaintextFlag(true);
+        const fileStore = new FileStore(credDir, getGlobalMasterKeyRegistry());
+        const store = new CredentialStore({
+            keychain: fakeKeychain(new Map<string, string>()),
+            fileStore,
+        });
+        expect(store.backend()).not.toBe("keychain");
+
+        const writer = new FileProfileWriter(configPath);
+        await store.writeWithPreflight(
+            ORIGIN_A,
+            "prod",
+            "apikey",
+            "",
+            "prod-secret",
+            { printBanner: false },
+        );
+        fileStore.write(ORIGIN_A, "prod", "meta", "index", "{not json");
+        silenceStderr();
+
+        const result = executeProfileDeletion(
+            { writer, store },
+            planProfileDeletion(writer, "prod", { clearDefault: true }),
+        );
+        expect(result.credentialIndexCorrupted).toBe(true);
+        expect(writer.get("prod")).toBeUndefined();
     });
 });

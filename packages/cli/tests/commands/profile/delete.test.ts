@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,8 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BIN_NAME } from "../../../src/branding.js";
 import type { RootConfigInput } from "../../../src/config/schema.js";
 import { saveConfigToPath } from "../../../src/config/saver.js";
+import { FileStore } from "../../../src/credential/file-store.js";
+import { deriveProfileHash12 } from "../../../src/credential/key-derivation.js";
 import { ExitCode } from "../../../src/exit-codes.js";
 import ProfileDelete from "../../../src/oclif/commands/profile/delete.js";
+import { canonicalOrigin } from "../../../src/profile/canonical-origin.js";
+import { setGlobalAllowPlaintextFlag } from "../../../src/runtime-state.js";
 
 /**
  * `profile:delete` の **CLI 契約** テスト。
@@ -36,10 +40,20 @@ vi.mock("../../../src/credential/prompt.js", async (importOriginal) => {
 const CLI_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 
 const API_URL_A = "https://a.example.com";
+const ORIGIN_A = canonicalOrigin(API_URL_A);
 
 let home: string;
 let origHome: string | undefined;
 let exitCodes: number[];
+
+/**
+ * `process.exit` の差し替え実装。`as` cast を避けるため、`process.exit` と
+ * 同じシグネチャの関数として先に定義する。
+ */
+function fakeExit(code?: number | string | null | undefined): never {
+    exitCodes.push(typeof code === "number" ? code : Number(code ?? 0));
+    throw new Error(`EXIT:${String(code)}`);
+}
 
 function seedConfig(config: RootConfigInput): void {
     saveConfigToPath(join(home, `.${BIN_NAME}`, "config.yaml"), config);
@@ -55,17 +69,13 @@ beforeEach(() => {
     // `process.exit` の最初の記録だけが本当の意図。BaseCommand.catch が
     // その throw を拾って **もう一度** exit(1) を呼ぶため、単純な
     // rejects.toThrow では常に 1 を見てしまう。
-    vi.spyOn(process, "exit").mockImplementation(((
-        code?: string | number | null,
-    ): never => {
-        exitCodes.push(typeof code === "number" ? code : Number(code ?? 0));
-        throw new Error(`EXIT:${String(code)}`);
-    }) as (code?: string | number | null) => never);
+    vi.spyOn(process, "exit").mockImplementation(fakeExit);
     vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
 afterEach(() => {
     vi.restoreAllMocks();
+    setGlobalAllowPlaintextFlag(false);
     rmSync(home, { recursive: true, force: true });
     if (origHome !== undefined) process.env["HOME"] = origHome;
     else delete process.env["HOME"];
@@ -127,6 +137,18 @@ describe("profile:delete — CLI 契約", () => {
                 staging: { api_url: API_URL_A },
             },
         });
+        // 拒否時に credential へ触れていないことまで見る (契約の直接固定)。
+        setGlobalAllowPlaintextFlag(true);
+        const credDir = join(home, `.${BIN_NAME}`, "credentials");
+        const seedStore = new FileStore(credDir);
+        seedStore.write(ORIGIN_A, "prod", "apikey", "", "prod-secret");
+        const credPath = seedStore.datPath(
+            deriveProfileHash12(ORIGIN_A, "prod"),
+            "apikey",
+            "",
+        );
+        expect(existsSync(credPath)).toBe(true);
+
         await expect(runDelete(["prod"])).rejects.toThrow(/EXIT:/);
         expect(exitCodes[0]).toBe(ExitCode.GeneralError);
         expect(confirmSpy).toHaveBeenCalledTimes(1);
@@ -135,6 +157,7 @@ describe("profile:delete — CLI 契約", () => {
             "../../../src/profile/writer.js"
         );
         expect(new FileProfileWriter().get("prod")).toBeDefined();
+        expect(existsSync(credPath)).toBe(true);
     });
 
     it("5. --yes 付きの正常削除では exit せず config から消える", async () => {

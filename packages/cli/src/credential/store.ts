@@ -334,9 +334,11 @@ export class CredentialStore {
             META_INDEX_ID,
         );
         this.fileStore.clearProfile(canonicalOrigin, profileName);
-        // keychain が primary のときだけ取りこぼしがありうる。
+        // keychain が primary のときだけ取りこぼしがありうる。判定は
+        // `primary()` と **同じ式**から導く (「keychain フィールドの有無」と
+        // 「実際に使われる backend」が将来ずれても嘘をつかないため)。
         return {
-            complete: this.keychain === null,
+            complete: this.primary() === this.fileStore,
             indexCorrupted: true,
         };
     }
