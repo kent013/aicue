@@ -42,7 +42,7 @@
         "@oclif/core": "^4.13.3",
         "@oclif/plugin-help": "^6.2.56",
         "envinfo": "^7.21.0",
-        "undici": "^6.27.0",
+        "undici": "^6.28.0",
         "yaml": "^2.9.0",
         "zod": "^3.23.0"
     },
