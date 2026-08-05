@@ -186,12 +186,44 @@ web group に append され、`config/security.php` 駆動で以下を送出す�
 事故を防ぐため、`TrustedHostsConfigValidator` が起動時 fail-fast する (allowlist 空 / wildcard suffix の書式違反 /
 `PRIMARY_HOST` の host 形式違反)。
 
+### client IP の信頼境界 (TrustProxies)
+
+`bootstrap/app.php` の `trustProxies()` は **`at:` を渡さない**。Laravel の `TrustProxies` は
+`$this->proxies() ?: config('trustedproxy.proxies')` の順で解決するため、`at:` を渡さないことで
+env 由来の allowlist (`TRUSTED_PROXIES` → `config/trustedproxy.php`) が正本になる。
+
+かつて `at: '*'` だった。全アドレスを trusted proxy 扱いにすると `$request->ip()` は
+**X-Forwarded-For 最左 = クライアントが自由に書ける値**になり、次がすべて攻撃者の制御下に落ちる:
+
+| 影響先 | 壊れ方 |
+|---|---|
+| IP ベースの rate limiter (`inquiry` / `oauth-register` 等) | XFF を変えるだけでバケットを無限に増やせる = 実質無制限 |
+| reCAPTCHA / bot 対策の IP 判定 | 同上 |
+| `security_audit_events.ip_address` | 監査ログの IP が任意の値になる (追跡不能) |
+
+逆に **hop を 1 つでも取りこぼす**と client IP がその hop の内部 IP に固定され、
+全利用者が 1 つの rate limit バケットに落ちる (**自己 DoS**)。多段構成
+(CDN → LB → app) では経路上のすべての hop を列挙する必要がある。
+
+production で `TRUSTED_PROXIES` が未宣言 / `*` / `REMOTE_ADDR` / 書式不正のときは
+`TrustedProxiesConfigValidator` (`ProductionEnvGuard` 経由) が**起動時 fail-fast** する。
+プロキシが無い構成は `none` の**明示宣言**を要求する (未設定と区別する)。
+運用契約・実 hop 一覧・変更手順は `docs/trusted-proxies-runbook.md` が正本。
+
+なお `RedirectToHttps` は **`append`** で global middleware に載せる (`prepend` にしない)。
+`prepend` すると `TrustProxies` より前に走り `$request->isSecure()` が `X-Forwarded-Proto` を
+見られず、LB 終端 + `FORCE_HTTPS_REDIRECT=true` で 308 の無限ループになる。
+
+> 既存の `security_audit_events.ip_address` は `at: '*'` 時代の値を含み**遡及訂正できない**。
+> 過去分の IP は信頼できない値として扱うこと。
+
 ### production 起動時 / デプロイ前の fail-fast
 
 - **単一ソース (SSOT)** は `ProductionEnvGuard`。`AppServiceProvider::boot()` (production 起動時) と
   `production:preflight` コマンドの双方がこの guard を参照する。検査項目: `APP_KEY` / `CIPHERSWEET_KEY` /
   `STRIPE_WEBHOOK_SECRET` 非空、`SESSION_SECURE_COOKIE=true`、`APP_DEBUG=false`、
-  `SECURITY_HSTS_ENABLED` / `SECURITY_CSP_ENABLED=true`、`DEBUG_LOGIN_*` が空、TrustHosts allowlist 非空 / 書式。
+  `SECURITY_HSTS_ENABLED` / `SECURITY_CSP_ENABLED=true`、`DEBUG_LOGIN_*` が空、TrustHosts allowlist 非空 / 書式、
+  **TrustProxies allowlist (`TRUSTED_PROXIES`) の宣言と書式**。
 - `php artisan production:preflight --strict` を deploy パイプラインの pre / post-deploy で実行する。
   1 件でも違反があれば exit 1 (デプロイを止める)。`--strict` は `APP_ENV` が production でない場合も fail させる
   (CI/CD での APP_ENV 設定ミス検出)。mail 設定検査 (`operations:check-mail-config`) も委譲する。
@@ -244,16 +276,17 @@ policy を interface にしてあるのは nOAuth 対策の**キルスイッチ*
 route / controller / action / migration は **Fortify + laravel/passkeys が提供する**
 (`config/fortify.php` の `Features::passkeys(['confirmPassword' => false])` が唯一の有効化点 =
 **実質的なキルスイッチ**)。アプリ側 (`PasskeyServiceProvider`) は「vendor にアプリ固有の
-不変条件を被せる」ことだけを担う。
+不変条件を被せる」ことだけを担う (監査記録だけは `RecordSecurityEvent` が vendor イベントを購読する)。
 
-### アプリが被せる 4 つの不変条件
+### アプリが被せる 5 つの不変条件
 
 | # | 内容 | 理由 |
 |---|------|------|
 | 1 | **binder 差し替え** (`SelfScopedPasskeyBinder`) | vendor binder はグローバル id 解決 → controller の `abort_unless(..., 403)` に到達し **他人の passkey の存在が漏れる**。所有者スコープで解決し「他人」と「不在」を等しく 404 にする (セキュリティ不変条件 2)。非数値 / bigint 範囲外も 404 に倒す (pgsql 22P02 / 22003 の 500 化を防ぐ) |
 | 2 | **Response contract 上書き** (`app/Http/Responses/Passkey/`) | vendor 既定は `new JsonResponse(...)` の直返しで禁止事項 4 に触れる。加えて confirm 経路が書く `auth.password_confirmed_at` をここで**除去**する (recent-auth の「Fortify の鍵には書かない」契約を守る) |
-| 3 | **route middleware の後付け** | `recent-auth` (登録 / 削除)、`ensure-login-method` (削除)、`no-store` (guest の login-options)。順序は **recent-auth → ensure-login-method** (逆順だと stale なリクエストでも行ロックを取る) |
+| 3 | **route middleware の後付け** | `throttle:passkeys` (削除。vendor は destroy にだけ throttle を付けない)、`recent-auth` (登録 / 削除)、`ensure-login-method` (削除)、`no-store` (guest の login-options)。順序は **throttle → recent-auth → ensure-login-method** (逆順だと stale なリクエストでも `EnsureLoginMethodRemains` が User 行 `lockForUpdate` を取りに行き、無制限のロック競合を作れる) |
 | 4 | **login 認可** (`PasskeyLoginPolicy`) | TOTP confirmed ユーザーの passkey login を拒否する |
+| 5 | **増減の監査記録** (`RecordSecurityEvent`) | パスキーは**単独でログインできる強い資格**のため、登録 / 削除を `security_audit_events` (`passkey_registered` / `passkey_deleted`) に残す (セッション乗っ取り後の永続化を事後追跡できるようにする)。credential 本体 (公開鍵 / signature counter) は metadata に載せない |
 
 配線は `$app->booted()` 内で最終上書きする (auto-discovery された
 `Laravel\Passkeys\PasskeysServiceProvider` との boot 順序が `bootstrap/providers.php` では
@@ -367,7 +400,12 @@ allowlist で固定する (transport 契約の食い違いは**無言失敗**と
 | `app/Notifications/User/TwoFactorResetSecurityNotification.php` | 組織管理者による 2FA 解除の本人通知 |
 | `app/Console/Commands/ResetAdminMfaCommand.php` | AdminUser の MFA break-glass リセット (`admin:reset-mfa`、reason 必須) |
 | `app/Http/Middleware/SecurityHeaders.php` | baseline セキュリティヘッダ (CSP / HSTS / frame 等)。`.well-known/oauth-*` は最小 subset |
-| `app/Http/Middleware/RedirectToHttps.php` | HTTP→HTTPS 308 リダイレクト (`FORCE_HTTPS_REDIRECT`) |
+| `app/Http/Middleware/RedirectToHttps.php` | HTTP→HTTPS 308 リダイレクト (`FORCE_HTTPS_REDIRECT`)。**append で TrustProxies の後**に走らせる |
+| `config/trustedproxy.php` | `TRUSTED_PROXIES` の解釈 (framework が読む固定名の config キー) |
+| `app/Support/TrustedProxyToken.php` | `TRUSTED_PROXIES` の 1 token 判定 (config 段と validator 段で共有) |
+| `app/Support/TrustedProxiesConfigValidator.php` | client IP 信頼境界の production 起動時検証 (未宣言 / `*` / `REMOTE_ADDR` / 書式不正を拒否) |
+| `docs/trusted-proxies-runbook.md` | 実 proxy hop 一覧・CIDR 管理主体・変更手順・切り分け (運用者記入欄あり) |
+| `app/Listeners/RecordSecurityEvent.php` | 認証系イベント → `security_audit_events` の記録 (passkey 増減を含む)。網羅性は `SecurityEventCoverageTest` |
 | `app/Http/Middleware/NoIndex.php` | `X-Robots-Tag: noindex` 付与 |
 | `app/Http/Middleware/LocalOnly.php` | local 専用経路ゲート (fail-secure 404 + Basic 認証) |
 | `app/Support/ProductionEnvGuard.php` | production env baseline 検査の SSOT (起動時 fail-fast + preflight 委譲) |

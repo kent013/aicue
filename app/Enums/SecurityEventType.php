@@ -6,7 +6,11 @@ namespace App\Enums;
 
 /**
  * security_audit_events に記録するイベント種別 (固定集合)。
- * 追加時は RecordSecurityEvent の購読 map も同一 PR で更新すること。
+ *
+ * **case を追加したら記録経路も同一 PR で配線すること**。
+ * 全 case の記録経路 (購読イベント / 直接呼び出し元 / 担保テスト) は
+ * tests/Architecture/SecurityEventCoverageTest.php の構造化 map が
+ * deny-by-default で機械保証する (map と enum の完全一致 + 担保テストの実在)。
  */
 enum SecurityEventType: string
 {
@@ -28,6 +32,9 @@ enum SecurityEventType: string
     // 組織管理者によるメンバー 2FA リセット (OrganizationMemberController::resetTwoFactor が
     // 直接記録する。RecordSecurityEvent の購読対象外)
     case OrgMemberTwoFactorReset = 'org_member_two_factor_reset';
+    // パスキー (単独でログインできる強い資格) の増減。vendor イベントを購読して記録する
+    case PasskeyRegistered = 'passkey_registered';
+    case PasskeyDeleted = 'passkey_deleted';
 
     public function label(): string
     {
@@ -47,6 +54,8 @@ enum SecurityEventType: string
             self::ApiKeyRevoked => 'API キー失効',
             self::AdminMfaReset => '管理者 MFA リセット',
             self::OrgMemberTwoFactorReset => '組織管理者によるメンバー 2FA リセット',
+            self::PasskeyRegistered => 'パスキーの登録',
+            self::PasskeyDeleted => 'パスキーの削除',
         };
     }
 }

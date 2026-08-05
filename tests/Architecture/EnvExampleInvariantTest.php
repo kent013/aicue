@@ -22,6 +22,18 @@ test('.env.example に SESSION_ENCRYPT=true が含まれる', function (): void 
 });
 
 /*
+ * client IP の信頼境界 (T108 S5)。production で未宣言だと起動時 fail-fast するため、
+ * .env.example に必ず提示して「設定し忘れてデプロイが落ちる」事故を減らす。
+ */
+
+test('.env.example に TRUSTED_PROXIES が含まれる', function (): void {
+    $contents = file_get_contents(base_path('.env.example'));
+    expect($contents)->toBeString();
+    /** @var string $contents */
+    expect($contents)->toContain('TRUSTED_PROXIES=');
+});
+
+/*
  * テンプレート規約: 環境座標 (config/template.php) のキーは .env.example に必ず提示する。
  */
 

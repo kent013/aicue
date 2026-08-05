@@ -36,8 +36,22 @@ use Webmozart\Assert\Assert;
  * user-token 経路では下流互換のため request attribute `organization` も注入する
  * (API キー経路は ApiKeyGuard が注入済み。ResolvesApiOrganization / rate limiter が参照)。
  *
- * 順序契約: auth → throttle → resolve.api-actor → api-key.ability:X → (idempotent) → controller
+ * 順序契約: auth → throttle → **resolve.api-actor → SubstituteBindings** →
+ * api.project-in-org → api-key.ability:X → (idempotent) → controller
  * (ApiGuardAllowlistInvariantTest が dual/oauth 分類ごと固定)。
+ *
+ * 本 middleware は route binding に依存しない (`$request->route(...)` を読まない)。
+ * この性質が `SubstituteBindings` より前に置ける根拠であり、
+ * `TenantBoundaryOrderingTest` の pre-binding 短絡 inventory が静的検査で固定する。
+ * binding より前に置く理由は、actor 解決失敗 (401/403) を
+ * 「不在 id の 404 がまだ起きていない時点」で返し、不在 id と実在 id の応答を
+ * 一致させるため (audit-cycle-2 High-1 横断)。
+ *
+ * 副作用の注記: OAuth 経路の `$session->touchLastUsedAt()` は binding より前に走るため、
+ * **不在 id へのリクエストでも last_used_at が更新される**。これは「そのトークンで
+ * API を叩いた」という事実の記録であり、リソースの実在とは無関係のため意図した挙動。
+ * むしろ binding 成否で更新有無が変わると、CLI セッション一覧の last_used_at 自体が
+ * 存在オラクルになる (更新される = その id は実在した) ため、前倒しが正しい。
  */
 class ResolveApiActor
 {

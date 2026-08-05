@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Http\Middleware\EnsureLoginMethodRemains;
 use App\Http\Middleware\NoStoreResponse;
 use App\Http\Middleware\RequireRecentAuth;
+use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Routing\Route as RoutingRoute;
 use Illuminate\Routing\Router;
 
@@ -30,8 +31,11 @@ function passkeyRouteMiddlewareInventory(): array
         // credential 集合を増やす管理経路
         'passkey.registration-options' => ['web', 'auth:web', 'throttle:passkeys', 'recent-auth'],
         'passkey.store' => ['web', 'auth:web', 'throttle:passkeys', 'recent-auth'],
-        // credential 集合を減らす管理経路 (手段保持 guard つき)
-        'passkey.destroy' => ['web', 'auth:web', 'recent-auth', 'ensure-login-method'],
+        // credential 集合を減らす管理経路 (手段保持 guard つき)。
+        // throttle は vendor (Fortify) が付けないため PasskeyServiceProvider が後付けする
+        // (EnsureLoginMethodRemains の User 行 lockForUpdate を無制限に叩けなくする。
+        //  audit-cycle-2 Medium-2)
+        'passkey.destroy' => ['web', 'auth:web', 'throttle:passkeys', 'recent-auth', 'ensure-login-method'],
     ];
 }
 
@@ -93,4 +97,26 @@ test('passkey.login-options の no-store は解決後も NoStoreResponse に落�
     $resolved = $router->gatherRouteMiddleware(passkeyRoute('passkey.login-options'));
 
     expect($resolved)->toContain(NoStoreResponse::class);
+});
+
+/*
+ * passkey.destroy の実行順: ThrottleRequests < RequireRecentAuth < EnsureLoginMethodRemains。
+ * throttle が最外周にあることで、stale recent-auth でも User 行ロックでもなく
+ * **リクエスト数そのもの**を先に止める。
+ */
+test('passkey.destroy は throttle が recent-auth / ensure-login-method より先に走る', function (): void {
+    /** @var Router $router */
+    $router = app('router');
+    $resolved = array_map(
+        static fn (mixed $m): string => is_string($m) ? explode(':', $m, 2)[0] : '(closure)',
+        $router->gatherRouteMiddleware(passkeyRoute('passkey.destroy')),
+    );
+
+    $throttleIndex = array_search(ThrottleRequests::class, $resolved, true);
+    $recentAuthIndex = array_search(RequireRecentAuth::class, $resolved, true);
+    $loginMethodIndex = array_search(EnsureLoginMethodRemains::class, $resolved, true);
+
+    expect($throttleIndex)->not->toBeFalse('ThrottleRequests が解決後の middleware 列に無い');
+    expect($throttleIndex)->toBeLessThan($recentAuthIndex);
+    expect($recentAuthIndex)->toBeLessThan($loginMethodIndex);
 });

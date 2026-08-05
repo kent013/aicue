@@ -321,6 +321,13 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
 - **403 ではなく専用画面で受ける**: 権限のない member を 403 で突き放すと行き先のない
   ループになるため、`onboarding.billing-required` を用意する。両画面が相互に離脱ガードを
   持つことで「どちらにも留まれない往復」が構造的に起きない。
+- **テナント境界 404 は課金ゲートより前**: `{project}` を持つ route では
+  `project.in-current-org` が `require-active-subscription` **より先**に走る
+  (`bootstrap/app.php` の priority list が正本)。逆順だと「他組織に実在する project =
+  課金ゲートの 302 / 不在の project = 404」と分岐し、未契約組織のユーザーでも
+  project id の実在を列挙できる**存在オラクル**になる (監査サイクル 2 High-1)。
+  自組織 project に対する着地は従来どおり 302 のままで、詰みは作らない。
+  順序は `TenantBoundaryOrderingTest`、挙動は `TenantBoundaryPrecedenceTest` が固定する。
 - **Personal(無料)の付与は `PersonalPlanService::activate()` が単一の真実源**
   (Controller は呼ぶだけ = 二重付与源を作らない)。適格性不成立は 500 でなく 422。
   完了後は課金ゲートが保存した継続先 (`OnboardingReturnResolver`。same-origin 内部 path のみ)

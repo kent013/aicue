@@ -15,6 +15,8 @@ use Illuminate\Events\Dispatcher;
 use Laravel\Fortify\Events\RecoveryCodesGenerated;
 use Laravel\Fortify\Events\TwoFactorAuthenticationConfirmed;
 use Laravel\Fortify\Events\TwoFactorAuthenticationDisabled;
+use Laravel\Passkeys\Events\PasskeyDeleted;
+use Laravel\Passkeys\Events\PasskeyRegistered;
 
 /**
  * 認証系イベント → security_audit_events の記録 (subscriber)。
@@ -35,6 +37,8 @@ class RecordSecurityEvent
         $events->listen(TwoFactorAuthenticationConfirmed::class, [self::class, 'handleTwoFactorConfirmed']);
         $events->listen(TwoFactorAuthenticationDisabled::class, [self::class, 'handleTwoFactorDisabled']);
         $events->listen(RecoveryCodesGenerated::class, [self::class, 'handleRecoveryCodesGenerated']);
+        $events->listen(PasskeyRegistered::class, [self::class, 'handlePasskeyRegistered']);
+        $events->listen(PasskeyDeleted::class, [self::class, 'handlePasskeyDeleted']);
     }
 
     public function handleLogin(Login $event): void
@@ -78,6 +82,34 @@ class RecordSecurityEvent
     {
         $this->recorder->record(SecurityEventType::TwoFactorEnabled, $this->asUser($event->user), [
             'action' => 'recovery_codes_generated',
+        ]);
+    }
+
+    /**
+     * パスキーは単独でログインできる強い資格のため、増減は監査上最重要事象として記録する
+     * (セッション乗っ取り後の永続化を事後追跡できるようにする)。
+     * credential 本体 (公開鍵 / signature counter) は metadata に載せない。
+     */
+    public function handlePasskeyRegistered(PasskeyRegistered $event): void
+    {
+        $this->recorder->record(SecurityEventType::PasskeyRegistered, $this->asUser($event->user), [
+            'passkey_id' => $event->passkey->getKey(),
+        ]);
+    }
+
+    /**
+     * 削除は EnsureLoginMethodRemains の transaction 内で発火するため、
+     * rollback 時は監査行も消える (削除自体も消えるので整合。テストで固定済み)。
+     *
+     * 注記: SecurityEventRecorder は Throwable を catch して report() するが、
+     * pgsql では transaction 内の失敗文が transaction 全体を abort させるため
+     * 「catch したのに後続 SQL が全部落ちる」経路が理論上ある。これは既存の全 recorder
+     * 呼び出しに共通する性質であり、本 handler で新設したものではない。
+     */
+    public function handlePasskeyDeleted(PasskeyDeleted $event): void
+    {
+        $this->recorder->record(SecurityEventType::PasskeyDeleted, $this->asUser($event->user), [
+            'passkey_id' => $event->passkey->getKey(),
         ]);
     }
 

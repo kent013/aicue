@@ -63,19 +63,28 @@ class ProjectMemberController extends Controller
         return back()->with('success', 'プロジェクトメンバーを追加しました');
     }
 
-    /** メンバー削除 (explicit member の detach。暗黙メンバー = org owner/admin は対象外) */
-    public function destroy(Request $request, Project $project, User $user): RedirectResponse
+    /**
+     * メンバー削除 (explicit member の detach。暗黙メンバー = org owner/admin は対象外)。
+     *
+     * {user} は **implicit binding を使わない** (action 引数を string で受ける)。
+     * implicit binding だと「不在 id = binding 段の 404 / 実在の非メンバー = 後段 middleware の
+     * 302/402」という差分が users.id の存在オラクルになるため
+     * (audit-cycle-2 High-1 横断)、組織メンバーに閉じた relation から手動解決して
+     * 両者を同一の応答に落とす。binding 段で解決されない = 不在も実在も同じ経路を辿る。
+     * 型制約 (数値・18 桁上限) は RouteBindingTypes の pattern が担保する。
+     */
+    public function destroy(Request $request, Project $project, string $user): RedirectResponse
     {
         $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404 (cross-tenant の {user} の存在を漏らさない)
         $this->resolveOrganizationProject($organization, $project);
-        abort_unless(
-            $organization->users()->whereKey($user->getKey())->exists(),
-            404,
-        );
+
+        /** @var User $member 組織メンバー以外・不在 id はここで等しく 404 */
+        $member = $organization->users()->whereKey($user)->firstOrFail();
+
         Gate::authorize('update', $project);
 
-        $project->members()->detach($user->getKey());
+        $project->members()->detach($member->getKey());
 
         return back()->with('success', 'プロジェクトメンバーを削除しました');
     }
