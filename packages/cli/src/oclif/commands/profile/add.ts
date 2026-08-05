@@ -1,4 +1,3 @@
-import { BIN_NAME } from "../../../branding.js";
 import { Args, Flags } from "@oclif/core";
 import { getCliVersion } from "../../../index.js";
 import { confirmPrompt } from "../../../credential/prompt.js";
@@ -12,7 +11,7 @@ import { profileFlags } from "../../base/flags.js";
 import { ProfileCommand } from "../../base/ProfileCommand.js";
 
 /**
- * `${BIN_NAME} profile:add <name>` — register a new profile and verify
+ * `profile:add <name>` — register a new profile and verify
  * its connection end-to-end (`/version` + optional `/me`).
  *
  * Uses `resolveMode: "if-needed"` because add creates the profile; it

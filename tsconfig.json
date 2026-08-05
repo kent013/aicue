@@ -20,7 +20,8 @@
     "include": [
         "resources/js/**/*.ts",
         "resources/js/**/*.svelte",
-        "tests/js/**/*.ts"
+        "tests/js/**/*.ts",
+        "scripts/**/*.ts"
     ],
     "exclude": ["node_modules", "tmp"]
 }

@@ -4,15 +4,55 @@ on:
   push:
     branches: [main]
   pull_request:
+  # 上流で新しい advisory が公開された事実を、無関係な PR のクリティカルパス外で先に検知する。
+  # nightly は PR job の **代替ではなく追加** (PR job を降格させない)。
+  schedule:
+    - cron: "0 20 * * *"   # 05:00 JST
 
 jobs:
   php:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # nightly (schedule) は supply-chain-audit だけを回すためのトリガーなので、
+    # 本 job は schedule では走らせない (impl-review R1 [Warning]:
+    # on.schedule は workflow 全体を起動するため、明示除外しないと
+    # docs の「nightly は supply-chain gate の先行検知」という記述と実体が食い違う)。
+    if: github.event_name != 'schedule'
+    # pgsql 一本化 (phpunit.xml が DB_CONNECTION=pgsql を <server force> する) の実体。
+    # image は docker-compose と同一 major に揃える: ローカルの実測 (2704 passed) を
+    # CI の期待値としてそのまま使えるようにするため (major 差は collation / SQL 差で
+    # 「CI だけ赤 / CI だけ緑」を生む)。
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          # scripts/ci/pgsql_test_conn.php が maintenance DB として固定で使うため明示する
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    # DB_DATABASE は置かない: tests/bootstrap.php が `<slug>_test_<worktree-hash>` を
+    # 後勝ちで注入し assertPgsqlTestDatabaseSafe() が fail-closed 検証する単一点ガードを
+    # 曖昧にしないため。接続先だけを渡す (pgsql_test_conn.php は shell env を最優先で読む)。
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
         with:
           php-version: "8.4"
+          # pdo_pgsql は既定で入る保証がない。未導入だと ensure-test-db.php が
+          # 「could not find driver」で落ちる (pgsql lane が丸ごと動かない)
+          extensions: pdo_pgsql, pgsql
           coverage: none
       - name: Install composer dependencies
         run: composer install --prefer-dist --no-progress --no-interaction
@@ -44,11 +84,95 @@ jobs:
       # 実ロックには触れず、mktemp -d の scratch 上で待機・シグナル収束・fd 非継承などを検証する。
       - name: Verify global test lock
         run: bash scripts/verify-global-test-lock.sh
+      # composer test = scripts/run-test.sh (グローバルロック → ensure-test-db → artisan test --parallel)。
+      # CI 専用の起動経路は作らない (T099: CI が検証するものと開発者が走らせるものを同一に保つ)。
+      # 1 job = 1 runner なので他 job と競合せず、ロックは無競合で即時取得される。
       - name: Pest
         run: composer test
 
+  # Browser lane (pest-plugin-browser)。Chromium + WebKit の 2 レーンが契約であり
+  # (AGENTS.md ドメイン規約 3 / docs/supported-browsers.md / T082)、CI でもレーンを絞らない。
+  # WebKit は撮影 PWA の主戦場 iOS Safari に最も近い engine で、ログアウト後の
+  # Inertia 履歴からの PII 復元を止める唯一の自動回帰である。
+  browser-tests:
+    runs-on: ubuntu-latest
+    # nightly (schedule) は supply-chain-audit だけを回すためのトリガーなので、
+    # 本 job は schedule では走らせない (impl-review R1 [Warning]:
+    # on.schedule は workflow 全体を起動するため、明示除外しないと
+    # docs の「nightly は supply-chain gate の先行検知」という記述と実体が食い違う)。
+    if: github.event_name != 'schedule'
+    # 実ブラウザがハングしたときに既定 6 時間を燃やさないための上限。
+    # 現状 14 テスト × 2 レーン (直列) なので十分な余裕がある。
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+      # BROWSER_TEST_LANES / BROWSER_TEST_PROCESSES は **意図的に設定しない**。
+      # 既定 (chromium webkit / 直列 1) が契約であり、CI で上書きするとレーンを
+      # 骨抜きにできてしまう (tests/js/architecture/ci-workflow-inventory.test.ts が
+      # この不在を deny-by-default で固定する)。
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          extensions: pdo_pgsql, pgsql
+          coverage: none
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.3.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install composer dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+      - name: Install pnpm dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Prepare environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+          php artisan passport:keys --force
+      # 実ブラウザは public/build のビルド済アセットを読む (withoutVite() は Browser lane に効かない)。
+      - name: Build frontend assets
+        run: pnpm build
+      # ブラウザ実体は Playwright が別途 DL する。**pnpm exec** を使うこと:
+      # pest-plugin-browser が起動する run-server は root devDependency の playwright と
+      # 同一実体である必要があり、npx だと別バージョンを引きうる。
+      # 未導入だと PlaywrightOutdatedException で 2 レーンとも全 fail する (ローカル実測)。
+      # --with-deps は WebKit が Linux で要求する共有ライブラリ群 (gstreamer / gtk-4 / libwoff2 等) を入れる。
+      - name: Install Playwright browsers (chromium + webkit)
+        run: pnpm exec playwright install --with-deps chromium webkit
+      # composer test:browser = scripts/run-browser-test.sh
+      # (グローバルロック → config:clear → ensure-test-db → chromium レーン → webkit レーン)。
+      # レーン引数は渡さない (§既定が契約)。
+      - name: Pest (browser lanes)
+        run: composer test:browser
+
   frontend:
     runs-on: ubuntu-latest
+    # nightly (schedule) は supply-chain-audit だけを回すためのトリガーなので、
+    # 本 job は schedule では走らせない (impl-review R1 [Warning]:
+    # on.schedule は workflow 全体を起動するため、明示除外しないと
+    # docs の「nightly は supply-chain gate の先行検知」という記述と実体が食い違う)。
+    if: github.event_name != 'schedule'
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -68,7 +192,47 @@ jobs:
         run: pnpm test
       - name: TypeScript (workspace packages)
         run: pnpm typecheck:packages
+      # emit 経路 (packages/cli/tsconfig.json) の検証。
+      # typecheck:packages が使う tsconfig.test.json は noUnusedLocals/noUnusedParameters を
+      # 明示的に false にしているため、**build を通さないと検出できないエラーが存在する**。
+      # 「typecheck があるから build は不要」は成立しない (実測: main で TS6133/TS6192 7 件)。
+      - name: Build (workspace packages)
+        run: pnpm build:packages
       - name: Vitest (workspace packages)
         run: pnpm test:packages
       - name: Build
         run: pnpm build
+
+  # supply-chain 依存脆弱性 gate (AGENTS.md §依存脆弱性の運用)。
+  #
+  # **continue-on-error を付けない**。soft-fail は「赤いのに緑に見える」= 偽グリーンであり、
+  # PHPStan の baseline 化 (禁止事項 2) と同型の逃げになる。
+  # 未受容 high/critical で fail、moderate は warn (audit-gate.ts の判定)。
+  # 逃げ道は docs/supply-chain/accepted-advisories.yaml の **期限付き** accept-risk のみ
+  # (expiry・cleanup・severity 別上限を audit-gate.ts が機械強制するため、
+  #  「黙らせて永続化する」ベースラインとは性質が異なる)。
+  supply-chain-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      # composer audit / pnpm audit の両方を回すため PHP と Node の両方が要る
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          coverage: none
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.3.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install composer dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+      - name: Install pnpm dependencies
+        run: pnpm install --frozen-lockfile
+      # scripts/audit-gate.sh → scripts/audit-gate.ts (tsx 経由)。
+      # ローカルの `pnpm run audit:gate` と同一経路 (CI 専用の判定を作らない)。
+      - name: Supply-chain audit gate
+        run: pnpm run audit:gate

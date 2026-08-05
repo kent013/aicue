@@ -39,8 +39,8 @@
     },
     "dependencies": {
         "@napi-rs/keyring": "^1.2.0",
-        "@oclif/core": "^4.10.5",
-        "@oclif/plugin-help": "^6.2.44",
+        "@oclif/core": "^4.13.3",
+        "@oclif/plugin-help": "^6.2.56",
         "envinfo": "^7.21.0",
         "undici": "^6.27.0",
         "yaml": "^2.9.0",

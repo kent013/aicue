@@ -17,8 +17,6 @@
 /.idea
 /.nova
 /.phpunit.cache
-# CI matrix sharding の生成物 (scripts/ci/make-shard-phpunit.php)
-/phpunit.ci-shard.xml
 # pest-plugin-browser が失敗時 screenshot を書く (runtime artifact)
 /tests/Browser/Screenshots/
 /.vscode/*

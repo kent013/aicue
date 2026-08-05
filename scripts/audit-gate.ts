@@ -165,10 +165,144 @@ export function daysBetween(fromIso: string, toIso: string): number {
 // Loaders
 // ============================================================================
 
-export function loadAuditJson(
-    path: string,
-    normalizer: (json: unknown) => NormalizedAdvisory[],
-): NormalizedAdvisory[] {
+/** audit 入力 1 件分の由来。エラーメッセージと shape 期待値を決める。 */
+export type AuditSource = "pnpm-audit" | "composer-audit" | "pip-audit";
+
+/**
+ * audit JSON が **その ecosystem の期待 schema を持つ**ことを検証する (純関数)。
+ *
+ * 目的は「valid JSON だが中身が違う」を 0 件へ黙って落とさないこと。
+ * 例: ネットワークエラーで `{"error":{...}}` が返ると、normalizer は
+ * `if (!obj.advisories) return []` により **advisory 0 件 = 緑** に落ちる。
+ * blocking gate ではこれが偽グリーンになるため、ここで fail-closed に止める。
+ *
+ * 検証するのは **normalizer が走査に使う最小構造** まで。未知フィールドは許容し、
+ * 空コンテナ (`{}` / `[]` / 空 `vulns`) は **正当な 0 件** として通す。
+ *
+ * top-level だけを見る設計にしないのは、内部が壊れた JSON も 0 件へ落ちるため。例:
+ *   `{"advisories":{"vendor/pkg":{"error":"unavailable"}}}`
+ *   → normalizeComposerAudit は `Array.isArray(advisoriesUnknown)` が false のとき
+ *     `[]` を使うので **黙って 0 件**になる。取得異常を「安全」と読み替えてしまう。
+ *
+ * @throws Error 期待 schema を満たさない場合
+ */
+export function assertAuditSourceShape(source: AuditSource, json: unknown): void {
+    if (!json || typeof json !== "object" || Array.isArray(json)) {
+        throw new Error(`${source}: expected a JSON object at top level`);
+    }
+    const obj = json as Record<string, unknown>;
+    const keys = Object.keys(obj).join(", ");
+
+    // **既知の失敗シグナルはコンテナが空でも拒否する** (impl-review R1 [Critical])。
+    // コンテナの型だけを見ると `{"advisories":{},"error":{"code":"ENETUNREACH"}}` /
+    // `{"dependencies":[],"error":...}` のような「有効 JSON だが取得失敗を示す形」が
+    // **正当な 0 件**として通ってしまう。空コンテナの許容 (真の 0 件を緑にする) と
+    // error-bearing output の拒否は必ずセットにする。
+    // 空の error (null / {} / []) は「エラー無し」を明示しただけなので通す (偽赤にしない)。
+    for (const field of ["error", "errors"]) {
+        const signal = obj[field];
+        if (signal === undefined || signal === null) continue;
+        const isEmpty =
+            (Array.isArray(signal) && signal.length === 0) ||
+            (typeof signal === "object" && !Array.isArray(signal) && Object.keys(signal).length === 0);
+        if (!isEmpty) {
+            throw new Error(
+                `${source}: output carries a non-empty '${field}' field — treating this as an acquisition ` +
+                    `failure, not as 'no advisories' (got keys: ${keys})`,
+            );
+        }
+    }
+
+    // **source ごとに期待コンテナの型を変える**。
+    // 共通条件 (`typeof === "object"`) にすると composer で `{"advisories": []}` が通り、
+    // normalizeComposerAudit の `typeof obj.advisories !== "object"` も配列を弾かないため
+    // Object.entries([]) = [] で **advisory 0 件 = 緑** に落ちる (偽グリーン)。
+    switch (source) {
+        case "pnpm-audit": {
+            // pnpm/npm audit は形式によって object (キー = advisory id) と array の両方を返す。
+            // normalizePnpmAudit が両対応しているので、ここも両方を受理する。
+            const c = obj.advisories;
+            if (c === undefined || c === null || typeof c !== "object") {
+                throw new Error(`pnpm-audit: missing 'advisories' object or array (got keys: ${keys})`);
+            }
+            // normalizePnpmAudit は各 entry を `Record<string, unknown>` として読む。
+            // primitive / null の entry は黙って id="" package="" の advisory になるため弾く。
+            const entries = Array.isArray(c) ? c : Object.values(c as Record<string, unknown>);
+            for (const [i, e] of entries.entries()) {
+                if (!e || typeof e !== "object" || Array.isArray(e)) {
+                    throw new Error(`pnpm-audit: advisories[${i}] must be an object (got ${typeof e})`);
+                }
+            }
+            return;
+        }
+        case "composer-audit": {
+            // composer audit は findings があるとき `{"advisories": {"<package>": [...]}}` の object。
+            //
+            // ただし **0 件のときだけ `[]` を出す** — PHP の空配列が json_encode で `[]` に
+            // なるためで、これは composer の正当な「advisory なし」表現である (実測)。
+            // 設計は当初「配列なら一律 fail」としていたが、それでは advisory を全て解消した
+            // 正常状態が恒久的に赤くなる (偽赤)。設計意図は「非 0 件の中身が黙って 0 件へ
+            // 落ちる経路を塞ぐ」ことなので、**空配列だけを許容し、非空配列は拒否**する。
+            // 非空配列は composer が出さない形であり、normalizeComposerAudit の
+            // Object.entries([...]) が index キーで走査して黙って 0 件になる偽グリーン経路。
+            const c = obj.advisories;
+            if (c === undefined || c === null || typeof c !== "object") {
+                throw new Error(`composer-audit: missing 'advisories' object (got keys: ${keys})`);
+            }
+            if (Array.isArray(c)) {
+                if (c.length > 0) {
+                    throw new Error(
+                        `composer-audit: 'advisories' must be an object when non-empty (got a ${c.length}-element array)`,
+                    );
+                }
+                return; // 空配列 = composer の正当な 0 件表現
+            }
+            // normalizeComposerAudit は package ごとの値が array でなければ **黙って空扱い** にする。
+            // 空の object {} (= 0 件) は正当だが、値が array でないのは schema 不一致なので弾く。
+            for (const [pkg, v] of Object.entries(c as Record<string, unknown>)) {
+                if (!Array.isArray(v)) {
+                    throw new Error(`composer-audit: advisories["${pkg}"] must be an array (got ${typeof v})`);
+                }
+            }
+            return;
+        }
+        case "pip-audit": {
+            if (!Array.isArray(obj.dependencies)) {
+                throw new Error(`pip-audit: missing 'dependencies' array (got keys: ${keys})`);
+            }
+            // normalizePipAudit は name / vulns を読む。空 vulns は正当な 0 件。
+            for (const [i, d] of obj.dependencies.entries()) {
+                if (!d || typeof d !== "object" || Array.isArray(d)) {
+                    throw new Error(`pip-audit: dependencies[${i}] must be an object`);
+                }
+                const dep = d as Record<string, unknown>;
+                if (typeof dep.name !== "string") {
+                    throw new Error(`pip-audit: dependencies[${i}].name must be a string`);
+                }
+                if (!Array.isArray(dep.vulns)) {
+                    throw new Error(`pip-audit: dependencies[${i}].vulns must be an array`);
+                }
+            }
+            return;
+        }
+    }
+}
+
+/**
+ * source => normalizer の対応表。
+ *
+ * pnpm と composer はどちらも object 形式の `advisories` を持ちうるため、
+ * shape 検査だけでは normalizer の取り違えを常に検出できない。
+ * `source` と `normalizer` を別々の引数で渡す限り、誤った組み合わせが型として書けてしまう。
+ * そこで source から normalizer を **内部で選択** し、誤配線そのものを表現不能にする。
+ */
+export const NORMALIZERS: Record<AuditSource, (json: unknown) => NormalizedAdvisory[]> = {
+    "pnpm-audit": normalizePnpmAudit,
+    "composer-audit": normalizeComposerAudit,
+    "pip-audit": normalizePipAudit,
+};
+
+export function loadAuditJson(path: string, source: AuditSource): NormalizedAdvisory[] {
     const raw = readFileSync(path, "utf-8");
     let json: unknown;
     try {
@@ -176,7 +310,8 @@ export function loadAuditJson(
     } catch (e) {
         throw new Error(`JSON parse failure in ${path}: ${(e as Error).message}`);
     }
-    return normalizer(json);
+    assertAuditSourceShape(source, json); // ← 配線点。ここを消すと unit テストが落ちる
+    return NORMALIZERS[source](json);
 }
 
 export function loadAcceptedAdvisories(path: string): AcceptedAdvisory[] {
@@ -389,8 +524,39 @@ export function evaluate(
         }
     }
 
-    // 4. 未受容 high/critical を fail
+    // 4. id 欠損 advisory は **severity に関係なく** 無条件 fail
+    //    (impl-review R3/R4 [Critical])。
+    //
+    // 背景 1 (R3): id が空の advisory は matchKey の fallback 経路で
+    // `<eco>|<pkg>|fallback:<missing-key>` というキーになる。ところが accept-risk 側は
+    // `id: "fallback:<missing-key>"` という**文字列を書くだけで同じキーを合成できる**
+    // (matchKey は id が非空ならそれをそのまま使うため)。実測で exitCode=0 になり、
+    // 「取得が壊れて中身を読めなかった advisory」を受容で黙らせられることを確認した。
+    //
+    // 背景 2 (R4): この検査を severity filter の**内側**に置くと、
+    // `{"advisories":[{"error":"boom","severity":"moderate"}]}` のように
+    // **明示 severity を持つ壊れた entry** が step 4 を素通りし、moderate warn (exit 0) に落ちる。
+    // 実測で確認済み。取得結果の破損は severity policy とは別軸の異常なので、
+    // 「unknown severity → high」という別の防壁に依存させず、同定不能性そのもので落とす。
+    //
+    // 根拠: upstream ID を持たない advisory は**同定不能**であり、同定できないものを
+    // 「このリスクは評価済み」と宣言することは原理的にできない。よって受容を許さない。
+    // 正しい対処は normalizer 側で upstream ID (GHSA-* / CVE-* / PYSEC-*) を補完すること。
+    const identifiable: NormalizedAdvisory[] = [];
     for (const adv of advisories) {
+        if (adv.id.trim().length === 0) {
+            failures.push(
+                `unidentifiable advisory (missing upstream id, severity=${adv.severity}): ${matchKey(adv)} ` +
+                    `(${adv.title ?? ""}). accept-risk cannot silence an advisory that has no id — ` +
+                    `this usually means the audit output was malformed or truncated.`,
+            );
+            continue;
+        }
+        identifiable.push(adv);
+    }
+
+    // 5. 未受容 high/critical を fail
+    for (const adv of identifiable) {
         if (adv.severity !== "high" && adv.severity !== "critical") continue;
         const acceptedEntry = acceptedByKey.get(matchKey(adv));
         if (!acceptedEntry) {
@@ -398,8 +564,8 @@ export function evaluate(
         }
     }
 
-    // 5. 未受容 moderate を warn 集計
-    for (const adv of advisories) {
+    // 6. 未受容 moderate を warn 集計
+    for (const adv of identifiable) {
         if (adv.severity !== "moderate") continue;
         const acceptedEntry = acceptedByKey.get(matchKey(adv));
         if (!acceptedEntry) {
@@ -490,9 +656,9 @@ async function main(): Promise<void> {
     let accepted: AcceptedAdvisory[];
     try {
         advisories = [
-            ...loadAuditJson(pnpmPath, normalizePnpmAudit),
-            ...loadAuditJson(composerPath, normalizeComposerAudit),
-            ...(pipPath ? loadAuditJson(pipPath, normalizePipAudit) : []),
+            ...loadAuditJson(pnpmPath, "pnpm-audit"),
+            ...loadAuditJson(composerPath, "composer-audit"),
+            ...(pipPath ? loadAuditJson(pipPath, "pip-audit") : []),
         ];
         accepted = loadAcceptedAdvisories(acceptedPath);
     } catch (e) {

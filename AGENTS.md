@@ -116,6 +116,9 @@
   rationale 付きで登録する(high/critical は approved_by / compensating_controls /
   tracking_issue も必須)。severity 別の expiry 上限(low/moderate 90 日・high 30 日・
   critical 14 日)、期限切れ・解消済み entry の残置は gate が機械的に fail させる
+- gate は CI (`supply-chain-audit` job) で **blocking** 実行され、加えて nightly (05:00 JST) でも回る。
+  `continue-on-error` は付けない (soft-fail = 偽グリーン)。取得失敗は advisory 0 件扱いにせず
+  fail-closed で止まる。運用責任 (owner / 初動 SLA) は `docs/supply-chain/review-checklist.md` §6
 - 判断基準・0day 緊急時フロー・新規 npm 依存の審査観点は
   `docs/supply-chain/review-checklist.md` を参照
 

@@ -2,6 +2,7 @@ import { defineConfig } from "vitest/config";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { svelteTesting } from "@testing-library/svelte/vite";
 import path from "path";
+import { testProject } from "./scripts/test-inventory-config";
 
 export default defineConfig({
     plugins: [
@@ -19,7 +20,9 @@ export default defineConfig({
         maxWorkers: "50%",
         minWorkers: 1,
         setupFiles: ["./tests/js/setup.ts"],
-        include: ["tests/js/**/*.test.ts", "scripts/**/*.test.ts"],
+        // include の正本は scripts/test-inventory-config.ts (2 project 分を 1 箇所で持つ)。
+        // scripts/vitest-inventory-gate.test.ts が FS 走査と突き合わせて漏れを検出する。
+        include: [...testProject("root").include],
         coverage: {
             provider: "v8",
             reporter: ["text", "json", "html"],

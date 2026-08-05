@@ -1,4 +1,3 @@
-import { ENV, BIN_NAME } from "../branding.js";
 import { readFileSync } from "node:fs";
 import {
     Agent,
@@ -167,7 +166,7 @@ export function buildUrl(
  * Resolve the `Authorization` header for a request.
  *
  * Precedence (T715 Phase 3): a configured API key always wins, so existing
- * `--api-key` / `${ENV.API_KEY}` / stored-key users keep their exact
+ * `--api-key` / `ENV.API_KEY` (branding.ts) / stored-key users keep their exact
  * behaviour. Only when no API key is present does the OAuth user-token
  * provider run (reading the stored token and refreshing under a file lock
  * if it is near expiry). When neither is available, the request goes out
@@ -622,7 +621,7 @@ export async function apiDelete<S extends ZodTypeAny>(
 
 /**
  * DELETE an API resource that responds with a JSON body (200, not 204).
- * Used by `${BIN_NAME} logout` against `DELETE /api/v1/me/session`, which returns
+ * Used by the CLI `logout` command against `DELETE /api/v1/me/session`, which returns
  * the revoked-session descriptor. Unlike {@link apiDelete} the body is
  * parsed against `schema`.
  */

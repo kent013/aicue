@@ -50,6 +50,39 @@ advisory が解消 (upgrade 等) されたら、対応する accepted entry を 
 `compensating_controls` に具体的な緩和 (WAF rule / 機能無効化 / network egress 制限 等) を明記する。
 7 日以内に恒久対応 (upgrade / patch / 機能撤去) を完了させる。
 
+## 6. CI での実行と運用責任
+
+`pnpm run audit:gate` は GitHub Actions の `supply-chain-audit` job で実行される。
+
+- **PR / push (main)**: blocking。`continue-on-error` は付けない
+  (soft-fail は「赤いのに緑に見える」= baseline 化と同型のため採らない)。
+- **nightly (05:00 JST)**: 同じ job を `schedule` でも回す。上流で新しい advisory が
+  公開された事実を、**無関係な PR のクリティカルパス外**で先に検知するため。
+  nightly は PR blocking の代替ではない。
+  `on.schedule` は workflow 全体を起動するため、`php` / `frontend` / `browser-tests` には
+  `if: github.event_name != 'schedule'` を付けて **nightly では supply-chain-audit だけが走る**
+  ようにしている (`tests/js/architecture/ci-workflow-inventory.test.ts` W15 が固定)。
+
+取得失敗 (network 不通・レジストリ障害) は **advisory 0 件として扱わない**。
+`scripts/audit-gate.sh` が空出力・前処理失敗をそこで止め、`assertAuditSourceShape` が
+「valid JSON だが期待 schema でない」出力を弾く (fail-closed)。一過性の赤は re-run で回復する。
+
+### 一次対応
+
+| 項目 | 決め |
+|---|---|
+| 一次対応 owner | リポジトリオーナー (`ishitoya`)。nightly / PR いずれの赤化でも同一 |
+| 初動 SLA | critical: 当日中に判断 / high: 2 営業日以内に判断 / moderate: warn のみ (SLA なし) |
+| 「判断」の中身 | upgrade で解消する、または §3 の上限内で accept-risk を登録する、のいずれか |
+| accept-risk の承認者 | 単独開発体制のため `approved_by` = owner。代替統制として `expiry` 上限 (high 30 日) と `tracking_issue` 必須で外部から追跡可能にする (`audit-gate.ts` が両方を機械強制) |
+| 自動 upgrade PR (Dependabot / Renovate) | **現時点では導入しない**。gate 単体で運用し「upgrade 追従が人手で回らない」ことが観測されてから検討する |
+
+### 上流由来で全 PR が赤くなったとき
+
+新しい advisory の公開は無関係な PR も止める。これは gate の副作用ではなく**意図した挙動**
+(未受容の high を抱えたまま main が進むことを許さない)。逃げ道は §3 の期限付き accept-risk のみで、
+`continue-on-error` の追加や gate の除外リスト化はしない。
+
 ## 付録: 新規 npm 依存の審査観点
 
 新規 npm 依存を追加する、もしくは既存依存を major version 更新する際の人手レビュー観点。

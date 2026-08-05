@@ -1,4 +1,3 @@
-import { BIN_NAME } from "../branding.js";
 import { z } from "zod";
 
 import { EnvironmentTagSourceSchema } from "../schemas/environment-tag-source.js";
@@ -15,7 +14,7 @@ export const VersionResponseSchema = z
                 environment_tag: z.string().nullable(),
                 environment_tag_source: EnvironmentTagSourceSchema,
                 instance_id: z.string().nullable(),
-                // T715 Phase 3: public PKCE client id for `${BIN_NAME} login`.
+                // T715 Phase 3: public PKCE client id for the CLI `login` command.
                 // Optional so older servers (and the CLI mock harness) that
                 // don't advertise it stay schema-valid; the login command
                 // falls back to --client-id / APP_OAUTH_CLIENT_ID.
