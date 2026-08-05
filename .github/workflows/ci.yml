@@ -66,5 +66,9 @@ jobs:
         run: pnpm typecheck
       - name: Vitest
         run: pnpm test
+      - name: TypeScript (workspace packages)
+        run: pnpm typecheck:packages
+      - name: Vitest (workspace packages)
+        run: pnpm test:packages
       - name: Build
         run: pnpm build

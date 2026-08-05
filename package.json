@@ -15,6 +15,7 @@
         "test:coverage": "bash scripts/with-global-test-lock.sh pnpm exec vitest run --coverage",
         "test:watch": "vitest --watch",
         "build:packages": "pnpm -F \"./packages/*\" build",
+        "typecheck:packages": "pnpm -F \"./packages/*\" typecheck",
         "test:packages": "bash scripts/with-global-test-lock.sh pnpm -F \"./packages/*\" test"
     },
     "dependencies": {
