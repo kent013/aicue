@@ -22,6 +22,9 @@
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
 | T085 | bfcache 実復元の iOS 実機受入確認 | test | Playwright 不可のため実機で確認+記録 | High | standalone | [設計](devnotes/20260803-0053-aigenba-alignment/) | 2026-08-03 03:10 |
+| T103 | 変更系 route の認可 gate 新設 + API 認可漏れ/存在オラクルの是正 | backend | 変更系routeの認可を機械強制 | High | standalone | [設計](devnotes/20260805-1244-controller-authorization-gate/) | 2026-08-05 13:20 |
+| T104 | CI レーン統合 (pgsql/browser/packages build/supply-chain gate) | infrastructure | CIレーンを実効化し契約を固定 | High | incremental | [設計](devnotes/20260805-1243-ci-lane-integration/) | 2026-08-05 13:22 |
+| T106 | passkey 導入とログイン手段保持 guard | backend | passkey導入と手段保持guard | High | standalone | [設計](devnotes/20260805-1244-auth-method-and-passkey/) | 2026-08-05 13:45 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
