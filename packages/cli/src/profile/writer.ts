@@ -18,13 +18,39 @@ export type ProfileInit = {
     allow_insecure?: boolean;
 };
 
+export type DeleteProfileOptions = {
+    /** default_profile が対象を指していても削除を許可する。 */
+    clearDefault?: boolean;
+    /**
+     * 削除と同時に default_profile を付け替える先。
+     * `clearDefault === true` かつ対象が現在の default のときのみ指定できる
+     * (それ以外は throw して **何も保存しない**)。
+     * 削除と default 遷移を 1 回の save() に畳むために存在する。
+     */
+    nextDefault?: string;
+};
+
+/**
+ * 1 回の config 読み込みから得た状態のスナップショット。
+ *
+ * `get()` / `list()` / default の 3 情報を**別々の loadUser() で**取ると、
+ * その間に他プロセスが config を書き替えたとき不整合な計画を作りうる。
+ * 削除の計画フェーズは必ずこれ 1 回で読む。
+ */
+export type ProfileState = {
+    defaultProfile: string | undefined;
+    profiles: ReadonlyArray<{ name: string; entry: ProfileEntry }>;
+};
+
 export interface ProfileWriter {
     list(): ReadonlyArray<{ name: string; entry: ProfileEntry }>;
     get(name: string): ProfileEntry | undefined;
+    /** default_profile と全プロファイルを **1 回の読み込みで** 返す。 */
+    readState(): ProfileState;
     snapshot(name: string): ProfileEntry;
     addProfile(name: string, init: ProfileInit): void;
     updateExpectedEnv(name: string, expected: string | null): void;
-    deleteProfile(name: string, opts?: { clearDefault?: boolean }): void;
+    deleteProfile(name: string, opts?: DeleteProfileOptions): void;
     useDefaultProfile(name: string): void;
     applyAtomic(
         name: string,
@@ -113,6 +139,19 @@ export class FileProfileWriter implements ProfileWriter {
         return this.loadUser().profiles?.[name];
     }
 
+    readState(): ProfileState {
+        const user = this.loadUser();
+        const profiles = user.profiles ?? {};
+        const state: ProfileState = {
+            defaultProfile: user.default_profile,
+            profiles: Object.entries(profiles).map(([name, entry]) => ({
+                name,
+                entry,
+            })),
+        };
+        return state;
+    }
+
     snapshot(name: string): ProfileEntry {
         const entry = this.get(name);
         if (!entry) throw new Error(`profile "${name}" not found`);
@@ -153,24 +192,60 @@ export class FileProfileWriter implements ProfileWriter {
         });
     }
 
-    deleteProfile(
-        name: string,
-        opts: { clearDefault?: boolean } = {},
-    ): void {
+    /**
+     * プロファイルの削除。`nextDefault` を渡すと **同じ 1 回の save() で**
+     * default_profile を付け替える (削除保存 → 付け替え保存の 2 段階にすると、
+     * 間の「default 不在」状態が永続化しうるため)。
+     */
+    deleteProfile(name: string, opts: DeleteProfileOptions = {}): void {
         const user = this.loadUser();
-        if (!user.profiles?.[name]) {
+        const profiles = user.profiles;
+        if (!profiles?.[name]) {
             throw new Error(`profile "${name}" not found`);
         }
-        if (user.default_profile === name && !opts.clearDefault) {
+        const isDefault = user.default_profile === name;
+
+        // --- nextDefault の受理条件 (満たさなければ save を呼ばない) ---
+        const nextDefault = opts.nextDefault;
+        if (nextDefault !== undefined) {
+            if (!isDefault) {
+                throw new Error(
+                    `nextDefault is only valid when deleting the default `
+                        + `profile (default_profile is `
+                        + `${String(user.default_profile)}).`,
+                );
+            }
+            if (opts.clearDefault !== true) {
+                throw new Error(
+                    "nextDefault requires clearDefault (the intent to change "
+                        + "default_profile must be explicit).",
+                );
+            }
+            if (nextDefault === name) {
+                throw new Error(
+                    `nextDefault "${nextDefault}" is the profile being deleted.`,
+                );
+            }
+            if (!profiles[nextDefault]) {
+                throw new Error(`profile "${nextDefault}" not found`);
+            }
+        }
+
+        if (isDefault && opts.clearDefault !== true) {
             throw new Error(
                 `profile "${name}" is the default. `
                     + "Use --clear-default or run `profile:use` first.",
             );
         }
-        const { [name]: _removed, ...rest } = user.profiles;
+
+        const { [name]: _removed, ...rest } = profiles;
         const next: RootConfigInput = { ...user, profiles: rest };
-        if (opts.clearDefault && user.default_profile === name) {
-            delete next.default_profile;
+        if (isDefault) {
+            if (nextDefault !== undefined) {
+                next.default_profile = nextDefault;
+            } else {
+                delete next.default_profile;
+            }
         }
         this.save(next);
     }

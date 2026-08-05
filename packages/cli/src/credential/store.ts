@@ -36,6 +36,17 @@ type IndexItem = z.infer<typeof IndexSchema>[number];
 
 const META_INDEX_ID = "index";
 
+export type PurgeProfileResult = {
+    /**
+     * このプロファイルの資格情報を **取りこぼしなく** 破棄できたか。
+     * `false` のとき、呼び出し側は config を消してはならない
+     * (api_url を失うと残った資格情報の在り処を二度と導出できなくなる)。
+     */
+    complete: boolean;
+    /** credential index が読めなかったか (診断用)。 */
+    indexCorrupted: boolean;
+};
+
 function assertMetaIdSafe(metaId: string): void {
     if (metaId === META_INDEX_ID) {
         throw new Error(
@@ -282,6 +293,54 @@ export class CredentialStore {
             "meta",
             metaId,
         );
+    }
+
+    /**
+     * `profile:delete` 用の破棄 API。
+     *
+     * `clearProfile` は index を読めないと
+     * `CredentialStoreError`(kind: "corrupted-index") を投げる。
+     * その場合の挙動は backend で本質的に異なる:
+     *
+     *   - file backend: プロファイルディレクトリを丸ごと落とせるので、
+     *     index が読めなくても **取りこぼしは発生しない** → complete: true
+     *   - keychain backend: 列挙手段が無く、index を失うと個々の item を
+     *     特定できない → **complete: false**。呼び出し側は config を残し、
+     *     利用者に手動清掃を求めること (config を消すと api_url が失われ、
+     *     残った資格情報が永久に到達不能な孤児になる)
+     */
+    purgeProfile(
+        canonicalOrigin: string,
+        profileName: string,
+    ): PurgeProfileResult {
+        try {
+            this.clearProfile(canonicalOrigin, profileName);
+            return { complete: true, indexCorrupted: false };
+        } catch (e) {
+            // index 破損**だけ**を握る。復号失敗・削除失敗など他の
+            // CredentialStoreError は握り潰さず素通しする。
+            if (
+                !(e instanceof CredentialStoreError)
+                || e.kind !== "corrupted-index"
+            ) {
+                throw e;
+            }
+        }
+        // index が読めなくても消せるものは消す。
+        this.primary().delete(
+            canonicalOrigin,
+            profileName,
+            "meta",
+            META_INDEX_ID,
+        );
+        this.fileStore.clearProfile(canonicalOrigin, profileName);
+        // keychain が primary のときだけ取りこぼしがありうる。判定は
+        // `primary()` と **同じ式**から導く (「keychain フィールドの有無」と
+        // 「実際に使われる backend」が将来ずれても嘘をつかないため)。
+        return {
+            complete: this.primary() === this.fileStore,
+            indexCorrupted: true,
+        };
     }
 
     /**

@@ -75,7 +75,8 @@
   `@lucide/svelte` のみ。Lucide に無いブランド/SSO ロゴの SVG 内包は
   `components/atoms/icons/` 配下に限る(`svg-inline-allowlist.test.ts` が強制)
 - 検証コマンド: `composer test` / `composer phpstan` / `vendor/bin/pint --test` /
-  `pnpm lint` / `pnpm typecheck` / `pnpm test` / `pnpm build`(全 green でコミット)
+  `pnpm lint` / `pnpm typecheck` / `pnpm test` / `pnpm build` /
+  `pnpm typecheck:packages` / `pnpm test:packages`(全 green でコミット)
 
 ## コードベース探索
 

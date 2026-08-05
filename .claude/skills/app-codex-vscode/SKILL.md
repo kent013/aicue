@@ -33,8 +33,10 @@ scripts/codex exec --ephemeral --sandbox read-only -m {model} \
 
 | モデル | 用途 |
 |--------|------|
-| `gpt-5.3-codex` | デフォルト。コード分析・レビュー・技術設計 |
-| `gpt-5.4` | 自然言語中心の議論・概念設計 |
+| `gpt-5.5` | 唯一の指定モデル。コード分析・レビュー・技術設計・概念設計のすべて |
+
+用途別のモデル使い分けは行わない（`tests/js/architecture/codex-model-consistency.test.ts`
+が `gpt-5.5` 以外のモデル名を deny-by-default で検出する）。
 
 ---
 
@@ -43,14 +45,12 @@ scripts/codex exec --ephemeral --sandbox read-only -m {model} \
 `-c 'model_reasoning_effort="{reasoning}"'` で推論の深さを制御する。
 `~/.codex/config.toml` のグローバル設定（`model_reasoning_effort`）はモデルとの互換性問題を起こす場合があるため、**常にコマンドラインで明示指定すること**。
 
-| レベル | 対応モデル | 用途 |
-|--------|-----------|------|
-| `low` | 全モデル | 高速・軽量な応答 |
-| `medium` | 全モデル | 議論・分析・ブレスト用（**デフォルト推奨** — Claudeが評価・選別する場面） |
-| `high` | 全モデル | コードレビュー・安全性判定用（Codex判断が直接品質に影響する場面） |
-| `xhigh` | `gpt-5.3-codex`, `gpt-5.4`, `gpt-5.2-codex`, `gpt-5.1-codex-max` のみ | 最大の推論深度 |
-
-**注意**: `gpt-5-codex`, `gpt-5.1-codex`, `gpt-5` 等の旧モデルは `xhigh` 非対応。
+| レベル | 用途 |
+|--------|------|
+| `low` | 高速・軽量な応答 |
+| `medium` | 議論・分析・ブレスト用（**デフォルト推奨** — Claudeが評価・選別する場面） |
+| `high` | コードレビュー・安全性判定用（Codex判断が直接品質に影響する場面） |
+| `xhigh` | 最大の推論深度 |
 
 ---
 

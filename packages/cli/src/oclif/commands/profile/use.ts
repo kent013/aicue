@@ -5,7 +5,7 @@ import { ProfileCommand } from "../../base/ProfileCommand.js";
 
 export default class ProfileUse extends ProfileCommand {
     static override description =
-        "Set default_profile (the only command that can change it).";
+        "Set default_profile (profile:delete --clear-default can also change it).";
     static override args = {
         name: Args.string({ description: "profile name", required: true }),
     };
