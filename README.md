@@ -76,4 +76,6 @@ pnpm lint && pnpm typecheck && pnpm test && pnpm build
 | `docs/app-integration-guide.md` | ドメインロジックのマッピング規則 + Item 見本チェックリスト |
 | `docs/default-team-pattern.md` | 組織 3 階層と Default Team の仕様 |
 | `docs/template-divergence.md` | テンプレートからの逸脱レジストリ |
+| `docs/auth-security-mechanisms.md` | 認証・セッション・パスキー・SSO・信頼境界の仕組みと不変条件 |
+| `docs/trusted-proxies-runbook.md` | client IP の信頼境界(`TRUSTED_PROXIES`)の運用契約。production は明示宣言が必須(未設定は起動時 fail-fast) |
 | `devnotes/20260611-template-extraction/` | テンプレート設計の調査・決定記録(01〜14) |

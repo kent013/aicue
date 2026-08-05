@@ -153,10 +153,16 @@ cd {repo_root}/.claude/worktrees/tasks/{todo_id} && pnpm install --config.ci=fal
    cd {repo_root}/.claude/worktrees/tasks/{todo_id} && composer test
    ```
 4. 全施策の実装完了後に品質チェック（全コマンド green になるまで修正する）:
+   <!-- VERIFICATION_COMMANDS:BEGIN -->
    ```bash
    cd {repo_root}/.claude/worktrees/tasks/{todo_id} && composer phpstan && composer fix && pnpm lint:fix
+   cd {repo_root}/.claude/worktrees/tasks/{todo_id} && composer test
    cd {repo_root}/.claude/worktrees/tasks/{todo_id} && vendor/bin/pint --test && pnpm lint && pnpm typecheck && pnpm test && pnpm build
+   cd {repo_root}/.claude/worktrees/tasks/{todo_id} && pnpm typecheck:packages && pnpm build:packages && pnpm test:packages
    ```
+   <!-- VERIFICATION_COMMANDS:END -->
+   > テストレーンは**ホスト全体のグローバルロック**で直列化される（AGENTS.md §worktree 運用ルール）。
+   > 待ち時間が出るのは正常で、30 秒ごとの heartbeat が出ていればハングではない。**kill しない**。
 5. **テストが失敗した場合はテスト駆動で修正**
 6. **E2E テスト基盤（Dusk 等）が導入済みなら**、UI変更を含む施策では E2E テストも追加・実行する（未導入のテンプレート初期状態ではスキップ）
 

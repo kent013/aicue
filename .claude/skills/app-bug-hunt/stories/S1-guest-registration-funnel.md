@@ -8,6 +8,15 @@
 2. `contact` → `contact.store` → `contact.thanks`(問い合わせ完了)。
 3. `register` → `register.store` → `verification.notice` → `verification.send` 再送 → `verification.verify` でメール認証完了。
 4. `login` → `login.store` → 2FA 有効なら `two-factor.login` → `two-factor.login.store` → `dashboard` へ。
+4-b. **パスキーでのログイン (T106)**:
+   S6 でパスキーを登録したユーザーでログアウト → `login` 画面に
+   **「パスキーでログイン」導線が出ている**こと → `passkey.login-options` で challenge 取得 →
+   `passkey.login` で `dashboard` へ到達できること。
+   - **存在オラクル検証**: 存在しないメールアドレスで `passkey.login-options` を叩いたときの
+     応答が、存在するユーザーのときと**区別できない**こと(区別できたら finding = High)。
+   - **詰み検証**: パスキー非対応ブラウザ / WebAuthn が利用不可の環境で
+     「パスキーでログイン」を押したとき、**説明が出て通常ログインに戻れる**こと
+     (無反応・白画面なら finding = H4)。
 5. **登録直後の課金オンボーディング着地 (P4 ゲート反転 / P7 `?plan=` handoff)**:
    新規登録で作られた個人組織は**未契約**なので、業務画面 (`dashboard` 配下の
    プロジェクト等) へ行こうとすると `onboarding.checkout`(`/onboarding/checkout`)へ
@@ -36,8 +45,8 @@
 8. `logout` でログアウト。
 
 ## このストーリーで消化する screens / operations
-- screens: home, register, login, dashboard, onboarding.checkout, verification.notice, verification.verify, password.request, password.reset, two-factor.login, contact, contact.thanks, legal.commerce-disclosure, legal.privacy, legal.terms
-- operations: register.store, login.store, logout, password.email, password.update, verification.send, two-factor.login.store, contact.store, debug.login-as, onboarding.activate-personal
+- screens: home, register, login, dashboard, onboarding.checkout, verification.notice, verification.verify, password.request, password.reset, two-factor.login, contact, contact.thanks, legal.commerce-disclosure, legal.privacy, legal.terms, passkey.login-options
+- operations: register.store, login.store, logout, password.email, password.update, verification.send, two-factor.login.store, contact.store, debug.login-as, onboarding.activate-personal, passkey.login
 
 ## 逸脱アイデア (--deviate 時)
 - 認証前ページ(dashboard 等)へ直アクセス → login へ誘導されるか。認証後に login/register を開くと dashboard へ戻るか。
@@ -49,3 +58,8 @@
   詰まずに戻れるか。
 - `?plan=` に未知値 / `enterprise` / 巨大文字列を入れる → 正規化されて既定に倒れるか
   (500・存在オラクルにならないか)。
+- `passkey.login-options` を存在しないメール / 巨大文字列 / 非文字列で叩く → 応答差から
+  **ユーザーの存在が判別できないか**(判別できたら finding = High)。`throttle:passkeys` の
+  429 が無反応でなく説明付きで出るか。
+- TOTP を confirmed 済みのユーザーで `passkey.login` を試す → **拒否される**か
+  (`PasskeyLoginPolicy` の assurance 後退防止。通ったら finding = Critical)。

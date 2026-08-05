@@ -54,6 +54,27 @@
 8. **外部 URL 取得は SSRF 検査経由**: 外部 URL(特にユーザ入力由来)を取得する機能は
    必ず `Kent013\SsrfPin\UrlSafetyInspector` / `PinnedHttpClient` を通す。
    安全境界は `config/ssrf-pin.php` に pin する(`SsrfPinBoundaryTest` が pin 値を固定)
+9. **変更系 route は認可を通る**: POST/PUT/PATCH/DELETE は `Gate::authorize` を通すか、
+   exemption inventory へ理由付きで登録する(deny-by-default)。
+   **層 2(テナント境界 = 404)は層 3(認可 = 403)より前**(逆にすると存在が漏れる)
+   (`ControllerAuthorizationGateTest`)
+10. **層 2 は binding の直後・FormRequest より前で閉じる**: binding とテナント境界 404 の間に
+    404 以外で短絡する middleware があると **1 bit の存在オラクル**になる。実行順の正本は
+    `bootstrap/app.php` の **priority list**(route の宣言順ではない)
+    (`ProjectRouteCurrentOrgGuardTest` / `NestedRouteIdorDefenseTest` /
+    `TenantBoundaryOrderingTest`)
+
+> **採番の注意**: 本節の番号と `docs/app-integration-guide.md` §7 の番号は **1:1 対応しない**
+> (本節 6 = PII CipherSweet / guide 6 = 逆シリアライズ、本節 8 = SSRF / guide 8 = 認可 gate)。
+> 相互参照するときは**番号ではなく項目名**で指すこと。既存の参照
+> (`docs/app-integration-guide.md` の「§7 不変条件 8」/ stripe webhook migration の「不変条件 7」)
+> を壊すため、どちらの側も renumber しない。
+
+> **運用要件 (T108)**: production は `TRUSTED_PROXIES` の**明示宣言が必須**
+> (未宣言 / `*` / `REMOTE_ADDR` / 書式不正は `ProductionEnvGuard` が起動時 fail-fast する
+> = **初回デプロイ前に設定が要る破壊的変更**)。`trustProxies(at: '*')` はレート制限を
+> 総当りに無効化するため復活させない。実 hop 一覧・CIDR の管理主体・変更手順は
+> `docs/trusted-proxies-runbook.md` が正本。
 
 ## 実装規約
 
@@ -74,9 +95,13 @@
   禁止。`tests/js/architecture/atomic-import-graph.test.ts` が強制)。アイコンは
   `@lucide/svelte` のみ。Lucide に無いブランド/SSO ロゴの SVG 内包は
   `components/atoms/icons/` 配下に限る(`svg-inline-allowlist.test.ts` が強制)
+<!-- VERIFICATION_COMMANDS:BEGIN -->
 - 検証コマンド: `composer test` / `composer phpstan` / `vendor/bin/pint --test` /
   `pnpm lint` / `pnpm typecheck` / `pnpm test` / `pnpm build` /
-  `pnpm typecheck:packages` / `pnpm test:packages`(全 green でコミット)
+  `pnpm typecheck:packages` / `pnpm build:packages` / `pnpm test:packages`
+  (全 green でコミット。`tests/js/architecture/verification-commands-doc-sync.test.ts` が
+  package.json の検証系 script との同期を deny-by-default で強制する。マーカーごと消さないこと)
+<!-- VERIFICATION_COMMANDS:END -->
 
 ## コードベース探索
 
@@ -151,8 +176,18 @@
 - **orphan 化した worktree**(teardown を経ず破棄)は `git worktree prune` で整理。
   検証なしの強制削除は
   `git worktree remove --force .claude/worktrees/tasks/<task-id> && git worktree prune`
-- **背景と障害対応**: 分離設計 (vendor / node_modules / テスト DB / 実行時ファイルの 4 軸) の
-  意図は `docs/worktree-isolation-strategy.md`、`enableGlobalVirtualStore` の前提・落とし穴・
+- **テストレーンのグローバルロック (T099)**: `composer test` / `composer test:browser` /
+  `pnpm test` / `pnpm test:packages` / `pnpm test:coverage` は**ホスト全体で 1 本ずつ**しか
+  走らない (worktree 横断で直列化し、テスト DB とポートの衝突を構造的に防ぐ)
+  - **待ち時間が出るのは正常**。他レーンが走っていると**エラーにはならず待つ**。
+    待機中は **30 秒ごとに heartbeat** が stderr に出るので、出ている間はハングではない
+  - **kill しない / ロックファイルを消さない**。中断が必要なら**ロック保持者の pid に
+    `kill -TERM`** を送る (プロセスグループが空になるまで解放されない)。
+    ロックファイルの手動削除は二重実行を生む
+  - 手動復旧の runbook は `docs/testing-browser.md` §グローバルテストロックの手動復旧
+- **背景と障害対応**: 分離設計は「**リソース名前空間** (vendor / node_modules / テスト DB /
+  実行時ファイル) と **実行そのもの** (グローバルテストロック)」の 2 層構造。意図は
+  `docs/worktree-isolation-strategy.md`、`enableGlobalVirtualStore` の前提・落とし穴・
   復旧手順は `docs/pnpm-global-virtual-store-runbook.md`(GVS 無効化・暗黙 peer・ENOMEM 等)
 
 ## bug-hunt (LLM 探索的バグハント、オプトイン)
