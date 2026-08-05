@@ -37,11 +37,22 @@ return [
     | id_token の auth_time を検証しないため fresh_auth_prompt_only が上限。
     | auth_time を返さない OAuth-only provider (GitHub 等) は identity_only にして
     | satisfier から除外すること。未宣言は identity_only 扱い (fail-closed)。
+    |
+    | email_trust: IdP の主張する email を検証済みとして扱ってよいか
+    | (App\Enums\EmailTrustLevel の value)。未宣言は unconfirmed 扱い (fail-closed)。
+    | confirmed を名乗ってよいのは「provider が email 所有を検証済み」かつ
+    | 「テナント管理者が任意の email を claim できない」の 2 条件を満たす provider のみ。
+    | 宣言漏れは tests/Architecture/SocialProviderTrustPolicyTest.php が検出する。
     */
     'social_providers' => [
         'google' => [
             'label' => 'Google',
             'capability' => 'fresh_auth_prompt_only',
+            // Google は Gmail / Workspace とも email 所有を検証しており、管理者は
+            // 所有権を証明したドメイン外を claim できないため confirmed。
+            // Microsoft (Entra ID) は管理者が未検証 email claim を設定できる (nOAuth) ため
+            // 追加する場合は必ず unconfirmed から始めること。
+            'email_trust' => 'confirmed',
         ],
     ],
 

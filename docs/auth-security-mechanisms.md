@@ -4,13 +4,15 @@
 
 ## 概要
 
-テンプレート共通のセキュリティ横断機構を 3 つ束ねて記述する。いずれも特定のドメインに属さず、
+テンプレート共通のセキュリティ横断機構を 4 つ束ねて記述する。いずれも特定のドメインに属さず、
 リクエスト / デプロイの横断層で動く。
 
 1. **機微操作の再認証 (recent-auth / step-up)** — Critical Action の直前に「直近の再認証」を要求する。
 2. **組織 2FA 強制 (enforced two-factor)** — 組織が 2FA を必須化した場合の未準拠ユーザーゲート + self-disable 禁止。
 3. **セキュリティヘッダ / 本番ハードニング層** — baseline セキュリティヘッダ、認証済み応答の
    `no-store` baseline、production 起動時 / デプロイ前の fail-fast。
+4. **SSO email の信頼方針 (email trust policy)** — IdP が主張する email を検証済みとして
+   扱ってよいかを provider ごとに宣言し、宣言のないものは fail-closed に倒す。
 
 MCP / CLI の OAuth 認可については [docs/mcp-oauth.md](mcp-oauth.md)、公開面の全体像は
 [docs/architecture.md](architecture.md) を参照。
@@ -176,6 +178,45 @@ web group に append され、`config/security.php` 駆動で以下を送出す�
 
 ---
 
+## 4. SSO email の信頼方針 (email trust policy)
+
+**実装**: `app/Services/Auth/EmailTrust/`, `app/Enums/EmailTrustLevel.php`, `config/template.php` (`social_providers.*.email_trust`)
+
+SSO 登録 (`Auth/SocialAccountService::register`) は、IdP が主張する email を無条件に
+検証済み (`email_verified_at`) として扱わない。provider ごとの信頼段階の宣言を
+`EmailTrustPolicyResolver` が `EmailTrustPolicy` へ解決し、`trustsEmail()` が true の
+場合にのみ `email_verified_at` を立てる。
+
+### Confirmed の判定基準 (契約)
+
+`email_trust = confirmed` を名乗ってよいのは、次の **2 条件をともに満たす** provider だけ。
+
+1. provider が当該 email の **所有を検証済み** である。
+2. **テナント管理者が任意の email を claim できない** (所有権を証明していないドメインの
+   email を主張できない)。
+
+満たさない / 不明な場合は `unconfirmed` に置き、アプリ側のメール到達確認
+(`/email/verify`) を経てから検証済みにする。
+
+- **Google**: Gmail / Workspace とも email 所有を検証しており、管理者は所有権を証明した
+  ドメイン外を claim できないため `confirmed`。
+- **Microsoft (Entra ID)**: テナント管理者が未検証の email claim を任意に設定でき、
+  他社ドメインの email を主張できる (nOAuth)。追加する場合は必ず `unconfirmed` から始める。
+
+### fail-closed と機械強制
+
+`email_trust` の未宣言・解釈不能 (非文字列 / 未知値) はすべて `Unconfirmed` に倒れる
+(`EmailTrustLevel::fromRaw`)。宣言漏れは静かな機能劣化 (登録者がメール確認を求められる) に
+なるため、`tests/Architecture/SocialProviderTrustPolicyTest.php` が
+「全 provider が `capability` / `email_trust` を明示宣言していること」と
+「google の `email_trust` が `confirmed` であること (現行挙動の pin)」を CI で強制する。
+
+policy を interface にしてあるのは nOAuth 対策の**キルスイッチ**を残すため
+(provider の運用変更が判明したら宣言 1 行を `unconfirmed` に倒せば新規登録が
+メール確認経路に落ちる)。
+
+---
+
 ## 関連ファイル
 
 | ファイル | 役割 |
@@ -202,4 +243,7 @@ web group に append され、`config/security.php` 駆動で以下を送出す�
 | `app/Console/Commands/ProductionPreflightCommand.php` | `production:preflight`。デプロイ前の設定検査 (違反で exit 1) |
 | `config/security.php` | CSP / HSTS / Permissions-Policy / metadata subset / HTTPS リダイレクトの設定 |
 | `config/trusted_hosts.php` | Host header allowlist (exact / wildcard suffix) |
+| `app/Services/Auth/EmailTrust/EmailTrustPolicy.php` | SSO email を検証済みとして信頼してよいかの方針 (interface。nOAuth 対策のキルスイッチ) |
+| `app/Services/Auth/EmailTrust/EmailTrustPolicyResolver.php` | provider の `email_trust` 宣言から policy を解決 (未宣言は Unconfirmed) |
+| `app/Enums/EmailTrustLevel.php` | 信頼段階 (Confirmed / Unconfirmed)。`fromRaw()` が fail-closed 変換の単一ソース |
 | `bootstrap/app.php` | 上記 middleware の配線 (prepend / web append / alias / trustHosts / trustProxies) |
