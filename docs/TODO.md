@@ -23,6 +23,9 @@
 |---|---|---|---|---|---|---|---|
 | T085 | bfcache 実復元の iOS 実機受入確認 | test | Playwright 不可のため実機で確認+記録 | High | standalone | [設計](devnotes/20260803-0053-aigenba-alignment/) | 2026-08-03 03:10 |
 | T110 | 認証手段変更のメール通知ポリシーの統一設計 | backend | passkey/2FA/SSO の増減通知を一貫したポリシーとして設計する(T108 S7 は監査ログのみで通知は見送り) | Low | standalone | [設計](devnotes/20260805-1550-security-audit-remediation/) | 2026-08-05 17:45 |
+| T112 | 監査フォロー A: PCRE /u 是正 + pgid race 修正 | test | \R の /u 欠落とpgid raceを是正 | High | incremental | [設計](devnotes/20260805-1813-audit-followup-maintenance/) | 2026-08-05 18:50 |
+| T113 | 監査フォロー B: bug-hunt inventory 追記 + ドキュメント乖離是正 | docs | inventory8routeとdoc乖離7件 | High | incremental | [設計](devnotes/20260805-1813-audit-followup-maintenance/) | 2026-08-05 18:50 |
+| T114 | 監査フォロー C: NFC/NFD index 是正 + 孤児DB回収経路 | infrastructure | index正規化と孤児DB回収 | Medium | standalone | [設計](devnotes/20260805-1813-audit-followup-maintenance/) | 2026-08-05 18:50 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
