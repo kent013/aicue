@@ -67,3 +67,33 @@ index 是正後はこのディレクトリだけが untracked として残るた
 **受入条件にもロールバックにも含めない**。`.git/config` のローカル設定なので
 clone した各人が設定しない限り効かず、**リポジトリの恒久対策にはならない**。
 恒久対策は index 正規化 + `GitIndexNormalizationTest` の側に置く。
+
+## 是正コミットを既存チェックアウトへ取り込んだときの実測 (main へのマージ時)
+
+**正規化非依存 FS では、マージ直後に `doc/reference/` の実体が 58 件消える。**
+git は index から落ちた NFD path を「削除されたファイル」として `unlink` するが、
+FS 上ではそれが NFC path と**同一の inode** だからである。
+
+実測 (main へ `git merge todo/T114 --no-ff` した直後):
+
+```
+index doc/reference : 139   (正しい)
+実体ファイル        : 81    (139 - 58。消えている)
+git status          : 58 件の ' D '
+on-disk NFD path    : 0
+```
+
+**中身は失われていない** (blob は index にも object DB にも残っている)。復旧は 1 コマンド:
+
+```bash
+git checkout -- doc/reference
+```
+
+実行後の実測: index 139 / 実体 139 / `git status -- doc/reference` **0 行** /
+`git diff HEAD -- doc/reference` **0 件** (= バイト一致で復元)。
+以後は index に NFC entry しか無いので二度と起きない。
+**新規 clone / 新規 worktree では最初から発生しない**
+(是正後のコミットから checkout した検証用 worktree は dirty 0 行 / on-disk NFD 0 件)。
+
+この注意書きは `docs/worktree-isolation-strategy.md` にも記載した
+(他の開発者が pull したときに同じ状況に遭遇するため)。
