@@ -22,6 +22,8 @@
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
 | T085 | bfcache 実復元の iOS 実機受入確認 | test | Playwright 不可のため実機で確認+記録 | High | standalone | [設計](devnotes/20260803-0053-aigenba-alignment/) | 2026-08-03 03:10 |
+| T100 | 開発ツール追従 (Codex gpt-5.5 一本化 / CLI profile:delete) | general | Codexモデル統一とCLI補完 | Medium | incremental | [設計](devnotes/20260805-0101-devtool-template-followup/) | 2026-08-05 11:59 |
+| T101 | テンプレ Architecture gate 追従 4 本 | test | テンプレ静的gate4本を移植 | High | incremental | [設計](devnotes/20260805-0101-architecture-gate-followup/) | 2026-08-05 11:59 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
