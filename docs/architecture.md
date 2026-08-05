@@ -80,9 +80,19 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
   実 ID が 10^18 に達することは無いため運用上の制約にならないが、
   「適合値の挙動は不変」ではない点に注意。値自体は Architecture テストが pin する
 - **5 分類 (deny-by-default)**: `BIGINT` / `UUID` (param => モデルの map。pattern 適用) /
-  `CUSTOM_BINDER` (`{organization}`。`{organization:slug}` 併用のため pattern を適用せず
-  `MembershipScopedOrganizationBinder` が入力正規化を担う) / `NON_MODEL` / `EXTERNAL`
+  `CUSTOM_BINDER` (explicit binder が入力正規化を担うため pattern を適用しない) /
+  `NON_MODEL` / `EXTERNAL`
   (vendor route が持ち込む param を route identity ごとに登録)。
+  `CUSTOM_BINDER` の現在の登録は以下 (`RouteBindingCustomBinderDocSyncTest` が
+  `RouteBindingTypes::CUSTOM_BINDER` と**双方向**で同期を強制する。マーカーごと消さないこと):
+  <!-- CUSTOM_BINDER:BEGIN -->
+  - `{organization}` — `MembershipScopedOrganizationBinder`。`{organization:slug}` を併用するため
+    数値 pattern を掛けると slug route が全滅する。binder が入力正規化を担う
+  - `{passkey}` — `SelfScopedPasskeyBinder`。Fortify (vendor) が登録する route の param で、
+    app 側から `Route::pattern` を掛けると vendor の route 定義変更に追随できないため、
+    binder が「認証ユーザー所有 + 数値正規化」を担う (**他人の passkey は 404** =
+    セキュリティ不変条件 2 の実装点。403 だと存在が漏れる)
+  <!-- CUSTOM_BINDER:END -->
   未登録 param の出現は `RouteBindingTypeConstraintInventoryTest` が fail させる
   (未知 param を数値と推測しない)。実挙動 (非適合 → 404) は
   `tests/Feature/Routing/RouteBindingTypeConstraintTest` が pgsql 実接続で固定する

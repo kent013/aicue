@@ -236,6 +236,25 @@ describe("ci.yml inventory gate", () => {
         expect(job(workflow, "supply-chain-audit").if).toBeUndefined();
     });
 
+    it("W16: php が bug-hunt インベントリの drift 検知を **実行行として** 持つこと", () => {
+        // T106 (passkey 7 route) / T107 (settings.password.store) で 2 サイクル連続して
+        // .claude/skills/app-bug-hunt/{screens,operations}.md がドリフトし、
+        // 「認証系が bug-hunt のカバレッジから丸ごと落ちる」実害が出た。
+        //
+        // runScript ではなく runLines を使う: runScript はコメント行も連結するため
+        // 「# bug-hunt-inventory-check.sh は将来入れる」というコメントで green になる
+        // (既存 W14b/W14c と同じ「実行行だけを見る」方針)。
+        const lines = runLines(job(workflow, "php"));
+        const mentions = lines.filter((l) => l.includes("scripts/bug-hunt-inventory-check.sh"));
+        expect(mentions, "php job に bug-hunt インベントリ drift 検知の実行行が無い").not.toEqual([]);
+
+        // `includes` だけでは `... || true` / `echo "bash scripts/..."` の soft-fail 偽装が素通りする
+        // (W6/W14c と同じ理由で完全一致を要求する)。continue-on-error 自体は W13 が別途禁じている。
+        expect(mentions, "drift 検知が完全一致の実行行になっていない (soft-fail 偽装の疑い)").toEqual([
+            "bash scripts/bug-hunt-inventory-check.sh",
+        ]);
+    });
+
     it("W13: continue-on-error が workflow のどこにも現れないこと (soft-fail 禁止)", () => {
         expect(findKeyPaths(workflow, "continue-on-error")).toEqual([]);
     });

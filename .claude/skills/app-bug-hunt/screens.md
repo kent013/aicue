@@ -4,7 +4,13 @@
 > ストーリー (S1..S7) を割り当てた。ドリフト検知は `scripts/bug-hunt-inventory-check.sh`。
 > 対象外 (seo/social/sso/2fa下位/legal confirmation 等) は OUT_OF_SCOPE_PREFIXES で除外済み。
 
-## 画面一覧
+## GET × web 一覧 (画面 + 画面に付随する JSON GET)
+
+> 本表は「GET × web セッション面」の一覧であり、**Inertia 画面だけではない**。
+> 以下は画面ではなく**画面に付随する JSON GET** として載せている
+> (bug-hunt は単独で開かず、対応する画面操作の副作用として通過させる):
+> `capture.csrf-cookie` / `session.status` / `passkey.registration-options` /
+> `passkey.login-options` / `passkey.confirm-options`
 
 | route (URL) | name | 割当ストーリー |
 |---|---|---|
@@ -35,6 +41,8 @@
 | organizations/{organization:slug}/onboarding/cli | organizations.onboarding.cli | S4 |
 | organizations/{organization:slug}/onboarding/mcp | organizations.onboarding.mcp | S4 |
 | organizations/{organization:slug}/settings | organizations.settings | S4 |
+| passkeys/confirm/options | passkey.confirm-options | S6 |
+| passkeys/login/options | passkey.login-options | S1 |
 | pricing | pricing | S5 |
 | privacy | legal.privacy | S1 |
 | purchase-tickets | billing.tickets.show | S5 |
@@ -60,6 +68,7 @@
 | terms | legal.terms | S1 |
 | two-factor-challenge | two-factor.login | S1 |
 | user/confirm-password | password.confirm | S6 |
+| user/passkeys/options | passkey.registration-options | S6 |
 
 **非 Inertia の GET (画面ではないが分母に載せているもの)**:
 `capture.csrf-cookie` (撮影 PWA の CSRF cookie 発行) と `session.status`
@@ -67,6 +76,22 @@
 セッション有効性プローブ。auth グループの**外**にあり guest でも 200 +
 `authenticated: false`) は Inertia ページを返さないが、ブラウザ挙動の契約に
 直結するためインベントリに残す (S3 / S6 で観測する)。
+パスキーの `passkey.*-options` 3 本も同じ扱い (次節)。
+
+## パスキー options endpoint の扱い (要検出)
+
+`passkey.*-options` の 3 本は**画面ではなく WebAuthn の challenge を返す JSON GET**
+(`capture.csrf-cookie` / `session.status` と同じ扱いで表に載せている)。
+bug-hunt はこれらを**単独で開くのではなく**、S1/S6 のパスキー操作を UI から実走した
+副作用として通過させる。加えて逸脱アイデアとして直叩きを行う:
+
+- `passkey.registration-options` / `passkey.confirm-options` は `RequireRecentAuth` /
+  auth の配下。**未ログイン・再認証切れで直叩きしたときに 401/302 で止まり、
+  challenge が漏れない**こと。
+- `passkey.login-options` は guest 配下。**メールアドレスを列挙できる応答差
+  (存在するユーザーと存在しないユーザーで応答が変わる)** が出ないこと (存在オラクル)。
+- 3 本とも `throttle:passkeys` 配下。連打時の 429 が**画面上で説明される**こと
+  (無反応で詰まないこと。H4)。
 
 ## 課金ゲート着地 (P4 ゲート反転) の画面遷移
 

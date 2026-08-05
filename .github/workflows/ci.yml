@@ -63,6 +63,14 @@ jobs:
           cp .env.example .env
           php artisan key:generate
           php artisan passport:keys --force
+      # bug-hunt インベントリ (.claude/skills/app-bug-hunt/{screens,operations}.md) と
+      # route:list のドリフト検知。T106 (passkey 7 route) / T107 (settings.password.store) で
+      # 2 サイクル連続してドリフトし、「認証系が bug-hunt のカバレッジから丸ごと落ちる」
+      # という実害が出た。台帳が正本である以上 soft-fail にしない (exit 3 で job を落とす)。
+      # 判定ロジックは既存スクリプトのままで PHP 側に再実装しない (自前解析器を増やさない)。
+      # route:list は APP_KEY を要するが DB は不要なので、Pest より前で fail-fast できる。
+      - name: Bug-hunt inventory drift
+        run: bash scripts/bug-hunt-inventory-check.sh
       # レンダー smoke テスト (施策 4) の前提。Dockerfile (dev/bughunt) と別に CI runner にも
       # ffmpeg/ffprobe と字幕フォントを導入し、存在・フォント解決を fail-fast 検証する (層 1)。
       - name: Provision ffmpeg for render smoke
