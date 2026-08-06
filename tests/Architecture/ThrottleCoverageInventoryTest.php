@@ -48,10 +48,36 @@ function throttleCoverageRouteFloor(): int
     return 60;
 }
 
-/** exemption 件数の上限 (形骸化ガード)。 */
+/** exemption 件数の上限 (形骸化ガード)。**現在値ちょうど** (exact fit)。 */
 function throttleCoverageExemptionCap(): int
 {
-    return 14;
+    // ★余裕を 1 でも持たせると、その 1 本は「個別の根拠も再レビューも無しに
+    //   免除できる枠」になる。exact fit なら次の 1 本が必ず「この数値を変える差分」
+    //   として現れ、個別理由・前提テスト追加要否・そもそも貼るべきでないかの
+    //   再検討を強制できる。上げる前に必ず再検討すること。
+    return 25;
+}
+
+/**
+ * exemption の case 別上限 (分類の偏り検出)。全体 cap とは役割が違う
+ * (全体 = セレクタの広さ / case 別 = どのカテゴリが膨らんだか)。
+ * ★array_sum() で全体 cap を導出しない (両方を独立に検査する)。
+ *
+ * @return array<string, int> ThrottleCoverageExemption::value => 上限
+ */
+function throttleCoverageExemptionCapByCase(): array
+{
+    return [
+        ThrottleCoverageExemption::StaticMetadataResponse->value => 4,
+        ThrottleCoverageExemption::VendorMethodNotAllowedStub->value => 2,
+        ThrottleCoverageExemption::SessionTeardownOnly->value => 2,
+        ThrottleCoverageExemption::LocalOnlyDebugRoute->value => 1,
+        ThrottleCoverageExemption::ComponentLevelLimiter->value => 1,
+        ThrottleCoverageExemption::SignatureRequiredBeforeEffect->value => 1,
+        // ★ここが膨らむ = 「貼るべき route を描画系として逃がした」疑い。
+        ThrottleCoverageExemption::AuthViewRenderOnly->value => 13,
+        ThrottleCoverageExemption::AuthFlowInitiationWithoutOutboundCall->value => 1,
+    ];
 }
 
 /** exemption 理由の最低文字数 (「同上」「N/A」を機械的に弾く)。 */
@@ -73,6 +99,8 @@ function throttleCoverageExemptions(): array
     $localOnly = ThrottleCoverageExemption::LocalOnlyDebugRoute;
     $component = ThrottleCoverageExemption::ComponentLevelLimiter;
     $signature = ThrottleCoverageExemption::SignatureRequiredBeforeEffect;
+    $render = ThrottleCoverageExemption::AuthViewRenderOnly;
+    $flowInit = ThrottleCoverageExemption::AuthFlowInitiationWithoutOutboundCall;
 
     return [
         'mcp.oauth.authorization-server' => [$metadata,
@@ -126,6 +154,85 @@ function throttleCoverageExemptions(): array
             'Illuminate\Filesystem\ReceiveFile::__invoke() が本体到達前に abort_unless('
             .'$request->boolean(\'upload\') && $request->hasValidRelativeSignature(), ...) で短絡し、'
             .'署名が無ければファイル書込を含む副作用がゼロになる。前提は ThrottleExemptionPremiseTest が固定する。'],
+
+        // ─────────────────────────────────────────────────────────────
+        // 認証面の非変更系 GET (T120 事後監査の是正で母集団に加わった 23 本のうち、
+        // throttle を貼らないことが正しいと裁定した 14 本)。
+        // 判断基準は「1 リクエストで外向き通信・重い計算・状態生成が起きるか」。
+        // ─────────────────────────────────────────────────────────────
+
+        'login' => [$render,
+            'Fortify::loginView() が config(template.social_providers) のキー一覧だけを props にした '
+            .'Inertia ページ (Auth/Login) を描画する。credential 検証は POST /login '
+            .'(throttle:login) 側にあり、GET は DB 書込・外部呼び出し・メール送信を伴わない。'],
+
+        'register' => [$render,
+            'Fortify::registerView() の Inertia 描画。session に**自分で置いた** invitation_token が '
+            .'ある場合のみ OrganizationMembershipService::resolveRegisterPrefillEmail() が招待を '
+            .'1 件 read するが、token を持たない要求は DB へ到達しない。DB 書込・外部呼び出しは無い。'],
+
+        'password.request' => [$render,
+            'Fortify::requestPasswordResetLinkView() が props 無しの Inertia ページ '
+            .'(Auth/ForgotPassword) を描画するだけ。メール送信は POST /forgot-password '
+            .'(throttle:password-reset-request) 側で、GET は DB にも外部にも触れない。'],
+
+        'password.reset' => [$render,
+            'Fortify::resetPasswordView() が route parameter の token と query の email を props へ '
+            .'写すだけの Inertia 描画。token の DB 照合は POST /reset-password '
+            .'(throttle:password-reset-submit) 側で行われ、GET は token の有効性を判定しない '
+            .'(応答が token に依存しないためオラクルにならない)。'],
+
+        'two-factor.login' => [$render,
+            'Fortify の TwoFactorAuthenticatedSessionController::create() が session の login.id に '
+            .'対応する user の存在を read し、無ければ login へ 302 する。コード検証は '
+            .'POST /two-factor-challenge (throttle:two-factor) 側。DB 書込・外部呼び出しは無い。'],
+
+        'password.confirm' => [$render,
+            'FortifyServiceProvider::configureViews() が confirmPasswordView を '
+            .'recent-auth.confirm への 302 に差し替えており、応答は redirect 1 本のみ。'
+            .'DB アクセス・外部呼び出し・秘密の開示を一切伴わない。'],
+
+        'password.confirmation' => [$render,
+            'Fortify の ConfirmedPasswordStatusController::show() が session の '
+            .'auth.password_confirmed_at と設定値を比較した bool を返すだけ。auth 必須で '
+            .'actor 自身の session 状態しか見ず、DB にも外部にも触れない。'],
+
+        'recent-auth.confirm' => [$render,
+            'auth 必須。ConfirmRecentAuthController::show() が actor 自身の recent-auth 鮮度と '
+            .'利用可能な satisfier を props にした Inertia 描画を返す。password 検証は '
+            .'POST /recent-auth/password (throttle:6,1) 側にあり、GET は DB 書込を伴わない。'],
+
+        'recent-auth.status' => [$render,
+            'auth 必須の軽量プローブ。ConfirmRecentAuthController::status() が actor 自身の鮮度を '
+            .'JsonResource で返し no-store を付けるだけで、DB 書込・外部呼び出し・'
+            .'秘密の開示を伴わない (bfcache 再検証のため頻繁に叩かれる前提の endpoint)。'],
+
+        'verification.notice' => [$render,
+            'auth 必須。Fortify::verifyEmailView() が EmailVerificationContinuation::hasContinuation() '
+            .'の bool だけを props にした Inertia 描画を返す。検証メールの再送は '
+            .'POST /email/verification-notification (throttle:6,1) 側で有界化されている。'],
+
+        'filament.admin.auth.login' => [$render,
+            'Filament panel のログインページ描画。credential 検証は Livewire の POST '
+            .'(default-livewire.update) 側にあり、そこは ComponentLevelLimiter として登録済みで '
+            .'Auth/Pages/Login の rateLimit(5) が実在する (ThrottleExemptionPremiseTest が固定)。'],
+
+        'filament.admin.auth.profile' => [$render,
+            'auth 必須の Filament プロフィールページ描画。パスワード変更等の実処理は Livewire POST '
+            .'(default-livewire.update) 側にあり ComponentLevelLimiter で分類済み。'
+            .'GET は actor 自身のフォーム描画のみで、秘密の生成も外部呼び出しも伴わない。'],
+
+        'filament.admin.auth.multi-factor-authentication.set-up-required' => [$render,
+            'auth 必須の Filament MFA 設定要求ページ描画 (SetUpRequiredMultiFactorAuthentication)。'
+            .'TOTP 秘密とリカバリコードの生成は SetUpAppAuthenticationAction の mountUsing '
+            .'(= Livewire POST / default-livewire.update) で起き、GET の描画では起きない '
+            .'(ComponentLevelLimiter で分類済みの経路)。GET は導線リンクの描画のみ。'],
+
+        'social.redirect' => [$flowInit,
+            'SocialAuthController::redirect() は provider allowlist (config) と intent を検証し、'
+            .'session へ intent と OAuth state を書いて IdP へ 302 するだけで、**その場では '
+            .'外向き HTTP を発行しない**。外向き HTTP は対になる social.callback で起き、'
+            .'そちらは throttle:social-callback で有界化されている (前提は Premise テストが固定)。'],
     ];
 }
 
@@ -290,4 +397,98 @@ test('exemption 件数が上限を超えない (形骸化ガード)', function (
         "exemption が {$count} 件あります。セレクタが広すぎるか、throttle を貼るべき route を"
         .'exemption で逃がしている可能性があります (上限を上げる前に必ず再検討すること)。',
     );
+});
+
+test('exemption inventory の key は throttle を 1 本も持たない (死んだ exemption の検出)', function (): void {
+    // ★既存の「ちょうど 1 本 or exemption」検査は count($entries) === 1 で先に continue するため、
+    //   *throttle 済みなのに exemption にも登録されている* 状態を検出できない。
+    //   stale 検出も「母集団に存在するか」しか見ないため素通りする。
+    //   放置すると「もう不要な免除理由」が台帳に溜まり、次に読む人を誤らせる。
+    /** @var Router $router */
+    $router = Route::getFacadeRoot();
+    $inventory = throttleCoverageExemptions();
+    $violations = [];
+
+    foreach (throttleCoverageProtectedRoutes() as $route) {
+        $label = throttleCoverageRouteLabel($route);
+        if (! array_key_exists($label, $inventory)) {
+            continue;
+        }
+
+        $entries = RouteThrottleBinder::throttleEntries($router, $route);
+        if ($entries !== []) {
+            $violations[] = "{$label}: throttle ({$entries[0]}) が付いているのに exemption にも登録されています";
+        }
+    }
+
+    expect($violations)->toBe([],
+        'throttle を貼ったら exemption inventory から削除してください。'
+        .PHP_EOL.implode(PHP_EOL, $violations));
+});
+
+test('認証面 GET 用の exemption case は非変更系 route にしか使われない', function (): void {
+    // AuthViewRenderOnly / AuthFlowInitiationWithoutOutboundCall の適用条件 1 番目
+    // (GET/HEAD のみ) を機械化する。変更系がこの箱に落ちると、
+    // 「描画だから」という理由で副作用のある route が免除される。
+    $getOnlyCases = [
+        ThrottleCoverageExemption::AuthViewRenderOnly,
+        ThrottleCoverageExemption::AuthFlowInitiationWithoutOutboundCall,
+    ];
+    $mutating = throttleCoverageMutatingMethods();
+    $inventory = throttleCoverageExemptions();
+    $violations = [];
+
+    foreach (throttleCoverageProtectedRoutes() as $route) {
+        $label = throttleCoverageRouteLabel($route);
+        if (! array_key_exists($label, $inventory)) {
+            continue;
+        }
+        if (! in_array($inventory[$label][0], $getOnlyCases, true)) {
+            continue;
+        }
+        if (array_intersect($mutating, $route->methods()) !== []) {
+            $violations[] = "{$label}: 変更系 (".implode('|', $route->methods()).') に GET 専用 case が使われています';
+        }
+    }
+
+    expect($violations)->toBe([], PHP_EOL.implode(PHP_EOL, $violations));
+});
+
+test('exemption の case 別件数が上限を超えない (分類の偏り検出)', function (): void {
+    // ★走査対象は **enum の全 case**。使用中の case だけを見ると、
+    //   「新しい case を足したが cap を決めていない」状態を検出できない
+    //   (使い始めた瞬間に上限なしで通ってしまう)。
+    $caps = throttleCoverageExemptionCapByCase();
+
+    $counts = [];
+    foreach (ThrottleCoverageExemption::cases() as $case) {
+        $counts[$case->value] = 0;
+    }
+    foreach (throttleCoverageExemptions() as [$exemption, $reason]) {
+        $counts[$exemption->value]++;
+    }
+
+    $violations = [];
+    foreach ($counts as $case => $count) {
+        if (! array_key_exists($case, $caps)) {
+            $violations[] = "{$case}: throttleCoverageExemptionCapByCase() に上限が登録されていません";
+
+            continue;
+        }
+        if ($count > $caps[$case]) {
+            $violations[] = "{$case}: {$count} 件 (上限 {$caps[$case]})";
+        }
+    }
+
+    // cap 側に enum に無い case が残っていないか (rename / 削除の stale 検出)
+    foreach (array_keys($caps) as $case) {
+        if (! array_key_exists($case, $counts)) {
+            $violations[] = "{$case}: enum に存在しない case の上限が残っています";
+        }
+    }
+
+    expect($violations)->toBe([],
+        'exemption の case 別件数が上限を超えました。上限を上げる前に、'
+        .'その case へ落とした route が本当に throttle 不要かを 1 本ずつ再検討してください。'
+        .PHP_EOL.implode(PHP_EOL, $violations));
 });

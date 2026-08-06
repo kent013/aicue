@@ -234,10 +234,53 @@ class AppServiceProvider extends ServiceProvider
         Event::listen(MessageSending::class, FilterSuppressedRecipients::class);
 
         $this->configureApiRateLimiters();
+        $this->configureAuthSurfaceRateLimiters();
         $this->configureInquiryRateLimiter();
         $this->configureRenderRateLimiter();
         $this->configureWebhookRateLimiters();
         $this->attachThrottleToVendorRoutes();
+    }
+
+    /**
+     * 未認証で到達する認証面 GET の RateLimiter (T120 事後監査の是正)。
+     *
+     * ★どちらも**未認証**面のため named limiter で数える単位を明示する。
+     *   inline throttle (`10,1`) はフレームワーク既定キーに依存するため、
+     *   AGENTS.md の規約どおり「認証済みかつ actor 自身に閉じる操作」以外では使わない。
+     *
+     * ★閾値は発明しない (AG-096 = 閾値はプロダクト依存):
+     *   - social-callback  = 10/min。未認証で到達する認証面の IP レーンとして
+     *     本番稼働中の `passkeys` limiter の guest 分岐 (10/min) と同値。
+     *   - invitation-accept = 10/min。姉妹操作 invitations.accept.store の
+     *     `throttle:10,1` と同値 (同じ token 照合を行う 2 本の非対称を解消する)。
+     *
+     * ★キーに route parameter / query token を混ぜない (NamedRateLimiterKeyTest)。
+     *   social.callback の {provider} や invitations.accept の ?token= を key に入れると
+     *   bucket が分かれ、「429 になるまでの回数」が実在オラクルになる。
+     *
+     * ★**無効リクエストも同じ bucket を消費する** (throttle は controller より前に走る)。
+     *   intent 不在の callback / 無効 token の招待 open も枠を減らすため、
+     *   同一 IP からの無効連打は正当利用者の枠を奪える (一時 DoS)。
+     *   これは「未認証面を IP で数える」ことの必然であり、
+     *   引き換えに得ているのは「外向き HTTP と token 照合の総量が有界になること」である。
+     *
+     * ★巻き添えの扱い: IP レーンである以上、同一 NAT 配下の一斉ログイン / 一斉招待受諾は
+     *   巻き添え 429 になりうる。limiter は恒久ロックを作らないが到達は保証しない。
+     *   運用は 429 発生率と invalid callback 比率を監視し、
+     *   **初動は閾値変更ではなく TRUSTED_PROXIES / 実 client IP の解決の確認**とする
+     *   (docs/trusted-proxies-runbook.md)。
+     */
+    private function configureAuthSurfaceRateLimiters(): void
+    {
+        // SSO callback。1 リクエストで IdP へ token エンドポイント POST が飛びうる
+        // (state + intent が揃った場合)。未認証で外部へ HTTP を発射できる唯一の経路。
+        RateLimiter::for('social-callback', fn (Request $request): Limit => Limit::perMinute(10)
+            ->by('social-callback:ip:'.($request->ip() ?? 'unknown')));
+
+        // 招待受諾の確認画面 (GET)。未認証入力の token を sha256 照合して DB を 1 件引き、
+        // 有効/無効で応答が分岐する。姉妹の POST は既に throttle:10,1 で有界化されている。
+        RateLimiter::for('invitation-accept', fn (Request $request): Limit => Limit::perMinute(10)
+            ->by('invitation-accept:ip:'.($request->ip() ?? 'unknown')));
     }
 
     /**
