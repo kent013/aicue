@@ -291,3 +291,22 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
    専用画面で受ける** (行き先のない詰みを作らない)。運用契約は `docs/architecture.md`
    §サブスク契約 Checkout とオンボーディング着地、デプロイ順序は
    `docs/billing-gate-inversion-runbook.md`
+5. **流量制限 (throttle) の付与規約**: 保護対象群 (未認証で到達しうる変更系 /
+   ステートレスな機械向け経路 `api/`・`oauth/`・`.well-known/oauth-` / 認証面の変更系) は
+   **throttle をちょうど 1 本**持つか、`ThrottleCoverageExemption` + 30 文字以上の根拠付きで
+   exemption inventory へ登録する (`ThrottleCoverageInventoryTest` が deny-by-default で強制。
+   exemption の**前提**は `ThrottleExemptionPremiseTest` が behavioral に固定する)。
+   - named limiter のキーは **`{レーン}:{種別}:{値}`** (`RateLimiterKeyConventionTest` が
+     全 limiter を実評価して検査)。email は `EmailNormalizer` → `EmailHash` を通し、
+     平文をキャッシュキーに残さない。**`Str::transliterate()` は使わない**
+     (legitimate な Unicode email を別 user へ collapse させ巻き添えロックアウトになる)。
+     inline throttle (`throttle:6,1`) は「認証済みかつ actor 自身に閉じる操作」限定
+   - vendor 登録 route への後付けは **`RouteThrottleBinder::attachOnBooted()`** 経由
+     (route 名が消えたら起動時 fail-fast)。**`php artisan route:cache` は毎デプロイ再生成する**
+     (後付けは cache 生成時に焼き込まれ cached 起動では skip されるため、stale cache は
+     古い付与状態のまま起動する)
+   - **閾値は既存値を変えない**。新しい面には既に本番稼働中の同性質エンドポイントと同値を充てる
+   - 未認証 webhook に**固定キーの全体天井を置かない** (throttle は署名検証より前に走るため、
+     無効 body の連打で正当通知を 429 にできる = 攻撃者が業務を止められる口になる)。
+     IP 単位は署名検証コストの上限であり正当通知の保護ではない (429 発生率を監視する)
+   - 詳細は `docs/app-integration-guide.md` §7b
