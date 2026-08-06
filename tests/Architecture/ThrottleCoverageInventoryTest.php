@@ -42,10 +42,10 @@ function throttleCoverageAuthSurfacePattern(): string
         .'|recent-auth\.|invitations\.|settings\.password\.|social\.|filament\.admin\.auth\.)#';
 }
 
-/** 母集団件数の下限 (空振り drift ガード。実測 47 に対し余裕を持たせた値)。 */
+/** 母集団件数の下限 (空振り drift ガード。実測 70 に対し余裕を持たせた値)。 */
 function throttleCoverageRouteFloor(): int
 {
-    return 40;
+    return 60;
 }
 
 /** exemption 件数の上限 (形骸化ガード)。 */
@@ -190,8 +190,15 @@ function throttleCoverageProtectedRoutes(): array
                 || str_starts_with($uri, '.well-known/oauth-'))
             && ! throttleCoverageHasMiddlewareClass($route, StartSession::class);
 
-        // S3: 認証済み側も含む credential 面
-        $s3 = $isMutating && $name !== '' && preg_match($pattern, $name) === 1;
+        // S3: credential 面 (認証済み側も含む)。
+        // ★**メソッドを問わない** (GET/HEAD も母集団に入れる)。
+        //   認証面は「読むだけ」の GET でも秘密の開示・外部呼び出し・状態生成を伴いうる。
+        //   $isMutating を条件に残していた頃は認証面 GET が 1 本も母集団に入らず、
+        //   パターン中の `social\.` は 1 件も一致しない**死んだ条件**だった
+        //   (social route は 2 本とも GET)。
+        // ★S1 (未認証の変更系) は $isMutating のまま残す。S1 まで GET へ広げると
+        //   母集団が数百本になり、exemption 台帳に埋もれて gate が機能しなくなる。
+        $s3 = $name !== '' && preg_match($pattern, $name) === 1;
 
         if ($s1 || $s2 || $s3) {
             $protected[] = $route;
