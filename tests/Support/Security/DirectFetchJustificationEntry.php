@@ -86,7 +86,10 @@ final readonly class DirectFetchJustificationEntry
     }
 
     /**
-     * **債務**エントリ。新規コードで使わない。
+     * **存在オラクル**エントリ。新規コードで使わない。
+     *
+     * 露出の中身: 認証済みの組織管理者が番号を順に送るだけで、その番号の利用者・組織が
+     * 実在するかを全数列挙できる (存在しない id と権限が無い id で応答が分岐するため)。
      *
      * @param  string  $verifiedBy  補償チェックを行う `Class::method`
      * @param  string  $validationRule  当該 id に掛けている validation rule (例 `exists:users,id`)
@@ -95,13 +98,13 @@ final readonly class DirectFetchJustificationEntry
      *                           (a) `aicue:T<番号>` 形式の TODO ID (docs/TODO.md か docs/TODO-closed.md に実在すること)
      *                           (b) リポジトリ相対のファイルパス (存在すること)
      */
-    public static function globalExistenceRuleDebt(
+    public static function payloadIdExistenceOracle(
         string $reason,
         string $verifiedBy,
         string $validationRule,
         string $todoRef,
     ): self {
-        return new self(DirectFetchJustification::PayloadIdWithGlobalExistenceRuleDebt, $reason, [
+        return new self(DirectFetchJustification::PayloadIdExistenceOracle, $reason, [
             'verifiedBy' => $verifiedBy,
             'validationRule' => $validationRule,
             'todoRef' => $todoRef,

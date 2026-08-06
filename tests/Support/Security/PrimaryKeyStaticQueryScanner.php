@@ -284,7 +284,7 @@ final class PrimaryKeyStaticQueryScanner
     }
 
     /**
-     * 指定メソッドの**本文だけ**を切り出す (債務 case の `verifiedBy` 検証に使う)。
+     * 指定メソッドの**本文だけ**を切り出す (存在オラクル case の `verifiedBy` 検証に使う)。
      *
      * 同名メソッドが複数ある場合は最初の 1 つを返す。
      */
