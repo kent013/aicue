@@ -38,7 +38,8 @@ const EXEMPT: Record<string, string> = {
     "test:ui": "vitest UI の対話起動。CI/検証で回すものではない",
     "test:watch": "watch 実行。単発検証ではない",
     "test:coverage": "カバレッジ計測。検証ゲートではない (test が正本)",
-    "audit:gate": "supply-chain gate は CI/nightly の blocking 実行が正本 (AGENTS.md §依存脆弱性に別記)",
+    "audit:gate":
+        "supply-chain gate は CI (push / pull_request) の blocking 実行が正本 (AGENTS.md §依存脆弱性に別記)",
 };
 
 function repoFile(relative: string): string {
