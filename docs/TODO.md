@@ -24,7 +24,6 @@
 | T085 | bfcache 実復元の iOS 実機受入確認 | test | Playwright 不可のため実機で確認+記録 | High | standalone | [設計](devnotes/20260803-0053-aigenba-alignment/) | 2026-08-03 03:10 |
 | T110 | 認証手段変更のメール通知ポリシーの統一設計 | backend | passkey/2FA/SSO の増減通知を一貫したポリシーとして設計する(T108 S7 は監査ログのみで通知は見送り) | Low | standalone | [設計](devnotes/20260805-1550-security-audit-remediation/) | 2026-08-05 17:45 |
 | T118 | payload 由来 id の org 相対化 (直 fetch 債務 3 件の解消) | backend | 直 fetch 債務 3 件を relation 起点へ寄せる | Medium | standalone | [設計](devnotes/20260806-1355-payload-id-org-scoping/) | 2026-08-06 01:12 |
-| T120 | 流量制限の付与漏れ検査 + キー規約の是正 | backend | 流量制限の付与漏れ目録検査とキー規約統一 | High | incremental | [設計](devnotes/20260806-1403-throttle-coverage-inventory/) | 2026-08-06 14:33 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
