@@ -5,11 +5,13 @@ declare(strict_types=1);
 use App\Enums\OrganizationRole;
 use App\Enums\ProjectRole;
 use App\Models\Project;
+use App\Models\User;
 
 /*
  * プロジェクトメンバー管理 (project_members pivot の追加・削除)。
- * 追加対象 (payload user_id) の cross-org は 403、削除対象 (URL {user}) の cross-org は
- * 認可より前に 404 (NestedRouteIdorDefenseTest の分類と対応)。
+ * 追加対象 (payload user_id) の cross-org は validation failure (field error)、
+ * 削除対象 (URL {user}) の cross-org は認可より前に 404
+ * (NestedRouteIdorDefenseTest の分類と対応)。
  */
 
 test('owner はプロジェクトメンバーを追加できる', function (): void {
@@ -43,7 +45,7 @@ test('既存メンバーへの store 再実行はロール更新になる', func
     expect($project->members()->whereKey($member->id)->count())->toBe(1);
 });
 
-test('他組織のユーザーは追加できない (cross-org は 403)', function (): void {
+test('他組織のユーザーは追加できない (cross-org は validation failure)', function (): void {
     [$organization, $owner] = createOrganizationWithOwner('組織A');
     [, $outsider] = createOrganizationWithOwner('組織B');
     $project = Project::factory()->forOrganization($organization)->create();
@@ -51,7 +53,22 @@ test('他組織のユーザーは追加できない (cross-org は 403)', functi
     $this->actingAs($owner)->post("/projects/{$project->id}/members", [
         'user_id' => $outsider->id,
         'role' => ProjectRole::Member->value,
-    ])->assertForbidden();
+    ])->assertSessionHasErrors(['user_id' => '追加できるのは組織のメンバーだけです。']);
+
+    expect($project->members()->count())->toBe(0);
+});
+
+test('pivot 在籍だがロール未付与のユーザーは追加できない', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+    // organization_user には居るが Laratrust ロールが無い異常行 (attach のみ・addRole しない)
+    $broken = User::factory()->create();
+    $organization->users()->attach($broken);
+
+    $this->actingAs($owner)->post("/projects/{$project->id}/members", [
+        'user_id' => $broken->id,
+        'role' => ProjectRole::Member->value,
+    ])->assertSessionHasErrors(['user_id' => '追加できるのは組織のメンバーだけです。']);
 
     expect($project->members()->count())->toBe(0);
 });

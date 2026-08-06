@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Http\Middleware;
 
-use App\Models\Organization;
 use App\Models\User;
 use Closure;
 use Illuminate\Http\Request;
@@ -34,13 +33,17 @@ final class McpConsentOrganizationBinder
             return $response;
         }
 
+        // 既存の bool guard は必ず残す。filter_var(true, FILTER_VALIDATE_INT) は
+        // 1 を返す (PHP 8.4 実測) ため、これが無いと `organization_id=true` が
+        // 組織 id 1 として membership 判定に流れ、入力分類契約が崩れる。
         if (is_bool($raw)) {
             throw new HttpException(422, 'Invalid organization_id.');
         }
 
         // `is_numeric('1.5')` 由来の truncation 事故防止。
-        // filter_var(FILTER_VALIDATE_INT) は `1.5` / `1e5` / `"1 "` / `true` を reject、
-        // `min_range => 1` で 0 / 負数も拒否する。
+        // filter_var(FILTER_VALIDATE_INT) は `1.5` / `1e5` / `abc` / 先頭ゼロ (`001`) を reject し、
+        // `min_range => 1` で 0 / 負数も拒否する。前後空白と符号 (`' 1'` / `'1 '` / `'+1'`) は
+        // 許容され int へ正規化される (PHP 8.4 実測。ConsentOrganizationBinderTest が固定)。
         $orgId = filter_var($raw, FILTER_VALIDATE_INT, [
             'options' => ['min_range' => 1],
         ]);
@@ -56,13 +59,10 @@ final class McpConsentOrganizationBinder
             return redirect()->guest(route('login'));
         }
 
-        $organization = Organization::query()->find($orgId);
-        if ($organization === null) {
-            throw new HttpException(422, 'Unknown organization.');
-        }
-
-        // membership は organization_user pivot が単一ソース。
-        if (! $user->organizations()->whereKey($organization->id)->exists()) {
+        // membership は organization_user pivot が単一ソース。**組織を fetch してから**
+        // 判定すると「不在 = 422 / 実在の非 member = 403」で組織の実在が 1 bit 漏れるため、
+        // 整数として受理した id は 1 つ残らずここへ流し、同一の 403 に落とす (aicue:T118)。
+        if (! $user->organizations()->whereKey($orgId)->exists()) {
             // consent 画面から非 member 組織を選べない UI ガードを迂回した場合の最終防御。
             throw new HttpException(403, 'You are not a member of the selected organization.');
         }

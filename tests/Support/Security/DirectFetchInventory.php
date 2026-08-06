@@ -313,28 +313,10 @@ final class DirectFetchInventory
                 calledBy: 'App\Services\Organization\OrganizationMembershipService::transferOwnership',
             ),
 
-            // --- ★債務 (新規コードで使わない。fetch 時点でスコープが閉じていない) ---
-            'Http/Controllers/Organizations/OrganizationOwnershipController.php#store#User.findOrFail:$userId#1' => DirectFetchJustificationEntry::globalExistenceRuleDebt(
-                'payload の user_id を組織スコープ外で引いている。移譲先が組織メンバーであることの検証は'
-                .'Service のロック下で行われるが、fetch 時点ではスコープが閉じていない',
-                verifiedBy: 'App\Services\Organization\OrganizationMembershipService::transferOwnership',
-                validationRule: 'exists:users,id',
-                todoRef: 'aicue:T118',
-            ),
-            'Http/Controllers/Projects/ProjectMemberController.php#store#User.findOrFail:$userId#1' => DirectFetchJustificationEntry::globalExistenceRuleDebt(
-                'payload の user_id を組織スコープ外で引いている。組織メンバーであることの確認は'
-                .'fetch 後の organizationRole() 判定であり、fetch 時点ではスコープが閉じていない',
-                verifiedBy: 'App\Http\Controllers\Projects\ProjectMemberController::store',
-                validationRule: 'exists:users,id',
-                todoRef: 'aicue:T118',
-            ),
-            'Http/Middleware/McpConsentOrganizationBinder.php#handle#Organization.find:$orgId#1' => DirectFetchJustificationEntry::globalExistenceRuleDebt(
-                'consent payload の organization_id を組織スコープ外で引いている。membership 確認は'
-                .'fetch 後の organizations()->whereKey()->exists() であり、fetch 時点ではスコープが閉じていない',
-                verifiedBy: 'App\Http\Middleware\McpConsentOrganizationBinder::handle',
-                validationRule: 'filter_var(FILTER_VALIDATE_INT, min_range=1)',
-                todoRef: 'aicue:T118',
-            ),
+            // --- ★債務 (globalExistenceRuleDebt) は現在 0 件。
+            //     aicue:T118 で payload 由来 id 3 件 (org 移譲 / project メンバー追加 /
+            //     MCP consent) を relation 起点の解決へ寄せたため。
+            //     再発時はここに分類を書き、modelDirectFetchDebtCap() も同時に上げる。
         ];
     }
 

@@ -122,7 +122,7 @@
      * 移譲確認ダイアログを開く。成立し得ない操作は ConfirmDialog まで進めず、
      * 押下時にエラー表示する (disabled 禁止 = AGENTS.md 8)。
      * 選択値の実在検証は DOM 改変・stale 値の早期排除で、最終ゲートはサーバ
-     * (Policy + exists:users,id + Service のメンバーシップ検証)。
+     * (Policy + 組織 relation での解決 + Service のロック下再検証)。
      * select の value は string のため、Member.id (number) は String() に揃えて比較する。
      */
     function openTransferDialog(event: SubmitEvent): void {

@@ -48,12 +48,17 @@ function modelDirectFetchCandidateFloor(): int
 /**
  * 債務 case の件数上限。
  *
- * 実測 3 件 (payload user_id 2 件 + MCP consent の organization_id 1 件)。
- * 4 件目を足そうとした瞬間に CI が落ち、「debt を増やす」判断が必ずレビューの俎上に乗る。
+ * **実測 0 件**。aicue:T118 で payload 由来 id 3 件 (org 移譲 / project メンバー追加 /
+ * MCP consent) を relation 起点へ寄せ、`exists:` rule とセットで存在オラクルを閉じたため。
+ * 0 のまま維持する — 1 件足すには inventory 登録と本 cap の引き上げの
+ * **2 つ**が要り、必ずレビューの俎上に乗る。
+ * 分類 case (`PayloadIdWithGlobalExistenceRuleDebt`) と
+ * `DirectFetchJustificationEntry::globalExistenceRuleDebt()` は
+ * 「この形は債務である」という裁定語彙として**残す** (消すと再発時の分類が失われる)。
  */
 function modelDirectFetchDebtCap(): int
 {
-    return 3;
+    return 0;
 }
 
 /** `actorSource` の既定値集合。 */

@@ -9,18 +9,19 @@ use App\Http\Concerns\ResolvesCurrentOrganization;
 use App\Http\Controllers\Controller;
 use App\Models\Project;
 use App\Models\User;
-use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Webmozart\Assert\Assert;
 
 /**
  * プロジェクトメンバー管理 (project_members pivot の追加・削除)。
  *
- * - 追加対象は payload の user_id で受ける (URL 子リソースでないため 404 秘匿でなく、
- *   同一組織メンバーでなければ 403 = cross-org 招へいの禁止)
+ * - 追加対象は payload の user_id で受ける。URL 上の子リソース指定ではないので
+ *   404 秘匿ではなく **field error (validation failure)** に倒す。不在 id・他組織ユーザーを
+ *   同一文言に揃えることで存在オラクルを閉じている (aicue:T118)
  * - 削除対象は URL の {user}。org member でなければ**認可より前に 404**
  *   (cross-tenant の存在を漏らさない)
  * - ロール変更は削除→追加でなく store の再実行 (syncWithoutDetaching + pivot 更新) で行う
@@ -29,16 +30,25 @@ class ProjectMemberController extends Controller
 {
     use ResolvesCurrentOrganization;
 
+    /**
+     * 追加対象が現在組織のメンバーとして解決できないときの文言。
+     * 「不在 id」「他組織のユーザー」「pivot 在籍だがロール未付与の異常行」を
+     * **同一文言**へ落とすことで users.id の存在オラクルを閉じる (aicue:T118)。
+     */
+    private const NOT_ORGANIZATION_MEMBER_MESSAGE = '追加できるのは組織のメンバーだけです。';
+
     /** メンバー追加 (組織メンバーのみ。既存メンバーはロール更新になる) */
     public function store(Request $request, Project $project): RedirectResponse
     {
         $organization = $this->resolveCurrentOrganization($request);
-        // URL 整合 guard: 認可より前に 404
+        // 層 2: URL 整合 guard (認可より前に 404)
         $this->resolveOrganizationProject($organization, $project);
+        // 層 3: 認可。payload に触れる前に通す (順序は PayloadIdExistenceOracleTest が固定)
         Gate::authorize('update', $project);
 
+        // 形式検証のみ (`exists:users,id` は全体実在を漏らすため使わない)
         $request->validate([
-            'user_id' => ['required', 'integer', 'exists:users,id'],
+            'user_id' => ['required', 'integer'],
             'role' => ['required', 'string', Rule::enum(ProjectRole::class)],
         ]);
         $userId = $request->input('user_id');
@@ -46,13 +56,15 @@ class ProjectMemberController extends Controller
         $role = $request->input('role');
         Assert::string($role);
 
-        /** @var User $target */
-        $target = User::query()->findOrFail((int) $userId);
-
-        // 追加対象が同一組織メンバーでなければ拒否 (cross-org 不変条件。payload 由来のため
-        // 存在秘匿 404 でなく認可拒否 403 に倒す)
-        if ($target->organizationRole($organization) === null) {
-            throw new AuthorizationException('Target user is not a member of this organization.');
+        // 追加対象は現在組織の relation から解決する。
+        // pivot 在籍 (organization_user) と Laratrust ロール付与は同値ではない
+        // (OrganizationMembershipService の「ロール未付与の異常行」修復契約) ため、
+        // ロール判定も残す。両者の失敗は同一 field error に落とす。
+        $target = $organization->users()->whereKey((int) $userId)->first();
+        if (! $target instanceof User || $target->organizationRole($organization) === null) {
+            throw ValidationException::withMessages([
+                'user_id' => [self::NOT_ORGANIZATION_MEMBER_MESSAGE],
+            ]);
         }
 
         // pivot ロールは明示代入 (既存メンバーはロール更新)
