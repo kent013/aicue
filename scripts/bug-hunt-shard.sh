@@ -709,6 +709,21 @@ cmd_keepdb_check() {
 #   一致させること (self-test [y] が PHP 実評価で drift を機械検出する。順序は不問 = sort 比較)。
 BUGHUNT_WORKER_CONNECTIONS=(database-analysis database-render database-media)
 
+# 接続ごとの listener timeout (規則 1: その接続の retry_after を必ず下回る)。
+# ★ 一律値にしない: retry_after は接続ごとに違う (1680 / 1680 / 300)。
+# ★ 旧実装は 3 接続すべてに一律 1800 を与えており、database-media (retry_after=300) では
+#   6 倍の違反だった (二重取得の窓)。
+# ★ queue:listen では Job 側 $timeout は効かない (Listener は子 `queue:work --once` へ
+#   --timeout を渡さず、Worker::runNextJob() は SIGALRM を張らない)。ここが唯一の上限。
+# ★ BUGHUNT_WORKER_CONNECTIONS の全要素が鍵を持つこと / 各値が retry_after 未満で
+#   あることは self-test [y3b] と tests/Architecture/QueueWorkerLeaseInvariantTest.php が
+#   二段で固定する。
+declare -A BUGHUNT_WORKER_TIMEOUTS=(
+    [database-analysis]=1620
+    [database-render]=1620
+    [database-media]=240
+)
+
 # worker pid が「当該 connection の queue:listen」として生きているかの検証 (kill -0 では
 # stale pidfile / pid 再利用を誤判定するため /proc cmdline を照合する。Linux 前提 = teardown と同じ)。
 # 照合は artisan / queue:listen / connection 名 / --env=bughunt.local を独立に確認する
@@ -733,16 +748,20 @@ worker_alive() {
 #   静かに死に F-01 が再発しうる)。
 # - setsid で専用 process group (pid==pgid) 化: teardown が process group 一括 kill で
 #   master と子を race なく停止するため。
-# - --tries=1 は Job 側の $tries=1 と整合。--timeout=1800 は listener が子を kill する天井で、
-#   Job 側の $timeout (1,380/1,500) が pcntl alarm で先に効く (予約 TTL 1,800 と同値)。
+# - --tries=1 は Job 側の $tries=1 と整合。--timeout は BUGHUNT_WORKER_TIMEOUTS の
+#   接続別の値 (規則 1: その接続の retry_after を必ず下回る)。listener が子を kill する
+#   天井であり、queue:listen では Job 側 $timeout が効かないためこれが唯一の上限になる。
 start_shard_workers() {
     local shard=$1 db=$2 url=$3
     guard_bughunt_runtime "${db}" bughunt
-    local conn pid
+    local conn pid wtimeout
     # 秘密 (LLM_KEY_ENV) を展開するプロセス起動を xtrace ガードで挟む (-x 有効時も値を trace に出さない)。
     # worker は serve と同一の env 隔離 + モードフラグ + 実キー (real-llm 時のみ) を注入する。
     secret_xtrace_off
     for conn in "${BUGHUNT_WORKER_CONNECTIONS[@]}"; do
+        wtimeout="${BUGHUNT_WORKER_TIMEOUTS[${conn}]:-}"
+        [[ -n "${wtimeout}" ]] \
+            || die 1 "BUGHUNT_WORKER_TIMEOUTS に ${conn} の値が無い (規則 1: listener timeout 未定義では起動しない)"
         env -i PATH="${PATH}" HOME="${HOME}" \
             DB_CONNECTION=pgsql \
             DB_HOST="$(env_file_required DB_HOST)" DB_PORT="$(env_file_required DB_PORT)" \
@@ -750,7 +769,7 @@ start_shard_workers() {
             APP_URL="${url}" \
             ${MODE_ENV[@]+"${MODE_ENV[@]}"} ${LLM_KEY_ENV[@]+"${LLM_KEY_ENV[@]}"} \
             setsid php artisan queue:listen "${conn}" --env=bughunt.local \
-                --sleep=1 --tries=1 --timeout=1800 \
+                --sleep=1 --tries=1 --timeout="${wtimeout}" \
             > "$(worker_logfile "${shard}" "${conn}")" 2>&1 &
         pid=$!
         echo "${pid}" > "$(worker_pidfile "${shard}" "${conn}")"
@@ -1741,6 +1760,40 @@ CURLEOF
         && t_fail "cmd_teardown: serve pidfile の '|| continue' が復活している (worker/wrapper 掃除がスキップされる回帰)"
     echo "$(declare -f cmd_keepdb_check)" | grep -q 'worker_alive' \
         || t_fail "cmd_keepdb_check に worker 生存確認が無い"
+
+    # (y3b) 接続別 listener timeout: 全 connection が鍵を持ち、値が retry_after 未満であること
+    #       (規則 1 の実行配線側。静的側は QueueWorkerLeaseInvariantTest が二段目)。
+    #       ★ 既存の (y4) 以降を renumber しないため 3b とした (wrk_def は (y3) で取得済み)。
+    local conn conn_rt wt
+    for conn in "${BUGHUNT_WORKER_CONNECTIONS[@]}"; do
+        wt="${BUGHUNT_WORKER_TIMEOUTS[${conn}]:-}"
+        if [[ -z "${wt}" ]]; then
+            t_fail "BUGHUNT_WORKER_TIMEOUTS に ${conn} の値が無い (規則 1 の検査対象から漏れる)"
+            continue
+        fi
+        # vendor/autoload.php を require する (config/queue.php が env() を呼ぶため。既存 (y2) と同じ)
+        conn_rt="$(cd "${WORKSPACE}" && php -r '
+            require "vendor/autoload.php";
+            $cfg = require "config/queue.php";
+            echo (int) ($cfg["connections"][$argv[1]]["retry_after"] ?? 0);
+        ' "${conn}" 2>/dev/null || echo "__php_failed__")"
+        # 算術比較の前に形式検査する (不正値で bash の算術評価エラーにしない)
+        if [[ "${conn_rt}" == "__php_failed__" ]]; then
+            t_fail "規則 1 検査 実行不能: config/queue.php を PHP 評価できない (composer install 後に再実行)"
+        elif [[ ! "${wt}" =~ ^[0-9]+$ ]]; then
+            t_fail "BUGHUNT_WORKER_TIMEOUTS[${conn}] が正の整数でない (${wt})"
+        elif [[ ! "${conn_rt}" =~ ^[0-9]+$ || "${conn_rt}" -le 0 ]]; then
+            t_fail "config の ${conn}.retry_after が正の整数でない (${conn_rt})"
+        elif [[ "${wt}" -le 0 || "${wt}" -ge "${conn_rt}" ]]; then
+            t_fail "規則 1 違反: ${conn} の listener timeout (${wt}) が retry_after (${conn_rt}) 以上"
+        fi
+    done
+    # 起動行が数値リテラル直書きへ戻っていないこと (配列経由の強制)
+    echo "${wrk_def}" | grep -q -- 'BUGHUNT_WORKER_TIMEOUTS' \
+        || t_fail "start_shard_workers が BUGHUNT_WORKER_TIMEOUTS 経由で --timeout を渡していない"
+    # `--timeout=1800` だけでなく `--timeout 1800` (空白区切り) も禁止する
+    echo "${wrk_def}" | grep -qE -- '--timeout(=|[[:space:]]+)[0-9]+' \
+        && t_fail "start_shard_workers に --timeout の数値直書きが復活している (接続別の値を潰す)"
 
     # (y4) worker_alive: stale pidfile (存在しない pid) と cmdline 不一致 (自プロセス pid) を fail 判定
     mkdir -p "${TMP_BASE}"

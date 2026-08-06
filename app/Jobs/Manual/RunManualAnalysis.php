@@ -51,7 +51,7 @@ class RunManualAnalysis implements ShouldQueue
 
     public function __construct(public readonly int $analysisJobId)
     {
-        // retry_after を解析専用値にした connection (config/queue.php)。既定 database は 90s のため。
+        // retry_after を解析専用値にした connection (config/queue.php)。既定 database は 600s のため。
         // Queueable trait が $connection プロパティを既に定義しているため、プロパティ再宣言でなく
         // onConnection() で指定する (typed 再宣言は trait composition エラーになる)
         $this->onConnection('database-analysis');

@@ -35,12 +35,19 @@ return [
             'driver' => 'sync',
         ],
 
+        // 既定接続 (Billing 6 / Mail 2 / Notification 6)。retry_after は **リテラル**で持つ:
+        // 静的 gate (QueueWorkerLeaseInvariantTest) は config をテスト環境の値で読むため、
+        // env 上書きを残すと「gate は通るが本番の実値は別」を作れてしまう (gate が嘘をつく)。
+        // 600s の根拠: この接続の既知の有限上限は ExecuteAutoRechargeAttemptJob の
+        // Stripe 4〜5 呼び出し × SDK 上限 80s (Stripe\HttpClient\CurlClient::DEFAULT_TIMEOUT)
+        // = 約 400s。ワーカー --timeout 540 (< 600) がそれを上回る
+        // (docs/architecture.md §キューのリース期間とワーカー制限時間の規約)。
         'database' => [
             'driver' => 'database',
             'connection' => env('DB_QUEUE_CONNECTION'),
             'table' => env('DB_QUEUE_TABLE', 'jobs'),
             'queue' => env('DB_QUEUE', 'default'),
-            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 90),
+            'retry_after' => 600,
             'after_commit' => false,
         ],
 
