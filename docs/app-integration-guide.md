@@ -284,9 +284,69 @@ LLM を使う機能が要件に来たら、まず利用形態を分類する:
    「権限の無い actor が実際に 403 になること」は Feature テストの責務
    (見本: `tests/Feature/Api/V1/ItemAuthorizationTest.php`)。
    この 2 層(入口 = Architecture / 実挙動 = Feature)はセットで維持する
-6. `composer test` で 3 つの gate
+6. **流量制限 (throttle) を付ける**。保護対象群(未認証で到達しうる変更系 /
+   ステートレスな機械向け経路 `api/`・`oauth/`・`.well-known/oauth-` /
+   認証面の変更系)は **throttle をちょうど 1 本**持つか、
+   `ThrottleCoverageInventoryTest` の exemption inventory へ
+   `ThrottleCoverageExemption` + 30 文字以上の根拠付きで登録する(deny-by-default)。
+   詳細は下の「§7b 流量制限の付与規約」
+7. `composer test` で 4 つの gate
    (`ControllerAuthorizationGateTest` / `NestedRouteIdorDefenseTest` /
-   `ProjectRouteCurrentOrgGuardTest`)が green であることを確認する
+   `ProjectRouteCurrentOrgGuardTest` / `ThrottleCoverageInventoryTest`)が
+   green であることを確認する
+
+### §7b 流量制限の付与規約
+
+**貼る仕組みの 3 段優先順**(上から順に検討し、**上で貼れるなら下は使わない**):
+
+1. **route 定義に直接書く**(自前 route)。`->middleware('throttle:{limiter}')`
+2. **package の設定で貼る**(vendor 登録 route。`config/fortify.php` の `limiters` など)。
+   受け付けるキーが限られる(Fortify は login / two-factor / passkeys / verification の 4 つだけ)ため、
+   賄えない分だけ 3 に落とす
+3. **`RouteThrottleBinder::attachOnBooted()` で後付けする**(2 でも貼れない vendor route 専用)。
+   `$this->app->booted()` の中で走り、route 名が消えていれば**起動時に fail-fast** する
+   (silent degradation = 無音の無防備を作らない)。付与は冪等
+   (実装: `app/Support/Http/RouteThrottleBinder.php`)
+   - **`php artisan route:cache` を毎デプロイ再生成すること**。後付けは route cache 生成時
+     (`route:clear` 後の再 bootstrap) に焼き込まれ、**cached 起動では skip される**
+     (compiled route collection が booted callback より後に読まれるため参照できない)。
+     stale な route cache を残すと古い付与状態のまま起動する
+   - 後付け側の判定は controller middleware を見ない
+     (boot 中に controller を container 解決すると request scope の singleton が
+      早すぎるタイミングで確定するため)。controller 側 throttle との二重付与は
+     目録検査が「2 本以上」として検出する
+
+**キー規約**: named limiter のキーは `{レーン}:{種別}:{値}`
+(例 `login:email-ip:{hash}:{ip}` / `webhook-ses:ip:{ip}`)。
+`RateLimiterKeyConventionTest` が全 limiter を実際に評価して機械検査する。
+
+- **email をキーに入れるときは `EmailNormalizer::normalize()` → `EmailHash::compute()`**。
+  平文も正規化済み平文もキャッシュキーに残さない。
+  `Str::transliterate()` は**使わない**(legitimate な Unicode email を別 user へ
+  collapse させ、無関係アカウントの巻き添えロックアウトになる)
+- **inline throttle (`throttle:6,1`) を使ってよいのは「認証済みかつ actor 自身に
+  閉じる操作」だけ**。フレームワーク既定のキー(認証済み = user id)が
+  ちょうど求める数える単位になる場合に限る。未認証面 / 主体が IP や email に
+  なる面は必ず named limiter を作る
+- **limiter キーに route parameter を入れない**(`NamedRateLimiterKeyTest`)。
+  bucket が id ごとに分かれると「429 になるまでの回数」が実在を漏らす
+
+**閾値**: プロダクト依存のため既存値を勝手に変えない。新しい面には
+**既に本番稼働している同性質エンドポイントと同値**を充てる
+(公開フォーム = IP 5/min + IP+email 10/60min、自分の credential 操作 = 6/min、
+認証済みの管理操作 = 10/min)。
+
+**未認証 webhook の注意**: throttle は署名検証より**先**に走る。したがって
+固定キー(全体天井)を置くと「無効 body の連打で正当な通知を 429 にできる」
+= 攻撃者が業務を止められる口になる。IP 単位に留め、これは
+**署名検証コストの上限であって正当通知を守る全体天井ではない**と理解する
+(共有クラウド出口では巻き添え 429 がありうるため、送信元 IP の分布と
+429 発生率を監視項目に入れる)。
+
+**exemption を書くときの原則**: exemption は「throttle が無いことが**正しい**」
+という主張であり、その**前提**(署名で短絡する / 定数応答である /
+production では登録されない)は `ThrottleExemptionPremiseTest` で
+behavioral に固定する。前提が崩れたのに気づけない状態を作らない。
 
 ## 8. 設計ドキュメントの書き方(このテンプレ上の流儀)
 

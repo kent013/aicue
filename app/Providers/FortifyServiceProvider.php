@@ -23,6 +23,9 @@ use App\Models\User;
 use App\Services\Onboarding\IntendedPlanResolver;
 use App\Services\Organization\OrganizationMembershipService;
 use App\Support\Auth\EmailVerificationContinuation;
+use App\Support\EmailHash;
+use App\Support\EmailNormalizer;
+use App\Support\Http\RouteThrottleBinder;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Http\RedirectResponse;
@@ -31,7 +34,6 @@ use Illuminate\Routing\RouteCollectionInterface;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
-use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response as InertiaResponse;
 use Laravel\Fortify\Actions\RedirectIfTwoFactorAuthenticatable;
@@ -47,6 +49,7 @@ use Laravel\Fortify\Contracts\RegisterResponse as RegisterResponseContract;
 use Laravel\Fortify\Contracts\SuccessfulPasswordResetLinkRequestResponse as SuccessfulPasswordResetLinkRequestResponseContract;
 use Laravel\Fortify\Contracts\TwoFactorDisabledResponse as TwoFactorDisabledResponseContract;
 use Laravel\Fortify\Contracts\VerifyEmailResponse as VerifyEmailResponseContract;
+use Laravel\Fortify\Features;
 use Laravel\Fortify\Fortify;
 use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 
@@ -119,6 +122,72 @@ class FortifyServiceProvider extends ServiceProvider
         $this->configureRateLimiters();
         $this->configureViews();
         $this->attachRecentAuthToSensitiveRoutes();
+        $this->attachThrottleToFortifyRoutes();
+    }
+
+    /**
+     * Fortify が登録する認証系 route への throttle 後付け表。
+     *
+     * config/fortify.php の `limiters` は login / two-factor / passkeys / verification の
+     * 4 キーしか受け付けないため、それ以外は route 名での後付けで賄う
+     * (「貼る仕組みの 3 段優先順」の第 2 段。第 1 段で貼れるものは第 1 段のまま)。
+     *
+     * 閾値の根拠:
+     *  - password-reset-request / password-reset-submit / account-register は
+     *    「未認証 + メール送信または credential 総当り」であり、**既に本番稼働中の
+     *    同性質エンドポイント (inquiry / login) と同値**にする (新しい値を発明しない)。
+     *  - `6,1` は recent-auth.password / settings.password.store と同値 (自分の credential 操作)。
+     *  - `10,1` は onboarding.activate-personal と同値 (認証済みの管理操作)。
+     *
+     * ★inline (`6,1` / `10,1`) を使ってよいのは **認証済みかつ actor 自身に閉じる route** だけ。
+     *   フレームワーク既定のキー (認証済み = user id) がちょうど求める数える単位になる。
+     *   未認証面 / 主体が IP や email になる面は必ず named limiter を作ること。
+     *
+     * ★`feature` は Fortify の機能フラグ (config/fortify.php の `features`)。
+     *   null = 常に必須 (route が無ければ起動時 fail-fast)。
+     *   非 null = その機能が有効なときだけ必須 (無効なら route 自体が登録されないため skip)。
+     *   **skip が穴にならない根拠**: 機能を再有効化して binder が skip したままなら、
+     *   ThrottleCoverageInventoryTest が「throttle 無しの保護対象 route」として必ず fail する
+     *   (binder の fail-fast と目録検査の二重の網で守る)。
+     *
+     * @return array<string, array{throttle: string, feature: string|null}>
+     */
+    private static function throttledFortifyRoutes(): array
+    {
+        return [
+            'password.email' => ['throttle' => 'password-reset-request', 'feature' => Features::resetPasswords()],
+            'password.update' => ['throttle' => 'password-reset-submit', 'feature' => Features::resetPasswords()],
+            'register.store' => ['throttle' => 'account-register', 'feature' => Features::registration()],
+            'password.confirm.store' => ['throttle' => '6,1', 'feature' => null],
+            'user-password.update' => ['throttle' => '6,1', 'feature' => Features::updatePasswords()],
+            'two-factor.enable' => ['throttle' => '10,1', 'feature' => Features::twoFactorAuthentication()],
+            'two-factor.confirm' => ['throttle' => '10,1', 'feature' => Features::twoFactorAuthentication()],
+            'two-factor.disable' => ['throttle' => '10,1', 'feature' => Features::twoFactorAuthentication()],
+            'two-factor.regenerate-recovery-codes' => ['throttle' => '10,1', 'feature' => Features::twoFactorAuthentication()],
+        ];
+    }
+
+    /**
+     * Fortify 登録 route へ throttle を後付けする (設定で貼れないものだけ)。
+     *
+     * route 登録は Fortify package provider の boot 内で行われるため、全 provider boot 後の
+     * booted callback で名前解決する (attachRecentAuthToSensitiveRoutes と同じ流儀)。
+     * 後付けは冪等で、route 名が消えていれば fail-fast する
+     * (route:cache 起動時の扱いは RouteThrottleBinder::attachOnBooted の docblock を参照)。
+     */
+    private function attachThrottleToFortifyRoutes(): void
+    {
+        $routes = [];
+
+        foreach (self::throttledFortifyRoutes() as $name => $spec) {
+            if ($spec['feature'] !== null && ! Features::enabled($spec['feature'])) {
+                continue; // 機能無効 = route 自体が存在しない (目録検査が二重の網)
+            }
+
+            $routes[$name] = $spec['throttle'];
+        }
+
+        RouteThrottleBinder::attachOnBooted($this->app, $routes);
     }
 
     /**
@@ -166,32 +235,108 @@ class FortifyServiceProvider extends ServiceProvider
 
     private function configureRateLimiters(): void
     {
-        RateLimiter::for('login', function (Request $request) {
-            $username = $request->input(Fortify::username());
-            $throttleKey = Str::transliterate(
-                Str::lower(is_string($username) ? $username : '').'|'.$request->ip(),
+        /*
+         * ログイン試行の RateLimiter。閾値 5/min は据え置き (プロダクト依存の既定値)。
+         *
+         * ★Str::transliterate を廃止した理由:
+         *   App\Support\EmailNormalizer の docblock が「legitimate な Unicode email を
+         *   別 user に collapse させるリスクがあるため使わない」と明記しているのに、
+         *   本 limiter だけが使っており設計意図と実装が正面から矛盾していた。
+         *   実害は「無関係アカウントの巻き添えロックアウト」。
+         *
+         * ★email は EmailHash (HMAC-SHA256 / app.key 鍵付き) でハッシュ化してからキーに入れる。
+         *   **canonical 化の正本は EmailNormalizer** (保存・検索・inquiry と同一)。
+         *   limiter は validation より前に走るため email が非 string で来うる → is_string ガード必須。
+         */
+        RateLimiter::for('login', function (Request $request): Limit {
+            return Limit::perMinute(5)->by(
+                'login:email-ip:'.self::emailKey($request, Fortify::username())
+                .':'.($request->ip() ?? 'unknown'),
             );
-
-            return Limit::perMinute(5)->by($throttleKey);
         });
 
-        RateLimiter::for('two-factor', function (Request $request) {
+        RateLimiter::for('two-factor', function (Request $request): Limit {
             $loginId = $request->session()->get('login.id');
 
-            return Limit::perMinute(5)->by(is_scalar($loginId) ? (string) $loginId : $request->ip().'|2fa');
+            return is_scalar($loginId)
+                ? Limit::perMinute(5)->by('two-factor:login-id:'.$loginId)
+                : Limit::perMinute(5)->by('two-factor:ip:'.($request->ip() ?? 'unknown'));
         });
 
         // passkey (WebAuthn) endpoint。config/fortify.php の limiters.passkeys が
         // この名前を指しており、未設定だと Fortify が throttle 自体を外す
         // (= 未認証の challenge 発行 GET /passkeys/login/options が無制限になる)。
         // 未認証の login-options を含むため、認証済みは user 単位・未認証は IP 単位で絞る。
-        RateLimiter::for('passkeys', function (Request $request) {
+        RateLimiter::for('passkeys', function (Request $request): Limit {
             $identifier = $request->user()?->getAuthIdentifier();
 
-            return Limit::perMinute(10)->by(
-                is_scalar($identifier) ? 'passkey|'.$identifier : 'passkey|'.$request->ip(),
-            );
+            return is_scalar($identifier)
+                ? Limit::perMinute(10)->by('passkeys:user:'.$identifier)
+                : Limit::perMinute(10)->by('passkeys:ip:'.($request->ip() ?? 'unknown'));
         });
+
+        $this->configureAuthFormRateLimiters();
+    }
+
+    /**
+     * 未認証 + メール送信 / credential 総当りを伴う認証系 POST の RateLimiter。
+     *
+     * 閾値は**既に本番稼働中の同性質エンドポイントと同値**にする (新しい値を発明しない):
+     *  - IP 単独 5/min      = inquiry (公開問い合わせフォーム) / login と同値
+     *  - IP+email 10/60min  = inquiry と同値
+     *
+     * 2 系統に分ける理由: IP 単独は「1 本の回線からのメール爆撃」を、
+     * IP+email は「同一宛先への長時間の反復」を止める (数える単位が違う)。
+     *
+     * ★`RateLimiter::for()` の第 1 引数は必ずリテラルで書く (ループで一括登録しない)。
+     *   RateLimiterKeyConventionTest の scanner が非リテラル引数を deny-by-default で
+     *   fail させる契約になっており、沈黙する登録を作らないため。
+     */
+    private function configureAuthFormRateLimiters(): void
+    {
+        RateLimiter::for(
+            'password-reset-request',
+            fn (Request $request): array => self::authFormLimits('password-reset-request', $request, Fortify::email()),
+        );
+
+        RateLimiter::for(
+            'password-reset-submit',
+            fn (Request $request): array => self::authFormLimits('password-reset-submit', $request, Fortify::email()),
+        );
+
+        RateLimiter::for(
+            'account-register',
+            fn (Request $request): array => self::authFormLimits('account-register', $request, Fortify::username()),
+        );
+    }
+
+    /**
+     * 認証フォーム系 limiter の 2 系統 (IP 単独 / IP+email) を組み立てる。
+     *
+     * @return list<Limit>
+     */
+    private static function authFormLimits(string $lane, Request $request, string $field): array
+    {
+        $ip = $request->ip() ?? 'unknown';
+
+        return [
+            Limit::perMinute(5)->by($lane.':ip:'.$ip),
+            Limit::perMinutes(60, 10)->by($lane.':ip-email:'.$ip.':'.self::emailKey($request, $field)),
+        ];
+    }
+
+    /**
+     * limiter キーに埋め込む email の鍵付きハッシュ (平文を cache キーに残さない)。
+     *
+     * 正規化の正本は EmailNormalizer (保存・検索・inquiry と同一関数)。
+     * limiter は validation より前に走るため、非 string / 空文字は `anon` へ倒す。
+     */
+    private static function emailKey(Request $request, string $field): string
+    {
+        $raw = $request->input($field);
+        $email = is_string($raw) && $raw !== '' ? EmailNormalizer::normalize($raw) : '';
+
+        return $email !== '' ? EmailHash::compute($email) : 'anon';
     }
 
     /**

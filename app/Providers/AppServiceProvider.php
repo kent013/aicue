@@ -34,7 +34,9 @@ use App\Services\Mail\Sns\SnsSignatureVerifier;
 use App\Services\Render\FfmpegVideoComposer;
 use App\Services\Render\VideoComposer;
 use App\Support\CriticalActionContext;
+use App\Support\EmailHash;
 use App\Support\EmailNormalizer;
+use App\Support\Http\RouteThrottleBinder;
 use App\Support\PasswordPolicy;
 use App\Support\ProductionEnvGuard;
 use Aws\Sns\SnsClient;
@@ -234,6 +236,53 @@ class AppServiceProvider extends ServiceProvider
         $this->configureApiRateLimiters();
         $this->configureInquiryRateLimiter();
         $this->configureRenderRateLimiter();
+        $this->configureWebhookRateLimiters();
+        $this->attachThrottleToVendorRoutes();
+    }
+
+    /**
+     * 未認証 webhook (SES/SNS 通知・Stripe) の RateLimiter。
+     *
+     * ★固定キーの全体天井は**置かない**。throttle middleware は署名検証より前に走るため、
+     *   固定キーのバケットを署名前に消費させると「無効 body の連打で正当な通知を 429 にできる」
+     *   = 攻撃者が任意に業務を止められる口になる。
+     *
+     * ★レーンは送信元ごとに分ける。SES への攻撃で Stripe を止めない。
+     *
+     * ★これは**署名検証コストの上限**であり、正当通知を守る全体天井ではない。
+     *   IP キーである以上、共有クラウド出口 / proxy 設定の誤りでは巻き添え 429 がありうる
+     *   (運用は送信元 IP の分布と 429 発生率を監視すること)。
+     *   正当通知の保護は「送信元の署名済み identity で bucket を切る」設計が要る (後続 TODO)。
+     *
+     * 閾値の根拠: 正常時ピークは分あたり数件〜数十件 (SES bounce/complaint、Stripe イベント)。
+     * 単一送信元からの署名検証コスト増幅 (SNS は証明書取得を伴う) を有界にする値として
+     * ピークの 1〜2 桁上の 300/min を置く。429 は SNS も Stripe も再送対象であり
+     * 恒久喪失しない (Stripe は最大 3 日間の指数バックオフ)。
+     */
+    private function configureWebhookRateLimiters(): void
+    {
+        RateLimiter::for('webhook-ses', fn (Request $request): Limit => Limit::perMinute(300)
+            ->by('webhook-ses:ip:'.($request->ip() ?? 'unknown')));
+
+        RateLimiter::for('webhook-stripe', fn (Request $request): Limit => Limit::perMinute(300)
+            ->by('webhook-stripe:ip:'.($request->ip() ?? 'unknown')));
+    }
+
+    /**
+     * vendor が自動登録する route への throttle 後付け (設定で貼れないため第 2 段)。
+     *
+     * Cashier の POST /stripe/webhook は middleware が 1 本も無い状態で公開されており、
+     * 署名検証 (VerifyWebhookSignature) は Cashier 側の設定次第で外れうる。
+     * 後付けは冪等で、route 名が消えていれば起動時 fail-fast する。
+     *
+     * ★運用条件: `php artisan route:cache` を**毎デプロイ再生成する**こと。
+     *   後付けは route cache 生成時 (route:clear 後の再 bootstrap) に焼き込まれ、
+     *   cached 起動では skip される (詳細は RouteThrottleBinder::attachOnBooted の docblock)。
+     *   stale な route cache を残すと古い付与状態のまま起動する。
+     */
+    private function attachThrottleToVendorRoutes(): void
+    {
+        RouteThrottleBinder::attachOnBooted($this->app, ['cashier.webhook' => 'webhook-stripe']);
     }
 
     /**
@@ -251,14 +300,15 @@ class AppServiceProvider extends ServiceProvider
                 ? (string) $user->current_organization_id
                 : 'none';
 
-            return Limit::perMinute(6)->by("render-trigger:{$userId}:{$orgId}");
+            return Limit::perMinute(6)->by("render-trigger:actor-org:{$userId}:{$orgId}");
         });
     }
 
     /**
      * 公開問い合わせフォーム (POST /contact) の RateLimiter。IP 単独 + IP+email の 2 系統。
      * email 正規化は保存・検索と同一の EmailNormalizer に集約 (大文字小文字での limiter 回避防止)。
-     * email はキャッシュキーへの平文残存を避けるため sha256 でハッシュ化する。
+     * email はキャッシュキーへの平文残存を避けるため EmailHash (app.key 鍵付き HMAC-SHA256) で
+     * ハッシュ化する (単純 sha256 は低エントロピーな email に対して辞書攻撃に弱い)。
      * limiter は validation 前に走るため email が非 string で来うる → is_string ガード必須。
      */
     private function configureInquiryRateLimiter(): void
@@ -266,8 +316,8 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('inquiry', function (Request $request): array {
             $rawEmail = $request->input('email', '');
             $email = is_string($rawEmail) && $rawEmail !== '' ? EmailNormalizer::normalize($rawEmail) : '';
-            $emailKey = $email !== '' ? hash('sha256', $email) : 'anon';
-            $ip = (string) $request->ip();
+            $emailKey = $email !== '' ? EmailHash::compute($email) : 'anon';
+            $ip = $request->ip() ?? 'unknown';
 
             return [
                 Limit::perMinute(5)->by('inquiry:ip:'.$ip),
@@ -297,17 +347,17 @@ class AppServiceProvider extends ServiceProvider
     {
         $apiKey = $request->attributes->get('api_key');
         if ($apiKey instanceof ApiKey) {
-            return 'api-key:'.$apiKey->id;
+            return 'api:api-key:'.$apiKey->id;
         }
 
         // dual guard の OAuth user-token 経路 (throttle は resolve.api-actor より前段の
         // ため guard から直接引く)。actor 単位で数える (IP 共有環境での巻き添え防止)
         $oauthUser = $request->user('api-oauth');
         if ($oauthUser instanceof User) {
-            return 'oauth-user:'.$oauthUser->id;
+            return 'api:oauth-user:'.$oauthUser->id;
         }
 
-        return 'ip:'.($request->ip() ?? 'unknown');
+        return 'api:ip:'.($request->ip() ?? 'unknown');
     }
 
     /**
@@ -321,6 +371,6 @@ class AppServiceProvider extends ServiceProvider
             return 'mcp:user:'.$user->id;
         }
 
-        return 'ip:mcp:'.($request->ip() ?? 'unknown');
+        return 'mcp:ip:'.($request->ip() ?? 'unknown');
     }
 }

@@ -105,7 +105,10 @@ Route::post('/ses/notification', SesNotificationController::class)
         PreventRequestForgery::class,
         HandleInertiaRequests::class,
     ])
-    ->middleware('sns.signature')
+    // throttle は署名検証より**先**に走る (priority list により ThrottleRequests が先行)。
+    // これは署名検証コスト (SNS は証明書取得を伴う) の上限であり、正当通知を守る全体天井ではない。
+    // 実効順は tests/Feature/Security/AuthThrottleCoverageTest が固定する。
+    ->middleware(['throttle:webhook-ses', 'sns.signature'])
     ->name('webhooks.ses');
 
 /*
@@ -596,8 +599,10 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
 */
 Route::get('/invitations/accept', [InvitationAcceptanceController::class, 'show'])
     ->name('invitations.accept');
+// 招待トークンは hash 照合されるが、総当り試行そのものを有界にする
+// (onboarding.activate-personal と同値 = 認証済みの一回性操作)。
 Route::post('/invitations/accept', [InvitationAcceptanceController::class, 'store'])
-    ->middleware('auth')
+    ->middleware(['auth', 'throttle:10,1'])
     ->name('invitations.accept.store');
 
 /*
