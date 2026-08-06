@@ -2,6 +2,8 @@
 python = "3.13"
 uv = "latest"
 node = "22"
-"npm:pnpm" = "11.3.0"
+# package.json の packageManager と同じ版に揃える (pnpm は packageManager を見て
+# 自己昇格するため、食い違うとここの数字だけが嘘になる)
+"npm:pnpm" = "11.9.0"
 herdr = "latest"
 gh = "latest"

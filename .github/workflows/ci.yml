@@ -57,13 +57,18 @@ jobs:
           # 「could not find driver」で落ちる (pgsql lane が丸ごと動かない)
           extensions: pdo_pgsql, pgsql
           coverage: none
+      # .env は composer install より **前** に置く。composer の post-autoload-dump が
+      # `artisan package:discover` を走らせてアプリを boot するため、.env が無いと
+      # APP_ENV が既定の production になり AppServiceProvider::boot() の
+      # ProductionEnvGuard が fail-fast する (APP_KEY 未設定等で composer install ごと落ちる)。
+      - name: Prepare .env
+        run: cp .env.example .env
       - name: Install composer dependencies
         run: composer install --prefer-dist --no-progress --no-interaction
       - name: Prepare environment
         # passport:keys: OAuth/MCP テストは Passport 鍵 (storage/oauth-*.key) を要する。
         # CI には鍵が無いため生成する (未生成だと "Invalid key supplied" で fail)
         run: |
-          cp .env.example .env
           php artisan key:generate
           php artisan passport:keys --force
       # bug-hunt インベントリ (.claude/skills/app-bug-hunt/{screens,operations}.md) と
@@ -140,20 +145,23 @@ jobs:
           php-version: "8.4"
           extensions: pdo_pgsql, pgsql
           coverage: none
+      # version は指定しない: package.json の packageManager (pnpm@11.9.0) を単一の正本にする。
+      # 両方書くと action が "Multiple versions of pnpm specified" で即 fail する
+      # (実際に 11.3.0 と packageManager が食い違い、pnpm を使う 3 job が全部落ちていた)。
       - uses: pnpm/action-setup@v4
-        with:
-          version: 11.3.0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
+      # php job と同じ理由で composer install より前に置く (ProductionEnvGuard の fail-fast 回避)。
+      - name: Prepare .env
+        run: cp .env.example .env
       - name: Install composer dependencies
         run: composer install --prefer-dist --no-progress --no-interaction
       - name: Install pnpm dependencies
         run: pnpm install --frozen-lockfile
       - name: Prepare environment
         run: |
-          cp .env.example .env
           php artisan key:generate
           php artisan passport:keys --force
       # 実ブラウザは public/build のビルド済アセットを読む (withoutVite() は Browser lane に効かない)。
@@ -176,9 +184,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # version は指定しない: package.json の packageManager (pnpm@11.9.0) を単一の正本にする。
+      # 両方書くと action が "Multiple versions of pnpm specified" で即 fail する
+      # (実際に 11.3.0 と packageManager が食い違い、pnpm を使う 3 job が全部落ちていた)。
       - uses: pnpm/action-setup@v4
-        with:
-          version: 11.3.0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -222,13 +231,17 @@ jobs:
         with:
           php-version: "8.4"
           coverage: none
+      # version は指定しない: package.json の packageManager (pnpm@11.9.0) を単一の正本にする。
+      # 両方書くと action が "Multiple versions of pnpm specified" で即 fail する
+      # (実際に 11.3.0 と packageManager が食い違い、pnpm を使う 3 job が全部落ちていた)。
       - uses: pnpm/action-setup@v4
-        with:
-          version: 11.3.0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
+      # php job と同じ理由で composer install より前に置く (ProductionEnvGuard の fail-fast 回避)。
+      - name: Prepare .env
+        run: cp .env.example .env
       - name: Install composer dependencies
         run: composer install --prefer-dist --no-progress --no-interaction
       - name: Install pnpm dependencies
