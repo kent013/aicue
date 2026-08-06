@@ -242,11 +242,50 @@ route parameter を経由しない id (POST payload / MCP tool 引数 / token cl
 - 状態 guard (rendering/analyzing 中の保存は 409) は第一防衛、共有行ロックは
   「job 側の書き込みと保存が絶対に交差しない」ための構造的防衛 (二重防御)
 
+### キューのリース期間とワーカー制限時間の規約
+
+DB driver のキューには**実行中にリース (`retry_after`) を延長する API が無い**ため、
+「まだ走っている処理を落ちたと誤認させない」手段は設定の大小関係を保つことだけである。
+リースが切れると、まだ走っているジョブが**別のワーカーへ再配布される** (二重実行)。
+2 本の規則を**互いに独立に**満たす (両者のあいだに大小関係は課さない)。
+
+- **規則 1 (無条件)**: その接続で有効なワーカー / supervisor の `--timeout` が、
+  その接続の `retry_after` を**下回る**。1 つのワーカーは同じ接続の複数種類のジョブを
+  処理するため、`$timeout` を持つジョブが 1 本あっても免除されない。
+- **規則 2**: その接続で動くジョブの明示的な `$timeout` が、その接続の `retry_after` を下回る。
+
+| 接続 | `retry_after` | ワーカー `--timeout` | 備考 |
+|---|---|---|---|
+| `database` | 600 | **540** | 既知の有限上限は Stripe 4〜5 呼び出し × SDK 上限 80s = 約 400s |
+| `database-analysis` | 1680 | **1620** | ジョブ側 `$timeout` 1,560 を上回る帯 |
+| `database-render` | 1680 | **1620** | ジョブ側 `$timeout` 1,500 を上回る帯 |
+| `database-media` | 300 | **240** | 削除は冪等 + `$tries=3` なので kill されても再配布で完了する |
+
+**本番/ステージングの supervisor 定義にもこの `--timeout` を必ず設定する**
+(リポジトリ外にあるため CI は検知しない。上表が正本)。
+
+- `driver=database` の接続は **dev ワーカーペイン (`mprocs.yaml`) を必ず持つ**。
+  接続だけ増やしてワーカーを足し忘れるとジョブが黙って滞留する。
+- 静的検査: `tests/Architecture/QueueWorkerLeaseInvariantTest.php` (規則 1。
+  `mprocs.yaml` と `scripts/bug-hunt-shard.sh` の両方) /
+  `tests/Architecture/QueuedJobLeaseInventoryTest.php` (規則 2 + キューに載る全クラスの
+  接続目録を deny-by-default で固定)。ワーカー timeout 到達時の遷移は
+  `tests/Feature/Queue/WorkerTimeoutTransitionTest.php` が behavioral に固定する。
+- **`queue:listen` ではジョブ側 `$timeout` が効かない**
+  (`Listener` が子 `queue:work --once` へ `--timeout` を渡さず、`Worker::runNextJob()` は
+  SIGALRM を張らない)。dev / bug-hunt では `--timeout` が唯一の上限であり、
+  到達すると listener 本体も終了する。**Laravel のメジャー更新時はこの前提を再確認する**
+  (前提が変わると規則 1 の重要度そのものが変わる)。
+- `database` の `retry_after` は **env で上書きできないリテラル**で持つ
+  (静的 gate は config をテスト環境の値で読むため、env 上書きを残すと
+  「gate は通るが本番の実値は別」を作れてしまう)。
+
 ### AI 解析ジョブの運用契約
 
 - 解析ジョブ (`RunManualAnalysis`) は専用 queue connection **`database-analysis`**
   (queue=analysis、retry_after=1680) で流れる。**本番/ステージングの worker プロセス定義・
-  デプロイ手順・監視対象に `php artisan queue:work database-analysis` を必須項目として登録する**
+  デプロイ手順・監視対象に `php artisan queue:work database-analysis --timeout=1620` を
+  必須項目として登録する** (`--timeout` は規則 1。§キューのリース期間とワーカー制限時間の規約)
   (専用 worker が居ないとジョブは滞留する。queued 滞留は `analysis:recover-stale-jobs` cron が
   30 分で failJob するため、滞留 = 監視で気づける)
 - 時間 budget の連鎖 `job timeout (1,560s) < retry_after (1,680s) < 予約 TTL (1,800s) ≤ stale 閾値 (1,800s)`
@@ -272,7 +311,8 @@ route parameter を経由しない id (POST payload / MCP tool 引数 / token cl
 
 - レンダジョブ (`RunManualRender`) は専用 queue connection **`database-render`**
   (queue=render、retry_after=1680) で流れる。**本番/ステージングの worker プロセス定義・
-  デプロイ手順・監視対象に `php artisan queue:work database-render` を必須項目として登録する**
+  デプロイ手順・監視対象に `php artisan queue:work database-render --timeout=1620` を
+  必須項目として登録する** (`--timeout` は規則 1。§キューのリース期間とワーカー制限時間の規約)
   (専用 worker が居ないとジョブは滞留する。queued 滞留は `render:recover-stale-jobs` cron が
   **10 分** (queued 短 SLA。enqueue 時点で編集を止めるため) / running 滞留は **30 分** で
   failJob するため、滞留 = 監視で気づける)
@@ -580,8 +620,9 @@ doc/10 §10.3 / §10.8-4/-7 の実装 (T004)。routes は `/app/projects/{projec
   org 合計 / bytes_pending = pending 未失効 + verifying 全件。カウンタキャッシュは持たない)
 - **media queue**: S3 オブジェクト削除 (`Jobs/Capture/DeleteTakeObjectsJob`) は専用 connection
   **`database-media`** (queue=media、retry_after=300) で流れる。**本番/ステージングの worker
-  プロセス定義・デプロイ手順・監視対象に `php artisan queue:work database-media` を必須項目
-  として登録する** (専用 worker が居ないと削除ジョブは滞留する)
+  プロセス定義・デプロイ手順・監視対象に `php artisan queue:work database-media --timeout=240`
+  を必須項目として登録する** (専用 worker が居ないと削除ジョブは滞留する。`--timeout` は
+  規則 1。§キューのリース期間とワーカー制限時間の規約)
 - **孤児掃除 cron**: `capture:release-stale-upload-reservations` (10 分毎・onOneServer) が
   期限切れ pending / stale verifying (updated_at 15 分超過) を released 化して bytes_pending を
   解放し、PUT 済み未登録の S3 オブジェクトを削除する (`Capture/StaleUploadReservationSweeper`。

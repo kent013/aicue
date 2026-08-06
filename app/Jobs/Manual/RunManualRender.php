@@ -41,7 +41,7 @@ class RunManualRender implements ShouldQueue
 
     public function __construct(public readonly int $renderJobId)
     {
-        // retry_after をレンダ専用値にした connection (config/queue.php)。既定 database は 90s のため。
+        // retry_after をレンダ専用値にした connection (config/queue.php)。既定 database は 600s のため。
         // Queueable trait が $connection プロパティを既に定義しているため onConnection() で指定する
         $this->onConnection('database-render');
     }
