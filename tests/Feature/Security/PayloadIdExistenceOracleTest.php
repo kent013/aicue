@@ -27,9 +27,62 @@ use Tests\Support\ResponseSignature;
 const PIEO_MISSING_USER_ID = 999999999;
 
 /**
- * 応答 signature と field error の文言を 1 つにまとめた観測値。
+ * `session('errors')` から指定 field のエラー文言を取り出す。
  *
- * `session('errors')` は静的解析上 mixed なので ViewErrorBag への narrowing を明示する。
+ * 実体は 2 形ありうる。ViewErrorBag だけを見て他を [] に落とす実装は、
+ * **この観測系ごと空洞化させる** (aicue:T118 の事後監査で実際に踏んだ:
+ * 実行時の実体は生配列だったため user_id_errors が恒常的に [] になり、
+ * 存在オラクル検査が 302 同士の比較へ退化していた)。
+ *
+ *   - ViewErrorBag … 同一リクエスト内で組み立てられた場合
+ *   - 生配列       … session に serialize されて戻る場合 (本テストの実測形):
+ *                    ['default' => ['format' => ':message',
+ *                                   'messages' => ['user_id' => ['...']]]]
+ *
+ * どちらでもない形は**握りつぶさず例外にする** (fail-closed)。
+ * 黙って [] を返すと、形が変わった瞬間に検査が無言で無力化するため。
+ *
+ * @return list<string>
+ */
+function pieoFieldErrors(mixed $errors, string $field): array
+{
+    if ($errors === null || $errors === []) {
+        return [];
+    }
+
+    if ($errors instanceof ViewErrorBag) {
+        return array_values($errors->getBag('default')->get($field));
+    }
+
+    $shape = json_encode($errors, JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR);
+
+    if (! is_array($errors)) {
+        throw new RuntimeException('session("errors") が想定外の型: '.get_debug_type($errors));
+    }
+
+    $default = $errors['default'] ?? null;
+    if (! is_array($default) || ! is_array($default['messages'] ?? null)) {
+        throw new RuntimeException('session("errors") の生配列形が想定外: '.(string) $shape);
+    }
+
+    $fieldMessages = $default['messages'][$field] ?? [];
+    if (! is_array($fieldMessages)) {
+        throw new RuntimeException('session("errors") の field 値が配列でない: '.(string) $shape);
+    }
+
+    $normalized = [];
+    foreach ($fieldMessages as $message) {
+        if (! is_string($message)) {
+            throw new RuntimeException('session("errors") の文言が文字列でない: '.get_debug_type($message));
+        }
+        $normalized[] = $message;
+    }
+
+    return $normalized;
+}
+
+/**
+ * 応答 signature と field error の文言を 1 つにまとめた観測値。
  *
  * @return array{
  *     signature: array{status: int, headers: array<string, list<string>>, body: string},
@@ -38,13 +91,9 @@ const PIEO_MISSING_USER_ID = 999999999;
  */
 function pieoObserve(TestResponse $response): array
 {
-    $errors = session('errors');
-
     return [
         'signature' => ResponseSignature::of($response),
-        'user_id_errors' => $errors instanceof ViewErrorBag
-            ? array_values($errors->getBag('default')->get('user_id'))
-            : [],
+        'user_id_errors' => pieoFieldErrors(session('errors'), 'user_id'),
     ];
 }
 
@@ -78,6 +127,13 @@ function pieoObserveAll(callable $request, array $userIds): array
 function pieoAssertNoOracle(callable $request, int $existingNonMemberId): void
 {
     [$existing, $missing] = pieoObserveAll($request, [$existingNonMemberId, PIEO_MISSING_USER_ID]);
+
+    // 観測系の自己検査 (fail-closed)。field error を 1 件も拾えていないなら、
+    // 以降の比較は 302 同士の signature 比較へ退化し、validation 文言の分岐
+    // (= 本検査が守るべき存在オラクルそのもの) を検出できなくなる。
+    // 「比較が通った」ことと「比較する中身があった」ことは別なので分けて表明する。
+    expect($existing['user_id_errors'])
+        ->not->toBe([], '観測系が field error を 1 件も拾えていない (この検査は空洞化している)');
 
     expect($existing)->toBe($missing, '実在の非メンバー id と 不在 id の応答が一致しない (存在オラクル)');
 }
