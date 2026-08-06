@@ -159,12 +159,19 @@ describe("vitest inventory gate", () => {
     const enumerated = new Map<string, string[]>();
 
     // 制約 1: spawn は beforeAll の中でのみ行う (収集フェーズでは実行されない)
+    //
+    // timeout が 15 分と長いのは、この hook が **本体の suite と並走しながら**
+    // project ごとに vitest を丸ごと 1 本起動するため。実測: root project の
+    // `vitest list` 単体で 12 コアの idle マシンでも ~95s かかる。CI (ubuntu-latest) では
+    // 残り 123 ファイルがランナーを飽和させた状態で走るので 180s では足りず、
+    // hook timeout だけで frontend job が落ちていた (run 31099359972)。
+    // gate の判定内容は一切緩めていない (soft-fail ではなく待ち時間の上限の話)。
     beforeAll(() => {
         fsFiles = scanTestFiles(REPO_ROOT);
         for (const project of TEST_PROJECTS) {
             enumerated.set(project.name, enumerateProject(project.root));
         }
-    }, 180_000);
+    }, 900_000);
 
     it("G1〜G3/G5: FS 上の *.test.ts と vitest の収集結果が一致すること", { timeout: 180_000 }, () => {
         const violations = inventoryViolations(fsFiles, enumerated);
