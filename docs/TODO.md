@@ -23,6 +23,9 @@
 |---|---|---|---|---|---|---|---|
 | T085 | bfcache 実復元の iOS 実機受入確認 | test | Playwright 不可のため実機で確認+記録 | High | standalone | [設計](devnotes/20260803-0053-aigenba-alignment/) | 2026-08-03 03:10 |
 | T110 | 認証手段変更のメール通知ポリシーの統一設計 | backend | passkey/2FA/SSO の増減通知を一貫したポリシーとして設計する(T108 S7 は監査ログのみで通知は見送り) | Low | standalone | [設計](devnotes/20260805-1550-security-audit-remediation/) | 2026-08-05 17:45 |
+| T121 | 未認証 GET の認証面を流量制限の母集団へ (T120 事後監査 Warning 是正) | backend | 認証面GETをthrottle母集団へ追加 | High | incremental | [設計](devnotes/20260806-1634-throttle-unauthenticated-get/) | 2026-08-06 17:14 |
+| T122 | キューのリース期間とワーカー制限時間の整合 (規則 1) | infrastructure | キューのリース期間とワーカー制限時間の整合 | High | standalone | [設計](devnotes/20260806-1635-queue-lease-timeout/) | 2026-08-06 17:14 |
+| T123 | CI から定期実行トリガ (on.schedule) を除去する | infrastructure | scheduleを除去、再導入はgateで反転 | Medium | incremental | [設計](devnotes/20260806-1634-ci-schedule-removal/) | 2026-08-06 17:14 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
