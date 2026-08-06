@@ -161,7 +161,13 @@ Route::get('/session/status', SessionStatusController::class)->name('session.sta
 */
 Route::get('/auth/{provider}/redirect/{intent}', [SocialAuthController::class, 'redirect'])
     ->name('social.redirect');
+// callback は SocialAuthController::callback() 内の Socialite::driver()->user() で
+// **IdP への外向き HTTP** が起きる (未認証で外部へ HTTP を発射できる唯一の経路)。
+// 未認証面のため named limiter で IP レーンを明示する (閾値は passkeys guest と同値)。
+// redirect 側は外向き通信をしないため throttle を貼らず、exemption
+// (AuthFlowInitiationWithoutOutboundCall) として理由を inventory に残す。
 Route::get('/auth/{provider}/callback', [SocialAuthController::class, 'callback'])
+    ->middleware('throttle:social-callback')
     ->name('social.callback');
 
 /*
@@ -597,7 +603,11 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
 | register へ誘導する (登録完了時に CreateNewUser が招待組織へ参加させる)。
 | POST (受諾確定) のみ auth 必須。
 */
+// GET も token を sha256 照合して DB を 1 件引き、有効/無効で応答が分岐する
+// (未認証で観測できる分、姉妹の POST より攻撃面として広い)。
+// POST 側の `10,1` と同値にする。未認証面のため named limiter でキーを明示する。
 Route::get('/invitations/accept', [InvitationAcceptanceController::class, 'show'])
+    ->middleware('throttle:invitation-accept')
     ->name('invitations.accept');
 // 招待トークンは hash 照合されるが、総当り試行そのものを有界にする
 // (onboarding.activate-personal と同値 = 認証済みの一回性操作)。

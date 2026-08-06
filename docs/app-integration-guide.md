@@ -325,9 +325,20 @@ LLM を使う機能が要件に来たら、まず利用形態を分類する:
   `Str::transliterate()` は**使わない**(legitimate な Unicode email を別 user へ
   collapse させ、無関係アカウントの巻き添えロックアウトになる)
 - **inline throttle (`throttle:6,1`) を使ってよいのは「認証済みかつ actor 自身に
-  閉じる操作」だけ**。フレームワーク既定のキー(認証済み = user id)が
-  ちょうど求める数える単位になる場合に限る。未認証面 / 主体が IP や email に
-  なる面は必ず named limiter を作る
+  閉じる操作」だけ**。未認証面 / 主体が IP や email になる面は必ず named limiter を作る
+  - ⚠ **inline の bucket は route ごとではない**。`ThrottleRequests::handle()` が組む
+    キーは `$prefix`(既定 `''`)+ `resolveRequestSignature()` で、後者は認証済みなら
+    **user id だけ**を返す(route も limiter 名も入らない)。つまり
+    **同一 actor の全 inline throttle route が 1 つの bucket を共有する**
+    (route ごとに違うのは `maxAttempts` の比較値だけ)。
+    named limiter はキーに limiter 名が入るため**レーンが独立する**
+  - したがって inline を使ってよいのは「その actor の**全 inline 操作を合算して
+    数えてよい**」場合に限る。**ページ描画のたびに飛ぶ GET のような高頻度レーンを
+    inline で足してはならない**: 合算値が最小 `max` を持つ route
+    (現状 `recent-auth.password` = 6)を先に食い潰し、**再認証ができなくなる**。
+    そういう面は named limiter でレーンを分ける
+    (実例: `two-factor-secret-read`。恒久回帰は `AuthThrottleCoverageTest` の
+     「2FA 秘密 GET のレーンは独立している」)
 - **limiter キーに route parameter を入れない**(`NamedRateLimiterKeyTest`)。
   bucket が id ごとに分かれると「429 になるまでの回数」が実在を漏らす
 
@@ -343,10 +354,50 @@ LLM を使う機能が要件に来たら、まず利用形態を分類する:
 (共有クラウド出口では巻き添え 429 がありうるため、送信元 IP の分布と
 429 発生率を監視項目に入れる)。
 
+**保護対象群セレクタの非対称**(意図的):
+
+| セレクタ | 対象 | メソッド条件 |
+|---------|------|------------|
+| S1 | 未認証で到達しうる route | **変更系のみ**(POST/PUT/PATCH/DELETE) |
+| S2 | ステートレスな機械向け経路(`api/` / `oauth/` / `.well-known/oauth-`) | 問わない |
+| S3 | 認証面(login / password. / two-factor. / social. / invitations. …) | **問わない(GET/HEAD も入る)** |
+
+S3 がメソッドを問わない理由は、**認証面は「読むだけ」の GET でも秘密の開示・
+外部呼び出し・状態生成を伴いうる**から(SSO callback は 1 リクエストで IdP へ
+外向き HTTP を出しうるし、招待受諾の GET は未認証入力の token を DB 照合する)。
+逆に S1 まで GET へ広げない理由は、母集団が数百本になり
+**exemption 台帳に埋もれて gate が機能しなくなる**から。
+
+**認証面 GET の分類方針**: 判断基準は「**1 リクエストで外向き通信・重い計算・
+状態生成が起きるか**」の 1 本。
+
+- 起きる → throttle を貼る(未認証面なので必ず named limiter)
+- 描画にすぎない → `AuthViewRenderOnly`
+- フロー開始だがその場で外向き通信をしない → `AuthFlowInitiationWithoutOutboundCall`
+  (**対になる完了経路が throttle 済みであること**が適用条件。前提テストが固定する)
+
+**exemption の cap は exact fit で運用する**(`throttleCoverageExemptionCap()` は
+現在値ちょうど)。余裕を 1 でも持たせると、その 1 本は「個別の根拠も再レビューも無しに
+免除できる枠」になる。exact fit なら次の 1 本が必ず「この数値を変える差分」として現れる。
+併せて `throttleCoverageExemptionCapByCase()` が case 別上限を持ち、
+**どのカテゴリが膨らんだか**を検出する(全体 cap の単なる内訳ではなく独立した検査)。
+
+**監視項目**: 429 発生率は `social-callback` / `invitation-accept` も対象に含める。
+併せて **invalid callback 比率**(intent 不在で `login` へ差し戻された割合)も見る。
+どちらも **IP レーン**のため、同一 NAT 配下の一斉ログイン / 一斉招待受諾で
+巻き添え 429 がありうる。limiter は恒久ロックを作らないが**到達は保証しない**
+(共有 IP の継続競合では解除直後の枠を取られ続けうる)。
+**巻き添えが出たときの初動は閾値変更ではなく `TRUSTED_PROXIES` / 実 client IP 解決の確認**
+(`docs/trusted-proxies-runbook.md`)。閾値変更はプロダクト判断として別 TODO を起票する。
+なお `social.redirect` は throttle しないため、**同一 IP から callback 枠を意図的に
+枯らす一時 DoS は残る**(許容リスク。redirect を絞っても外向き HTTP の総量は
+callback 側で有界化されており減らない)。
+
 **exemption を書くときの原則**: exemption は「throttle が無いことが**正しい**」
 という主張であり、その**前提**(署名で短絡する / 定数応答である /
-production では登録されない)は `ThrottleExemptionPremiseTest` で
-behavioral に固定する。前提が崩れたのに気づけない状態を作らない。
+production では登録されない / 完了経路が throttle 済みである)は
+`ThrottleExemptionPremiseTest` で behavioral に固定する。
+前提が崩れたのに気づけない状態を作らない。
 
 ## 8. 設計ドキュメントの書き方(このテンプレ上の流儀)
 

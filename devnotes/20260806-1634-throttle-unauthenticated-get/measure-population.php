@@ -18,6 +18,7 @@ declare(strict_types=1);
 use App\Support\Http\RouteThrottleBinder;
 use Illuminate\Auth\Middleware\Authenticate;
 use Illuminate\Contracts\Console\Kernel;
+use Illuminate\Foundation\Application;
 use Illuminate\Routing\Route as RoutingRoute;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
@@ -27,7 +28,7 @@ $root = dirname(__DIR__, 2);
 
 require $root.'/vendor/autoload.php';
 
-/** @var \Illuminate\Foundation\Application $app */
+/** @var Application $app */
 $app = require $root.'/bootstrap/app.php';
 $app->make(Kernel::class)->bootstrap();
 

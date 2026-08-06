@@ -195,6 +195,26 @@ function rateLimiterKeyInventory(): array
             'expectedKeyPrefixes' => ['webhook-stripe:ip'],
             'emailScenarios' => [],
         ],
+        'social-callback' => [
+            'scenarios' => ['guest' => $noEmail],
+            'expectedKeyPrefixes' => ['social-callback:ip'],
+            'emailScenarios' => [],
+        ],
+        'invitation-accept' => [
+            'scenarios' => ['guest' => $noEmail],
+            'expectedKeyPrefixes' => ['invitation-accept:ip'],
+            'emailScenarios' => [],
+        ],
+        // 認証済み / 未認証の 2 分岐 (passkeys と同じ形)。
+        // throttle は auth middleware より先に走るため guest 分岐も実在する。
+        'two-factor-secret-read' => [
+            'scenarios' => [
+                'authenticated' => static fn (): Request => rateLimiterAuthenticatedRequest(rateLimiterProbeUser()),
+                'guest' => $noEmail,
+            ],
+            'expectedKeyPrefixes' => ['two-factor-secret-read:user', 'two-factor-secret-read:ip'],
+            'emailScenarios' => [],
+        ],
     ];
 
     // api-read / api-write / api-status は同一 apiRateKey() を共有する

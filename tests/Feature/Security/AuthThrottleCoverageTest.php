@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 use App\Http\Middleware\RequireRecentAuth;
 use App\Http\Middleware\VerifySnsSignature;
+use App\Models\User;
 use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Routing\Router;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Testing\TestResponse;
+use Laravel\Socialite\Facades\Socialite;
 
 /*
  * T120 で新設した認証系 / webhook throttle の behavioral proof。
@@ -199,8 +202,8 @@ test('POST /ses/notification は不正 body でも上限を超えると 400 で�
     expect($status)->toBe(429);
 })->group('slow');
 
-test('2FA 管理 route は throttle が recent-auth より先に走る', function (): void {
-    $resolved = throttleProbeResolvedClasses('two-factor.disable');
+test('2FA 管理 route は throttle が recent-auth より先に走る', function (string $routeName): void {
+    $resolved = throttleProbeResolvedClasses($routeName);
 
     $throttleIndex = array_search(ThrottleRequests::class, $resolved, true);
     $recentAuthIndex = array_search(RequireRecentAuth::class, $resolved, true);
@@ -208,4 +211,160 @@ test('2FA 管理 route は throttle が recent-auth より先に走る', functio
     expect($throttleIndex)->not->toBeFalse('ThrottleRequests が実効列に無い');
     expect($recentAuthIndex)->not->toBeFalse('RequireRecentAuth が実効列に無い');
     expect($throttleIndex)->toBeLessThan($recentAuthIndex);
+})->with([
+    'DELETE (2FA 無効化)' => ['two-factor.disable'],
+    // T121: 秘密を返す GET 側も同じ実効順であること (throttle が先 = recent-auth の
+    // 判定コストと 409/302 分岐の前に回数上限が効く)。
+    'GET (リカバリコード表示)' => ['two-factor.recovery-codes'],
+]);
+
+/*
+ |--------------------------------------------------------------------------
+ | T121: 未認証で到達する認証面 GET / 2FA 秘密 GET の throttle (behavioral proof)
+ |--------------------------------------------------------------------------
+ |
+ | ここで固定するのは「何回で 429 になるか」と「**何を 1 つの bucket として数えるか**」。
+ | 目録検査 (ThrottleCoverageInventoryTest) は付与の有無しか見ないため、
+ | キーに route parameter / token が混ざる (= bucket が分かれて総当りが有界にならない) 事故や、
+ | named limiter を inline に戻してレーンが合流する事故はここでしか検出できない。
+ */
+
+test('GET /auth/{provider}/callback は 10 回目まで通り 11 回目で 429 (IP レーン 10/min。無効リクエストも枠を消費する)', function (): void {
+    // session に social_auth_intent を置かない = controller は Socialite に触れる前に
+    // login へ 302 する。**その無効リクエストでも枠を消費する**ことを同時に示す
+    // (throttle は controller より前で数えるため)。
+    for ($i = 1; $i <= 10; $i++) {
+        $response = $this->get('/auth/google/callback?code=dummy&state=dummy');
+        expect($response->getStatusCode())->not->toBe(429, "{$i} 回目で既に 429 になりました");
+    }
+
+    expect($this->get('/auth/google/callback?code=dummy&state=dummy')->getStatusCode())->toBe(429);
+});
+
+test('social.callback は provider を変えても同じ bucket を消費する (存在オラクル不成立)', function (): void {
+    // limiter キーに route parameter ({provider}) が混ざっていないことの証明。
+    // 混ざっていると provider ごとに bucket が分かれ、「429 になるまでの回数」が
+    // 「その provider が有効か」を漏らす観測点になる。
+    config()->set('template.social_providers', [
+        'google' => ['label' => 'Google', 'capability' => 'fresh_auth_prompt_only', 'email_trust' => 'confirmed'],
+        'probe' => ['label' => 'Probe', 'capability' => 'fresh_auth_prompt_only', 'email_trust' => 'unconfirmed'],
+    ]);
+
+    $first = $this->get('/auth/google/callback?code=dummy&state=dummy');
+    $second = $this->get('/auth/probe/callback?code=dummy&state=dummy');
+
+    expect((int) $second->headers->get('X-RateLimit-Remaining'))->toBe(
+        (int) $first->headers->get('X-RateLimit-Remaining') - 1,
+        'provider を変えたら残数が戻った = provider ごとに bucket が分かれている (存在オラクル)',
+    );
+});
+
+test('social.callback の throttle は Socialite を一切呼ばずに枠を消費する (外向き HTTP の増幅が有界)', function (): void {
+    // 「throttle が外向き HTTP より前にある」ことの本体。
+    // intent 不在で controller が Socialite に触れる前に短絡することを spy で直接示す
+    // (Socialite は Guzzle を直接使うため Http::preventStrayRequests() では捕まらない。
+    //  preventStrayRequests は Laravel HTTP client 側の追加の網として併用する)。
+    Http::preventStrayRequests();
+    Socialite::spy();
+
+    $first = $this->get('/auth/google/callback?code=dummy&state=dummy');
+    $second = $this->get('/auth/google/callback?code=dummy&state=dummy');
+
+    // ★「Socialite を呼ばない」だけでは半分。**枠を消費している**ことまで示して初めて
+    //   「外向き HTTP の増幅が有界」になる (呼ばれず数えられもしないなら無制限に踏める)。
+    expect((int) $second->headers->get('X-RateLimit-Remaining'))->toBe(
+        (int) $first->headers->get('X-RateLimit-Remaining') - 1,
+        'Socialite に到達しない無効リクエストが枠を消費していません (連打で増幅を狙える)',
+    );
+    Socialite::shouldNotHaveReceived('driver');
+});
+
+test('GET /invitations/accept は 10 回目まで通り 11 回目で 429 (無効 token でも枠を消費する)', function (): void {
+    // 存在しない token で叩く (Invitations/Invalid が返るだけで DB を汚さない)。
+    for ($i = 1; $i <= 10; $i++) {
+        $response = $this->get('/invitations/accept?token=invalid-token');
+        expect($response->getStatusCode())->not->toBe(429, "{$i} 回目で既に 429 になりました");
+    }
+
+    expect($this->get('/invitations/accept?token=invalid-token')->getStatusCode())->toBe(429);
+});
+
+test('invitations.accept は token を変えても同じ bucket を消費する (token 総当りが有界)', function (): void {
+    // query の token が limiter キーに混ざっていたら bucket が token ごとに分かれ、
+    // **総当りが一切有界にならない** (1 token あたり 10 回ではなく無限に試せる)。
+    $first = $this->get('/invitations/accept?token=probe-token-a');
+    $second = $this->get('/invitations/accept?token=probe-token-b');
+
+    expect((int) $second->headers->get('X-RateLimit-Remaining'))->toBe(
+        (int) $first->headers->get('X-RateLimit-Remaining') - 1,
+        'token を変えたら残数が戻った = token ごとに bucket が分かれている (総当りが有界にならない)',
+    );
+});
+
+test('2FA 秘密 GET のレーンは独立している — 10 回踏んでも recent-auth / 2FA 管理 POST が 429 にならない', function (): void {
+    // ★本設計で最も重要な恒久回帰。**削らないこと**。
+    //   two-factor.qr-code に inline throttle (`10,1`) を貼ると、inline のキーは
+    //   sha1(user id) のみで route も limiter 名も入らないため、同一 actor の
+    //   **全 inline throttle route が 1 bucket を共有する**
+    //   (ThrottleRequests::handle() の $prefix 既定 '' + resolveRequestSignature())。
+    //   その状態で描画のたびに飛ぶ GET を足すと、共有カウンタが最小 max の
+    //   recent-auth.password (6,1) を先に食い潰し **再認証できなくなる**。
+    //   named limiter (two-factor-secret-read) はキーに limiter 名が入るためレーンが分かれる。
+    //   inline へ戻す変更を入れたらこのテストが落ちる。
+    $user = User::factory()->withTwoFactor()->create();
+    $this->actingAs($user);
+
+    for ($i = 1; $i <= 10; $i++) {
+        expect($this->get('/user/two-factor-qr-code')->getStatusCode())
+            ->not->toBe(429, "{$i} 回目で既に 429 になりました");
+    }
+    expect($this->get('/user/two-factor-qr-code')->getStatusCode())->toBe(429, '2FA 秘密 GET のレーンが使い切られていません');
+
+    // 秘密読み取りレーンを使い切った直後でも、別レーンは 1 枠も消費していない。
+    // (認証情報が誤っていてもよい。429 でないこと = throttle で止まっていないことだけ見る)
+    expect($this->post('/recent-auth/password', ['password' => 'wrong-password'])->getStatusCode())
+        ->not->toBe(429, '再認証 (recent-auth.password) が 2FA 秘密 GET の巻き添えで 429 になりました');
+
+    expect($this->post('/user/confirmed-two-factor-authentication', ['code' => '000000'])->getStatusCode())
+        ->not->toBe(429, '2FA 管理 POST が 2FA 秘密 GET の巻き添えで 429 になりました');
+});
+
+test('2FA 秘密 GET は 11 回目で 429 — これは連続取得の回数上限であって認証強度ではない (認証強度は後続 TODO B2)', function (): void {
+    // ★誤読防止: ここで固定しているのは「回数の上限」だけである。
+    //   qr-code / secret-key / recovery-codes を **step-up なしで読めること自体**の是非は
+    //   aicue:T120 の後続 TODO B2 (recent-auth 化) の担当であり、本テストが green でも
+    //   「秘密の保護が済んだ」ことは 1 ミリも意味しない。
+    $user = User::factory()->withTwoFactor()->create();
+    $this->actingAs($user);
+
+    for ($i = 1; $i <= 10; $i++) {
+        expect($this->get('/user/two-factor-secret-key')->getStatusCode())
+            ->not->toBe(429, "{$i} 回目で既に 429 になりました");
+    }
+
+    expect($this->get('/user/two-factor-secret-key')->getStatusCode())->toBe(429);
+});
+
+test('2FA 秘密 GET 3 本は 1 つのレーンを共有する (描画で複数発飛ぶ GET を合算して数える)', function (): void {
+    // qr-code / secret-key は 2FA 設定画面の 1 描画で 2 発飛ぶ。両者が別 bucket だと
+    // 「画面を開く回数」ではなく「endpoint ごとの回数」を数えることになり、
+    // 秘密の連続取得の上限としては実効が薄れる。同一 limiter 名を共有していることを示す。
+    // ★3 本すべてを対象にする。1 本でも別 limiter (inline `10,1` 等) に戻ると
+    //   残数が連続しなくなりここで落ちる。
+    $user = User::factory()->withTwoFactor()->create();
+    $this->actingAs($user);
+
+    $uris = ['/user/two-factor-qr-code', '/user/two-factor-secret-key', '/user/two-factor-recovery-codes'];
+    $previous = null;
+
+    foreach ($uris as $uri) {
+        $remaining = $this->get($uri)->headers->get('X-RateLimit-Remaining');
+        expect($remaining)->not->toBeNull("{$uri} に X-RateLimit-* が付いていません (throttle が効いていない)");
+
+        if ($previous !== null) {
+            expect((int) $remaining)->toBe($previous - 1,
+                "{$uri} が他の 2FA 秘密 GET と別 bucket へ分かれています");
+        }
+        $previous = (int) $remaining;
+    }
 });

@@ -62,4 +62,34 @@ enum ThrottleCoverageExemption: string
      * 適用条件: ハンドラ冒頭で署名検証を行い、不成立なら副作用ゼロで短絡する。
      */
     case SignatureRequiredBeforeEffect = 'signature_required_before_effect';
+
+    /**
+     * 認証面の非変更系 (GET/HEAD) で、応答が画面 / ステータスの描画にすぎない route。
+     *
+     * 適用条件 (すべて満たすこと):
+     *  - HTTP メソッドが GET/HEAD のみ (変更系には適用しない)
+     *  - 外部呼び出し・メール送信・重い計算・**DB 書込**を伴わない (DB read は可)
+     *  - 推測可能な秘密を開示しない
+     *    (自セッションが既に保持する情報の再表示・自分が提示した token の prefill は可)
+     *  - 副作用が自セッション (CSRF token / flash / 汚染値の除去) の中に閉じる
+     *
+     * ★credential の検証・生成が同 URI の変更系側にある場合は、その変更系が
+     *   throttle か exemption のどちらかで分類済みであることまで確認して使う。
+     */
+    case AuthViewRenderOnly = 'auth_view_render_only';
+
+    /**
+     * 認証フローを開始するが、その場では外向き通信を一切行わない非変更系 route。
+     *
+     * 適用条件 (すべて満たすこと):
+     *  - HTTP メソッドが GET/HEAD のみ
+     *  - **その場で外向き HTTP を発行しない** (発行するのは対になる完了経路)
+     *  - 生成する状態が自セッション内に閉じ、他セッションから消費できない
+     *  - **対になる完了経路が throttle 済みである** (増幅はそちらで有界化されている)
+     *
+     * ★4 番目の条件が本 case の要である。完了経路の throttle を外すと
+     *   この exemption の前提が崩れるため、前提テストが完了経路の throttle 実在と
+     *   limiter 名を behavioral に固定する。
+     */
+    case AuthFlowInitiationWithoutOutboundCall = 'auth_flow_initiation_without_outbound_call';
 }

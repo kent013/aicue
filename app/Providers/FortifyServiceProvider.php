@@ -140,8 +140,14 @@ class FortifyServiceProvider extends ServiceProvider
      *  - `10,1` は onboarding.activate-personal と同値 (認証済みの管理操作)。
      *
      * ★inline (`6,1` / `10,1`) を使ってよいのは **認証済みかつ actor 自身に閉じる route** だけ。
-     *   フレームワーク既定のキー (認証済み = user id) がちょうど求める数える単位になる。
      *   未認証面 / 主体が IP や email になる面は必ず named limiter を作ること。
+     *   **さらに注意**: inline のキーは `sha1(user id)` だけで route も limiter 名も入らないため、
+     *   **同一 actor の全 inline throttle route が 1 bucket を共有する**
+     *   (ThrottleRequests::handle() の $prefix 既定 '' + resolveRequestSignature())。
+     *   したがって inline は「その actor の全 inline 操作を合算して数えてよい」場合に限る。
+     *   ページ描画のたびに飛ぶような高頻度レーンを inline で足すと、
+     *   合算値が最小 max (recent-auth.password = 6) を先に食い潰して再認証を壊す。
+     *   そういう面は named limiter でレーンを分ける (下記 two-factor-secret-read)。
      *
      * ★`feature` は Fortify の機能フラグ (config/fortify.php の `features`)。
      *   null = 常に必須 (route が無ければ起動時 fail-fast)。
@@ -164,6 +170,13 @@ class FortifyServiceProvider extends ServiceProvider
             'two-factor.confirm' => ['throttle' => '10,1', 'feature' => Features::twoFactorAuthentication()],
             'two-factor.disable' => ['throttle' => '10,1', 'feature' => Features::twoFactorAuthentication()],
             'two-factor.regenerate-recovery-codes' => ['throttle' => '10,1', 'feature' => Features::twoFactorAuthentication()],
+            // ★秘密を返す GET 3 本 (T120 事後監査の是正)。
+            //   named limiter を使う理由は configureRateLimiters() の
+            //   two-factor-secret-read の docblock を参照 (inline は bucket を
+            //   全 inline route で共有するため、描画 GET を足すと再認証を壊す)。
+            'two-factor.qr-code' => ['throttle' => 'two-factor-secret-read', 'feature' => Features::twoFactorAuthentication()],
+            'two-factor.secret-key' => ['throttle' => 'two-factor-secret-read', 'feature' => Features::twoFactorAuthentication()],
+            'two-factor.recovery-codes' => ['throttle' => 'two-factor-secret-read', 'feature' => Features::twoFactorAuthentication()],
         ];
     }
 
@@ -273,6 +286,32 @@ class FortifyServiceProvider extends ServiceProvider
             return is_scalar($identifier)
                 ? Limit::perMinute(10)->by('passkeys:user:'.$identifier)
                 : Limit::perMinute(10)->by('passkeys:ip:'.($request->ip() ?? 'unknown'));
+        });
+
+        /*
+         * 2FA の秘密を返す GET (qr-code / secret-key / recovery-codes) の読み取りレーン。
+         *
+         * ★inline (`10,1`) にしない: inline のキーは sha1(user id) だけで
+         *   **同一ユーザーの全 inline route が 1 bucket を共有する**
+         *   (ThrottleRequests::resolveRequestSignature)。ページ描画で 2 発飛ぶ GET を
+         *   そこへ足すと、リロード数回で recent-auth.password (max 6) まで 429 にしてしまう。
+         *   named limiter はキーに limiter 名が入るためレーンが独立する。
+         *
+         * ★閾値 10/min は姉妹の 2FA 管理操作 (two-factor.enable / .confirm / .disable /
+         *   .regenerate-recovery-codes の `10,1`) と同値 (新しい値を発明しない)。
+         *
+         * ★throttle は auth middleware より先に走る (priority list) ため未認証でも
+         *   closure が評価される。passkeys limiter と同じく IP へ倒す。
+         *
+         * ★これは**連続取得の回数上限**であって、秘密の漏えい防止でも step-up の代替でもない。
+         *   認証強度 (recent-auth 化) は aicue:T120 の後続 TODO B2 の担当。
+         */
+        RateLimiter::for('two-factor-secret-read', function (Request $request): Limit {
+            $identifier = $request->user()?->getAuthIdentifier();
+
+            return is_scalar($identifier)
+                ? Limit::perMinute(10)->by('two-factor-secret-read:user:'.$identifier)
+                : Limit::perMinute(10)->by('two-factor-secret-read:ip:'.($request->ip() ?? 'unknown'));
         });
 
         $this->configureAuthFormRateLimiters();
