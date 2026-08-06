@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Enums\OrganizationRole;
 use App\Models\SecurityAuditEvent;
 use App\Models\User;
+use App\Services\Organization\OrganizationMembershipService;
 
 /*
  * オーナー移譲 (recent-auth 必須 + 行ロックによる直列化)。
@@ -67,7 +68,10 @@ test('非メンバーへは移譲できない', function (): void {
         ->withSession(['recent_auth_at' => time()])
         ->post("/organizations/{$organization->slug}/transfer-ownership", ['user_id' => $outsider->id]);
 
-    $response->assertSessionHasErrors('user_id');
+    // 不在 id と同一文言であることが存在オラクル不成立の条件 (aicue:T118)
+    $response->assertSessionHasErrors([
+        'user_id' => OrganizationMembershipService::MEMBER_REQUIRED_MESSAGE,
+    ]);
     expect($owner->fresh()->organizationRole($organization))->toBe(OrganizationRole::Owner);
     expect($outsider->fresh()->organizationRole($organization))->toBeNull();
 });

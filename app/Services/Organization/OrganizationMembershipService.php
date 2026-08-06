@@ -39,6 +39,13 @@ class OrganizationMembershipService
     /** 招待の有効期限 (日) */
     private const EXPIRES_DAYS = 7;
 
+    /**
+     * 移譲先が組織メンバーでないときの文言。Controller の org 相対解決と
+     * ロック下の再検証が**同一文言**であることが存在オラクル不成立の条件なので、
+     * 文字列リテラルを 2 箇所に置かない (aicue:T118)。
+     */
+    public const MEMBER_REQUIRED_MESSAGE = '移譲先は組織のメンバーである必要があります。';
+
     public function __construct(
         private readonly SecurityEventRecorder $recorder,
         private readonly DefaultProjectResolver $defaultProjects,
@@ -496,7 +503,7 @@ class OrganizationMembershipService
                 ->all();
             if (count($memberUserIds) < 2) {
                 throw ValidationException::withMessages([
-                    'user_id' => ['移譲先は組織のメンバーである必要があります。'],
+                    'user_id' => [self::MEMBER_REQUIRED_MESSAGE],
                 ]);
             }
 
