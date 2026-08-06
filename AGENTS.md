@@ -303,7 +303,12 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
      全 limiter を実評価して検査)。email は `EmailNormalizer` → `EmailHash` を通し、
      平文をキャッシュキーに残さない。**`Str::transliterate()` は使わない**
      (legitimate な Unicode email を別 user へ collapse させ巻き添えロックアウトになる)。
-     inline throttle (`throttle:6,1`) は「認証済みかつ actor 自身に閉じる操作」限定
+     inline throttle (`throttle:6,1`) は「認証済みかつ actor 自身に閉じる操作」限定。
+     **ただし inline のキーは actor id だけで route 名も limiter 名も入らない**ため、
+     同一 actor の inline throttle route は**すべて 1 bucket を共有する**
+     (T121 実測)。描画のたびに発火する GET を足すと、max が最小の route
+     (`recent-auth.password` = 6) を巻き添えで 429 にして**再認証を壊す**。
+     レーンを分けたいときは inline ではなく named limiter を新設する
    - vendor 登録 route への後付けは **`RouteThrottleBinder::attachOnBooted()`** 経由
      (route 名が消えたら起動時 fail-fast)。**`php artisan route:cache` は毎デプロイ再生成する**
      (後付けは cache 生成時に焼き込まれ cached 起動では skip されるため、stale cache は
