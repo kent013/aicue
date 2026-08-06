@@ -1,23 +1,26 @@
 name: CI
 
+# 定期実行 (on.schedule) は持たない — オーナー裁定 (2026-08-05 / 再周知 2026-08-06)。
+# 1. 裁定: CI の責務は push / pull_request の同期検査に限る。定期実行を CI に置くこと自体が
+#    責務の置き違いという判断であり、「うまく作れば残せる」道は無い
+#    (技術的に妥当な定期実行が一度入り、巻き戻された経緯がある)。
+# 2. 受容済みの損失: 依存を変えない限り、上流で新しく公開された advisory の検知と
+#    docs/supply-chain/accepted-advisories.yaml の expiry 切れの検出は**次の push まで起きない**。
+# 3. 代替: 定期実行の枠組みは CI の外に用意する。**CI に戻さない**。
+# 4. 機械的な歯止め: tests/js/architecture/ci-workflow-inventory.test.ts の
+#    W12 (本ファイルのトリガー集合の完全一致) / W15 (job-level if の不在) /
+#    W17 (.github/workflows 配下の全 workflow に schedule が無いこと) が再導入を止める。
+#    別ファイルに新しい workflow を作って定期実行を復活させる経路も W17 が塞ぐ。
+# 詳細は docs/supply-chain/review-checklist.md §6。
 on:
   push:
     branches: [main]
   pull_request:
-  # 上流で新しい advisory が公開された事実を、無関係な PR のクリティカルパス外で先に検知する。
-  # nightly は PR job の **代替ではなく追加** (PR job を降格させない)。
-  schedule:
-    - cron: "0 20 * * *"   # 05:00 JST
 
 jobs:
   php:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # nightly (schedule) は supply-chain-audit だけを回すためのトリガーなので、
-    # 本 job は schedule では走らせない (impl-review R1 [Warning]:
-    # on.schedule は workflow 全体を起動するため、明示除外しないと
-    # docs の「nightly は supply-chain gate の先行検知」という記述と実体が食い違う)。
-    if: github.event_name != 'schedule'
     # pgsql 一本化 (phpunit.xml が DB_CONNECTION=pgsql を <server force> する) の実体。
     # image は docker-compose と同一 major に揃える: ローカルの実測 (2704 passed) を
     # CI の期待値としてそのまま使えるようにするため (major 差は collation / SQL 差で
@@ -104,11 +107,6 @@ jobs:
   # Inertia 履歴からの PII 復元を止める唯一の自動回帰である。
   browser-tests:
     runs-on: ubuntu-latest
-    # nightly (schedule) は supply-chain-audit だけを回すためのトリガーなので、
-    # 本 job は schedule では走らせない (impl-review R1 [Warning]:
-    # on.schedule は workflow 全体を起動するため、明示除外しないと
-    # docs の「nightly は supply-chain gate の先行検知」という記述と実体が食い違う)。
-    if: github.event_name != 'schedule'
     # 実ブラウザがハングしたときに既定 6 時間を燃やさないための上限。
     # 現状 14 テスト × 2 レーン (直列) なので十分な余裕がある。
     timeout-minutes: 45
@@ -176,11 +174,6 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
-    # nightly (schedule) は supply-chain-audit だけを回すためのトリガーなので、
-    # 本 job は schedule では走らせない (impl-review R1 [Warning]:
-    # on.schedule は workflow 全体を起動するため、明示除外しないと
-    # docs の「nightly は supply-chain gate の先行検知」という記述と実体が食い違う)。
-    if: github.event_name != 'schedule'
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

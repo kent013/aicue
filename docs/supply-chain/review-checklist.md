@@ -56,22 +56,38 @@ advisory が解消 (upgrade 等) されたら、対応する accepted entry を 
 
 - **PR / push (main)**: blocking。`continue-on-error` は付けない
   (soft-fail は「赤いのに緑に見える」= baseline 化と同型のため採らない)。
-- **nightly (05:00 JST)**: 同じ job を `schedule` でも回す。上流で新しい advisory が
-  公開された事実を、**無関係な PR のクリティカルパス外**で先に検知するため。
-  nightly は PR blocking の代替ではない。
-  `on.schedule` は workflow 全体を起動するため、`php` / `frontend` / `browser-tests` には
-  `if: github.event_name != 'schedule'` を付けて **nightly では supply-chain-audit だけが走る**
-  ようにしている (`tests/js/architecture/ci-workflow-inventory.test.ts` W15 が固定)。
+- **定期実行 (schedule) は持たない**: CI の責務は push / pull_request の同期検査に限る、
+  というオーナー裁定 (2026-08-05 / 再周知 2026-08-06)。
+  **実装の巧拙の問題ではない** — 「workflow 起動と job 実行を分けて供給網監査だけを
+  定期実行する」技術的に妥当な実装が一度入り、それでも巻き戻された経緯がある。
+  「もっとうまく作れば残せる」道は無い。
+  `.github/workflows/ci.yml` の `on:` は `push` / `pull_request` の 2 つで、
+  `tests/js/architecture/ci-workflow-inventory.test.ts` の
+  W12 (ci.yml のトリガー集合の完全一致) / W15 (job-level `if` の不在) /
+  **W17 (`.github/workflows/` 配下の全 workflow に `schedule` が無いこと)** が
+  再導入を機械的に止める。別 workflow を新設して定期実行を戻す経路も W17 が塞ぐ。
 
 取得失敗 (network 不通・レジストリ障害) は **advisory 0 件として扱わない**。
 `scripts/audit-gate.sh` が空出力・前処理失敗をそこで止め、`assertAuditSourceShape` が
 「valid JSON だが期待 schema でない」出力を弾く (fail-closed)。一過性の赤は re-run で回復する。
 
+### 定期実行を持たないことで失うもの (受容済み)
+
+| 失うもの | 帰結 |
+|---|---|
+| 上流で新しい advisory が公開された事実の先行検知 | 依存を変えない限り、**次の push / PR まで検出されない**。検知の間隔は push / PR の頻度に依存する |
+| `accepted-advisories.yaml` の expiry 切れの自動検出 | 同じく次の push / PR まで検出されない。期限を過ぎた entry が気付かれないまま残る期間が生じうる |
+
+これは把握したうえでの受容であり、**埋め合わせに `continue-on-error` を足す /
+gate を除外リスト化する / schedule を戻す、のいずれもしない**。
+定期的な検知が必要になったときの枠組みは **CI の外**に用意する。
+どういう形で用意するかはオーナーの裁量であり、**リポジトリ側で代替の定期実行を作らない**。
+
 ### 一次対応
 
 | 項目 | 決め |
 |---|---|
-| 一次対応 owner | リポジトリオーナー (`ishitoya`)。nightly / PR いずれの赤化でも同一 |
+| 一次対応 owner | リポジトリオーナー (`ishitoya`)。push / PR いずれの赤化でも同一 |
 | 初動 SLA | critical: 当日中に判断 / high: 2 営業日以内に判断 / moderate: warn のみ (SLA なし) |
 | 「判断」の中身 | upgrade で解消する、または §3 の上限内で accept-risk を登録する、のいずれか |
 | accept-risk の承認者 | 単独開発体制のため `approved_by` = owner。代替統制として `expiry` 上限 (high 30 日) と `tracking_issue` 必須で外部から追跡可能にする (`audit-gate.ts` が両方を機械強制) |

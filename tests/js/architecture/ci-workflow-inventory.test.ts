@@ -14,7 +14,7 @@
  * (コメントは parse 時に落ちるので、`BROWSER_TEST_LANES` を**コメントで説明する**ことは許される)。
  */
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 
@@ -34,7 +34,8 @@ interface WorkflowJob {
     steps?: WorkflowStep[];
 }
 interface Workflow {
-    on?: Record<string, unknown>;
+    // `on:` は map / 配列 / scalar の 3 形式が有効なため unknown で受け、triggerNames で正規化する。
+    on?: unknown;
     jobs?: Record<string, WorkflowJob>;
 }
 
@@ -100,6 +101,59 @@ export function findScalarValuePathsContaining(node: unknown, needle: string, pa
         }
     }
     return hits;
+}
+
+/**
+ * workflow の `on:` に宣言されたトリガー名を昇順で返す純関数 (W12 / W17 用)。
+ *
+ * GitHub Actions の `on:` は **3 形式すべて有効**なので全部正規化する
+ * (`Object.keys()` だけだと配列形式で `["0","1"]`、scalar 形式で文字位置のキーが返り、
+ *  **schedule を素通りさせる偽グリーン**になる):
+ *   - map 形式    `on:\n  push:\n  schedule:\n    - cron: "…"`
+ *   - 配列形式    `on: [push, schedule]`
+ *   - scalar 形式 `on: schedule`
+ *
+ * `on` が未定義なら空配列を返す。YAML 1.1 互換の parser が `on` を boolean `true` として
+ * 解釈した場合もここが空配列になり **W12 が落ちる** (静かに素通りしない fail-safe な向き)。
+ */
+export function triggerNames(workflow: Workflow): string[] {
+    const triggers = workflow.on;
+
+    // scalar 形式: `on: schedule`
+    if (typeof triggers === "string") return [triggers];
+
+    // 配列形式: `on: [push, schedule]`
+    if (Array.isArray(triggers)) {
+        return triggers.filter((name): name is string => typeof name === "string").sort();
+    }
+
+    // map 形式: `on:\n  push:\n  pull_request:`
+    if (triggers !== null && typeof triggers === "object") return Object.keys(triggers).sort();
+
+    // 未定義 / boolean true として parse された場合 (静かに素通りさせず W12 を落とす)
+    return [];
+}
+
+/**
+ * job-level `if` を持つ job 名を宣言順で返す純関数 (W15 用)。
+ * 値ではなく **`if` の有無**を見るので、条件式の言い換えでは逃げられない。
+ */
+export function jobsWithCondition(workflow: Workflow): string[] {
+    return Object.entries(workflow.jobs ?? {})
+        .filter(([, target]) => target.if !== undefined)
+        .map(([name]) => name);
+}
+
+/**
+ * workflow ファイル群のうち `on:` に `schedule` を持つものの**ファイル名**を返す純関数 (W17 用)。
+ * 入力は「ファイル名 → YAML テキスト」の対にして、FS 走査と検査を分離する
+ * (負のコントロールから FS に触れずに呼べるようにするため)。
+ */
+export function workflowsWithSchedule(files: ReadonlyArray<readonly [name: string, yaml: string]>): string[] {
+    return files
+        .filter(([, yaml]) => triggerNames(parseYaml(yaml) as Workflow).includes("schedule"))
+        .map(([name]) => name)
+        .sort(); // 診断メッセージを readdirSync の順序に依存させない
 }
 
 /** action 名から `@version` を落とす (version 上げで偽赤にしない)。 */
@@ -219,21 +273,40 @@ describe("ci.yml inventory gate", () => {
         expect(runScript(job(workflow, "supply-chain-audit"))).toContain("pnpm run audit:gate");
     });
 
-    it("W12: on.schedule (nightly) が存在すること", () => {
-        expect(workflow.on?.schedule).toBeDefined();
+    it("W12: on のトリガー集合が push / pull_request と完全一致すること", () => {
+        // **定期実行 (schedule) は持たない** — CI の責務は push / pull_request の同期検査に
+        // 限るという裁定による (理由と受容した損失は ci.yml の on: 直上のコメントと
+        // docs/supply-chain/review-checklist.md §6)。
+        //
+        // 「schedule が無いこと」ではなく **集合の完全一致** で固定するのは、
+        // repository_dispatch を外部 cron から叩く等、別名で定期実行を復活させる経路を
+        // 塞ぐため。トリガーを増やすときはこの配列に登録させる (W1 と同じ作法)。
+        expect(triggerNames(workflow)).toEqual(["pull_request", "push"]);
     });
 
-    it("W15: nightly (schedule) では supply-chain-audit だけが走ること", () => {
-        // on.schedule は workflow 全体を起動する。docs (review-checklist §6) が
-        // 「nightly は supply-chain gate の先行検知」と書いている以上、
-        // 他 job は schedule から明示除外され、**gate 自身は除外されない**ことを固定する。
-        for (const name of ["php", "frontend", "browser-tests"]) {
-            expect(job(workflow, name).if, `${name} が schedule から除外されていない`).toBe(
-                "github.event_name != 'schedule'",
-            );
-        }
-        // gate を nightly から外す (= 先行検知を殺す) 退行を止める
-        expect(job(workflow, "supply-chain-audit").if).toBeUndefined();
+    it("W15: どの job も job-level if を持たないこと", () => {
+        // 定期実行トリガーの除去に伴い `if: github.event_name != 'schedule'` を全廃した。
+        // 値ではなく **`if` の有無** を見るのは、`!contains(github.event_name, 'schedule')`
+        // のような言い換えを一網打尽にするため。
+        //
+        // job-level `if` は **deny-by-default**。条件付き job が必要になったら、
+        // W14a / W14b と同じく「理由付きの allowlist」としてここへ登録すること
+        // (黙って足すと、条件の形を変えた定期実行の復活を見逃す)。
+        expect(jobsWithCondition(workflow), "job-level if は deny-by-default (登録が必要)").toEqual([]);
+    });
+
+    it("W17: .github/workflows のどの workflow も schedule トリガーを持たないこと", () => {
+        // W12 は ci.yml 1 ファイルしか縛らない。裁定は「CI の定期実行トリガを持たない」で
+        // あってファイル名の話ではないので、別 workflow を新設して定期実行を復活させる
+        // 経路もここで塞ぐ。
+        const dir = resolve(process.cwd(), ".github/workflows");
+        const files = readdirSync(dir)
+            .filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"))
+            .map((name) => [name, readFileSync(resolve(dir, name), "utf-8")] as [string, string]);
+
+        // 空振り防止: workflow ファイルが 1 本も無い状態で green にならないこと
+        expect(files.length, "workflow ファイルが 1 本も見つからない (走査パスの誤り)").toBeGreaterThanOrEqual(1);
+        expect(workflowsWithSchedule(files), "schedule トリガーを持つ workflow").toEqual([]);
     });
 
     it("W16: php が bug-hunt インベントリの drift 検知を **実行行として** 持つこと", () => {
@@ -349,6 +422,68 @@ describe("走査関数の負のコントロール (検出器が空振りして�
             runLines(fixture).filter((l) => !(BROWSER_JOB_ALLOWED_RUN_LINES as readonly string[]).includes(l)),
         ).toHaveLength(1);
         expect((fixture.steps ?? []).filter((s) => (s.run ?? "").trim() === "composer test:browser")).toHaveLength(0);
+    });
+
+    it("W12: 復活した schedule トリガーを検出する", () => {
+        const fixture = {
+            on: { push: null, pull_request: null, schedule: [{ cron: "0 20 * * *" }] },
+        } as Workflow;
+        expect(triggerNames(fixture)).not.toEqual(["pull_request", "push"]);
+        expect(triggerNames(fixture)).toContain("schedule");
+    });
+
+    it("W12: 別名トリガー (repository_dispatch) の追加も検出する", () => {
+        const fixture = { on: { push: null, pull_request: null, repository_dispatch: null } } as Workflow;
+        expect(triggerNames(fixture)).not.toEqual(["pull_request", "push"]);
+    });
+
+    it("W15: 復活した job-level if を条件式の形によらず検出する", () => {
+        const fixture = {
+            jobs: {
+                php: { if: "github.event_name != 'schedule'" },
+                frontend: { if: "!contains(github.event_name, 'schedule')" },
+                "supply-chain-audit": {},
+            },
+        } as Workflow;
+        // 言い換えた条件式も同じく検出される (値ではなく有無を見ているため)
+        expect(jobsWithCondition(fixture)).toEqual(["php", "frontend"]);
+    });
+
+    it("W17: 別 workflow ファイルに新設された schedule を検出する (map 形式)", () => {
+        const files: Array<[string, string]> = [
+            ["ci.yml", "on:\n  push:\n    branches: [main]\n  pull_request:\n"],
+            ["secret-scan.yml", "on:\n  pull_request:\n    branches:\n      - main\n"],
+            ["scheduled-audit.yml", 'on:\n  schedule:\n    - cron: "0 20 * * *"\n'],
+        ];
+        expect(workflowsWithSchedule(files)).toEqual(["scheduled-audit.yml"]);
+    });
+
+    it("W17: 配列形式 / scalar 形式の on も検出する (map 形式だけ見ると素通りする)", () => {
+        // GitHub Actions では 3 形式すべて有効。Object.keys() だけの実装では
+        // 配列形式が ["0","1"]、scalar 形式が文字位置のキーになり **schedule を見落とす**。
+        expect(workflowsWithSchedule([["array.yml", "on: [push, schedule]\n"]])).toEqual(["array.yml"]);
+        expect(workflowsWithSchedule([["scalar.yml", "on: schedule\n"]])).toEqual(["scalar.yml"]);
+        // 正のコントロール: 同じ形式でも schedule を含まなければ検出しない
+        expect(workflowsWithSchedule([["array.yml", "on: [push, pull_request]\n"]])).toEqual([]);
+    });
+
+    it("triggerNames: 3 形式を同じ語彙へ正規化する", () => {
+        expect(triggerNames({ on: { push: null, pull_request: null } })).toEqual(["pull_request", "push"]);
+        expect(triggerNames({ on: ["push", "schedule"] })).toEqual(["push", "schedule"]);
+        expect(triggerNames({ on: "schedule" })).toEqual(["schedule"]);
+        expect(triggerNames({})).toEqual([]);
+        // parser が YAML 1.1 の boolean として解釈した場合も空配列 (= W12 が落ちる向き)
+        expect(triggerNames({ on: true })).toEqual([]);
+    });
+
+    it("正常な fixture では W12 / W15 / W17 とも違反 0 件", () => {
+        const fixture = {
+            on: { push: null, pull_request: null },
+            jobs: { php: {}, "supply-chain-audit": {} },
+        } as Workflow;
+        expect(triggerNames(fixture)).toEqual(["pull_request", "push"]);
+        expect(jobsWithCondition(fixture)).toEqual([]);
+        expect(workflowsWithSchedule([["ci.yml", "on:\n  push:\n  pull_request:\n"]])).toEqual([]);
     });
 
     it("composite action へ移送すると W14a と W14c の両方が違反を返す", () => {
