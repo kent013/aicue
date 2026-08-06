@@ -701,3 +701,36 @@ Vitest (`OrganizationsSettings.test.ts`) と Feature 両面で回帰固定する
 | REST API v1 | `routes/api.php` → `Http/Controllers/Api/V1` | dual guard (`auth:api-key,api-oauth`) + `resolve.api-actor` |
 | MCP | `routes/ai.php` → `Mcp/Servers` | Passport OAuth 2.1 (`auth:mcp-oauth`) |
 | 管理画面 | Filament (`app/Filament`) | AdminUser guard |
+
+## 外部 fake 配線の不変条件 (T119)
+
+外部サービス (Stripe / S3 / LLM) の fake 差し替えは、**登録漏れが例外にならず本物が静かに動く**
+という性質を持つ (Laravel は abstract が具象クラスなら設定が無くても自動組み立てする)。
+撮影データと課金は取り返しがつかない副作用を持つため、以下を不変条件として固定する
+(gate は `tests/Architecture/ExternalFakeWiringInvariantTest` と
+`tests/Architecture/FakeClassReferenceInvariantTest`、走査器の固定は
+`tests/Unit/Architecture/FakeWiringSourceScannerTest`)。
+
+- **差し替えの唯一の配線点は `App\Providers\FakeExternalsServiceProvider`**。container 差し替えは
+  `$this->app->bind(A::class, B::class)` の形だけで行う (`singleton()` / `bind()` の第 3 引数
+  (= singleton 相当) / 変数 abstract / closure concrete / `app()`・`resolve()`・`App::`・
+  `Container::getInstance()` 経由は deny-by-default で fail する)。登録は
+  `bootstrap/providers.php` で **`AppServiceProvider` より後**に置く (後勝ち rebind)。
+- **新しい差し替えを足したら `tests/Support/ExternalFakes/ExternalFakeWiringInventory::bindings()`
+  に登録する**。未登録の bind 組は集合一致で検出される。登録すると「flag off で real /
+  flag on + allowlist env で fake / allowlist 外 env で real」の**実証**検査が自動で増える。
+  判定は必ず**厳密クラス一致** (`$resolved::class === $expected`) — storage fake は real の
+  サブクラスなので `instanceof` では偽グリーンになる。Architecture lane は `RefreshDatabase` を
+  使わないため、**解決対象の constructor が DB 非依存**であることを確認すること。
+- **capability flag は 3 系統で allowlist が異なる**: `testing.fake_externals` (課金。
+  local / testing / bughunt.local)、`testing.fake_storage` (`App\Support\FakeStorageGate` が
+  predicate の SSOT。bughunt.local ∨ (testing ∧ runningUnitTests))、`testing.fake_llm`
+  (bughunt.local のみ。`Prompt::$fake` は container ではなくプロセスグローバル static)。
+- **本番混入防止の正本は `App\Support\ProductionEnvGuard`** (配備前 = `production:preflight` /
+  起動時 = `AppServiceProvider::boot`)。fake 配線 gate はこれを二重実装しない。
+- **fake 実装クラスは `app/**/Fakes/` か `app/**/Testing/` に置く**。配置例外は
+  `FakeExternalsServiceProvider` (唯一の配線点) と `FakeStorageGate` (有効化 predicate) の 2 件のみ。
+- **本番コード (`app/` • `routes/` • `config/` • `bootstrap/`) は fake クラスを参照しない**。
+  参照してよいのは配線点と fake storage signed route の受け口を含む 4 ファイルだけで、
+  allowlist の件数はテストが固定している (増やすには理由コメントと併せて 2 箇所を触る摩擦がかかる)。
+  **誤検出が出ても allowlist を足す方向へ倒さない** — それが gate の目的である。
