@@ -313,10 +313,11 @@ final class DirectFetchInventory
                 calledBy: 'App\Services\Organization\OrganizationMembershipService::transferOwnership',
             ),
 
-            // --- ★債務 (globalExistenceRuleDebt) は現在 0 件。
+            // --- ★存在オラクル (payloadIdExistenceOracle) は現在 0 件。
             //     aicue:T118 で payload 由来 id 3 件 (org 移譲 / project メンバー追加 /
             //     MCP consent) を relation 起点の解決へ寄せたため。
-            //     再発時はここに分類を書き、modelDirectFetchDebtCap() も同時に上げる。
+            //     再発時はここに分類を書き、modelDirectFetchExistenceOracleCount() も同時に上げる
+            //     (件数は「以下」ではなく一致で固定されているので、書き換えは必須 — c2c 裁定 AG-103)。
         ];
     }
 

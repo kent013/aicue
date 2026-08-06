@@ -46,17 +46,24 @@ function modelDirectFetchCandidateFloor(): int
 }
 
 /**
- * 債務 case の件数上限。
+ * 存在オラクル case の**現在件数** (上限ではない)。
  *
  * **実測 0 件**。aicue:T118 で payload 由来 id 3 件 (org 移譲 / project メンバー追加 /
  * MCP consent) を relation 起点へ寄せ、`exists:` rule とセットで存在オラクルを閉じたため。
- * 0 のまま維持する — 1 件足すには inventory 登録と本 cap の引き上げの
- * **2 つ**が要り、必ずレビューの俎上に乗る。
- * 分類 case (`PayloadIdWithGlobalExistenceRuleDebt`) と
- * `DirectFetchJustificationEntry::globalExistenceRuleDebt()` は
- * 「この形は債務である」という裁定語彙として**残す** (消すと再発時の分類が失われる)。
+ *
+ * > **「以下」ではなく「一致」で固定する理由 (c2c 裁定 AG-103 / 2026-08-06)**:
+ * > 本関数はかつて `modelDirectFetchDebtCap()` という名の**上限**で、検査は
+ * > 「件数 ≤ 上限」だった。その形は **1 件直しても数字が下がらず、
+ * > 「あと N 件は黙って足せる枠」が残る**。オーナー裁定はこれを
+ * > 「実在する情報漏れを『返す予定のある借り』のように見せる」として退けた。
+ * > **一致**で固定すれば、増やすときも減らすときも必ずこの数字を書き換えることになり、
+ * > 件数の変化が差分に必ず現れる。「以下」へ戻さないこと。
+ *
+ * 分類 case (`PayloadIdExistenceOracle`) と
+ * `DirectFetchJustificationEntry::payloadIdExistenceOracle()` は
+ * 再発時の分類語彙として**残す** (消すと再発時に分類先が無くなる)。
  */
-function modelDirectFetchDebtCap(): int
+function modelDirectFetchExistenceOracleCount(): int
 {
     return 0;
 }
@@ -68,7 +75,7 @@ function modelDirectFetchActorSources(): array
 }
 
 /**
- * 債務 case の membership / tenant marker。
+ * 存在オラクル case の membership / tenant marker。
  *
  * `lockForUpdate` は marker に含めない (ロックは競合制御であって所属検証ではない)。
  */
@@ -107,7 +114,7 @@ function modelDirectFetchAllowedPredicateKinds(): array
         DirectFetchJustification::QueuePayloadRehydration->value => [$single, $multi],
         DirectFetchJustification::LocalOnlyDiagnostics->value => [$single],
         DirectFetchJustification::OperatorInvokedConsoleCommand->value => [$single, $multi, $exclusion, $destructive],
-        DirectFetchJustification::PayloadIdWithGlobalExistenceRuleDebt->value => [$single],
+        DirectFetchJustification::PayloadIdExistenceOracle->value => [$single],
     ];
 }
 
@@ -435,12 +442,12 @@ test('OperatorInvokedConsoleCommand は Console/Commands 配下で signature が
         .PHP_EOL.implode(PHP_EOL, $violations));
 });
 
-test('債務 case は補償チェックの実在 (verifiedBy / 呼び出し / marker / todoRef) を伴う', function (): void {
+test('存在オラクル case は補償チェックの実在 (verifiedBy / 呼び出し / marker / todoRef) を伴う', function (): void {
     $violations = [];
     $sources = DirectFetchInventory::sourceFiles();
     $todoSources = file_get_contents(base_path('docs/TODO.md')).file_get_contents(base_path('docs/TODO-closed.md'));
 
-    foreach (modelDirectFetchPairsFor(DirectFetchJustification::PayloadIdWithGlobalExistenceRuleDebt) as $key => [$candidate, $entry]) {
+    foreach (modelDirectFetchPairsFor(DirectFetchJustification::PayloadIdExistenceOracle) as $key => [$candidate, $entry]) {
         $verifiedBy = $entry->verifiedBy();
         $path = modelDirectFetchClassPath($verifiedBy);
         $method = modelDirectFetchMethodName($verifiedBy);
@@ -494,16 +501,22 @@ test('債務 case は補償チェックの実在 (verifiedBy / 呼び出し / ma
     //   候補と同一メソッド内に存在する」「verifiedBy のクラスが実在し当該メソッド本文に
     //   marker がある」「根拠文がある」の 3 点で受理し、**exact class を証明したとは主張しない**。
     expect($violations)->toBe([],
-        '債務 case は補償チェックの実在が条件です。'.PHP_EOL.implode(PHP_EOL, $violations));
+        '存在オラクル case は補償チェックの実在が条件です。'.PHP_EOL.implode(PHP_EOL, $violations));
 });
 
-test('債務 case が増殖していない (上限を超えたら是正 TODO を先に進める)', function (): void {
-    $debts = array_keys(modelDirectFetchPairsFor(DirectFetchJustification::PayloadIdWithGlobalExistenceRuleDebt));
+test('存在オラクル case の件数が宣言値と一致する (増えても減っても検出する)', function (): void {
+    $oracles = array_keys(modelDirectFetchPairsFor(DirectFetchJustification::PayloadIdExistenceOracle));
 
-    expect(count($debts))->toBeLessThanOrEqual(modelDirectFetchDebtCap(),
-        'PayloadIdWithGlobalExistenceRuleDebt は「fetch 後に弾く」形であり準拠形ではありません。'
-        .'新規に増やさず、org 相対化 (relation 起点) と exists: rule の見直しをセットで行ってください。'
-        .PHP_EOL.implode(PHP_EOL, $debts));
+    // 「以下」ではなく「一致」で見る (c2c 裁定 AG-103)。
+    // 増えたときだけでなく **減ったときも落とす** ことに意味がある —
+    // 1 件直したら宣言値も下げさせることで、「あと N 件は黙って足せる枠」を残さない。
+    expect(count($oracles))->toBe(modelDirectFetchExistenceOracleCount(),
+        'PayloadIdExistenceOracle は「fetch 後に弾く」形であり準拠形ではありません '
+        .'(認証済みの組織管理者が番号を順に送るだけで利用者・組織の実在を全数列挙できる)。'.PHP_EOL
+        .'増やす場合: org 相対化 (relation 起点) と exists: rule の見直しをセットで行い、'
+        .'それでも残るなら inventory 登録と modelDirectFetchExistenceOracleCount() の引き上げの 2 つを行うこと。'.PHP_EOL
+        .'減らした場合: modelDirectFetchExistenceOracleCount() を実件数まで下げること。'.PHP_EOL
+        .implode(PHP_EOL, $oracles));
 });
 
 test('case × predicateKind が許可表の組み合わせに収まっている', function (): void {

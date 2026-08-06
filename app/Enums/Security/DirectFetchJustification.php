@@ -104,11 +104,23 @@ enum DirectFetchJustification: string
     case OperatorInvokedConsoleCommand = 'operator_invoked_console_command';
 
     /**
-     * **債務**: payload 由来 id を global に引いており、補償チェックが fetch の後段にある。
+     * **存在オラクル**: payload 由来 id を global に引いており、補償チェックが fetch の後段にある。
      *
      * 他の case が「fetch 時点でスコープが閉じている」のに対し、本 case は
      * 「引いた後で弾く」形であり**安全性の質が違う**。準拠形と同列に扱わないために分けてある。
-     * 新規コードで本 case を使ってはならない (既存 2 件の可視化のためだけに存在する)。
+     *
+     * この形が残っていると何が起きるか (名前が名乗るべき実害):
+     * **認証済みの組織管理者が番号を順に送るだけで、その番号の利用者・組織が実在するかを全数列挙できる**
+     * — 存在しない id は validation error、実在するが権限が無い id は認可拒否となり、
+     * 応答が分岐するため。cross-org の read/write は起きないが、情報漏れは実在する。
+     *
+     * 新規コードで本 case を使ってはならない (再発時の分類語彙としてのみ存在する)。
+     *
+     * > **命名の経緯 (c2c 裁定 AG-103 / 2026-08-06)**: 本 case はかつて
+     * > `PayloadIdWithGlobalExistenceRuleDebt` (債務) という名前だった。オーナー裁定は
+     * > 「『債務』という語が**実在する情報漏れを「返す予定のある借り」のように見せ**、
+     * > 判断を鈍らせる。名前は露出の中身 (存在オラクル) を名乗ること」として改名を求めた。
+     * > 借りではなく穴である。名前を戻さないこと。
      */
-    case PayloadIdWithGlobalExistenceRuleDebt = 'payload_id_with_global_existence_rule_debt';
+    case PayloadIdExistenceOracle = 'payload_id_existence_oracle';
 }
