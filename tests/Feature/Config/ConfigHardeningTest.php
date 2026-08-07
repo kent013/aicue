@@ -127,3 +127,19 @@ test('cache.stores にカスタム storage store が存在しない', function (
 
     expect($config['stores']['storage'] ?? null)->toBeNull();
 });
+
+// ========== cache: 逆シリアライズの許可一覧を持たない ==========
+
+test('config/cache.php は serializable_classes を false で宣言している', function (): void {
+    // ★`false` と「キー欠落」は等価ではない。CacheManager は
+    //   `config['cache.serializable_classes'] ?? null` を読み、各 store は
+    //   `if ($this->serializableClasses !== null)` のときだけ allowed_classes を渡す。
+    //   キーを消すと制限なしの unserialize() に戻る = fail-open。
+    //   したがって「宣言が存在すること」と「値が false であること」を分けて固定する。
+    $config = evaluateConfigFileWithEnv('cache.php', []);
+
+    expect(array_key_exists('serializable_classes', $config))->toBeTrue(
+        'serializable_classes の宣言が消えると Laravel は制限なしの unserialize() に戻る');
+    expect($config['serializable_classes'])->toBeFalse(
+        'クラス許可一覧は作らない (lctl 標準形 v1 / AGENTS.md セキュリティ不変条件 11)');
+});

@@ -67,6 +67,15 @@
     `bootstrap/app.php` の **priority list**(route の宣言順ではない)
     (`ProjectRouteCurrentOrgGuardTest` / `NestedRouteIdorDefenseTest` /
     `TenantBoundaryOrderingTest`)
+11. **キャッシュに入れるのは素のデータだけ**: cache へ渡す値は配列 / 文字列 / 数値 / 真偽値に限る
+    (オブジェクトを直接入れない)。読み戻しは `fromArray()` 等で**明示的に組み立て直して検査**し、
+    失敗したら `forget` する(準拠実装 `FxRateService` + `FxSnapshotDto`)。
+    `config/cache.php` の `serializable_classes` は **`false` 固定**でクラス許可一覧を作らず、
+    **キーごと消さない**(宣言が無いと制限なしの `unserialize()` に戻る = fail-open)。
+    **テストは array store で緑になり本番 database store でだけ壊れる**ため、
+    書き込み経路とキャッシュに触れるファイルは deny-by-default の目録で強制する
+    (`CachePayloadPlainDataGateTest` / 宣言 pin は `ConfigHardeningTest`。
+    guide §7 不変条件 6 と対応)
 
 > **採番の注意**: 本節の番号と `docs/app-integration-guide.md` §7 の番号は **1:1 対応しない**
 > (本節 6 = PII CipherSweet / guide 6 = 逆シリアライズ、本節 8 = SSRF / guide 8 = 認可 gate)。
