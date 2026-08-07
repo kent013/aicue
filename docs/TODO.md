@@ -23,9 +23,11 @@
 |---|---|---|---|---|---|---|---|
 | T085 | bfcache 実復元の iOS 実機受入確認 | test | Playwright 不可のため実機で確認+記録 | High | standalone | [設計](devnotes/20260803-0053-aigenba-alignment/) | 2026-08-03 03:10 |
 | T110 | 認証手段変更のメール通知ポリシーの統一設計 | backend | passkey/2FA/SSO の増減通知を一貫したポリシーとして設計する(T108 S7 は監査ログのみで通知は見送り) | Low | standalone | [設計](devnotes/20260805-1550-security-audit-remediation/) | 2026-08-05 17:45 |
-| T124 | 2FA 秘密を返す GET の recent-auth 化 | backend | 秘密 GET 3 本に step-up を要求する | Medium | standalone | [設計](devnotes/20260806-1403-throttle-coverage-inventory/) | 2026-08-06 18:40 |
-| T125 | inline throttle 群の bucket 共有の見直し | backend | 同一 actor が 1 bucket 共有の是正 | Medium | standalone | [設計](devnotes/20260806-1634-throttle-unauthenticated-get/) | 2026-08-06 18:40 |
-| T126 | 外部 SDK の client timeout を pin する | backend | Stripe/AWS SDK の待ち上限を固定 | Medium | incremental | [設計](devnotes/20260806-1635-queue-lease-timeout/) | 2026-08-06 18:40 |
+| T124 | 2FA 秘密GETとenableのstep-up化 | backend | 2FA 秘密GET/enableにstep-up必須 | High | standalone | [設計](devnotes/20260807-2032-todo-T124-design/) | 2026-08-06 18:40 |
+| T125 | inline throttle 群の bucket 共有の見直し | backend | inline 13本を6 named レーンへ分離 | High | standalone | [設計](devnotes/20260807-2032-todo-T125-design/) | 2026-08-06 18:40 |
+| T126 | 外部 SDK の client timeout を pin | backend | Stripe/AWS SDK の待ち上限を pin | High | incremental | [設計](devnotes/20260807-2032-todo-T126-design/) | 2026-08-06 18:40 |
+| T133 | キャッシュ素データ規約の明文化と gate | test | キャッシュ素データ規約の gate 化と文書訂正 | Medium | standalone | [設計](devnotes/20260807-2032-cache-payload-plain-data/) | 2026-08-07 21:35 |
+| T134 | アプリ内招待受諾の追加と役割付き招待の撤去 | backend | アプリ内受諾入口追加と役割付き招待の撤去 | Medium | standalone | [設計](devnotes/20260807-2032-invitation-in-app-acceptance/) | 2026-08-07 21:35 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
