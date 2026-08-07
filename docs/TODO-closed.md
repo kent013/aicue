@@ -143,6 +143,9 @@ Open リストは [TODO.md](TODO.md) を参照。
 | T132 | 決済 gateway エラー分類の統一と gate 化。Throwable を有界 enum (業務 4 case + 写像の不在専用 unknown) へ写す純関数を新設し、AutoRechargeService の観測 4 箇所から $e->getMessage() を全廃して failure_class / error_class の 2 キーへ統一。gateway interface の契約は変更しない (合議の結論)。spy と本物の分類が実際に食い違う偽グリーンを実測で確認し、実ライブラリ例外を返す共有 fixture + 検査 21 本で固定。vendor 走査で Stripe/Cashier 例外 21 クラスの全件明示分類を強制 | backend | 2026-08-07 21:05 |
 | T125 | inline throttle 群の bucket 共有の見直し。inline 13 本を 6 named レーン (password-verify / password-set / email-verification / two-factor-manage / invitation-accept-submit / plan-activate) へ分離。閾値は 1 つも変えず移行元 inline 値をそのまま使う。inline の残置は vendor 3 本のみで、自前 route 向けの enum case を定義しないことで AGENTS.md 規約 5 を機械化。検査 4 種 + mutation 17 項目 | backend | 2026-08-08 00:05 |
 | T133 | キャッシュ素データ規約の明文化と gate 化。aicue の app/ は既に標準形のためアプリの振る舞いは 1 行も変えず (git diff で機械確認)、deny-by-default の目録 gate と docs/app-integration-guide.md §7-6 の誤情報訂正のみ。実装中に設計コードの bug 2 件 (alias 展開の分岐反転 / app()->make('cache')->put の素通り) と語彙表の誤り 1 件を発見し是正。mutation M1〜M17 | test | 2026-08-08 00:05 |
+| T124 | 2FA 秘密GETとenableのstep-up化。qr-code / secret-key の GET に加え、実査で見つけた enable の force 再生成による永久ロックアウト経路 (force=true が secret/recovery_codes を再生成する一方 confirmed_at を触らない) にも step-up を要求。2FA 必須組織の passkey-only ユーザーが enrollment 入口で詰まないよう passkey satisfier を allowlist へ追加。deny-by-default 目録 gate + mutation m1〜m8 | backend | 2026-08-08 01:00 |
+| T126 | 外部 SDK の client timeout を pin。Stripe (connect 5s/timeout 20s/retries 0) と AWS (制御系 15s / データ系 900s) を App\Support\ExternalClientTimeouts へ単一出典化し env 上書きの口を作らない。これにより queue の retry_after を 600 → 360 へ縮小 (T122 が固定した序列は検査の期待値ごと同一 PR で更新)。S3 到達境界の deny-by-default 目録 + mutation 22 件 | backend | 2026-08-08 01:00 |
+| T134 | アプリ内招待受諾の追加と役割付き招待の撤去。既存のアプリ内通知 (発見面) は捨てず、存在秘匿つき (宛先不一致・不在・期限切れは一律 404) の 受諾の入口を追加。受諾の解決と件数/一覧の算出で同一 scope を再利用し、未ログイン・未 verified・email 空は DB を引かない。同じ裁定系統が求める役割付き招待 (project_role) の撤去も同一 PR で実施 | backend | 2026-08-08 01:00 |
 
 ## Obsoleted
 
