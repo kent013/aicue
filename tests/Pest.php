@@ -20,6 +20,7 @@ use Illuminate\Support\Facades\Vite;
 use Illuminate\Support\Str;
 use Kent013\PrismPrompt\Prompt;
 use Laravel\Cashier\Subscription;
+use Tests\Support\StrayHttpRequestGuard;
 use Tests\Support\StrayLlmCallGuard;
 use Tests\TestCase;
 
@@ -46,25 +47,53 @@ pest()->extend(TestCase::class)
         // Prism 基盤を直接テストする稀な Unit テストのみ
         // StrayLlmCallGuard::uninstallForTest($this->app) で opt-out できる。
         StrayLlmCallGuard::install($this->app);
+
+        // 未 fake の外向き HTTP を fail-fast させる guard (裁定 AG-105)。
+        // レーン既定として Http::preventStrayRequests() を常時 ON にし、
+        // 自機宛て loopback だけを Http::allowStrayRequests([...]) で明示許可する。
+        // テスト本体で Http::fake([...]) を呼ぶと該当 URL は透過する
+        // (Factory::fake() は prevent フラグを reset しないため共存する)。
+        StrayHttpRequestGuard::install($this->app);
     })
     ->afterEach(function (): void {
         try {
             // stray call が記録されていれば test を fail させる (Service 層の
             // try/catch fallback で guard 例外が握り潰されてもここで必ず赤くなる)
+            //
+            // ★2 つの guard は順に flush する。**同時発生時は先に throw した guard の
+            //   詳細だけが表示される** (もう一方の accumulator は finally の reset で
+            //   捨てられる)。test は既に赤いので「静かに緑」にはならず、検出目的は達成される。
+            //   両方を集約する仕組みは入れない (今必要なものだけ作る)。
             StrayLlmCallGuard::flushAndFailIfStray();
+            StrayHttpRequestGuard::flushAndFailIfStray();
         } finally {
             // flush が throw しても次テストへ accumulator / Prompt::$fake を漏らさない
             if (Prompt::isFaking()) {
                 Prompt::stopFaking();
             }
             StrayLlmCallGuard::reset();
+            StrayHttpRequestGuard::reset();
         }
     })
     ->in('Feature', 'Unit');
 
+/*
+| Architecture lane はファイル走査中心で DB を使わないが、HTTP 出口の既定拒否は
+| **全レーン一律**にする (レーンごとに既定が違うと「どのレーンなら外へ出られるか」を
+| 覚える必要が生まれ、gate も分岐だらけになる)。Tests\TestCase は
+| Illuminate\Foundation\Testing\TestCase 継承で Laravel app 上を走るため install できる。
+*/
 pest()->extend(TestCase::class)
     ->beforeEach(function (): void {
         $this->withoutVite();
+        StrayHttpRequestGuard::install($this->app);
+    })
+    ->afterEach(function (): void {
+        try {
+            StrayHttpRequestGuard::flushAndFailIfStray();
+        } finally {
+            StrayHttpRequestGuard::reset();
+        }
     })
     ->in('Architecture');
 
@@ -89,6 +118,14 @@ pest()->extend(TestCase::class)
         // accumulator に記録され afterEach で fail する)。
         StrayLlmCallGuard::install($this->app);
 
+        // in-process サーバ (Amp) はテストプロセス自身の HttpKernel / container を使うため、
+        // ブラウザ経由リクエストの処理中に出る Laravel HTTP client の呼び出しにも効く。
+        // in-process サーバは常に 127.0.0.1 に bind するので、許可パターンの loopback
+        // リテラルで自機宛ては通る。
+        // ★ただし Playwright のブラウザ自身が出す外部フォント / CDN 取得は**捕捉できない**
+        //   (別プロセスのため)。保証範囲は docs/testing-browser.md に明記している。
+        StrayHttpRequestGuard::install($this->app);
+
         // Browser lane は Prompt を常時 canned fake 化する (SystemMessage signature 別の
         // 決定論応答。未登録の Prompt から呼ばれると fail-fast)。canned PromptFake は
         // Browser lane と bughunt 実行時の両方で共有 (registrar 参照)。install() 内の
@@ -98,11 +135,13 @@ pest()->extend(TestCase::class)
     ->afterEach(function (): void {
         try {
             StrayLlmCallGuard::flushAndFailIfStray();
+            StrayHttpRequestGuard::flushAndFailIfStray();
         } finally {
             if (Prompt::isFaking()) {
                 Prompt::stopFaking();
             }
             StrayLlmCallGuard::reset();
+            StrayHttpRequestGuard::reset();
         }
     })
     ->in('Browser');

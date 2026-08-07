@@ -264,6 +264,10 @@ test('social.callback の throttle は Socialite を一切呼ばずに枠を消�
     // intent 不在で controller が Socialite に触れる前に短絡することを spy で直接示す
     // (Socialite は Guzzle を直接使うため Http::preventStrayRequests() では捕まらない。
     //  preventStrayRequests は Laravel HTTP client 側の追加の網として併用する)。
+    // ★この 1 行は tests/Pest.php のレーン既定と**同値の重複宣言**であり、後方互換の並走ではない
+    //  (Factory::preventStrayRequests は冪等。allowStrayRequests は呼んでいないので
+    //   レーン既定の loopback 許可集合を置換しない)。このテストの意図
+    //   「ここで外向き HTTP が起きないこと」を呼び出し側に明示する目的で残す。
     Http::preventStrayRequests();
     Socialite::spy();
 
