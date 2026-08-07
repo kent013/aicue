@@ -338,7 +338,7 @@ DB driver のキューには**実行中にリース (`retry_after`) を延長す
 
      | # | 発生条件 | 検知元 | 収束手順 |
      |---|---|---|---|
-     | (a) | 所有権喪失後の void / delete に失敗した | **アプリログ**: `event = job_ownership_lost_cleanup` かつ `terminated=false` (原因の分類は同ログの `error` = 例外クラス名。`report()` 側にも **invoice id と例外クラス名だけを持つサニタイズ済み例外**しか流れないため、**この cleanup 経路では Stripe が生成した原メッセージはアプリのどこにも残らない** (別経路の `tryTerminateInvoice()` は対象外)。詳細が要るときは `invoice_id` で Stripe 側を直接確認する) | 同ログの `invoice_id` を Stripe で確認し、`paid` でなければ手動 void |
+     | (a) | 所有権喪失後の void / delete に失敗した | **アプリログ**: `event = job_ownership_lost_cleanup` かつ `terminated=false` (原因の分類は同ログの **`failure_class`** = `GatewayFailureClass`、**`error_class`** = 例外クラス名。**成功時も両キーは `null` で存在する** (集計 schema を成否で割らない)。`report()` 側にも invoice id とこの 2 値だけを持つサニタイズ済み例外しか流れないため、**この cleanup 経路で本サービスが出す構造化ログと report message には Stripe が生成した原メッセージが残らない** (`report()` の stack trace / vendor 側の別ログ / 伝播した queue failure は本保証の範囲外)。`tryTerminateInvoice()` / `reconcile()` も同じ 2 キーへ統一済み。詳細が要るときは `invoice_id` で Stripe 側を直接確認する) | 同ログの `invoice_id` を Stripe で確認し、`paid` でなければ手動 void |
      | (b) | invoice 作成成功 → `stripe_invoice_id` の永続化前にワーカーが死亡した | **アプリログには何も残らない**。Stripe 側を起点に探す — metadata `purpose=auto_recharge` を持つ `draft` / `open` invoice を列挙し、その `recharge_attempt_ulid` に対応する `ticket_auto_recharge_attempts` 行の `stripe_invoice_id` が **NULL または別 id** のものが孤児 | **原則すべて手動終端の対象**とする。`paid` でないことを確認して void / delete する |
 
      > **(b) を「次の実行が拾うから放置してよい」と書かない** — Stripe の idempotency key は
@@ -374,6 +374,68 @@ DB driver のキューには**実行中にリース (`retry_after`) を延長す
 | 所有権喪失時に invoice 作成・支払いを抑止し、必要な既作成 invoice を終端する | `AutoRechargeServiceTest` |
 | ログコンテキストに PII を含めない | `JobOwnershipLostContextTest` |
 | 固定 event 名の literal が 1 箇所に閉じる | `JobExecutionDedupInventoryTest` |
+| gateway を注入されるクラスが観測目録 or 免除に分類される / vendor 例外が全件分類される / `unknown` が写像表の値に現れない / fake の失敗注入が本物と同じ分類になる | `BillingGatewayFailureTaxonomyInventoryTest` |
+| 分類器の写像・境界 (`UnknownApiErrorException` の HTTP status) ・`context()` の array shape | `GatewayFailureClassifierTest` |
+| 失敗分類が実際にログへ載る / 成功時も null で存在する / 制御フローが変わらない | `AutoRechargeServiceTest` / `AutoRechargeReconcileTest` |
+
+### オートリチャージの失敗分類
+
+決済 gateway (`AutoRechargeGatewayInterface`) の消費経路で捕まえた例外は、
+`App\Support\Billing\GatewayFailureClassifier` が**有界な語彙**へ写してからログに載せる。
+**分類は観測のためであり、制御フローを変えない** (課金の振る舞いは分類の導入前後で同一)。
+
+| `failure_class` | 意味 | 運用担当が取る行動 |
+|---|---|---|
+| `provider_unavailable` | 決済事業者側の一時的な不能 (接続断・レート制限・5xx) | 同じ要求の再送で収束しうる。頻度を監視する |
+| `provider_rejected` | 決済事業者が要求を受理しなかった (400/401/402/403 等) | 再送しても収束しない。要求内容・認証情報・利用者操作を確認する |
+| `invariant_violation` | アプリ自身が検出した不変条件違反 (Assert / SDK・Cashier の誤用) | **アプリの欠陥**。コードを直す |
+| `local_failure` | 自インフラ層 (DB / cache) の失敗 | インフラを確認する |
+| `unknown` | **写像表に一致が無かった** | 下記「`unknown` の運用契約」 |
+
+ログに載るのは `failure_class` と `error_class` (例外クラス名) の **2 キーだけ**である。
+**例外 message は載せない** (外部サービスが生成する可変文字列であり、
+構造化ログの集計語彙にしない)。
+
+**`unknown` の運用契約 (所有者 = 課金運用担当)**
+
+- **検知条件**: `failure_class = unknown` を含む warning が 1 件でも出たら検知とみなす
+  (`unknown` は「分類器に欠落がある」という通知そのものであり、正常状態では出ない)。
+- **初動**: 同ログの `error_class` を見て、そのクラスを
+  `GatewayFailureClassifier::directMap()` (または条件付き規則) へ追加し、
+  `GatewayFailureClassifierTest` の期待値表にも**独立に**書く。
+  **`unknown` を写像表の値として書いてはならない** (gate が機械的に禁止する)。
+- vendor 由来のクラスなら `BillingGatewayFailureTaxonomyInventoryTest` の検査 9 が
+  同時に赤くなっているはずなので、CI の赤と突き合わせる。
+
+**vendor 更新 (`composer update`) で gate が赤くなったときの手順**
+
+`BillingGatewayFailureTaxonomyInventoryTest` は stripe-php / cashier の例外クラス集合を走査し
+「写像表 == 実在クラス集合」を要求する。**依存更新で赤くなるのは意図した費用**であり
+(外部の語彙が増えたことを人間に必ず知らせるための仕掛け)、soft-fail 化しない。
+
+1. 検査 9 の失敗メッセージが挙げるクラス名を確認する。
+2. 増えたクラスは vendor の throw site を読んで**行動で切る**分類を決め、
+   `GatewayFailureClassifier::directMap()` と `GatewayFailureClassifierTest` の期待値表の
+   **両方**へ追加する (二重宣言なのは、片方だけでは写像を間違えても green になるため)。
+   HTTP status 等の条件で分岐が要るものだけ `conditionalClasses()` 側へ置く。
+3. 消えたクラスは両方から削除する。
+4. 検査 13 (a) が赤い場合は SDK が**サブ名前空間を増減させた**ことを意味する。
+   `VendorExceptionPopulation::EXCLUDED_STRIPE_SUBNAMESPACES` に
+   30 文字以上の根拠付きで宣言するか、母集団定義そのものを再検討する。
+
+**Stripe 例外型を知ってよいクラス**は gateway 実装 3 本
+(`CashierStripeGateway` / `CashierAutoRechargeGateway` / `StripeScheduleGateway`) と
+`GatewayFailureClassifier` の**計 4 つに閉じる** (検査 19 が allowlist で固定。
+走査は PHP 同梱の tokenizer で行い、`use` 文だけでなく完全修飾名・文字列リテラルも拾う。
+コメント / docblock での言及は対象外)。
+集約点が増えると観測語彙が割れるため、新しい観測点を作らず分類器を使うこと。
+
+**免除 (`GatewayFailureObservationExemption::PropagatesToQueueFailure`) の前提**は
+検査 21 が behavioral に固定する: 免除宣言したクラスは `catch` 節を **1 つも持たない**
+(tokenizer の `T_CATCH` 計数。コメント中の記述には反応しない)。
+件数と根拠長だけを見る gate では、後から `catch (Throwable)` を足して `getMessage()` を
+ログへ載せても green のままになるため (`ThrottleExemptionPremiseTest` と同じ作法)。
+catch を足す必要が出たら、観測目録へ移すか免除の分類を見直すこと。
 
 ### AI 解析ジョブの運用契約
 

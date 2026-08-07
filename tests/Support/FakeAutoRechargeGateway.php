@@ -7,10 +7,11 @@ namespace Tests\Support;
 use App\DataTransferObjects\Billing\DefaultPaymentMethodDto;
 use App\DataTransferObjects\Billing\InvoiceStateDto;
 use App\DataTransferObjects\Billing\OffSessionChargeResultDto;
+use App\Enums\Billing\GatewayFailureClass;
 use App\Models\Organization;
 use App\Services\Billing\Contracts\AutoRechargeGatewayInterface;
 use Closure;
-use RuntimeException;
+use Tests\Support\Billing\GatewayFailureFixtures;
 
 /**
  * AutoRechargeGatewayInterface のテスト用 spy (Stripe に到達しない)。
@@ -53,8 +54,13 @@ final class FakeAutoRechargeGateway implements AutoRechargeGatewayInterface
     /** @var array<string, string> */
     public array $invoiceStatuses = [];
 
-    /** true にすると terminateInvoice が throw する (終端失敗 → pending 維持の再現)。 */
-    public bool $failOnTerminate = false;
+    /**
+     * terminateInvoice が投げる失敗の**分類** (null なら投げない)。
+     *
+     * ★bool ではなく分類で指定する。投げる実体は GatewayFailureFixtures が返す
+     *   **実ライブラリ例外**であり、本物の gateway が伝播させるクラスと一致する。
+     */
+    public ?GatewayFailureClass $terminateFailure = null;
 
     /**
      * createAutoRechargeInvoice が invoice ID を返す**直前**に呼ばれる hook
@@ -71,8 +77,8 @@ final class FakeAutoRechargeGateway implements AutoRechargeGatewayInterface
     /** resolveSubscriptionPaymentMethod の返り値 (null = 解決不能)。 */
     public ?string $subscriptionPaymentMethodId = 'pm_test_subscription';
 
-    /** true にすると resolveSubscriptionPaymentMethod が throw する。 */
-    public bool $failOnResolveSubscriptionPaymentMethod = false;
+    /** resolveSubscriptionPaymentMethod が投げる失敗の分類 (null なら投げない)。 */
+    public ?GatewayFailureClass $resolveSubscriptionFailure = null;
 
     /** createSetupCheckout が返す url (null = 進行中 replay の再現)。 */
     public ?string $setupUrl = 'https://checkout.stripe.test/c/setup/cs_setup_test';
@@ -152,13 +158,14 @@ final class FakeAutoRechargeGateway implements AutoRechargeGatewayInterface
 
     public function terminateInvoice(string $invoiceId): void
     {
-        if ($this->failOnTerminate) {
-            throw new RuntimeException('fake gateway: invoice 終端失敗');
+        if ($this->terminateFailure !== null) {
+            throw GatewayFailureFixtures::throwableFor($this->terminateFailure);
         }
 
         $status = $this->invoiceStatuses[$invoiceId] ?? 'open';
         if ($status === 'paid') {
-            throw new RuntimeException("fake gateway: paid invoice {$invoiceId} は終端できない");
+            // ★本物 (CashierAutoRechargeGateway の Assert::true) と**同じクラス**を投げる
+            throw GatewayFailureFixtures::throwableFor(GatewayFailureClass::InvariantViolation);
         }
 
         $this->terminated[] = $invoiceId;
@@ -208,8 +215,8 @@ final class FakeAutoRechargeGateway implements AutoRechargeGatewayInterface
     {
         $this->resolvedSubscriptions[] = $stripeSubscriptionId;
 
-        if ($this->failOnResolveSubscriptionPaymentMethod) {
-            throw new RuntimeException('fake gateway: resolveSubscriptionPaymentMethod failed');
+        if ($this->resolveSubscriptionFailure !== null) {
+            throw GatewayFailureFixtures::throwableFor($this->resolveSubscriptionFailure);
         }
 
         return $this->subscriptionPaymentMethodId;

@@ -363,3 +363,12 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
    保証を代替できる長さに伸ばさない (`JobExclusionOrderingInvariantTest` が
    `retry_after` 未満を固定)。**閉じない窓と運用上の所有者**は `docs/architecture.md`
    §ジョブの重複実行と結果の一回性 が正本。
+7. **決済 gateway 失敗の観測語彙**: `AutoRechargeGatewayInterface` を注入されるクラスは、
+   gateway 例外を **観測する (`GatewayFailureClassifier::context()` の
+   `failure_class` / `error_class` の 2 キーだけをログへ載せる)** か、
+   **伝播させる (`GatewayFailureObservationExemption` + 30 文字以上の根拠で免除登録)** かの
+   どちらかに目録登録が必須 (`BillingGatewayFailureTaxonomyInventoryTest` が
+   deny-by-default で強制)。**例外 message はログに載せない** (外部生成の可変文字列)。
+   分類は**観測のためであり制御フローを変えない**。`unknown` は「写像表に一致が無かった」
+   ことを意味し、写像表の値としては禁止。詳細と運用契約は
+   `docs/architecture.md` §オートリチャージの失敗分類。
