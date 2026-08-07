@@ -17,7 +17,7 @@ procs:
   # ★ 接続名は必ず明示する (既定接続に頼ると QUEUE_CONNECTION 次第で
   #   どの retry_after と比較すべきか静的に決まらない)。
   queue:
-    shell: "php artisan queue:listen database --tries=1 --timeout=540"
+    shell: "php artisan queue:listen database --tries=1 --timeout=300"
   # 専用 connection (analysis/render/media) は既定 database connection の default
   # キューを見る上の worker では拾われないため、docs/architecture.md の運用契約どおり
   # connection ごとに worker を分けて常駐させる (retry_after が connection 固有のため

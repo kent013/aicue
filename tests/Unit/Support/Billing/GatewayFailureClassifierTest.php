@@ -189,3 +189,17 @@ test('LockTimeoutException は Contracts\Cache の具象クラスである (同�
     expect($throwable::class)->toBe('Illuminate\Contracts\Cache\LockTimeoutException');
     expect(GatewayFailureClassifier::classify($throwable))->toBe(GatewayFailureClass::LocalFailure);
 });
+
+test('Stripe の接続断/timeout は ApiConnectionException の class 分類で ProviderUnavailable になる', function (): void {
+    // ★分類は **class-based** である (message 文字列は判定に一切効かない)。
+    //   timeout らしい message を使うのは可読性のためだけ。
+    // ★cURL の timeout は ApiRequestor::handleCurlError() が ApiConnectionException へ変換する。
+    //   timeout を短く pin (T126) すると本例外の出現頻度が上がるため、分類の対応関係を固定する。
+    //   分類表 (directMap) を**変えない**という判断を CI に残すのが目的である。
+    $exception = new ApiConnectionException('Operation timed out after 20000 milliseconds');
+
+    expect(GatewayFailureClassifier::classify($exception))->toBe(GatewayFailureClass::ProviderUnavailable);
+
+    // 観測語彙は 2 キーのまま (例外 message を載せない)
+    expect(array_keys(GatewayFailureClassifier::context($exception)))->toBe(['failure_class', 'error_class']);
+});

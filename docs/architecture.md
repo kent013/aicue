@@ -256,7 +256,7 @@ DB driver のキューには**実行中にリース (`retry_after`) を延長す
 
 | 接続 | `retry_after` | ワーカー `--timeout` | 備考 |
 |---|---|---|---|
-| `database` | 600 | **540** | 既知の有限上限は Stripe 4〜5 呼び出し × SDK 上限 80s = 約 400s |
+| `database` | 360 | **300** | 外部予算 200s (Stripe 20s × 呼び出し予算 10 回) + 局所予算 90s = 290 < 300 (T126)。§外部 SDK の待ち上限の規約 |
 | `database-analysis` | 1680 | **1620** | ジョブ側 `$timeout` 1,560 を上回る帯 |
 | `database-render` | 1680 | **1620** | ジョブ側 `$timeout` 1,500 を上回る帯 |
 | `database-media` | 300 | **240** | 削除は冪等 + `$tries=3` なので kill されても再配布で完了する |
@@ -932,3 +932,92 @@ Vitest (`OrganizationsSettings.test.ts`) と Feature 両面で回帰固定する
   参照してよいのは配線点と fake storage signed route の受け口を含む 4 ファイルだけで、
   allowlist の件数はテストが固定している (増やすには理由コメントと併せて 2 箇所を触る摩擦がかかる)。
   **誤検出が出ても allowlist を足す方向へ倒さない** — それが gate の目的である。
+
+## 外部 SDK の待ち上限の規約 (T126)
+
+外部 SDK (Stripe / AWS) は**無指定だと待ちが有界にならない**
+(Stripe cURL client の既定 80s × SDK 自動リトライ / AWS は timeout 無指定 = 無制限 × 3 attempts)。
+値の正本は **`App\Support\ExternalClientTimeouts`** ただ 1 つで、env で上書きできる口を作らない
+(gate が読む値と本番の実値を一致させるため。`config/queue.php` の `retry_after` と同じ理屈)。
+
+> **用語 (誇張しない)**: 「HTTP 試行 timeout 予算」= cURL / Guzzle に与える 1 試行あたりの上限 × 試行回数。
+> **SDK 操作全体の wall-clock deadline ではない** (DNS 解決・credential provider・
+> endpoint discovery・retry backoff はこの外側)。
+
+| 面 | 値 | 配線点 |
+|---|---|---|
+| Stripe (プロセス大域) | connect 5s / timeout 20s / `max_network_retries` 0 | `App\Providers\ExternalClientTimeoutServiceProvider` |
+| AWS 制御系 (SES 送信 / SNS) | connect 5s / timeout 15s / `max_attempts` 2 | `config/services.php` の `ses` / `AppServiceProvider` の `SnsClient` singleton |
+| AWS データ系 (s3 disk 既定) | connect 10s / timeout 900s / `max_attempts` 2 | `config/filesystems.php` の `disks.s3` |
+| S3 per-command (web 同期の metadata) | connect 5s / timeout 15s / `@retries` 0 | `TakeObjectStorage::headObject()` |
+
+- **Stripe は client ごとの timeout を支えない**。`StripeClient` の config に timeout 系のキーが無く、
+  `Stripe\ApiRequestor` の static HTTP client だけが唯一の調整点である。したがってテナント別 timeout は持たない。
+- **`max_network_retries = 0`** に pin する。課金の一回性は **Stripe idempotency key とリコンサイル**が
+  担う設計 (AGENTS.md ドメイン規約 6) であり、SDK 自動 retry に寄せない
+  (0 でないとジョブの外部予算が retry 数だけ倍化する)。
+- **AWS の語彙に注意**: 構築引数の `retries.max_attempts` は **初回を含む試行回数** (2 = 初回 + 再試行 1 回)、
+  per-command の `@retries` は **retry 回数** (0 = 再試行しない)。同じ数字でも意味が違う。
+- **s3 disk の既定を短くできない**: Flysystem の write 経路 (`AwsS3V3Adapter::upload()`) は
+  `@http` を per-command で転送しないため、client 既定がデータ系を賄う必要がある。
+- **`services.ses` は vendor 契約に依存する**。`Illuminate\Mail\MailManager::createSesV2Transport()` が
+  `config('services.ses')` を **そのまま `new SesV2Client(...)` へ渡す**ため、AWS client option は
+  この配列の**直下**に置く (ネストすると AWS 側から未知キーになり黙って無視される)。
+  この前提は `ExternalClientTimeoutInventoryTest` が behavioral に固定する。
+
+### S3 到達境界と面分類
+
+- 業務層は **`TakeObjectStorage` / `RenderObjectStorage`** しか参照しない。AWS SDK / Flysystem へ
+  到達しうる `app/` のクラスは `ExternalClientTimeoutInventoryTest` の目録へ
+  「adapter」か「免除 (`App\Enums\Storage\ExternalClientBoundaryExemption` + 30 文字以上の根拠)」で
+  登録が必須 (deny-by-default)。
+- adapter の public メソッドは **`App\Enums\Storage\S3OperationSurface`** で面分類する
+  (正本は `tests/Support/Storage/S3SurfaceInventory`)。分類軸は「転送量が有界か」と
+  「per-command option を注入できるか」の 2 つ。
+- **`Bulk` 面を web 同期経路から呼ばない**。これは**規約であって機械証明ではない**
+  (呼び出しグラフ解析が要る)。既存の web 経路については
+  `tests/Feature/Capture/TakeRegistrationS3SurfaceTest.php` が behavioral に固定する。
+- 免除理由 (`ExternalClientBoundaryExemption`) には**適用条件を機械検査する前提表**が付く
+  (「`disk()` を呼ばない」「`new Aws\…` しない」等)。docblock の約束だけで免除を通さない。
+- **`driver=s3` の disk は全件が pin を宣言する**ことを gate が要求する。
+  `Storage` facade を既定 disk のまま使う層は `FILESYSTEM_DISK` 次第で S3 へ到達しうるため、
+  「特定の disk 名」ではなく driver 単位で塞ぐ。到達しても待ちはデータ系の帯 (有界) になる。
+- **走査の保証範囲を誇張しない**: 目録の母集団は「型/クラス名の参照」「`new Aws\…`」
+  「`disk()` / `getClient()` の呼び出し」「Stripe 大域 setter の呼び出し」の静的検出である。
+  **文字列キーの container 解決だけでこれらの token をまったく出さない迂回は検出できない**。
+  だから**やらない**、が規約の側の担保である。
+
+### 帯を変更するときのデプロイ順序
+
+**worker の起動形態は環境で違う**: `mprocs.yaml` は **dev** で `queue:listen`、
+**本番/ステージングの supervisor** は上の値表どおり `queue:work`。確認コマンドは**両方**を拾う正規表現にする。
+
+```
+0. 実施条件 (手順 1 の前に確認する)
+   - **低トラフィック時間帯**に実施する (SIGALRM で落ちる旧ジョブを最小化するため)
+   - `database` キューの未処理件数が 0 に近いこと
+     (select count(*) from jobs where queue = 'default')
+   - オートリチャージの pending attempt が滞留していないこと
+     (select count(*) from ticket_auto_recharge_attempts where status = 'pending')
+
+1. 全 worker の supervisor 定義を --timeout=540 → 300 へ変更して再起動する
+   (このときコードは旧のまま = retry_after 600。300 < 600 で規則 1 は成立)
+   ★確認方法: 各 worker ホストで
+     pgrep -af 'artisan queue:(work|listen) database( |$)' を実行し、
+     出力の全行に --timeout=300 が含まれること。実施主体は本番デプロイ担当。
+
+2. 新コード (SDK pin + retry_after 360) をデプロイし、全 worker を入れ替える
+
+3. 旧 worker が残っていないことを確認する
+   ★確認方法: 同コマンドで --timeout=540 の行が 0 件であること。
+     加えてデプロイ開始時刻より前に起動した worker プロセスが残っていないこと
+     (ps -o lstart=,args= -p <pid>)
+
+4. 実施後、手順 0 と同じクエリで pending attempt の残留を確認し、
+   残っていればリコンサイルの完了を待つ (または手動起動する)
+```
+
+**受容事項**: 手順 1 の間、旧コード (Stripe 80s 前提) のジョブが 300s で SIGALRM されうる。
+`ExecuteAutoRechargeAttemptJob` は `$tries = 1` でリコンサイルが再試行を担うため、恒久喪失にはならない
+(Stripe idempotency key により二重課金にもならない)。手順 0 の実施条件はこの受容の**発生確率を下げる**
+ためのものであり、「起きない」ことの保証ではない。

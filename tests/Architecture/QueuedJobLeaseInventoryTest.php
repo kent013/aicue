@@ -20,6 +20,7 @@ use App\Notifications\Billing\AutoRechargeEnabledNotification;
 use App\Notifications\Billing\AutoRechargeFailedNotification;
 use App\Notifications\Billing\PaymentFailedNotification;
 use App\Notifications\Billing\RenewalReminderNotification;
+use Tests\Support\PhpTokenScan;
 use Tests\Support\QueuedJobPopulation;
 use Tests\Support\QueueLeaseConfig;
 use Webmozart\Assert\Assert;
@@ -300,26 +301,14 @@ function jobLeaseConnectionDeclarationSites(string $phpSource): array
 /**
  * `token_get_all()` を「空白・コメントを除いた添字連番のリスト」へ正規化する (純関数)。
  *
+ * ★実体は `Tests\Support\PhpTokenScan::normalize()` (T126 で共通化)。
+ *   同じ正規化を 2 本持たないための delegate であり、振る舞いは従前と同一。
+ *
  * @return list<array{id: int|null, text: string, line: int}>
  */
 function jobLeaseNormalizedTokens(string $phpSource): array
 {
-    $normalized = [];
-    foreach (token_get_all($phpSource) as $token) {
-        if (is_array($token)) {
-            if (in_array($token[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) {
-                continue;
-            }
-            $normalized[] = ['id' => $token[0], 'text' => $token[1], 'line' => $token[2]];
-
-            continue;
-        }
-
-        $line = $normalized === [] ? 0 : $normalized[count($normalized) - 1]['line'];
-        $normalized[] = ['id' => null, 'text' => $token, 'line' => $line];
-    }
-
-    return $normalized;
+    return PhpTokenScan::normalize($phpSource);
 }
 
 /**

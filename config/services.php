@@ -1,5 +1,7 @@
 <?php
 
+use App\Support\ExternalClientTimeouts;
+
 return [
 
     /*
@@ -36,6 +38,17 @@ return [
             'trim',
             explode(',', (string) env('SES_SNS_TOPIC_ARNS', ''))
         ))),
+        // ★**vendor 契約に依存する**: Illuminate\Mail\MailManager::createSesV2Transport() は
+        //   array_merge(config('services.ses'), ['version' => 'latest'], $config) を
+        //   Arr::except(…, ['transport']) して **そのまま new SesV2Client(...)** へ渡す。
+        //   したがって AWS client option は**この配列の直下**に置く必要がある
+        //   (`client_options` のようにネストすると AWS の ClientResolver から見て未知キーになり
+        //    黙って無視される = pin が効かない)。アプリ設定 (options / sns_topic_arns) と
+        //   同居するのは Laravel 側の契約であり、この前提は
+        //   ExternalClientTimeoutInventoryTest の
+        //   「vendor 契約: MailManager は services.ses を SesV2Client の構築引数へ素通しする」が
+        //   behavioral に固定する (Laravel が strict 化した瞬間に赤くなる)。
+        ...ExternalClientTimeouts::awsControlClientOptions(),
     ],
 
     'google' => [

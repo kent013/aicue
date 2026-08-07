@@ -409,9 +409,9 @@ test('規則 1: database の retry_after は env で上書きできない', func
         $connections = QueueLeaseConfig::databaseConnections();
         expect($connections)->toHaveKey('database');
         expect($connections['database'])->toBe(
-            600,
+            360,
             '規則 1: config/queue.php の database.retry_after が env で上書きされた。'
-            .'env('."'DB_QUEUE_RETRY_AFTER'".') ではなくリテラル 600 で持つこと',
+            .'env('."'DB_QUEUE_RETRY_AFTER'".') ではなくリテラル 360 で持つこと',
         );
     } finally {
         if ($hadOriginal && is_string($original)) {

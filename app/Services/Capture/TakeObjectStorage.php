@@ -6,6 +6,7 @@ namespace App\Services\Capture;
 
 use App\DataTransferObjects\Capture\ObjectMetadataData;
 use App\DataTransferObjects\Capture\PresignedUploadData;
+use App\Support\ExternalClientTimeouts;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
 use Carbon\CarbonImmutable;
@@ -54,6 +55,12 @@ class TakeObjectStorage
     /**
      * オブジェクトが存在しなければ null (PUT 未完了)。ChecksumMode=ENABLED で
      * ChecksumSHA256 も取得する (欠落する互換実装では null = 照合スキップの二重防御位置づけ)。
+     *
+     * ★**web 同期経路 (テイク登録) から呼ばれる唯一の S3 ネットワーク操作**である。
+     *   s3 disk のクライアント既定はデータ系 (900s) のため、ここで per-command に
+     *   制御系の帯へ絞る。`@http` は `AwsClient::getCommand()` が `+=` で合成する
+     *   = 渡した側が勝つ。`@retries` は RetryMiddleware / RetryMiddlewareV2 の両方が読む。
+     *   面分類は App\Enums\Storage\S3OperationSurface::BoundedControl。
      */
     public function headObject(string $path): ?ObjectMetadataData
     {
@@ -62,6 +69,7 @@ class TakeObjectStorage
                 'Bucket' => $this->bucket(),
                 'Key' => $path,
                 'ChecksumMode' => 'ENABLED',
+                ...ExternalClientTimeouts::awsControlPlaneCommandOptions(),
             ]);
         } catch (S3Exception $exception) {
             if ($exception->getStatusCode() === 404) {

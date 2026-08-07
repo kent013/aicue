@@ -1,6 +1,7 @@
 <?php
 
 use App\Providers\AppServiceProvider;
+use App\Providers\ExternalClientTimeoutServiceProvider;
 use App\Providers\FakeExternalsServiceProvider;
 use App\Providers\Filament\AdminPanelProvider;
 use App\Providers\FortifyServiceProvider;
@@ -10,6 +11,9 @@ use App\Providers\SeoServiceProvider;
 
 return [
     AppServiceProvider::class,
+    // 外部 SDK (Stripe) のプロセス大域 timeout pin。他の provider の副作用と混ぜないため
+    // 専用に切り出す (テストが boot() を単独で再実行できるようにする)
+    ExternalClientTimeoutServiceProvider::class,
     AdminPanelProvider::class,
     FortifyServiceProvider::class,
     // passkey (laravel/passkeys) の app アダプタ。Fortify が feature flag で route を
