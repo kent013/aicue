@@ -140,6 +140,7 @@ Open リストは [TODO.md](TODO.md) を参照。
 | T129 | Inertia の 4xx/5xx を Error 画面へ差替。X-Inertia 付き XHR の 4xx/5xx をサーバ側で Error 画面へ差し替え (差し替え対象 status / 素通し理由を型付き目録で deny-by-default 固定)。戻り先はサーバ固定の許可一覧から出しリクエスト入力を混ぜない。Retry-After パースを ApiExceptionRenderer と共有 SoT 化。mutation M4〜M17 全件で赤化を確認 | backend | 2026-08-07 15:05 |
 | T130 | テストレーンの HTTP 出口既定拒否。Feature/Unit・Architecture・Browser の 3 レーンで preventStrayRequests を既定 ON にし loopback のみ明示許可。握り潰しを検出する globalMiddleware accumulator 付き。実装中に userinfo 詐称 URL (127.0.0.1:80@外部ホスト) が glob 一致で実際に外部送信される穴を発見し、パース済みホストを見る第 2 層を追加 | test | 2026-08-07 15:05 |
 | T131 | ジョブ二重実行の所有権再検証を追加。取り消せない外部呼び出し (LLM 3 段 / S3 PUT / Stripe) の直前で所有権を再検証し、喪失時は例外で中断してジョブ行への書き込みも止める。ShouldQueue 全 18 クラスを保証側 4 / 免除 14 に分類する deny-by-default 目録 gate と 排他 TTL の序列固定つき。mutation M1〜M17 全件で赤化を確認 | backend | 2026-08-07 15:58 |
+| T132 | 決済 gateway エラー分類の統一と gate 化。Throwable を有界 enum (業務 4 case + 写像の不在専用 unknown) へ写す純関数を新設し、AutoRechargeService の観測 4 箇所から $e->getMessage() を全廃して failure_class / error_class の 2 キーへ統一。gateway interface の契約は変更しない (合議の結論)。spy と本物の分類が実際に食い違う偽グリーンを実測で確認し、実ライブラリ例外を返す共有 fixture + 検査 21 本で固定。vendor 走査で Stripe/Cashier 例外 21 クラスの全件明示分類を強制 | backend | 2026-08-07 21:05 |
 
 ## Obsoleted
 
