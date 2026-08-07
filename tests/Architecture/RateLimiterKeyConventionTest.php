@@ -217,6 +217,28 @@ function rateLimiterKeyInventory(): array
         ],
     ];
 
+    // ── T125: inline から移行したレーン群 ──────────────────────────────
+    // いずれも「認証済みは actor / 未認証は IP」の 2 分岐 (passkeys と同形)。
+    // throttle は route によっては auth より後に走る (現行 priority list では後) ため、
+    // guest 分岐は防御的な冗長だが、closure 単体としては両分岐が実在する。
+    foreach ([
+        'password-verify',
+        'password-set',
+        'email-verification',
+        'two-factor-manage',
+        'invitation-accept-submit',
+        'plan-activate',
+    ] as $lane) {
+        $inventory[$lane] = [
+            'scenarios' => [
+                'authenticated' => static fn (): Request => rateLimiterAuthenticatedRequest(rateLimiterProbeUser()),
+                'guest' => $noEmail,
+            ],
+            'expectedKeyPrefixes' => [$lane.':user', $lane.':ip'],
+            'emailScenarios' => [],
+        ];
+    }
+
     // api-read / api-write / api-status は同一 apiRateKey() を共有する
     // (oauth-user 分岐は guard 解決が要るため scenario から外す = expectedKeyPrefixes にも入れない)。
     foreach (['api-read', 'api-write', 'api-status'] as $lane) {
@@ -363,4 +385,192 @@ test('email を扱う limiter のキーに EmailHash::compute の値が含まれ
     }
 
     expect($violations)->toBe([], PHP_EOL.implode(PHP_EOL, $violations));
+});
+
+/*
+ |--------------------------------------------------------------------------
+ | T125: レーン分離の実証 (キーの衝突検査 + full key の固定)
+ |--------------------------------------------------------------------------
+ |
+ | ★保証範囲を誇張しない: 以下の衝突検査は **inventory の scenario で produce した
+ |   キーだけ**を見る。scenario に無い分岐 (例: api-* の oauth-user 経路) の衝突は
+ |   検出できない。これは既存の expectedKeyPrefixes 検査と同じ制約である。
+ */
+
+/**
+ * 意図的に同一キーを共有している limiter の組 (それ以外は pairwise disjoint であること)。
+ *
+ * ★レーンを分ける = **bucket が実際に分かれる**ことであり、
+ *   キー接頭辞の宣言が違っても produce されるキーが同じなら分かれていない。
+ *   ここに載っていない組が衝突したら、それは「レーンを分けたつもりで分かれていない」バグである。
+ *
+ * @return array<string, array{limiters: list<string>, reason: string}>
+ */
+function rateLimiterSharedKeyGroups(): array
+{
+    return [
+        'api-actor' => [
+            'limiters' => ['api-read', 'api-write', 'api-status'],
+            'reason' => '3 本とも apiRateKey() を返し、1 クライアントの read / write / status を'
+                .'1 つの bucket で数える現行仕様 (実効上限は最小の api-status = 30/min に律速する)。'
+                .'分離は 1 クライアントの総量上限を実質 120/min から 210/min へ**緩める**変更であり、'
+                .'API の abuse 耐性の判断を伴うため T125 では挙動を変えず、事実の記録のみ行う。',
+        ],
+    ];
+}
+
+/**
+ * limiter が produce するキー文字列の集合 (全 scenario 合算)。
+ *
+ * @param  array{scenarios: array<string, callable(): Request>, expectedKeyPrefixes: list<string>, emailScenarios: list<string>}  $spec
+ * @return list<string>
+ */
+function rateLimiterProducedKeys(string $name, array $spec): array
+{
+    $keys = [];
+    foreach ($spec['scenarios'] as $build) {
+        foreach (rateLimiterProduceLimits($name, $build()) as $limit) {
+            $keys[(string) $limit->key] = true;
+        }
+    }
+
+    return array_keys($keys);
+}
+
+/**
+ * helper (`RateLimiterKeys::actorOrIp`) を使う limiter の **full key** 期待値。
+ *
+ * ★`expectedKeyPrefixes` は接頭辞しか見ないため、suffix (actor id / IP) の作り方が
+ *   変わっても検出できない。S1 の helper 移行が **bucket をリセットしない**ことを
+ *   主張するには full key の同一性が要る (prefix 一致では不十分)。
+ *
+ * probe の固定値: user id = 4242 (rateLimiterProbeUser) / IP = 203.0.113.7。
+ *
+ * @return array<string, array{authenticated: string, guest: string}>
+ */
+function rateLimiterActorOrIpFullKeys(): array
+{
+    $ip = rateLimiterScenarioIp();
+    $lanes = [
+        'passkeys',
+        'two-factor-secret-read',
+        'password-verify',
+        'password-set',
+        'email-verification',
+        'two-factor-manage',
+        'invitation-accept-submit',
+        'plan-activate',
+    ];
+
+    $expected = [];
+    foreach ($lanes as $lane) {
+        $expected[$lane] = [
+            'authenticated' => $lane.':user:4242',
+            'guest' => $lane.':ip:'.$ip,
+        ];
+    }
+
+    return $expected;
+}
+
+test('actor/IP レーンの full key が宣言と完全一致する (helper 移行で bucket をリセットしない)', function (): void {
+    $inventory = rateLimiterKeyInventory();
+    $violations = [];
+
+    foreach (rateLimiterActorOrIpFullKeys() as $lane => $expected) {
+        foreach ($expected as $scenario => $key) {
+            $limits = rateLimiterProduceLimits($lane, $inventory[$lane]['scenarios'][$scenario]());
+            $actual = array_map(static fn (Limit $limit): string => (string) $limit->key, $limits);
+            if ($actual !== [$key]) {
+                $violations[] = "{$lane}/{$scenario}: 期待 [{$key}] 実際 [".implode(', ', $actual).']';
+            }
+        }
+    }
+
+    expect($violations)->toBe([],
+        'キー文字列が変わると既存 bucket がリセットされ、デプロイ直後に枠が復活します。'
+        .PHP_EOL.implode(PHP_EOL, $violations));
+});
+
+test('共有グループの宣言は実在する limiter を 2 本以上指す', function (): void {
+    $known = array_keys(rateLimiterKeyInventory());
+    $violations = [];
+
+    foreach (rateLimiterSharedKeyGroups() as $group => $spec) {
+        if (count($spec['limiters']) < 2) {
+            $violations[] = "{$group}: 共有グループは 2 本以上でなければ意味がありません";
+        }
+        if (mb_strlen($spec['reason']) < 30) {
+            $violations[] = "{$group}: 根拠が 30 文字未満です";
+        }
+        foreach ($spec['limiters'] as $limiter) {
+            if (! in_array($limiter, $known, true)) {
+                $violations[] = "{$group}: 未知の limiter [{$limiter}]";
+            }
+        }
+    }
+
+    expect($violations)->toBe([], PHP_EOL.implode(PHP_EOL, $violations));
+});
+
+test('宣言した共有グループは実際にキーを共有している (死んだ宣言の検出)', function (): void {
+    // ★グループが実際には衝突していないなら、その宣言は「もう不要な免除」である。
+    //   残すと次に読む人へ嘘を伝え、かつ本物の衝突を隠す枠になる。
+    $inventory = rateLimiterKeyInventory();
+    $violations = [];
+
+    foreach (rateLimiterSharedKeyGroups() as $group => $spec) {
+        $sets = [];
+        foreach ($spec['limiters'] as $limiter) {
+            $sets[$limiter] = rateLimiterProducedKeys($limiter, $inventory[$limiter]);
+        }
+
+        foreach ($spec['limiters'] as $limiter) {
+            $others = array_merge(...array_values(array_diff_key($sets, [$limiter => true])));
+            if (array_intersect($sets[$limiter], $others) === []) {
+                $violations[] = "{$group}/{$limiter}: 他のメンバーとキーを共有していません (宣言が古い)";
+            }
+        }
+    }
+
+    expect($violations)->toBe([], PHP_EOL.implode(PHP_EOL, $violations));
+});
+
+test('共有グループ外の limiter は互いにキーを共有しない (レーン分離の実証)', function (): void {
+    $inventory = rateLimiterKeyInventory();
+
+    // 同一グループのペアだけを許可集合にする
+    $allowed = [];
+    foreach (rateLimiterSharedKeyGroups() as $spec) {
+        foreach ($spec['limiters'] as $a) {
+            foreach ($spec['limiters'] as $b) {
+                $allowed[$a.'|'.$b] = true;
+            }
+        }
+    }
+
+    $keys = [];
+    foreach ($inventory as $name => $spec) {
+        $keys[$name] = rateLimiterProducedKeys($name, $spec);
+    }
+
+    $names = array_keys($inventory);
+    $violations = [];
+    foreach ($names as $i => $a) {
+        foreach (array_slice($names, $i + 1) as $b) {
+            if (isset($allowed[$a.'|'.$b])) {
+                continue;
+            }
+            $shared = array_intersect($keys[$a], $keys[$b]);
+            if ($shared !== []) {
+                $violations[] = "{$a} と {$b} が同じキーを produce しています: ".implode(', ', $shared);
+            }
+        }
+    }
+
+    expect($violations)->toBe([],
+        'レーンを分けたつもりで bucket が分かれていません。'
+        .'キーの接頭辞にレーン名が入っているか確認してください'
+        .'(意図的な共有なら rateLimiterSharedKeyGroups() へ根拠付きで登録すること)。'
+        .PHP_EOL.implode(PHP_EOL, $violations));
 });

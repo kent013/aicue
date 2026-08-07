@@ -185,7 +185,7 @@ test('有効な有償契約がある org は errors.plan_code', function (): voi
     expect($organization->fresh()?->free_plan_code)->toBeNull();
 });
 
-test('throttle:10,1 が効く (11 回目は 429)', function (): void {
+test('plan-activate レーンが効く (11 回目は 429)', function (): void {
     [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
 
     for ($i = 0; $i < 10; $i++) {
@@ -197,6 +197,31 @@ test('throttle:10,1 が効く (11 回目は 429)', function (): void {
     $this->actingAs($owner)
         ->post('/onboarding/activate-personal', activatePersonalPayload())
         ->assertStatus(429);
+});
+
+/*
+ * T125: plan-activate レーンの独立性 (behavioral proof)。
+ *
+ * ★`throttleProbeExpectNotThrottled()` は AuthThrottleCoverageTest 内の関数なので
+ *   ここからは呼ばない (ファイル単独実行 / --filter でロード順に依存して未定義になりうる)。
+ *   利用箇所が 1 か所なので assertion を直接書く。
+ */
+test('plan-activate レーンを使い切っても再認証は 429 にならない', function (): void {
+    [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    $this->actingAs($owner);
+
+    for ($i = 1; $i <= 10; $i++) {
+        expect($this->post('/onboarding/activate-personal', activatePersonalPayload())->getStatusCode())
+            ->not->toBe(429, "{$i} 回目で既に 429 になりました");
+    }
+    expect($this->post('/onboarding/activate-personal', activatePersonalPayload())->getStatusCode())->toBe(429);
+
+    // throttle が実際に走ったうえで通ったことを示す (残数ヘッダの存在 + 429 でないこと)
+    $recentAuth = $this->post('/recent-auth/password', ['password' => 'wrong-password']);
+    expect($recentAuth->headers->get('X-RateLimit-Remaining'))
+        ->not->toBeNull('X-RateLimit-* が無い = throttle が走っていない (false green の疑い)');
+    expect($recentAuth->getStatusCode())
+        ->not->toBe(429, '再認証がプラン有効化の巻き添えで 429 になりました');
 });
 
 test('未認証は login へ', function (): void {

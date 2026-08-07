@@ -189,8 +189,10 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
     // クライアント主導 step-up の precheck (XHR, no-store)
     Route::get('/recent-auth/status', [ConfirmRecentAuthController::class, 'status'])
         ->name('recent-auth.status');
+    // 再認証 (step-up) の password satisfier。**この route が 429 になると復帰導線が塞がる**ため、
+    // 他の認証操作と bucket を共有しない named limiter を使う (T125。inline は共有される)。
     Route::post('/recent-auth/password', [ConfirmRecentAuthController::class, 'confirmPassword'])
-        ->middleware('throttle:6,1')
+        ->middleware('throttle:password-verify')
         ->name('recent-auth.password');
 
     Route::get('/settings', [ProfileController::class, 'index'])->name('settings');
@@ -198,8 +200,10 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
     // パスワード**初回設定** (password 未設定ユーザー専用)。認証手段を増やす操作のため
     // step-up (recent-auth) 必須。変更 (current_password 必須) は Fortify の PUT /user/password。
     // EnsureLoginMethodRemains は付けない (手段を減らす操作の関門であり方向が逆)。
+    // 初回設定は current_password を照合しない credential mutation のため
+    // 照合面 (password-verify) とはレーンを分ける (T125)。閾値は 6/min のまま。
     Route::post('/settings/password', [PasswordSetupController::class, 'store'])
-        ->middleware(['recent-auth', 'throttle:6,1'])
+        ->middleware(['recent-auth', 'throttle:password-set'])
         ->name('settings.password.store');
 
     // 2FA / ソーシャル連携 / パスキーの管理面 (passkey 一覧の組み立てに DI が要るため Controller)
@@ -381,7 +385,7 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         ->name('onboarding.checkout');
     // Personal (free) の有効化 (Stripe checkout を通らない。自己申告チェック必須)
     Route::post('/onboarding/activate-personal', ActivatePersonalController::class)
-        ->middleware('throttle:10,1')
+        ->middleware('throttle:plan-activate')
         ->name('onboarding.activate-personal');
     Route::get('/billing-required', [BillingRequiredController::class, 'show'])
         ->name('onboarding.billing-required');
@@ -609,10 +613,11 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
 Route::get('/invitations/accept', [InvitationAcceptanceController::class, 'show'])
     ->middleware('throttle:invitation-accept')
     ->name('invitations.accept');
-// 招待トークンは hash 照合されるが、総当り試行そのものを有界にする
-// (onboarding.activate-personal と同値 = 認証済みの一回性操作)。
+// 招待トークンは hash 照合されるが、総当り試行そのものを有界にする (10/min は据え置き)。
+// GET 側の `invitation-accept` (未認証 IP レーン) とは別レーン = 確認画面のリロードが
+// 受諾の枠を食わない (T125)。
 Route::post('/invitations/accept', [InvitationAcceptanceController::class, 'store'])
-    ->middleware(['auth', 'throttle:10,1'])
+    ->middleware(['auth', 'throttle:invitation-accept-submit'])
     ->name('invitations.accept.store');
 
 /*

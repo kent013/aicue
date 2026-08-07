@@ -5,9 +5,11 @@ declare(strict_types=1);
 use App\Http\Middleware\RequireRecentAuth;
 use App\Http\Middleware\VerifySnsSignature;
 use App\Models\User;
+use Illuminate\Auth\Middleware\Authenticate;
 use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Testing\TestResponse;
 use Laravel\Socialite\Facades\Socialite;
@@ -371,4 +373,200 @@ test('2FA 秘密 GET 3 本は 1 つのレーンを共有する (描画で複数�
         }
         $previous = (int) $remaining;
     }
+});
+
+/*
+ |--------------------------------------------------------------------------
+ | T125: inline throttle から移した 6 レーンの独立性 (behavioral proof)
+ |--------------------------------------------------------------------------
+ |
+ | 目録検査 (InlineThrottleInventoryTest / ThrottleLaneAssignmentTest) は
+ | 「どう貼られているか」しか見ない。**あるレーンを使い切ったとき別レーンが生きているか**は
+ | 実挙動でしか固定できない。ここが固定するのはその 1 点である。
+ |
+ | ★**責務境界を誇張しない** (mutation M8 の実測で確認済み):
+ |   本セクションが固定するのは**巻き添え 429 が消えていること**であって、
+ |   「inline へ戻したら必ず落ちる」ではない。1 本だけ inline へ戻しても、
+ |   巻き添え先が named レーンに居る限りここは緑のままになる
+ |   (その route 自身の上限は inline でも保たれるため)。
+ |   **inline への差し戻しそのものの検出は目録 gate の担当**である
+ |   (InlineThrottleInventoryTest「未登録」/ ThrottleLaneAssignmentTest「割当一致」
+ |    「レーンはすべて 1 本以上」)。両者はセットで維持すること。
+ |
+ | cache store はテスト実行時 array に強制されている (phpunit.xml) ため、
+ | app を作り直す各テストで RateLimiter のバケットは空から始まる。
+ |
+ | ★**「429 でないこと」だけを見ない** (false green の防止)。
+ |   前段 middleware の短絡や throttle の付け外しでも「429 でない」は成立するため、
+ |   独立性を主張する probe では必ず `X-RateLimit-Remaining` の存在も確認し、
+ |   「throttle が実際に走ったうえで通った」ことを示す。
+ */
+
+/**
+ * 429 ではなく、かつ throttle が実際に走った (残数ヘッダがある) ことを検査する。
+ *
+ * ★命名は同ファイル既存の `throttleProbe*` に合わせる (Pest のグローバル関数汚染を抑える)。
+ * ★**このファイル内でのみ使う**。他のテストファイルから参照すると、
+ *   ファイル単独実行 / `--filter` 絞り込みでロード順に依存して未定義になりうる。
+ *   利用箇所が少ないうちは各ファイルへ直接書く (`tests/Support` のクラス化はしない)。
+ */
+function throttleProbeExpectNotThrottled(TestResponse $response, string $message): void
+{
+    expect($response->headers->get('X-RateLimit-Remaining'))->not->toBeNull(
+        $message.' (X-RateLimit-* が無い = throttle が走っていない。false green の疑い)',
+    );
+    expect($response->getStatusCode())->not->toBe(429, $message);
+}
+
+test('Livewire アップロードのレーンは再認証を巻き添えにしない (max 60 が max 6 を殺さない)', function (): void {
+    // ★本 TODO の中心的な回帰。inline のままだと livewire.upload-file (max 60) の
+    //   6 回目で共有カウンタが 6 に達し、recent-auth.password (max 6) が 429 になる。
+    $user = User::factory()->create();
+    $this->actingAs($user);
+
+    // ★消費元の空振り防止。他のレーンは「N+1 回目が 429」で消費を証明できるが、
+    //   Livewire だけは上限 60 のためループ内で 429 に到達せず、
+    //   「署名検査や middleware 順の変更で 1 枠も消費しなくなった」状態でも
+    //   probe 側が緑になってしまう。**残数が 1 ずつ減っていること**まで固定する。
+    $remainings = [];
+    for ($i = 1; $i <= 6; $i++) {
+        // 署名なしのため 401 で弾かれるが、throttle は controller より前で数える
+        $response = $this->post(route('livewire.upload-file'));
+        $remaining = $response->headers->get('X-RateLimit-Remaining');
+        expect($remaining)->not->toBeNull("{$i} 回目に X-RateLimit-* がありません (throttle が走っていない)");
+        expect($response->getStatusCode())->not->toBe(429, "{$i} 回目で既に 429 になりました");
+        $remainings[] = (int) $remaining;
+    }
+    expect($remainings[5])->toBe($remainings[0] - 5,
+        'Livewire アップロードが bucket を消費していません (消費していないなら独立性の主張が空振りする)');
+
+    throttleProbeExpectNotThrottled(
+        $this->post('/recent-auth/password', ['password' => 'wrong-password']),
+        '再認証がファイルアップロードの巻き添えで 429 になりました',
+    );
+});
+
+test('2FA 管理レーンを使い切っても再認証・パスワード設定・メール検証は 429 にならない', function (): void {
+    Notification::fake();
+    $user = User::factory()->create();
+    $this->actingAs($user);
+
+    for ($i = 1; $i <= 10; $i++) {
+        expect($this->post('/user/two-factor-authentication')->getStatusCode())
+            ->not->toBe(429, "{$i} 回目で既に 429 になりました");
+    }
+    expect($this->post('/user/two-factor-authentication')->getStatusCode())
+        ->toBe(429, '2FA 管理レーンの上限 10/min が維持されていません');
+
+    throttleProbeExpectNotThrottled(
+        $this->post('/recent-auth/password', ['password' => 'wrong-password']),
+        '再認証が 2FA 管理の巻き添えで 429 になりました',
+    );
+    throttleProbeExpectNotThrottled(
+        $this->post('/settings/password', ['password' => 'short']),
+        'パスワード初回設定が 2FA 管理の巻き添えで 429 になりました',
+    );
+    throttleProbeExpectNotThrottled(
+        $this->post('/email/verification-notification'),
+        '認証メール再送が 2FA 管理の巻き添えで 429 になりました',
+    );
+});
+
+test('パスワード照合レーンを使い切っても初回設定・2FA 管理・メール検証は 429 にならない', function (): void {
+    Notification::fake();
+    $user = User::factory()->create();
+    $this->actingAs($user);
+
+    for ($i = 1; $i <= 6; $i++) {
+        expect($this->post('/recent-auth/password', ['password' => 'wrong-password'])->getStatusCode())
+            ->not->toBe(429, "{$i} 回目で既に 429 になりました");
+    }
+    expect($this->post('/recent-auth/password', ['password' => 'wrong-password'])->getStatusCode())
+        ->toBe(429, 'パスワード照合レーンの上限 6/min が維持されていません');
+
+    // ★照合と初回設定を分けた根拠そのもの (同レーンだとここが 429 になる)
+    throttleProbeExpectNotThrottled(
+        $this->post('/settings/password', ['password' => 'short']),
+        'パスワード初回設定が照合レーンの巻き添えで 429 になりました',
+    );
+    throttleProbeExpectNotThrottled(
+        $this->post('/user/two-factor-authentication'),
+        '2FA 管理が照合レーンの巻き添えで 429 になりました',
+    );
+    throttleProbeExpectNotThrottled(
+        $this->post('/email/verification-notification'),
+        '認証メール再送が照合レーンの巻き添えで 429 になりました',
+    );
+});
+
+test('パスワード照合面 3 本は 1 つのレーンを共有する (1 つの秘密の試行予算)', function (): void {
+    // ★分けてはいけない結合の固定。3 面が別 bucket になると同じパスワードを 18 回/min
+    //   試せることになり、総当り耐性が現状より下がる。
+    $user = User::factory()->create();
+    $this->actingAs($user);
+
+    $probes = [
+        fn () => $this->post('/recent-auth/password', ['password' => 'wrong-password']),
+        fn () => $this->post('/user/confirm-password', ['password' => 'wrong-password']),
+        fn () => $this->put('/user/password', ['current_password' => 'wrong', 'password' => 'NewPassw0rd!', 'password_confirmation' => 'NewPassw0rd!']),
+    ];
+
+    $previous = null;
+    foreach ($probes as $probe) {
+        $remaining = $probe()->headers->get('X-RateLimit-Remaining');
+        expect($remaining)->not->toBeNull('throttle が付いていません');
+        if ($previous !== null) {
+            expect((int) $remaining)->toBe($previous - 1, 'パスワード照合面が別 bucket へ分かれています');
+        }
+        $previous = (int) $remaining;
+    }
+});
+
+test('メール検証レーンは 6/min で、使い切っても再認証は 429 にならない', function (): void {
+    Notification::fake();
+    $user = User::factory()->unverified()->create();
+    $this->actingAs($user);
+
+    for ($i = 1; $i <= 6; $i++) {
+        expect($this->post('/email/verification-notification')->getStatusCode())
+            ->not->toBe(429, "{$i} 回目で既に 429 になりました");
+    }
+    expect($this->post('/email/verification-notification')->getStatusCode())->toBe(429);
+
+    throttleProbeExpectNotThrottled(
+        $this->post('/recent-auth/password', ['password' => 'wrong-password']),
+        '再認証がメール再送の巻き添えで 429 になりました',
+    );
+});
+
+test('招待受諾 POST は 10/min で、確認画面 GET とは別 bucket である', function (): void {
+    // GET 側 invitation-accept は未認証 IP レーン (10/min)。同一 bucket だと
+    // 「リンクを開き直したら受諾できない」という詰みになる。
+    $user = User::factory()->create();
+    $this->actingAs($user);
+
+    for ($i = 1; $i <= 10; $i++) {
+        expect($this->get('/invitations/accept?token=invalid-token')->getStatusCode())
+            ->not->toBe(429, "GET {$i} 回目で既に 429 になりました");
+    }
+    expect($this->get('/invitations/accept?token=invalid-token')->getStatusCode())->toBe(429);
+
+    throttleProbeExpectNotThrottled(
+        $this->post('/invitations/accept', ['token' => 'invalid-token']),
+        '受諾 POST が確認画面 GET の巻き添えで 429 になりました',
+    );
+});
+
+test('認証は throttle より先に走る (レーンの guest 分岐が防御的冗長であることの前提固定)', function (): void {
+    // ★limiter の IP 分岐は「auth を持たない route でも同じ helper が使える」ための冗長であり、
+    //   auth 必須 route では通らない。この前提が変わったら (priority list を触ったら)
+    //   ここが落ちて、IP 分岐が実運用に載ることに気づける。
+    $resolved = throttleProbeResolvedClasses('recent-auth.password');
+
+    $authIndex = array_search(Authenticate::class, $resolved, true);
+    $throttleIndex = array_search(ThrottleRequests::class, $resolved, true);
+
+    expect($authIndex)->not->toBeFalse('Authenticate が実効列に無い');
+    expect($throttleIndex)->not->toBeFalse('ThrottleRequests が実効列に無い');
+    expect($authIndex)->toBeLessThan($throttleIndex);
 });

@@ -36,6 +36,7 @@ use App\Services\Render\VideoComposer;
 use App\Support\CriticalActionContext;
 use App\Support\EmailHash;
 use App\Support\EmailNormalizer;
+use App\Support\Http\RateLimiterKeys;
 use App\Support\Http\RouteThrottleBinder;
 use App\Support\PasswordPolicy;
 use App\Support\ProductionEnvGuard;
@@ -233,12 +234,38 @@ class AppServiceProvider extends ServiceProvider
         // 経路を横断して一律適用される (返り値契約は FilterSuppressedRecipients docblock 参照)。
         Event::listen(MessageSending::class, FilterSuppressedRecipients::class);
 
+        $this->configureActorScopedRateLimiters();
         $this->configureApiRateLimiters();
         $this->configureAuthSurfaceRateLimiters();
         $this->configureInquiryRateLimiter();
         $this->configureRenderRateLimiter();
         $this->configureWebhookRateLimiters();
         $this->attachThrottleToVendorRoutes();
+    }
+
+    /**
+     * 認証済み actor 自身に閉じる業務操作のレーン (T125 で inline から移行)。
+     *
+     * ★`configureAuthSurfaceRateLimiters()` とは対象が違う。あちらは**未認証面の IP レーン**、
+     *   こちらは**認証済み actor レーン**である (数える単位が違うので同じメソッドに混ぜない)。
+     *
+     * ★閾値は移行元の inline 値 (どちらも 10/min) そのまま。
+     */
+    private function configureActorScopedRateLimiters(): void
+    {
+        // 招待受諾の確定 (POST /invitations/accept)。
+        // ★未認証面の `invitation-accept` (GET・IP レーン 10/min) とは**別レーン**にする。
+        //   同一 bucket にすると確認画面のリロードが受諾の枠を食い、
+        //   「リンクを開き直したら受諾できない」という詰みを作る。
+        //   token 総当りの天井は 10/min のままで変わらない。
+        RateLimiter::for('invitation-accept-submit', fn (Request $request): Limit => Limit::perMinute(10)
+            ->by(RateLimiterKeys::actorOrIp($request, 'invitation-accept-submit')));
+
+        // パーソナルプランの有効化 (POST /onboarding/activate-personal)。
+        // 一回性の操作であり、連打の実効は事前条件 (既契約なら常に失敗) が抑えるが、
+        // throttle は「試行の受理数」の上限として 10/min を維持する。
+        RateLimiter::for('plan-activate', fn (Request $request): Limit => Limit::perMinute(10)
+            ->by(RateLimiterKeys::actorOrIp($request, 'plan-activate')));
     }
 
     /**

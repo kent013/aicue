@@ -335,12 +335,22 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
      全 limiter を実評価して検査)。email は `EmailNormalizer` → `EmailHash` を通し、
      平文をキャッシュキーに残さない。**`Str::transliterate()` は使わない**
      (legitimate な Unicode email を別 user へ collapse させ巻き添えロックアウトになる)。
-     inline throttle (`throttle:6,1`) は「認証済みかつ actor 自身に閉じる操作」限定。
-     **ただし inline のキーは actor id だけで route 名も limiter 名も入らない**ため、
-     同一 actor の inline throttle route は**すべて 1 bucket を共有する**
-     (T121 実測)。描画のたびに発火する GET を足すと、max が最小の route
+     **inline throttle (`throttle:6,1`) は自前 route では使えない** (T125 で全廃)。
+     inline のキーは actor id だけで route 名も limiter 名も入らないため、
+     同一 actor の inline throttle route は**すべて 1 bucket を共有する** (T121 実測)。
+     描画のたびに発火する GET を足すと、max が最小の route
      (`recent-auth.password` = 6) を巻き添えで 429 にして**再認証を壊す**。
      レーンを分けたいときは inline ではなく named limiter を新設する
+   - **inline の残置は目録制** (T125): inline を持つ route は
+     `InlineThrottleBucketRationale` + 30 文字以上の根拠で
+     `InlineThrottleInventoryTest` の目録へ登録が必須 (deny-by-default)。
+     残っているのは vendor 3 本のみ (`passport.token` / `passport.device.code` /
+     `livewire.upload-file`)。**enum に自前 route 向けの case は 1 つも無く**、
+     各 case の premise が action class の vendor 名前空間を機械検査するため、
+     自前 route の inline は**登録できない** = 上の規約の機械化になっている。
+     新レーンへの route 割当 (相乗り禁止) は `ThrottleLaneAssignmentTest`、
+     レーンをまたぐキー衝突は `RateLimiterKeyConventionTest`、
+     巻き添え 429 が消えたことの実挙動は `AuthThrottleCoverageTest` が固定する
    - vendor 登録 route への後付けは **`RouteThrottleBinder::attachOnBooted()`** 経由
      (route 名が消えたら起動時 fail-fast)。**`php artisan route:cache` は毎デプロイ再生成する**
      (後付けは cache 生成時に焼き込まれ cached 起動では skip されるため、stale cache は

@@ -324,21 +324,52 @@ LLM を使う機能が要件に来たら、まず利用形態を分類する:
   平文も正規化済み平文もキャッシュキーに残さない。
   `Str::transliterate()` は**使わない**(legitimate な Unicode email を別 user へ
   collapse させ、無関係アカウントの巻き添えロックアウトになる)
-- **inline throttle (`throttle:6,1`) を使ってよいのは「認証済みかつ actor 自身に
-  閉じる操作」だけ**。未認証面 / 主体が IP や email になる面は必ず named limiter を作る
+- **inline throttle (`throttle:6,1`) は自前 route では使えない**(T125 で全廃)。
+  残る inline は **vendor 由来の 3 本だけ**で、`InlineThrottleInventoryTest` の目録に
+  `InlineThrottleBucketRationale` + 30 文字以上の根拠付きで登録済み
+  (`passport.token` / `passport.device.code` / `livewire.upload-file`)。
   - ⚠ **inline の bucket は route ごとではない**。`ThrottleRequests::handle()` が組む
     キーは `$prefix`(既定 `''`)+ `resolveRequestSignature()` で、後者は認証済みなら
     **user id だけ**を返す(route も limiter 名も入らない)。つまり
     **同一 actor の全 inline throttle route が 1 つの bucket を共有する**
     (route ごとに違うのは `maxAttempts` の比較値だけ)。
     named limiter はキーに limiter 名が入るため**レーンが独立する**
-  - したがって inline を使ってよいのは「その actor の**全 inline 操作を合算して
-    数えてよい**」場合に限る。**ページ描画のたびに飛ぶ GET のような高頻度レーンを
-    inline で足してはならない**: 合算値が最小 `max` を持つ route
-    (現状 `recent-auth.password` = 6)を先に食い潰し、**再認証ができなくなる**。
-    そういう面は named limiter でレーンを分ける
-    (実例: `two-factor-secret-read`。恒久回帰は `AuthThrottleCoverageTest` の
-     「2FA 秘密 GET のレーンは独立している」)
+  - **`InlineThrottleBucketRationale` に自前 route 向けの case は 1 つも無い**(意図的)。
+    各 case の premise が **action class の vendor 名前空間**(`Laravel\Passport\` /
+    `Livewire\`)を機械検査するため、`App\...` の自前 controller はどの case にも
+    当てはまらず**目録に登録できない** = 自前 route への inline 追加は必ず fail する。
+    これが「レーンを分けたいときは inline ではなく named limiter を新設する」の機械化
+  - 恒久回帰は `AuthThrottleCoverageTest` の T125 セクション
+    (あるレーンを使い切っても別レーンが生きていることを実 HTTP で固定する)
+
+**レーンの切り方の 2 基準**(混同しない):
+
+| 基準 | 数える対象 | 例 |
+|---|---|---|
+| **credential 単位の試行予算** | 同じ秘密を照合する面をまとめる(分けると同じ秘密を n 倍試せる) | `password-verify`(recent-auth / confirm-password / update-password の 3 面で合算 6/min) |
+| **feature 単位の操作予算** | 同じフローの操作をまとめる(フロー内の相互消費は許容し、別 feature との巻き添えを断つ) | `two-factor-manage`(10/min)/ `email-verification`(6/min) |
+
+T125 で新設したレーンと割当(正本は `ThrottleLaneAssignmentTest` の
+`throttleLaneAssignments()`。相乗りは deny-by-default で fail する):
+
+| limiter | 上限 | route |
+|---|---|---|
+| `password-verify` | 6/min | `recent-auth.password` / `password.confirm.store` / `user-password.update` |
+| `password-set` | 6/min | `settings.password.store` |
+| `email-verification` | 6/min | `verification.send` / `verification.verify` |
+| `two-factor-manage` | 10/min | `two-factor.{enable,confirm,disable,regenerate-recovery-codes}` |
+| `invitation-accept-submit` | 10/min | `invitations.accept.store` |
+| `plan-activate` | 10/min | `onboarding.activate-personal` |
+
+- 閾値は**移行元の inline 値そのまま**(新しい値を発明していない)。
+  増えたのは「認証面 12 本の受理リクエスト総数が合算 10/min から各レーン合計 48/min になる」
+  ことだけで、これは受容済み。安全性の主張は**巻き添え 429 についての単調緩和**に限る
+  (新レーンの route 集合は移行前の共有 bucket の部分集合なので、
+   新たに 429 になる経路は増えない。ただし「後退リスクゼロ」ではない)
+- キーの組み立ては `App\Support\Http\RateLimiterKeys::actorOrIp()` に一点集約する
+  (認証済み = `{lane}:user:{id}` / 未認証 = `{lane}:ip:{ip}`)。
+  full key は `RateLimiterKeyConventionTest` が固定し、
+  **レーンをまたぐキー衝突**(分けたつもりで分かれていない)も同テストが検出する
 - **limiter キーに route parameter を入れない**(`NamedRateLimiterKeyTest`)。
   bucket が id ごとに分かれると「429 になるまでの回数」が実在を漏らす
 
