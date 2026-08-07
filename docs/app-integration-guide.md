@@ -210,8 +210,18 @@ LLM を使う機能が要件に来たら、まず利用形態を分類する:
    `NestedRouteIdorDefenseTest` の担当で母集団が交わらない
 4. **untrusted 文字列は安全処理を経てのみ prompt に入る**(UserInput 型強制)
 5. **権限判定は常に呼び出し側組織の team スコープに束縛**(team 明示 + strict_check=true)
-6. **任意 class の逆シリアライズを許さない**(cache serializable_classes は既定 false。
-   object cache が必要になったときだけ最小 allowlist)
+6. **任意 class の逆シリアライズを許さない / キャッシュに入れるのは素のデータだけ**:
+   `config/cache.php` の `serializable_classes` は **`false` 固定**でクラス許可一覧は作らない
+   (例外を作らない)。**キーごと消すのも不可** — Laravel は宣言が無いと制限なしの
+   `unserialize()` に戻る(fail-open)。cache へ渡してよいのは配列 / 文字列 / 数値 / 真偽値だけで、
+   オブジェクトは `toArray()` で素の配列にしてから入れ、読み戻しは `fromArray()` 等で
+   **明示的に組み立て直して検査し、失敗したら `forget`** する
+   (準拠実装: `App\Services\FxRateService` + `App\DataTransferObjects\FxSnapshotDto`)。
+   **テストレーンは array store(`serialize => false`)なのでオブジェクトを入れても緑になる** —
+   本番の database store でだけ壊れるため、静的検査で塞ぐ:
+   キャッシュ書き込み経路とキャッシュに触れるファイルは
+   `tests/Architecture/CachePayloadPlainDataGateTest.php` の目録へ登録必須(deny-by-default)。
+   配列往復は `tests/Unit/DataTransferObjects/FxSnapshotDtoTest.php` が固定する
 7. **課金系の冪等性**: webhook は冪等マシン経由、消費は 2 フェーズ、通知は dedup_key。
    課金による利用可否の判定は `BillingAccess` 経由のみ(subscription 直参照の gate 分岐禁止。
    AI-CUE の判定は billing entitlement: `state()` が Subscribed / ActiveFreePlan なら許可。
