@@ -36,6 +36,7 @@ use App\Services\Render\VideoComposer;
 use App\Support\CriticalActionContext;
 use App\Support\EmailHash;
 use App\Support\EmailNormalizer;
+use App\Support\ExternalClientTimeouts;
 use App\Support\Http\RateLimiterKeys;
 use App\Support\Http\RouteThrottleBinder;
 use App\Support\PasswordPolicy;
@@ -95,6 +96,9 @@ class AppServiceProvider extends ServiceProvider
             $config = [
                 'version' => 'latest',
                 'region' => is_string($ses['region'] ?? null) ? $ses['region'] : 'us-east-1',
+                // ★config('services.ses') の http/retries を継承しない (自前で $config を組むため)。
+                //   pin を明示する。無指定は「無制限 × 3 attempts」= web 経路のハング要因 (T126)。
+                ...ExternalClientTimeouts::awsControlClientOptions(),
             ];
             $key = $ses['key'] ?? null;
             $secret = $ses['secret'] ?? null;

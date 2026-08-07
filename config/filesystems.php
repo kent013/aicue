@@ -1,5 +1,7 @@
 <?php
 
+use App\Support\ExternalClientTimeouts;
+
 return [
 
     /*
@@ -58,6 +60,11 @@ return [
             'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
             'throw' => false,
             'report' => false,
+            // AWS SDK は http / retries を無指定にすると「無制限 × 3 attempts」になる。
+            // データ系 (本文 read/write) の値。metadata 操作は per-command で制御系へ絞る
+            // (App\Services\Capture\TakeObjectStorage::headObject)。
+            // FilesystemManager::createS3Driver() がこの配列を素通しで S3Client へ渡す。
+            ...ExternalClientTimeouts::awsS3ClientOptions(),
         ],
 
         // bughunt / testing の storage fake 用ローカル disk (実 S3 非依存の emulation)。

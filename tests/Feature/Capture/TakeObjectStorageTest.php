@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use App\Services\Capture\TakeObjectStorage;
+use App\Support\ExternalClientTimeouts;
+use Aws\CommandInterface;
 use Aws\MockHandler;
 use Aws\Result;
 use Aws\S3\Exception\S3Exception;
@@ -30,6 +32,9 @@ function fakeS3DiskConfig(): void
         'use_path_style_endpoint' => true,
         'throw' => false,
         'report' => false,
+        // ★波及変更 (T126): 本 helper は disks.s3 を**丸ごと差し替える**ため、
+        //   実 config と同じ http / retries を入れないと pin の配線が素通しになる。
+        ...ExternalClientTimeouts::awsS3ClientOptions(),
     ]);
     Storage::forgetDisk('s3');
 }
@@ -42,6 +47,9 @@ function storageWithMockHandler(MockHandler $handler): TakeObjectStorage
         'version' => 'latest',
         'credentials' => ['key' => 'test-key', 'secret' => 'test-secret'],
         'handler' => $handler,
+        // ★client 既定を**データ系 (900s)** にしておく。per-command 上書きの負のコントロールは
+        //   「捕捉した timeout がデータ系ではなく制御系である」ことで初めて意味を持つ。
+        ...ExternalClientTimeouts::awsS3ClientOptions(),
     ]);
 
     return new class($client) extends TakeObjectStorage
@@ -115,6 +123,44 @@ test('headObject は ChecksumMode=ENABLED を渡し ContentLength/ContentType/Ch
     expect($command->getName())->toBe('HeadObject');
     expect($command['ChecksumMode'])->toBe('ENABLED');
     expect($command['Key'])->toBe('projects/1/manuals/2/cuts/3/takes/01TEST.mp4');
+});
+
+test('headObject は制御系の @http / @retries を per-command で積む', function (): void {
+    // web 同期経路 (テイク登録) から呼ぶ唯一の S3 ネットワーク操作。s3 disk のクライアント既定は
+    // データ系 (900s) なので、ここで制御系の帯へ絞れていることを実物で確認する。
+    fakeS3DiskConfig();
+    $captured = null;
+    $handler = new MockHandler;
+    $handler->append(function (CommandInterface $command) use (&$captured): Result {
+        $captured = ['@http' => $command['@http'], '@retries' => $command['@retries']];
+
+        return new Result(['ContentLength' => 1, 'ContentType' => 'video/mp4']);
+    });
+
+    storageWithMockHandler($handler)->headObject('projects/1/manuals/2/cuts/3/takes/01TEST.mp4');
+
+    expect($captured)->not->toBeNull();
+    // ★SDK が既定で足す他キー (decode_content 等) には触れず、pin した 2 キーだけを固定する。
+    expect($captured['@http']['connect_timeout'])->toBe(ExternalClientTimeouts::AWS_CONTROL_CONNECT_TIMEOUT_SECONDS);
+    expect($captured['@http']['timeout'])->toBe(ExternalClientTimeouts::AWS_CONTROL_TIMEOUT_SECONDS);
+    expect($captured['@retries'])->toBe(ExternalClientTimeouts::AWS_CONTROL_PLANE_RETRIES);
+});
+
+test('負のコントロール: headObject の @http は s3 disk の既定 (データ系) を上書きする', function (): void {
+    fakeS3DiskConfig();
+    $captured = null;
+    $handler = new MockHandler;
+    $handler->append(function (CommandInterface $command) use (&$captured): Result {
+        $captured = $command['@http'];
+
+        return new Result(['ContentLength' => 1]);
+    });
+
+    storageWithMockHandler($handler)->headObject('projects/1/manuals/2/cuts/3/takes/01TEST.mp4');
+
+    // per-command 上書きが実は効いていないのに green、を防ぐ。
+    expect($captured['timeout'])->not->toBe(ExternalClientTimeouts::AWS_S3_TIMEOUT_SECONDS);
+    expect($captured['connect_timeout'])->not->toBe(ExternalClientTimeouts::AWS_S3_CONNECT_TIMEOUT_SECONDS);
 });
 
 test('headObject はオブジェクト不存在 (404) で null を返す (PUT 未完了)', function (): void {
