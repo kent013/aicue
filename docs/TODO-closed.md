@@ -141,6 +141,8 @@ Open リストは [TODO.md](TODO.md) を参照。
 | T130 | テストレーンの HTTP 出口既定拒否。Feature/Unit・Architecture・Browser の 3 レーンで preventStrayRequests を既定 ON にし loopback のみ明示許可。握り潰しを検出する globalMiddleware accumulator 付き。実装中に userinfo 詐称 URL (127.0.0.1:80@外部ホスト) が glob 一致で実際に外部送信される穴を発見し、パース済みホストを見る第 2 層を追加 | test | 2026-08-07 15:05 |
 | T131 | ジョブ二重実行の所有権再検証を追加。取り消せない外部呼び出し (LLM 3 段 / S3 PUT / Stripe) の直前で所有権を再検証し、喪失時は例外で中断してジョブ行への書き込みも止める。ShouldQueue 全 18 クラスを保証側 4 / 免除 14 に分類する deny-by-default 目録 gate と 排他 TTL の序列固定つき。mutation M1〜M17 全件で赤化を確認 | backend | 2026-08-07 15:58 |
 | T132 | 決済 gateway エラー分類の統一と gate 化。Throwable を有界 enum (業務 4 case + 写像の不在専用 unknown) へ写す純関数を新設し、AutoRechargeService の観測 4 箇所から $e->getMessage() を全廃して failure_class / error_class の 2 キーへ統一。gateway interface の契約は変更しない (合議の結論)。spy と本物の分類が実際に食い違う偽グリーンを実測で確認し、実ライブラリ例外を返す共有 fixture + 検査 21 本で固定。vendor 走査で Stripe/Cashier 例外 21 クラスの全件明示分類を強制 | backend | 2026-08-07 21:05 |
+| T125 | inline throttle 群の bucket 共有の見直し。inline 13 本を 6 named レーン (password-verify / password-set / email-verification / two-factor-manage / invitation-accept-submit / plan-activate) へ分離。閾値は 1 つも変えず移行元 inline 値をそのまま使う。inline の残置は vendor 3 本のみで、自前 route 向けの enum case を定義しないことで AGENTS.md 規約 5 を機械化。検査 4 種 + mutation 17 項目 | backend | 2026-08-08 00:05 |
+| T133 | キャッシュ素データ規約の明文化と gate 化。aicue の app/ は既に標準形のためアプリの振る舞いは 1 行も変えず (git diff で機械確認)、deny-by-default の目録 gate と docs/app-integration-guide.md §7-6 の誤情報訂正のみ。実装中に設計コードの bug 2 件 (alias 展開の分岐反転 / app()->make('cache')->put の素通り) と語彙表の誤り 1 件を発見し是正。mutation M1〜M17 | test | 2026-08-08 00:05 |
 
 ## Obsoleted
 
