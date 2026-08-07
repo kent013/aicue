@@ -152,7 +152,7 @@ describe("NotificationListItem", () => {
         expect(screen.getByText(/5 枚/)).toBeInTheDocument();
     });
 
-    it("invitation_received: 招待文言とメール案内", () => {
+    it("invitation_received: 招待文言とアプリ内受諾への案内", () => {
         render(NotificationListItem, {
             props: {
                 notification: manualAnalyzedItem({
@@ -163,7 +163,9 @@ describe("NotificationListItem", () => {
         });
 
         expect(screen.getByText("招待元組織 に招待されています")).toBeInTheDocument();
-        expect(screen.getByText("メールの受諾リンクから参加してください")).toBeInTheDocument();
+        expect(
+            screen.getByText("クリックすると、届いている招待から参加できます"),
+        ).toBeInTheDocument();
     });
 
     it("未読行には個別既読ボタンを表示する", () => {

@@ -45,6 +45,15 @@
         members.find((member) => member.isSelf)?.roleState === "owner",
     );
 
+    /**
+     * 招待のロール選択肢 = org ロール 2 値 (編集者 / 撮影者は参加後に割り当てる)。
+     * メンバーのロール変更コマンド (ROLE_OPTIONS) とは別集合 (統合しない)。
+     */
+    const INVITE_ROLE_OPTIONS: { value: string; label: string }[] = [
+        { value: "organization_admin", label: "管理者" },
+        { value: "organization_member", label: "メンバー" },
+    ];
+
     /** ロール select の選択肢 (遷移コマンド 3 値。owner は enum 外 = 構造的に指定不可) */
     const ROLE_OPTIONS: { value: ConsoleRole; label: string }[] = [
         { value: "admin", label: "管理者" },
@@ -212,7 +221,7 @@
     }
 
     /* ---- ユーザー追加 (招待。モック 03/04/06) ---- */
-    const inviteForm = useForm({ email: "", role: "shooter" });
+    const inviteForm = useForm({ email: "", role: "organization_member" });
 
     function submitInvite(event: SubmitEvent): void {
         event.preventDefault();
@@ -254,7 +263,7 @@
     <PageContainer>
         <PageHeader
             title="ユーザー管理"
-            description="組織のメンバーと招待を管理します。ロールは「管理者・編集者・撮影者」から選択します。"
+            description="組織のメンバーと招待を管理します。メンバーのロールは「管理者・編集者・撮影者」から選択します (招待は「管理者・メンバー」の 2 値で、編集者・撮影者は参加後に割り当てます)。"
             icon={Users}
             testId="users-heading"
         />
@@ -372,7 +381,7 @@
                 <Card padding="lg">
                     <h2 class="text-h3">ユーザーを追加</h2>
                     <p class="mt-1 text-caption text-text-secondary">
-                        招待メールを送信します。招待の有効期限は 7 日間です。
+                        招待メールを送信します。招待の有効期限は 7 日間です。編集者・撮影者は参加後に割り当てます。
                     </p>
                     <form novalidate onsubmit={submitInvite} class="mt-4 flex flex-col gap-4">
                         <FormField
@@ -399,7 +408,7 @@
                                     error={invalid}
                                     aria-describedby={describedBy}
                                 >
-                                    {#each ROLE_OPTIONS as option (option.value)}
+                                    {#each INVITE_ROLE_OPTIONS as option (option.value)}
                                         <option value={option.value}>{option.label}</option>
                                     {/each}
                                 </Select>

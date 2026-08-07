@@ -6,6 +6,7 @@ use App\DataTransferObjects\Notification\InvitationReceivedPayload;
 use App\DataTransferObjects\Notification\ManualJobPayload;
 use App\DataTransferObjects\Notification\TicketBalanceLowPayload;
 use App\Models\Organization;
+use App\Models\OrganizationInvitation;
 use App\Models\Project;
 use App\Models\User;
 use App\Models\VideoManual;
@@ -258,17 +259,35 @@ test('open: ticket_balance_low → billing.tickets.show へ 303', function (): v
         ->assertRedirect('/purchase-tickets');
 });
 
-test('open: invitation_received → 一覧へ 303 + 招待案内 info', function (): void {
+test('open: invitation_received → 受諾可能な招待があるときは info を出さず一覧へ 303', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $owner->notify(new InvitationReceivedNotification(
         $organization->id, new InvitationReceivedPayload($organization->name),
     ));
     $id = $owner->notifications()->firstOrFail()->getKey();
+    // 一覧に「届いている招待」が出る状態 (受諾の解決と同一 scope で件数を算出する)
+    OrganizationInvitation::factory()->forOrganization($organization)->create(['email' => $owner->email]);
 
     $this->actingAs($owner)->post("/notifications/{$id}/open")
         ->assertStatus(303)
         ->assertRedirect('/notifications')
-        ->assertSessionHas('info', '招待はメールの受諾リンクから参加してください。');
+        ->assertSessionMissing('info');
+});
+
+test('open: invitation_received → 受諾可能な招待が無いときは説明 info を出す', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $owner->notify(new InvitationReceivedNotification(
+        $organization->id, new InvitationReceivedPayload($organization->name),
+    ));
+    $id = $owner->notifications()->firstOrFail()->getKey();
+    // 取り消し済み = 受諾できない (件数 0 に collapse する)
+    OrganizationInvitation::factory()->forOrganization($organization)->revoked()
+        ->create(['email' => $owner->email]);
+
+    $this->actingAs($owner)->post("/notifications/{$id}/open")
+        ->assertStatus(303)
+        ->assertRedirect('/notifications')
+        ->assertSessionHas('info', '現在有効な招待はありません (取り消し・期限切れ・参加済みの可能性があります)。');
 });
 
 test('open: 未知 type → 一覧へ 303 + 汎用 info (招待文言と混同しない)・既読化のみ', function (): void {

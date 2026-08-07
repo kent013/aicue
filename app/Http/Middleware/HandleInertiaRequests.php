@@ -7,6 +7,7 @@ namespace App\Http\Middleware;
 use App\Models\Organization;
 use App\Models\User;
 use App\Services\Marketing\ContactUrl;
+use App\Services\Organization\OrganizationMembershipService;
 use App\Support\Seo\SeoManager;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -63,6 +64,19 @@ class HandleInertiaRequests extends Middleware
             // 省略可能 (将来の router.reload({ only: ['notifications'] }) ポーリング拡張にも使える)
             'notifications' => [
                 'unreadCount' => fn (): int => $user === null ? 0 : $user->unreadNotifications()->count(),
+            ],
+            // 自分宛の受諾可能な招待の件数 (全画面横断の気づき。裁定 AG-113 必須要素 (b)(c))。
+            // ★件数は受諾の解決・一覧と**同一 scope** から算出する
+            //   (ずれると「件数は出るのに受諾できない」が起きる)。
+            // ★未ログイン・未 verified・email 空は pendingInvitationCountFor が
+            //   DB を一切引かずに 0 を返す (全リクエストで評価されるため実効的な負荷契約)。
+            // app() 解決にするのはコンストラクタ注入を増やさないため (contact prop と同じ流儀)。
+            // ★キー名を 'invitations' にしない: ページ prop 'invitations' (Admin/Users の
+            //   招待一覧) と衝突し、その画面だけ共有 prop が配列で上書きされて
+            //   横断の気づきが黙って消える (通知の unreadCount と同じ衝突クラス)。
+            'invitationInbox' => [
+                'pendingCount' => fn (): int => app(OrganizationMembershipService::class)
+                    ->pendingInvitationCountFor($user),
             ],
             'flash' => [
                 'success' => $request->session()->get('success'),

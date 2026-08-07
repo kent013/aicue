@@ -19,6 +19,7 @@
     } from "@lucide/svelte";
     import EmailVerificationBanner from "@/components/features/auth/EmailVerificationBanner.svelte";
     import NotificationBell from "@/components/molecules/NotificationBell.svelte";
+    import PendingInvitationsNotice from "@/components/molecules/PendingInvitationsNotice.svelte";
     import ToastContainer from "@/components/organisms/ToastContainer.svelte";
     import SidebarNavItems, {
         type SidebarNavItem,
@@ -60,6 +61,8 @@
     const userName = $derived(shared.auth?.user?.name ?? "ユーザー");
     const orgName = $derived(currentOrganization?.name ?? "組織未選択");
     const unreadCount = $derived(shared.notifications?.unreadCount ?? 0);
+    // 自分宛の保留中招待の件数 (全画面横断の気づき。未ログイン / 未 verified は 0)
+    const pendingInvitationCount = $derived(shared.invitationInbox?.pendingCount ?? 0);
 
     // メール未認証のソフトゲート案内
     const showEmailBanner = $derived(
@@ -472,6 +475,11 @@
             {#if showEmailBanner}
                 <div class="px-4 pt-4 sm:px-6 lg:px-8">
                     <EmailVerificationBanner />
+                </div>
+            {/if}
+            {#if showAccountNav && pendingInvitationCount > 0}
+                <div class="px-4 pt-4 sm:px-6 lg:px-8">
+                    <PendingInvitationsNotice pendingCount={pendingInvitationCount} />
                 </div>
             {/if}
             <!-- padding は各ページの PageContainer が担う (aigenba parity, T071)。ここでは付けない。 -->

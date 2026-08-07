@@ -19,11 +19,17 @@ test('OrganizationMembershipService の書き込みメソッドは共通ロッ�
     // 自身の tx 冒頭で直接ロックする mutating メソッド
     $directLock = ['applyConsoleRole', 'changeRole', 'removeMember', 'transferOwnership', 'deleteAccount'];
     // ロック済み内部メソッド (joinOrganization) 経由で間接的にロックされる受諾経路
-    $delegatedToLocked = ['acceptInvitation', 'acceptInvitationIfValid'];
+    $delegatedToLocked = ['acceptInvitation', 'acceptInvitationIfValid', 'acceptPendingInvitation'];
     // ロック不要 (membership/role を変えない) と判断した書き込みメソッド (根拠付き exempt)
     $exempt = [
         'inviteMember',     // 招待レコード生成のみ (membership/role 不変)
-        'revokeInvitation', // 招待の論理失効のみ (membership/role 不変)
+        // 招待の論理失効のみ (membership/role 不変)。**受諾との競合の最終権威は
+        // joinOrganization が取る招待行の lockForUpdate 側にあり**、取り消しの UPDATE も
+        // 同じ行を取るため直列化される (ここで membership ロックを取る必要はない)
+        'revokeInvitation',
+        // 受信者視点の read-only (表示・件数)。membership/role を変えない
+        'pendingInvitationsFor',
+        'pendingInvitationCountFor',
         // 読み取り専用判定 (ロック不要・表示スナップショット)。deleteAccount がロック下で権威判定する
         'organizationsBlockingDeletion',
         // 課金孤児の検知バッチ用の読み取り専用列挙 (Owner 不在の組織)。membership/role を変えない
@@ -74,6 +80,91 @@ test('OrganizationMembershipService の書き込みメソッドは共通ロッ�
     expect($firstLock)->not->toBeFalse('deleteAccount は lockForMembershipWrite を呼ぶこと');
     expect($orgEnumeration)->not->toBeFalse('deleteAccount は organizations を列挙すること');
     expect($firstLock)->toBeLessThan($orgEnumeration, 'deleteAccount は組織列挙の前に user 行をロックすること');
+});
+
+/*
+ * joinOrganization() の戻り値 (bool) 消費 drift-guard。
+ *
+ * joinOrganization は「ロック下再検証で受諾不能だった」を false で返す。false を捨てると
+ * 呼び出し元は受諾できていないのに成功扱いで応答してしまう (register 経路では非所属 org を
+ * current_organization_id に据える非正規状態まで作る)。
+ *
+ * 本検査は token_get_all() で**呼び出し式の形**だけを見る (契約の正しさは
+ * InvitationAcceptRaceTest が behavioral に見る。2 本は役割が違うので併存させる)。
+ * 判定は「破棄形の拒否」で、許可形の列挙はしない (&& / || / ( / , など値が使われる文脈は
+ * 無数にあり、許可側を列挙すると正しい実装を落とすため)。
+ */
+test('joinOrganization() の戻り値を破棄している呼び出しが無い (受諾不能を成功扱いにしない)', function (): void {
+    $reflection = new ReflectionClass(OrganizationMembershipService::class);
+    $path = $reflection->getFileName();
+    expect($path)->not->toBeFalse();
+    $source = file_get_contents((string) $path);
+    expect($source)->not->toBeFalse();
+
+    $tokens = token_get_all((string) $source);
+    /** 空白 / コメントを飛ばして有意トークンの index 列を作る */
+    $significant = [];
+    foreach ($tokens as $index => $token) {
+        if (is_array($token) && in_array($token[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) {
+            continue;
+        }
+        $significant[] = $index;
+    }
+
+    $callCount = 0;
+    $violations = [];
+    $unknownForms = [];
+
+    foreach ($significant as $position => $index) {
+        $token = $tokens[$index];
+        if (! is_array($token) || $token[0] !== T_STRING || $token[1] !== 'joinOrganization') {
+            continue;
+        }
+        // 呼び出しであること (次の有意トークンが `(`)
+        $next = $tokens[$significant[$position + 1] ?? $index] ?? null;
+        if ($next !== '(') {
+            continue;
+        }
+        // メソッド宣言 (`private function joinOrganization(`) は呼び出しではない
+        $prev = $tokens[$significant[$position - 1] ?? $index] ?? null;
+        if (is_array($prev) && $prev[0] === T_FUNCTION) {
+            continue;
+        }
+
+        $callCount++;
+        $line = $token[2];
+
+        // `$this->joinOrganization(` の形であること (未知の呼び出し形は deny-by-default)
+        $prevPrev = $tokens[$significant[$position - 2] ?? $index] ?? null;
+        $isThisCall = is_array($prev) && $prev[0] === T_OBJECT_OPERATOR
+            && is_array($prevPrev) && $prevPrev[0] === T_VARIABLE && $prevPrev[1] === '$this';
+        if (! $isThisCall) {
+            $unknownForms[] = "line {$line}";
+
+            continue;
+        }
+
+        // さらに 1 つ前が `;` / `{` / `}` なら式文 = 戻り値の破棄
+        $beforeCall = $tokens[$significant[$position - 3] ?? $index] ?? null;
+        if (in_array($beforeCall, [';', '{', '}'], true)) {
+            $violations[] = "line {$line}";
+        }
+    }
+
+    expect($unknownForms)->toBe([],
+        'joinOrganization() の未知の呼び出し形を検出しました (人のレビューを通すため fail させています)。'
+        .PHP_EOL.implode(PHP_EOL, $unknownForms));
+
+    expect($violations)->toBe([],
+        'joinOrganization() の戻り値 (false = ロック下再検証で受諾不能) を破棄している呼び出しがあります。'
+        .PHP_EOL.implode(PHP_EOL, $violations));
+
+    // exact-fit: 現在の呼び出し元は acceptInvitation / acceptInvitationIfValid /
+    // acceptPendingInvitation の 3 つ。増減は必ずこの数値を変える差分として現れ、
+    // 「その経路でも false を正しく消費しているか」の再レビューを強制する。
+    expect($callCount)->toBe(3,
+        'joinOrganization() の呼び出し元の数が変わりました。新しい経路が false を'
+        .'正しく消費しているかを確認してからこの数値を更新してください。');
 });
 
 /*

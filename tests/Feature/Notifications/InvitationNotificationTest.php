@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use App\Enums\AdminConsoleRole;
+use App\Enums\OrganizationRole;
 use App\Models\User;
 use App\Notifications\InApp\InvitationReceivedNotification;
 use App\Notifications\OrganizationInvitationNotification;
@@ -22,7 +22,7 @@ test('既存ユーザーの email へ招待 → その User に 1 件 (org 名�
     $existing = User::factory()->create(['email' => 'invited@example.com']);
 
     app(OrganizationMembershipService::class)->inviteMember(
-        $organization, $owner, 'invited@example.com', AdminConsoleRole::Admin,
+        $organization, $owner, 'invited@example.com', OrganizationRole::Admin,
     );
 
     $rows = DB::table('notifications')->where('notifiable_id', $existing->id)->get();
@@ -40,7 +40,7 @@ test('未登録 email へ招待 → アプリ内通知 0 (メールのみ)', fun
     [$organization, $owner] = createOrganizationWithOwner();
 
     app(OrganizationMembershipService::class)->inviteMember(
-        $organization, $owner, 'nobody@example.com', AdminConsoleRole::Admin,
+        $organization, $owner, 'nobody@example.com', OrganizationRole::Admin,
     );
 
     expect(DB::table('notifications')->count())->toBe(0);
@@ -52,7 +52,7 @@ test('招待メールは従来どおり送信され、既存ユーザーには�
     $existing = User::factory()->create(['email' => 'both@example.com']);
 
     app(OrganizationMembershipService::class)->inviteMember(
-        $organization, $owner, 'both@example.com', AdminConsoleRole::Admin,
+        $organization, $owner, 'both@example.com', OrganizationRole::Admin,
     );
 
     // メール (on-demand route) は従来どおり

@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use App\Enums\AdminConsoleRole;
 use App\Enums\OrganizationRole;
 use App\Models\User;
 
@@ -104,7 +103,7 @@ it('same-org 権限不足は 403 を維持 (秘匿対象でない): Member の i
     $this->actingAs($member)
         ->post(route('organizations.invitations.store', $organization), [
             'email' => 'someone@example.com',
-            'role' => AdminConsoleRole::Admin->value,
+            'role' => OrganizationRole::Admin->value,
         ])
         ->assertForbidden();
 });

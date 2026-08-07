@@ -857,12 +857,65 @@ doc/04 §4.2 の管理者専用画面 (T006)。書き込みは既存 endpoint �
 ロール未付与の異常行) は非表示にせず可視化し、ロール割当コマンドで修復できる
 (`OrganizationMembershipService::applyConsoleRole` の修復経路)。
 
-- `organizations.members.update` (PATCH) / `organizations.invitations.store` (POST) の role
-  payload は 3 値コマンド (旧 org ロール値は enum 検証で拒否)。Owner は enum 外 = 構造的に
-  指定不可 (Owner 昇格は transferOwnership のみ)
-- 招待は `organization_invitations.project_role` (nullable・サーバ導出・forceFill 専有) を持ち、
-  受諾 (`joinOrganization` = 招待行 lockForUpdate + organization_user の insertOrIgnore) で
-  Default Project へ pivot attach。受諾時 project 不在は org 参加のみ = 未割当へ可視 degrade
+- `organizations.members.update` (PATCH) の role payload は 3 値コマンド
+  (旧 org ロール値は enum 検証で拒否)。Owner は enum 外 = 構造的に指定不可
+  (Owner 昇格は transferOwnership のみ)
+- **`organizations.invitations.store` (POST) の role payload は org ロール 2 値**
+  (`organization_admin` / `organization_member`)。`Rule::enum(OrganizationRole)->except([Owner])`
+  で Owner を構造的に拒否する。**招待は「組織に入れる」ことだけを意味し**、
+  編集者 / 撮影者は参加後にロール割当コマンドで付与する
+  (役割付き招待 `organization_invitations.project_role` は裁定 AG-079 で列ごと撤去。
+  受諾 `joinOrganization` は org 参加 + org ロール付与 + accepted_at のみを行う)
+
+### 招待受諾の 2 経路 (token URL / アプリ内)
+
+受諾経路は 2 本あり **受諾の根拠が違う**。片方だけを見て「不整合」と直さないこと。
+
+| 経路 | route | 受諾の根拠 | 解決方法 |
+|---|---|---|---|
+| メール token URL | `invitations.accept` (GET) / `invitations.accept.store` (POST) | **有効な招待 token の保持** | `token_hash` (sha256) 照合 |
+| アプリ内 | `invitations.accept-in-app` (POST) | **auth 済み ∧ email 確認済み ∧ ログイン者 email = 招待宛先** | `OrganizationInvitation::scopeActivePendingForEmail($user->email)` |
+
+- **`verified` の非対称は仕様**: token 経路は招待直後の未検証ユーザーも受諾できる
+  (メールを受け取れたこと自体が根拠の一部)。アプリ内経路は根拠そのものが
+  「email 確認済みのログイン者 = 招待宛先」なので `verified` が必須。
+- **email 照合の非対称**: アプリ内経路は blind index の**大文字小文字を区別する完全一致**
+  (email の blind index に Lowercase transformer を付けていない)。
+  **email は正規化保存していない** (`App\Support\EmailNormalizer` は inquiry / billing contact 専用で、
+  `CreateNewUser` は validated 値をそのまま保存する) ため、「招待は `Foo@example.com` 宛 /
+  ログインは `foo@example.com`」は実運用で起こりうる。この場合アプリ内受諾は 0 件 = **404 に倒れる**
+  (fail-secure) が、**メール token 経路は `token_hash` 照合なので影響を受けず従来どおり受諾できる**。
+  正規化するなら既存全レコードの blind index 再計算と全 `whereBlind` 呼び出し元の同時変更を伴う別作業になる。
+- **存在秘匿の畳み方**: 受信者視点の解決・一覧・件数は `scopeActivePendingForEmail` の 1 本だけを
+  再利用する (`InvitationResolutionInventoryTest` が deny-by-default で強制)。
+  宛先不一致 / 不在 id / 期限切れ / 取消済 / 受諾済 / 削除済み組織宛は**すべて同じ 0 件**へ collapse し、
+  controller は**一律 404** を返す (403 を返さない = 招待の存在を教えない)。
+  `{invitation}` は implicit binding させない (binding 段で解決すると不在 id だけが binding 404 になり
+  1 bit の存在オラクルになる。`NestedRouteDefenseInventory` / `RouteBindingTypes::MANUALLY_RESOLVED` に登録)。
+- **最終権威の表** (どの競合をどのロックが閉じるか):
+
+| 競合 | 最終権威 |
+|---|---|
+| 組織の soft-delete | `lockForMembershipWrite` が取る organizations 行ロック (削除も同じ行の UPDATE) |
+| 取消 / 期限到来 / 並行受諾 | `joinOrganization` の招待行 `lockForUpdate` (取消の UPDATE も同じ行を取る) |
+| 別経路での並行 join | `organization_user` の `insertOrIgnore` (0 行 = 既 join として role を変更しない) |
+
+- `joinOrganization()` は **bool を返す** (false = ロック下再検証で受諾不能)。
+  全呼び出し元が false を消費する (token 経路は中立メッセージへ / register 経路は
+  現在組織を確定せず null / アプリ内経路は 404)。戻り値を捨てる実装は
+  `MembershipWriteLockInventoryTest` のトークナイザ検査が fail させる。
+- 共有 prop `invitationInbox.pendingCount` は **closure** のため `only:` 指定の partial reload では
+  評価されない (件数はフルページ遷移時に更新される。受諾直後は dashboard へフル遷移するため実害はない)。
+  キー名を `invitations` にしないのは、ページ prop `invitations` (Admin/Users の招待一覧) と
+  衝突して共有 prop が上書きされるため。
+- **未ログイン / 未 verified / email 空は DB を一切引かない**
+  (`OrganizationMembershipService::pendingInvitationsQuery` の early return。
+  共有 prop は全リクエストで評価されるため、これが実効的な負荷契約になる)。
+- **役割付き招待の撤去 (AG-079) のデプロイ順序**: (1) `project_role` を読み書きしないコードを先にデプロイ →
+  (2) 旧プロセスの排除 (`queue:restart` / web worker 入替完了) → (3) 列 drop の migration。
+  逆順にすると旧コードが存在しない列へ INSERT して 500 になる (回復導線が無い)。
+  ローリング更新中は新旧 HTTP 契約の混在で招待送信が一時的に 422 になりうるが、
+  `StoreOrganizationInvitationRequest::messages()` の「画面を再読み込みしてやり直してください。」が回復導線になる。
 
 ### DefaultProjectResolver の read/write 契約
 

@@ -130,6 +130,10 @@ final class NestedRouteDefenseInventory
             'notifications.read' => ['notification' => $manual],
             // {passkey} は SelfScopedPasskeyBinder が認証ユーザーの passkeys() スコープで解決する
             'passkey.destroy' => ['passkey' => $binder],
+            // {invitation} は AcceptInvitationInAppController が認証ユーザー宛の有効 pending 集合
+            // (scopeActivePendingForEmail) から手動解決する。不在 id / 他人宛 / 期限切れ /
+            // 取消済 / 削除済み組織宛はすべて同一の 404 に畳まれる (存在オラクル封じ)
+            'invitations.accept-in-app' => ['invitation' => $manual],
 
             // --- テナント親子でない param (理由は nonTenantReasons に必須登録) ---
             'social.callback' => ['provider' => $nonRes],

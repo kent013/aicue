@@ -2,9 +2,7 @@
 
 declare(strict_types=1);
 
-use App\Enums\AdminConsoleRole;
 use App\Enums\OrganizationRole;
-use App\Enums\ProjectRole;
 use App\Models\Organization;
 use App\Models\OrganizationInvitation;
 use App\Models\Project;
@@ -20,13 +18,14 @@ use Inertia\Testing\AssertableInertia;
  * 組織招待 (送信 / 受諾 / 拒否系)。
  * 招待送信は back + success flash で完結すること (画面遷移しない。
  * devnotes/20260611-template-extraction/14 §4)。
- * ロールは 3 値遷移コマンド (admin/editor/shooter = AdminConsoleRole)。
+ * 招待のロールは**組織ロール 2 値** (管理者 / メンバー)。役割付き招待 (project_role) は
+ * 裁定 AG-079 で撤去済みで、編集者 / 撮影者は参加後に管理画面のロール割当コマンドで付与する。
  */
 
 /**
  * service 経由で招待を送り、メールに載った平文 token を取り出す。
  */
-function inviteAndCaptureToken(Organization $organization, User $invitedBy, string $email, AdminConsoleRole $role): string
+function inviteAndCaptureToken(Organization $organization, User $invitedBy, string $email, OrganizationRole $role): string
 {
     Notification::fake();
     app(OrganizationMembershipService::class)->inviteMember($organization, $invitedBy, $email, $role);
@@ -54,7 +53,7 @@ test('招待送信は redirect back + success flash で完結する (画面遷�
         ->from("/organizations/{$organization->slug}/settings")
         ->post("/organizations/{$organization->slug}/invitations", [
             'email' => 'invitee@example.com',
-            'role' => AdminConsoleRole::Admin->value,
+            'role' => OrganizationRole::Admin->value,
         ]);
 
     // back (= 元画面の組織設定) へ戻ること。intended は使わない
@@ -74,7 +73,7 @@ test('招待送信は redirect back + success flash で完結する (画面遷�
 
 test('token 受諾でメンバーシップ + 招待ロールが付与される', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
-    $token = inviteAndCaptureToken($organization, $owner, 'invitee@example.com', AdminConsoleRole::Admin);
+    $token = inviteAndCaptureToken($organization, $owner, 'invitee@example.com', OrganizationRole::Admin);
 
     // 受諾するユーザーは別組織を現在組織に持つ (POST 受諾が現在組織を切り替えないことを固定するため)
     [$otherOrg, $invitee] = createOrganizationWithOwner('受諾者の既存組織');
@@ -96,7 +95,7 @@ test('token 受諾でメンバーシップ + 招待ロールが付与される',
 
 test('受諾画面 (GET) は組織名と token を表示する', function (): void {
     [$organization, $owner] = createOrganizationWithOwner('受諾テスト組織');
-    $token = inviteAndCaptureToken($organization, $owner, 'invitee@example.com', AdminConsoleRole::Admin);
+    $token = inviteAndCaptureToken($organization, $owner, 'invitee@example.com', OrganizationRole::Admin);
 
     $invitee = User::factory()->create();
     $response = $this->actingAs($invitee)->get('/invitations/accept?token='.$token);
@@ -157,7 +156,7 @@ test('既存メンバーへの再招待は中立メッセージで拒否され�
         ->from("/organizations/{$organization->slug}/settings")
         ->post("/organizations/{$organization->slug}/invitations", [
             'email' => $member->email,
-            'role' => AdminConsoleRole::Admin->value,
+            'role' => OrganizationRole::Admin->value,
         ]);
 
     // 既存メンバーであることを開示しない中立メッセージ
@@ -167,11 +166,11 @@ test('既存メンバーへの再招待は中立メッセージで拒否され�
 
 test('有効な既存招待がある email への再招待も中立メッセージで拒否される', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
-    inviteAndCaptureToken($organization, $owner, 'pending@example.com', AdminConsoleRole::Admin);
+    inviteAndCaptureToken($organization, $owner, 'pending@example.com', OrganizationRole::Admin);
 
     $response = $this->actingAs($owner)->post("/organizations/{$organization->slug}/invitations", [
         'email' => 'pending@example.com',
-        'role' => AdminConsoleRole::Admin->value,
+        'role' => OrganizationRole::Admin->value,
     ]);
 
     $response->assertSessionHasErrors(['email' => 'このメールアドレスには招待を送信できません。']);
@@ -186,7 +185,7 @@ test('manageMembers 権限がない member は招待できない (403)', functio
 
     $response = $this->actingAs($member)->post("/organizations/{$organization->slug}/invitations", [
         'email' => 'someone@example.com',
-        'role' => AdminConsoleRole::Admin->value,
+        'role' => OrganizationRole::Admin->value,
     ]);
 
     $response->assertForbidden();
@@ -278,7 +277,7 @@ test('組織を跨いだ招待の取り消しは認可より前に 404 (scopeBin
 
 test('未ログインの有効招待リンクは token を session 保存し register へ誘導する', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
-    $token = inviteAndCaptureToken($organization, $owner, 'guest@example.com', AdminConsoleRole::Admin);
+    $token = inviteAndCaptureToken($organization, $owner, 'guest@example.com', OrganizationRole::Admin);
 
     $response = $this->get('/invitations/accept?token='.$token);
 
@@ -347,7 +346,7 @@ test('無効な招待リンクは専用タイトルを返す (組織名は漏ら
 
 test('有効な招待リンクの受諾確認画面は route 既定タイトルのまま', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
-    $token = inviteAndCaptureToken($organization, $owner, 'valid-title@example.com', AdminConsoleRole::Admin);
+    $token = inviteAndCaptureToken($organization, $owner, 'valid-title@example.com', OrganizationRole::Admin);
     $invitee = User::factory()->create();
 
     $this->actingAs($invitee)
@@ -369,7 +368,7 @@ test('有効な招待リンクの受諾確認画面は route 既定タイトル�
 
 test('招待 email で register すると個人組織を作らず招待組織へ参加する', function (): void {
     [$organization, $owner] = createOrganizationWithOwner('招待組織');
-    $token = inviteAndCaptureToken($organization, $owner, 'newbie@example.com', AdminConsoleRole::Admin);
+    $token = inviteAndCaptureToken($organization, $owner, 'newbie@example.com', OrganizationRole::Admin);
 
     $response = $this->withSession(['invitation_token' => $token])->post('/register', [
         'name' => '新人 花子',
@@ -396,7 +395,7 @@ test('招待 email で register すると個人組織を作らず招待組織へ
 
 test('招待経由登録の直後、dashboard 自己修復を経ずに共有プロップ currentOrganization が招待先を指す', function (): void {
     [$organization, $owner] = createOrganizationWithOwner('招待組織');
-    $token = inviteAndCaptureToken($organization, $owner, 'header@example.com', AdminConsoleRole::Admin);
+    $token = inviteAndCaptureToken($organization, $owner, 'header@example.com', OrganizationRole::Admin);
 
     $this->withSession(['invitation_token' => $token])->post('/register', [
         'name' => 'ヘッダー 確認',
@@ -422,7 +421,7 @@ test('招待経由登録では個人組織を作らず signup grant を付与し
     // 招待経由は個人組織を作らず所属組織の残高を共有する。ここで付与すると招待 N 人 = N×10 の
     // 増幅になるため、signup grant は「個人組織を作る新規登録」時のみに限定する (LP CTA も同じ意図)。
     [$organization, $owner] = createOrganizationWithOwner('招待組織');
-    $token = inviteAndCaptureToken($organization, $owner, 'nofree@example.com', AdminConsoleRole::Admin);
+    $token = inviteAndCaptureToken($organization, $owner, 'nofree@example.com', OrganizationRole::Admin);
 
     $this->withSession(['invitation_token' => $token])->post('/register', [
         'name' => '無償なし 花子',
@@ -446,7 +445,7 @@ test('招待経由登録では個人組織を作らず signup grant を付与し
 
 test('招待 email と異なる email で register すると email エラーになる', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
-    $token = inviteAndCaptureToken($organization, $owner, 'invited@example.com', AdminConsoleRole::Admin);
+    $token = inviteAndCaptureToken($organization, $owner, 'invited@example.com', OrganizationRole::Admin);
 
     $response = $this->withSession(['invitation_token' => $token])
         ->from('/register')
@@ -491,34 +490,8 @@ test('取り消し済みの招待 token で register すると通常登録 (個�
 });
 
 /*
- * 3 値ロールコマンド招待 (editor/shooter = project_role 付き) の送信・受諾。
+ * 役割付き招待の撤去 (裁定 AG-079)。招待は「組織に入れる」ことだけを意味する。
  */
-
-test('editor 招待の受諾で Default Project へ project_admin pivot が attach される', function (): void {
-    [$organization, $owner] = createOrganizationWithOwner();
-    $project = Project::factory()->forOrganization($organization)->create();
-    $token = inviteAndCaptureToken($organization, $owner, 'editor@example.com', AdminConsoleRole::Editor);
-
-    $invitee = User::factory()->create();
-    $this->actingAs($invitee)->post('/invitations/accept', ['token' => $token])
-        ->assertRedirect('/dashboard');
-
-    expect($invitee->organizationRole($organization))->toBe(OrganizationRole::Member);
-    expect($project->memberRole($invitee))->toBe(ProjectRole::Admin);
-});
-
-test('shooter 招待の受諾で Default Project へ project_member pivot が attach される', function (): void {
-    [$organization, $owner] = createOrganizationWithOwner();
-    $project = Project::factory()->forOrganization($organization)->create();
-    $token = inviteAndCaptureToken($organization, $owner, 'shooter@example.com', AdminConsoleRole::Shooter);
-
-    $invitee = User::factory()->create();
-    $this->actingAs($invitee)->post('/invitations/accept', ['token' => $token])
-        ->assertRedirect('/dashboard');
-
-    expect($invitee->organizationRole($organization))->toBe(OrganizationRole::Member);
-    expect($project->memberRole($invitee))->toBe(ProjectRole::Member);
-});
 
 test('招待送信の role が不正値ならカスタムメッセージ付き error bag になる (Enum ルールキー解決の回帰防止)', function (): void {
     Notification::fake();
@@ -537,71 +510,33 @@ test('招待送信の role が不正値ならカスタムメッセージ付き e
     expect(OrganizationInvitation::query()->count())->toBe(0);
 });
 
-test('editor/shooter 招待の送信は Default Project 不在なら error bag (role)', function (string $role): void {
+test('招待の受諾は org 参加のみで Default Project の pivot を作らない', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+    $token = inviteAndCaptureToken($organization, $owner, 'member@example.com', OrganizationRole::Member);
+
+    $invitee = User::factory()->create();
+    $this->actingAs($invitee)->post('/invitations/accept', ['token' => $token])
+        ->assertRedirect('/dashboard');
+
+    expect($invitee->organizationRole($organization))->toBe(OrganizationRole::Member);
+    // 編集者 / 撮影者は参加後にロール割当コマンドで付与する (招待では付かない)
+    expect($project->memberRole($invitee))->toBeNull();
+});
+
+test('招待は Default Project が無くても送信できる (撤去で消えた前提検査の回帰封じ)', function (): void {
     Notification::fake();
     [$organization, $owner] = createOrganizationWithOwner();
 
     $response = $this->actingAs($owner)->post("/organizations/{$organization->slug}/invitations", [
-        'email' => 'someone@example.com',
-        'role' => $role,
+        'email' => 'no-project@example.com',
+        'role' => OrganizationRole::Member->value,
     ]);
 
-    $response->assertSessionHasErrors('role');
-    Notification::assertNothingSent();
-    expect(OrganizationInvitation::query()->count())->toBe(0);
-})->with(['editor', 'shooter']);
-
-test('受諾時に project が消えていた場合は org 参加のみ = 未割当に落ちる (例外にならない)', function (): void {
-    [$organization, $owner] = createOrganizationWithOwner();
-    $project = Project::factory()->forOrganization($organization)->create();
-    $token = inviteAndCaptureToken($organization, $owner, 'degrade@example.com', AdminConsoleRole::Shooter);
-
-    // 招待後に project を削除 (受諾時 race の逐次再現)
-    $project->delete();
-
-    $invitee = User::factory()->create();
-    $this->actingAs($invitee)->post('/invitations/accept', ['token' => $token])
-        ->assertRedirect('/dashboard');
-
-    // org 参加 + org ロールは付与される (未割当として可視化され、管理画面から再割当できる)
-    expect($organization->users()->whereKey($invitee->id)->exists())->toBeTrue();
-    expect($invitee->organizationRole($organization))->toBe(OrganizationRole::Member);
-    expect(OrganizationInvitation::query()->sole()->isAccepted())->toBeTrue();
-});
-
-test('旧招待互換: project_role = null の既存行の受諾は従来どおり org 参加のみ', function (): void {
-    [$organization] = createOrganizationWithOwner();
-    Project::factory()->forOrganization($organization)->create();
-    [, $token] = OrganizationInvitation::factory()
-        ->forOrganization($organization)
-        ->createWithPlainToken(['email' => 'legacy@example.com']);
-
-    $invitee = User::factory()->create();
-    $this->actingAs($invitee)->post('/invitations/accept', ['token' => $token])
-        ->assertRedirect('/dashboard');
-
-    expect($invitee->organizationRole($organization))->toBe(OrganizationRole::Member);
-    // pivot は付与されない (未割当)
-    expect($organization->projects()->sole()->members()->whereKey($invitee->id)->exists())->toBeFalse();
-});
-
-test('register 経路でも project_role 付き招待の受諾で pivot が attach される', function (): void {
-    [$organization, $owner] = createOrganizationWithOwner();
-    $project = Project::factory()->forOrganization($organization)->create();
-    $token = inviteAndCaptureToken($organization, $owner, 'register-shooter@example.com', AdminConsoleRole::Shooter);
-
-    $response = $this->withSession(['invitation_token' => $token])->post('/register', [
-        'name' => '撮影 次郎',
-        'email' => 'register-shooter@example.com',
-        'password' => 'SecurePass1234',
-        'terms_accepted' => '1',
-    ]);
-
-    $response->assertRedirect(route('verification.notice'));
-
-    $user = User::whereBlind('email', 'email_index', 'register-shooter@example.com')->firstOrFail();
-    expect($user->organizationRole($organization))->toBe(OrganizationRole::Member);
-    expect($project->memberRole($user))->toBe(ProjectRole::Member);
+    $response->assertSessionHasNoErrors();
+    $response->assertSessionHas('success');
+    expect($organization->projects()->count())->toBe(0);
+    expect(OrganizationInvitation::query()->count())->toBe(1);
 });
 
 /*
@@ -610,7 +545,7 @@ test('register 経路でも project_role 付き招待の受諾で pivot が atta
 
 test('受諾済み招待で joinOrganization 相当に到達しても no-op (ロック下再検証の契約)', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
-    $token = inviteAndCaptureToken($organization, $owner, 'idempotent@example.com', AdminConsoleRole::Admin);
+    $token = inviteAndCaptureToken($organization, $owner, 'idempotent@example.com', OrganizationRole::Admin);
 
     $first = User::factory()->create();
     $this->actingAs($first)->post('/invitations/accept', ['token' => $token]);
@@ -624,10 +559,10 @@ test('受諾済み招待で joinOrganization 相当に到達しても no-op (ロ
     expect($organization->users()->whereKey($first->id)->exists())->toBeTrue();
 });
 
-test('既 attach 状態での受諾は unique 違反にならず role/pivot を変更しない (insertOrIgnore 契約)', function (): void {
+test('既 attach 状態での受諾は unique 違反にならず role を変更しない (insertOrIgnore 契約)', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $project = Project::factory()->forOrganization($organization)->create();
-    $token = inviteAndCaptureToken($organization, $owner, 'already@example.com', AdminConsoleRole::Editor);
+    $token = inviteAndCaptureToken($organization, $owner, 'already@example.com', OrganizationRole::Member);
 
     // 招待送信後に別経路で org へ参加済み (organization_user 行あり + Admin ロール)
     $invitee = User::factory()->create();
@@ -637,7 +572,7 @@ test('既 attach 状態での受諾は unique 違反にならず role/pivot を�
     // Controller 経路は「既にメンバー」で弾かれるため、Service の joinOrganization 契約を直接検証する
     $invitation = OrganizationInvitation::query()->sole();
     $method = new ReflectionMethod(OrganizationMembershipService::class, 'joinOrganization');
-    $method->invoke(
+    $joined = $method->invoke(
         app(OrganizationMembershipService::class),
         $invitation,
         $organization,
@@ -645,6 +580,8 @@ test('既 attach 状態での受諾は unique 違反にならず role/pivot を�
         OrganizationRole::Member,
     );
 
+    // ロック下再検証を通ったので true (既 join の冪等 no-op も「変換完了」に含む)
+    expect($joined)->toBeTrue();
     // 500 (unique 違反) にならず、既存 role は温存・pivot も付与されない
     expect($invitee->fresh()->organizationRole($organization))->toBe(OrganizationRole::Admin);
     expect($project->memberRole($invitee))->toBeNull();
