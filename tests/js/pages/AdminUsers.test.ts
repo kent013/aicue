@@ -92,8 +92,9 @@ const invitationsFixture: InvitationRow[] = [
     {
         id: 10,
         email: "invited@example.com",
-        roleState: "shooter",
-        roleLabel: "撮影者",
+        // 招待は org ロールのみ (役割付き招待は AG-079 で撤去)
+        role: "organization_member",
+        roleLabel: "メンバー",
         expiresAt: "2026-07-18",
     },
 ];

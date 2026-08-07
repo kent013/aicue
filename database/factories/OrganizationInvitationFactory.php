@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Database\Factories;
 
 use App\Enums\OrganizationRole;
-use App\Enums\ProjectRole;
 use App\Models\Organization;
 use App\Models\OrganizationInvitation;
 use App\Models\User;
@@ -94,24 +93,6 @@ class OrganizationInvitationFactory extends Factory
     {
         return $this->state(fn (): array => [
             'role' => OrganizationRole::Admin->value,
-        ]);
-    }
-
-    /** 編集者招待 (org Member + 受諾時 Default Project project_admin) */
-    public function editorInvitation(): static
-    {
-        return $this->state(fn (): array => [
-            'role' => OrganizationRole::Member->value,
-            'project_role' => ProjectRole::Admin->value,
-        ]);
-    }
-
-    /** 撮影者招待 (org Member + 受諾時 Default Project project_member) */
-    public function shooterInvitation(): static
-    {
-        return $this->state(fn (): array => [
-            'role' => OrganizationRole::Member->value,
-            'project_role' => ProjectRole::Member->value,
         ]);
     }
 }

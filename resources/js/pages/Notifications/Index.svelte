@@ -6,12 +6,14 @@
     import EmptyState from "@/components/molecules/EmptyState.svelte";
     import Pagination from "@/components/molecules/Pagination.svelte";
     import NotificationListItem from "@/components/features/notifications/NotificationListItem.svelte";
+    import PendingInvitationList from "@/components/features/invitations/PendingInvitationList.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
     import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
     import PageHeaderSection from "@/components/molecules/PageHeaderSection.svelte";
     import type { SharedProps } from "@/lib/shared-props";
     import type { PaginationMeta } from "@/types/manual";
+    import type { PendingInvitation } from "@/types/invitation";
     import type { NotificationItem } from "@/types/notification";
 
     /**
@@ -29,9 +31,11 @@
         notifications: NotificationItem[];
         meta: PaginationMeta;
         unreadCount: number;
+        /** 自分宛の受諾可能な招待 (受諾の解決・共有 prop の件数と同一 scope から算出) */
+        pendingInvitations: PendingInvitation[];
     }
 
-    let { notifications, meta, unreadCount }: Props = $props();
+    let { notifications, meta, unreadCount, pendingInvitations }: Props = $props();
 
     const shared = $derived(page.props as unknown as SharedProps);
     const appName = $derived(shared.appName ?? "");
@@ -74,6 +78,11 @@
             {/if}
         </PageHeaderSection>
         <PageContent>
+            {#if pendingInvitations.length > 0}
+                <div class="mt-6">
+                    <PendingInvitationList invitations={pendingInvitations} />
+                </div>
+            {/if}
             {#if notifications.length === 0}
                 <div class="mt-6">
                     <EmptyState

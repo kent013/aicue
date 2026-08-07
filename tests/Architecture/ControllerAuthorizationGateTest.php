@@ -90,6 +90,13 @@ function controllerAuthorizationExemptions(): array
             .'token hash 照合と失効/期限/受諾済み判定を行う。受諾前の user は対象組織の非メンバーであり、'
             .'組織 Policy を通すと構造的に必ず拒否になる (機能が成立しない)。'],
 
+        'invitations.accept-in-app' => [$selfScoped,
+            '対象は認証ユーザー自身宛の招待のみ。acceptPendingInvitation が '
+            .'scopeActivePendingForEmail($user->email) の集合からしか解決せず、宛先不一致・不在・'
+            .'期限切れ・取消済・削除済み組織宛はすべて 404 に畳まれる。受諾前の user は対象組織の'
+            .'非メンバーであり組織 Policy は構造的に必ず拒否になるうえ、403 を返すこと自体が'
+            .'招待の存在を教える口になるため Gate を置かない (層 2 の 404 が層 3 より前という不変条件)。'],
+
         'settings.account.destroy' => [$selfScoped,
             '対象は $request->user() 自身のみ。route に他者を指せる parameter が 1 つも無く、'
             .'他人のアカウントへ到達する経路がコード上存在しない。'

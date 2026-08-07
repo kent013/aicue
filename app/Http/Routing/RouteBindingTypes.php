@@ -109,6 +109,14 @@ final class RouteBindingTypes
             'reason' => '存在オラクル封じのため controller が $organization->users() 経由で解決する'
                 .' (binding 段で解決しないことが不在 id と実在の非メンバーを同一応答にする根拠)',
         ],
+        // AcceptInvitationInAppController は $user 宛の有効 pending 集合 (scopeActivePendingForEmail)
+        // から解決する。implicit binding のままだと「不在 id = binding 404 / 実在の他人宛 =
+        // 後段短絡」に分岐し 1 bit の存在オラクルになる。
+        'invitation' => [
+            'routes' => ['invitations.accept-in-app'],
+            'reason' => '存在秘匿のため controller が認証ユーザー宛の有効 pending 集合から解決する'
+                .' (binding 段で解決しないことが不在 id と実在の他人宛招待を同一の 404 にする根拠)',
+        ],
     ];
 
     /**

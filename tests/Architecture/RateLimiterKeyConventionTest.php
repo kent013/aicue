@@ -205,6 +205,17 @@ function rateLimiterKeyInventory(): array
             'expectedKeyPrefixes' => ['invitation-accept:ip'],
             'emailScenarios' => [],
         ],
+        // アプリ内受諾 (T134)。RateLimiterKeys::actorOrIp の actor/IP 2 分岐。
+        // route parameter ({invitation}) はキーに混ぜない (bucket が id ごとに分かれると
+        // 「429 になるまでの回数」が招待の実在オラクルになる)。
+        'invitation-accept-in-app' => [
+            'scenarios' => [
+                'authenticated' => static fn (): Request => rateLimiterAuthenticatedRequest(rateLimiterProbeUser()),
+                'guest' => $noEmail,
+            ],
+            'expectedKeyPrefixes' => ['invitation-accept-in-app:user', 'invitation-accept-in-app:ip'],
+            'emailScenarios' => [],
+        ],
         // 認証済み / 未認証の 2 分岐 (passkeys と同じ形)。
         // throttle は auth middleware より先に走るため guest 分岐も実在する。
         'two-factor-secret-read' => [
@@ -460,6 +471,8 @@ function rateLimiterActorOrIpFullKeys(): array
         'two-factor-manage',
         'invitation-accept-submit',
         'plan-activate',
+        // T134 で新設。helper 経由なので同じ full key 契約に載る
+        'invitation-accept-in-app',
     ];
 
     $expected = [];

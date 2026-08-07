@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Models;
 
-use App\Enums\ProjectRole;
 use Database\Factories\OrganizationInvitationFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -22,8 +21,8 @@ use Spatie\LaravelCipherSweet\Contracts\CipherSweetEncrypted;
  * email は CipherSweet 暗号化 + blind index。
  * token_hash / organization_id / invited_by_user_id は $fillable 外。
  * 取り消しは行削除ではなく revoked_at による論理失効 (spirux 方式)。
- *
- * @property-read ProjectRole|null $project_role 受諾時に Default Project へ付与する pivot ロール
+ * 招待が持つロールは**組織ロールのみ** (役割付き招待は裁定 AG-079 で撤去。
+ * 編集者 / 撮影者は参加後に管理画面のロール割当コマンドで付与する)。
  */
 class OrganizationInvitation extends Model implements CipherSweetEncrypted
 {
@@ -134,14 +133,43 @@ class OrganizationInvitation extends Model implements CipherSweetEncrypted
     }
 
     /**
+     * **受信者視点の単一解決口** — 「この email 宛の、いま受諾できる招待」の集合。
+     *
+     * アプリ内受諾 (invitations.accept-in-app) の解決・一覧・件数はすべてこの scope を
+     * 再利用する (裁定 AG-113 の必須要素 (b)。2 つがずれると「件数は出るのに受諾できない」が起きる)。
+     * 再利用の強制は InvitationResolutionInventoryTest が deny-by-default で行う。
+     *
+     * 3 条件は**すべて存在秘匿のためにある**:
+     *  - active(): 期限切れ・取消済・受諾済を落とす
+     *  - whereBlind: 宛先不一致を落とす (CipherSweet の blind index。平文 where は hit しない)
+     *  - whereHas('organization'): 削除済み組織宛を落とす
+     *    (Organization は SoftDeletes。default scope が効くため deleted_at 判定を手書きしない)
+     * これらが**すべて同じ「0 件」に collapse する**ことが、呼び出し側で理由を出し分けずに
+     * 一律 404 へ畳める根拠である (403 を返さない = 招待の存在を教えない)。
+     *
+     * ★email は**大文字小文字を区別する完全一致**である (email の blind index に
+     *   Lowercase transformer を付けていない)。大小差のある宛先は 0 件 = 404 に倒れる
+     *   (fail-secure)。従来のメール token 経路は token_hash 照合なので影響を受けず、
+     *   そちらで受諾できる。
+     * ★空文字 email での呼び出しは**呼び出し側が事前に弾く**契約
+     *   (OrganizationMembershipService::pendingInvitationsQuery)。ここでは防御しない
+     *   (guard を 2 箇所に置くと「どちらが正か」が曖昧になる)。
+     *
+     * @param  Builder<OrganizationInvitation>  $query
+     */
+    public function scopeActivePendingForEmail(Builder $query, string $email): void
+    {
+        $query->active()
+            ->whereBlind('email', 'email_index', $email)
+            ->whereHas('organization');
+    }
+
+    /**
      * @return array<string, string>
      */
     protected function casts(): array
     {
         return [
-            // 受諾時に Default Project へ付与する pivot ロール (null = org 参加のみ)。
-            // サーバ導出値のため $fillable 外 (forceFill 専用 = tenant キー不信の流儀)
-            'project_role' => ProjectRole::class,
             'expires_at' => 'datetime',
             'accepted_at' => 'datetime',
             'revoked_at' => 'datetime',

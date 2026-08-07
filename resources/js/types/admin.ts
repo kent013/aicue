@@ -19,10 +19,16 @@ export interface MemberRow {
     isSelf: boolean;
 }
 
+/**
+ * 招待中の 1 行。招待は org ロールだけを持つ (役割付き招待は裁定 AG-079 で撤去)。
+ * メンバー行の 5 値表示状態 (MemberRoleState) とは語彙が違う
+ * (招待中の行は「未割当」ではなく、まだ参加していないだけ)。
+ */
 export interface InvitationRow {
     id: number;
     email: string;
-    roleState: MemberRoleState;
+    /** App\Enums\OrganizationRole の value (organization_admin / organization_member) */
+    role: string;
     roleLabel: string;
     expiresAt: string;
 }

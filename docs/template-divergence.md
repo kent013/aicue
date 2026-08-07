@@ -224,7 +224,7 @@ checksum query の存在を固定し、`TakeRegistrationTest` が三点照合の
 |---|---|---|
 | メンバー管理 UI | `Organizations/Settings.svelte` に組織設定と同居 | 管理メニュー専用画面 `Admin/Users` (GET `/manage/users`) へ移設。Settings は組織設定 (名称 / 2FA 方針 / API キー導線 / オーナー移譲) のみ |
 | ロールの語彙 | org ロール直接指定 (`organization_admin` / `organization_member`) | **3 値遷移コマンド** (`AdminConsoleRole`: admin/editor/shooter)。org ロール + Default Project pivot への「正規状態への遷移」を 1 tx で適用 (`applyConsoleRole`)。表示は導出 5 値 (`MemberRoleState`: owner/admin/editor/shooter/unassigned) |
-| 招待 | org ロールのみ | `organization_invitations.project_role` (nullable・forceFill 専有) を追加し、受諾時に Default Project へ pivot attach。旧行 (null) は従来どおり org 参加のみ |
+| 招待 | org ロールのみ | **org ロールのみ (テンプレートと同じ)**。一度 `organization_invitations.project_role` を追加して受諾時に Default Project へ pivot attach する差分を持っていたが、裁定 AG-079 (Default Project という概念自体が不要) で**列ごと撤去**し逸脱を戻した。編集者 / 撮影者は参加後にロール割当コマンドで付与する |
 | settings() props | members に email / role / twoFactorStatus | members は `{id, name}` に縮小 (オーナー移譲 select 用途のみ = PII 最小化)。invitations prop は撤去 |
 | ユーザー作成 | (doc/04 レガシーモック: 管理者がパスワード直接発行・平文一覧表示) | **招待一本化** (ユーザー ID → email へマッピング)。パスワードは本人設定のみ |
 
@@ -242,9 +242,10 @@ backfill 不要・非正規状態 (未割当 / stale pivot) の可視化と修�
 > 「招待 token は hash-only 保存 / 重複は中立メッセージ / 権限判定は laratrust_team_id 明示 /
 > Owner 昇格は transferOwnership のみ / PII 可視性は manageMembers 到達境界 (403)」
 
-- Owner は `AdminConsoleRole` の enum 外 = 型で構造的に指定不可
-- project_role はクライアント payload から受けない (role コマンドからサーバ導出 + forceFill。
-  `ProhibitsProtectedKeys` は入口で保護キーを missing 強制)
+- Owner はメンバーのロール変更では `AdminConsoleRole` の enum 外 = 型で構造的に指定不可。
+  招待では `Rule::enum(OrganizationRole)->except([Owner])` が構造的に拒否する
+  (**ロール語彙の非対称**: 招待は org ロール 2 値 / メンバーのロール変更は 3 値コマンド。
+  招待は「組織に入れる」だけを意味し、編集者 / 撮影者の割当は参加後の別操作である)
 - pivot 書き込み経路は `OrganizationMembershipService` / `ProjectMemberController` に閉じる
   (**`ProjectMemberPivotWritePathTest`** が deny-by-default で強制)
 - `/manage/` 配下 route の auth+verified は **`ManageRouteAuthGuardTest`** が deny-by-default で強制
@@ -257,7 +258,8 @@ backfill 不要・非正規状態 (未割当 / stale pivot) の可視化と修�
   `app/Services/Organization/OrganizationMembershipService.php` /
   `app/Services/Project/DefaultProjectResolver.php` /
   `app/Http/Controllers/Admin/UserManagementController.php`
-- 設計: `devnotes/20260711-1009-admin-console/` (概念設計 D1/D2/D6・詳細設計 施策 1〜7)
+- 設計: `devnotes/20260711-1009-admin-console/` (概念設計 D1/D2/D6・詳細設計 施策 1〜7) /
+  `devnotes/20260807-2032-invitation-in-app-acceptance/` (役割付き招待の撤去 = 裁定 AG-079)
 
 ## D9 ✅→解消 BillingAccess の entitlement 判定への書き換え (free tier は課金ゲートを通す)
 

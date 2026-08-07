@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\DataTransferObjects\Invitations\PendingInvitationForUserDto;
 use App\DataTransferObjects\Notification\NotificationListItemData;
 use App\Enums\Notification\NotificationType;
 use App\Models\User;
 use App\Services\Notification\NotificationCenterService;
+use App\Services\Organization\OrganizationMembershipService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -31,7 +33,10 @@ use Webmozart\Assert\Assert;
  */
 class NotificationController extends Controller
 {
-    public function __construct(private readonly NotificationCenterService $notifications) {}
+    public function __construct(
+        private readonly NotificationCenterService $notifications,
+        private readonly OrganizationMembershipService $membership,
+    ) {}
 
     /** 通知一覧 (全 org 横断 = 自分宛のみで構造的に閉じる) */
     public function index(Request $request): Response
@@ -51,6 +56,12 @@ class NotificationController extends Controller
             // shared prop notifications.unreadCount がページ prop `notifications` (配列) と
             // キー衝突するため (詳細は Index.svelte JSDoc)。
             'unreadCount' => $this->notifications->unreadCountFor($user),
+            // 自分宛の受諾可能な招待 (受信者視点 DTO)。共有 prop の件数・受諾の解決と
+            // **同一 scope** から算出する (裁定 AG-113 必須要素 (b))
+            'pendingInvitations' => array_map(
+                fn (PendingInvitationForUserDto $dto): array => $dto->toArray(),
+                $this->membership->pendingInvitationsFor($user),
+            ),
             // 既存 ManualListItem のページャ shape (ProjectController::manualRows) と同形
             'meta' => [
                 'current_page' => $paginator->currentPage(),
@@ -84,9 +95,14 @@ class NotificationController extends Controller
                 ->with('info', '対象の動画マニュアルは削除されています。'),
             $item->type === NotificationType::TicketBalanceLow => redirect()
                 ->route('billing.tickets.show', [], 303),
-            $item->type === NotificationType::InvitationReceived => redirect()
-                ->route('notifications.index', [], 303)
-                ->with('info', '招待はメールの受諾リンクから参加してください。'),
+            // 招待通知: 受諾可能な一覧が出る通知センターへ戻す。
+            // ★通知 payload は招待 id を持たないため「この招待」を特定できない。
+            //   したがって flash は**集合表現**にする (件数 0 のときだけ説明を出す)。
+            //   件数は受諾の解決と同一 scope から算出する。
+            $item->type === NotificationType::InvitationReceived => $this->membership->pendingInvitationCountFor($user) > 0
+                ? redirect()->route('notifications.index', [], 303)
+                : redirect()->route('notifications.index', [], 303)
+                    ->with('info', '現在有効な招待はありません (取り消し・期限切れ・参加済みの可能性があります)。'),
             // 未知 type (enum⇔DB ドリフト時の防御): 既読化のみ・汎用文言
             default => redirect()
                 ->route('notifications.index', [], 303)

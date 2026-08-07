@@ -16,8 +16,8 @@ use App\Models\User;
 
 test('org Owner は 200 + Admin/Users component で members/invitations shape を受け取る', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
-    OrganizationInvitation::factory()->forOrganization($organization)->editorInvitation()
-        ->create(['email' => 'pending-editor@example.com']);
+    OrganizationInvitation::factory()->forOrganization($organization)
+        ->create(['email' => 'pending-member@example.com', 'role' => OrganizationRole::Member->value]);
 
     $response = $this->actingAs($owner)->get('/manage/users');
 
@@ -27,8 +27,9 @@ test('org Owner は 200 + Admin/Users component で members/invitations shape �
         ->where('organizationSlug', $organization->slug)
         ->where('members.0.roleState', 'owner')
         ->where('members.0.isSelf', true)
-        ->where('invitations.0.email', 'pending-editor@example.com')
-        ->where('invitations.0.roleState', 'editor')
+        ->where('invitations.0.email', 'pending-member@example.com')
+        ->where('invitations.0.role', OrganizationRole::Member->value)
+        ->where('invitations.0.roleLabel', 'メンバー')
         ->where('hasDefaultProject', false)
         // T071: 独自二次左メニュー(AdminMenuNav)撤去に伴い categoriesUrl prop は廃止 → 存在しない
         ->missing('categoriesUrl'));
@@ -137,8 +138,9 @@ test('招待一覧は active のみ (失効・受諾済・取消済は出ない)
     $response->assertInertia(fn ($page) => $page
         ->count('invitations', 1)
         ->where('invitations.0.email', 'active@example.com')
-        // 旧招待 (project_role なし) は未割当語彙で表示される
-        ->where('invitations.0.roleState', 'unassigned'));
+        // 招待は org ロールで表示される (役割付き招待は AG-079 で撤去)
+        ->where('invitations.0.role', OrganizationRole::Member->value)
+        ->where('invitations.0.roleLabel', 'メンバー'));
 });
 
 test('current org 未設定 (組織未所属状態) は 404', function (): void {

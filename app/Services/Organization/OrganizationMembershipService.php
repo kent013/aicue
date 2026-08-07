@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace App\Services\Organization;
 
+use App\DataTransferObjects\Invitations\PendingInvitationForUserDto;
 use App\DataTransferObjects\Organizations\AccountDeletionBlockerDto;
 use App\Enums\AccountDeletionBlockReason;
 use App\Enums\AdminConsoleRole;
 use App\Enums\OrganizationRole;
-use App\Enums\ProjectRole;
 use App\Enums\SecurityEventType;
 use App\Models\Organization;
 use App\Models\OrganizationInvitation;
@@ -54,25 +54,24 @@ class OrganizationMembershipService
     ) {}
 
     /**
-     * メンバー招待 (3 値ロールコマンド)。招待レコード生成 + 受諾 URL 付きメール送信。
-     * 編集者/撮影者は Default Project 存在が必須 (不在は ValidationException = Inertia error bag)。
+     * メンバー招待。招待レコード生成 + 受諾 URL 付きメール送信。
+     * ロールは**組織ロール 2 値 (管理者 / メンバー)**。Owner は招待で付与できない
+     * (Owner 昇格は transferOwnership のみという不変条件の型表現)。
+     * 編集者 / 撮影者 (Default Project の pivot ロール) は参加後に applyConsoleRole で割り当てる
+     * (裁定 AG-079 で役割付き招待を撤去したため)。
      *
-     * @throws ValidationException 既存メンバー / 有効な既存招待 (中立メッセージ) / project 不在
+     * @throws ValidationException 既存メンバー / 有効な既存招待 (中立メッセージ)
      */
-    public function inviteMember(Organization $organization, User $invitedBy, string $email, AdminConsoleRole $role): OrganizationInvitation
+    public function inviteMember(Organization $organization, User $invitedBy, string $email, OrganizationRole $role): OrganizationInvitation
     {
+        // Owner は FormRequest の Rule::enum(...)->except() で構造的に弾かれるが、
+        // Service を直接呼ぶ経路 (テスト・将来のバッチ) でも不変条件を守る
+        Assert::notSame($role, OrganizationRole::Owner, 'Owner は招待で付与できない');
+
         if ($this->emailBelongsToMember($organization, $email) || $this->hasPendingInvitation($organization, $email)) {
             // 既存メンバーか既存招待かを開示しない中立メッセージ (アカウント列挙対策)
             throw ValidationException::withMessages([
                 'email' => ['このメールアドレスには招待を送信できません。'],
-            ]);
-        }
-
-        // 編集者/撮影者は Default Project が前提 (送信時点の静的確認。受諾時の最終確認は
-        // joinOrganization が resolveForUpdate で行い、不在なら未割当に落とす)
-        if ($role->projectRole() !== null && $this->defaultProjects->resolve($organization) === null) {
-            throw ValidationException::withMessages([
-                'role' => ['編集者・撮影者を招待するには、先にプロジェクトを作成してください。'],
             ]);
         }
 
@@ -81,10 +80,9 @@ class OrganizationMembershipService
         $invitation = new OrganizationInvitation(['email' => $email]);
         $invitation->organization()->associate($organization);
         $invitation->invitedBy()->associate($invitedBy);
-        // role / project_role / token_hash / expires_at は明示代入 (mass-assignment させない)
+        // role / token_hash / expires_at は明示代入 (mass-assignment させない)
         $invitation->forceFill([
-            'role' => $role->organizationRole()->value,
-            'project_role' => $role->projectRole()?->value,
+            'role' => $role->value,
             'token_hash' => OrganizationInvitation::hashToken($plainToken),
             'expires_at' => now()->addDays(self::EXPIRES_DAYS),
         ]);
@@ -133,7 +131,11 @@ class OrganizationMembershipService
 
         $role = OrganizationRole::from($invitation->role);
 
-        $this->joinOrganization($invitation, $organization, $user, $role);
+        if (! $this->joinOrganization($invitation, $organization, $user, $role)) {
+            // ロック下再検証で受諾不能になった (並行受諾 / 取り消し / 期限到来)。
+            // 事前検証と同じ中立メッセージへ畳む (取り消された事実を token 保持者に開示しない)
+            throw ValidationException::withMessages(['token' => ['この招待は無効です。']]);
+        }
 
         return $organization;
     }
@@ -178,7 +180,11 @@ class OrganizationMembershipService
             return null;
         }
 
-        $this->joinOrganization($invitation, $organization, $user, OrganizationRole::from($invitation->role));
+        if (! $this->joinOrganization($invitation, $organization, $user, OrganizationRole::from($invitation->role))) {
+            // 受諾不能なら現在組織も確定しない (join 失敗でも current_organization_id を
+            // 招待組織へ書くと、非所属 org が current という非正規状態を作る)
+            return null;
+        }
 
         // [register 経路限定] 参加した招待組織をこの新規ユーザーの「現在組織」として確定する。
         // - 本メソッドは register 経路専用 (呼び出し元は CreateNewUser のみ。POST 受諾は acceptInvitation)。
@@ -254,7 +260,122 @@ class OrganizationMembershipService
     }
 
     /**
-     * 招待受諾の確定処理 (attach + ロール付与 + pivot attach + accepted_at)。両受諾経路の共通コア。
+     * **受信者視点の pending 集合クエリの唯一の起点**。
+     *
+     * 裁定 AG-113 の必須要素 (b)(c) をここ 1 箇所で満たす:
+     *  (b) 受諾の解決・一覧・件数がすべてこのメソッドを通る (絞り込みが 1 本 = drift しない)
+     *  (c) 未ログイン / 未 verified / email 空は **null を返し DB を一切引かない**
+     *      (共有 prop は全リクエストで評価されるため、この early return が実効的な負荷契約になる)
+     *
+     * @return Builder<OrganizationInvitation>|null null = 引くべきでない (クエリを組み立てない)
+     */
+    private function pendingInvitationsQuery(?User $user): ?Builder
+    {
+        if ($user === null || ! $user->hasVerifiedEmail()) {
+            return null;
+        }
+
+        $email = $user->email; // CipherSweet 復号後
+        if ($email === '') {
+            return null;
+        }
+
+        return OrganizationInvitation::query()->activePendingForEmail($email);
+    }
+
+    /**
+     * 自分宛の受諾可能な招待の一覧 (受信者視点 DTO)。表示専用でロックしない。
+     *
+     * @return list<PendingInvitationForUserDto>
+     */
+    public function pendingInvitationsFor(?User $user): array
+    {
+        $query = $this->pendingInvitationsQuery($user);
+        if ($query === null) {
+            return [];
+        }
+
+        // N+1 回避に with('organization') を付ける (DTO が organization->name を読む)
+        $invitations = $query->with('organization')->orderBy('expires_at')->get();
+
+        $rows = [];
+        foreach ($invitations as $invitation) {
+            $rows[] = PendingInvitationForUserDto::fromInvitation($invitation);
+        }
+
+        return $rows;
+    }
+
+    /** 自分宛の受諾可能な招待の件数 (共有 prop 用。一覧と同一 scope を再利用する)。 */
+    public function pendingInvitationCountFor(?User $user): int
+    {
+        return $this->pendingInvitationsQuery($user)?->count() ?? 0;
+    }
+
+    /**
+     * **アプリ内受諾** (メールの URL を根拠にしない受諾。裁定 AG-113 標準形 v1)。
+     *
+     * 受諾の根拠は「auth 済み ∧ email 確認済み ∧ ログイン者 email = 招待宛先」であり、
+     * その全部が pendingInvitationsQuery() の 1 本に畳まれている。
+     *
+     * **戻り値契約**: 業務上の受諾不能 (宛先不一致 / 不在 / 期限切れ / 取消済 / 受諾済 /
+     * 組織削除済 / ロック下再検証での敗北) は例外にせず null を返す (呼び出し側が一律 404)。
+     * DB 障害・インフラ障害・プログラム不整合の例外は**捕捉せず伝播させる** (500 のまま。
+     * 404 に化けさせない)。この分離により、将来この分岐へ理由を足しても情報が漏れない。
+     *
+     * **ロックと最終権威**:
+     *  1. 下見 (ロック無し) で organization_id を得る
+     *  2. canonical 順序 (users 昇順 → organizations) で lockForMembershipWrite
+     *     — 組織の soft-delete は同じ organizations 行の UPDATE なのでここで直列化される
+     *  3. **ロック下で同一 scope を再解決** — ここが組織 soft-delete / 取消 / 期限に対する権威
+     *  4. joinOrganization() が招待行を lockForUpdate して最終再検証 (取消の割り込みはここが閉じる。
+     *     revokeInvitation は membership ロックを取らないため 3 と 4 の間に窓があるが、
+     *     取り消し側の UPDATE も同じ招待行を取るため直列化される)
+     * joinOrganization() は同一 tx 内で同じ行の lockForMembershipWrite を再取得するが、
+     * 取得済み行の再取得は no-op でロック順序も変わらない (新しい順序を作らない
+     * = デッドロックを導入しない)。
+     *
+     * @param  string  $invitationId  route parameter (未検証の文字列。pattern で 1-18 桁数値に制約済み)
+     */
+    public function acceptPendingInvitation(?User $user, string $invitationId): ?Organization
+    {
+        if ($user === null) {
+            return null;
+        }
+
+        return DB::transaction(function () use ($user, $invitationId): ?Organization {
+            // 1. 下見 (ロック前)。ここで null なら DB もロックも最小で終わる
+            $preliminary = $this->pendingInvitationsQuery($user)?->whereKey($invitationId)->first();
+            if ($preliminary === null) {
+                return null;
+            }
+
+            // 2. canonical 順序でロック (users 昇順 → organizations)
+            $organizationId = $preliminary->getAttribute('organization_id');
+            Assert::integer($organizationId);
+            $this->lockForMembershipWrite([$this->keyOf($user)], [$organizationId]);
+
+            // 3. ロック下で同一 scope を再解決 (下見の結果は信用しない)
+            $invitation = $this->pendingInvitationsQuery($user)?->whereKey($invitationId)->first();
+            if ($invitation === null) {
+                return null;
+            }
+
+            $organization = $invitation->organization;
+            Assert::isInstanceOf($organization, Organization::class);
+
+            // 4. 変換本体 (token 経路と共有)。false = 招待行ロック下の再検証で受諾不能
+            if (! $this->joinOrganization($invitation, $organization, $user, OrganizationRole::from($invitation->role))) {
+                return null;
+            }
+
+            // 現在組織は切り替えない (POST 受諾の既存契約と揃える。驚き最小)
+            return $organization;
+        });
+    }
+
+    /**
+     * 招待受諾の確定処理 (attach + ロール付与 + accepted_at)。全受諾経路の共通コア。
      * accepted_at は $fillable 外のため forceFill で明示代入する。
      *
      * 並行受諾への防御は 2 層:
@@ -267,12 +388,16 @@ class OrganizationMembershipService
      *    (organization/user は relation 解決済み) で、payload 不信の保護キー規約に反しない。
      *    organization_user は (organization_id, user_id) UNIQUE + timestamps のみの pivot。
      *
-     * project_role 付き招待は Default Project (resolveForUpdate = 行ロック) へ pivot attach。
-     * 受諾時に project が消えていた場合は org 参加のみ = 「未割当」表示状態に落ちる (可視 degrade)。
+     * 招待は「組織に入れる」ことだけを意味する (役割付き招待は裁定 AG-079 で撤去)。
+     * 編集者 / 撮影者の割当は参加後に applyConsoleRole で行う。
+     *
+     * @return bool true = ロック下再検証を通り変換が完了した (既 join の冪等 no-op を含む) /
+     *              false = ロック下で受諾不能 (受諾済 / 取消済 / 期限切れ) だった。
+     *              **false は全呼び出し元が必ず消費する** (成功扱いで返さない)。
      */
-    private function joinOrganization(OrganizationInvitation $invitation, Organization $organization, User $user, OrganizationRole $role): void
+    private function joinOrganization(OrganizationInvitation $invitation, Organization $organization, User $user, OrganizationRole $role): bool
     {
-        DB::transaction(function () use ($organization, $user, $role, $invitation): void {
+        return DB::transaction(function () use ($organization, $user, $role, $invitation): bool {
             // canonical 共通ロック境界 (users 昇順 → organizations)。並行メンバー追加を
             // deleteAccount 等と直列化する (招待行ロックの手前で org/user 行ロックを取る)。
             $this->lockForMembershipWrite([$this->keyOf($user)], [$this->keyOf($organization)]);
@@ -281,10 +406,10 @@ class OrganizationMembershipService
             /** @var OrganizationInvitation $locked */
             $locked = OrganizationInvitation::query()->whereKey($invitation->id)->lockForUpdate()->firstOrFail();
             if ($locked->isAccepted() || $locked->isRevoked() || $locked->isExpired()) {
-                return; // 期限境界の TOCTOU も含めロック下で完全再検証 (敗者は冪等 no-op)
+                return false; // 期限境界の TOCTOU も含めロック下で完全再検証 (敗者は受諾不能)
             }
 
-            // 2. org 参加の原子的 INSERT。0 行 = 別経路で join 済み (role/pivot は変更しない。
+            // 2. org 参加の原子的 INSERT。0 行 = 別経路で join 済み (role は変更しない。
             //    非正規状態が残る場合も「未割当」として可視化され管理画面から修復できる)
             $joined = DB::table('organization_user')->insertOrIgnore([
                 'organization_id' => $organization->id,
@@ -295,17 +420,11 @@ class OrganizationMembershipService
 
             if ($joined === 1) {
                 $user->addRole($role->value, $organization->laratrust_team_id);
-
-                $projectRole = $locked->project_role;
-                if ($projectRole instanceof ProjectRole) {
-                    $project = $this->defaultProjects->resolveForUpdate($organization);
-                    $project?->members()->syncWithoutDetaching([
-                        $user->id => ['role' => $projectRole->value],
-                    ]);
-                }
             }
 
             $locked->forceFill(['accepted_at' => now()])->save();
+
+            return true;
         });
     }
 

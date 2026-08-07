@@ -1,4 +1,5 @@
 import type { FlashPayload } from "@/lib/stores/flash-to-toast";
+import type { InvitationSharedProps } from "@/types/invitation";
 import type { NotificationSharedProps } from "@/types/notification";
 
 /**
@@ -61,6 +62,12 @@ export interface SharedProps {
     flash: FlashPayload;
     /** 通知センターの未読数 (全 org 横断・自分宛のみ。未ログイン時は 0) */
     notifications: NotificationSharedProps;
+    /**
+     * 自分宛の受諾可能な招待の件数 (未ログイン / 未 verified / email 空は 0)。
+     * キー名が `invitations` でないのは、ページ prop `invitations` (Admin/Users の招待一覧) と
+     * 衝突して共有 prop が上書きされるのを避けるため。
+     */
+    invitationInbox: InvitationSharedProps;
     /** サーバ描画 <title> と同一の完成タイトル (document-title.ts が SPA 遷移時に同期する) */
     title: string;
 }

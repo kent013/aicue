@@ -20,6 +20,7 @@ use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\Onboarding\ActivatePersonalController;
 use App\Http\Controllers\Onboarding\BillingRequiredController;
 use App\Http\Controllers\Onboarding\OnboardingController;
+use App\Http\Controllers\Organizations\AcceptInvitationInAppController;
 use App\Http\Controllers\Organizations\InvitationAcceptanceController;
 use App\Http\Controllers\Organizations\OrganizationApiKeyController;
 use App\Http\Controllers\Organizations\OrganizationController;
@@ -619,6 +620,27 @@ Route::get('/invitations/accept', [InvitationAcceptanceController::class, 'show'
 Route::post('/invitations/accept', [InvitationAcceptanceController::class, 'store'])
     ->middleware(['auth', 'throttle:invitation-accept-submit'])
     ->name('invitations.accept.store');
+
+/*
+| アプリ内受諾 (メールの URL を根拠にしない第 2 の受諾経路。裁定 AG-113 標準形 v1)。
+| 根拠は「auth 済み ∧ email 確認済み ∧ ログイン者 email = 招待宛先」。
+| 既存 token 経路を**置き換えず並べて持つ** (未登録の人にはメールが唯一の入口)。
+|
+| ★{invitation} は implicit binding させない。binding 段で解決すると
+|   「不在 id = binding 404 / 実在の他人宛 = 後段の応答」に分岐し 1 bit の存在オラクルになる。
+|   controller が $user 宛の有効 pending 集合から手動解決し、全ての不成立を 404 へ畳む。
+| ★verified 必須。姉妹の invitations.accept.store は意図的に verified を要求しない
+|   (招待直後の未検証ユーザーも token で受諾できる仕様) — この非対称は仕様であり、
+|   受諾根拠が違うことに由来する (docs/architecture.md に理由を明記)。
+| ★throttle は named limiter `invitation-accept-in-app` (10/min・actor レーン)。
+|   自前 route の inline throttle は T125 で全廃済みで、InlineThrottleInventoryTest の
+|   enum に自前 route 向けの case が無いため**登録できない** = 構造的に使えない。
+|   姉妹の invitations.accept.store (invitation-accept-submit) とも別レーンにする
+|   (片方の連打がもう片方の入口を 429 で塞がないため)。
+*/
+Route::post('/invitations/{invitation}/accept-in-app', AcceptInvitationInAppController::class)
+    ->middleware(['auth', 'verified', 'throttle:invitation-accept-in-app'])
+    ->name('invitations.accept-in-app');
 
 /*
 |--------------------------------------------------------------------------

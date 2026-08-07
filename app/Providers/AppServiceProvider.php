@@ -265,6 +265,17 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('invitation-accept-submit', fn (Request $request): Limit => Limit::perMinute(10)
             ->by(RateLimiterKeys::actorOrIp($request, 'invitation-accept-submit')));
 
+        // アプリ内受諾の確定 (POST /invitations/{invitation}/accept-in-app)。
+        // ★閾値は姉妹の `invitation-accept-submit` / `invitation-accept` と同値 10/min
+        //   (既存値を変えない = AG-096)。
+        // ★`invitation-accept-submit` と**別レーン**にする。あちらは token URL 経路の確定で、
+        //   こちらは受諾可能な招待一覧からの確定。同一 bucket にすると片方の連打が
+        //   もう片方を 429 にして「別の入口なら受諾できる」という救済を潰す。
+        // ★route parameter ({invitation}) をキーに混ぜない。混ぜると bucket が id ごとに分かれ、
+        //   「429 になるまでの回数」が招待の実在オラクルになる。
+        RateLimiter::for('invitation-accept-in-app', fn (Request $request): Limit => Limit::perMinute(10)
+            ->by(RateLimiterKeys::actorOrIp($request, 'invitation-accept-in-app')));
+
         // パーソナルプランの有効化 (POST /onboarding/activate-personal)。
         // 一回性の操作であり、連打の実効は事前条件 (既契約なら常に失敗) が抑えるが、
         // throttle は「試行の受理数」の上限として 10/min を維持する。

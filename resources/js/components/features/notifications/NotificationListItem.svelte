@@ -94,7 +94,7 @@
                 : `${manualPayload.manual_title}: ${manualPayload.error ?? "エラーが発生しました"}`;
         }
         if (invitationPayload) {
-            return "メールの受諾リンクから参加してください";
+            return "クリックすると、届いている招待から参加できます";
         }
         if (balancePayload) {
             return `通知の目安 (${balancePayload.threshold} 枚) を下回りました。チケットを追加購入できます`;

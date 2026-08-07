@@ -1,14 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import NotificationsIndex from "@/pages/Notifications/Index.svelte";
+import type { PendingInvitation } from "@/types/invitation";
 import type { NotificationItem } from "@/types/notification";
 import type { PaginationMeta } from "@/types/manual";
 
-/** Index.svelte の Props (unreadCount 必須)。全 render はこの型で統一する */
+/** Index.svelte の Props (unreadCount / pendingInvitations 必須)。全 render はこの型で統一する */
 interface IndexProps {
     notifications: NotificationItem[];
     meta: PaginationMeta;
     unreadCount: number;
+    pendingInvitations: PendingInvitation[];
 }
 
 // router をモックし page state は実物を使う (props 未設定の空オブジェクト)
@@ -23,9 +25,9 @@ vi.mock("@inertiajs/svelte", async (importOriginal) => ({
 
 const meta: PaginationMeta = { current_page: 1, last_page: 1, per_page: 20, total: 0 };
 
-/** 全 render の共通 props。unreadCount 必須化に伴う追従漏れを防ぐ (デフォルト 0) */
+/** 全 render の共通 props。必須 prop 追加時の追従漏れを防ぐ (デフォルト空) */
 function baseProps(overrides: Partial<IndexProps> = {}): IndexProps {
-    return { notifications: [], meta, unreadCount: 0, ...overrides };
+    return { notifications: [], meta, unreadCount: 0, pendingInvitations: [], ...overrides };
 }
 
 function item(id: string): NotificationItem {
@@ -95,5 +97,33 @@ describe("Notifications/Index", () => {
 
         expect(screen.getByTestId("notification-list")).toBeInTheDocument();
         expect(screen.getAllByTestId("notification-item")).toHaveLength(2);
+    });
+});
+
+describe("Notifications/Index 届いている招待", () => {
+    afterEach(() => cleanup());
+
+    it("pendingInvitations が空なら招待セクションを描画しない", () => {
+        render(NotificationsIndex, { props: baseProps() });
+
+        expect(screen.queryByTestId("pending-invitation-list")).toBeNull();
+    });
+
+    it("pendingInvitations があれば招待セクションを描画する", () => {
+        render(NotificationsIndex, {
+            props: baseProps({
+                pendingInvitations: [
+                    {
+                        id: 7,
+                        organizationName: "招待元組織",
+                        roleLabel: "メンバー",
+                        expiresAt: "2026-09-30",
+                    },
+                ],
+            }),
+        });
+
+        expect(screen.getByTestId("pending-invitation-list")).toBeInTheDocument();
+        expect(screen.getByTestId("accept-invitation-7")).toBeInTheDocument();
     });
 });
