@@ -7,6 +7,7 @@ use App\DataTransferObjects\Billing\OffSessionChargeResultDto;
 use App\Enums\Billing\AutoRechargeAttemptStatus;
 use App\Enums\Billing\AutoRechargeDisabledReason;
 use App\Enums\Billing\BillingNotificationType;
+use App\Enums\Billing\GatewayFailureClass;
 use App\Enums\Billing\TicketLedgerKind;
 use App\Enums\Security\ExternalCallKind;
 use App\Models\Billing\BillingNotification;
@@ -23,6 +24,9 @@ use App\Support\JobExecution\AttemptOwnershipPreflight;
 use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
+use Stripe\Exception\ApiConnectionException;
+use Stripe\Exception\InvalidRequestException;
+use Tests\Support\Billing\GatewayFailureFixtures;
 use Tests\Support\FakeAttemptOwnershipPreflight;
 use Tests\Support\FakeAutoRechargeGateway;
 
@@ -296,7 +300,7 @@ test('invoice 終端に失敗したら pending を維持する (終端保証を�
 
     $attempt = $service->maybeCreateAttempt($organization);
     $attempt->forceFill(['stripe_invoice_id' => 'in_stuck'])->save();
-    $gateway->failOnTerminate = true;
+    $gateway->terminateFailure = GatewayFailureClass::ProviderUnavailable;
 
     $service->terminateAndFail($organization, $attempt);
 
@@ -634,7 +638,7 @@ test('preflight 2: terminateInvoice が例外を投げても課金処理へ進�
     $gateway->withDefaultPaymentMethod();
     $attempt = autoRechargePendingAttempt($organization, $owner, $service);
     $preflight->terminalizeAt = [ExternalCallKind::StripeInvoicePay];
-    $gateway->failOnTerminate = true;
+    $gateway->terminateFailure = GatewayFailureClass::ProviderUnavailable;
 
     $service->executeAttempt($attempt);
 
@@ -658,11 +662,16 @@ test('後始末ログは別 event 名 job_ownership_lost_cleanup を使い独自
             }
             $keys = array_keys($context);
             sort($keys);
-            $expected = ['attempt_ulid', 'error', 'event', 'invoice_id', 'job_id', 'job_type', 'terminated'];
+            $expected = [
+                'attempt_ulid', 'error_class', 'event', 'failure_class',
+                'invoice_id', 'job_id', 'job_type', 'terminated',
+            ];
 
             return $keys === $expected
                 && $context['terminated'] === true
-                && $context['error'] === null
+                // ★成功時も 2 キーは null で存在する (集計 schema を成否で割らない)
+                && $context['failure_class'] === null
+                && $context['error_class'] === null
                 && $context['attempt_ulid'] === $attempt->attempt_ulid;
         })
         ->once();
@@ -674,7 +683,7 @@ test('後始末ログは別 event 名 job_ownership_lost_cleanup を使い独自
         ->once();
 });
 
-test('後始末ログの error は例外クラス名のみで、外部由来のメッセージを含まない', function (): void {
+test('後始末のログに外部由来のメッセージを載せない (分類 + 例外クラス名のみ)', function (): void {
     // Stripe SDK の例外メッセージは外部サービスが生成する可変文字列であり、構造化ログの
     // 集計語彙へ流さない。
     Log::spy();
@@ -682,7 +691,8 @@ test('後始末ログの error は例外クラス名のみで、外部由来の�
     $gateway->withDefaultPaymentMethod();
     $attempt = autoRechargePendingAttempt($organization, $owner, $service);
     $preflight->terminalizeAt = [ExternalCallKind::StripeInvoicePay];
-    $gateway->failOnTerminate = true; // メッセージ「fake gateway: invoice 終端失敗」で throw する
+    // 本物の gateway が伝播させる実ライブラリ例外を投げる (message にマーカーが入る)
+    $gateway->terminateFailure = GatewayFailureClass::ProviderUnavailable;
 
     $service->executeAttempt($attempt);
 
@@ -693,13 +703,19 @@ test('後始末ログの error は例外クラス名のみで、外部由来の�
             }
 
             return $context['terminated'] === false
-                && $context['error'] === RuntimeException::class
-                && ! str_contains((string) $context['error'], 'fake gateway');
+                && $context['failure_class'] === 'provider_unavailable'
+                && $context['error_class'] === ApiConnectionException::class
+                // ★マーカー非含有。gate が「fixture の message にマーカーが確かに入る」ことを
+                //   保証しているため、この negative assertion は空虚にならない。
+                && ! str_contains(
+                    json_encode($context, JSON_THROW_ON_ERROR),
+                    GatewayFailureFixtures::EXTERNAL_MESSAGE_MARKER,
+                );
         })
         ->once();
 });
 
-test('後始末の例外報告にも外部由来のメッセージを渡さない (サニタイズ済み例外のみ)', function (): void {
+test('後始末の例外報告は固定テンプレートと完全一致する (外部由来のメッセージを渡さない)', function (): void {
     // 「構造化ログに載せない」だけでは不十分 — 標準の exception handler は message と
     // スタックトレースを記録するため、原例外をそのまま report() すると保存場所が移るだけになる。
     Exceptions::fake();
@@ -707,17 +723,24 @@ test('後始末の例外報告にも外部由来のメッセージを渡さな�
     $gateway->withDefaultPaymentMethod();
     $attempt = autoRechargePendingAttempt($organization, $owner, $service);
     $preflight->terminalizeAt = [ExternalCallKind::StripeInvoicePay];
-    $gateway->failOnTerminate = true;
+    $gateway->terminateFailure = GatewayFailureClass::ProviderUnavailable;
 
     $service->executeAttempt($attempt);
 
-    Exceptions::assertReported(function (RuntimeException $reported): bool {
-        return str_contains($reported->getMessage(), 'の終端に失敗しました')
-            // 外部 (fake gateway = Stripe SDK 相当) が生成した文字列を含まない
-            && ! str_contains($reported->getMessage(), 'fake gateway')
-            // previous chain も繋がない (reporter が previous を出力しうるため)
-            && $reported->getPrevious() === null;
-    });
+    // ★部分一致をやめ**完全一致**で固定する (予期しない文字列の追加を必ず検出する)。
+    //   invoice_id は pay preflight より前に永続化されているため DB から取れる。
+    $invoiceId = $attempt->refresh()->stripe_invoice_id;
+    expect($invoiceId)->not->toBeNull();
+    $expected = sprintf(
+        'auto-recharge: invoice %s の終端に失敗しました (%s / %s)',
+        $invoiceId,
+        'provider_unavailable',
+        ApiConnectionException::class,
+    );
+
+    Exceptions::assertReported(fn (RuntimeException $reported): bool => $reported->getMessage() === $expected
+        // previous chain も繋がない (reporter が previous を出力しうるため)
+        && $reported->getPrevious() === null);
     Exceptions::assertReportedCount(1);
 });
 
@@ -781,11 +804,107 @@ test('前提: terminateInvoice が失敗したら attempt は Pending のまま 
     $gateway->withDefaultPaymentMethod();
     $attempt = autoRechargePendingAttempt($organization, $owner, $service);
     $attempt->forceFill(['stripe_invoice_id' => 'in_stuck_precondition'])->save();
-    $gateway->failOnTerminate = true;
+    $gateway->terminateFailure = GatewayFailureClass::ProviderUnavailable;
 
     $service->terminateAndFail($organization, $attempt);
 
     expect($attempt->refresh()->status)->toBe(AutoRechargeAttemptStatus::Pending);
+});
+
+/** 所有権喪失 → 後始末までを 1 シナリオ実行する (cleanup ログの発生源)。 */
+function autoRechargeRunCleanupScenario(?GatewayFailureClass $terminateFailure): void
+{
+    [$organization, $owner, $gateway, $service, $preflight] = autoRechargePreflightSetup();
+    $gateway->withDefaultPaymentMethod();
+    $attempt = autoRechargePendingAttempt($organization, $owner, $service);
+    $preflight->terminalizeAt = [ExternalCallKind::StripeInvoicePay];
+    $gateway->terminateFailure = $terminateFailure;
+
+    $service->executeAttempt($attempt);
+}
+
+test('cleanup event のキー集合が成功・失敗の両方で同一である (集計 schema を成否で割らない)', function (): void {
+    // ★Log::spy() は既に mock 済みなら再作成しないため、1 本の spy で 2 シナリオを記録する。
+    Log::spy();
+
+    autoRechargeRunCleanupScenario(null);                                        // 終端成功
+    autoRechargeRunCleanupScenario(GatewayFailureClass::ProviderUnavailable);     // 終端失敗
+
+    $contexts = [];
+    Log::shouldHaveReceived('warning')
+        ->withArgs(function (string $message, array $context) use (&$contexts): bool {
+            if (($context['event'] ?? null) !== ExternalCallKind::CLEANUP_LOG_EVENT) {
+                return false;
+            }
+            // ★Mockery は照合と件数検証で closure を複数回呼ぶため、成否をキーにして
+            //   冪等に記録する (append だと重複して数が合わない)。
+            $contexts[$context['terminated'] === true ? 'success' : 'failure'] = $context;
+
+            return true;
+        })
+        ->twice();
+
+    expect(array_keys($contexts))->toEqualCanonicalizing(['success', 'failure']);
+    $success = $contexts['success'];
+    $failure = $contexts['failure'];
+
+    expect(array_keys($success))->toBe(array_keys($failure));
+    // 成功時も 2 キーは **null で存在**する
+    expect($success['terminated'])->toBeTrue()
+        ->and($success['failure_class'])->toBeNull()
+        ->and($success['error_class'])->toBeNull();
+    expect($failure['terminated'])->toBeFalse()
+        ->and($failure['failure_class'])->toBe('provider_unavailable')
+        ->and($failure['error_class'])->toBe(ApiConnectionException::class);
+});
+
+test('制御フロー等価性: 分類ログを出しても収束先と gateway 呼び出し回数が変わらない', function (): void {
+    // ★分類は**観測のため**であり課金の振る舞いを変えない。終端失敗時の収束先
+    //   (pending 維持) と gateway 呼び出し回数を明示的に固定する。
+    [$organization, $owner, $gateway, $service, $preflight] = autoRechargePreflightSetup();
+    $gateway->withDefaultPaymentMethod();
+    $attempt = autoRechargePendingAttempt($organization, $owner, $service);
+    $preflight->terminalizeAt = [ExternalCallKind::StripeInvoicePay];
+    $gateway->terminateFailure = GatewayFailureClass::ProviderUnavailable;
+
+    $service->executeAttempt($attempt);
+
+    // 所有権喪失で canceled 化済み (preflight が terminal 化させた側の結果)
+    expect($attempt->refresh()->status)->toBe(AutoRechargeAttemptStatus::Canceled);
+    // 終端は失敗したので terminated 配列は空のまま / 課金 (pay) には進まない
+    expect($gateway->terminated)->toBe([]);
+    expect($gateway->payCalls)->toBe([]);
+    expect($gateway->createdInvoices)->toHaveCount(1);
+    expect(TicketLedgerEntry::query()->where('kind', TicketLedgerKind::Grant)->count())->toBe(0);
+});
+
+test('停止側の終端失敗ログにも分類が載る (message は載らない)', function (): void {
+    // tryTerminateInvoice の catch。制御フローは現行のまま (pending 維持)。
+    Log::spy();
+    [$organization, $owner, $gateway, $service] = autoRechargeSetup();
+    $gateway->withDefaultPaymentMethod();
+    $attempt = autoRechargePendingAttempt($organization, $owner, $service);
+    $attempt->forceFill(['stripe_invoice_id' => 'in_try_terminate'])->save();
+    $gateway->terminateFailure = GatewayFailureClass::ProviderRejected;
+
+    $service->terminateAndCancel($attempt);
+
+    expect($attempt->refresh()->status)->toBe(AutoRechargeAttemptStatus::Pending);
+
+    Log::shouldHaveReceived('warning')
+        ->withArgs(function (string $message, array $context): bool {
+            if ($message !== 'auto-recharge: invoice termination failed, keeping attempt pending') {
+                return false;
+            }
+
+            return $context['failure_class'] === 'provider_rejected'
+                && $context['error_class'] === InvalidRequestException::class
+                && ! str_contains(
+                    json_encode($context, JSON_THROW_ON_ERROR),
+                    GatewayFailureFixtures::EXTERNAL_MESSAGE_MARKER,
+                );
+        })
+        ->once();
 });
 
 test('冪等キーは 2 本ある: 同一 invoice の付与は台帳 1 件・attempt 遷移も 1 回', function (): void {

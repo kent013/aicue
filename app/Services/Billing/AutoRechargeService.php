@@ -27,6 +27,7 @@ use App\Notifications\Billing\AutoRechargeDisabledNotification;
 use App\Notifications\Billing\AutoRechargeEnabledNotification;
 use App\Notifications\Billing\AutoRechargeFailedNotification;
 use App\Services\Billing\Contracts\AutoRechargeGatewayInterface;
+use App\Support\Billing\GatewayFailureClassifier;
 use App\Support\JobExecution\AttemptOwnershipPreflight;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Cache\LockTimeoutException;
@@ -680,10 +681,12 @@ final class AutoRechargeService
      *   手動収束に委ねる。
      * ★ **cleanup 専用の event 名**を使う。送信抑止の記録 (`LOG_EVENT`) は最小 7 キー schema を
      *   持つ契約であり、キー集合の違うログを同じ event 名に混ぜない。
-     * ★ `error` に入れるのは**例外クラス名だけ**である (impl-review Round 2/3 反映)。
+     * ★ ログに載せるのは `GatewayFailureClassifier` が返す**2 キーだけ**である
+     *   (`failure_class` = 有界な分類 / `error_class` = 例外クラス名。T132)。
      *   Stripe SDK の例外メッセージは**外部サービスが生成する可変文字列**であり、
      *   いま既知の内容が invoice id と status だけでも、将来の SDK / API 応答で
      *   何が混ざるかの契約は無い。構造化ログには**アプリが決めた有界な語彙**だけを載せる。
+     *   ★成功時も 2 キーは **null で存在させる** (集計 schema を成否で割らない)。
      * ★ 例外報告も**原例外を渡さない** (impl-review Round 3 反映)。
      *   標準の exception handler は message とスタックトレースを記録するため、
      *   `report($exception)` では「保存場所を移しただけ」で外部生成文字列が残る。
@@ -696,17 +699,22 @@ final class AutoRechargeService
         string $invoiceId,
     ): void {
         $terminated = true;
-        $error = null;
+        $failure = null;
         try {
             $this->gateway->terminateInvoice($invoiceId);
         } catch (Throwable $exception) {
             $terminated = false;
-            // paid 等の「明示的な非成功」もここに落ちる。分類できる有界な値 (クラス名) のみ記録する。
-            $error = $exception::class;
+            // paid 等の「明示的な非成功」もここに落ちる。有界な 2 キー (分類 + 例外クラス名) のみ記録する。
+            $failure = GatewayFailureClassifier::context($exception);
             // 原例外は報告しない (外部生成メッセージ / previous chain をログ基盤へ流さない)。
-            report(new RuntimeException(
-                "auto-recharge: invoice {$invoiceId} の終端に失敗しました ({$error})",
-            ));
+            // ★文言は**固定テンプレート**にする。report message は集計語彙になりうるため、
+            //   Feature テストが**完全一致**で固定する (部分一致だと文字列の追加を検出できない)。
+            report(new RuntimeException(sprintf(
+                'auto-recharge: invoice %s の終端に失敗しました (%s / %s)',
+                $invoiceId,
+                $failure['failure_class'],
+                $failure['error_class'],
+            )));
         }
 
         Log::warning('auto-recharge: 所有権喪失後の invoice 終端', [
@@ -716,7 +724,10 @@ final class AutoRechargeService
             'attempt_ulid' => $attempt->attempt_ulid,
             'invoice_id' => $invoiceId,
             'terminated' => $terminated,
-            'error' => $error,
+            // ★成功時も**キーは常に存在させる** (集計 schema を安定させる。値は null)。
+            //   ここだけ spread を使わないのはこのためである。
+            'failure_class' => $failure['failure_class'] ?? null,
+            'error_class' => $failure['error_class'] ?? null,
         ]);
     }
 
@@ -830,10 +841,10 @@ final class AutoRechargeService
             Log::warning('auto-recharge: invoice termination failed, keeping attempt pending', [
                 'attempt_ulid' => $attempt->attempt_ulid,
                 'invoice_id' => $attempt->stripe_invoice_id,
-                'error' => $e->getMessage(),
+                ...GatewayFailureClassifier::context($e),
             ]);
 
-            return false;
+            return false; // ★制御フローは現行のまま (pending 維持 → リコンサイル再試行)
         }
     }
 
@@ -991,7 +1002,7 @@ final class AutoRechargeService
                 // 1 attempt の失敗が他 org の回収を止めないよう隔離 (次周期で再試行)。
                 Log::warning('auto-recharge reconcile: attempt processing failed', [
                     'attempt_ulid' => $attempt->attempt_ulid,
-                    'error' => $e->getMessage(),
+                    ...GatewayFailureClassifier::context($e),
                 ]);
             }
         }
@@ -1011,7 +1022,7 @@ final class AutoRechargeService
             } catch (Throwable $e) {
                 Log::warning('auto-recharge reconcile: trigger failed', [
                     'organization_id' => $organization->getKey(),
-                    'error' => $e->getMessage(),
+                    ...GatewayFailureClassifier::context($e),
                 ]);
             }
         }

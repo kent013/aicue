@@ -6,6 +6,7 @@ use App\DataTransferObjects\Billing\AutoRechargeConsentDto;
 use App\DataTransferObjects\Billing\InvoiceStateDto;
 use App\Enums\Billing\AutoRechargeAttemptStatus;
 use App\Enums\Billing\BillingNotificationType;
+use App\Enums\Billing\GatewayFailureClass;
 use App\Models\Billing\BillingNotification;
 use App\Models\Billing\TicketAutoRechargeAttempt;
 use App\Models\Billing\TicketLedgerEntry;
@@ -15,7 +16,12 @@ use App\Services\Billing\Contracts\AutoRechargeGatewayInterface;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Scheduling\Event;
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Schema;
+use Stripe\Exception\ApiConnectionException;
+use Tests\Support\Billing\GatewayFailureFixtures;
 use Tests\Support\FakeAutoRechargeGateway;
 
 /*
@@ -164,6 +170,74 @@ test('1 attempt の例外が他 org の回収を止めない (隔離)', function
 
     expect($stats['recovered_paid'])->toBe(1);
     expect($good->fresh()->status)->toBe(AutoRechargeAttemptStatus::Paid);
+});
+
+test('隔離ログに失敗分類が載る (gateway 例外 → provider_unavailable)', function (): void {
+    // ★分類は観測のためであり制御フローを変えない: 隔離は現行どおり続行する。
+    Log::spy();
+    [$organization] = createOrganizationWithOwner();
+    $attempt = TicketAutoRechargeAttempt::factory()->for($organization)->create([
+        'created_at' => CarbonImmutable::now()->subMinutes(20),
+    ]);
+    enableAutoRecharge($organization);
+    // 本物の gateway が伝播させる実ライブラリ例外を invoice 作成中に注入する
+    $this->gateway->duringCreateInvoice = function (): void {
+        throw GatewayFailureFixtures::throwableFor(GatewayFailureClass::ProviderUnavailable);
+    };
+
+    $stats = app(AutoRechargeService::class)->reconcile();
+
+    // 隔離されるので reconcile 自体は例外を投げず、attempt は pending のまま次周期へ回る
+    expect($stats['retried'])->toBe(0);
+    expect($attempt->fresh()->status)->toBe(AutoRechargeAttemptStatus::Pending);
+
+    Log::shouldHaveReceived('warning')
+        ->withArgs(function (string $message, array $context): bool {
+            if ($message !== 'auto-recharge reconcile: attempt processing failed') {
+                return false;
+            }
+
+            return $context['failure_class'] === 'provider_unavailable'
+                && $context['error_class'] === ApiConnectionException::class
+                && ! str_contains(
+                    json_encode($context, JSON_THROW_ON_ERROR),
+                    GatewayFailureFixtures::EXTERNAL_MESSAGE_MARKER,
+                );
+        })
+        ->once();
+});
+
+test('取りこぼし起票ログに失敗分類が載る (DB 例外 → local_failure)', function (): void {
+    Log::spy();
+    [$organization] = createOrganizationWithOwner();
+    enableAutoRecharge($organization);
+
+    // 単価表を実際に引けなくして DB 例外 (QueryException) を起こす。
+    // ★注入点の選択理由: 取りこぼし起票の catch は `maybeCreateAttempt()` の内側で起きる
+    //   DB 失敗しか受けず、AutoRechargeService は final なので差し替えられない。
+    //   実 DB を一時的に壊すのが「QueryException が実際に上がる」唯一の素直な作り方である。
+    // ★後片付けは 2 重: 明示的に rename を戻し、さらに RefreshDatabase の
+    //   トランザクション巻き戻しでも復元される。
+    Schema::rename('ticket_volume_prices', 'ticket_volume_prices_missing');
+
+    try {
+        $stats = app(AutoRechargeService::class)->reconcile();
+    } finally {
+        Schema::rename('ticket_volume_prices_missing', 'ticket_volume_prices');
+    }
+
+    expect($stats['triggered'])->toBe(0);
+
+    Log::shouldHaveReceived('warning')
+        ->withArgs(function (string $message, array $context): bool {
+            if ($message !== 'auto-recharge reconcile: trigger failed') {
+                return false;
+            }
+
+            return $context['failure_class'] === 'local_failure'
+                && $context['error_class'] === QueryException::class;
+        })
+        ->once();
 });
 
 test('リコンサイルコマンドは 0 で終了し統計を出力する', function (): void {
