@@ -338,7 +338,7 @@ DB driver のキューには**実行中にリース (`retry_after`) を延長す
 
      | # | 発生条件 | 検知元 | 収束手順 |
      |---|---|---|---|
-     | (a) | 所有権喪失後の void / delete に失敗した | **アプリログ**: `event = job_ownership_lost_cleanup` かつ `terminated=false` (原因の分類は同ログの `error` = 例外クラス名。メッセージ本文は `report()` 側の例外報告に残る) | 同ログの `invoice_id` を Stripe で確認し、`paid` でなければ手動 void |
+     | (a) | 所有権喪失後の void / delete に失敗した | **アプリログ**: `event = job_ownership_lost_cleanup` かつ `terminated=false` (原因の分類は同ログの `error` = 例外クラス名。`report()` 側にも **invoice id と例外クラス名だけを持つサニタイズ済み例外**しか流れないため、**この cleanup 経路では Stripe が生成した原メッセージはアプリのどこにも残らない** (別経路の `tryTerminateInvoice()` は対象外)。詳細が要るときは `invoice_id` で Stripe 側を直接確認する) | 同ログの `invoice_id` を Stripe で確認し、`paid` でなければ手動 void |
      | (b) | invoice 作成成功 → `stripe_invoice_id` の永続化前にワーカーが死亡した | **アプリログには何も残らない**。Stripe 側を起点に探す — metadata `purpose=auto_recharge` を持つ `draft` / `open` invoice を列挙し、その `recharge_attempt_ulid` に対応する `ticket_auto_recharge_attempts` 行の `stripe_invoice_id` が **NULL または別 id** のものが孤児 | **原則すべて手動終端の対象**とする。`paid` でないことを確認して void / delete する |
 
      > **(b) を「次の実行が拾うから放置してよい」と書かない** — Stripe の idempotency key は
