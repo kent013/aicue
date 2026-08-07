@@ -7,6 +7,8 @@ use App\DataTransferObjects\Billing\OffSessionChargeResultDto;
 use App\Enums\Billing\AutoRechargeAttemptStatus;
 use App\Enums\Billing\AutoRechargeDisabledReason;
 use App\Enums\Billing\BillingNotificationType;
+use App\Enums\Billing\TicketLedgerKind;
+use App\Enums\Security\ExternalCallKind;
 use App\Models\Billing\BillingNotification;
 use App\Models\Billing\TicketAutoRecharge;
 use App\Models\Billing\TicketAutoRechargeAttempt;
@@ -17,7 +19,11 @@ use App\Models\User;
 use App\Services\Billing\AutoRechargeService;
 use App\Services\Billing\Contracts\AutoRechargeGatewayInterface;
 use App\Services\Billing\TicketLedgerService;
+use App\Support\JobExecution\AttemptOwnershipPreflight;
+use Illuminate\Support\Facades\Exceptions;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
+use Tests\Support\FakeAttemptOwnershipPreflight;
 use Tests\Support\FakeAutoRechargeGateway;
 
 /*
@@ -451,4 +457,376 @@ test('部分補充でも 1 回の請求額が同意上限を超えない (適用
 
     // hard invariant: 実請求額 (attempt に pin した単価 × 数量) は同意上限を超えない
     expect($attempt->unit_amount * $attempt->quantity)->toBeLessThanOrEqual($consentedAmount);
+});
+
+/*
+ * ─────────────────────────────────────────────────────────────────────
+ * T131 / S4: Stripe 呼び出し直前の所有権再検証 (preflight suppression) と
+ *            中断時の invoice 終端 (裁定 AG-082)
+ *
+ * 配置 (placement) は `FakeAttemptOwnershipPreflight` (競合注入シーム) が固定する。
+ * シームは **verdict を差し替えない** — checkpoint 直前に attempt 行を terminal 化して
+ * `parent::stillPending()` へ委譲するだけなので、refresh / status 判定 /
+ * 所有権喪失ログは常に本番実装が実行する。
+ * ─────────────────────────────────────────────────────────────────────
+ */
+
+/**
+ * 抑止ログ (`job_ownership_lost`) の必須キー集合。
+ *
+ * ★他テストファイルのグローバル定数を参照しない (Pest の --parallel はファイル単位で
+ *   プロセスを分けるため未定義になりうる)。Manual 側 (JobOwnershipLostContextTest) と
+ *   同じ集合をここにも書き、両者が一致していることを人が読める形で残す。
+ *
+ * @var list<string>
+ */
+const AUTO_RECHARGE_OWNERSHIP_LOST_REQUIRED_KEYS = [
+    'event',
+    'job_type',
+    'job_id',
+    'expected_status',
+    'actual_status',
+    'stage',
+    'external_call',
+];
+
+/**
+ * preflight シームを差し込んだ setup (service 解決より前に instance() する)。
+ *
+ * @return array{Organization, User, FakeAutoRechargeGateway, AutoRechargeService, FakeAttemptOwnershipPreflight}
+ */
+function autoRechargePreflightSetup(): array
+{
+    $preflight = new FakeAttemptOwnershipPreflight;
+    app()->instance(AttemptOwnershipPreflight::class, $preflight);
+
+    [$organization, $owner, $gateway, $service] = autoRechargeSetup();
+
+    return [$organization, $owner, $gateway, $service, $preflight];
+}
+
+/** enabled 設定 + pending attempt を 1 件作る (残高 0 = 閾値割れ)。 */
+function autoRechargePendingAttempt(
+    Organization $organization,
+    User $owner,
+    AutoRechargeService $service,
+): TicketAutoRechargeAttempt {
+    $service->updateSettings($organization, $owner, true, 5, 50, new AutoRechargeConsentDto(
+        config()->string('billing.auto_recharge.consent_version'),
+    ));
+
+    $attempt = $service->maybeCreateAttempt($organization);
+    expect($attempt)->not->toBeNull();
+    assert($attempt instanceof TicketAutoRechargeAttempt);
+
+    return $attempt;
+}
+
+test('配置: create の直前に preflight がある (terminalizeAt=create で invoice を作らない)', function (): void {
+    Log::spy();
+    [$organization, $owner, $gateway, $service, $preflight] = autoRechargePreflightSetup();
+    $gateway->withDefaultPaymentMethod();
+    $attempt = autoRechargePendingAttempt($organization, $owner, $service);
+    $preflight->terminalizeAt = [ExternalCallKind::StripeInvoiceCreate];
+
+    $service->executeAttempt($attempt);
+
+    // create checkpoint で止まる = pay checkpoint へ到達しない
+    expect($preflight->calls)->toBe([ExternalCallKind::StripeInvoiceCreate->value]);
+    expect($gateway->createdInvoices)->toBe([]);
+    expect($gateway->payCalls)->toBe([]);
+    expect($gateway->terminated)->toBe([]); // 未作成なので終端対象が無い
+    expect($attempt->refresh()->stripe_invoice_id)->toBeNull();
+
+    // 所有権喪失ログ: Manual 側と必須 7 キーが一致し、Billing 固有の追加は attempt_ulid のみ
+    Log::shouldHaveReceived('warning')
+        ->withArgs(function (string $message, array $context) use ($attempt): bool {
+            if (($context['event'] ?? null) !== ExternalCallKind::LOG_EVENT) {
+                return false;
+            }
+            $keys = array_keys($context);
+            sort($keys);
+            $expected = array_merge(AUTO_RECHARGE_OWNERSHIP_LOST_REQUIRED_KEYS, ['attempt_ulid']);
+            sort($expected);
+
+            return $keys === $expected
+                && $context['job_type'] === TicketAutoRechargeAttempt::class
+                && $context['job_id'] === $attempt->id
+                && $context['expected_status'] === 'pending'
+                && $context['actual_status'] === 'canceled'
+                && $context['stage'] === 'execute_attempt'
+                && $context['external_call'] === ExternalCallKind::StripeInvoiceCreate->value
+                && $context['attempt_ulid'] === $attempt->attempt_ulid;
+        })
+        ->once();
+});
+
+test('配置: pay の直前に preflight がある (terminalizeAt=pay で pay せず invoice を終端する)', function (): void {
+    [$organization, $owner, $gateway, $service, $preflight] = autoRechargePreflightSetup();
+    $gateway->withDefaultPaymentMethod();
+    $attempt = autoRechargePendingAttempt($organization, $owner, $service);
+    $preflight->terminalizeAt = [ExternalCallKind::StripeInvoicePay];
+
+    $service->executeAttempt($attempt);
+
+    // preflight 1 は Pending で通過 → create → attach 1 行 → preflight 2 直前に canceled 化
+    expect($preflight->calls)->toBe([
+        ExternalCallKind::StripeInvoiceCreate->value,
+        ExternalCallKind::StripeInvoicePay->value,
+    ]);
+    expect($gateway->createdInvoices)->toHaveCount(1);
+    expect($gateway->payCalls)->toBe([]);
+
+    $attempt->refresh();
+    $invoiceId = $attempt->stripe_invoice_id;
+    expect($invoiceId)->not->toBeNull(); // attach は成功している (DB に残る)
+    // 作成された invoice id で 1 回だけ終端される (Canceled 分岐)
+    expect($gateway->terminated)->toBe([$invoiceId]);
+    expect($attempt->status)->toBe(AutoRechargeAttemptStatus::Canceled);
+});
+
+test('後始末: terminalStatus=failed のとき terminateInvoice を呼ばない (二重終端の抑止)', function (): void {
+    [$organization, $owner, $gateway, $service, $preflight] = autoRechargePreflightSetup();
+    $gateway->withDefaultPaymentMethod();
+    $attempt = autoRechargePendingAttempt($organization, $owner, $service);
+    $preflight->terminalizeAt = [ExternalCallKind::StripeInvoicePay];
+    $preflight->terminalStatus = AutoRechargeAttemptStatus::Failed;
+
+    $service->executeAttempt($attempt);
+
+    // failed へ遷移させた側 (terminateAndFail) が既に終端済みという前提に立つ
+    expect($gateway->terminated)->toBe([]);
+    expect($gateway->payCalls)->toBe([]);
+});
+
+test('後始末: terminalStatus=paid のとき terminateInvoice を呼ばない (void 不可の分類)', function (): void {
+    [$organization, $owner, $gateway, $service, $preflight] = autoRechargePreflightSetup();
+    $gateway->withDefaultPaymentMethod();
+    $attempt = autoRechargePendingAttempt($organization, $owner, $service);
+    $preflight->terminalizeAt = [ExternalCallKind::StripeInvoicePay];
+    $preflight->terminalStatus = AutoRechargeAttemptStatus::Paid;
+
+    $service->executeAttempt($attempt);
+
+    expect($gateway->terminated)->toBe([]);
+    expect($gateway->payCalls)->toBe([]);
+});
+
+test('配置: 行が Pending のままなら create → pay が従来どおり進む (回帰)', function (): void {
+    [$organization, $owner, $gateway, $service, $preflight] = autoRechargePreflightSetup();
+    $gateway->withDefaultPaymentMethod();
+    $attempt = autoRechargePendingAttempt($organization, $owner, $service);
+    $gateway->payAmountPaid = $attempt->unit_amount * $attempt->quantity;
+
+    $service->executeAttempt($attempt);
+
+    // 2 つの checkpoint を**両方**通る
+    expect($preflight->calls)->toBe([
+        ExternalCallKind::StripeInvoiceCreate->value,
+        ExternalCallKind::StripeInvoicePay->value,
+    ]);
+    expect($attempt->refresh()->status)->toBe(AutoRechargeAttemptStatus::Paid);
+    expect($gateway->payCalls)->toHaveCount(1);
+});
+
+test('preflight 2: terminateInvoice が例外を投げても課金処理へ進まない', function (): void {
+    [$organization, $owner, $gateway, $service, $preflight] = autoRechargePreflightSetup();
+    $gateway->withDefaultPaymentMethod();
+    $attempt = autoRechargePendingAttempt($organization, $owner, $service);
+    $preflight->terminalizeAt = [ExternalCallKind::StripeInvoicePay];
+    $gateway->failOnTerminate = true;
+
+    $service->executeAttempt($attempt);
+
+    expect($gateway->payCalls)->toBe([]);
+    expect(TicketLedgerEntry::query()->where('kind', TicketLedgerKind::Grant)->count())->toBe(0);
+});
+
+test('後始末ログは別 event 名 job_ownership_lost_cleanup を使い独自 schema を持つ', function (): void {
+    Log::spy();
+    [$organization, $owner, $gateway, $service, $preflight] = autoRechargePreflightSetup();
+    $gateway->withDefaultPaymentMethod();
+    $attempt = autoRechargePendingAttempt($organization, $owner, $service);
+    $preflight->terminalizeAt = [ExternalCallKind::StripeInvoicePay];
+
+    $service->executeAttempt($attempt);
+
+    Log::shouldHaveReceived('warning')
+        ->withArgs(function (string $message, array $context) use ($attempt): bool {
+            if (($context['event'] ?? null) !== ExternalCallKind::CLEANUP_LOG_EVENT) {
+                return false;
+            }
+            $keys = array_keys($context);
+            sort($keys);
+            $expected = ['attempt_ulid', 'error', 'event', 'invoice_id', 'job_id', 'job_type', 'terminated'];
+
+            return $keys === $expected
+                && $context['terminated'] === true
+                && $context['error'] === null
+                && $context['attempt_ulid'] === $attempt->attempt_ulid;
+        })
+        ->once();
+
+    // 抑止ログと後始末ログが同じ event 名に混ざらない (同一 event = 同一集計 schema)
+    Log::shouldHaveReceived('warning')
+        ->withArgs(fn (string $message, array $context): bool => ($context['event'] ?? null) === ExternalCallKind::LOG_EVENT
+            && ! array_key_exists('invoice_id', $context))
+        ->once();
+});
+
+test('後始末ログの error は例外クラス名のみで、外部由来のメッセージを含まない', function (): void {
+    // Stripe SDK の例外メッセージは外部サービスが生成する可変文字列であり、構造化ログの
+    // 集計語彙へ流さない。
+    Log::spy();
+    [$organization, $owner, $gateway, $service, $preflight] = autoRechargePreflightSetup();
+    $gateway->withDefaultPaymentMethod();
+    $attempt = autoRechargePendingAttempt($organization, $owner, $service);
+    $preflight->terminalizeAt = [ExternalCallKind::StripeInvoicePay];
+    $gateway->failOnTerminate = true; // メッセージ「fake gateway: invoice 終端失敗」で throw する
+
+    $service->executeAttempt($attempt);
+
+    Log::shouldHaveReceived('warning')
+        ->withArgs(function (string $message, array $context): bool {
+            if (($context['event'] ?? null) !== ExternalCallKind::CLEANUP_LOG_EVENT) {
+                return false;
+            }
+
+            return $context['terminated'] === false
+                && $context['error'] === RuntimeException::class
+                && ! str_contains((string) $context['error'], 'fake gateway');
+        })
+        ->once();
+});
+
+test('後始末の例外報告にも外部由来のメッセージを渡さない (サニタイズ済み例外のみ)', function (): void {
+    // 「構造化ログに載せない」だけでは不十分 — 標準の exception handler は message と
+    // スタックトレースを記録するため、原例外をそのまま report() すると保存場所が移るだけになる。
+    Exceptions::fake();
+    [$organization, $owner, $gateway, $service, $preflight] = autoRechargePreflightSetup();
+    $gateway->withDefaultPaymentMethod();
+    $attempt = autoRechargePendingAttempt($organization, $owner, $service);
+    $preflight->terminalizeAt = [ExternalCallKind::StripeInvoicePay];
+    $gateway->failOnTerminate = true;
+
+    $service->executeAttempt($attempt);
+
+    Exceptions::assertReported(function (RuntimeException $reported): bool {
+        return str_contains($reported->getMessage(), 'の終端に失敗しました')
+            // 外部 (fake gateway = Stripe SDK 相当) が生成した文字列を含まない
+            && ! str_contains($reported->getMessage(), 'fake gateway')
+            // previous chain も繋がない (reporter が previous を出力しうるため)
+            && $reported->getPrevious() === null;
+    });
+    Exceptions::assertReportedCount(1);
+});
+
+test('attach 0 行: invoice 作成成功と同時に canceled 化 → invoice_id を書かず invoice を終端する', function (): void {
+    // 実 preflight を使う (競合点は gateway の duringCreateInvoice hook が作る)
+    [$organization, $owner, $gateway, $service] = autoRechargeSetup();
+    $gateway->withDefaultPaymentMethod();
+    $attempt = autoRechargePendingAttempt($organization, $owner, $service);
+    $gateway->duringCreateInvoice = function () use ($attempt): void {
+        // Stripe 側の作成は成功したが、返る前に停止側が canceled 化した
+        TicketAutoRechargeAttempt::query()->whereKey($attempt->id)->update([
+            'status' => AutoRechargeAttemptStatus::Canceled->value,
+        ]);
+    };
+
+    $service->executeAttempt($attempt);
+
+    $attempt->refresh();
+    expect($attempt->stripe_invoice_id)->toBeNull();  // DB には書かない
+    expect($gateway->createdInvoices)->toHaveCount(1);
+    // DB に保存済みであることに依存せず、ローカルの invoice id で終端する
+    expect($gateway->terminated)->toHaveCount(1);
+    expect($gateway->payCalls)->toBe([]);
+});
+
+test('attach 0 行: failed へ遷移していた場合も invoice を終端する (status を問わない)', function (): void {
+    [$organization, $owner, $gateway, $service] = autoRechargeSetup();
+    $gateway->withDefaultPaymentMethod();
+    $attempt = autoRechargePendingAttempt($organization, $owner, $service);
+    $gateway->duringCreateInvoice = function () use ($attempt): void {
+        TicketAutoRechargeAttempt::query()->whereKey($attempt->id)->update([
+            'status' => AutoRechargeAttemptStatus::Failed->value,
+        ]);
+    };
+
+    $service->executeAttempt($attempt);
+
+    // failed へ遷移させた側は stripe_invoice_id === null を見ているため終端できない。
+    // ここで終端しないと「誰も終端しない open invoice」が残る
+    expect($gateway->terminated)->toHaveCount(1);
+    expect($attempt->refresh()->stripe_invoice_id)->toBeNull();
+});
+
+test('前提: Failed へ遷移した attempt は invoice が終端済みである', function (): void {
+    [$organization, $owner, $gateway, $service] = autoRechargeSetup();
+    $gateway->withDefaultPaymentMethod();
+    $attempt = autoRechargePendingAttempt($organization, $owner, $service);
+    $attempt->forceFill(['stripe_invoice_id' => 'in_precondition'])->save();
+    $gateway->invoiceStatuses['in_precondition'] = 'open';
+
+    $service->terminateAndFail($organization, $attempt);
+
+    // terminateAndFail は「invoice 終端成功 → failed 遷移」の順序を守る。
+    // この前提が崩れると terminateInvoiceAfterOwnershipLost の Canceled 限定が壊れる
+    expect($attempt->refresh()->status)->toBe(AutoRechargeAttemptStatus::Failed);
+    expect($gateway->terminated)->toBe(['in_precondition']);
+});
+
+test('前提: terminateInvoice が失敗したら attempt は Pending のまま (Failed へ遷移しない)', function (): void {
+    [$organization, $owner, $gateway, $service] = autoRechargeSetup();
+    $gateway->withDefaultPaymentMethod();
+    $attempt = autoRechargePendingAttempt($organization, $owner, $service);
+    $attempt->forceFill(['stripe_invoice_id' => 'in_stuck_precondition'])->save();
+    $gateway->failOnTerminate = true;
+
+    $service->terminateAndFail($organization, $attempt);
+
+    expect($attempt->refresh()->status)->toBe(AutoRechargeAttemptStatus::Pending);
+});
+
+test('冪等キーは 2 本ある: 同一 invoice の付与は台帳 1 件・attempt 遷移も 1 回', function (): void {
+    [$organization, $owner, $gateway, $service] = autoRechargeSetup();
+    $gateway->withDefaultPaymentMethod();
+    $attempt = autoRechargePendingAttempt($organization, $owner, $service);
+    $due = $attempt->unit_amount * $attempt->quantity;
+
+    // 付与の一回性 = 台帳の recharge:{invoiceId} UNIQUE (invoice 単位)
+    // attempt 遷移の一回性 = where status=pending の条件付き UPDATE (attempt 単位)
+    $service->recordSuccessfulCharge($organization, $attempt, 'in_two_keys', $due, $due, 'pi_1');
+    $resolvedAt = $attempt->refresh()->resolved_at;
+    $service->recordSuccessfulCharge($organization, $attempt->fresh(), 'in_two_keys', $due, $due, 'pi_1');
+
+    expect(TicketLedgerEntry::query()->where('idempotency_key', 'recharge:in_two_keys')->count())->toBe(1);
+    $attempt->refresh();
+    expect($attempt->status)->toBe(AutoRechargeAttemptStatus::Paid);
+    // 2 回目は 0 行更新 = resolved_at が動かない
+    expect((string) $attempt->resolved_at?->toJSON())->toBe((string) $resolvedAt?->toJSON());
+});
+
+test('Stripe idempotency key は操作ごとに異なり attempt_ulid に pin されている', function (): void {
+    [$organization, $owner, $gateway, $service] = autoRechargeSetup();
+    $gateway->withDefaultPaymentMethod();
+    $attempt = autoRechargePendingAttempt($organization, $owner, $service);
+    $gateway->payAmountPaid = $attempt->unit_amount * $attempt->quantity;
+
+    $service->executeAttempt($attempt);
+
+    // key base は attempt_ulid に pin される (attempt が変われば必ず別キーになる)
+    $expectedBase = "auto-recharge:{$attempt->attempt_ulid}";
+    expect($gateway->createdInvoices[0]['keyBase'])->toBe($expectedBase);
+    expect($gateway->payCalls[0]['keyBase'])->toBe($expectedBase);
+
+    // gateway 実装が組む 4 キーは互いに異なる (同一キーだと Stripe が別操作を replay 扱いする)。
+    // Stripe SDK へ到達させずに固定するため、実装ソースの接尾辞集合を検査する。
+    $source = file_get_contents(app_path('Services/Billing/CashierAutoRechargeGateway.php'));
+    expect($source)->toBeString();
+    $suffixes = ['invoice', 'item', 'finalize', 'pay'];
+    foreach ($suffixes as $suffix) {
+        expect($source)->toContain("{\$idempotencyKeyBase}:{$suffix}");
+    }
+    expect(count(array_unique($suffixes)))->toBe(4);
 });

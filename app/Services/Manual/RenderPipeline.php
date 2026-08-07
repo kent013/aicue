@@ -16,7 +16,9 @@ use App\Enums\Manual\RenderKind;
 use App\Enums\Manual\RenderStep;
 use App\Enums\Manual\TakeStatus;
 use App\Enums\Manual\VideoManualStatus;
+use App\Enums\Security\ExternalCallKind;
 use App\Exceptions\Billing\InsufficientTicketsException;
+use App\Exceptions\Manual\JobOwnershipLostException;
 use App\Exceptions\Manual\RenderScenarioChangedException;
 use App\Jobs\Manual\DeleteRenderOutputsJob;
 use App\Models\Cut;
@@ -30,6 +32,7 @@ use App\Services\Render\RenderObjectStorage;
 use App\Services\Render\VideoComposer;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Log;
 use LogicException;
 use Throwable;
 use Webmozart\Assert\Assert;
@@ -93,6 +96,13 @@ class RenderPipeline
             );
             $this->updateProgress($job, RenderStep::Concat, 90);
 
+            // ★ preflight suppression (裁定 AG-082 標準形 (2)): S3 PUT の直前で所有権を再検証する。
+            //   updateProgress() という**自前の書き込みの後**に置くことが要点
+            //   (書き込みの前に検証すると、書き込み中の接続断で旧担当が PUT できる窓が開く)。
+            //   ffmpeg compose / S3 GET の前には置かない — ローカル CPU と冪等な読み取りであり、
+            //   取り消せない外部副作用を持たないため (docs/architecture.md の残余窓 3)。
+            $this->assertStillOwned($job, RenderStep::Concat);
+
             // upload → finalize (terminal tx)
             $this->storage->upload($composed->localPath, $manifest->outputKey);
             $uploadedKey = $manifest->outputKey;
@@ -110,6 +120,12 @@ class RenderPipeline
                     $this->notifications->notifyRenderFinished($job);
                 }
             }
+        } catch (JobOwnershipLostException $exception) {
+            // preflight suppression: 既に terminal 化されている = 自分は旧担当。
+            // failJob も通知もチケット release も呼ばない。$uploadedKey は null のままなので
+            // finally の後始末は work dir の削除だけを行う (孤児オブジェクトを作らずに降りる)。
+            // return ではなく catch で受けるのは、片付け経路 (finally) を 1 本に保つため。
+            Log::warning('レンダジョブの所有権を失ったため出力アップロードを中止しました', $exception->logContext());
         } catch (Throwable $exception) {
             report($exception);
             $this->jobs->failJob($job, $this->errorCodeFor($exception), $this->userMessageFor($exception));
@@ -380,14 +396,49 @@ class RenderPipeline
     }
 
     /**
-     * step/progress の表示用更新 (tx 不要の単発 update。状態機械は status のみが真実源。
-     * updated_at の更新が stale 判定の「最終 step 更新時刻」を兼ねる)。
+     * 所有権の再検証 (preflight suppression)。AnalysisPipeline と同型
+     * (§10.8 方針: 共通抽象化しない。個別実装を見本に合わせる)。
+     *
+     * 所有権 = (行の主キー, `running`)。行が消えている (null) 場合も所有権喪失として扱う
+     * (deny-by-default)。
+     *
+     * @throws JobOwnershipLostException
+     */
+    private function assertStillOwned(RenderJob $job, RenderStep $step): void
+    {
+        $current = RenderJob::query()->whereKey($job->getKey())->first();
+        if ($current !== null && $current->status === JobStatus::Running) {
+            return; // アーリーリターン (正常系)
+        }
+
+        throw JobOwnershipLostException::whileRunning(
+            jobType: RenderJob::class,
+            jobId: $job->id,
+            actualStatus: $current?->status,
+            stage: $step->value,
+            externalCall: ExternalCallKind::ObjectStoragePut,
+        );
+    }
+
+    /**
+     * step/progress の表示用更新 (AnalysisPipeline::writeProgress と同型)。
+     *
+     * ★ **条件付き UPDATE (`where status=running`)**。compose は最大 25 分走り、
+     *   `onClipComposed()` から高頻度に呼ばれるため、terminal 化後の書き戻しが
+     *   最も起きやすい経路である (「failed なのに progress=62」を作らない)。
+     * ★ `Builder::update()` は `updated_at` を自動付与する (stale 判定の
+     *   「最終 step 更新時刻」という意味は従来どおり。ただし terminal 行では動かない)。
+     * ★ AnalysisPipeline::writeProgress と違い cast の正規化を挟まないのは、ここで書く 2 列が
+     *   **cast 適用後と同一表現のスカラー** (`RenderStep` の backing value と int) だけだからである。
+     *   配列 / 日時など cast で表現が変わる列をここへ足すときは、あちらと同じく
+     *   `forceFill()->getAttributes()` を通すこと。
      */
     private function updateProgress(RenderJob $job, RenderStep $step, int $progress): void
     {
-        $job->step = $step;
-        $job->progress = $progress;
-        $job->save();
+        RenderJob::query()
+            ->whereKey($job->getKey())
+            ->where('status', JobStatus::Running->value)
+            ->update(['step' => $step->value, 'progress' => $progress]);
     }
 
     /** job → manual → project の導出 (payload 不信任。DB から relation 経由で再解決) */

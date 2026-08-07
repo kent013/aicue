@@ -9,6 +9,7 @@ use App\DataTransferObjects\Billing\InvoiceStateDto;
 use App\DataTransferObjects\Billing\OffSessionChargeResultDto;
 use App\Models\Organization;
 use App\Services\Billing\Contracts\AutoRechargeGatewayInterface;
+use Closure;
 use RuntimeException;
 
 /**
@@ -54,6 +55,15 @@ final class FakeAutoRechargeGateway implements AutoRechargeGatewayInterface
 
     /** true にすると terminateInvoice が throw する (終端失敗 → pending 維持の再現)。 */
     public bool $failOnTerminate = false;
+
+    /**
+     * createAutoRechargeInvoice が invoice ID を返す**直前**に呼ばれる hook
+     * (`FakeRenderComposer::$duringCompose` と同じ作法)。
+     *
+     * 「Stripe 側の作成は成功したが、返る前に停止側が terminal 化した」
+     * = attach 0 行になる競合点を決定論的に再現するために使う。
+     */
+    public ?Closure $duringCreateInvoice = null;
 
     /** @var list<string> resolveSubscriptionPaymentMethod を要求された subscription id (T1004) */
     public array $resolvedSubscriptions = [];
@@ -112,6 +122,10 @@ final class FakeAutoRechargeGateway implements AutoRechargeGatewayInterface
         // Stripe 冪等: 同一 key base は同一 invoice id に収束する
         $invoiceId = 'in_'.substr(hash('sha256', $idempotencyKeyBase), 0, 24);
         $this->invoiceStatuses[$invoiceId] ??= 'draft';
+
+        if ($this->duringCreateInvoice !== null) {
+            ($this->duringCreateInvoice)($invoiceId);
+        }
 
         return $invoiceId;
     }

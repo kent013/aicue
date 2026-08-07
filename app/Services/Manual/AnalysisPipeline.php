@@ -11,8 +11,10 @@ use App\DataTransferObjects\Manual\Analysis\WorkDecompositionData;
 use App\Enums\Billing\TicketReservationStatus;
 use App\Enums\Manual\AnalysisStep;
 use App\Enums\Manual\JobStatus;
+use App\Enums\Security\ExternalCallKind;
 use App\Exceptions\Billing\InsufficientTicketsException;
 use App\Exceptions\Manual\AnalysisFailedException;
+use App\Exceptions\Manual\JobOwnershipLostException;
 use App\Exceptions\Manual\LlmOutputInvalidException;
 use App\Models\AnalysisJob;
 use App\Models\Organization;
@@ -106,6 +108,13 @@ class AnalysisPipeline
                 // succeeded 到達時のみ・terminal tx の commit 後に通知 (stale 先勝ち false は通知しない)
                 $this->notifications->notifyAnalysisFinished($job->refresh());
             }
+        } catch (JobOwnershipLostException $exception) {
+            // preflight suppression: 既に terminal 化されている = 自分は旧担当。
+            // failJob も通知もチケット release も呼ばない (すべて先着が済ませている)。
+            // report() しない — これは「正常だが観測したい事象」であり、固定 event 名で集計する。
+            Log::warning('解析ジョブの所有権を失ったため外部呼び出しを中止しました', $exception->logContext());
+
+            return;
         } catch (Throwable $exception) {
             report($exception);
             $this->jobs->failJob($job, $this->userMessageFor($exception));
@@ -161,7 +170,15 @@ class AnalysisPipeline
         $locked->save();
     }
 
-    /** extract 段: 統一 JSON 化 + extracted_json 保存 (write-only 監査スナップショット) */
+    /**
+     * extract 段: 統一 JSON 化 + extracted_json 保存 (write-only 監査スナップショット)。
+     *
+     * ★ `SourceDocument::extracted_json` は**条件付き UPDATE にしない** (T131):
+     *   これは write-only の監査スナップショットであって状態機械の一部ではなく、guard には
+     *   job → document の join が要る。failed 行の document に抽出結果が残っても不整合にならない
+     *   (むしろ調査に役立つ)。「終端後の**ジョブ状態・進捗**書き込みの禁止」が対象を
+     *   ジョブ行に限っているのはこのためである。
+     */
     private function runExtractStep(
         AnalysisJob $job,
         SourceDocument $document,
@@ -169,6 +186,7 @@ class AnalysisPipeline
         CarbonImmutable $deadline,
     ): ExtractedSopData {
         $extracted = $this->withBoundedRetry(
+            $job,
             $deadline,
             AnalysisStep::Extract,
             fn (): ExtractedSopData => ExtractedSopData::fromLlmText(
@@ -190,6 +208,7 @@ class AnalysisPipeline
         CarbonImmutable $deadline,
     ): WorkDecompositionData {
         $decomposition = $this->withBoundedRetry(
+            $job,
             $deadline,
             AnalysisStep::Decompose,
             fn (): WorkDecompositionData => WorkDecompositionData::fromLlmText(
@@ -197,10 +216,12 @@ class AnalysisPipeline
             ),
         );
 
-        $job->result_json = $decomposition->toArray();
-        $job->step = AnalysisStep::Generate;
-        $job->progress = 65;
-        $job->save();
+        // 終端後の自前書き込みを塞ぐ: 進捗と result_json は running のときだけ書く
+        $this->writeProgress($job, [
+            'result_json' => $decomposition->toArray(),
+            'step' => AnalysisStep::Generate->value,
+            'progress' => 65,
+        ]);
 
         return $decomposition;
     }
@@ -212,6 +233,7 @@ class AnalysisPipeline
         CarbonImmutable $deadline,
     ): GeneratedScenarioData {
         $generated = $this->withBoundedRetry(
+            $job,
             $deadline,
             AnalysisStep::Generate,
             fn (): GeneratedScenarioData => GeneratedScenarioData::fromLlmText(
@@ -299,18 +321,30 @@ class AnalysisPipeline
      * 「D + C」という単純な形に閉じている (概念設計 §時間 budget)。
      * 残り時間を timeout に渡す実装へ変えるとこのモデルが壊れる。
      *
+     * ★ preflight suppression (裁定 AG-082 標準形 (2)): **`$attempt()` の直前**で所有権を
+     *   再検証する。ここに 1 箇所置くだけで extract / decompose / generate の 3 段 ×
+     *   全リトライ試行を覆う (挿入点が 1 つ = 新しい段を足しても抜けようがない)。
+     *   deadline 判定 (時計の読み取り) は自前の書き込みではないため、
+     *   preflight と `$attempt()` の間に書き込みは 1 つも無い。
+     *
      * @template T
      *
      * @param  callable(): T  $attempt
      * @return T
      */
-    private function withBoundedRetry(CarbonImmutable $deadline, AnalysisStep $step, callable $attempt): mixed
-    {
+    private function withBoundedRetry(
+        AnalysisJob $job,
+        CarbonImmutable $deadline,
+        AnalysisStep $step,
+        callable $attempt,
+    ): mixed {
         $maxRetries = config()->integer('manual.analysis_llm_max_retries');
         for ($tryCount = 0; ; $tryCount++) {
             if (CarbonImmutable::now()->greaterThanOrEqualTo($deadline)) {
                 throw AnalysisFailedException::timedOut();
             }
+            // ★外部呼び出しの直前 (これより後に自前の書き込みを挟まない)
+            $this->assertStillOwned($job, $step);
             try {
                 return $attempt();
             } catch (Throwable $exception) {
@@ -385,14 +419,68 @@ class AnalysisPipeline
     }
 
     /**
-     * step/progress の表示用更新 (tx 不要の単発 update。状態機械は status のみが真実源。
-     * updated_at の更新が stale 判定の「最終 step 更新時刻」を兼ねる)。
+     * 所有権の再検証 (preflight suppression)。
+     *
+     * 所有権 = (行の主キー, `running`)。`startJob()` の `lockForUpdate + status === Queued`
+     * guard により 1 行が `running` になるのは高々 1 回で、再実行は新しい行を起票するため、
+     * `status` の再読込がそのまま所有権の再検証になる (claim token を持たない根拠は
+     * docs/architecture.md §ジョブの重複実行と結果の一回性)。
+     *
+     * 行が消えている (null) 場合も所有権喪失として扱う (deny-by-default)。
+     *
+     * @throws JobOwnershipLostException
      */
+    private function assertStillOwned(AnalysisJob $job, AnalysisStep $step): void
+    {
+        $current = AnalysisJob::query()->whereKey($job->getKey())->first();
+        if ($current !== null && $current->status === JobStatus::Running) {
+            return; // アーリーリターン (正常系)
+        }
+
+        throw JobOwnershipLostException::whileRunning(
+            jobType: AnalysisJob::class,
+            jobId: $job->id,
+            actualStatus: $current?->status,
+            stage: $step->value,
+            externalCall: ExternalCallKind::LlmCompletion,
+        );
+    }
+
+    /**
+     * ジョブ行の進捗系列の更新 (status は書かない)。
+     *
+     * ★ **条件付き UPDATE (`where status=running`)** にする理由:
+     *   preflight で「terminal 化後は外部を呼ばない」ようにした以上、
+     *   「terminal 化後に自前の DB を書く」経路も同時に塞ぐ。素の `save()` だと
+     *   stale 回復 cron が failed にした行へ step/progress/updated_at を書き戻し、
+     *   「failed なのに progress=65」という不整合を作る。
+     * ★ `Builder::update()` は `updated_at` を自動付与する (stale 判定の
+     *   「最終 step 更新時刻」という意味は従来どおり。ただし terminal 行では動かない)。
+     * ★ 状態機械は status のみが真実源であり、本メソッドは status を書かない。
+     *   **array shape で書ける列を閉じている** — `status` 等の保護列を渡せないことを
+     *   PHPStan level 10 が静的に弾く。
+     * ★ `Builder::update()` は `updated_at` 以外の列に**モデルの cast を適用しない**
+     *   (`addUpdatedAtColumn()` だけが cast を通す)。素で渡すと `result_json` (cast=array) の
+     *   エンコードが driver の grammar 任せになり、`save()` 経路と表現がずれうる。
+     *   そこでモデルへ `forceFill()` してから `getAttributes()` を取り、**cast 済みの生値**を
+     *   UPDATE に渡す (Laravel 自身が `addUpdatedAtColumn()` で使っているのと同じ手口)。
+     *
+     * @param  array{step: string, progress: int, result_json?: array<string, mixed>}  $attributes
+     */
+    private function writeProgress(AnalysisJob $job, array $attributes): void
+    {
+        $casted = (new AnalysisJob)->forceFill($attributes)->getAttributes();
+
+        AnalysisJob::query()
+            ->whereKey($job->getKey())
+            ->where('status', JobStatus::Running->value)
+            ->update($casted);
+    }
+
+    /** step/progress の表示用更新 (条件付き UPDATE 経路へ寄せる)。 */
     private function updateProgress(AnalysisJob $job, AnalysisStep $step, int $progress): void
     {
-        $job->step = $step;
-        $job->progress = $progress;
-        $job->save();
+        $this->writeProgress($job, ['step' => $step->value, 'progress' => $progress]);
     }
 
     /** job → manual → project の導出 (payload 不信任。DB から relation 経由で再解決) */

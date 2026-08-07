@@ -13,6 +13,7 @@ use App\Enums\Billing\BillingNotificationType;
 use App\Enums\Billing\SignupFundingChoice;
 use App\Enums\CheckoutIntent;
 use App\Enums\CheckoutSessionStatus;
+use App\Enums\Security\ExternalCallKind;
 use App\Exceptions\Billing\CheckoutInProgressException;
 use App\Jobs\Billing\ExecuteAutoRechargeAttemptJob;
 use App\Models\Billing\BillingCheckoutSession;
@@ -26,6 +27,7 @@ use App\Notifications\Billing\AutoRechargeDisabledNotification;
 use App\Notifications\Billing\AutoRechargeEnabledNotification;
 use App\Notifications\Billing\AutoRechargeFailedNotification;
 use App\Services\Billing\Contracts\AutoRechargeGatewayInterface;
+use App\Support\JobExecution\AttemptOwnershipPreflight;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Database\QueryException;
@@ -58,18 +60,30 @@ use Webmozart\Assert\Assert;
 final class AutoRechargeService
 {
     /**
-     * org lock の TTL。updateSettings (cancelPendingAttempts の terminateInvoice) と
-     * executeAttempt (invoice create/pay) の両方が lock 内で外向き Stripe API を呼ぶため、
-     * Stripe client timeout より十分長く統一する (TTL 失効による直列化の破れを防ぐ)。
-     * block 待機は短いまま (競合時は no-op / リコンサイル再試行)。
+     * org 単位 `Cache::lock` の TTL (秒)。updateSettings (cancelPendingAttempts の
+     * terminateInvoice) と executeAttempt (invoice create/pay) の両方が lock 内で外向き
+     * Stripe API を呼ぶため、Stripe client timeout より十分長く統一する
+     * (TTL 失効による直列化の破れを防ぐ)。block 待機は短いまま
+     * (競合時は no-op / リコンサイル再試行)。
+     *
+     * ★これは**入口の排他**であり、結果の一回性を保証しない (裁定 AG-082)。
+     *   保証は (a) 外部呼び出し直前の preflight、(b) `where status=pending` の条件付き UPDATE、
+     *   (c) Stripe idempotency key が担う。
+     * ★したがって値は「保証を代替できる長さ」ではなく**短い側**に倒す。
+     *   `JobExclusionOrderingInvariantTest` が
+     *   `LOCK_TTL_SECONDS < queue.connections.database.retry_after` を CI 固定する
+     *   (鍵の残留が正当な再実行を封鎖する時間が、キューの再配送間隔を超えない)。
+     *   **可視性が public なのは不変条件の契約としての意図的な公開**である
+     *   (T127 で既定キュー接続が分割されたら、上記テストの比較先を差し替えること)。
      */
-    private const int LOCK_TTL_SECONDS = 180;
+    public const int LOCK_TTL_SECONDS = 180;
 
     public function __construct(
         private readonly TicketLedgerService $tickets,
         private readonly TicketPricingService $pricing,
         private readonly AutoRechargeGatewayInterface $gateway,
         private readonly BillingNotificationDispatcher $notifications,
+        private readonly AttemptOwnershipPreflight $preflight,
     ) {}
 
     // ------------------------------------------------------------------
@@ -544,6 +558,12 @@ final class AutoRechargeService
 
         $invoiceId = $attempt->stripe_invoice_id;
         if ($invoiceId === null) {
+            // ★ preflight 1: invoice 作成の直前。org lock は TTL 180 秒で切れうるため
+            //   (lock は best-effort。保証は本再検証と条件付き UPDATE と Stripe 冪等キー)。
+            if (! $this->preflight->stillPending($attempt, ExternalCallKind::StripeInvoiceCreate)) {
+                return; // invoice 未作成なので収束は自明 (残す open invoice が無い)
+            }
+
             $invoiceId = $this->gateway->createAutoRechargeInvoice(
                 $organization,
                 $attempt->stripe_price_id,
@@ -551,8 +571,40 @@ final class AutoRechargeService
                 $this->metadataFor($organization, $attempt),
                 $keyBase,
             );
+
             // invoice_id の永続化は pay より必ず前 (プロセス死でも迷子 invoice を作らない)。
-            $attempt->forceFill(['stripe_invoice_id' => $invoiceId])->save();
+            // ★ **条件付き UPDATE** にする: 素の save() だと停止側が先に canceled 化した
+            //   terminal 行へ invoice_id を後から書き込むことになり、状態機械の例外を作る。
+            //   0 行なら「attempt へ紐付けられなかった invoice」であり、
+            //   DB の値に依存せずローカルの $invoiceId で終端する。
+            $attached = TicketAutoRechargeAttempt::query()
+                ->whereKey($attempt->id)
+                ->where('status', AutoRechargeAttemptStatus::Pending->value)
+                ->update([
+                    'stripe_invoice_id' => $invoiceId,
+                    'updated_at' => CarbonImmutable::now(),
+                ]);
+
+            if ($attached !== 1) {
+                // ★ attach 失敗は **status を問わず**終端する。
+                //   この invoice ID を知っているのは自分だけであり、
+                //   terminal 化させた側は stripe_invoice_id === null を見ているため終端できない。
+                $this->terminateUnattachedInvoice($attempt->refresh(), $invoiceId);
+
+                return;
+            }
+            // in-memory 同期 (再 save しない)
+            $attempt->forceFill(['stripe_invoice_id' => $invoiceId])->syncOriginal();
+        }
+
+        // ★ preflight 2: pay の直前。**直前に自前の書き込み (invoice_id の永続化) を挟んだため
+        //   必ずもう一度検証する** (裁定 AG-082: 検証の後に自前の書き込みを挟むと、
+        //   接続断で旧担当が送信できる窓が開く)。
+        //   既存 invoice を再利用する経路 (上の if を通らない場合) でもここが唯一の関門になる。
+        if (! $this->preflight->stillPending($attempt, ExternalCallKind::StripeInvoicePay)) {
+            $this->terminateInvoiceAfterOwnershipLost($attempt, $invoiceId);
+
+            return;
         }
 
         $result = $this->gateway->payOffSessionInvoice($invoiceId, $keyBase);
@@ -568,6 +620,104 @@ final class AutoRechargeService
         }
 
         $this->handleChargeFailure($organization, $attempt, $result->failureCode, $result->requiresAction());
+    }
+
+    /**
+     * preflight 2 で中断したときの invoice 後始末。
+     *
+     * **canceled のときだけ**終端する:
+     *  - paid  … void できない (付与経路の管轄)
+     *  - failed… `terminateAndFail()` が **`stripe_invoice_id` を DB 経由で見えている状態**で
+     *    終端済み (attach 済みだからこの分岐に来ている)
+     *  - canceled … 停止側の `tryTerminateInvoice()` は `stripe_invoice_id === null` を
+     *    「invoice 未作成」と解釈して素通りするため、こちらの永続化が停止より後だと
+     *    **誰も void しない open invoice が残る**。ここで拾う。
+     *
+     * ★ attach に失敗した invoice は本メソッドではなく `terminateUnattachedInvoice()` の担当
+     *   (あちらは status を問わず終端する)。
+     */
+    private function terminateInvoiceAfterOwnershipLost(
+        TicketAutoRechargeAttempt $attempt,
+        string $invoiceId,
+    ): void {
+        if ($attempt->status !== AutoRechargeAttemptStatus::Canceled) {
+            return; // アーリーリターン
+        }
+
+        $this->terminateInvoiceBestEffort($attempt, $invoiceId);
+    }
+
+    /**
+     * attempt 行へ紐付けられなかった (条件付き UPDATE が 0 行だった) invoice の後始末。
+     *
+     * ★ **status を問わず終端を試みる**。この invoice ID を知っているのは自分だけであり、
+     *   terminal 化させた側は `stripe_invoice_id === null` を見ているため終端できない。
+     *   canceled 限定にすると failed 経路で**誰も終端しない open invoice**が残る。
+     * ★ `paid` の可能性は `CashierAutoRechargeGateway::terminateInvoice()` の状態検査が
+     *   `Assert` で fail-closed に分類する (例外 → `terminated=false` としてログに残る)。
+     */
+    private function terminateUnattachedInvoice(
+        TicketAutoRechargeAttempt $attempt,
+        string $invoiceId,
+    ): void {
+        $this->terminateInvoiceBestEffort($attempt, $invoiceId);
+    }
+
+    /**
+     * invoice の best-effort 終端 + 固定 event 名でのログ (上 2 つの共通部)。
+     *
+     * ★ `$invoiceId` を**引数で受ける**。attempt 行に永続化できなかった invoice も
+     *   終端したいため、DB の値に依存しない。
+     * ★ `tryTerminateInvoice($attempt)` を再利用しない理由: あちらは
+     *   `$attempt->stripe_invoice_id` を読むため「永続化できなかった invoice」を扱えず、
+     *   かつ独自の warning を出すのでログが二重になる。ここは固定 event の 1 行に閉じる。
+     * ★ `CashierAutoRechargeGateway::terminateInvoice()` は Stripe から retrieve して
+     *   void/deleted/404 → 成功扱い、paid → `Assert` で明示的な非成功、draft → delete、
+     *   open/uncollectible → void と**状態検査で冪等化**されている
+     *   (idempotency key より強い — 期限が無い)。
+     * ★ 失敗しても**課金処理へは進まない** (呼び出し側が無条件に return する)。
+     *   残った open invoice は reconcile の母集団外なので、運用契約 (docs/architecture.md) の
+     *   手動収束に委ねる。
+     * ★ **cleanup 専用の event 名**を使う。送信抑止の記録 (`LOG_EVENT`) は最小 7 キー schema を
+     *   持つ契約であり、キー集合の違うログを同じ event 名に混ぜない。
+     * ★ `error` に入れるのは**例外クラス名だけ**である (impl-review Round 2/3 反映)。
+     *   Stripe SDK の例外メッセージは**外部サービスが生成する可変文字列**であり、
+     *   いま既知の内容が invoice id と status だけでも、将来の SDK / API 応答で
+     *   何が混ざるかの契約は無い。構造化ログには**アプリが決めた有界な語彙**だけを載せる。
+     * ★ 例外報告も**原例外を渡さない** (impl-review Round 3 反映)。
+     *   標準の exception handler は message とスタックトレースを記録するため、
+     *   `report($exception)` では「保存場所を移しただけ」で外部生成文字列が残る。
+     *   ここでは invoice id と例外クラス名だけを持つ**サニタイズ済み例外**を報告し、
+     *   原例外は `previous` にも**繋がない** (reporter が previous chain を出力しうるため)。
+     *   トリアージに必要な情報 (どの invoice が / どの種類の失敗か) は保たれる。
+     */
+    private function terminateInvoiceBestEffort(
+        TicketAutoRechargeAttempt $attempt,
+        string $invoiceId,
+    ): void {
+        $terminated = true;
+        $error = null;
+        try {
+            $this->gateway->terminateInvoice($invoiceId);
+        } catch (Throwable $exception) {
+            $terminated = false;
+            // paid 等の「明示的な非成功」もここに落ちる。分類できる有界な値 (クラス名) のみ記録する。
+            $error = $exception::class;
+            // 原例外は報告しない (外部生成メッセージ / previous chain をログ基盤へ流さない)。
+            report(new RuntimeException(
+                "auto-recharge: invoice {$invoiceId} の終端に失敗しました ({$error})",
+            ));
+        }
+
+        Log::warning('auto-recharge: 所有権喪失後の invoice 終端', [
+            'event' => ExternalCallKind::CLEANUP_LOG_EVENT,
+            'job_type' => TicketAutoRechargeAttempt::class,
+            'job_id' => $attempt->id,
+            'attempt_ulid' => $attempt->attempt_ulid,
+            'invoice_id' => $invoiceId,
+            'terminated' => $terminated,
+            'error' => $error,
+        ]);
     }
 
     /**

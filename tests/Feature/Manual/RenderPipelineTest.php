@@ -12,6 +12,7 @@ use App\Enums\Manual\MaterialType;
 use App\Enums\Manual\RenderErrorCode;
 use App\Enums\Manual\RenderKind;
 use App\Enums\Manual\VideoManualStatus;
+use App\Enums\Security\ExternalCallKind;
 use App\Exceptions\Manual\RenderCompositionException;
 use App\Jobs\Manual\DeleteRenderOutputsJob;
 use App\Models\Billing\TicketLedgerEntry;
@@ -23,11 +24,14 @@ use App\Models\RenderJob;
 use App\Models\Take;
 use App\Models\User;
 use App\Models\VideoManual;
+use App\Notifications\InApp\ManualRenderedNotification;
 use App\Services\Billing\TicketLedgerService;
 use App\Services\Manual\RenderJobService;
 use App\Services\Manual\RenderPipeline;
 use App\Services\Render\VideoComposer;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 
@@ -392,4 +396,183 @@ test('rendering 中の scenario 保存は 409 (既存 guard との整合を再�
         "/projects/{$project->id}/manuals/{$manual->id}/scenario",
         ['expected_version' => 2, 'steps' => []],
     )->assertConflict()->assertJson(['conflict_type' => 'rendering']);
+});
+
+/*
+ * ─────────────────────────────────────────────────────────────────────
+ * T131 / S3: 所有権再検証 (preflight suppression) + 終端後の進捗書き戻し禁止
+ * (裁定 AG-082。詳細設計 devnotes/20260807-1235-job-execution-dedup)
+ * ─────────────────────────────────────────────────────────────────────
+ */
+
+/** stale 回復 cron が先着で書く文言 (preflight 経路が上書きしないことの固定に使う) */
+const RENDER_STALE_CRON_ERROR_MESSAGE = 'stale 回復 cron が失敗確定しました。';
+
+test('preflight: compose 中に cron が failed 化 → S3 へ 1 件も PUT しない', function (): void {
+    [, , , $manual, , $job, $fake] = renderPipelineContext();
+    $job = renderTriggeredJob($job);
+    $fake->duringCompose = function () use ($job): void {
+        app(RenderJobService::class)->failJob(
+            $job->refresh(),
+            RenderErrorCode::Timeout,
+            RENDER_STALE_CRON_ERROR_MESSAGE,
+        );
+    };
+
+    app(RenderPipeline::class)->run($job->id);
+
+    $expectedKey = "projects/{$manual->project_id}/manuals/{$manual->id}/renders/v2-{$job->id}.mp4";
+    Storage::disk('s3')->assertMissing($expectedKey);
+    // 素材以外は S3 に増えていない (アップロード → 後始末削除ですらない = そもそも PUT していない)
+    expect(Storage::disk('s3')->allFiles())->toBe([Take::query()->firstOrFail()->video_path]);
+
+    $job->refresh();
+    expect($job->output_path)->toBeNull();
+    expect($job->status)->toBe(JobStatus::Failed);
+});
+
+test('preflight: cron failed 後に step / progress が旧ワーカーから書き戻されない', function (): void {
+    [, , , , , $job, $fake] = renderPipelineContext();
+    $job = renderTriggeredJob($job);
+    /** @var array{step: mixed, progress: ?int, error: ?string, error_code: mixed, updated_at: string} $snapshot */
+    $snapshot = ['step' => null, 'progress' => null, 'error' => null, 'error_code' => null, 'updated_at' => ''];
+
+    $fake->duringCompose = function () use ($job, &$snapshot): void {
+        app(RenderJobService::class)->failJob(
+            $job->refresh(),
+            RenderErrorCode::Timeout,
+            RENDER_STALE_CRON_ERROR_MESSAGE,
+        );
+        $after = RenderJob::query()->findOrFail($job->id);
+        $snapshot = [
+            'step' => $after->step,
+            'progress' => $after->progress,
+            'error' => $after->error,
+            'error_code' => $after->error_code,
+            'updated_at' => (string) $after->updated_at?->toJSON(),
+        ];
+    };
+
+    app(RenderPipeline::class)->run($job->id);
+
+    $job->refresh();
+    // onClipComposed / concat の進捗書き戻しが terminal 行へ 1 バイトも入らない
+    expect($job->step)->toBe($snapshot['step']);
+    expect($job->progress)->toBe($snapshot['progress']);
+    expect((string) $job->updated_at?->toJSON())->toBe($snapshot['updated_at']);
+    // failJob が二重に走らない (error / error_code が cron の値のまま)
+    expect($job->error)->toBe($snapshot['error']);
+    expect($job->error_code)->toBe($snapshot['error_code']);
+    expect($job->error)->toBe(RENDER_STALE_CRON_ERROR_MESSAGE);
+    expect($job->error_code)->toBe(RenderErrorCode::Timeout);
+});
+
+test('preflight: 所有権喪失時に work dir が削除される (finally を通る)', function (): void {
+    [, , , , , $job, $fake] = renderPipelineContext();
+    $job = renderTriggeredJob($job);
+    $fake->duringCompose = function () use ($job): void {
+        app(RenderJobService::class)->failJob(
+            $job->refresh(),
+            RenderErrorCode::Timeout,
+            RENDER_STALE_CRON_ERROR_MESSAGE,
+        );
+    };
+
+    app(RenderPipeline::class)->run($job->id);
+
+    expect(is_dir(storage_path("app/render/{$job->id}")))->toBeFalse();
+});
+
+test('preflight: preview (kind=preview) でも同じく PUT しない', function (): void {
+    [, , $project, $manual, , , $fake] = renderPipelineContext(tickets: 0, trigger: false);
+    $previewJob = app(RenderJobService::class)->triggerPreview($project, $manual);
+    $fake->duringCompose = function () use ($previewJob): void {
+        app(RenderJobService::class)->failJob(
+            $previewJob->refresh(),
+            RenderErrorCode::Timeout,
+            RENDER_STALE_CRON_ERROR_MESSAGE,
+        );
+    };
+
+    app(RenderPipeline::class)->run($previewJob->id);
+
+    $expectedKey = "projects/{$manual->project_id}/manuals/{$manual->id}/previews/v2-{$previewJob->id}.mp4";
+    Storage::disk('s3')->assertMissing($expectedKey);
+    expect($previewJob->refresh()->output_path)->toBeNull();
+});
+
+test('preflight: 所有権喪失は固定 event 名で warning ログに出る', function (): void {
+    Log::spy();
+    [, , , , , $job, $fake] = renderPipelineContext();
+    $job = renderTriggeredJob($job);
+    $fake->duringCompose = function () use ($job): void {
+        app(RenderJobService::class)->failJob(
+            $job->refresh(),
+            RenderErrorCode::Timeout,
+            RENDER_STALE_CRON_ERROR_MESSAGE,
+        );
+    };
+
+    app(RenderPipeline::class)->run($job->id);
+
+    Log::shouldHaveReceived('warning')
+        ->withArgs(function (string $message, array $context) use ($job): bool {
+            return ($context['event'] ?? null) === ExternalCallKind::LOG_EVENT
+                && ($context['job_type'] ?? null) === RenderJob::class
+                && ($context['job_id'] ?? null) === $job->id
+                && ($context['expected_status'] ?? null) === 'running'
+                && ($context['actual_status'] ?? null) === 'failed'
+                && ($context['stage'] ?? null) === 'concat'
+                && ($context['external_call'] ?? null) === ExternalCallKind::ObjectStoragePut->value;
+        })
+        ->once();
+});
+
+test('preflight: 所有権喪失時に完了通知が二重に飛ばない (先着の cron 分だけ)', function (): void {
+    Notification::fake();
+    [, $owner, , , , $job, $fake] = renderPipelineContext();
+    $job = renderTriggeredJob($job);
+    // 通知宛先を実在させる (宛先ゼロだと「飛んでいない」ことの検査が空振りする)
+    $job->triggeredBy()->associate($owner);
+    $job->save();
+    $fake->duringCompose = function () use ($job): void {
+        app(RenderJobService::class)->failJob(
+            $job->refresh(),
+            RenderErrorCode::Timeout,
+            RENDER_STALE_CRON_ERROR_MESSAGE,
+        );
+    };
+
+    app(RenderPipeline::class)->run($job->id);
+
+    Notification::assertSentTimes(ManualRenderedNotification::class, 1);
+});
+
+test('preflight: 所有権喪失時に DeleteRenderOutputsJob が dispatch されない', function (): void {
+    [, , , , , $job, $fake] = renderPipelineContext();
+    $job = renderTriggeredJob($job);
+    $fake->duringCompose = function () use ($job): void {
+        app(RenderJobService::class)->failJob(
+            $job->refresh(),
+            RenderErrorCode::Timeout,
+            RENDER_STALE_CRON_ERROR_MESSAGE,
+        );
+    };
+
+    app(RenderPipeline::class)->run($job->id);
+
+    Queue::assertNotPushed(DeleteRenderOutputsJob::class);
+});
+
+test('preflight: 行が消えていても所有権喪失として扱う (deny-by-default)', function (): void {
+    [, , , , , $job, $fake] = renderPipelineContext();
+    $job = renderTriggeredJob($job);
+    $fake->duringCompose = function () use ($job): void {
+        RenderJob::query()->whereKey($job->id)->delete();
+    };
+
+    app(RenderPipeline::class)->run($job->id);
+
+    expect(RenderJob::query()->whereKey($job->id)->exists())->toBeFalse();
+    expect(Storage::disk('s3')->allFiles())->toBe([Take::query()->firstOrFail()->video_path]);
 });
