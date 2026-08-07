@@ -41,3 +41,19 @@ it('renders the admin error layout with a neutral operator tone (no customer bra
         ->toContain('name="robots" content="noindex"')
         ->toContain('href="/admin"');
 });
+
+/*
+ * 上 3 ケースは view()->render() 直叩きのため bootstrap/app.php の respond callback を通らない。
+ * respond のスロットは Handler の $finalizeResponseCallback への単純代入 (単一スロット・
+ * last-write-wins) であり、2 本目の登録が現れると admin 分離が**黙って**無効化される。
+ * その退行を振る舞い側から捕まえるため HTTP 経路のケースを 1 本置く
+ * (静的側の検出は tests/Architecture/InertiaErrorScreenContractTest)。
+ */
+it('serves the operator-facing template for admin 404 over HTTP (respond callback regression guard)', function (): void {
+    $response = $this->get('/admin/definitely-not-a-real-admin-route-xyz');
+
+    $response->assertNotFound();
+    expect((string) $response->getContent())
+        ->toContain('管理パネルに戻る')
+        ->toContain('name="robots" content="noindex"');
+});
