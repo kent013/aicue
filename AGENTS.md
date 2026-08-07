@@ -391,3 +391,32 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
    分類は**観測のためであり制御フローを変えない**。`unknown` は「写像表に一致が無かった」
    ことを意味し、写像表の値としては禁止。詳細と運用契約は
    `docs/architecture.md` §オートリチャージの失敗分類。
+8. **2FA 面の step-up (recent-auth) 規約**: route 名に `two-factor` を含む route は
+   **recent-auth 系 middleware をちょうど 1 種類持つ**か、`TwoFactorStepUpExemption` +
+   30 文字以上の根拠付きで exemption inventory へ登録する
+   (`TwoFactorStepUpInventoryTest` が deny-by-default で強制。母集団は **exact-fit**)。
+   - 「1 種類」は `recent-auth` (無条件) と `recent-auth.on-email-change` (条件付き) の
+     **同居**を禁じる意味である。同一 alias の重複登録は `Router::uniqueMiddleware()` が
+     畳むため実行時に観測できず、検査対象にしていない (誇張しない)。
+   - **exemption にできない 6 本**が gate に名指しで固定されている:
+     (a) 秘密の開示 3 本 = `two-factor.qr-code` / `two-factor.secret-key` /
+     `two-factor.recovery-codes`、
+     (b) 第二要素の除去・差し替え 3 本 = `two-factor.enable` / `two-factor.disable` /
+     `two-factor.regenerate-recovery-codes`。
+     throttle (`two-factor-secret-read`) は**連続取得の回数上限**であって step-up の
+     代替ではない。
+   - (b) に `two-factor.enable` が入るのは、Fortify の `force=true` が seed とリカバリコードを
+     再生成する一方で `two_factor_confirmed_at` を触らないためである。開けたままにすると
+     **奪取セッションから永久ロックアウトを作れる**。
+   - 組織管理側の 2 本 (`organizations.members.two-factor.reset` /
+     `organizations.two-factor-requirement.update`) は目録の母集団には入るが
+     non-exemptible 名指しには入れない (脅威系統が違い、`RecentAuthRouteTest` の
+     allowlist が既に固定している)。
+   - **保証範囲を誇張しない**: セレクタは名前ベースであり、`mfa.*` 等の別名で
+     第二要素へ触る route には**沈黙する**。別名の route を足すときは inventory の
+     母集団設計も同時に見直すこと。
+   - step-up を新しい面に課すときは **satisfier の到達性**を必ず確認する。
+     2FA 必須組織のゲート (`RequireTwoFactorForEnforcedOrganizations::ALLOWED_ROUTE_NAMES`) は
+     password / 再SSO / **passkey** の 3 satisfier をすべて通す (どれか 1 つでも欠けると
+     その手段しか持たないユーザーが詰む)。詳細は `docs/architecture.md`
+     §2FA 面の step-up (recent-auth) 契約。

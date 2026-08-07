@@ -1021,3 +1021,79 @@ Vitest (`OrganizationsSettings.test.ts`) と Feature 両面で回帰固定する
 `ExecuteAutoRechargeAttemptJob` は `$tries = 1` でリコンサイルが再試行を担うため、恒久喪失にはならない
 (Stripe idempotency key により二重課金にもならない)。手順 0 の実施条件はこの受容の**発生確率を下げる**
 ためのものであり、「起きない」ことの保証ではない。
+## 2FA 面の step-up (recent-auth) 契約 (T124)
+
+第二要素そのものを扱う面は、**セッション認証だけでは到達させない**。
+機械強制は 2 枚 (`RecentAuthRouteTest` の allowlist + `TwoFactorStepUpInventoryTest` の
+deny-by-default 目録) で、判定述語は `Tests\Support\Security\RecentAuthMiddleware` に
+単一化してある (2 つの gate が別々に堅牢化されてドリフトするのを防ぐ)。
+
+### 何を守るか
+
+| 系統 | route | 開けたままにすると |
+|---|---|---|
+| (a) 秘密の開示 | `two-factor.qr-code` / `two-factor.secret-key` / `two-factor.recovery-codes` | 奪取セッションから TOTP seed を読み出して**第二要素を複製**できる (以後ログインが素通し) |
+| (b) 第二要素の除去・差し替え | `two-factor.enable` / `two-factor.disable` / `two-factor.regenerate-recovery-codes` | 正規ユーザーを**締め出せる** |
+
+(b) に `two-factor.enable` が入るのは、Fortify の `TwoFactorAuthenticationController` が
+`$request->boolean('force')` をそのまま `EnableTwoFactorAuthentication` へ渡し、
+**force=true が `two_factor_secret` と `two_factor_recovery_codes` を再生成する一方で
+`two_factor_confirmed_at` を触らない**ためである (fortify v1.37.2 実査)。
+奪取セッションから 1 回叩くだけで「誰も知らない秘密で TOTP を要求し続ける」
+**永久ロックアウト**が成立する。秘密の読み出しだけ塞いで差し替えを開けたままにしない。
+
+throttle (`two-factor-secret-read`) は**連続取得の回数上限**であって step-up の代替ではない。
+
+### 目録の契約 (`TwoFactorStepUpInventoryTest`)
+
+- 母集団は **route 名に `two-factor` を含む全 route** で、件数は **exact fit** (現在 11 本)。
+  vendor が 1 本足しても必ず差分として現れ、分類を強制できる。
+- 各 route は **recent-auth 系 middleware をちょうど 1 種類**持つか、
+  `App\Enums\Security\TwoFactorStepUpExemption` + 30 文字以上の根拠で免除登録する。
+  「1 種類」は `recent-auth` (無条件) と `recent-auth.on-email-change` (条件付き) の
+  **同居**を禁じる意味である。同一 alias の重複登録は `Router::uniqueMiddleware()` が畳むため
+  **実行時に観測できず**、検査対象にしていない (誇張しない)。
+- 上の表の **6 本は exemption にできない** (名指しで固定)。免除側へ移されたら fail する。
+- 免除は現在 3 件 (`two-factor.login` / `two-factor.login.store` = 未認証チャレンジ面、
+  `two-factor.confirm` = TOTP の所持証明が前提で秘密を開示しない) で、全体 cap と
+  case 別 cap の両方が exact fit。
+- 組織管理側の 2 本 (`organizations.members.two-factor.reset` /
+  `organizations.two-factor-requirement.update`) は母集団には入るが non-exemptible 名指しには
+  入れない (脅威系統が違い、`RecentAuthRouteTest` の allowlist が既に固定している)。
+- **保証範囲を誇張しない**: セレクタは名前ベースであり、`mfa.*` 等の別名で第二要素へ触る
+  route には**沈黙する**。別名の route を足すときは母集団設計も同時に見直すこと。
+
+### satisfier の到達性 (詰みを作らない側の契約)
+
+step-up を新しい面に課したら、**その面へ到達する前に step-up を満たせる手段**が
+必ず 1 つ以上あることを確認する。2FA 必須組織のゲート
+(`RequireTwoFactorForEnforcedOrganizations::ALLOWED_ROUTE_NAMES`) は
+password (`recent-auth.password`) / 再SSO (`social.redirect` • `social.callback`) /
+**passkey** (`passkey.confirm-options` • `passkey.confirm`) の 3 satisfier をすべて通す。
+どれか 1 つでも欠けると、その手段しか持たないユーザーが enrollment の入口で手段ゼロになり詰む。
+`passkey.registration-options` / `passkey.store` / `passkey.destroy` は credential 集合を
+増減させる**管理**経路であり satisfier ではないので、allowlist に入れない
+(`TwoFactorEnforcementTest` の負のコントロールが固定)。
+
+### クライアント側 (enrollment 動線)
+
+`resources/js/pages/Settings/Security.svelte` は
+**step-up を enrollment の最初の操作に固定する** (有効化ボタン → precheck → POST)。
+precheck 無しで POST すると Inertia mutation が 409 (`recent_auth_required`) を受け、
+単一ハンドラ (`registerRecentAuthRedirectHandler`) が confirm 画面へ**全画面遷移**する。
+precheck ならモーダルで完結するので**設定画面から離脱せず**、再認証成立後に
+enrollment の開始操作をその場で再開できる。
+守っているのは離脱の回避であって QR / 入力中コードの保持ではない
+(開始 POST の時点で素材はまだ存在しない。素材取得**後**の鮮度切れは下の 409 分岐が担当する)。
+
+throttle の**巻き添え**は論点ではない (T125 でレーン分離済み。`two-factor-manage` 10/min と
+`password-verify` 6/min は別 bucket なので、2FA 操作の連打で再認証が 429 になる
+inline 時代の構造は残っていない)。ただし `ThrottleRequests` は middleware priority により
+`RequireRecentAuth` より**先**に走るため、鮮度切れの試行もレーンの枠を消費する
+(実測: 鮮度切れの GET でも `X-RateLimit-Remaining` が減る)。precheck はその無駄も避けるが、
+固定したい本命は画面状態を失わないことである。
+
+素材 (QR / セットアップキー) の 409 は「取得失敗」とは**別事象**として扱い、
+自動再開は 1 enrollment につき 1 回に制限する。status が取れない (delegated) ときは
+**再取得しない** — 再取得すると 409 → status 失敗 → 再取得 の無限ループになるため、
+`enrollment-step-up-blocked` の Alert と再認証ページ導線を出して**人間の操作**を待つ。

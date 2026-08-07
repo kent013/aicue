@@ -58,15 +58,27 @@ class FortifyServiceProvider extends ServiceProvider
 {
     /**
      * recent-auth (step-up) を後付け配線する Fortify 登録ルート。
-     * いずれも「確立済み第二要素の bypass / 除去」経路であり、通常セッション認証だけで
-     * 到達させない (姉妹操作: organizations.members.two-factor.reset /
+     * いずれも「第二要素の秘密の露出」または「確立済み第二要素の除去・差し替え」経路であり、
+     * 通常セッション認証だけで到達させない (姉妹操作: organizations.members.two-factor.reset /
      * settings.account.destroy 等と同基準)。
      * - recovery-codes 表示 (GET) / 再生成 (POST): TOTP を伴わないログイン成立手段の露出・更新。
      * - disable (DELETE): 第二要素そのものの無効化 (bug-hunt F-H3)。
      *   ※ 2FA 必須組織の準拠ユーザーは BlockTwoFactorDisableForEnforcedOrganizations
      *     (web group、recent-auth より先行) が 422 で拒否するため、本配線が実効するのは
      *     self-disable が許可される非 enforced 組織のユーザー。
-     * 付与漏れは RecentAuthRouteTest (Architecture) が CI で検出する。
+     * - qr-code / secret-key (GET, T124): TOTP seed そのものの露出。
+     *   Fortify の TwoFactorSecretKeyController は two_factor_secret を**復号して平文で返し**、
+     *   TwoFactorQrCodeController は otpauth:// URL (秘密を内包) を返す。どちらも
+     *   two_factor_confirmed_at を見ないため、**確立済み**第二要素の seed が読める。
+     *   throttle (two-factor-secret-read) は連続取得の回数上限であって step-up の代替ではない。
+     * - enable (POST, T124): Fortify の TwoFactorAuthenticationController は
+     *   `$request->boolean('force')` を EnableTwoFactorAuthentication へ渡す。
+     *   force=true は two_factor_secret と two_factor_recovery_codes を**再生成する一方で
+     *   two_factor_confirmed_at を触らない** (fortify v1.37.2 実査) ため、奪取セッションから
+     *   1 回叩くだけで「誰も知らない秘密で TOTP を要求し続ける」永久ロックアウトを作れる。
+     *   秘密の**読み出し**だけ塞いで**差し替え**を開けたままにしない。
+     * 付与漏れは RecentAuthRouteTest (allowlist) と TwoFactorStepUpInventoryTest
+     * (deny-by-default 目録) の 2 枚で検出する。
      *
      * @var list<string>
      */
@@ -74,6 +86,9 @@ class FortifyServiceProvider extends ServiceProvider
         'two-factor.recovery-codes',
         'two-factor.regenerate-recovery-codes',
         'two-factor.disable',
+        'two-factor.qr-code',
+        'two-factor.secret-key',
+        'two-factor.enable',
     ];
 
     /**
@@ -306,7 +321,8 @@ class FortifyServiceProvider extends ServiceProvider
          *   AuthThrottleCoverageTest「認証は throttle より先に走る」が固定する。
          *
          * ★これは**連続取得の回数上限**であって、秘密の漏えい防止でも step-up の代替でもない。
-         *   認証強度 (recent-auth 化) は aicue:T120 の後続 TODO B2 の担当。
+         *   認証強度は T124 で別途 recent-auth を後付けした (RECENT_AUTH_ROUTE_NAMES)。
+         *   この 2 つは役割が違うので、片方を理由にもう片方を外さないこと。
          */
         RateLimiter::for('two-factor-secret-read', fn (Request $request): Limit => Limit::perMinute(10)
             ->by(RateLimiterKeys::actorOrIp($request, 'two-factor-secret-read')));
