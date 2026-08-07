@@ -9,6 +9,7 @@ use App\Enums\Manual\CutType;
 use App\Enums\Manual\JobStatus;
 use App\Enums\Manual\ShotType;
 use App\Enums\Manual\VideoManualStatus;
+use App\Enums\Security\ExternalCallKind;
 use App\Models\AnalysisJob;
 use App\Models\Billing\TicketLedgerEntry;
 use App\Models\Billing\TicketReservation;
@@ -18,6 +19,7 @@ use App\Models\Project;
 use App\Models\SourceDocument;
 use App\Models\User;
 use App\Models\VideoManual;
+use App\Notifications\InApp\ManualAnalyzedNotification;
 use App\Services\Billing\TicketLedgerService;
 use App\Services\Manual\AnalysisJobService;
 use App\Services\Manual\AnalysisPipeline;
@@ -26,6 +28,8 @@ use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Storage;
 use Kent013\PrismPrompt\Prompt;
 use Kent013\PrismPrompt\Testing\TextResponseFake;
@@ -159,6 +163,9 @@ const ANALYSIS_TIMED_OUT_MESSAGE = '解析が時間内に終わりませんで�
 const ANALYSIS_PROVIDER_BUSY_MESSAGE = 'AI が混み合っています。しばらく時間をおいて再実行してください。';
 
 const ANALYSIS_GENERIC_FAILURE_MESSAGE = '解析に失敗しました。時間をおいて再実行してください。';
+
+/** T131 / S2: stale 回復 cron が先着で書く文言 (preflight 経路が上書きしないことの固定に使う) */
+const STALE_CRON_ERROR_MESSAGE = 'stale 回復 cron が失敗確定しました。';
 
 test('成功パス: cuts materialize / ready / version+1 / succeeded / committed / スナップショット保存', function (): void {
     [$organization, , , $manual, $document, $job] = pipelineContext();
@@ -742,4 +749,156 @@ test('(D) 強制終了: releaseStale → recoverStale → failJob の逆順で�
     expect($job->refresh()->status)->toBe(JobStatus::Failed);
     expect($reservation->refresh()->status)->toBe(TicketReservationStatus::Released);
     expect(TicketLedgerEntry::query()->where('kind', TicketLedgerKind::ReserveCommit)->count())->toBe(0);
+});
+
+/*
+ * ─────────────────────────────────────────────────────────────────────
+ * T131 / S2: 所有権再検証 (preflight suppression) + 終端後の進捗書き戻し禁止
+ * (裁定 AG-082。詳細設計 devnotes/20260807-1235-job-execution-dedup)
+ * ─────────────────────────────────────────────────────────────────────
+ */
+
+test('preflight: extract の 1 回目直後に cron が failed 化 → 以降の LLM を 1 回も呼ばない', function (): void {
+    [, , , , , $job] = pipelineContext();
+    $fake = installThrowingLlm(
+        script: successfulLlmScript(),
+        onAttempt: function (int $attempt) use ($job): void {
+            if ($attempt === 1) {
+                // stale 回復 cron 相当が extract の 1 試行目の最中に失敗確定する
+                app(AnalysisJobService::class)->failJob($job->refresh(), STALE_CRON_ERROR_MESSAGE);
+            }
+        },
+    );
+
+    app(AnalysisPipeline::class)->run($job->id);
+
+    // decompose / generate の LLM は 1 回も呼ばれない (extract の 1 回だけ)
+    expect($fake->attemptCount())->toBe(1);
+
+    $job->refresh();
+    expect($job->status)->toBe(JobStatus::Failed);
+    // preflight 経路は failJob を呼ばない = cron の文言を上書きしない
+    expect($job->error)->toBe(STALE_CRON_ERROR_MESSAGE);
+});
+
+test('preflight: cron failed 後に step / progress が旧ワーカーから書き戻されない', function (): void {
+    [, , , , , $job] = pipelineContext();
+    /** @var array{step: mixed, progress: ?int, updated_at: ?string} $snapshot */
+    $snapshot = ['step' => null, 'progress' => null, 'updated_at' => null];
+
+    installThrowingLlm(
+        script: successfulLlmScript(),
+        onAttempt: function (int $attempt) use ($job, &$snapshot): void {
+            if ($attempt !== 1) {
+                return;
+            }
+            app(AnalysisJobService::class)->failJob($job->refresh(), STALE_CRON_ERROR_MESSAGE);
+            $after = AnalysisJob::query()->findOrFail($job->id);
+            $snapshot = [
+                'step' => $after->step,
+                'progress' => $after->progress,
+                'updated_at' => (string) $after->updated_at?->toJSON(),
+            ];
+        },
+    );
+
+    app(AnalysisPipeline::class)->run($job->id);
+
+    $job->refresh();
+    // 条件付き UPDATE (where status=running) により terminal 行へは 1 バイトも書かない
+    expect($job->step)->toBe($snapshot['step']);
+    expect($job->progress)->toBe($snapshot['progress']);
+    expect((string) $job->updated_at?->toJSON())->toBe($snapshot['updated_at']);
+    expect($job->result_json)->toBeNull(); // decompose の result_json も書かれない
+});
+
+test('preflight: 所有権喪失時に完了通知が二重に飛ばない (先着の cron 分だけ)', function (): void {
+    Notification::fake();
+    [, $owner, , , , $job] = pipelineContext();
+    // 通知宛先を実在させる (宛先ゼロだと「飛んでいない」ことの検査が空振りする)
+    $job->triggeredBy()->associate($owner);
+    $job->save();
+    installThrowingLlm(
+        script: successfulLlmScript(),
+        onAttempt: function (int $attempt) use ($job): void {
+            if ($attempt === 1) {
+                app(AnalysisJobService::class)->failJob($job->refresh(), STALE_CRON_ERROR_MESSAGE);
+            }
+        },
+    );
+
+    app(AnalysisPipeline::class)->run($job->id);
+
+    // 先着 (cron) の failJob が 1 通送る。preflight 経路は failJob も通知も呼ばない
+    Notification::assertSentTimes(ManualAnalyzedNotification::class, 1);
+});
+
+test('preflight: 所有権喪失時に予約が二重 release されない', function (): void {
+    [, , , , , $job] = pipelineContext();
+    installThrowingLlm(
+        script: successfulLlmScript(),
+        onAttempt: function (int $attempt) use ($job): void {
+            if ($attempt === 1) {
+                app(AnalysisJobService::class)->failJob($job->refresh(), STALE_CRON_ERROR_MESSAGE);
+            }
+        },
+    );
+
+    app(AnalysisPipeline::class)->run($job->id);
+
+    $job->refresh();
+    $reservation = $job->ticketReservation;
+    expect($reservation)->not->toBeNull();
+    expect($reservation?->status)->toBe(TicketReservationStatus::Released);
+    // 解放の監査痕跡は 1 件のみ (二重 release していない)
+    expect(TicketLedgerEntry::query()
+        ->where('reservation_id', $reservation?->getKey())
+        ->where('kind', TicketLedgerKind::Release)
+        ->count())->toBe(1);
+    expect(TicketLedgerEntry::query()->where('kind', TicketLedgerKind::ReserveCommit)->count())->toBe(0);
+});
+
+test('preflight: 所有権喪失は固定 event 名で warning ログに出る', function (): void {
+    Log::spy();
+    [, , , , , $job] = pipelineContext();
+    installThrowingLlm(
+        script: successfulLlmScript(),
+        onAttempt: function (int $attempt) use ($job): void {
+            if ($attempt === 1) {
+                app(AnalysisJobService::class)->failJob($job->refresh(), STALE_CRON_ERROR_MESSAGE);
+            }
+        },
+    );
+
+    app(AnalysisPipeline::class)->run($job->id);
+
+    // メッセージ文字列には依存せず context の event キーで判定する
+    // (既存の「LLM 呼び出しを再試行します」warning と混ざらない)
+    Log::shouldHaveReceived('warning')
+        ->withArgs(function (string $message, array $context) use ($job): bool {
+            return ($context['event'] ?? null) === ExternalCallKind::LOG_EVENT
+                && ($context['job_type'] ?? null) === AnalysisJob::class
+                && ($context['job_id'] ?? null) === $job->id
+                && ($context['expected_status'] ?? null) === 'running'
+                && ($context['actual_status'] ?? null) === 'failed'
+                && ($context['external_call'] ?? null) === ExternalCallKind::LlmCompletion->value;
+        })
+        ->once();
+});
+
+test('preflight: 行が消えていても所有権喪失として扱う (deny-by-default)', function (): void {
+    [, , , , , $job] = pipelineContext();
+    $fake = installThrowingLlm(
+        script: successfulLlmScript(),
+        onAttempt: function (int $attempt) use ($job): void {
+            if ($attempt === 1) {
+                AnalysisJob::query()->whereKey($job->id)->delete();
+            }
+        },
+    );
+
+    app(AnalysisPipeline::class)->run($job->id);
+
+    expect($fake->attemptCount())->toBe(1);
+    expect(AnalysisJob::query()->whereKey($job->id)->exists())->toBeFalse();
 });

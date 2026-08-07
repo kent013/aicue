@@ -20,7 +20,7 @@ use App\Notifications\Billing\AutoRechargeEnabledNotification;
 use App\Notifications\Billing\AutoRechargeFailedNotification;
 use App\Notifications\Billing\PaymentFailedNotification;
 use App\Notifications\Billing\RenewalReminderNotification;
-use Illuminate\Contracts\Queue\ShouldQueue;
+use Tests\Support\QueuedJobPopulation;
 use Tests\Support\QueueLeaseConfig;
 use Webmozart\Assert\Assert;
 
@@ -78,35 +78,16 @@ const QUEUED_JOB_LEASE_INVENTORY = [
 /**
  * app/ 配下の ShouldQueue 実装クラスを列挙する (純関数)。
  *
- * 母集団判定の正本は `ReflectionClass::implementsInterface(ShouldQueue::class)` +
- * `isInstantiable()`。親クラス / trait 経由の実装も拾えるため、Job だけでなく
- * Mailable / Notification も自動的に母集団へ入る。
+ * ★母集団の走査実装は `Tests\Support\QueuedJobPopulation` に **1 本化**されている
+ *   (T131)。JobExecutionDedupInventoryTest と同じ母集団を見ることを構造的に保証し、
+ *   片方だけ更新される drift を根で断つため。判定の正本は
+ *   `ReflectionClass::implementsInterface(ShouldQueue::class)` + `isInstantiable()` で不変。
  *
  * @return list<class-string>
  */
 function jobLeaseShouldQueueClasses(): array
 {
-    $classes = [];
-    foreach (jobLeaseAppPhpFiles() as $path) {
-        $class = jobLeaseClassNameForPath($path);
-        if (! class_exists($class)) {
-            continue;
-        }
-
-        $reflection = new ReflectionClass($class);
-        if (! $reflection->isInstantiable()) {
-            continue;
-        }
-        if (! $reflection->implementsInterface(ShouldQueue::class)) {
-            continue;
-        }
-
-        $classes[] = $reflection->getName();
-    }
-
-    sort($classes);
-
-    return $classes;
+    return QueuedJobPopulation::shouldQueueClasses();
 }
 
 /**
@@ -116,34 +97,13 @@ function jobLeaseShouldQueueClasses(): array
  */
 function jobLeaseAppPhpFiles(): array
 {
-    $appPath = base_path('app');
-    $iterator = new RecursiveIteratorIterator(
-        new RecursiveDirectoryIterator($appPath, FilesystemIterator::SKIP_DOTS),
-    );
-
-    $paths = [];
-    foreach ($iterator as $file) {
-        Assert::isInstanceOf($file, SplFileInfo::class);
-        if (! $file->isFile() || $file->getExtension() !== 'php') {
-            continue;
-        }
-        $paths[] = $file->getPathname();
-    }
-
-    sort($paths);
-
-    return $paths;
+    return QueuedJobPopulation::appPhpFiles();
 }
 
 /** app/ 配下のパスを PSR-4 でクラス名へ変換する (純関数)。 */
 function jobLeaseClassNameForPath(string $path): string
 {
-    $appPath = base_path('app').DIRECTORY_SEPARATOR;
-    Assert::startsWith($path, $appPath, "app/ 配下ではないパスです: {$path}");
-
-    $relative = substr($path, strlen($appPath), -strlen('.php'));
-
-    return 'App\\'.str_replace(DIRECTORY_SEPARATOR, '\\', $relative);
+    return QueuedJobPopulation::classNameForPath($path);
 }
 
 /**

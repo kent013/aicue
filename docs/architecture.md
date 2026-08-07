@@ -280,6 +280,101 @@ DB driver のキューには**実行中にリース (`retry_after`) を延長す
   (静的 gate は config をテスト環境の値で読むため、env 上書きを残すと
   「gate は通るが本番の実値は別」を作れてしまう)。
 
+### ジョブの重複実行と結果の一回性
+
+キューは at-least-once であり、上のリース規約を守っても**二重実行そのものは無くならない**
+(worker 停止・再開、リース切れ、cron による stale 回復)。したがって守るのは「実行が 1 回」ではなく
+**「結果が 1 回」**である (裁定 AG-082 の追従。設計は
+`devnotes/20260807-1235-job-execution-dedup/`)。
+
+1. **2 層の役割** — 入口の排他 (`ShouldBeUnique` / `Cache::lock`) は **best-effort** であり、
+   保証を担わない (鍵は失敗・timeout で解放されないことがあり、TTL でも切れる)。
+   結果の一回性は**永続状態遷移** (条件付き UPDATE / 悲観ロック + status guard / 予約 CAS) と
+   **外部側の冪等性** (Stripe idempotency key / invoice の状態検査) が担う。
+   **preflight** (外部呼び出し直前の所有権再検証) は「既に失われた所有権を検出して送信を止める」
+   **抑止策**であって保証ではない。
+2. **所有権の定義** — **(行の主キー, 進行中 status)**。`AnalysisJob` / `RenderJob` /
+   `TicketAutoRechargeAttempt` はいずれも単調な状態機械で、再実行は**新しい行を起票する**ため、
+   `status` の再読込がそのまま所有権の再検証になる (claim token 列を持たない根拠)。
+   行が消えている場合も所有権喪失として扱う (deny-by-default)。
+3. **preflight の配置規則** — **外部呼び出しの直前**に置く。再検証と外部呼び出しの間に
+   **自前の書き込みを挟まない**。挟んだ場合は書き込みの**後**に再度置く
+   (auto-recharge は `invoice_id` の永続化を挟むため create 前と pay 前の 2 箇所)。
+4. **終端後のジョブ状態・進捗書き込みの禁止** — preflight を置いた経路では、terminal 化された後に
+   旧ワーカーが自前の書き込みを行う経路も同時に塞ぐ。**ジョブ行**への進捗書き込み
+   (`step` / `progress` / `result_json` / `stripe_invoice_id`) は `where status=…` の
+   **条件付き UPDATE** にする (「failed なのに progress=65」を作らない。副次的に `updated_at` の
+   更新も止まるため stale 判定の基準が terminal 行で動かない)。
+   **対象はジョブ行に限る** — `SourceDocument::extracted_json` のような write-only の
+   監査スナップショットは状態機械の一部ではないため対象外である。
+5. **auto-recharge の保証層** (課金は最も高価なので 4 層で持つ):
+
+   | 層 | 機構 | 何を保証するか |
+   |---|---|---|
+   | 入口 | org `Cache::lock` (TTL 180s) / `AutoRechargeTriggerJob::$uniqueFor` (30s) | best-effort の直列化のみ |
+   | 起票 | `tar_attempts_org_pending_unique` (partial unique) | org に pending は 1 つまで |
+   | 遷移 | `where status='pending'` の条件付き UPDATE | 1 attempt = 1 遷移 |
+   | 効果 | 台帳 `recharge:{invoiceId}` の UNIQUE + Stripe idempotency key | 付与と課金の一回性 |
+
+   **冪等キーは 2 本ある**: 付与の一回性は台帳の `recharge:{invoiceId}` (**invoice 単位**)、
+   attempt 遷移の一回性は条件付き UPDATE (**attempt 単位**)。`recordSuccessfulCharge()` が
+   「grant → attempt 遷移」の順なのはこのためで、**逆順にしない**
+   (逆順は「Stripe で課金済みなのにチケット未付与」というより悪い不整合を生む)。
+6. **閉じない窓 (受容済み)** —
+   (a) **送信権の競合**: preflight 通過から送信までの間に terminal 化されうる。
+   (b) **送信結果の不明**: 送信直後にプロセスが死ぬと結果が分からない (S3 PUT / Stripe pay 同型)。
+   (c) **LLM に冪等キーが無い**: provider 側で重複排除できない (だから preflight を置く)。
+   (d) **`queue:listen` ではジョブ側 `$timeout` が効かない** (dev / bug-hunt)。
+7. **序列** — `LOCK_TTL_SECONDS` / `uniqueFor` < 既定接続の `retry_after`
+   (鍵の残留が正当な再実行を封鎖する時間を、キューの再配送間隔の内側に収める)。
+   ジョブ側 `$timeout` < `retry_after` < 予約 TTL ≤ stale 閾値 (上節)。
+   成立前提は「pcntl 有効 / 遅延なし / 時計ずれが小さい / シグナル順序 / supervisor 設定」。
+8. **運用契約 (所有者 = 課金運用担当)** —
+   - `event = job_ownership_lost` の**連続発生**は「ワーカーの停止・再開が多い」または
+     「序列の前提が崩れた」の兆候。頻度を監視する。
+   - **恒久回収を持たない open invoice が 2 種ある**。どちらも `reconcile()` は
+     DB の pending attempt を走査するため**母集団外**であり、手動収束が必要。
+     **検知元がそれぞれ違う**ので分けて書く:
+
+     | # | 発生条件 | 検知元 | 収束手順 |
+     |---|---|---|---|
+     | (a) | 所有権喪失後の void / delete に失敗した | **アプリログ**: `event = job_ownership_lost_cleanup` かつ `terminated=false` (原因の分類は同ログの `error` = 例外クラス名。メッセージ本文は `report()` 側の例外報告に残る) | 同ログの `invoice_id` を Stripe で確認し、`paid` でなければ手動 void |
+     | (b) | invoice 作成成功 → `stripe_invoice_id` の永続化前にワーカーが死亡した | **アプリログには何も残らない**。Stripe 側を起点に探す — metadata `purpose=auto_recharge` を持つ `draft` / `open` invoice を列挙し、その `recharge_attempt_ulid` に対応する `ticket_auto_recharge_attempts` 行の `stripe_invoice_id` が **NULL または別 id** のものが孤児 | **原則すべて手動終端の対象**とする。`paid` でないことを確認して void / delete する |
+
+     > **(b) を「次の実行が拾うから放置してよい」と書かない** — Stripe の idempotency key は
+     > **保持期間 (数十時間程度) を過ぎると再実行で別の invoice が作られる**。
+     > 期限の無い状態検査で冪等化されている `terminateInvoice()` とは性質が違う。
+     > 例外的に一時保留してよいのは「保持期間内であることが確認でき、かつ再実行が確実に
+     > 予定されている」場合だけで、その場合も**再実行後に DB の `stripe_invoice_id` と
+     > 一致しない旧 invoice は終端する**。長期間残った pending attempt に対して
+     > 「収束するはず」という偽の安全性を持たせないこと。
+
+     どちらも Stripe metadata の `recharge_attempt_ulid` から attempt を逆引きできる
+     (`metadataFor()` が全 invoice に付与している)。
+     照合は**課金運用担当が定期的に行う** (自動化は母集団が Stripe 側にあるため
+     本節のスコープ外。必要になったら独立の TODO として起票する)。
+
+**規約 ↔ テスト対応表** (AGENTS.md 禁止事項 1 = 不変条件はテスト登録まで含めて「実装済み」):
+
+| 規約の文 | 保証するテスト |
+|---|---|
+| キューに載る全クラスが保証側 or 免除に分類される | `JobExecutionDedupInventoryTest` |
+| 登録された**すべての** preflight checkpoint が実在し、制御方式 (`PreflightControlFlow`) に一致する戻り型を持つ (**存在まで**) | `JobExecutionDedupInventoryTest` |
+| 期待する外部呼び出し種別 (`jobDedupRequiredExternalCalls()` が正本) と checkpoint 登録の集合一致 / `NoExternalCall` と混在しない | `JobExecutionDedupInventoryTest` |
+| preflight が**外部呼び出しの直前に置かれている** (配置) | `AnalysisPipelineTest` / `RenderPipelineTest` / `AutoRechargeServiceTest`。★**分担**: Architecture gate = 集合一致 + 実在 + 戻り型 / Feature テスト = 配置。Manual は既存 fake のフック (`onAttempt` / `duringCompose`)、**Billing は注入可能な `FakeAttemptOwnershipPreflight`** (競合注入シーム) で配置を赤化する |
+| 終端後にジョブ行の進捗を書き戻さない (条件付き UPDATE) | `AnalysisPipelineTest` / `RenderPipelineTest` |
+| 終端後に `stripe_invoice_id` を書き込まない (条件付き UPDATE) | `AutoRechargeServiceTest` |
+| 同一 invoice への付与は台帳に 1 件しか入らない | `AutoRechargeServiceTest` |
+| 免除は型付き enum + 30 文字以上の根拠 / 件数は宣言と一致 | `JobExecutionDedupInventoryTest` + value object の `Assert` |
+| 入口の排他 TTL / `uniqueFor` < `retry_after` | `JobExclusionOrderingInvariantTest` |
+| `$timeout < retry_after < 予約 TTL ≤ stale 閾値` | `AnalysisTimeBudgetInvariantTest` / `RenderTimeBudgetInvariantTest` |
+| worker `--timeout` < `retry_after` | `QueueWorkerLeaseInvariantTest` |
+| 所有権喪失時に LLM を呼ばない | `AnalysisPipelineTest` |
+| 所有権喪失時に S3 PUT しない | `RenderPipelineTest` |
+| 所有権喪失時に invoice 作成・支払いを抑止し、必要な既作成 invoice を終端する | `AutoRechargeServiceTest` |
+| ログコンテキストに PII を含めない | `JobOwnershipLostContextTest` |
+| 固定 event 名の literal が 1 箇所に閉じる | `JobExecutionDedupInventoryTest` |
+
 ### AI 解析ジョブの運用契約
 
 - 解析ジョブ (`RunManualAnalysis`) は専用 queue connection **`database-analysis`**

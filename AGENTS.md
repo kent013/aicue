@@ -318,3 +318,16 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
      無効 body の連打で正当通知を 429 にできる = 攻撃者が業務を止められる口になる)。
      IP 単位は署名検証コストの上限であり正当通知の保護ではない (429 発生率を監視する)
    - 詳細は `docs/app-integration-guide.md` §7b
+6. **ジョブの重複実行と結果の一回性**: 入口の排他 (`ShouldBeUnique` / `Cache::lock`) は
+   **best-effort であり保証を担わない**。結果の一回性は永続状態遷移 (条件付き UPDATE /
+   悲観ロック + status guard / 予約 CAS) と外部側の冪等キーが担う。
+   **取り消せない外部副作用 (LLM 呼び出し / S3 PUT / Stripe 課金) の直前には
+   所有権の再検証 (preflight) を置く**。検証と外部呼び出しの間に自前の書き込みを挟まない
+   (挟んだら書き込みの後にもう一度置く)。terminal 化された後に旧ワーカーが**ジョブ行**の
+   状態・進捗を書き戻さないよう、進捗更新は `where status=…` の条件付き UPDATE にする。
+   キューに載る全クラス (`ShouldQueue` 実装) は `JobExecutionDedupInventoryTest` の目録へ
+   「保証側 (`JobDedupGuarantee` + preflight)」か「免除 (`JobDedupExemption` +
+   30 文字以上の根拠)」で登録が必須 (deny-by-default)。排他 TTL / `uniqueFor` は
+   保証を代替できる長さに伸ばさない (`JobExclusionOrderingInvariantTest` が
+   `retry_after` 未満を固定)。**閉じない窓と運用上の所有者**は `docs/architecture.md`
+   §ジョブの重複実行と結果の一回性 が正本。
