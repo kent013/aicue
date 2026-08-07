@@ -1,0 +1,1473 @@
+# Round 3: 対応マトリクスと修正後の詳細設計
+
+Round 2 の指摘 ([Critical] 1 / [Warning] 2) を**全件そのまま採用**した (反論なし)。
+
+## [Critical] S5 検査 17c は Architecture テスト自身を検出して必ず失敗する
+
+完全に正しい。旧 API 名のリテラルは**検査コード自身に書かれる**ため、`tests/` 全体を
+走査すれば必ず自分自身が hit する。既存 gate (`JobExecutionDedupInventoryTest` の
+固定 event literal 検査が `ExternalCallKind.php` を「正本」として除外している) と
+同じ構造を書き忘れていた。
+
+修正: 検査 17c を「**本 gate ファイル自身 (= リテラルの正本) を除く** `tests/` 配下の
+PHP ファイルで 0 件」に変更し、「除外しないと検査コード自身が hit して必ず失敗する」という
+理由も gate の保証範囲コメントへ明記した。
+
+## [Warning] S5 検査 13 の「除外名前空間に具象例外 0 件」は定義上自明
+
+正しい。母集団が直下 `*.php` だけなら `OAuth/` は最初から母集団に入らず、この要求は自明。
+しかも OAuth 配下には**実際に具象例外が存在する**ため、要求すると「除外する」という
+設計意図と矛盾する (Round 1 の Warning への対応を作りすぎていた)。
+
+修正: 提示どおり 4 本に分解した。
+
+- 13a 実サブディレクトリ集合 == 除外宣言のキー集合 (SDK 追加で赤くなる = 非自明)
+- 13b 除外理由が 30 文字以上
+- 13c 直下母集団の各クラスが除外名前空間に属さない (集合の非交差)
+- 13d 走査結果が代表クラスを含む (縮み検出)
+
+「OAuth 配下に具象例外が 0 件」は**要求しない**ことを理由付きで設計へ明記した。
+
+## [Warning] S6 独立期待値表は 24 entry ではなく 23 entry
+
+正しい。内訳は Stripe 12 + Cashier 8 + 非 vendor 3 = **23**。
+`UnknownApiErrorException` は `conditionalClasses()` 側なので `directMap()` には入らない
+(概念設計の「vendor 21」は条件付き 1 件を含む**母集団**の数であり、期待値表の件数と混同していた)。
+
+修正: コメントを「全 entry (Stripe 12 + Cashier 8 + 非 vendor 3 = 23)」へ訂正し、併せて
+**件数を固定定数で持たない** (正本はキー集合一致の検査) ことを明記した
+(件数を別に持つと片方だけ直したときに嘘の安心を与えるため)。
+
+---
+
+Round 2 の指摘はこれで全件反映済みである。全体判定を返してほしい。
+
+## 修正後の詳細設計 (全文)
+
+# 詳細設計: billing-gateway-error-taxonomy
+
+## 使命・制約（絶対遵守）
+
+### アプリの使命（North Star）
+
+**AI-CUE** は、現場に既にある**作業手順書(SOP)を起点に**、AI が撮るべきカットを設計した**動画シナリオ**を生成し、そのシナリオを**スマホ(PWA)でナビゲーション撮影**することで、専門知識ゼロの現場作業者でも**標準化されたマニュアル動画**を作れるようにする。
+
+- 「思考ゼロ・編集ゼロ」— 台本作成・撮影判断・編集の 3 ハードルを AI とナビ撮影で肩代わりする。
+- 競合(OJT を撮って形式化する tebiki)と異なり、**標準作業を起点に AI が教材設計し撮影を指示する**（撮影者・教える人のスキルに品質を依存させない）。
+- 熟練者の暗黙知を動画マニュアルという形式知へ変換する装置（SECI）。
+
+> **v1 スコープ**: 字幕のみ(TTS 後回し) / 撮影は PWA(同一オリジン・セッション認証) / 動画合成は自前 ffmpeg / 単一 Default Project。
+
+### 禁止事項（AGENTS.md 転記）
+
+1. テストなしの実装完了報告(不変条件は対応する Architecture/Feature テストへの登録まで含めて「実装済み」)
+2. PHPStan エラーの widen(型を緩めて黙らせる)・baseline 化
+3. dev DB への破壊操作(`migrate:fresh` 等)をエージェント判断で実行すること
+4. `response()->json()` の直書き(DTO / JsonResource / Inertia を使う。仕様固定 endpoint のみ例外)
+5. LLM 呼び出しの Prism 直呼び(`app/Prompts/` の factory 経由のみ)
+6. prompt 文字列のコード直書き(`resources/prompts/*.yaml` に置く)
+7. 操作系 POST の応答での `redirect()->intended()`
+8. 必須条件未充足を理由にボタンを disabled にする UI
+9. Artifact の使用(成果物はリポジトリ内のファイルとして出力する)
+
+### 思考原則（本設計で特に効くもの）
+
+2. **今必要なものだけ作る**（オーバーエンジニアリング禁止）
+3. **後方互換の並走を残さない**（書き換えると決めたら同じ PR で旧実装を消す）
+5. **テストファースト**（fail を確認してから実装に入る）
+
+### コーディングルール
+
+- **PHPStan level 10** 必須（`composer phpstan`）
+- **Pest** テストフレームワーク（`composer test`）
+- **RefreshDatabase** + `--parallel` 並列実行（`tests/Pest.php` でグローバル適用、個別 `DatabaseTransactions` 使用禁止）
+- テストデータは必ず Factory で生成
+- `declare(strict_types=1)` + 日本語コメント
+- **アーリーリターン** 推奨 / `composer fix`（Pint）
+- PHP 8.4 + Laravel 12 + Svelte 5 + Inertia.js + TypeScript
+
+## 概念設計リファレンス
+
+- [`conceptual-design.md`](./conceptual-design.md)（Codex conceptual-review Round 5 で **APPROVED**）
+- [`recon-brief.md`](./recon-brief.md)（一次入力）
+
+### 概念設計で確定済み・詳細設計で蒸し返さない判断
+
+| 論点 | 結論 |
+|---|---|
+| `AutoRechargeGatewayInterface` の契約 | **変更しない**（9 メソッドいずれも wrap しない） |
+| 語彙 | `GatewayFailureClass` **1 系統**のみ。2 系統に割らない |
+| `unknown` | **写像の不在**専用。写像表の値としては禁止 |
+| `UnknownApiErrorException` | HTTP status で 2 分岐（`>= 500` → `provider_unavailable` / それ以外・null → `provider_rejected`） |
+| fake/real parity | 業務分類 **4 case のみ**（`unknown` は対象外） |
+| 制御フロー | **変えない**（分類は観測のため） |
+| T131 の確定判断 | `terminateInvoiceBestEffort()` の「原例外を report/previous しない」「`tryTerminateInvoice()` を再利用しない」は維持 |
+
+## 施策一覧
+
+| # | 施策名 | 変更ファイル | 優先度 |
+|---|--------|------------|--------|
+| S1 | 失敗分類語彙 `GatewayFailureClass` の新設 | `app/Enums/Billing/GatewayFailureClass.php` (新規) | High |
+| S2 | 分類器 `GatewayFailureClassifier` の新設 | `app/Support/Billing/GatewayFailureClassifier.php` (新規) | High |
+| S3 | `AutoRechargeService` の観測 4 箇所を分類器へ統一（`getMessage()` 全廃） | `app/Services/Billing/AutoRechargeService.php` | High |
+| S4 | テスト用 spy の失敗注入を共有 fixture 経由へ（fake/real 分類一致） | `tests/Support/FakeAutoRechargeGateway.php` / `tests/Support/Billing/*` (新規) | High |
+| S5 | deny-by-default 目録 gate の新設 | `tests/Architecture/BillingGatewayFailureTaxonomyInventoryTest.php` (新規) / `app/Enums/Security/GatewayFailureObservationExemption.php` (新規) | High |
+| S6 | Unit / Feature テスト（分類の全域性・境界・制御フロー等価性・ログ語彙） | `tests/Unit/Support/Billing/*` (新規) / `tests/Feature/Billing/AutoRechargeServiceTest.php` | High |
+| S7 | 運用契約の記述 | `docs/architecture.md` / `AGENTS.md` | Medium |
+
+---
+
+## S1: 失敗分類語彙 `GatewayFailureClass` の新設
+
+### 変更箇所
+
+- ファイル: `app/Enums/Billing/GatewayFailureClass.php`（新規）
+
+### 波及変更
+
+- TypeScript 型定義: **なし**（フロントに露出しない。ログ context 専用）
+- API Resource/DTO: **なし**（HTTP 応答に載せない）
+- テストファイル: S5 / S6 で参照
+
+### 現行コード
+
+存在しない。現行は `$e::class`（1 箇所）と `$e->getMessage()`（3 箇所）が併存している。
+
+### 変更後コード
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Enums\Billing;
+
+/**
+ * 決済 gateway 消費経路で観測された失敗の分類。
+ *
+ * ★語彙は「**呼び出し側 / 運用担当が取れる行動**」で切る。Stripe の error code を
+ *   そのまま採らない (外部語彙に依存すると増えたときに追随できない)。
+ * ★case を足す条件は「運用担当が取る行動が既存 case と異なる」ことだけ。
+ *   分類の粒度を過剰にしない (AGENTS.md 思考原則 2)。
+ * ★**この分類は観測のためであり、制御フローを変えない。**
+ *   分岐に使いたくなったら、そのときは型 (ドメイン例外) を検討し直すこと。
+ * ★カード拒否 (`card_declined` / `authentication_required`) は本 enum の担当ではない。
+ *   既に `OffSessionChargeResultDto` の typed 結果が持っている (語彙を二重管理しない)。
+ */
+enum GatewayFailureClass: string
+{
+    /** 決済事業者側の一時的な不能 (接続断・タイムアウト・レート制限・5xx)。同じ要求の再送で収束しうる */
+    case ProviderUnavailable = 'provider_unavailable';
+
+    /** 決済事業者が要求を受理しなかった。同じ要求を再送しても収束しない (要求内容・認証情報・利用者操作のいずれかが要る) */
+    case ProviderRejected = 'provider_rejected';
+
+    /** アプリ自身が検出した不変条件違反 (Assert / 明示的な例外 / SDK・Cashier の誤用) */
+    case InvariantViolation = 'invariant_violation';
+
+    /** 自インフラ層 (DB / cache) が返した失敗。障害・SQL 不備・制約違反のいずれもありうる */
+    case LocalFailure = 'local_failure';
+
+    /**
+     * **写像表に一致が無かった**。
+     *
+     * ★この case が出ること自体が「分類器に欠落がある」という通知である。
+     *   したがって**写像表の値として使ってはならない** (登録済みなのに unknown、という
+     *   状態を作ると運用契約「unknown が出たら表へ足せ」と矛盾する)。
+     *   `BillingGatewayFailureTaxonomyInventoryTest` が機械で禁止する。
+     */
+    case Unknown = 'unknown';
+}
+```
+
+### PHPStan 適合チェック
+
+- [x] backed enum（`string`）で `->value` が `string` に確定する
+- [x] 戻り値の型が明示されている（enum 自体に処理は無い）
+- [x] null 安全（該当なし）
+- [x] DTO を返している（該当なし。HTTP 応答に載らない）
+
+### テスト計画
+
+- [x] S5 の gate が「case 集合」を fixture 側と exact fit で照合する（case の増減は必ず赤くなる）
+- [x] S6 の Unit テストが全 case の分類を固定する
+
+### リスク
+
+- case を将来増やしたときに fixture / gate の cap を更新し忘れる → **gate が exact fit で赤くする**。
+
+---
+
+## S2: 分類器 `GatewayFailureClassifier` の新設
+
+### 変更箇所
+
+- ファイル: `app/Support/Billing/GatewayFailureClassifier.php`（新規）
+
+配置理由: 既存の `app/Support/Billing/`（`BillingNotificationRecorder` / `StripePriceFixtures` 等）と同層。
+`app/Support/JobExecution/AttemptOwnershipPreflight` と同じ「Service から切り出した純ロジック」の位置づけ。
+
+### 波及変更
+
+- TypeScript 型定義: なし
+- API Resource/DTO: なし
+- テストファイル: `tests/Unit/Support/Billing/GatewayFailureClassifierTest.php`（新規）/ S5 の gate
+
+**`Stripe\Exception\*` を import する app 側クラスが 1 つ増える**（現行 3: `CashierStripeGateway` /
+`CashierAutoRechargeGateway` / `StripeScheduleGateway`）。これは意図した集約であり、
+S5 の gate が「Stripe 例外型を import してよいクラス」を allowlist で固定する。
+
+### 現行コード
+
+存在しない。
+
+### 変更後コード
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Support\Billing;
+
+use App\Enums\Billing\GatewayFailureClass;
+use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Database\QueryException;
+use Laravel\Cashier\Exceptions\CustomerAlreadyCreated;
+use Laravel\Cashier\Exceptions\IncompletePayment;
+use Laravel\Cashier\Exceptions\InvalidCoupon;
+use Laravel\Cashier\Exceptions\InvalidCustomer;
+use Laravel\Cashier\Exceptions\InvalidCustomerBalanceTransaction;
+use Laravel\Cashier\Exceptions\InvalidInvoice;
+use Laravel\Cashier\Exceptions\InvalidPaymentMethod;
+use Laravel\Cashier\Exceptions\SubscriptionUpdateFailure;
+use Stripe\Exception\ApiConnectionException;
+use Stripe\Exception\AuthenticationException;
+use Stripe\Exception\BadMethodCallException as StripeBadMethodCallException;
+use Stripe\Exception\CardException;
+use Stripe\Exception\IdempotencyException;
+use Stripe\Exception\InvalidArgumentException as StripeInvalidArgumentException;
+use Stripe\Exception\InvalidRequestException;
+use Stripe\Exception\PermissionException;
+use Stripe\Exception\RateLimitException;
+use Stripe\Exception\SignatureVerificationException;
+use Stripe\Exception\TemporarySessionExpiredException;
+use Stripe\Exception\UnexpectedValueException as StripeUnexpectedValueException;
+use Stripe\Exception\UnknownApiErrorException;
+use Throwable;
+use Webmozart\Assert\InvalidArgumentException as AssertInvalidArgumentException;
+
+/**
+ * 決済 gateway 消費経路で捕まえた Throwable を、有界な分類 (GatewayFailureClass) へ写す純関数。
+ *
+ * ★**Stripe / Cashier の例外型を知る唯一の非 gateway コンポーネント**である。
+ *   ここに集約することで「外部語彙が観測点へ散らばる」ことを防ぐ
+ *   (集約点が 2 つになったら語彙が割れる。gate が import の allowlist を固定する)。
+ * ★制御フローに使わない。分類は観測 (構造化ログ / 例外報告の文言) 専用である。
+ * ★`unknown` は「写像の不在」であり、`directMap()` の値には現れない
+ *   (`BillingGatewayFailureTaxonomyInventoryTest` が機械で禁止する)。
+ */
+final class GatewayFailureClassifier
+{
+    public static function classify(Throwable $throwable): GatewayFailureClass
+    {
+        // ★条件付き規則を先に判定する (唯一の特別扱い)。
+        //   UnknownApiErrorException は ApiRequestor::_specificV1APIError() の status switch の
+        //   `default:` 分岐であり、**Stripe の 5xx はすべてここに来る**。
+        //   「未知」なのは error type であって status ではないため、status で細分する。
+        if ($throwable instanceof UnknownApiErrorException) {
+            // ★vendor の PHPDoc は @return null|int だが**戻り型宣言は無い**。
+            //   `!== null` ではなく `is_int()` で narrowing して、PHPDoc の揺れに耐えさせる。
+            $status = $throwable->getHttpStatus();
+
+            if (is_int($status) && $status >= 500) {
+                return GatewayFailureClass::ProviderUnavailable;
+            }
+
+            // 4xx / その他 / null / 非 int。**運用上の保守的分類**であり、
+            // 再送可能性の完全な意味判定ではない。status 不明で ProviderUnavailable
+            // (= 待てば直る) と言うと**無行動を示唆する誤誘導**になるため「調べる」側へ倒す。
+            // 実際には factory が必ず status を受け取るため、null / 非 int は防御的分岐である。
+            return GatewayFailureClass::ProviderRejected;
+        }
+
+        $map = self::directMap();
+
+        // ★実クラス → 親クラス連鎖の順に最初の一致を採る (将来のサブクラスを取りこぼさない)。
+        //   グローバル SPL クラス (\RuntimeException 等) は表に入れないため、
+        //   Stripe\Exception\InvalidArgumentException と Webmozart\Assert\InvalidArgumentException が
+        //   共通祖先 \InvalidArgumentException で衝突することはない。
+        /** @var class-string|false $class */
+        $class = $throwable::class;
+
+        while ($class !== false) {
+            if (array_key_exists($class, $map)) {
+                return $map[$class];
+            }
+
+            $class = get_parent_class($class);
+        }
+
+        return GatewayFailureClass::Unknown;
+    }
+
+    /**
+     * 構造化ログ / 例外報告に載せる 2 キー。
+     *
+     * ★観測点が**同じ綴りの同じ 2 キー**を出すことをコードの構造で担保する
+     *   (gate が「宣言した catch 箇所の数 == `context(` の出現回数」を exact fit で検査する)。
+     * ★`error_class` は外部サービスが生成する文字列ではない (値域はコードベース + vendor の
+     *   クラス名に閉じる)。**例外 message は載せない**。
+     *
+     * @return array{failure_class: string, error_class: class-string<Throwable>}
+     */
+    public static function context(Throwable $throwable): array
+    {
+        return [
+            'failure_class' => self::classify($throwable)->value,
+            'error_class' => $throwable::class,
+        ];
+    }
+
+    /**
+     * 直接写像 (class → case) の正本。
+     *
+     * ★根拠は推測ではなく **vendor の throw site**。Stripe 側は
+     *   `vendor/stripe/stripe-php/lib/ApiRequestor.php` の `_specificV1APIError()` の
+     *   HTTP status switch が正本 (400→InvalidRequest / 400+idempotency_error→Idempotency /
+     *   400+rate_limit→RateLimit / 401→Authentication / 402→Card / 403→Permission /
+     *   404→InvalidRequest / 429→RateLimit / default→UnknownApiError)。
+     *   `_specificV2APIError()` は temporary_session_expired のみ振り分けて V1 へ委譲する。
+     * ★**値に GatewayFailureClass::Unknown を置かない** (unknown は写像の不在専用)。
+     * ★**vendor 全件分類 gate のため、gateway 経路で通常発生しない Stripe 例外
+     *   (SignatureVerificationException = webhook 署名検証用 など) も観測語彙上は分類する。**
+     *   分類は「もし来たら何と呼ぶか」の宣言であって「来る」という主張ではない
+     *   (母集団に穴を空けると、SDK 更新で増えた例外が無音で unknown へ落ちる)。
+     *
+     * @return array<class-string<Throwable>, GatewayFailureClass>
+     */
+    public static function directMap(): array
+    {
+        return [
+            // --- Stripe SDK: 決済事業者側の一時的な不能 ---
+            ApiConnectionException::class => GatewayFailureClass::ProviderUnavailable, // HTTP 到達前の接続断
+            RateLimitException::class => GatewayFailureClass::ProviderUnavailable,     // 429 / 400+rate_limit
+
+            // --- Stripe SDK: 要求が受理されなかった ---
+            InvalidRequestException::class => GatewayFailureClass::ProviderRejected,           // 400 / 404
+            AuthenticationException::class => GatewayFailureClass::ProviderRejected,           // 401
+            CardException::class => GatewayFailureClass::ProviderRejected,                     // 402 (通常は typed 結果へ変換される)
+            PermissionException::class => GatewayFailureClass::ProviderRejected,               // 403
+            IdempotencyException::class => GatewayFailureClass::ProviderRejected,              // 400 + idempotency_error
+            TemporarySessionExpiredException::class => GatewayFailureClass::ProviderRejected,  // V2: temporary_session_expired
+            SignatureVerificationException::class => GatewayFailureClass::ProviderRejected,    // webhook 署名不一致 (gateway 経路では発生しない)
+
+            // --- Stripe SDK: SDK の誤用 = 自コードの欠陥 ---
+            StripeBadMethodCallException::class => GatewayFailureClass::InvariantViolation,
+            StripeInvalidArgumentException::class => GatewayFailureClass::InvariantViolation,
+            StripeUnexpectedValueException::class => GatewayFailureClass::InvariantViolation,
+
+            // --- Cashier ---
+            IncompletePayment::class => GatewayFailureClass::ProviderRejected,          // 追加認証 (SCA) が要る
+            CustomerAlreadyCreated::class => GatewayFailureClass::InvariantViolation,   // ManagesCustomer::createAsStripeCustomer
+            InvalidCustomer::class => GatewayFailureClass::InvariantViolation,          // ManagesCustomer::assertCustomerExists
+            InvalidPaymentMethod::class => GatewayFailureClass::InvariantViolation,     // PaymentMethod::__construct (invalidOwner)
+            InvalidInvoice::class => GatewayFailureClass::InvariantViolation,           // Invoice::__construct (invalidOwner)
+            InvalidCoupon::class => GatewayFailureClass::InvariantViolation,            // 本アプリは coupon を使わない
+            InvalidCustomerBalanceTransaction::class => GatewayFailureClass::InvariantViolation,
+            SubscriptionUpdateFailure::class => GatewayFailureClass::InvariantViolation, // Subscription::guardAgainst*
+
+            // --- 非 vendor 明示宣言 (reconcile の catch(Throwable) が実際に受けうるもの) ---
+            QueryException::class => GatewayFailureClass::LocalFailure,
+            LockTimeoutException::class => GatewayFailureClass::LocalFailure,
+            AssertInvalidArgumentException::class => GatewayFailureClass::InvariantViolation,
+        ];
+    }
+
+    /**
+     * 条件付き規則を持つクラス (直接写像に入れられないもの)。
+     *
+     * ★`directMap()` に入れると値がダミーになり「正本」が嘘をつくため分けている。
+     * ★gate が `=== [UnknownApiErrorException::class]` を**クラス同一性**で固定する
+     *   (件数だけだと別クラスへ差し替えても green になる)。
+     *
+     * @return list<class-string<Throwable>>
+     */
+    public static function conditionalClasses(): array
+    {
+        return [UnknownApiErrorException::class];
+    }
+}
+```
+
+> **`Illuminate\Contracts\Cache\LockTimeoutException` は interface ではなく具象クラス**である
+> （`class LockTimeoutException extends Exception`。`Contracts` 名前空間にあるが実体クラス。
+> vendor で確認済み）。`AutoRechargeService` が既にこの FQCN を import して `catch` しており、
+> 表のキーもこれで一致する。
+> **`Illuminate\Contracts\Filesystem\LockTimeoutException` という同名の別クラスがある**ので
+> import を取り違えないこと（Unit テストが実インスタンスで固定する）。
+
+### PHPStan 適合チェック
+
+- [x] 戻り値の型が明示されている（`GatewayFailureClass` / `array{...}` / `array<...>` / `list<...>`）
+- [x] null 安全（`getHttpStatus()` を `is_int()` で narrowing してから比較。vendor は戻り型宣言なし）
+- [x] Generics の型パラメータが正しい（`class-string<Throwable>` / `list<class-string<Throwable>>`）
+- [x] `array_key_exists()` + `get_parent_class()` の戻り型（`class-string|false`）をループ変数の PHPDoc で明示
+- [x] DTO を返している（該当なし。ログ context の array shape は型で固定）
+
+### テスト計画
+
+- [x] 新規 Unit `tests/Unit/Support/Billing/GatewayFailureClassifierTest.php`
+  - `directMap()` の全 entry について `classify(new/factory(...)) === 期待 case`（dataset 駆動）
+  - 条件付き規則の境界: **500 → unavailable / 503 → unavailable / 499 → rejected / 400 → rejected / null → rejected**
+  - 未知例外（`Tests\Support\Billing\UnmappedGatewayFailureForTest`）→ `Unknown`
+  - 親クラス連鎖: `ApiConnectionException` を継承したテスト専用クラス → `ProviderUnavailable`
+  - `context()` が**ちょうど 2 キー**で、`failure_class` が enum の `value`、
+    `error_class` が実クラス名であること
+  - `context()` の値に例外 message が含まれないこと（message に目印文字列を入れて検査）
+- [x] 個別の `DatabaseTransactions` を使わない（Unit テストで DB を触らない）
+
+### リスク
+
+- 親クラス連鎖の走査が意図せぬ一致を作る → グローバル SPL クラスを表に入れないことで回避。
+  gate が「表のキーがすべて vendor か非 vendor 明示宣言集合に属する」を集合一致で固定する。
+- `LockTimeoutException` の同名別クラス (`Contracts\Filesystem`) を import してしまう → Unit テストが実インスタンスで固定する。
+
+---
+
+## S3: `AutoRechargeService` の観測 4 箇所を分類器へ統一
+
+### 変更箇所
+
+- ファイル: `app/Services/Billing/AutoRechargeService.php`
+  - `terminateInvoiceBestEffort()` (L694-721)
+  - `tryTerminateInvoice()` (L819-838)
+  - `reconcile()` の attempt 隔離 catch (L990-996)
+  - `reconcile()` の取りこぼし起票 catch (L1011-1016)
+
+### 波及変更
+
+- TypeScript 型定義: **なし**
+- API Resource/DTO: **なし**（制御フロー・戻り値・状態遷移を変えない）
+- テストファイル:
+  - `tests/Feature/Billing/AutoRechargeServiceTest.php`
+    — L685-700 の `$context['error'] === RuntimeException::class` を新語彙へ更新、
+      L710-722 の report サニタイズ検査を fixture 文言へ更新
+  - `tests/Feature/Billing/AutoRechargeReconcileTest.php` — ログ語彙の新規検査を追加
+- ドキュメント: `docs/architecture.md` の運用契約表 (a) 行が
+  「原因の分類は同ログの **`error` = 例外クラス名**」と書いており、**キー名が変わるため必ず更新する**（S7）
+
+**対象外の catch（意図的に触らない）**: `applySetupCompletion()` L1096-1100 /
+`applyReusedPaymentMethod()` L1174-1178 の `catch (Throwable $e) { report($e); }` は
+**通知送信の失敗**を受けるものであり、gateway 例外の観測ではない。
+gateway を消費していないため目録の `catchSites` にも入れない（gate のコメントに理由を残す）。
+
+### 現行コード
+
+```php
+// (1) terminateInvoiceBestEffort()
+$terminated = true;
+$error = null;
+try {
+    $this->gateway->terminateInvoice($invoiceId);
+} catch (Throwable $exception) {
+    $terminated = false;
+    $error = $exception::class;
+    report(new RuntimeException(
+        "auto-recharge: invoice {$invoiceId} の終端に失敗しました ({$error})",
+    ));
+}
+
+Log::warning('auto-recharge: 所有権喪失後の invoice 終端', [
+    'event' => ExternalCallKind::CLEANUP_LOG_EVENT,
+    'job_type' => TicketAutoRechargeAttempt::class,
+    'job_id' => $attempt->id,
+    'attempt_ulid' => $attempt->attempt_ulid,
+    'invoice_id' => $invoiceId,
+    'terminated' => $terminated,
+    'error' => $error,
+]);
+
+// (2) tryTerminateInvoice()
+} catch (Throwable $e) {
+    Log::warning('auto-recharge: invoice termination failed, keeping attempt pending', [
+        'attempt_ulid' => $attempt->attempt_ulid,
+        'invoice_id' => $attempt->stripe_invoice_id,
+        'error' => $e->getMessage(),
+    ]);
+
+    return false;
+}
+
+// (3) reconcile() attempt 隔離
+} catch (Throwable $e) {
+    Log::warning('auto-recharge reconcile: attempt processing failed', [
+        'attempt_ulid' => $attempt->attempt_ulid,
+        'error' => $e->getMessage(),
+    ]);
+}
+
+// (4) reconcile() 取りこぼし起票
+} catch (Throwable $e) {
+    Log::warning('auto-recharge reconcile: trigger failed', [
+        'organization_id' => $organization->getKey(),
+        'error' => $e->getMessage(),
+    ]);
+}
+```
+
+### 変更後コード
+
+```php
+// (1) terminateInvoiceBestEffort()
+// ★ docblock の「`error` に入れるのは例外クラス名だけ」の段落を
+//    「`failure_class` / `error_class` の 2 キーだけを載せる」に書き換える。
+//    T131 で確定した「原例外を report せず previous にも繋がない」性質は維持する。
+$terminated = true;
+$failure = null;
+try {
+    $this->gateway->terminateInvoice($invoiceId);
+} catch (Throwable $exception) {
+    $terminated = false;
+    // 有界な 2 キー (分類 + 例外クラス名) のみ。message は載せない。
+    $failure = GatewayFailureClassifier::context($exception);
+    // 原例外は報告しない (外部生成メッセージ / previous chain をログ基盤へ流さない)。
+    // ★文言は**固定テンプレート**にする。report message は集計語彙になりうるため、
+    //   Feature テストが**完全一致**で固定する (部分一致だと文字列の追加を検出できない)。
+    report(new RuntimeException(sprintf(
+        'auto-recharge: invoice %s の終端に失敗しました (%s / %s)',
+        $invoiceId,
+        $failure['failure_class'],
+        $failure['error_class'],
+    )));
+}
+
+Log::warning('auto-recharge: 所有権喪失後の invoice 終端', [
+    'event' => ExternalCallKind::CLEANUP_LOG_EVENT,
+    'job_type' => TicketAutoRechargeAttempt::class,
+    'job_id' => $attempt->id,
+    'attempt_ulid' => $attempt->attempt_ulid,
+    'invoice_id' => $invoiceId,
+    'terminated' => $terminated,
+    // ★成功時も**キーは常に存在させる** (集計 schema を安定させる。値は null)。
+    'failure_class' => $failure['failure_class'] ?? null,
+    'error_class' => $failure['error_class'] ?? null,
+]);
+
+// (2) tryTerminateInvoice()
+} catch (Throwable $e) {
+    Log::warning('auto-recharge: invoice termination failed, keeping attempt pending', [
+        'attempt_ulid' => $attempt->attempt_ulid,
+        'invoice_id' => $attempt->stripe_invoice_id,
+        ...GatewayFailureClassifier::context($e),
+    ]);
+
+    return false; // ★制御フローは現行のまま (pending 維持 → リコンサイル再試行)
+}
+
+// (3) reconcile() attempt 隔離
+} catch (Throwable $e) {
+    // 1 attempt の失敗が他 org の回収を止めないよう隔離 (次周期で再試行)。
+    Log::warning('auto-recharge reconcile: attempt processing failed', [
+        'attempt_ulid' => $attempt->attempt_ulid,
+        ...GatewayFailureClassifier::context($e),
+    ]);
+}
+
+// (4) reconcile() 取りこぼし起票
+} catch (Throwable $e) {
+    Log::warning('auto-recharge reconcile: trigger failed', [
+        'organization_id' => $organization->getKey(),
+        ...GatewayFailureClassifier::context($e),
+    ]);
+}
+```
+
+`use App\Support\Billing\GatewayFailureClassifier;` を import に追加する。
+
+> **(1) だけ spread を使わない理由**: 成功時に `failure_class` / `error_class` を
+> **null で存在させる**必要があるため（キー集合が成否で変わると集計 schema が割れる）。
+> 残り 3 箇所は catch 内でのみログを出すので spread で足りる。
+> どちらの形でも `GatewayFailureClassifier::context(` の出現回数は 1 なので、
+> gate の exact fit 検査（4 箇所 = 4 回）は成立する。
+
+### PHPStan 適合チェック
+
+- [x] 戻り値の型が明示されている（既存メソッドのシグネチャは不変）
+- [x] null 安全（`$failure['failure_class'] ?? null` で null 合体。`$failure` は `array{...}|null`）
+- [x] DTO を返している（該当なし。`Log::warning` の context 配列）
+- [x] Generics の型パラメータが正しい（`context()` の array shape をそのまま spread）
+- [x] `@phpstan-ignore-line` / baseline を使わない（禁止事項 2）
+
+### テスト計画
+
+- [x] **バグ修正ではないが「fail を先に見る」**: S5 の gate（`getMessage()` 0 件検査）を
+      先にコミットして **main の現状で赤くなる**ことを確認してから S3 を実装する
+      （思考原則 5。この gate は**素の main で実際に赤くなる**唯一の検査である）
+- [x] 既存テスト更新 `tests/Feature/Billing/AutoRechargeServiceTest.php`
+  - `後始末のログに外部由来のメッセージを載せない` — `$context['error']` →
+    `$context['failure_class'] === 'invariant_violation'` かつ
+    `$context['error_class'] === Webmozart\Assert\InvalidArgumentException::class`
+  - `後始末の例外報告にも外部由来のメッセージを渡さない` —
+    **報告文言を完全一致で固定する**（`sprintf` の期待文字列を組み立てて `===` で突き合わせ、
+    部分一致検査をやめる。予期しない文字列の追加を必ず検出する）/
+    `GatewayFailureFixtures::EXTERNAL_MESSAGE_MARKER` を含まないこと /
+    `getPrevious() === null` / `assertReportedCount(1)` は据え置き
+- [x] 新規テスト（Feature）:
+  - `終端失敗のログに 4 箇所とも failure_class / error_class が載る（例外 message は載らない）`
+  - **cleanup event のキー集合を成功・失敗の両方で固定する**
+    （成功時も `failure_class` / `error_class` が **null で存在**する = 集計 schema が成否で割れない）
+  - **制御フロー等価性**: `分類ログの導入で attempt の収束先と gateway 呼び出し回数が変わらない`
+    — 終端失敗 → attempt は `pending` 維持 / `terminated` 配列の要素数 / `reconcile()` の
+    戻り値 `stats` が変更前と同一であることを固定する
+  - `reconcile` の 2 箇所（DB 例外を注入して `local_failure`、gateway 例外を注入して
+    `provider_unavailable`）
+- [x] 個別の `DatabaseTransactions` を使っていないことを確認（`tests/Pest.php` のグローバル適用に従う）
+
+### リスク
+
+| リスク | 対処 |
+|---|---|
+| ログのキー名変更（`error` → `failure_class` / `error_class`）で既存の運用ダッシュボード / 検索条件が壊れる | `docs/architecture.md` の運用契約表を同 PR で更新する（S7）。**旧キーを並走させない**（思考原則 3） |
+| 制御フローを誤って変えてしまう | 既存 34 本の `AutoRechargeServiceTest` が現行の収束先を固定している。**1 本も書き換えずに green** であることを等価性の主要な証拠にする（書き換えるのはログ検査 2 本だけ） |
+| `?? null` の連発が読みにくい | (1) の 1 箇所だけ。理由を docblock に残す |
+
+---
+
+## S4: テスト用 spy の失敗注入を共有 fixture 経由へ
+
+### 変更箇所
+
+- `tests/Support/Billing/GatewayFailureFixtures.php`（新規）
+- `tests/Support/Billing/UnmappedGatewayFailureForTest.php`（新規）
+- `tests/Support/FakeAutoRechargeGateway.php`（変更）
+
+### 波及変更
+
+- テストファイル: `tests/Feature/Billing/AutoRechargeServiceTest.php` の
+  `$gateway->failOnTerminate = true;` 4 箇所（L299 / L637 / L685 / L710 / L784）を
+  `$gateway->terminateFailure = GatewayFailureClass::ProviderUnavailable;` 等へ置換
+- `App\Services\Billing\Fakes\FakeAutoRechargeGateway`（runtime fake）: **変更なし**
+  （例外を 1 つも投げない契約。S5 の gate がそれをソース走査で固定する）
+- `tests/Architecture/ExternalFakeWiringInvariantTest.php`: **影響なし**
+  （runtime fake のクラスも bind も変えない）
+
+### 現行コード
+
+```php
+// tests/Support/FakeAutoRechargeGateway.php
+/** true にすると terminateInvoice が throw する (終端失敗 → pending 維持の再現)。 */
+public bool $failOnTerminate = false;
+
+/** true にすると resolveSubscriptionPaymentMethod が throw する。 */
+public bool $failOnResolveSubscriptionPaymentMethod = false;
+
+public function terminateInvoice(string $invoiceId): void
+{
+    if ($this->failOnTerminate) {
+        throw new RuntimeException('fake gateway: invoice 終端失敗');
+    }
+
+    $status = $this->invoiceStatuses[$invoiceId] ?? 'open';
+    if ($status === 'paid') {
+        throw new RuntimeException("fake gateway: paid invoice {$invoiceId} は終端できない");
+    }
+    …
+}
+```
+
+**これが実在する偽グリーンである**: 本物 `CashierAutoRechargeGateway::terminateInvoice()` の
+paid 判定は `Assert::true(...)` = `Webmozart\Assert\InvalidArgumentException` を投げるのに対し、
+spy は `RuntimeException` を投げる。分類は前者が `invariant_violation`、後者が `unknown` で
+**実際に食い違う**。
+
+### 変更後コード
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Support\Billing;
+
+use App\Enums\Billing\GatewayFailureClass;
+use Illuminate\Database\QueryException;
+use LogicException;
+use PDOException;
+use Stripe\Exception\ApiConnectionException;
+use Stripe\Exception\InvalidRequestException;
+use Throwable;
+use Webmozart\Assert\Assert;
+
+/**
+ * 「**本物の gateway が実際に伝播させる例外クラスそのもの**」を分類ごとに返す共有 fixture。
+ *
+ * ★fake が独自の RuntimeException を投げると、分類を記録する経路がテストで一度も
+ *   本物と同じ値を見ない (偽グリーン)。fake の失敗注入をここへ集約し、
+ *   `BillingGatewayFailureTaxonomyInventoryTest` が
+ *   「fixture の case 集合 == 業務 4 case」「classify(fixture(case)) === case」
+ *   「fixture が返すクラスが実ライブラリ名前空間に属する」を deny-by-default で固定する。
+ * ★`Unknown` は parity の対象外 (写像の不在専用なので「本物と同じ例外」が存在しない)。
+ *   `Unknown` の固定は分類器の Unit テストが UnmappedGatewayFailureForTest で行う。
+ */
+final class GatewayFailureFixtures
+{
+    /**
+     * 全 fixture の message に必ず含める「外部生成文字列」の目印。
+     *
+     * ★これが**無いと negative assertion が空虚に green になる**。
+     *   「ログにこの文字列が含まれない」という検査は、
+     *   「例外 message にはこの文字列が確かに入っている」という保証とセットでしか意味を持たない。
+     *   gate が全 fixture について `str_contains(getMessage(), MARKER)` を検査する。
+     */
+    public const string EXTERNAL_MESSAGE_MARKER = 'FIXTURE-EXTERNAL-MESSAGE';
+
+    /** fixture が返してよいクラスの名前空間 (gate が参照する) */
+    public const array ALLOWED_NAMESPACE_PREFIXES = [
+        'Stripe\\Exception\\',
+        'Laravel\\Cashier\\Exceptions\\',
+        'Illuminate\\',
+        'Webmozart\\Assert\\',
+    ];
+
+    /** parity の対象 (業務分類 4 case)。`Unknown` を含めない。 */
+    public static function throwableFor(GatewayFailureClass $class): Throwable
+    {
+        return match ($class) {
+            // Stripe に到達できない (接続断) — 本物では ApiConnectionException が伝播する
+            GatewayFailureClass::ProviderUnavailable => ApiConnectionException::factory(
+                self::EXTERNAL_MESSAGE_MARKER.': stripe unreachable',
+            ),
+            // 要求が拒否された (400) — 本物では InvalidRequestException が伝播する
+            GatewayFailureClass::ProviderRejected => InvalidRequestException::factory(
+                self::EXTERNAL_MESSAGE_MARKER.': invalid request',
+                400,
+            ),
+            // 本物の terminateInvoice の paid 判定 (Assert::true) と**同じクラス**
+            GatewayFailureClass::InvariantViolation => self::assertFailure(),
+            // reconcile が DB 例外を受ける経路
+            GatewayFailureClass::LocalFailure => new QueryException(
+                'pgsql',
+                'select 1',
+                [],
+                // ★QueryException::formatMessage() は previous の message を取り込むため、
+                //   マーカーは QueryException 自身の getMessage() にも現れる (実測で確認済み)。
+                new PDOException(self::EXTERNAL_MESSAGE_MARKER.': db unavailable'),
+            ),
+            GatewayFailureClass::Unknown => throw new LogicException(
+                'Unknown は parity の対象外。分類器 Unit テストの UnmappedGatewayFailureForTest を使うこと',
+            ),
+        };
+    }
+
+    /** Webmozart\Assert\InvalidArgumentException を「実際に Assert に投げさせて」得る。 */
+    private static function assertFailure(): Throwable
+    {
+        try {
+            Assert::true(false, self::EXTERNAL_MESSAGE_MARKER.': 不変条件違反');
+        } catch (Throwable $throwable) {
+            return $throwable;
+        }
+
+        throw new LogicException('Assert::true(false) が例外を投げませんでした');
+    }
+}
+```
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Support\Billing;
+
+use RuntimeException;
+
+/**
+ * 写像表に**載っていない**ことを目的とするテスト専用例外。
+ *
+ * ★`unknown` (写像の不在) の分類を固定するために使う。vendor 例外を未分類のまま
+ *   fixture に使うと「vendor 全件分類」の gate と衝突するため、専用クラスを置く。
+ */
+final class UnmappedGatewayFailureForTest extends RuntimeException {}
+```
+
+```php
+// tests/Support/FakeAutoRechargeGateway.php (差分)
+
+-    /** true にすると terminateInvoice が throw する (終端失敗 → pending 維持の再現)。 */
+-    public bool $failOnTerminate = false;
++    /**
++     * terminateInvoice が投げる失敗の**分類** (null なら投げない)。
++     *
++     * ★bool ではなく分類で指定する。投げる実体は GatewayFailureFixtures が返す
++     *   **実ライブラリ例外**であり、本物の gateway が伝播させるクラスと一致する。
++     */
++    public ?GatewayFailureClass $terminateFailure = null;
+
+-    /** true にすると resolveSubscriptionPaymentMethod が throw する。 */
+-    public bool $failOnResolveSubscriptionPaymentMethod = false;
++    /** resolveSubscriptionPaymentMethod が投げる失敗の分類 (null なら投げない)。 */
++    public ?GatewayFailureClass $resolveSubscriptionFailure = null;
+
+     public function terminateInvoice(string $invoiceId): void
+     {
+-        if ($this->failOnTerminate) {
+-            throw new RuntimeException('fake gateway: invoice 終端失敗');
+-        }
++        if ($this->terminateFailure !== null) {
++            throw GatewayFailureFixtures::throwableFor($this->terminateFailure);
++        }
+
+         $status = $this->invoiceStatuses[$invoiceId] ?? 'open';
+         if ($status === 'paid') {
+-            throw new RuntimeException("fake gateway: paid invoice {$invoiceId} は終端できない");
++            // ★本物 (CashierAutoRechargeGateway の Assert::true) と**同じクラス**を投げる
++            throw GatewayFailureFixtures::throwableFor(GatewayFailureClass::InvariantViolation);
+         }
+         …
+     }
+
+     public function resolveSubscriptionPaymentMethod(string $stripeSubscriptionId): ?string
+     {
+         $this->resolvedSubscriptions[] = $stripeSubscriptionId;
+
+-        if ($this->failOnResolveSubscriptionPaymentMethod) {
+-            throw new RuntimeException('fake gateway: resolveSubscriptionPaymentMethod failed');
+-        }
++        if ($this->resolveSubscriptionFailure !== null) {
++            throw GatewayFailureFixtures::throwableFor($this->resolveSubscriptionFailure);
++        }
+
+         return $this->subscriptionPaymentMethodId;
+     }
+```
+
+### PHPStan 適合チェック
+
+- [x] 戻り値の型が明示されている（`Throwable` / `void` / `?string`）
+- [x] null 安全（`?GatewayFailureClass` を `!== null` で判定）
+- [x] `match` が全 case を網羅（`Unknown` は `throw` 式で明示的に拒否 → 到達不能でも網羅性は満たす）
+- [x] `ApiConnectionException::factory()` / `InvalidRequestException::factory()` の
+      引数は vendor PHPDoc（`$message, $httpStatus = null, …`）に一致
+- [x] `QueryException::__construct($connectionName, $sql, array $bindings, Throwable $previous)`
+      は Laravel 12 のシグネチャに一致
+
+### テスト計画
+
+- [x] S5 の gate が fixture の全域性・分類一致・名前空間・spy の `throw` 形式を固定する
+- [x] 既存の `AutoRechargeServiceTest` 5 箇所の呼び出し更新後に **34 本すべて green**
+      （= spy の投げ方を変えても収束先が変わらない = 制御フロー等価性の傍証）
+
+### リスク
+
+| リスク | 対処 |
+|---|---|
+| 他の並走タスクが `failOnTerminate` を使っていると衝突する | 実装モードを **standalone** にする（後述） |
+| negative assertion（ログにマーカーが無い）が**空虚に green** になる | `EXTERNAL_MESSAGE_MARKER` を導入し、gate が「全 fixture の `getMessage()` にマーカーが含まれる」ことを検査する。T131 のテストが使っていた目印 `'fake gateway'` はこのマーカーへ置き換える |
+| `Assert::true(false)` の例外クラスが vendor 更新で変わる | Unit テストが `classify()` の結果を固定するため、変われば赤くなる |
+
+---
+
+## S5: deny-by-default 目録 gate の新設
+
+### 変更箇所
+
+- `app/Enums/Security/GatewayFailureObservationExemption.php`（新規）
+- `tests/Support/Billing/GatewayObservationEntry.php`（新規）
+- `tests/Support/Billing/GatewayObservationExemptionEntry.php`（新規）
+- `tests/Support/Billing/GatewayConsumerPopulation.php`（新規）
+- `tests/Support/Billing/VendorExceptionPopulation.php`（新規）
+- `tests/Architecture/BillingGatewayFailureTaxonomyInventoryTest.php`（新規）
+
+### 波及変更
+
+- TypeScript 型定義: なし / API Resource/DTO: なし
+- 既存 gate との重複: **なし**。`ExternalFakeWiringInvariantTest` は runtime fake の
+  bind を見る gate であり、本 gate は「分類語彙の全域性と観測点」を見る。母集団が交わらない。
+
+### 現行コード
+
+存在しない。
+
+### 変更後コード（要点）
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Enums\Security;
+
+/**
+ * 「決済 gateway を注入されるが、gateway 例外を**観測しない**ことが正しい」と裁定された理由の分類。
+ *
+ * `tests/Architecture/BillingGatewayFailureTaxonomyInventoryTest.php` が deny-by-default で
+ * 「観測目録に登録する」か「本 enum + 具体的根拠付きの exemption」かを機械強制する。
+ *
+ * ★置き場所は既存の gate 語彙 enum (ThrottleCoverageExemption / JobDedupExemption /
+ *   DirectFetchJustification / ControllerAuthorizationExemption / NestedRouteDefenseMode) と揃える。
+ */
+enum GatewayFailureObservationExemption: string
+{
+    /**
+     * gateway 例外を catch せず**伝播させる**。
+     *
+     * 適用条件: クラス内に gateway 呼び出しを囲む catch が 1 つも無く、失敗が
+     * キューの再試行 / `failed_jobs` に載ることで可観測性が担保されること。
+     * ★根拠欄には「catch しないから安全」ではなく
+     *   **「catch しない結果どこに何が残るか」**を書くこと
+     *   (伝播先には vendor 例外の message が載る = 本設計の保証範囲外である)。
+     */
+    case PropagatesToQueueFailure = 'propagates_to_queue_failure';
+}
+```
+
+```php
+// tests/Architecture/BillingGatewayFailureTaxonomyInventoryTest.php (骨子)
+
+/*
+ * 決済 gateway 消費経路の「失敗分類の語彙」を deny-by-default で固定する。
+ *
+ * ★この gate が保証するもの:
+ *   - gateway を注入される app クラスが全件「観測目録」か「免除」に分類されている
+ *   - vendor (Stripe / Cashier) の例外クラスが全件、写像表か条件付き規則に属する
+ *   - `unknown` が写像表の値に現れない (= unknown は写像の不在専用)
+ *   - 条件付き規則のクラスがクラス同一性で 1 件に固定されている
+ *   - fake の失敗注入が本物と同じ分類を返す (fixture 経由・実ライブラリ例外)
+ *   - **fixture の message に外部生成文字列の目印が確かに入っている**
+ *     (negative assertion が空虚に green にならないための前提保証)
+ *   - 観測目録のクラスが例外 message をログへ載せない (getMessage() の cap)。
+ *     ★これは gateway 観測点だけでなく**クラス全体**に掛かる設計制約である
+ *       (対象クラスは gateway 以外の外部由来例外も受けうる。catch 近傍だけに限ると走査が脆い)。
+ *       将来正当な必要が出たら rawMessageCap の変更が必ず差分に現れる
+ *   - 旧 API (`failOnTerminate` 等) の残存が **本 gate ファイル自身 (= リテラルの正本) を除いて**
+ *     0 件 (思考原則 3 の機械化)。★除外しないと**検査コード自身が hit して必ず失敗する**
+ *
+ * ★この gate が保証しないもの:
+ *   - catch が「gateway 呼び出しを囲んでいる」こと (メソッド単位までは絞るが、
+ *     catch の**中**で呼ばれているかは検査しない。配置の保証は Feature テスト =
+ *     AutoRechargeServiceTest / AutoRechargeReconcileTest が
+ *     「失敗時に分類が載る / 成功時にキーが null で載る」で担う)
+ *   - **AST は使わない**。nikic/php-parser は vendor に存在するが直接依存ではなく
+ *     transitive (phpstan / nette 経由) であり、composer の解決次第で消えうるものへ
+ *     Architecture テストを依存させない (AGENTS.md 思考原則 1・2)。
+ *     Reflection によるメソッド単位の切り出しで足りる
+ *   - 期待値と目録を**同時に**消す変更 (宣言的 gate の性質。目的は
+ *     「1 箇所の削除では通らない = レビューで必ず 2 箇所の差分が見える」こと)
+ *
+ * 運用契約: docs/architecture.md §オートリチャージの失敗分類
+ */
+
+const BILLING_GATEWAY_TAXONOMY_MUTATION_COVERAGE = [
+    'M1' => '写像表から entry を 1 つ削ると vendor 集合一致が赤くなる',
+    'M2' => '写像表に実在しないクラスを足すと集合一致が赤くなる',
+    'M3' => '写像表の値に Unknown を置くと赤くなる',
+    'M4' => 'conditionalClasses を別クラスへ差し替えると赤くなる',
+    'M5' => 'fixture の 1 case を独自 RuntimeException にすると分類一致 / 名前空間が赤くなる',
+    'M6' => 'spy に fixture 経由でない throw を戻すと赤くなる',
+    'M7' => 'AutoRechargeService に $e->getMessage() を戻すと赤くなる',
+    'M8' => '観測目録から AutoRechargeService を消すと未分類で赤くなる',
+    'M9' => '免除 cap を書き換えると赤くなる',
+    'M10' => 'context() の呼び出しを 1 つ削ると出現回数の exact fit が赤くなる',
+];
+
+/** @return array<class-string, GatewayObservationEntry> */
+function billingGatewayObservers(): array
+{
+    return [
+        AutoRechargeService::class => new GatewayObservationEntry(
+            // ★メソッド名 => そのメソッド内で期待する context() 呼び出し回数。
+            //   ファイル全体の出現回数ではなく**メソッド単位**で検査する
+            //   (ファイル総数だとコメント / 別文脈でも数が合えば green になる)。
+            catchSites: [
+                'terminateInvoiceBestEffort' => 1,  // 所有権喪失後の後始末 (T131 新設)
+                'tryTerminateInvoice' => 1,         // 停止側の invoice 終端
+                'reconcile' => 2,                   // attempt 隔離 + 取りこぼし起票
+            ],
+            rawMessageCap: 0,
+            rationale: 'gateway 例外を catch して観測へ落とす唯一のクラス。4 箇所すべてが '
+                .'GatewayFailureClassifier::context() の 2 キーだけを載せ、例外 message は載せない。'
+                .'rawMessageCap=0 は gateway 観測点だけでなく**クラス全体**に掛かる設計制約である '
+                .'(本クラスが受ける例外は gateway 以外も外部由来を含みうるため。'
+                .'catch の近傍だけに限定すると走査が脆くなる)。'
+                .'通知送信失敗を受ける applySetupCompletion / applyReusedPaymentMethod の '
+                .'catch は gateway を消費しないため catchSites の対象外。',
+        ),
+    ];
+}
+
+/** @return array<class-string, GatewayObservationExemptionEntry> */
+function billingGatewayObservationExemptions(): array
+{
+    return [
+        SetDefaultPaymentMethodJob::class => new GatewayObservationExemptionEntry(
+            GatewayFailureObservationExemption::PropagatesToQueueFailure,
+            'gateway 例外を catch せず伝播させる。失敗は queue の再試行と failed_jobs に載り、'
+            .'そこには vendor 例外の message が残る (本設計の保証範囲は AutoRechargeService の'
+            .'構造化ログと report 文言までであり、伝播先の redact は横断基盤の話でスコープ外)。',
+        ),
+        ReuseSubscriptionPaymentMethodJob::class => new GatewayObservationExemptionEntry(…),
+        HandleAutoRechargeChargeFailureJob::class => new GatewayObservationExemptionEntry(…),
+    ];
+}
+
+function billingGatewayObservationExemptionCap(): int
+{
+    return 3; // exact fit
+}
+
+/**
+ * 非 vendor の明示宣言クラス (期待値の正本。分類器の写像表とは**独立した宣言**)。
+ *
+ * ★framework 由来に限定しない。`unknown` の運用契約 (出たクラスは必ず写像表へ足す) により、
+ *   将来アプリ自身の例外クラスがここへ入りうる。
+ *
+ * @return list<class-string<Throwable>>
+ */
+function billingNonVendorExplicitClasses(): array
+{
+    return [
+        QueryException::class,
+        LockTimeoutException::class,           // Illuminate\Contracts\Cache\LockTimeoutException (具象クラス)
+        AssertInvalidArgumentException::class,
+    ];
+}
+
+function billingNonVendorExplicitCap(): int
+{
+    return 3; // exact fit
+}
+```
+
+```php
+// tests/Support/Billing/GatewayObservationEntry.php
+final class GatewayObservationEntry
+{
+    /**
+     * @param  array<string, int>  $catchSites  メソッド名 => 期待する context() 呼び出し回数
+     * @param  int  $rawMessageCap  当該クラスのソースに現れてよい `getMessage()` の件数 (exact fit)
+     */
+    public function __construct(
+        public readonly array $catchSites,
+        public readonly int $rawMessageCap,
+        public readonly string $rationale,
+    ) {}
+}
+```
+
+**検査一覧（test 名）**
+
+| # | 検査 | 落ちる mutation |
+|---|---|---|
+| 1 | gateway を注入される app クラスが全件分類されている（未分類 / 実在しない目録 entry は fail） | M8 |
+| 2 | 観測目録と免除は排他 | — |
+| 3 | 免除件数が cap と一致（exact fit = 3） | M9 |
+| 4 | 目録・免除の根拠が 30 文字以上 | — |
+| 5 | 目録 entry の `catchSites` のキーがすべて実在するメソッド（Reflection）で、値が 1 以上 | — |
+| 6 | 目録 entry のクラスのソースの `getMessage()` 件数が `rawMessageCap` と**一致**（exact fit = 0） | M7 |
+| 7a | **メソッド単位**: `catchSites` の各メソッドについて、`ReflectionMethod` の行範囲で切り出したソースが `catch (` を含み、`GatewayFailureClassifier::context(` の出現回数が宣言値と一致する | M10 |
+| 7b | ファイル全体の `GatewayFailureClassifier::context(` 出現回数 == `array_sum(catchSites)`（宣言外メソッドへの追加を検出） | M10 |
+| 8 | `keys(directMap) ∩ conditionalClasses = ∅` | — |
+| 9 | `keys(directMap) ∪ conditionalClasses == vendorConcreteClasses ∪ nonVendorExplicitClasses` | M1 / M2 |
+| 10 | `conditionalClasses() === [UnknownApiErrorException::class]`（クラス同一性） | M4 |
+| 11 | `directMap()` の値に `GatewayFailureClass::Unknown` が現れない | M3 |
+| 12 | `nonVendorExplicitClasses` の件数が cap と一致（exact fit = 3） | — |
+| 13a | 実サブディレクトリ集合 == `array_keys(EXCLUDED_STRIPE_SUBNAMESPACES)`（SDK がサブ名前空間を増やしたら赤くなり、母集団定義の再検討が強制される）。`Laravel\Cashier\Exceptions\` はサブディレクトリ `[]` | — |
+| 13b | 除外理由が **30 文字以上** | — |
+| 13c | 直下母集団の各クラスが**除外名前空間に属さない**（`Stripe\Exception\OAuth\` 由来のクラスが母集団へ混入していない = 集合の非交差） | — |
+| 13d | 走査結果が代表クラス（`ApiConnectionException` / `IncompletePayment`）を含む（**縮み検出**） | — |
+| 14 | fixture の case 集合 == `GatewayFailureClass::cases()` − `Unknown`（exact fit） | — |
+| 15 | 全 fixture について `classify(fixture(case)) === case` | M5 |
+| 16 | fixture が返すクラスが `ALLOWED_NAMESPACE_PREFIXES` に属する | M5 |
+| 17 | spy（`Tests\Support\FakeAutoRechargeGateway`）のソースの `throw ` 出現回数 == `throw GatewayFailureFixtures::throwableFor(` の出現回数 | M6 |
+| 17b | 全 fixture の `getMessage()` に `EXTERNAL_MESSAGE_MARKER` が含まれる（negative assertion の前提保証） | — |
+| 17c | 旧 API 名（`failOnTerminate` / `failOnResolveSubscriptionPaymentMethod`）が **本 gate ファイル自身を除く `tests/` 配下の PHP ファイル**に 0 件（思考原則 3 の機械化） | — |
+| 18 | runtime fake（`App\Services\Billing\Fakes\FakeAutoRechargeGateway`）のソースに `throw ` が 0 件 | — |
+| 19 | `Stripe\Exception\` を import する app クラスが allowlist と集合一致（`CashierStripeGateway` / `CashierAutoRechargeGateway` / `StripeScheduleGateway` / `GatewayFailureClassifier`） | — |
+| 20 | mutation coverage 表のキー集合が想定 ID 集合と一致 | — |
+
+母集団の導出（`GatewayConsumerPopulation::classes()`）:
+`app/` の PHP ファイルを走査 → PSR-4 でクラス名へ変換 → `class_exists()` →
+`ReflectionClass` の constructor と全メソッドの引数型に
+`AutoRechargeGatewayInterface` が現れるものを収集し `sort()` する。
+（`QueuedJobPopulation` と同じ作法。**走査の縮み**は検査 1 の `stale` 判定と
+検査 13 相当の代表クラス検査で拾う）
+
+vendor 母集団の導出（`VendorExceptionPopulation::classes()`）:
+`vendor/stripe/stripe-php/lib/Exception/*.php`（**直下のみ**）と
+`vendor/laravel/cashier/src/Exceptions/*.php` を glob → クラス名へ変換 →
+`class_exists()` → `ReflectionClass::isInterface()` / `isAbstract()` を除外。
+
+母集団から外すサブ名前空間は**宣言済み定数 + 根拠**で持つ:
+
+```php
+/** 母集団から外す Stripe のサブ名前空間 (根拠付き。gate がサブディレクトリ集合と突き合わせる) */
+public const array EXCLUDED_STRIPE_SUBNAMESPACES = [
+    'OAuth' => 'Stripe Connect の OAuth 専用。本アプリは Connect を使わないため gateway 経路から到達しない',
+];
+```
+
+gate は (a) 実サブディレクトリ集合 == `array_keys(EXCLUDED_STRIPE_SUBNAMESPACES)`、
+(b) 除外理由が 30 文字以上、(c) **直下母集団の各クラスが除外名前空間に属さない**
+（集合の非交差）を検査する。SDK がサブ名前空間を増やしたら (a) が赤くなり、
+母集団定義の再検討が強制される。
+
+> **「OAuth 配下に具象例外が 0 件であること」は要求しない**。母集団が直下の `*.php` だけなら
+> `OAuth/` 配下は最初から母集団に入らず、この要求は**定義上自明**で検査の意味が無い。
+> しかも OAuth 配下には実際に具象例外が存在するため、要求すると「除外する」という
+> 設計意図そのものと矛盾する。非自明な保証は (a)(b)(c) の 3 本である。
+
+### PHPStan 適合チェック
+
+- [x] 戻り値の型が明示されている（`array<class-string, …>` / `list<class-string<Throwable>>` / `int`）
+- [x] null 安全（`file_get_contents()` の `string|false` を `Assert::string()` で narrowing。既存 gate と同作法）
+- [x] `glob()` の `array|false` を `Assert::isArray()` で narrowing（`jobDedupSupportPhpFiles()` と同じ）
+- [x] Generics の型パラメータが正しい
+- [x] readonly promoted property の entry クラスに PHPDoc 配列型を付ける
+
+### テスト計画
+
+- [x] gate 自体がテスト。**素の main で赤くなるのは検査 6（`getMessage()` cap）だけ**であり、
+      これを**先にコミットして赤を見る**（思考原則 5）
+- [x] それ以外の検査は「新規に導入する不変条件」なので main では赤にならない。
+      実効性は **mutation（M1〜M10）で 1 つずつ確認**し `mutation-log.md` に記録する（後述）
+- [x] Architecture lane は `RefreshDatabase` の対象外。DB を触らない実装にする
+
+### リスク
+
+| リスク | 対処 |
+|---|---|
+| `composer update` で stripe-php / cashier の例外クラスが増減すると CI が赤くなる | **意図した副作用**。「外部の語彙が増えたことを人間に必ず知らせる」ための費用として受け入れる（概念設計の制約に明記済み）。復旧手順は `docs/architecture.md` に書く |
+| `LockTimeoutException` の同名別クラス (`Contracts\Filesystem`) を import してしまう | Unit テストが実インスタンスで固定する |
+| ソース走査が脆い（コメント内の `getMessage()` に反応する等） | 既存 gate（`JobExecutionDedupInventoryTest` の literal 走査）と同じ割り切り。**偽陽性側に倒れる**ので安全側 |
+
+---
+
+## S6: Unit / Feature テスト
+
+### 変更箇所
+
+- `tests/Unit/Support/Billing/GatewayFailureClassifierTest.php`（新規）
+- `tests/Feature/Billing/AutoRechargeServiceTest.php`（変更 + 追加）
+- `tests/Feature/Billing/AutoRechargeReconcileTest.php`（追加）
+
+### 波及変更
+
+- 既存 34 本の `AutoRechargeServiceTest` は**ログ検査 2 本以外書き換えない**
+  （書き換えないこと自体が制御フロー等価性の証拠）
+
+### 変更後コード（要点）
+
+```php
+// tests/Unit/Support/Billing/GatewayFailureClassifierTest.php
+
+/**
+ * ★**期待値は分類器と独立に手書きで宣言する**。
+ *   `directMap()` をそのまま dataset にすると、期待値と実装が同一ソースになり
+ *   **写像を間違えても常に green** になる (既存 gate の「目録と期待値 map の二重宣言」と同じ作法)。
+ * ★件数は固定定数で持たない。**キー集合一致の検査が正本**である
+ *   (件数を別に持つと、片方だけ直したときに嘘の安心を与える)。
+ *
+ * @return array<class-string<Throwable>, GatewayFailureClass>
+ */
+function billingTaxonomyExpectedClassification(): array
+{
+    return [
+        ApiConnectionException::class => GatewayFailureClass::ProviderUnavailable,
+        RateLimitException::class => GatewayFailureClass::ProviderUnavailable,
+        InvalidRequestException::class => GatewayFailureClass::ProviderRejected,
+        // … directMap() の**全 entry** を手書きで列挙する
+        //    (Stripe 12 + Cashier 8 + 非 vendor 3 = 23。UnknownApiErrorException は
+        //     conditionalClasses() 側なのでここには入らない)。
+        //    ★件数を定数で別途持たない — 正本はキー集合一致の検査である …
+    ];
+}
+
+dataset('分類の期待値 (独立宣言)', function (): Generator {
+    foreach (billingTaxonomyExpectedClassification() as $class => $expected) {
+        yield $class => [$class, $expected];
+    }
+});
+
+test('各クラスが期待どおりに分類される', function (string $class, GatewayFailureClass $expected): void {
+    // クラスごとの生成ヘルパ (factory / constructor が違うため match で分ける)
+    $throwable = billingTaxonomyInstantiate($class);
+
+    expect(GatewayFailureClassifier::classify($throwable))->toBe($expected);
+})->with('分類の期待値 (独立宣言)');
+
+test('期待値表と directMap のキー集合が一致する (書き忘れ / 余剰の検出)', function (): void {
+    $expected = array_keys(billingTaxonomyExpectedClassification());
+    $actual = array_keys(GatewayFailureClassifier::directMap());
+    sort($expected);
+    sort($actual);
+
+    expect($actual)->toBe($expected);
+});
+
+test('UnknownApiErrorException は HTTP status で分岐する', function (?int $status, GatewayFailureClass $expected): void {
+    $throwable = UnknownApiErrorException::factory('boundary', $status);
+
+    expect(GatewayFailureClassifier::classify($throwable))->toBe($expected);
+})->with([
+    'null (status 不明)' => [null, GatewayFailureClass::ProviderRejected],
+    '400' => [400, GatewayFailureClass::ProviderRejected],
+    '499 (境界の下)' => [499, GatewayFailureClass::ProviderRejected],
+    '500 (境界)' => [500, GatewayFailureClass::ProviderUnavailable],
+    '503' => [503, GatewayFailureClass::ProviderUnavailable],
+]);
+
+test('写像表に無い例外は unknown へ落ちる', function (): void {
+    expect(GatewayFailureClassifier::classify(new UnmappedGatewayFailureForTest('x')))
+        ->toBe(GatewayFailureClass::Unknown);
+});
+
+test('親クラス連鎖で分類される (将来のサブクラスを取りこぼさない)', function (): void {
+    $subclass = new class('sub') extends ApiConnectionException {};
+
+    expect(GatewayFailureClassifier::classify($subclass))->toBe(GatewayFailureClass::ProviderUnavailable);
+});
+
+test('context はキー集合と値が完全一致する (message は入り得ない)', function (): void {
+    $context = GatewayFailureClassifier::context(
+        ApiConnectionException::factory(GatewayFailureFixtures::EXTERNAL_MESSAGE_MARKER),
+    );
+
+    // ★キー集合と各値を**完全一致**で固定する。
+    //   これ以外の値が入り得ないので、マーカー非含有は自明になる
+    //   (json_encode して部分文字列を否定する形は array shape の検査として過剰)。
+    expect($context)->toBe([
+        'failure_class' => 'provider_unavailable',
+        'error_class' => ApiConnectionException::class,
+    ]);
+});
+```
+
+```php
+// tests/Feature/Billing/AutoRechargeServiceTest.php (更新 2 本 + 追加)
+
+test('後始末のログに外部由来のメッセージを載せない (分類 + 例外クラス名のみ)', function (): void {
+    Log::spy();
+    …
+    $gateway->terminateFailure = GatewayFailureClass::ProviderUnavailable;
+
+    $service->executeAttempt($attempt);
+
+    Log::shouldHaveReceived('warning')
+        ->withArgs(function (string $message, array $context): bool {
+            if (($context['event'] ?? null) !== ExternalCallKind::CLEANUP_LOG_EVENT) {
+                return false;
+            }
+
+            return $context['terminated'] === false
+                && $context['failure_class'] === 'provider_unavailable'
+                && $context['error_class'] === ApiConnectionException::class
+                // ★マーカー非含有。gate が「fixture の message にマーカーが確かに入る」ことを
+                //   保証しているため、この negative assertion は空虚にならない。
+                && ! str_contains(
+                    json_encode($context, JSON_THROW_ON_ERROR),
+                    GatewayFailureFixtures::EXTERNAL_MESSAGE_MARKER,
+                );
+        })
+        ->once();
+});
+
+test('後始末の例外報告は固定テンプレートと完全一致する', function (): void {
+    // ★部分一致をやめる。予期しない文字列の追加を必ず検出する。
+    Exceptions::assertReported(function (RuntimeException $reported) use ($invoiceId): bool {
+        return $reported->getMessage() === sprintf(
+            'auto-recharge: invoice %s の終端に失敗しました (%s / %s)',
+            $invoiceId,
+            'provider_unavailable',
+            ApiConnectionException::class,
+        ) && $reported->getPrevious() === null;
+    });
+    Exceptions::assertReportedCount(1);
+});
+
+test('制御フロー等価性: 分類ログを出しても収束先と gateway 呼び出し回数が変わらない', function (): void {
+    // 終端失敗 → attempt は pending 維持 / terminate は 1 回だけ呼ばれる /
+    // 課金 (pay) には進まない、を明示的に固定する
+});
+
+test('cleanup event のキー集合が成功・失敗の両方で同一である', function (): void {
+    // ★集計 schema が成否で割れないことを固定する。
+    //   成功時は failure_class / error_class が **null で存在**する。
+    expect(array_keys($successContext))->toBe(array_keys($failureContext));
+});
+```
+
+```php
+// tests/Feature/Billing/AutoRechargeReconcileTest.php (追加)
+
+test('reconcile の attempt 隔離ログに分類が載る (gateway 例外)', …);   // provider_unavailable
+test('reconcile の取りこぼし起票ログに分類が載る (DB 例外)', …);        // local_failure
+```
+
+### PHPStan 適合チェック
+
+- [x] dataset の generator に戻り型 `Generator` を付ける
+- [x] `json_encode(..., JSON_THROW_ON_ERROR)` で `string|false` を避ける
+- [x] 匿名クラスの継承（`extends ApiConnectionException`）は PHPStan で解決可能
+
+### テスト計画
+
+- [x] `composer test -- tests/Unit/Support/Billing/` / `tests/Feature/Billing/` / `tests/Architecture/`
+- [x] 最終的に `composer test` 全件 + `composer phpstan` + `vendor/bin/pint --test`
+- [x] 個別の `DatabaseTransactions` を使わない
+
+### リスク
+
+- 匿名クラスの `extends ApiConnectionException` が SDK の final 化で壊れる →
+  現状 final ではない。壊れたら専用の名前付きテストクラスへ置き換える。
+
+---
+
+## S7: 運用契約の記述
+
+### 変更箇所
+
+- `docs/architecture.md`
+  - §ジョブの重複実行と結果の一回性 の運用契約表 (a) 行:
+    **`error` = 例外クラス名 → `failure_class` / `error_class` の 2 キー**へ書き換え
+  - **§オートリチャージの失敗分類（新設）**: 語彙の定義表 / `unknown` の運用契約
+    （検知条件・初動・owner）/ vendor 更新で gate が赤くなったときの手順
+  - 規約 ↔ テスト対応表に本 gate を追加
+- `AGENTS.md` ドメイン固有規約に **1 項目**追加（数行）
+
+### 現行コード
+
+```markdown
+| (a) | 所有権喪失後の void / delete に失敗した | **アプリログ**: `event = job_ownership_lost_cleanup` かつ `terminated=false`
+(原因の分類は同ログの `error` = 例外クラス名。…) | … |
+```
+
+### 変更後コード
+
+```markdown
+| (a) | … | **アプリログ**: `event = job_ownership_lost_cleanup` かつ `terminated=false`
+(原因の分類は同ログの **`failure_class`** = `GatewayFailureClass`、**`error_class`** = 例外クラス名。
+**成功時も両キーは `null` で存在する**（集計 schema を成否で割らない）。
+`report()` 側にも invoice id とこの 2 値だけを持つサニタイズ済み例外しか流れないため、
+**この cleanup 経路で本サービスが出す構造化ログと report message には
+Stripe が生成した原メッセージが残らない**
+（`report()` の stack trace / vendor 側の別ログ / 伝播した queue failure は本保証の範囲外）。
+`tryTerminateInvoice()` / `reconcile()` も同じ 2 キーへ統一済み。
+詳細が要るときは `invoice_id` で Stripe 側を直接確認する) | … |
+```
+
+`AGENTS.md` 追記（ドメイン固有規約 **7** として）。
+
+> **実装手順（番号衝突の防止）**: **既存末尾へ 7 として追加する。既存 1〜6 は renumber しない。**
+> 実装時点で同趣旨の項目が既に存在する場合は、追記ではなく**その項目を更新**すること
+> （AGENTS.md は他タスクも触るため、マージ時に番号がずれていないか必ず確認する）。
+
+
+```markdown
+7. **決済 gateway 失敗の観測語彙**: `AutoRechargeGatewayInterface` を注入されるクラスは、
+   gateway 例外を **観測する (`GatewayFailureClassifier::context()` の
+   `failure_class` / `error_class` の 2 キーだけをログへ載せる)** か、
+   **伝播させる (`GatewayFailureObservationExemption` + 30 文字以上の根拠で免除登録)** かの
+   どちらかに目録登録が必須 (`BillingGatewayFailureTaxonomyInventoryTest` が
+   deny-by-default で強制)。**例外 message はログに載せない** (外部生成の可変文字列)。
+   分類は**観測のためであり制御フローを変えない**。`unknown` は「写像表に一致が無かった」
+   ことを意味し、写像表の値としては禁止。詳細と運用契約は
+   `docs/architecture.md` §オートリチャージの失敗分類。
+```
+
+### PHPStan 適合チェック
+
+該当なし（ドキュメント）。ただし `docs/architecture.md` の
+「規約 ↔ テスト対応表」に本 gate を追加すること。
+
+### テスト計画
+
+- [x] `docs/architecture.md` の記述が実装と一致していることを目視 + 該当テスト名の実在確認
+- [x] `AGENTS.md` の追記が 1 項目・数行に収まっていること
+
+### リスク
+
+- ドキュメントと実装の乖離（T131 Round 4 で実際に起きた） →
+  **キー名を変える S3 と同一 PR で更新**し、レビューで差分を並べて確認する。
+- 保証範囲の誇張（「アプリのどこにも残らない」）→ 文言を
+  「**本サービスが出す構造化ログと report message には残らない**」に限定した。
+  `report()` の stack trace / vendor 側ログ / 伝播した queue failure は範囲外であると明記する。
+- `AGENTS.md` の番号衝突 → 「末尾へ 7 として追加。1〜6 は renumber しない」を実装手順に明記。
+
+---
+
+## mutation で赤化を確認する手順
+
+**素の main で赤くなるのは S5 の検査 6（`getMessage()` cap）だけ**である。
+残りは新規に導入する不変条件なので、gate と実装が同一 PR に入る以上
+「main では赤くならない」。したがって実効性は **mutation で 1 つずつ確認**し、
+結果を `devnotes/20260807-1851-billing-gateway-error-taxonomy/mutation-log.md` に記録する。
+
+手順（実装 PR の worktree 内で行う）:
+
+1. 実装が全 green の状態を作る（`composer test` / `composer phpstan` / `pint --test`）
+2. 下表の mutation を **1 つだけ**適用する
+3. `composer test -- tests/Architecture/BillingGatewayFailureTaxonomyInventoryTest.php`
+   （M5/M7 は Feature / Unit も）を実行し、**期待した検査が赤くなる**ことを確認
+4. `git checkout -- <file>` で戻し、次の mutation へ進む
+5. 全 mutation の結果（赤くなった test 名）を `mutation-log.md` に記録する
+
+| ID | mutation | 期待して赤くなる検査 |
+|---|---|---|
+| M1 | `directMap()` から `RateLimitException` の entry を削除 | 検査 9（vendor 集合一致） |
+| M2 | `directMap()` に実在しないクラス（`\Foo\BarException::class` 相当の文字列キー）を追加 | 検査 9 |
+| M3 | `directMap()` の 1 entry の値を `GatewayFailureClass::Unknown` に変更 | 検査 11 |
+| M4 | `conditionalClasses()` を `[RateLimitException::class]` に差し替え | 検査 10（+ 9） |
+| M5 | `GatewayFailureFixtures::throwableFor()` の `InvariantViolation` を `new RuntimeException('x')` に変更 | 検査 15 / 16 + Unit（分類一致） |
+| M6 | spy の `terminateInvoice` を `throw new RuntimeException('fake gateway')` に戻す | 検査 17 |
+| M7 | `AutoRechargeService::tryTerminateInvoice()` のログに `'error' => $e->getMessage()` を戻す | 検査 6（+ Feature のログ検査） |
+| M8 | `billingGatewayObservers()` から `AutoRechargeService` の entry を削除 | 検査 1（未分類） |
+| M9 | `billingGatewayObservationExemptionCap()` を `4` に変更 | 検査 3 |
+| M10 | `reconcile()` の catch から `...GatewayFailureClassifier::context($e)` を 1 つ削除 | 検査 7 |
+
+さらに、**M7 だけは順序を逆にする**（思考原則 5「テストファースト」）:
+S5 の検査 6 を**先にコミットして main の現状で赤を見る**（3 箇所の `getMessage()` が
+実在するため実際に赤くなる）→ そのうえで S3 を実装して green にする。
+
+---
+
+## 実装モード
+
+| 項目 | 内容 |
+|------|------|
+| 推奨モード | **standalone** |
+| 判断根拠 | (1) `tests/Support/FakeAutoRechargeGateway` の**公開プロパティ名を変える**（`failOnTerminate` → `terminateFailure`）ため、同じ spy を使う 7 本の Feature テストへ波及する。並走タスクが同 spy を触ると衝突が避けられない。(2) `AutoRechargeService` は T131 で直前に触った中心ファイルであり、他タスクと同 worktree に積むと責任範囲が混ざる。(3) vendor 走査 gate を含むため、依存更新タスクと同居させると赤の原因切り分けが難しくなる |
+| 競合リスク | `AutoRechargeService` / `tests/Support/FakeAutoRechargeGateway` / `docs/architecture.md` / `AGENTS.md` を触る他タスクとの競合。とくに `AGENTS.md` ドメイン固有規約は**末尾に 1 項目追加**なので、番号衝突に注意（追加時に既存 6 項目の番号を変えない） |
+| 前提 | 本設計は main の T131 マージ済み状態（`b9907af`）を起点とする |
+
+## 実装順序（テストファーストを守る）
+
+1. **S5 の検査 6 だけ**を先に置く → `composer test -- tests/Architecture/BillingGatewayFailureTaxonomyInventoryTest.php` で**赤を確認**
+2. S1（enum）→ S2（分類器）→ S6 の Unit テスト（分類の全域性・境界・unknown）
+3. S4（fixture + spy）→ 既存 Feature テストの呼び出し更新
+4. S3（`AutoRechargeService` の 4 箇所）→ 検査 6 が green になることを確認
+5. S5 の残り検査（1〜5, 7〜20）
+6. S6 の Feature テスト追加（制御フロー等価性・ログ語彙）
+7. S7（ドキュメント）
+8. mutation M1〜M10 を実施し `mutation-log.md` に記録
+9. 全検証コマンド: `composer test` / `composer phpstan` / `vendor/bin/pint --test` /
+   `pnpm lint` / `pnpm typecheck` / `pnpm test` / `pnpm build` /
+   `pnpm typecheck:packages` / `pnpm build:packages` / `pnpm test:packages`
+   （フロント側の変更は無いが、AGENTS.md の検証コマンド契約に従い全件回す）
+
+## 使命・禁止事項チェック
+
+| 項目 | 判定 |
+|---|---|
+| 使命への寄与 | 課金が静かに壊れないことは撮影・生成の前提。失敗の一次切り分け（再送で収束するか）がログ 1 行で決まる |
+| 禁止事項 1（テストなし完了なし） | Architecture gate（20 検査）+ Unit + Feature を施策ごとに用意 |
+| 禁止事項 2（PHPStan widen / baseline） | 使わない。型は `class-string<Throwable>` / array shape で明示 |
+| 禁止事項 3（dev DB 破壊） | 該当なし |
+| 禁止事項 4（`response()->json()`） | 該当なし（HTTP 応答を触らない） |
+| 禁止事項 5・6（Prism / prompt） | 該当なし |
+| 禁止事項 7・8（redirect / disabled UI） | 該当なし |
+| 禁止事項 9（Artifact） | 使用しない。成果物はリポジトリ内ファイル |
+| 思考原則 2（今必要なものだけ） | interface 契約変更・他 gateway 横展開・横断 redact をスコープ外にした |
+| 思考原則 3（並走を残さない） | `$e->getMessage()` を同一 PR で全廃。`failOnTerminate` も残さない |
+| 思考原則 5（テストファースト） | 検査 6 を先にコミットして赤を見る手順を明記 |

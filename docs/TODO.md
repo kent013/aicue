@@ -26,6 +26,7 @@
 | T124 | 2FA 秘密を返す GET の recent-auth 化 | backend | 秘密 GET 3 本に step-up を要求する | Medium | standalone | [設計](devnotes/20260806-1403-throttle-coverage-inventory/) | 2026-08-06 18:40 |
 | T125 | inline throttle 群の bucket 共有の見直し | backend | 同一 actor が 1 bucket 共有の是正 | Medium | standalone | [設計](devnotes/20260806-1634-throttle-unauthenticated-get/) | 2026-08-06 18:40 |
 | T126 | 外部 SDK の client timeout を pin する | backend | Stripe/AWS SDK の待ち上限を固定 | Medium | incremental | [設計](devnotes/20260806-1635-queue-lease-timeout/) | 2026-08-06 18:40 |
+| T132 | 決済 gateway エラー分類の統一と gate 化 | backend | 決済 gateway 失敗の観測語彙を統一 | Medium | standalone | [設計](devnotes/20260807-1851-billing-gateway-error-taxonomy/) | 2026-08-07 19:35 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
