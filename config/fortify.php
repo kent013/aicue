@@ -122,6 +122,11 @@ return [
         // (毎回 random_bytes(32) + session 書き込みが走る)。
         // limiter 本体は App\Providers\FortifyServiceProvider::configureRateLimiters()。
         'passkeys' => 'passkeys',
+        // メール検証 (verification.send / verification.verify)。**未設定だと Fortify 既定の
+        // inline `6,1` になり、同一 actor の全 inline route と bucket を共有する** (T125)。
+        // 1 knob で 2 route に貼られるため、この 2 本は構造的に同一レーンになる。
+        // limiter 本体は FortifyServiceProvider::configureStepUpAndCredentialRateLimiters()。
+        'verification' => 'email-verification',
     ],
 
     /*

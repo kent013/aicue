@@ -200,7 +200,7 @@ function throttleCoverageExemptions(): array
         'recent-auth.confirm' => [$render,
             'auth 必須。ConfirmRecentAuthController::show() が actor 自身の recent-auth 鮮度と '
             .'利用可能な satisfier を props にした Inertia 描画を返す。password 検証は '
-            .'POST /recent-auth/password (throttle:6,1) 側にあり、GET は DB 書込を伴わない。'],
+            .'POST /recent-auth/password (throttle:password-verify) 側にあり、GET は DB 書込を伴わない。'],
 
         'recent-auth.status' => [$render,
             'auth 必須の軽量プローブ。ConfirmRecentAuthController::status() が actor 自身の鮮度を '
@@ -210,7 +210,7 @@ function throttleCoverageExemptions(): array
         'verification.notice' => [$render,
             'auth 必須。Fortify::verifyEmailView() が EmailVerificationContinuation::hasContinuation() '
             .'の bool だけを props にした Inertia 描画を返す。検証メールの再送は '
-            .'POST /email/verification-notification (throttle:6,1) 側で有界化されている。'],
+            .'POST /email/verification-notification (throttle:email-verification) 側で有界化されている。'],
 
         'filament.admin.auth.login' => [$render,
             'Filament panel のログインページ描画。credential 検証は Livewire の POST '

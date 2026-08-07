@@ -172,7 +172,10 @@ test('弱いパスワードは 422 (PasswordPolicy 経由)', function (): void {
     expect($user->refresh()->hasPassword())->toBeFalse();
 });
 
-test('throttle 超過で 429 (6/分)', function (): void {
+// 初回設定は password-set レーン (6/min)。照合面 (password-verify = recent-auth.password /
+// password.confirm.store / user-password.update) とは**別 bucket**であり、
+// ここを使い切っても step-up 再認証は 429 にならない (T125。恒久回帰は AuthThrottleCoverageTest)。
+test('password-set レーンの超過で 429 (6/分)', function (): void {
     $user = passwordlessUser();
 
     for ($i = 0; $i < 6; $i++) {

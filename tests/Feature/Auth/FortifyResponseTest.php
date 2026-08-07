@@ -41,7 +41,7 @@ test('forgot-password は user 在/不在で同一応答 (enumeration 抑止)', 
 });
 
 test('認証メール再送は success flash を返す (web)', function (): void {
-    // verification.send は auth:web + throttle:6,1 (config fortify.limiters.verification)。
+    // verification.send は auth:web + throttle:email-verification (config fortify.limiters.verification)。
     // 本テストは 1 リクエストのみ発行し throttle 上限に構造的に触れない
     // (middleware の抑制はしない。並列実行でもユーザー毎にレートキーは独立)。
     // JSON 分岐は Fortify 元実装互換のため wantsJson/202 を維持している
@@ -63,7 +63,7 @@ test('認証メール再送は JSON リクエストに 202 を返す (Fortify �
     // VerificationNotificationSentResponse の wantsJson 分岐は Fortify 既定
     // (wantsJson / 202) の挙動互換を維持する設計意図の固定。誤って expectsJson 化・
     // ステータス変更されると XHR クライアントの契約が壊れるため契約テストで固定する。
-    // 別ユーザーで 1 リクエストのみ発行するため throttle:6,1 には触れない。
+    // 別ユーザーで 1 リクエストのみ発行するため throttle:email-verification には触れない。
     Notification::fake();
     $user = User::factory()->unverified()->create();
 
