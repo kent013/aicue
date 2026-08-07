@@ -7,6 +7,7 @@ namespace App\Exceptions;
 use App\Enums\ApiErrorCode;
 use App\Http\Resources\ApiErrorResource;
 use App\Support\Api\ApiError;
+use App\Support\Http\RetryAfterSeconds;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -123,26 +124,26 @@ final class ApiExceptionRenderer
     }
 
     /**
-     * @return array<string, mixed>|null
+     * @return array{retry_after: int<0, max>}|null
      */
     private static function rateLimitDetails(HttpExceptionInterface $e): ?array
     {
-        $headers = $e->getHeaders();
-        if (! isset($headers['Retry-After'])) {
+        $seconds = RetryAfterSeconds::parse($e->getHeaders()['Retry-After'] ?? null);
+        if ($seconds === null) {
             return null;
         }
-        $retryAfter = $headers['Retry-After'];
-        if (is_string($retryAfter) && ctype_digit($retryAfter)) {
-            return ['retry_after' => (int) $retryAfter];
-        }
-        if (is_int($retryAfter) || is_string($retryAfter)) {
-            return ['retry_after' => $retryAfter];
-        }
 
-        return null;
+        return ['retry_after' => $seconds];
     }
 
     /**
+     * 例外が持つヘッダを応答へ移す。
+     *
+     * ★`Retry-After` だけは **RetryAfterSeconds を通して正規化**する。
+     *   本文 (details.retry_after) では捨てた不正形式が HTTP ヘッダにだけ残ると、
+     *   「解釈の SoT は 1 つ」という契約が成立しない (同じ応答の中で 2 つの解釈が並ぶ)。
+     *   解釈できない値はヘッダごと落とす。
+     *
      * @return array<string, string>
      */
     private static function extraHeaders(Throwable $e): array
@@ -153,7 +154,20 @@ final class ApiExceptionRenderer
 
         $headers = [];
         foreach ($e->getHeaders() as $name => $value) {
-            if (is_string($name) && (is_string($value) || is_int($value))) {
+            if (! is_string($name)) {
+                continue;
+            }
+
+            if (strcasecmp($name, 'Retry-After') === 0) {
+                $seconds = RetryAfterSeconds::parse($value);
+                if ($seconds !== null) {
+                    $headers[$name] = (string) $seconds;
+                }
+
+                continue;
+            }
+
+            if (is_string($value) || is_int($value)) {
                 $headers[$name] = (string) $value;
             }
         }

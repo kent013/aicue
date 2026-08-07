@@ -3,6 +3,7 @@
 use App\Exceptions\ApiExceptionRenderer;
 use App\Exceptions\Billing\InsufficientTicketsException;
 use App\Exceptions\Billing\QuotaExceededException;
+use App\Exceptions\InertiaExceptionRenderer;
 use App\Http\Middleware\BlockTwoFactorDisableForEnforcedOrganizations;
 use App\Http\Middleware\BughuntCoverageMiddleware;
 use App\Http\Middleware\EnforceMcpTransport;
@@ -353,10 +354,22 @@ return Application::configure(basePath: dirname(__DIR__))
             return ApiExceptionRenderer::render($exception, $request);
         });
 
-        // /admin (Filament 運営) 配下の error は運用者向け中立テンプレートへ分離する
-        // (顧客向けマーケ文言の errors/4xx.blade.php を出さない = customer-facing と
-        // operator-facing の error ページを分離)。判定は AdminPanelPath::resolve() に一本化。
-        // API/JSON 経路は不変 (ApiExceptionRenderer が先に JSON 化する)。
+        /*
+         | 例外応答の最終整形。**このアプリで唯一の respond callback**。
+         |
+         | ⚠ Illuminate\Foundation\Exceptions\Handler の respondUsing() は
+         |   $finalizeResponseCallback への**単純代入** (単一スロット・last-write-wins)。
+         |   2 本目の respond callback を足すと、この callback が黙って無効化される。
+         |   同じ理由で Inertia の handleExceptionsUsing (内部で respondUsing を呼ぶ) も使わない。
+         |   分岐を増やすときは**必ずこの 1 本の中に足す**こと。
+         |   (tests/Architecture/InertiaErrorScreenContractTest が登録箇所 1 件を機械強制する)
+         |
+         | 適用順:
+         |   1. status < 400 / api/* / expectsJson … 触らない (ApiExceptionRenderer の封筒 JSON を守る)
+         |   2. /admin 配下 … 運営者向け中立テンプレート (customer-facing と operator-facing の分離)
+         |   3. Inertia XHR … Error 画面へ差し替え (InertiaExceptionRenderer が deny-by-default で判定)
+         |   4. それ以外 … 自己完結 Blade (resources/views/errors/*.blade.php) のまま
+         */
         $exceptions->respond(function (Response $response, Throwable $exception, Request $request) {
             $status = $response->getStatusCode();
             if ($status < 400 || $request->is('api/*') || $request->expectsJson()) {
@@ -365,18 +378,18 @@ return Application::configure(basePath: dirname(__DIR__))
 
             $adminPath = AdminPanelPath::resolve();
             $isAdminPath = $request->is($adminPath) || $request->is($adminPath.'/*');
-            if (! $isAdminPath) {
-                return $response;
+            if ($isAdminPath) {
+                $adminView = $status >= 500 ? 'errors.admin.5xx' : 'errors.admin.4xx';
+                if (! view()->exists($adminView)) {
+                    return $response;
+                }
+
+                return response()->view($adminView, [
+                    'status' => $status,
+                    'adminPath' => $adminPath,
+                ], $status);
             }
 
-            $adminView = $status >= 500 ? 'errors.admin.5xx' : 'errors.admin.4xx';
-            if (! view()->exists($adminView)) {
-                return $response;
-            }
-
-            return response()->view($adminView, [
-                'status' => $status,
-                'adminPath' => $adminPath,
-            ], $status);
+            return InertiaExceptionRenderer::render($response, $request) ?? $response;
         });
     })->create();
