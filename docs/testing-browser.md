@@ -161,6 +161,20 @@ prompt 単位で応答を分けたい場合は専用サブクラス (`class FooP
 失敗系 (LLM schema 違反、Prism タイムアウト等) は Browser ではなく Feature テストで
 `Prism::fake()` に fail response を仕込む方が確実かつ高速。
 
+## 外部 HTTP 出口の既定拒否 (in-process)
+
+Browser lane は LLM (上記 2 層) に加えて **Laravel HTTP client 経由の外向き HTTP** も
+既定拒否する (`tests/Pest.php` の Browser lane が `StrayHttpRequestGuard` を install)。
+
+- in-process サーバ (Amp) はテストプロセス自身の HttpKernel / container を使うため、
+  **ブラウザ経由リクエストの処理中に出るアプリ側の `Http::` 呼び出しにも効く**。
+- in-process サーバは常に `127.0.0.1` に bind するので、自機宛ては
+  `StrayHttpRequestGuard::ALLOWED_URL_PATTERNS` の loopback 許可で通る。
+- **効かないもの**: Playwright の**ブラウザ自身**が出す外部フォント / CDN / 解析タグの取得は
+  別プロセスなので捕捉できない。Socialite (Guzzle 直) / Stripe SDK / AWS SDK も対象外。
+  bug-hunt (別プロセス実行) にも**無言で効かない**。
+  「Browser テストは外部に一切出ない」とは書けない。
+
 ## 役割分担
 
 | 層 | 責務 |

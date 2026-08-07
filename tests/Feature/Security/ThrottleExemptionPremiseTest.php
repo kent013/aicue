@@ -346,6 +346,10 @@ test('SQL 書込判定の検出器そのものが機能する (見逃しと過�
 ]);
 
 test('AuthViewRenderOnly の代表 GET は外向き HTTP もメール送信も起こさない', function (): void {
+    // ★この 1 行は tests/Pest.php のレーン既定と**同値の重複宣言**であり、後方互換の並走ではない
+    //  (Factory::preventStrayRequests は冪等。allowStrayRequests は呼んでいないので
+    //   レーン既定の loopback 許可集合を置換しない)。このテストの意図
+    //   「ここで外向き HTTP が起きないこと」を呼び出し側に明示する目的で残す。
     Http::preventStrayRequests();
     Mail::fake();
 
@@ -407,6 +411,10 @@ test('social.redirect は外向き HTTP を発行しない (Socialite の redire
     //   本 case の適用条件は「外向き HTTP を発行しない」「状態が自セッションに閉じる」
     //   「完了経路が throttle 済み」であって DB 書込の有無ではない。
     //   条件に無いものを検査すると、session driver を変えただけで green/red が動く。
+    // ★この 1 行は tests/Pest.php のレーン既定と**同値の重複宣言**であり、後方互換の並走ではない
+    //  (Factory::preventStrayRequests は冪等。allowStrayRequests は呼んでいないので
+    //   レーン既定の loopback 許可集合を置換しない)。このテストの意図
+    //   「ここで外向き HTTP が起きないこと」を呼び出し側に明示する目的で残す。
     Http::preventStrayRequests();
     $requests = [];
     throttlePremiseInstallSocialiteHttpSpy($requests);
@@ -512,6 +520,10 @@ test('別セッションで発行した state では callback が外向き HTTP 
     // ★成立条件: セッション B 側に正しい social_auth_intent を持たせること。
     //   intent があれば controller は短絡せず Socialite::driver()->user() まで進み、
     //   止まるのは AbstractProvider::hasInvalidState() **だけ**になる。
+    // ★この 1 行は tests/Pest.php のレーン既定と**同値の重複宣言**であり、後方互換の並走ではない
+    //  (Factory::preventStrayRequests は冪等。allowStrayRequests は呼んでいないので
+    //   レーン既定の loopback 許可集合を置換しない)。このテストの意図
+    //   「ここで外向き HTTP が起きないこと」を呼び出し側に明示する目的で残す。
     Http::preventStrayRequests();
     $requests = [];
     throttlePremiseInstallSocialiteHttpSpy($requests);
@@ -541,6 +553,10 @@ test('negative control: 自セッションの state なら callback は実際に
     //   (a) state 照合が止めたから か (b) spy / driver 差し替えが壊れて何も観測していないから
     //   のどちらでもありうる。(b) を排除する対照実験がこれ。
     //   この対照が落ちたら上のテストの green は無意味になっているので、両方を必ず一緒に直すこと。
+    // ★この 1 行は tests/Pest.php のレーン既定と**同値の重複宣言**であり、後方互換の並走ではない
+    //  (Factory::preventStrayRequests は冪等。allowStrayRequests は呼んでいないので
+    //   レーン既定の loopback 許可集合を置換しない)。このテストの意図
+    //   「ここで外向き HTTP が起きないこと」を呼び出し側に明示する目的で残す。
     Http::preventStrayRequests();
     $requests = [];
     throttlePremiseInstallSocialiteHttpSpy($requests);

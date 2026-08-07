@@ -80,6 +80,38 @@
 > 総当りに無効化するため復活させない。実 hop 一覧・CIDR の管理主体・変更手順は
 > `docs/trusted-proxies-runbook.md` が正本。
 
+## テストレーンの外部 HTTP 出口 (既定拒否)
+
+テストレーンは Laravel HTTP client (`Http::`) 経由の外向き通信を**既定で拒否**する
+(裁定 AG-105 準拠。設計は `devnotes/20260807-1235-stray-http-egress-deny/`)。
+
+- 配線は `tests/Pest.php` の**全レーン** (Feature/Unit・Architecture・Browser) が
+  `Tests\Support\StrayHttpRequestGuard::install()` / `flushAndFailIfStray()` で行う。
+  **テスト内で局所的に張って外す形は既定と認めない**
+  (`StrayHttpEgressLaneGateTest` が deny-by-default で強制)
+- 自機宛て loopback (`127.0.0.1` / `localhost` / `[::1]`) だけが
+  `StrayHttpRequestGuard::ALLOWED_URL_PATTERNS` で明示許可される。
+  この定数が許可集合の唯一の正本で、`config('app.url')` の host は含めない
+- **許可判定は 2 層**。framework 側の `Str::is()` glob 照合だけでは userinfo 詐称
+  (`http://127.0.0.1:80@api.frankfurter.dev/` = userinfo が loopback で**実ホストは外部**) が
+  `:*` パターンに一致して通ってしまうため、guard は**パース済みホスト**を見る第 2 層
+  (`StrayHttpRequestGuard::isSmuggledLoopbackUrl()`) を middleware で併用する。
+  `LOOPBACK_HOSTS` は `ALLOWED_URL_PATTERNS` のホスト部と 1:1 (gate が機械固定)
+- 外部 URL を叩くテストは `Http::fake([...])` を書く。opt-out
+  (`Http::allowStrayRequests(...)` / `preventStrayRequests(false)`) は
+  型付き enum + 30 文字以上の根拠付きで exemption inventory へ登録する
+- アプリ側が `catch (Throwable)` で握り潰しても検出できるよう、guard は
+  `Http::globalMiddleware` で `StrayRequestException` を accumulator に記録し
+  afterEach で一括判定する (LLM 側の `StrayLlmCallGuard` と同じ形。両者は**並存**する)
+- **保証範囲 (誇張しない)**: 効くのは **`Http::` を呼んだプロセス内**の Laravel HTTP client
+  経由の出口**だけ**。以下には**無言で効かない** —
+  bug-hunt (`scripts/bug-hunt-shard.sh` の別プロセス実行) /
+  Socialite (Guzzle 直) / Stripe SDK / AWS SDK /
+  Browser lane で Playwright のブラウザ自身が出す外部取得。
+  また許可判定は**名前解決前の URL 文字列**照合なので、`localhost` が loopback に
+  解決されることは**前提であって保証ではない** (hosts / DNS の健全性は対象外)。
+  この非対称を対称に書かない (「テストは外部に一切出ない」と書くのは嘘になる)
+
 ## 実装規約
 
 - `declare(strict_types=1)` + 日本語コメント。Controller は薄く(Service 委譲)、

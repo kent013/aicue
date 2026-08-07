@@ -41,9 +41,19 @@ test('登録できる (同意の証跡が記録される)', function (): void {
 });
 
 test('登録 POST は非本番で api.pwnedpasswords.com を呼ばない (F-4-01 非退行)', function (): void {
-    // HIBP エンドポイントのみ intercept して実ネットワークを遮断する
-    // (preventStrayRequests は合法な他 HTTP まで例外化するため使わない = 過検出回避)。
+    // HIBP エンドポイントのみ intercept して「呼ばれないこと」を assert 可能にする。
     // uncompromised は NotPwnedVerifier (Http client factory 経由) のため Http::fake で捕捉できる。
+    //
+    // ★旧コメントの棄却理由「preventStrayRequests は合法な他 HTTP まで例外化するため
+    //   使わない (過検出回避)」は**前提そのものが成立していない**ので撤回した (裁定 AG-105):
+    //   (1) 想定されていた「合法な他 HTTP」= HIBP は、app/Support/PasswordPolicy.php の
+    //       PWNED_CHECK_DISABLED_APP_ENVS に 'testing' が含まれるため testing env では
+    //       uncompromised 自体が付かず、そもそも通信が発生しない
+    //       (下の Http::fake は「万一 rule が復活したら捕捉する」保険であって no-op が正常)。
+    //   (2) 実際に既定拒否へ掛かるのは api.frankfurter.dev (FxRateService) と reCAPTCHA で、
+    //       いずれも**外部宛て = 通してはいけない通信**。過検出ではなく検出である。
+    //   (3) 自機宛て loopback は StrayHttpRequestGuard::ALLOWED_URL_PATTERNS で明示許可済み。
+    //   現在は tests/Pest.php のレーン既定として preventStrayRequests が常時 ON になっている。
     Http::fake([
         'api.pwnedpasswords.com/*' => Http::response('', 200),
     ]);
