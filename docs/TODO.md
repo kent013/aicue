@@ -26,8 +26,6 @@
 | T124 | 2FA 秘密を返す GET の recent-auth 化 | backend | 秘密 GET 3 本に step-up を要求する | Medium | standalone | [設計](devnotes/20260806-1403-throttle-coverage-inventory/) | 2026-08-06 18:40 |
 | T125 | inline throttle 群の bucket 共有の見直し | backend | 同一 actor が 1 bucket 共有の是正 | Medium | standalone | [設計](devnotes/20260806-1634-throttle-unauthenticated-get/) | 2026-08-06 18:40 |
 | T126 | 外部 SDK の client timeout を pin する | backend | Stripe/AWS SDK の待ち上限を固定 | Medium | incremental | [設計](devnotes/20260806-1635-queue-lease-timeout/) | 2026-08-06 18:40 |
-| T129 | Inertia の 4xx/5xx を Error 画面へ差替 | backend | Inertia XHR のエラーを Error 画面へ差替 | High | incremental | [設計](devnotes/20260807-1235-inertia-error-screen-contract/) | 2026-08-07 12:35 |
-| T130 | テストレーンの HTTP 出口既定拒否 | test | テストレーンのHTTP出口を既定拒否 | Medium | standalone | [設計](devnotes/20260807-1235-stray-http-egress-deny/) | 2026-08-07 12:35 |
 | T131 | ジョブ二重実行の所有権再検証を追加 | backend | ジョブ二重実行の所有権再検証と横断gate | High | incremental | [設計](devnotes/20260807-1235-job-execution-dedup/) | 2026-08-07 12:35 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
