@@ -32,6 +32,7 @@ vi.mock("@/lib/stores/toast", async (importOriginal) => ({
 
 import {
     fetchRecentAuthStatus,
+    isRecentAuthRequiredPayload,
     parseRecentAuthStatus,
     registerRecentAuthRedirectHandler,
     withRecentAuth,
@@ -254,5 +255,49 @@ describe("registerRecentAuthRedirectHandler (409 の単一ハンドラ)", () => 
         registerRecentAuthRedirectHandler()();
 
         expect(unsubscribe).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe("isRecentAuthRequiredPayload (409 契約の型ガード。T124)", () => {
+    /*
+     * status だけでは判定しない。同じ 409 を RequireTwoFactorForEnforcedOrganizations も
+     * 返す (code: "two_factor_required") ため、status のみの判定は誤食する。
+     */
+
+    it("409 + code=recent_auth_required を true と判定する", () => {
+        expect(
+            isRecentAuthRequiredPayload(409, {
+                code: "recent_auth_required",
+                message: "この操作には直近の再認証が必要です。",
+                redirect: "/recent-auth/confirm",
+            }),
+        ).toBe(true);
+    });
+
+    it("409 + code=two_factor_required を false と判定する (2FA 必須ゲートの 409 を誤食しない)", () => {
+        expect(
+            isRecentAuthRequiredPayload(409, {
+                code: "two_factor_required",
+                message: "組織は 2 段階認証を必須としています。",
+                redirect: "/settings/security",
+            }),
+        ).toBe(false);
+    });
+
+    it.each([200, 302, 422, 500])("status %i は code が一致しても false", (status) => {
+        expect(isRecentAuthRequiredPayload(status, { code: "recent_auth_required" })).toBe(false);
+    });
+
+    it.each([
+        ["null", null],
+        ["文字列 (非 JSON 応答)", "<html>error</html>"],
+        ["配列", []],
+        ["数値", 1],
+        ["undefined", undefined],
+        ["code 欠損", { message: "x" }],
+        ["code が非文字列", { code: 1 }],
+    ])("body が %s でも例外を投げず false", (_label, body) => {
+        expect(() => isRecentAuthRequiredPayload(409, body)).not.toThrow();
+        expect(isRecentAuthRequiredPayload(409, body)).toBe(false);
     });
 });

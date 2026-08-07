@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Auth\ConfirmRecentAuthController;
 use App\Http\Controllers\Auth\SocialAuthController;
-use App\Http\Middleware\RequireRecentAuth;
 use App\Listeners\Auth\StampRecentAuthOnLogin;
 use App\Listeners\Auth\StampRecentAuthOnPasskeyVerified;
 use Illuminate\Routing\Route as RoutingRoute;
 use Illuminate\Routing\Router;
+use Tests\Support\Security\RecentAuthMiddleware;
 
 /*
  * 機微操作 route に recent-auth middleware が付与されていることを CI で担保する (付与漏れ検出)。
@@ -42,6 +42,11 @@ function recentAuthRequiredRouteNames(): array
         'two-factor.regenerate-recovery-codes',
         // 2FA 無効化 (第二要素そのものの除去。bug-hunt F-H3。同じく後付け配線)
         'two-factor.disable',
+        // 2FA seed の露出 (T124)。qr-code は otpauth:// URL、secret-key は平文 seed を返す
+        'two-factor.qr-code',
+        'two-factor.secret-key',
+        // 2FA enrollment 開始 (T124)。force=true が seed とリカバリコードを差し替える
+        'two-factor.enable',
         // profile 更新 (email 変更時のみ条件付き step-up。配線は
         // FortifyServiceProvider::attachRecentAuthToSensitiveRoutes()。
         // routeHasRecentAuth は 'recent-auth.on-email-change' も str_starts_with で検出)
@@ -56,19 +61,14 @@ function recentAuthRequiredRouteNames(): array
     ];
 }
 
+/**
+ * 判定の実体は Tests\Support\Security\RecentAuthMiddleware に単一化してある (T124)。
+ * TwoFactorStepUpInventoryTest (deny-by-default 目録) と同じ述語を使い、
+ * 「一方は付いていると言い、他方は付いていないと言う」ドリフトを防ぐ。
+ */
 function routeHasRecentAuth(RoutingRoute $route): bool
 {
-    foreach ($route->gatherMiddleware() as $middleware) {
-        if (! is_string($middleware)) {
-            continue;
-        }
-        // alias 'recent-auth' / 'recent-auth:param' / 完全クラス名のいずれかを許容 (堅牢化)
-        if ($middleware === RequireRecentAuth::class || str_starts_with($middleware, 'recent-auth')) {
-            return true;
-        }
-    }
-
-    return false;
+    return RecentAuthMiddleware::isAttached($route);
 }
 
 test('機微操作 route 全件に recent-auth middleware が付与されている', function (): void {

@@ -54,6 +54,14 @@ final class RequireTwoFactorForEnforcedOrganizations
         'recent-auth.confirm' => '機微操作前の step-up 画面 (2FA 設定動線が要求し得る)',
         'recent-auth.status' => 'step-up 状態の確認 (XHR precheck)',
         'recent-auth.password' => 'password による step-up 完了',
+        // passkey による step-up (T124)。2FA 必須ゲート下の未準拠ユーザーは enrollment
+        // (two-factor.enable / qr-code / secret-key) に step-up を要求されるため、
+        // satisfier を password と再SSO だけに絞ると **passkey-only ユーザー**
+        // (password 未設定・SSO 未連携) が enrollment の入口で手段ゼロになり詰む。
+        // これらは satisfier 側であり、通すこと自体は 2FA ゲートの解除にならない
+        // (準拠判定は two_factor_confirmed_at のみが決める)。
+        'passkey.confirm-options' => 'passkey による step-up の challenge 発行',
+        'passkey.confirm' => 'passkey による step-up 完了',
         // {intent} は login/register/link/step-up 共用だが、認証済みユーザーの主用途は
         // step-up (SSO-only ユーザーの再認証)。link を許してもゲート解除にはならない
         'social.redirect' => 'SSO step-up の開始 (SSO-only ユーザーの再認証)',

@@ -319,6 +319,10 @@ test('2FA 秘密 GET のレーンは独立している — 10 回踏んでも re
     //   inline へ戻す変更を入れたらこのテストが落ちる。
     $user = User::factory()->withTwoFactor()->create();
     $this->actingAs($user);
+    // T124: 秘密 GET は recent-auth 必須になった。step-up 済み相当の session を与えて
+    // **実際に秘密が返る通常経路**でレーンを数える (鮮度切れの 302 を数えても
+    // 「連続取得の上限」の観測にならない)。閾値・limiter 名・アサーションは変えない。
+    $this->withSession(freshRecentAuthSession());
 
     for ($i = 1; $i <= 10; $i++) {
         expect($this->get('/user/two-factor-qr-code')->getStatusCode())
@@ -335,13 +339,16 @@ test('2FA 秘密 GET のレーンは独立している — 10 回踏んでも re
         ->not->toBe(429, '2FA 管理 POST が 2FA 秘密 GET の巻き添えで 429 になりました');
 });
 
-test('2FA 秘密 GET は 11 回目で 429 — これは連続取得の回数上限であって認証強度ではない (認証強度は後続 TODO B2)', function (): void {
+test('2FA 秘密 GET は 11 回目で 429 — これは連続取得の回数上限であって認証強度ではない (認証強度は T124 の recent-auth)', function (): void {
     // ★誤読防止: ここで固定しているのは「回数の上限」だけである。
-    //   qr-code / secret-key / recovery-codes を **step-up なしで読めること自体**の是非は
-    //   aicue:T120 の後続 TODO B2 (recent-auth 化) の担当であり、本テストが green でも
+    //   qr-code / secret-key / recovery-codes を **step-up なしで読めないこと**は
+    //   T124 の recent-auth 配線 (RecentAuthRouteTest / TwoFactorStepUpInventoryTest /
+    //   TwoFactorSecretReadStepUpTest) の担当であり、本テストが green でも
     //   「秘密の保護が済んだ」ことは 1 ミリも意味しない。
     $user = User::factory()->withTwoFactor()->create();
     $this->actingAs($user);
+    // T124: step-up 済み相当の session (上のテストと同じ理由)
+    $this->withSession(freshRecentAuthSession());
 
     for ($i = 1; $i <= 10; $i++) {
         expect($this->get('/user/two-factor-secret-key')->getStatusCode())
@@ -359,6 +366,8 @@ test('2FA 秘密 GET 3 本は 1 つのレーンを共有する (描画で複数�
     //   残数が連続しなくなりここで落ちる。
     $user = User::factory()->withTwoFactor()->create();
     $this->actingAs($user);
+    // T124: step-up 済み相当の session (上のテストと同じ理由)
+    $this->withSession(freshRecentAuthSession());
 
     $uris = ['/user/two-factor-qr-code', '/user/two-factor-secret-key', '/user/two-factor-recovery-codes'];
     $previous = null;

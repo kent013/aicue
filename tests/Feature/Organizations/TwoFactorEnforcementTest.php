@@ -6,6 +6,7 @@ use App\Enums\OrganizationRole;
 use App\Enums\SecurityEventType;
 use App\Http\Middleware\RequireTwoFactorForEnforcedOrganizations;
 use App\Models\Organization;
+use App\Models\Passkey;
 use App\Models\SecurityAuditEvent;
 use App\Models\User;
 use App\Notifications\User\TwoFactorResetSecurityNotification;
@@ -232,6 +233,45 @@ test('allowlist の各 route はゲート中でも settings.security へ redirec
     }
 })->with(array_keys(RequireTwoFactorForEnforcedOrganizations::ALLOWED_ROUTE_NAMES));
 
+test('2FA 必須ゲート下の passkey-only ユーザーは passkey step-up の challenge を取得できる (T124)', function (): void {
+    // enrollment (two-factor.enable / qr-code / secret-key) に step-up が課された結果、
+    // satisfier の到達性が enrollment の前提になった。password / 再SSO / passkey の
+    // どれか 1 つでも allowlist から漏れると、その手段しか持たないユーザーが入口で詰む。
+    [$organization] = tfeCreateOrganization(twoFactorRequired: true);
+    $member = tfeAddMember($organization, 'pending');
+    // 「passkey-only」をテスト名だけの主張にしない: password を実際に外す
+    // (users.password は SSO-only ユーザーのため nullable)。SSO 連携も張らないので
+    // このユーザーの step-up 手段は passkey 1 本だけになる。
+    $member->forceFill(['password' => null])->save();
+    Passkey::factory()->for($member)->create();
+
+    $member->refresh();
+    expect($member->password)->toBeNull();
+    expect($member->socialAccounts()->count())->toBe(0);
+
+    $response = $this->actingAs($member)->getJson('/passkeys/confirm/options');
+
+    // 本施策の直接の回帰: ゲートによる settings.security への redirect でないこと
+    expect($response->headers->get('Location'))->not->toBe(route('settings.security'));
+    // 期待値は vendor controller の正常契約から確定している:
+    // Laravel\Passkeys\Http\Controllers\PasskeyConfirmationController::index() は
+    // response()->json(['options' => ...]) を返す = 200。
+    // (「allowlist は通ったが実用上は壊れている」空振りを排除する)
+    $response->assertOk()->assertJsonStructure(['options']);
+});
+
+test('allowlist 外の passkey 管理 route はゲート中に settings.security へ 302 (T124 の負のコントロール)', function (): void {
+    // 「passkey なら何でも通す」になっていないことの証拠。registration-options は
+    // credential を**増やす**管理経路であり satisfier ではない。
+    [$organization] = tfeCreateOrganization(twoFactorRequired: true);
+    $member = tfeAddMember($organization, 'pending');
+
+    $this->actingAs($member)
+        ->withSession(freshRecentAuthSession())
+        ->get('/user/passkeys/options')
+        ->assertRedirect(route('settings.security'));
+});
+
 test('非許可 route の代表はゲート中必ず settings.security へ 302', function (string $path): void {
     [$organization] = tfeCreateOrganization(twoFactorRequired: true);
     $member = tfeAddMember($organization, 'disabled');
@@ -271,7 +311,11 @@ test('状態遷移 (Fortify 実経路): ゲート → enable → confirm → ゲ
     $this->get(route('settings.security'))->assertOk();
 
     // 3. Fortify 実 POST で enrollment 開始
-    $this->post('/user/two-factor-authentication')->assertRedirect();
+    //    T124: enable は step-up 必須になった (force=true の seed 差し替えによる永久ロックアウト対策)。
+    //    実運用ではログイン直後 15 分は StampRecentAuthOnLogin により fresh なので、
+    //    ここでも「step-up 済み相当」の session を与えて enrollment 本体の遷移を検証する。
+    $this->withSession(freshRecentAuthSession())
+        ->post('/user/two-factor-authentication')->assertRedirect();
     $secret = decrypt($member->fresh()->two_factor_secret);
     expect($secret)->toBeString();
 

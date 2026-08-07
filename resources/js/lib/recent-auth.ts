@@ -130,7 +130,24 @@ export async function withRecentAuth(handlers: {
 /** RecentAuthRequiredDto::CODE と対 (code 厳格一致で自分宛て応答のみ処理する) */
 const RECENT_AUTH_REQUIRED_CODE = "recent_auth_required";
 /** 遷移を許す唯一の着地 (サーバ由来 URL を無検証でグローバル遷移に使わない) */
-const RECENT_AUTH_CONFIRM_PATH = "/recent-auth/confirm";
+export const RECENT_AUTH_CONFIRM_PATH = "/recent-auth/confirm";
+
+/**
+ * XHR 応答が recent-auth の 409 契約か。**status だけでは判定しない**。
+ *
+ * 同じ 409 を `RequireTwoFactorForEnforcedOrganizations` も返す
+ * (`code: "two_factor_required"`) ため、status のみの判定は**誤食する**。
+ * body の形状は信用せず unknown から絞り込む型ガードにする
+ * (parseRecentAuthStatus と同じ流儀)。
+ *
+ * Inertia visit 側の判定 (recentAuthRedirectTarget) と同じ定数を共有し、
+ * 判定点を 2 つ作らない。
+ */
+export function isRecentAuthRequiredPayload(status: number, body: unknown): boolean {
+    if (status !== 409) return false;
+    if (typeof body !== "object" || body === null) return false;
+    return (body as Record<string, unknown>).code === RECENT_AUTH_REQUIRED_CODE;
+}
 
 /**
  * `httpException` の `event.detail.response` (Inertia core の `HttpExceptionResponse` =
