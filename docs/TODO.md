@@ -23,7 +23,6 @@
 |---|---|---|---|---|---|---|---|
 | T085 | bfcache 実復元の iOS 実機受入確認 | test | Playwright 不可のため実機で確認+記録 | High | standalone | [設計](devnotes/20260803-0053-aigenba-alignment/) | 2026-08-03 03:10 |
 | T110 | 認証手段変更のメール通知ポリシーの統一設計 | backend | passkey/2FA/SSO の増減通知を一貫したポリシーとして設計する(T108 S7 は監査ログのみで通知は見送り) | Low | standalone | [設計](devnotes/20260805-1550-security-audit-remediation/) | 2026-08-05 17:45 |
-| T136 | 同意バージョン解決点の単一化とgate | backend | 同意バージョン解決点の単一化とgate | Medium | incremental | [設計](devnotes/20260809-0027-legal-consent-single-source/) | 2026-08-09 00:50 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
