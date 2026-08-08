@@ -13,6 +13,8 @@ use App\Services\Billing\Fakes\FakeAutoRechargeGateway;
 use App\Services\Billing\Fakes\FakeStripeGateway;
 use App\Services\Billing\Fakes\FakeTicketCheckoutGateway;
 use App\Services\Billing\TicketCheckoutGateway;
+use App\Services\Captcha\RecaptchaVerifier;
+use App\Services\Captcha\Testing\RecaptchaVerifierTestFake;
 use App\Services\Capture\Fakes\FakeTakeObjectStorage;
 use App\Services\Capture\TakeObjectStorage;
 use App\Services\Render\Fakes\FakeRenderObjectStorage;
@@ -33,8 +35,10 @@ use Illuminate\Support\ServiceProvider;
  *    production は加えて ProductionEnvGuard が flag=true を deploy 時 fail-fast で拒否する。
  *
  * fake 対象は 2 系統で capability flag も allowlist も異なる:
- * - Stripe 課金 gateway: config('testing.fake_externals') が capability flag。
- *   container bind (per-test 隔離が効くため testing 可)。register() で配線。
+ * - 外部サービス (Stripe 課金 gateway + captcha 検証器): config('testing.fake_externals') が
+ *   capability flag。container bind (per-test 隔離が効くため testing 可)。register() で配線。
+ *   **SSO (Socialite) は fake しない** (差し替え先を作っていない。
+ *   docs/architecture.md §外部到達点の目録 (標準形 v1) を参照)。
  * - LLM (Prism): config('testing.fake_llm') が capability flag (fake_externals から分離)。
  *   Prompt::$fake は static (プロセスグローバル) のため testing/local を除外し bughunt.local のみ配線。
  *   bughunt 既定は real-llm (fake_llm off) で install しない。--fake-llm 時のみ install する。
@@ -42,8 +46,13 @@ use Illuminate\Support\ServiceProvider;
  */
 class FakeExternalsServiceProvider extends ServiceProvider
 {
-    /** Stripe 課金 gateway fake を許可する環境 allowlist (container bind。per-test 隔離が効くため testing 可) */
-    private const array PAYMENT_FAKE_ENVIRONMENTS = ['local', 'testing', 'bughunt.local'];
+    /**
+     * 外部サービス fake を許可する環境 allowlist (container bind。per-test 隔離が効くため testing 可)。
+     *
+     * ★対象は **Stripe 課金 gateway と captcha 検証器**。SSO (Socialite) は fake しない
+     *   (差し替え先を作っていない。docs/architecture.md §外部到達点の目録)。
+     */
+    private const array EXTERNAL_FAKE_ENVIRONMENTS = ['local', 'testing', 'bughunt.local'];
 
     /** LLM (Prism) fake の install を許可する環境 allowlist (Prompt::$fake は static。testing/local を除外) */
     private const array LLM_FAKE_ENVIRONMENTS = ['bughunt.local'];
@@ -51,8 +60,8 @@ class FakeExternalsServiceProvider extends ServiceProvider
     public function register(): void
     {
         // capability ごとに独立 private method へ分離する (early return が他 capability を巻き込まない)。
-        $this->registerPaymentFakes(); // Stripe: fake_externals 依存 (挙動不変)
-        $this->registerStorageFakes(); // storage: fake_storage (FakeStorageGate) 依存 — 独立
+        $this->registerExternalServiceFakes(); // Stripe + captcha: fake_externals 依存 (挙動不変)
+        $this->registerStorageFakes();         // storage: fake_storage (FakeStorageGate) 依存 — 独立
     }
 
     public function boot(): void
@@ -61,15 +70,15 @@ class FakeExternalsServiceProvider extends ServiceProvider
         $this->bootStorageRoutes(); // storage signed route — 独立
     }
 
-    /** Stripe 課金 gateway fake (fake_externals + PAYMENT_FAKE_ENVIRONMENTS。挙動不変) */
-    private function registerPaymentFakes(): void
+    /** 外部サービス fake (fake_externals + EXTERNAL_FAKE_ENVIRONMENTS。挙動不変) */
+    private function registerExternalServiceFakes(): void
     {
         if (config('testing.fake_externals') !== true) {
             return;
         }
 
         $environment = $this->app->environment();
-        if (! in_array($environment, self::PAYMENT_FAKE_ENVIRONMENTS, true)) {
+        if (! in_array($environment, self::EXTERNAL_FAKE_ENVIRONMENTS, true)) {
             Log::warning('TESTING_FAKE_EXTERNALS=true ですが allowlist 外の環境のため fake を bind しません。', [
                 'environment' => $environment,
             ]);
@@ -81,6 +90,12 @@ class FakeExternalsServiceProvider extends ServiceProvider
         $this->app->bind(TicketCheckoutGateway::class, FakeTicketCheckoutGateway::class);
         $this->app->bind(StripeGatewayInterface::class, FakeStripeGateway::class);
         $this->app->bind(AutoRechargeGatewayInterface::class, FakeAutoRechargeGateway::class);
+
+        // captcha 到達点を fake へ rebind。
+        // ★abstract が具象クラスのため、bind を消しても Laravel が本物を自動組み立てし、
+        //   RECAPTCHA_SECRET_KEY が設定された瞬間に**無言で** Google siteverify を叩く。
+        //   StrayHttpRequestGuard は bug-hunt の別プロセス実行には効かない (AGENTS.md)。
+        $this->app->bind(RecaptchaVerifier::class, RecaptchaVerifierTestFake::class);
     }
 
     /** LLM (Prism) fake (fake_llm + LLM_FAKE_ENVIRONMENTS。挙動不変) */

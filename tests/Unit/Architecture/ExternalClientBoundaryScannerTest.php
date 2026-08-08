@@ -266,3 +266,22 @@ test('Stripe の大域 setter は Stripe 名前空間の receiver に限って�
     expect(array_column(ExternalClientBoundaryScanner::stripeGlobalSites('app/Gate/Sample.php', $source), 'name'))
         ->toBe(['setHttpClient', 'setMaxNetworkRetries', 'instance']);
 });
+
+test('グループ use を接頭辞ごと解決する', function (): void {
+    // ★T138 の走査基盤抽出 (PhpReferenceScanner) で group use の接頭辞連結を直した際の回帰。
+    //   抽出前は `use Aws\{S3\S3Client, ...}` の区切り `\` を落として
+    //   `AwsS3\S3Client` と解決していた (= 検出漏れ)。app/ に group use が無いため
+    //   T126 の母集団は変わらないが、docblock が謳う仕様との差を残さない。
+    $source = <<<'PHP'
+    <?php
+    namespace App\Gate;
+    use Aws\{S3\S3Client, Sns\SnsClient};
+    class Sample { public function f(SnsClient $s): S3Client { return new S3Client([]); } }
+    PHP;
+
+    expect(scannerSummary(ExternalClientBoundaryScanner::scan('app/Gate/Sample.php', $source)))->toBe([
+        ['rule' => 'imported_name_reference', 'name' => 'Aws\Sns\SnsClient', 'class' => 'App\Gate\Sample', 'scope' => 'NamedClass'],
+        ['rule' => 'imported_name_reference', 'name' => 'Aws\S3\S3Client', 'class' => 'App\Gate\Sample', 'scope' => 'NamedClass'],
+        ['rule' => 'new_external_object', 'name' => 'Aws\S3\S3Client', 'class' => 'App\Gate\Sample', 'scope' => 'NamedClass'],
+    ]);
+});
