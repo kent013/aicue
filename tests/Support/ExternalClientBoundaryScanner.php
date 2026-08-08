@@ -8,6 +8,11 @@ namespace Tests\Support;
  * 「AWS SDK / Flysystem (= 外部ストレージ client) へ到達しうる site」と
  * 「Stripe SDK のプロセス大域 setter を呼ぶ site」を PHP ソースから静的に走査する純関数群。
  *
+ * ★走査そのものは `PhpReferenceScanner` (中立走査器) に委譲し、本クラスは
+ *   **「何を到達境界とみなすか」の filter だけ**を持つ。同じ namespace 解決 /
+ *   alias マップ / brace scope 追跡を 2 本持たないため (T138 で抽出。public API と
+ *   出力 shape は抽出前と完全に不変)。
+ *
  * ★走査は `PhpTokenScan::normalize()` (空白 / コメント / DocComment 除去) の結果に対して行う。
  *   `T_CONSTANT_ENCAPSED_STRING` の中身は名前解決の対象にしない
  *   (コメント・文字列中の `Aws\` を拾わない = 偽陽性の排除)。
@@ -91,6 +96,9 @@ final class ExternalClientBoundaryScanner
     /**
      * 全規則の site を 1 パスで走査する。
      *
+     * ★分岐順は抽出前の `continue` 順と同じ (disk / getClient / stripe を名前参照より**先**に
+     *   評価する)。順序を変えると `dropOrphanGetClientSites()` の入力が変わる。
+     *
      * @return list<array{
      *     path: string,
      *     line: int,
@@ -104,199 +112,51 @@ final class ExternalClientBoundaryScanner
      */
     public static function scan(string $relativePath, string $phpSource): array
     {
-        $tokens = PhpTokenScan::normalize($phpSource);
-        $count = count($tokens);
-
-        $namespace = '';
-        /** @var array<string, string> $aliases short name (小文字) => FQCN */
-        $aliases = [];
-
-        $braceDepth = 0;
-        /** @var list<array{kind: ScanScopeKind, class: string|null, bodyDepth: int}> $scopes */
-        $scopes = [];
-        /** @var array{kind: ScanScopeKind, class: string|null}|null $pendingScope */
-        $pendingScope = null;
-        /** @var list<array{name: string, bodyDepth: int}> $callables */
-        $callables = [];
-        $pendingCallable = null;
-
+        $tokens = PhpReferenceScanner::tokens($phpSource);
         $sites = [];
 
-        for ($i = 0; $i < $count; $i++) {
-            $token = $tokens[$i];
-            $id = $token['id'];
-            $text = $token['text'];
+        foreach (PhpReferenceScanner::references($relativePath, $phpSource)->sites as $reference) {
+            $isCall = $reference->kind === ReferenceKind::MethodCall || $reference->kind === ReferenceKind::StaticCall;
 
-            // --- namespace 宣言 ---
-            if ($id === T_NAMESPACE) {
-                $next = $tokens[$i + 1] ?? null;
-                if ($next !== null && ($next['id'] === T_NAME_QUALIFIED || $next['id'] === T_STRING)) {
-                    $namespace = $next['text'];
-                    $i++;
-                }
-
-                continue;
-            }
-
-            // --- R1: use import (alias マップ構築専用。母集団へ登録しない) ---
-            if ($id === T_USE) {
-                $next = $tokens[$i + 1] ?? null;
-                // closure の `use ($x)` は import ではない
-                if ($next !== null && $next['text'] === '(') {
-                    continue;
-                }
-                $i = self::collectUseStatement($tokens, $i, $aliases);
-
-                continue;
-            }
-
-            // --- クラス様宣言 (次の `{` で scope を push する) ---
-            if ($id === T_CLASS || $id === T_TRAIT || $id === T_INTERFACE || $id === T_ENUM) {
-                $previous = $tokens[$i - 1] ?? null;
-                if ($previous !== null && $previous['id'] === T_DOUBLE_COLON) {
-                    continue; // `Foo::class`
-                }
-
-                $next = $tokens[$i + 1] ?? null;
-                $isNamed = $next !== null && $next['id'] === T_STRING;
-                $pendingScope = [
-                    'kind' => $isNamed ? ScanScopeKind::NamedClass : ScanScopeKind::AnonymousClass,
-                    'class' => $isNamed && $next !== null
-                        ? ($namespace === '' ? $next['text'] : $namespace.'\\'.$next['text'])
-                        : null,
-                ];
-
-                continue;
-            }
-
-            // --- 関数 / メソッド宣言 (診断用の callable 名) ---
-            if ($id === T_FUNCTION) {
-                $next = $tokens[$i + 1] ?? null;
-                $name = $next !== null && $next['id'] === T_STRING ? $next['text'] : '{closure}';
-                $pendingCallable = $name;
-
-                continue;
-            }
-
-            // --- 文字列補間の `{$x}` / `${x}` ---
-            // ★閉じ `}` は**単一文字トークン**として現れるため、開き側を depth に数えないと
-            //   brace が片側だけ減り、以降の site が誤って FileScope 帰属になる (実測で発覚)。
-            if ($id === T_CURLY_OPEN || $id === T_DOLLAR_OPEN_CURLY_BRACES) {
-                $braceDepth++;
-
-                continue;
-            }
-
-            // --- brace の出入りで scope を push / pop ---
-            if ($id === null && $text === '{') {
-                $braceDepth++;
-                if ($pendingScope !== null) {
-                    $scopes[] = ['kind' => $pendingScope['kind'], 'class' => $pendingScope['class'], 'bodyDepth' => $braceDepth];
-                    $pendingScope = null;
-                } elseif ($pendingCallable !== null) {
-                    $callables[] = ['name' => $pendingCallable, 'bodyDepth' => $braceDepth];
-                    $pendingCallable = null;
-                }
-
-                continue;
-            }
-
-            if ($id === null && $text === '}') {
-                $top = $scopes === [] ? null : $scopes[count($scopes) - 1];
-                if ($top !== null && $top['bodyDepth'] === $braceDepth) {
-                    array_pop($scopes);
-                }
-                $topCallable = $callables === [] ? null : $callables[count($callables) - 1];
-                if ($topCallable !== null && $topCallable['bodyDepth'] === $braceDepth) {
-                    array_pop($callables);
-                }
-                $braceDepth--;
-
-                continue;
-            }
-
-            // 宣言だけで本体が無い (interface / abstract メソッド) の取りこぼしを残さない
-            if ($id === null && $text === ';') {
-                $pendingCallable = null;
-                $pendingScope = null;
-
-                continue;
-            }
-
-            $scopeKind = $scopes === [] ? ScanScopeKind::FileScope : $scopes[count($scopes) - 1]['kind'];
-            $scopeClass = $scopes === [] ? null : $scopes[count($scopes) - 1]['class'];
-            $callableName = $callables === [] ? null : $callables[count($callables) - 1]['name'];
-
-            // --- R2: 完全修飾 / 修飾名による参照 ---
-            if ($id === T_NAME_FULLY_QUALIFIED || $id === T_NAME_QUALIFIED) {
-                if (self::isTargetName($text)) {
-                    $rule = ($tokens[$i - 1]['id'] ?? null) === T_NEW ? 'new_external_object' : 'fqn_reference';
-                    $sites[] = self::site($relativePath, $token['line'], $rule, ltrim($text, '\\'), $scopeKind, $scopeClass, $callableName, null);
-                }
-
-                continue;
-            }
-
-            if ($id !== T_STRING) {
-                continue;
-            }
-
-            $previous = $tokens[$i - 1] ?? null;
-            $previousId = $previous['id'] ?? null;
-            $isMemberAccess = $previousId === T_OBJECT_OPERATOR || $previousId === T_NULLSAFE_OBJECT_OPERATOR;
-            $isStaticAccess = $previousId === T_DOUBLE_COLON;
-            $next = $tokens[$i + 1] ?? null;
-            $isCall = $next !== null && $next['id'] === null && $next['text'] === '(';
-
-            // --- R4: disk() 呼び出し (receiver を問わない) ---
-            if ($text === 'disk' && ($isMemberAccess || $isStaticAccess) && $isCall) {
-                $sites[] = self::site(
-                    $relativePath,
-                    $token['line'],
+            $site = match (true) {
+                // R4: disk() 呼び出し (receiver を問わない)
+                $isCall && $reference->name === 'disk' => self::fromReference(
+                    $reference,
                     'disk_call',
                     'disk',
-                    $scopeKind,
-                    $scopeClass,
-                    $callableName,
-                    self::classifyCallArgument($tokens, $i + 1),
-                );
+                    self::classifyCallArgument($tokens, $reference->tokenIndex + 1),
+                ),
 
-                continue;
-            }
+                // R5: getClient() 呼び出し (receiver を問わない)
+                $isCall && $reference->name === 'getClient' => self::fromReference(
+                    $reference,
+                    'get_client_call',
+                    'getClient',
+                    null,
+                ),
 
-            // --- R5: getClient() 呼び出し (receiver を問わない) ---
-            if ($text === 'getClient' && ($isMemberAccess || $isStaticAccess) && $isCall) {
-                $sites[] = self::site($relativePath, $token['line'], 'get_client_call', 'getClient', $scopeKind, $scopeClass, $callableName, null);
+                // R6: Stripe のプロセス大域 setter
+                $reference->kind === ReferenceKind::StaticCall
+                    && in_array($reference->name, self::STRIPE_GLOBAL_SYMBOLS, true)
+                    && $reference->receiver !== null
+                    && str_starts_with($reference->receiver, 'Stripe\\') => self::fromReference($reference, 'stripe_global_setter', $reference->name, null),
 
-                continue;
-            }
-
-            // --- R6: Stripe のプロセス大域 setter ---
-            if (in_array($text, self::STRIPE_GLOBAL_SYMBOLS, true) && $isStaticAccess && $isCall) {
-                $receiver = $tokens[$i - 2] ?? null;
-                $receiverName = $receiver === null ? null : self::resolveName($receiver, $aliases);
-                if ($receiverName !== null && str_starts_with($receiverName, 'Stripe\\')) {
-                    $sites[] = self::site($relativePath, $token['line'], 'stripe_global_setter', $text, $scopeKind, $scopeClass, $callableName, null);
-
-                    continue;
-                }
-            }
-
-            // --- R3: import 済み short name による参照 (型宣言 / new / ::class / instanceof を含む) ---
-            if ($isMemberAccess || $isStaticAccess) {
-                continue; // メソッド名 / 定数名であってクラス参照ではない
-            }
-            if ($previousId === T_FUNCTION || $previousId === T_CONST || $previousId === T_CLASS
-                || $previousId === T_INTERFACE || $previousId === T_TRAIT || $previousId === T_ENUM
-                || $previousId === T_AS || $previousId === T_GOTO) {
-                continue; // 宣言名であって参照ではない
-            }
-            $resolved = $aliases[mb_strtolower($text)] ?? null;
-            if ($resolved !== null && self::isTargetName($resolved)) {
                 // R7: `new Aws\…` は「構築点」であり、DI で受け取るだけの消費点と区別する
-                // (免除理由の適用条件を機械検査するために種別を分ける)。
-                $rule = $previousId === T_NEW ? 'new_external_object' : 'imported_name_reference';
-                $sites[] = self::site($relativePath, $token['line'], $rule, $resolved, $scopeKind, $scopeClass, $callableName, null);
+                $reference->kind === ReferenceKind::Construction && self::isTargetName($reference->name) => self::fromReference($reference, 'new_external_object', $reference->name, null),
+
+                // R2 / R3: 到達境界の名前参照
+                $reference->kind === ReferenceKind::NameReference && self::isTargetName($reference->name) => self::fromReference(
+                    $reference,
+                    $reference->qualified ? 'fqn_reference' : 'imported_name_reference',
+                    $reference->name,
+                    null,
+                ),
+
+                default => null,
+            };
+
+            if ($site !== null) {
+                $sites[] = $site;
             }
         }
 
@@ -333,104 +193,6 @@ final class ExternalClientBoundaryScanner
             $sites,
             static fn (array $site): bool => $site['rule'] !== 'get_client_call',
         ));
-    }
-
-    /**
-     * `use` 文を読み進めて alias マップへ登録し、`;` の添字を返す。
-     *
-     * `use function` / `use const` は名前解決の対象外 (クラス参照ではない)。
-     * グループ use (`use Aws\{S3\S3Client, Sns\SnsClient};`) にも対応する。
-     *
-     * @param  list<array{id: int|null, text: string, line: int}>  $tokens
-     * @param  array<string, string>  $aliases
-     */
-    private static function collectUseStatement(array $tokens, int $useIndex, array &$aliases): int
-    {
-        $count = count($tokens);
-        $i = $useIndex + 1;
-
-        if (($tokens[$i]['id'] ?? null) === T_FUNCTION || ($tokens[$i]['id'] ?? null) === T_CONST) {
-            // 関数 / 定数の import。`;` まで読み飛ばす
-            while ($i < $count && ! ($tokens[$i]['id'] === null && $tokens[$i]['text'] === ';')) {
-                $i++;
-            }
-
-            return $i;
-        }
-
-        $prefix = '';
-        $current = '';
-        $alias = null;
-        $expectAlias = false;
-
-        for (; $i < $count; $i++) {
-            $token = $tokens[$i];
-            $id = $token['id'];
-            $text = $token['text'];
-
-            if ($id === null && ($text === ';' || $text === '{' || $text === '}' || $text === ',')) {
-                if ($current !== '') {
-                    $fqcn = ltrim($prefix.$current, '\\');
-                    $short = $alias ?? self::shortName($fqcn);
-                    $aliases[mb_strtolower($short)] = $fqcn;
-                }
-                $current = '';
-                $alias = null;
-                $expectAlias = false;
-
-                if ($text === '{') {
-                    // グループ use: 直前までの名前が接頭辞になる
-                    $prefix = '';
-                    // `{` の直前に確定させた current を接頭辞へ戻す必要があるため再構築する
-                    $prefix = self::groupPrefix($tokens, $useIndex, $i);
-
-                    continue;
-                }
-
-                if ($text === ';') {
-                    return $i;
-                }
-
-                continue;
-            }
-
-            if ($id === T_AS) {
-                $expectAlias = true;
-
-                continue;
-            }
-
-            if ($id === T_STRING || $id === T_NAME_QUALIFIED || $id === T_NAME_FULLY_QUALIFIED) {
-                if ($expectAlias) {
-                    $alias = $text;
-
-                    continue;
-                }
-                $current .= $text;
-
-                continue;
-            }
-        }
-
-        return $count - 1;
-    }
-
-    /**
-     * グループ use の接頭辞 (`use Aws\{...}` の `Aws\`) を組み立てる。
-     *
-     * @param  list<array{id: int|null, text: string, line: int}>  $tokens
-     */
-    private static function groupPrefix(array $tokens, int $useIndex, int $braceIndex): string
-    {
-        $prefix = '';
-        for ($i = $useIndex + 1; $i < $braceIndex; $i++) {
-            $id = $tokens[$i]['id'];
-            if ($id === T_STRING || $id === T_NAME_QUALIFIED || $id === T_NAME_FULLY_QUALIFIED) {
-                $prefix .= $tokens[$i]['text'];
-            }
-        }
-
-        return ltrim($prefix, '\\');
     }
 
     /**
@@ -489,25 +251,6 @@ final class ExternalClientBoundaryScanner
         return 'dynamic';
     }
 
-    /**
-     * トークンをクラス名 (FQCN) として解決する。解決できなければ null。
-     *
-     * @param  array{id: int|null, text: string, line: int}  $token
-     * @param  array<string, string>  $aliases
-     */
-    private static function resolveName(array $token, array $aliases): ?string
-    {
-        $id = $token['id'];
-        if ($id === T_NAME_FULLY_QUALIFIED || $id === T_NAME_QUALIFIED) {
-            return ltrim($token['text'], '\\');
-        }
-        if ($id === T_STRING) {
-            return $aliases[mb_strtolower($token['text'])] ?? null;
-        }
-
-        return null;
-    }
-
     /** 到達境界の対象名か。 */
     private static function isTargetName(string $name): bool
     {
@@ -526,14 +269,9 @@ final class ExternalClientBoundaryScanner
         return false;
     }
 
-    private static function shortName(string $fqcn): string
-    {
-        $position = strrpos($fqcn, '\\');
-
-        return $position === false ? $fqcn : substr($fqcn, $position + 1);
-    }
-
     /**
+     * 中立走査器の site を本目録の site shape へ変換する。
+     *
      * @param  'none'|'static'|'dynamic'|null  $diskArgument
      * @return array{
      *     path: string,
@@ -546,24 +284,20 @@ final class ExternalClientBoundaryScanner
      *     diskArgument: 'none'|'static'|'dynamic'|null,
      * }
      */
-    private static function site(
-        string $path,
-        int $line,
+    private static function fromReference(
+        ReferenceSite $reference,
         string $rule,
         string $name,
-        ScanScopeKind $scopeKind,
-        ?string $class,
-        ?string $callable,
         ?string $diskArgument,
     ): array {
         return [
-            'path' => $path,
-            'line' => $line,
+            'path' => $reference->path,
+            'line' => $reference->line,
             'rule' => $rule,
             'name' => $name,
-            'scopeKind' => $scopeKind,
-            'class' => $class,
-            'callable' => $callable,
+            'scopeKind' => $reference->scopeKind,
+            'class' => $reference->class,
+            'callable' => $reference->callable,
             'diskArgument' => $diskArgument,
         ];
     }
@@ -587,30 +321,6 @@ final class ExternalClientBoundaryScanner
      */
     public static function phpFiles(string $absoluteRoot, string $relativeRoot): array
     {
-        if (! is_dir($absoluteRoot)) {
-            return [];
-        }
-
-        $iterator = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($absoluteRoot, \FilesystemIterator::SKIP_DOTS),
-        );
-
-        $files = [];
-        foreach ($iterator as $file) {
-            if (! $file instanceof \SplFileInfo || $file->getExtension() !== 'php') {
-                continue;
-            }
-            $absolute = $file->getPathname();
-            $source = file_get_contents($absolute);
-            if ($source === false) {
-                continue;
-            }
-            $relative = $relativeRoot.'/'.ltrim(str_replace($absoluteRoot, '', $absolute), '/');
-            $files[$relative] = $source;
-        }
-
-        ksort($files);
-
-        return $files;
+        return PhpReferenceScanner::phpFiles($absoluteRoot, $relativeRoot);
     }
 }

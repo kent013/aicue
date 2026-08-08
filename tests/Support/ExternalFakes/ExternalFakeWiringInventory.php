@@ -16,6 +16,8 @@ use App\Services\Billing\Fakes\FakeAutoRechargeGateway;
 use App\Services\Billing\Fakes\FakeStripeGateway;
 use App\Services\Billing\Fakes\FakeTicketCheckoutGateway;
 use App\Services\Billing\TicketCheckoutGateway;
+use App\Services\Captcha\RecaptchaVerifier;
+use App\Services\Captcha\Testing\RecaptchaVerifierTestFake;
 use App\Services\Capture\Fakes\FakeTakeObjectStorage;
 use App\Services\Capture\TakeObjectStorage;
 use App\Services\Render\Fakes\FakeRenderObjectStorage;
@@ -35,8 +37,8 @@ use App\Support\FakeStorageGate;
  */
 final class ExternalFakeWiringInventory
 {
-    /** 課金 fake の capability flag */
-    public const string PAYMENT_FLAG = 'testing.fake_externals';
+    /** 外部サービス fake (Stripe 課金 + captcha) の capability flag */
+    public const string EXTERNALS_FLAG = 'testing.fake_externals';
 
     /** storage fake の capability flag */
     public const string STORAGE_FLAG = 'testing.fake_storage';
@@ -44,8 +46,8 @@ final class ExternalFakeWiringInventory
     /** LLM fake の capability flag (container 差し替えではないため bindings() には現れない) */
     public const string LLM_FLAG = 'testing.fake_llm';
 
-    /** 課金 fake の env allowlist (FakeExternalsServiceProvider::PAYMENT_FAKE_ENVIRONMENTS と対) */
-    private const array PAYMENT_ENVIRONMENTS = ['local', 'testing', 'bughunt.local'];
+    /** 外部サービス fake の env allowlist (FakeExternalsServiceProvider::EXTERNAL_FAKE_ENVIRONMENTS と対) */
+    private const array EXTERNAL_ENVIRONMENTS = ['local', 'testing', 'bughunt.local'];
 
     /** storage fake の env allowlist (FakeStorageGate の predicate と対。testing は runningUnitTests 前提) */
     private const array STORAGE_ENVIRONMENTS = ['testing', 'bughunt.local'];
@@ -90,24 +92,24 @@ final class ExternalFakeWiringInventory
                 abstract: TicketCheckoutGateway::class,
                 real: CashierTicketCheckoutGateway::class,
                 fake: FakeTicketCheckoutGateway::class,
-                flag: self::PAYMENT_FLAG,
-                allowedEnvironments: self::PAYMENT_ENVIRONMENTS,
+                flag: self::EXTERNALS_FLAG,
+                allowedEnvironments: self::EXTERNAL_ENVIRONMENTS,
                 risk: 'チケットスポット購入の Stripe Checkout。配線が外れると実 Stripe に実課金セッションを作る。',
             ),
             new ExternalFakeBinding(
                 abstract: StripeGatewayInterface::class,
                 real: CashierStripeGateway::class,
                 fake: FakeStripeGateway::class,
-                flag: self::PAYMENT_FLAG,
-                allowedEnvironments: self::PAYMENT_ENVIRONMENTS,
+                flag: self::EXTERNALS_FLAG,
+                allowedEnvironments: self::EXTERNAL_ENVIRONMENTS,
                 risk: 'サブスク Checkout / Customer Portal。配線が外れると実 Stripe に契約を作る。',
             ),
             new ExternalFakeBinding(
                 abstract: AutoRechargeGatewayInterface::class,
                 real: CashierAutoRechargeGateway::class,
                 fake: FakeAutoRechargeGateway::class,
-                flag: self::PAYMENT_FLAG,
-                allowedEnvironments: self::PAYMENT_ENVIRONMENTS,
+                flag: self::EXTERNALS_FLAG,
+                allowedEnvironments: self::EXTERNAL_ENVIRONMENTS,
                 risk: 'オートリチャージの off-session invoice。配線が外れると実カードへ請求が飛ぶ。',
             ),
             new ExternalFakeBinding(
@@ -126,6 +128,17 @@ final class ExternalFakeWiringInventory
                 flag: self::STORAGE_FLAG,
                 allowedEnvironments: self::STORAGE_ENVIRONMENTS,
                 risk: 'レンダ出力の S3 read/write。TakeObjectStorage と同じく具象クラス起点で無音になる。',
+            ),
+            new ExternalFakeBinding(
+                abstract: RecaptchaVerifier::class,
+                real: RecaptchaVerifier::class,
+                fake: RecaptchaVerifierTestFake::class,
+                flag: self::EXTERNALS_FLAG,
+                allowedEnvironments: self::EXTERNAL_ENVIRONMENTS,
+                risk: 'Google reCAPTCHA siteverify への外向き POST。abstract が具象クラスのため、'
+                    .'bind を消しても Laravel が本物を自動組み立てし、RECAPTCHA_SECRET_KEY が'
+                    .'設定された環境では無言で実 Google を叩く (bug-hunt の別プロセスには '
+                    .'StrayHttpRequestGuard が効かない)。',
             ),
         ];
     }

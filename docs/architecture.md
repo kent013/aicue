@@ -1150,3 +1150,112 @@ inline 時代の構造は残っていない)。ただし `ThrottleRequests` は 
 自動再開は 1 enrollment につき 1 回に制限する。status が取れない (delegated) ときは
 **再取得しない** — 再取得すると 409 → status 失敗 → 再取得 の無限ループになるため、
 `enrollment-step-up-blocked` の Alert と再認証ページ導線を出して**人間の操作**を待つ。
+
+## 外部到達点の目録 (標準形 v1 / 検知 v1) (T138)
+
+`app/` から外部サービスへ出るコード到達点を **deny-by-default の目録**で押さえる。
+正本は `Tests\Support\ExternalSeam\ExternalSeamInventory`、強制は
+`tests/Architecture/ExternalSeamInventoryTest.php`。**本節が「保証しないもの」の正本**である
+(`AGENTS.md` ドメイン固有規約と gate 冒頭コメントは要約であり、増減はここで管理する)。
+
+### 目的と、T126 到達境界目録との違い
+
+| | §外部 SDK の待ち上限の規約 (T126) | 本目録 (T138) |
+|---|---|---|
+| 問い | **待ち上限が pin されているか** | **その到達点の身元が検査されているか** |
+| 母集団 | AWS / Flysystem / Storage facade / Stripe 大域 setter | 決済 client の取得・構築 / Socialite / Http / Mail・Notification facade |
+| 目的 | ハング防止 (timeout の宣言) | 差し替え・監視の設計に含める (fake 配線と新経路の検知) |
+
+目的が違うので**両方に載るクラスがある**のは正当である (`AppServiceProvider` は
+AWS SNS クライアント構築で T126 に、`Cashier::stripe()->prices` の container 配線で
+本目録に載る = **別々の到達事実**)。禁じているのは「同じ到達事実の二重宣言」であり、
+規則が分離しているので構造的に起きない。
+
+走査基盤は `Tests\Support\PhpReferenceScanner` (中立走査器) に一本化されており、
+T126 の `ExternalClientBoundaryScanner` も本目録の `ExternalSeamScanner` も
+**同じ namespace 解決 / alias マップ / brace scope 追跡**の上に立つ (2 本持たない)。
+
+### 検出規則 (5 種)
+
+| 規則 | 何を見るか | 名乗ってよい種別 |
+|---|---|---|
+| `payment_client_call` | `Cashier::stripe()` / `$x->stripe()` | `payment` |
+| `payment_client_construction` | `new Stripe\StripeClient` (**完全一致**) | `payment` |
+| `socialite_facade_reference` | `Laravel\Socialite\Facades\Socialite` の参照 | `social_login` |
+| `http_facade_reference` | `Illuminate\Support\Facades\Http` の参照 | `captcha` / `market_data` |
+| `mail_facade_reference` | `Mail` / `Notification` facade の参照 | `mail` |
+
+- **接頭辞走査をしない**。`Stripe\` を素の接頭辞で走ると `GatewayFailureClassifier` が
+  import する Stripe 例外 14 クラスと `StripePriceCatalogEntry` の値オブジェクト参照を拾い、
+  目録が肥大して信号が死ぬ。規則は **client の取得・構築**に限定する。
+- `$x->stripe()` は receiver 非依存で拾い、同一ファイルが決済名前空間 (`Laravel\Cashier\` /
+  `Stripe\`) を **site または import で**知らない場合だけ抑制する。抑制した site は
+  捨てずに `ExternalSeamScanResult::$suppressed` へ積み、gate が **0 件**を固定する
+  (抑制が静かに効いて偽陰性になることがない)。
+- facade の canonical は **`NameReference` のみ**。`Socialite::driver()` は receiver が
+  `NameReference`、メソッドが `StaticCall` として **2 site 出る**ため、両方を採ると
+  1 呼び出しが 2 件に数えられる。
+
+### 種別 × 次元と委譲
+
+`ExternalSeamKind` (payment / social_login / captcha / mail / market_data / object_storage / llm) ×
+`ExternalSeamDimension` (code_reach_point / destination_set) の必須表を
+`ExternalSeamInventory::requiredDimensions()` が exact-fit で宣言し、各対は
+**目録か委譲のちょうど一方**で覆われる (二重宣言も未被覆も赤)。
+
+| 種別 × 次元 | 覆う側 | 委譲先 |
+|---|---|---|
+| `object_storage` × code_reach_point | 委譲 | `ExternalClientTimeoutInventoryTest` (T126) |
+| `llm` × code_reach_point | 委譲 | `PromptGuardrailTest` (Prism 直呼び禁止) |
+| `social_login` × destination_set | 委譲 | `SocialProviderTrustPolicyTest` (`config('template.social_providers')`) |
+| 上記以外 | 目録 (`entries()`) | — |
+
+委譲の結線は 2 層: (1) `livenessProbe` を**実行**して母集団が空でないこと (behavioral)、
+(2) `gateFile` の実在 + `gateTestName` が `PestTestNameScanner` の抽出結果に**完全一致**すること。
+単なる文字列包含にしないのは、改名後も旧名がコメントに残れば緑になってしまうためである。
+
+`payment` に `destination_set` を要求しない: Stripe の宛先は API キーが指す account であり、
+設定面の走査対象にしていない。
+
+### SSO の集約と captcha の fake 配線
+
+- SSO は `App\Http\Controllers\Auth\SocialAuthController` **1 クラスに名指し固定**される
+  (`ExternalSeamInventory::socialLoginFunnel()`)。他クラスからの `Socialite::driver()` は
+  登録も免除もできず必ず赤くなる (集約と直呼び禁止の機械化)。
+- 非本番の captcha は `testing.fake_externals` で `RecaptchaVerifier` →
+  `RecaptchaVerifierTestFake` へ container bind される (`ExternalFakeWiringInventory`)。
+  abstract が**具象クラス**のため bind を消しても Laravel が本物を自動組み立てし、
+  `RECAPTCHA_SECRET_KEY` が設定された環境では**無言で** Google siteverify を叩く
+  (`StrayHttpRequestGuard` は bug-hunt の別プロセス実行には効かない)。
+- **SSO は fake しない**。差し替え先 (SSO fake) を作っていないため、bug-hunt のブラウザは
+  SSO ボタンから実 IdP へ遷移する。
+
+### 免除分類 (`ExternalSeamClassification::Exempt`) は現時点で使用できない
+
+規則を「client の取得・構築」と「外向き facade の参照」に絞った結果、検出 = 実到達となり
+「身元検査不要」側の母集団が **0 件**である。母集団 0 の免除語彙を先に作ると
+「1 件も検査せずに緑」な gate が 3 本増えるため、`Exempt` の使用を gate が明示的に拒否する。
+免除が本当に必要になった時点で、免除語彙 enum・免除前提表・30 文字根拠検査・空振り防止を
+**セットで新設**させる意図的な摩擦である (失敗メッセージが案内する)。
+
+### 保証しないもの (誇張しない。**本節が正本**)
+
+1. **出口の遮断**。本目録は新経路の**検知**であり、実行時の外部通信は止めない。
+   bug-hunt のブラウザが SSO ボタンから実 IdP へ遷移する現状は変わらない
+2. **委譲先の assert の中身**。委譲先の gate が弱められた (必須宣言のうち 1 つを検査しなくなった等)
+   場合は検出できない。結線は「母集団の生存」と「test 名の同定」までである
+3. **`app/` の外**。`routes/` / `config/` に書かれた到達コードは走査しない
+   (SSO の宛先集合だけは委譲で押さえるが、これは SSO 固有の措置である)
+4. **次元そのものの数え落とし**。次元の定義は人手であり、未知の設定面や新 SDK 表面が
+   第 3 の次元を作った場合は沈黙する
+5. **文字列キーの container 解決だけの経路** (型名も呼び出しも出さない形)
+6. **vendor 内部から出る通信** (Cashier / Socialite の内部実装)
+7. **他種別の宛先集合** (Stripe の API キーが指す account / SES の region / 為替 API の URL)
+8. **`.env.bughunt.local` (git 管理外) の内容**。pin できるのは `.env.bughunt.local.example` まで
+9. **決済の別 API 表面**。検出は「client の取得・構築」に限り、新しい静的 helper が増えたときは
+   規則の追加が要る
+10. **部分修飾名の解決**。`T_NAME_QUALIFIED` (`Facades\Http::get()` のような書き方) は
+    現在の namespace への相対解決も先頭 segment の alias 解決も行わない
+    (`ExternalClientBoundaryScanner` と同じ限界)。この限界は
+    `tests/Unit/Architecture/ExternalSeamScannerTest.php` が**テストとして明示的に固定**しており、
+    将来直すときは必ず差分が出る

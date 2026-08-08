@@ -9,9 +9,13 @@ return [
     | 外部サービス fake 化の capability flag
     |--------------------------------------------------------------------------
     |
-    | fake_externals: Stripe 課金 fake の capability flag (既定 false = no-op)。
-    | true のとき FakeExternalsServiceProvider::register() が Stripe checkout/portal
-    | gateway を fake 実装に bind する (bughunt / local 検証用)。
+    | fake_externals: **外部サービス fake の capability flag** (既定 false = no-op)。
+    | true のとき FakeExternalsServiceProvider::register() が以下を fake 実装へ bind する:
+    |   - Stripe 課金 gateway (checkout / portal / auto-recharge)
+    |   - captcha 検証器 (RecaptchaVerifier → RecaptchaVerifierTestFake)
+    | **SSO (Socialite) は fake しない** (差し替え先を作っていない。
+    |  bug-hunt のブラウザは SSO ボタンから実 IdP へ遷移する。
+    |  docs/architecture.md §外部到達点の目録 (標準形 v1) を参照)。
     | 有効化は allowlist 環境 (local / testing / bughunt.local) に限定され、
     | production では ProductionEnvGuard が true を deploy 時 fail-fast で拒否する。
     | 既定 false = 本 flag 未設定の環境では完全 no-op。

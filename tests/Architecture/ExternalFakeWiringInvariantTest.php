@@ -156,21 +156,21 @@ test('3-3 provider 単体: flag on でも allowlist 外 env では real のま�
     }
 )->with('external fake bindings and denied environments');
 
-test('3-4 provider 単体: 課金 flag on + allowlist 外 env は warning を出す', function (): void {
-    $originalFlag = config(ExternalFakeWiringInventory::PAYMENT_FLAG);
+test('3-4 provider 単体: 外部サービス fake flag on + allowlist 外 env は warning を出す', function (): void {
+    $originalFlag = config(ExternalFakeWiringInventory::EXTERNALS_FLAG);
     $originalEnvironment = $this->app['env'];
 
     try {
         Log::spy();
 
         $this->app['env'] = 'staging';
-        config([ExternalFakeWiringInventory::PAYMENT_FLAG => true]);
+        config([ExternalFakeWiringInventory::EXTERNALS_FLAG => true]);
 
         (new FakeExternalsServiceProvider($this->app))->register();
 
         Log::shouldHaveReceived('warning')->once();
     } finally {
-        config([ExternalFakeWiringInventory::PAYMENT_FLAG => $originalFlag]);
+        config([ExternalFakeWiringInventory::EXTERNALS_FLAG => $originalFlag]);
         $this->app['env'] = $originalEnvironment;
     }
 });
