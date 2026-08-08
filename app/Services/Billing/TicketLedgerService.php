@@ -374,12 +374,17 @@ class TicketLedgerService
      * 消費優先順位は monthly (期限付き = 先に失効する) → purchased (無期限)。予約時に
      * 「どの出所をどの期限で消費するか」を consume_source / consume_expires_at へ固定し、
      * commit は再探索しない。残高不足は InsufficientTicketsException。
+     *
+     * 低残高通知 (AG-127 の付随的副作用) は **tx を抜けた最後**に実行する。閾値クロスの事実は
+     * クロージャの**戻り値**で持ち出す (参照渡しにしない — 将来 transaction retry が入ったとき、
+     * rollback された試行の副作用がクロージャの外に残るため)。
      */
     public function reserve(Organization $organization, int $amount): TicketReservation
     {
         Assert::positiveInteger($amount, 'reserve の amount は正の整数のみ');
 
-        return DB::transaction(function () use ($organization, $amount): TicketReservation {
+        /** @var array{reservation: TicketReservation, crossing: array{balance: int, threshold: int}|null} $result */
+        $result = DB::transaction(function () use ($organization, $amount): array {
             // 残高判定の直列化点: organizations 行ロックで並行 reserve の TOCTOU を防ぐ
             $this->lockOrganizationRow($organization);
 
@@ -420,10 +425,13 @@ class TicketLedgerService
             $balance = $availableMonthly + $availablePurchased; // = availableTrueBalance と同一意味論
             $threshold = config()->integer('billing.ticket_low_balance_threshold');
             $after = $balance - $amount;
+            $crossing = null;
             if ($balance >= $threshold && $after < $threshold) {
-                // afterCommit: reserve は pipeline の startJob tx 内から savepoint で呼ばれ得るため、
-                // 最外層 commit 成立後にのみ通知する (rollback 時は発火しない)
-                DB::afterCommit(fn () => $this->notifications->notifyTicketBalanceLow($organization, $after, $threshold));
+                // 通知は**付随的副作用** (AG-127)。tx の内側では実行せず、閾値クロスの事実だけ持ち出す。
+                // TicketBalanceLowNotification は ShouldQueue ではない同期 DB 書き込みのため、
+                // ここで実行すると organizations 行ロック (reserve の直列化点) を通知 INSERT の
+                // 分だけ長く保持することになる。
+                $crossing = ['balance' => $after, 'threshold' => $threshold];
             }
 
             // P8a: オートリチャージ (裏チャージ) のトリガ点。**低残高通知と同居**させる
@@ -436,13 +444,29 @@ class TicketLedgerService
             // 閾値判定・pending 検査・数量確定は Job 側 (AutoRechargeService) が org 行ロック下で
             // 再評価するため、ここでは条件を絞らない = 過剰 dispatch は無害
             // (設定行なし org は Job 冒頭で即 return。既定 off の org には何も起きない)。
-            // afterCommit で rollback 時は発火しない。
+            //
+            // **業務 tx の内側で投入する** (AG-114 確定 1)。jobs 行が同一 tx に乗るため
+            // rollback すれば投入ごと巻き戻る (旧: DB::afterCommit。afterCommit は
+            // 「commit したのに未投入」の窓を残す)。
             $organizationId = $organization->getKey();
             Assert::integer($organizationId);
-            DB::afterCommit(static fn () => AutoRechargeTriggerJob::dispatch($organizationId));
+            AutoRechargeTriggerJob::dispatch($organizationId);
 
-            return $reservation;
+            return ['reservation' => $reservation, 'crossing' => $crossing];
         });
+
+        $crossing = $result['crossing'];
+
+        // 低残高通知 (AG-127 の付随的副作用)。**tx を抜けた最後**に実行する。
+        // 保証範囲を誇張しない: reserve が呼び出し側の tx にネストされている場合、
+        // ここは依然として外側 tx の内側であり、(a) 外側のロックを保持したまま INSERT が走る、
+        // (b) SQL 層の失敗は PostgreSQL の tx abort を経て業務操作ごと失敗させる。
+        // アプリケーション層の例外は NotificationCenterService::safely() が握る。
+        if ($crossing !== null) {
+            $this->notifications->notifyTicketBalanceLow($organization, $crossing['balance'], $crossing['threshold']);
+        }
+
+        return $result['reservation'];
     }
 
     /**

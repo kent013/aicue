@@ -498,6 +498,12 @@ final class AutoRechargeService
                 ]);
                 $attempt->save();
 
+                // 実行 job の投入を**起票と同一 tx**で行う (AG-114 確定 1)。
+                // 旧: 呼び出し側 (AutoRechargeTriggerJob::handle / reconcile (v)) が tx 成功後に
+                // dispatch していたため「attempt=pending・実行未投入」の窓があり、
+                // reconcile (v) の 15 分周期に依存していた。
+                ExecuteAutoRechargeAttemptJob::dispatch($attempt->id);
+
                 return $attempt;
             });
         } catch (QueryException $e) {
@@ -1014,9 +1020,10 @@ final class AutoRechargeService
             Assert::isInstanceOf($organization, Organization::class);
 
             try {
+                // 実行 job の投入は createAttemptLocked が起票と同一 tx で行う (AG-114 確定 1)。
+                // ここで dispatch すると二重投入になる。
                 $attempt = $this->maybeCreateAttempt($organization);
                 if ($attempt !== null) {
-                    ExecuteAutoRechargeAttemptJob::dispatch($attempt->id);
                     $stats['triggered']++;
                 }
             } catch (Throwable $e) {

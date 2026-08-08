@@ -279,9 +279,7 @@ class RenderPipeline
      */
     private function finalize(RenderJob $job, RenderResult $result): bool
     {
-        /** @var list<int> $oldJobIds */
-        $oldJobIds = [];
-        $succeeded = DB::transaction(function () use ($job, $result, &$oldJobIds): bool {
+        $succeeded = DB::transaction(function () use ($job, $result): bool {
             // ロック 1: job 行 (stale 回復 cron との直列化点)
             /** @var RenderJob $locked */
             $locked = RenderJob::query()->whereKey($job->getKey())->lockForUpdate()->firstOrFail();
@@ -331,14 +329,17 @@ class RenderPipeline
                 ->map(static fn (RenderJob $old): int => $old->id)
                 ->all();
 
+            // 旧世代 output の削除投入を **terminal tx の内側**で行う (AG-114 確定 1)。
+            // 削除 job は冪等のため重複無害。喪失時の回収役 (render:reconcile-outputs) は
+            // 別要因 (worker 異常終了) のために残す。
+            foreach ($oldJobIds as $oldJobId) {
+                DeleteRenderOutputsJob::dispatch($oldJobId);
+            }
+
             return true;
         });
 
         if ($succeeded) {
-            // dispatch は commit 後 (喪失は render:reconcile-outputs が回収)
-            foreach ($oldJobIds as $oldJobId) {
-                DeleteRenderOutputsJob::dispatch($oldJobId);
-            }
             $job->refresh();
         }
 

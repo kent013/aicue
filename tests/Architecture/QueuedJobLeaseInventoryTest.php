@@ -20,6 +20,7 @@ use App\Notifications\Billing\AutoRechargeEnabledNotification;
 use App\Notifications\Billing\AutoRechargeFailedNotification;
 use App\Notifications\Billing\PaymentFailedNotification;
 use App\Notifications\Billing\RenewalReminderNotification;
+use App\Support\QueueDispatchAtomicityGuard;
 use Tests\Support\PhpTokenScan;
 use Tests\Support\QueuedJobPopulation;
 use Tests\Support\QueueLeaseConfig;
@@ -574,6 +575,33 @@ test('規則 2: 既定接続のジョブは $timeout を宣言しない', functi
             .'接続が変わるため静的に retry_after と比較できない。$this->onConnection() で接続を pin すること',
         );
     }
+});
+
+test('接続経路: QueueDispatchAtomicityGuard::PINNED_CONNECTIONS は目録の明示接続集合と一致する', function (): void {
+    // ★ drift 防止 (T137)。guard の R1〜R3 は「既定接続 ∪ pin 済み接続」を検査対象にするが、
+    //   guard 側の定数は静的リテラルなので、新しい pin 済み接続が増えても guard は黙る。
+    //   本目録は全 ShouldQueue クラスの接続を deny-by-default で固定しているため、
+    //   ここに繋げば guard 側の見落としが対称差 0 で検出できる。
+    //
+    //   抽出規則 (実装ごとに意味が揺れないよう固定する):
+    //   「明示接続集合」= QUEUED_JOB_LEASE_INVENTORY の**値**のうち
+    //   (1) null を除外 (= 既定接続の entry)、(2) array_unique、(3) sort で正規化したもの。
+    //   `sync` と既定接続名は含めない (onConnection リテラルで pin された接続だけが対象)。
+    $pinned = array_values(array_unique(array_filter(
+        array_values(QUEUED_JOB_LEASE_INVENTORY),
+        static fn (?string $connection): bool => $connection !== null,
+    )));
+    sort($pinned);
+
+    $guarded = QueueDispatchAtomicityGuard::PINNED_CONNECTIONS;
+    sort($guarded);
+
+    expect($guarded)->toBe(
+        $pinned,
+        'QueueDispatchAtomicityGuard::PINNED_CONNECTIONS が目録の明示接続集合と一致しません。'
+        .'guard が検査しない接続へジョブを pin すると、その接続の driver / DB 接続 / after_commit が'
+        .'起動時検査から漏れます (原子性の前提が黙って崩れる)。',
+    );
 });
 
 test('規則 2: 目録の接続名が config/queue.php に実在する', function (): void {

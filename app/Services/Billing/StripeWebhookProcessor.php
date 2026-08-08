@@ -474,6 +474,8 @@ class StripeWebhookProcessor
             $attemptUlid = $this->stringAt($payload, 'data.object.metadata.recharge_attempt_ulid');
             $attempt = $attemptUlid === null ? null : $this->autoRecharge->findPendingAttemptByUlid($attemptUlid);
             if ($attempt !== null) {
+                // ★ ここは tx で括らない (AG-114 確定 1 の対象外)。先行する自 DB 書き込みが無く、
+                //   原子性の対象になる業務 tx が存在しないため (findPendingAttemptByUlid は読み取りのみ)。
                 HandleAutoRechargeChargeFailureJob::dispatch($attempt->id);
             }
 
@@ -619,8 +621,13 @@ class StripeWebhookProcessor
         //     (未決済 completed への伝播防止)。再送は (4) の終局 no-op で到達しない。
         $subscriptionId = $this->subscriptionIdFrom($payload);
         if ($local->funding_choice === SignupFundingChoice::AutoRecharge->value && $subscriptionId !== null) {
-            $local->forceFill(['pm_reuse_dispatched_at' => CarbonImmutable::now()])->save();
-            ReuseSubscriptionPaymentMethodJob::dispatch($local->organization_id, $subscriptionId);
+            // 打刻と投入を同一 tx で括る (AG-114 確定 1)。
+            // pm_reuse_dispatched_at は「自動的に有効になります」表示の出典であり、
+            // 打刻だけ残って job が投入されない状態は**表示と実態の食い違い**になる。
+            DB::transaction(function () use ($local, $subscriptionId): void {
+                $local->forceFill(['pm_reuse_dispatched_at' => CarbonImmutable::now()])->save();
+                ReuseSubscriptionPaymentMethodJob::dispatch($local->organization_id, $subscriptionId);
+            });
         }
     }
 
@@ -684,15 +691,21 @@ class StripeWebhookProcessor
             throw new RuntimeException("auto-recharge setup webhook: setup_intent 欠落 (session {$sessionId})");
         }
 
-        if ($session->status !== CheckoutSessionStatus::Completed->value) {
-            $session->status = CheckoutSessionStatus::Completed->value;
-            $session->completed_at = now();
-            $session->save();
-        }
-
         $organizationId = $organization->getKey();
         Assert::integer($organizationId);
-        SetDefaultPaymentMethodJob::dispatch($organizationId, $setupIntentId);
+
+        // 台帳の completed 化と PM 既定設定 job の投入を同一 tx で括る (AG-114 確定 1)。
+        // status だけ completed になって job が投入されないと、PM が既定にならないまま
+        // 「設定完了」の表示になる。
+        DB::transaction(function () use ($session, $organizationId, $setupIntentId): void {
+            if ($session->status !== CheckoutSessionStatus::Completed->value) {
+                $session->status = CheckoutSessionStatus::Completed->value;
+                $session->completed_at = now();
+                $session->save();
+            }
+
+            SetDefaultPaymentMethodJob::dispatch($organizationId, $setupIntentId);
+        });
     }
 
     /**

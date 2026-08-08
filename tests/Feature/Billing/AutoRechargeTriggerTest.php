@@ -73,10 +73,21 @@ test('commit では dispatch されない (balance 不変のため)', function (
     Queue::assertNotPushed(AutoRechargeTriggerJob::class);
 });
 
-test('reserve が rollback したら dispatch されない (afterCommit の保証)', function (): void {
-    Queue::fake();
+/**
+ * 【契約の反転 (AG-114 確定 1 / T137)】
+ * - 旧主張: reserve が rollback したら dispatch されない (afterCommit の保証)
+ * - 旧目的: rollback した予約でオートリチャージを起票させない
+ * - 新主張: reserve が rollback したら **jobs 行ごと巻き戻る** (業務 tx への相乗り)
+ * - 新前提: キュー投入が業務 tx の内側で行われ、jobs 行が同一トランザクションに乗る
+ * - 前提を守る機構: QueueDispatchAtomicityGuard (R1〜R3) + TicketReserveDispatchAtomicityTest
+ * - 反転根拠: Queue::fake は enqueueUsing を経由せず即時記録するため、この主張を fake では
+ *   検証できない (偽グリーンになる)。実 jobs 表の観測へ切り替える
+ */
+test('reserve が rollback したら jobs 行が残らない (業務 tx への相乗り)', function (): void {
+    config()->set('queue.default', 'database');
     [$organization] = createOrganizationWithOwner();
     app(TicketLedgerService::class)->grant($organization, 10, '初期付与');
+    $before = DB::table('jobs')->count();
 
     try {
         DB::transaction(function () use ($organization): void {
@@ -88,7 +99,7 @@ test('reserve が rollback したら dispatch されない (afterCommit の保�
         // 期待どおり
     }
 
-    Queue::assertNotPushed(AutoRechargeTriggerJob::class);
+    expect(DB::table('jobs')->count())->toBe($before);
 });
 
 test('amount ベース reserve (可変コスト) が壊れていない', function (): void {

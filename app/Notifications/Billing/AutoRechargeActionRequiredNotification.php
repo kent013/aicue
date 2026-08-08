@@ -9,7 +9,6 @@ use App\Notifications\Billing\Concerns\TracksBillingReminderDelivery;
 use App\Support\Billing\BillingNotificationRecorder;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Contracts\Queue\ShouldQueueAfterCommit;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 use Illuminate\Support\Facades\Config;
@@ -19,8 +18,18 @@ use Throwable;
  * P8a: オートリチャージ課金の SCA (3D セキュア) 認証要求通知。
  * dedup_key = auto_recharge_sca:{invoice_id}:{JST date} (日次で再通知を許す — 放置での失効を防ぐ)。
  * action URL は invoice の hosted_invoice_url (Stripe ホストページで認証完了できる)。
+ *
+ * 【`ShouldQueueAfterCommit` を持たない理由 — AG-114 確定 1 / AG-126 の 0 件 pin (T137)】
+ * 本通知の送信元は BillingNotificationDispatcher 1 経路で、その呼び出し元
+ * (StripeWebhookProcessor / AutoRechargeService の通知群 / SendBillingReminders) は
+ * **すべて業務 tx の外**である。よって `ShouldQueueAfterCommit` は実行時に何の効果も
+ * 持っていなかった (`addCallback` は pending tx が 0 件なら即時実行する)。
+ * 一方この interface は「grep afterCommit では見えない宣言的迂回」であり、
+ * 将来 tx 内から送ったときに黙って投入を commit 後へずらす。撤去して
+ * QueueDispatchAtomicityInventoryTest (D3) の 0 件 pin に載せる。
+ * 失敗の吸収は従来どおり dispatcher 側 (insertOrIgnore + markFailed + Log::warning) が担う。
  */
-class AutoRechargeActionRequiredNotification extends Notification implements ShouldQueue, ShouldQueueAfterCommit, TracksBillingReminderDelivery
+class AutoRechargeActionRequiredNotification extends Notification implements ShouldQueue, TracksBillingReminderDelivery
 {
     use Queueable;
 

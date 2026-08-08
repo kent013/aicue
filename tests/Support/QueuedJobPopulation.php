@@ -6,6 +6,7 @@ namespace Tests\Support;
 
 use FilesystemIterator;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Mail\Mailable;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use ReflectionClass;
@@ -45,6 +46,73 @@ final class QueuedJobPopulation
             }
 
             $classes[] = $reflection->getName();
+        }
+
+        sort($classes);
+
+        return $classes;
+    }
+
+    /**
+     * app/ 配下の `Illuminate\Mail\Mailable` subclass を **`ShouldQueue` 実装の有無を問わず**列挙する。
+     *
+     * ★ **なぜ `shouldQueueClasses()` と別に要るか**: Mailable は `ShouldQueue` を実装して
+     *   いなくても `Mail::to(...)->queue()` / `Mail::queue()` でキューへ載る。このとき vendor の
+     *   `SendQueuedMailable::__construct()` が
+     *   `$mailable instanceof ShouldQueueAfterCommit ? true : ($mailable->afterCommit ?? null)` を
+     *   **wrapper job へコピーする**ため、非 `ShouldQueue` な Mailable の
+     *   `public $afterCommit = true;` / `implements ShouldQueueAfterCommit` がそのまま
+     *   commit 後ずらしになる (QueueDispatchAtomicityInventoryTest の D3 / D5 が使う)。
+     *
+     * ★ **`isInstantiable()` は要求しない**。first-party の abstract な base Mailable は
+     *   `$afterCommit` の既定値や宣言的迂回 interface を concrete subclass へ伝播させる
+     *   carrier であり、除外すると 0 件 pin が抜ける。vendor の `Illuminate\Mail\Mailable`
+     *   本体は `app/` 探索に入らないので母集団には現れない
+     *   (`shouldQueueClasses()` 側の `isInstantiable()` は既存挙動なので変更しない)。
+     *
+     * @return list<class-string>
+     */
+    public static function mailableClasses(): array
+    {
+        $classes = [];
+        foreach (self::appPhpFiles() as $path) {
+            $class = self::classNameForPath($path);
+            if (! class_exists($class)) {
+                continue;
+            }
+
+            $reflection = new ReflectionClass($class);
+            if (! $reflection->isSubclassOf(Mailable::class)) {
+                continue;
+            }
+
+            $classes[] = $reflection->getName();
+        }
+
+        sort($classes);
+
+        return $classes;
+    }
+
+    /**
+     * app/ 配下の **読み込み可能な全クラス**を列挙する (interface / trait / enum を含む)。
+     *
+     * ★ D6 (`ShouldDispatchAfterCommit`) の母集団に使う。event クラスには marker interface が
+     *   無く「どれが event か」を静的に決められないため、**app/ 全クラスという超集合**を
+     *   母集団にして deny-by-default で見る (event 検出のヒューリスティクスを持たない)。
+     *
+     * @return list<class-string>
+     */
+    public static function appClasses(): array
+    {
+        $classes = [];
+        foreach (self::appPhpFiles() as $path) {
+            $class = self::classNameForPath($path);
+            if (! class_exists($class) && ! interface_exists($class) && ! trait_exists($class) && ! enum_exists($class)) {
+                continue;
+            }
+
+            $classes[] = (new ReflectionClass($class))->getName();
         }
 
         sort($classes);

@@ -195,7 +195,7 @@ class VideoManualService
      */
     public function delete(Project $project, VideoManual $manual): void
     {
-        $paths = DB::transaction(function () use ($project, $manual): array {
+        DB::transaction(function () use ($project, $manual): void {
             $locked = Project::whereKey($project->id)->lockForUpdate()->firstOrFail();
             // 子は親に属する: ロック済み親 relation から再解決 (cross-project は 404)
             /** @var VideoManual $lockedManual */
@@ -214,12 +214,15 @@ class VideoManualService
                 ->all();
             $lockedManual->delete(); // cuts / takes / source_documents は FK cascade
 
-            return array_values(array_unique([...$takePaths, ...$documentPaths]));
-        });
+            /** @var list<string> $paths */
+            $paths = array_values(array_unique([...$takePaths, ...$documentPaths]));
 
-        if ($paths !== []) {
-            DeleteTakeObjectsJob::dispatch($paths); // tx 成功後に media queue へ (重複キーは除去済み)
-        }
+            // S3 削除の投入を**同一 tx 内**で行う (AG-114 確定 1)。
+            // 保証するのは「manual を消したのに削除 job が投入されない窓」の解消だけである。
+            if ($paths !== []) {
+                DeleteTakeObjectsJob::dispatch($paths); // media queue へ (重複キーは除去済み)
+            }
+        });
     }
 
     /**

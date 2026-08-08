@@ -41,6 +41,7 @@ use App\Support\Http\RateLimiterKeys;
 use App\Support\Http\RouteThrottleBinder;
 use App\Support\PasswordPolicy;
 use App\Support\ProductionEnvGuard;
+use App\Support\QueueDispatchAtomicityGuard;
 use Aws\Sns\SnsClient;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -142,6 +143,13 @@ class AppServiceProvider extends ServiceProvider
         if ($this->app->environment('production')) {
             (new ProductionEnvGuard)->enforce();
         }
+
+        // キュー投入の原子性の前提を**全環境**で fail-closed 検査する (AG-114 確定 2)。
+        // ProductionEnvGuard に相乗りしないのは、適用範囲が production 限定ではないため
+        // (sync レーンの実行順序 R4 はテスト・dev でこそ意味を持つ)。
+        // container 解決にしておくと boot からの呼び出しをテストで差し替えられる
+        $this->app->make(QueueDispatchAtomicityGuard::class)
+            ->enforce($this->app->environment('production'));
 
         // email が CipherSweet 暗号化カラムのため、credentials 検索を blind index 経由にする
         // (config/auth.php providers.users.driver = 'encrypted-eloquent')

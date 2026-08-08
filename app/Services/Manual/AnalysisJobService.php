@@ -95,11 +95,14 @@ class AnalysisJobService
 
             $locked->forceFill(['status' => VideoManualStatus::Analyzing])->save();
 
+            // キュー投入は**業務 tx の内側**で行う (AG-114 確定 1)。payload は job id のみ。
+            // jobs 行が同一 tx に乗るため「保存済み・未投入」が構造的に消え、rollback すれば
+            // jobs 行ごと巻き戻る。原子性の前提 (driver=database / キュー DB 接続 = 業務 DB /
+            // after_commit=false) は QueueDispatchAtomicityGuard が起動時に fail-closed 検査する。
+            RunManualAnalysis::dispatch($job->id);
+
             return $job;
         });
-
-        // commit 後に dispatch (payload は job id のみ。dispatch 喪失は recoverStale が回収)
-        RunManualAnalysis::dispatch($job->id);
 
         return $job;
     }

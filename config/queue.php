@@ -31,8 +31,22 @@ return [
 
     'connections' => [
 
+        // sync は「テストレーン (phpunit.xml / phpunit.browser.xml が force) と local dev」専用。
+        // **after_commit => true が必須**: これが無いと業務 tx の内側からの dispatch が
+        // その場でインライン実行され、RunManualAnalysis / RunManualRender が trigger の tx の
+        // 内側で走って AnalysisPipeline / RenderPipeline の startJob (lockForUpdate + status===queued)
+        // が自分自身のロック下で成立してしまう (= 共有ロック規約の意味論が壊れる)。
+        //
+        // SyncQueue::push() は shouldDispatchAfterCommit() を尊重し db.transactions へ倒す。
+        // テストレーンでは RefreshDatabase が Illuminate\Foundation\Testing\DatabaseTransactionsManager
+        // を差し込み、ラッパ tx を skip したうえで level 1 を root 扱いするため、
+        // 「業務 tx の commit 直後・テスト tx の内側でインライン実行」= 本番の
+        // 「commit 後に worker が拾う」と同じ順序意味論になる。
+        //
+        // この 1 行は QueueDispatchAtomicityGuard の規則 R4 が起動時に機械固定する。
         'sync' => [
             'driver' => 'sync',
+            'after_commit' => true,
         ],
 
         // 既定接続 (Billing 6 / Mail 2 / Notification 6)。retry_after は **リテラル**で持つ:
