@@ -146,6 +146,7 @@ Open リストは [TODO.md](TODO.md) を参照。
 | T124 | 2FA 秘密GETとenableのstep-up化。qr-code / secret-key の GET に加え、実査で見つけた enable の force 再生成による永久ロックアウト経路 (force=true が secret/recovery_codes を再生成する一方 confirmed_at を触らない) にも step-up を要求。2FA 必須組織の passkey-only ユーザーが enrollment 入口で詰まないよう passkey satisfier を allowlist へ追加。deny-by-default 目録 gate + mutation m1〜m8 | backend | 2026-08-08 01:00 |
 | T126 | 外部 SDK の client timeout を pin。Stripe (connect 5s/timeout 20s/retries 0) と AWS (制御系 15s / データ系 900s) を App\Support\ExternalClientTimeouts へ単一出典化し env 上書きの口を作らない。これにより queue の retry_after を 600 → 360 へ縮小 (T122 が固定した序列は検査の期待値ごと同一 PR で更新)。S3 到達境界の deny-by-default 目録 + mutation 22 件 | backend | 2026-08-08 01:00 |
 | T134 | アプリ内招待受諾の追加と役割付き招待の撤去。既存のアプリ内通知 (発見面) は捨てず、存在秘匿つき (宛先不一致・不在・期限切れは一律 404) の 受諾の入口を追加。受諾の解決と件数/一覧の算出で同一 scope を再利用し、未ログイン・未 verified・email 空は DB を引かない。同じ裁定系統が求める役割付き招待 (project_role) の撤去も同一 PR で実施 | backend | 2026-08-08 01:00 |
+| T135 | route:cache 起動での後付け契約の是正。独立 2 系統の実測で「cached 起動では booted callback からの middleware 後付けが 1 本も効かない」(loadRoutesFrom が require を飛ばし対象 route が未登録 → getByName が null → 無音 no-op) を確定し、FortifyServiceProvider / PasskeyServiceProvider の誤った機序記述を是正。保護が実効しているのは route:cache 生成時の焼き込みであることを明記した。RouteMiddlewareBinder を新設し skip 判定を引数で受ける純粋関数へ切り出して無音 no-op に安全弁を追加 (T120 の事故を踏まない形)。振る舞いは不変 (既存 route 保護系テストと RouteThrottleBinder は 1 行も変更せず green)。route:cache → route:list → route:clear の往復を実測 | backend | 2026-08-08 17:00 |
 
 ## Obsoleted
 
