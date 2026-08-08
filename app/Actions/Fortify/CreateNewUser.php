@@ -10,6 +10,7 @@ use App\Rules\UniqueEncryptedEmail;
 use App\Services\Onboarding\IntendedPlanResolver;
 use App\Services\Organization\OrganizationMembershipService;
 use App\Services\Organization\OrganizationProvisioningService;
+use App\Support\Legal\LegalConsent;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -91,7 +92,7 @@ class CreateNewUser implements CreatesNewUsers
                     'password' => $password,
                 ]))->forceFill([
                     'terms_accepted_at' => now(),
-                    'consent_version' => config()->string('legal.consent_version'),
+                    'consent_version' => LegalConsent::version(),
                 ]);
                 $user->save();
 

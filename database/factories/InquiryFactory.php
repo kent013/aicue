@@ -8,6 +8,7 @@ use App\Enums\Inquiry\InquirySource;
 use App\Enums\Inquiry\InquiryStatus;
 use App\Enums\Inquiry\InquiryType;
 use App\Models\Inquiry;
+use App\Support\Legal\LegalConsent;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /** @extends Factory<Inquiry> */
@@ -27,7 +28,9 @@ class InquiryFactory extends Factory
             'company_name' => fake()->company(),
             'message' => fake()->paragraph(),
             'terms_accepted_at' => now(),
-            'consent_version' => 'draft-1',
+            // 版の出所は LegalConsent に一本化する (literal を持つと config と独立した
+            // 4 つ目の出所になり、config を変えても fixture が追随しない)。
+            'consent_version' => LegalConsent::version(),
         ];
     }
 
