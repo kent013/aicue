@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Services\Auth\EmailTrust\EmailTrustPolicyResolver;
 use App\Services\Organization\OrganizationProvisioningService;
 use App\Services\Security\SecurityEventRecorder;
+use App\Support\Legal\LegalConsent;
 use Illuminate\Support\Facades\DB;
 use Laravel\Socialite\Contracts\User as SocialiteUser;
 
@@ -72,7 +73,7 @@ class SocialAccountService
                 'email' => $email,
             ]))->forceFill([
                 'terms_accepted_at' => now(),
-                'consent_version' => config()->string('legal.consent_version'),
+                'consent_version' => LegalConsent::version(),
                 'email_verified_at' => $verifiedAt,
             ]);
             $user->save();

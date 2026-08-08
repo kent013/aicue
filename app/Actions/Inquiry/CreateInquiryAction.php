@@ -10,6 +10,7 @@ use App\Filament\Resources\InquiryResource;
 use App\Mail\InquiryAcknowledgementMail;
 use App\Mail\InquiryReceivedMail;
 use App\Models\Inquiry;
+use App\Support\Legal\LegalConsent;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Throwable;
@@ -28,9 +29,8 @@ final class CreateInquiryAction
 {
     public function __invoke(CreateInquiryData $data): Inquiry
     {
-        // 同意の証跡: 受付時刻 + 同意時点のポリシー版。空版は設定漏れなので fail-fast。
-        $consentVersion = config('legal.consent_version');
-        Assert::stringNotEmpty($consentVersion, 'legal.consent_version must be configured');
+        // 同意の証跡: 受付時刻 + 同意時点のポリシー版。空版の fail-fast は LegalConsent が持つ。
+        $consentVersion = LegalConsent::version();
 
         // 運営宛通知の宛先を save 前に解決して fail-fast (設定破損時に孤児行を作らない)。
         $recipient = config('legal.inquiry_recipient');
