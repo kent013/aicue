@@ -314,13 +314,17 @@ LLM を使う機能が要件に来たら、まず利用形態を分類する:
    受け付けるキーが限られる(Fortify は login / two-factor / passkeys / verification の 4 つだけ)ため、
    賄えない分だけ 3 に落とす
 3. **`RouteThrottleBinder::attachOnBooted()` で後付けする**(2 でも貼れない vendor route 専用)。
-   `$this->app->booted()` の中で走り、route 名が消えていれば**起動時に fail-fast** する
+   `$this->app->booted()` の中で走り、route 名が消えていれば **fail-fast** する
    (silent degradation = 無音の無防備を作らない)。付与は冪等
    (実装: `app/Support/Http/RouteThrottleBinder.php`)
-   - **`php artisan route:cache` を毎デプロイ再生成すること**。後付けは route cache 生成時
-     (`route:clear` 後の再 bootstrap) に焼き込まれ、**cached 起動では skip される**
-     (compiled route collection が booted callback より後に読まれるため参照できない)。
-     stale な route cache を残すと古い付与状態のまま起動する
+   - ⚠ fail-fast が効くのは**後付けが実際に走る起動**、すなわち route cache が無い起動
+     (ローカル開発・テスト・`php artisan route:cache` 生成時の再 bootstrap) **すべて**である。
+     **cached 起動では後付けごと skip される**ため route 名が消えていても静かに起動する
+     (「どんな起動でも必ず落ちる」ではない)。cached 運用の本番で意味を持つ検出点は
+     `route:cache` **生成時**。詳細は下の §7c
+   - **`php artisan route:cache` を毎デプロイ再生成すること**。契約の正本は
+     **下の「§7c vendor route への後付け機構と route:cache の契約」**
+     (この要件は throttle 専用ではなく、後付け機構**全体**の前提条件である)
    - 後付け側の判定は controller middleware を見ない
      (boot 中に controller を container 解決すると request scope の singleton が
       早すぎるタイミングで確定するため)。controller 側 throttle との二重付与は
@@ -439,6 +443,54 @@ callback 側で有界化されており減らない)。
 production では登録されない / 完了経路が throttle 済みである)は
 `ThrottleExemptionPremiseTest` で behavioral に固定する。
 前提が崩れたのに気づけない状態を作らない。
+
+### §7c vendor route への後付け機構と route:cache の契約
+
+vendor (Fortify / laravel-passkeys / Cashier) が登録した route へ、アプリ側が
+boot 後に middleware を後付けする経路は **2 つの binder に限られる**:
+
+| binder | 付けるもの | 呼び出し元 |
+|---|---|---|
+| `RouteThrottleBinder::attachOnBooted()` | `throttle:{limiter}` | FortifyServiceProvider / AppServiceProvider |
+| `RouteMiddlewareBinder::attachOnBooted()` | `recent-auth` / `recent-auth.on-email-change` / `ensure-login-method` / `no-store` / `throttle:passkeys` | FortifyServiceProvider / PasskeyServiceProvider |
+
+**2 つの事象を混ぜないこと**:
+
+1. **生成時**(`php artisan route:cache` 実行中)= 後付けが完全に走り、cache へ焼き込まれる。
+   `RouteCacheCommand::handle()` が先頭で `route:clear` してから **cache 無しのアプリを
+   再 bootstrap** するため、`loadRoutesFrom()` が `require` を通して対象 route が登録される。
+   route 名が消えていればここでデプロイが止まる。
+   なお fail-fast 自体は「**後付けが実際に走る起動すべて**」= route cache が無い起動
+   (ローカル開発・テストを含む)で効く。`route:cache` 生成時**だけ**に効くのではない。
+   ただし **cached 運用の本番で意味を持つ検出点はここだけ**である
+   (ここで止まらなければ、cached 起動は skip するのでサービス投入まで誰も気づかない)。
+2. **起動時**(cached 起動)= 後付けは **1 本も効かない**。
+   `loadRoutesFrom()` が require を飛ばすため、**binder の callback が走る時点では**
+   対象 named route が 1 本も登録されていない(compiled routes はこの callback より
+   **後**に読まれる。「route が永久に存在しない」の意味ではない)。
+   仮に触れていても `Router::setCompiledRoutes()` が collection を新品へ丸ごと
+   差し替えるため捨てられる。ゆえに binder は明示 skip する
+   (**ここで例外を投げると `php artisan route:list` が必ず落ちる** = T120 の事故)。
+
+⇒ **運用要件: `php artisan route:cache` を毎デプロイ再生成すること。**
+   これは throttle だけの要件ではない。**2FA 秘密の露出防止 (recent-auth) /
+   passkey 削除の手段保持 (ensure-login-method) / WebAuthn challenge の no-store も
+   同じ前提条件に乗っている**。stale な route cache は古い付与状態のまま起動し、
+   **無音で保護が外れる**(実測: 剥がした cache では鮮度切れセッションの
+   2FA 秘密 GET が 409 でなく **200 で秘密を返す**、`force=true` の enable も 200、
+   `passkey.destroy` の 429 が消える)。
+
+**現状**: 本リポジトリに**デプロイ定義は存在しない**(deploy/ / terraform / k8s manifest /
+CI のデプロイ job のいずれも無い)。したがって上記は**今日は人手で守られている要件**であり、
+デプロイ基盤を作る PR が**必ず実装しなければならない要件**である(AGENTS.md の運用要件ブロック)。
+今その基盤を先回りして作らない(思考原則 2)。
+
+**新しい後付け経路を足すとき**: 必ず上記 2 binder のどちらかを通す。
+`PostBootRouteMutationInventoryTest` が deny-by-default で強制する
+(`app/` 配下で起動後に named route を名前で引くコードを allowlist 2 ファイルに限る)。
+ただしこの gate が守るのは**入口が絞られていること**までで、
+**docblock の主張が機序と一致していること**も**起動時の cache 鮮度**も検査しない
+(前者は機械照合できず、後者は本番デプロイで mtime が揃うため正しく作れない)。
 
 ## 8. 設計ドキュメントの書き方(このテンプレ上の流儀)
 

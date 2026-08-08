@@ -26,13 +26,11 @@ use App\Support\Auth\EmailVerificationContinuation;
 use App\Support\EmailHash;
 use App\Support\EmailNormalizer;
 use App\Support\Http\RateLimiterKeys;
+use App\Support\Http\RouteMiddlewareBinder;
 use App\Support\Http\RouteThrottleBinder;
 use Illuminate\Cache\RateLimiting\Limit;
-use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Routing\RouteCollectionInterface;
-use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Inertia\Inertia;
@@ -229,40 +227,53 @@ class FortifyServiceProvider extends ServiceProvider
      * (config/fortify.php features.twoFactorAuthentication.confirmPassword=false) のため、
      * そのままではリカバリコードの表示/再生成が step-up なしで到達可能になる。
      * ルート登録は Fortify package provider の boot 内で行われるため、全 provider boot 後の
-     * booted callback で名前解決して append する。route:cache 下でも
-     * CompiledRouteCollection::getByName() が nameCache に memoize した同一 instance を
-     * match() が返すため、この変更は dispatch にも有効。
+     * booted callback で名前解決して append する。
+     *
+     * ★route:cache との契約 (**cached 起動では 1 本も効かない**) と、
+     *   「毎デプロイ `php artisan route:cache` を再生成する」という前提条件は
+     *   {@see RouteMiddlewareBinder} の docblock が正本。
+     *   **旧記述の訂正**: かつてここには「route:cache 下でも nameCache が同一 instance を
+     *   返すため dispatch にも有効」と書いてあったが、**誤り**である。cached 起動では
+     *   Fortify の loadRoutesFrom() が require を飛ばして対象 route を登録しないため、
+     *   この callback は compiled collection に到達しない。実効しているのは
+     *   route:cache **生成時**の焼き込みである。
+     *
+     * ★feature flag の扱い: 対象 route は Fortify の機能フラグで登録有無が決まるため、
+     *   有効な機能の分だけを spec に載せる (無効な機能の route まで要求すると
+     *   binder が fail-fast して起動できなくなる)。skip が穴にならない根拠は
+     *   throttledFortifyRoutes() の docblock と同じ = 目録検査 (RecentAuthRouteTest /
+     *   TwoFactorStepUpInventoryTest) が二重の網になる。
      */
     private function attachRecentAuthToSensitiveRoutes(): void
     {
-        $this->app->booted(static function (Application $app): void {
-            $routes = $app->make(Router::class)->getRoutes();
-            // fluent な ->name() 付与はコレクションの name index に遅延反映のため明示 refresh
-            $routes->refreshNameLookups();
-
-            foreach (self::RECENT_AUTH_ROUTE_NAMES as $name) {
-                self::appendMiddlewareIfMissing($routes, $name, 'recent-auth');
-            }
-
-            foreach (self::CONDITIONAL_RECENT_AUTH_ROUTES as $name => $alias) {
-                self::appendMiddlewareIfMissing($routes, $name, $alias);
-            }
-        });
+        // first-class callable で渡す (`static fn (): array => …` にすると
+        // 匿名関数の戻り値に iterable value type が付かず PHPStan level 10 で詰まる。
+        // メソッド参照なら recentAuthRouteSpecs() の @return がそのまま効く)
+        RouteMiddlewareBinder::attachOnBooted($this->app, self::recentAuthRouteSpecs(...));
     }
 
     /**
-     * named route に middleware alias を idempotent に append する (未登録時のみ)。
+     * recent-auth 系 middleware を後付けする Fortify route の spec。
      *
-     * booted callback (static クロージャ) から呼ぶため **static** で定義し
-     * `self::appendMiddlewareIfMissing(...)` で呼ぶ。長寿命プロセス等で callback が
-     * 同一 Route instance に複数回届いても重複付与しない (idempotent)。
+     * @return array<string, list<string>> route 名 => middleware alias の列
      */
-    private static function appendMiddlewareIfMissing(RouteCollectionInterface $routes, string $name, string $alias): void
+    private static function recentAuthRouteSpecs(): array
     {
-        $route = $routes->getByName($name);
-        if ($route !== null && ! in_array($alias, $route->middleware(), true)) {
-            $route->middleware($alias);
+        $specs = [];
+
+        if (Features::enabled(Features::twoFactorAuthentication())) {
+            foreach (self::RECENT_AUTH_ROUTE_NAMES as $name) {
+                $specs[$name] = ['recent-auth'];
+            }
         }
+
+        if (Features::enabled(Features::updateProfileInformation())) {
+            foreach (self::CONDITIONAL_RECENT_AUTH_ROUTES as $name => $alias) {
+                $specs[$name] = [$alias];
+            }
+        }
+
+        return $specs;
     }
 
     private function configureRateLimiters(): void
