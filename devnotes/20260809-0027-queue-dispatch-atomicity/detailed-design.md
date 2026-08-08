@@ -775,7 +775,8 @@ class PaymentFailedNotification extends Notification implements ShouldQueue, Tra
 ### テスト計画
 
 - [ ] 新規 (M7 の一部): `QueueDispatchAtomicityInventoryTest` の D3 —
-  `ShouldQueue 実装クラスのうち ShouldQueueAfterCommit を implement するものは 0 件`
+  `母集団 (ShouldQueue 実装 ∪ Mailable) のうち ShouldQueueAfterCommit /
+  ShouldHandleEventsAfterCommit を implement するものは 0 件`
   (リフレクション判定。中間 interface / 親クラス経由も拾う)
 - [ ] 既存の請求通知テスト (`tests/Feature/Billing/BillingNotification*Test.php` /
   `tests/Feature/Billing/SendBillingRemindersTest.php` 等) が緑のままであることを確認
@@ -1099,6 +1100,17 @@ class QueueDispatchAtomicityGuard
 - TypeScript 型定義: なし / API Resource/DTO: なし
 - 母集団は既存の `Tests\Support\QueuedJobPopulation` を**再利用**する (2 実装を作らない。
   同ファイルの docblock が「2 実装に分かれると片方だけ更新される drift が起きる」と明記)
+- 同 class に **`mailableClasses()` を 1 メソッド追加**する (`app/` 配下の
+  `Illuminate\Mail\Mailable` subclass を `ShouldQueue` 実装の有無を問わず列挙。
+  既存の `appPhpFiles()` / `classNameForPath()` を再利用する)。
+  - ★ **`isInstantiable()` は要求しない** (Codex Round 8)。first-party の abstract な
+    base Mailable は `$afterCommit` の既定値や宣言的迂回 interface を concrete subclass へ
+    伝播させる carrier であり、除外すると 0 件 pin が抜ける。vendor の
+    `Illuminate\Mail\Mailable` 本体は `app/` 探索に入らないので母集団には現れない
+    (`shouldQueueClasses()` 側の `isInstantiable()` は既存挙動なので**変更しない**)
+  **`shouldQueueClasses()` は変更しない** — 既存 2 gate
+  (`QueuedJobLeaseInventoryTest` / `JobExecutionDedupInventoryTest`) の母集団を
+  本 PR で動かさないため (対称差テストが巻き添えで落ちる)
 
 ### 現行コード
 
@@ -1116,12 +1128,31 @@ class QueueDispatchAtomicityGuard
  * 1:1 で対応させ、どの層からも迂回できないようにしている。
  * - D1 `->afterCommit(` / `?->afterCommit(`  … PendingDispatch の明示指定
  * - D2 `DB::afterCommit(`                    … トランザクション callback への退避
- * - D3 `ShouldQueueAfterCommit` の実装        … **リフレクション判定** (文字列走査ではない)
+ * - D3 宣言的迂回 interface の実装            … **リフレクション判定** (文字列走査ではない)。
+ *   `ShouldQueueAfterCommit` に加え **`ShouldHandleEventsAfterCommit`** も見る
+ *   (`Events\Dispatcher::handlerShouldBeDispatchedAfterDatabaseTransactions()` が
+ *   この interface でも commit 後ずらしを発動するため。ShouldQueue な listener では
+ *   これが**キュー投入そのもの**を commit 後へずらす)
  * - D4 config の `after_commit => true`       … sync 以外の接続
  * - D5 `Queueable` の `$afterCommit` プロパティ … **既定値はリフレクション** +
- *   **実行時代入は文字列走査**。`public bool $afterCommit = true;` /
+ *   **実行時代入は token 走査**。`public bool $afterCommit = true;` /
  *   `$this->afterCommit = true;` は **D1〜D4 のどれにも映らない第 3 の迂回路**であり、
  *   これを落とすと「0 件 pin」の主張が嘘になる
+ *
+ * 【D3 / D5(既定値) の母集団は `ShouldQueue` 実装だけでは足りない — Mailable を足す】
+ * `Mailable` は **`ShouldQueue` を実装していなくても** `Mail::to(...)->queue()` /
+ * `Mail::queue()` でキューへ載る。このとき vendor の `SendQueuedMailable::__construct()` が
+ * `$mailable instanceof ShouldQueueAfterCommit ? true : ($mailable->afterCommit ?? null)` を
+ * **wrapper job へコピーする**ため、非 `ShouldQueue` な Mailable の
+ * `public $afterCommit = true;` / `implements ShouldQueueAfterCommit` が
+ * そのまま commit 後ずらしになる (Codex Round 7 の Warning)。
+ * **本リポジトリでは現に `CreateInquiryAction` が `Mail::to(...)->queue(...)` を使っている**
+ * (仮想の穴ではない。現行 2 クラスは `ShouldQueue` を併記しているので今は母集団に入るが、
+ * 併記を外した瞬間に検出器から消える)。
+ * よって D3 / D5(既定値) の母集団は
+ * **`QueuedJobPopulation::shouldQueueClasses()` ∪ `QueuedJobPopulation::mailableClasses()`** とする。
+ * Notification と listener は vendor 側 (`NotificationSender` / `Events\Dispatcher`) が
+ * `ShouldQueue` を要求するため `shouldQueueClasses()` で尽きており、追加は要らない。
  *
  * 【D3 を文字列走査にしない理由】文字列走査だと「`ShouldQueueAfterCommit` を継承した中間
  * interface を implement する」「親クラス経由で implement される」形を丸ごと見落とす。
@@ -1189,8 +1220,34 @@ final class QueueDispatchDeferralInventory
     /** @param list<string> $paths @return list<array{path: string, line: int, kind: string}> */
     public static function detectInFiles(array $paths): array { /* D1 + D2 */ }
 
-    /** @param list<class-string> $classes @return list<class-string> */
-    public static function detectShouldQueueAfterCommit(array $classes): array { /* D3 */ }
+    /**
+     * D3: 宣言的迂回 interface を implement するクラス。
+     * `ShouldQueueAfterCommit` と `ShouldHandleEventsAfterCommit` の**両方**を見る
+     * (`ReflectionClass::implementsInterface()` なので中間 interface / 親クラス経由も拾う)。
+     *
+     * @param  list<class-string>  $classes
+     * @return list<class-string>
+     */
+    public static function detectAfterCommitInterfaces(array $classes): array { /* D3 */ }
+
+    /**
+     * D3 / D5(既定値) の母集団 = `ShouldQueue` 実装 ∪ Mailable subclass。
+     * **和集合にする理由**は上の docblock (Mailable は `ShouldQueue` なしでも
+     * `Mail::queue()` でキューに載り、`SendQueuedMailable` が `$afterCommit` を
+     * wrapper job へコピーする) を参照。重複は除去し昇順で返す。
+     *
+     * @return list<class-string>
+     */
+    public static function deferralCandidateClasses(): array
+    {
+        $classes = array_values(array_unique(array_merge(
+            QueuedJobPopulation::shouldQueueClasses(),
+            QueuedJobPopulation::mailableClasses(),
+        )));
+        sort($classes);
+
+        return $classes;
+    }
 
     /** @param array<mixed> $connections @return list<string> 違反した接続名 */
     public static function detectAfterCommitEnabledConnections(array $connections): array { /* D4 */ }
@@ -1200,13 +1257,19 @@ final class QueueDispatchDeferralInventory
      * `ReflectionClass::getDefaultProperties()` を使う (**インスタンス化しない**ので、
      * コンストラクタ引数が必要な job でも判定できる)。
      *
+     * ★ 判定は **`=== true` の厳密比較**である。`Queueable` trait の既定値は `null` で
+     *   あり、`null` を truthy 側へ落とすと全 job が偽陽性になる。
+     *
      * @param  list<class-string>  $classes
      * @return list<class-string>
      */
     public static function detectAfterCommitProperty(array $classes): array { /* D5 (既定値) */ }
 
     /**
-     * D5 (実行時代入): `$this->afterCommit = true` / `->afterCommit = true` の文字列走査。
+     * D5 (実行時代入): `->afterCommit = true` の **token 走査**。
+     * `$this->afterCommit = true;` (自クラス内) と `$job->afterCommit = true;`
+     * (外部からの代入) の**両方**を拾う = 判定は receiver を問わず
+     * `T_OBJECT_OPERATOR` + `afterCommit` + `=` + `true` の並びで行う。
      *
      * @param  list<string>  $paths
      * @return list<array{path: string, line: int}>
@@ -1242,21 +1305,27 @@ final class QueueDispatchDeferralInventory
 |---|---|---|
 | 1 | `D1: first-party ランタイム PHP に ->afterCommit() の呼び出しは 1 件も無い` | 0 件 pin |
 | 2 | `D2: first-party ランタイム PHP に DB::afterCommit() の呼び出しは 1 件も無い` | 0 件 pin |
-| 3 | `D3: ShouldQueue 実装で ShouldQueueAfterCommit を implement するクラスは 1 件も無い` | 0 件 pin |
+| 3 | `D3: 母集団に ShouldQueueAfterCommit / ShouldHandleEventsAfterCommit を implement するクラスは 1 件も無い` | 0 件 pin |
 | 4 | `D4: after_commit=true を持ってよい接続は sync だけである` | 0 件 pin (全接続集合) |
-| 4b | `D5: ShouldQueue 実装で $afterCommit の既定値が true のクラスは 1 件も無い` | 0 件 pin |
+| 4b | `D5: 母集団に $afterCommit の既定値が true のクラスは 1 件も無い` | 0 件 pin |
 | 4c | `D5: first-party ランタイム PHP に $afterCommit への true 代入は 1 件も無い` | 0 件 pin |
 | 5 | `母集団: runtimePhpFiles() は Finder による独立列挙と対称差が空である` | 母集団境界の exact-fit |
 | 5b | `母集団: RUNTIME_ROOTS はテスト側で独立に固定した期待ルート集合と一致する` | **ルート集合の独立 pin** |
 | 6 | `母集団: 期待ルート集合の各ルートについて 1 件以上のファイルが列挙される` | 母集団 0 件 fail (ルート単位) |
 | 7 | `母集団: ShouldQueue 実装クラスの列挙は 0 件でない` | 母集団 0 件 fail |
+| 7b | `母集団: Mailable subclass の列挙は 0 件でない` | 母集団 0 件 fail |
+| 7c | `母集団: deferralCandidateClasses() は unique(shouldQueueClasses ∪ mailableClasses) と一致し、Mailable 全件を含む` | **和集合の固定** |
 | 8 | `母集団: queue.connections は 0 件でない` | 母集団 0 件 fail |
 | 9 | `負のコントロール: fixture ツリーを列挙して D1 を検出する` | 経路統合 |
 | 10 | `負のコントロール: fixture ツリーを列挙して D2 を検出する` | 経路統合 |
 | 11 | `負のコントロール: ShouldQueueAfterCommit 実装ダミークラスを D3 が検出する` | 経路統合 |
+| 11b | `負のコントロール: ShouldHandleEventsAfterCommit 実装ダミークラスを D3 が検出する` | 経路統合 |
 | 12 | `負のコントロール: after_commit=true の非 sync 接続を D4 が検出する` | 経路統合 |
 | 12b | `負のコントロール: $afterCommit = true を持つダミー job クラスを D5 (既定値) が検出する` | 経路統合 |
+| 12b2 | `負のコントロール: ShouldQueue を実装しないダミー Mailable の $afterCommit = true を D5 (既定値) が検出する` | **Mailable 経路の固定** |
 | 12c | `負のコントロール: $this->afterCommit = true; を含む fixture を D5 (代入) が検出する` | 経路統合 |
+| 12e | `負のコントロール: $job->afterCommit = true; (外部からの代入) も D5 (代入) が検出する` | 経路統合 |
+| 12f | `偽陰性の負のコントロール: $afterCommit の既定値が null / false のクラスは D5 (既定値) が検出しない` | 誤検出の固定 |
 | 12d | `偽陽性の負のコントロール: コメント / docblock / 文字列リテラル中の ->afterCommit() は検出しない` | 誤検出の固定 |
 | 13 | `phpFilesUnder(): 相対パスを渡すと例外になる` | 契約の固定 |
 | 14 | `phpFilesUnder(): 存在しないディレクトリを渡すと例外になる (黙って 0 件を返さない)` | 契約の固定 |
@@ -1273,9 +1342,30 @@ final class QueueDispatchDeferralInventory
   を置く。テスト 6 のループもこの**テスト側リテラル**を回す (定数を回さない)
 - テスト 6 は**ルート単位**で 1 件以上を要求する。全体件数だけを見ると
   「`routes/` だけ丸ごと脱落」が通ってしまうため
-- **D3 の母集団は `QueuedJobPopulation::shouldQueueClasses()`** (`app/` 配下の
-  `ShouldQueue` 実装) のままでよい。`ShouldQueueAfterCommit` を implement できるのは
-  クラスであり、`routes/` にクラス定義は置かないため
+- **D3 / D5(既定値) の母集団は `deferralCandidateClasses()`**
+  (= `shouldQueueClasses()` ∪ `mailableClasses()`)。`routes/` を含めないのは
+  宣言的迂回もプロパティ既定値も**クラス定義**にしか書けず、`routes/` に
+  クラス定義を置かないため。
+  - **Mailable を足す根拠 (Codex Round 7 の Warning)**: `Mailable` は
+    `ShouldQueue` なしでも `Mail::to(...)->queue()` でキューに載り、
+    vendor の `SendQueuedMailable::__construct()` が
+    `instanceof ShouldQueueAfterCommit` と `$mailable->afterCommit` を
+    **wrapper job へコピーする**。本リポジトリは `CreateInquiryAction` が
+    現に `Mail::to(...)->queue(...)` を使っており、現行 2 クラス
+    (`InquiryReceivedMail` / `InquiryAcknowledgementMail`) は
+    `implements ShouldQueue` を併記しているだけである。併記を外せば
+    `shouldQueueClasses()` から消え、`$afterCommit = true` が gate をすり抜ける
+  - **Notification / listener に同じ拡張は要らない**: vendor 側が
+    `NotificationSender` (`$notification instanceof ShouldQueue`) と
+    `Events\Dispatcher::handlerShouldBeQueued()` で `ShouldQueue` を要求するため、
+    キューに載る母集団は `shouldQueueClasses()` で尽きる (思考原則 2 — 現に到達不能な
+    経路のために母集団を広げない)
+  - **`ShouldHandleEventsAfterCommit` を D3 に足す根拠**:
+    `Events\Dispatcher::handlerShouldBeDispatchedAfterDatabaseTransactions()` は
+    `ShouldQueueAfterCommit` ではなく**この interface**を見る。ShouldQueue な listener に
+    付けるとキュー投入そのものが commit 後へずれるため、D3 の interface 集合に加える
+    (新しい検出器ではなく既存リフレクション判定の対象 interface が 1 つ増えるだけ)。
+    現行 `app/` の使用は 0 件
 - テスト 7 の「完全性」自体は `QueuedJobLeaseInventoryTest` /
   `JobExecutionDedupInventoryTest` が対称差 0 で既に固定しているため、
   本 gate では 0 件 fail のみとし二重実装しない (docblock でその契約を参照する)
@@ -1679,7 +1769,9 @@ test('外側 tx が rollback すると analysis_jobs も jobs 行も残らない
 ```markdown
 9. **キュー投入の原子性**: 業務状態の保存とキュー投入は**同一トランザクション内**で行う
    (`afterCommit` に依存しない)。`->afterCommit()` / `DB::afterCommit` /
-   `ShouldQueueAfterCommit` / job の `$afterCommit = true` プロパティ /
+   `ShouldQueueAfterCommit` / `ShouldHandleEventsAfterCommit` /
+   `$afterCommit = true` プロパティ (**`ShouldQueue` 実装だけでなく Mailable も** —
+   Mailable は `ShouldQueue` なしでも `Mail::queue()` でキューに載る) /
    config の `after_commit => true` (sync 以外) は
    **すべて 0 件で pin** されている (`QueueDispatchAtomicityInventoryTest` が
    deny-by-default。allow-list は持たない = 免除機構そのものが無い)。
@@ -1692,8 +1784,9 @@ test('外側 tx が rollback すると analysis_jobs も jobs 行も残らない
    - **`Queue::fake()` では原子性を検証できない** (`QueueFake::push()` は
      `enqueueUsing` を通らない)。原子性の検証は実 `jobs` 表と
      `JobQueueing` の `DB::transactionLevel()` 観測で行う
-   - **保証しないもの**: 検出は文字列パターン (D1/D2) とリフレクション (D3) の併用で、
-     動的な迂回 (`$m = 'afterCommit'`) や helper 経由の呼び出しには沈黙する。
+   - **保証しないもの**: 検出は token 走査 (D1/D2/D5 の代入形) とリフレクション
+     (D3/D5 の既定値) の併用で、動的な迂回 (`$m = 'afterCommit'` /
+     `$this->afterCommit = $flag;`) や helper 経由の呼び出しには沈黙する。
      guard は config の値だけを見るため、`connection` 名の一致は
      「同一トランザクションに乗る」ことの**代理検査**にすぎない。
      また **「dispatch が業務 tx の内側にあること」の静的完全性は保証しない** —
@@ -1769,6 +1862,14 @@ test('外側 tx が rollback すると analysis_jobs も jobs 行も残らない
 14b. **D5 は動的な値の代入 (`$this->afterCommit = $flag;`) を検出できない**。
     既定値のリフレクション判定にも `= true` の token パターンにも映らないため。
     これは 0 件 pin の穴として残る (誇張しない)
+
+14c. **D3 / D5(既定値) の母集団は `app/` 配下の `ShouldQueue` 実装 ∪ Mailable subclass** である。
+    ここに入らない形でキューに載る経路 — vendor / package が定義するクラス、
+    `app/` の外に置かれた first-party クラス、`class_exists()` で解決できない
+    動的生成クラス — には沈黙する。
+    また `ShouldHandleEventsAfterCommit` を**非 ShouldQueue の listener**に付けた場合は
+    「同期ハンドラの実行が commit 後へずれる」だけでキュー投入ではないため、
+    本 gate の対象外である (母集団にも入らない)
 15. **D1/D2/D5(代入) は token 走査**なのでコメント・docblock・文字列リテラルは
     対象外になる。裏を返すと、**文字列で組み立てた動的呼び出しには沈黙する**
 16. (13 番の運用上の注意) **どの接続を検査すべきかを間違えない**。
@@ -1808,6 +1909,9 @@ test('外側 tx が rollback すると analysis_jobs も jobs 行も残らない
 | 19 | `config/queue.php` の `database-analysis` の `driver` を `sync` に変える | `QueueDispatchAtomicityGuardTest` (R1。sync 除外を接続名で行っていないと**落ちない**) |
 | 20 | 任意の job クラスに `public bool $afterCommit = true;` を足す | `QueueDispatchAtomicityInventoryTest` (D5 既定値)。**D1〜D4 では落ちない**ことも同時に確認する |
 | 21 | 任意の job クラスのコンストラクタに `$this->afterCommit = true;` を足す | 同 (D5 代入) |
+| 22 | `app/Mail/InquiryReceivedMail.php` から `implements ShouldQueue` を外し `public bool $afterCommit = true;` を足す | 同 (D5 既定値)。**母集団を `shouldQueueClasses()` だけに戻すと落ちない**ことも同時に確認する (Mailable 和集合の要) |
+| 23 | 任意の ShouldQueue listener に `implements ShouldHandleEventsAfterCommit` を足す | 同 (D3)。`ShouldQueueAfterCommit` だけを見る実装では**落ちない**ことも同時に確認する |
+| 24 | `deferralCandidateClasses()` を `shouldQueueClasses()` だけ返すよう潰す | M7 テスト 7c (和集合の固定) と 12b2 (Mailable 経路の負のコントロール) |
 
 **各変異は 1 個ずつ入れて 1 回テストし、必ず戻す。** 手順と結果 (どのテストがどう落ちたか) は
 実装 PR の devnotes に記録する。
