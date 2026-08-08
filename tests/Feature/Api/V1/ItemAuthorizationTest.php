@@ -2,8 +2,10 @@
 
 declare(strict_types=1);
 
+use App\Enums\Idempotency\IdempotencyState;
 use App\Enums\OrganizationRole;
 use App\Enums\ProjectRole;
+use App\Models\IdempotencyKey;
 use App\Models\Item;
 use App\Models\Organization;
 use App\Models\Project;
@@ -317,7 +319,11 @@ test('{item} も cross-project / cross-org / 不在 で完全に同一の 404 �
 
 // --- idempotency 層との相互作用 (ケース 16) ---
 
-test('403 は Idempotency-Key で再生されない (権限付与後の再送は成功する)', function (): void {
+test('403 の後は同一キーが 409 になり、新しいキーなら権限付与後に成功する', function (): void {
+    // ★契約変更 (T139): 403 は「決着不明」として indeterminate に倒れる。
+    //   middleware は controller の 403 が副作用の前だったか後だったかを知らないため、
+    //   再実行せず新しいキーを要求する。**403 が再生されることは無い**
+    //   (403 応答そのものが保存されないので、権限回復後に 403 で詰むことはない)。
     [$organization] = createOrganizationWithOwner();
     $project = Project::factory()->forOrganization($organization)->create();
     $viewer = attachOrganizationMember($organization, OrganizationRole::Member);
@@ -329,13 +335,23 @@ test('403 は Idempotency-Key で再生されない (権限付与後の再送は
         ->postJson("/api/v1/projects/{$project->id}/items", $payload)
         ->assertForbidden();
 
+    $row = IdempotencyKey::query()->sole();
+    expect($row->state)->toBe(IdempotencyState::Indeterminate);
+    expect($row->response_status)->toBeNull();
+
     attachProjectMember($project, $viewer, ProjectRole::Admin);
     // relation キャッシュ由来の偽陰性でテスト失敗の原因が切り分けられなくなるのを防ぐ
     $viewer->refresh();
     $project->unsetRelations();
 
-    // 保存済み 403 が再生されるなら 403 のまま = 権限回復後も詰む
+    // 同一キーは 409 (403 が再生されるわけではない = コードで区別できる)
     $this->withHeaders($headers)
+        ->postJson("/api/v1/projects/{$project->id}/items", $payload)
+        ->assertStatus(409)
+        ->assertJsonPath('error.code', 'idempotency_indeterminate');
+
+    // 新しいキーなら権限回復後に成功する (詰まないことの確認)
+    $this->withHeaders([...$headers, 'Idempotency-Key' => 'fixed-key-002'])
         ->postJson("/api/v1/projects/{$project->id}/items", $payload)
         ->assertCreated();
 

@@ -130,16 +130,19 @@ test('write scope 付き OAuth token は write endpoint を叩けて Idempotency
     );
     $project = Project::factory()->forOrganization($this->org)->create();
 
+    // 初回応答には Idempotent-Replayed を付けない
     $first = $this->withHeader('Authorization', 'Bearer '.$issued['access_token'])
         ->withHeader('Idempotency-Key', 'oauth-idem-1')
         ->postJson("/api/v1/projects/{$project->id}/items", ['name' => 'OAuth経由アイテム'])
-        ->assertCreated();
+        ->assertCreated()
+        ->assertHeaderMissing('Idempotent-Replayed');
 
     // 同一 key + 同一 body の再送は保存済みレスポンスを再生する (副作用は 1 回)
     $replay = $this->withHeader('Authorization', 'Bearer '.$issued['access_token'])
         ->withHeader('Idempotency-Key', 'oauth-idem-1')
         ->postJson("/api/v1/projects/{$project->id}/items", ['name' => 'OAuth経由アイテム'])
-        ->assertCreated();
+        ->assertCreated()
+        ->assertHeader('Idempotent-Replayed', 'true');
 
     expect($replay->json('data.id'))->toBe($first->json('data.id'));
     expect($project->items()->count())->toBe(1);

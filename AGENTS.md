@@ -466,3 +466,27 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
    - 非本番の captcha は `testing.fake_externals` で `RecaptchaVerifierTestFake` へ bind される
      (`ExternalFakeWiringInventory`)。**SSO は fake しない**。
    - 詳細は `docs/architecture.md` §外部到達点の目録 (標準形 v1)。
+10. **冪等キーの配線と決着規約**: `api/v1/*` の変更系 route は `idempotent` middleware を
+    **ちょうど 1 本**持つか、`IdempotencyWiringExemption` + 30 文字以上の根拠で
+    `IdempotentRouteCoverageTest` の目録へ登録する (deny-by-default。免除の**前提**は
+    `IdempotencyExemptionPremiseTest` が behavioral に固定する)。
+    - **決着は `completed` / `indeterminate` の 2 つだけ**で、release (再実行を許す) 経路を
+      持たない。claim は本処理の**前**に `insertOrIgnore` で行い、調停者は
+      `idempotency_keys` の既存 unique 2 本**だけ**である (cache ロックを併用しない =
+      best-effort の二重機構を作らない)。帰結として **4xx/5xx の後に同じキーは
+      再利用できない** (409 `idempotency_indeterminate`。破壊的契約変更)
+    - **保持期間の SoT は `config/idempotency.php`** (`retention_hours`)。**env は使わない**
+      (環境ごとに変えてよい運用値ではない)。クラス定数での二重管理へ戻さないこと
+      (`IdempotencyContractParityTest` が `TTL_HOURS` の不在を機械固定する)
+    - `Idempotent-Replayed` は**外部標準 (IETF の Idempotency-Key draft) には無い拡張**で、
+      **再生応答にのみ**付与する。名前と付与条件の正本は `docs/api-idempotency.md`
+    - **middleware を terminable にしない**。順序契約
+      `api.project-in-org < api-key.ability < idempotent` は不変
+    - **MCP 側は据え置き** (`McpIdempotencyService::store()` の unique 握り潰しは残る)。
+      write tool が 0 本で到達不能なため実害は無いが「MCP も並行安全になった」とは書かない。
+      最初の write tool 追加時に `McpWriteToolIdempotencyEnforcementTest` の trip-wire が
+      赤くなり、必要作業 (状態機械化 / T109 解消 / behavioral テスト) を失敗メッセージで提示する
+    - **保証範囲を誇張しない**: gate は `api/v1/` 配下しか見ず、web の書込 route・`oauth/*`・
+      将来別 prefix の機械向け API には**沈黙する**。fatal error で `processing` が残る窓も
+      閉じない (保持期間満了まで 409 が続く)。詳細は `docs/api-idempotency.md` と
+      `docs/architecture.md` §冪等キーの claim と保持期間

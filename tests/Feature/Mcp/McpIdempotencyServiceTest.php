@@ -7,6 +7,7 @@ use App\Exceptions\Mcp\InvalidParamsException;
 use App\Models\McpIdempotencyKey;
 use App\Services\Mcp\McpIdempotencyService;
 use App\Values\Mcp\IdempotencyKey;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Str;
 
 /*
@@ -118,3 +119,18 @@ test('idempotency_key は UUID v4 のみ受理する', function (string $invalid
     '非UUID' => ['not-a-uuid'],
     'UUID v1 相当' => ['550e8400-e29b-11d4-a716-446655440000'],
 ])->throws(InvalidParamsException::class);
+
+test('store の expires_at は config の保持期間から決まる (クラス定数ではない)', function (): void {
+    // 保持期間の SoT は config/idempotency.php (REST 側と共有)。
+    // ここを変えて expires_at が追随しなければ二重管理へ逆戻りしている。
+    config(['idempotency.retention_hours' => 1]);
+    $this->freezeTime();
+    $now = CarbonImmutable::now();
+
+    $this->service->store(
+        $this->org->id, $this->user->id, 'test-tool', $this->key, ['a' => 1], ['ok' => true],
+    );
+
+    $row = McpIdempotencyKey::query()->sole();
+    expect($row->expires_at->toDateTimeString())->toBe($now->addHour()->toDateTimeString());
+});

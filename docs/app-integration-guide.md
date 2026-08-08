@@ -147,6 +147,15 @@
 - REST API: nested route + flat ability。新リソースの ability は `{resource}:read` /
   `{resource}:write` / 動詞付き(`evaluations:run` 型)で定義し、ability 定義 1 箇所に追記。
 - すべての書き込みエンドポイントに Idempotency-Key を配線する(テンプレの middleware を使う)。
+- **冪等配線は deny-by-default で機械強制される**: `api/v1/*` の変更系 route は
+  `idempotent` を**ちょうど 1 本**持つか、`IdempotencyWiringExemption` + 30 文字以上の根拠で
+  `tests/Architecture/IdempotentRouteCoverageTest.php` の目録へ登録する
+  (免除の**前提**は `tests/Feature/Security/IdempotencyExemptionPremiseTest.php` が behavioral に固定)。
+  決着は `completed` / `indeterminate` の 2 つだけで **release (再実行を許す) 経路を持たない**ため、
+  **4xx/5xx の後に同じキーは再利用できない**(破壊的契約変更)。保持期間の SoT は
+  `config/idempotency.php`(env 不使用)。契約の正本は [docs/api-idempotency.md](api-idempotency.md)、
+  文書と実装の parity は `tests/Architecture/IdempotencyContractParityTest.php` が固定する。
+  gate が見るのは `api/v1/` 配下だけで、web の書込 route・`oauth/*`・別 prefix の API には**沈黙する**。
 - **API の権限境界は ability(トークンの能力)と Policy(actor の権限)の 2 段**。
   ability 不足は `code: "insufficient_ability"`、Policy 不足は `code: "forbidden"` で返り、
   クライアントは「トークン設定不足」と「権限不足」を判別できる。

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Database\Factories;
 
+use App\Enums\Idempotency\IdempotencyState;
 use App\Models\ApiKey;
 use App\Models\IdempotencyKey;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -27,6 +28,7 @@ class IdempotencyKeyFactory extends Factory
             'route_name' => 'api.v1.projects.items.store',
             'key' => (string) Str::uuid(),
             'request_hash' => hash('sha256', Str::random(32)),
+            'state' => IdempotencyState::Completed,
             'response_status' => 201,
             'response_body' => ['data' => ['id' => 1]],
             'expires_at' => Carbon::now()->addDay(),
@@ -37,6 +39,26 @@ class IdempotencyKeyFactory extends Factory
     public function forApiKey(ApiKey $apiKey): static
     {
         return $this->state(fn () => ['api_key_id' => $apiKey->id]);
+    }
+
+    /** claim 済み・本処理実行中 (応答未確定) として作る */
+    public function processing(): static
+    {
+        return $this->state(fn () => [
+            'state' => IdempotencyState::Processing,
+            'response_status' => null,
+            'response_body' => null,
+        ]);
+    }
+
+    /** 決着が不明 (非 2xx / 非 JSON / 例外) として作る */
+    public function indeterminate(): static
+    {
+        return $this->state(fn () => [
+            'state' => IdempotencyState::Indeterminate,
+            'response_status' => null,
+            'response_body' => null,
+        ]);
     }
 
     /** TTL 超過 (未使用扱い) として作る */

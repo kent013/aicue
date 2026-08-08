@@ -1259,3 +1259,29 @@ T126 の `ExternalClientBoundaryScanner` も本目録の `ExternalSeamScanner` �
     (`ExternalClientBoundaryScanner` と同じ限界)。この限界は
     `tests/Unit/Architecture/ExternalSeamScannerTest.php` が**テストとして明示的に固定**しており、
     将来直すときは必ず差分が出る
+## 冪等キーの claim と保持期間 (REST API v1 / MCP)
+
+REST API v1 の `Idempotency-Key` は **本処理の前に claim する**方式で、契約の正本は
+[docs/api-idempotency.md](api-idempotency.md)。ここには運用側の要点だけを置く。
+
+- **モデル**: `IdempotencyKey` は `state` 列 (`processing` / `completed` / `indeterminate`) を持つ。
+  claim は `insertOrIgnore` で行い、調停者は既存 unique 2 本
+  (`api_key_id, route_name, key` / `user_id, route_name, key`) **だけ** (cache ロックを併用しない)。
+  決着は `completed` / `indeterminate` の 2 つで、**release (再実行を許す) 経路を持たない**。
+  状態遷移は middleware の条件付き UPDATE のみが行うため `state` は `$fillable` に入れない。
+- **契約変更 (破壊的)**: 4xx/5xx で終わった要求の後、同じキーは再利用できない
+  (409 `idempotency_indeterminate`)。観測面は `api.v1.projects.items.{store,update,destroy}` の
+  3 route のみ。MCP write tool は 0 本のため観測面なし。
+- **cron**: `idempotency:prune` (daily・`onOneServer`) が保持期間
+  (`config/idempotency.php` の `retention_hours`。**env 不使用**) を超えた行を
+  REST / MCP 両テーブルから物理削除する。claim 時の lazy delete は
+  「再送されたキー」しか回収しないため単調増加を止められない。
+- **監視対象**: `idempotency:prune` の `report()`。`processing` のまま期限切れになった行は
+  「claim したのに確定できなかった要求」= プロセス強制終了か finalize 失敗の痕跡である
+  (載せるのは件数のみ。キー値・body は載せない)。
+- **閉じない窓 (誇張しない)**: OOM / timeout / プロセス強制終了で `processing` が残る窓は
+  閉じない。保持期間満了まで同一キーは 409 `idempotency_in_progress` を返し続ける。
+- **`onOneServer()` の前提**: scheduler が動いていることと、ロックを提供する cache driver が
+  使われていることが前提 (既存の `billing:send-billing-reminders` /
+  `render:reconcile-outputs` と同じ。本節で新しく持ち込む前提ではない)。
+  満たさないと多重実行しうるが DELETE は冪等で、害は `report()` の重複に留まる。

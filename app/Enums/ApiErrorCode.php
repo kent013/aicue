@@ -30,6 +30,10 @@ enum ApiErrorCode: string
     case RateLimited = 'rate_limited';
     /** 同一 Idempotency-Key + 異なる request body の再送 (409) */
     case IdempotencyConflict = 'idempotency_conflict';
+    /** 同一 Idempotency-Key の別要求が処理中 (409)。少し待って再送するか新しいキーを使う */
+    case IdempotencyInProgress = 'idempotency_in_progress';
+    /** 同一 Idempotency-Key の先行要求が成功として記録されていない (409)。新しいキーを使う */
+    case IdempotencyIndeterminate = 'idempotency_indeterminate';
     case InternalServerError = 'internal_server_error';
 
     public function defaultStatus(): int
@@ -40,7 +44,9 @@ enum ApiErrorCode: string
             self::NotFound => 404,
             self::ValidationFailed => 422,
             self::RateLimited => 429,
-            self::IdempotencyConflict => 409,
+            self::IdempotencyConflict,
+            self::IdempotencyInProgress,
+            self::IdempotencyIndeterminate => 409,
             self::InternalServerError => 500,
         };
     }
@@ -56,6 +62,8 @@ enum ApiErrorCode: string
             self::ValidationFailed => 'The given data was invalid.',
             self::RateLimited => 'Too many requests.',
             self::IdempotencyConflict => 'Idempotency key conflict.',
+            self::IdempotencyInProgress => 'A request with this Idempotency-Key is still being processed.',
+            self::IdempotencyIndeterminate => 'The prior request with this Idempotency-Key did not complete successfully. Use a new Idempotency-Key.',
             self::InternalServerError => 'Internal server error.',
         };
     }
@@ -63,6 +71,11 @@ enum ApiErrorCode: string
     /**
      * HTTP status → 正規コード。未対応 status (405 / 415 等) は internal_server_error に
      * collapse する (無関係なコードへの暗黙の別名化を防ぐ。HTTP status 自体は保持される)。
+     *
+     * ★409 は `IdempotencyConflict` に**据え置く**。409 系は 3 コードあるが、これは
+     *   「HTTP status しか手掛かりが無いときの既定名」であり、IdempotentRequest は
+     *   常に明示コードを構築する (本メソッドを経由しない)。したがって新コードが
+     *   暗黙に別名化されることはない。この非対称は意図的である。
      */
     public static function fromHttpStatus(int $status): self
     {
