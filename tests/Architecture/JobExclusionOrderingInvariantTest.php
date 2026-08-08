@@ -5,9 +5,12 @@ declare(strict_types=1);
 use App\Jobs\Billing\AutoRechargeTriggerJob;
 use App\Jobs\Billing\ExecuteAutoRechargeAttemptJob;
 use App\Services\Billing\AutoRechargeService;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 
 /*
- * 入口の排他 (Cache::lock TTL / ShouldBeUnique の uniqueFor) の**序列**を CI 固定する。
+ * 入口の排他 (Cache::lock TTL) の**序列**を CI 固定する。
+ * ★ T137 で `ShouldBeUnique` (uniqueFor) の系統は AutoRechargeTriggerJob から撤去され、
+ *   本ファイルの当該 2 テストは「実装しないこと」の固定へ**反転**した (下の反転 docblock)。
  *
  * 裁定 AG-082: 入口の排他は best-effort であり、結果の一回性を保証しない。
  * したがって「保証を代替できるほど長く」してはならない — 鍵が残留すると、
@@ -48,19 +51,33 @@ test('入口の排他: auto-recharge の org lock TTL は既定接続の retry_a
     );
 });
 
-test('入口の排他: AutoRechargeTriggerJob の uniqueFor は既定接続の retry_after を下回る', function (): void {
-    $retryAfter = jobExclusionDefaultRetryAfter();
-
-    expect((new AutoRechargeTriggerJob(1))->uniqueFor)->toBeLessThan(
-        $retryAfter,
-        'uniqueFor がキューの再配送間隔以上です。ShouldBeUnique の鍵は失敗や timeout で'
-        .'解放されないことがあるため (Laravel 公式)、残留時間を再配送間隔の内側に収めること。',
+/**
+ * 【契約の反転 (AG-114 確定 1 / T137)】
+ * - 旧主張: AutoRechargeTriggerJob の uniqueFor は既定接続の retry_after を下回り、正の値である
+ * - 旧目的: 入口排他 (ShouldBeUnique) の鍵が再配送間隔を跨いで抑止を残さないようにする
+ * - 新主張: AutoRechargeTriggerJob は ShouldBeUnique を **実装しない** (入口排他を持たない)
+ * - 新前提: 結果の一回性は maybeCreateAttempt の organizations 行ロック + pending 検査 +
+ *   tar_attempts_org_pending_unique (partial unique) + unique violation の no-op 化が担う
+ * - 前提を守る機構: AutoRechargeAttemptUniquenessTest (3 点の behavioral 固定) +
+ *   JobExecutionDedupInventoryTest の GuardedByDownstreamConstraint 登録
+ * - 反転根拠: UniqueLock は dispatch 呼び出し時に取得され rollback で解放されない。業務 tx の
+ *   内側で dispatch する設計 (確定 1) では、ネスト深さに依らず rollback 後も uniqueFor 秒の
+ *   抑止が残る。AGENTS.md ドメイン規約 6 のとおり入口排他は保証を担わないため撤去する
+ */
+test('入口の排他: AutoRechargeTriggerJob は ShouldBeUnique を実装しない', function (): void {
+    expect(is_subclass_of(AutoRechargeTriggerJob::class, ShouldBeUnique::class))->toBeFalse(
+        'AutoRechargeTriggerJob が入口排他 (ShouldBeUnique) を持っています。業務 tx の内側で'
+        .'dispatch する設計では UniqueLock が rollback で解放されず、uniqueFor 秒の抑止が残ります。'
+        .'一回性は永続状態遷移 (org 行ロック + pending 検査 + partial unique) が担います。',
     );
 });
 
-test('入口の排他: uniqueFor は正の値である (実質無効化の検出)', function (): void {
-    // 0 / 負値は「鍵を持たない」に等しく、ShouldBeUnique の宣言が静かに空洞化する
-    expect((new AutoRechargeTriggerJob(1))->uniqueFor)->toBeGreaterThan(0);
+test('入口の排他: AutoRechargeTriggerJob は uniqueFor / uniqueId を持たない (死んだ宣言の検出)', function (): void {
+    // ShouldBeUnique 無しの uniqueFor / uniqueId は何も効かない宣言であり、
+    // 「排他がある」という誤読を生むため残さない
+    $reflection = new ReflectionClass(AutoRechargeTriggerJob::class);
+    expect(array_key_exists('uniqueFor', $reflection->getDefaultProperties()))->toBeFalse();
+    expect($reflection->hasMethod('uniqueId'))->toBeFalse();
 });
 
 test('入口の排他: 比較先の前提 — auto-recharge の 2 ジョブは既定接続で動く', function (): void {

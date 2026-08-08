@@ -85,11 +85,11 @@ class CaptureTakeService
     }
 
     /**
-     * 削除。DL 済み (downloaded_at 非 null) は 422。採用中なら null 化 + S3 削除 Job (tx 成功後)。
+     * 削除。DL 済み (downloaded_at 非 null) は 422。採用中なら null 化 + S3 削除 Job (業務 tx 内)。
      */
     public function delete(Project $project, VideoManual $manual, Cut $cut, Take $take): void
     {
-        $paths = DB::transaction(function () use ($project, $manual, $cut, $take): array {
+        DB::transaction(function () use ($project, $manual, $cut, $take): void {
             /** @var VideoManual $lockedManual */
             $lockedManual = $project->manuals()->whereKey($manual->id)->lockForUpdate()->firstOrFail();
             /** @var Cut $lockedCut */
@@ -108,12 +108,13 @@ class CaptureTakeService
             $lockedTake->delete();
             $this->renumber($lockedCut);
 
-            return $paths;
+            // S3 削除の投入を**同一 tx 内**で行う (AG-114 確定 1)。
+            // 保証するのは「take 行を消したのに削除 job が投入されない窓」の解消だけである
+            // (worker 停止 / job 失敗 / ストレージ失敗ではオブジェクトは残る = 誇張しない)。
+            if ($paths !== []) {
+                DeleteTakeObjectsJob::dispatch($paths); // media queue へ
+            }
         });
-
-        if ($paths !== []) {
-            DeleteTakeObjectsJob::dispatch($paths); // tx 成功後に media queue へ
-        }
     }
 
     /**

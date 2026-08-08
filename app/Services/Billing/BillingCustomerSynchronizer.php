@@ -19,9 +19,19 @@ final class BillingCustomerSynchronizer
     /**
      * Stripe customer 同期 job を dispatch する。
      *
-     * **必ず `DB::transaction` クロージャの内側から呼ぶこと。** transaction 内で
-     * `afterCommit()` を付けることで outer commit 後に発火し、commit 前の stale read を防ぐ (IV-3)。
-     * transaction の外で呼ぶと `afterCommit()` が即時実行になり遅延保証が崩れるため禁止。
+     * **必ず `DB::transaction` クロージャの内側から呼ぶこと** (呼び出し元 2 経路は既にそう)。
+     *
+     * 【契約の反転 (AG-114 確定 1 / T137)】
+     * - 旧主張: transaction 内で `afterCommit()` を付け、outer commit 後に発火させる
+     * - 旧目的: commit 前の stale read を防ぐ (IV-3)
+     * - 新主張: `afterCommit()` を付けず、業務 tx の内側で素直に dispatch する
+     * - 新前提: jobs 行が業務 tx に乗るため、**worker が job を可視化できるのは commit 後**
+     * - 前提を守る機構: QueueDispatchAtomicityGuard (driver=database / キュー DB 接続 =
+     *   業務 DB / after_commit=false を起動時に fail-closed 検査)
+     * - 反転根拠: 本 job は SerializesModels で organization を **ID で直列化し handle 時に
+     *   再取得**する。可視化が commit 後である以上、再取得値は必ず commit 後の値になり、
+     *   IV-3 は afterCommit なしで (むしろより強く) 保たれる。加えて afterCommit は
+     *   「commit したのに dispatch されない」窓を残すため、確定 1 の下では有害である
      *
      * Stripe customer 未作成 (`stripe_id === null`) の組織は no-op (IV-4、例外にしない)。
      */
@@ -31,6 +41,6 @@ final class BillingCustomerSynchronizer
             return;
         }
 
-        SyncBillingCustomerDetails::dispatch($organization)->afterCommit();
+        SyncBillingCustomerDetails::dispatch($organization);
     }
 }

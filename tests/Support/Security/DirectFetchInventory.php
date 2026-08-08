@@ -220,9 +220,11 @@ final class DirectFetchInventory
                 enqueuedBy: 'App\Services\Billing\TicketLedgerService::reserve',
             ),
             'Jobs/Billing/ExecuteAutoRechargeAttemptJob.php#handle#TicketAutoRechargeAttempt.find:$this->attemptId#1' => DirectFetchJustificationEntry::queuePayload(
-                'attempt id は AutoRechargeTriggerJob がサーバ側で作成した attempt 行の主キーであり、'
-                .'client からは指定できない。worker 側は再水和のみ行う',
-                enqueuedBy: 'App\Jobs\Billing\AutoRechargeTriggerJob::handle',
+                'attempt id は AutoRechargeService が起票と同一 tx でサーバ側に作成した attempt 行の'
+                .'主キーであり、client からは指定できない。worker 側は再水和のみ行う',
+                // T137: 投入点が呼び出し側 (AutoRechargeTriggerJob::handle) から起票と同一 tx の
+                // createAttemptLocked へ移った (AG-114 確定 1)。
+                enqueuedBy: 'App\Services\Billing\AutoRechargeService::createAttemptLocked',
             ),
             'Jobs/Billing/HandleAutoRechargeChargeFailureJob.php#handle#TicketAutoRechargeAttempt.find:$this->attemptId#1' => DirectFetchJustificationEntry::queuePayload(
                 'attempt id は署名検証済み Stripe webhook の処理中にサーバが特定した attempt 行の主キーで、'

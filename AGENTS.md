@@ -490,3 +490,34 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
       将来別 prefix の機械向け API には**沈黙する**。fatal error で `processing` が残る窓も
       閉じない (保持期間満了まで 409 が続く)。詳細は `docs/api-idempotency.md` と
       `docs/architecture.md` §冪等キーの claim と保持期間
+11. **キュー投入の原子性**: 業務状態の保存とキュー投入は**同一トランザクション内**で行う
+    (`afterCommit` に依存しない)。`->afterCommit()` / `DB::afterCommit` /
+    `ShouldQueueAfterCommit` / `ShouldHandleEventsAfterCommit` /
+    `ShouldDispatchAfterCommit` (event 側。母集団は `app/` の全クラス) /
+    `$afterCommit` の truthy な既定値・promoted parameter・`= true` 代入
+    (**`ShouldQueue` 実装だけでなく Mailable も** —
+    Mailable は `ShouldQueue` なしでも `Mail::queue()` でキューに載る) /
+    config の `after_commit => true` (sync 以外) は **すべて 0 件で pin** されている
+    (`QueueDispatchAtomicityInventoryTest` が deny-by-default。allow-list は持たない =
+    免除機構そのものが無い)。原子性の前提 (driver=database / キュー DB 接続 = 業務 DB /
+    after_commit=false / production の既定接続が sync でない) は
+    `QueueDispatchAtomicityGuard` が **全環境の起動時**に fail-closed 検査する。
+    - `config/queue.php` の `sync` は **`after_commit => true` が必須**。これが無いと
+      tx 内 dispatch がテストレーンで即時インライン実行され、pipeline の `startJob` が
+      自分自身のロック下で成立してしまう
+    - **`Queue::fake()` では原子性を検証できない** (`QueueFake::push()` は
+      `enqueueUsing` を通らない)。原子性の検証は実 `jobs` 表と
+      `JobQueueing` の `DB::transactionLevel()` 観測で行う (主契約は
+      「action 直前の level + 1 以上」。**rollback テストは移設を検出しない**)
+    - `ShouldBeUnique` は業務 tx 内 dispatch と両立しない (unique lock は dispatch 時に取得され
+      rollback で解放されない)。`AutoRechargeTriggerJob` からは撤去済みで、一回性は
+      永続状態遷移が担う (ドメイン規約 6)
+    - **保証しないもの**: 検出は token 走査 (D1/D2/D5 の代入形) とリフレクション
+      (D3/D5 の既定値) の併用で、動的な迂回 (`$m = 'afterCommit'` /
+      `$this->afterCommit = $flag;`) や helper 経由の呼び出しには沈黙する。
+      guard は config の値だけを見るため、`connection` 名の一致は
+      「同一トランザクションに乗る」ことの**代理検査**にすぎない。
+      また **「dispatch が業務 tx の内側にあること」の静的完全性は保証しない** —
+      gate が固定するのは「commit 後ずらしの機構を使っていないこと」までで、
+      既知経路が実際に tx 内で投入していることは behavioral test が固定する
+    - 詳細は `docs/architecture.md` §キュー投入の原子性

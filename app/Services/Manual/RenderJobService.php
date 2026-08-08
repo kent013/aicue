@@ -106,11 +106,13 @@ class RenderJobService
 
             $locked->forceFill(['status' => VideoManualStatus::Rendering])->save();
 
+            // キュー投入は**業務 tx の内側**で行う (AG-114 確定 1)。payload は job id のみ。
+            // jobs 行が同一 tx に乗るため「保存済み・未投入」が構造的に消える。
+            // 前提は QueueDispatchAtomicityGuard が起動時に fail-closed 検査する。
+            RunManualRender::dispatch($job->id);
+
             return $job;
         });
-
-        // commit 後に dispatch (payload は job id のみ。dispatch 喪失は recoverStale が回収)
-        RunManualRender::dispatch($job->id);
 
         return $job;
     }
@@ -156,10 +158,11 @@ class RenderJobService
             }
             $job->save();
 
+            // キュー投入は**業務 tx の内側**で行う (AG-114 確定 1)。
+            RunManualRender::dispatch($job->id);
+
             return $job; // manual status は変更しない (編集と並走)
         });
-
-        RunManualRender::dispatch($job->id);
 
         return $job;
     }

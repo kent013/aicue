@@ -242,6 +242,102 @@ route parameter を経由しない id (POST payload / MCP tool 引数 / token cl
 - 状態 guard (rendering/analyzing 中の保存は 409) は第一防衛、共有行ロックは
   「job 側の書き込みと保存が絶対に交差しない」ための構造的防衛 (二重防御)
 
+### キュー投入の原子性
+
+**業務状態の保存とキュー投入は同一トランザクション内で行う** (裁定 AG-114 確定 1 / 到達基準 AG-126 /
+除外基準 AG-127。設計は `devnotes/20260809-0027-queue-dispatch-atomicity/`)。
+旧実装は commit 後に dispatch していたため、その間にプロセスが落ちると
+`RunManualAnalysis` / `RunManualRender` / `DeleteRenderOutputsJob` / `DeleteTakeObjectsJob` /
+Stripe webhook 由来の 2 ジョブが「保存済み・未投入」のまま残った。
+`recoverStale` は**再投入ではなく failJob へ倒す**ため、ユーザーの再実行なしには前進しない。
+
+1. **0 件 pin (commit 後ずらしの機構を使わない)** — 次の 6 種は
+   `QueueDispatchAtomicityInventoryTest` が deny-by-default で **0 件**に固定する。
+   **allow-list は持たない** (case を 1 つも持たない免除 enum は死んだ機構になるため、
+   除外が必要になった時点で免除機構ごと設計し直す)。
+
+   | # | 迂回路 | 検出方法 | 母集団 |
+   |---|---|---|---|
+   | D1 | `->afterCommit()` | token 走査 | `app` / `routes` / `bootstrap` / `database` / `config` |
+   | D2 | 静的 `::afterCommit()` 全般 (`DB::afterCommit()` を含む) | token 走査 | 同上 |
+   | D3 | `ShouldQueueAfterCommit` / `ShouldHandleEventsAfterCommit` | リフレクション | `ShouldQueue` 実装 ∪ Mailable subclass |
+   | D4 | config の `after_commit => true` (sync 以外) | config 走査 | `queue.connections` 全件 |
+   | D5 | `$afterCommit` の truthy な既定値 / promoted parameter / truthy な単一リテラル代入 | リフレクション + token 走査 | D3 と同じ / D1 と同じ |
+   | D6 | `ShouldDispatchAfterCommit` (event 側) | リフレクション | `app/` の**全クラス** |
+
+   - **D3 / D5 の母集団に Mailable を足す**のは、Mailable が `ShouldQueue` なしでも
+     `Mail::to(...)->queue()` でキューに載り、vendor の `SendQueuedMailable::__construct()` が
+     `$afterCommit` を wrapper job へコピーするため (本リポジトリは `CreateInquiryAction` が
+     現に `Mail::to(...)->queue(...)` を使っている)。
+   - **D6 が要る**のは、`Events\Dispatcher::dispatch()` が `ShouldDispatchAfterCommit` を見て
+     **イベント発火そのもの**を commit 後へ回すためである (queued listener がぶら下がっていれば
+     enqueue も commit 後になる)。event には marker interface が無く母集団を静的に絞れないので、
+     `app/` の全クラスという**超集合**を deny-by-default で見る。
+   - **`ShouldHandleEventsAfterCommit` も D3 で見る**のは、
+     `Events\Dispatcher::handlerShouldBeDispatchedAfterDatabaseTransactions()` が
+     `ShouldQueueAfterCommit` ではなくこちらを見るためである (ShouldQueue な listener では
+     これが**キュー投入そのもの**を commit 後へずらす)。
+   - **token 走査である理由**: 素の文字列 grep にすると、契約の反転 docblock が旧主張として
+     `->afterCommit()` を引用した瞬間に gate が自壊する。
+   - **D5 の判定は vendor と同じ真偽値文脈**である (`Queue::shouldDispatchAfterCommit()` は
+     `isset($job->afterCommit)` で拾った値をそのまま真偽値評価する)。`1` のような truthy 値も違反、
+     `null` / `false` / `0` は違反にしない。**promoted parameter は既定値に依らず違反**とする
+     (呼び出し側が `new Job(afterCommit: true)` で任意に渡せるため)。
+
+2. **起動時 fail-closed 検査** — `QueueDispatchAtomicityGuard` が
+   `AppServiceProvider::boot()` から**全環境で**走る (production 限定ではない —
+   R4 はテスト・dev でこそ意味を持つため `ProductionEnvGuard` には相乗りしない)。
+
+   | 規則 | 内容 |
+   |---|---|
+   | R1 | 参照接続 (既定接続 ∪ pin 済み 3 接続) の driver は `database` |
+   | R2 | 同接続の DB 接続は業務 DB と同一 (`connection` が null = 既定 DB は許可) |
+   | R3 | 同接続の `after_commit` は `false` を明示 (キー欠落も違反) |
+   | R4 | `sync` 接続は driver=sync かつ `after_commit=true` |
+   | R5 | production の既定接続の driver は `database` (sync の本番投入を拒否) |
+
+   - **sync の除外は driver ではなく接続「名」で判定する**。driver で除外すると
+     `database-analysis.driver = sync` にした構成が R1〜R3 を丸ごと skip して通ってしまう。
+   - **pin 済み接続集合の drift** は `QueuedJobLeaseInventoryTest` の対称差テストが閉じる
+     (guard 単体では閉じない)。
+   - `Bus::batch` / `Bus::chain` は `app/` に 0 件のため束台帳の検査は持たない
+     (導入時は `config('queue.batching')` の接続一致検査を guard に足すこと)。
+
+3. **`config/queue.php` の `sync` は `after_commit => true` が必須** — これが無いと
+   tx 内 dispatch がテストレーンで即時インライン実行され、pipeline の `startJob`
+   (lockForUpdate + `status===queued`) が**自分自身のロック下で成立**してしまう。
+   `after_commit=true` の sync では「業務 tx の commit 直後・テスト tx の内側でインライン実行」
+   となり、本番の「commit 後に worker が拾う」と同じ順序意味論になる。
+
+4. **検証方法** — **`Queue::fake()` では原子性を検証できない**
+   (`QueueFake::push()` は `enqueueUsing` を通らず、after_commit の解決も観測点も素通りする)。
+   原子性の検証は `queue.default='database'` + 実 `jobs` 表 +
+   `JobQueueing` の `DB::transactionLevel()` 観測 (`RecordsJobQueueingTransactionLevel`) で行う。
+   判定は **action 直前の level (baseline) + 1 以上**であり、固定値では判定しない。
+   **rollback テストは移設を検出しない** — 旧実装でもテストが外側 tx で包めば jobs 行は
+   rollback で消えるため、主契約は tx level 観測だけである。
+
+5. **入口排他との関係** — `AutoRechargeTriggerJob` から `ShouldBeUnique` を撤去した。
+   `UniqueLock` は dispatch 呼び出し時に取得され、rollback 時の解放は afterCommit 経路でしか
+   行われないため、業務 tx の内側で dispatch すると rollback しても `uniqueFor` 秒の抑止が残る
+   (ネスト深さに依らず解消できない)。一回性は永続状態遷移が担う (§ジョブの重複実行と結果の一回性)。
+
+6. **保証しないもの (誇張しない)**
+   - 消えるのは「業務状態を commit したのにキューへ投入されない」窓**だけ**である。
+     commit 前の障害は両方 rollback し (不整合ではない)、commit 後に jobs 行が残っても
+     **worker がそれを処理することは保証しない**。
+   - guard は **config の値だけ**を見る。`connection` 名の一致は「同一トランザクションに乗る」
+     ことの**代理検査**にすぎず、別 PDO / connection resolver 差し替え / 同名で別サーバを指す
+     構成は検査しない。
+   - **「dispatch が業務 tx の内側にあること」の静的完全性は保証しない**。gate が固定するのは
+     「commit 後ずらしの機構を使っていないこと」までで、tx 外に置かれた新しい dispatch は
+     gate に映らない (既知経路は behavioral テストが経路ごとに固定する)。
+   - D1/D2/D5(代入) は token 走査なので、動的な迂回 (`$m = 'afterCommit'; $job->$m();` /
+     `$this->afterCommit = $flag;` / `= 1 + 1` のような式 / helper 経由) には沈黙する
+     (D5 の代入は**単一リテラルの代入だけ**を真偽値評価する。基数付き数値と数値区切りは扱うが、
+     **エスケープを含む文字列リテラルは評価不能に倒して検出しない**)。
+   - **低残高通知は原子的でない** (at-most-once = 既定仕様。§アプリ内通知の配信保証)。
+
 ### キューのリース期間とワーカー制限時間の規約
 
 DB driver のキューには**実行中にリース (`retry_after`) を延長する API が無い**ため、
@@ -311,7 +407,7 @@ DB driver のキューには**実行中にリース (`retry_after`) を延長す
 
    | 層 | 機構 | 何を保証するか |
    |---|---|---|
-   | 入口 | org `Cache::lock` (TTL 180s) / `AutoRechargeTriggerJob::$uniqueFor` (30s) | best-effort の直列化のみ |
+   | 入口 | org `Cache::lock` (TTL 180s) | best-effort の直列化のみ (T137 で `AutoRechargeTriggerJob` の `ShouldBeUnique` は撤去。§キュー投入の原子性) |
    | 起票 | `tar_attempts_org_pending_unique` (partial unique) | org に pending は 1 つまで |
    | 遷移 | `where status='pending'` の条件付き UPDATE | 1 attempt = 1 遷移 |
    | 効果 | 台帳 `recharge:{invoiceId}` の UNIQUE + Stripe idempotency key | 付与と課金の一回性 |
@@ -325,8 +421,10 @@ DB driver のキューには**実行中にリース (`retry_after`) を延長す
    (b) **送信結果の不明**: 送信直後にプロセスが死ぬと結果が分からない (S3 PUT / Stripe pay 同型)。
    (c) **LLM に冪等キーが無い**: provider 側で重複排除できない (だから preflight を置く)。
    (d) **`queue:listen` ではジョブ側 `$timeout` が効かない** (dev / bug-hunt)。
-7. **序列** — `LOCK_TTL_SECONDS` / `uniqueFor` < 既定接続の `retry_after`
+7. **序列** — `LOCK_TTL_SECONDS` < 既定接続の `retry_after`
    (鍵の残留が正当な再実行を封鎖する時間を、キューの再配送間隔の内側に収める)。
+   `uniqueFor` の系統は T137 で撤去済み (`ShouldBeUnique` の unique lock は業務 tx 内 dispatch と
+   両立しない — dispatch 時に取得され rollback で解放されないため)。
    ジョブ側 `$timeout` < `retry_after` < 予約 TTL ≤ stale 閾値 (上節)。
    成立前提は「pcntl 有効 / 遅延なし / 時計ずれが小さい / シグナル順序 / supervisor 設定」。
 8. **運用契約 (所有者 = 課金運用担当)** —
@@ -748,9 +846,17 @@ catch を足す必要が出たら、観測目録へ移すか免除の分類を�
   既存ユーザーのみ (平文 token 非含有) / 残高低下 = org の owner/admin
   (`organizationRole` = laratrust_team_id 明示判定)
 - **残高低下のクロス検知**: `TicketLedgerService::reserve` の org 行ロック内で
-  「実効残高 (Reserved 拘束込み) が `billing.ticket_low_balance_threshold` を跨いだ」ときのみ
-  `DB::afterCommit` で 1 回通知 (commit は拘束と台帳が相殺し balance 不変 = クロスを発生させない。
+  「実効残高 (Reserved 拘束込み) が `billing.ticket_low_balance_threshold` を跨いだ」ことを判定し、
+  **クロスの事実だけをクロージャの戻り値で持ち出して tx を抜けた最後に 1 回通知する**
+  (commit は拘束と台帳が相殺し balance 不変 = クロスを発生させない。
   release/grant で回復して再度跨げば再通知)。`billing_notifications` (メール送達台帳) には行を作らない
+  - **T137 で `DB::afterCommit` を撤去した** (§キュー投入の原子性)。afterCommit は
+    「commit したのに未投入」の窓を作る機構であり、AG-127 の付随的副作用は
+    「tx の外へ出す」であって「afterCommit で温存する」ではない
+  - **保証範囲を誇張しない**: `reserve()` が呼び出し側の tx にネストされている場合、通知は
+    依然として外側 tx の内側で走る (= 外側のロックを保持したまま INSERT され、SQL 層の失敗は
+    PostgreSQL の transaction abort を経て業務操作ごと失敗させうる)。
+    `NotificationCenterService::safely()` が握るのは**アプリケーション層の例外だけ**である
 - **読み出し**: 自分宛 (notifiable = 自分) で構造的に閉じる (org フィルタなし = 全 org 横断)。
   `{notification}` は implicit binding を使わず relation 経由解決 (cross-user は 404 = 存在秘匿)。
   `open` は POST + 303 のサーバ解決遷移 (認可判断は複製せず遷移先の Gate が唯一の判断点)。
