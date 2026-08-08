@@ -12,12 +12,11 @@ use App\Http\Routing\SelfScopedPasskeyBinder;
 use App\Models\Passkey;
 use App\Models\User;
 use App\Services\Auth\PasskeyLoginPolicy;
-use Illuminate\Contracts\Foundation\Application;
+use App\Support\Http\RouteMiddlewareBinder;
 use Illuminate\Http\Request;
-use Illuminate\Routing\RouteCollectionInterface;
-use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
+use Laravel\Fortify\Features;
 use Laravel\Passkeys\Contracts\PasskeyConfirmationResponse as PasskeyConfirmationResponseContract;
 use Laravel\Passkeys\Contracts\PasskeyDeletedResponse as PasskeyDeletedResponseContract;
 use Laravel\Passkeys\Contracts\PasskeyLoginResponse as PasskeyLoginResponseContract;
@@ -100,12 +99,21 @@ final class PasskeyServiceProvider extends ServiceProvider
     {
         $this->configureLoginAuthorization();
 
-        // binder と middleware は **全 provider boot 後** に最終上書きする
-        // (PasskeysServiceProvider::boot() の Route::bind に確実に後勝ちするため)。
-        $this->app->booted(static function (Application $app): void {
+        // ★この 2 つには **cached 起動での有効/無効に差がある**。
+        //   一括りに「booted の後付けは cached では無効」と読まないこと:
+        //
+        //   - Route::bind() は Router::$binders (route collection とは**別の**連想配列) への
+        //     登録であり、Router::setCompiledRoutes() の collection 差し替えの影響を受けない。
+        //     **cached 起動でも有効**。booted に置いてあるのは boot 順序の問題
+        //     (PasskeysServiceProvider::boot() の Route::bind に後勝ちする) だけが理由。
+        //   - middleware の後付けは route collection への書き込みであり、
+        //     **cached 起動では 1 本も効かない** (RouteMiddlewareBinder の docblock が正本)。
+        $this->app->booted(static function (): void {
             Route::bind('passkey', SelfScopedPasskeyBinder::class);
-            self::attachMiddlewareToPasskeyRoutes($app);
         });
+
+        // first-class callable (理由は FortifyServiceProvider 側と同じ)
+        RouteMiddlewareBinder::attachOnBooted($this->app, self::passkeyRouteSpecs(...));
     }
 
     /**
@@ -124,42 +132,69 @@ final class PasskeyServiceProvider extends ServiceProvider
     }
 
     /**
-     * Fortify が登録した passkey route へアプリ側 middleware を後付けする。
-     * FortifyServiceProvider::attachRecentAuthToSensitiveRoutes() と同じ作法
-     * (route:cache 下でも CompiledRouteCollection の nameCache が同一 instance を返すため有効)。
+     * Fortify が登録した passkey route へ後付けするアプリ側 middleware の spec。
+     *
+     * ★**順序が重要**: throttle → recent-auth → 手段保持 の順に並べる。
+     *   throttle を先に並べることで、priority 適用後も ThrottleRequests が
+     *   RequireRecentAuth より前になる (無制限のロック競合を最外周で止める)。
+     *   逆順だと stale recent-auth のリクエストでも User 行ロックを取りに行ってしまう。
+     *   PasskeyRouteProtectionTest が解決後のクラス列上の index 比較で固定する。
+     *   → 1 route あたりの alias 列も**この順**で並べる (binder は列の順に append する)。
+     *
+     * ★route:cache との契約 (cached 起動では 1 本も効かない / 実効は生成時の焼き込み /
+     *   毎デプロイ再生成が前提条件) は {@see RouteMiddlewareBinder} が正本。
+     *   **旧記述の訂正**: かつてここには「route:cache 下でも nameCache が同一 instance を
+     *   返すため有効」と書いてあったが誤りである。
+     *
+     * ★feature flag: passkey route は `Features::passkeys()` が有効なときだけ登録される
+     *   (config/fortify.php の「この 1 行が実質的なキルスイッチ」)。無効時は spec を空にする。
+     *
+     * @return array<string, list<string>> route 名 => middleware alias の列
      */
-    private static function attachMiddlewareToPasskeyRoutes(Application $app): void
+    private static function passkeyRouteSpecs(): array
     {
-        $routes = $app->make(Router::class)->getRoutes();
-        $routes->refreshNameLookups();
+        if (! Features::enabled(Features::passkeys())) {
+            return [];
+        }
 
-        // **順序が重要**: throttle → recent-auth → 手段保持 の順に通す。
-        // throttle を先に並べることで、priority 適用後も ThrottleRequests が
-        // RequireRecentAuth より前になる (無制限のロック競合を最外周で止める)。
-        // 逆順だと stale recent-auth のリクエストでも User 行ロックを取りに行ってしまう。
-        // PasskeyRouteProtectionTest が解決後のクラス列上の index 比較で固定する。
+        $specs = [];
+
         foreach (self::THROTTLE_ROUTE_NAMES as $name) {
-            self::appendMiddlewareIfMissing($routes, $name, 'throttle:passkeys');
+            $specs = self::withAlias($specs, $name, 'throttle:passkeys');
         }
 
         foreach (self::RECENT_AUTH_ROUTE_NAMES as $name) {
-            self::appendMiddlewareIfMissing($routes, $name, 'recent-auth');
+            $specs = self::withAlias($specs, $name, 'recent-auth');
         }
 
         foreach (self::LOGIN_METHOD_GUARD_ROUTE_NAMES as $name) {
-            self::appendMiddlewareIfMissing($routes, $name, 'ensure-login-method');
+            $specs = self::withAlias($specs, $name, 'ensure-login-method');
         }
 
         // guest route のため NoStoreCacheHeadersForAuthenticatedPages の対象外。
         // WebAuthn challenge を載せる応答をキャッシュさせない。
-        self::appendMiddlewareIfMissing($routes, 'passkey.login-options', 'no-store');
+        $specs = self::withAlias($specs, 'passkey.login-options', 'no-store');
+
+        return $specs;
     }
 
-    private static function appendMiddlewareIfMissing(RouteCollectionInterface $routes, string $name, string $alias): void
+    /**
+     * spec の route へ alias を**列の末尾**に足す (列の順がそのまま append 順になる)。
+     *
+     * ★helper に切り出しているのは PHPStan level 10 のため。const 由来のリテラル配列へ
+     *   `[...($specs[$name] ?? []), $alias]` を直接書くと、shape が完全に推論されて
+     *   「`??` の左辺は常に存在する / 存在しない」の nullCoalesce.offset で落ちる。
+     *   一般型 `array<string, list<string>>` を跨がせることで、`mixed` 化や
+     *   ignore 注釈に逃げず、公開契約の型をそのまま保ったまま具体 shape の推論だけを
+     *   切り、「未定義キーなら空列から始める」という**意図**をそのまま書ける。
+     *
+     * @param  array<string, list<string>>  $specs
+     * @return array<string, list<string>>
+     */
+    private static function withAlias(array $specs, string $routeName, string $alias): array
     {
-        $route = $routes->getByName($name);
-        if ($route !== null && ! in_array($alias, $route->middleware(), true)) {
-            $route->middleware($alias);
-        }
+        $specs[$routeName] = [...($specs[$routeName] ?? []), $alias];
+
+        return $specs;
     }
 }

@@ -89,6 +89,18 @@
 > 総当りに無効化するため復活させない。実 hop 一覧・CIDR の管理主体・変更手順は
 > `docs/trusted-proxies-runbook.md` が正本。
 
+> **運用要件 (route:cache)**: production は `php artisan route:cache` を**毎デプロイ再生成する**。
+> vendor route への middleware 後付け(`RouteThrottleBinder` / `RouteMiddlewareBinder`)は
+> **cache 生成時に焼き込まれ、cached 起動では 1 本も効かない**ため、stale cache は
+> **無音で保護を外す**(実測: 2FA 秘密 GET が 409 でなく 200 を返し、passkey 削除の
+> 手段保持 guard も消える)。対象は throttle だけではない(recent-auth /
+> ensure-login-method / no-store も同じ前提条件)。機序と実測は
+> `docs/app-integration-guide.md` §7c が正本。
+> **本リポジトリにデプロイ定義は無い**(deploy/ / terraform / k8s / CI デプロイ job のいずれも無い)。
+> よって現在この要件は**人手でのみ守られている**。**デプロイ基盤を作る PR は、
+> 本要件と TRUSTED_PROXIES 運用要件 (T108) の 2 つを実装するまで完了にできない**。
+> 存在しない基盤のための preflight 機構を先回りして作らないこと(思考原則 2)。
+
 ## テストレーンの外部 HTTP 出口 (既定拒否)
 
 テストレーンは Laravel HTTP client (`Http::`) 経由の外向き通信を**既定で拒否**する
@@ -361,9 +373,18 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
      レーンをまたぐキー衝突は `RateLimiterKeyConventionTest`、
      巻き添え 429 が消えたことの実挙動は `AuthThrottleCoverageTest` が固定する
    - vendor 登録 route への後付けは **`RouteThrottleBinder::attachOnBooted()`** 経由
-     (route 名が消えたら起動時 fail-fast)。**`php artisan route:cache` は毎デプロイ再生成する**
+     (route 名が消えたら fail-fast。効くのは**後付けが実際に走る起動すべて** =
+     route cache が無い起動であり、**cached 起動では後付けごと skip されるので効かない**
+     (そこで例外を投げると `route:list` が必ず落ちるため = T120)。
+     cached 運用の本番で意味を持つ検出点は `route:cache` **生成時**である)。
+     **`php artisan route:cache` は毎デプロイ再生成する**
      (後付けは cache 生成時に焼き込まれ cached 起動では skip されるため、stale cache は
-     古い付与状態のまま起動する)
+     古い付与状態のまま起動する)。
+     throttle 以外の alias 後付け(recent-auth / ensure-login-method / no-store)は
+     **`RouteMiddlewareBinder::attachOnBooted()`** 経由で、**同じ前提条件に乗っている**。
+     後付け経路を新設するときの契約と、入口を 2 binder に絞る
+     `PostBootRouteMutationInventoryTest` の説明は
+     `docs/app-integration-guide.md` **§7c** が正本
    - **閾値は既存値を変えない**。新しい面には既に本番稼働中の同性質エンドポイントと同値を充てる
    - 未認証 webhook に**固定キーの全体天井を置かない** (throttle は署名検証より前に走るため、
      無効 body の連打で正当通知を 429 にできる = 攻撃者が業務を止められる口になる)。
