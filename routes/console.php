@@ -156,3 +156,19 @@ Artisan::command('capture:release-stale-upload-reservations', function (StaleUpl
 })->purpose('期限切れのテイクアップロード予約を解放し S3 孤児オブジェクトを削除する');
 
 Schedule::command('capture:release-stale-upload-reservations')->everyTenMinutes()->onOneServer()->withoutOverlapping();
+
+/*
+|--------------------------------------------------------------------------
+| 冪等キーの保持期間 purge (T139)
+|--------------------------------------------------------------------------
+| 保持期間 (config idempotency.retention_hours) を超えた冪等キーを
+| REST / MCP 両テーブルから物理削除する。claim 時の lazy delete だけでは
+| 「二度と再送されなかったキー」が残り続け単調増加するため。
+|
+| **監視対象**: 本コマンドの report() (processing のまま期限切れ = 確定できなかった claim。
+| プロセス強制終了か finalize 失敗の痕跡)。
+|
+| ⚠ onOneServer() は **scheduler が動いていること + ロックを提供する cache driver** を
+|   前提にする (既存の billing:send-billing-reminders / render:reconcile-outputs と同じ前提)。
+*/
+Schedule::command('idempotency:prune')->daily()->onOneServer();

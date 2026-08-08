@@ -32,7 +32,7 @@
 | `TakeUploadReservationFactory` | TakeUploadReservation | `forCut($cut)` / `verifying()` / `completed()` / `released()` / `expired()`。`organization_id` は cut→manual→project→org を辿ってサーバ導出 (afterMaking) |
 | `ApiKeyFactory` | ApiKey | `forOrganization($org)`, `revoked()`, `expired(?Carbon $expiresAt = null)` |
 | `OrganizationInvitationFactory` | OrganizationInvitation | `forOrganization($org)`, `expired()`, `accepted()`, `revoked()`, `asAdmin()`。加えて `createWithPlainToken(array): array` (invitation と平文 token を tuple で返す。URL 生成用。DB には sha256 hash のみ保存) |
-| `IdempotencyKeyFactory` | IdempotencyKey | `forApiKey($apiKey)`, `expired(?Carbon $expiresAt = null)` |
+| `IdempotencyKeyFactory` | IdempotencyKey | `forApiKey($apiKey)`, `processing()` (claim 済み・応答未確定), `indeterminate()` (決着不明), `expired(?Carbon $expiresAt = null)` |
 | `OauthSessionFactory` | OauthSession | `cli()`, `mcp()`, `revoked()` |
 | `McpIdempotencyKeyFactory` | McpIdempotencyKey | `forOrganizationAndUser($org, $user)`, `expired()` |
 | `InquiryFactory` | Inquiry | `spam()`, `closed(int $closedDaysAgo = 0)`, `staleOpen(int $createdDaysAgo = 40)` |

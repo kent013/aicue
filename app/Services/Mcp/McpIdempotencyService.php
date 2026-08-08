@@ -6,6 +6,7 @@ namespace App\Services\Mcp;
 
 use App\Exceptions\Mcp\IdempotencyConflictException;
 use App\Models\McpIdempotencyKey;
+use App\Support\Idempotency\IdempotencyRetention;
 use App\Values\Mcp\IdempotencyKey;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
@@ -21,11 +22,17 @@ use Illuminate\Database\QueryException;
  * - 同一 user の純粋 retry は replay される
  * - refresh で access_token が回転しても同一 user の replay は継続する
  *   (user_id を key に使うので refresh の影響を受けない)
+ *
+ * 保持期間は `config/idempotency.php` (App\Support\Idempotency\IdempotencyRetention) が
+ * REST 側と共有する唯一の正本。**クラス定数での二重管理へ戻さないこと**
+ * (IdempotencyContractParityTest が TTL_HOURS 定数の不在を機械固定する)。
+ *
+ * ⚠ 本サービスの store() は unique 違反を握り潰す best-effort のままである
+ * (T139 では据え置き)。MCP write tool は現在 0 本で到達不能であり、最初の write tool 追加時に
+ * McpWriteToolIdempotencyEnforcementTest の trip-wire が是正作業を提示する。
  */
 final class McpIdempotencyService
 {
-    public const TTL_HOURS = 24;
-
     /**
      * 同一 key を探して replay 可能なら response body を返す。
      * payload mismatch は conflict 例外、TTL 超過は row 削除して null を返す。
@@ -91,6 +98,9 @@ final class McpIdempotencyService
         array $payload,
         array $response,
     ): void {
+        // 基準時刻は 1 回だけ確定させ created_at / expires_at で共有する
+        $now = CarbonImmutable::now();
+
         try {
             // ownership キー (organization_id / user_id) は $fillable 外のため
             // named creation method 経由で明示代入する。
@@ -101,8 +111,8 @@ final class McpIdempotencyService
                 idempotencyKey: $key->value,
                 payloadHash: self::hashPayload($payload),
                 responseBody: $response,
-                createdAt: CarbonImmutable::now(),
-                expiresAt: CarbonImmutable::now()->addHours(self::TTL_HOURS),
+                createdAt: $now,
+                expiresAt: IdempotencyRetention::expiresAt($now),
             );
         } catch (QueryException $e) {
             if (! self::isUniqueViolation($e)) {

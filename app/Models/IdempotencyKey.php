@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Enums\Idempotency\IdempotencyState;
+use Carbon\CarbonInterface;
 use Database\Factories\IdempotencyKeyFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -15,10 +17,15 @@ use Illuminate\Support\Carbon;
  *
  * actor 単位の UNIQUE で同一 actor × route の再送を検知する: API キー actor は
  * (api_key_id, route_name, key)、OAuth user-token actor は (user_id, route_name, key)。
- * expires_at 超過エントリは未使用扱い (TTL は IdempotentRequest middleware が付与)。
+ * expires_at 超過エントリは未使用扱い (保持期間は config/idempotency.php が正本)。
  *
- * api_key_id / user_id は所有権キーのため $fillable 外。作成は relation 経由か
- * forceFill での明示代入のみ (IdempotentRequest::storeResponse)。
+ * 行は本処理の**前**に `processing` として claim され、決着時に `completed` /
+ * `indeterminate` へ確定する (release 経路は持たない)。状態遷移は
+ * `IdempotentRequest` の insertOrIgnore と条件付き UPDATE だけが行うため、
+ * **`state` は $fillable に入れない** (Eloquent 経由の mass assign 経路を作らない)。
+ *
+ * api_key_id / user_id は所有権キーのため $fillable 外。書き込みは
+ * IdempotentRequest::ownershipColumns() の単一構築点のみ。
  *
  * @property int $id
  * @property int|null $api_key_id
@@ -26,7 +33,8 @@ use Illuminate\Support\Carbon;
  * @property string $route_name
  * @property string $key
  * @property string $request_hash
- * @property int $response_status
+ * @property IdempotencyState $state
+ * @property int|null $response_status
  * @property array<array-key, mixed>|null $response_body
  * @property Carbon $expires_at
  * @property Carbon|null $created_at
@@ -52,6 +60,7 @@ class IdempotencyKey extends Model
     protected function casts(): array
     {
         return [
+            'state' => IdempotencyState::class,
             'response_status' => 'integer',
             'response_body' => 'array',
             'expires_at' => 'datetime',
@@ -60,8 +69,12 @@ class IdempotencyKey extends Model
 
     /**
      * TTL 超過か。超過エントリは未使用扱い (再送時に削除して作り直す)。
+     *
+     * 引数は `CarbonInterface`。middleware は基準時刻に `CarbonImmutable` を使うが、
+     * `Illuminate\Support\Carbon` (mutable) は `CarbonImmutable` の親ではないため、
+     * `?Carbon` に狭めると実行時 TypeError になる。
      */
-    public function isExpired(?Carbon $now = null): bool
+    public function isExpired(?CarbonInterface $now = null): bool
     {
         return $this->expires_at->lessThanOrEqualTo($now ?? Carbon::now());
     }
