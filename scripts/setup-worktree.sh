@@ -30,6 +30,28 @@
 
 set -euo pipefail
 
+# --- bug-hunt 専用 env の provisioning (契約テストから source して単体で叩けるよう関数化) ---
+# .env.bughunt.local は .gitignore 対象で worktree には決して現れない = コピーが唯一の供給路。
+# bug-hunt は worktree 走行が既定 (AGENTS.md) なので、無いと provision が必ず止まる。
+#
+# ★ mode は親に追随させず 0600 に固定する。親が 0644 だと `cp -p` は
+#   **world-readable な秘密ファイルを新たに作る**ため契約として弱い。
+#   `install -m 600` は作成時点で mode を確定するので、`cp` → `chmod` の 2 段にある
+#   「一瞬だけ広く読める窓」も無い。
+# ★ 今回 0600 を固定する対象は **.env.bughunt.local だけ**である。
+#   既存の .env / storage/oauth-*.key の権限契約は変更しない (別施策)。
+provision_bughunt_env_file() {
+    local repo_root=$1 worktree_dir=$2
+    [[ -f "${repo_root}/.env.bughunt.local" ]] || return 0   # 非利用リポジトリでは no-op
+    install -m 600 "${repo_root}/.env.bughunt.local" "${worktree_dir}/.env.bughunt.local"
+}
+
+# ★ source 専用モード: 関数定義だけ取り込んで抜ける (契約テスト用)。
+#   実行時 (bash setup-worktree.sh) は環境変数を立てないので通らない。
+if [[ -n "${SETUP_WORKTREE_SOURCE_ONLY:-}" && "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0
+fi
+
 if [[ $# -ne 1 || -z "${1:-}" ]]; then
     echo "usage: $0 <task-id>" >&2
     echo "  ブランチ名は todo/<task-id> に固定 (custom branch 非対応)" >&2
@@ -197,7 +219,7 @@ fi
 # storage/oauth-*.key / public/build は runtime artifact (.gitignore 対象) で、workspace に
 # あればコピー / 無ければ note して続行 (テンプレート初期状態では未生成のことがある。
 # 必要になった時点で worktree 内 `php artisan passport:keys` / `pnpm build` で生成できる)。
-echo ">>> [2/7] .env / storage/oauth-*.key / public/build を親からコピー"
+echo ">>> [2/7] .env / .env.bughunt.local / storage/oauth-*.key / public/build を親からコピー"
 if [[ -f "${REPO_ROOT}/.env" ]]; then
     cp "${REPO_ROOT}/.env" "${WORKTREE_DIR}/.env"
 else
@@ -211,6 +233,14 @@ for f in storage/oauth-private.key storage/oauth-public.key; do
         echo "    note: ${f} が親に無いためコピーをスキップ (必要なら worktree 内で 'php artisan passport:keys')" >&2
     fi
 done
+# ★ 関数呼び出しを if の条件に置かない。条件内では set -e が効かず、
+#   install の失敗が「無いためスキップ」に化けて秘密ファイルのコピー失敗を隠す。
+if [[ -f "${REPO_ROOT}/.env.bughunt.local" ]]; then
+    provision_bughunt_env_file "${REPO_ROOT}" "${WORKTREE_DIR}"
+    PROVISIONED_PATHS+=(".env.bughunt.local")
+else
+    echo "    note: .env.bughunt.local が親に無いためコピーをスキップ (bug-hunt 未使用なら不要)" >&2
+fi
 if [[ -d "${REPO_ROOT}/public/build" ]]; then
     cp -r "${REPO_ROOT}/public/build" "${WORKTREE_DIR}/public/build"
     PROVISIONED_PATHS+=("public/build")
