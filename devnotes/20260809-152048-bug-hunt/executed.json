@@ -1,0 +1,431 @@
+{
+ "run_id": "20260809-152048",
+ "shards": [
+  "1",
+  "2",
+  "3",
+  "4"
+ ],
+ "executed_routes": [
+  {
+   "route_name": "register.store",
+   "shard": "2",
+   "story": "S1",
+   "status": "ok"
+  },
+  {
+   "route_name": "login.store",
+   "shard": "2",
+   "story": "S1",
+   "status": "ok"
+  },
+  {
+   "route_name": "logout",
+   "shard": "2",
+   "story": "S1",
+   "status": "ok"
+  },
+  {
+   "route_name": "password.email",
+   "shard": "2",
+   "story": "S1",
+   "status": "ok"
+  },
+  {
+   "route_name": "password.update",
+   "shard": "2",
+   "story": "S1",
+   "status": "ok"
+  },
+  {
+   "route_name": "verification.send",
+   "shard": "2",
+   "story": "S1",
+   "status": "ok"
+  },
+  {
+   "route_name": "two-factor.login.store",
+   "shard": "2",
+   "story": "S1",
+   "status": "ok"
+  },
+  {
+   "route_name": "contact.store",
+   "shard": "2",
+   "story": "S1",
+   "status": "ok"
+  },
+  {
+   "route_name": "onboarding.activate-personal",
+   "shard": "2",
+   "story": "S1",
+   "status": "ok"
+  },
+  {
+   "route_name": "invitations.accept.store",
+   "shard": "2",
+   "story": "S2",
+   "status": "ok"
+  },
+  {
+   "route_name": "organizations.invitations.store",
+   "shard": "2",
+   "story": "S2",
+   "status": "ok"
+  },
+  {
+   "route_name": "organizations.invitations.revoke",
+   "shard": "2",
+   "story": "S2",
+   "status": "ok"
+  },
+  {
+   "route_name": "organizations.members.update",
+   "shard": "2",
+   "story": "S2",
+   "status": "ok"
+  },
+  {
+   "route_name": "organizations.members.destroy",
+   "shard": "2",
+   "story": "S2",
+   "status": "ok"
+  },
+  {
+   "route_name": "organizations.members.two-factor.reset",
+   "shard": "2",
+   "story": "S2",
+   "status": "ok"
+  },
+  {
+   "route_name": "projects.manuals.store",
+   "shard": "1",
+   "story": "S3",
+   "status": "ok"
+  },
+  {
+   "route_name": "projects.manuals.update",
+   "shard": "1",
+   "story": "S3",
+   "status": "ok"
+  },
+  {
+   "route_name": "projects.manuals.destroy",
+   "shard": "1",
+   "story": "S3",
+   "status": "ok"
+  },
+  {
+   "route_name": "projects.manuals.duplicate",
+   "shard": "1",
+   "story": "S3",
+   "status": "ok"
+  },
+  {
+   "route_name": "projects.manuals.source-documents.store",
+   "shard": "1",
+   "story": "S3",
+   "status": "ok"
+  },
+  {
+   "route_name": "projects.manuals.analyze",
+   "shard": "1",
+   "story": "S3",
+   "status": "ok"
+  },
+  {
+   "route_name": "projects.manuals.scenario.update",
+   "shard": "1",
+   "story": "S3",
+   "status": "ok"
+  },
+  {
+   "route_name": "projects.manuals.preview",
+   "shard": "1",
+   "story": "S3",
+   "status": "ok"
+  },
+  {
+   "route_name": "projects.manuals.render",
+   "shard": "1",
+   "story": "S3",
+   "status": "ok"
+  },
+  {
+   "route_name": "capture.takes.upload-url",
+   "shard": "1",
+   "story": "S3",
+   "status": "ok"
+  },
+  {
+   "route_name": "capture.takes.store",
+   "shard": "1",
+   "story": "S3",
+   "status": "ok"
+  },
+  {
+   "route_name": "capture.takes.update",
+   "shard": "1",
+   "story": "S3",
+   "status": "ok"
+  },
+  {
+   "route_name": "capture.takes.destroy",
+   "shard": "1",
+   "story": "S3",
+   "status": "ok"
+  },
+  {
+   "route_name": "capture.takes.adopt",
+   "shard": "1",
+   "story": "S3",
+   "status": "ok"
+  },
+  {
+   "route_name": "capture.takes.downloaded",
+   "shard": "1",
+   "story": "S3",
+   "status": "ok"
+  },
+  {
+   "route_name": "organizations.store",
+   "shard": "3",
+   "story": "S4",
+   "status": "ok"
+  },
+  {
+   "route_name": "organizations.update",
+   "shard": "3",
+   "story": "S4",
+   "status": "ok"
+  },
+  {
+   "route_name": "organizations.switch",
+   "shard": "3",
+   "story": "S4",
+   "status": "ok"
+  },
+  {
+   "route_name": "organizations.transfer-ownership",
+   "shard": "3",
+   "story": "S4",
+   "status": "ok"
+  },
+  {
+   "route_name": "organizations.two-factor-requirement.update",
+   "shard": "3",
+   "story": "S4",
+   "status": "ok"
+  },
+  {
+   "route_name": "organizations.api-keys.store",
+   "shard": "3",
+   "story": "S4",
+   "status": "ok"
+  },
+  {
+   "route_name": "organizations.api-keys.revoke",
+   "shard": "3",
+   "story": "S4",
+   "status": "ok"
+  },
+  {
+   "route_name": "projects.store",
+   "shard": "3",
+   "story": "S4",
+   "status": "ok"
+  },
+  {
+   "route_name": "projects.update",
+   "shard": "3",
+   "story": "S4",
+   "status": "ok"
+  },
+  {
+   "route_name": "projects.destroy",
+   "shard": "3",
+   "story": "S4",
+   "status": "ok"
+  },
+  {
+   "route_name": "projects.categories.store",
+   "shard": "3",
+   "story": "S4",
+   "status": "ok"
+  },
+  {
+   "route_name": "projects.categories.update",
+   "shard": "3",
+   "story": "S4",
+   "status": "ok"
+  },
+  {
+   "route_name": "projects.categories.destroy",
+   "shard": "3",
+   "story": "S4",
+   "status": "ok"
+  },
+  {
+   "route_name": "projects.categories.reorder",
+   "shard": "3",
+   "story": "S4",
+   "status": "ok"
+  },
+  {
+   "route_name": "projects.members.destroy",
+   "shard": "3",
+   "story": "S4",
+   "status": "ok"
+  },
+  {
+   "route_name": "projects.items.store",
+   "shard": "3",
+   "story": "S4",
+   "status": "ok"
+  },
+  {
+   "route_name": "projects.items.update",
+   "shard": "3",
+   "story": "S4",
+   "status": "ok"
+  },
+  {
+   "route_name": "projects.items.destroy",
+   "shard": "3",
+   "story": "S4",
+   "status": "ok"
+  },
+  {
+   "route_name": "billing.checkout",
+   "shard": "3",
+   "story": "S5",
+   "status": "ok"
+  },
+  {
+   "route_name": "billing.plan.change",
+   "shard": "3",
+   "story": "S5",
+   "status": "ok"
+  },
+  {
+   "route_name": "billing.portal",
+   "shard": "3",
+   "story": "S5",
+   "status": "ok"
+  },
+  {
+   "route_name": "billing.tickets.checkout",
+   "shard": "3",
+   "story": "S5",
+   "status": "ok"
+  },
+  {
+   "route_name": "billing.contact.update",
+   "shard": "3",
+   "story": "S5",
+   "status": "ok"
+  },
+  {
+   "route_name": "billing.auto-recharge.update",
+   "shard": "3",
+   "story": "S5",
+   "status": "ok"
+  },
+  {
+   "route_name": "billing.auto-recharge.setup",
+   "shard": "3",
+   "story": "S5",
+   "status": "ok"
+  },
+  {
+   "route_name": "user-profile-information.update",
+   "shard": "4",
+   "story": "S6",
+   "status": "ok"
+  },
+  {
+   "route_name": "user-password.update",
+   "shard": "4",
+   "story": "S6",
+   "status": "ok"
+  },
+  {
+   "route_name": "two-factor.enable",
+   "shard": "4",
+   "story": "S6",
+   "status": "ok"
+  },
+  {
+   "route_name": "two-factor.confirm",
+   "shard": "4",
+   "story": "S6",
+   "status": "ok"
+  },
+  {
+   "route_name": "two-factor.disable",
+   "shard": "4",
+   "story": "S6",
+   "status": "ok"
+  },
+  {
+   "route_name": "two-factor.regenerate-recovery-codes",
+   "shard": "4",
+   "story": "S6",
+   "status": "ok"
+  },
+  {
+   "route_name": "password.confirm.store",
+   "shard": "4",
+   "story": "S6",
+   "status": "ok"
+  },
+  {
+   "route_name": "recent-auth.password",
+   "shard": "4",
+   "story": "S6",
+   "status": "ok"
+  },
+  {
+   "route_name": "settings.account.destroy",
+   "shard": "4",
+   "story": "S6",
+   "status": "ok"
+  },
+  {
+   "route_name": "notifications.read",
+   "shard": "4",
+   "story": "S6",
+   "status": "ok"
+  },
+  {
+   "route_name": "notifications.read-all",
+   "shard": "4",
+   "story": "S6",
+   "status": "ok"
+  },
+  {
+   "route_name": "notifications.open",
+   "shard": "4",
+   "story": "S6",
+   "status": "ok"
+  },
+  {
+   "route_name": "passkey.destroy",
+   "shard": "4",
+   "story": "S6",
+   "status": "ok"
+  },
+  {
+   "route_name": "passkey.confirm",
+   "shard": "4",
+   "story": "S6",
+   "status": "ok"
+  },
+  {
+   "route_name": "settings.password.store",
+   "shard": "4",
+   "story": "S6",
+   "status": "ok"
+  }
+ ]
+}
