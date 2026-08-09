@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount } from "svelte";
+    import { onMount, tick } from "svelte";
     import { page, router } from "@inertiajs/svelte";
     import { ArrowLeft, Video } from "@lucide/svelte";
     import TextLink from "@/components/atoms/TextLink.svelte";
@@ -15,6 +15,13 @@
     import { AdoptedTakeAutoDownloader } from "@/lib/capture/auto-download";
     import { supportsMediaRecorder } from "@/lib/capture/camera";
     import type { CameraUnavailableReason } from "@/lib/capture/camera";
+    import { buildCutLabels } from "@/lib/capture/cut-labels";
+    import {
+        isStackedLayout,
+        navigateBackToList,
+        navigateToPanelIfNeeded,
+        prefersReducedMotion,
+    } from "@/lib/capture/panel-navigation";
     import { createIdbPendingStore } from "@/lib/capture/idb";
     import { generateClientTakeId, UploadQueue } from "@/lib/capture/upload-queue";
     import type { PendingStore } from "@/lib/capture/upload-queue";
@@ -38,6 +45,8 @@
 
     let selectedCutId = $state<number | null>(null);
     const selectedCut = $derived(manual.cuts.find((cut) => cut.id === selectedCutId) ?? null);
+    /** 手順 N / 急所 N-M。CutNavigator の行ラベルと同じ導出元を共有する (二重管理を避ける) */
+    const cutLabels = $derived(buildCutLabels(manual.cuts));
     // 静的 feature-detect (従来) + 実行時失敗による上書き (F-03: doc/10 §10.8-3)
     const canRecord = typeof window !== "undefined" && supportsMediaRecorder();
     let cameraUnavailableReason = $state<CameraUnavailableReason | null>(null);
@@ -80,6 +89,56 @@
     function reloadManual(): void {
         router.reload({ only: ["manual"] });
     }
+
+    /* ---- 撮影パネルへの視点/フォーカス移送 (F-1-03) ----
+     * 1 カラム表示ではシナリオ一覧の下に撮影パネルが縦積みされるため、カットをタップしても
+     * 撮影パネルが viewport に入らず、ユーザーが毎回手動スクロールしていた。
+     * 判定と副作用は lib/capture/panel-navigation.ts が持つ (page は配線だけ)。 */
+    let leftPaneEl = $state<HTMLElement | null>(null);
+    let rightPaneEl = $state<HTMLElement | null>(null);
+    let recordingHeadingEl = $state<HTMLElement | null>(null);
+    let cutListHeadingEl = $state<HTMLElement | null>(null);
+    /** 縦積みか (= 1 カラム)。「カット一覧へ戻る」の出し分けに使う */
+    let stacked = $state(false);
+
+    function updateStacked(): void {
+        if (leftPaneEl === null || rightPaneEl === null) return;
+        stacked = isStackedLayout(
+            leftPaneEl.getBoundingClientRect(),
+            rightPaneEl.getBoundingClientRect(),
+        );
+    }
+
+    function handleSelectCut(cutId: number): void {
+        selectedCutId = cutId;
+        // DOM 反映後に測る (撮影パネルは選択で初めて描画される)
+        void tick().then(() => {
+            updateStacked();
+            navigateToPanelIfNeeded({
+                captureActive,
+                leftEl: leftPaneEl,
+                rightEl: rightPaneEl,
+                headingEl: recordingHeadingEl,
+                reducedMotion: prefersReducedMotion(),
+            });
+        });
+    }
+
+    /** 視点で運んだ以上、帰り道も用意する (行き先のない詰みを作らない) */
+    function backToCutList(): void {
+        navigateBackToList(cutListHeadingEl, prefersReducedMotion());
+    }
+
+    $effect(() => {
+        if (leftPaneEl === null || rightPaneEl === null) return;
+        // observer の初回 callback はタイミング差があるため当てにせず、登録前に必ず 1 回測る
+        updateStacked();
+        if (typeof ResizeObserver === "undefined") return;
+        const observer = new ResizeObserver(() => updateStacked());
+        observer.observe(leftPaneEl);
+        observer.observe(rightPaneEl);
+        return () => observer.disconnect();
+    });
 
     async function handleCaptured(blob: Blob, mimeType: string, durationMs: number | null): Promise<void> {
         if (selectedCutId === null) return;
@@ -176,23 +235,54 @@
     </div>
 
     <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2" data-testid="capture-grid">
-        <section class="min-w-0 rounded-md border border-border bg-surface" data-testid="capture-left-pane">
-            <h2 class="border-b border-border px-3 py-2 text-caption text-text-secondary">
+        <section
+            bind:this={leftPaneEl}
+            class="min-w-0 rounded-md border border-border bg-surface"
+            data-testid="capture-left-pane"
+        >
+            <!-- 「カット一覧へ戻る」のフォーカス着地点。tabindex="-1" でプログラムからのみ
+                 フォーカス可能にする (Tab 順には入れない)。 -->
+            <h2
+                bind:this={cutListHeadingEl}
+                tabindex="-1"
+                class="border-b border-border px-3 py-2 text-caption text-text-secondary focus-visible:ring-3 focus-visible:ring-primary/35 focus-visible:outline-none"
+                data-testid="capture-cut-list-heading"
+            >
                 シナリオ (タップして撮影)
             </h2>
-            <CutNavigator
-                cuts={manual.cuts}
-                {selectedCutId}
-                onSelect={(cutId) => (selectedCutId = cutId)}
-            />
+            <CutNavigator cuts={manual.cuts} {selectedCutId} onSelect={handleSelectCut} />
         </section>
 
-        <section class="flex min-w-0 flex-col gap-4" data-testid="capture-right-pane">
+        <section
+            bind:this={rightPaneEl}
+            class="flex min-w-0 flex-col gap-4"
+            data-testid="capture-right-pane"
+        >
             {#if selectedCut === null}
                 <p class="text-caption text-text-secondary">
                     左のシナリオからカットを選ぶと撮影パネルが開きます。
                 </p>
             {:else}
+                <div class="flex items-center justify-between gap-2">
+                    <!-- カット選択時のフォーカス着地点。ラベルを含めて「どのカットの撮影か」を
+                         名前で伝える (視点だけ運んでフォーカスを残すと a11y 欠落を作るため)。 -->
+                    <h2
+                        bind:this={recordingHeadingEl}
+                        tabindex="-1"
+                        class="text-caption text-text-secondary focus-visible:ring-3 focus-visible:ring-primary/35 focus-visible:outline-none"
+                        data-testid="capture-recording-heading"
+                    >
+                        {cutLabels[selectedCut.id] ?? "選択中カット"} の撮影
+                    </h2>
+                    {#if stacked}
+                        <!-- 1 カラムのときだけ出す (2 カラムでは一覧が常に見えているので不要)。
+                             TextLink のボタンモード (href なし + onclick) = <button type="button">。 -->
+                        <TextLink onclick={backToCutList} testId="back-to-cut-list">
+                            カット一覧へ戻る
+                        </TextLink>
+                    {/if}
+                </div>
+
                 <div class="rounded-md border border-border bg-surface p-3">
                     <p class="text-caption text-text-secondary">ナレーション</p>
                     <p class="mt-1 text-body">{selectedCut.narration}</p>
@@ -232,6 +322,7 @@
                     projectId={project.id}
                     manualId={manual.id}
                     cut={selectedCut}
+                    cutLabel={cutLabels[selectedCut.id] ?? "選択中カット"}
                     onChanged={reloadManual}
                     {captureActive}
                     onRequestCameraRelease={() => recorderRef?.releaseForPreview()}
