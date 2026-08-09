@@ -17,6 +17,8 @@
         projectId: number;
         manualId: number;
         cut: CaptureCut;
+        /** 手順 N / 急所 N-M。TakePreviewDialog の video アクセシブルネームへ中継する */
+        cutLabel: string;
         onChanged: () => void;
         /** 撮影 active (recording|stopping) なら preview を開かずエラー表示 (資源競合防止) */
         captureActive?: boolean;
@@ -30,6 +32,7 @@
         projectId,
         manualId,
         cut,
+        cutLabel,
         onChanged,
         captureActive = false,
         onRequestCameraRelease,
@@ -317,6 +320,7 @@
     bind:open={previewOpen}
     take={previewTarget}
     {cut}
+    {cutLabel}
     playbackUrl={previewUrl}
     adopting={previewTarget !== null && busyTakeId === previewTarget.id}
     {error}

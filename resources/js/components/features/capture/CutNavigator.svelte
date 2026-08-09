@@ -1,6 +1,7 @@
 <script lang="ts">
     import { Check, MapPin, Video } from "@lucide/svelte";
     import Badge from "@/components/atoms/Badge.svelte";
+    import { buildCutLabels } from "@/lib/capture/cut-labels";
     import type { CaptureCut } from "@/types/capture";
 
     /**
@@ -15,23 +16,12 @@
 
     let { cuts, selectedCutId, onSelect }: Props = $props();
 
-    /** 手順番号ラベル (step は連番、point は親 step の番号 + 枝番) */
-    const labels = $derived.by(() => {
-        const result: Record<number, string> = {};
-        let stepIndex = 0;
-        let pointIndex = 0;
-        for (const cut of cuts) {
-            if (cut.type === "step") {
-                stepIndex += 1;
-                pointIndex = 0;
-                result[cut.id] = `手順 ${stepIndex}`;
-            } else {
-                pointIndex += 1;
-                result[cut.id] = `急所 ${stepIndex}-${pointIndex}`;
-            }
-        }
-        return result;
-    });
+    /**
+     * 手順番号ラベル (step は連番、point は親 step の番号 + 枝番)。
+     * 導出規則は lib/capture/cut-labels.ts が唯一の正本 (撮影パネル見出し・
+     * テイクプレビューの aria-label と共有するため)。
+     */
+    const labels = $derived(buildCutLabels(cuts));
 </script>
 
 <ul class="divide-y divide-border" data-testid="cut-navigator">

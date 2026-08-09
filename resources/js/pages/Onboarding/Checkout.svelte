@@ -197,6 +197,30 @@
                             isHighlighted={selectedPlanCode === plan.code}
                             testId={`plan-card-${plan.code}`}
                         >
+                            {#snippet headerBadges()}
+                                {#if selectedPlanCode === plan.code}
+                                    <!-- 青枠 (isHighlighted) が視覚で伝えている状態を、支援技術にも
+                                         同じだけ伝える (F-2-01)。role は偽らない: 排他選択なので
+                                         aria-pressed は誤りで、radiogroup 化はキーボード操作モデルの
+                                         作り替えになる。文言にプラン名を含めるのは、カードが semantic
+                                         group ではなくテキスト単位の移動で対象が読み上げ順に依存する
+                                         のを避けるため。文言は CTA と同じ基準 (chosenPlanCode) で
+                                         切り替え、未押下を「選択済み」と誤認させない。
+                                         「プラン」の語は付けない: plan.name の実値 (Personal /
+                                         Starter / Standard) に将来「プラン」が含まれても
+                                         「プラン プラン」と重複しないようにするため。 -->
+                                    <span
+                                        class="sr-only"
+                                        data-testid={`plan-selected-note-${plan.code}`}
+                                    >
+                                        {#if chosenPlanCode === plan.code}
+                                            {plan.name} を選択中です
+                                        {:else}
+                                            {plan.name} が初期候補として表示されています
+                                        {/if}
+                                    </span>
+                                {/if}
+                            {/snippet}
                             {#snippet footerCta()}
                                 <div class="flex flex-col gap-2">
                                     {#if showRecommendedBadge(plan.code)}

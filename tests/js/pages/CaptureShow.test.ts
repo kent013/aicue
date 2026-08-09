@@ -11,10 +11,23 @@ import type { CaptureCut, CaptureManualDetail, CaptureTake } from "@/types/captu
  * enqueue 後の HTTP 経路は upload-queue.test.ts が担うため、本テストは enqueue 引き渡しまで。
  */
 
-const { routerReloadMock, enqueueMock, autoDownloadRunMock } = vi.hoisted(() => ({
-    routerReloadMock: vi.fn(),
-    enqueueMock: vi.fn(),
-    autoDownloadRunMock: vi.fn(),
+const { routerReloadMock, enqueueMock, autoDownloadRunMock, navigateToPanelMock } = vi.hoisted(
+    () => ({
+        routerReloadMock: vi.fn(),
+        enqueueMock: vi.fn(),
+        autoDownloadRunMock: vi.fn(),
+        navigateToPanelMock: vi.fn(),
+    }),
+);
+
+// 撮影パネルへのナビゲーション (F-1-03) は panel-navigation.ts が副作用ごと担い、
+// その抑止契約は panel-navigation.test.ts が固定する。ここで固定するのは
+// **ページ配線** = Show が navigateToPanelIfNeeded に何を渡しているか、だけ。
+// jsdom の矩形 / focus / scrollIntoView 実装差に依存させないため spy に差し替える
+// (実装の他の export は本物を残す)。
+vi.mock("@/lib/capture/panel-navigation", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("@/lib/capture/panel-navigation")>()),
+    navigateToPanelIfNeeded: navigateToPanelMock,
 }));
 
 vi.mock("@inertiajs/svelte", async (importOriginal) => ({
@@ -139,6 +152,8 @@ beforeEach(() => {
     // 既定: 対象なし (changed=false)。個別ケースで override する
     autoDownloadRunMock.mockResolvedValue({ changed: false, hasPendingAck: false });
     getUserMediaMock.mockReset();
+    navigateToPanelMock.mockReset();
+    navigateToPanelMock.mockReturnValue(false);
 });
 
 afterEach(() => {
@@ -333,6 +348,48 @@ describe("Capture/Show 採用済みテイク自動 DL 結線 (T051)", () => {
         await vi.waitFor(() => {
             expect(enqueueMock).toHaveBeenCalledTimes(1);
         });
+    });
+});
+
+/*
+ * 受入条件 4 (bug-hunt F-1-03) のうち **ページ配線** を固定する。
+ *
+ * 抑止そのもの (captureActive=true で focus / scrollIntoView が呼ばれない) は
+ * panel-navigation.test.ts が担う。ここは「Show が captureActive を正しく渡しているか」
+ * だけを見る。両方揃って初めて「録画中は視点とフォーカスを奪わない」が守られる
+ * (helper だけでは、将来 Show が誤って false を渡しても緑のままになる)。
+ */
+describe("Capture/Show 撮影パネルへのナビゲーション配線 (F-1-03 受入条件 4)", () => {
+    it("通常時は captureActive=false を渡す", async () => {
+        stubCameraSupported(false);
+        render(CaptureShow, { props: baseProps });
+
+        await selectCut();
+
+        await vi.waitFor(() => {
+            expect(navigateToPanelMock).toHaveBeenCalled();
+        });
+        expect(navigateToPanelMock.mock.calls.at(-1)?.[0]).toMatchObject({ captureActive: false });
+    });
+
+    it("録画開始 (getUserMedia grant 待ち) の間は captureActive=true を渡す", async () => {
+        stubCameraSupported(true);
+        // grant 待ちを再現する: 解決しない Promise を返すと starting=true のまま留まる。
+        // CameraRecorder の公開 active は `starting || resuming || phase !== "idle"` であり、
+        // grant 窓も active に含める設計なので、ここで captureActive=true になるはず。
+        getUserMediaMock.mockReturnValue(new Promise<MediaStream>(() => {}));
+
+        render(CaptureShow, { props: baseProps });
+        await selectCut();
+        await fireEvent.click(screen.getByTestId("start-recording"));
+
+        navigateToPanelMock.mockClear();
+        await selectCut(); // 録画中に同じカットを選び直す
+
+        await vi.waitFor(() => {
+            expect(navigateToPanelMock).toHaveBeenCalled();
+        });
+        expect(navigateToPanelMock.mock.calls.at(-1)?.[0]).toMatchObject({ captureActive: true });
     });
 });
 

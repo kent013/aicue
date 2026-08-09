@@ -367,11 +367,15 @@
             {/if}
             {#if playbackId !== null && !previewInFlight}
                 <!-- svelte-ignore a11y_media_has_caption (プレビュー動画の字幕は焼き込み済み) -->
+                <!-- aria-label は固定文言でよい: playbackId の供給源は初期値 (Controller が
+                     kind=Preview ∧ status=Succeeded で抽出) と poll の preview 分岐だけで、
+                     render job が入る経路が無い (完成動画と取り違わない)。 -->
                 <video
                     controls
                     preload="metadata"
                     class="w-full rounded-md bg-neutral"
                     src={`/projects/${projectId}/manuals/${manualId}/render-jobs/${playbackId}/playback`}
+                    aria-label="プレビュー動画"
                     data-testid="preview-video"
                 ></video>
             {/if}

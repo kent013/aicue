@@ -62,7 +62,12 @@
             {priceCaption}
         </p>
     {/if}
-    <p class="{priceCaption !== undefined && !isFree ? 'mt-0.5' : 'mt-3'} text-h2 text-text">
+    <!-- data-testid は headerBadges 追加によるレイアウト退行を測るための計測点 (T141)。
+         表示・スタイルには一切影響しない。 -->
+    <p
+        class="{priceCaption !== undefined && !isFree ? 'mt-0.5' : 'mt-3'} text-h2 text-text"
+        data-testid="plan-price"
+    >
         {#if isFree}
             <!-- 無料プラン: ¥0 表記でなく「無料」を価格として掲示する -->
             無料

@@ -14,6 +14,8 @@
         open: boolean; // bindable
         take: CaptureTake | null; // 再生対象 (null で閉)
         cut: CaptureCut; // 字幕 (subtitle_primary/secondary) の供給元
+        /** 手順 N / 急所 N-M。video のアクセシブルネームに使う (どのカットのテイクか) */
+        cutLabel: string;
         playbackUrl: string | null; // takeUrl(take, "/playback")。親が組み立て
         adopting: boolean; // 採用 XHR 中
         error: string | null; // 採用失敗メッセージ (親の run() error を流用)
@@ -25,6 +27,7 @@
         open = $bindable(false),
         take,
         cut,
+        cutLabel,
         playbackUrl,
         adopting,
         error,
@@ -81,6 +84,7 @@
                         playsinline
                         src={playbackUrl ?? undefined}
                         class="w-full"
+                        aria-label={`${cutLabel} のテイク再生`}
                         data-testid="take-preview-video"
                     ></video>
                 {/key}
