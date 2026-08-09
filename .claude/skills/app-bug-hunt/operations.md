@@ -28,6 +28,7 @@
 | POST | contact | contact.store | S1 | 通常 |
 | POST | debug/login/{userId} | debug.login-as | S1 | 通常 |
 | POST | invitations/accept | invitations.accept.store | S2 | 通常 |
+| POST | invitations/{invitation}/accept-in-app | invitations.accept-in-app | S2 | 通常 |
 | POST | login | login.store | S1 | 通常 |
 | POST | logout | logout | S1 | 通常 |
 | DELETE | organizations/{organization:slug}/api-keys/{apiKey} | organizations.api-keys.revoke | S4 | 通常 |
