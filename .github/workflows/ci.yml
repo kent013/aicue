@@ -49,7 +49,7 @@ jobs:
       DB_USERNAME: postgres
       DB_PASSWORD: postgres
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: shivammathur/setup-php@v2
         with:
           php-version: "8.4"
@@ -139,7 +139,7 @@ jobs:
       # 骨抜きにできてしまう (tests/js/architecture/ci-workflow-inventory.test.ts が
       # この不在を deny-by-default で固定する)。
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: shivammathur/setup-php@v2
         with:
           php-version: "8.4"
@@ -148,8 +148,8 @@ jobs:
       # version は指定しない: package.json の packageManager (pnpm@11.9.0) を単一の正本にする。
       # 両方書くと action が "Multiple versions of pnpm specified" で即 fail する
       # (実際に 11.3.0 と packageManager が食い違い、pnpm を使う 3 job が全部落ちていた)。
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -183,12 +183,12 @@ jobs:
   frontend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # version は指定しない: package.json の packageManager (pnpm@11.9.0) を単一の正本にする。
       # 両方書くと action が "Multiple versions of pnpm specified" で即 fail する
       # (実際に 11.3.0 と packageManager が食い違い、pnpm を使う 3 job が全部落ちていた)。
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -225,7 +225,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # composer audit / pnpm audit の両方を回すため PHP と Node の両方が要る
       - uses: shivammathur/setup-php@v2
         with:
@@ -234,8 +234,8 @@ jobs:
       # version は指定しない: package.json の packageManager (pnpm@11.9.0) を単一の正本にする。
       # 両方書くと action が "Multiple versions of pnpm specified" で即 fail する
       # (実際に 11.3.0 と packageManager が食い違い、pnpm を使う 3 job が全部落ちていた)。
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
