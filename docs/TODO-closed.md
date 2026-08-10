@@ -157,6 +157,8 @@ Open リストは [TODO.md](TODO.md) を参照。
 | T143 | 課金記録の保持期間の基盤整備 (非公開) (PR-C1)。保持 7 年の単一出典 (config/legal.php → BillingRetention) と対象目録・起算点・purger interface・dry-run 専用コマンドを実装。実処理の有効化 (PR-C2) と規約公開 (PR-C3) は含まない (規約が宣言していない削除を先に走らせないため)。purge 対象の網羅性は人間の申告であり機械保証しないことを明記。mutation 5 件 | backend | 2026-08-10 12:00 |
 | T142 | 退会の猶予期間つき削除 (凍結方式・30 日) (PR-B)。users 行の生死を変えない凍結方式で 30 日猶予を実装 (予約 POST / 取消 DELETE / 日次執行バッチ)。即時削除は副導線として残し標準形の併存要件を満たす。凍結は deny-by-default で allowlist の exact case のみ通し settings.account.destroy は除外 (猶予の迂回口になるため)。**実装中に設計の allowlist 漏れによる行き先のない詰みを発見・修正**: 2FA 必須組織の未準拠ユーザーが「取消は 2FA ゲート / 2FA 設定は凍結」で相互ブロックされていた。日次バッチの report が Laravel の既定 dontReport に握り潰され何も報告していなかった点も実測で発見し是正。mutation 17 種 | backend | 2026-08-10 13:30 |
 | T144 | 課金記録の保持期間の実処理を有効化 (PR-C2)。台帳行の畳み込みと日次 apply を追加。繰越行は現在残高のスナップショットで取引追跡情報を引き継がない。mutation 2 件が初回は緑のままで、fixture 不足 (同一 source で失効時刻だけ違う group / 閾値が過去へ動くケース) が原因と判明し追加して赤化させた。冪等キーの構成も是正 (through 由来だと閾値が過去へ動く再畳み込みで前回行とキー衝突し、その group が二度と畳み込めなくなる)。mutation 11 種 | backend | 2026-08-10 13:30 |
+| T146 | horizon 判定の fail-open を是正。dry-run の実走で、クエリが全件失敗しても「horizon: OK」と表示することが判明 (remaining=0 は「期限超過が無い」ではなく「数えられなかった」結果)。設計が「人手に残すのは horizon 0 の確認だけ」とした、その人間向けの行が嘘をついていた。OK / NG / 判定不能 の 3 値へ改め、runbook と docs/architecture.md も同一 diff で同期 | backend | 2026-08-10 14:30 |
+| T145 | 保持期間の規約公開 (PR-C3)。privacy.blade.php に「4. 保有期間」を追記し、年数は literal で書かず BillingRetention::years() から描画 (規約の宣言 / config の値 / purge の閾値が単一出典)。検査は見出し番号ではなく data-legal-retention 属性と「取引関係書類等」の語で照合するため並べ替えに耐える。Codex 5 ラウンドで単一出典の迂回路を 3 つ発見・封鎖 (自己参照コントロールの向き / クラス名・alias・メソッド名の大文字小文字 / T_NAME_RELATIVE)。**追記文面は法務レビュー前の草案**で consent_version は draft-1 のまま。初回 --apply の証跡取得と法務確定は人間の作業 | docs | 2026-08-10 14:30 |
 
 ## Obsoleted
 
