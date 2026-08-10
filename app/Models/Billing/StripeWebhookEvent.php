@@ -6,6 +6,8 @@ namespace App\Models\Billing;
 
 use App\Enums\Billing\WebhookEventStatus;
 use Carbon\CarbonImmutable;
+use Database\Factories\Billing\StripeWebhookEventFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -25,6 +27,9 @@ use Illuminate\Database\Eloquent\Model;
  */
 class StripeWebhookEvent extends Model
 {
+    /** @use HasFactory<StripeWebhookEventFactory> */
+    use HasFactory;
+
     /**
      * @return array<string, string>
      */
