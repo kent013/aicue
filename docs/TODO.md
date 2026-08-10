@@ -24,6 +24,11 @@
 | T085 | bfcache 実復元の iOS 実機受入確認 | test | Playwright 不可のため実機で確認+記録 | High | standalone | [設計](devnotes/20260803-0053-aigenba-alignment/) | 2026-08-03 03:10 |
 | T110 | 認証手段変更のメール通知ポリシーの統一設計 | backend | passkey/2FA/SSO の増減通知を一貫したポリシーとして設計する(T108 S7 は監査ログのみで通知は見送り) | Low | standalone | [設計](devnotes/20260805-1550-security-audit-remediation/) | 2026-08-05 17:45 |
 | T140 | auto-recharge の unique violation 判定を対象制約名で識別する | backend | AutoRechargeService::isUniqueViolation() が SQLSTATE (23505/23000) だけを見て制約名を識別しないため、tar_attempts_org_pending_unique 以外の unique 違反も no-op へ収束し本当の障害が隠れる。T137 で ShouldBeUnique を撤去し DB 制約への依存を強めたため追跡先を残す | Low | incremental | [設計](devnotes/20260809-0027-queue-dispatch-atomicity/) | 2026-08-09 03:20 |
+| T141 | 退会経路の依存閉包 gate と redaction 記録 | backend | 退会経路の静的 gate と redaction 記録列 | High | standalone | [設計](devnotes/20260809-0908-account-deletion-grace/) | 2026-08-10 09:30 |
+| T142 | 退会の猶予期間つき削除 (凍結方式・30 日) | backend | 猶予 30 日の予約/取消/日次執行と凍結 | High | standalone | [設計](devnotes/20260809-0908-account-deletion-grace/) | 2026-08-10 09:30 |
+| T143 | 課金記録の保持期間の基盤整備 (非公開) | backend | 保持 7 年の SSOT と目録と dry-run | High | standalone | [設計](devnotes/20260809-0908-account-deletion-grace/) | 2026-08-10 09:30 |
+| T144 | 課金記録の保持期間の実処理を有効化 | backend | 台帳行の畳み込みと日次 apply | High | standalone | [設計](devnotes/20260809-0908-account-deletion-grace/) | 2026-08-10 09:30 |
+| T145 | 保持期間の規約公開 (privacy へ節を追記) | docs | 保持期間の節を追記し年数を SSOT 描画 | Medium | standalone | [設計](devnotes/20260809-0908-account-deletion-grace/) | 2026-08-10 09:30 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
