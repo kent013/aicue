@@ -12,7 +12,6 @@ use App\Enums\Manual\MaterialType;
 use App\Enums\Manual\RenderConflictType;
 use App\Enums\Manual\RenderErrorCode;
 use App\Enums\Manual\RenderKind;
-use App\Enums\Manual\TakeStatus;
 use App\Enums\Manual\VideoManualStatus;
 use App\Exceptions\Billing\InsufficientTicketsException;
 use App\Exceptions\Manual\RenderConflictException;
@@ -358,22 +357,22 @@ class RenderJobService
      * 採用テイク検証 (欠落 = 422。スキップしない: 標準化された成果物の完全性)。
      * adopted_take_id NULL または採用テイクが ready でないカットの表示ラベル一覧を message に含める。
      *
+     * 判定式そのものは持たない (AdoptedReadyTakeCoverage へ委譲)。render の 422 と
+     * preview の事前告知は**制裁が違うだけで基準は同じ**であり、式を写経すると再び乖離する
+     * (bug-hunt F-1-01)。
+     *
      * @param  list<OrderedCut>  $ordered
      */
     private function assertAllCutsHaveAdoptedReadyTakes(array $ordered): void
     {
-        $missing = [];
-        foreach ($ordered as $entry) {
-            $take = $entry->cut->adoptedTake;
-            if ($take === null || $take->status !== TakeStatus::Ready) {
-                $missing[] = $entry->label;
-            }
+        $coverage = AdoptedReadyTakeCoverage::fromOrdered($ordered);
+        if ($coverage->missingCount() === 0) {
+            return;
         }
-        if ($missing !== []) {
-            throw ValidationException::withMessages([
-                'takes' => ['採用テイクが未設定のカットがあります: '.implode('、', $missing)],
-            ]);
-        }
+
+        throw ValidationException::withMessages([
+            'takes' => ['採用テイクが未設定のカットがあります: '.implode('、', $coverage->missingLabels)],
+        ]);
     }
 
     /**

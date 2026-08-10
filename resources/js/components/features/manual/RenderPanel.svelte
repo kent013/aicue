@@ -8,7 +8,7 @@
     import Card from "@/components/atoms/Card.svelte";
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
     import { csrfToken } from "@/lib/csrf";
-    import type { RenderJobProps, VideoManualStatus } from "@/types/manual";
+    import type { RenderJobProps, TakeCoverageProps, VideoManualStatus } from "@/types/manual";
     import { RENDER_STEP_LABELS } from "@/types/manual";
 
     /**
@@ -19,6 +19,9 @@
      *   追わない)。単一 interval が追跡中 job id 集合を順に fetch し、終端条件のみ kind 別分岐
      *   (render: succeeded → router.reload() / preview: succeeded → <video> 表示)
      * - failed + error_code=scenario_version_changed は「作り直す」CTA (preview 再 POST)
+     * - 事前告知 (coverage) / 事後説明 (playbackJob.placeholder_cut_count) は**別概念**:
+     *   前者は「今から作ると黒背景が出る」、後者は「今再生している動画に黒背景があった」。
+     *   どちらもボタンを止めない (必須条件未充足を理由に disabled にしない = 禁止事項 8)
      */
     interface Props {
         projectId: number;
@@ -26,12 +29,21 @@
         manualStatus: VideoManualStatus;
         job: RenderJobProps | null;
         previewJob: RenderJobProps | null;
-        playbackJobId: number | null;
+        playbackJob: RenderJobProps | null;
+        coverage: TakeCoverageProps;
         canManage: boolean;
     }
 
-    let { projectId, manualId, manualStatus, job, previewJob, playbackJobId, canManage }: Props =
-        $props();
+    let {
+        projectId,
+        manualId,
+        manualStatus,
+        job,
+        previewJob,
+        playbackJob: playbackJobProp,
+        coverage,
+        canManage,
+    }: Props = $props();
 
     // 作業状態 (props から一度だけ seed し、以後は XHR 応答で更新する)
     // svelte-ignore state_referenced_locally
@@ -39,7 +51,7 @@
     // svelte-ignore state_referenced_locally
     let preview = $state<RenderJobProps | null>(previewJob);
     // svelte-ignore state_referenced_locally
-    let playbackId = $state<number | null>(playbackJobId);
+    let playbackJob = $state<RenderJobProps | null>(playbackJobProp);
     // svelte-ignore state_referenced_locally
     let status = $state<VideoManualStatus>(manualStatus);
     let starting = $state(false);
@@ -65,6 +77,25 @@
     // 完成動画はあるがシナリオ編集で ready に戻った (要再生成) 案内
     const needsRegenerate = $derived(
         status === "ready" && renderJob?.status === "succeeded",
+    );
+    /**
+     * 事前告知の要約ラベル。missing_labels は props 側で先頭 10 件に打ち切られているため、
+     * 打ち切られていることを UI 側でも明示する (件数は missing_count が正)。
+     */
+    const missingLabelSummary = $derived(
+        coverage.missing_labels.length < coverage.missing_count
+            ? `${coverage.missing_labels.join("、")} ほか ${
+                  coverage.missing_count - coverage.missing_labels.length
+              } 件`
+            : coverage.missing_labels.join("、"),
+    );
+    /** 再生している動画**そのもの**の実績値だけを出す (null は 0 と同一視しない = 何も言わない) */
+    const playbackNote = $derived(
+        playbackJob !== null &&
+            playbackJob.placeholder_cut_count !== null &&
+            playbackJob.placeholder_cut_count > 0
+            ? playbackJob.placeholder_cut_count
+            : null,
     );
     // ポーリング対象の job id 集合 (id のみに依存を狭め、応答更新で再購読しない)
     const pollKey = $derived(
@@ -126,7 +157,8 @@
             } else {
                 preview = body;
                 if (body.status === "succeeded") {
-                    playbackId = body.id;
+                    // 注記と動画 URL は同一オブジェクトから出す (別世代の値で説明しない)
+                    playbackJob = body;
                 }
             }
         };
@@ -324,6 +356,16 @@
 
     {#if canManage}
         <div class="mt-6 flex flex-col gap-2">
+            {#if coverage.missing_count > 0}
+                <!-- 事前告知: プレビューは生成できる (ボタンは止めない) が黒背景になることを先に伝える。
+                     TakeStatus は 4 値あるため「未撮影」と断定せず述語の意味をそのまま言う。 -->
+                <div data-testid="preview-coverage-note">
+                    <Alert type="warning" title="プレビューに黒背景の区間があります">
+                        {coverage.missing_count} / {coverage.total_cuts}
+                        件のカットに、撮影・処理が完了した採用テイクがありません ({missingLabelSummary})。プレビューは生成できますが、該当区間は黒背景になります。完成動画の生成には、すべてのカットで撮影・処理が完了した採用テイクが必要です。
+                    </Alert>
+                </div>
+            {/if}
             {#if previewInFlight}
                 <div
                     class="flex items-center gap-2 text-body text-text-secondary"
@@ -365,16 +407,26 @@
                     </Alert>
                 </div>
             {/if}
-            {#if playbackId !== null && !previewInFlight}
+            {#if playbackJob !== null && !previewInFlight}
+                {#if playbackNote !== null}
+                    <!-- 事後説明: 注記と動画 URL は同一の playbackJob から出る (別世代の値で説明しない) -->
+                    <p
+                        class="text-caption text-text-secondary"
+                        data-testid="preview-placeholder-note"
+                    >
+                        このプレビューは {playbackNote}
+                        件のカットに使用できる採用テイクがないため、その区間が黒背景になっています。
+                    </p>
+                {/if}
                 <!-- svelte-ignore a11y_media_has_caption (プレビュー動画の字幕は焼き込み済み) -->
-                <!-- aria-label は固定文言でよい: playbackId の供給源は初期値 (Controller が
+                <!-- aria-label は固定文言でよい: playbackJob の供給源は初期値 (Controller が
                      kind=Preview ∧ status=Succeeded で抽出) と poll の preview 分岐だけで、
                      render job が入る経路が無い (完成動画と取り違わない)。 -->
                 <video
                     controls
                     preload="metadata"
                     class="w-full rounded-md bg-neutral"
-                    src={`/projects/${projectId}/manuals/${manualId}/render-jobs/${playbackId}/playback`}
+                    src={`/projects/${projectId}/manuals/${manualId}/render-jobs/${playbackJob.id}/playback`}
                     aria-label="プレビュー動画"
                     data-testid="preview-video"
                 ></video>

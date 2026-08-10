@@ -33,6 +33,7 @@ class RenderJobFactory extends Factory
             'scenario_version' => 0,
             'ticket_reservation_id' => null,
             'output_path' => null,
+            'placeholder_cut_count' => null,
             'error' => null,
             'error_code' => null,
         ];
@@ -60,14 +61,27 @@ class RenderJobFactory extends Factory
         ]);
     }
 
-    /** 成功確定の状態 (output_path 付き) */
-    public function succeeded(string $outputPath): static
+    /**
+     * 成功確定の状態 (output_path 付き)。
+     * アプリが生成した succeeded 行は必ず件数を持つため既定は 0 (黒背景なしで生成された)。
+     */
+    public function succeeded(string $outputPath, int $placeholderCutCount = 0): static
     {
         return $this->state(fn () => [
             'status' => JobStatus::Succeeded->value,
             'progress' => 100,
             'output_path' => $outputPath,
+            'placeholder_cut_count' => $placeholderCutCount,
         ]);
+    }
+
+    /**
+     * T148 **以前**から在る succeeded 行の再現 (placeholder_cut_count は null)。
+     * backfill しない契約 (null は 0 と同一視しない) の UI 分岐を検証するための fixture。
+     */
+    public function legacySucceeded(string $outputPath): static
+    {
+        return $this->succeeded($outputPath)->state(fn () => ['placeholder_cut_count' => null]);
     }
 
     /** 失敗確定の状態 */

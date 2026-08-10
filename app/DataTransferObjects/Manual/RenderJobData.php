@@ -28,6 +28,12 @@ final readonly class RenderJobData
         public ?string $error,
         public ?RenderErrorCode $errorCode,
         public VideoManualStatus $manualStatus,
+        /**
+         * 生成物に含まれたプレースホルダ (黒背景) クリップ数。
+         * null = その動画について言えることが無い (未完了 / T148 以前の succeeded 行)。
+         * **null を 0 と同一視しない** (0 は「黒背景ゼロで生成された」という積極的な事実)。
+         */
+        public ?int $placeholderCutCount,
     ) {}
 
     public static function fromJob(RenderJob $job, VideoManual $manual): self
@@ -41,12 +47,14 @@ final readonly class RenderJobData
             error: $job->error,
             errorCode: $job->error_code,
             manualStatus: $manual->status,
+            placeholderCutCount: $job->placeholder_cut_count,
         );
     }
 
     /**
      * @return array{id: int, kind: string, status: string, step: string|null, progress: int|null,
-     *   error: string|null, error_code: string|null, manual_status: string}
+     *   error: string|null, error_code: string|null, manual_status: string,
+     *   placeholder_cut_count: int|null}
      */
     public function toArray(): array
     {
@@ -59,6 +67,7 @@ final readonly class RenderJobData
             'error' => $this->error,
             'error_code' => $this->errorCode?->value,
             'manual_status' => $this->manualStatus->value,
+            'placeholder_cut_count' => $this->placeholderCutCount,
         ];
     }
 }

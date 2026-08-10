@@ -237,6 +237,22 @@ export interface RenderJobProps {
     error: string | null;
     error_code: RenderErrorCode | null;
     manual_status: VideoManualStatus;
+    /**
+     * 生成物に含まれたプレースホルダ (黒背景) クリップ数。
+     * null = その動画について言えることが無い (未完了 / T148 以前の succeeded 行)。
+     * **null を 0 と同一視しない** (0 は「黒背景ゼロで生成された」という積極的な事実)。
+     */
+    placeholder_cut_count: number | null;
+}
+
+/** PHP: App\DataTransferObjects\Manual\TakeCoverageData::toProps() と対 */
+export interface TakeCoverageProps {
+    /** カット総数 */
+    total_cuts: number;
+    /** 使用できる採用テイクがないカット数 (**打ち切らない全件数**) */
+    missing_count: number;
+    /** 該当カットの表示ラベル (先頭 10 件で打ち切られる。件数は missing_count が正) */
+    missing_labels: string[];
 }
 
 /** PHP: App\Enums\Manual\RenderConflictType と対 (値集合同期テストあり) */
@@ -259,8 +275,16 @@ export interface RenderProps {
     job: RenderJobProps | null;
     /** 最新 kind=preview の job (無ければ null) */
     previewJob: RenderJobProps | null;
-    /** 再生可能な最新 succeeded preview の job id (無ければ null) */
-    playbackJobId: number | null;
+    /**
+     * 再生可能な最新 succeeded preview の job (無ければ null)。
+     * 動画 URL と黒背景の注記が同一オブジェクトから出る (別世代の値で説明しないため)。
+     */
+    playbackJob: RenderJobProps | null;
+    /**
+     * 採用テイクの充足状況 (描画時点のスナップショット。常に最新ではない)。
+     * 生成物の実績は playbackJob.placeholder_cut_count が語る (別概念なので混ぜない)。
+     */
+    coverage: TakeCoverageProps;
 }
 
 /** PHP: App\Enums\Manual\ScenarioConflictType と対 (discriminated union) */

@@ -18,6 +18,7 @@ use App\Models\Category;
 use App\Models\Project;
 use App\Models\User;
 use App\Models\VideoManual;
+use App\Services\Manual\AdoptedReadyTakeCoverage;
 use App\Services\Manual\VideoManualService;
 use App\Support\Seo\SeoManager;
 use Illuminate\Http\RedirectResponse;
@@ -109,6 +110,16 @@ class VideoManualController extends Controller
         $analysisJob = $manuals->displayAnalysisJob($manual);
         $renderJob = $manuals->displayRenderJob($manual);
         $previewJob = $manuals->displayPreviewJob($manual);
+        // 再生できるプレビュー (最新 succeeded preview)。**id だけでなく行そのもの**を props に載せる:
+        // 動画 URL と「黒背景が何カット分か」の注記が同一オブジェクトから出るため、
+        // 最新 preview job と再生対象が別世代になる穴が構造的に消える (T148)。
+        // succeeded preview のみを見るため staleness 抑制の対象外 (不変)。
+        $playbackJob = $manual->renderJobs()
+            ->where('kind', RenderKind::Preview->value)
+            ->where('status', JobStatus::Succeeded->value)
+            ->whereNotNull('output_path')
+            ->latest('id')
+            ->first();
 
         return Inertia::render('Manuals/Show', [
             'project' => [
@@ -139,13 +150,13 @@ class VideoManualController extends Controller
                 'previewJob' => $previewJob === null
                     ? null
                     : RenderJobData::fromJob($previewJob, $manual)->toArray(),
-                // playbackJobId は succeeded preview のみを見るため staleness 抑制の対象外 (不変)
-                'playbackJobId' => $manual->renderJobs()
-                    ->where('kind', RenderKind::Preview->value)
-                    ->where('status', JobStatus::Succeeded->value)
-                    ->whereNotNull('output_path')
-                    ->latest('id')
-                    ->value('id'),
+                'playbackJob' => $playbackJob === null
+                    ? null
+                    : RenderJobData::fromJob($playbackJob, $manual)->toArray(),
+                // 「使用できる採用テイクがない」カットの充足状況。render の 422 と**同じ述語**から出す
+                // = 判断基準を 1 箇所に置く (bug-hunt F-1-01)。描画時点のスナップショットであり
+                // 常に最新ではない (押下は止めないので詰みにはならない)。
+                'coverage' => AdoptedReadyTakeCoverage::for($manual)->toProps(),
             ],
             'canManage' => $user->can('update', $manual),
             'categories' => $this->categoryOptions($project), // 複製ダイアログのカテゴリ選択肢 (既存 helper 再利用)

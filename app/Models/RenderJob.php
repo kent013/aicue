@@ -33,6 +33,8 @@ use Illuminate\Support\Carbon;
  * @property int|null $ticket_reservation_id
  * @property int|null $triggered_by
  * @property string|null $output_path
+ * @property int|null $placeholder_cut_count 生成物に含まれたプレースホルダ (黒背景) クリップ数。
+ *                                           null = その動画について言えることが無い (既存行 / queued / running / finalize 未到達の failed)
  * @property string|null $error
  * @property RenderErrorCode|null $error_code
  * @property int|null $scenario_version_at_terminal
@@ -54,6 +56,7 @@ class RenderJob extends Model
             'status' => JobStatus::class,
             'step' => RenderStep::class,
             'progress' => 'integer',
+            'placeholder_cut_count' => 'integer',
             'scenario_version' => 'integer',
             'error_code' => RenderErrorCode::class,
         ];

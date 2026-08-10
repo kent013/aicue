@@ -13,7 +13,12 @@ const baseProps = {
         created_at: "2026-07-10 12:00",
     },
     analysis: { job: null, hasDocument: false },
-    render: { job: null, previewJob: null, playbackJobId: null },
+    render: {
+        job: null,
+        previewJob: null,
+        playbackJob: null,
+        coverage: { total_cuts: 1, missing_count: 0, missing_labels: [] },
+    },
     canManage: true,
     categories: [
         { id: 1, name: "準備作業" },
@@ -146,5 +151,40 @@ describe("Manuals/Show", () => {
 
         expect(screen.queryByTestId("source-document-upload")).toBeNull();
         expect(screen.getByTestId("analysis-progress")).toBeInTheDocument();
+    });
+
+    // --- T148 (bug-hunt F-1-01): render props の配線 ---
+
+    it("D-9: render.coverage と render.playbackJob が RenderPanel へ渡る", () => {
+        render(Show, {
+            props: {
+                ...baseProps,
+                manual: { ...baseProps.manual, status: "ready" as VideoManualStatus },
+                render: {
+                    job: null,
+                    previewJob: null,
+                    playbackJob: {
+                        id: 33,
+                        kind: "preview" as const,
+                        status: "succeeded" as const,
+                        step: null,
+                        progress: 100,
+                        error: null,
+                        error_code: null,
+                        manual_status: "ready" as VideoManualStatus,
+                        placeholder_cut_count: 2,
+                    },
+                    coverage: { total_cuts: 3, missing_count: 2, missing_labels: ["手順2", "手順3"] },
+                },
+            },
+        });
+
+        // coverage は事前告知へ、playbackJob は動画 URL と事後説明へ流れる
+        expect(screen.getByTestId("preview-coverage-note")).toHaveTextContent("手順2、手順3");
+        expect(screen.getByTestId("preview-video")).toHaveAttribute(
+            "src",
+            "/projects/1/manuals/5/render-jobs/33/playback",
+        );
+        expect(screen.getByTestId("preview-placeholder-note")).toHaveTextContent("2");
     });
 });

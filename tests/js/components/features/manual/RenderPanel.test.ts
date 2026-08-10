@@ -32,7 +32,8 @@ const baseProps = {
     manualStatus: "ready" as const,
     job: null,
     previewJob: null,
-    playbackJobId: null,
+    playbackJob: null,
+    coverage: { total_cuts: 1, missing_count: 0, missing_labels: [] },
     canManage: true,
 };
 
@@ -46,6 +47,7 @@ function renderJobBody(overrides: Partial<RenderJobProps> = {}): RenderJobProps 
         error: null,
         error_code: null,
         manual_status: "rendering",
+        placeholder_cut_count: null,
         ...overrides,
     };
 }
@@ -222,7 +224,10 @@ describe("RenderPanel", () => {
 
     it("再生可能な preview があれば <video> を playback route で表示する", () => {
         render(RenderPanel, {
-            props: { ...baseProps, playbackJobId: 33 },
+            props: {
+                ...baseProps,
+                playbackJob: renderJobBody({ id: 33, kind: "preview", status: "succeeded" }),
+            },
         });
 
         const video = screen.getByTestId("preview-video");
@@ -388,5 +393,188 @@ describe("RenderPanel", () => {
         expect(screen.getByTestId("render-start-error")).toHaveTextContent(
             "完成動画の生成を開始できませんでした",
         );
+    });
+
+    // --- T148 (bug-hunt F-1-01): 事前告知 (coverage) と事後説明 (placeholder_cut_count) ---
+
+    it("D-1: missing_count>0 でプレビュー近傍に事前告知を出す", () => {
+        render(RenderPanel, {
+            props: {
+                ...baseProps,
+                coverage: { total_cuts: 4, missing_count: 3, missing_labels: ["手順2", "手順3", "手順4"] },
+            },
+        });
+
+        const note = screen.getByTestId("preview-coverage-note");
+        expect(note).toHaveTextContent("3");
+        expect(note).toHaveTextContent("4");
+        expect(note).toHaveTextContent("手順2、手順3、手順4");
+        // 述語は「未撮影」ではなく「撮影・処理が完了した採用テイクがない」ことを言う
+        expect(note).toHaveTextContent("撮影・処理が完了した採用テイクがありません");
+    });
+
+    it("D-2: missing_count>0 でもプレビュー生成ボタンは disabled にならない (禁止事項 8)", () => {
+        render(RenderPanel, {
+            props: {
+                ...baseProps,
+                coverage: { total_cuts: 2, missing_count: 1, missing_labels: ["手順2"] },
+            },
+        });
+
+        const previewButton = screen.getByTestId("preview-button");
+        expect(previewButton).not.toBeDisabled();
+        expect(previewButton).not.toHaveAttribute("aria-disabled", "true");
+        const renderButton = screen.getByTestId("render-button");
+        expect(renderButton).not.toBeDisabled();
+        expect(renderButton).not.toHaveAttribute("aria-disabled", "true");
+    });
+
+    it("D-3: missing_count が 0 なら事前告知を出さない", () => {
+        render(RenderPanel, { props: baseProps });
+
+        expect(screen.queryByTestId("preview-coverage-note")).not.toBeInTheDocument();
+    });
+
+    it("D-4: playbackJob.placeholder_cut_count>0 なら動画の上に事後説明を出す", () => {
+        render(RenderPanel, {
+            props: {
+                ...baseProps,
+                playbackJob: renderJobBody({
+                    id: 33,
+                    kind: "preview",
+                    status: "succeeded",
+                    placeholder_cut_count: 2,
+                }),
+            },
+        });
+
+        expect(screen.getByTestId("preview-placeholder-note")).toHaveTextContent("2");
+        expect(screen.getByTestId("preview-video")).toBeInTheDocument();
+    });
+
+    it("D-5: placeholder_cut_count が null なら事後説明を出さない (0 と同一視しない)", () => {
+        render(RenderPanel, {
+            props: {
+                ...baseProps,
+                playbackJob: renderJobBody({
+                    id: 33,
+                    kind: "preview",
+                    status: "succeeded",
+                    placeholder_cut_count: null,
+                }),
+            },
+        });
+
+        expect(screen.queryByTestId("preview-placeholder-note")).not.toBeInTheDocument();
+        expect(screen.getByTestId("preview-video")).toBeInTheDocument();
+    });
+
+    it("D-5b: placeholder_cut_count が 0 なら事後説明を出さない", () => {
+        render(RenderPanel, {
+            props: {
+                ...baseProps,
+                playbackJob: renderJobBody({
+                    id: 33,
+                    kind: "preview",
+                    status: "succeeded",
+                    placeholder_cut_count: 0,
+                }),
+            },
+        });
+
+        expect(screen.queryByTestId("preview-placeholder-note")).not.toBeInTheDocument();
+    });
+
+    it("D-6: 事後説明と動画 URL は同一の playbackJob から出る (最新 preview が別世代でも)", () => {
+        render(RenderPanel, {
+            props: {
+                ...baseProps,
+                // 最新 preview job は別世代 (失敗済み・件数 9)
+                previewJob: renderJobBody({
+                    id: 44,
+                    kind: "preview",
+                    status: "failed",
+                    error: "書き出しに失敗しました。",
+                    error_code: "internal",
+                    manual_status: "ready",
+                    placeholder_cut_count: 9,
+                }),
+                playbackJob: renderJobBody({
+                    id: 33,
+                    kind: "preview",
+                    status: "succeeded",
+                    placeholder_cut_count: 2,
+                }),
+            },
+        });
+
+        expect(screen.getByTestId("preview-video")).toHaveAttribute(
+            "src",
+            "/projects/1/manuals/5/render-jobs/33/playback",
+        );
+        const note = screen.getByTestId("preview-placeholder-note");
+        expect(note).toHaveTextContent("2");
+        expect(note).not.toHaveTextContent("9");
+    });
+
+    it("D-7: missing_labels が打ち切られているとき「ほか N 件」を出す", () => {
+        render(RenderPanel, {
+            props: {
+                ...baseProps,
+                coverage: {
+                    total_cuts: 12,
+                    missing_count: 11,
+                    missing_labels: [
+                        "手順2",
+                        "手順3",
+                        "手順4",
+                        "手順5",
+                        "手順6",
+                        "手順7",
+                        "手順8",
+                        "手順9",
+                        "手順10",
+                        "手順11",
+                    ],
+                },
+            },
+        });
+
+        expect(screen.getByTestId("preview-coverage-note")).toHaveTextContent("ほか 1 件");
+    });
+
+    it("D-8: preview 成功のポーリング応答で playbackJob が更新され事後説明も追随する", async () => {
+        fetchMock.mockResolvedValueOnce(
+            jsonResponse(
+                200,
+                renderJobBody({
+                    id: 77,
+                    kind: "preview",
+                    status: "succeeded",
+                    manual_status: "ready",
+                    placeholder_cut_count: 5,
+                }),
+            ),
+        );
+
+        render(RenderPanel, {
+            props: {
+                ...baseProps,
+                previewJob: renderJobBody({
+                    id: 77,
+                    kind: "preview",
+                    status: "running",
+                    manual_status: "ready",
+                }),
+            },
+        });
+
+        await waitFor(() => {
+            expect(screen.getByTestId("preview-video")).toHaveAttribute(
+                "src",
+                "/projects/1/manuals/5/render-jobs/77/playback",
+            );
+        });
+        expect(screen.getByTestId("preview-placeholder-note")).toHaveTextContent("5");
     });
 });

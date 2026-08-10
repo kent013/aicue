@@ -110,7 +110,7 @@ test('succeeded は version が進んでも抑制されない', function (): voi
             ->where('analysis.job.status', JobStatus::Succeeded->value));
 });
 
-test('preview 独立: preview 失敗が stale でも playbackJobId は succeeded preview を維持', function (): void {
+test('preview 独立: preview 失敗が stale でも playbackJob は succeeded preview を維持', function (): void {
     [$owner, $project, $manual] = staleDisplayContext(scenarioVersion: 2);
     // 古い succeeded preview (再生可能) と、その後の失敗 preview (stale)
     $playable = RenderJob::factory()->forManual($manual)->preview()
@@ -123,7 +123,8 @@ test('preview 独立: preview 失敗が stale でも playbackJobId は succeeded
     $this->actingAs($owner)->get(route('projects.manuals.show', [$project, $manual]))
         ->assertInertia(fn (Assert $page) => $page
             ->where('render.previewJob', null)
-            ->where('render.playbackJobId', $playable->id));
+            // T148: playbackJobId (id だけ) から playbackJob (行そのもの) へ置換済み
+            ->where('render.playbackJob.id', $playable->id));
 });
 
 test('統合: ScenarioService::save の実経路 (no-op 保存) で version++ すると解析失敗が stale 化', function (): void {
