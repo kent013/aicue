@@ -1,10 +1,11 @@
 <script lang="ts">
     import { tick, type Component } from "svelte";
     import { router } from "@inertiajs/svelte";
-    import { Bell, Check, FileSearch, Film, Mail, TicketMinus } from "@lucide/svelte";
+    import { Bell, Check, FileSearch, Film, Mail, TicketMinus, UserRoundX } from "@lucide/svelte";
     import Badge from "@/components/atoms/Badge.svelte";
     import { addToast } from "@/lib/stores/toast";
     import type {
+        AccountDeletionRequestedPayload,
         InvitationReceivedPayload,
         ManualJobPayload,
         NotificationItem,
@@ -55,6 +56,12 @@
             : null,
     );
 
+    const deletionPayload = $derived(
+        notification.type === "account_deletion_requested" && notification.payload !== null
+            ? (notification.payload as AccountDeletionRequestedPayload)
+            : null,
+    );
+
     const icon = $derived.by<Component>(() => {
         switch (notification.type) {
             case "manual_analyzed":
@@ -65,6 +72,8 @@
                 return Mail;
             case "ticket_balance_low":
                 return TicketMinus;
+            case "account_deletion_requested":
+                return UserRoundX;
             default:
                 return Bell;
         }
@@ -83,6 +92,9 @@
         if (balancePayload) {
             return `チケット残高が残り ${balancePayload.balance} 枚になりました`;
         }
+        if (deletionPayload) {
+            return "退会のお手続きを受け付けました";
+        }
         // 未知 type / payload 復元失敗の fallback (rawType をそのまま出す)
         return notification.type;
     });
@@ -99,6 +111,9 @@
         if (balancePayload) {
             return `通知の目安 (${balancePayload.threshold} 枚) を下回りました。チケットを追加購入できます`;
         }
+        if (deletionPayload) {
+            return `${formatDate(deletionPayload.purge_after)} に削除されます。設定画面からいつでも取り消せます`;
+        }
         return null;
     });
 
@@ -108,6 +123,13 @@
         if (balancePayload) return balancePayload.organization_name;
         return null;
     });
+
+    /** ISO8601 を「YYYY年M月D日」表記へ。解釈できない値は空文字 (fallback 描画に倒す) */
+    function formatDate(iso: string): string {
+        const date = new Date(iso);
+        if (Number.isNaN(date.getTime())) return "";
+        return date.toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric" });
+    }
 
     /** 相対時刻 (分/時間/日)。7 日超は日付表示 */
     function relativeTime(iso: string): string {

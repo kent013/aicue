@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Database\Factories;
 
 use App\Models\User;
+use App\Support\Account\AccountDeletionGrace;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Hash;
@@ -63,6 +65,25 @@ class UserFactory extends Factory
     }
 
     /**
+     * 退会予約中 (凍結方式) のユーザー。**users 行の生死は変えない**ので、埋めるのは予約列 2 本だけ。
+     *
+     * 両列は同時に埋まる (DB の CHECK 制約 users_deletion_request_pair_check が片列だけを拒否する)。
+     * `$purgeAfter` 未指定なら猶予日数の SSOT (AccountDeletionGrace) から導出する
+     * = テストが猶予日数を独自に持たない。
+     */
+    public function pendingDeletion(?CarbonImmutable $requestedAt = null, ?CarbonImmutable $purgeAfter = null): static
+    {
+        return $this->state(function (array $attributes) use ($requestedAt, $purgeAfter): array {
+            $requested = $requestedAt ?? CarbonImmutable::now();
+
+            return [
+                'deletion_requested_at' => $requested,
+                'deletion_purge_after' => $purgeAfter ?? AccountDeletionGrace::purgeAfter($requested),
+            ];
+        });
+    }
+
+    /**
      * 2FA 有効・confirmed 状態のユーザーを生成する。
      *
      * Fortify の EnableTwoFactorAuthentication / ConfirmTwoFactorAuthentication
@@ -72,19 +93,29 @@ class UserFactory extends Factory
      */
     public function withTwoFactor(): static
     {
-        return $this->afterCreating(function (User $user): void {
-            $secret = app(Google2FA::class)->generateSecretKey();
+        return $this->afterCreating(static fn (User $user) => self::enableTwoFactorFor($user));
+    }
 
-            /** @var Collection<int, string> $codes */
-            $codes = Collection::times(8, fn (): string => RecoveryCode::generate());
+    /**
+     * 既存ユーザーを 2FA 準拠 (confirmed) 状態へ遷移させる。
+     *
+     * `withTwoFactor()` state と**同一の実装**を共有する (2 箇所に書かない)。
+     * 「未準拠のまま作ったユーザーが、途中で準拠を達成する」導線を検証するテスト
+     * (2FA 必須組織での退会予約の取消など) から呼ぶ。
+     */
+    public static function enableTwoFactorFor(User $user): void
+    {
+        $secret = app(Google2FA::class)->generateSecretKey();
 
-            $user->forceFill([
-                'two_factor_secret' => Fortify::currentEncrypter()->encrypt($secret),
-                'two_factor_recovery_codes' => Fortify::currentEncrypter()->encrypt(
-                    (string) json_encode($codes->all()),
-                ),
-                'two_factor_confirmed_at' => now(),
-            ])->save();
-        });
+        /** @var Collection<int, string> $codes */
+        $codes = Collection::times(8, fn (): string => RecoveryCode::generate());
+
+        $user->forceFill([
+            'two_factor_secret' => Fortify::currentEncrypter()->encrypt($secret),
+            'two_factor_recovery_codes' => Fortify::currentEncrypter()->encrypt(
+                (string) json_encode($codes->all()),
+            ),
+            'two_factor_confirmed_at' => now(),
+        ])->save();
     }
 }

@@ -25,6 +25,10 @@ enum SecurityEventType: string
     case TwoFactorDisabled = 'two_factor_disabled';
     case EmailChanged = 'email_changed';
     case AccountDeleted = 'account_deleted';
+    // 猶予期間つき退会 (凍結方式) の予約 / 取消。物理削除 (account_deleted) とは別事象で、
+    // 「意思表示があった / 撤回された」ことを残す (誤操作救済の追跡と、凍結の説明責任のため)
+    case AccountDeletionRequested = 'account_deletion_requested';
+    case AccountDeletionCancelled = 'account_deletion_cancelled';
     case SocialAccountLinked = 'social_account_linked';
     case OwnershipTransferred = 'ownership_transferred';
     case ApiKeyIssued = 'api_key_issued';
@@ -51,6 +55,8 @@ enum SecurityEventType: string
             self::TwoFactorDisabled => '2要素認証の無効化',
             self::EmailChanged => 'メールアドレス変更',
             self::AccountDeleted => 'アカウント削除',
+            self::AccountDeletionRequested => '退会の予約',
+            self::AccountDeletionCancelled => '退会予約の取消',
             self::SocialAccountLinked => 'ソーシャルアカウント連携',
             self::OwnershipTransferred => '組織オーナー移譲',
             self::ApiKeyIssued => 'API キー発行',

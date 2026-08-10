@@ -125,3 +125,27 @@ YYYY-MM-DD に記録済みです (customer=cus_xxx)。何もしません。
 - 同じ organization id が**日をまたいで再報告され続ける**場合、redaction 待ち (90 日 / 最大 30 日)
   なのか、対応が止まっているのかを本 runbook の手順で切り分ける。
   再報告そのものは抑制状態を持たない冪等な観測であり、異常ではない。
+
+## 猶予期間つき削除 (T142) の運用
+
+即時削除に加えて **猶予 30 日の予約 (凍結方式)** が併存する。契約と設計判断の正本は
+`docs/architecture.md` §退会の猶予期間つき削除 (凍結方式・30 日)。
+
+1. **執行バッチ**: `account:purge-deletion-requests --apply` が daily (`onOneServer`) で走る。
+   手で確認したいときは `--apply` 無しの **dry-run** で件数だけを見る
+   (`due` / `deleted` / `blocked` / `unexpected` を出力。user id / email は出さない)。
+2. **終了コードの読み方**:
+   - `SUCCESS` かつ `blocked>0` = **業務上の保留**。件数を載せた `RuntimeException` が
+     `report()` される (`ValidationException` を素で report しても既定 dontReport が握り潰すため)。唯一 Owner + 他メンバー / 生きた課金責務が
+     残っている。予約は維持され翌日また試される。対応は本 runbook 冒頭の
+     「退会をブロックしている組織」の解消手順と同じ (移譲 / 解約)。
+   - `FAILURE` = **想定外**。`unexpected` の内訳は (a) インフラ障害、(b) 予約列の非正規行
+     (片列だけ / 期限が予約時刻より前)。(b) は DB の CHECK 制約が本来拒否するはずの状態なので、
+     **制約が落ちていないかを先に確認する** (`users_deletion_request_pair_check` /
+     `users_deletion_purge_after_order_check`)。
+3. **利用者からの「取り消したい」問い合わせ**: 取消は本人が `/settings` からいつでも実行できる
+   (step-up 不要)。予約中は業務画面が `/settings` へ 302 されるため、
+   **ログインさえできれば必ず取消画面に着く**。運用側で代行取消する導線は用意していない。
+4. **決済事業者 API は 1 回も呼ばない**。予約・取消・執行のいずれの経路も自 DB しか触らない
+   (静的検査は `AccountDeletionPathGateTest`、挙動は Feature テストが固定する)。
+   解約は利用者自身が Customer Portal で行う (凍結中も `billing.portal` は通る)。

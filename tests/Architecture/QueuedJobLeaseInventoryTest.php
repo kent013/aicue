@@ -14,6 +14,7 @@ use App\Jobs\Manual\RunManualAnalysis;
 use App\Jobs\Manual\RunManualRender;
 use App\Mail\InquiryAcknowledgementMail;
 use App\Mail\InquiryReceivedMail;
+use App\Notifications\Account\AccountDeletionRequestedNotification;
 use App\Notifications\Billing\AutoRechargeActionRequiredNotification;
 use App\Notifications\Billing\AutoRechargeDisabledNotification;
 use App\Notifications\Billing\AutoRechargeEnabledNotification;
@@ -75,6 +76,7 @@ const QUEUED_JOB_LEASE_INVENTORY = [
     AutoRechargeFailedNotification::class => null,
     PaymentFailedNotification::class => null,
     RenewalReminderNotification::class => null,
+    AccountDeletionRequestedNotification::class => null,
 ];
 
 /**

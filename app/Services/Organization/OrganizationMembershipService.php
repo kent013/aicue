@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Organization;
 
+use App\DataTransferObjects\Account\AccountDeletionStateDto;
 use App\DataTransferObjects\Invitations\PendingInvitationForUserDto;
 use App\DataTransferObjects\Organizations\AccountDeletionBlockerDto;
 use App\Enums\AccountDeletionBlockReason;
@@ -13,11 +14,14 @@ use App\Enums\SecurityEventType;
 use App\Models\Organization;
 use App\Models\OrganizationInvitation;
 use App\Models\User;
+use App\Notifications\Account\AccountDeletionRequestedNotification;
 use App\Notifications\OrganizationInvitationNotification;
 use App\Services\Billing\AccountDeletionBillingGuard;
 use App\Services\Notification\NotificationCenterService;
 use App\Services\Project\DefaultProjectResolver;
 use App\Services\Security\SecurityEventRecorder;
+use App\Support\Account\AccountDeletionGrace;
+use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Session\Session;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -651,6 +655,106 @@ class OrganizationMembershipService
     }
 
     /**
+     * 退会の予約 (猶予期間つき削除)。**凍結方式**なので users 行の生死は変えない。
+     *
+     * 冪等: 既に予約中なら **`purge_after` を延長せず**既存の予約をそのまま返す
+     * (二重送信で猶予が伸び続けるのを防ぐ。取消 → 再予約は明示操作)。
+     * この冪等 no-op が「予約操作からの通知 job 生成は最大 1 件」の一回性も担う
+     * (AGENTS.md ドメイン規約 6: 結果の一回性は永続状態遷移が担う)。
+     *
+     * **予約時にブロッカーを評価しない**。予約は退会の意思表示であって削除ではなく、
+     * ブロックされている人が予約すらできないと「解約待ちの間は退会予約もできない」詰みになる。
+     * 権威判定は執行時 (deleteAccount のロック下再評価) が担う。
+     *
+     * @return AccountDeletionStateDto 予約後の状態 (通知とレスポンスが同じ値を見る)
+     */
+    public function requestAccountDeletion(User $user): AccountDeletionStateDto
+    {
+        return DB::transaction(function () use ($user): AccountDeletionStateDto {
+            // canonical 共通ロック境界 (users 昇順 → organizations 昇順)。organizations は不要だが
+            // 順序の起点を deleteAccount と揃える (新しいロック順序を作らない)。
+            $this->lockForMembershipWrite([$this->keyOf($user)], []);
+
+            $fresh = $user->fresh();
+            Assert::isInstanceOf($fresh, User::class);
+
+            $state = AccountDeletionStateDto::fromUser($fresh);
+            if ($state->isPending()) {
+                return $state; // 冪等 no-op (延長しない / 通知も発火しない)
+            }
+
+            // 秒精度で確定させる (DB の timestamp(0) と in-memory 値のズレで
+            // 通知側の一致検査 matches() が偽陰性にならないようにする)。
+            $requestedAt = CarbonImmutable::now()->startOfSecond();
+            // 猶予日数の解決は AccountDeletionGrace 1 箇所だけ。Service は config を直読しない。
+            $purgeAfter = AccountDeletionGrace::purgeAfter($requestedAt);
+            $fresh->forceFill([
+                'deletion_requested_at' => $requestedAt,
+                'deletion_purge_after' => $purgeAfter,
+            ])->save();
+
+            $this->recorder->record(SecurityEventType::AccountDeletionRequested, $fresh);
+
+            // AGENTS.md ドメイン規約 11: 業務状態の保存とキュー投入は**同一トランザクション内**で
+            // 行う (afterCommit に依存しない)。通知側は送信直前に予約の生存を再確認する。
+            $fresh->notify(new AccountDeletionRequestedNotification($requestedAt, $purgeAfter));
+            $this->notifications->notifyAccountDeletionRequested($fresh, $purgeAfter);
+
+            return AccountDeletionStateDto::fromUser($fresh);
+        });
+    }
+
+    /**
+     * 退会予約の取消。**誤操作救済の本体**であり、ブロッカーの有無に関わらず必ず成功する。
+     * 冪等: 予約が無ければ no-op。
+     */
+    public function cancelAccountDeletion(User $user): AccountDeletionStateDto
+    {
+        return DB::transaction(function () use ($user): AccountDeletionStateDto {
+            $this->lockForMembershipWrite([$this->keyOf($user)], []);
+
+            $fresh = $user->fresh();
+            Assert::isInstanceOf($fresh, User::class);
+
+            if (! AccountDeletionStateDto::fromUser($fresh)->isPending()) {
+                return AccountDeletionStateDto::fromUser($fresh); // 冪等 no-op
+            }
+
+            $fresh->forceFill([
+                'deletion_requested_at' => null,
+                'deletion_purge_after' => null,
+            ])->save();
+
+            $this->recorder->record(SecurityEventType::AccountDeletionCancelled, $fresh);
+
+            return AccountDeletionStateDto::fromUser($fresh);
+        });
+    }
+
+    /**
+     * 予約の執行 (日次バッチ専用)。**期限到来をロック下で再確認してから**既存の
+     * `deleteAccount()` をそのまま呼ぶ (判定コードを分岐させない = 課金ガードの
+     * ロック下再評価をそのまま継承する)。
+     *
+     * @return bool true = 削除した / false = 期限未到来 or 予約が消えていた (抽出後の取消)
+     *
+     * @throws ValidationException 退会ブロッカーが立っている (呼び出し側が「業務上の保留」として捌く)
+     */
+    public function executeAccountDeletionRequest(User $user): bool
+    {
+        $executed = false;
+
+        $this->deleteAccount($user, null, function (User $locked) use (&$executed): bool {
+            // deleteAccount のロック取得後・ガード評価**前**に呼ばれる前提条件フック。
+            $executed = AccountDeletionStateDto::fromUser($locked)->isDue(CarbonImmutable::now());
+
+            return $executed;
+        });
+
+        return $executed;
+    }
+
+    /**
      * 退会をブロックしている組織と理由。
      *
      * 述語:
@@ -788,13 +892,19 @@ class OrganizationMembershipService
      * (ブロックされたユーザーはログアウトされない)。**フックは例外を投げてはならない**
      * (投げると削除トランザクション全体が rollback する)。
      *
+     * $precondition はロック取得直後・**ガード評価前**に呼ばれる前提条件フックである。
+     * false を返すと**ブロッカー判定に入らず**削除もせずに正常終了する。日次執行バッチが
+     * 「抽出後に取り消された予約」を検出する口で、ここでブロッカー例外を出さないのは
+     * 「取消済みユーザーを業務上の保留と誤分類しない」ためである (null なら常に true)。
+     *
      * @param  (\Closure(): void)|null  $beforeDelete  例外を投げないこと (投げると削除全体が rollback)
+     * @param  (\Closure(User): bool)|null  $precondition  ロック取得直後・ガード評価前の前提条件
      *
      * @throws ValidationException 唯一 Owner かつ (他メンバーが残る ∨ 生きた課金責務がある) 組織がある
      */
-    public function deleteAccount(User $user, ?\Closure $beforeDelete = null): void
+    public function deleteAccount(User $user, ?\Closure $beforeDelete = null, ?\Closure $precondition = null): void
     {
-        DB::transaction(function () use ($user, $beforeDelete): void {
+        DB::transaction(function () use ($user, $beforeDelete, $precondition): void {
             // 1. 対象 User 行を最初にロック (この後の所属列挙を安定させる。列挙前に user を
             //    ロックしないと、列挙〜user ロック取得の間に別 txn が新組織 B の Owner を user へ
             //    移譲し、B を未検査のまま削除する race が残る)。
@@ -818,6 +928,14 @@ class OrganizationMembershipService
             // 3. ロック下で述語を再評価 (fresh。事前取得値は信用しない。null フォールバック禁止)
             $freshUser = $user->fresh();
             Assert::isInstanceOf($freshUser, User::class);
+
+            // 3a. 前提条件フック (ロック下・**ブロッカー判定より前**)。false = 削除しないで正常終了。
+            //     ★判定の**前**でなければならない: 後ろに置くと、抽出後に予約を取り消した
+            //       ユーザーに対してブロッカー例外が出て、バッチが「保留」と誤分類する。
+            if ($precondition !== null && $precondition($freshUser) !== true) {
+                return;
+            }
+
             $blockers = $this->organizationsBlockingDeletion($freshUser);
             if ($blockers->isNotEmpty()) {
                 // Inertia の resolveValidationErrors() は field ごとに先頭 1 件しかクライアントへ

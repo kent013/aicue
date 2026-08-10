@@ -253,6 +253,23 @@ describe("NotificationListItem", () => {
         );
     });
 
+    it("account_deletion_requested: 退会予約の文言と削除予定日を出す (T142)", () => {
+        render(NotificationListItem, {
+            props: {
+                notification: manualAnalyzedItem({
+                    type: "account_deletion_requested",
+                    payload: { purge_after: "2026-09-09T09:00:00+09:00", grace_days: 30 },
+                }),
+            },
+        });
+
+        expect(screen.getByText("退会のお手続きを受け付けました")).toBeInTheDocument();
+        // 未知 type の fallback (rawType 表示) に落ちていないこと
+        expect(screen.queryByText("account_deletion_requested")).toBeNull();
+        expect(screen.getByText(/2026/)).toBeInTheDocument();
+        expect(screen.getByText(/取り消せます/)).toBeInTheDocument();
+    });
+
     it("排他 (逆方向): open (行) クリックで read URL は呼ばれない", async () => {
         render(NotificationListItem, { props: { notification: manualAnalyzedItem() } });
 

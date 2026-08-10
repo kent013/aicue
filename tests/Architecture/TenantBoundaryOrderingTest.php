@@ -6,6 +6,7 @@ use App\Enums\Security\NestedRouteDefenseMode;
 use App\Http\Middleware\BlockTwoFactorDisableForEnforcedOrganizations;
 use App\Http\Middleware\BughuntCoverageMiddleware;
 use App\Http\Middleware\EnforceMcpTransport;
+use App\Http\Middleware\EnsureAccountNotPendingDeletion;
 use App\Http\Middleware\EnsureEmailIsVerifiedOrBack;
 use App\Http\Middleware\EnsureLoginMethodRemains;
 use App\Http\Middleware\EnsureProjectBelongsToApiOrganization;
@@ -94,6 +95,8 @@ function middlewareShortCircuitInventory(): array
         // Inertia の asset version mismatch は 409 で短絡する
         HandleInertiaRequests::class => true,
         RequireActiveSubscription::class => true,
+        // 退会予約中の凍結。302 (web) / 409 (XHR) で短絡する
+        EnsureAccountNotPendingDeletion::class => true,
         RequireTwoFactorForEnforcedOrganizations::class => true,
         BlockTwoFactorDisableForEnforcedOrganizations::class => true,
         RequireRecentAuth::class => true,
@@ -449,6 +452,8 @@ test('検査5: 代表 route の解決後 middleware 列を完全一致で固定�
     ];
     $guard = EnsureProjectBelongsToCurrentOrganization::class;
     $billing = RequireActiveSubscription::class;
+    // 退会予約中の凍結は**課金ゲートの直後**。テナント境界 404 より必ず後 (302 短絡のため)。
+    $freeze = EnsureAccountNotPendingDeletion::class;
 
     $apiHead = [
         Authenticate::class,
@@ -466,10 +471,10 @@ test('検査5: 代表 route の解決後 middleware 列を完全一致で固定�
         // {project} を持たない route でも guard は列に載る (no-op。group 一括付与の許容)
         'api.v1.me' => $apiHead,
         // web: テナント境界 404 が Inertia / 2FA / verified / 課金ゲートより前
-        'projects.update' => [...$webHead, $guard, ...$webAppend, $billing],
-        'capture.manuals.show' => [...$webHead, $guard, ...$webAppend, $billing],
+        'projects.update' => [...$webHead, $guard, ...$webAppend, $billing, $freeze],
+        'capture.manuals.show' => [...$webHead, $guard, ...$webAppend, $billing, $freeze],
         // guard を持たない web route の列は変化しない (priority 追加の副作用が無いことの pin)
-        'organizations.settings' => [...$webHead, ...$webAppend],
+        'organizations.settings' => [...$webHead, ...$webAppend, $freeze],
     ];
 
     $routes = app('router')->getRoutes();

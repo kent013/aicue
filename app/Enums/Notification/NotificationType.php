@@ -18,4 +18,7 @@ enum NotificationType: string
     case ManualRendered = 'manual_rendered';
     case InvitationReceived = 'invitation_received';
     case TicketBalanceLow = 'ticket_balance_low';
+    // 退会 (猶予期間つき削除) の予約。凍結中でも通知センターは読めるため、
+    // 「いつ消えるか / どこで取り消せるか」を本人が確認できる rescue surface になる
+    case AccountDeletionRequested = 'account_deletion_requested';
 }

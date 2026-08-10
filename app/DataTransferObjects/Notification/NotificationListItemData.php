@@ -26,7 +26,7 @@ final readonly class NotificationListItemData
         public ?int $organizationId,
         public ?string $readAt,
         public string $createdAt,
-        public ManualJobPayload|InvitationReceivedPayload|TicketBalanceLowPayload|null $payload,
+        public ManualJobPayload|InvitationReceivedPayload|TicketBalanceLowPayload|AccountDeletionRequestedPayload|null $payload,
     ) {}
 
     public static function fromNotification(DatabaseNotification $notification): self
@@ -47,6 +47,7 @@ final readonly class NotificationListItemData
             NotificationType::ManualRendered => ManualJobPayload::tryFromArray($data),
             NotificationType::InvitationReceived => InvitationReceivedPayload::tryFromArray($data),
             NotificationType::TicketBalanceLow => TicketBalanceLowPayload::tryFromArray($data),
+            NotificationType::AccountDeletionRequested => AccountDeletionRequestedPayload::tryFromArray($data),
             null => null,
         };
 

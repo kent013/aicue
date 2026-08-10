@@ -18,3 +18,18 @@ export interface AccountDeletionBlocker {
     slug: string;
     actions: AccountDeletionBlockerAction[];
 }
+
+/**
+ * 退会予約 (猶予期間つき削除・凍結方式) の状態。
+ *
+ * PHP: App\DataTransferObjects\Account\AccountDeletionStateDto::toArray() と対。
+ * 3 値すべてが null なら「予約なし」。graceDays は purgeAfter - requestedAt の導出値で、
+ * サーバ側が唯一の出典 (クライアントで日数を計算し直さない)。
+ */
+export interface AccountDeletionState {
+    /** ISO8601。null = 未予約 */
+    requestedAt: string | null;
+    /** ISO8601。null = 未予約 */
+    purgeAfter: string | null;
+    graceDays: number | null;
+}

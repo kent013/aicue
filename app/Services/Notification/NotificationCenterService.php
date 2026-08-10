@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Services\Notification;
 
+use App\DataTransferObjects\Account\AccountDeletionStateDto;
+use App\DataTransferObjects\Notification\AccountDeletionRequestedPayload;
 use App\DataTransferObjects\Notification\InvitationReceivedPayload;
 use App\DataTransferObjects\Notification\ManualJobPayload;
 use App\DataTransferObjects\Notification\TicketBalanceLowPayload;
@@ -16,10 +18,12 @@ use App\Models\Project;
 use App\Models\RenderJob;
 use App\Models\User;
 use App\Models\VideoManual;
+use App\Notifications\InApp\AccountDeletionRequestedNotification;
 use App\Notifications\InApp\InvitationReceivedNotification;
 use App\Notifications\InApp\ManualAnalyzedNotification;
 use App\Notifications\InApp\ManualRenderedNotification;
 use App\Notifications\InApp\TicketBalanceLowNotification;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Notifications\DatabaseNotification;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -31,8 +35,12 @@ use Webmozart\Assert\Assert;
  * アプリ内通知センターの唯一の窓口 (発火・読み出し・既読化)。概念設計 20260711-2255。
  *
  * 発火の設計上の位置づけ:
- * - すべて既存 exactly-once 遷移 (terminal tx / org 行ロック) の **commit 後** に呼ばれる
+ * - ジョブ / 招待 / 残高系はすべて既存 exactly-once 遷移 (terminal tx / org 行ロック) の
+ *   **commit 後** に呼ばれる
  *   (terminal tx 内に通知 insert を入れない = 通知失敗がジョブ結果を rollback しない)
+ * - **例外は退会予約 (notifyAccountDeletionRequested) の 1 本**で、こちらは予約の書き込みと
+ *   同一 tx 内から呼ばれる (予約が rollback したら通知も残らないのが正しい)。
+ *   失敗の吸収は同じく safely() が行う
  * - 配信保証は at-most-once (重複なし・欠落あり得る)。正はジョブ status + 既存ポーリング UI
  *   であり通知は補助チャネル (outbox 台帳は作らない。詳細設計「配信保証仕様」)
  * - 宛先・内容・organization_id は DB relation からの再解決のみ (payload 不信任)
@@ -144,6 +152,37 @@ class NotificationCenterService
                 }
                 $user->notify(new TicketBalanceLowNotification($organization->id, $payload));
             }
+        });
+    }
+
+    /**
+     * 退会予約 (猶予期間つき削除) の気づき通知。
+     *
+     * ★呼び出し位置は **予約の書き込みと同一 tx 内** (他の発火とは違う)。予約が rollback したら
+     *   通知も残らないのが正しい状態であるため。
+     * ★アプリ内通知は org 文脈を必須とする (`AppNotification::organizationId()` が
+     *   non-nullable)。退会は組織に属さない事象なので、**予約時点の current org** を表示文脈として
+     *   写す。current org を持たないユーザーには**作らない** (メールだけが届く。
+     *   org 文脈を捏造しない)。
+     */
+    public function notifyAccountDeletionRequested(User $user, CarbonImmutable $purgeAfter): void
+    {
+        $this->safely(function () use ($user, $purgeAfter): void {
+            $organizationId = $user->current_organization_id;
+            if (! is_int($organizationId)) {
+                return;
+            }
+
+            $state = AccountDeletionStateDto::fromUser($user);
+            $graceDays = $state->graceDays();
+            if ($graceDays === null) {
+                return; // 予約が成立していない (呼び出し順の異常) ときは作らない
+            }
+
+            $user->notify(new AccountDeletionRequestedNotification(
+                $organizationId,
+                new AccountDeletionRequestedPayload($purgeAfter->toIso8601String(), $graceDays),
+            ));
         });
     }
 

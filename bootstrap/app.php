@@ -7,6 +7,7 @@ use App\Exceptions\InertiaExceptionRenderer;
 use App\Http\Middleware\BlockTwoFactorDisableForEnforcedOrganizations;
 use App\Http\Middleware\BughuntCoverageMiddleware;
 use App\Http\Middleware\EnforceMcpTransport;
+use App\Http\Middleware\EnsureAccountNotPendingDeletion;
 use App\Http\Middleware\EnsureEmailIsVerifiedOrBack;
 use App\Http\Middleware\EnsureLoginMethodRemains;
 use App\Http\Middleware\EnsureProjectBelongsToApiOrganization;
@@ -166,6 +167,10 @@ return Application::configure(basePath: dirname(__DIR__))
             // 現在の付与先は passkey.login-options (WebAuthn challenge を載せる guest route)
             'no-store' => NoStoreResponse::class,
             'require-active-subscription' => RequireActiveSubscription::class,
+            // 退会予約中 (猶予期間つき削除・凍結方式) のアクセス制限。
+            // 通す route は AccountDeletionFreezeAllowance の exact case のみ (deny-by-default)。
+            // **実行位置は下の priority list が正本** (テナント境界 404 より後)。
+            'not-pending-deletion' => EnsureAccountNotPendingDeletion::class,
             // `verified` の web POST 向け代替。未認証時に back + error flash で元ページへ戻す
             // (context 別文言は EmailVerificationGateContext)。organizations.store /
             // organizations.invitations.store に withoutMiddleware('verified') とセットで付与。
@@ -249,6 +254,12 @@ return Application::configure(basePath: dirname(__DIR__))
             [NoStoreCacheHeadersForAuthenticatedPages::class, EncryptHistory::class],
             [EncryptHistory::class, EnsureEmailIsVerified::class],
             [EnsureEmailIsVerified::class, RequireActiveSubscription::class],
+            // 退会予約中の凍結。**302 で短絡する**ため、テナント境界 404
+            // (EnsureProjectBelongsToCurrentOrganization) より必ず後に置く。前に置くと
+            // 「他組織に実在 = 302 / 不在 = 404」の 1 bit 存在オラクルになる
+            // (AGENTS.md セキュリティ不変条件 10)。課金ゲートの直後に置き、未契約組織の
+            // ユーザーは 課金ゲート → onboarding → 凍結 → /settings の 2 hop で取消 UI に着く。
+            [RequireActiveSubscription::class, EnsureAccountNotPendingDeletion::class],
         ] as [$after, $append]) {
             $middleware->appendToPriorityList($after, $append);
         }

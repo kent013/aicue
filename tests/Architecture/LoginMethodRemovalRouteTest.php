@@ -39,6 +39,13 @@ function loginMethodRemovalExemptRoutes(): array
         // アカウント自体を消す操作。手段が 0 になるのは目的であって事故ではない。
         // 別途 recent-auth (step-up) で保護済み。
         'settings.account.destroy' => 'アカウント除去そのものであり、手段が残らないことが意図',
+        // 母集団は URI 接頭辞 ('settings/account') × 破壊的メソッド (DELETE) で定義されるため、
+        // 退会**予約の取消**もここに入る。実際にはログイン手段を 1 つも触らない
+        // (users の予約列 2 本を null に戻すだけ) ので免除する。
+        // ★設計は「予約は認証手段を減らさないので登録不要」と書いていたが、母集団は
+        //   「認証手段を触るか」ではなく URI 接頭辞で決まるため実測では登録が必要だった。
+        'settings.account.deletion-request.destroy' => '退会予約の取消であり認証手段を一切触らない '
+            .'(users の予約列 2 本を null に戻すだけ。むしろアカウント消失を防ぐ救済経路)',
         // 第二要素の除去であってログイン手段の除去ではない
         // (TOTP を外してもパスワード / SSO / passkey は残る)。
         'two-factor.disable' => '第二要素の除去でありログイン手段ではない',
