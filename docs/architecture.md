@@ -942,6 +942,33 @@ doc/10 §10.3 / §10.8-4/-7 の実装 (T004)。routes は `/app/projects/{projec
   の handover / 裁定 AG-033 (**確認日 2026-08-05**。一次情報は決済事業者 (Stripe) の公式
   ドキュメントだが、**台帳側に一次情報の URL が pin されていない**)。数値を運用に効かせる前に
   一次情報を引き直し、URL と確認日をここへ追記すること。事業者仕様変更時に更新する対象である
+- **⚠ 直上の bullet は経緯として残した過去記述である**。「台帳側に一次情報の URL が pin されていない」
+  「数値を運用に効かせる前に一次情報を引き直せ」の 2 点は **T141 で解消済み**で、
+  現在状態は直下の 3 bullet が正本である (直上の未 pin 記述を現在状態として読まないこと)
+- **一次情報の pin (T141)**:
+  <https://docs.stripe.com/privacy/redaction> と
+  <https://docs.stripe.com/privacy/deletion-requests> を **2026-08-10 に確認**した。
+  90 日は「**取引**は作成から 90 日後に非表示にできる」(失敗した取引は直ちに / サンドボックスは即時 /
+  返金済みは返金完了時点)、最大 30 日は「関連データを非同期で識別して編集するのに最大 30 日」を指す。
+  **customer 単体の待機期間ではない**点に注意 (上の運用注記の要約より条件が細かい)。
+  なお RedactionJob は同日時点で**公開プレビュー**と明記されている。手順・保証しないもの・
+  実施記録コマンドは **`docs/account-deletion-runbook.md` が正本**
+- **redaction の実施記録 (T141)**: 実施は人手で行い、アプリは記録だけ持つ。
+  `organizations.stripe_customer_redacted_at` (実施日時) と
+  `organizations.stripe_customer_redacted_id` (記録時点の `stripe_id` の写し) の **2 列セット**で、
+  記録経路は `billing:mark-stripe-customer-redacted` (既定 dry-run / `--apply` で実記録 /
+  既記録なら no-op。**決済事業者 API を呼ばない**)。日時だけだと「**どの** customer を
+  redact したか」が事後に検証できないため 2 列必要で、**両列同時**の不変条件は
+  PostgreSQL の CHECK 制約 (`organizations_stripe_customer_redaction_pair_check`) が
+  アプリ層を迂回した UPDATE に対しても担保する
+- **「決済事業者 API を呼ばない」の静的 gate (T141)**:
+  `tests/Architecture/AccountDeletionPathGateTest.php` が退会経路の**依存閉包**を走査し、
+  閉包内のクラスが決済事業者記号へ到達しないことを固定する (免除は
+  `App\Enums\Security\DeletionPathSeamExemption` + 30 文字以上の根拠。現在 0 件)。
+  behavioral 2 本は「その経路で今日呼ばれなかった」しか言えず**新しい依存を注入した瞬間に沈黙する**
+  ため、静的 gate と behavioral は**並存**させる (behavioral 側は変更しない)。
+  **保証しないもの**は gate 冒頭 docblock が正本 (変数 container 解決 / vendor 内部の通信 /
+  docblock のみの受け手 / 実行時 bind 差し替え。**そもそも検知であって遮断ではない**)
 - **決済手段の前提**: subscription Checkout は `payment_method_types` を指定せず Stripe
   ダッシュボード設定に委ねている。**非同期決済 (コンビニ払い等) を有効化する場合、`incomplete` を
   退会ガードで通過させている判断を再確認すること** (滞留時間が伸びるため)
