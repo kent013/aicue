@@ -46,6 +46,7 @@
 | `Billing\TicketAutoRechargeFactory` | Billing/TicketAutoRecharge | `enabled()` (PM + 同意記録済み), `preConsented()` (事前同意のみ = pendingAutoEnable), `consentedMaxAmount(int $amount)` (価格改定 → 再同意シナリオ), `disabledByFailures()` |
 | `Billing\StripeWebhookEventFactory` | Billing/StripeWebhookEvent | `processed(?CarbonImmutable $processedAt = null)` (保持期間の起算済み), `failed()` (処理失敗のまま滞留 = 起算されない)。既定は受信済み・未処理 |
 | `Billing\TicketAutoRechargeAttemptFactory` | Billing/TicketAutoRechargeAttempt | `withInvoice(?string $invoiceId = null)`, `paid()`, `failed()`, `canceled()` (既定は invoice 未作成の pending。**org あたり pending は DB partial unique で 1 件まで**) |
+| `Billing\TicketLedgerEntryFactory` | Billing/TicketLedgerEntry | `forOrganization($org)`, `createdAt(CarbonImmutable $at)` (保持期間の起算点), `monthly(?CarbonImmutable $expiresAt)`, `purchased()`, `legacy()` (source null の P5 以前行), `consumed(int $amount, ?CarbonImmutable $expiresAt = null)`, `delta(int $delta)`, `idempotencyKey(string $key)`。既定は purchased の無期限付与 (+1)。**台帳は append-only** で factory は insert のみ |
 
 Factory を持たないモデル (Role / Permission / Team 等) は seed 固定値
 または Service (`OrganizationProvisioningService` 等) 経由で作る。

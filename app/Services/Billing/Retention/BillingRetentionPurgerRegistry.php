@@ -35,6 +35,10 @@ final class BillingRetentionPurgerRegistry
             // 子 → 親 の順 (入れ替えない)
             SubscriptionItemPurger::class,
             SubscriptionPurger::class,
+            // 台帳は物理削除ではなく畳み込みで決着する (残高を保存する操作)。
+            // 他 target と親子関係を持たないため順序制約は無いが、最後に置いて
+            // 「削除で決着する群」と「畳み込みで決着する群」を出力上も分ける。
+            TicketLedgerEntryPurger::class,
         ];
     }
 
