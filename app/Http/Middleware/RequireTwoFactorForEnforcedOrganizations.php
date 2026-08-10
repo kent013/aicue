@@ -67,10 +67,33 @@ final class RequireTwoFactorForEnforcedOrganizations
         'social.redirect' => 'SSO step-up の開始 (SSO-only ユーザーの再認証)',
         'social.callback' => 'SSO step-up の callback',
         'logout' => '離脱は常に可能',
+        // 退会予約の**取消**は「業務の利用」ではなく**誤操作の救済**である (bug-hunt F-4-01)。
+        // 凍結側 (AccountDeletionFreezeAllowance::DeletionRequestDestroy) は同じ問いに
+        // 「凍結中に必ず実行できなければ猶予期間を設けた意味が消える」と結論しており、
+        // 実行順が先の本ゲートだけがそれを覆していた (priority list で本ゲートが凍結より前)。
+        // 通しても (a) 業務面には到達できないまま (b) 認証手段は増減しない
+        // (c) 準拠判定は two_factor_confirmed_at のみが決める、ため 2FA 必須の効力は変わらない。
+        // 逆に塞ぐと deletion_purge_after (絶対時刻) が走り続け、本ゲートが
+        // **不可逆な物理削除の後押し**になる (「使えない」を超えて「消える」に化ける)。
+        // ★**予約 (…deletion-request.store) と即時削除 (settings.account.destroy) は入れない**
+        //   — どちらも救済ではなく、遮断されても失われるのは意思表示だけである。
+        'settings.account.deletion-request.destroy' => '退会予約の取消 (誤操作救済。凍結 allowlist と判断を揃える)',
         'verification.notice' => 'verified middleware との redirect 競合回避',
         'verification.verify' => 'メール検証リンクの踏破',
         'verification.send' => '検証メール再送',
     ];
+
+    /**
+     * 遮断されたのが**書き込み要求**だったときに文頭へ付ける固定文。
+     *
+     * 本 middleware は controller より前で短絡するため、この主張は構造的に真である
+     * (= 対象 controller に到達しておらず、ドメイン状態は変化していない)。
+     * ★**「副作用が一切ない」ことは主張しない** — session 書き込み・throttle 記録・
+     *   CSRF 検証はこの短絡でも起こりうる。ここで言う「操作」は controller が行う業務処理を指す。
+     * ★route 名 → 日本語の操作名の写像表は**持たない** (二重管理になり route 追加のたびに腐る)。
+     *   伝えるのは「起きなかった」ことだけで、「何をしようとしたか」は伝えない。
+     */
+    public const string BLOCKED_WRITE_PREFIX = '直前の操作は実行されていません。';
 
     public function handle(Request $request, Closure $next): Response
     {
@@ -92,6 +115,13 @@ final class RequireTwoFactorForEnforcedOrganizations
         }
 
         $message = "組織「{$enforcingOrganization->name}」は 2 段階認証を必須としています。設定が完了するまで他のページはご利用いただけません。";
+
+        // 安全メソッド (GET/HEAD/OPTIONS/TRACE) は「ページに来られない」だけなので既存文言のまま。
+        // 非安全メソッドはユーザーがボタンを押した結果なので、**何が起きなかったか**を先に言う
+        // (F-4-01: 押した結果が分からないまま予約が生き残る、が High の理由)。
+        if (! $request->isMethodSafe()) {
+            $message = self::BLOCKED_WRITE_PREFIX.$message;
+        }
 
         // XHR/JSON は RequireRecentAuth と同形の 409 + { code, message, redirect } (no-store)。
         // SPA の非画面 fetch に HTML リダイレクトを返さない

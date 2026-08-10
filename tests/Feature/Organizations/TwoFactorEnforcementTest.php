@@ -300,6 +300,74 @@ test('XHR (Accept: json) でゲート → 409 + code/message/redirect + no-store
     expect($response->json('redirect'))->toBe(route('settings.security'));
 });
 
+// ──────────────── 遮断された「書き込み」への「実行されていません」 ────────────────
+
+test('遮断された書き込みには「実行されていません」が付き、実際に何も起きていない', function (): void {
+    // F-4-01: 押した結果が分からないまま状態が残る、が High の理由。
+    // 非安全メソッドが短絡されたときは「何が起きなかったか」を先に伝える。
+    [$organization] = tfeCreateOrganization(twoFactorRequired: true);
+    $member = tfeAddMember($organization, 'disabled');
+
+    // ★2FA ゲートと RequireRecentAuth の resolve 順に**依存しない**テストにするため
+    //   step-up 済みセッションを与える (順序が入れ替わっても主張が壊れない)。
+    $this->actingAs($member)
+        ->withSession(freshRecentAuthSession())
+        ->post('/settings/account/deletion-request')
+        ->assertRedirect(route('settings.security'));
+
+    expect(session('info'))
+        ->toStartWith(RequireTwoFactorForEnforcedOrganizations::BLOCKED_WRITE_PREFIX)
+        ->toContain('2 段階認証を必須としています');
+
+    // ★文言の主張が事実であることの実測 (文字列一致だけで満足しない)
+    expect($member->fresh()?->deletion_requested_at)->toBeNull();
+});
+
+test('遮断された GET には「実行されていません」を付けない (安全メソッドの負のコントロール)', function (): void {
+    [$organization] = tfeCreateOrganization(twoFactorRequired: true);
+    $member = tfeAddMember($organization, 'disabled');
+
+    $this->actingAs($member)->get('/dashboard')->assertRedirect(route('settings.security'));
+
+    // 安全メソッドは「ページに来られない」だけなので既存文言のまま
+    expect(session('info'))
+        ->not->toContain(RequireTwoFactorForEnforcedOrganizations::BLOCKED_WRITE_PREFIX);
+    expect(session('info'))->toContain('2 段階認証を必須としています');
+});
+
+test('XHR で遮断された書き込みも 409 本文に「実行されていません」を含む', function (): void {
+    [$organization] = tfeCreateOrganization(twoFactorRequired: true);
+    $member = tfeAddMember($organization, 'disabled');
+
+    $response = $this->actingAs($member)
+        ->withSession(freshRecentAuthSession())
+        ->postJson('/settings/account/deletion-request');
+
+    $response->assertStatus(409)
+        ->assertJsonPath('code', 'two_factor_required')
+        ->assertHeader('Cache-Control', 'no-store, private');
+    expect($response->json('message'))
+        ->toStartWith(RequireTwoFactorForEnforcedOrganizations::BLOCKED_WRITE_PREFIX);
+    expect($response->json('redirect'))->toBe(route('settings.security'));
+
+    expect($member->fresh()?->deletion_requested_at)->toBeNull();
+});
+
+test('退会取消は allowlist 経由でゲートを通り 2FA 状態を変えない', function (): void {
+    [$organization] = tfeCreateOrganization(twoFactorRequired: true);
+    $member = tfeAddMember($organization, 'pending');
+
+    // 未予約でも controller は冪等 no-op で back() を返す
+    // (Referer を明示して UI 導線 = /settings 上の取消ボタンと一致させる)。
+    $this->actingAs($member)
+        ->from('/settings')
+        ->delete('/settings/account/deletion-request')
+        ->assertRedirect('/settings');
+
+    // 通しても準拠判定 (two_factor_confirmed_at) は動かない
+    expect($member->fresh()?->two_factor_confirmed_at)->toBeNull();
+});
+
 test('状態遷移 (Fortify 実経路): ゲート → enable → confirm → ゲート解除', function (): void {
     [$organization] = tfeCreateOrganization(twoFactorRequired: true);
     $member = tfeAddMember($organization, 'disabled');

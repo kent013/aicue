@@ -109,9 +109,12 @@ Fortify 生の `password.confirm` (password 専用・3h 窓) を置き換え、S
 
 **(1) 未準拠ユーザーの全画面ゲート** (`RequireTwoFactorForEnforcedOrganizations`):
 1 つでも `two_factor_required` な組織に所属する **2FA 未完了 (disabled / pending)** ユーザーは、
-`ALLOWED_ROUTE_NAMES` (2FA 設定達成に必要な route + logout / メール検証 / step-up 等) 以外の全 web 経路から
+`ALLOWED_ROUTE_NAMES` (2FA 設定達成に必要な route + logout / メール検証 / step-up
+**+ 救済経路 (退会予約の取消 `settings.account.deletion-request.destroy`)** 等) 以外の全 web 経路から
 `settings.security` へ `302` (XHR は `409` + `{ code, message, redirect }`) される。組織スコープの部分制限は採らない
 (2FA はアカウント全体の属性のため)。準拠 (enabled) ユーザーは attribute 判定のみで追加クエリゼロ。
+遮断されたのが**非安全メソッド** (`! isMethodSafe()`) のときだけ、302 / 409 の文言の先頭に
+`BLOCKED_WRITE_PREFIX` (「直前の操作は実行されていません。」) が付く (元操作の名指しはしない)。
 
 **(2) 準拠ユーザーの self-disable 禁止** (`BlockTwoFactorDisableForEnforcedOrganizations`):
 準拠ユーザーが `DELETE /user/two-factor-authentication` (`two-factor.disable`) を打つと action 自体は通ってしまい、
