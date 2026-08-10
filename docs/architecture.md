@@ -1477,12 +1477,24 @@ lctl 台帳 feature `account-deletion-billing-guard` の標準形 v1 (裁定 AG-
   通知の重複配送も止めない (保証しているのは「予約操作からの job 生成は最大 1 件」まで)。
   予約中のユーザーが他者から招待を受けること自体は止めない
   (受諾 route は凍結対象なので受諾はできない)。
-## 課金記録の保持期間 (7 年) の決着 (T143 / T144)
+## 課金記録の保持期間 (7 年) の決着 (T143 / T144 / T145)
 
 保持年数の正本は `config/legal.php` の `billing_retention_years`、唯一の解決点は
 `App\Support\Legal\BillingRetention` (`BillingRetentionConfigSingleSourceTest` が機械固定)。
 運用手順・障害対応は **`docs/billing-retention-runbook.md` が正本**。
 
+- **規約側の宣言 (T145)**: `/privacy` の「保有期間」節が保持年数を公開する。年数は
+  literal を書かず `BillingRetention::years()` から描画し、**config / SSOT / 文面の三者一致**を
+  `BillingRetentionConfigSingleSourceTest` (検査 6 = 呼び出し元 exact-fit / 検査 7 =
+  blade に literal が無いこと) と `PrivacyRetentionDeclarationTest` (描画結果の側から
+  マーカー `data-legal-retention="billing-records"` / 節見出し / 固定文言「取引関係書類等」/
+  年数の 4 点) が機械固定する。**照合は見出し番号ではなく属性と固定文言**で行う
+  (節の並べ替え・番号の繰り下げで偽赤にしないため)。
+  ⚠ **この文面は法務レビュー前の草案**である (家系の先例に揃えたもので独自の法的主張はしない)。
+  「実装が宣言する年数」と「法務が確定する年数」の一致確認は**人間の仕事**であり、
+  `config/legal.php` の `consent_version` は本追記では `draft-1` から動かしていない
+  (版の確定はリリース時のオーナー判断)。よって「文面が変わったのに版が上がっていない」ことは
+  検査対象外である。
 - **コマンド**: `billing:purge-retention-expired` (既定 dry-run / `--apply` で実処理)。
   日次登録は `routes/console.php` の `Schedule::command('… --apply')->daily()->onOneServer()`。
 - **決着の方式は target で 2 種類ある**。削除で決着する 6 target
