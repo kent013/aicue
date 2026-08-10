@@ -39,6 +39,15 @@ RUN docker-php-ext-install \
     intl \
     sockets
 
+# pcov: bug-hunt の実装到達カバレッジ (Stage3) 収集に使う。
+# BughuntCoverageMiddleware は env(BUGHUNT_PCOV) と function_exists('\pcov\start') の
+# 二重 guard なので、拡張を入れただけでは本番/CI/dev の挙動は変わらない (常に no-op)。
+# pcov.directory を /workspace に絞り、vendor/ を除外して収集コストを抑える。
+RUN pecl install pcov \
+    && docker-php-ext-enable pcov \
+    && printf 'pcov.enabled=1\npcov.directory=/workspace\npcov.exclude="~vendor~"\n' \
+       > /usr/local/etc/php/conf.d/zz-pcov.ini
+
 # 開発用 php.ini (opcache.enable_cli=1 を含む。pest --parallel が同一ファイルを
 # 多数プロセスで繰り返し include するため、CLI でも opcode キャッシュが効く)
 COPY .devcontainer/php.ini /usr/local/etc/php/conf.d/zz-dev.ini
