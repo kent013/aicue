@@ -159,6 +159,7 @@ Open リストは [TODO.md](TODO.md) を参照。
 | T144 | 課金記録の保持期間の実処理を有効化 (PR-C2)。台帳行の畳み込みと日次 apply を追加。繰越行は現在残高のスナップショットで取引追跡情報を引き継がない。mutation 2 件が初回は緑のままで、fixture 不足 (同一 source で失効時刻だけ違う group / 閾値が過去へ動くケース) が原因と判明し追加して赤化させた。冪等キーの構成も是正 (through 由来だと閾値が過去へ動く再畳み込みで前回行とキー衝突し、その group が二度と畳み込めなくなる)。mutation 11 種 | backend | 2026-08-10 13:30 |
 | T146 | horizon 判定の fail-open を是正。dry-run の実走で、クエリが全件失敗しても「horizon: OK」と表示することが判明 (remaining=0 は「期限超過が無い」ではなく「数えられなかった」結果)。設計が「人手に残すのは horizon 0 の確認だけ」とした、その人間向けの行が嘘をついていた。OK / NG / 判定不能 の 3 値へ改め、runbook と docs/architecture.md も同一 diff で同期 | backend | 2026-08-10 14:30 |
 | T145 | 保持期間の規約公開 (PR-C3)。privacy.blade.php に「4. 保有期間」を追記し、年数は literal で書かず BillingRetention::years() から描画 (規約の宣言 / config の値 / purge の閾値が単一出典)。検査は見出し番号ではなく data-legal-retention 属性と「取引関係書類等」の語で照合するため並べ替えに耐える。Codex 5 ラウンドで単一出典の迂回路を 3 つ発見・封鎖 (自己参照コントロールの向き / クラス名・alias・メソッド名の大文字小文字 / T_NAME_RELATIVE)。**追記文面は法務レビュー前の草案**で consent_version は draft-1 のまま。初回 --apply の証跡取得と法務確定は人間の作業 | docs | 2026-08-10 14:30 |
+| T147 | パイプライン通し確認 smoke と LLM コストレポート。SOP → AI 解析 3 段 (実 LLM) → シナリオ → ダミーテイク → ffmpeg 合成 → mp4 の全段が通ることを機械確認する dev:pipeline-smoke を新設 (品質は判定しない / fail-secure 4 条件 / --check は費用ゼロ)。あわせて LLM 呼び出しの帰属メタデータを factory 側の必須引数として配線し (禁止事項 5 により迂回経路が構造的に無い)、llm_call_logs を GROUP BY するだけの薄い集計 operations:llm-cost-report を追加。**記録層の列は 1 本も増やしていない**ため他リポジトリは migration の移植なしで持っていける。オーナー指示で設計を一度差し戻して集計層を削った (v1 → v2)。コスト集計は家系初のため還流対象 | test | 2026-08-10 23:15 |
 
 ## Obsoleted
 
