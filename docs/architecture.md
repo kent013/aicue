@@ -1469,9 +1469,24 @@ lctl 台帳 feature `account-deletion-billing-guard` の標準形 v1 (裁定 AG-
   T142 で実測)。保留が滞留すると 30 日を過ぎた予約が消えないままになるので、
   `blocked` の継続・増加を正常成功として扱わない。
 - **2FA 必須組織との相互作用**: 2FA 強制ゲートは priority list で凍結より**前**に走る。
-  未準拠ユーザーの取消 DELETE は 2FA ゲートが `settings.security` へ倒すため、
-  **`settings.security` を凍結の allowlist に入れないと「取消は 2FA ゲート / 2FA 設定は凍結」の
-  相互ブロックで詰む** (T142 で実測して発見)。allowlist に入っているのはこの理由である。
+  取消は**業務の利用ではなく誤操作の救済**なので、**両ゲートの allowlist に入っている**
+  (凍結側 = `AccountDeletionFreezeAllowance::DeletionRequestDestroy`、2FA 側 =
+  `RequireTwoFactorForEnforcedOrganizations::ALLOWED_ROUTE_NAMES`)。かつては 2FA 側にだけ
+  無く、未準拠ユーザーの取消 DELETE が `settings.security` へ倒れて
+  「取り消したつもりで取り消せていない」状態になっていた (T149 / bug-hunt F-4-01 で実測)。
+  通しても業務面には到達できないまま・認証手段は増減しない・準拠判定
+  (`two_factor_confirmed_at`) も動かないため、2FA 必須の効力は変わらない。
+  なお **`settings.security` を凍結の allowlist に入れる理由は据え置き**である
+  (未準拠ユーザーが 2FA 設定に到達できないと準拠達成そのものが詰む。T142 で実測して発見)。
+  この**ゲート間の判断の一致**は `RescueRouteGateInventoryTest` (救済 route の経路上の
+  ゲートに分類の宣言を強制する deny-by-default 目録) が機械固定する。
+  ⚠ 同目録が守るのは**分類の網羅**であって「経路上の全 middleware を通過できる」ことではない。
+- **遮断メッセージ**: 2FA ゲートが**非安全メソッド**を短絡したときだけ、文頭に固定文
+  `RequireTwoFactorForEnforcedOrganizations::BLOCKED_WRITE_PREFIX` (「直前の操作は
+  実行されていません。」) を付ける。**遮断メッセージが元操作を名指しすることは保証しない**
+  (route 名 → 操作名の写像表は持たない = 二重管理を作らない)。また
+  「副作用が一切ない」ことも主張しない (session 書き込み・throttle 記録・CSRF 検証は
+  短絡時にも起こりうる)。主張の範囲は「controller に到達していない」までである。
 - **保証しないもの (誇張しない)**: 凍結は**アプリの web route だけ**に効く。
   `api/v1` / MCP / OAuth token 経由の経路には**沈黙する** (母集団に入っていない)。
   通知の重複配送も止めない (保証しているのは「予約操作からの job 生成は最大 1 件」まで)。

@@ -1,6 +1,8 @@
 <?php
 
 declare(strict_types=1);
+use Illuminate\Contracts\Console\Kernel;
+use Illuminate\Routing\Router;
 
 /*
  * 設計用の read-only プローブ: 退会取消 route (救済経路) の resolve 済み middleware を列挙する。
@@ -10,9 +12,9 @@ declare(strict_types=1);
 require __DIR__.'/../../vendor/autoload.php';
 
 $app = require __DIR__.'/../../bootstrap/app.php';
-$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+$app->make(Kernel::class)->bootstrap();
 
-/** @var Illuminate\Routing\Router $router */
+/** @var Router $router */
 $router = $app->make('router');
 $routes = $router->getRoutes();
 $routes->refreshNameLookups();

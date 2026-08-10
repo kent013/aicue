@@ -279,11 +279,9 @@ test('2FA 必須組織のユーザーでも取消できる (satisfier の到達�
     expect($user->fresh()?->deletion_requested_at)->toBeNull();
 });
 
-test('2FA 未準拠ユーザーは 2FA ゲートが先に効くが、設定画面へ到達できる (詰みではない)', function (): void {
-    // ★凍結より **前** に走る 2FA 強制ゲート (priority list) の方が優先されるため、
-    //   未準拠ユーザーは取消 DELETE に直接到達できない。これは詰みではなく、
-    //   2FA 設定を済ませれば取消できる (準拠済みの取消は上のテストが固定している)。
-    //   この非対称を「取消はいつでもできる」と誇張しないために明示的に固定する。
+/** 2FA 必須組織に所属する**未準拠**ユーザーを作り、退会予約中にして返す。 */
+function twoFactorPendingFrozenUser(): User
+{
     [$organization] = createOrganizationWithOwner();
     $organization->forceFill(['two_factor_required' => true])->save();
     $user = User::factory()->create(); // 2FA 未準拠
@@ -293,27 +291,56 @@ test('2FA 未準拠ユーザーは 2FA ゲートが先に効くが、設定画�
     app(OrganizationMembershipService::class)->requestAccountDeletion($user);
     $user->refresh();
 
-    // 取消は 2FA ゲートに阻まれる (凍結の 302 先ではなく 2FA 設定ページへ倒れる)
-    $this->actingAs($user)->delete('/settings/account/deletion-request')
-        ->assertRedirect('/settings/security');
-    expect($user->fresh()?->deletion_requested_at)->not->toBeNull();
+    return $user;
+}
+
+test('2FA 未準拠でも退会予約を取り消せる (救済は 2FA ゲートも凍結も通る)', function (): void {
+    // ★bug-hunt F-4-01 の再現条件。凍結側 allowlist は取消を通しているのに、priority list で
+    //   **前**に走る 2FA 強制ゲートが取消 DELETE を settings.security へ倒していたため、
+    //   「取り消したつもりで取り消せていない」状態が生まれていた。
+    //   救済 (誤操作の取消) は業務の利用ではないので、両ゲートの判断を揃えて通す。
+    $user = twoFactorPendingFrozenUser();
+
+    // 負のコントロール (取消の**前**): 業務面は 2FA ゲートで遮断されている
+    $this->actingAs($user)->get('/dashboard')->assertRedirect(route('settings.security'));
+
+    // 救済そのもの: 取消は通り、予約は実際に消える
+    $this->actingAs($user)->from('/settings')
+        ->delete('/settings/account/deletion-request')
+        ->assertRedirect('/settings');
+    expect($user->fresh()?->deletion_requested_at)->toBeNull();
+
+    // 負のコントロール (取消の**後**): 2FA 強制は 1mm も緩んでいない
+    $this->actingAs($user)->get('/dashboard')->assertRedirect(route('settings.security'));
+    // 準拠判定 (two_factor_confirmed_at) も動かない = allowlist 通過はゲート解除ではない
+    expect($user->fresh()?->two_factor_confirmed_at)->toBeNull();
 
     // ★準拠達成の入口 (settings.security) に到達できることが**詰みでないことの条件**。
     //   ここを凍結すると「取消は 2FA ゲート / 2FA 設定は凍結」の相互ブロックになる。
     $this->actingAs($user)->get('/settings/security')->assertOk();
     $this->actingAs($user)->get('/settings')->assertOk();
 
-    // ★**同一ユーザー**で脱出の連鎖を固定する
-    //   (未準拠 → settings.security → 2FA 準拠 → 取消)。別ユーザーで代用すると
-    //   「元のユーザーが本当に脱出できるか」を証明しないため、詰みの回帰防止にならない。
-    //   準拠状態への遷移は UserFactory::withTwoFactor() と同一実装を共有する helper で行う。
+    // ★**同一ユーザー**で脱出の連鎖を固定する (未準拠 → settings.security → 2FA 準拠 → 業務面)。
+    //   別ユーザーで代用すると「元のユーザーが本当に脱出できるか」を証明しないため、
+    //   詰みの回帰防止にならない。準拠状態への遷移は UserFactory::withTwoFactor() と
+    //   同一実装を共有する helper で行う。
     UserFactory::enableTwoFactorFor($user);
     $user->refresh();
 
-    $this->actingAs($user)->from('/settings')
-        ->delete('/settings/account/deletion-request')
-        ->assertRedirect('/settings');
-    expect($user->fresh()?->deletion_requested_at)->toBeNull();
+    $this->actingAs($user)->get('/dashboard')->assertOk();
+});
+
+test('2FA 未準拠ユーザーの即時削除は通らない (救済だけを通す非対称)', function (): void {
+    // 「削除系なら何でも通す」になっていないことの負のコントロール。
+    // 即時削除 (settings.account.destroy) は救済ではなく 30 日猶予の迂回口である。
+    $user = twoFactorPendingFrozenUser();
+
+    $this->actingAs($user)
+        ->withSession(freshRecentAuthSession())
+        ->delete('/settings/account')
+        ->assertRedirect(route('settings.security'));
+
+    expect(User::query()->whereKey($user->id)->exists())->toBeTrue();
 });
 
 test('XHR は 409 Conflict で遮断される (302 に倒さない)', function (): void {
