@@ -522,10 +522,19 @@ test('DEV_DB_DENYLIST が cap を超える bug_hunt_5..bug_hunt_8 を保持し�
     }
 });
 
-test('DetectsBughuntDatabase の regex が cap を超える _[1-8] を保持していること', function (): void {
-    $source = bughuntCapReadSource('database/seeders/Concerns/DetectsBughuntDatabase.php');
+test('BughuntDatabaseGuard の regex が cap を超える _[1-8] を保持していること', function (): void {
+    // 判定の SSOT は app 側 (seeder trait は委譲するだけの薄い殻)。
+    // dev DB 防御は smoke コマンドの fail-secure 条件もここを読むため、正本を 1 つに保つ。
+    $source = bughuntCapReadSource('app/Support/BughuntDatabaseGuard.php');
 
     expect($source)->toContain('/^bug_hunt(_[1-8])?$/');
+});
+
+test('DetectsBughuntDatabase は regex を二重に持たず SSOT へ委譲していること', function (): void {
+    $source = bughuntCapReadSource('database/seeders/Concerns/DetectsBughuntDatabase.php');
+
+    expect($source)->toContain('BughuntDatabaseGuard')
+        ->and($source)->not->toContain('bug_hunt(');
 });
 
 test('run-browser-test.sh の pre-flight guard が cap を超える 8018 まで見ていること', function (): void {

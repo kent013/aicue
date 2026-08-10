@@ -40,6 +40,10 @@
 #   db-check  --shard I --run-id TS    # DB 名 + User::count() 表示
 #   db-exists --shard I --run-id TS    # pg_database 存在確認 (owner role, read-only)
 #   mail-urls --shard I --run-id TS [--count K]   # 署名 URL 抽出 (offset+port 二重フィルタ)
+#   pipeline-smoke --shard I --run-id TS [--check] [--json] [--org=ID]
+#                                      # SOP→AI 解析→撮影→ffmpeg 合成→mp4 の通し確認 (dev:pipeline-smoke)。
+#                                      # ★実 LLM を 3 段呼ぶため課金が発生する (--check は preflight のみ = 費用ゼロ)。
+#                                      # BUGHUNT_ORCHESTRATOR=1 が必須 (子 wrapper には露出しない)。
 #   verify-run --run-id TS             # (fan-out 用) 全 shard の shard-report.md 完遂判定 (空/骨子のみは欠落扱い)。
 #   teardown  --run-id TS [--drop-db]  # serve 停止 (+DB 破棄, admin role)
 #   self-test                          # 実資源に触れない自己検証 (guard / 資源導出 / env 注入 / run)
@@ -320,6 +324,25 @@ artisan_for_shard() {
         DB_DATABASE="${db}" DB_USERNAME=bughunt DB_PASSWORD="$(env_file_get DB_PASSWORD)" \
         APP_URL="${url}" \
         php artisan "$@" --env=bughunt.local
+}
+
+# artisan (dev:pipeline-smoke) — runtime 経路 + モードフラグ + 実キー。
+# artisan_for_shard との違いは MODE_ENV / LLM_KEY_ENV を載せる点だけ (実 LLM を呼ぶため)。
+# 秘密 (LLM_KEY_ENV) を展開するプロセス起動を xtrace ガードで挟む (-x 有効時も値を trace に出さない)。
+artisan_with_mode_for_shard() {
+    local db=$1 url=$2; shift 2
+    guard_bughunt_runtime "${db}" bughunt
+    secret_xtrace_off
+    env -i PATH="${PATH}" HOME="${HOME}" \
+        DB_CONNECTION=pgsql \
+        DB_HOST="$(env_file_required DB_HOST)" DB_PORT="$(env_file_required DB_PORT)" \
+        DB_DATABASE="${db}" DB_USERNAME=bughunt DB_PASSWORD="$(env_file_get DB_PASSWORD)" \
+        APP_URL="${url}" \
+        ${MODE_ENV[@]+"${MODE_ENV[@]}"} ${LLM_KEY_ENV[@]+"${LLM_KEY_ENV[@]}"} \
+        php artisan "$@" --env=bughunt.local
+    local rc=$?
+    secret_xtrace_restore
+    return "${rc}"
 }
 
 # createdb / dropdb — admin 経路 (bughunt role は CREATEDB を持たない)。
@@ -1245,6 +1268,23 @@ cmd_reseed() {
     echo "reseeded: ${db}"
 }
 
+# パイプライン通し確認 (dev:pipeline-smoke)。★実 LLM を 3 段呼ぶため課金が発生する。
+# 費用の防壁として orchestrator gate を最初の実効文に置く (子 wrapper にも露出させない)。
+# 転送する artisan option は allowlist で明示列挙する (--shard / --run-id は script が消費し転送しない)。
+cmd_pipeline_smoke() {
+    require_orchestrator "pipeline-smoke"
+    local shard=$1 run_id=$2 smoke_check=$3 smoke_json=$4 smoke_org=$5
+    require_manifest "${run_id}"
+    local db url
+    db="$(shard_db "${shard}")"; url="$(shard_url "${shard}")"
+    prepare_mode_and_preflight
+    local -a smoke_args=(dev:pipeline-smoke --force)
+    [[ -n "${smoke_check}" ]] && smoke_args+=(--check)
+    [[ -n "${smoke_json}" ]] && smoke_args+=(--json)
+    [[ -n "${smoke_org}" ]] && smoke_args+=("--org=${smoke_org}")
+    artisan_with_mode_for_shard "${db}" "${url}" "${smoke_args[@]}"
+}
+
 cmd_db_check() {
     local shard=$1 run_id=$2
     local db url
@@ -1488,6 +1528,36 @@ ENVEOF
     rc=0; ( unset BUGHUNT_SELFTEST_DRYRUN; export BUGHUNT_ORCHESTRATOR=1; require_orchestrator "teardown" ) >/dev/null 2>&1 || rc=$?
     [[ "${rc}" == 0 ]] || t_fail "親 (token有り) で gate が通過しない (rc=${rc})"
     t_ok "orchestrator gate (provision/provision-all/teardown は親専用)"
+
+    echo "[e3] pipeline-smoke gate: 費用の防壁 (orchestrator token 必須) と option 転送 allowlist"
+    # (a) token 無しでは**副作用の前に** die する (manifest 確認 / mode 構築 / artisan 起動のいずれにも到達しない)。
+    local e3_marker="${TMP_BASE}/e3-pipeline-smoke-side-effects"
+    rm -f "${e3_marker}"
+    rc=0
+    ( unset BUGHUNT_SELFTEST_DRYRUN; unset BUGHUNT_ORCHESTRATOR
+      require_manifest() { echo "require_manifest" >> "${e3_marker}"; }
+      prepare_mode_and_preflight() { echo "prepare_mode_and_preflight" >> "${e3_marker}"; }
+      artisan_with_mode_for_shard() { echo "artisan" >> "${e3_marker}"; }
+      cmd_pipeline_smoke 0 20990301-000000 1 "" "" ) >/dev/null 2>&1 || rc=$?
+    [[ "${rc}" == 1 ]] || t_fail "[e3] token 無しの pipeline-smoke が die しない (rc=${rc})"
+    [[ ! -f "${e3_marker}" ]] \
+        || t_fail "[e3] gate より前に副作用が起きた (記録: $(tr '\n' ' ' < "${e3_marker}"))"
+
+    # (b) --shard / --run-id は script が消費し artisan へ転送しない (--force は常に付ける)。
+    local e3_args="${TMP_BASE}/e3-pipeline-smoke-args"
+    rm -f "${e3_args}"
+    ( unset BUGHUNT_SELFTEST_DRYRUN; export BUGHUNT_ORCHESTRATOR=1
+      require_manifest() { :; }
+      prepare_mode_and_preflight() { :; }
+      artisan_with_mode_for_shard() { shift 2; echo "$*" > "${e3_args}"; }
+      cmd_pipeline_smoke 1 20990301-000000 1 1 7 ) >/dev/null 2>&1
+    [[ -f "${e3_args}" ]] || t_fail "[e3] artisan wrapper が呼ばれていない"
+    grep -q -- 'dev:pipeline-smoke --force --check --json --org=7' "${e3_args}" 2>/dev/null \
+        || t_fail "[e3] 転送 option が allowlist どおりでない (実際: $(cat "${e3_args}" 2>/dev/null))"
+    grep -q -- '--shard' "${e3_args}" 2>/dev/null && t_fail "[e3] --shard が artisan へ転送された"
+    grep -q -- '--run-id' "${e3_args}" 2>/dev/null && t_fail "[e3] --run-id が artisan へ転送された"
+    rm -f "${e3_marker}" "${e3_args}"
+    t_ok "pipeline-smoke gate (orchestrator 専用 / option 転送 allowlist)"
 
     echo "[f] createdb 実行コマンドに OWNER bughunt が含まれる"
     local createdb_cmd
@@ -2448,6 +2518,8 @@ main() {
     local sub="${1:-}"
     shift || true
     local shard="" run_id="" count=5 drop_db="" parallel=4 hold_lock=""
+    # pipeline-smoke へ転送する option (allowlist)。他サブコマンドでの指定は下で die 2 する。
+    local smoke_check="" smoke_json="" smoke_org="" _smoke_flag=0
     COVERAGE=""    # --coverage: pcov 付きで serve 起動しコード到達カバレッジを収集 (既定 OFF)
     # モードは既定 real-llm + fake-storage。専用フラグ変数で「同時指定」「適用範囲」を判定する
     # (LLM_MODE/STORAGE_MODE の上書きだけだと「既定と同値の明示指定」を取りこぼすため)。
@@ -2465,6 +2537,9 @@ main() {
             --real-llm) LLM_MODE="real"; _llm_flag_real=1; shift ;;
             --fake-llm) LLM_MODE="fake"; _llm_flag_fake=1; shift ;;
             --real-storage) STORAGE_MODE="real"; _storage_flag_real=1; shift ;;
+            --check) smoke_check=1; _smoke_flag=1; shift ;;
+            --json) smoke_json=1; _smoke_flag=1; shift ;;
+            --org=*) smoke_org="${1#--org=}"; _smoke_flag=1; shift ;;
             --drop-db) drop_db="--drop-db"; shift ;;
             --hold-lock) hold_lock="--hold-lock"; shift ;;
             *) die 2 "unknown option: $1" ;;
@@ -2483,6 +2558,11 @@ main() {
     if [[ "${_llm_flag_real}" == 1 || "${_llm_flag_fake}" == 1 || "${_storage_flag_real}" == 1 ]]; then
         [[ "${sub}" == "provision" || "${sub}" == "provision-all" ]] \
             || die 2 "--real-llm / --fake-llm / --real-storage は provision または provision-all でのみ使える"
+    fi
+
+    # smoke option は pipeline-smoke 専用 (--coverage / モードフラグと同じ流儀)。
+    if [[ "${_smoke_flag}" == 1 && "${sub}" != "pipeline-smoke" ]]; then
+        die 2 "--check / --json / --org は pipeline-smoke でのみ使える"
     fi
 
     case "${sub}" in
@@ -2505,6 +2585,9 @@ main() {
             validate_shard "${shard}"; validate_run_id "${run_id}"
             [[ "${count}" =~ ^[0-9]+$ ]] || die 2 "--count は整数"
             cmd_mail_urls "${shard}" "${run_id}" "${count}" ;;
+        pipeline-smoke)
+            validate_shard "${shard}"; validate_run_id "${run_id}"
+            cmd_pipeline_smoke "${shard}" "${run_id}" "${smoke_check}" "${smoke_json}" "${smoke_org}" ;;
         verify-run)
             validate_run_id "${run_id}"
             cmd_verify_run "${run_id}" ;;

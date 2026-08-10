@@ -55,6 +55,9 @@ final class ScenarioWritePathScanner
         'Services/Manual/RenderJobService.php',
         'Services/Manual/RenderPipeline.php',
         'Models/RenderJob.php',
+        // bug-hunt 専用の通し確認コマンド。analysis 段の成功条件 (scenario_version >= 1) を
+        // **読み取るだけ**で、書き込みは 1 箇所も持たない (書き込みは検出 2 が別途 deny する)。
+        'Console/Commands/Development/PipelineSmokeCommand.php',
         // T032: failJob が失敗確定時の scenario_version を job にスナップショット読みする
         // (書き込むのは scenario_version_at_terminal であり scenario_version ではない)
         'Services/Manual/AnalysisJobService.php',

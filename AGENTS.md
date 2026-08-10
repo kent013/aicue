@@ -31,7 +31,13 @@
 2. PHPStan エラーの widen(型を緩めて黙らせる)・baseline 化
 3. dev DB への破壊操作(`migrate:fresh` 等)をエージェント判断で実行すること
 4. `response()->json()` の直書き(DTO / JsonResource / Inertia を使う。仕様固定 endpoint のみ例外)
-5. LLM 呼び出しの Prism 直呼び(`app/Prompts/` の factory 経由のみ。PromptGuardrailTest が検出)
+5. LLM 呼び出しの Prism 直呼び(`app/Prompts/` の factory 経由のみ。PromptGuardrailTest が検出)。
+   **実行経路を持つ prompt factory は `LlmCallContextData` を必須引数で受け、
+   `->withMetadata($context->toMetadata())` で帰属 (organization / subject) を付ける** — 付け忘れは
+   PHPStan level 10 が落とす。帰属の対象を持たない見本 (`ExampleSummaryPrompt`) は
+   `PromptUntrustedInputContractTest` の inventory へ**帰属キーを空配列で exempt 登録**する
+   (deny-by-default なので exempt にする操作がレビューで必ず見える)。
+   欠けると `llm_call_logs.metadata_missing` になり組織別・対象別の費用が出せない
 6. prompt 文字列のコード直書き(`resources/prompts/*.yaml` に置く)
 7. 操作系 POST の応答での `redirect()->intended()`(ログイン直後フロー専用。
    招待送信等は `back()->with(...)` で完結させる)
@@ -278,6 +284,13 @@
 - **dev DB 防御 (非交渉)**: 全 DB 操作は `scripts/bug-hunt-shard.sh` の用途別 wrapper (`env -i` で
   shell の `DB_*`/`PG*` を遮断 + DB名 regex + role guard) 経由のみ。生 artisan/psql/tinker/createdb/dropdb 禁止。
   `provision`/`teardown` は `BUGHUNT_ORCHESTRATOR=1` を持つ親のみ (worker は default-deny)。
+- **パイプライン通し確認 (`pipeline-smoke`)**: `scripts/bug-hunt-shard.sh pipeline-smoke --shard I --run-id TS`
+  が `dev:pipeline-smoke` を走らせ、SOP 投入 → AI 解析 → 撮影テイク → ffmpeg 合成 → mp4 の
+  **全段が通ること**だけを確認する (生成物の品質は判定しない)。**LLM を 3 段とも実呼び出しするため
+  実行そのものが課金である** (`--check` は preflight のみ = 費用ゼロ)。`provision`/`teardown` と同じく
+  **`BUGHUNT_ORCHESTRATOR=1` を持つ親のみ**が実行でき (費用の防壁)、子 (探索エージェント) 用の
+  wrapper `tmp/bug-hunt/shard-{i}-cmd.sh` には**露出しない**。段の定義・合否条件・失敗分類の語彙・
+  **保証しないもの**は `docs/architecture.md` §パイプライン通し確認 が正本。
 - **worktree 既定**: bug-hunt は worktree から走る (`scripts/bughunt-worktree-hook.sh` の PreToolUse ガードが
   main 直叩きを早期に止める。配線は `.claude/settings.bughunt-hook.example.json` を `.claude/settings.json` にマージ)。
 - **スケルトン**: `screens.md` / `operations.md` / `stories/` はテンプレートでは空スケルトン。初回に

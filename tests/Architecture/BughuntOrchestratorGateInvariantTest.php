@@ -124,13 +124,16 @@ test('bug-hunt-shard.sh の require_orchestrator が default-deny (token 無し 
     expect($window)->toMatch('/is_dryrun\s*&&\s*return\s*0/');
 });
 
-test('provision / provision-all / teardown が最初の実効文で require_orchestrator を呼ぶこと', function (): void {
+test('provision / provision-all / teardown / pipeline-smoke が最初の実効文で require_orchestrator を呼ぶこと', function (): void {
     $sh = bughuntGateReadSource('scripts/bug-hunt-shard.sh');
 
     $expectations = [
         'cmd_provision' => 'provision',
         'cmd_provision_all' => 'provision-all',
         'cmd_teardown' => 'teardown',
+        // pipeline-smoke は実 LLM を 3 段呼ぶ = 実行そのものが課金である。
+        // dev DB 防御と同じ理由ではなく**費用の防壁**として同じ gate に乗せる。
+        'cmd_pipeline_smoke' => 'pipeline-smoke',
     ];
     foreach ($expectations as $function => $label) {
         $window = bughuntGateFunctionWindow($sh, $function);

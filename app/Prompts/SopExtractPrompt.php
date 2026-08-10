@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Prompts;
 
+use App\DataTransferObjects\LlmCallContextData;
 use Kent013\PrismPrompt\Prompt;
 use Kent013\PrismPrompt\TextPrompt;
 use Kent013\PrismPrompt\Values\UserInput;
@@ -14,10 +15,10 @@ use Kent013\PrismPrompt\Values\UserInput;
  */
 final class SopExtractPrompt
 {
-    public static function make(string $untrustedSopText): TextPrompt
+    public static function make(string $untrustedSopText, LlmCallContextData $context): TextPrompt
     {
         return Prompt::load('sop-extract', [
             'text' => UserInput::from($untrustedSopText), // 不変条件 4: untrusted は UserInput
-        ]);
+        ])->withMetadata($context->toMetadata()); // 帰属: llm_call_logs の organization / subject
     }
 }

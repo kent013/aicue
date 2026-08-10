@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Manual;
 
+use App\DataTransferObjects\LlmCallContextData;
 use App\DataTransferObjects\Manual\Analysis\ExtractedSopData;
 use App\DataTransferObjects\Manual\Analysis\ExtractedText;
 use App\DataTransferObjects\Manual\Analysis\GeneratedScenarioData;
@@ -100,10 +101,16 @@ class AnalysisPipeline
             $document = $job->sourceDocument;
             Assert::notNull($document, 'trigger が必ず associate している');
 
+            // LLM コスト記録の帰属 (llm_call_logs.organization_id / subject_*)。
+            // startJob() が true を返した直後 = 実際に走る担当だと確定した後に 1 度だけ解決し、
+            // 3 段すべての prompt factory へ引数で渡す (パイプラインを stateful にしない)。
+            // リトライでも同じ context が使われるため、再試行で出た失敗行にも同じ帰属が付く。
+            $context = $this->resolveCallContext($job);
+
             $text = $this->extractor->extract($document);
-            $extracted = $this->runExtractStep($job, $document, $text, $deadline);
-            $decomposition = $this->runDecomposeStep($job, $extracted, $deadline);
-            $generated = $this->runGenerateStep($job, $decomposition, $deadline);
+            $extracted = $this->runExtractStep($job, $document, $text, $deadline, $context);
+            $decomposition = $this->runDecomposeStep($job, $extracted, $deadline, $context);
+            $generated = $this->runGenerateStep($job, $decomposition, $deadline, $context);
             if ($this->finalize($job, $generated)) {
                 // succeeded 到達時のみ・terminal tx の commit 後に通知 (stale 先勝ち false は通知しない)
                 $this->notifications->notifyAnalysisFinished($job->refresh());
@@ -184,13 +191,14 @@ class AnalysisPipeline
         SourceDocument $document,
         ExtractedText $text,
         CarbonImmutable $deadline,
+        LlmCallContextData $context,
     ): ExtractedSopData {
         $extracted = $this->withBoundedRetry(
             $job,
             $deadline,
             AnalysisStep::Extract,
             fn (): ExtractedSopData => ExtractedSopData::fromLlmText(
-                SopExtractPrompt::make($text->text)->executeSync(),
+                SopExtractPrompt::make($text->text, $context)->executeSync(),
             ),
         );
 
@@ -206,13 +214,14 @@ class AnalysisPipeline
         AnalysisJob $job,
         ExtractedSopData $extracted,
         CarbonImmutable $deadline,
+        LlmCallContextData $context,
     ): WorkDecompositionData {
         $decomposition = $this->withBoundedRetry(
             $job,
             $deadline,
             AnalysisStep::Decompose,
             fn (): WorkDecompositionData => WorkDecompositionData::fromLlmText(
-                WorkDecompositionPrompt::make($extracted->toJsonString())->executeSync(),
+                WorkDecompositionPrompt::make($extracted->toJsonString(), $context)->executeSync(),
             ),
         );
 
@@ -231,13 +240,14 @@ class AnalysisPipeline
         AnalysisJob $job,
         WorkDecompositionData $decomposition,
         CarbonImmutable $deadline,
+        LlmCallContextData $context,
     ): GeneratedScenarioData {
         $generated = $this->withBoundedRetry(
             $job,
             $deadline,
             AnalysisStep::Generate,
             fn (): GeneratedScenarioData => GeneratedScenarioData::fromLlmText(
-                ScenarioGenerationPrompt::make($decomposition->toJsonString())->executeSync(),
+                ScenarioGenerationPrompt::make($decomposition->toJsonString(), $context)->executeSync(),
             ),
         );
 
@@ -490,6 +500,27 @@ class AnalysisPipeline
         Assert::isInstanceOf($project, Project::class, 'analysis job は必ず project 配下の manual に属する');
 
         return $project;
+    }
+
+    /**
+     * LLM 呼び出しの帰属コンテキストの導出 (payload 不信任。すべて DB から relation 経由で再解決)。
+     *
+     * subject は **VideoManual** にする。費用を知りたい単位は成果物 (マニュアル) であって
+     * job ではない (再解析で job は増えるが「このマニュアルに合計いくらかけたか」が運用の要求)。
+     * なお集計層はこの判断を一切知らない (見るのは subject_type / subject_id の 2 列だけ)。
+     *
+     * ★ 参照のみで書き込みも判定もしない (startJob の行ロック外で呼んでも状態を変えない)。
+     */
+    private function resolveCallContext(AnalysisJob $job): LlmCallContextData
+    {
+        $manual = $job->videoManual;
+        Assert::isInstanceOf($manual, VideoManual::class, 'analysis job は必ず manual に属する');
+
+        return LlmCallContextData::for(
+            $this->resolveOrganization($job)->id,
+            $manual,
+            $job->triggered_by,
+        );
     }
 
     /** job → manual → project → organization の導出 */
