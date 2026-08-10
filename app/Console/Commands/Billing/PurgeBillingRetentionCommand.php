@@ -25,6 +25,8 @@ use Throwable;
  *
  * ★**horizon (期限超過が残っているか) を出力で観測できる**こと。規約文面の公開 (PR-C3) の
  *   前提条件は「分類を問わず期限超過 0 件」であり、その確認はこのコマンドの出力で行う。
+ *   horizon は **OK / NG / 判定不能** の 3 値である。想定外失敗があった target の件数は
+ *   「数えられなかった」ので 0 で報告されるため、その 0 を根拠に OK と言ってはならない。
  *
  * ★終了コードは 2 分類 — 想定外失敗があれば FAILURE。**`failClosed` が残っていても
  *   SUCCESS である** (安全に残した = 異常ではない)。ただしそれは「規約を満たした」ではない
@@ -117,19 +119,34 @@ final class PurgeBillingRetentionCommand extends Command
             $failClosed,
         ));
 
+        $failed = array_filter(
+            $results,
+            static fn (BillingRetentionPurgeResultDto $result): bool => $result->hasUnexpectedFailures(),
+        );
+
         // horizon の観測点。C3 の前提条件は「分類を問わず 0 件」である。
-        $this->line($remaining === 0
-            ? 'horizon: OK (期限超過 0 件)'
-            : "horizon: NG (期限超過 {$remaining} 件が残存。fail-closed も残存に数える)");
+        //
+        // ★失敗した target が 1 つでもあれば **OK とも NG とも言えない**。失敗した target の
+        //   件数は「数えられなかった」ので 0 で報告されており、その 0 を合計に足した
+        //   `$remaining === 0` は「期限超過が無い」ことを意味しない (fail-open)。
+        //   終了コードは FAILURE になるが、この行を読む人間 (C3 の唯一の歯止め) には
+        //   「確認できていない」ことが伝わらなければならない。
+        if ($failed !== []) {
+            $this->error(sprintf(
+                'horizon: 判定不能 (処理または集計に失敗した target が %d 件。観測できた期限超過は %d 件だが、実数は不明)',
+                count($failed),
+                $remaining,
+            ));
+        } else {
+            $this->line($remaining === 0
+                ? 'horizon: OK (期限超過 0 件)'
+                : "horizon: NG (期限超過 {$remaining} 件が残存。fail-closed も残存に数える)");
+        }
 
         if (! $apply) {
             $this->comment('dry-run のため 1 行も変更していません (--apply で実処理)。');
         }
 
-        $failed = array_filter(
-            $results,
-            static fn (BillingRetentionPurgeResultDto $result): bool => $result->hasUnexpectedFailures(),
-        );
         if ($failed !== []) {
             $this->error('想定外の失敗がある target があります (件数は不明として扱ってください)。');
 
