@@ -534,3 +534,18 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
       gate が固定するのは「commit 後ずらしの機構を使っていないこと」までで、
       既知経路が実際に tx 内で投入していることは behavioral test が固定する
     - 詳細は `docs/architecture.md` §キュー投入の原子性
+12. **採用テイク充足判定の単一化 (T148)**: 「採用済みかつ ready のテイクを持つか」の判定式を
+    書いてよいのは `Services/Manual/AdoptedReadyTakeCoverage` **ただ 1 ファイル**である
+    (述語 `isMissing(Cut)`)。`adoptedTake` を参照する `app/` 配下のファイルは
+    `AdoptedTakeReferenceInventory` へ区分 (`AdoptedTakeReferenceKind`) と 30 文字以上の根拠付きで
+    登録する (`AdoptedReadyTakeCriterionInventoryTest` が deny-by-default + exact-fit で強制)。
+    - **制裁だけが非対称で基準は同じ**: render は 422 でブロックし、preview は**ブロックしない**
+      (未撮影は制作途中の正常な状態)。代わりに詳細画面 props が押す前に同じ件数を告知する。
+      **必須条件未充足を理由にボタンを disabled にしない / 確認ダイアログも足さない** (禁止事項 8)
+    - **告知文は述語の意味をそのまま言う**。`TakeStatus` は 4 値あるため「未撮影」と断定せず
+      「撮影・処理が完了した採用テイクがありません」と書く
+    - **`render_jobs.placeholder_cut_count` は生成物の説明**であり現在状態から再計算しない
+      (出所は buildManifest の clips)。既存行/queued/running/failed=null、succeeded preview=実数、
+      succeeded render=0。**`null` を `0` と同一視しない / backfill しない**
+    - 値契約・ロック順序上の書き込み位置・保証しないものは
+      `docs/architecture.md` §採用テイク充足判定の単一化と告知契約 が正本

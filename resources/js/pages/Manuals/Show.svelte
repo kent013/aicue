@@ -133,7 +133,8 @@
                 manualStatus={manual.status}
                 job={render.job}
                 previewJob={render.previewJob}
-                playbackJobId={render.playbackJobId}
+                playbackJob={render.playbackJob}
+                coverage={render.coverage}
                 {canManage}
             />
 

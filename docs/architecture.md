@@ -608,6 +608,66 @@ catch を足す必要が出たら、観測目録へ移すか免除の分類を�
 - ローカル/テストの検証: パイプラインの同期実行は `RenderPipeline::run()` の直接呼び出し +
   fake `VideoComposer` (container swap)、dispatch の検証は `Queue::fake()`
 
+#### 採用テイク充足判定の単一化と告知契約 (T148)
+
+「採用済みかつ ready のテイクを持つか」の判定は **`Services/Manual/AdoptedReadyTakeCoverage`
+の 1 ファイルだけ**が持つ。以前は同じ式が `RenderJobService` と `RenderPipeline` に複製され、
+**preview のトリガーには存在しなかった**ため、完成動画生成が 422 でブロックする状態を
+プレビューは黙って通し、全編黒画面の動画を警告なしで出していた (bug-hunt F-1-01)。
+
+- **述語はカット単位で切り出す** (`AdoptedReadyTakeCoverage::isMissing(Cut)`)。集計 API だけを
+  共有すると manifest 側 (Placeholder 分岐) で式が再実装されるため、**3 消費者
+  (render の 422 / 詳細画面 props / manifest の Placeholder 分岐) がすべて同じ述語を通る**。
+- **制裁だけが非対称で、基準は同じ**である。render は 422 でブロックする (標準化された成果物の
+  完全性)。preview は**ブロックしない** — 未撮影は制作途中の正常な状態であり、preview は
+  チケット非消費で manual status も触らない「途中経過を見る」機能だからである。
+  代わりに詳細画面 props (`render.coverage`) が**押す前に**同じ件数を告知する。
+  **必須条件未充足を理由にボタンを disabled にしない / 確認ダイアログも足さない**
+  (AGENTS.md 禁止事項 8)。
+- **告知文は述語の意味をそのまま言う**。`TakeStatus` は uploading / processing / ready / failed の
+  4 値を持つため、述語が真になるのは「まだ撮っていない」だけではない。よって
+  「未撮影」と断定せず「撮影・処理が完了した採用テイクがありません」と書く。
+- **`render_jobs.placeholder_cut_count` の値契約** (生成物の説明であり、現在状態からの
+  再計算はしない。値の出所は buildManifest が確定した clips ただ 1 つ):
+
+  | 行の状態 | 値 |
+  |---|---|
+  | 本列の追加以前から在る行 | `null` (**backfill しない**) |
+  | queued / running / finalize 未到達の failed | `null` |
+  | succeeded な preview | 実際にプレースホルダへ落ちたクリップ数 |
+  | succeeded な render | `0` (render は欠落し得ない) |
+
+  **`null` を `0` と同一視しない**。`0` は「黒背景ゼロで生成された」という積極的な事実であり、
+  `null` は「その動画について言えることが無い」である。UI は `null` では何も表示しない。
+- **書き込み位置は `finalize`** である。値が確定するのは `buildManifest` だが、そこは
+  `video_manuals` を先にロックしているため、同 tx で `render_jobs` を UPDATE すると
+  グローバル順の**逆順取得**になる。`finalize` は既に `render_jobs → video_manuals` の正順で
+  ロック済みなので、そこに 1 列足すのが唯一の順序安全な置き場である。
+- **再生対象は id ではなく job そのものを props に載せる** (`render.playbackJob`)。動画 URL と
+  「黒背景が何カット分あったか」の注記が同一オブジェクトから出るため、最新 preview job と
+  再生中の動画が別世代になる穴が条件分岐ではなく構造で消える。
+- **機械強制**: `adoptedTake` を参照する `app/` 配下のファイルは
+  `Support/Security/AdoptedTakeReferenceInventory` へ区分 (`AdoptedTakeReferenceKind`) と
+  30 文字以上の根拠付きで登録する (deny-by-default・exact-fit)。判定式の同居
+  (`adoptedTake` 参照と `TakeStatus::Ready` の同一ファイル出現) を許されるのは Canonical 1 件と
+  名指し免除だけで、免除には「relation の実体を参照しない」機械検査される前提が付く
+  (`tests/Architecture/AdoptedReadyTakeCriterionInventoryTest.php`)。
+- **保証しないもの (誇張しない)**:
+  - 事前告知は**描画時点のスナップショット**である。別タブ・別ユーザー・別デバイスの撮影で
+    古くなる (押下を止めないため詰みは作らないが「常に最新」ではない)。
+  - gate は静的走査であり、文字列変数経由の relation 名・動的プロパティアクセス・
+    `Take` を別経路で引いて status を見るコードには**沈黙する**。判定式の同居検出も
+    「同一ファイル内に `TakeStatus::Ready` が出るか」という近似で、別ファイルへ切り出して
+    同じ判定を書く経路は検出できない。
+  - `placeholder_cut_count` が語るのは**プレースホルダに落ちたクリップ数だけ**で、
+    その動画が実用に足るか (品質) は何も語らない。
+  - **プレースホルダ映像自体は変えない** (黒背景 + 字幕は意図的な仕様)。
+  - ダッシュボード / 撮影ナビの撮影待ちカウント (`whereDoesntHave('adoptedTake')`) との差は
+    残る (あちらは「採用済みだが ready でないテイク」を撮影済みとして数える別基準)。
+    統合せず `DifferentCriterion` として記録するだけである。
+  - Browser lane が見るのは**告知の可視性と押下可能性**のみで、実 ffmpeg 合成・黒画面の
+    目視確認は staging worker での運用確認に委ねる。
+
 ## サブスク契約 Checkout とオンボーディング着地 (P7/P9) の運用契約
 
 課金ゲート反転 (P4) 後、未契約組織は業務 route group に入れない。**遮断された先の着地**と

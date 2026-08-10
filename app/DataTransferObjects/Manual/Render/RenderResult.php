@@ -17,5 +17,7 @@ final readonly class RenderResult
         public string $outputPath,
         public array $clipDurationsMs,
         public int $totalDurationMs,
+        /** manifest 由来のプレースホルダ件数。**現在の manual 状態から数え直さない** (生成物の説明) */
+        public int $placeholderCutCount,
     ) {}
 }

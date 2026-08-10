@@ -65,6 +65,8 @@ test('ポーリング: 200 + 進捗 shape のみ (output_path / URL を含めな
         'error' => null,
         'error_code' => null,
         'manual_status' => 'ready',
+        // T148: 生成物の説明。running なので「言えることが無い」= null
+        'placeholder_cut_count' => null,
     ]);
 });
 

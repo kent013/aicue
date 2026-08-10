@@ -14,7 +14,6 @@ use App\Enums\Manual\MaterialType;
 use App\Enums\Manual\RenderErrorCode;
 use App\Enums\Manual\RenderKind;
 use App\Enums\Manual\RenderStep;
-use App\Enums\Manual\TakeStatus;
 use App\Enums\Manual\VideoManualStatus;
 use App\Enums\Security\ExternalCallKind;
 use App\Exceptions\Billing\InsufficientTicketsException;
@@ -111,6 +110,7 @@ class RenderPipeline
                 outputPath: $manifest->outputKey,
                 clipDurationsMs: $composed->clipDurationsMs,
                 totalDurationMs: $composed->totalDurationMs,
+                placeholderCutCount: $manifest->placeholderCutCount(),
             );
             if ($this->finalize($job, $result)) {
                 $uploadedKey = null; // succeeded に到達した出力は正 (後始末しない)
@@ -236,11 +236,15 @@ class RenderPipeline
         });
     }
 
-    /** カット 1 枚分のクリップ仕様 (欠落は render=防御例外 / preview=Placeholder) */
+    /**
+     * カット 1 枚分のクリップ仕様 (欠落は render=防御例外 / preview=Placeholder)。
+     *
+     * 「使用できる採用テイクがあるか」の判定は **AdoptedReadyTakeCoverage が唯一の所在**である
+     * (ここで式を書き直すと render の 422 と preview の扱いが再び乖離する = bug-hunt F-1-01)。
+     */
     private function clipSpecFor(RenderJob $job, Cut $cut, string $label): RenderClipSpec
     {
-        $take = $cut->adoptedTake;
-        if ($take === null || $take->status !== TakeStatus::Ready) {
+        if (AdoptedReadyTakeCoverage::isMissing($cut)) {
             if ($job->kind === RenderKind::Render) {
                 // trigger 422 + rendering 排他により起き得ない。防御的に fail させる
                 throw new LogicException("render job {$job->id}: 採用テイク欠落 ({$label})");
@@ -256,6 +260,11 @@ class RenderPipeline
                 subtitleSecondary: $cut->subtitle_secondary,
             );
         }
+
+        // 述語が false なら採用テイクは必ず存在する。PHPStan level 10 は静的には ?Take のままなので
+        // Assert で絞る (述語の再実装ではない = TakeStatus を参照しない)。
+        $take = $cut->adoptedTake;
+        Assert::notNull($take, 'isMissing() が false なら採用テイクは必ず存在する');
 
         $isStill = $cut->material_type === MaterialType::Still;
 
@@ -316,6 +325,10 @@ class RenderPipeline
             $locked->status = JobStatus::Succeeded;
             $locked->progress = 100;
             $locked->output_path = $result->outputPath;
+            // 生成物の説明 (manifest 由来の実績値)。書き込み位置が finalize なのはロック順序の要請で、
+            // 値が確定する buildManifest は video_manuals を先にロックしているため、そこで
+            // render_jobs を UPDATE するとグローバル順 render_jobs → video_manuals の逆順取得になる。
+            $locked->placeholder_cut_count = $result->placeholderCutCount;
             $locked->save();
 
             // 旧世代 (同 manual・同 kind・output_path 非 NULL・id < 自分の succeeded)

@@ -22,7 +22,8 @@ final class RenderJobResource extends JsonResource
 
     /**
      * @return array{id: int, kind: string, status: string, step: string|null, progress: int|null,
-     *   error: string|null, error_code: string|null, manual_status: string}
+     *   error: string|null, error_code: string|null, manual_status: string,
+     *   placeholder_cut_count: int|null}
      */
     public function toArray(Request $request): array
     {
