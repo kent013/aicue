@@ -100,6 +100,19 @@ class OrganizationFactory extends Factory
         ]);
     }
 
+    /**
+     * 決済事業者側 customer を持つ組織 (Cashier の `stripe_id` が入っている状態)。
+     *
+     * redaction 記録 (T141) は `stripe_id` の写しを残すため、記録対象の組織は
+     * customer を持っていることが前提になる (持たない組織は fail-closed で記録不可)。
+     */
+    public function withStripeCustomer(?string $customerId = null): static
+    {
+        return $this->state(fn (): array => [
+            'stripe_id' => $customerId ?? 'cus_'.Str::lower(Str::random(14)),
+        ]);
+    }
+
     /** 初回無償チケット付与済み (org 単位 1 回マーカーが立っている) 組織 */
     public function signupGranted(): static
     {

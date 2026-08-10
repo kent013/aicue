@@ -157,6 +157,12 @@ final class DirectFetchInventory
                 .'HTTP から到達不能で scheduler / queue からも呼ばれず、--reason を監査ログへ残す',
                 commandSignature: 'admin:reset-mfa {id} {--reason=}',
             ),
+            'Console/Commands/Billing/MarkStripeCustomerRedactedCommand.php#handle#Organization.whereKey:$organizationId#1' => DirectFetchJustificationEntry::operatorConsole(
+                '運用者が CLI で組織を id で名指しし、決済事業者側 customer の redaction 実施を記録する保守コマンド。'
+                .'HTTP から到達不能で scheduler / queue からも呼ばれず、cross-org の概念が無い (対象は常に 1 組織)。'
+                .'行ロック下で既記録を再確認するため主キーで引いている',
+                commandSignature: 'billing:mark-stripe-customer-redacted {organization} {--apply}',
+            ),
 
             // --- 認証済み actor / 検証済み token claim 由来 ---
             'Http/Controllers/Api/V1/Me/RevokeSessionController.php#destroy#OauthSession.find:$sessionId#1' => DirectFetchJustificationEntry::authenticatedActor(

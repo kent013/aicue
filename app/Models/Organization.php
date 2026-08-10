@@ -10,6 +10,7 @@ use App\Models\Billing\OrganizationQuota;
 use App\Models\Billing\Plan;
 use App\Models\Billing\TicketLedgerEntry;
 use App\Models\Billing\TicketReservation;
+use Carbon\CarbonImmutable;
 use Database\Factories\OrganizationFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -53,8 +54,15 @@ use Webmozart\Assert\Assert;
  * のみ (保存値は EmailNormalizer 正規化済みのため検索入力も同一正規化を通すこと)。
  * 両列とも $fillable 外 (UpdateBillingContactAction が明示代入する)。
  *
+ * T141: 決済事業者側 customer の redaction 実施記録 (stripe_customer_redacted_at /
+ * stripe_customer_redacted_id) は**人手操作の記録専用**で $fillable 外
+ * (MarkStripeCustomerRedactedCommand が forceFill で明示代入する)。両列は同時に埋まり
+ * 同時に NULL で、この不変条件は DB の CHECK 制約でも担保している。
+ *
  * @property string|null $billing_contact_email
  * @property string|null $billing_contact_name
+ * @property CarbonImmutable|null $stripe_customer_redacted_at
+ * @property string|null $stripe_customer_redacted_id
  */
 class Organization extends Model implements CipherSweetEncrypted
 {
@@ -272,6 +280,10 @@ class Organization extends Model implements CipherSweetEncrypted
             'personal_declared_at' => 'immutable_datetime',
             'personal_declared_by_user_id' => 'integer',
             'signup_tickets_granted_at' => 'immutable_datetime',
+            // T141: 決済事業者側 customer の redaction 実施記録。人手操作の記録専用で
+            // $fillable 外 (MarkStripeCustomerRedactedCommand が forceFill で明示代入する)。
+            // 両列は同時に埋まり同時に NULL (DB の CHECK 制約でも担保)。
+            'stripe_customer_redacted_at' => 'immutable_datetime',
         ];
     }
 }

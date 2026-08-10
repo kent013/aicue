@@ -1,0 +1,1473 @@
+# Round 4 (確認ラウンド): Round 3 指摘への対応
+
+これは **APPROVED / CHANGES_REQUESTED の確認ラウンド**である。
+
+## 対応マトリクス
+
+# 対応マトリクス: impl-review Round 3
+
+## [Warning] 「1 ファイル = パス由来の型 1 つ」の検査が exact pin になっていない
+
+- 判断: **対応する**
+- 根拠: 指摘は正しい。`declared` を `ReferenceSite` の `scopeKind/class` から間接的に集めていたため、
+  **参照 site を 1 つも持たない空クラス / interface / trait では集合が空**になり、
+  「不一致 0 件」で緑になる = 前提検査が空振りしていた。しかも docblock は
+  「宣言された型 == パス由来の FQCN」と実装より強い保証を謳っていた。
+- 対応内容:
+  1. `deletionPathDeclaredTypes()` を新設し、**宣言トークン (`T_CLASS` / `T_INTERFACE` /
+     `T_TRAIT` / `T_ENUM`) を直接解析**して FQCN を組み立てるようにした
+     (`Foo::class` は `::` の直後なので除外、匿名クラスは名前トークンが無いので除外)。
+  2. 判定を**集合全体の比較** (`$declared !== [$scan['class']]`) に変えた。
+     宣言 0 件も不一致として落ちる。
+  3. `ScanScopeKind` 経由の間接収集は撤去した (後方互換の並走を残さない)。
+- 実測: app/ の 692 ファイルすべてで `[$class]` ちょうどとなり緑。
+
+## [Warning] 新設した宣言型 pin の赤化実測が無い
+
+- 判断: **対応する**
+- 根拠: 禁止事項 1 (不変条件は壊すと赤くなることまで確認して初めて実装済み) のとおり。
+- 対応内容:
+  - **負の fixture 3 本**を追加した:
+    - 9 形目: 参照 site を持たない**空クラス / 空 interface** でも宣言集合が 1 件出る
+    - 10 形目: **1 ファイル 2 型** / **ファイル名と一致しない型**が `[$class]` と一致しないこと
+    - 正のコントロール: **匿名クラス / `::class`** を宣言型に数えないこと
+  - **mutation M9** を実施し実測した (`deletionPathDeclaredTypes()` を `return []` にする =
+    Round 3 で指摘された退行の再現)。**24 tests / 20 passed / 4 failed**
+    (検査 4 + fixture 9 + fixture 10 + 匿名クラスの正コントロール)。
+    検査 4 は app/ 全ファイルを列挙して落ちたので、集合比較にしたことで
+    **宣言 0 件でも空振りしない**ことが実測できた。
+  - `DELETION_PATH_MUTATION_COVERAGE` に M9 を追加した。
+
+## [Suggestion] 表現訂正の残り 2 箇所
+
+- 判断: **対応する**
+- 根拠: 保証範囲の表現は一貫していないと意味がない。
+- 対応内容:
+  - 冒頭 fixture 一覧: 「interface 経由の container binding」→
+    **「interface 実装への保守的な逆向き辺」**
+  - `deletionPathTraverse()` 内コメント: 「container binding 越しの到達」→
+    **「閉包に入った interface の実装クラスを保守的に引き込む逆向きの辺
+    (bind 宣言は読まない = container binding の解決ではない)」**
+
+
+## 修正後の gate 全文差分 (Round 3 以降に変更したのはこのファイルのみ)
+
+```diff
+diff --git a/tests/Architecture/AccountDeletionPathGateTest.php b/tests/Architecture/AccountDeletionPathGateTest.php
+new file mode 100644
+index 0000000..d3b6037
+--- /dev/null
++++ b/tests/Architecture/AccountDeletionPathGateTest.php
+@@ -0,0 +1,1381 @@
++<?php
++
++declare(strict_types=1);
++
++use App\Enums\Security\DeletionPathSeamExemption;
++use Laravel\Cashier\Billable;
++use Laravel\Cashier\Subscription;
++use Tests\Support\PhpReferenceScanner;
++use Tests\Support\ReferenceKind;
++use Tests\Support\ReferenceScanResult;
++use Tests\Support\ReferenceSite;
++use Webmozart\Assert\Assert;
++
++/*
++ * Architecture invariant: **退会 (アカウント削除) 経路の依存閉包から決済事業者 SDK へ到達しない**。
++ *
++ * SoT = lctl 台帳 feature `account-deletion-billing-guard` の標準形 v1 (裁定 AG-128) と
++ * docs/architecture.md §退会 (アカウント削除) の課金ガード (T115)。
++ *
++ * ★なぜ静的検査か (behavioral では捕まらない):
++ *   既存の tests/Feature/Auth/AccountDeletionTest.php の 2 本
++ *   (「退会成功経路では決済事業者 API を呼ばない」「課金中でブロックされる経路でも呼ばない」) は
++ *   **その経路で今日呼ばれなかった**ことしか言えない。新しい依存を注入した瞬間に沈黙する
++ *   (注入しただけで呼ばれない依存は behavioral では観測できず、次の変更で呼ばれた時に初めて壊れる)。
++ *   laravel-claude-template では実際に「依存閉包の抽出が**型宣言だけの注入**を素通りさせていた」
++ *   fail-open が実装レビューで見つかっている。よって静的 gate と behavioral 2 本は**並存**させる
++ *   (behavioral 側は 1 行も変更しない)。
++ *
++ * ★この gate が保証するもの:
++ *   - 検査 1: 起点から辿れる app/ 内クラスの閉包が目録 (DELETION_PATH_CLOSURE) と exact-fit
++ *   - 検査 2: 閉包内のどのクラスも決済事業者記号を参照しない
++ *     (Stripe\* / Laravel\Cashier\Cashier / Cashier Billable・Subscription の API メソッド名 /
++ *      名前に stripe を含む呼び出し / 決済 binding の container literal)
++ *   - 検査 3: 免除は DeletionPathSeamExemption (型付き enum) + 30 文字以上の根拠のみ。現在 0 本ちょうど
++ *   - 検査 4: 空振り検知 (走査ファイル数 / 解決できた到達辺 / 閉包サイズが 0 でない・閉包が実在クラス)
++ *   - 検査 5: 自己参照コントロール (本ファイル自身を走査して記号 hit 0 件・辺は exact-fit)
++ *   - 検査 6: 閉包内に**動的メソッド名の呼び出しが 0 件** (`->{$m}()` / `::$m()` は名前が字句的に
++ *     確定せず記号照合を迂回できるため、閉包内では deny-by-default で 0 件に pin する)
++ *   - 検査 7: Cashier API 名の導出が生きている (ローカル判定 allowlist は **exact-fit の二重宣言**
++ *     + 30 文字以上の根拠つき。allowlist へ足すことは検出面を狭めることと同義なので摩擦を置く)
++ *   - 検査 8: 起点集合の exact-fit pin (起点を静かに減らせない)
++ *   - 検査 9: redaction 記録コマンドが決済事業者記号を持たない (記録専用であることの静的固定)
++ *   - 正負 fixture: 型注入のみ / facade / static call / app()・resolve()・make() の literal 引数 /
++ *     trait 経由 (+ alias 上書き) / 動的メソッド名 / literal 動的メソッド名 /
++ *     interface 実装への保守的な逆向き辺 / 基底クラス継承を辿らないこと / コメント・文字列の非誤検出
++ *
++ * ★この gate が保証しないもの (誇張しない):
++ *   - **文字列キーが変数の container 解決** (`$c->make($name)`)。受け手を解決できない
++ *   - **vendor 内部から出る通信**。Cashier の WebhookController / Billable の内部実装は閉包の外
++ *   - **完全修飾 docblock だけで型宣言も import も無い受け手** (docblock 解析はしない)
++ *   - **実行時 config による bind 差し替え** (静的走査は bind 先を知らない)
++ *   - **container binding のうち `implements` 関係で表せないもの**。閉包は interface の
++ *     実装クラスを逆向きに引き込むが、**abstract 基底クラスへの bind / closure binding /
++ *     contextual binding / 別名文字列 bind** は辿らない (`extends` を逆向きに辿ると
++ *     `AccountController extends Controller` から app/ の全 Controller が入り信号が死ぬため、
++ *     意図的に `implements` だけに限定している)
++ *   - **`use Billable;` のような trait 取り込み**そのもの。PhpReferenceScanner はクラス本体の
++ *     `use` を import として扱い site を出さないため、trait 名は記号照合に載らない
++ *     (帰結として Cashier の**構造的な取り込み**は検出せず、**呼び出し**だけを見る)
++ *   - **`Laravel\Cashier\` 名前空間の型参照そのもの** (`Subscription extends CashierSubscription` /
++ *     `use Billable;`) は記号にしない。接頭辞走査は値オブジェクト・例外・モデル継承を巻き込んで
++ *     信号を殺すため (ExternalSeamScanner が同じ理由で接頭辞走査を禁じている)
++ *   - **メソッド呼び出しの受け手は解決しない**。決済 API 名の照合は名前だけで行うため、
++ *     同名の無関係な呼び出しは偽陽性になりうる (fail-closed 側に倒している)
++ *   - **これは検知であって遮断ではない**。実行時の外部通信を止める機構ではない
++ *
++ * ★閉包の粒度は**クラス**である (起点は method 名で指すが、閉包はクラス単位で辿る)。
++ *   同一クラス内の private メソッド経由の到達 (`deleteAccount` → `$this->organizationsBlockingDeletion()`)
++ *   を落とさないための意図的な過大近似 = fail-closed。method 粒度にすると
++ *   「private メソッドへ移せば gate を迂回できる」抜け道ができる。
++ *
++ * 解析は Tests\Support\PhpReferenceScanner に乗せる (namespace 解決 / alias / scope 追跡を
++ * ExternalSeamInventoryTest / ExternalClientTimeoutInventoryTest と共有する。自前の走査器を作らない)。
++ * 走査は正規化済みトークン列に対して行うため、**この説明コメント自身では偽赤にならない** (検査 5)。
++ * DB 不使用 (Architecture lane は TestCase のみ)。
++ */
++
++/**
++ * 退会経路の起点 (`FQCN::method`)。
++ *
++ * ★**PR-A の時点では 2 つ**である。PR-B (猶予期間つき削除) で日次執行バッチ
++ *   `App\Console\Commands\Account\PurgeDeletionRequestsCommand::handle` を 3 つ目として足す。
++ *
++ * @var list<string>
++ */
++const DELETION_PATH_ROOTS = [
++    'App\Http\Controllers\Settings\AccountController::destroy',
++    'App\Services\Organization\OrganizationMembershipService::deleteAccount',
++];
++
++/**
++ * 起点から辿れる app/ 内クラスの閉包 (exact-fit の目録)。
++ *
++ * ★増減はどちらも赤くする。増えたら「退会経路の依存が広がった」ことのレビューを、
++ *   減ったら「走査が壊れた / 起点が外れた」ことの検出を意図している。
++ *
++ * @var list<string>
++ */
++const DELETION_PATH_CLOSURE = [
++    'App\DataTransferObjects\Invitations\PendingInvitationForUserDto',
++    'App\DataTransferObjects\Notification\InvitationReceivedPayload',
++    'App\DataTransferObjects\Notification\ManualJobPayload',
++    'App\DataTransferObjects\Notification\TicketBalanceLowPayload',
++    'App\DataTransferObjects\Organizations\AccountDeletionBlockerDto',
++    'App\Enums\AccountDeletionBlockReason',
++    'App\Enums\AccountDeletionBlockerAction',
++    'App\Enums\AdminConsoleRole',
++    'App\Enums\Billing\PlanPriceKind',
++    'App\Enums\Billing\ScheduleSetupStatus',
++    'App\Enums\Billing\SubscriptionState',
++    'App\Enums\Billing\TicketLedgerKind',
++    'App\Enums\Billing\TicketReservationStatus',
++    'App\Enums\Billing\TicketSource',
++    'App\Enums\CheckoutIntent',
++    'App\Enums\CheckoutSessionStatus',
++    'App\Enums\Manual\AnalysisStep',
++    'App\Enums\Manual\JobStatus',
++    'App\Enums\Manual\RenderErrorCode',
++    'App\Enums\Manual\RenderKind',
++    'App\Enums\Manual\RenderStep',
++    'App\Enums\Manual\VideoManualStatus',
++    'App\Enums\Notification\NotificationType',
++    'App\Enums\OrganizationRole',
++    'App\Enums\ProjectRole',
++    'App\Enums\SecurityEventType',
++    'App\Enums\TwoFactorStatus',
++    'App\Http\Controllers\Controller',
++    'App\Http\Controllers\Settings\AccountController',
++    'App\Models\AnalysisJob',
++    'App\Models\Billing\BillingCheckoutSession',
++    'App\Models\Billing\OrganizationQuota',
++    'App\Models\Billing\Plan',
++    'App\Models\Billing\Subscription',
++    'App\Models\Billing\TicketLedgerEntry',
++    'App\Models\Billing\TicketReservation',
++    'App\Models\Organization',
++    'App\Models\OrganizationInvitation',
++    'App\Models\Project',
++    'App\Models\RenderJob',
++    'App\Models\SecurityAuditEvent',
++    'App\Models\User',
++    'App\Models\VideoManual',
++    'App\Notifications\InApp\InvitationReceivedNotification',
++    'App\Notifications\InApp\ManualAnalyzedNotification',
++    'App\Notifications\InApp\ManualRenderedNotification',
++    'App\Notifications\InApp\TicketBalanceLowNotification',
++    'App\Notifications\OrganizationInvitationNotification',
++    'App\Services\Billing\AccountDeletionBillingGuard',
++    'App\Services\Notification\NotificationCenterService',
++    'App\Services\Organization\OrganizationMembershipService',
++    'App\Services\Project\DefaultProjectResolver',
++    'App\Services\Security\SecurityEventRecorder',
++];
++
++/**
++ * Cashier の API 表面から**除外**するメソッド名 (小文字) => ローカル処理である根拠。
++ *
++ * ★決済 API 名の集合は `Laravel\Cashier\Billable` / `Laravel\Cashier\Subscription` の
++ *   public メソッドから**リフレクションで導出**する (Cashier が API を増やしたら自動で
++ *   母集団に入る = fail-closed)。ここに載せた名前だけがその母集団から外れる。
++ * ★走査は受け手を解決しない (`PhpReferenceScanner` の MethodCall は名前だけ)。よって
++ *   ここに載るのは「Cashier と同名だが実際には決済到達でない呼び出し」の allowlist である。
++ * ★`stripe` を含む名前は載せられない (検査 7 が拒否する)。
++ *
++ * @var array<string, string>
++ */
++const DELETION_PATH_CASHIER_LOCAL_METHODS = [
++    'subscriptions' => 'Billable が生やす subscriptions リレーションの取得。AccountDeletionBillingGuard は '
++        .'ローカル subscriptions 行を読むだけで決済事業者 API を呼ばない (T115 の設計そのもの)',
++    'active' => 'OrganizationInvitation の「有効な招待か」を判定するローカル述語。Cashier Subscription の '
++        .'同名メソッドとは無関係で、招待テーブルの列 (accepted_at / expires_at) だけを見る',
++    'user' => 'Request::user() / SecurityEventRecorder の actor 取得。Cashier Subscription の owner 取得と '
++        .'同名なだけで、認証済み actor をローカルに読むだけの呼び出しである',
++];
++
++/**
++ * 決済 binding とみなす container literal (小文字で部分一致)。
++ *
++ * `app('cashier.stripe')` のように **文字列キーで client を取り出す**形を捕まえる。
++ *
++ * @var list<string>
++ */
++const DELETION_PATH_CONTAINER_LITERAL_MARKERS = ['stripe', 'cashier'];
++
++/**
++ * 免除 (case value => 30 文字以上の根拠)。**現在 0 件ちょうど**。
++ *
++ * @var array<string, string>
++ */
++const DELETION_PATH_SEAM_EXEMPTION_RATIONALES = [];
++
++/**
++ * mutation 被覆表 (設計 §共通/mutation の本 gate 該当分)。
++ *
++ * @var array<string, string>
++ */
++const DELETION_PATH_MUTATION_COVERAGE = [
++    // ★M1 は**設計の予測が外れた**。設計は「deleteAccount を起点から外すと閉包が縮む」と
++    //   書いていたが、AccountController::destroy が OrganizationMembershipService を
++    //   型宣言で受けるため閉包は 1 件も変わらず**緑のまま**だった。実測は
++    //   devnotes/20260810-1004-todo-T141/mutation-evidence.md に記録してある。
++    //   起点を減らす改変は検査 8 (起点の exact-fit pin) が捕まえる。
++    'M1' => '起点から AccountController::destroy を外すと閉包が縮み検査 1 と検査 8 が赤くなる'
++        .' (設計どおりの deleteAccount を外す形は閉包が変わらず緑。実測を記録済み)',
++    'M2' => 'OrganizationMembershipService へ Stripe\StripeClient を型注入するだけの property を足すと検査 2 が赤くなる',
++    'M3' => '同じ注入を app(\'cashier.stripe\') の literal 呼び出しで書くと検査 2 が赤くなる',
++    'M4' => 'DELETION_PATH_CASHIER_LOCAL_METHODS へ charge を足すと検査 7 の allowlist exact-fit pin が赤くなる',
++    'M5' => '起点を 1 つ削ると検査 8 の exact-fit pin が赤くなる',
++    'M6' => 'redaction 記録コマンドへ Cashier::stripe() を書くと検査 9 が赤くなる',
++    'M7' => 'literal 動的メソッド名の検出を殺すと fixture 7 形目が赤くなる',
++    'M8' => 'deletionPathTraverse() から implementors の辺を外すと fixture 8 形目が赤くなる',
++    'M9' => '宣言型の抽出を ReferenceSite 経由へ戻すと fixture 9 形目 (空の型) が赤くなる',
++];
++
++/** @var list<string> */
++const DELETION_PATH_MUTATION_IDS = ['M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'M8', 'M9'];
++
++/**
++ * app/ 配下 1 ファイルぶんの走査結果。
++ *
++ * @return array{
++ *     class: string,
++ *     declared: list<string>,
++ *     edges: list<string>,
++ *     implements: list<string>,
++ *     payment: list<array{symbol: string, descriptor: string}>,
++ *     dynamic: list<string>,
++ * }
++ */
++function deletionPathScanSource(string $relativePath, string $source): array
++{
++    $result = PhpReferenceScanner::references($relativePath, $source);
++    $tokens = PhpReferenceScanner::tokens($source);
++
++    $class = deletionPathClassFromPath($relativePath);
++    $edges = deletionPathEdges($result, $tokens);
++    $payment = deletionPathPaymentHits($relativePath, $result, $tokens);
++    $dynamic = deletionPathDynamicCallSites($relativePath, $tokens);
++
++    // container literal は到達辺にもなる (`app(App\Foo::class)` は NameReference で拾えるが、
++    // `app('App\Foo')` は文字列なので site を出さない)。
++    foreach (deletionPathContainerLiterals($tokens) as $literal) {
++        if (str_starts_with($literal, 'App\\')) {
++            $edges[] = $literal;
++        }
++    }
++
++    return [
++        'class' => $class,
++        'declared' => deletionPathDeclaredTypes($tokens),
++        'edges' => array_values(array_unique($edges)),
++        'implements' => deletionPathImplementedInterfaces($result, $tokens),
++        'payment' => $payment,
++        'dynamic' => $dynamic,
++    ];
++}
++
++/**
++ * このファイルが `implements` している interface の FQCN。
++ *
++ * ★**なぜ必要か**: 退会経路が `App\Contracts\Foo` を型注入し、service provider が
++ *   concrete 実装へ bind している場合、型宣言の辺だけでは interface で止まり
++ *   **実装クラス側の決済事業者記号に到達しない** (impl-review Round 1 [Critical])。
++ * ★**これは container binding を解決しているのではない**。service provider の bind 宣言は
++ *   一切読まず、「閉包に入った interface の **app/ 内の全実装クラスを保守的に引き込む**」
++ *   だけである (過大近似 = fail-closed。未登録・未使用・別用途の実装も入る)。
++ *   複数実装を持つ interface が退会経路へ入ると閉包が膨らんで信号が弱くなりうるので、
++ *   検査 1 の失敗出力に interface ごとの実装数を出してレビューで気づけるようにしてある。
++ * ★**`extends` は辺にしない**。`AccountController extends Controller` の基底クラスを
++ *   逆向きに辿ると **app/ の全 Controller** が閉包に入り信号が死ぬ。基底クラスの継承は
++ *   container binding の代替ではないため対象外とする (残る穴は冒頭の「保証しないもの」に明記)。
++ *
++ * @param  list<array{id: int|null, text: string, line: int}>  $tokens
++ * @return list<string>
++ */
++function deletionPathImplementedInterfaces(ReferenceScanResult $result, array $tokens): array
++{
++    /** @var array<int, ReferenceSite> $byTokenIndex */
++    $byTokenIndex = [];
++    foreach ($result->sites as $site) {
++        $byTokenIndex[$site->tokenIndex] = $site;
++    }
++
++    $names = [];
++    $count = count($tokens);
++
++    for ($i = 0; $i < $count; $i++) {
++        if ($tokens[$i]['id'] !== T_IMPLEMENTS) {
++            continue;
++        }
++        for ($j = $i + 1; $j < $count; $j++) {
++            $token = $tokens[$j];
++            if ($token['id'] === null && ($token['text'] === '{' || $token['text'] === ';')) {
++                break;
++            }
++            if ($token['id'] === T_NAME_QUALIFIED || $token['id'] === T_NAME_FULLY_QUALIFIED) {
++                $names[] = ltrim($token['text'], '\\');
++
++                continue;
++            }
++            // 短縮名は alias 解決済みの site から引く (`use App\Contracts\Foo;` + `implements Foo`)。
++            $site = $byTokenIndex[$j] ?? null;
++            if ($site !== null && $site->kind === ReferenceKind::NameReference) {
++                $names[] = $site->name;
++            }
++        }
++    }
++
++    return array_values(array_unique(array_filter(
++        $names,
++        static fn (string $name): bool => str_starts_with($name, 'App\\'),
++    )));
++}
++
++/**
++ * ファイルが**宣言している**名前付き型の FQCN (宣言トークンから直接取る)。
++ *
++ * ★`ReferenceSite` の `scopeKind` から間接的に集めない。参照 site を 1 つも持たない
++ *   **空のクラス / interface / trait** では site が出ず、集合が空になって
++ *   「不一致 0 件」で緑になる = 前提検査が空振りする (impl-review Round 3 [Warning])。
++ * ★匿名クラス (`new class { … }`) は名前を持たないので母集団に入らない。
++ *   `Foo::class` は `::` の直後なので宣言ではない。
++ *
++ * @param  list<array{id: int|null, text: string, line: int}>  $tokens
++ * @return list<string>
++ */
++function deletionPathDeclaredTypes(array $tokens): array
++{
++    $namespace = '';
++    $declared = [];
++    $count = count($tokens);
++
++    for ($i = 0; $i < $count; $i++) {
++        $id = $tokens[$i]['id'];
++
++        if ($id === T_NAMESPACE) {
++            $next = $tokens[$i + 1] ?? null;
++            if ($next !== null && ($next['id'] === T_NAME_QUALIFIED || $next['id'] === T_STRING)) {
++                $namespace = $next['text'];
++            }
++
++            continue;
++        }
++
++        if ($id !== T_CLASS && $id !== T_INTERFACE && $id !== T_TRAIT && $id !== T_ENUM) {
++            continue;
++        }
++        if (($tokens[$i - 1]['id'] ?? null) === T_DOUBLE_COLON) {
++            continue; // `Foo::class`
++        }
++        $next = $tokens[$i + 1] ?? null;
++        if ($next === null || $next['id'] !== T_STRING) {
++            continue; // 匿名クラス
++        }
++
++        $declared[] = $namespace === '' ? $next['text'] : $namespace.'\\'.$next['text'];
++    }
++
++    return array_values(array_unique($declared));
++}
++
++/**
++ * PSR-4 (`app/` => `App\`) でファイルパスからクラス FQCN を導く。
++ */
++function deletionPathClassFromPath(string $relativePath): string
++{
++    $withoutExtension = preg_replace('/\.php$/', '', $relativePath);
++    Assert::string($withoutExtension);
++
++    return str_replace('/', '\\', 'App'.substr($withoutExtension, strlen('app')));
++}
++
++/**
++ * 到達辺 (`App\` で始まる参照先 FQCN)。
++ *
++ * 型宣言 / `new` / `::class` / instanceof は NameReference・Construction として、
++ * 静的呼び出しの受け手は StaticCall の receiver として拾う。
++ * import を辺に数えるのは意図的な過大近似 = fail-closed (使われていない import も辺にする)。
++ *
++ * ★**import は alias マップ (`ReferenceScanResult::$imports`) から取らず、正規化トークン列の
++ *   修飾名トークンから直接取る**。`PhpReferenceScanner` はクラス本体の `use SomeTrait;` も
++ *   `use` 文として処理するため、**同名の短縮キーで先頭の import を上書きし FQCN を失う**
++ *   (`use App\Models\Concerns\Foo;` + `use Foo;` → alias マップは `foo => 'Foo'`)。
++ *   alias マップだけを見ると **trait 経由の到達辺が丸ごと消える** = fail-open になる
++ *   (実測: 本 gate の fixture 5 形目で発覚)。トークンを直接見れば上書きの影響を受けない。
++ *
++ * @param  list<array{id: int|null, text: string, line: int}>  $tokens
++ * @return list<string>
++ */
++function deletionPathEdges(ReferenceScanResult $result, array $tokens): array
++{
++    $names = [];
++    foreach ($result->sites as $site) {
++        if ($site->kind === ReferenceKind::NameReference || $site->kind === ReferenceKind::Construction) {
++            $names[] = $site->name;
++        }
++        if ($site->kind === ReferenceKind::StaticCall && $site->receiver !== null) {
++            $names[] = $site->receiver;
++        }
++    }
++    foreach ($tokens as $token) {
++        if ($token['id'] === T_NAME_QUALIFIED || $token['id'] === T_NAME_FULLY_QUALIFIED) {
++            $names[] = ltrim($token['text'], '\\');
++        }
++    }
++
++    return array_values(array_unique(array_filter(
++        $names,
++        static fn (string $name): bool => str_starts_with($name, 'App\\'),
++    )));
++}
++
++/**
++ * 決済事業者記号の hit。
++ *
++ * ★`symbol` は**行番号を含まない安定キー**である (免除 `DeletionPathSeamExemption` の value は
++ *   `{クラス FQCN}#{symbol}` で書くため。行番号を含めると免除が行移動で壊れる)。
++ *   `descriptor` は失敗メッセージ用に path:line を含む。
++ *
++ * @param  list<array{id: int|null, text: string, line: int}>  $tokens
++ * @return list<array{symbol: string, descriptor: string}>
++ */
++function deletionPathPaymentHits(string $relativePath, ReferenceScanResult $result, array $tokens): array
++{
++    $apiMethods = deletionPathPaymentApiMethods();
++    /** @var array<string, array{symbol: string, descriptor: string}> $hits 重複排除キー => hit */
++    $hits = [];
++
++    foreach ($result->sites as $site) {
++        $symbol = deletionPathClassifySite($site, $apiMethods);
++        if ($symbol !== null) {
++            $hits[$symbol.'@'.$site->line] = [
++                'symbol' => $symbol,
++                'descriptor' => $relativePath.':'.$site->line.' '.$symbol,
++            ];
++        }
++    }
++
++    // import だけを持ち site を出さないファイル (`use Stripe\StripeClient;` のみ) も拾う。
++    // alias マップではなくトークンを見る (辺の収集と同じ理由。上書きの影響を受けない)。
++    foreach ($tokens as $token) {
++        if ($token['id'] !== T_NAME_QUALIFIED && $token['id'] !== T_NAME_FULLY_QUALIFIED) {
++            continue;
++        }
++        $name = ltrim($token['text'], '\\');
++        if (deletionPathIsPaymentNamespace($name)) {
++            $hits[$name.'@name'] ??= [
++                'symbol' => $name,
++                'descriptor' => $relativePath.':'.$token['line'].' name '.$name,
++            ];
++        }
++    }
++
++    // literal の動的メソッド名 (`->{'stripe'}()`)。名前が字句的に確定するので
++    // **動的扱いにせず通常の呼び出しと同じ規則で分類する** (impl-review Round 1 [Warning])。
++    foreach (deletionPathLiteralDynamicCalls($tokens) as $call) {
++        $symbol = deletionPathClassifyMethodName($call['name'], $apiMethods);
++        if ($symbol !== null) {
++            $hits[$symbol.'@'.$call['line']] = [
++                'symbol' => $symbol,
++                'descriptor' => $relativePath.':'.$call['line'].' '.$symbol.' (literal 動的メソッド名)',
++            ];
++        }
++    }
++
++    foreach (deletionPathContainerLiterals($tokens) as $literal) {
++        $lower = mb_strtolower($literal);
++        foreach (DELETION_PATH_CONTAINER_LITERAL_MARKERS as $marker) {
++            if (str_contains($lower, $marker)) {
++                $symbol = 'container:'.$literal;
++                $hits[$symbol] = [
++                    'symbol' => $symbol,
++                    'descriptor' => $relativePath.' container literal '.$literal,
++                ];
++
++                break;
++            }
++        }
++    }
++
++    return array_values($hits);
++}
++
++/**
++ * site 1 件が決済事業者記号かを判定し**安定 symbol** を返す (該当しなければ null)。
++ *
++ * @param  array<string, string>  $apiMethods  小文字メソッド名 => 正規表記
++ */
++function deletionPathClassifySite(ReferenceSite $site, array $apiMethods): ?string
++{
++    if (($site->kind === ReferenceKind::NameReference || $site->kind === ReferenceKind::Construction)
++        && deletionPathIsPaymentNamespace($site->name)
++    ) {
++        return $site->name;
++    }
++
++    if ($site->kind === ReferenceKind::StaticCall && $site->receiver !== null
++        && deletionPathIsPaymentNamespace($site->receiver)
++    ) {
++        return $site->receiver.'::'.$site->name.'()';
++    }
++
++    if ($site->kind !== ReferenceKind::MethodCall && $site->kind !== ReferenceKind::StaticCall) {
++        return null;
++    }
++
++    return deletionPathClassifyMethodName($site->name, $apiMethods);
++}
++
++/**
++ * メソッド名 1 つが決済事業者 API かを判定し安定 symbol を返す。
++ *
++ * @param  array<string, string>  $apiMethods  小文字メソッド名 => 正規表記
++ */
++function deletionPathClassifyMethodName(string $name, array $apiMethods): ?string
++{
++    $lower = mb_strtolower($name);
++    if (str_contains($lower, 'stripe') || array_key_exists($lower, $apiMethods)) {
++        return '->'.$name.'()';
++    }
++
++    return null;
++}
++
++/**
++ * 決済事業者の名前空間か (**接頭辞走査は Stripe SDK だけ**。Cashier は facade 1 本に限定する)。
++ */
++function deletionPathIsPaymentNamespace(string $fqcn): bool
++{
++    return str_starts_with($fqcn, 'Stripe\\') || $fqcn === 'Laravel\Cashier\Cashier';
++}
++
++/**
++ * Cashier の API 表面とみなすメソッド名 (小文字 => 正規表記)。
++ *
++ * @return array<string, string>
++ */
++function deletionPathPaymentApiMethods(): array
++{
++    /** @var array<string, string>|null $cache */
++    static $cache = null;
++    if ($cache !== null) {
++        return $cache;
++    }
++
++    $methods = [];
++    foreach ([Billable::class, Subscription::class] as $target) {
++        $reflection = new ReflectionClass($target);
++        foreach ($reflection->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
++            if (! str_starts_with($method->getDeclaringClass()->getName(), 'Laravel\Cashier')) {
++                continue; // Eloquent 由来の継承メソッドは Cashier の API 表面ではない
++            }
++            $methods[mb_strtolower($method->getName())] = $method->getName();
++        }
++    }
++
++    foreach (array_keys(DELETION_PATH_CASHIER_LOCAL_METHODS) as $local) {
++        unset($methods[$local]);
++    }
++
++    $cache = $methods;
++
++    return $methods;
++}
++
++/**
++ * `app('...')` / `resolve('...')` / `->make('...')` の literal 第 1 引数。
++ *
++ * @param  list<array{id: int|null, text: string, line: int}>  $tokens
++ * @return list<string>
++ */
++function deletionPathContainerLiterals(array $tokens): array
++{
++    $literals = [];
++    $count = count($tokens);
++
++    for ($i = 0; $i < $count; $i++) {
++        if ($tokens[$i]['id'] !== T_STRING) {
++            continue;
++        }
++        if (! in_array(mb_strtolower($tokens[$i]['text']), ['app', 'resolve', 'make'], true)) {
++            continue;
++        }
++        $open = $tokens[$i + 1] ?? null;
++        $argument = $tokens[$i + 2] ?? null;
++        if ($open === null || $argument === null) {
++            continue;
++        }
++        if ($open['id'] !== null || $open['text'] !== '(') {
++            continue;
++        }
++        if ($argument['id'] !== T_CONSTANT_ENCAPSED_STRING) {
++            continue;
++        }
++
++        $literals[] = deletionPathUnquote($argument['text']);
++    }
++
++    return array_values(array_unique($literals));
++}
++
++/**
++ * 文字列リテラルトークンから値を取り出す。
++ *
++ * ★`stripcslashes()` を通さない。単引用符の `'App\Foo'` に掛けると `\F` が escape として
++ *   消費され `AppFoo` になり、**クラス名の literal が丸ごと辺から落ちる**。
++ */
++function deletionPathUnquote(string $token): string
++{
++    $quote = $token[0] ?? "'";
++    $inner = substr($token, 1, -1);
++
++    return $quote === "'"
++        ? str_replace(['\\\\', "\\'"], ['\\', "'"], $inner)
++        : stripcslashes($inner);
++}
++
++/**
++ * literal の動的メソッド呼び出し (`->{'stripe'}()` / `::{'charge'}()`)。
++ *
++ * 名前が字句的に確定するので**動的扱いにせず記号照合へ載せる** (載せないと
++ * `->{'stripe'}()` で記号照合を素通りできる = fail-open。impl-review Round 1 [Warning])。
++ *
++ * @param  list<array{id: int|null, text: string, line: int}>  $tokens
++ * @return list<array{name: string, line: int}>
++ */
++function deletionPathLiteralDynamicCalls(array $tokens): array
++{
++    $calls = [];
++    $count = count($tokens);
++
++    for ($i = 0; $i < $count; $i++) {
++        $id = $tokens[$i]['id'];
++        if ($id !== T_OBJECT_OPERATOR && $id !== T_NULLSAFE_OBJECT_OPERATOR && $id !== T_DOUBLE_COLON) {
++            continue;
++        }
++        $open = $tokens[$i + 1] ?? null;
++        $inner = $tokens[$i + 2] ?? null;
++        $close = $tokens[$i + 3] ?? null;
++        $paren = $tokens[$i + 4] ?? null;
++        if ($open === null || $inner === null || $close === null || $paren === null) {
++            continue;
++        }
++        if ($open['id'] !== null || $open['text'] !== '{') {
++            continue;
++        }
++        if ($inner['id'] !== T_CONSTANT_ENCAPSED_STRING) {
++            continue;
++        }
++        if ($close['id'] !== null || $close['text'] !== '}') {
++            continue;
++        }
++        if ($paren['id'] !== null || $paren['text'] !== '(') {
++            continue;
++        }
++
++        $calls[] = ['name' => deletionPathUnquote($inner['text']), 'line' => $tokens[$i]['line']];
++    }
++
++    return $calls;
++}
++
++/**
++ * 動的メソッド名の呼び出し (`->{$m}()` / `->$m()` / `::{$m}()` / `::$m()`)。
++ *
++ * ★literal の `->{'stripe'}()` はここには含めない。名前が字句的に確定するので
++ *   `deletionPathLiteralDynamicCalls()` が拾い、通常の呼び出しと同じ規則で記号照合する。
++ *
++ * @param  list<array{id: int|null, text: string, line: int}>  $tokens
++ * @return list<string>
++ */
++function deletionPathDynamicCallSites(string $relativePath, array $tokens): array
++{
++    $sites = [];
++    $count = count($tokens);
++
++    for ($i = 0; $i < $count; $i++) {
++        $id = $tokens[$i]['id'];
++        if ($id !== T_OBJECT_OPERATOR && $id !== T_NULLSAFE_OBJECT_OPERATOR && $id !== T_DOUBLE_COLON) {
++            continue;
++        }
++
++        $next = $tokens[$i + 1] ?? null;
++        if ($next === null) {
++            continue;
++        }
++
++        // `->$m(` 形
++        if ($next['id'] === T_VARIABLE) {
++            $after = $tokens[$i + 2] ?? null;
++            if ($after !== null && $after['id'] === null && $after['text'] === '(') {
++                $sites[] = $relativePath.':'.$tokens[$i]['line'].' '.$tokens[$i]['text'].$next['text'].'()';
++            }
++
++            continue;
++        }
++
++        // `->{expr}(` 形 (literal は除く)
++        if ($next['id'] === null && $next['text'] === '{') {
++            $inner = $tokens[$i + 2] ?? null;
++            $closing = $tokens[$i + 3] ?? null;
++            $isLiteral = $inner !== null && $inner['id'] === T_CONSTANT_ENCAPSED_STRING
++                && $closing !== null && $closing['id'] === null && $closing['text'] === '}';
++            if (! $isLiteral) {
++                $sites[] = $relativePath.':'.$tokens[$i]['line'].' '.$tokens[$i]['text'].'{...}()';
++            }
++        }
++    }
++
++    return array_values(array_unique($sites));
++}
++
++/**
++ * app/ 全体の走査結果 (1 回だけ実行してテスト間で使い回す)。
++ *
++ * @return array{
++ *     files: int,
++ *     edges: array<string, list<string>>,
++ *     implementors: array<string, list<string>>,
++ *     payment: array<string, list<array{symbol: string, descriptor: string}>>,
++ *     dynamic: array<string, list<string>>,
++ *     misdeclared: list<string>,
++ *     edgeCount: int,
++ * }
++ */
++function deletionPathScanApp(): array
++{
++    /**
++     * @var array{
++     *     files: int,
++     *     edges: array<string, list<string>>,
++     *     implementors: array<string, list<string>>,
++     *     payment: array<string, list<array{symbol: string, descriptor: string}>>,
++     *     dynamic: array<string, list<string>>,
++     *     misdeclared: list<string>,
++     *     edgeCount: int,
++     * }|null $cache
++     */
++    static $cache = null;
++    if ($cache !== null) {
++        return $cache;
++    }
++
++    $files = PhpReferenceScanner::phpFiles(base_path('app'), 'app');
++
++    $edges = [];
++    $implementors = [];
++    $payment = [];
++    $dynamic = [];
++    $misdeclared = [];
++    $edgeCount = 0;
++
++    foreach ($files as $relativePath => $source) {
++        $scan = deletionPathScanSource($relativePath, $source);
++        $edges[$scan['class']] = $scan['edges'];
++        $payment[$scan['class']] = $scan['payment'];
++        $dynamic[$scan['class']] = $scan['dynamic'];
++        $edgeCount += count($scan['edges']);
++        foreach ($scan['implements'] as $interface) {
++            $implementors[$interface][] = $scan['class'];
++        }
++        // PSR-4 導出の前提: 1 ファイルが宣言する名前付き型はパス由来の FQCN **ちょうど 1 つ**。
++        // 集合そのものを比較する (不一致だけを見ると「宣言 0 件」で空振りする)。
++        $declared = $scan['declared'];
++        sort($declared);
++        if ($declared !== [$scan['class']]) {
++            $misdeclared[] = $relativePath.' が宣言する型 ['.implode(', ', $declared).'] が'
++                .' パス由来の ['.$scan['class'].'] と一致しません';
++        }
++    }
++
++    $cache = [
++        'files' => count($files),
++        'edges' => $edges,
++        'implementors' => $implementors,
++        'payment' => $payment,
++        'dynamic' => $dynamic,
++        'misdeclared' => $misdeclared,
++        'edgeCount' => $edgeCount,
++    ];
++
++    return $cache;
++}
++
++/**
++ * 起点から辿れる app/ 内クラスの閉包 (ソート済み)。
++ *
++ * @return list<string>
++ */
++function deletionPathClosure(): array
++{
++    $scan = deletionPathScanApp();
++
++    $roots = array_map(deletionPathRootClass(...), DELETION_PATH_ROOTS);
++
++    return deletionPathTraverse($roots, $scan['edges'], $scan['implementors']);
++}
++
++/**
++ * 閉包の到達計算 (純関数。fixture から合成データで検証できるよう切り出してある)。
++ *
++ * @param  list<string>  $roots
++ * @param  array<string, list<string>>  $edges  クラス => 参照先クラス
++ * @param  array<string, list<string>>  $implementors  interface => 実装クラス (逆向きの辺)
++ * @return list<string>
++ */
++function deletionPathTraverse(array $roots, array $edges, array $implementors): array
++{
++    $queue = $roots;
++    $seen = [];
++
++    while ($queue !== []) {
++        $class = array_shift($queue);
++        if (array_key_exists($class, $seen) || ! array_key_exists($class, $edges)) {
++            continue;
++        }
++        $seen[$class] = true;
++        foreach ($edges[$class] as $next) {
++            $queue[] = $next;
++        }
++        // 閉包に入った interface の実装クラスを保守的に引き込む逆向きの辺
++        // (bind 宣言は読まない = container binding の解決ではない)。
++        foreach ($implementors[$class] ?? [] as $implementor) {
++            $queue[] = $implementor;
++        }
++    }
++
++    $closure = array_keys($seen);
++    sort($closure);
++
++    return $closure;
++}
++
++/** `FQCN::method` からクラス部分を取り出す。 */
++function deletionPathRootClass(string $root): string
++{
++    $position = strpos($root, '::');
++
++    return $position === false ? $root : substr($root, 0, $position);
++}
++
++/** `FQCN::method` からメソッド部分を取り出す。 */
++function deletionPathRootMethod(string $root): string
++{
++    $position = strpos($root, '::');
++
++    return $position === false ? '' : substr($root, $position + 2);
++}
++
++// ---------------------------------------------------------------------------
++// 検査
++// ---------------------------------------------------------------------------
++
++test('検査 1: 退会経路の依存閉包は目録と exact-fit で一致する', function (): void {
++    $closure = deletionPathClosure();
++    $inventory = DELETION_PATH_CLOSURE;
++    sort($inventory);
++
++    $missing = array_values(array_diff($closure, $inventory));
++    $stale = array_values(array_diff($inventory, $closure));
++
++    // 閉包に入った interface とその実装数を出す (逆向きの辺で閉包が膨らんだときに
++    // 「信号が弱まり始めたこと」をレビューで判断できるようにする。impl-review Round 2 [Suggestion])。
++    $implementors = deletionPathScanApp()['implementors'];
++    $interfaceNotes = [];
++    foreach ($closure as $class) {
++        $count = count($implementors[$class] ?? []);
++        if ($count > 0) {
++            $interfaceNotes[] = "{$class} の実装 {$count} 件が逆向きの辺で閉包に入っています";
++        }
++    }
++
++    expect(['未登録' => $missing, '残骸' => $stale])->toBe(['未登録' => [], '残骸' => []],
++        '退会経路の依存閉包が変わりました。DELETION_PATH_CLOSURE を更新する前に'
++        .'「この依存は本当に退会経路に必要か」「決済事業者へ到達しないか」をレビューしてください。'
++        .($interfaceNotes === [] ? '' : PHP_EOL.implode(PHP_EOL, $interfaceNotes)));
++});
++
++test('検査 2: 閉包内のどのクラスも決済事業者記号を参照しない', function (): void {
++    $payment = deletionPathScanApp()['payment'];
++    $exemptions = array_map(
++        static fn (DeletionPathSeamExemption $case): string => $case->value,
++        DeletionPathSeamExemption::cases(),
++    );
++
++    $violations = [];
++    foreach (deletionPathClosure() as $class) {
++        foreach ($payment[$class] ?? [] as $hit) {
++            // 免除キーは `{クラス FQCN}#{symbol}`。symbol は行番号を含まない安定キーで、
++            // enum の docblock が宣言している書式と同一である (行移動で免除が壊れない)。
++            if (in_array($class.'#'.$hit['symbol'], $exemptions, true)) {
++                continue;
++            }
++            $violations[] = $class.' : '.$hit['descriptor'];
++        }
++    }
++
++    expect($violations)->toBe([],
++        '退会経路の依存閉包から決済事業者記号へ到達しています。退会経路は決済事業者 API を呼びません '
++        .'(T115: 自 DB と外部サービスの二重書き込みを避ける / 解約を代行しない)。'
++        .'やむを得ない場合のみ DeletionPathSeamExemption へ 30 文字以上の根拠つきで登録してください。'
++        .PHP_EOL.implode(PHP_EOL, $violations));
++});
++
++test('検査 3: 免除は型付き enum + 30 文字以上の根拠で、現在 0 件ちょうど', function (): void {
++    $cases = array_map(
++        static fn (DeletionPathSeamExemption $case): string => $case->value,
++        DeletionPathSeamExemption::cases(),
++    );
++    $keys = array_keys(DELETION_PATH_SEAM_EXEMPTION_RATIONALES);
++    sort($cases);
++    sort($keys);
++
++    expect($keys)->toBe($cases,
++        'DeletionPathSeamExemption に case を足したら DELETION_PATH_SEAM_EXEMPTION_RATIONALES へも'
++        .'同じ value をキーに根拠を登録してください (免除を型と根拠の両方で縛るための二重宣言です)。');
++
++    $short = [];
++    foreach (DELETION_PATH_SEAM_EXEMPTION_RATIONALES as $value => $rationale) {
++        if (mb_strlen($rationale) < 30) {
++            $short[] = $value.': 根拠が '.mb_strlen($rationale).' 文字';
++        }
++    }
++    expect($short)->toBe([], implode(PHP_EOL, $short));
++
++    // exact-fit cap: 余裕枠は「根拠なしに免除できる枠」になるため 1 でも持たせない。
++    expect($cases)->toHaveCount(0,
++        '免除は現在 0 件です。増やす場合はこの cap も同時に更新し、増やした理由をレビューで残してください。');
++});
++
++test('検査 4: 走査が空振りしていない', function (): void {
++    $scan = deletionPathScanApp();
++
++    expect($scan['files'])->toBeGreaterThan(300, '走査対象ファイルが想定より少ない (ディレクトリ構成の変更を疑う)');
++    expect($scan['edgeCount'])->toBeGreaterThan(0, '到達辺を 1 件も解決できていない (走査が死んでいる)');
++
++    $closure = deletionPathClosure();
++    expect(count($closure))->toBeGreaterThan(1, '閉包が起点だけになっている (辺の解決が死んでいる)');
++
++    // 起点が実在すること (クラス名 / メソッド名のタイポで空振りしない)。
++    foreach (DELETION_PATH_ROOTS as $root) {
++        $class = deletionPathRootClass($root);
++        $method = deletionPathRootMethod($root);
++        expect(class_exists($class))->toBeTrue("起点クラスが実在しません: {$class}");
++        expect(method_exists($class, $method))->toBeTrue("起点メソッドが実在しません: {$root}");
++        expect($closure)->toContain($class);
++    }
++
++    // 閉包の要素がすべて実在の型であること (PSR-4 導出の健全性)。
++    $unresolved = array_values(array_filter(
++        $closure,
++        static fn (string $class): bool => ! class_exists($class) && ! interface_exists($class)
++            && ! trait_exists($class) && ! enum_exists($class),
++    ));
++    expect($unresolved)->toBe([], '閉包に実在しない型が含まれます (PSR-4 導出の破綻): '.implode(', ', $unresolved));
++
++    // ★**前提の機械検査**: 走査は「1 ファイル = パス由来の FQCN 1 型」を前提に、
++    //   辺と implementor をファイル単位で帰属させている。ファイル名とクラス名がずれた実装や
++    //   1 ファイル複数型があると **implementor が別クラスへ帰属して静かに落ちる** (fail-open)。
++    //   前提を文章で断らず、app/ 全ファイルで実測して 0 件に pin する
++    //   (impl-review Round 2 [Warning])。匿名クラスは class=null なので母集団から自然に外れる。
++    expect($scan['misdeclared'])->toBe([],
++        'PSR-4 導出の前提 (1 ファイル = パス由来の型 1 つ) が崩れています。'
++        .'この前提が崩れると implements の逆向きの辺が誤ったクラスへ帰属します。'
++        .PHP_EOL.implode(PHP_EOL, $scan['misdeclared']));
++});
++
++test('検査 5: 自己参照コントロール (本 gate 自身は記号 hit なし・辺も exact-fit)', function (): void {
++    $self = 'tests/Architecture/AccountDeletionPathGateTest.php';
++    $source = file_get_contents(base_path($self));
++    Assert::string($source, '本 gate 自身を読み込めません');
++
++    $scan = deletionPathScanSource($self, $source);
++
++    // 説明コメント・nowdoc fixture は正規化で落ちるため記号 hit にならない。
++    expect($scan['payment'])->toBe([],
++        '本 gate 自身が決済事業者記号を持っています (コメントで偽赤になっていないか確認してください)。');
++    expect($scan['dynamic'])->toBe([]);
++
++    // ★「到達 0 件」ではなく **exact-fit** で pin する。本ファイルは免除 enum を import するので
++    //   辺は 1 本ある。0 件を主張すると実装より強い保証を謳うことになる (impl-review Round 1)。
++    //   nowdoc fixture 内の `App\...` は code token にならないため辺に現れない = 自己汚染しない。
++    expect($scan['edges'])->toBe(['App\Enums\Security\DeletionPathSeamExemption'],
++        '本 gate が app/ の型を追加参照しています。nowdoc fixture が code として走査されていないか確認してください。');
++});
++
++test('検査 6: 閉包内に動的メソッド名の呼び出しは 0 件', function (): void {
++    $dynamic = deletionPathScanApp()['dynamic'];
++
++    $violations = [];
++    foreach (deletionPathClosure() as $class) {
++        foreach ($dynamic[$class] ?? [] as $site) {
++            $violations[] = $class.' : '.$site;
++        }
++    }
++
++    expect($violations)->toBe([],
++        '退会経路の閉包に動的メソッド名の呼び出しがあります。名前が字句的に確定しないため'
++        .'決済事業者記号の照合を迂回できます (deny-by-default で 0 件に pin しています)。'
++        .PHP_EOL.implode(PHP_EOL, $violations));
++});
++
++test('検査 7: Cashier API 名の導出が生きており、ローカル allowlist は exact-fit で根拠つき', function (): void {
++    $api = deletionPathPaymentApiMethods();
++
++    // 導出が死んでいないこと (Cashier の API 表面は数十件ある)。
++    expect(count($api))->toBeGreaterThan(50, 'Cashier API 名の導出が壊れています (リフレクションの前提を確認)');
++    expect($api)->toHaveKey('newsubscription')
++        ->and($api)->toHaveKey('charge')
++        ->and($api)->toHaveKey('cancelnow');
++
++    $violations = [];
++    foreach (DELETION_PATH_CASHIER_LOCAL_METHODS as $name => $rationale) {
++        if (str_contains($name, 'stripe')) {
++            $violations[] = "{$name}: 名前に stripe を含むメソッドは allowlist へ載せられません";
++        }
++        if (mb_strlen($rationale) < 30) {
++            $violations[] = "{$name}: 根拠が ".mb_strlen($rationale).' 文字';
++        }
++        if (! method_exists(Billable::class, $name)
++            && ! method_exists(Subscription::class, $name)
++        ) {
++            $violations[] = "{$name}: Cashier に実在しないメソッド名です (残骸)";
++        }
++        if (array_key_exists($name, $api)) {
++            $violations[] = "{$name}: allowlist が効いていません";
++        }
++    }
++
++    expect($violations)->toBe([], implode(PHP_EOL, $violations));
++
++    // ★**exact-fit cap**。根拠文さえ書けば `charge` / `cancelNow` を allowlist へ足して
++    //   検出面を静かに狭められる (fail-open) ため、キー集合そのものを別宣言で pin する
++    //   = 検出面を狭めるには 2 箇所を触らせる (impl-review Round 1 [Critical])。
++    $allowlist = array_keys(DELETION_PATH_CASHIER_LOCAL_METHODS);
++    sort($allowlist);
++    expect($allowlist)->toBe(['active', 'subscriptions', 'user'],
++        'Cashier API のローカル判定 allowlist を変えるときは、この pin も同時に更新してください'
++        .' (allowlist に足すことは決済到達の検出面を狭めることと同義です)。');
++});
++
++test('検査 8: 起点集合は exact-fit で pin される', function (): void {
++    // ★起点を静かに減らすと閉包が縮み、以後の到達検出が丸ごと消える。
++    //   PR-B (猶予期間つき削除) で PurgeDeletionRequestsCommand::handle を 3 本目として足すときは
++    //   この pin も同時に更新する (意図的な摩擦)。
++    expect(DELETION_PATH_ROOTS)->toBe([
++        'App\Http\Controllers\Settings\AccountController::destroy',
++        'App\Services\Organization\OrganizationMembershipService::deleteAccount',
++    ], '退会経路の起点を変えるときは、なぜ変えるのかをレビューで残してください。');
++});
++
++test('検査 9: redaction 記録コマンドは決済事業者記号を参照しない (記録専用の静的固定)', function (): void {
++    // ★A2 の「決済事業者 API を呼ばない」は Feature テストの StripeGatewayInterface mock だけでは
++    //   足りない (Cashier / Stripe SDK を直接使えば mock を経由しない)。記録コマンドは退会経路の
++    //   閉包には入らないので、ここで名指しの静的検査を置く (impl-review Round 1 [Warning])。
++    $relativePath = 'app/Console/Commands/Billing/MarkStripeCustomerRedactedCommand.php';
++    $source = file_get_contents(base_path($relativePath));
++    Assert::string($source, 'redaction 記録コマンドを読み込めません');
++
++    $scan = deletionPathScanSource($relativePath, $source);
++
++    expect($scan['payment'])->toBe([],
++        'redaction の記録コマンドが決済事業者記号を参照しています。このコマンドは**記録専用**で'
++        .'決済事業者 API を呼びません (実施は人手。docs/account-deletion-runbook.md)。');
++    expect($scan['dynamic'])->toBe([]);
++});
++
++// ---------------------------------------------------------------------------
++// 正負コントロール fixture
++// fixture は nowdoc (文字列トークン) なので本ファイルの走査では code にならない (検査 5)。
++// ---------------------------------------------------------------------------
++
++/**
++ * hit の symbol 一覧 (fixture の assert 用)。
++ *
++ * @param  list<array{symbol: string, descriptor: string}>  $hits
++ * @return list<string>
++ */
++function deletionPathSymbols(array $hits): array
++{
++    return array_values(array_map(static fn (array $hit): string => $hit['symbol'], $hits));
++}
++
++test('負のコントロール 1 形目: 型宣言だけの注入を検出する', function (): void {
++    // laravel-claude-template で実際に fail-open していた形。呼び出しが 1 つも無くても赤くする。
++    $fixture = <<<'PHP'
++    <?php
++    namespace App\Services\Organization;
++    use Stripe\StripeClient;
++    class Fixture {
++        public function __construct(private readonly StripeClient $stripeClient) {}
++        public function run(\Stripe\Customer $customer): void {}
++    }
++    PHP;
++
++    $scan = deletionPathScanSource('app/Services/Organization/Fixture.php', $fixture);
++
++    expect(deletionPathSymbols($scan['payment']))
++        ->toContain('Stripe\StripeClient')
++        ->toContain('Stripe\Customer');
++});
++
++test('負のコントロール 2 形目: facade 経由の client 取得を検出する', function (): void {
++    $fixture = <<<'PHP'
++    <?php
++    namespace App\Services\Organization;
++    use Laravel\Cashier\Cashier;
++    class Fixture {
++        public function run(): void { Cashier::stripe()->customers->delete('cus_1'); }
++    }
++    PHP;
++
++    $scan = deletionPathScanSource('app/Services/Organization/Fixture.php', $fixture);
++
++    expect(deletionPathSymbols($scan['payment']))
++        ->toContain('Laravel\Cashier\Cashier')
++        ->toContain('Laravel\Cashier\Cashier::stripe()');
++});
++
++test('負のコントロール 3 形目: 完全修飾の static 呼び出しを検出する', function (): void {
++    $fixture = <<<'PHP'
++    <?php
++    namespace App\Services\Organization;
++    class Fixture {
++        public function run(): void { \Stripe\Customer::retrieve('cus_1'); }
++    }
++    PHP;
++
++    $scan = deletionPathScanSource('app/Services/Organization/Fixture.php', $fixture);
++
++    expect(deletionPathSymbols($scan['payment']))
++        ->toContain('Stripe\Customer')
++        ->toContain('Stripe\Customer::retrieve()');
++});
++
++test('負のコントロール 4 形目: app() / resolve() / make() の literal 引数を検出する', function (): void {
++    $fixture = <<<'PHP'
++    <?php
++    namespace App\Services\Organization;
++    class Fixture {
++        public function run(\Illuminate\Contracts\Container\Container $container): void {
++            app('cashier.stripe');
++            resolve('stripe.client');
++            $container->make('Stripe\StripeClient');
++        }
++    }
++    PHP;
++
++    $scan = deletionPathScanSource('app/Services/Organization/Fixture.php', $fixture);
++
++    expect(deletionPathSymbols($scan['payment']))->toBe([
++        'container:cashier.stripe',
++        'container:stripe.client',
++        'container:Stripe\StripeClient',
++    ]);
++});
++
++test('負のコントロール 5 形目: trait / import 経由の到達を辺として拾う', function (): void {
++    $fixture = <<<'PHP'
++    <?php
++    namespace App\Services\Organization;
++    use App\Support\Billing\SomeBillingTrait;
++    class Fixture {
++        use SomeBillingTrait;
++    }
++    PHP;
++
++    $scan = deletionPathScanSource('app/Services/Organization/Fixture.php', $fixture);
++
++    expect($scan['edges'])->toContain('App\Support\Billing\SomeBillingTrait');
++});
++
++test('負のコントロール 5 形目 (b): クラス本体の use が先頭 import を上書きしても辺を失わない', function (): void {
++    // ★`PhpReferenceScanner` の alias マップは `use App\...\Foo;` と クラス本体の `use Foo;` を
++    //   同じ短縮キーで扱うため、後者が前者を上書きして FQCN を失う。alias マップを辺に使うと
++    //   **trait 経由の到達が丸ごと消える** (fail-open)。トークン直読みでこれを防いでいることを固定する。
++    $fixture = <<<'PHP'
++    <?php
++    namespace App\Models;
++    use App\Models\Concerns\ShadowedTrait;
++    class Fixture {
++        use ShadowedTrait;
++    }
++    PHP;
++
++    $result = PhpReferenceScanner::references('app/Models/Fixture.php', $fixture);
++    // 前提の実測: alias マップ側は上書きで短縮名に潰れている (この前提が崩れたら本テストは不要になる)。
++    expect($result->imports['shadowedtrait'] ?? null)->toBe('ShadowedTrait');
++
++    $scan = deletionPathScanSource('app/Models/Fixture.php', $fixture);
++    expect($scan['edges'])->toContain('App\Models\Concerns\ShadowedTrait');
++});
++
++test('負のコントロール 6 形目: 動的メソッド名を検出する', function (): void {
++    $fixture = <<<'PHP'
++    <?php
++    namespace App\Services\Organization;
++    class Fixture {
++        public function run(object $billable, string $method): void {
++            $billable->{$method}();
++            $billable->$method();
++        }
++    }
++    PHP;
++
++    $scan = deletionPathScanSource('app/Services/Organization/Fixture.php', $fixture);
++
++    expect($scan['dynamic'])->toHaveCount(2);
++});
++
++test('負のコントロール 7 形目: literal の動的メソッド名も記号照合に載せる', function (): void {
++    // ★`->{'stripe'}()` は名前が字句的に確定するので**動的扱いにしない**。
++    //   動的にも記号にも載せないと、この書き方 1 つで検出を素通りできる (fail-open)。
++    $fixture = <<<'PHP'
++    <?php
++    namespace App\Services\Organization;
++    class Fixture {
++        public function run(object $billable): void {
++            $billable->{'stripe'}();
++            $billable->{'charge'}(100);
++        }
++    }
++    PHP;
++
++    $scan = deletionPathScanSource('app/Services/Organization/Fixture.php', $fixture);
++
++    expect(deletionPathSymbols($scan['payment']))->toBe(['->stripe()', '->charge()']);
++    // literal なので「動的」には数えない (二重計上しない)。
++    expect($scan['dynamic'])->toBe([]);
++});
++
++test('負のコントロール 8 形目: 閉包に入った interface の実装クラスを保守的に引き込む', function (): void {
++    // ★退会経路が interface を型注入し、service provider が concrete へ bind している形を想定する。
++    //   ただし **bind 宣言は読まない** — 「その interface の app/ 内実装を全部引き込む」保守的な
++    //   逆向きの辺である (impl-review Round 1 [Critical] / Round 2 [Warning] の表現訂正)。
++    $consumer = <<<'PHP'
++    <?php
++    namespace App\Services\Organization;
++    use App\Contracts\BillingRedactor;
++    class Consumer {
++        public function __construct(private readonly BillingRedactor $redactor) {}
++    }
++    PHP;
++    $implementation = <<<'PHP'
++    <?php
++    namespace App\Services\Billing;
++    use App\Contracts\BillingRedactor;
++    use Stripe\StripeClient;
++    class StripeBillingRedactor implements BillingRedactor {
++        public function __construct(private readonly StripeClient $client) {}
++    }
++    PHP;
++    $interface = <<<'PHP'
++    <?php
++    namespace App\Contracts;
++    interface BillingRedactor {}
++    PHP;
++
++    $consumerScan = deletionPathScanSource('app/Services/Organization/Consumer.php', $consumer);
++    $implementationScan = deletionPathScanSource('app/Services/Billing/StripeBillingRedactor.php', $implementation);
++    $interfaceScan = deletionPathScanSource('app/Contracts/BillingRedactor.php', $interface);
++
++    expect($implementationScan['implements'])->toBe(['App\Contracts\BillingRedactor']);
++
++    $edges = [
++        $consumerScan['class'] => $consumerScan['edges'],
++        $implementationScan['class'] => $implementationScan['edges'],
++        $interfaceScan['class'] => $interfaceScan['edges'],
++    ];
++    $implementors = ['App\Contracts\BillingRedactor' => [$implementationScan['class']]];
++
++    $closure = deletionPathTraverse([$consumerScan['class']], $edges, $implementors);
++
++    expect($closure)->toContain('App\Services\Billing\StripeBillingRedactor');
++    expect(deletionPathSymbols($implementationScan['payment']))->toContain('Stripe\StripeClient');
++});
++
++test('正のコントロール: 基底クラスの継承は逆向きに辿らない (信号を殺さない)', function (): void {
++    // ★`implements` だけを逆向きの辺にする。`extends` を辿ると
++    //   `AccountController extends Controller` から app/ の全 Controller が閉包に入り信号が死ぬ。
++    $source = <<<'PHP'
++    <?php
++    namespace App\Http\Controllers\Other;
++    use App\Http\Controllers\Controller;
++    class OtherController extends Controller {}
++    PHP;
++
++    $scan = deletionPathScanSource('app/Http/Controllers/Other/OtherController.php', $source);
++
++    expect($scan['implements'])->toBe([]);
++    // 実アプリの閉包にも兄弟 Controller は入っていない (検査 1 の目録が 53 件に収まっている根拠)。
++    expect(deletionPathClosure())->not->toContain('App\Http\Controllers\Settings\ProfileController');
++});
++
++test('負のコントロール 9 形目: 宣言型の抽出は参照 site を持たない空の型でも 1 件出す', function (): void {
++    // ★`ReferenceSite` 経由で宣言を集めると、参照を 1 つも持たない空クラス / interface で
++    //   集合が空になり、前提検査 (misdeclared) が「不一致 0 件」で空振りする
++    //   (impl-review Round 3 [Warning])。宣言トークンを直接見ていることを固定する。
++    $emptyClass = <<<'PHP'
++    <?php
++    namespace App\Support\Empty1;
++    class Nothing {}
++    PHP;
++    $emptyInterface = <<<'PHP'
++    <?php
++    namespace App\Contracts;
++    interface Nothing {}
++    PHP;
++
++    expect(deletionPathScanSource('app/Support/Empty1/Nothing.php', $emptyClass)['declared'])
++        ->toBe(['App\Support\Empty1\Nothing']);
++    expect(deletionPathScanSource('app/Contracts/Nothing.php', $emptyInterface)['declared'])
++        ->toBe(['App\Contracts\Nothing']);
++});
++
++test('負のコントロール 10 形目: 1 ファイル 2 型 / ファイル名と不一致の型を宣言集合が暴く', function (): void {
++    // この形は implementor の帰属をずらして gate を静かに黙らせる (fail-open)。
++    $twoTypes = <<<'PHP'
++    <?php
++    namespace App\Services\Billing;
++    interface Redactor {}
++    class StripeRedactor implements Redactor {}
++    PHP;
++
++    $scan = deletionPathScanSource('app/Services/Billing/StripeRedactor.php', $twoTypes);
++
++    expect($scan['declared'])->toBe(['App\Services\Billing\Redactor', 'App\Services\Billing\StripeRedactor']);
++    // 検査 4 が比較する形 (パス由来の 1 型ちょうど) と一致しないことを固定する。
++    expect($scan['declared'])->not->toBe([$scan['class']]);
++
++    $mismatched = <<<'PHP'
++    <?php
++    namespace App\Services\Billing;
++    class SomethingElse {}
++    PHP;
++
++    $scan = deletionPathScanSource('app/Services/Billing/StripeRedactor.php', $mismatched);
++    expect($scan['declared'])->not->toBe([$scan['class']]);
++});
++
++test('正のコントロール: 匿名クラスと ::class は宣言型に数えない', function (): void {
++    $fixture = <<<'PHP'
++    <?php
++    namespace App\Services\Billing;
++    use App\Models\Organization;
++    class Holder {
++        public function make(): object {
++            $probe = Organization::class;
++
++            return new class {
++                public function run(): void {}
++            };
++        }
++    }
++    PHP;
++
++    expect(deletionPathScanSource('app/Services/Billing/Holder.php', $fixture)['declared'])
++        ->toBe(['App\Services\Billing\Holder']);
++});
++
++test('正のコントロール: コメント・文字列中の決済事業者記号を誤検出しない', function (): void {
++    $fixture = <<<'PHP'
++    <?php
++    namespace App\Services\Organization;
++    /** Stripe\StripeClient を呼ばないことがこのクラスの契約である (Cashier::stripe も同様)。 */
++    class Fixture {
++        public function run(): void {
++            $note = 'Stripe\StripeClient';
++            // Cashier::stripe()->customers->delete($id);
++        }
++    }
++    PHP;
++
++    $scan = deletionPathScanSource('app/Services/Organization/Fixture.php', $fixture);
++
++    expect($scan['payment'])->toBe([]);
++});
++
++test('検査: mutation 被覆表のキー集合が想定 mutation ID と一致する', function (): void {
++    expect(array_keys(DELETION_PATH_MUTATION_COVERAGE))->toBe(DELETION_PATH_MUTATION_IDS);
++});
+
+```
+
+## mutation M9 の実測 (Round 3 で要求された赤化確認)
+
+変異: `deletionPathDeclaredTypes()` を `return []` にする。
+
+```
+24 tests / 20 passed / 4 failed
+  - 検査 4: 走査が空振りしていない
+      → app/ 全ファイルが「宣言する型 [] が パス由来の [App\...] と一致しません」で列挙されて失敗
+  - 負のコントロール 9 形目: 宣言型の抽出は参照 site を持たない空の型でも 1 件出す
+  - 負のコントロール 10 形目: 1 ファイル 2 型 / ファイル名と不一致の型を宣言集合が暴く
+  - 正のコントロール: 匿名クラスと ::class は宣言型に数えない
+```
+
+変異は復元済み (`git status --short` に残留なし)。
+
+## 再検証結果
+
+- `composer phpstan` : OK (841 files, No errors)
+- `vendor/bin/pint --test` : passed
+- `composer test` : 4148 tests / 4146 passed / 2 skipped / 0 failed (17802 assertions)
+- `AccountDeletionPathGateTest` 単体: 24 tests / 24 passed
+
+## 質問
+
+Round 3 の [Warning] 2 件・[Suggestion] 1 件はすべて対応した。
+残る [Critical] があれば挙げよ。無ければ APPROVED としてよいか。
+
+全体判定 (APPROVED / CHANGES_REQUESTED) を最後に 1 行で書け。
