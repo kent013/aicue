@@ -75,6 +75,8 @@
 | POST | recent-auth/password | recent-auth.password | S6 | 通常 |
 | POST | register | register.store | S1 | 通常 |
 | DELETE | settings/account | settings.account.destroy | S6 | 通常 |
+| POST | settings/account/deletion-request | settings.account.deletion-request.store | S6 | 通常 |
+| DELETE | settings/account/deletion-request | settings.account.deletion-request.destroy | S6 | 通常 |
 | POST | settings/password | settings.password.store | S6 | 通常 |
 | POST | user/confirmed-two-factor-authentication | two-factor.confirm | S6 | 通常 |
 | DELETE | user/two-factor-authentication | two-factor.disable | S6 | 通常 |
