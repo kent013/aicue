@@ -28,6 +28,15 @@ return [
     'inquiry_retention_days' => (int) env('LEGAL_INQUIRY_RETENTION_DAYS', 365),
 
     /*
+    | 課金取引記録の保持年数。**env を使わない** — 環境ごとに変えてよい運用値ではなく、
+    | 法務文書 (/privacy) が宣言する値そのものである (config/idempotency.php の
+    | retention_hours と同じ理由)。値の変更は規約文面の変更と同義であり、
+    | App\Support\Legal\BillingRetention が唯一の解決点として読む
+    | (直読は BillingRetentionConfigSingleSourceTest が deny-by-default で禁止する)。
+    */
+    'billing_retention_years' => 7,
+
+    /*
     | 問い合わせ受付通知 (運営宛) の宛先。INQUIRY_RECIPIENT 優先、未設定時は
     | MAIL_FROM_ADDRESS、それも未設定なら mail.php と同一の default に fallback
     | (null 化を防ぐ)。この mailbox は PII 保管先として扱うこと。
