@@ -157,6 +157,14 @@ final class DirectFetchInventory
                 .'HTTP から到達不能で scheduler / queue からも呼ばれず、--reason を監査ログへ残す',
                 commandSignature: 'admin:reset-mfa {id} {--reason=}',
             ),
+            'Console/Commands/Development/PipelineSmokeCommand.php#resolveOrganization#Organization.whereKey:$option#1' => DirectFetchJustificationEntry::operatorConsole(
+                '運用者が bug-hunt レーンで CLI から対象組織を --org=ID で名指しする通し確認コマンド。'
+                .'HTTP から到達不能で scheduler / queue からも呼ばれず、実行そのものが fail-secure 4 条件'
+                .'(env=bughunt.local / bug-hunt DB / fake storage / real LLM) を満たさないと開始しない。'
+                .'--org 省略時は使い捨ての bug-hunt DB 内で条件を満たす組織を探索するが、最終的に触るのは'
+                .'選ばれた 1 組織だけで、組織を跨ぐ read/write は 1 箇所も無い',
+                commandSignature: 'dev:pipeline-smoke {--check} {--org=} {--json} {--force}',
+            ),
             'Console/Commands/Billing/MarkStripeCustomerRedactedCommand.php#handle#Organization.whereKey:$organizationId#1' => DirectFetchJustificationEntry::operatorConsole(
                 '運用者が CLI で組織を id で名指しし、決済事業者側 customer の redaction 実施を記録する保守コマンド。'
                 .'HTTP から到達不能で scheduler / queue からも呼ばれず、cross-org の概念が無い (対象は常に 1 組織)。'

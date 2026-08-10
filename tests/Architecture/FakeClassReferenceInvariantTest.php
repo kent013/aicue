@@ -33,6 +33,12 @@ const FAKE_REFERENCE_ALLOWED = [
     // fake storage signed route の受け口 (FakeStorageGate 成立時のみ route 登録される)
     'app/Http/Controllers/Testing/PutFakeStorageObjectController.php',
     'app/Http/Controllers/Testing/GetFakeStorageObjectController.php',
+    // bug-hunt 専用の通し確認コマンド。fake storage へ実バイトを置く必要があり、
+    // FakeStorageGate 成立時のみ動く (上 2 件の controller と同 species)。
+    // 本番経路からは到達しない (artisan 手動実行のみ・スケジュール登録なし)。
+    // ★実装条件: constructor 引数を持たず、fake は handle() の fail-secure 4 条件を
+    //   通過した**後**にのみ app() で遅延解決する。
+    'app/Console/Commands/Development/PipelineSmokeCommand.php',
     // provider 登録点。FakeExternalsServiceProvider (配置例外クラス) を必ず参照する
     'bootstrap/providers.php',
 ];
@@ -93,13 +99,14 @@ test('4-3 本番コードは fake クラスを参照しない', function (): voi
     expect($violations)->toBe([]);
 });
 
-test('4-4 参照 allowlist は 4 件から増えていない', function (): void {
+test('4-4 参照 allowlist は 5 件から増えていない', function (): void {
     // 増やすときは理由コメントを添えて**ここも触る** (意図的な摩擦)。
-    expect(FAKE_REFERENCE_ALLOWED)->toHaveCount(4)
+    expect(FAKE_REFERENCE_ALLOWED)->toHaveCount(5)
         ->and(FAKE_REFERENCE_ALLOWED)->toBe([
             'app/Providers/FakeExternalsServiceProvider.php',
             'app/Http/Controllers/Testing/PutFakeStorageObjectController.php',
             'app/Http/Controllers/Testing/GetFakeStorageObjectController.php',
+            'app/Console/Commands/Development/PipelineSmokeCommand.php',
             'bootstrap/providers.php',
         ]);
 });

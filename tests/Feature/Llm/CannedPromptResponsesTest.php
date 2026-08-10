@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\DataTransferObjects\LlmCallContextData;
 use App\DataTransferObjects\Manual\Analysis\ExtractedSopData;
 use App\DataTransferObjects\Manual\Analysis\GeneratedScenarioData;
 use App\DataTransferObjects\Manual\Analysis\WorkDecompositionData;
@@ -82,9 +83,9 @@ function systemTextOf(array $messages): string
 function makeRegisteredPrompt(string $key): TextPrompt
 {
     return match ($key) {
-        'sop-extract' => SopExtractPrompt::make('サンプル SOP'),
-        'work-decomposition' => WorkDecompositionPrompt::make('{"header":{},"sections":[]}'),
-        'scenario-generation' => ScenarioGenerationPrompt::make('{"steps":[]}'),
+        'sop-extract' => SopExtractPrompt::make('サンプル SOP', LlmCallContextData::none()),
+        'work-decomposition' => WorkDecompositionPrompt::make('{"header":{},"sections":[]}', LlmCallContextData::none()),
+        'scenario-generation' => ScenarioGenerationPrompt::make('{"steps":[]}', LlmCallContextData::none()),
         'example-summary' => ExampleSummaryPrompt::make('本文'),
         default => throw new InvalidArgumentException("unknown prompt key: {$key}"),
     };
@@ -93,7 +94,7 @@ function makeRegisteredPrompt(string $key): TextPrompt
 // ---- 5-1: canned DTO 通過テスト (主保証) ----
 
 test('sop-extract の canned が ExtractedSopData::fromLlmText を通過する', function (): void {
-    $text = SopExtractPrompt::make('サンプル SOP')->executeSync();
+    $text = SopExtractPrompt::make('サンプル SOP', LlmCallContextData::none())->executeSync();
     Assert::string($text);
 
     $dto = ExtractedSopData::fromLlmText($text);
@@ -102,7 +103,7 @@ test('sop-extract の canned が ExtractedSopData::fromLlmText を通過する',
 });
 
 test('work-decomposition の canned が WorkDecompositionData::fromLlmText を通過する', function (): void {
-    $text = WorkDecompositionPrompt::make('{"header":{},"sections":[]}')->executeSync();
+    $text = WorkDecompositionPrompt::make('{"header":{},"sections":[]}', LlmCallContextData::none())->executeSync();
     Assert::string($text);
 
     $dto = WorkDecompositionData::fromLlmText($text);
@@ -110,7 +111,7 @@ test('work-decomposition の canned が WorkDecompositionData::fromLlmText を�
 });
 
 test('scenario-generation の canned が GeneratedScenarioData::fromLlmText を通過する', function (): void {
-    $text = ScenarioGenerationPrompt::make('{"steps":[]}')->executeSync();
+    $text = ScenarioGenerationPrompt::make('{"steps":[]}', LlmCallContextData::none())->executeSync();
     Assert::string($text);
 
     $dto = GeneratedScenarioData::fromLlmText($text);

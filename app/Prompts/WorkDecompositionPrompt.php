@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Prompts;
 
+use App\DataTransferObjects\LlmCallContextData;
 use Kent013\PrismPrompt\Prompt;
 use Kent013\PrismPrompt\TextPrompt;
 use Kent013\PrismPrompt\Values\UserInput;
@@ -15,10 +16,10 @@ use Kent013\PrismPrompt\Values\UserInput;
  */
 final class WorkDecompositionPrompt
 {
-    public static function make(string $untrustedExtractedJson): TextPrompt
+    public static function make(string $untrustedExtractedJson, LlmCallContextData $context): TextPrompt
     {
         return Prompt::load('work-decomposition', [
             'extracted' => UserInput::from($untrustedExtractedJson), // 不変条件 4: untrusted は UserInput
-        ]);
+        ])->withMetadata($context->toMetadata()); // 帰属: llm_call_logs の organization / subject
     }
 }

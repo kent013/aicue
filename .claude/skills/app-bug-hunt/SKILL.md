@@ -74,7 +74,12 @@ screens.md (画面 = GET×inertia) と operations.md (全書き込み操作 = �
    実リクエストは従来どおり全面禁止**で、検知したら即中断して報告する (egress ガードの許可先に LLM API ドメインを
    加えるだけで、他は不変。SSRF/egress ガードの他ドメイン全面禁止は変わらない)。`--fake-llm` 時は LLM も canned
    (実接続なし)。real-llm は実キー必須で、未設定なら provision が fail-fast する (`--fake-llm` を案内)。
-5. **誤検知をバグとして断定しない。** 期待仕様が設計文書 (devnotes/docs) から確認できないものは
+5. **`pipeline-smoke` を実行しない。** `scripts/bug-hunt-shard.sh pipeline-smoke` は
+   **LLM を 3 段とも実呼び出しする = 実行するたびに課金が発生する**。実行するのは親
+   (orchestrator) のみで、子 wrapper にも露出していない (`BUGHUNT_ORCHESTRATOR` 無しでは
+   副作用の前に die する)。探索中にパイプラインの通し確認が要ると判断したら、
+   自分で走らせずレポートに「親へ依頼」と書く。
+6. **誤検知をバグとして断定しない。** 期待仕様が設計文書 (devnotes/docs) から確認できないものは
    「要確認」に分類し、severity を付けない。
 
 ## 並列モード (--parallel[=N]) — 親セッションの手順

@@ -1528,3 +1528,103 @@ lctl 台帳 feature `account-deletion-billing-guard` の標準形 v1 (裁定 AG-
   本番で日次処理が止まっていないことも保証しない (責務は終了コードと scheduler 運用)。
   畳み込みで失われるもの (返金逆仕訳の逆引き / 消費の冪等キー / signup grant の部分 UNIQUE
   index の保護範囲) は `docs/billing-retention-runbook.md` §7 が一覧を持つ。
+
+## パイプライン通し確認 (pipeline smoke) と LLM コストレポート (T147)
+
+`dev:pipeline-smoke` は **SOP 投入 → AI 解析 → 撮影テイク → ffmpeg 合成 → mp4** の全段が
+**実際に最後まで回ること**だけを機械で確認するコマンドである。bug-hunt レーン専用で、
+起動導線は `scripts/bug-hunt-shard.sh pipeline-smoke --shard I --run-id TS`
+(`BUGHUNT_ORCHESTRATOR=1` 必須 = 費用の防壁)。
+
+### 実行を許す条件 (fail-secure。`--force` でも迂回できない)
+
+1. `app()->environment('bughunt.local')` — 実 LLM / 実 ffmpeg / チケット消費を dev / production で走らせない
+2. `BughuntDatabaseGuard::isBughuntDatabase()` — dev DB へ fixture をばら撒かない
+3. `FakeStorageGate::enabled()` — 実 S3 へ書かない
+4. `config('testing.fake_llm') === false` — fake のまま「通った」と報告しない
+
+4 は**自プロセスの config** であり worker の設定は見ていない。worker が fake なら
+`llm_call_logs` の記録行が 0 になり `llm-evidence` 段で落ちる (2 層で守る)。
+確認プロンプトは `confirmToProceed($warning, true)` で**常に**出す (既定 callback は
+production でしか確認しないため、bughunt.local では確認なしで課金が走ってしまう)。
+
+### 段と成功条件 (**これだけを見る**)
+
+| 段 | 成功条件 |
+|---|---|
+| `preflight` | ffmpeg / ffprobe 実行可 ∧ queue connection 2 本 ∧ SOP fixture ∧ 対象組織 (所属 user ∧ 残高 4 枚) |
+| `fixture` | manual が `draft` ∧ `source_documents` 1 件 |
+| `analysis` | `analysis_jobs.status = succeeded` ∧ `video_manuals.status = ready` ∧ `cuts` ≥ 1 ∧ `scenario_version` ≥ 1 |
+| `llm-evidence` | 3 template それぞれに成功行 (`failure_reason IS NULL` ∧ `input_tokens > 0`) があり、**そのすべてが `metadata_missing = false` ∧ 期待した organization / subject を持つ** |
+| `capture` | 全 cut に採用テイク (`ready`) がある |
+| `render` | `render_jobs.status = succeeded` ∧ `video_manuals.status = published` ∧ `output_path` 非 NULL |
+| `artifact` | 出力を読み出せ、ffprobe が 0 終了し、映像ストリーム ≥ 1 ∧ 尺 > 0 |
+
+「この実行分」は `llm_call_logs.id > baselineId` で切り出す (`baselineId` は preflight 通過直後・
+`fixture` 段の前に 1 回だけ取る)。`llm-evidence` の母集団は `whereIn('prompt_template', 3 template)`
+で絞る (同 shard で他の prompt が走っても混ざらない)。
+
+### 失敗分類 (`SmokeFailureClass`。観測のためであり制御フローを変えない)
+
+`preflight` / `wiring` / `stage_timeout` / `llm` / `render` / `storage` / `unknown`。
+判定は `App\Support\Smoke\SmokeFailureClassifier::classify()` の純関数 1 本で、判定順は
+「成功段は分類しない → preflight → timeout×queued=wiring / timeout×running=stage_timeout →
+render の error_code → artifact の読めない=storage / ffprobe 失敗=render →
+**llm-evidence で成功行はあるが記録が不完全=wiring** → LLM 起因になり得る段だけ llm → unknown」。
+
+- **`llm` は `analysis` / `llm-evidence` に閉じる**。他の段の失敗を provider のせいにしない
+- **記録の不備 (帰属欠落 / 必要 template の成功行欠落) は `wiring`**。
+  `llm` に混ぜると「レート制限で落ちた」と「`withMetadata()` を書き忘れた」が同じ札になる
+- リトライは最終的に成功しても `failure_reason` 行を残すため、**成功した段は分類しない**
+
+### LLM 呼び出しの帰属 (記録側の配線)
+
+**実行経路を持つ** `app/Prompts/` の factory は `LlmCallContextData` を**必須引数**で受け、
+`->withMetadata($context->toMetadata())` で `organization_id` / `user_id` /
+`subject_type` / `subject_id` を載せる。AI 解析では subject = **`VideoManual`**
+(費用を知りたい単位は成果物であって job ではない)。禁止事項 5 (LLM 呼び出しは factory 経由のみ) が
+既に強制しているため、**帰属を迂回する経路が構造的に存在しない**。記録層の列は 1 本も増やしていない。
+
+**適用範囲を誇張しない**: 帰属の対象を持たない見本 (`ExampleSummaryPrompt`。呼び出し元が無い) は
+`PromptUntrustedInputContractTest` の inventory へ**帰属キーを空配列で exempt 登録**してある。
+つまり「全 factory が必須引数を持つ」のではなく「**inventory に帰属キーを登録した factory が
+必須引数を持つ**」であり、exempt にする操作は deny-by-default の inventory 変更として
+レビューに必ず現れる。
+
+3 層で固定する: **型** (必須引数 = PHPStan level 10) / **構造**
+(`PromptUntrustedInputContractTest` が組み立て済み Prompt の `metadata_context` を reflection で検査) /
+**実地** (本 smoke の `llm-evidence` 段)。
+
+### LLM コストレポート
+
+集計は `LlmCostReportService` 1 本で、入口は 2 つ (**1 実装・複数入口**):
+smoke 末尾の「この実行分」と `operations:llm-cost-report` の期間集計。
+
+- 軸は `LlmCostGroupBy` の 4 つ (`prompt_template` / `model` / `organization` / `subject`)。
+  すべて**素の列 GROUP BY** で、GROUP BY キーへ SQL 関数を適用しない
+- **USD が主** (`total_cost_usd` は `pricing_snapshot` から決定的)。
+  **JPY は副**で、期間合計は「各行の記録時レート (`fx_snapshot`) での合計」であり
+  単一レートで USD を換算した値ではない
+- **未解決 (null) は 0 に潰さない**。件数 (`usd_unresolved_calls` / `jpy_unresolved_calls`) で別に返す
+  (整数集計列だけ `COALESCE(SUM(...), 0)` を掛ける = 0 件時の TOTAL が TypeError にならない)
+- 期間は**半開区間 `since <= created_at < until`** で **UTC 解釈** (JST とは 9 時間ずれる)。
+  日付のみの `--until` はその日を含む (排他境界を翌日 0 時にする)
+- `metadata_missing_calls` は**帰属配線の健全性シグナル**である (0 でないなら呼び出し側の配線が欠けている)
+
+### 保証しないもの (誇張しない)
+
+1. **生成物の品質は一切保証しない**。判定しているのは「期待した状態遷移が起きたか」だけ
+2. **実 S3 は検証していない**。通るのは `FakeObjectStore` の checksum 三者一致だけ
+3. **ブラウザ (撮影 PWA) の実機経路は検証していない**。CLI から Service を呼んでいる
+4. **worker プロセスの LLM モードを直接は見ていない**。`llm_call_logs` の記録行の存在で
+   間接的に実呼び出しを実証している
+5. **費用は「この実行で記録された行の合計」**であり provider 側の請求額とは一致しない
+6. **帰属メタデータが「イベント経由で `llm_call_logs` に記録されること」はテストレーンでは
+   検証できない** (`Prompt::$fake` は `executePrism()` の先頭で短絡して
+   `PromptExecutionCompleted` を発火せず、`PromptFake::record()` は metadata を記録しない)。
+   テストレーンで検証できるのは「factory が組み立てた Prompt が `metadata_context` に
+   帰属キーを持つこと」(reflection) までで、**listener を経て DB へ入ったことを確かめられるのは
+   本 smoke の `llm-evidence` 段だけ**である
+7. **並行実行に対する保証は無い**。「この実行分」は `llm_call_logs.id` の差分で切り出しており、
+   同一 shard で別の LLM 呼び出しが並行すると混入する
+8. **1 回通ったことは、次も通ることを意味しない**。実 LLM の出力は非決定的である
