@@ -1506,8 +1506,10 @@ lctl 台帳 feature `account-deletion-billing-guard` の標準形 v1 (裁定 AG-
   ある日その経路だけが静かに壊れる。目録は読み方 (`aggregate` / `row_detail` / `other_table`)
   の宣言を強制する。
 - **監視対象**: 本コマンドの終了コード (`unexpected_failures > 0` で `FAILURE`) と、
-  出力の `horizon:` 行。**`fail_closed` は「安全に残した」であって「規約を満たした」ではない**
-  ので、`horizon: NG` の継続と `fail_closed` の増加を正常成功として扱わない。
+  出力の `horizon:` 行 (**OK / NG / 判定不能** の 3 値)。**`fail_closed` は「安全に残した」であって
+  「規約を満たした」ではない**ので、`horizon: NG` の継続と `fail_closed` の増加を正常成功として
+  扱わない。想定外失敗があった target の件数は**数えられなかったので 0 で報告される**ため、
+  失敗が 1 件でもあれば horizon は `判定不能` になる (その 0 を根拠に OK と言わない)。
 - **保証しないもの (誇張しない)**: 目録 (`BillingRetentionTarget` /
   `BillingRetentionExclusion`) は**人間の申告**であり、課金取引の記録が
   `app/Models/Billing/` の外や Eloquent を経由しない表に置かれれば gate は沈黙する。

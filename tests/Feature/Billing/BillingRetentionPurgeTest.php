@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\DataTransferObjects\Billing\BillingRetentionPurgeResultDto;
 use App\Enums\Billing\BillingRetentionTarget;
 use App\Models\Billing\StripeWebhookEvent;
 use App\Models\Billing\Subscription;
@@ -269,6 +270,90 @@ test('--apply でも決着できない記録が残れば horizon は NG と報�
         ->assertExitCode(0);
 
     expect(Subscription::query()->count())->toBe(1);
+});
+
+/*
+ * horizon の fail-open 是正 (T146)。
+ *
+ * `remaining=0` は「期限超過が無い」とは限らない。**集計クエリ自体が失敗して数えられなかった**
+ * ときも 0 になる (コマンドは件数不明を 0 で報告し `unexpected_failures` を立てる)。
+ * 終了コードは FAILURE になるので機械は気づけるが、**人間が読む horizon 行が「OK」と嘘をつく**と
+ * PR-C3 (規約文面の公開) の唯一の歯止めが外れる。よって失敗が 1 件でもあれば
+ * horizon は **OK と読めない**表現でなければならない。
+ */
+
+/**
+ * 指定 purger を「必ず例外を投げる」実装へ差し替える (集計クエリ失敗の再現)。
+ *
+ * registry は final だが `app($class)` で purger を解決するため、container への
+ * bind がそのまま効く。
+ */
+function bindFailingBillingRetentionPurger(string $purgerClass, BillingRetentionTarget $target): void
+{
+    app()->bind($purgerClass, fn (): BillingRetentionPurger => new class($target) implements BillingRetentionPurger
+    {
+        public function __construct(private readonly BillingRetentionTarget $target) {}
+
+        public function target(): BillingRetentionTarget
+        {
+            return $this->target;
+        }
+
+        public function countExpired(CarbonImmutable $threshold): int
+        {
+            throw new RuntimeException('集計に失敗した (テスト用)');
+        }
+
+        public function countFailClosed(CarbonImmutable $threshold): int
+        {
+            throw new RuntimeException('集計に失敗した (テスト用)');
+        }
+
+        public function purgeExpired(CarbonImmutable $threshold): BillingRetentionPurgeResultDto
+        {
+            throw new RuntimeException('決着に失敗した (テスト用)');
+        }
+    });
+}
+
+test('集計に失敗した target があれば dry-run の horizon を OK と報告しない', function (): void {
+    // 他 target は 1 件も持たないので、失敗を無視すると remaining 合計は 0 = 従来は OK と出ていた
+    bindFailingBillingRetentionPurger(StripeWebhookEventPurger::class, BillingRetentionTarget::StripeWebhookEvent);
+
+    $this->artisan('billing:purge-retention-expired')
+        ->expectsOutputToContain('stripe_webhook_event: expired=0 processed=0 fail_closed=0 unexpected_failures=1 remaining=0')
+        ->expectsOutputToContain('horizon: 判定不能 (処理または集計に失敗した target が 1 件')
+        ->doesntExpectOutputToContain('horizon: OK')
+        ->assertExitCode(1);
+});
+
+test('決着に失敗した target があれば --apply の horizon を OK と報告しない', function (): void {
+    bindFailingBillingRetentionPurger(StripeWebhookEventPurger::class, BillingRetentionTarget::StripeWebhookEvent);
+
+    $this->artisan('billing:purge-retention-expired', ['--apply' => true])
+        ->expectsOutputToContain('horizon: 判定不能 (処理または集計に失敗した target が 1 件')
+        ->doesntExpectOutputToContain('horizon: OK')
+        ->assertExitCode(1);
+});
+
+test('失敗と実在の残存が同時にあっても件数を確定させず判定不能と報告する', function (): void {
+    $threshold = BillingRetention::threshold();
+    BillingRetentionFixtures::endedSubscription($threshold->subSecond());
+    bindFailingBillingRetentionPurger(StripeWebhookEventPurger::class, BillingRetentionTarget::StripeWebhookEvent);
+
+    $this->artisan('billing:purge-retention-expired')
+        ->expectsOutputToContain('horizon: 判定不能 (処理または集計に失敗した target が 1 件。観測できた期限超過は 1 件だが、実数は不明)')
+        ->doesntExpectOutputToContain('horizon: OK')
+        ->doesntExpectOutputToContain('horizon: NG')
+        ->assertExitCode(1);
+});
+
+test('負のコントロール: 失敗が無ければ従来どおり horizon: OK と報告する', function (): void {
+    $this->artisan('billing:purge-retention-expired')
+        ->expectsOutputToContain('unexpected_failures=0')
+        ->expectsOutputToContain('horizon: OK (期限超過 0 件)')
+        ->doesntExpectOutputToContain('判定不能')
+        ->assertExitCode(0);
 });
 
 test('保持年数が 0 以下なら fail-fast する', function (): void {
