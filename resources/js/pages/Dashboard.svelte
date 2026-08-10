@@ -22,7 +22,7 @@
     import PageContent from "@/components/templates/PageContent.svelte";
     import { formatBytes } from "@/lib/format-bytes";
     import type { SharedProps } from "@/lib/shared-props";
-    import type { DashboardProps } from "@/types/dashboard";
+    import { BILLING_CALLOUTS, type DashboardProps } from "@/types/dashboard";
     import { STATUS_TONES, VIDEO_MANUAL_STATUS_LABELS } from "@/types/manual";
 
     /**
@@ -43,6 +43,10 @@
     const isEditor = $derived(dashboard.role === "editor");
     const isShooter = $derived(dashboard.role === "shooter");
 
+    // null = callout を出さない。copy と CTA の正本は types/dashboard.ts
+    // (`.svelte` は tsc の検査対象外なので、キー漏れをコンパイル時に検出させるには
+    //  `.ts` に置く必要がある。VIDEO_MANUAL_STATUS_LABELS と同じ所在)
+    const billingCallout = $derived(billing ? BILLING_CALLOUTS[billing.billing_state] : null);
 </script>
 
 {#snippet shootingCard()}
@@ -205,13 +209,15 @@
                         />
                     </div>
 
-                    {#if !billing.has_billing_access}
+                    {#if billingCallout}
                         <Card class="mt-6" testId="billing-callout">
-                            <p class="text-body text-text">
-                                サブスクリプションのお支払いが確認できないため、一部機能を一時停止しています。お支払い方法をご確認ください。
+                            <p class="text-body text-text" data-testid="billing-callout-body">
+                                {billingCallout.body}
                             </p>
                             <div class="mt-4">
-                                <Button href="/billing" inertia>お支払い方法を確認</Button>
+                                <Button href={billingCallout.cta.href} inertia>
+                                    {billingCallout.cta.label}
+                                </Button>
                             </div>
                         </Card>
                     {/if}

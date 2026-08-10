@@ -746,6 +746,30 @@ catch を足す必要が出たら、観測目録へ移すか免除の分類を�
   (`pm_reuse_dispatched_at` が dispatch marker)。**webhook 同期処理から外向き Stripe API を
   撃たない**不変条件のため Job へ退避する。`AutoRechargeService::applyReusedPaymentMethod` は
   適格性先行の fail-closed (同意なし・失効・停止状態では Stripe にも DB にも触らない)。
+- **ダッシュボード callout は state 別 (T150)**: `/dashboard` の課金 callout は
+  `BillingSummaryData::$billingState` (`OnboardingBillingState` の 5 値) をそのまま props に
+  載せて分岐する。**真偽値に潰さない** — 一度も契約していない組織 (`no_subscription`) に
+  支払い失敗の文言を出していた回帰 (bug-hunt 20260811-003230 F-2-01) の原因が、
+  `hasBillingAccess` が「未契約」と「支払い不健全」を 1 bit に畳んでいたことだった。
+  - **CTA の行き先を画面が権限で分岐させない**: 未契約系 (`no_subscription` /
+    `pending_checkout`) の CTA は常に `/onboarding/checkout` を指し、契約済みなら
+    `billing.index`、`manageBilling` なしなら `onboarding.billing-required` へ
+    **サーバ (`OnboardingController::show` の離脱ガード) が捌く**。認可をフロントで
+    二重実装しないし、押せないボタンも作らない (禁止事項 8)。
+  - 値集合の同期は `OnboardingBillingStateTsSyncInvariantTest` (PHP enum ⇔
+    `resources/js/types/billing.ts` の `BillingStateValue`)、分岐の網羅は
+    **`resources/js/types/dashboard.ts` の `BILLING_CALLOUTS`** が持つ
+    `satisfies Record<BillingStateValue, …>` (= `pnpm typecheck`)、描画は vitest と
+    Browser lane が担う。**3 層は別物でどれか 1 つでは足りない**。
+  - **copy map を `.svelte` に置かない**: `pnpm typecheck` は `tsc --noEmit` であり
+    `.svelte` を型検査しない (svelte-check は未導入)。page 内に `satisfies` を書くと
+    **一度も評価されず**、キー漏れが無言で通る (T150 の mutation で実測)。
+    state 網羅をコンパイル時に守らせる map は `resources/js/types/*.ts` に置く
+    (`types/manual.ts` の `VIDEO_MANUAL_STATUS_LABELS` /
+    `CAPTURE_NAVIGABLE_BY_STATUS` と同じ所在)。
+  - **判定ロジックは変えていない** (`BillingAccess::state()` / `grantsAccess()` は不変)。
+    `expired_checkout` が「有償契約後の支払い不健全」と「checkout 期限切れの未契約」を
+    ともに指す多義性は残る。
 
 ## チケットスポット購入 (T007) の運用契約
 

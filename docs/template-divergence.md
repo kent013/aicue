@@ -274,7 +274,7 @@ backfill 不要・非正規状態 (未割当 / stale pivot) の可視化と修�
 |---|---|---|
 | BillingAccess::hasActiveAccess | `subscription('default')` が active/trialing のときのみ許可 (未契約 = fail-closed) | plan_code null (未契約 = 支払い不要 free tier) は許可 / plan_code 非 null (有償プラン契約状態) のみ active/trialing を要求 |
 | 遮断時の UX | billing へ redirect (理由提示なし) / JSON 402 「有効なサブスクリプションがありません」 | billing へ redirect + 理由 flash / JSON 402 (両経路とも「サブスクリプションのお支払いが確認できないため…」で統一) |
-| ダッシュボード callout | `has_active_subscription` (subscription 有無) | `has_billing_access` (billing entitlement) + 支払い方法確認 CTA |
+| ダッシュボード callout | `has_active_subscription` (subscription 有無) | `billing_state` (`OnboardingBillingState` の 5 値) による状態別 callout。未契約はプラン選択 CTA / 支払い不健全は支払い方法確認 CTA (真偽値に潰さない。T150) |
 
 ### なぜ正当な差分か (logic-driven)
 

@@ -6,6 +6,7 @@ use App\Enums\Manual\VideoManualStatus;
 use App\Enums\OrganizationRole;
 use App\Enums\ProjectRole;
 use App\Models\AnalysisJob;
+use App\Models\Billing\BillingCheckoutSession;
 use App\Models\Category;
 use App\Models\Cut;
 use App\Models\Project;
@@ -205,7 +206,7 @@ test('残高/容量: grant 済み残高・低残高フラグ・使用率が正�
             ->where('dashboard.billing.ticket_balance', 10)
             ->where('dashboard.billing.is_low_balance', false)
             ->where('dashboard.billing.storage_used_bytes', 0)
-            ->where('dashboard.billing.has_billing_access', true));
+            ->where('dashboard.billing.billing_state', 'active_free_plan'));
 });
 
 test('残高/容量: threshold 未満で is_low_balance=true', function (): void {
@@ -409,19 +410,19 @@ test('dangling current の cross-org 防御: 他 org のデータは一切出ず
     expect($member->fresh()->current_organization_id)->toBe($organization->id);
 });
 
-test('Free (未契約) org: dashboard 200 + has_billing_access=true + 業務 route 開通', function (): void {
+test('Free (grandfathered) org: dashboard 200 + billing_state=active_free_plan + 業務 route 開通', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     Project::factory()->forOrganization($organization)->create();
 
     $this->actingAs($owner)->get('/dashboard')
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
-            ->where('dashboard.billing.has_billing_access', true));
+            ->where('dashboard.billing.billing_state', 'active_free_plan'));
 
     $this->actingAs($owner)->get('/projects')->assertOk();
 });
 
-test('有償契約 + 支払い不健全 org: has_billing_access=false + CTA 遷移先 200 (redirect loop なし)', function (): void {
+test('有償契約 + 支払い不健全 org: billing_state=expired_checkout + CTA 遷移先 200 (redirect loop なし)', function (): void {
     // 有償 org は grandfatherFreePlan: false (backfill 対象は plan_code/free_plan_code とも
     // NULL の org に閉じるため、有償 org に grandfather マーカーが付くのは非現実な fixture。
     // 付くと state() の ActiveFreePlan が支払い健全性判定を覆い隠す)
@@ -434,14 +435,14 @@ test('有償契約 + 支払い不健全 org: has_billing_access=false + CTA 遷�
     $this->actingAs($owner)->get('/dashboard')
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
-            ->where('dashboard.billing.has_billing_access', false));
+            ->where('dashboard.billing.billing_state', 'expired_checkout'));
 
     // CTA 遷移先は課金ゲート外 (redirect loop なし不変条件)
     $this->actingAs($owner)->get('/purchase-tickets')->assertOk();
     $this->actingAs($owner)->get('/billing')->assertOk();
 });
 
-test('有償契約 + past_due org: has_billing_access=true (cohort D。dunning 中も利用継続)', function (): void {
+test('有償契約 + past_due org: billing_state=subscribed (cohort D。dunning 中も利用継続)', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     contractPaidPlan($organization, status: 'past_due');
     Project::factory()->forOrganization($organization)->create();
@@ -449,7 +450,67 @@ test('有償契約 + past_due org: has_billing_access=true (cohort D。dunning �
     $this->actingAs($owner)->get('/dashboard')
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
-            ->where('dashboard.billing.has_billing_access', true));
+            ->where('dashboard.billing.billing_state', 'subscribed'));
+});
+
+/*
+ * F-2-01 (bug-hunt 20260811-003230): 一度も契約していない組織に「支払いが確認できない」
+ * 文言が出ていた。原因は props が hasBillingAccess の真偽値で「未契約」と「支払い不健全」を
+ * 潰していたこと。ここで固定するのは「state が画面まで届くこと」であり、state 導出そのものは
+ * tests/Feature/Billing/BillingAccessStateTest.php が担当する (重複させない)。
+ *
+ * fixture 注意: createOrganizationWithOwner() は既定で free_plan_code='personal' を立てる
+ * (= ActiveFreePlan で先に返る)。未契約系 state を作るテストは grandfatherFreePlan: false 必須。
+ */
+test('新規登録相当 (未契約) org: billing_state=no_subscription (F-2-01 再現)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    Project::factory()->forOrganization($organization)->create();
+
+    $this->actingAs($owner)->get('/dashboard')
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('dashboard.billing.billing_state', 'no_subscription')
+            // 旧 prop を並走させていないこと (思考原則 3 の機械固定)
+            ->missing('dashboard.billing.has_billing_access'));
+});
+
+test('未契約 org の CTA 着地 /onboarding/checkout が 200 (行き先のない詰みを作らない)', function (): void {
+    [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+
+    $this->actingAs($owner)->get('/onboarding/checkout')->assertOk();
+});
+
+test('未契約 org の非 manageBilling メンバーは CTA 着地で /billing-required へ捌かれる', function (): void {
+    [$organization] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    $member = attachOrganizationMember($organization, OrganizationRole::Member);
+    // current org は保護キーのため forceFill (attachOrganizationMember は設定しない)
+    $member->forceFill(['current_organization_id' => $organization->id])->save();
+
+    // CTA の行き先はサーバが決める (フロントで認可を二重実装しない) ことの behavioral な裏付け
+    $this->actingAs($member)->get('/onboarding/checkout')
+        ->assertRedirect(route('onboarding.billing-required'));
+
+    $this->actingAs($member)->get('/billing-required')->assertOk();
+});
+
+test('live pending checkout org: billing_state=pending_checkout', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    BillingCheckoutSession::factory()->for($organization)->create(); // 既定 = live pending
+
+    $this->actingAs($owner)->get('/dashboard')
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('dashboard.billing.billing_state', 'pending_checkout'));
+});
+
+test('expired checkout org: billing_state=expired_checkout', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    BillingCheckoutSession::factory()->for($organization)->expired()->create();
+
+    $this->actingAs($owner)->get('/dashboard')
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('dashboard.billing.billing_state', 'expired_checkout'));
 });
 
 test('ゲストは /login へ redirect (既存挙動維持)', function (): void {

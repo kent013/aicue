@@ -37,6 +37,19 @@ export type PasskeyOutcome<T> =
 
 const GENERIC_FAILURE = "パスキーの処理に失敗しました。時間をおいて再度お試しください。";
 
+/**
+ * 429 専用の文言。「待てば直る」は他の失敗と質が違う唯一の情報であり、
+ * 汎用文言に畳むとユーザーは連打を続けて状況を悪化させる
+ * (bug-hunt 20260811-003230 F-2-02)。
+ *
+ * 文言はアプリ既存の 429 語彙に揃える
+ * (InertiaErrorScreenStatus::TooManyRequests->message())。
+ * **待ち時間の秒数は出さない**: Retry-After の解釈点は PHP 側の
+ * App\Support\Http\RetryAfterSeconds 1 箇所に集約されており、
+ * 表示のためだけにクライアント側へ 2 つ目の解釈点を作らない。
+ */
+const RATE_LIMITED_FAILURE = "リクエストが続けて行われました。少し時間をおいてからお試しください。";
+
 /** この端末で passkey ceremony を開始できるか (API の存在確認) */
 export function isPasskeySupported(): boolean {
     return (
@@ -132,16 +145,23 @@ async function requestJson(url: string, body?: JsonRecord): Promise<Response> {
     });
 }
 
-/** options endpoint から `{ options }` を取り出す (不正 shape は null) */
-async function fetchOptions(url: string): Promise<JsonRecord | null> {
+/** options 取得の結果。**HTTP status を捨てない** (429 だけは呼び出し側で分岐が要る) */
+type OptionsFetchResult =
+    | { status: "ok"; options: JsonRecord }
+    | { status: "rate_limited" }
+    | { status: "error" };
+
+/** options endpoint から `{ options }` を取り出す (不正 shape は error) */
+async function fetchOptions(url: string): Promise<OptionsFetchResult> {
     try {
         const res = await requestJson(url);
-        if (!res.ok) return null;
+        if (res.status === 429) return { status: "rate_limited" };
+        if (!res.ok) return { status: "error" };
         const payload: unknown = await res.json();
-        if (!isRecord(payload) || !isRecord(payload.options)) return null;
-        return payload.options;
+        if (!isRecord(payload) || !isRecord(payload.options)) return { status: "error" };
+        return { status: "ok", options: payload.options };
     } catch {
-        return null;
+        return { status: "error" };
     }
 }
 
@@ -268,12 +288,15 @@ function toRequestOptions(options: JsonRecord): PublicKeyCredentialRequestOption
 export async function createPasskeyCredential(): Promise<PasskeyOutcome<JsonRecord>> {
     if (!isPasskeySupported()) return { status: "unsupported" };
 
-    const options = await fetchOptions("/user/passkeys/options");
-    if (options === null) {
+    const fetched = await fetchOptions("/user/passkeys/options");
+    if (fetched.status === "rate_limited") {
+        return { status: "failed", message: RATE_LIMITED_FAILURE };
+    }
+    if (fetched.status === "error") {
         return { status: "failed", message: "パスキーの登録を開始できませんでした。" };
     }
 
-    const creationOptions = toCreationOptions(options);
+    const creationOptions = toCreationOptions(fetched.options);
     if (creationOptions === null) {
         return { status: "failed", message: GENERIC_FAILURE };
     }
@@ -349,12 +372,15 @@ export async function confirmWithPasskey(): Promise<PasskeyOutcome<void>> {
 async function assertPasskey(optionsUrl: string): Promise<PasskeyOutcome<JsonRecord>> {
     if (!isPasskeySupported()) return { status: "unsupported" };
 
-    const options = await fetchOptions(optionsUrl);
-    if (options === null) {
+    const fetched = await fetchOptions(optionsUrl);
+    if (fetched.status === "rate_limited") {
+        return { status: "failed", message: RATE_LIMITED_FAILURE };
+    }
+    if (fetched.status === "error") {
         return { status: "failed", message: "パスキーの認証を開始できませんでした。" };
     }
 
-    const requestOptions = toRequestOptions(options);
+    const requestOptions = toRequestOptions(fetched.options);
     if (requestOptions === null) {
         return { status: "failed", message: GENERIC_FAILURE };
     }
@@ -373,6 +399,11 @@ async function assertPasskey(optionsUrl: string): Promise<PasskeyOutcome<JsonRec
 
 /** サーバのエラー本文から表示可能なメッセージを取り出す (取れなければ既定文言) */
 async function readErrorMessage(response: Response): Promise<string> {
+    // 429 は POST 経路 (/passkeys/login, /passkeys/confirm) でも起きる。
+    // Laravel の 429 本文は message="Too Many Requests" (英語) のため、
+    // そのまま出すと汎用文言より悪化する。status を先に見る。
+    if (response.status === 429) return RATE_LIMITED_FAILURE;
+
     try {
         const payload: unknown = await response.json();
         if (!isRecord(payload)) return GENERIC_FAILURE;
