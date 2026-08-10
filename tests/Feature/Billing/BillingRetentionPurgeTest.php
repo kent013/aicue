@@ -6,6 +6,7 @@ use App\Enums\Billing\BillingRetentionTarget;
 use App\Models\Billing\StripeWebhookEvent;
 use App\Models\Billing\Subscription;
 use App\Models\Billing\TicketCheckoutSession;
+use App\Models\Billing\TicketLedgerEntry;
 use App\Services\Billing\Contracts\BillingRetentionPurger;
 use App\Services\Billing\Retention\BillingCheckoutSessionPurger;
 use App\Services\Billing\Retention\BillingRetentionPurgerRegistry;
@@ -183,9 +184,10 @@ test('dry-run コマンドは 1 行も消さず target 別の件数を報告す�
 
     $this->artisan('billing:purge-retention-expired')
         ->expectsOutputToContain('[dry-run]')
-        ->expectsOutputToContain('stripe_webhook_event: expired=1 fail_closed=0')
-        ->expectsOutputToContain('ticket_checkout_session: expired=0 fail_closed=1')
-        ->expectsOutputToContain('subscription: expired=1 fail_closed=1')
+        ->expectsOutputToContain('stripe_webhook_event: expired=1 processed=0 fail_closed=0')
+        ->expectsOutputToContain('ticket_checkout_session: expired=0 processed=0 fail_closed=1')
+        ->expectsOutputToContain('subscription: expired=1 processed=0 fail_closed=1')
+        ->expectsOutputToContain('dry-run のため 1 行も変更していません')
         ->assertExitCode(0);
 
     expect(StripeWebhookEvent::query()->count())->toBe(1);
@@ -194,9 +196,9 @@ test('dry-run コマンドは 1 行も消さず target 別の件数を報告す�
     expect(SubscriptionItem::query()->count())->toBe(1);
 });
 
-test('コマンドは purger 未実装の target (台帳の畳み込み) を出力で明示する', function (): void {
+test('コマンドは台帳 (畳み込みで決着する target) も集計対象に含める', function (): void {
     $this->artisan('billing:purge-retention-expired')
-        ->expectsOutputToContain('ticket_ledger_entry: purger 未実装')
+        ->expectsOutputToContain('ticket_ledger_entry: expired=0')
         ->assertExitCode(0);
 });
 
@@ -237,10 +239,36 @@ test('コマンドは --target で 1 つに絞れる', function (): void {
         ->assertExitCode(0);
 });
 
-test('コマンドは --apply オプションを持たない (規約が宣言していない削除を先に効かせない)', function (): void {
-    $definition = Artisan::all()['billing:purge-retention-expired']->getDefinition();
+test('コマンドは --apply で実際に決着させ、horizon の観測点を出力する', function (): void {
+    $threshold = BillingRetention::threshold();
+    BillingRetentionFixtures::createStarted(BillingRetentionTarget::StripeWebhookEvent, $threshold->subSecond());
+    BillingRetentionFixtures::expiredLedgerEntries($threshold->subSecond());
 
-    expect($definition->hasOption('apply'))->toBeFalse();
+    $this->artisan('billing:purge-retention-expired', ['--apply' => true])
+        ->expectsOutputToContain('[apply]')
+        ->expectsOutputToContain('stripe_webhook_event: expired=1 processed=1')
+        ->expectsOutputToContain('ticket_ledger_entry: expired=2 processed=2')
+        ->expectsOutputToContain('horizon: OK (期限超過 0 件)')
+        ->assertExitCode(0);
+
+    expect(StripeWebhookEvent::query()->count())->toBe(0);
+    // 台帳は消えるのではなく繰越行 1 行へ畳み込まれる (残高 10 - 4 = 6 が保存される)
+    expect(TicketLedgerEntry::query()->count())->toBe(1);
+    expect(TicketLedgerEntry::query()->sole()->delta)->toBe(6);
+});
+
+test('--apply でも決着できない記録が残れば horizon は NG と報告する (終了コードは成功)', function (): void {
+    $threshold = BillingRetention::threshold();
+    // 明細が残っている契約は消せない (fail-closed)。「安全に残した」も規約から見れば残存である。
+    // --target で親だけを回し、子が残ったまま = fail-closed の状態を作る
+    BillingRetentionFixtures::attachItem(BillingRetentionFixtures::endedSubscription($threshold->subSecond()));
+
+    $this->artisan('billing:purge-retention-expired', ['--apply' => true, '--target' => 'subscription'])
+        ->expectsOutputToContain('subscription: expired=1 processed=0 fail_closed=1')
+        ->expectsOutputToContain('horizon: NG (期限超過 1 件が残存')
+        ->assertExitCode(0);
+
+    expect(Subscription::query()->count())->toBe(1);
 });
 
 test('保持年数が 0 以下なら fail-fast する', function (): void {

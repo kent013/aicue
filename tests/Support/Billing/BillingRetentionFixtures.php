@@ -10,6 +10,8 @@ use App\Models\Billing\StripeWebhookEvent;
 use App\Models\Billing\Subscription;
 use App\Models\Billing\TicketAutoRechargeAttempt;
 use App\Models\Billing\TicketCheckoutSession;
+use App\Models\Billing\TicketLedgerEntry;
+use App\Models\Organization;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
@@ -87,7 +89,25 @@ final class BillingRetentionFixtures
         return $item;
     }
 
-    /** 全 target ぶんの「期限超過だが消せる」記録を作る (horizon 検査の母集団)。 */
+    /**
+     * 期限超過の台帳行 (畳み込みで決着する target) を 1 組織ぶん作る。
+     *
+     * 付与と消費を 1 組ずつ置き、畳み込みが**合算して残高を保存する**ことを
+     * horizon 側でも通す (残高保存そのものの検証は TicketLedgerCarryForwardTest)。
+     */
+    public static function expiredLedgerEntries(CarbonImmutable $clock): Organization
+    {
+        [$organization] = \createOrganizationWithOwner('台帳保持期間テスト組織');
+
+        TicketLedgerEntry::factory()->forOrganization($organization)
+            ->createdAt($clock)->purchased()->delta(10)->create();
+        TicketLedgerEntry::factory()->forOrganization($organization)
+            ->createdAt($clock)->purchased()->consumed(4)->create();
+
+        return $organization;
+    }
+
+    /** 全 target ぶんの「期限超過だが決着できる」記録を作る (horizon 検査の母集団)。 */
     public static function seedExpiredRows(CarbonImmutable $threshold): void
     {
         self::createStarted(BillingRetentionTarget::StripeWebhookEvent, $threshold->subDay());
@@ -96,5 +116,7 @@ final class BillingRetentionFixtures
         self::createStarted(BillingRetentionTarget::TicketAutoRechargeAttempt, $threshold->subDay());
 
         self::attachItem(self::endedSubscription($threshold->subDay()));
+
+        self::expiredLedgerEntries($threshold->subDay());
     }
 }

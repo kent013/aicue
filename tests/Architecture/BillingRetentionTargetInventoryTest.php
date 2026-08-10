@@ -63,8 +63,8 @@ const BILLING_RETENTION_EXTERNAL_POPULATION = [
 /** 母集団の**現在件数** (cap ではなく exact-fit。増減したら必ずこの数字を書き換える)。 */
 const BILLING_RETENTION_POPULATION_COUNT = 14;
 
-/** C1 時点の purger 実装数 (TicketLedgerEntry は C2 の畳み込み待ちで含まない)。 */
-const BILLING_RETENTION_PURGER_COUNT = 6;
+/** purger 実装数 (全 target が purger を持つ。削除 6 本 + 畳み込み 1 本)。 */
+const BILLING_RETENTION_PURGER_COUNT = 7;
 
 /**
  * 母集団: app/Models/Billing 配下の全 Model + 外部列挙。
@@ -191,6 +191,22 @@ function billingRetentionPurgerClassesOnDisk(): array
     return $classes;
 }
 
+/**
+ * purger 実装クラスが宣言する target の value。
+ *
+ * **コンテナ経由で解決する** (`new $class` にしない) — purger は依存を注入されうるため、
+ * gate 側で生成方法を固定すると「依存を持つ purger を書けない」制約になる。
+ *
+ * @param  class-string<BillingRetentionPurger>  $class
+ */
+function billingRetentionTargetOf(string $class): string
+{
+    $purger = app($class);
+    expect($purger)->toBeInstanceOf(BillingRetentionPurger::class);
+
+    return $purger->target()->value;
+}
+
 test('検査 1: 課金モデルの母集団が target / exclusion にちょうど 1 回分類されている', function (): void {
     $result = billingRetentionClassify(billingRetentionPopulation(), billingRetentionDeclarations());
 
@@ -264,33 +280,24 @@ test('検査 4: target と purger 実装クラスが exact-fit である', funct
         'app/Services/Billing/Retention/ の purger 実装と registry の登録が一致しません '
         .'(登録漏れの purger は実行されず、期限超過が黙って残ります)。');
 
-    $registeredTargets = array_map(
-        static fn (string $class): string => (new $class)->target()->value,
-        $registry,
-    );
+    $registeredTargets = array_map(billingRetentionTargetOf(...), $registry);
     sort($registeredTargets);
 
     $expected = array_map(
         static fn (BillingRetentionTarget $case): string => $case->value,
-        array_filter(
-            BillingRetentionTarget::cases(),
-            static fn (BillingRetentionTarget $case): bool => ! $case->isPendingCarryForward(),
-        ),
+        BillingRetentionTarget::cases(),
     );
     sort($expected);
 
     expect($registeredTargets)->toBe($expected,
-        'purger を持つべき target と実装が一致しません (isPendingCarryForward() の target を除く)。');
+        'purger を持つべき target と実装が一致しません (全 target が purger を持つ)。');
 
     // 1 target につき purger は 1 本 (重複登録で二重実行しない)
     expect(count(array_unique($registeredTargets)))->toBe(count($registeredTargets));
 });
 
 test('検査 4b: 実行順が子 → 親である (SubscriptionItem → Subscription)', function (): void {
-    $order = array_map(
-        static fn (string $class): string => (new $class)->target()->value,
-        BillingRetentionPurgerRegistry::purgerClasses(),
-    );
+    $order = array_map(billingRetentionTargetOf(...), BillingRetentionPurgerRegistry::purgerClasses());
 
     $child = array_search(BillingRetentionTarget::SubscriptionItem->value, $order, true);
     $parent = array_search(BillingRetentionTarget::Subscription->value, $order, true);

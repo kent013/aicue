@@ -25,19 +25,15 @@ use Tests\Support\Billing\BillingRetentionFixtures;
  *   - **本番で日次処理が止まっていないこと**は保証しない (責務は Command の件数報告 +
  *     FAILURE 終了コード + scheduler 運用。C1 では日次登録すらしていない)
  *   - **目録の網羅性**は保証しない (BillingRetentionTarget は人間の申告である)
- *   - C1 時点では `ticket_ledger_entry` (append-only の畳み込み待ち) を対象から外している。
- *     C1 は規約に何も宣言せず日次も回さないため、この未了は利用者に見える不整合にならない。
- *     C2 で畳み込みを実装したら `isPendingCarryForward()` が false になり、本検査の
- *     母集団へ自動的に入る (除外を書き足す必要がない = 外し忘れが起きない)
+ *   - **決着の方式は target で違う** (削除 6 本 / 畳み込み 1 本) が、horizon は方式を問わず
+ *     「起算済み・期限超過が残っていないか」だけを見る。台帳の畳み込みが**残高を保存するか**は
+ *     本検査の担当ではない (tests/Feature/Billing/TicketLedgerCarryForwardTest.php が担う)
  */
 
-/** C1 時点で horizon の母集団に入る target。 */
+/** horizon の母集団に入る target (= 全 target。除外は無い)。 */
 function billingRetentionHorizonTargets(): array
 {
-    return array_values(array_filter(
-        BillingRetentionTarget::cases(),
-        static fn (BillingRetentionTarget $case): bool => ! $case->isPendingCarryForward(),
-    ));
+    return BillingRetentionTarget::cases();
 }
 
 /** @return list<BillingRetentionPurger> */
@@ -128,15 +124,20 @@ test('負のコントロール: purge 後に古い記録を作ると horizon が
     expect(Subscription::query()->count())->toBe(1);
 });
 
-test('C1 の母集団は畳み込み待ちの台帳を含まない (C2 で自動的に加わる)', function (): void {
+test('母集団は全 target を含む (畳み込みで決着する台帳も horizon の対象である)', function (): void {
     $targets = array_map(
         static fn (BillingRetentionPurger $purger): string => $purger->target()->value,
         billingRetentionPurgersInOrder(),
     );
 
-    expect($targets)->not->toContain(BillingRetentionTarget::TicketLedgerEntry->value);
-    expect(array_map(
+    expect($targets)->toContain(BillingRetentionTarget::TicketLedgerEntry->value);
+
+    $expected = array_map(
         static fn (BillingRetentionTarget $case): string => $case->value,
         billingRetentionHorizonTargets(),
-    ))->toBe($targets);
+    );
+    sort($expected);
+    sort($targets);
+
+    expect($targets)->toBe($expected);
 });

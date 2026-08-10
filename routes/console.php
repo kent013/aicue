@@ -172,3 +172,22 @@ Schedule::command('capture:release-stale-upload-reservations')->everyTenMinutes(
 |   前提にする (既存の billing:send-billing-reminders / render:reconcile-outputs と同じ前提)。
 */
 Schedule::command('idempotency:prune')->daily()->onOneServer();
+
+/*
+|--------------------------------------------------------------------------
+| 課金記録の保持期間 (7 年) の決着 (T144 / PR-C2)
+|--------------------------------------------------------------------------
+| 保持期限 (config legal.billing_retention_years) を超えた課金記録を日次で決着させる。
+| 削除で決着する 6 target と、**畳み込み**で決着する台帳 (ticket_ledger_entries) がある
+| (台帳は残高の真実源なので消すと残高が変わる。古い行は残高スナップショットへ置換する)。
+|
+| **監視対象**: 本コマンドの終了コードと出力の `horizon:` 行。
+|   - `horizon: NG` が続く = 規約 (/privacy が宣言する最長 7 年) を満たせていない状態である。
+|     **`fail_closed` は「安全に残した」であって「規約を満たした」ではない**ため残存に数える。
+|   - `fail_closed` の**継続・増加**を正常成功として扱わないこと (解消手順は
+|     docs/billing-retention-runbook.md)。
+|
+| 本コマンドは PR-C2 のデプロイ時点から --apply で有効である (runbook の初回 apply は
+| 「初回を能動的に完走させて結果を確認する」ためのもので、schedule の抑止ではない)。
+*/
+Schedule::command('billing:purge-retention-expired --apply')->daily()->onOneServer();

@@ -1418,3 +1418,41 @@ REST API v1 の `Idempotency-Key` は **本処理の前に claim する**方式�
   使われていることが前提 (既存の `billing:send-billing-reminders` /
   `render:reconcile-outputs` と同じ。本節で新しく持ち込む前提ではない)。
   満たさないと多重実行しうるが DELETE は冪等で、害は `report()` の重複に留まる。
+
+## 課金記録の保持期間 (7 年) の決着 (T143 / T144)
+
+保持年数の正本は `config/legal.php` の `billing_retention_years`、唯一の解決点は
+`App\Support\Legal\BillingRetention` (`BillingRetentionConfigSingleSourceTest` が機械固定)。
+運用手順・障害対応は **`docs/billing-retention-runbook.md` が正本**。
+
+- **コマンド**: `billing:purge-retention-expired` (既定 dry-run / `--apply` で実処理)。
+  日次登録は `routes/console.php` の `Schedule::command('… --apply')->daily()->onOneServer()`。
+- **決着の方式は target で 2 種類ある**。削除で決着する 6 target
+  (`stripe_webhook_event` / `billing_checkout_session` / `ticket_checkout_session` /
+  `ticket_auto_recharge_attempt` / `subscription_item` / `subscription`) と、
+  **畳み込み**で決着する `ticket_ledger_entry` である。実行順は registry
+  (`BillingRetentionPurgerRegistry`) が持ち、**子 → 親** (`subscription_item` →
+  `subscription`) は入れ替えない (親を先に消すと FK cascade で子が件数報告を経由せず消える)。
+- **台帳 (`ticket_ledger_entries`) だけ方式が違う理由**: そこが**残高の真実源**だからである。
+  期限超過の行をそのまま消すと利用者のチケット残高が変わる。畳み込み
+  (`App\Services\Billing\TicketLedgerCarryForwardService`) は
+  `(organization_id, source, expires_at)` ごとに合算し、`kind = carry_forward` の
+  **残高スナップショット 1 行**へ置換する。**group key に `organization_id` を必ず含める**
+  (欠くと組織を跨いで残高を合算する)。`source IS NULL` (legacy 行) は独立した group。
+  繰越行は**取引記録ではなく残高のスナップショット**であり、原取引の識別子を 1 つも
+  引き継がない (`carried_forward_through` に集約期間の終端だけを持つ)。
+  残高が 1 枚も変わらないことは `tests/Feature/Billing/TicketLedgerCarryForwardTest.php` が
+  組織 / source / 失効時刻の粒度で機械固定する。
+- **台帳を読む場所は目録制** (`TicketLedgerReaderInventoryTest`)。畳み込みの帰結として
+  「7 年より古い個別取引は復元できない」ため、個別行に依存する読み手が宣言なしに増えると
+  ある日その経路だけが静かに壊れる。目録は読み方 (`aggregate` / `row_detail` / `other_table`)
+  の宣言を強制する。
+- **監視対象**: 本コマンドの終了コード (`unexpected_failures > 0` で `FAILURE`) と、
+  出力の `horizon:` 行。**`fail_closed` は「安全に残した」であって「規約を満たした」ではない**
+  ので、`horizon: NG` の継続と `fail_closed` の増加を正常成功として扱わない。
+- **保証しないもの (誇張しない)**: 目録 (`BillingRetentionTarget` /
+  `BillingRetentionExclusion`) は**人間の申告**であり、課金取引の記録が
+  `app/Models/Billing/` の外や Eloquent を経由しない表に置かれれば gate は沈黙する。
+  本番で日次処理が止まっていないことも保証しない (責務は終了コードと scheduler 運用)。
+  畳み込みで失われるもの (返金逆仕訳の逆引き / 消費の冪等キー / signup grant の部分 UNIQUE
+  index の保護範囲) は `docs/billing-retention-runbook.md` §7 が一覧を持つ。

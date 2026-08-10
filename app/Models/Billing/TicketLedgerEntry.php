@@ -8,6 +8,8 @@ use App\Enums\Billing\TicketLedgerKind;
 use App\Enums\Billing\TicketSource;
 use App\Models\Organization;
 use Carbon\CarbonImmutable;
+use Database\Factories\Billing\TicketLedgerEntryFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use LogicException;
@@ -23,6 +25,12 @@ use LogicException;
  * idempotency_key (UNIQUE) で二重付与を防ぐ。買い切り購入行は payment_intent_id /
  * purchase_amount を持ち、返金 (charge.refunded) の逆仕訳 (clawback) の正本になる。
  *
+ * 保持期間 (7 年) の決着は**物理削除ではなく畳み込み**である
+ * (`TicketLedgerCarryForwardService`)。期限超過の取引行は
+ * `(organization_id, source, expires_at)` ごとに合算され、`kind = carry_forward` の
+ * **残高スナップショット 1 行**へ置換される。置換後の行は `carried_forward_through` に
+ * 集約期間の終端を持ち、原取引の識別子を 1 つも持たない。
+ *
  * 全カラムが TicketLedgerService の内部状態のため $fillable は持たない (明示代入のみ)。
  *
  * @property int $id
@@ -34,7 +42,9 @@ use LogicException;
  * @property string $description
  * @property CarbonImmutable|null $granted_at
  * @property CarbonImmutable|null $expires_at
+ * @property CarbonImmutable|null $carried_forward_through
  * @property string|null $stripe_checkout_session_id
+ * @property string|null $stripe_invoice_id
  * @property string|null $payment_intent_id
  * @property int|null $purchase_amount
  * @property string|null $idempotency_key
@@ -42,6 +52,9 @@ use LogicException;
  */
 class TicketLedgerEntry extends Model
 {
+    /** @use HasFactory<TicketLedgerEntryFactory> */
+    use HasFactory;
+
     /** append-only のため updated_at を持たない */
     public const UPDATED_AT = null;
 
@@ -83,6 +96,7 @@ class TicketLedgerEntry extends Model
             'purchase_amount' => 'integer',
             'granted_at' => 'immutable_datetime',
             'expires_at' => 'immutable_datetime',
+            'carried_forward_through' => 'immutable_datetime',
             'created_at' => 'immutable_datetime',
         ];
     }

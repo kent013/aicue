@@ -75,7 +75,8 @@ enum BillingRetentionTarget: string
             // 子は親 (subscriptions) の契約終了日で判定する
             self::SubscriptionItem => 'subscriptions.ends_at',
             self::Subscription => 'ends_at',
-            // 台帳は取引成立の時点で起算済み (null にならない)
+            // 台帳は取引成立の時点で起算済み (null にならない)。
+            // 決着は物理削除ではなく畳み込み (App\Services\Billing\TicketLedgerCarryForwardService)
             self::TicketLedgerEntry => 'created_at',
         };
     }
@@ -115,17 +116,5 @@ enum BillingRetentionTarget: string
             self::Subscription => '継続課金契約そのものの記録。契約終了日 (ends_at) が保持期間の起算点である',
             self::TicketLedgerEntry => 'チケット残高の取引台帳。append-only のため物理削除ではなく繰越 (畳み込み) で決着させる',
         };
-    }
-
-    /**
-     * C1 時点で purger 未実装 (C2 の畳み込みで解消する)。
-     *
-     * `ticket_ledger_entries` は append-only (残高の真実源) であり、物理削除すると
-     * 残高が変わる。保持期間の決着は「古い行を残高スナップショットへ畳み込む」形になり、
-     * その設計と検証は PR-C2 の担当である。
-     */
-    public function isPendingCarryForward(): bool
-    {
-        return $this === self::TicketLedgerEntry;
     }
 }
