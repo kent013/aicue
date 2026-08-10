@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\DataTransferObjects\Dashboard;
 
+use App\Enums\Billing\OnboardingBillingState;
 use App\Enums\Dashboard\DashboardRole;
 use App\Enums\Dashboard\DashboardState;
 
@@ -47,7 +48,7 @@ final readonly class DashboardPageData
      *     pending_cuts_count: int}>,
      *   billing: array{ticket_balance: int, is_low_balance: bool, storage_used_bytes: int,
      *     storage_limit_bytes: int|null, storage_usage_percent: int|null,
-     *     has_billing_access: bool}|null}
+     *     billing_state: value-of<OnboardingBillingState>}|null}
      */
     public function toArray(): array
     {

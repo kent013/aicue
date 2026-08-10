@@ -166,6 +166,72 @@ describe("ceremony の分岐", () => {
         expect(outcome.status).toBe("failed");
     });
 
+    /*
+     * F-2-02 (bug-hunt 20260811-003230): 429 が汎用の「開始できませんでした」に畳まれ、
+     * 流量制限だと分からないためユーザーが連打して状況を悪化させていた。
+     * 429 だけが「待てば直る」という他と質の違う行動指針を持つので、それだけを区別する。
+     */
+    const RATE_LIMITED_FAILURE =
+        "リクエストが続けて行われました。少し時間をおいてからお試しください。";
+
+    it("options が 429 のとき流量制限だと分かる文言を返す (F-2-02)", async () => {
+        stubWebAuthnApis();
+        fetchMock.mockResolvedValue({ ok: false, status: 429, json: () => Promise.resolve({}) });
+
+        await expect(loginWithPasskey()).resolves.toEqual({
+            status: "failed",
+            message: RATE_LIMITED_FAILURE,
+        });
+    });
+
+    it("options が 500 のときは汎用文言のまま (429 だけを特別扱いする)", async () => {
+        // negative control: 429 判定が「あらゆる失敗」に反応していないことを示す
+        stubWebAuthnApis();
+        fetchMock.mockResolvedValue({ ok: false, status: 500, json: () => Promise.resolve({}) });
+
+        await expect(loginWithPasskey()).resolves.toEqual({
+            status: "failed",
+            message: "パスキーの認証を開始できませんでした。",
+        });
+    });
+
+    it("登録 options が 429 のとき流量制限の文言を返す", async () => {
+        stubWebAuthnApis();
+        fetchMock.mockResolvedValue({ ok: false, status: 429, json: () => Promise.resolve({}) });
+
+        await expect(createPasskeyCredential()).resolves.toEqual({
+            status: "failed",
+            message: RATE_LIMITED_FAILURE,
+        });
+    });
+
+    it("POST が 429 のとき本文の英語 message ではなく流量制限の文言を返す", async () => {
+        const credentials = stubWebAuthnApis();
+        fetchMock.mockImplementation((url: string) =>
+            url.endsWith("/options")
+                ? Promise.resolve(optionsResponse(loginOptions))
+                : Promise.resolve({
+                      ok: false,
+                      status: 429,
+                      json: () => Promise.resolve({ message: "Too Many Requests" }),
+                  }),
+        );
+
+        const credential = Object.create(
+            (window.PublicKeyCredential as unknown as { prototype: object }).prototype,
+        ) as Record<string, unknown>;
+        credential.id = "cred-id";
+        credential.rawId = new Uint8Array([1, 2, 3, 4]).buffer;
+        credential.type = "public-key";
+        credential.response = {};
+        credentials.get.mockResolvedValue(credential);
+
+        await expect(loginWithPasskey()).resolves.toEqual({
+            status: "failed",
+            message: RATE_LIMITED_FAILURE,
+        });
+    });
+
     it("options 取得は Accept: application/json を送る", async () => {
         stubWebAuthnApis();
         fetchMock.mockResolvedValue({ ok: false, status: 500, json: () => Promise.resolve({}) });

@@ -231,7 +231,9 @@ class DashboardService
             storageUsedBytes: $used,
             storageLimitBytes: $limit,
             storageUsagePercent: $percent,
-            hasBillingAccess: $this->billingAccess->hasActiveAccess($organization),
+            // 真偽値へ潰さず state をそのまま渡す (画面が未契約と支払い不健全を区別するため)。
+            // hasActiveAccess() は state()->grantsAccess() の 1 行なのでクエリ本数は変わらない。
+            billingState: $this->billingAccess->state($organization),
         );
     }
 }

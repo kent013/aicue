@@ -15,7 +15,7 @@ function billingData(overrides: Partial<BillingSummary> = {}): BillingSummary {
         storage_used_bytes: 250 * 1024 * 1024,
         storage_limit_bytes: 1024 * 1024 * 1024,
         storage_usage_percent: 25,
-        has_billing_access: true,
+        billing_state: "subscribed",
         ...overrides,
     };
 }
@@ -245,11 +245,46 @@ describe("Dashboard", () => {
         expect(screen.getByTestId("stat-tickets")).toHaveTextContent("残高が少なくなっています");
     });
 
-    it("has_billing_access=false で billing callout が出る (支払い確認文言 + /billing CTA)", () => {
+    it("billing_state=no_subscription で「プランを選ぶ」callout が出る (F-2-01)", () => {
         render(Dashboard, {
             props: {
                 dashboard: dashboardData({
-                    billing: billingData({ has_billing_access: false }),
+                    billing: billingData({ billing_state: "no_subscription" }),
+                }),
+            },
+        });
+
+        // 一度も契約していないユーザーに支払い失敗を告げないこと (F-2-01 の本体)
+        const body = screen.getByTestId("billing-callout-body");
+        expect(body).toHaveTextContent("ご利用にはプランの選択が必要です。");
+        expect(body).not.toHaveTextContent("お支払いが確認できない");
+        expect(screen.getByText("プランを選ぶ").getAttribute("href")).toMatch(
+            /\/onboarding\/checkout$/,
+        );
+    });
+
+    it("billing_state=pending_checkout で「プラン選択へ」callout が出る", () => {
+        render(Dashboard, {
+            props: {
+                dashboard: dashboardData({
+                    billing: billingData({ billing_state: "pending_checkout" }),
+                }),
+            },
+        });
+
+        expect(screen.getByTestId("billing-callout-body")).toHaveTextContent(
+            "お支払いのお手続きが完了していません。",
+        );
+        expect(screen.getByText("プラン選択へ").getAttribute("href")).toMatch(
+            /\/onboarding\/checkout$/,
+        );
+    });
+
+    it("billing_state=expired_checkout で billing callout が出る (支払い確認文言 + /billing CTA)", () => {
+        render(Dashboard, {
+            props: {
+                dashboard: dashboardData({
+                    billing: billingData({ billing_state: "expired_checkout" }),
                 }),
             },
         });
@@ -266,11 +301,24 @@ describe("Dashboard", () => {
         );
     });
 
-    it("has_billing_access=true で billing callout は出ない", () => {
+    it("billing_state=subscribed で billing callout は出ない", () => {
         render(Dashboard, {
             props: {
                 dashboard: dashboardData({
-                    billing: billingData({ has_billing_access: true }),
+                    billing: billingData({ billing_state: "subscribed" }),
+                }),
+            },
+        });
+
+        expect(screen.queryByTestId("billing-callout")).toBeNull();
+    });
+
+    it("billing_state=active_free_plan で billing callout は出ない", () => {
+        // negative control: 非表示の 2 状態を別々に固定する (片方だけの取りこぼしを防ぐ)
+        render(Dashboard, {
+            props: {
+                dashboard: dashboardData({
+                    billing: billingData({ billing_state: "active_free_plan" }),
                 }),
             },
         });
