@@ -17,6 +17,7 @@ use App\Jobs\Manual\RunManualAnalysis;
 use App\Jobs\Manual\RunManualRender;
 use App\Mail\InquiryAcknowledgementMail;
 use App\Mail\InquiryReceivedMail;
+use App\Notifications\Account\AccountDeletionRequestedNotification;
 use App\Notifications\Billing\AutoRechargeActionRequiredNotification;
 use App\Notifications\Billing\AutoRechargeDisabledNotification;
 use App\Notifications\Billing\AutoRechargeEnabledNotification;
@@ -236,6 +237,14 @@ function jobDedupExemptions(): array
             'サブスク決済失敗のお知らせ。支払い自体は Stripe 側の請求書で一意に管理され、'
             .'重複受信しても同じ請求書へ誘導するだけなので二重支払いにはならない。',
         ),
+        AccountDeletionRequestedNotification::class => new ExemptionEntry(
+            JobDedupExemption::DuplicateDeliveryAccepted,
+            '退会予約を受け付けたことのお知らせ。ドメイン状態を一切書かず (via() は予約の生存を'
+            .'読むだけ)、重複受信しても案内先は /settings の取消ボタンで、支払い等の操作を'
+            .'新たに発生させない。**job 実行の dedup は主張しない** — 保証しているのは'
+            .'「予約操作からの job 生成は最大 1 件」までで、それは requestAccountDeletion() の'
+            .'冪等 no-op (永続状態遷移) が担う。',
+        ),
         RenewalReminderNotification::class => new ExemptionEntry(
             JobDedupExemption::DuplicateDeliveryAccepted,
             '契約更新のリマインダ。ドメイン状態を書かず、重複受信しても案内内容が同一で'
@@ -252,7 +261,7 @@ function jobDedupExemptions(): array
  */
 function jobDedupExemptionCap(): int
 {
-    return 14;
+    return 15;
 }
 
 /**
@@ -264,7 +273,7 @@ function jobDedupExemptionCap(): int
 function jobDedupExemptionCapByCase(): array
 {
     return [
-        JobDedupExemption::DuplicateDeliveryAccepted->value => 8,
+        JobDedupExemption::DuplicateDeliveryAccepted->value => 9,
         JobDedupExemption::IdempotentDeletion->value => 2,
         JobDedupExemption::ConvergentStateSync->value => 3,
         JobDedupExemption::GuardedByDownstreamConstraint->value => 1,

@@ -91,6 +91,14 @@ function securityEventRecordingMap(): array
             'caller' => OrganizationMembershipService::class,
             'covered_by' => 'tests/Feature/Auth/AccountDeletionTest.php',
         ],
+        SecurityEventType::AccountDeletionRequested->value => [
+            'caller' => OrganizationMembershipService::class,
+            'covered_by' => 'tests/Feature/Auth/AccountDeletionGraceTest.php',
+        ],
+        SecurityEventType::AccountDeletionCancelled->value => [
+            'caller' => OrganizationMembershipService::class,
+            'covered_by' => 'tests/Feature/Auth/AccountDeletionGraceTest.php',
+        ],
         SecurityEventType::SocialAccountLinked->value => [
             'caller' => SocialAccountService::class,
             'covered_by' => 'tests/Feature/Security/SecurityAuditTrailCoverageTest.php',

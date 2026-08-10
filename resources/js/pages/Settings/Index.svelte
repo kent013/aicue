@@ -17,13 +17,17 @@
     import { withRecentAuth, type RecentAuthStatus } from "@/lib/recent-auth";
     import { Settings } from "@lucide/svelte";
     import type { SharedProps } from "@/lib/shared-props";
-    import type { AccountDeletionBlocker } from "@/types/account";
+    import type { AccountDeletionBlocker, AccountDeletionState } from "@/types/account";
 
     // ページ専用 props 型 (SharedProps を継承しページ固有 prop を足す。多重キャスト排除)。
     // SharedProps に errors フィールドは無く、Inertia が別途注入するため継承衝突しない。
     interface SettingsPageProps extends SharedProps {
         /** 退会をブロックしている組織と次の一手 (表示時点のスナップショット) */
         accountDeletionBlockers?: AccountDeletionBlocker[];
+        /** 退会予約 (猶予期間つき削除) の状態。欠落 = 未予約として扱う */
+        accountDeletionState?: AccountDeletionState;
+        /** 未予約時の主導線ラベル用の猶予日数 (サーバの SSOT 由来。欠落 = 日数を出さない) */
+        accountDeletionGraceDays?: number;
         /** password が設定済みか。欠落 = 状態不明 (既定値に倒さない。下記 passwordState 参照) */
         hasPassword?: boolean;
         errors?: Record<string, string | string[]>;
@@ -32,6 +36,30 @@
     const props = $derived(page.props as unknown as SettingsPageProps);
     const appName = $derived(props.appName ?? "");
     const accountDeletionBlockers = $derived(props.accountDeletionBlockers ?? []);
+    const accountDeletionState = $derived(props.accountDeletionState ?? null);
+    /** 予約中か。両方揃っているときだけ true (PHP 側 AccountDeletionStateDto::isPending() と同義) */
+    const pendingDeletion = $derived(
+        accountDeletionState !== null &&
+            accountDeletionState.requestedAt !== null &&
+            accountDeletionState.purgeAfter !== null,
+    );
+    const purgeAfterLabel = $derived.by((): string => {
+        const iso = accountDeletionState?.purgeAfter;
+        if (!iso) return "";
+        const date = new Date(iso);
+        if (Number.isNaN(date.getTime())) return "";
+        return date.toLocaleString("ja-JP", {
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+        });
+    });
+    /** 主導線ラベルの日数。予約中は予約時の導出値、未予約は現行 config 由来の日数 */
+    const graceDays = $derived(
+        accountDeletionState?.graceDays ?? props.accountDeletionGraceDays ?? null,
+    );
 
     /** 別組織へ切り替える導線の失敗表示 (押したのに何も起きない = 詰みを作らない) */
     let switchError = $state<string | null>(null);
@@ -153,6 +181,8 @@
 
     let deleteDialogOpen = $state(false);
     let deleting = $state(false);
+    let requestingDeletion = $state(false);
+    let cancellingDeletion = $state(false);
 
     /* ---- recent-auth (step-up) precheck。stale なら再認証モーダルを挟んで再開する ---- */
     let recentAuthOpen = $state(false);
@@ -174,6 +204,45 @@
         const action = pendingAction;
         pendingAction = null;
         action?.();
+    }
+
+    /**
+     * 退会の予約 (猶予つき削除)。UI の主導線。
+     * 即時削除と同水準の機微操作なのでサーバ側 recent-auth が最終ゲート。precheck を挟む。
+     * ブロッカーがあっても disabled にしない (禁止事項 8) — 予約自体はサーバが受理する。
+     */
+    function requestAccountDeletion(): void {
+        guardWithRecentAuth(() => {
+            router.post(
+                "/settings/account/deletion-request",
+                {},
+                {
+                    preserveScroll: true,
+                    onStart: () => {
+                        requestingDeletion = true;
+                    },
+                    onFinish: () => {
+                        requestingDeletion = false;
+                    },
+                },
+            );
+        });
+    }
+
+    /**
+     * 退会予約の取消 (誤操作救済の本体)。**step-up を挟まない** —
+     * 救済経路に関門を足すと「取り消せない」詰みの再生産になる (サーバ側も同じ契約)。
+     */
+    function cancelAccountDeletion(): void {
+        router.delete("/settings/account/deletion-request", {
+            preserveScroll: true,
+            onStart: () => {
+                cancellingDeletion = true;
+            },
+            onFinish: () => {
+                cancellingDeletion = false;
+            },
+        });
     }
 
     // アカウント削除は recent-auth (step-up) 必須。precheck で鮮度を確認してから送る
@@ -379,15 +448,58 @@
                 {#if accountError}
                     <Alert type="danger" class="mb-3">{accountError}</Alert>
                 {/if}
-                <Button
-                    variant="danger-outline"
-                    onclick={() => {
-                        deleteDialogOpen = true;
-                    }}
-                    testId="delete-account-button"
-                >
-                    アカウントを削除
-                </Button>
+                {#if pendingDeletion}
+                    <!-- 予約中は削除ボタン群を出さず、バナー (取消 + 次の一手) だけを出す。
+                         サーバ側でも settings.account.destroy は凍結で遮断されており、
+                         「押せるのに必ず失敗するボタン」を残さない。 -->
+                    <Alert
+                        type="warning"
+                        title="退会を予約しています"
+                        testId="deletion-request-banner"
+                        class="mb-3"
+                    >
+                        <p data-testid="deletion-request-purge-after">
+                            {purgeAfterLabel} に、このアカウントとすべてのデータを削除します。
+                        </p>
+                        <p class="mt-1">
+                            それまではいつでも取り消せます。上に「対応が必要」と出ている場合は削除できないため、
+                            毎日 1 回自動で削除を再試行します。
+                        </p>
+                        {#snippet action()}
+                            <Button
+                                onclick={cancelAccountDeletion}
+                                loading={cancellingDeletion}
+                                testId="cancel-deletion-request-button"
+                            >
+                                退会を取り消す
+                            </Button>
+                        {/snippet}
+                    </Alert>
+                {:else}
+                    <div class="flex flex-col items-start gap-3">
+                        <Button
+                            variant="danger"
+                            onclick={requestAccountDeletion}
+                            loading={requestingDeletion}
+                            testId="request-deletion-button"
+                        >
+                            {graceDays === null
+                                ? "退会する (取り消せます)"
+                                : `${graceDays}日後に削除 (取り消せます)`}
+                        </Button>
+                        <!-- 副導線: 即時削除 (取り消せない)。testId は既存のまま変えない -->
+                        <Button
+                            variant="danger-ghost"
+                            size="sm"
+                            onclick={() => {
+                                deleteDialogOpen = true;
+                            }}
+                            testId="delete-account-button"
+                        >
+                            今すぐ完全に削除する (取り消せません)
+                        </Button>
+                    </div>
+                {/if}
             </DangerZone>
         </div>
 

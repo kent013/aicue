@@ -26,8 +26,12 @@ function recentAuthRequiredRouteNames(): array
         'organizations.api-keys.revoke',
         // OAuth セッション失効 (組織管理経路。API キー失効と同じ機微度)
         'organizations.api-keys.sessions.revoke',
-        // アカウント削除
+        // アカウント削除 (即時)
         'settings.account.destroy',
+        // 退会の予約 (猶予 30 日)。即時削除と同水準の機微操作のため step-up 必須。
+        // **取消 (settings.account.deletion-request.destroy) は追加しない** —
+        // 誤操作救済の本体であり、救済経路に関門を足すと「取り消せない」詰みの再生産になる
+        'settings.account.deletion-request.store',
         // パスワード初回設定 (認証手段を増やす操作。セッション奪取からの永続化を防ぐため step-up 必須)
         'settings.password.store',
         // オーナー移譲

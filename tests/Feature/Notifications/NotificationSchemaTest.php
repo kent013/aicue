@@ -2,9 +2,11 @@
 
 declare(strict_types=1);
 
+use App\DataTransferObjects\Notification\AccountDeletionRequestedPayload;
 use App\DataTransferObjects\Notification\InvitationReceivedPayload;
 use App\DataTransferObjects\Notification\ManualJobPayload;
 use App\DataTransferObjects\Notification\TicketBalanceLowPayload;
+use App\Notifications\InApp\AccountDeletionRequestedNotification;
 use App\Notifications\InApp\InvitationReceivedNotification;
 use App\Notifications\InApp\ManualAnalyzedNotification;
 use App\Notifications\InApp\ManualRenderedNotification;
@@ -64,10 +66,16 @@ test('v1 の全通知種別で organization_id が非 null で書き込まれる
     $owner->notify(new ManualRenderedNotification($organization->id, manualJobPayloadFixture(succeeded: false)));
     $owner->notify(new InvitationReceivedNotification($organization->id, new InvitationReceivedPayload('テスト組織')));
     $owner->notify(new TicketBalanceLowNotification($organization->id, new TicketBalanceLowPayload('テスト組織', 3, 5)));
+    // T142: 退会予約通知は「予約時点の current org」を表示文脈として持つ (org 非依存通知にしない)
+    $owner->notify(new AccountDeletionRequestedNotification(
+        $organization->id,
+        new AccountDeletionRequestedPayload('2026-09-09T09:00:00+09:00', 30),
+    ));
 
-    expect(DB::table('notifications')->count())->toBe(4);
+    expect(DB::table('notifications')->count())->toBe(5);
     expect(DB::table('notifications')->whereNull('organization_id')->count())->toBe(0);
     expect(DB::table('notifications')->pluck('type')->sort()->values()->all())->toBe([
+        'account_deletion_requested',
         'invitation_received',
         'manual_analyzed',
         'manual_rendered',
@@ -116,6 +124,13 @@ test('InvitationReceivedPayload / TicketBalanceLowPayload の tryFromArray も�
     expect(InvitationReceivedPayload::tryFromArray(['organization_name' => 'X']))->not->toBeNull();
     expect(InvitationReceivedPayload::tryFromArray(['organization_name' => 1]))->toBeNull();
     expect(InvitationReceivedPayload::tryFromArray([]))->toBeNull();
+
+    expect(AccountDeletionRequestedPayload::tryFromArray(
+        ['purge_after' => '2026-09-09T09:00:00+09:00', 'grace_days' => 30],
+    ))->not->toBeNull();
+    expect(AccountDeletionRequestedPayload::tryFromArray(['purge_after' => 1, 'grace_days' => 30]))->toBeNull();
+    expect(AccountDeletionRequestedPayload::tryFromArray(['purge_after' => 'x', 'grace_days' => '30']))->toBeNull();
+    expect(AccountDeletionRequestedPayload::tryFromArray([]))->toBeNull();
 
     expect(TicketBalanceLowPayload::tryFromArray([
         'organization_name' => 'X', 'balance' => 3, 'threshold' => 5,

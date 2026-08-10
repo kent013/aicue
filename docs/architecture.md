@@ -1418,3 +1418,62 @@ REST API v1 の `Idempotency-Key` は **本処理の前に claim する**方式�
   使われていることが前提 (既存の `billing:send-billing-reminders` /
   `render:reconcile-outputs` と同じ。本節で新しく持ち込む前提ではない)。
   満たさないと多重実行しうるが DELETE は冪等で、害は `report()` の重複に留まる。
+
+## 退会の猶予期間つき削除 (凍結方式・30 日)
+
+lctl 台帳 feature `account-deletion-billing-guard` の標準形 v1 (裁定 AG-128) の必須 (2)。
+設計は `devnotes/20260809-0908-account-deletion-grace/detailed-design.md` の PR-B。
+**猶予つき予約と即時削除は併存する** (どちらか一方に寄せない)。
+
+- **凍結方式の定義は「users 行の生死を変えない」**。`SoftDeletes` は使わない —
+  FK cascade / nullOnDelete / CipherSweet の blind index (`email_index`) の一意照合 /
+  passkey / OAuth セッション / 招待の email 照合が、すべて users 行の実在を前提にしている。
+  予約は `users.deletion_requested_at` / `users.deletion_purge_after` の 2 列で表す。
+- **`deletion_purge_after` は絶対時刻**で持つ (猶予日数のスナップショットを持たない)。
+  不可逆な物理削除の期日に config 変更を遡及させないため。猶予日数は
+  `purge_after - requested_at` から導出する。値の SSOT は
+  `App\Support\Account\AccountDeletionGrace` (`config/account.php`。**env 不使用**)。
+- **状態機械は DB で閉じている**。CHECK 制約 2 本
+  (`users_deletion_request_pair_check` = 両列同時 / `users_deletion_purge_after_order_check`
+  = 期限が予約時刻以降) が片列だけの非正規状態を拒否する。アプリ側の `isPending()` は
+  同じ定義 (両列が揃うときだけ true) で、制約が無効化されても判定がぶれない。
+- **凍結は deny-by-default**。`routes/web.php` の `auth` + `verified` group 全体に
+  `not-pending-deletion` を直付けし (route cache に焼き込むため後付け binder は使わない)、
+  `App\Enums\Account\AccountDeletionFreezeAllowance` の **exact case のみ**通す
+  (wildcard 禁止・30 文字以上の根拠必須)。通すのは「取消」「取消への step-up」
+  「退会ブロッカーの解消 (解約 / 移譲 / メンバー整理 / 招待取消)」「通知の閲覧」だけ。
+  遮断は **302 → `/settings`** (403 で突き放さない)、JSON/XHR は **409**。
+  母集団と allowlist の一致は `AccountDeletionFreezeRouteGateTest`、実挙動は
+  `tests/Feature/Auth/AccountDeletionFreezeTest.php` が固定する。
+- **`settings.account.destroy` (即時削除) は allowlist に入れない**。予約中に即時削除を通すと
+  30 日猶予の迂回口になる。「今すぐ消したい」なら **取消 → 即時削除**の 2 手を踏む。
+- **実行位置**は `bootstrap/app.php` の priority list が正本で、テナント境界 404
+  (`EnsureProjectBelongsToCurrentOrganization`) より**後**・課金ゲートの直後に置く。
+  302 で短絡するため前に置くと存在オラクルになる (セキュリティ不変条件 10)。
+  ログイン・ログアウト・パスワード再設定・メール確認・2FA challenge・passkey ログインは
+  group の外にあり、**認証回復と離脱の手段は構造的に凍結されない**。
+- **取消に step-up を課さない**。誤操作救済の本体であり、関門を足すと「取り消せない」詰みの
+  再生産になる。受け入れるリスクは「奪取者が予約を取り消せる」ことだが、失われるのは
+  意思表示だけで本人は再予約できる (逆は本人が救済できない = 被害が重い)。
+  予約 (`settings.account.deletion-request.store`) には recent-auth を課す。
+- **cron**: `account:purge-deletion-requests --apply` (daily・`onOneServer`) が
+  期限到来の予約を執行する。判定は既存の
+  `OrganizationMembershipService::deleteAccount()` がそのまま行う (課金ガードの
+  ロック下再評価を継承)。予約 / 取消 / 執行はいずれも `lockForMembershipWrite`
+  (users 昇順 → organizations 昇順) の canonical 順序に乗る。
+- **監視対象**: 本コマンドの**終了コード**と `report()`。退会ブロッカーは**業務上の保留**で
+  SUCCESS のまま次へ進み (予約は維持し翌日再試行)、インフラ障害・不変条件違反・
+  予約列の非正規行は `unexpected` として **FAILURE** になる。出力は**件数のみ**で
+  user id / email を載せない。保留は **走査後に件数を集約した `RuntimeException` で report** する
+  (`ValidationException` を素で `report()` しても Laravel の既定 dontReport が握り潰すため。
+  T142 で実測)。保留が滞留すると 30 日を過ぎた予約が消えないままになるので、
+  `blocked` の継続・増加を正常成功として扱わない。
+- **2FA 必須組織との相互作用**: 2FA 強制ゲートは priority list で凍結より**前**に走る。
+  未準拠ユーザーの取消 DELETE は 2FA ゲートが `settings.security` へ倒すため、
+  **`settings.security` を凍結の allowlist に入れないと「取消は 2FA ゲート / 2FA 設定は凍結」の
+  相互ブロックで詰む** (T142 で実測して発見)。allowlist に入っているのはこの理由である。
+- **保証しないもの (誇張しない)**: 凍結は**アプリの web route だけ**に効く。
+  `api/v1` / MCP / OAuth token 経由の経路には**沈黙する** (母集団に入っていない)。
+  通知の重複配送も止めない (保証しているのは「予約操作からの job 生成は最大 1 件」まで)。
+  予約中のユーザーが他者から招待を受けること自体は止めない
+  (受諾 route は凍結対象なので受諾はできない)。

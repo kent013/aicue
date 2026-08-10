@@ -11,15 +11,34 @@ use App\Services\Organization\OrganizationMembershipService;
  * 3 分類 (directLock / delegatedToLocked / exempt) への登録を強制する。加えてメソッドソースを
  * 検査し、実際にロックを呼んでいることを保証する:
  * - directLock 群: メソッドソースに `lockForMembershipWrite(` が現れること。
- * - delegatedToLocked 群: ロック済み内部メソッド (`joinOrganization(`) 呼び出しが現れること。
+ * - delegatedToLocked 群: 宣言した委譲先 (メソッド名 => 必須の呼び出し文字列の map) が
+ *   メソッドソースに現れること。
+ *   ★かつては `joinOrganization(` のハードコードだった。別のロック済みメソッドへ委譲する経路
+ *   (executeAccountDeletionRequest → deleteAccount) を足したときに実ロック検査が
+ *   空振りしないよう map へ一般化してある (既存 3 本の判定は等価)。
  * - 未分類メソッドがあれば fail (drift 検出)。
  */
 
 test('OrganizationMembershipService の書き込みメソッドは共通ロック規約に準拠する', function (): void {
     // 自身の tx 冒頭で直接ロックする mutating メソッド
-    $directLock = ['applyConsoleRole', 'changeRole', 'removeMember', 'transferOwnership', 'deleteAccount'];
-    // ロック済み内部メソッド (joinOrganization) 経由で間接的にロックされる受諾経路
-    $delegatedToLocked = ['acceptInvitation', 'acceptInvitationIfValid', 'acceptPendingInvitation'];
+    $directLock = [
+        'applyConsoleRole', 'changeRole', 'removeMember', 'transferOwnership', 'deleteAccount',
+        // 退会予約 / 取消 (猶予期間つき削除・凍結方式)。users 行だけを書くが、
+        // deleteAccount と同じ canonical 順序 (users 昇順 → organizations 昇順) の起点に乗せ、
+        // 新しいロック順序を作らない (順序の SoT を 2 クラスに分けない)
+        'requestAccountDeletion', 'cancelAccountDeletion',
+    ];
+    // ロック済み内部メソッド経由で間接的にロックされる経路 (メソッド名 => 必須の委譲先呼び出し)。
+    // ★ハードコードの 'joinOrganization(' を map へ一般化した (既存 3 本の判定は等価のまま)。
+    //   委譲先が 1 種類しか無い前提を残すと、別のロック済みメソッドへ委譲する経路を
+    //   足したときに「登録はできるが実ロックの検査は空振り」になる。
+    $delegatedToLocked = [
+        'acceptInvitation' => 'joinOrganization(',
+        'acceptInvitationIfValid' => 'joinOrganization(',
+        'acceptPendingInvitation' => 'joinOrganization(',
+        // 予約の執行 (日次バッチ専用)。ロック・ガード・削除はすべて deleteAccount が持つ
+        'executeAccountDeletionRequest' => 'deleteAccount(',
+    ];
     // ロック不要 (membership/role を変えない) と判断した書き込みメソッド (根拠付き exempt)
     $exempt = [
         'inviteMember',     // 招待レコード生成のみ (membership/role 不変)
@@ -47,7 +66,7 @@ test('OrganizationMembershipService の書き込みメソッドは共通ロッ�
         ->all();
 
     // 1. 分類漏れ検出
-    $classified = array_merge($directLock, $delegatedToLocked, $exempt);
+    $classified = array_merge($directLock, array_keys($delegatedToLocked), $exempt);
     expect(array_values(array_diff($ownPublicMethods, $classified)))
         ->toBe([], '新しい書き込みメソッドは directLock / delegatedToLocked / exempt に分類すること');
 
@@ -67,9 +86,9 @@ test('OrganizationMembershipService の書き込みメソッドは共通ロッ�
         // {$method} は lockForMembershipWrite を直接呼ぶこと (toContain は message 引数を取らない)
         expect(str_contains($bodyOf($method), 'lockForMembershipWrite('))->toBeTrue();
     }
-    foreach ($delegatedToLocked as $method) {
-        // {$method} はロック済み joinOrganization を経由すること
-        expect(str_contains($bodyOf($method), 'joinOrganization('))->toBeTrue();
+    foreach ($delegatedToLocked as $method => $requiredCall) {
+        // {$method} は宣言した委譲先 ({$requiredCall}) を経由すること
+        expect(str_contains($bodyOf($method), $requiredCall))->toBeTrue();
     }
 
     // 3. [ロック順序 guard] deleteAccount 本文で最初の lockForMembershipWrite( が

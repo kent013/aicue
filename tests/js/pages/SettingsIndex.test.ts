@@ -674,3 +674,114 @@ describe("Settings/Index パスワードカードの出し分け (施策 7)", ()
         expect(formHolder.passwordSetup?.post as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
     });
 });
+
+/*
+ * T142: 猶予期間つき退会 (凍結方式) の UI 契約。
+ * - 未予約: 主導線は「N 日後に削除 (取り消せます)」、即時削除は副導線として併存
+ * - 予約中: バナー + 取消ボタンだけを出し、削除ボタン群は出さない
+ *   (サーバ側で settings.account.destroy が凍結遮断されることと UI を一致させる)
+ */
+describe("Settings/Index 退会予約 (猶予期間つき削除)", () => {
+    it("未予約時は予約が主導線で、即時削除が副導線として併存する", () => {
+        setProps({
+            accountDeletionState: { requestedAt: null, purgeAfter: null, graceDays: null },
+            accountDeletionGraceDays: 30,
+        });
+        render(Index, { props: {} });
+
+        const request = screen.getByTestId("request-deletion-button");
+        const immediate = screen.getByTestId("delete-account-button");
+        expect(request).toHaveTextContent("30日後に削除 (取り消せます)");
+        expect(immediate).toHaveTextContent("今すぐ完全に削除する (取り消せません)");
+
+        // 主導線が先に現れる (視覚的優先度を口約束にしない)
+        expect(request.compareDocumentPosition(immediate) & Node.DOCUMENT_POSITION_FOLLOWING)
+            .toBeTruthy();
+        // 予約バナーは出ない
+        expect(screen.queryByTestId("deletion-request-banner")).toBeNull();
+    });
+
+    it("予約中はバナーと取消ボタンが出て、削除ボタン群は出ない", () => {
+        setProps({
+            accountDeletionState: {
+                requestedAt: "2026-08-10T09:00:00+09:00",
+                purgeAfter: "2026-09-09T09:00:00+09:00",
+                graceDays: 30,
+            },
+            accountDeletionGraceDays: 30,
+        });
+        render(Index, { props: {} });
+
+        expect(screen.getByTestId("deletion-request-banner")).toBeInTheDocument();
+        expect(screen.getByTestId("cancel-deletion-request-button")).toBeInTheDocument();
+        expect(screen.getByTestId("deletion-request-purge-after")).toHaveTextContent("2026");
+        expect(screen.queryByTestId("request-deletion-button")).toBeNull();
+        expect(screen.queryByTestId("delete-account-button")).toBeNull();
+    });
+
+    it("取消は step-up precheck を挟まずに DELETE する (救済経路に関門を置かない)", async () => {
+        setProps({
+            accountDeletionState: {
+                requestedAt: "2026-08-10T09:00:00+09:00",
+                purgeAfter: "2026-09-09T09:00:00+09:00",
+                graceDays: 30,
+            },
+        });
+        const fetchSpy = vi.fn();
+        vi.stubGlobal("fetch", fetchSpy);
+        render(Index, { props: {} });
+
+        await fireEvent.click(screen.getByTestId("cancel-deletion-request-button"));
+
+        await waitFor(() => expect(routerDeleteMock).toHaveBeenCalled());
+        expect(routerDeleteMock.mock.calls.at(-1)?.[0]).toBe("/settings/account/deletion-request");
+        // recent-auth の precheck (fetch) を一切踏まない
+        expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it("予約は recent-auth precheck を通ってから POST する", async () => {
+        setProps({
+            accountDeletionState: { requestedAt: null, purgeAfter: null, graceDays: null },
+            accountDeletionGraceDays: 30,
+        });
+        stubRecentAuthFresh();
+        render(Index, { props: {} });
+
+        await fireEvent.click(screen.getByTestId("request-deletion-button"));
+
+        await waitFor(() => expect(routerPostMock).toHaveBeenCalled());
+        expect(routerPostMock.mock.calls.at(-1)?.[0]).toBe("/settings/account/deletion-request");
+    });
+
+    it("ブロッカーがあっても予約ボタンは disabled にならない (禁止事項 8)", () => {
+        setProps({
+            accountDeletionBlockers: [
+                { name: "現場A", slug: "genba-a", actions: ["transfer_ownership"] },
+            ],
+            accountDeletionState: { requestedAt: null, purgeAfter: null, graceDays: null },
+            accountDeletionGraceDays: 30,
+        });
+        render(Index, { props: {} });
+
+        expect(screen.getByTestId("request-deletion-button")).not.toBeDisabled();
+        expect(screen.getByTestId("delete-account-button")).not.toBeDisabled();
+    });
+
+    it("予約中でもブロッカーの次の一手は表示され続ける (解消導線を隠さない)", () => {
+        setProps({
+            accountDeletionBlockers: [
+                { name: "現場A", slug: "genba-a", actions: ["transfer_ownership"] },
+            ],
+            accountDeletionState: {
+                requestedAt: "2026-08-10T09:00:00+09:00",
+                purgeAfter: "2026-09-09T09:00:00+09:00",
+                graceDays: 30,
+            },
+        });
+        render(Index, { props: {} });
+
+        expect(screen.getByText("退会するには先に対応が必要です")).toBeInTheDocument();
+        expect(screen.getByText("オーナーを移譲する")).toBeInTheDocument();
+        expect(screen.getByTestId("cancel-deletion-request-button")).toBeInTheDocument();
+    });
+});

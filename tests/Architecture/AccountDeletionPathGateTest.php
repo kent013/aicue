@@ -84,6 +84,7 @@ use Webmozart\Assert\Assert;
  * @var list<string>
  */
 const DELETION_PATH_ROOTS = [
+    'App\Console\Commands\Account\PurgeDeletionRequestsCommand::handle',
     'App\Http\Controllers\Settings\AccountController::destroy',
     'App\Services\Organization\OrganizationMembershipService::deleteAccount',
 ];
@@ -97,6 +98,12 @@ const DELETION_PATH_ROOTS = [
  * @var list<string>
  */
 const DELETION_PATH_CLOSURE = [
+    // ↓ T142 (PR-B) の猶予期間つき削除で閉包に入った 6 クラス。いずれも
+    //   「予約列の読み書き」「猶予日数の解決」「予約したことの通知」だけを行い、
+    //   決済事業者 SDK への到達辺を持たない (検査 2 が機械的に固定する)。
+    'App\Console\Commands\Account\PurgeDeletionRequestsCommand',
+    'App\DataTransferObjects\Account\AccountDeletionStateDto',
+    'App\DataTransferObjects\Notification\AccountDeletionRequestedPayload',
     'App\DataTransferObjects\Invitations\PendingInvitationForUserDto',
     'App\DataTransferObjects\Notification\InvitationReceivedPayload',
     'App\DataTransferObjects\Notification\ManualJobPayload',
@@ -140,6 +147,8 @@ const DELETION_PATH_CLOSURE = [
     'App\Models\SecurityAuditEvent',
     'App\Models\User',
     'App\Models\VideoManual',
+    'App\Notifications\Account\AccountDeletionRequestedNotification',
+    'App\Notifications\InApp\AccountDeletionRequestedNotification',
     'App\Notifications\InApp\InvitationReceivedNotification',
     'App\Notifications\InApp\ManualAnalyzedNotification',
     'App\Notifications\InApp\ManualRenderedNotification',
@@ -150,6 +159,7 @@ const DELETION_PATH_CLOSURE = [
     'App\Services\Organization\OrganizationMembershipService',
     'App\Services\Project\DefaultProjectResolver',
     'App\Services\Security\SecurityEventRecorder',
+    'App\Support\Account\AccountDeletionGrace',
 ];
 
 /**
@@ -1044,6 +1054,9 @@ test('検査 8: 起点集合は exact-fit で pin される', function (): void 
     //   PR-B (猶予期間つき削除) で PurgeDeletionRequestsCommand::handle を 3 本目として足すときは
     //   この pin も同時に更新する (意図的な摩擦)。
     expect(DELETION_PATH_ROOTS)->toBe([
+        // T142 (PR-B) で日次執行バッチを 3 本目として追加した。執行経路も依存閉包の対象である
+        // (バッチから決済事業者 SDK へ到達したら、退会が「解約を代行する」機能に化ける)。
+        'App\Console\Commands\Account\PurgeDeletionRequestsCommand::handle',
         'App\Http\Controllers\Settings\AccountController::destroy',
         'App\Services\Organization\OrganizationMembershipService::deleteAccount',
     ], '退会経路の起点を変えるときは、なぜ変えるのかをレビューで残してください。');

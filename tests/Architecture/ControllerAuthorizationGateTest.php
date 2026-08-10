@@ -102,6 +102,16 @@ function controllerAuthorizationExemptions(): array
             .'他人のアカウントへ到達する経路がコード上存在しない。'
             .'別軸の防御として recent-auth (step-up) middleware を必須にしている。'],
 
+        'settings.account.deletion-request.store' => [$selfScoped,
+            '対象は $request->user() 自身の退会予約のみ。route に他者を指せる parameter が 1 つも無く、'
+            .'他人のアカウントへ到達する経路がコード上存在しない。即時削除と同水準の機微操作のため'
+            .'別軸の防御として recent-auth (step-up) middleware を必須にしている。'],
+
+        'settings.account.deletion-request.destroy' => [$selfScoped,
+            '対象は $request->user() 自身の退会予約の取消のみ。route に他者を指せる parameter が無く、'
+            .'他人の予約へ到達する経路が存在しない。**誤操作救済の本体**であり権限を増やす操作でもないため、'
+            .'step-up も含めて関門を置かない (救済経路に関門を足すと「取り消せない」詰みの再生産になる)。'],
+
         'settings.password.store' => [$selfScoped,
             '対象は $request->user() 自身のパスワード初回設定のみ。route に他者を指せる parameter が'
             .'無く、他人の credential へ到達する経路がコード上存在しない。'

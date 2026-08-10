@@ -45,6 +45,7 @@ use App\Http\Controllers\Seo\LlmsTxtController;
 use App\Http\Controllers\Seo\RobotsController;
 use App\Http\Controllers\Seo\SitemapController;
 use App\Http\Controllers\Settings\AccountController;
+use App\Http\Controllers\Settings\AccountDeletionRequestController;
 use App\Http\Controllers\Settings\PasswordSetupController;
 use App\Http\Controllers\Settings\ProfileController;
 use App\Http\Controllers\Settings\SecurityController;
@@ -176,7 +177,16 @@ Route::get('/auth/{provider}/callback', [SocialAuthController::class, 'callback'
 | 認証済み
 |--------------------------------------------------------------------------
 */
-Route::middleware(['auth', 'verified'])->group(function (): void {
+/*
+| 退会予約中 (猶予期間つき削除・凍結方式) の凍結対象は **この group 全体**である
+| (`not-pending-deletion` = deny-by-default)。通す route は
+| App\Enums\Account\AccountDeletionFreezeAllowance の exact case のみで、
+| 母集団の内外と allowlist の一致は AccountDeletionFreezeRouteGateTest が固定する。
+| ログイン・ログアウト・パスワード再設定・メール確認・2FA challenge・passkey ログインは
+| **この group の外**にあるため、認証回復と離脱の手段は構造的に凍結されない。
+| 実行位置 (テナント境界 404 より後) の正本は bootstrap/app.php の priority list。
+*/
+Route::middleware(['auth', 'verified', 'not-pending-deletion'])->group(function (): void {
     // ログイン直後の着地点 (課金ゲート外のまま。未契約でも状況把握と復帰導線を提供)
     Route::get('/dashboard', DashboardController::class)->name('dashboard');
 
@@ -210,10 +220,21 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
     // 2FA / ソーシャル連携 / パスキーの管理面 (passkey 一覧の組み立てに DI が要るため Controller)
     Route::get('/settings/security', SecurityController::class)->name('settings.security');
 
-    // アカウント削除は step-up (recent-auth) 必須
+    // アカウント削除 (即時・取り消せない) は step-up (recent-auth) 必須。
+    // 猶予期間つきの予約 (下記) が UI の主導線で、こちらは**副導線として併存**させる
+    // (標準形 v1 は「猶予つき予約と即時削除の両方」を必須にしている)。
     Route::delete('/settings/account', [AccountController::class, 'destroy'])
         ->middleware('recent-auth')
         ->name('settings.account.destroy');
+
+    // 退会の予約 (猶予 30 日)。**UI の主導線**。即時削除と同水準の機微操作のため step-up 必須。
+    Route::post('/settings/account/deletion-request', [AccountDeletionRequestController::class, 'store'])
+        ->middleware('recent-auth')
+        ->name('settings.account.deletion-request.store');
+    // 退会予約の取消。**誤操作救済の本体**なので step-up を課さない
+    // (救済経路に関門を足すと「取り消せない」詰みの再生産になる。取消は権限を増やす操作ではない)。
+    Route::delete('/settings/account/deletion-request', [AccountDeletionRequestController::class, 'destroy'])
+        ->name('settings.account.deletion-request.destroy');
 
     /*
     | 組織。`{organization}` / `{organization:slug}` は MembershipScopedOrganizationBinder

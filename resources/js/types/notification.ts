@@ -10,7 +10,8 @@ export type NotificationType =
     | "manual_analyzed"
     | "manual_rendered"
     | "invitation_received"
-    | "ticket_balance_low";
+    | "ticket_balance_low"
+    | "account_deletion_requested";
 
 /** 解析/レンダ完了通知の payload (manual_analyzed / manual_rendered 共用) */
 export interface ManualJobPayload {
@@ -32,6 +33,13 @@ export interface TicketBalanceLowPayload {
     threshold: number;
 }
 
+/** 退会予約 (猶予期間つき削除) を受け付けたことの通知 payload */
+export interface AccountDeletionRequestedPayload {
+    /** ISO8601。予約した時点の削除予定日時 (取消後も通知履歴には残る) */
+    purge_after: string;
+    grace_days: number;
+}
+
 /**
  * 通知一覧の 1 行。type を discriminant にした union。
  * 未知 type (enum⇔TS の一時的ドリフト) は string として受け、fallback 描画する。
@@ -45,7 +53,12 @@ export interface NotificationItem {
     /** ISO8601 */
     created_at: string;
     /** サーバ側の検証復元に失敗した場合は null (fallback 描画) */
-    payload: ManualJobPayload | InvitationReceivedPayload | TicketBalanceLowPayload | null;
+    payload:
+        | ManualJobPayload
+        | InvitationReceivedPayload
+        | TicketBalanceLowPayload
+        | AccountDeletionRequestedPayload
+        | null;
 }
 
 /** HandleInertiaRequests が共有する notifications props */

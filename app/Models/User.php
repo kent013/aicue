@@ -6,6 +6,7 @@ namespace App\Models;
 
 use App\Enums\OrganizationRole;
 use App\Enums\TwoFactorStatus;
+use Carbon\CarbonImmutable;
 use Database\Factories\UserFactory;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -27,6 +28,15 @@ use ParagonIE\CipherSweet\Transformation\Lowercase;
 use Spatie\LaravelCipherSweet\Concerns\UsesCipherSweet;
 use Spatie\LaravelCipherSweet\Contracts\CipherSweetEncrypted;
 
+/**
+ * T142: 退会予約 (猶予期間つき削除・凍結方式) の予約列。**users 行の生死は変えない**ため
+ * SoftDeletes は使わず、両列が揃っているときだけ「予約中」とみなす
+ * (状態機械は DB の CHECK 制約 users_deletion_request_pair_check が閉じている)。
+ * 保護列であり $fillable 外 (forceFill でのみ書く)。
+ *
+ * @property CarbonImmutable|null $deletion_requested_at
+ * @property CarbonImmutable|null $deletion_purge_after
+ */
 class User extends Authenticatable implements CipherSweetEncrypted, LaratrustUser, MustVerifyEmail, OAuthenticatable, PasskeyUser
 {
     // Passport OAuth guard (mcp-oauth / api-oauth) が withAccessToken() / token() を要求する
@@ -200,6 +210,11 @@ class User extends Authenticatable implements CipherSweetEncrypted, LaratrustUse
             'email_verified_at' => 'datetime',
             'terms_accepted_at' => 'datetime',
             'two_factor_confirmed_at' => 'datetime',
+            // 退会予約 (猶予期間つき削除)。**immutable_datetime** を使う
+            // (AccountDeletionStateDto が CarbonImmutable 前提。'datetime' だと mutable Carbon が
+            // 返り DTO の型と食い違う)。$fillable には入れない = forceFill でのみ書く保護列。
+            'deletion_requested_at' => 'immutable_datetime',
+            'deletion_purge_after' => 'immutable_datetime',
             'password' => 'hashed',
         ];
     }
