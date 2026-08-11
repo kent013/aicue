@@ -33,9 +33,23 @@ const baseProps = {
     job: null,
     previewJob: null,
     playbackJob: null,
+    finishedJob: null,
     coverage: { total_cuts: 1, missing_count: 0, missing_labels: [] },
     canManage: true,
 };
+
+/** 受け取れる完成動画 (サーバが published + download ability + 現行世代を判定済み) */
+function finishedJobBody(overrides: Partial<RenderJobProps> = {}): RenderJobProps {
+    return renderJobBody({
+        id: 77,
+        kind: "render",
+        status: "succeeded",
+        progress: 100,
+        manual_status: "published",
+        placeholder_cut_count: 0,
+        ...overrides,
+    });
+}
 
 function renderJobBody(overrides: Partial<RenderJobProps> = {}): RenderJobProps {
     return {
@@ -167,13 +181,100 @@ describe("RenderPanel", () => {
         expect(screen.getByTestId("render-step-label")).toHaveTextContent("カットを合成中");
     });
 
-    it("published + canManage はダウンロード導線を表示する", () => {
+    it("finishedJob があると完成動画プレイヤーと DL ボタンの両方が出る", () => {
         render(RenderPanel, {
-            props: { ...baseProps, manualStatus: "published" as const },
+            props: {
+                ...baseProps,
+                manualStatus: "published" as const,
+                finishedJob: finishedJobBody(),
+            },
         });
 
-        const link = screen.getByTestId("download-button");
-        expect(link).toHaveAttribute("href", "/projects/1/manuals/5/download");
+        expect(screen.getByTestId("final-video-block")).toBeInTheDocument();
+        expect(screen.getByTestId("final-video")).toBeInTheDocument();
+        expect(screen.getByTestId("download-button")).toHaveAttribute(
+            "href",
+            "/projects/1/manuals/5/download",
+        );
+    });
+
+    it("完成動画プレイヤーの src は playback route を job id 込みで指す (再レンダで URL が変わる)", () => {
+        render(RenderPanel, {
+            props: {
+                ...baseProps,
+                manualStatus: "published" as const,
+                finishedJob: finishedJobBody({ id: 91 }),
+            },
+        });
+
+        expect(screen.getByTestId("final-video")).toHaveAttribute(
+            "src",
+            "/projects/1/manuals/5/render-jobs/91/playback",
+        );
+        expect(screen.getByTestId("final-video")).toHaveAttribute("preload", "none");
+    });
+
+    it("finishedJob があれば canManage=false でも完成動画ブロックは出る (表示条件は finishedJob だけ)", () => {
+        // サーバが渡した成果物を UI が独自条件で隠さないことの固定。
+        // 現行 props ではこの組合せは発生しない (props が download ability を評価済み) が、
+        // component 単体の契約として作為的に与える。
+        render(RenderPanel, {
+            props: {
+                ...baseProps,
+                manualStatus: "published" as const,
+                canManage: false,
+                finishedJob: finishedJobBody(),
+            },
+        });
+
+        expect(screen.getByTestId("final-video-block")).toBeInTheDocument();
+        expect(screen.getByTestId("download-button")).toBeInTheDocument();
+    });
+
+    it("finishedJob が null なら完成動画プレイヤーも DL ボタンも出ない (published でも)", () => {
+        // 「押すと 404」の導線を UI から消したことの固定
+        render(RenderPanel, {
+            props: { ...baseProps, manualStatus: "published" as const, finishedJob: null },
+        });
+
+        expect(screen.queryByTestId("final-video-block")).not.toBeInTheDocument();
+        expect(screen.queryByTestId("final-video")).not.toBeInTheDocument();
+        expect(screen.queryByTestId("download-button")).not.toBeInTheDocument();
+    });
+
+    it("完成動画には黒背景の注記を出さない (placeholder_cut_count=0 / null の両方)", () => {
+        // succeeded render の値契約は 0 (T148)。完成動画用の注記分岐は新設していない。
+        const { unmount } = render(RenderPanel, {
+            props: {
+                ...baseProps,
+                manualStatus: "published" as const,
+                finishedJob: finishedJobBody({ placeholder_cut_count: 0 }),
+            },
+        });
+        expect(screen.queryByTestId("preview-placeholder-note")).not.toBeInTheDocument();
+        unmount();
+
+        render(RenderPanel, {
+            props: {
+                ...baseProps,
+                manualStatus: "published" as const,
+                finishedJob: finishedJobBody({ placeholder_cut_count: null }),
+            },
+        });
+        expect(screen.queryByTestId("preview-placeholder-note")).not.toBeInTheDocument();
+    });
+
+    it("書き出し中 (rendering) は完成動画ブロックを描画しない", () => {
+        render(RenderPanel, {
+            props: {
+                ...baseProps,
+                manualStatus: "rendering" as const,
+                finishedJob: finishedJobBody(),
+            },
+        });
+
+        expect(screen.getByTestId("render-progress")).toBeInTheDocument();
+        expect(screen.queryByTestId("final-video-block")).not.toBeInTheDocument();
     });
 
     it("render failed はエラーを表示する", () => {

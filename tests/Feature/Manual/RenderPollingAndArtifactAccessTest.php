@@ -14,7 +14,8 @@ use Illuminate\Support\Facades\Storage;
 /*
  * ポーリングと成果物アクセスの権限分離 (概念設計 §2/§7 Round 1 Critical):
  * - ポーリング (view = 撮影者も可) は進捗のみ。output_path / 署名 URL を一切含めない
- * - playback (render ability) は最新 succeeded preview のみ 302
+ * - playback は preview (render ability) と完成動画 (download ability + published) を扱う。
+ *   preview 側の 404 条件と ability は T154 で**変えていない** (本ファイルがその回帰である)
  * - download (download ability) は published + 最新 succeeded render のみ 302
  */
 
@@ -128,11 +129,11 @@ test('playback: 最新 succeeded preview は 302 (S3 署名 URL へ redirect)', 
     $response->assertRedirect("https://signed.example/{$key}");
 });
 
-test('playback の 404 マトリクス: kind=render / 未完了 / output_path NULL / 旧世代', function (): void {
+test('playback の 404 マトリクス: published でない kind=render / 未完了 / output_path NULL / 旧世代', function (): void {
     [, $owner, $project, $manual] = artifactAccessContext();
     $base = "/projects/{$project->id}/manuals/{$manual->id}/render-jobs";
 
-    // kind=render の succeeded (download route が正)
+    // published でない manual の kind=render succeeded (完成動画の再生条件は download と同一 = T154)
     $renderJob = RenderJob::factory()->forManual($manual)->succeeded('projects/x/renders/v2-1.mp4')->create();
     $this->actingAs($owner)->get("{$base}/{$renderJob->id}/playback")->assertNotFound();
 

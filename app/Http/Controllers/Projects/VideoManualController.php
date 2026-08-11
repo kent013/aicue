@@ -7,8 +7,8 @@ namespace App\Http\Controllers\Projects;
 use App\DataTransferObjects\Manual\AnalysisJobData;
 use App\DataTransferObjects\Manual\RenderJobData;
 use App\DataTransferObjects\Manual\ScenarioDocumentData;
-use App\Enums\Manual\JobStatus;
 use App\Enums\Manual\RenderKind;
+use App\Enums\Manual\VideoManualStatus;
 use App\Http\Concerns\ResolvesCurrentOrganization;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Projects\DuplicateVideoManualRequest;
@@ -19,6 +19,7 @@ use App\Models\Project;
 use App\Models\User;
 use App\Models\VideoManual;
 use App\Services\Manual\AdoptedReadyTakeCoverage;
+use App\Services\Manual\CurrentRenderArtifact;
 use App\Services\Manual\VideoManualService;
 use App\Support\Seo\SeoManager;
 use Illuminate\Http\RedirectResponse;
@@ -114,12 +115,14 @@ class VideoManualController extends Controller
         // 動画 URL と「黒背景が何カット分か」の注記が同一オブジェクトから出るため、
         // 最新 preview job と再生対象が別世代になる穴が構造的に消える (T148)。
         // succeeded preview のみを見るため staleness 抑制の対象外 (不変)。
-        $playbackJob = $manual->renderJobs()
-            ->where('kind', RenderKind::Preview->value)
-            ->where('status', JobStatus::Succeeded->value)
-            ->whereNotNull('output_path')
-            ->latest('id')
-            ->first();
+        // 選択式は CurrentRenderArtifact に集約済み (route 側と同一の行を指す = T154)。
+        $playbackJob = CurrentRenderArtifact::currentSucceeded($manual, RenderKind::Preview);
+        // 受け取れる完成動画。**endpoint が 302 を返す条件と 1 対 1**にする:
+        // published + download ability + 現行世代。UI の canManage は表示制御であって
+        // 秘匿境界ではないため、ここで ability を評価する (条件を UI 側に持たせない)。
+        $finishedJob = $manual->status === VideoManualStatus::Published && $user->can('download', $manual)
+            ? CurrentRenderArtifact::currentSucceeded($manual, RenderKind::Render)
+            : null;
 
         return Inertia::render('Manuals/Show', [
             'project' => [
@@ -142,7 +145,7 @@ class VideoManualController extends Controller
                     : AnalysisJobData::fromJob($analysisJob, $manual)->toArray(),
                 'hasDocument' => $manual->sourceDocuments()->exists(),
             ],
-            // レンダパネル (最新 render job / 最新 preview job / 再生可能 preview)。RenderProps と対
+            // レンダパネル (最新 render job / 最新 preview job / 再生可能 preview / 完成動画)。RenderProps と対
             'render' => [
                 'job' => $renderJob === null
                     ? null
@@ -153,6 +156,10 @@ class VideoManualController extends Controller
                 'playbackJob' => $playbackJob === null
                     ? null
                     : RenderJobData::fromJob($playbackJob, $manual)->toArray(),
+                // 完成動画 (再生 + DL の唯一の出し分け根拠)。null = 出さない
+                'finishedJob' => $finishedJob === null
+                    ? null
+                    : RenderJobData::fromJob($finishedJob, $manual)->toArray(),
                 // 「使用できる採用テイクがない」カットの充足状況。render の 422 と**同じ述語**から出す
                 // = 判断基準を 1 箇所に置く (bug-hunt F-1-01)。描画時点のスナップショットであり
                 // 常に最新ではない (押下は止めないので詰みにはならない)。

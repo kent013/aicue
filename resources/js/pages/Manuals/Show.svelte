@@ -134,6 +134,7 @@
                 job={render.job}
                 previewJob={render.previewJob}
                 playbackJob={render.playbackJob}
+                finishedJob={render.finishedJob}
                 coverage={render.coverage}
                 {canManage}
             />

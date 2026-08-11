@@ -17,6 +17,7 @@ const baseProps = {
         job: null,
         previewJob: null,
         playbackJob: null,
+        finishedJob: null,
         coverage: { total_cuts: 1, missing_count: 0, missing_labels: [] },
     },
     canManage: true,
@@ -174,6 +175,7 @@ describe("Manuals/Show", () => {
                         manual_status: "ready" as VideoManualStatus,
                         placeholder_cut_count: 2,
                     },
+                    finishedJob: null,
                     coverage: { total_cuts: 3, missing_count: 2, missing_labels: ["手順2", "手順3"] },
                 },
             },
@@ -186,5 +188,36 @@ describe("Manuals/Show", () => {
             "/projects/1/manuals/5/render-jobs/33/playback",
         );
         expect(screen.getByTestId("preview-placeholder-note")).toHaveTextContent("2");
+    });
+
+    // --- T154: 完成動画の props 配線 ---
+
+    it("D-10: render.finishedJob が RenderPanel へそのまま渡る", () => {
+        render(Show, {
+            props: {
+                ...baseProps,
+                manual: { ...baseProps.manual, status: "published" as VideoManualStatus },
+                render: {
+                    ...baseProps.render,
+                    finishedJob: {
+                        id: 44,
+                        kind: "render" as const,
+                        status: "succeeded" as const,
+                        step: null,
+                        progress: 100,
+                        error: null,
+                        error_code: null,
+                        manual_status: "published" as VideoManualStatus,
+                        placeholder_cut_count: 0,
+                    },
+                },
+            },
+        });
+
+        expect(screen.getByTestId("final-video")).toHaveAttribute(
+            "src",
+            "/projects/1/manuals/5/render-jobs/44/playback",
+        );
+        expect(screen.getByTestId("download-button")).toBeInTheDocument();
     });
 });
