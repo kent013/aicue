@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import CaptureShow from "@/pages/Capture/Show.svelte";
 import type { CaptureCut, CaptureManualDetail, CaptureTake } from "@/types/capture";
+import { VIDEO_MANUAL_STATUS_LABELS, type VideoManualStatus } from "@/types/manual";
 
 /*
  * 撮影ページ Capture/Show: F-03 実行時カメラフォールバック。
@@ -404,4 +405,69 @@ describe("Capture/Show レイアウト overflow ガード (H13/F-1-3)", () => {
         expect(screen.getByTestId("capture-left-pane").className).toContain("min-w-0");
         expect(screen.getByTestId("capture-right-pane").className).toContain("min-w-0");
     });
+});
+
+/*
+ * 撮影 PWA → PC 側マニュアル詳細の復路 (T155)。
+ * 往路 (Manuals/Show の「この手順書を撮影する」) と対になる導線で、
+ * **この画面へ到達できた利用者に対しては追加の status / ability 条件で出し分けない**。
+ * 根拠と保証範囲は docs/architecture.md §撮影 PWA の運用契約。
+ */
+
+// status の全数は「型で全数が保証されている写像」のキーから採る。
+// VIDEO_MANUAL_STATUS_LABELS は Record<VideoManualStatus, string> なので、status が増えたら
+// 写像側がコンパイルエラーになり、直すと本 dataset も自動で増える (二重管理をつくらない)。
+const ALL_STATUSES = Object.keys(VIDEO_MANUAL_STATUS_LABELS) as VideoManualStatus[];
+
+// Inertia の Link は href を絶対 URL へ正規化して描画する (jsdom では
+// http://localhost:3000/... になる)。origin に依存させないため origin から先だけを比較する
+// (query / hash も含める = 余計なパラメータが付いたら落ちる)。
+function pathOf(element: Element): string {
+    const url = new URL(element.getAttribute("href") ?? "", window.location.href);
+
+    return `${url.pathname}${url.search}${url.hash}`;
+}
+
+describe("Capture/Show マニュアル詳細への復路 (T155)", () => {
+    it("ヘッダーに PC 側マニュアル詳細へのリンクを出す", () => {
+        stubCameraSupported(false);
+        render(CaptureShow, { props: baseProps });
+
+        // 利用者が認識する名前 (accessible name) で取る。getByRole の name に文字列を渡すと
+        // **完全一致**になるため、名前に余計な文字列が混ざった場合もここで落ちる
+        // (ByRoleOptions に exact は無い = 既定で完全一致)。
+        const link = screen.getByRole("link", { name: "マニュアル詳細へ" });
+        expect(pathOf(link)).toBe("/projects/1/manuals/5");
+        // アイコンが名前を汚さないことは**別契約**として明示的に見る
+        // (Lucide の svg は title を持たないので、aria-hidden を外しても名前は変わらない =
+        //  名前の検査だけでは aria-hidden の消失を検出できないため)
+        expect(link.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+    });
+
+    it("既存の「一覧へ戻る」(撮影 PWA 一覧) は置き換えず、その後ろに併置する", () => {
+        stubCameraSupported(false);
+        render(CaptureShow, { props: baseProps });
+
+        const back = screen.getByRole("link", { name: "一覧へ戻る" });
+        const detail = screen.getByRole("link", { name: "マニュアル詳細へ" });
+
+        expect(pathOf(back)).toBe("/app/projects/1/manuals");
+        // この実装は tabindex も CSS order も使わないので DOM 順がタブ順になる。
+        // 既存要素を動かさないことを固定する
+        expect(back.compareDocumentPosition(detail) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+            Node.DOCUMENT_POSITION_FOLLOWING,
+        );
+    });
+
+    it.each(ALL_STATUSES)(
+        "status=%s でも復路は消えない (往路の isCaptureNavigable を流用していないこと)",
+        (status) => {
+            stubCameraSupported(false);
+            render(CaptureShow, {
+                props: { ...baseProps, manual: { ...makeManual(), status } },
+            });
+
+            expect(screen.getByRole("link", { name: "マニュアル詳細へ" })).toBeTruthy();
+        },
+    );
 });
