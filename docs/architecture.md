@@ -215,14 +215,24 @@ route parameter を経由しない id (POST payload / MCP tool 引数 / token cl
 ## シナリオ整合の共有不変条件 (AI-CUE ドメイン規約)
 
 > **cuts / video_manuals.scenario_version / video_manuals.status を書き込む全経路は、
-> 対象 VideoManual 行を `lockForUpdate()` で取得した同一トランザクション内で反映する。**
+> 対象 VideoManual 行を `lockForUpdate()` で取得した同一トランザクション内で反映する
+> (= 更新経路)。対象行がまだ存在しない生成経路 (新規 INSERT) は、所有元 Project 行を
+> `lockForUpdate()` した同一トランザクション内で INSERT し、初期状態
+> (`status` / `scenario_version`) を明示代入する (DB カラム default に依存しない)。**
 
-- 直列化点は VideoManual 行 (Project 行はロックしない。カテゴリ等 project 集合との整合は
-  シナリオ書き込みに無関係のため、直列化粒度を manual に意図的に絞る)。
+- **更新経路**の直列化点は VideoManual 行 (Project 行はロックしない。カテゴリ等 project 集合との
+  整合はシナリオ書き込みに無関係のため、直列化粒度を manual に意図的に絞る)。
   親 relation 経由の再解決 (`$project->manuals()->whereKey(...)->lockForUpdate()`) で
   「子は親に属する」も同時に担保する
-- 準拠実装 (メソッド粒度の経路 inventory。`ScenarioWritePathInventoryTest` が
-  deny-by-default の token 走査で機械検証する = **Architecture テストへ昇格済み**):
+- **生成経路**は対象 VideoManual 行が未存在のため、所有元 Project 行を `lockForUpdate()` した
+  同一 tx 内で INSERT する。**免除されるのはその tx が生成した新規行の初期値
+  (`status` / `scenario_version`) の INSERT のみ**であり、生成後の行に対する後続の書き込みは
+  更新経路として扱う — `duplicate()` の cuts materialize は、保存した新 manual を
+  `lockForUpdate()` で**再取得してから**行う (`copyCuts` の呼び出し前提)
+- 準拠実装 (下表は**メソッド粒度で記録する経路 inventory**。ただし
+  `ScenarioWritePathInventoryTest` (Architecture テストへ昇格済み) の**機械検証は
+  deny-by-default の token 走査 = ファイル粒度**に留まり、表の粒度と一致しない。
+  同一ファイル内のメソッド追加は検出しない):
 
   | 経路 | 書いてよいもの |
   |---|---|
@@ -234,7 +244,14 @@ route parameter を経由しない id (POST payload / MCP tool 引数 / token cl
   | `RenderJobService::trigger()` | status (ready→rendering のみ。scenario_version はスナップショット読み) |
   | `RenderJobService::failJob()` | status (rendering→ready のみ。kind=render に限る。preview は触らない) |
   | `RenderJobService::completeRenderIntoLockedManual()` | cuts.cut_length_ms / total_length_ms / status (rendering→published のみ。呼び出しは RenderPipeline::finalize の terminal tx に限定 = 検出 5) |
-  | `VideoManualService::duplicate()` | cuts (別名保存。元 manual を lockForUpdate して一貫読み取り、cuts は lockForUpdate 済みの**新** manual 経由で作成)。scenario_version/status/adopted_take_id のリテラル書き込みはしない (新規行は DB default 依存) ため検出 1/2/4 は非対象 |
+  | `VideoManualService::create()` | **生成経路**。status=Draft / scenario_version=0 を新規 manual の INSERT 時に明示代入 (DB default 非依存 = 戻り値インスタンスが hydrate 済みになる)。Project 行 lockForUpdate 済み tx 内の新規 INSERT で、既存行への並行書き込みではない |
+  | `VideoManualService::duplicate()` | **生成経路**。cuts (別名保存。元 manual を lockForUpdate して一貫読み取り、cuts は lockForUpdate 済みの**新** manual 経由で作成) + status=Draft / scenario_version=0 の明示代入。adopted_take_id は複製しない (検出 4 は非対象) |
+
+  生成経路 (`create()` / `duplicate()`) の allowlist は**ファイル粒度**であり、
+  `ScenarioWritePathInventoryTest` は「VideoManualService.php が status/scenario_version を書く」
+  ことまでしか固定しない。**個々のメソッドが初期状態を明示代入していることの fail-first は
+  `tests/Feature/Projects/ManualServiceBoundaryTest.php` /
+  `tests/Feature/Projects/ManualDuplicateTest.php` の behavioral テストが担う。**
 
   テイク採用 API は inventory 準拠へ昇格済み (検出 4 = `adopted_take_id` の token 走査 +
   書き込み形検出)。RenderJob の状態遷移も inventory 準拠済み (検出 5 =
