@@ -7,6 +7,7 @@ namespace App\Services\Capture;
 use App\DataTransferObjects\Capture\TakeUploadInput;
 use App\DataTransferObjects\Capture\TakeUploadTicketData;
 use App\DataTransferObjects\Capture\UploadTicketClaims;
+use App\Enums\Capture\TakeUploadReservationStatus;
 use App\Enums\Manual\VideoManualStatus;
 use App\Enums\QuotaKey;
 use App\Models\Cut;
@@ -81,7 +82,15 @@ class TakeUploadService
                 'checksum_sha256' => $input->checksum->base64,
                 'expires_at' => $expiresAt,
             ]);
-            $reservation->forceFill(['organization_id' => $lockedOrg->id])->save();
+            // organization_id は保護キー、status は保護状態列のため $fillable 外 (forceFill で代入)。
+            // status は**初期状態の明示代入**であり状態遷移ではない (AGENTS.md ドメイン規約 2 の
+            // 「直接 UPDATE を書かない」は pending→verifying 以降の CAS の話。ドメイン規約 1 (ii) と
+            // 同じ理由で、DB カラム default に依存すると (a) migration default 変更でこの経路の
+            // 意味だけが黙って変わり (b) save() 直後の in-memory instance の status が null になる)。
+            $reservation->forceFill([
+                'organization_id' => $lockedOrg->id,
+                'status' => TakeUploadReservationStatus::Pending,
+            ])->save();
 
             return $reservation;
         });

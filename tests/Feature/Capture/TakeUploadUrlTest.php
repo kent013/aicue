@@ -16,6 +16,7 @@ use App\Models\VideoManual;
 use App\Services\Capture\StorageUsageService;
 use App\Services\Capture\TakeObjectStorage;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Mockery\MockInterface;
 
@@ -254,4 +255,27 @@ test('checksum が base64 44 文字でもデコード後 32 bytes でなけれ�
         uploadUrlPath($project, $manual, $cut),
         uploadUrlPayload(['checksum_sha256' => $tooLong]),
     )->assertStatus(422);
+});
+
+test('issue() が保持する予約インスタンスは refresh なしで status=pending を持つ', function (): void {
+    [, $owner, $project, $manual, $cut] = uploadUrlContext();
+    mockPresign();
+
+    /** @var TakeUploadReservation|null $captured */
+    $captured = null;
+    TakeUploadReservation::created(function (TakeUploadReservation $reservation) use (&$captured): void {
+        $captured = $reservation;   // service が save() した当のインスタンス
+    });
+
+    $this->actingAs($owner)
+        ->postJson(uploadUrlPath($project, $manual, $cut), uploadUrlPayload())
+        ->assertOk();
+
+    // in-memory: 明示代入していないと属性ごと存在せず null になる (DB default では埋まらない)。
+    // 既存テスト「発行成功: pending 予約が作成され…」は uploadReservations()->sole() = **DB 再読込**
+    // なので DB default で緑になり、この欠落を検出できなかった。
+    expect($captured)->not->toBeNull();
+    expect($captured->status)->toBe(TakeUploadReservationStatus::Pending);
+    // enum → backing value の往復が効いていること (DB 実値も pending)
+    expect(DB::table('take_upload_reservations')->where('id', $captured->id)->value('status'))->toBe('pending');
 });

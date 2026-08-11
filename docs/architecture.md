@@ -972,7 +972,9 @@ doc/10 §10.3 / §10.8-4/-7 の実装 (T004)。routes は `/app/projects/{projec
 
 - **presigned 直アップロード**: `Capture/TakeUploadService` が Organization 行ロック tx 内で
   容量 Quota (`max_storage_bytes`。bytes_used + bytes_pending + 加算) を判定し
-  `take_upload_reservations` (pending) を予約 → `Capture/TakeObjectStorage` が
+  `take_upload_reservations` (pending) を予約
+  (**初期 status は INSERT 時に明示代入**する。DB カラム default は既存行と他の INSERT 経路の
+  ために残すが、この経路の意味は default に依存しない) → `Capture/TakeObjectStorage` が
   **ChecksumSHA256 を署名条件に含む** presigned PUT URL + Crypt 封緘の検証専用チケットを発行
   (封緘/開封は `Capture/UploadTicketCodec` に集約。AEAD で改竄検出し、復号失敗・shape 不正・
   期限切れは null → 呼び出し側が 422 に変換。payload 種別キーで upload チケットと

@@ -344,6 +344,11 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
    `Billing/QuotaService::checkAddition` + `Capture/StorageUsageService::occupiedBytes`
    (bytes_used + bytes_pending) 経由のみ。予約 (`take_upload_reservations`) の状態遷移は
    pending→verifying (claim)→completed/released の CAS で行い、直接 UPDATE を書かない。
+   **初期状態 `pending` は INSERT 時に明示代入する** (`TakeUploadService::issue()`。
+   DB カラム default に依存しない = migration default 変更による silent break と、
+   `save()` 直後の in-memory instance の属性欠落の両方を防ぐ。ドメイン規約 1 (ii) と同じ理由)。
+   **これは状態遷移ではないので上の CAS 規約とは独立である**。
+   migration の `default('pending')` は既存行と Factory 以外の INSERT 経路のために残す。
    運用契約 (media queue worker / 孤児掃除 cron) は `docs/architecture.md` §撮影 PWA
 3. **サポート対象ブラウザと履歴復元の扱い**: 「どのブラウザで何をどこまで保証しているか」の
    正本は **`docs/supported-browsers.md`**。**Inertia が描画する認証済み画面**が

@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Services\Billing\AutoRechargeService;
 use App\Services\Billing\Contracts\AutoRechargeGatewayInterface;
 use Illuminate\Database\QueryException;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\Support\FakeAutoRechargeGateway;
@@ -24,8 +25,9 @@ use Tests\Support\FakeAutoRechargeGateway;
 |  (2) tar_attempts_org_pending_unique (partial unique) — DB の最終防衛
 |  (3) unique violation の no-op 収束 (呼び出し側へ例外を漏らさない)
 |
-| ★ (3) の判定 (isUniqueViolation) は SQLSTATE だけを見て制約名を識別しない。
-|   これは本 PR で作った問題ではなく、docs/TODO.md へ Low で追跡起票済みである。
+| ★ (3) の判定は当初 SQLSTATE だけを見て制約名を識別しなかった (T140)。
+|   現在は期待制約 tar_attempts_org_pending_unique **1 本だけ**を握り、それ以外は再送出する
+|   (fail-closed)。下の attempt_ulid テストがその境界を固定する。
 */
 
 beforeEach(function (): void {
@@ -122,4 +124,30 @@ test('unique violation は no-op へ収束し呼び出し側へ例外が漏れ�
     // 例外は漏れず null に収束し、tx ごと巻き戻るため attempt 行も残らない
     expect($result)->toBeNull();
     expect(TicketAutoRechargeAttempt::query()->count())->toBe(0);
+});
+
+test('別の unique 制約 (attempt_ulid) の違反は no-op へ収束させず再送出する', function (): void {
+    [$organization] = attemptUniquenessContext();
+    [$otherOrganization] = createOrganizationWithOwner();
+
+    // pending 検査の**後**・INSERT の**直前**に、**別 org**で**同じ attempt_ulid** の行を作る。
+    // 別 org なので部分 unique (org 単位) には触れず、attempt_ulid unique **だけ**が違反する。
+    // DB::table は model event を発火しないため再入しない。
+    TicketAutoRechargeAttempt::creating(function (TicketAutoRechargeAttempt $attempt) use ($otherOrganization): void {
+        DB::table('ticket_auto_recharge_attempts')->insert([
+            'organization_id' => $otherOrganization->getKey(),
+            'attempt_ulid' => $attempt->attempt_ulid,   // ← 衝突させたい 1 本
+            'status' => AutoRechargeAttemptStatus::Pending->value,
+            'quantity' => 10,
+            'unit_amount' => 70,
+            'stripe_price_id' => 'price_other',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    });
+
+    // 握ると AutoRechargeTriggerJob が structured no-op として黙り、その組織のリチャージが
+    // 起票されないまま誰も気づかない。期待制約以外は fail-closed で再送出する。
+    expect(fn () => app(AutoRechargeService::class)->maybeCreateAttempt($organization))
+        ->toThrow(UniqueConstraintViolationException::class);
 });
