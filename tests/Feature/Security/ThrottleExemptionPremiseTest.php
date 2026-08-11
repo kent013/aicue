@@ -573,12 +573,36 @@ test('negative control: 自セッションの state なら callback は実際に
         .'「別セッションの state では進まない」テストが空振り green になっています。');
 });
 
-test('SocialAuthController は stateless() を使わない (state 照合を無効化する最短経路の封鎖)', function (): void {
+test('SSO の driver 解決経路は stateless() を使わない (state 照合を無効化する最短経路の封鎖)', function (): void {
     // ソース走査は**補助**。単独の根拠にはしない (上の実挙動テストが本体)。
     // stateless() 化は state 照合を丸ごと無効化する最短経路なので二重に塞ぐ。
-    $source = file_get_contents(app_path('Http/Controllers/Auth/SocialAuthController.php'));
-    expect($source)->toBeString();
-    expect($source)->not->toContain('stateless(');
+    // ★T153: driver 解決点を SocialiteDriverResolver へ切り出したため、走査対象は
+    //   controller と resolver の 2 本である (片方だけ見ると移設で無音になる)。
+    $paths = [
+        'Http/Controllers/Auth/SocialAuthController.php',
+        'Services/Auth/SocialiteDriverResolver.php',
+    ];
+
+    $sources = [];
+    foreach ($paths as $path) {
+        $source = file_get_contents(app_path($path));
+        // 読み取り失敗を「違反なし」と解釈させない (fail-closed)
+        expect($source)->toBeString()->not->toBe('', "走査対象を読めません: {$path}");
+        $sources[$path] = $source;
+    }
+
+    // 母集団 0 件で緑にならないことの保証
+    expect($sources)->toHaveCount(count($paths));
+
+    foreach ($sources as $path => $source) {
+        // ★包含ではなく**メソッド呼び出しの形**で検出する。
+        //   包含だと `->stateless (` (空白入り) をすり抜け、逆に docblock 中の
+        //   「stateless()」という**語の言及**で偽陽性を出す。
+        expect($source)->not->toMatch(
+            '/->\s*stateless\s*\(/',
+            "{$path} が stateless() を呼び出しています (OAuth state 照合の無効化)"
+        );
+    }
 });
 
 test('filament.admin.auth.multi-factor-authentication.set-up-required の GET は MFA 秘密を生成・永続化しない', function (): void {

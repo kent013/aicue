@@ -486,19 +486,23 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
      Prism 直呼び禁止が正本で、`ExternalSeamInventory::delegations()` が機械的に結線する
      (同じ到達事実を 2 箇所で宣言しない)。走査基盤は `Tests\Support\PhpReferenceScanner` に
      一本化されており、両目録は同じ namespace 解決 / alias / scope 追跡の上に立つ。
-   - **SSO は `SocialAuthController` 1 クラスに名指し固定**され、他クラスからの
+   - **SSO は `SocialiteDriverResolver` 1 クラスに名指し固定**され、他クラスからの
      `Socialite::driver()` は登録も免除もできない (集約と直呼び禁止の機械化)。
      宛先集合 (`config/template.php` の `social_providers`) の増加は
      `SocialProviderTrustPolicyTest` へ委譲する。
-   - **保証範囲を誇張しない**: これは**検知**であって**遮断ではない**。bug-hunt のブラウザは
-     SSO ボタンから実 IdP へ遷移する。走査根は `app/` のみで `routes/` / `config/` は見ない。
+   - **保証範囲を誇張しない**: これは**検知**であって**遮断ではない**。
+     SSO だけは別途 fake 配線 (testing / bughunt.local) で実 IdP への遷移を塞いでいるが、
+     それは**本目録の効果ではない** (`ExternalFakeWiringInventory` が正本)。
+     走査根は `app/` のみで `routes/` / `config/` は見ない。
      委譲先の assert の中身を弱める改変、次元そのものの数え落とし、部分修飾名、
      文字列キーの container 解決だけの経路、vendor 内部から出る通信、他種別の宛先集合、
      決済の別 API 表面、git 管理外の `.env.bughunt.local` は検出・固定できない。
      **保証しないものの完全な一覧は `docs/architecture.md` §外部到達点の目録 (標準形 v1) が正本**
      (ここは要約であり、増減はそちらで管理する)。
    - 非本番の captcha は `testing.fake_externals` で `RecaptchaVerifierTestFake` へ bind される
-     (`ExternalFakeWiringInventory`)。**SSO は fake しない**。
+     (`ExternalFakeWiringInventory`)。**SSO も同じ flag で fake する**が、env allowlist は
+     `testing` / `bughunt.local` のみで **`local` を除く** (認証バイパス面の最小化と
+     実 IdP 連携の確認手段の温存)。
    - 詳細は `docs/architecture.md` §外部到達点の目録 (標準形 v1)。
 10. **冪等キーの配線と決着規約**: `api/v1/*` の変更系 route は `idempotent` middleware を
     **ちょうど 1 本**持つか、`IdempotencyWiringExemption` + 30 文字以上の根拠で

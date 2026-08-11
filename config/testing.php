@@ -13,10 +13,12 @@ return [
     | true のとき FakeExternalsServiceProvider::register() が以下を fake 実装へ bind する:
     |   - Stripe 課金 gateway (checkout / portal / auto-recharge)
     |   - captcha 検証器 (RecaptchaVerifier → RecaptchaVerifierTestFake)
-    | **SSO (Socialite) は fake しない** (差し替え先を作っていない。
-    |  bug-hunt のブラウザは SSO ボタンから実 IdP へ遷移する。
-    |  docs/architecture.md §外部到達点の目録 (標準形 v1) を参照)。
-    | 有効化は allowlist 環境 (local / testing / bughunt.local) に限定され、
+    |   - SSO driver 解決点 (SocialiteDriverResolver → FakeSocialiteDriverResolver)
+    | **SSO だけは env allowlist が狭い** (testing / bughunt.local のみ。**local を除外**)。
+    |  SSO fake は未認証 GET 2 本で canned アカウントへログインできる = 認証バイパスであり、
+    |  かつ local は実 IdP 連携を確認する唯一の環境であるため
+    |  (docs/architecture.md §外部到達点の目録 (標準形 v1) を参照)。
+    | Stripe / captcha の有効化は allowlist 環境 (local / testing / bughunt.local) に限定され、
     | production では ProductionEnvGuard が true を deploy 時 fail-fast で拒否する。
     | 既定 false = 本 flag 未設定の環境では完全 no-op。
     |
