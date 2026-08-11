@@ -31,7 +31,7 @@ use App\Support\Billing\GatewayFailureClassifier;
 use App\Support\JobExecution\AttemptOwnershipPreflight;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Cache\LockTimeoutException;
-use Illuminate\Database\QueryException;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -78,6 +78,13 @@ final class AutoRechargeService
      *   (T127 で既定キュー接続が分割されたら、上記テストの比較先を差し替えること)。
      */
     public const int LOCK_TTL_SECONDS = 180;
+
+    /**
+     * 期待する unique 制約 (この 1 本だけを並行起票の敗者として握る)。
+     * 部分 UNIQUE index (WHERE status = 'pending') = 「org に pending は同時に 1 つまで」。
+     * 名前の正本は create_ticket_auto_recharge_attempts_table migration の PENDING_INDEX_NAME。
+     */
+    private const string ATTEMPT_ORG_PENDING_UNIQUE = 'tar_attempts_org_pending_unique';
 
     public function __construct(
         private readonly TicketLedgerService $tickets,
@@ -302,11 +309,35 @@ final class AutoRechargeService
                 ]);
                 $session->save();
             });
-        } catch (QueryException $e) {
-            if (! $this->isUniqueViolation($e)) {
+        } catch (UniqueConstraintViolationException $e) {
+            // **制約名では判定しない**。正規 replay では 3 本の unique
+            // (org+intent+attempt_token / idempotency_key / stripe_session_id) が**同時に**違反し、
+            // PostgreSQL が報告する 1 本は index の作成順 (OID 昇順) で決まるため、
+            // アプリの意味論として依存できない (詳細設計 E-7 の実測)。
+            //
+            // 代わりに**自然キーで既存行を読み直し、同一内容であることを確認**する。
+            // 一致しない / 行が無い場合は fail-closed で再送出する — 握ると
+            // 「Stripe session はあるのに台帳行が無い」状態が正常終了として通ってしまう。
+            // (失敗した insert は上の tx / savepoint で巻き戻っているので、この SELECT は
+            //  pgsql の 25P02 に当たらない。SubscriptionService::startCheckout と同じ形。)
+            //
+            // 同一性判定に initiated_by_user_id は**入れない**。attempt の同一性を決めるのは
+            // (organization_id, intent, attempt_token) であり、actor は「誰が起こしたか」の
+            // 記録に過ぎない (両者とも manageBilling 済みの同一 org 管理者)。入れると
+            // これまで正常終了していた別 actor の replay が 500 になる。
+            $existing = BillingCheckoutSession::query()
+                ->where('organization_id', $this->orgId($organization))
+                ->where('intent', CheckoutIntent::SetupPaymentMethod->value)
+                ->where('attempt_token', $attemptToken)
+                ->first();
+
+            if (! $existing instanceof BillingCheckoutSession
+                || $existing->stripe_session_id !== $result['id']
+                || $existing->idempotency_key !== $idempotencyKey) {
                 throw $e;
             }
-            // 同一 attempt_token の replay — Stripe 側も同一冪等キーで同一 session を返している。
+            // 同一 attempt_token の replay — Stripe 側も同一冪等キーで同一 session を返しており、
+            // 既存行の session id / 冪等キーが今回の値と一致することを確認済み。
         }
 
         return $result;
@@ -506,12 +537,16 @@ final class AutoRechargeService
 
                 return $attempt;
             });
-        } catch (QueryException $e) {
-            if ($this->isUniqueViolation($e)) {
-                // DB partial unique (tar_attempts_org_pending_unique) が最終防衛。並行起票は no-op。
+        } catch (UniqueConstraintViolationException $e) {
+            if ($e->index === self::ATTEMPT_ORG_PENDING_UNIQUE) {
+                // DB partial unique が最終防衛。並行起票は no-op。
                 return null;
             }
 
+            // fail-closed: attempt_ulid / stripe_invoice_id / pkey の違反と、制約名を
+            // 特定できなかった場合 ($e->index === null) は握らない。握ると
+            // AutoRechargeTriggerJob が structured no-op として黙り、その組織のリチャージが
+            // 起票されないまま誰も気づかない。
             throw $e;
         }
     }
@@ -1496,13 +1531,5 @@ final class AutoRechargeService
         Assert::stringNotEmpty($version, 'config billing.auto_recharge.consent_version は非空で設定してください');
 
         return $version;
-    }
-
-    private function isUniqueViolation(QueryException $e): bool
-    {
-        // driver 差吸収 (23505 = pgsql / 23000 = sqlite・mysql)。
-        $sqlState = $e->errorInfo[0] ?? null;
-
-        return $sqlState === '23505' || $sqlState === '23000';
     }
 }

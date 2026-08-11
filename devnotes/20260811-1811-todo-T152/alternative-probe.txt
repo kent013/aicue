@@ -1,0 +1,73 @@
+=====================================================================
+T152 代替実装 probe (mutation ではない)
+=====================================================================
+
+これは「実装を壊すとテストが赤くなる」ことの確認 (mutation.txt) ではなく、
+**テストでは識別できない設計上の差**を正直に記録するための比較実験である。
+両者を同じ節に置くと「全 mutation が kill された」という読み方と衝突するため分けている。
+
+時刻 : 2026-08-11 18:52 JST
+基準 : 210e7e5 (実装済み・全 green)
+
+---------------------------------------------------------------------
+P-1: 施策 1a を**撤回した旧案**(制約名 `..._org_intent_attempt_unique` で判定)に差し替える
+---------------------------------------------------------------------
+差し替え内容 (catch 節の中身を丸ごと置換):
+
+    -   $existing = BillingCheckoutSession::query()->where(...)->first();
+    -   if (! $existing instanceof BillingCheckoutSession
+    -       || $existing->stripe_session_id !== $result['id']
+    -       || $existing->idempotency_key !== $idempotencyKey) {
+    -       throw $e;
+    -   }
+    +   if ($e->index !== 'billing_checkout_sessions_org_intent_attempt_unique') {
+    +       throw $e;
+    +   }
+
+$ composer test -- --filter=AutoRechargeSetupCheckoutUniquenessTest
+{"tool":"pest","result":"failed","tests":4,"passed":3,"assertions":8,"duration_ms":6225,"failed":1,
+ "failures":[{"test":"…既存行の stripe_session_id が今回の値と食い違うなら replay として握らない",
+              "file":".../AutoRechargeSetupCheckoutUniquenessTest.php","line":86,
+              "message":"Exception \"Illuminate\\Database\\UniqueConstraintViolationException\" not thrown."}]}
+
+---------------------------------------------------------------------
+**設計の予測は外れた**(予測: 4 本とも緑 / 実測: テスト 3 が赤)
+---------------------------------------------------------------------
+詳細設計 P-1 は「4 本とも緑になる = 新規テストでは旧案と新案を区別できない」と予測していた。
+実測は **3 passed / 1 failed** で、テスト 3 (既存行の stripe_session_id 食い違い) が旧案では赤い。
+
+**原因は OID 順の理解の誤りではない**。設計が指示した通り `pg_index` を再照会した
+(読み取り専用 SELECT。実行 DB は migrate 済みテスト DB `app_test_922486d1_test_1`):
+
+    billing_checkout_sessions_pkey                                oid=1992000 unique=t
+    billing_checkout_sessions_organization_id_intent_status_index oid=1992012 unique=f
+    billing_checkout_sessions_org_intent_attempt_unique           oid=1992013 unique=t
+    billing_checkout_sessions_stripe_session_id_unique            oid=1992015 unique=t
+    billing_checkout_sessions_idempotency_key_unique              oid=1992017 unique=t
+
+E-7 の「複合 unique が unique の中で最若」は**この DB でも成立している**
+(絶対値は DB ごとに異なるが順序関係は同じ)。よって **E-7 の訂正は不要**である。
+
+外れた理由は、設計の P-1 予測が**テスト 3 のシナリオを勘定に入れていなかった**こと:
+
+- テスト 3 は「自然キーでは行が見つかるが内容 (stripe_session_id) が食い違う」状態を作る。
+  このとき違反するのは `org_intent_attempt` と `idempotency_key` の 2 本で、
+  報告されるのは OID が若い `org_intent_attempt` = **旧案が期待する当の制約名**である。
+- したがって旧案は**制約名が一致してしまい握り潰す**。これは OID 順が何であっても変わらない
+  (期待制約そのものが報告されるため)。制約名判定は原理的に
+  「行は在るが内容が違う」を識別できない。
+
+---------------------------------------------------------------------
+この結果が意味すること (誇張しない)
+---------------------------------------------------------------------
+1. 新規テスト 4 本は、**テスト 3 の 1 本によって旧案と新案を区別できている**。
+   詳細設計「保証しないもの」§15 が想定した「テストでは区別できない」状態ではなかった。
+2. ただし **OID 順への非依存性そのものはテストで固定されていない**。
+   テスト 1・2・4 は旧案でも緑であり、migration に unique を 1 本足して OID 順が変わったときに
+   正規 replay (テスト 2) が壊れることを、このテスト群は**事前には捕まえない**
+   (順序が変わった後に赤くなる = 事後検出)。これを担保しているのは E-7 の実測と設計判断で
+   あって、テストではない。**この限界は残る**。
+3. `pg_indexes` を照合する専用 gate は作らない (詳細設計「保証しないもの」§4 / 思考原則 2)。
+
+probe 後は `git checkout -- app/` で復帰し、`git diff --stat app/` が空であることを確認済み
+(mutation.txt の M-7)。

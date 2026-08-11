@@ -1,0 +1,72 @@
+=====================================================================
+T152 fail-first 実測ログ (修正前の期待マトリクス確認)
+=====================================================================
+
+時刻   : 2026-08-11 18:14 JST 〜 18:20 JST
+HEAD   : 5f1b2cff76a2236e73093973e76afe76977deb6e (todo/T152 = main 起点、実装前)
+worktree: /workspace/.claude/worktrees/tasks/T152
+DB     : pgsql (phpunit.xml が DB_CONNECTION=pgsql を force)
+
+この時点で **テストのみ追加済み・app/ は 1 行も変更していない**
+(git diff --stat app/ は空)。
+
+---------------------------------------------------------------------
+[1] 3 ファイル一括
+---------------------------------------------------------------------
+$ composer test -- --filter='AutoRechargeSetupCheckoutUniquenessTest|AutoRechargeAttemptUniquenessTest|TakeUploadUrlTest'
+
+ INFO Configuration cache cleared successfully.
+
+ensure-test-db: base DB already exists: app_test_922486d1
+{"tool":"pest","result":"failed","tests":28,"passed":24,"assertions":81,"duration_ms":15132,"failed":4,"failures":[
+  {"test":"AutoRechargeAttemptUniquenessTest::別の unique 制約 (attempt_ulid) の違反は no-op へ収束させず再送出する",
+   "file":".../tests/Feature/Billing/AutoRechargeAttemptUniquenessTest.php","line":152,
+   "message":"Exception \"Illuminate\\Database\\UniqueConstraintViolationException\" not thrown."},
+  {"test":"AutoRechargeSetupCheckoutUniquenessTest::別の unique 制約 (stripe_session_id) の違反は握り潰さず再送出する",
+   "file":".../tests/Feature/Billing/AutoRechargeSetupCheckoutUniquenessTest.php","line":55,
+   "message":"Exception \"Illuminate\\Database\\UniqueConstraintViolationException\" not thrown."},
+  {"test":"AutoRechargeSetupCheckoutUniquenessTest::既存行の stripe_session_id が今回の値と食い違うなら replay として握らない",
+   "file":".../tests/Feature/Billing/AutoRechargeSetupCheckoutUniquenessTest.php","line":86,
+   "message":"Exception \"Illuminate\\Database\\UniqueConstraintViolationException\" not thrown."},
+  {"test":"TakeUploadUrlTest::issue() が保持する予約インスタンスは refresh なしで status=pending を持つ",
+   "file":".../tests/Feature/Capture/TakeUploadUrlTest.php","line":278,
+   "message":"Failed asserting that null is identical to an object of class \"App\\Enums\\Capture\\TakeUploadReservationStatus\"."}
+]}
+Script bash scripts/run-test.sh handling the test event returned with error code 1
+
+(注: 上記 JSON の "test" キーは実出力では Unicode エスケープ済み。可読性のため
+ このログでは日本語に復元した。値そのものは改変していない)
+
+---------------------------------------------------------------------
+[2] 施策 1a の新規ファイル単独 (緑であるべき 2 本の確認)
+---------------------------------------------------------------------
+$ composer test -- --filter='AutoRechargeSetupCheckoutUniquenessTest'
+
+{"tool":"pest","result":"failed","tests":4,"passed":2,"assertions":8,"duration_ms":6333,"failed":2, ...}
+
+→ 4 本中 2 本 passed。passed の 2 本は failures に現れない
+  「同一 attempt_token の replay は例外を漏らさず結果を返し行も増えない」と
+  「同一 org の別 billing 管理者が同じ attempt_token を送っても replay として握る」である。
+
+---------------------------------------------------------------------
+判定: 詳細設計「実装順序 1」の期待マトリクスと **完全一致**
+---------------------------------------------------------------------
+| テスト                                          | 期待 | 実測 |
+|-------------------------------------------------|------|------|
+| R-1a テスト 1 (stripe_session_id-only 衝突)      | 赤   | 赤   |
+| R-1a テスト 2 (正規 replay)                      | 緑   | 緑   |
+| R-1a テスト 3 (既存行の session id 食い違い)     | 赤   | 赤   |
+| R-1a テスト 4 (別 actor の同 token)              | 緑   | 緑   |
+| R-1b (attempt_ulid 衝突)                        | 赤   | 赤   |
+| R-2 (in-memory status)                          | 赤   | 赤   |
+
+赤 4 本 / 緑 2 本。「緑であるべきものが赤」は 0 件のため、設計の前提は成立している。
+
+赤の意味 (修正前の実挙動):
+- 施策 1a/1b: isUniqueViolation() が SQLSTATE だけを見るため、**期待制約以外の
+  unique 違反も**「replay」「並行起票の敗者」として握り潰され、正常終了していた。
+- 施策 2: TakeUploadService::issue() が status を明示代入しないため、save() 直後の
+  in-memory インスタンスには status 属性が存在せず null になる (DB default では埋まらない)。
+  aicue:T151 の red-before-fix.txt と同一の失敗メッセージ形である。
+
+これを確認してから実装に入る (AGENTS.md 思考原則 5: テストファースト)。
