@@ -7,6 +7,8 @@ namespace Tests\Support\ExternalFakes;
 use App\Http\Controllers\Testing\GetFakeStorageObjectController;
 use App\Http\Controllers\Testing\PutFakeStorageObjectController;
 use App\Services\AI\Testing\CannedPromptFakeRegistrar;
+use App\Services\Auth\Fakes\FakeSocialiteDriverResolver;
+use App\Services\Auth\SocialiteDriverResolver;
 use App\Services\Billing\CashierAutoRechargeGateway;
 use App\Services\Billing\CashierStripeGateway;
 use App\Services\Billing\CashierTicketCheckoutGateway;
@@ -51,6 +53,14 @@ final class ExternalFakeWiringInventory
 
     /** storage fake の env allowlist (FakeStorageGate の predicate と対。testing は runningUnitTests 前提) */
     private const array STORAGE_ENVIRONMENTS = ['testing', 'bughunt.local'];
+
+    /**
+     * SSO fake の env allowlist (FakeExternalsServiceProvider::SSO_FAKE_ENVIRONMENTS と対)。
+     *
+     * ★`local` を含めない。SSO fake は未認証 GET 2 本で canned アカウントへログインできる
+     *   = 認証バイパスであり、かつ local は実 IdP 連携を確認する唯一の環境である。
+     */
+    private const array SSO_ENVIRONMENTS = ['testing', 'bughunt.local'];
 
     /**
      * fake の実体ではないが FakeExternalsServiceProvider が参照してよい配線基盤クラス。
@@ -139,6 +149,16 @@ final class ExternalFakeWiringInventory
                     .'bind を消しても Laravel が本物を自動組み立てし、RECAPTCHA_SECRET_KEY が'
                     .'設定された環境では無言で実 Google を叩く (bug-hunt の別プロセスには '
                     .'StrayHttpRequestGuard が効かない)。',
+            ),
+            new ExternalFakeBinding(
+                abstract: SocialiteDriverResolver::class,
+                real: SocialiteDriverResolver::class,
+                fake: FakeSocialiteDriverResolver::class,
+                flag: self::EXTERNALS_FLAG,
+                allowedEnvironments: self::SSO_ENVIRONMENTS,
+                risk: 'SSO (Socialite) の driver 解決点。abstract が具象クラスのため、bind を消しても '
+                    .'Laravel が本物を自動組み立てし、**無言で**実 IdP (accounts.google.com 等) への '
+                    .'リダイレクトに戻る。bug-hunt のブラウザは別プロセスなので StrayHttpRequestGuard は効かない。',
             ),
         ];
     }

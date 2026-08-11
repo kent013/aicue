@@ -1090,6 +1090,7 @@ cmd_provision() {
             "mail" => config("mail.default"),
             "filesystem" => config("filesystems.default"),
             "admin_mfa_required" => config("admin.mfa_required"),
+            "fake_externals" => config("testing.fake_externals"),
             "fake_llm" => config("testing.fake_llm"),
             "fake_storage" => config("testing.fake_storage"),
         ]);' --env=bughunt.local | grep -o '{.*}' | tail -1)"
@@ -1101,6 +1102,9 @@ expected = {
     "session": "database", "cache": "database", "queue": "sync",
     "mail": "log",
     "admin_mfa_required": False,
+    # bughunt は外部 fake (Stripe / captcha / SSO) が必須。.env.bughunt.local は git 管理外なので
+    # 行の欠落を provision で fail-fast させる (モード派生ではない固定期待値)。
+    "fake_externals": True,
     # モードから期待値を導出 (serve/worker と同一フラグで config が解決されることを固定)。
     "fake_llm": (os.environ["LLM_MODE"] == "fake"),
     "fake_storage": (os.environ["STORAGE_MODE"] == "fake"),

@@ -9,11 +9,11 @@ use App\Models\Organization;
 use App\Models\User;
 use App\Security\RecentAuthState;
 use App\Services\Auth\SocialAccountService;
+use App\Services\Auth\SocialiteDriverResolver;
 use App\Services\Onboarding\IntendedPlanResolver;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Laravel\Socialite\Facades\Socialite;
 use Symfony\Component\HttpFoundation\RedirectResponse as SymfonyRedirectResponse;
 use Webmozart\Assert\Assert;
 
@@ -34,6 +34,7 @@ class SocialAuthController extends Controller
 
     public function __construct(
         private readonly IntendedPlanResolver $intendedPlanResolver,
+        private readonly SocialiteDriverResolver $socialiteDriver,
     ) {}
 
     public function redirect(Request $request, string $provider, string $intent): RedirectResponse|SymfonyRedirectResponse
@@ -62,7 +63,7 @@ class SocialAuthController extends Controller
 
         $request->session()->put('social_auth_intent', $intent);
 
-        $driver = Socialite::driver($provider);
+        $driver = $this->socialiteDriver->driver($provider);
 
         // step-up は IdP に再認証を促す (OIDC 標準の prompt=login)。RP 側で auth_time は
         // 検証しない最小実装 (capability=fresh_auth_prompt_only)。対応しない provider では
@@ -85,7 +86,7 @@ class SocialAuthController extends Controller
             ]);
         }
 
-        $socialiteUser = Socialite::driver($provider)->user();
+        $socialiteUser = $this->socialiteDriver->driver($provider)->user();
 
         if ($intent === 'step-up') {
             return $this->completeStepUp($request, $provider, $socialiteUser->getId(), $recentAuthState);

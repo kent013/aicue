@@ -1455,16 +1455,34 @@ T126 の `ExternalClientBoundaryScanner` も本目録の `ExternalSeamScanner` �
 
 ### SSO の集約と captcha の fake 配線
 
-- SSO は `App\Http\Controllers\Auth\SocialAuthController` **1 クラスに名指し固定**される
+- SSO は `App\Services\Auth\SocialiteDriverResolver` **1 クラスに名指し固定**される
   (`ExternalSeamInventory::socialLoginFunnel()`)。他クラスからの `Socialite::driver()` は
   登録も免除もできず必ず赤くなる (集約と直呼び禁止の機械化)。
+  **T153 で集約先を controller からこの薄い解決点へ切り出した** — container の差し替えキーに
+  なれるのは controller ではなく解決点だからである。
 - 非本番の captcha は `testing.fake_externals` で `RecaptchaVerifier` →
   `RecaptchaVerifierTestFake` へ container bind される (`ExternalFakeWiringInventory`)。
   abstract が**具象クラス**のため bind を消しても Laravel が本物を自動組み立てし、
   `RECAPTCHA_SECRET_KEY` が設定された環境では**無言で** Google siteverify を叩く
   (`StrayHttpRequestGuard` は bug-hunt の別プロセス実行には効かない)。
-- **SSO は fake しない**。差し替え先 (SSO fake) を作っていないため、bug-hunt のブラウザは
-  SSO ボタンから実 IdP へ遷移する。
+- **SSO も同じ capability flag (`testing.fake_externals`) で fake する** (T153)。
+  `SocialiteDriverResolver` → `App\Services\Auth\Fakes\FakeSocialiteDriverResolver` へ
+  container bind され、`redirect()` は自アプリの `social.callback` へ 302 する
+  (IdP 風の中間スタブ画面は作らない)。identity は provider 名から決定論的に導出した
+  canned 値 (`fake-{provider}-user` / `fake-{provider}-sso@example.com`) で、
+  外部入力では切り替えられない。
+  - **env allowlist は `testing` / `bughunt.local` のみで `local` を除く**
+    (`FakeExternalsServiceProvider::SSO_FAKE_ENVIRONMENTS`)。SSO fake は未認証 GET 2 本
+    (`/auth/{p}/redirect/login` → `/auth/{p}/callback`) で canned アカウントへログインできる
+    = **認証バイパス**であり、かつ `local` は開発者が実 IdP 連携を確認する唯一の環境である。
+    この除外は**誤設定ではなく設計上の除外**なので warning ログを出さない (LLM fake と同じ扱い)。
+  - **差し替えキーは自前の具象クラスであって Socialite の `Factory` ではない**。
+    `SocialiteServiceProvider` は `DeferrableProvider` で、`Container::bind()` は
+    `deferredServices` を消さない。`Factory::class` へ bind すると最初の解決時に deferred
+    provider が読み込まれ、その `singleton(Factory::class, …)` が**後勝ちで fake を消して
+    無言で実 IdP へ戻る**。
+  - vendor の `Socialite::fake()` は使わない (戻り先が `https://socialite.fake/...` で
+    round-trip が完成しない)。ただし identity は vendor の `Two\User` を `map()` で再利用する。
 
 ### 免除分類 (`ExternalSeamClassification::Exempt`) は現時点で使用できない
 
@@ -1477,7 +1495,9 @@ T126 の `ExternalClientBoundaryScanner` も本目録の `ExternalSeamScanner` �
 ### 保証しないもの (誇張しない。**本節が正本**)
 
 1. **出口の遮断**。本目録は新経路の**検知**であり、実行時の外部通信は止めない。
-   bug-hunt のブラウザが SSO ボタンから実 IdP へ遷移する現状は変わらない
+   SSO の実 IdP 遷移は別機構 (fake 配線) が塞いでおり、本目録の効果ではない。
+   また塞がるのは**アプリが返すリダイレクト先**までで、ブラウザ自身が出す通信は
+   Playwright の origin allowlist が担う別の層である
 2. **委譲先の assert の中身**。委譲先の gate が弱められた (必須宣言のうち 1 つを検査しなくなった等)
    場合は検出できない。結線は「母集団の生存」と「test 名の同定」までである
 3. **`app/` の外**。`routes/` / `config/` に書かれた到達コードは走査しない

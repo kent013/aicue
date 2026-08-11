@@ -48,7 +48,7 @@ const EXTERNAL_SEAM_MUTATION_COVERAGE = [
     'M2' => '目録に走査で出ないクラスを足すと対称差ゼロ (残骸側) が赤くなる',
     'M3' => 'FACADE_RULES を空にすると対称差ゼロ (missing 側) が赤くなる',
     'M4' => '全規則を無効化すると空振り防止が赤くなる',
-    'M5' => 'SocialAuthController 以外のクラスに Socialite::driver() を書くと名指し固定が赤くなる',
+    'M5' => 'funnel クラス以外に Socialite::driver() を書くと名指し固定が赤くなる',
     'M6' => 'Cashier / Stripe を知らないクラスに ->stripe() を書くと抑制 0 件が赤くなる',
     'M7' => '規則→種別表の 1 行を書き換えると種別突合が赤くなる',
     'M8' => 'requiredDimensions から kind を 1 つ消すと exact-fit が赤くなる',
@@ -230,7 +230,7 @@ test('外部到達: 決済の抑制 site は 0 件', function (): void {
         .PHP_EOL.implode(PHP_EOL, $described));
 });
 
-test('外部到達: SocialLogin は SocialAuthController 1 クラスに固定される', function (): void {
+test('外部到達: SocialLogin は funnel 1 クラスに固定される', function (): void {
     $registered = array_values(array_map(
         static fn ($entry): string => $entry->class,
         array_filter(

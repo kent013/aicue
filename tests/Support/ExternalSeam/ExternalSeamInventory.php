@@ -10,8 +10,8 @@ use App\Console\Commands\Billing\EnsurePortalConfiguration;
 use App\Enums\Security\ExternalSeamClassification;
 use App\Enums\Security\ExternalSeamDimension;
 use App\Enums\Security\ExternalSeamKind;
-use App\Http\Controllers\Auth\SocialAuthController;
 use App\Providers\AppServiceProvider;
+use App\Services\Auth\SocialiteDriverResolver;
 use App\Services\Billing\CashierAutoRechargeGateway;
 use App\Services\Billing\CashierStripeGateway;
 use App\Services\Billing\CashierTicketCheckoutGateway;
@@ -61,13 +61,15 @@ final class ExternalSeamInventory
      *
      * ★標準形 v1「正規経路へ集約し直呼びを構文解析で禁止」の機械化。
      *   この 1 クラス以外は `Guarded` でも `Exempt` でも登録できない。
-     *   集約先を別クラスへ切り出さないのは、差し替え先 (SSO fake) を今作らないため。
+     *   ★T153: 差し替え先 (SSO fake) を作るため、集約先を controller から
+     *     `SocialiteDriverResolver` へ切り出した。container の差し替えキーになれるのは
+     *     controller ではなくこの薄い解決点である。
      *
      * @return class-string
      */
     public static function socialLoginFunnel(): string
     {
-        return SocialAuthController::class;
+        return SocialiteDriverResolver::class;
     }
 
     /** @return list<ExternalSeamEntry> */
@@ -114,10 +116,11 @@ final class ExternalSeamInventory
 
             // --- social_login (1 クラス。名指し固定) ---
             new ExternalSeamEntry(
-                class: SocialAuthController::class,
+                class: SocialiteDriverResolver::class,
                 kind: ExternalSeamKind::SocialLogin,
                 classification: ExternalSeamClassification::Guarded,
-                rationale: 'SSO の唯一の正規経路。他クラスからの Socialite::driver() は本目録に登録できず必ず赤くなる',
+                rationale: 'SSO の唯一の正規経路。他クラスからの Socialite::driver() は本目録に登録できず必ず赤くなる。'
+                    .'非本番は FakeSocialiteDriverResolver へ container bind で差し替わる',
             ),
 
             // --- captcha (1 クラス) ---
