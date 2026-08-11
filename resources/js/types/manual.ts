@@ -281,6 +281,12 @@ export interface RenderProps {
      */
     playbackJob: RenderJobProps | null;
     /**
+     * 受け取れる完成動画の job (無ければ null)。
+     * サーバが「published + download ability + 現行世代」を判定した結果そのものであり、
+     * **UI 側で条件を再判定しない** (判断は props で 1 回)。
+     */
+    finishedJob: RenderJobProps | null;
+    /**
      * 採用テイクの充足状況 (描画時点のスナップショット。常に最新ではない)。
      * 生成物の実績は playbackJob.placeholder_cut_count が語る (別概念なので混ぜない)。
      */

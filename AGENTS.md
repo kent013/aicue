@@ -574,3 +574,27 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
       succeeded render=0。**`null` を `0` と同一視しない / backfill しない**
     - 値契約・ロック順序上の書き込み位置・保証しないものは
       `docs/architecture.md` §採用テイク充足判定の単一化と告知契約 が正本
+13. **レンダ成果物の選択式の単一化 (T154)**: 「いま受け取れるレンダ成果物はどれか」を
+    **1 件選ぶ**式を書いてよいのは `Services/Manual/CurrentRenderArtifact` **ただ 1 ファイル**である
+    (`currentSucceeded(manual, kind)`)。定義は保持ポリシー
+    (`RenderJobService::newerSucceededExists` / `DeleteRenderOutputsJob`) と**同じ世代定義**で、
+    最新 succeeded の `output_path` が NULL なら**旧世代へフォールバックしない**
+    (実体が削除済みのため = 壊れた署名 URL を返さない)。`app/` 配下で `render_jobs` に対する
+    succeeded 条件つきの直接クエリを持つファイルは `RenderArtifactSelectionInventory` へ
+    区分 (`RenderArtifactSelectionKind`) と 30 文字以上の根拠付きで登録する
+    (`CurrentRenderArtifactInventoryTest` が deny-by-default + exact-fit で強制。
+    `SupersessionCriterion` 区分には「`latest(`/`orderByDesc(` を持たず `where('id','>'|'<',…)` の
+    連続 token 列を持つ」前提の機械検査が付く)。
+    - **成果物の受け取り口は route を増やさない**。`playback` が preview と完成動画の両方を扱い、
+      **kind→ability 写像は網羅 `match`** で書く (`preview` → `render` / `render` → `download`。
+      到達不能な `else` を作らない)。完成動画の再生条件は download と**完全同一**
+      (published + 現行世代 + download ability + **同じ評価順序**)。preview 側の 404 条件と
+      ability は変えない
+    - **秘匿境界は props 側**に置く。詳細画面の `render.finishedJob` は endpoint が 302 を返す条件と
+      1 対 1 で、UI は `finishedJob !== null` **だけ**で判断する (`canManage` を積まない =
+      判断を 2 箇所に持たない)
+    - **写像は本番 policy では観測差が出ない** (`render` と `download` はどちらも
+      `ProjectPolicy::update`)。テスト専用 policy を `Gate::policy` で差し込んで behavioral に固定する。
+      「本番で意味のある権限差が既に存在する」とは書かない
+    - 保証しないもの (撮影者は完成動画を観られない / gate はファイル粒度 / Browser lane は
+      DOM 契約のみ 等) は `docs/architecture.md` §完成レンダ成果物の選択と受け取り口 が正本

@@ -175,6 +175,7 @@ route parameter を経由しない id (POST payload / MCP tool 引数 / token cl
 | `Manual/RenderJobService` | AI-CUE: レンダの状態機械 (trigger = ready→rendering + render 冪等 + 採用テイク/尺/残高 guard / triggerPreview = Organization 行ロックで org 同時 preview 上限を直列化 / failJob = 冪等失敗確定 / completeRenderIntoLockedManual = ロック済み前提メソッド / recoverStale・reconcileOutputs = cron 本体) |
 | `Manual/RenderPipeline` | AI-CUE: レンダパイプライン本体 (startJob→buildManifest→compose→upload→finalize)。チケット 2 フェーズ (予約冪等キー = render_jobs.ticket_reservation_id、complete + commit + succeeded を terminal tx で原子化)。version スナップショット固定 (§10.8-6) |
 | `Manual/CutSequencer` | AI-CUE: カット表示順 (step→配下 point) と表示ラベル (手順N/急所N-M) の導出 (読み取り専用) |
+| `Manual/CurrentRenderArtifact` | AI-CUE: 「いま受け取れるレンダ成果物はどれか」の唯一の選択式 (読み取り専用)。playback / download / 詳細画面 props の 3 消費者が同じ行を指す。保持ポリシーと同じ世代定義 (最新 succeeded の output_path が NULL なら旧世代へフォールバックしない)。§完成レンダ成果物の選択と受け取り口 |
 | `Manual/ScenarioBookendBuilder` | AI-CUE: AI 生成シナリオの前後へ導入/総括カットを決定的に付与する純関数 (DB/ロックに触れない。呼び出しは `AnalysisPipeline::finalize` の terminal tx 内。総括の要点再掲は**今回生成の steps からのみ**抽出 = 再生成時に旧シナリオを総括しない) |
 | `Render/VideoComposer` (interface) + `Render/FfmpegVideoComposer` | AI-CUE: 動画合成の抽象 + ffmpeg v1 実装 (Process facade 経由・配列引数。filtergraph にはサーバ生成一時ファイル名と数値のみ = 字幕本文を直接埋めない) |
 | `Render/AssSubtitleWriter` | AI-CUE: ASS 字幕生成の安全境界 (唯一の字幕テキスト出力点。リテラル \N/override tag/制御文字/zero-width の正規化 + mb 安全な長さ上限) |
@@ -1766,3 +1767,110 @@ smoke 末尾の「この実行分」と `operations:llm-cost-report` の期間�
 7. **並行実行に対する保証は無い**。「この実行分」は `llm_call_logs.id` の差分で切り出しており、
    同一 shard で別の LLM 呼び出しが並行すると混入する
 8. **1 回通ったことは、次も通ることを意味しない**。実 LLM の出力は非決定的である
+
+## 完成レンダ成果物の選択と受け取り口 (T154)
+
+制作フロー最終段の「完成物の受け取り」は **DL 1 本**しかなく、アプリ内で観る手段が無かった
+(`playback` は `kind=preview` 以外を 404 にしていた)。「思考ゼロ・編集ゼロ」を掲げながら
+最後だけ外部プレイヤーを要求している状態を解消したのが本節の変更である。
+
+### 選択式は 1 つ (`Services/Manual/CurrentRenderArtifact`)
+
+「いま受け取れる成果物はどれか」は **`CurrentRenderArtifact::currentSucceeded(manual, kind)`
+ただ 1 つ**が答える。定義は保持ポリシー
+(`RenderJobService::newerSucceededExists` / `DeleteRenderOutputsJob`) と**同じ世代定義**である:
+
+- 実体が残るのは「同 manual・同 kind の**最新 succeeded**」だけである
+- したがって最新 succeeded の `output_path` が NULL (生成に失敗した / 掃除された) なら
+  **旧世代へフォールバックしない**。旧世代の実体は削除済みなので、フォールバックは
+  **壊れた署名 URL を返すことと同義**である
+- **持たない責務**: published 判定と ability 判定は呼び出し側にある (名前が示す役割を超えない)
+
+> これは「不具合を直した」ではなく「**定義を保持ポリシーへ揃えた**」である。
+> `whereNotNull('output_path')` を先に効かせる旧式が本番データで実際に旧世代を
+> 選んでいたかは**実測していない**。
+
+### playback の 3 層 404 と kind→ability 写像
+
+**route は 1 本も増やさない**。既存の `projects.manuals.render-jobs.playback` を
+`kind=render` へ拡張する。manual 単位 URL にすると**再レンダ後も URL 文字列が変わらず**
+ブラウザが古い媒体を再生しうるため、**job id を含む既存の形**を使う。
+
+評価順は次のとおりで、**すべて認可より前に 404** (セキュリティ不変条件 2/10):
+
+1. `{project}` ∈ current org (`project.in-current-org` middleware + inline guard)
+2. `{manual}` ∈ `{project}` (`Route::scopeBindings()`)
+3. `{renderJob}` ∈ `{manual}` (scopeBindings + inline 再検査 = 二重防御)
+
+その後に**成果物の性質に合う ability** を評価する (2 値 enum の網羅 `match`。
+到達不能な `else` を作らないので、`RenderKind` に case が増えたら PHPStan level 10 が落ちる):
+
+| kind | ability | 追加条件 |
+|---|---|---|
+| `preview` | `render` | なし (**T154 で変えていない**) |
+| `render` | `download` | `manual.status === published` (download と**同条件・同順序**) |
+
+最後に「いま受け取れる成果物」と**同一行か**を照合する (旧世代 job id の直叩き・未完了・
+実体削除済みはここで 404)。
+
+**写像は `RenderPlaybackAbilityMappingTest` が behavioral に固定する**。本番 policy は
+`VideoManualPolicy::render` と `::download` がどちらも `ProjectPolicy::update` に落ちるため
+**可否が同値で観測差が出ない**ので、テスト専用 policy (`Tests\Support\Policies\DivergentVideoManualPolicy`)
+を `Gate::policy()` で差し込み、ability ごとに可否を分岐させて写像を直接観測する。
+「本番で意味のある権限差が既に存在する」とは言えない (固定できるのは写像が kind で
+分岐していることまで)。
+
+### props と endpoint は 1 対 1
+
+詳細画面 props の `render.finishedJob` は、**endpoint が 302 を返す条件と 1 対 1** である
+(`published` + `download` ability + 現行世代)。UI は `finishedJob !== null` **だけ**で
+表示を決め、`canManage` を積まない:
+
+- 秘匿境界は props 側に置く (判断を 2 箇所に持たない)
+- `canManage` は `update` ability であり、`finishedJob` が既に運んでいる `download` ability とは
+  別物である。積むと policy が分岐した日に**サーバが渡した成果物を UI が隠す**
+- 「押すと 404」の導線を UI に出さない (`finishedJob=null` なら再生も DL も出さない)
+
+`finishedJob` は**local state にしない**。render 成功時の `router.reload()` で props ごと
+入れ替わる。ポーリング応答から組み立てる経路は作らない (応答は published / ability / 世代を
+判定していない)。`<video preload="none">` なのは、詳細画面を開くたびに署名 URL 発行と
+本体取得が走るのを避けるためである (完成動画は尺が長い)。
+
+**完成動画に黒背景の注記は出さない**。`placeholder_cut_count` の値契約では succeeded render は
+`0` であり、既存の `> 0` 条件では何も表示されない (完成動画用の分岐を新設していない)。
+
+### 機械強制 (`CurrentRenderArtifactInventoryTest`)
+
+`app/` 配下で **`render_jobs` に対する succeeded 条件つきの直接クエリ**を書いてよいファイルは
+`Support/Security/RenderArtifactSelectionInventory` に登録されたものだけである
+(deny-by-default・exact-fit)。区分 (`RenderArtifactSelectionKind`) と 30 文字以上の根拠が要る。
+
+| 区分 | 意味 | 登録 |
+|---|---|---|
+| `Canonical` | 受け取り対象を 1 件選ぶ選択式の実体 | `Services/Manual/CurrentRenderArtifact.php` **のみ** |
+| `SupersessionCriterion` | 世代交代の判定 (より新しい succeeded が在るか / 旧世代の収集) | `RenderJobService` / `RenderPipeline` |
+
+`SupersessionCriterion` には**機械検査される前提**が付く: `latest(` / `orderByDesc(` を
+1 度も持たず、かつ `where('id', '>' | '<', …)` の**連続 token 列**を持つこと
+(「`id` と `>` が同一ファイルに在る」ではない)。前提が崩れた瞬間に区分ごと再審査になる。
+
+### 保証しないもの (誇張しない)
+
+- **撮影者 (project_member) は完成動画を観られない**。`download` ability は編集者のみのままで、
+  本変更はそれを緩めない。「撮った人が結果に到達する」は**編集者について**成立する
+- **kind→ability 写像は固定するが、本番 policy の差は今は存在しない** (上記)
+- **シナリオ編集で `ready` に戻った manual の旧完成動画は、再生も DL もできない**。
+  これは既存 download の挙動であり、本変更は**揃えるだけで改善しない**
+- **既存 `playbackJob` (preview) の props 露出条件は変えていない**。`render` ability を持たない
+  撮影者にも (UI では隠れているが) job の存在が渡る。`RenderJobData` は `output_path` も
+  署名 URL も含まないため露出は「preview job が在ること」に留まる
+- **Architecture gate が閉じるのはファイル粒度の直接クエリだけ**である。登録済みファイル内で
+  メソッドを増やして選択式を書く経路・文字列変数経由・動的呼び出し・別ファイルへ切り出した
+  同義式・repository を挟む間接経路には**沈黙する**。走査根は `app/` のみ
+- succeeded 条件を伴わない別基準の選択 (表示用の最新 job = `VideoManualService::displayRenderJob`)
+  はそもそも母集団に入らない (意図した設計)
+- **署名 URL の TTL とその先の再生可否は保証しない** (`manual.render_playback_url_ttl_minutes`。
+  長尺動画で TTL 切れの途中失敗が起きうるかは測っていない)
+- **Browser lane は DOM 契約だけを検査する**。実際に mp4 が再生されること・S3 の CORS 設定・
+  iOS Safari のインライン再生挙動 (`playsinline` 未付与) は確認していない
+- **撮影 PWA からの戻り導線は含まない** (別 TODO)

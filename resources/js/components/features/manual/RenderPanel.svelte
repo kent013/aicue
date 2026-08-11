@@ -30,6 +30,12 @@
         job: RenderJobProps | null;
         previewJob: RenderJobProps | null;
         playbackJob: RenderJobProps | null;
+        /**
+         * 受け取れる完成動画 (サーバが published + download ability + 現行世代を判定済み)。
+         * **local state にしない**: render 成功時の router.reload() で props ごと入れ替わる。
+         * ポーリング応答から組み立てる経路は作らない (応答は上記条件を判定していない)。
+         */
+        finishedJob: RenderJobProps | null;
         coverage: TakeCoverageProps;
         canManage: boolean;
     }
@@ -41,6 +47,7 @@
         job,
         previewJob,
         playbackJob: playbackJobProp,
+        finishedJob,
         coverage,
         canManage,
     }: Props = $props();
@@ -315,16 +322,39 @@
                 シナリオが編集されています。最新の内容で完成動画を再生成してください。
             </p>
         {/if}
-        {#if status === "published" && canManage}
-            <div class="mt-4">
-                <Button
-                    variant="secondary"
-                    href={`/projects/${projectId}/manuals/${manualId}/download`}
-                    testId="download-button"
-                >
-                    <Download class="size-4" />
-                    完成動画をダウンロード
-                </Button>
+        <!-- 完成動画 (再生 + DL)。表示の可否はサーバが決めた finishedJob **だけ**で判断する
+             (published / ability を UI 側で再判定しない = 判断を 2 箇所に持たない)。
+             canManage を積まないのは、finishedJob が既に download ability の評価結果を
+             運んでいるためである (canManage = update ability を積むと、policy が分岐した日に
+             サーバが渡した成果物を UI が隠す)。
+             書き出し中に出ないことは、この枝が {#if rendering}…{:else} の else 側にある
+             ことで構造的に保証される。
+             黒背景の注記は出さない: succeeded render の placeholder_cut_count は 0 (T148 の
+             値契約) なので、完成動画用の注記分岐は新設しない。 -->
+        {#if finishedJob !== null}
+            <div class="mt-4 flex flex-col gap-3" data-testid="final-video-block">
+                <!-- svelte-ignore a11y_media_has_caption (完成動画の字幕は焼き込み済み) -->
+                <!-- preload="none": 詳細画面を開くたびに署名 URL 発行と本体取得が走るのを避ける
+                     (完成動画は尺が長い)。src に job id を含むため、再レンダで URL が変わり
+                     古い世代が再生され続けることが起きない。 -->
+                <video
+                    controls
+                    preload="none"
+                    class="w-full rounded-md bg-neutral"
+                    src={`/projects/${projectId}/manuals/${manualId}/render-jobs/${finishedJob.id}/playback`}
+                    aria-label="完成動画"
+                    data-testid="final-video"
+                ></video>
+                <div>
+                    <Button
+                        variant="secondary"
+                        href={`/projects/${projectId}/manuals/${manualId}/download`}
+                        testId="download-button"
+                    >
+                        <Download class="size-4" />
+                        完成動画をダウンロード
+                    </Button>
+                </div>
             </div>
         {/if}
         {#if !canManage}
@@ -421,7 +451,8 @@
                 <!-- svelte-ignore a11y_media_has_caption (プレビュー動画の字幕は焼き込み済み) -->
                 <!-- aria-label は固定文言でよい: playbackJob の供給源は初期値 (Controller が
                      kind=Preview ∧ status=Succeeded で抽出) と poll の preview 分岐だけで、
-                     render job が入る経路が無い (完成動画と取り違わない)。 -->
+                     render job が入る経路が無い (完成動画と取り違わない)。
+                     完成動画は finishedJob という別枠で持つため、この根拠は T154 後も成立する。 -->
                 <video
                     controls
                     preload="metadata"
