@@ -315,15 +315,31 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
      テンプレート更新の取り込みを容易にするため、できるだけ書き換えない。 -->
 
 1. **シナリオ整合の共有ロック規約**: `cuts` / `video_manuals.scenario_version` /
-   `video_manuals.status` を書き込む全経路は、対象 VideoManual 行を `lockForUpdate()` で
-   取得した同一トランザクション内で反映する (準拠実装: `Manual/ScenarioService::save()` /
-   `Manual/ScenarioService::materializeIntoLockedManual()` / `Manual/AnalysisJobService::trigger()` /
-   `Manual/AnalysisJobService::failJob()` / `Capture/CaptureTakeService::adopt()`・`delete()`
-   (cuts.adopted_take_id)。経路 inventory は **`ScenarioWritePathInventoryTest`
-   (Architecture テスト) へ昇格済み** = 新しい書き込み経路は inventory 登録が必須。
+   `video_manuals.status` を書き込む経路は、次の 2 分類のいずれかに属する。
+   - **(i) 更新経路** (既存行の書き換え): 対象 VideoManual 行を `lockForUpdate()` で取得した
+     同一トランザクション内で反映する (準拠実装: `Manual/ScenarioService::save()` /
+     `Manual/ScenarioService::materializeIntoLockedManual()` /
+     `Manual/AnalysisJobService::trigger()` / `Manual/AnalysisJobService::failJob()` /
+     `Manual/RenderJobService::trigger()` / `Manual/RenderJobService::failJob()` /
+     `Manual/RenderJobService::completeRenderIntoLockedManual()` /
+     `Capture/CaptureTakeService::adopt()`・`delete()` (cuts.adopted_take_id))
+   - **(ii) 生成経路** (新規 INSERT): 対象行は未存在のため、**所有元 Project 行を
+     `lockForUpdate()` した同一トランザクション内で INSERT** し、初期状態
+     (`status` / `scenario_version`) を **INSERT 時に明示代入する**
+     (DB カラム default に依存しない = migration default 変更による silent break と、
+     戻り値インスタンスの属性欠落の両方を防ぐ)。
+     準拠実装: `Manual/VideoManualService::create()` / `::duplicate()`
+     - **免除の範囲を広げない**: (ii) が `lockForUpdate()` を免除されるのは
+       **その tx が生成した新規行の初期値 (`status` / `scenario_version`) の INSERT のみ**である。
+       **生成後の行に対する後続の書き込み (`cuts` 等) は (i) 更新経路として扱い**、
+       保存済みの新 manual を `lockForUpdate()` で**再取得した**同一 tx 内で行う
+       (準拠実装: `duplicate()` は新 manual を save 後に `lockForUpdate()` で再取得してから
+       `copyCuts()` を呼ぶ)
+   経路 inventory は **`ScenarioWritePathInventoryTest` (Architecture テスト) へ昇格済み** =
+   新しい書き込み経路は inventory 登録が必須。**ただし allowlist はファイル粒度**であり、
+   同一ファイル内のメソッド追加は検出しない (メソッド単位の fail-first は behavioral テストが担う)。
    テイク採用 API は検出 4 (`adopted_take_id` の deny-by-default 走査) で inventory 準拠済み。
-   後続の RenderJob 状態遷移も同規約に従う。
-   詳細は `docs/architecture.md` §シナリオ整合の共有不変条件)
+   詳細は `docs/architecture.md` §シナリオ整合の共有不変条件
 2. **容量 Quota (max_storage_bytes) の予約規約**: presigned アップロードの容量判定は
    `Billing/QuotaService::checkAddition` + `Capture/StorageUsageService::occupiedBytes`
    (bytes_used + bytes_pending) 経由のみ。予約 (`take_upload_reservations`) の状態遷移は

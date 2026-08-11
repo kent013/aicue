@@ -1,0 +1,80 @@
+# T151 gate / mutation 実測ログ
+#
+# 詳細設計 §「gate が正しく赤くなることの確認手順」の G-2 / G-3 に対応する。
+# 実行時刻: 2026-08-11 15:4x JST (worktree /workspace/.claude/worktrees/tasks/T151)
+
+================================================================================
+G-2: ScenarioWritePathInventoryTest のファイル粒度 gate が空回りしていないこと
+================================================================================
+
+前提 (誇張しない): `Services/Manual/VideoManualService.php` は T066 (duplicate()) の時点で
+STATUS_WRITE_ALLOWED / SCENARIO_VERSION_ALLOWED の**両方に登録済み**である。allowlist は
+**ファイル粒度**のため、create() に明示 write を足しても gate は新たに赤くならない。
+したがって「登録前に gate が赤いことの確認」は、**allowlist から当該ファイルを一時除外すると
+実際に赤くなる** (= 登録が load-bearing で空振りでない) ことの確認として実施した。
+
+--- G-2a: STATUS_WRITE_ALLOWED から 'Services/Manual/VideoManualService.php' を一時除外 ---
+$ composer test -- --filter=ScenarioWritePathInventoryTest
+result=failed tests=11 passed=10 failed=1
+message: video_manuals.status の書き込みは ScenarioService / AnalysisJobService の
+         ロック済み経路のみです: Services/Manual/VideoManualService.php
+         Failed asserting that two arrays are identical.
+         -Array &0 []
+         +Array &0 [ 0 => 'Services/Manual/VideoManualService.php' ]
+→ RED (期待どおり。除外したファイルが violation として列挙された)
+
+--- G-2b: SCENARIO_VERSION_ALLOWED から同ファイルを一時除外 ---
+$ composer test -- --filter=ScenarioWritePathInventoryTest
+result=failed tests=11 passed=10 failed=1
+message: scenario_version に触れてよいのは ScenarioService (書き込み) と
+         ScenarioDocumentData (読み取り shape) のみです: Services/Manual/VideoManualService.php
+→ RED (期待どおり)
+
+--- 復帰確認 (両方を元に戻す) ---
+$ git diff --stat tests/Architecture/ScenarioWritePathInventoryTest.php  → 差分なし
+$ composer test -- --filter=ScenarioWritePathInventoryTest
+result=passed tests=11 passed=11 assertions=45
+→ GREEN
+
+**この赤が実証しないこと**: create() の登録が load-bearing であること。この赤は既存の
+duplicate() の write だけでも成立する。G-2 が実証するのは「ファイル粒度 gate が
+空回りしていない」ことまでである。create() の明示代入を守るのは下の G-3 の behavioral
+テストだけである。
+
+================================================================================
+G-3: create() の明示代入が消えたら気づけること (属性ごとに個別に)
+================================================================================
+
+--- G-3a: create() の forceFill から 'status' => VideoManualStatus::Draft の 1 行だけ削除 ---
+$ composer test -- --filter=ManualServiceBoundaryTest
+result=failed tests=9 passed=8 failed=1
+failure: "…status_Draft_を保持する__category_SOP_あり_"
+         Failed asserting that null is identical to an object of class
+         "App\Enums\Manual\VideoManualStatus".
+→ テスト 1 (status 契約) のみ RED / テスト 2 (scenario_version 契約) は GREEN のまま
+  = **非対称を実測で観測**
+
+--- G-3b: create() の forceFill から 'scenario_version' => 0 の 1 行だけ削除 ---
+$ composer test -- --filter=ManualServiceBoundaryTest
+result=failed tests=9 passed=8 failed=1
+failure: "…scenario__version_0_を保持する"
+         Failed asserting that null is identical to 0.
+→ テスト 2 のみ RED / テスト 1 は GREEN のまま = **逆向きの非対称も観測**
+
+--- 復帰確認 ---
+$ composer test -- --filter=ManualServiceBoundaryTest
+result=passed tests=9 passed=9
+→ GREEN
+
+同時に消していない (同時に消すと両方が同時に赤くなり、どの assertion がどの実装行を
+守っているかの 1:1 対応を確認できない)。
+
+================================================================================
+G-1 (fail-first) は devnotes/20260811-1544-todo-T151/red-before-fix.txt が正本
+================================================================================
+
+================================================================================
+G-4 (pipeline-smoke 実走) は実施していない
+================================================================================
+LLM を 3 段とも実呼び出しするため実行そのものが課金であり、ユーザーの明示承認を得ていない。
+本修正の検証には必須ではない (fixture 段のこの 1 因は G-1〜G-3 で閉じている)。

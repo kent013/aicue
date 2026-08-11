@@ -5,10 +5,14 @@ declare(strict_types=1);
 /*
  * シナリオ整合の共有ロック規約 (AGENTS.md ドメイン固有規約 1) の書き込み経路 inventory。
  *
- * 「cuts / video_manuals.scenario_version / video_manuals.status を書き込む全経路は、
- *   対象 VideoManual 行を lockForUpdate() で取得した同一トランザクション内で反映する」
+ * 「cuts / video_manuals.scenario_version / video_manuals.status を書き込む経路は次の 2 分類:
+ *   (i) 更新経路 = 対象 VideoManual 行を lockForUpdate() で取得した同一トランザクション内で反映する。
+ *   (ii) 生成経路 = 対象行が未存在のため所有元 Project 行を lockForUpdate() した同一 tx 内で INSERT し、
+ *        初期状態 (status / scenario_version) を INSERT 時に明示代入する (DB default に依存しない)」
  *
- * 経路 (メソッド粒度。docs/architecture.md と対):
+ * 下表は**メソッド粒度で記録する**経路 inventory (docs/architecture.md と対)。ただし
+ * **本テストの機械検証は下記 allowlist によるファイル粒度**であり表の粒度とは一致しない
+ * (同一ファイル内のメソッド追加は検出しない。メソッド単位の fail-first は behavioral テストが担う):
  * | 経路 | 書いてよいもの |
  * |---|---|
  * | ScenarioService::save() | cuts / scenario_version / status (rendering·analyzing guard 付き) |
@@ -16,7 +20,13 @@ declare(strict_types=1);
  * | AnalysisJobService::trigger() | status (draft·ready→analyzing のみ) |
  * | AnalysisJobService::failJob() | status (analyzing→ready·draft のみ。cuts 有無で決定。scenario_version は snapshot 読みのみ) |
  * | VideoManualService::displayXxxJob() | 書き込みなし (stale 判定で scenario_version を読むのみ) |
- * | VideoManualService::duplicate() | cuts (lockForUpdate 済みの新 manual 経由で作成)。元 manual を
+ * | VideoManualService::create() | status / scenario_version (**(ii) 生成経路**。新規 manual の INSERT 時に
+ *   status=Draft / scenario_version=0 を明示代入する。対象 VideoManual 行は未存在のため所有元 Project 行を
+ *   lockForUpdate した同一 tx 内で INSERT = 既存行への並行書き込みではない。検出 1 は
+ *   SCENARIO_VERSION_ALLOWED、検出 2 は STATUS_WRITE_ALLOWED に登録済み (duplicate() と同一ファイル)。
+ *   **allowlist はファイル粒度のため create() 単体の検出保証はなく、fail-first を担うのは
+ *   tests/Feature/Projects/ManualServiceBoundaryTest.php の behavioral 契約テストである** (T151) |
+ * | VideoManualService::duplicate() | **(ii) 生成経路**。cuts (lockForUpdate 済みの新 manual 経由で作成)。元 manual を
  *   lockForUpdate して一貫読み取り。複製 manual の INSERT 時に status=Draft / scenario_version=0 を
  *   明示代入する (新規行生成 = lockForUpdate 前だが、その tx が生成した排他的新規行・同一 tx 内反映で
  *   既存行への並行書き込みではない)。検出 1 (scenario_version) は SCENARIO_VERSION_ALLOWED、
@@ -61,9 +71,11 @@ final class ScenarioWritePathScanner
         // T032: failJob が失敗確定時の scenario_version を job にスナップショット読みする
         // (書き込むのは scenario_version_at_terminal であり scenario_version ではない)
         'Services/Manual/AnalysisJobService.php',
-        // VideoManualService は 2 理由で許可: (1) T032 stale alert 判定 (displayXxxJob) が
+        // VideoManualService は 3 理由で許可: (1) T032 stale alert 判定 (displayXxxJob) が
         // manual.scenario_version を read (read-only)。(2) T066 duplicate() が複製 manual の
-        // INSERT 時に scenario_version=0 を明示 write (新規行生成 + 同一 tx。既存行への並行 write ではない)
+        // INSERT 時に scenario_version=0 を明示 write。(3) T151 create() が新規 manual の
+        // INSERT 時に scenario_version=0 を明示 write
+        // ((2)(3) はいずれも生成経路 = 新規行生成 + 同一 tx。既存行への並行 write ではない)
         'Services/Manual/VideoManualService.php',
     ];
 
@@ -74,8 +86,10 @@ final class ScenarioWritePathScanner
         // trigger: ready→rendering / failJob: rendering→ready / complete...: rendering→published。
         // RenderPipeline は VideoManualStatus を直接書かない (全て Service メソッド経由)
         'Services/Manual/RenderJobService.php',
-        // T066: duplicate() が複製 manual の INSERT 時に status=Draft を明示代入
-        // (新規行生成 + 同一 tx。既存行への並行書き込みではないためロック規約の趣旨に整合)
+        // T066: duplicate() が複製 manual の INSERT 時に status=Draft を明示代入。
+        // T151: create() も新規 manual の INSERT 時に status=Draft を明示代入
+        // (どちらも生成経路 = 新規行生成 + 同一 tx。既存行への並行書き込みではないため
+        //  ロック規約の趣旨に整合)
         'Services/Manual/VideoManualService.php',
     ];
 
@@ -676,11 +690,14 @@ test('現行コードベースに adopted_take_id の書き込みが実在する
     expect(ScenarioWritePathScanner::containsAdoptedTakeIdWrite($captureTakeService))->toBeTrue();
 });
 
-test('T066: VideoManualService に status/scenario_version の明示 write が実在する (allowlist の degenerate PASS 防止 + 明示代入の fail-first 契約)', function (): void {
-    // duplicate() は複製 manual の初期状態を DB default に委ねず status=Draft / scenario_version=0 を
-    // 明示 write する。その **write 形** が VideoManualService 内に実在することを token ベースで担保する
-    // (明示代入を消すと write が消え、この契約テストが fail = fail-first。STATUS_WRITE_ALLOWED /
-    //  SCENARIO_VERSION_ALLOWED の degenerate = 未使用 allowlist 化も防ぐ)。
+test('T066: VideoManualService ファイルに status/scenario_version の明示 write が少なくとも 1 つ存在する (allowlist の degenerate PASS 防止。ファイル粒度でありメソッド単位の fail-first ではない)', function (): void {
+    // create() / duplicate() は新規 manual の初期状態を DB default に委ねず status=Draft /
+    // scenario_version=0 を明示 write する。その **write 形** が VideoManualService 内に実在することを
+    // token ベースで担保する (STATUS_WRITE_ALLOWED / SCENARIO_VERSION_ALLOWED の
+    // degenerate = 未使用 allowlist 化を防ぐ)。
+    // **メソッド単位の fail-first は本テストでは担えない** (create() の明示代入を消しても
+    // duplicate() が残れば通る)。create()/duplicate() それぞれの初期状態の保証は
+    // ManualServiceBoundaryTest / ManualDuplicateTest の behavioral テストが担う (T151)。
     // scenario_version は displayXxxJob の read があるため token 出現では区別できず、write 形で判定する。
     $appDir = ScenarioWritePathScanner::appDir();
     $videoManualService = (string) file_get_contents($appDir.'/Services/Manual/VideoManualService.php');

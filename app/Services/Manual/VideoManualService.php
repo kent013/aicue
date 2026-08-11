@@ -35,13 +35,35 @@ class VideoManualService
         private readonly SourceDocumentService $sourceDocuments,
     ) {}
 
-    /** VideoManual 作成 (status は DB default の draft)。$document は任意の SOP 同時アップロード */
+    /**
+     * VideoManual 作成。$document は任意の SOP 同時アップロード。
+     *
+     * 新規 manual は必ず status=Draft・scenario_version=0 から開始する (この初期状態を
+     * INSERT 時に明示代入し、DB カラム default に依存しない = 将来の migration default 変更による
+     * silent break を防ぐ + **戻り値インスタンス上でも status/scenario_version が読み出せる**。
+     * DB から hydrate されるのではなく INSERT 前に属性を明示セットするためである)。
+     * 既定値依存だった頃は create() の戻り値の status が null で、pipeline-smoke の fixture 段が
+     * `$manual->status->value` で落ちた (実走で観測。T151)。
+     *
+     * シナリオ整合の共有ロック規約 (AGENTS.md ドメイン規約 1) の **(ii) 生成経路**:
+     *  - 対象 VideoManual 行は未存在のため、所有元 Project 行を lockForUpdate した同一 tx 内で
+     *    INSERT する (既存行への並行書き込みではなく、その tx が生成した排他的新規行)
+     *  - status / scenario_version は INSERT 時に明示代入する。duplicate() と同一カテゴリで、
+     *    ScenarioWritePathInventoryTest の STATUS_WRITE_ALLOWED / SCENARIO_VERSION_ALLOWED に
+     *    登録済み (**ファイル粒度**のため本メソッド単体の fail-first は担えない。それを担うのは
+     *    tests/Feature/Projects/ManualServiceBoundaryTest.php の behavioral 契約テストである)
+     */
     public function create(Project $project, string $title, ?int $categoryId, int $userId, ?UploadedFile $document = null): VideoManual
     {
         return DB::transaction(function () use ($project, $title, $categoryId, $userId, $document): VideoManual {
             $locked = Project::whereKey($project->id)->lockForUpdate()->firstOrFail();
             $manual = $locked->manuals()->make(['title' => $title]);
-            $manual->forceFill(['created_by' => $userId])->save();
+            // created_by はサーバ導出。status/scenario_version は初期状態の明示代入 (DB default 非依存)
+            $manual->forceFill([
+                'created_by' => $userId,
+                'status' => VideoManualStatus::Draft,
+                'scenario_version' => 0,
+            ])->save();
             if ($categoryId !== null) {
                 // 保存時再解決: ロック済み project 配下から取得 (cross-project は 404)
                 $category = $locked->categories()->whereKey($categoryId)->firstOrFail();
