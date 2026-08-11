@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, tick } from "svelte";
     import { page, router } from "@inertiajs/svelte";
-    import { ArrowLeft, Video } from "@lucide/svelte";
+    import { ArrowLeft, BookOpen, Video } from "@lucide/svelte";
     import TextLink from "@/components/atoms/TextLink.svelte";
     import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageHeaderSection from "@/components/molecules/PageHeaderSection.svelte";
@@ -227,6 +227,16 @@
             <TextLink href={`/app/projects/${project.id}/manuals`}>
                 <ArrowLeft class="inline size-3" aria-hidden="true" />
                 一覧へ戻る
+            </TextLink>
+            <!-- PC 側詳細への復路 (T155)。**この画面へ到達できた利用者に対しては、追加の
+                 status / ability 条件で出し分けない**。根拠と保証範囲は
+                 docs/architecture.md §撮影 PWA の運用契約。 -->
+            <TextLink
+                href={`/projects/${project.id}/manuals/${manual.id}`}
+                testId="manual-detail-link"
+            >
+                <BookOpen class="inline size-3" aria-hidden="true" />
+                マニュアル詳細へ
             </TextLink>
         </PageHeaderSection>
 

@@ -1007,6 +1007,26 @@ doc/10 §10.3 / §10.8-4/-7 の実装 (T004)。routes は `/app/projects/{projec
   必要になれば `downloaded_at` を流用せず別状態を設計する。本番 S3 は署名 URL への CORS GET 許可
   (`AllowedMethods` に GET、size 検査を使うなら `Access-Control-Expose-Headers: Content-Length,
   Content-Encoding`) が受け入れ条件 (未公開でも size 検査を自動スキップして degrade 成立)
+- **PC 面との導線は往復で 1 対 (T155)**: 往路は `Manuals/Show` / `Manuals/Edit` の
+  「この手順書を撮影する」(`isCaptureNavigable` = ready / published のときだけ出す)、
+  復路は `Capture/Show` ヘッダーの「マニュアル詳細へ」(**`Capture/Show` へ到達済みの利用者に対し、
+  追加の status / ability 条件を設けず常に出す**)。
+  **2 つの述語を共有しない**: 往路は「いま撮影を始めてよい相か」、復路は「元の画面へ戻れるか」で
+  意味が違い、合成中 (`rendering`) こそ進み具合を見に戻る場面である。復路専用の述語も作らない。
+  復路を無条件にできる根拠は、行き先 `projects.manuals.show` が `capture.manuals.show` と
+  **同じ層を同じ順序で通る**ことである — 外側 group の `auth` / `verified` /
+  `not-pending-deletion`、内側 group の `require-active-subscription` / `project.in-current-org`、
+  `Route::scopeBindings()`、controller の `resolveOrganizationProject()` (認可より前に 404)、
+  `Gate::authorize('view', $manual)`。詳細 GET はどちらも status で絞り込まない (一覧だけが絞る)。
+  よって復路が 403 になる経路が見当たらない。**ただしテストが固定するのはこの構造的同一性ではなく**、
+  現在サポートする最弱 principal である撮影者 (project_member) について全 status で
+  両 route の 200 + 着地 component が成立することである (`CaptureReturnPathTest`)。
+  **保証しないもの**: インストール済み PWA (standalone) で同一窓に留まることは保証しない
+  (`public/manifest.webmanifest` に `scope` 宣言が無く、既定 scope が `/` になるという
+  仕様の読みに基づくだけで実機観測がない)。狭幅ヘッダーの実レイアウト (折り返し・truncate) も
+  保証しない (Vitest は jsdom でクラス名しか見ない。Browser lane は追加していない)。
+  撮影完了の検知・自動遷移も行わない (ヘッダーの常設リンクのみ)。
+  撮影者が完成動画を観られるようにもならない (認可は不変。§完成レンダ成果物の選択と受け取り口)
 - **PWA フロント**: `pages/Capture/*` + `features/capture/*` + `lib/capture/*`
   (即時アップロード優先・IndexedDB は失敗/オフライン時の一時バッファ・419 は csrf-cookie
   再取得 1 回リトライ)。SW (`public/capture-sw.js`) は同一オリジン GET `/build/*` のみ
@@ -1873,4 +1893,6 @@ smoke 末尾の「この実行分」と `operations:llm-cost-report` の期間�
   長尺動画で TTL 切れの途中失敗が起きうるかは測っていない)
 - **Browser lane は DOM 契約だけを検査する**。実際に mp4 が再生されること・S3 の CORS 設定・
   iOS Safari のインライン再生挙動 (`playsinline` 未付与) は確認していない
-- **撮影 PWA からの戻り導線は含まない** (別 TODO)
+- **撮影 PWA からの戻り導線は `Capture/Show` ヘッダーの常設リンクとして実装済み** (T155。
+  §撮影 PWA の運用契約)。ただし**完成動画へ直接着地するわけではない** — 行き先はマニュアル
+  詳細画面で、そこに完成動画が出るかは本節の認可条件がそのまま決める (撮影者には出ない)
