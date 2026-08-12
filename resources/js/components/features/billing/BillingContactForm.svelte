@@ -29,11 +29,33 @@
     let nameText = $state(billingContact.name ?? "");
     let submitting = $state(false);
 
+    /**
+     * 「前回の検証結果を、ユーザーが編集したので stale とみなして隠す」フラグ (T157)。
+     * **値の正誤は見ていない** (クライアント検証ではない)。
+     */
+    let emailEdited = $state(false);
+    let nameEdited = $state(false);
+
+    /**
+     * フィールドごとの**編集世代**。編集のたびに増える。送信時の世代を控えておき、
+     * **応答時に世代が変わっていないフィールドだけ**抑制を解く。
+     * 送信中にさらに編集された場合は解かない — その応答は**古い値**への検証結果であり、
+     * それを根拠に stale なエラーを出し直すのは誤りだから。
+     */
+    let emailEditVersion = 0;
+    let nameEditVersion = 0;
+
     const serverErrors = $derived(
         (inertiaPage.props.errors ?? {}) as Record<string, string>,
     );
-    const emailError = $derived(!submitting ? (serverErrors.billing_contact_email ?? null) : null);
-    const nameError = $derived(!submitting ? (serverErrors.billing_contact_name ?? null) : null);
+    // 抑制条件に編集済みフラグを足す。**page props の同一性や router の finish には依存しない**
+    // (どちらも無関係な visit で古いエラーを復活させるため)
+    const emailError = $derived(
+        !submitting && !emailEdited ? (serverErrors.billing_contact_email ?? null) : null,
+    );
+    const nameError = $derived(
+        !submitting && !nameEdited ? (serverErrors.billing_contact_name ?? null) : null,
+    );
 
     const helpText = $derived(
         billingContact.email === null && billingContact.fallbackEmail !== null
@@ -43,6 +65,17 @@
 
     function submit(): void {
         if (submitting) return; // 多重送信ガード (disabled にはしない)
+        // 送信時点の編集世代を控える (応答が返るまでに編集されたかを判定するため)
+        const emailVersionAtSubmit = emailEditVersion;
+        const nameVersionAtSubmit = nameEditVersion;
+
+        // **この送信の検証結果が届いた**フィールドだけ抑制を解く (同じ文言でも必ず再表示される)。
+        // onFinish は使わない (キャンセル・通信失敗でも動くため再表示の根拠にならない)。
+        const release = (): void => {
+            if (emailEditVersion === emailVersionAtSubmit) emailEdited = false;
+            if (nameEditVersion === nameVersionAtSubmit) nameEdited = false;
+        };
+
         router.patch(
             updateUrl,
             { billing_contact_email: emailText, billing_contact_name: nameText },
@@ -51,6 +84,8 @@
                 onStart: () => {
                     submitting = true;
                 },
+                onError: release,
+                onSuccess: release,
                 onFinish: () => {
                     submitting = false;
                 },
@@ -90,6 +125,10 @@
                         error={invalid}
                         aria-describedby={describedBy}
                         testId="billing-contact-email-input"
+                        oninput={() => {
+                            emailEdited = true;
+                            emailEditVersion += 1;
+                        }}
                     />
                 {/snippet}
             </FormField>
@@ -102,6 +141,10 @@
                         error={invalid}
                         aria-describedby={describedBy}
                         testId="billing-contact-name-input"
+                        oninput={() => {
+                            nameEdited = true;
+                            nameEditVersion += 1;
+                        }}
                     />
                 {/snippet}
             </FormField>
