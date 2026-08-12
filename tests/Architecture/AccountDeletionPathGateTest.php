@@ -102,6 +102,10 @@ const DELETION_PATH_CLOSURE = [
     //   「予約列の読み書き」「猶予日数の解決」「予約したことの通知」だけを行い、
     //   決済事業者 SDK への到達辺を持たない (検査 2 が機械的に固定する)。
     'App\Console\Commands\Account\PurgeDeletionRequestsCommand',
+    // ↓ T160 (bug-hunt F-4-Q1) で閉包に入った 1 クラス。削除の到達経路 (route / method) を
+    //   監査 metadata へ運ぶだけの readonly DTO で、**観測専用** (値で分岐しない)。
+    //   決済事業者 SDK への到達辺は持たない (検査 2 が機械的に固定する)。
+    'App\DataTransferObjects\Account\AccountDeletionAuditContext',
     'App\DataTransferObjects\Account\AccountDeletionStateDto',
     'App\DataTransferObjects\Notification\AccountDeletionRequestedPayload',
     'App\DataTransferObjects\Invitations\PendingInvitationForUserDto',

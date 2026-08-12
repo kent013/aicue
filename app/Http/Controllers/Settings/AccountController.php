@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Settings;
 
+use App\DataTransferObjects\Account\AccountDeletionAuditContext;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\Organization\OrganizationMembershipService;
@@ -27,7 +28,13 @@ class AccountController extends Controller
         // 記録 (AccountDeleted) と削除は service の単一トランザクション内・行ロック下で直列化される。
         // Auth::logout はガード通過後・削除直前のフックで呼ぶ (logout 監査イベントを user 行が
         // 存在するうちに記録するため。ブロック時はフックが実行されずログアウトされない)。
-        $membership->deleteAccount($user, static fn () => Auth::logout());
+        $membership->deleteAccount(
+            $user,
+            static fn () => Auth::logout(),
+            null,
+            // 監査 metadata へ到達経路を残す (T160 / bug-hunt F-4-Q1。観測専用で分岐しない)
+            AccountDeletionAuditContext::http($request->route()?->getName(), $request->method()),
+        );
 
         // 削除成功後のみ後処理 (ブロック時は上で例外伝播し到達しない)。
         $request->session()->invalidate();
