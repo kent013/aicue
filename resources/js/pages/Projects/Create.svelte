@@ -46,6 +46,11 @@
                                 bind:value={form.name}
                                 error={invalid}
                                 aria-describedby={describedBy}
+                                oninput={() => {
+                                    // 入力し始めたらその場でエラーを消す (次 submit を待たない)。
+                                    // **値そのものを消す**ので、同じ文言が再び返れば必ず再表示される。
+                                    if (form.errors.name) form.clearErrors("name");
+                                }}
                             />
                         {/snippet}
                     </FormField>
@@ -56,6 +61,11 @@
                                 bind:value={form.description}
                                 error={invalid}
                                 aria-describedby={describedBy}
+                                oninput={() => {
+                                    // フィールド単位で消す (引数なし clearErrors は使わない =
+                                    // 片方の編集で他方のエラーを消さない)
+                                    if (form.errors.description) form.clearErrors("description");
+                                }}
                             />
                         {/snippet}
                     </FormField>
