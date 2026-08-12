@@ -586,6 +586,64 @@ describe("RenderPanel", () => {
         expect(screen.queryByTestId("preview-placeholder-note")).not.toBeInTheDocument();
     });
 
+    /*
+     * 完成動画の直下に矛盾する注記が残る問題 (T159 / bug-hunt F-1-02)。
+     *
+     * 注記は**常に「生成時点で」**と書く (現在形にしない = 部分解消でも誤読を作らない)。
+     * 黒背景の理由が**完全に解消**しているとき (placeholder_cut_count>0 かつ missing_count===0)
+     * だけ、現在状態と再生成の案内を足す。
+     * **「プレビューが古い」という一般命題は名乗らない** (シナリオ編集等では判定できないため)。
+     */
+    // 戻り値の型注釈は付けない (baseProps の null 型に狭まってしまうため。呼び出し側は render の props)
+    function stalePreviewProps(missingCount: number, withFinished: boolean) {
+        return {
+            ...baseProps,
+            coverage: {
+                total_cuts: 20,
+                missing_count: missingCount,
+                missing_labels: missingCount > 0 ? ["手順 1"] : [],
+            },
+            playbackJob: renderJobBody({
+                id: 33,
+                kind: "preview",
+                status: "succeeded",
+                placeholder_cut_count: 20,
+            }),
+            finishedJob: withFinished ? finishedJobBody() : null,
+        };
+    }
+
+    it.each([false, true])(
+        "T159 契約 1: 部分解消 (finishedJob=%s) では生成時点の件数だけを書き、現在状態の文は出さない",
+        (withFinished) => {
+            render(RenderPanel, { props: stalePreviewProps(5, withFinished) });
+
+            const note = screen.getByTestId("preview-placeholder-note");
+            expect(note).toHaveTextContent("生成時点で 20 件");
+            expect(note).not.toHaveTextContent("現在のシナリオでは未採用のカットはありません");
+        },
+    );
+
+    it.each([false, true])(
+        "T159 契約 2: 完全解消 (finishedJob=%s) では現在状態と再生成の案内を足す",
+        (withFinished) => {
+            render(RenderPanel, { props: stalePreviewProps(0, withFinished) });
+
+            const note = screen.getByTestId("preview-placeholder-note");
+            expect(note).toHaveTextContent("生成時点で 20 件");
+            expect(note).toHaveTextContent("現在のシナリオでは未採用のカットはありません");
+            expect(note).toHaveTextContent("プレビューを再生成");
+        },
+    );
+
+    it("T159 契約 5: 現在形の断定文 (「〜ないため、〜黒背景になっています」) は残っていない", () => {
+        render(RenderPanel, { props: stalePreviewProps(5, true) });
+
+        expect(screen.getByTestId("preview-placeholder-note")).not.toHaveTextContent(
+            "ないため、その区間が黒背景になっています",
+        );
+    });
+
     it("D-6: 事後説明と動画 URL は同一の playbackJob から出る (最新 preview が別世代でも)", () => {
         render(RenderPanel, {
             props: {

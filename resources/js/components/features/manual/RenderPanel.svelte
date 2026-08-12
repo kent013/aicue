@@ -104,6 +104,16 @@
             ? playbackJob.placeholder_cut_count
             : null,
     );
+    /**
+     * **その動画の黒背景の理由が、現在は完全に解消しているか** (T159 / bug-hunt F-1-02)。
+     * 名前をこの意味のまま保つ — 「プレビューが古いか」という一般命題は名乗らない
+     * (シナリオ編集・カット追加・テイク差し替えでも古くなるが、この 2 値では判定できない)。
+     * placeholder_cut_count は**再計算しない** (T148 の値契約)。現在 coverage は
+     * 上書きではなく**表示の文脈**としてだけ使う。
+     */
+    const previewPlaceholderStateFullyResolved = $derived(
+        playbackNote !== null && coverage.missing_count === 0,
+    );
     // ポーリング対象の job id 集合 (id のみに依存を狭め、応答更新で再購読しない)
     const pollKey = $derived(
         [
@@ -440,12 +450,15 @@
             {#if playbackJob !== null && !previewInFlight}
                 {#if playbackNote !== null}
                     <!-- 事後説明: 注記と動画 URL は同一の playbackJob から出る (別世代の値で説明しない) -->
+                    <!-- **常に「生成時点で」と書く** (現在形にしない)。生成時 20 件 → 現在 5 件の
+                         ような部分解消でも「いま 20 件足りない」という誤読が起きないため。
+                         完全解消しているときだけ現在状態と再生成の案内を足す (F-1-02)。 -->
                     <p
                         class="text-caption text-text-secondary"
                         data-testid="preview-placeholder-note"
                     >
-                        このプレビューは {playbackNote}
-                        件のカットに使用できる採用テイクがないため、その区間が黒背景になっています。
+                        このプレビューは生成時点で {playbackNote}
+                        件のカットに使用できる採用テイクがなく、その区間が黒背景になっています。{#if previewPlaceholderStateFullyResolved}現在のシナリオでは未採用のカットはありません。最新の内容で確認するにはプレビューを再生成してください。{/if}
                     </p>
                 {/if}
                 <!-- svelte-ignore a11y_media_has_caption (プレビュー動画の字幕は焼き込み済み) -->
