@@ -19,7 +19,14 @@ enum InertiaErrorScreenPassthrough: string
     /** status が 400 未満 (2xx / 3xx)。Location を持つ遷移や成功応答を触らない。 */
     case SuccessOrRedirectStatus = 'success_or_redirect_status';
 
-    /** api/* または expectsJson。(c) の統一エラー封筒 JSON が正しい応答形。 */
+    /**
+     * api/* または expectsJson。**機械可読な JSON が正しい応答形**である。
+     *
+     * ★形は面で違う (T158): `api/*` は (c) の統一エラー封筒 `{error: {...}}`
+     * (`ApiExceptionRenderer`)、それ以外の JSON は Laravel 既定と同じ `{"message": ...}` で、
+     * **404 の message は固定文言へ collapse 済み** (`NotFoundMessage`。
+     * 内部クラス名を漏らさないため)。「封筒が返る」と読める書き方にしない。
+     */
     case MachineReadableEnvelope = 'machine_readable_envelope';
 
     /** admin panel 配下。運営者向け中立テンプレート (errors.admin.*) が正しい応答形。 */
