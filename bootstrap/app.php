@@ -29,18 +29,22 @@ use App\Http\Middleware\VerifyMcpOrigin;
 use App\Http\Middleware\VerifySnsSignature;
 use App\Http\Resources\Billing\InsufficientTicketsResource;
 use App\Http\Resources\Billing\QuotaExceededResource;
+use App\Http\Resources\NotFoundMessageResource;
 use App\Support\Http\AdminPanelPath;
+use App\Support\Http\NotFoundMessage;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Auth\Middleware\EnsureEmailIsVerified;
 use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Inertia\Inertia;
 use Inertia\Middleware\EncryptHistory;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -363,6 +367,34 @@ return Application::configure(basePath: dirname(__DIR__))
         // api/* 以外 (web / Inertia) は null を返して既定レンダリングを保つ
         $exceptions->render(function (Throwable $exception, Request $request) {
             return ApiExceptionRenderer::render($exception, $request);
+        });
+
+        /*
+         | JSON を期待された 404 の message を固定文言へ collapse する (T158 / bug-hunt F-1-03)。
+         |
+         | Laravel は ModelNotFoundException を NotFoundHttpException($e->getMessage()) へ
+         | 変換するため、既定のままだと `No query results for model [App\Models\Take] 1` のように
+         | 内部の名前空間が JSON body へ漏れる (HTML 経路は日本語の 404 画面 = 経路で露出が非対称)。
+         |
+         | ★`api/*` の除外を条件に書かない。上の ApiExceptionRenderer が先に非 null を返すため
+         |   構造的に到達しない (二重に書くと「どちらが正か」が曖昧になる)。
+         |   **到達しないことは JsonNotFoundMessageTest の契約 1 が固定する** = 登録順が契約である。
+         | ★型は Throwable で受け、HttpExceptionInterface かつ status 404 のときだけ非 null を返す
+         |   (ModelNotFoundException に狭めると、Laravel が変換した後の経路 = 実際に漏れている
+         |    経路を取り逃がす)。
+         */
+        $exceptions->render(function (Throwable $exception, Request $request): ?JsonResponse {
+            if (! $request->expectsJson()) {
+                return null; // HTML / Inertia は既存のエラー画面に任せる
+            }
+
+            if (! $exception instanceof HttpExceptionInterface || $exception->getStatusCode() !== 404) {
+                return null; // collapse するのは 404 だけ (401/402/403/409/422 は素通し)
+            }
+
+            return NotFoundMessageResource::make(NotFoundMessage::forRequest($request))
+                ->response($request)
+                ->setStatusCode(404);
         });
 
         /*
