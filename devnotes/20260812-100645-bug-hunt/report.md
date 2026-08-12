@@ -13,7 +13,8 @@
 - **IDOR / 認可漏れは検出されなかった** (S7 の cross-org 検査で GET/write とも一律 404、
   カテゴリ reorder の実在/不在 ID で応答差分なし = 存在オラクル不成立、protected keys 注入は全 422、
   署名 URL 改ざんは 403、ロール境界の 403 も正常)。
-- 6 件すべて adjudication registry に**既存の該当なし** (`adjudication_status: none`) = 新規。
+- 走行時点では 6 件すべて adjudication registry に該当なし (新規)。
+  **その後の処理で F-3-01 は `known_accepted` (A-003 / intentional) になった** (下記「事後の決着」)。
 - **前回 run (20260811-003230) の High 2 件は回帰していない**ことを実機確認 (下記「回帰確認」)。
 
 ### カバレッジ (シャードの和集合)
@@ -169,6 +170,19 @@ browser story の対象外 (PLAT-01 等) が大半である。**顧客 UX 面で
 
 1. **退会予約 (凍結) 中の即時削除に、通る窓が実在するか** (F-4-Q1)。再現しなかったが実データが消えた。
 2. **同一組織内のメンバー削除で 403/404 を分けてよいか** (F-3-01)。cross-tenant の存在秘匿とは層が違う。
+
+## 事後の決着 (2026-08-12。この run の後で行った処理)
+
+| finding | 決着 |
+|---|---|
+| F-1-01 / F-3-02 | **aicue:T157** で修正 (stale-invalid を出所別の 2 機構で) |
+| F-1-03 | **aicue:T158** で修正 (JSON 404 の message collapse) |
+| F-1-02 | **aicue:T159** で修正 (注記を「生成時点で」に言い換え + 完全解消時の文脈) |
+| F-4-Q1 | **aicue:T160** で観測ギャップを閉じた (XHR 経路の契約 9 件 + 監査 metadata)。**原因は未特定のまま** |
+| F-3-01 | **仕様どおりとして adjudication へ記録** (A-003 / `intentional`)。AGENTS.md セキュリティ不変条件 9 (層 2 テナント境界 = 404 は層 3 認可 = 403 より前) のとおりで、404 へ潰すと文書化済みの 3 層モデルに反する |
+
+`findings-merged.jsonl` には照合に要る `surface` (route 名) と `observed_conditions`
+(browser / mode) を後から補った (無いと registry の 4-gate 照合が `ambiguous` に倒れるため)。
 
 ## インベントリの drift
 
