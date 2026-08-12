@@ -2,12 +2,15 @@
 
 declare(strict_types=1);
 
+use App\DataTransferObjects\Account\AccountDeletionAuditContext;
 use App\Enums\Account\AccountDeletionFreezeAllowance;
 use App\Enums\OrganizationRole;
+use App\Enums\SecurityEventType;
 use App\Http\Middleware\EnsureAccountNotPendingDeletion;
 use App\Jobs\Billing\AutoRechargeTriggerJob;
 use App\Models\AnalysisJob;
 use App\Models\Project;
+use App\Models\SecurityAuditEvent;
 use App\Models\SourceDocument;
 use App\Models\User;
 use App\Models\VideoManual;
@@ -373,4 +376,128 @@ test('テナント境界 404 が凍結 302 より前に閉じる (存在オラ�
     // ★凍結 middleware を priority list でテナント境界より前へ動かすとここが 302 になる (M6)
     $this->actingAs($owner)->get("/projects/{$foreign->id}")->assertNotFound();
     $this->actingAs($owner)->get('/projects/999999999')->assertNotFound();
+});
+
+/*
+ * 凍結中の即時削除 — XHR 経路の観測ギャップを閉じる (T160 / bug-hunt F-4-Q1)。
+ *
+ * 既存テストは HTML 経路 (302 リダイレクト) しか叩いておらず、探索エージェントが通った
+ * **XHR/JSON の DELETE には遮断を固定するテストが 1 本も無かった**。再現しなかったことは
+ * 無罪証明ではない (実データが消えた観測が 1 件ある) ため、経路を機械で固定する。
+ *
+ * 順序の決定 (概念設計): **凍結は recent-auth より先** = step-up の有無にかかわらず 409。
+ * 理由は (a) 凍結状態を知るのは本人で /settings に既に表示しており秘匿すべき相手がいない、
+ * (b) 再認証させてから断るのは体験として悪い。実行順が変わっても 409 が正である。
+ */
+
+test('T160 契約 1: 凍結中の XHR DELETE は 409 で、その user は消えていない', function (): void {
+    [, $owner] = frozenUser();
+
+    $this->actingAs($owner)
+        ->withSession(freshRecentAuthSession())
+        ->deleteJson('/settings/account')
+        ->assertStatus(409);
+
+    // 件数ではなく**その user** の実在で見る
+    expect(User::query()->whereKey($owner->id)->exists())->toBeTrue();
+});
+
+test('T160 契約 2: recent-auth を満たしていても 409 (step-up を通過しても凍結が優先)', function (): void {
+    [, $owner] = frozenUser();
+
+    $this->actingAs($owner)
+        ->withSession(freshRecentAuthSession())
+        ->deleteJson('/settings/account')
+        ->assertStatus(409);
+});
+
+test('T160 契約 3: recent-auth を満たしていなくても 409 (step-up challenge を先に返さない)', function (): void {
+    [, $owner] = frozenUser();
+
+    // recent_auth_at を積まない = step-up 未充足
+    $this->actingAs($owner)
+        ->deleteJson('/settings/account')
+        ->assertStatus(409);
+});
+
+test('T160 契約 4: 凍結中に即時削除を試みた後、取消してからなら削除できる', function (): void {
+    [, $owner] = frozenUser();
+
+    $this->actingAs($owner)->withSession(freshRecentAuthSession())
+        ->deleteJson('/settings/account')->assertStatus(409);
+
+    $this->actingAs($owner)->delete('/settings/account/deletion-request');
+    $owner->refresh();
+
+    $this->actingAs($owner)->withSession(freshRecentAuthSession())
+        ->delete('/settings/account')->assertRedirect('/');
+    expect(User::query()->whereKey($owner->id)->exists())->toBeFalse();
+});
+
+test('T160 契約 5: 即時削除は凍結 allowlist に入っていない (足した瞬間に赤くなる)', function (): void {
+    $allowed = array_map(
+        static fn (AccountDeletionFreezeAllowance $case): string => $case->value,
+        AccountDeletionFreezeAllowance::cases(),
+    );
+
+    expect($allowed)->not->toContain('settings.account.destroy');
+});
+
+test('T160 契約 6: 2FA 必須組織でも凍結中の即時削除は 409', function (): void {
+    [$organization, $owner] = frozenUser();
+    $organization->forceFill(['two_factor_required' => true])->save();
+
+    $this->actingAs($owner)
+        ->withSession(freshRecentAuthSession())
+        ->deleteJson('/settings/account')
+        ->assertStatus(409);
+
+    expect(User::query()->whereKey($owner->id)->exists())->toBeTrue();
+});
+
+test('T160 契約 7a: 通常削除の監査 metadata に凍結状態と到達経路が載る', function (): void {
+    [, $owner] = createOrganizationWithOwner();
+
+    $this->actingAs($owner)
+        ->withSession(freshRecentAuthSession())
+        ->delete('/settings/account')
+        ->assertRedirect('/');
+
+    $event = SecurityAuditEvent::query()
+        ->where('event_type', SecurityEventType::AccountDeleted->value)
+        ->latest('id')
+        ->first();
+
+    expect($event)->not->toBeNull();
+    expect($event?->metadata)->toMatchArray([
+        'deletion_requested' => false,
+        'route' => 'settings.account.destroy',
+        'method' => 'DELETE',
+    ]);
+});
+
+test('T160 契約 7b: 凍結中の user を service へ直接渡すと deletion_requested=true が残る', function (): void {
+    // 凍結中は HTTP 経由では削除されないため、**この経路でしか観測できない**。
+    // 「値を常に false にする」mutation を殺すのはこの契約である。
+    [, $owner] = frozenUser();
+
+    app(OrganizationMembershipService::class)
+        ->deleteAccount($owner, null, null, AccountDeletionAuditContext::nonHttp());
+
+    $event = SecurityAuditEvent::query()
+        ->where('event_type', SecurityEventType::AccountDeleted->value)
+        ->latest('id')
+        ->first();
+
+    expect($event?->metadata)->toMatchArray([
+        'deletion_requested' => true,
+        'route' => null,
+        'method' => null,
+    ]);
+});
+
+test('T160 契約 8: 未認証の XHR DELETE は 409 ではなく 401', function (): void {
+    // 凍結の遮断が未認証要求を横取りしないことの固定。
+    // (未認証時は user 不在で凍結判定が作用しないため、この要求について middleware 順序への依存は無い)
+    $this->deleteJson('/settings/account')->assertStatus(401);
 });

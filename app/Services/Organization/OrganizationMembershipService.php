@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Organization;
 
+use App\DataTransferObjects\Account\AccountDeletionAuditContext;
 use App\DataTransferObjects\Account\AccountDeletionStateDto;
 use App\DataTransferObjects\Invitations\PendingInvitationForUserDto;
 use App\DataTransferObjects\Organizations\AccountDeletionBlockerDto;
@@ -749,7 +750,7 @@ class OrganizationMembershipService
             $executed = AccountDeletionStateDto::fromUser($locked)->isDue(CarbonImmutable::now());
 
             return $executed;
-        });
+        }, AccountDeletionAuditContext::nonHttp());
 
         return $executed;
     }
@@ -902,9 +903,9 @@ class OrganizationMembershipService
      *
      * @throws ValidationException 唯一 Owner かつ (他メンバーが残る ∨ 生きた課金責務がある) 組織がある
      */
-    public function deleteAccount(User $user, ?\Closure $beforeDelete = null, ?\Closure $precondition = null): void
+    public function deleteAccount(User $user, ?\Closure $beforeDelete, ?\Closure $precondition, AccountDeletionAuditContext $auditContext): void
     {
-        DB::transaction(function () use ($user, $beforeDelete, $precondition): void {
+        DB::transaction(function () use ($user, $beforeDelete, $precondition, $auditContext): void {
             // 1. 対象 User 行を最初にロック (この後の所属列挙を安定させる。列挙前に user を
             //    ロックしないと、列挙〜user ロック取得の間に別 txn が新組織 B の Owner を user へ
             //    移譲し、B を未検査のまま削除する race が残る)。
@@ -956,8 +957,17 @@ class OrganizationMembershipService
                 $beforeDelete();
             }
 
-            // 5. 監査記録 (純 DB insert。user_id は nullOnDelete で削除時に null 化される)
-            $this->recorder->record(SecurityEventType::AccountDeleted, $freshUser);
+            // 5. 監査記録 (純 DB insert。user_id は nullOnDelete で削除時に null 化される)。
+            //    **削除実行時点の凍結状態と到達経路を残す** (T160 / bug-hunt F-4-Q1)。
+            //    再現しなかった「凍結中なのに削除された」観測に対し、再発時に原因へ到達できるようにする。
+            //    ★観測であって防御ではない — この値で分岐する処理は 1 つも無い。
+            $this->recorder->record(SecurityEventType::AccountDeleted, $freshUser, [
+                // 行ロック下で読み直した $freshUser から取る (削除と同一トランザクション内)
+                'deletion_requested' => $freshUser->deletion_requested_at !== null,
+                // 呼び出し元が渡す。HTTP 外 (日次執行・コンソール) は null が正常値
+                'route' => $auditContext->route,
+                'method' => $auditContext->method,
+            ]);
             $freshUser->delete();
         });
     }

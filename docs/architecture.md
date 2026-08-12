@@ -1632,6 +1632,21 @@ lctl 台帳 feature `account-deletion-billing-guard` の標準形 v1 (裁定 AG-
   (`ValidationException` を素で `report()` しても Laravel の既定 dontReport が握り潰すため。
   T142 で実測)。保留が滞留すると 30 日を過ぎた予約が消えないままになるので、
   `blocked` の継続・増加を正常成功として扱わない。
+- **即時削除 (`settings.account.destroy`) の遮断は HTML と XHR の両方で固定済み (T160)**。
+  凍結中の即時削除は **recent-auth の有無にかかわらず 409** を返す (凍結が step-up より先)。
+  理由は (a) 凍結状態を知るのは**本人**で `/settings` に既に表示しており秘匿すべき相手がいない、
+  (b) 再認証させてから断るのは体験として悪い。**実行順が変わっても 409 が正**であり、
+  `AccountDeletionFreezeTest` の契約がそれを固定する。
+  **未認証要求は 409 ではなく 401** — 未認証時は user 不在で凍結判定が作用しないため、
+  この要求について middleware 順序への依存は無い。
+- **削除の監査 metadata (T160)**: `AccountDeleted` イベントへ
+  `deletion_requested` (削除実行時点で凍結中だったか。**行ロック下で読み直した行**から取る) /
+  `route` / `method` を残す。route・method は呼び出し元が
+  `AccountDeletionAuditContext::http()` / `::nonHttp()` で**明示的に**渡す
+  (既定引数を持たせない = HTTP 呼び出し元の渡し忘れと「HTTP 外なので null」を区別する)。
+  **これは観測であって防御ではない** — この値で分岐する処理は 1 つも無い。
+  背景は bug-hunt run 20260812-100645 の F-4-Q1 (凍結中の即時削除で 1 件だけ実データが消えた
+  観測。**2 回のクリーン再現では遮断され、原因は未特定**)。
 - **2FA 必須組織との相互作用**: 2FA 強制ゲートは priority list で凍結より**前**に走る。
   取消は**業務の利用ではなく誤操作の救済**なので、**両ゲートの allowlist に入っている**
   (凍結側 = `AccountDeletionFreezeAllowance::DeletionRequestDestroy`、2FA 側 =
