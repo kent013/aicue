@@ -2065,9 +2065,30 @@ CURLEOF
 
     # (y6) stop_shard_workers の機能検査 (実 worker/DB を使わない軽量プロセスで代替。
     #      worker_alive / kill / sleep は subshell 内 stub = 本体無変更):
+    #
+    # ★ スタブ worker の起動は必ずこのヘルパを通す。`setsid cmd &` の**直後**は子がまだ
+    #   setsid(2) を呼んでおらず pgid が**親のまま**でありうる (CI 実測: pid=19226 pgid=8988)。
+    #   その状態で stop_shard_workers を呼ぶと本体の「pid==pgid (setsid 成立) 検証」に掛かり、
+    #   検査対象と無関係な理由で落ちる (= CI の flaky)。本体 start_shard_workers も sleep 1 の
+    #   後に同じ検証をするので、テスト側でも **pid==pgid を観測してから**検査に入る。
+    #   ★ pid は command substitution で返さない (subshell の job になると呼び出し側の
+    #     `wait` / group kill の対象にならない)。グローバル SELFTEST_STUB_PID に置く。
+    spawn_group_stub() {
+        local i pgid=""
+        setsid sleep 30 > /dev/null 2>&1 &
+        SELFTEST_STUB_PID=$!
+        for i in $(seq 1 50); do    # 最大 5 秒 (本体の sleep 1 より広く取る)
+            pgid="$(ps -o pgid= -p "${SELFTEST_STUB_PID}" 2>/dev/null | tr -d ' ' || true)"
+            [[ "${pgid}" == "${SELFTEST_STUB_PID}" ]] && return 0
+            sleep 0.1
+        done
+        t_fail "スタブ worker (pid=${SELFTEST_STUB_PID}) が自前 process group を確立しない (pgid=${pgid:-?})"
+        return 0    # 失敗は t_fail で計上済み。set -e で self-test を途中終了させない
+    }
+
     # (y6a) 正常系: setsid sleep を worker に見立て、group kill → 消滅 → pidfile 削除
-    setsid sleep 30 > /dev/null 2>&1 &
-    local fake_wpid=$!
+    spawn_group_stub
+    local fake_wpid=${SELFTEST_STUB_PID}
     echo "${fake_wpid}" > "$(worker_pidfile 8 database-analysis)"
     ( worker_alive() { [[ "$1" == 8 && "$2" == database-analysis ]]; }
       stop_shard_workers 8 ) || t_fail "[y6a] stop_shard_workers (stub) が非ゼロ"
@@ -2077,8 +2098,8 @@ CURLEOF
 
     # (y6b) 失敗系 (最重要不変条件): TERM/KILL を no-op 化して「group が残留」を再現し、
     #       rc=1 + pidfile 保持を機能検証する (kill -0 は builtin へ委譲 = 実在確認は本物)
-    setsid sleep 30 > /dev/null 2>&1 &
-    local fake_wpid2=$!
+    spawn_group_stub
+    local fake_wpid2=${SELFTEST_STUB_PID}
     echo "${fake_wpid2}" > "$(worker_pidfile 8 database-analysis)"
     ( worker_alive() { [[ "$1" == 8 && "$2" == database-analysis ]]; }
       kill() { [[ "${1:-}" == "-TERM" || "${1:-}" == "-KILL" ]] && return 0; builtin kill "$@"; }
@@ -2247,8 +2268,8 @@ CURLEOF
 
     # (y7p) 受入条件 1 の実挙動: zombie だけが残った group で **stop_shard_workers が
     #       pidfile を削除する** (判定関数の stub 検証だけでなく、呼び出し側の帰結まで見る)。
-    setsid sleep 30 > /dev/null 2>&1 &
-    local fake_z=$!
+    spawn_group_stub
+    local fake_z=${SELFTEST_STUB_PID}
     echo "${fake_z}" > "$(worker_pidfile 8 database-analysis)"
     ( worker_alive() { [[ "$1" == 8 && "$2" == database-analysis ]]; }
       # 実 kill はさせず、group は「zombie だけが残っている」ことにする
@@ -2269,8 +2290,8 @@ CURLEOF
     #         そのため「marker が空」ではなく「marker に当該 shard の DB が無い」で判定する。
     local y7q_marker="${TMP_BASE}/y7q-dropdb-called"
     rm -f "${y7q_marker}"
-    setsid sleep 30 > /dev/null 2>&1 &
-    local fake_q=$!
+    spawn_group_stub
+    local fake_q=${SELFTEST_STUB_PID}
     echo "${fake_q}" > "$(worker_pidfile 1 database-analysis)"
     ( worker_alive() { [[ "$2" == database-analysis ]] && [[ -f "$(worker_pidfile "$1" database-analysis)" ]]; }
       kill() { [[ "${1:-}" == "-TERM" || "${1:-}" == "-KILL" ]] && return 0; builtin kill "$@"; }
@@ -2301,8 +2322,8 @@ CURLEOF
     #       recheck が無い実装ではこの shard の dropdb が呼ばれてしまう。
     local y7r_marker="${TMP_BASE}/y7r-dropdb-called"
     rm -f "${y7r_marker}"
-    setsid sleep 30 > /dev/null 2>&1 &
-    local fake_r=$!
+    spawn_group_stub
+    local fake_r=${SELFTEST_STUB_PID}
     echo "${fake_r}" > "$(worker_pidfile 1 database-analysis)"
     ( worker_alive() { [[ "$2" == database-analysis ]] && [[ -f "$(worker_pidfile "$1" database-analysis)" ]]; }
       kill() { [[ "${1:-}" == "-TERM" || "${1:-}" == "-KILL" ]] && return 0; builtin kill "$@"; }
