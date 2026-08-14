@@ -91,6 +91,10 @@ function documentTitleExemptAllowlist(): array
         // routes/web.php が isLocal() || runningUnitTests() で route 登録自体を囲む =
         // staging / production には存在しない。LocalOnly middleware で二重防御済み。
         'debug.login' => 'local / テスト専用のデバッグログイン。本番に存在しないため固有タイトルを持たせる価値がない',
+        // 同上。bfcache 実機受入確認 (T085) の検証ページ。local 限定で、実機を手元に
+        // 置いて 1 枚ずつ操作する手動確認の設備であり、タブを並べて見分ける用途がない。
+        'debug.bfcache-trial' => 'local / テスト専用の bfcache 検証ページ。本番に存在しないため固有タイトルを持たせる価値がない',
+        'debug.bfcache-trial.away' => 'local / テスト専用の bfcache 検証ページ (相方)。本番に存在しないため固有タイトルを持たせる価値がない',
     ];
 }
 

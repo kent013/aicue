@@ -582,12 +582,39 @@ class DebugBfcacheTrialController extends Controller
 - [ ] 新規 `DebugBfcacheTrialRouteGateTest`（施策 6）— route 包含・env ゲート・`auth`・`no-store`
 - [ ] 個別の `DatabaseTransactions` を使っていないことを確認
 
+### 実装時の実測: `auth` は `LocalOnly` より先に走る（2026-08-14）
+
+設計は「local 以外は 404 で**経路の存在自体を秘匿**する」を前提にしていたが、
+実装して測ったところ **guest には 404 ではなく `/login` への 302 が返る**。
+
+**機序**: `Authenticate` は Laravel 既定の priority list に載っており、
+載っていない `LocalOnly` より前へソートされる。
+`bootstrap/app.php` の注記どおり
+「priority list は載っている middleware 同士の相対順序しか強制しない」ため、
+`LocalOnly` グループの内側に `auth` を書いても実行順は逆転する。
+`auth` を持たない `/debug/login` とはここが非対称になる。
+
+**判断: 許容する。priority list は動かさない。**
+
+- staging / production では route 登録ゲートが働き **route 自体が存在しない**ため、
+  存在オラクルにならない
+- local でのみ guest が 302 を観測しうるが、開発者自身の環境である。
+  実際に到達しうる相手（認証済みユーザー）に対しては
+  `LocalOnly` の env / 資格情報ゲートが正しく 404 / 401 を返す
+- `bootstrap/app.php` の priority list は `TenantBoundaryOrderingTest` が固定している
+  **load-bearing な宣言**であり、local 限定 debug ページのために順序を動かすのは
+  リスクに見合わない（思考原則 2）
+
+施策 6 のテストはこの実測に合わせ、
+**認証済みユーザーに対する `LocalOnly` の実効性**を主に固定し、
+guest には 302（= `auth` が効いていること）を負のコントロールとして固定する。
+
 ### リスク
 
 | リスク | 対策 |
 |---|---|
 | `auth` を付け忘れると guest でも開け、no-store も付かず検証が無効になる | 施策 6 の route 包含テストで `auth` の存在を機械固定 |
-| 将来 debug ブロックの外へ移動される | 同テストで「`LocalOnly` グループ内にあること」を構造的に固定 |
+| 将来 debug ブロックの外へ移動される | 同テストで env ゲート・資格情報ゲートの実効性を固定 |
 
 ---
 

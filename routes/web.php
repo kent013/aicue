@@ -13,6 +13,7 @@ use App\Http\Controllers\Capture\CaptureTakeController;
 use App\Http\Controllers\Capture\TakeUploadUrlController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DebugBfcacheTrialController;
 use App\Http\Controllers\DebugLoginController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\Marketing\PricingController;
@@ -677,5 +678,23 @@ if (app()->isLocal() || app()->runningUnitTests()) {
     Route::middleware(LocalOnly::class)->group(function (): void {
         Route::get('/debug/login', [DebugLoginController::class, 'index'])->name('debug.login');
         Route::post('/debug/login/{userId}', [DebugLoginController::class, 'loginAs'])->name('debug.login-as');
+
+        /*
+        | bfcache 実機受入確認 (T085) の検証ページ。
+        |
+        | auth 配下に置くのは必須である。web グループの
+        | NoStoreCacheHeadersForAuthenticatedPages が乗って **no-store が実際に付いた状態**に
+        | ならないと、「Safari は no-store でも bfcache に格納する」の検証にならない
+        | (本番と違う条件を見て「確認済み」と記録する事故になる)。
+        |
+        | A と B の 2 枚が要るのは、A から full document navigation で離脱しないと
+        | A が bfcache に入らないため (Inertia visit は同一 Document のまま = 経路 C)。
+        */
+        Route::middleware('auth')->group(function (): void {
+            Route::get('/debug/bfcache-trial', [DebugBfcacheTrialController::class, 'trial'])
+                ->name('debug.bfcache-trial');
+            Route::get('/debug/bfcache-trial/away', [DebugBfcacheTrialController::class, 'away'])
+                ->name('debug.bfcache-trial.away');
+        });
     });
 }
