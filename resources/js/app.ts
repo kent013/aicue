@@ -1,10 +1,10 @@
 import { createInertiaApp, page } from "@inertiajs/svelte";
 import { hydrate, mount } from "svelte";
 import { resolvePage } from "./inertia";
-import { registerBfcacheGuard } from "./lib/bfcache-guard";
+import { readSessionEpochCookie, registerBfcacheGuard } from "./lib/bfcache-guard";
 import { registerDocumentTitleSync } from "./lib/document-title";
 import { registerRecentAuthRedirectHandler } from "./lib/recent-auth";
-import { hasAuthenticatedUser } from "./lib/shared-props";
+import { hasAuthenticatedUser, readSessionEpoch } from "./lib/shared-props";
 
 // SPA 遷移後の document.title 陳腐化を解消する。Svelte adapter には createInertiaApp の
 // title callback が無いため、router.on('navigate') を購読してサーバ共有 prop `title` を
@@ -20,8 +20,15 @@ if (typeof document !== "undefined") {
     // login は Inertia の client-side 遷移で完了するため、「起動時 guest だった document が
     // そのまま認証済み画面になる」経路があり、起動時 1 回の判定では取りこぼす。
     // 公開ページ (LP / login / SEO) では秘匿もプローブも起こらない点は同じ。
+    // 2 つの世代の出所は呼び出し側で名前付きで明示する (既定任せにすると、読み手が
+    // 「描画世代と現世代がどこから来るか」を追えない)。
     const disposeBfcacheGuard = registerBfcacheGuard({
         isAuthenticated: () => hasAuthenticatedUser(page.props),
+        // 描画世代は **いま画面に出ている内容と同じ応答で来た値**を使う
+        // (cookie から読むと「内容は A・印は B」の取り違えが起きる)
+        readRenderedEpoch: () => readSessionEpoch(page.props),
+        // 現世代は cookie の写し。同期判定でしか使わない (開示の根拠にはしない)
+        readCurrentEpoch: () => readSessionEpochCookie(document.cookie),
     });
     import.meta.hot?.dispose(disposeBfcacheGuard);
 

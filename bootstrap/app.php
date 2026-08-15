@@ -17,6 +17,7 @@ use App\Http\Middleware\EnsureProjectBelongsToApiOrganization;
 use App\Http\Middleware\EnsureProjectBelongsToCurrentOrganization;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\IdempotentRequest;
+use App\Http\Middleware\IssueSessionEpochCookie;
 use App\Http\Middleware\LocalOnly;
 use App\Http\Middleware\McpConsentOrganizationBinder;
 use App\Http\Middleware\NoStoreCacheHeadersForAuthenticatedPages;
@@ -34,6 +35,7 @@ use App\Http\Middleware\VerifySnsSignature;
 use App\Http\Resources\Billing\InsufficientTicketsResource;
 use App\Http\Resources\Billing\QuotaExceededResource;
 use App\Http\Resources\NotFoundMessageResource;
+use App\Support\Auth\SessionEpoch;
 use App\Support\Http\AdminPanelPath;
 use App\Support\Http\NotFoundMessage;
 use Illuminate\Auth\AuthenticationException;
@@ -137,6 +139,9 @@ return Application::configure(basePath: dirname(__DIR__))
             // 契約: $next から返った (= 下流の) 応答を確認し、既に `no-store` を持つなら変更しない。
             // (位置関係ではなくこの契約が正本。実効性は Feature テストが固定する)
             NoStoreCacheHeadersForAuthenticatedPages::class,
+            // セッション世代の印を画面側へ配る (bfcache 復元時の同期判定用)。
+            // 応答加工のみで短絡しない。順序の正本は下の priority list。
+            IssueSessionEpochCookie::class,
             // Inertia の履歴 state を AES-GCM で暗号化する (Inertia 公式のグローバル適用手順)。
             // ログアウト時に LogoutResponse が Inertia::clearHistory() で鍵を捨てるため、
             // ログアウト後の「戻る」は復号に失敗し、**コンポーネントを描画しないまま**
@@ -266,7 +271,8 @@ return Application::configure(basePath: dirname(__DIR__))
             [SecurityHeaders::class, RequireTwoFactorForEnforcedOrganizations::class],
             [RequireTwoFactorForEnforcedOrganizations::class, BlockTwoFactorDisableForEnforcedOrganizations::class],
             [BlockTwoFactorDisableForEnforcedOrganizations::class, NoStoreCacheHeadersForAuthenticatedPages::class],
-            [NoStoreCacheHeadersForAuthenticatedPages::class, EncryptHistory::class],
+            [NoStoreCacheHeadersForAuthenticatedPages::class, IssueSessionEpochCookie::class],
+            [IssueSessionEpochCookie::class, EncryptHistory::class],
             [EncryptHistory::class, EnsureEmailIsVerified::class],
             [EnsureEmailIsVerified::class, RequireActiveSubscription::class],
             // 退会予約中の凍結。**302 で短絡する**ため、テナント境界 404
@@ -325,6 +331,14 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->validateCsrfTokens(except: [
             'stripe/*',
             'ses/*',
+        ]);
+
+        // 世代 cookie だけは画面側 (bfcache guard) が読むため暗号化しない。
+        // 中身はセッション ID から鍵付きハッシュで導出した印であってセッション ID ではない。
+        // 除外を外すと画面側は復号できない文字列を読み、常に不一致 = 復元のたびに読み直しになる
+        // (静かな劣化)。SessionEpochCookieTest が平文値そのもので固定する。
+        $middleware->encryptCookies(except: [
+            SessionEpoch::COOKIE_NAME,
         ]);
 
         // bug-hunt (LLM 探索的バグハント) 用コード到達カバレッジ観測器。

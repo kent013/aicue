@@ -2,18 +2,41 @@
 
 AI-CUE が「どのブラウザで、どのレベルまで動作を保証しているか」の正本。
 
+一次情報の最終確認日: 2026-08-15
+
+> 上の行は `tests/Architecture/SupportedBrowsersDocFreshnessTest.php` が機械で読む
+> (書式は `YYYY-MM-DD` 固定、行は本書に 1 行だけ)。本書はブラウザ挙動の一次情報
+> (自動化ハーネスの版と起動スイッチ / 復元が再現しない原因 / 実機受入確認の実施状況) に
+> 依存しており、時間で陳腐化する。**日付は「見直した」ことの自己申告であって、
+> 内容が正しいことの担保ではない。**
+
 **Inertia が描画する認証済み画面**が「ログアウト後に復元される」経路は 3 本あり、
 それぞれ担当が違う。本書はその保証範囲を語るための前提として置く
 (Filament 管理パネル `/admin` は Inertia でも web グループでもないため本書の対象外)。
 
 | 経路 | 担当 | 何を保証するか |
 |------|------|----------------|
-| A: HTTP / disk / proxy cache、Chrome・Firefox の bfcache | `App\Http\Middleware\NoStoreCacheHeadersForAuthenticatedPages` | `no-store, private` により格納拒否 / cookie 変更時 evict |
-| B: Safari の真の bfcache (`pagehide` / `pageshow`) | `resources/js/lib/bfcache-guard.ts` + `session.status` プローブ (`App\Http\Controllers\Auth\SessionStatusController`) | **描画前に同期秘匿**し、セッション有効なら秘匿解除のみ (hard reload しない) |
+| A: HTTP / disk / proxy cache、ブラウザの「戻る」用の一時保存 (bfcache) | `App\Http\Middleware\NoStoreCacheHeadersForAuthenticatedPages` | `no-store, private` により **disk / proxy cache への残留を禁じる**。**bfcache へ格納するか・いつ捨てるかはブラウザの実装判断**であり、このヘッダで復元が止まることは保証しない |
+| B: 真の bfcache (`pagehide` / `pageshow`) | `resources/js/lib/bfcache-guard.ts` + セッション世代の印 (`App\Support\Auth\SessionEpoch` / `App\Http\Middleware\IssueSessionEpochCookie`) + `session.status` プローブ (`App\Http\Controllers\Auth\SessionStatusController`) | **描画前に同期秘匿**し、**認証済みかつ描画世代が現世代と一致**したときだけ秘匿解除する (hard reload しない)。世代が違えば秘匿を維持したまま同じ URL を読み直す |
 | C: Inertia SPA のクライアント履歴復元 (`popstate`) | `Inertia\Middleware\EncryptHistory` (web グループ) + `Inertia::clearHistory()` の発行契機 2 つ: **ログアウト** (`App\Http\Responses\Fortify\LogoutResponse`) と **認証失敗** (`bootstrap/app.php` の `AuthenticationException` render callback) | 発行契機の後は復号不能 → **コンポーネントを描画しないまま**再問い合わせ → `/login` |
 
 > 経路 B / C の実装は上表の参照点が正本 (将来の差分レビューで担当実装を辿れるよう、
 > 本書では実装ファイルを名指しする)。
+
+経路 B の**開示 (秘匿の解除) に到達する経路はただ 1 本**である。復元直後の判定は 2 段で、
+1 段目 (通信を待たない同期判定) は「読み直す」へしか到達しない:
+
+1. **同期判定**: 描画世代 (Inertia 共有 prop `sessionEpoch`) と世代 cookie (`session_epoch`) を
+   突き合わせる。どちらかが無い / 食い違うときは、プローブを 1 度も呼ばずに
+   秘匿を維持したまま同じ URL を読み直す。一致してもここでは開示せず 2 段目へ進む。
+2. **プローブ**: 描画世代を `X-Session-Epoch` ヘッダで送り、`authenticated` と
+   `sessionEpochMatches` の両方が真のときだけ秘匿を解く。認証済みでも世代が違えば読み直し、
+   未認証なら `/login` へ置換遷移、応答が読めなければ秘匿維持 + 再試行ボタンにする。
+   **サーバは要求ヘッダの値だけを照合に使い、要求の Cookie ヘッダに載る世代 cookie は使わない。**
+
+保証するのは「読み直しが完了して新しい文書が生成された場合、その文書は復元マーカー (秘匿属性) を
+継承しない」ことまでである。読み直し自体が通信障害で完了しないことは塞がない
+(既存の `/login` 置換遷移も同じ性質)。読み直しは 1 つの文書につき高々 1 回でループにはならない。
 
 経路 C の保証条件は「**`clearHistory: true` を含む Inertia page をクライアントが適用したタブ**」。
 `Inertia::clearHistory()` はサーバ session にフラグを積むだけで、`sessionStorage` の
@@ -56,7 +79,7 @@ AI-CUE が「どのブラウザで、どのレベルまで動作を保証して�
 
 撮影 PWA が中核 (使命 = 現場作業者がスマホで撮る) であり、**iOS Safari が最重要**。
 bfcache 周りの設計判断はすべてこの前提から来ている
-(Safari は `Cache-Control: no-store` のページでも bfcache に格納しうる)。
+(**保存禁止ヘッダが付いていても「戻る」で復元されうる環境がある。主戦場の iOS Safari を含む**)。
 
 ## Current — マージ後に実際に保証していること
 
@@ -135,10 +158,17 @@ iOS Safari で (1) 登録 → (2) ログアウト → (3) パスキーでログ�
 - `resources/css/app.css` の秘匿オーバーレイのスタイル (`#bfcache-guard-overlay` 周辺)
 - プローブ endpoint (`routes/web.php` の `session.status` /
   `App\Http\Controllers\Auth\SessionStatusController` / `SessionStatusResource`)
+  と**その応答契約** (`authenticated` / `sessionEpochMatches` の 2 キー)
+- セッション世代の印の供給元 (`App\Support\Auth\SessionEpoch` /
+  `App\Http\Middleware\IssueSessionEpochCookie` / `HandleInertiaRequests` の
+  共有 prop `sessionEpoch`)
 - `resources/js/lib/passkeys.ts` (WebAuthn ラッパ本体。上記「パスキーの保証範囲」)
 
 **docblock / コメントのみの変更はトリガに当たらない** (挙動が変わっていないため)。
 不要な実機再確認を誘発しないよう、トリガは「挙動変更」に限る。
+
+> **T178 (同期判定の前置) は挙動変更である**。guard 本体・プローブ応答契約・秘匿状態の語彙が
+> 変わったため上記トリガに当たり、**T085 の実機受入確認は T178 のマージ後に実施する**。
 
 記録先: `devnotes/<日付>-<topic>/` に日時・端末・iOS バージョン・実施シナリオ・結果を残す。
 **本書には「いつ・何を確認したか」を書かない** (記録の二重管理を作らない)。
@@ -168,6 +198,14 @@ iOS Safari で (1) 登録 → (2) ログアウト → (3) パスキーでログ�
 記録する manual confirmation を含む** (イベント列だけからリダイレクト成功を機械的に断定しない設計であり、
 完全自動判定ではない)。この表現は `docs/TODO.md` の T085 の記述と揃えること
 (片方だけ読んだ人が自動判定と誤解しないため)。
+
+**T178 以降、失効セッション経路で検証ページが観測するのは「秘匿を維持したまま読み直す」**である
+(世代 cookie が入れ替わっているため、同期判定がプローブより前に読み直しへ倒す)。
+guard の秘匿状態には `reloading` が加わり、検証ページはこれを軸 2 の終端候補
+`stale-session-reloaded` (目視確認待ち) として扱う。**合格終端は `unauthenticated-redirected` のままで、
+T085 の完了条件は変わらない** — 目視確認の記録が入って初めて合格終端になる。
+別の利用者としてアプリ画面に着地した試行は `/login` に着かず目視確認を記録できないので、
+判定は目視確認待ちに留まり合格にならない (意図した安全側の挙動)。
 
 トンネル運用規律 (実機からの到達には HTTPS トンネルが要る。`APP_ENV=local` のまま露出する運用のため、
 誤公開時の影響を軽く見ない):
@@ -230,8 +268,14 @@ iOS Safari で (1) 登録 → (2) ログアウト → (3) パスキーでログ�
   (1) 表示中の PII は塞げないため目的を達しない、
   (2) 通常の戻る/進むに毎回ネットワーク往復と秘匿オーバーレイが入り、プローブ失敗時は
       「再試行」で操作が塞がれる (現場の不安定な回線で**新しい詰み**を作る)。
+- **世代 cookie を画面側から読めない環境では、復元のたびに読み直しになる**。
+  同期判定は現世代を読めないと「読み直す」へ倒すためで、**開示側へは倒れない**。
+  体感は「戻ると再読込」になる。
 - **非 Inertia 面 (Filament `/admin`) は経路 B / C の保証外**。独自 middleware stack を持ち
-  web グループを経由せず、Inertia でも描画されない。
+  web グループを経由せず、Inertia でも描画されない。したがって**セッション世代の印の配布経路も
+  guard の入口も無い** (世代 cookie は web グループの middleware が発行し、guard は
+  Inertia の入口スクリプトが登録するため)。管理面はサーバ側の保存禁止ヘッダのみで受容する。
+  **スコープからの漏れではなく、受容した非対称である。**
 - **非セキュアコンテキスト (`http://` の LAN IP 等) では経路 C が degrade する**。
   `window.crypto.subtle` が無い環境で Inertia は履歴を平文で保存する (`console.warn` のみ)。
   撮影 PWA は `getUserMedia` / Service Worker のためセキュアコンテキスト必須であり、

@@ -40,7 +40,7 @@ use Illuminate\Routing\Router;
  */
 
 /** 母集団 `U` の件数 (exact。middleware の増減を必ずレビューに出す)。 */
-const RESCUE_GATE_POPULATION_COUNT = 10;
+const RESCUE_GATE_POPULATION_COUNT = 11;
 
 /**
  * 母集団に名指しで加える vendor 認証ゲート。

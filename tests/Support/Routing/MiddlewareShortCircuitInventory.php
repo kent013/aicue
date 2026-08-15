@@ -15,6 +15,7 @@ use App\Http\Middleware\EnsureProjectBelongsToApiOrganization;
 use App\Http\Middleware\EnsureProjectBelongsToCurrentOrganization;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\IdempotentRequest;
+use App\Http\Middleware\IssueSessionEpochCookie;
 use App\Http\Middleware\LocalOnly;
 use App\Http\Middleware\McpConsentOrganizationBinder;
 use App\Http\Middleware\NoIndex;
@@ -107,6 +108,8 @@ final class MiddlewareShortCircuitInventory
             SecurityHeaders::class => false,
             NoStoreCacheHeadersForAuthenticatedPages::class => false,
             NoStoreResponse::class => false,
+            // セッション世代の印を応答に載せるだけ (必ず $next を呼ぶ)
+            IssueSessionEpochCookie::class => false,
             // X-Robots-Tag: noindex を足すだけ
             NoIndex::class => false,
             BughuntCoverageMiddleware::class => false,

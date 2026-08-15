@@ -8,9 +8,11 @@ use App\Models\Organization;
 use App\Models\User;
 use App\Services\Marketing\ContactUrl;
 use App\Services\Organization\OrganizationMembershipService;
+use App\Support\Auth\SessionEpoch;
 use App\Support\Seo\SeoManager;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use Inertia\Inertia;
 use Inertia\Middleware;
 
 class HandleInertiaRequests extends Middleware
@@ -95,6 +97,18 @@ class HandleInertiaRequests extends Middleware
             // SeoComposer と同じ実体 (二重 SoT を作らない)。controller の set / setPrivateTitle は
             // share 評価時点 (response 構築時) で反映済み。
             'title' => fn (): string => $this->seoManager->resolveDocumentTitle($request->route()?->getName()),
+            // 描画世代: この応答の内容がどのセッション世代のものかを、内容と同じ 1 通で運ぶ。
+            // **常に載せる** (Inertia の部分再読み込みで省略されると印だけ古くなるため)。
+            // これを cookie から読む形にすると「内容は A・印は B」の取り違えが起きる。
+            //
+            // **closure で渡す (即値にしない)**。vendor の Inertia\Middleware は
+            // $next($request) の**前**に Inertia::share($this->share($request)) を呼ぶため、
+            // 即値だと「要求前のセッション ID」で固定される。AlwaysProp は callable を
+            // 応答構築時に解決する (ResolvesCallables) ので、closure なら
+            // 世代 cookie ($next の後に導出) と同じ時点のセッション ID になる。
+            SessionEpoch::SHARED_PROP_KEY => Inertia::always(
+                fn (): ?string => SessionEpoch::current($request),
+            ),
         ];
     }
 

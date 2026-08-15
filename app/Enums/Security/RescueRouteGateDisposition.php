@@ -34,6 +34,7 @@ enum RescueRouteGateDisposition: string
     case RequireTwoFactor = 'App\Http\Middleware\RequireTwoFactorForEnforcedOrganizations';
     case BlockTwoFactorDisable = 'App\Http\Middleware\BlockTwoFactorDisableForEnforcedOrganizations';
     case NoStoreCacheHeaders = 'App\Http\Middleware\NoStoreCacheHeadersForAuthenticatedPages';
+    case IssueSessionEpochCookie = 'App\Http\Middleware\IssueSessionEpochCookie';
     case NotPendingDeletion = 'App\Http\Middleware\EnsureAccountNotPendingDeletion';
     case BughuntExecutedRoute = 'App\Http\Middleware\BughuntExecutedRouteMiddleware';
 
@@ -44,7 +45,8 @@ enum RescueRouteGateDisposition: string
             self::RequireTwoFactor, self::NotPendingDeletion => RescueRouteGateKind::PassesRescueRoute,
             self::Authenticate, self::AuthenticateSession, self::EnsureEmailIsVerified => RescueRouteGateKind::ShortCircuitsButEscapable,
             self::HandleInertiaRequests, self::SecurityHeaders, self::BlockTwoFactorDisable,
-            self::NoStoreCacheHeaders, self::BughuntExecutedRoute => RescueRouteGateKind::NeverShortCircuitsRescueRoute,
+            self::NoStoreCacheHeaders, self::IssueSessionEpochCookie,
+            self::BughuntExecutedRoute => RescueRouteGateKind::NeverShortCircuitsRescueRoute,
         };
     }
 
@@ -77,6 +79,9 @@ enum RescueRouteGateDisposition: string
                 .'無条件に素通しする。救済 route の名前とは一致しないため短絡経路が構造的に無い。',
             self::NoStoreCacheHeaders => '認証済みページに Cache-Control: no-store を付けるだけの'
                 .'応答加工であり、リクエストを短絡させる分岐を持たない。救済の到達性に影響しない。',
+            self::IssueSessionEpochCookie => 'セッション世代の印を応答に cookie として載せるだけの'
+                .'応答加工であり、リクエストを短絡させる分岐を持たない。印が導出できない要求 '
+                .'(session を持たない) では cookie を付けずにそのまま返すため、救済の到達性に影響しない。',
             self::NotPendingDeletion => '退会予約中の凍結ゲート。救済 route は '
                 .'AccountDeletionFreezeAllowance::DeletionRequestDestroy として登録済みで、'
                 .'凍結中に必ず実行できなければ猶予期間の意味が消える。**non-exemptible**。',

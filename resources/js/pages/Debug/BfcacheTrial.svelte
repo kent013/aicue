@@ -368,7 +368,14 @@
 
     function guardStateOf(): GuardState {
         const value = document.documentElement.getAttribute(BFCACHE_HIDDEN_ATTRIBUTE);
-        if (value === "pending" || value === "verifying" || value === "retry") return value;
+        if (
+            value === "pending" ||
+            value === "verifying" ||
+            value === "retry" ||
+            value === "reloading"
+        ) {
+            return value;
+        }
         return null;
     }
 
@@ -667,6 +674,14 @@
                                         秘匿を維持したまま A から離脱しました。<strong
                                             >/login に着地したことを確認して記録</strong
                                         >すると判定が確定します。
+                                    </p>
+                                {/if}
+                                {#if guardVerdict === "stale-session-reloaded"}
+                                    <p class="mt-3 text-caption text-text-secondary">
+                                        秘匿を維持したまま同じ URL を読み直しました。<strong
+                                            >/login に着地したことを確認して記録</strong
+                                        >すると判定が確定します
+                                        (読み直しの着地先は A から観測できません)。
                                     </p>
                                 {/if}
 
