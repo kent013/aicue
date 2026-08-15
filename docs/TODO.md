@@ -23,7 +23,6 @@
 |---|---|---|---|---|---|---|---|
 | T085 | bfcache 実復元の iOS 実機受入確認 | test | Playwright 不可のため実機で確認+記録 | High | standalone | [設計](devnotes/20260803-0053-aigenba-alignment/) | 2026-08-03 03:10 |
 | T110 | 認証手段変更のメール通知ポリシーの統一設計 | backend | passkey/2FA/SSO の増減通知を一貫したポリシーとして設計する(T108 S7 は監査ログのみで通知は見送り) | Low | standalone | [設計](devnotes/20260805-1550-security-audit-remediation/) | 2026-08-05 17:45 |
-| T173 | 経路キャッシュ起動での middleware 後付け: 正典 (a) 形へ移行しない判断の逸脱登録と、焼き込み・剥落の回帰固定 | backend | route:cache 逸脱の登録と回帰固定 | Medium | standalone | [設計](devnotes/20260815-2100-route-cache-middleware-attach/) | 2026-08-15 21:35 |
 | T174 | 組織の役割変更に同期したトークン失効 (正典 v2 の導入) | backend | 役割変更と同一tx内でOAuth資格を失効 | Medium | standalone | [設計](devnotes/20260815-2058-mcp-org-scope-revocation/) | 2026-08-15 21:35 |
 | T175 | 表ごとの保持期限の分類と実スキーマ整合 | backend | 全表を保持期限で分類し実スキーマと照合 | Medium | standalone | [設計](devnotes/20260815-2057-retention-table-classification/) | 2026-08-15 21:35 |
 | T176 | bug-hunt 目録の生成器化とドリフト検査の作り替え | test | bug-hunt 目録を生成物へ移す | Medium | standalone | [設計](devnotes/20260815-2100-bughunt-inventory-generator/) | 2026-08-15 21:35 |
