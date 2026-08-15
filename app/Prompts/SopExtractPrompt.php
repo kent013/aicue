@@ -5,20 +5,23 @@ declare(strict_types=1);
 namespace App\Prompts;
 
 use App\DataTransferObjects\LlmCallContextData;
-use Kent013\PrismPrompt\Prompt;
-use Kent013\PrismPrompt\TextPrompt;
-use Kent013\PrismPrompt\Values\UserInput;
+use App\Support\Llm\GuardedPrompt;
+use App\Support\Llm\PromptDefense;
 
 /**
  * SOP 抽出プロンプト (AI 解析 1 段目)。抽出テキスト → 統一 JSON。
  * 出力は ExtractedSopData::fromLlmText() で検証する。
+ *
+ * untrusted 文字列は窓口 (PromptDefense) が無害化・タグ境界化・合言葉の合流を行う。
  */
 final class SopExtractPrompt
 {
-    public static function make(string $untrustedSopText, LlmCallContextData $context): TextPrompt
+    public static function make(string $untrustedSopText, LlmCallContextData $context): GuardedPrompt
     {
-        return Prompt::load('sop-extract', [
-            'text' => UserInput::from($untrustedSopText), // 不変条件 4: untrusted は UserInput
-        ])->withMetadata($context->toMetadata()); // 帰属: llm_call_logs の organization / subject
+        return PromptDefense::load(
+            template: 'sop-extract',
+            untrusted: ['text' => $untrustedSopText],
+            context: $context,
+        );
     }
 }

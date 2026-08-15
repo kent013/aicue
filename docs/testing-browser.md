@@ -170,10 +170,13 @@ Browser lane では LLM 呼び出しを二層で遮断する (`tests/Pest.php` �
 どの signature にも一致しない (0 件) / 複数一致 (2 件以上) の Prompt から呼ばれると即
 `RuntimeException` で fail-fast する (silent green 防止)。
 
-キーの注意: `Prompt::load()` を使う factory (例: `App\Prompts\ExampleSummaryPrompt`) は
-generic な `TextPrompt` を実行するため、記録される prompt class は `TextPrompt::class` になる。
-prompt 単位で応答を分けたい場合は専用サブクラス (`class FooPrompt extends TextPrompt`) を
-定義し、そのクラス名で登録する。
+キーの注意: 窓口 (`App\Support\Llm\PromptDefense`) は generic な `TextPrompt` を組み立てるため、
+factory (例: `App\Prompts\ExampleSummaryPrompt`) が何であれ
+記録される prompt class は `TextPrompt::class` になる。
+窓口を通す限りクラス名では分けられないため、**prompt 単位の返し分けは signature で行う**
+(`system_prompt` 固有の一意句)。合言葉 (`{{ $llm_canary }}`) は呼び出しのたびに変わるが、
+signature は YAML の役割文なので解決は一意のまま保たれる
+(`tests/Feature/Llm/PromptDefenseTest.php` が 4 本すべてで固定している)。
 
 失敗系 (LLM schema 違反、Prism タイムアウト等) は Browser ではなく Feature テストで
 `Prism::fake()` に fail response を仕込む方が確実かつ高速。

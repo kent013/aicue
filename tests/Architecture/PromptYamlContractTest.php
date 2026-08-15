@@ -80,3 +80,61 @@ test('name は全 prompt YAML 横断で一意 (identity/observability hygiene)',
     expect($violations)->toBe([],
         'prompt YAML の name が重複しています (識別子衛生違反)。'.PHP_EOL.implode(PHP_EOL, $violations));
 });
+
+/*
+ * Blade 構文契約 (裁定 AG-028 の窓口方式の土台)。
+ *
+ * ★ この契約は **PromptDefenseWindowGateTest の変数集合突き合わせの前提**である。
+ *   あちらは `{{ $name }}` を正規表現で抽出しており、その抽出が成立するのは
+ *   ここで書ける Blade 式を 2 形へ絞っているからである。
+ *   **構文を増やすなら PromptDefenseWindowGateTest の抽出も同時に見直すこと。**
+ *
+ * 書けるのは 2 形だけ:
+ *   (i)  単純変数展開            `{{ $name }}`
+ *   (ii) 防御指示の静的呼び出し  `{{ \Kent013\PrismPrompt\Values\DefensiveInstructions::forUserInput(Ja)?() }}`
+ * 禁止: `{!! !!}` (エスケープなし出力) / 上記 2 形以外の `{{ … }}` /
+ *       `@if` 等のディレクティブ / 上記以外の位置に現れる `$`。
+ */
+test('prompt YAML の Blade 式は単純変数展開と防御指示の静的呼び出しの 2 形だけ', function (): void {
+    $simpleVariable = '/\{\{\s*\$[a-zA-Z_][a-zA-Z0-9_]*\s*\}\}/';
+    $defensiveCall = '/\{\{\s*\\\\Kent013\\\\PrismPrompt\\\\Values\\\\DefensiveInstructions::forUserInput(?:Ja)?\(\)\s*\}\}/';
+
+    $violations = [];
+    foreach (PromptYaml::paths() as $path) {
+        $parseErrors = [];
+        $parsed = PromptYaml::parseOrFail($path, $parseErrors);
+        if ($parsed === null) {
+            array_push($violations, ...$parseErrors);
+
+            continue;
+        }
+
+        foreach (['system_prompt', 'prompt'] as $key) {
+            $value = $parsed[$key] ?? null;
+            if (! is_string($value)) {
+                continue;
+            }
+
+            if (str_contains($value, '{!!')) {
+                $violations[] = "{$path} ({$key}): エスケープなし出力 {!! !!} は使えません";
+            }
+
+            // 許可 2 形を取り除いた残りに Blade 由来の記号が残っていたら違反
+            $residual = (string) preg_replace([$simpleVariable, $defensiveCall], '', $value);
+            if (preg_match('/\{\{/', $residual) === 1) {
+                $violations[] = "{$path} ({$key}): 許可されていない Blade 式 {{ … }} があります";
+            }
+            if (preg_match('/\$/', $residual) === 1) {
+                $violations[] = "{$path} ({$key}): 変数展開の外に \$ があります";
+            }
+            if (preg_match('/(?:^|\s)@[a-zA-Z]/', $residual) === 1) {
+                $violations[] = "{$path} ({$key}): Blade ディレクティブ (@…) は使えません";
+            }
+        }
+    }
+
+    expect($violations)->toBe([],
+        'この契約は窓口 gate (PromptDefenseWindowGateTest) の変数集合突き合わせの前提です。'
+        .'構文を増やすなら、あちらの変数抽出も同じ PR で見直してください。'
+        .PHP_EOL.implode(PHP_EOL, $violations));
+});

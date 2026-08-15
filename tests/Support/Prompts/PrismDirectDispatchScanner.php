@@ -11,9 +11,14 @@ use RuntimeException;
 use SplFileInfo;
 
 /**
- * app/ 配下で Prism Facade の LLM 系メソッド (`Prism::text()`, `Prism::structured()`,
- * `Prism::stream()`, `Prism::embeddings()`, `Prism::image()`, `Prism::audio()`) を
+ * Prism Facade の LLM 系メソッド (`Prism::text()`, `Prism::structured()`, `Prism::stream()`,
+ * `Prism::embeddings()`, `Prism::image()`, `Prism::audio()`, `Prism::moderation()`) を
  * 直接呼び出すコードを token ベースで検出する scanner。
+ *
+ * ★走査根は **`app/` + `routes/` + `database/` + `config/` + `bootstrap/` の 5 本**である
+ *   (`routes/` のクロージャや seeder から直呼びできる場所を残さない)。
+ *   scanner は `token_get_all` ベースでコメント・docblock・文字列リテラルを無視するため、
+ *   `config/` を加えてもコメント中の文字列で偽陽性は出ない。
  *
  * ★`tests/Architecture/PromptGuardrailTest.php` から**移設**した (振る舞い不変)。
  *   Pest の `--parallel` はファイル単位でプロセスを分けるため、テストファイル内の
@@ -32,23 +37,42 @@ use SplFileInfo;
  */
 final class PrismDirectDispatchScanner
 {
-    private const array TARGET_METHODS = ['text', 'structured', 'stream', 'embeddings', 'image', 'audio'];
+    /**
+     * ★`moderation` は現行 vendor に無くても deny 側に置く (後から生えたときに黙って通らない)。
+     *
+     * @var list<string>
+     */
+    private const array TARGET_METHODS = ['text', 'structured', 'stream', 'embeddings', 'image', 'audio', 'moderation'];
 
     /**
-     * @var list<string> app/ からの相対パスで指定。テンプレートは allowlist 不要のため空。
+     * @var list<string> リポジトリルートからの相対パスで指定。テンプレートは allowlist 不要のため空。
      *                   将来正当な理由で直叩きが必要になった場合のみ追加し、理由を明記すること。
      */
     private const array ALLOWED_FILES = [];
 
-    /** repo ルート配下の app/ (tests/Support/Prompts から 3 段上)。 */
-    private static function appDir(): string
+    /** 走査根 (リポジトリルートからの相対パス)。 */
+    private const array ROOT_DIRECTORIES = ['app', 'routes', 'database', 'config', 'bootstrap'];
+
+    /**
+     * 走査根 (相対パス => 絶対パス)。**存在しない根は fail-fast** で落とす
+     * (根の移動 / typo で黙って PASS する事故を防ぐ)。
+     *
+     * @return array<string, string>
+     */
+    public static function roots(): array
     {
-        $appDir = realpath(dirname(__DIR__, 3).'/app');
-        if (! is_string($appDir)) {
-            throw new RuntimeException('app/ ディレクトリを解決できません');
+        $repoRoot = dirname(__DIR__, 3);
+
+        $roots = [];
+        foreach (self::ROOT_DIRECTORIES as $relative) {
+            $absolute = realpath($repoRoot.'/'.$relative);
+            if (! is_string($absolute)) {
+                throw new RuntimeException("走査根を解決できません: {$relative}");
+            }
+            $roots[$relative] = $absolute;
         }
 
-        return $appDir;
+        return $roots;
     }
 
     /**
@@ -59,13 +83,15 @@ final class PrismDirectDispatchScanner
     public static function scannedFiles(): array
     {
         $files = [];
-        $iterator = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator(self::appDir(), FilesystemIterator::SKIP_DOTS),
-        );
-        /** @var SplFileInfo $file */
-        foreach ($iterator as $file) {
-            if ($file->isFile() && $file->getExtension() === 'php') {
-                $files[] = $file->getPathname();
+        foreach (self::roots() as $absolute) {
+            $iterator = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($absolute, FilesystemIterator::SKIP_DOTS),
+            );
+            /** @var SplFileInfo $file */
+            foreach ($iterator as $file) {
+                if ($file->isFile() && $file->getExtension() === 'php') {
+                    $files[] = $file->getPathname();
+                }
             }
         }
         sort($files);
@@ -74,39 +100,35 @@ final class PrismDirectDispatchScanner
     }
 
     /**
-     * @return list<string> 違反ファイル (app/ 相対パス)
+     * @return list<string> 違反ファイル (リポジトリルート相対パス)
      */
     public static function findViolations(): array
     {
-        $appDir = self::appDir();
-
-        $allowedAbsolutePaths = array_map(
-            fn (string $relative): string => $appDir.'/'.$relative,
-            self::ALLOWED_FILES,
-        );
-
         $violations = [];
-        $iterator = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($appDir, FilesystemIterator::SKIP_DOTS),
-        );
+        foreach (self::roots() as $relativeRoot => $absoluteRoot) {
+            $iterator = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($absoluteRoot, FilesystemIterator::SKIP_DOTS),
+            );
 
-        /** @var SplFileInfo $file */
-        foreach ($iterator as $file) {
-            if ($file->getExtension() !== 'php') {
-                continue;
-            }
-            $path = $file->getPathname();
-            if (in_array($path, $allowedAbsolutePaths, true)) {
-                continue;
-            }
+            /** @var SplFileInfo $file */
+            foreach ($iterator as $file) {
+                if ($file->getExtension() !== 'php') {
+                    continue;
+                }
+                $path = $file->getPathname();
+                $relative = $relativeRoot.'/'.ltrim(substr($path, strlen($absoluteRoot)), '/');
+                if (in_array($relative, self::ALLOWED_FILES, true)) {
+                    continue;
+                }
 
-            $contents = file_get_contents($path);
-            if ($contents === false) {
-                throw new RuntimeException("Failed to read PHP source: {$path}");
-            }
+                $contents = file_get_contents($path);
+                if ($contents === false) {
+                    throw new RuntimeException("Failed to read PHP source: {$path}");
+                }
 
-            if (self::containsPrismDirectCall($contents)) {
-                $violations[] = substr($path, strlen($appDir) + 1);
+                if (self::containsPrismDirectCall($contents)) {
+                    $violations[] = $relative;
+                }
             }
         }
 

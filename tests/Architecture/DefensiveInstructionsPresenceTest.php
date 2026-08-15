@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Support\Llm\PromptDefense;
 use Tests\Support\PromptYaml;
 
 /*
@@ -66,4 +67,66 @@ test('全 prompt YAML の system_prompt が DefensiveInstructions preamble を�
 
     expect($violations)->toBe([],
         'DefensiveInstructions preamble invariant に違反があります。'.PHP_EOL.implode(PHP_EOL, $violations));
+});
+
+/*
+ * 合言葉 slot の検査 (裁定 AG-028 の「応答カナリアによる乗っ取り検知」の雛形側)。
+ *
+ * 合言葉は **system_prompt 側にだけ**置く。prompt (user) 側に出すと、入力と一緒に
+ * モデルへ「見せてよい値」として提示することになり、検知の前提が崩れる。
+ * 変数名は PromptDefense::CANARY_VARIABLE から取る (名前の二重管理をしない)。
+ */
+test('全 prompt YAML の system_prompt に合言葉 slot がちょうど 1 つある', function (): void {
+    $files = PromptYaml::paths();
+    expect($files)->not->toBeEmpty();
+
+    $slot = '/\{\{\s*\$'.preg_quote(PromptDefense::CANARY_VARIABLE, '/').'\s*\}\}/';
+    $violations = [];
+
+    foreach ($files as $file) {
+        $parseErrors = [];
+        $parsed = PromptYaml::parseOrFail($file, $parseErrors);
+        if ($parsed === null) {
+            array_push($violations, ...$parseErrors);
+
+            continue;
+        }
+
+        $systemPrompt = $parsed['system_prompt'] ?? null;
+        if (! is_string($systemPrompt)) {
+            $violations[] = "{$file}: system_prompt が string でない";
+
+            continue;
+        }
+        $count = preg_match_all($slot, $systemPrompt);
+        if ($count !== 1) {
+            $violations[] = "{$file}: system_prompt の合言葉 slot が {$count} 個 (1 個にしてください)";
+        }
+    }
+
+    expect($violations)->toBe([],
+        '合言葉 slot ({{ $'.PromptDefense::CANARY_VARIABLE.' }}) を system_prompt に置いてください。'
+        .'無いと応答カナリアが機能せず、乗っ取り時の漏洩を検知できません。'
+        .PHP_EOL.implode(PHP_EOL, $violations));
+});
+
+test('prompt (user) 側に合言葉 slot が無い', function (): void {
+    $slot = '/\{\{\s*\$'.preg_quote(PromptDefense::CANARY_VARIABLE, '/').'\s*\}\}/';
+    $violations = [];
+
+    foreach (PromptYaml::paths() as $file) {
+        $parseErrors = [];
+        $parsed = PromptYaml::parseOrFail($file, $parseErrors);
+        if ($parsed === null) {
+            continue; // 上のテストが parse 失敗を報告済み
+        }
+        $userPrompt = $parsed['prompt'] ?? null;
+        if (is_string($userPrompt) && preg_match($slot, $userPrompt) === 1) {
+            $violations[] = $file;
+        }
+    }
+
+    expect($violations)->toBe([],
+        '合言葉を user 側に出すと、untrusted 入力と同じ区画に「見せてよい値」として並びます。'
+        .'system_prompt 側にだけ置いてください。'.PHP_EOL.implode(PHP_EOL, $violations));
 });

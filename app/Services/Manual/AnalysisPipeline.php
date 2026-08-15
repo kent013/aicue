@@ -10,10 +10,13 @@ use App\DataTransferObjects\Manual\Analysis\ExtractedText;
 use App\DataTransferObjects\Manual\Analysis\GeneratedScenarioData;
 use App\DataTransferObjects\Manual\Analysis\WorkDecompositionData;
 use App\Enums\Billing\TicketReservationStatus;
+use App\Enums\Llm\UntrustedInputRejectionReason;
 use App\Enums\Manual\AnalysisStep;
 use App\Enums\Manual\JobStatus;
 use App\Enums\Security\ExternalCallKind;
 use App\Exceptions\Billing\InsufficientTicketsException;
+use App\Exceptions\Llm\PromptResponseRejectedException;
+use App\Exceptions\Llm\UntrustedInputRejectedException;
 use App\Exceptions\Manual\AnalysisFailedException;
 use App\Exceptions\Manual\JobOwnershipLostException;
 use App\Exceptions\Manual\LlmOutputInvalidException;
@@ -547,6 +550,14 @@ class AnalysisPipeline
             $exception instanceof AnalysisFailedException,
             $exception instanceof InsufficientTicketsException => $exception->getMessage(),
             $exception instanceof LlmOutputInvalidException => $exception->userMessage(),
+            // 窓口が untrusted 入力を prompt に載せる前に拒否した (LLM は 1 回も呼ばれていない)。
+            // 拒否理由は網羅 match で写像し、到達不能な else を作らない。
+            $exception instanceof UntrustedInputRejectedException => match ($exception->reason) {
+                UntrustedInputRejectionReason::TooLarge => AnalysisFailedException::tooLarge()->getMessage(),
+                UntrustedInputRejectionReason::InvalidEncoding => AnalysisFailedException::unreadableEncoding()->getMessage(),
+            },
+            // 実行単位が応答を捨てた (system prompt の合言葉が応答に現れた)。原因は断定しない
+            $exception instanceof PromptResponseRejectedException => AnalysisFailedException::unsafeResponse()->getMessage(),
             // provider 応答が client timeout を超えた (cURL 28 等)
             $exception instanceof ConnectionException => AnalysisFailedException::timedOut()->getMessage(),
             // provider 混雑 (429 / 529)

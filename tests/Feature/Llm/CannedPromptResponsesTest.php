@@ -12,9 +12,9 @@ use App\Prompts\SopExtractPrompt;
 use App\Prompts\WorkDecompositionPrompt;
 use App\Services\AI\Testing\CannedPromptFakeRegistrar;
 use App\Services\AI\Testing\CannedPromptResponses;
+use App\Support\Llm\GuardedPrompt;
 use Illuminate\Support\Facades\Http;
 use Kent013\PrismPrompt\Prompt;
-use Kent013\PrismPrompt\TextPrompt;
 use Prism\Prism\Contracts\Message;
 use Prism\Prism\ValueObjects\Messages\SystemMessage;
 use Webmozart\Assert\Assert;
@@ -80,7 +80,7 @@ function systemTextOf(array $messages): string
 }
 
 /** 登録済み prompt allowlist (key => [factory 実体, 期待 signature]) */
-function makeRegisteredPrompt(string $key): TextPrompt
+function makeRegisteredPrompt(string $key): GuardedPrompt
 {
     return match ($key) {
         'sop-extract' => SopExtractPrompt::make('サンプル SOP', LlmCallContextData::none()),

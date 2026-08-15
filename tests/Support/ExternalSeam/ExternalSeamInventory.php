@@ -186,9 +186,9 @@ final class ExternalSeamInventory
                 kind: ExternalSeamKind::Llm,
                 dimension: ExternalSeamDimension::CodeReachPoint,
                 gateFile: 'tests/Architecture/PromptGuardrailTest.php',
-                gateTestName: 'app/ で Prism Facade の LLM 系メソッドを直接呼んでいない (Prompt 経由のみ)',
+                gateTestName: '5 走査根で Prism Facade の LLM 系メソッドを直接呼んでいない (Prompt 経由のみ)',
                 livenessProbe: static fn (): array => PrismDirectDispatchScanner::scannedFiles(),
-                rationale: 'Prism 直呼び禁止は ALLOWED_FILES 空の完全禁止で PromptGuardrailTest が正本。目録より強い形で閉じている',
+                rationale: 'Prism 直呼び禁止は ALLOWED_FILES 空の完全禁止で PromptGuardrailTest が正本。走査根は app/ routes/ database/ config/ bootstrap/ の 5 本で目録より強い形で閉じている',
             ),
             new ExternalSeamDelegation(
                 kind: ExternalSeamKind::SocialLogin,

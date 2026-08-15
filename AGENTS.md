@@ -31,11 +31,14 @@
 2. PHPStan エラーの widen(型を緩めて黙らせる)・baseline 化
 3. dev DB への破壊操作(`migrate:fresh` 等)をエージェント判断で実行すること
 4. `response()->json()` の直書き(DTO / JsonResource / Inertia を使う。仕様固定 endpoint のみ例外)
-5. LLM 呼び出しの Prism 直呼び(`app/Prompts/` の factory 経由のみ。PromptGuardrailTest が検出)。
+5. LLM 呼び出しの Prism 直呼び(`app/Prompts/` の factory → 窓口 (`PromptDefense`) →
+   実行単位 (`GuardedPrompt`) の**1 本道のみ**。`PromptGuardrailTest` が
+   app/ routes/ database/ config/ bootstrap/ の 5 走査根で検出する)。
    **実行経路を持つ prompt factory は `LlmCallContextData` を必須引数で受け、
-   `->withMetadata($context->toMetadata())` で帰属 (organization / subject) を付ける** — 付け忘れは
-   PHPStan level 10 が落とす。帰属の対象を持たない見本 (`ExampleSummaryPrompt`) は
-   `PromptUntrustedInputContractTest` の inventory へ**帰属キーを空配列で exempt 登録**する
+   `PromptDefense::load()` へ渡して帰属 (organization / subject) を付ける** — 付け忘れは
+   PHPStan level 10 が落とす。帰属の対象を持たない見本 (`ExampleSummaryPrompt`) だけが
+   `PromptDefense::loadUnattributed()` を使え、窓口 gate が**この 1 件を名指しで pin** する。
+   併せて `PromptUntrustedInputContractTest` の inventory へ**帰属キーを空配列で exempt 登録**する
    (deny-by-default なので exempt にする操作がレビューで必ず見える)。
    欠けると `llm_call_logs.metadata_missing` になり組織別・対象別の費用が出せない
 6. prompt 文字列のコード直書き(`resources/prompts/*.yaml` に置く)
@@ -57,7 +60,17 @@
    `User::query()->where('id', …)` / `DB::table('users')->where('id', …)`)は
    deny-by-default で分類が要る(`ModelDirectFetchInvariantTest` + `DirectFetchInventory`。
    route parameter 由来の id は `NestedRouteIdorDefenseTest` の担当で母集団が交わらない)
-4. **untrusted 文字列は UserInput 型経由でのみ prompt に入れる**
+4. **untrusted 文字列は窓口 (`App\Support\Llm\PromptDefense`) 経由でのみ prompt に入れる**。
+   窓口が無害化 (制御文字・不可視文字・長さ) → タグ境界化 (`UserInput`) → 合言葉の合流 →
+   帰属の付与を行い、実行単位 (`App\Support\Llm\GuardedPrompt`) が vendor 実行と応答検査を
+   1 メソッドに束ねる (合言葉が応答に出たら**応答を返さず**例外)。
+   窓口の引数は生の string なので、呼び出し側が自分でタグ境界化の型を作る経路は型で消えている
+   (`PromptDefenseWindowGateTest` / `PromptUntrustedInputContractTest` /
+   `DefensiveInstructionsPresenceTest` / `LlmDefenseConfigGateTest`)。
+   **監視条件**: 実行時に決まる値 (会話履歴・過去の出力・他利用者の入力) を prompt へ入れる形が
+   生まれたら、その経路も窓口の untrusted 側を通す (trusted の入口は作っていない。
+   足すときの義務は `docs/template-divergence.md` D16)。
+   保証しないものの正本は `docs/architecture.md` §LLM プロンプト防御の窓口方式
 5. **権限判定は常に `laratrust_team_id` を明示**(strict_check=true)
 6. **PII(email/name)は CipherSweet**。検索は `whereBlind()`(平文 where は hit しない)
 7. **課金の冪等性**: webhook は冪等マシン経由、チケットは reserve→commit/release の 2 フェーズ
