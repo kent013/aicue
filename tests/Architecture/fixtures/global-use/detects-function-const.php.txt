@@ -1,0 +1,5 @@
+<?php
+
+// 検出: 関数と定数の取り込みでも、まったく同じ警告が出る (実測)。
+use function strlen;
+use const PHP_VERSION;

@@ -1,0 +1,22 @@
+<?php
+
+// 検出: グローバルを明示した波括弧ブロックの中も対象である。
+// 同じブロックの中にある「クラス本体の取り込み」と「クロージャの use ($x)」は対象外。
+namespace {
+    use Foo;
+    use function strlen;
+
+    trait T
+    {
+    }
+
+    class A
+    {
+        use T;
+    }
+
+    $x = 1;
+    $f = function () use ($x) {
+        return $x;
+    };
+}

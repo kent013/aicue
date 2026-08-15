@@ -58,6 +58,12 @@ drift は `tests/js/styles/canonical-source-parity.test.ts` が機械検出す�
 remove_condition / reason_classes / lifecycle)を必ず埋める。`transitional` は
 撤去条件必須、`permanent` は brand 色・真円 UI(`rounded-full`)等の恒久例外のみ。
 
+`patterns` は**区切り文字で分割した class トークンとの完全一致**で照合する。
+変種の修飾や重要度の修飾が付いた形(`sm:rounded-full` / `!rounded-full`)は
+**別のトークン**なので自動では免罪されず、要るならそれ自体を 1 行足して登録する。
+登録した文字列が単一の class トークンとして成立していること(= 登録した瞬間に
+死んでいる例外を作らないこと)は `ds-purity.test.ts` が機械で確かめる。
+
 ## コンポーネント追加時のチェックリスト
 
 - [ ] 配置層(atoms / molecules / organisms / features / templates)。迷ったら下の層へ

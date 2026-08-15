@@ -82,7 +82,11 @@ export const THEME_PATTERNS = [
 export interface FileScopedAllowlistEntry {
     /** resources/js からの相対パス */
     file: string;
-    /** 許可する class 文字列 (完全一致部分文字列) */
+    /**
+     * 許可する class トークン (区切り文字で分割したトークンとの**完全一致**)。
+     * 変種の修飾や重要度の修飾が付いた形 (`sm:rounded-full` / `!rounded-full`) は
+     * **別のトークン**なので、必要ならそれ自体を 1 行足して登録する (自動では免罪しない)。
+     */
     patterns: readonly string[];
     reason: string;
     owner_phase: string;
@@ -125,12 +129,51 @@ export function allowlistPatternsFor(relPath: string): readonly string[] {
 }
 
 /**
- * content から allowlist で許可された文字列を除去する (除去後に禁止パターンを適用する)。
+ * class トークンを構成する文字。これ以外の文字はすべて区切りとして扱う。
+ *
+ * 含める文字と理由:
+ *   英数字 / `_` / `-`  … utility 名の本体 (`rounded-full`)
+ *   `:`                 … 変種の修飾 (`sm:` `hover:`)
+ *   `/`                 … 不透明度の指定 (`bg-primary/50`)
+ *   `.` `%`             … 任意値の中の数値 (`w-[62.5%]`)
+ *   `[` `]`             … 任意値 (`text-[13px]`)
+ *   `!`                 … 重要度の修飾 (`!rounded-full` / `rounded-full!`)
+ *   `#`                 … 色の直値 (`#1DA1F2`。将来ブランド色を登録するときに 1 トークンで扱えるようにする)
+ *
+ * **保証しないもの (誇張しない)**: 丸括弧・`@`・カンマを含む書き方
+ * (`bg-(--var)` / `@md:flex`) はここでトークンが割れるため、その形は
+ * 許可一覧に**登録できない**。登録が要るようになったらこの文字集合を広げる
+ * (広げたら「許可一覧の全エントリが単一の class トークンとして成立している」検査が
+ * 巻き添えで赤くなるので、黙って広がることはない)。
+ */
+const CLASS_TOKEN_PATTERN = /[A-Za-z0-9_:./[\]!%#-]+/g;
+
+/** 許可一覧の 1 エントリが class トークンとして成立しているか (登録した瞬間に死んでいる例外を防ぐ) */
+export function isSingleClassToken(value: string): boolean {
+    const matched = value.match(CLASS_TOKEN_PATTERN);
+
+    return matched !== null && matched.length === 1 && matched[0] === value;
+}
+
+/**
+ * content から allowlist で許可された class トークンを除去する (除去後に禁止パターンを適用する)。
+ *
+ * 除去は**区切り文字で分割した class トークンの完全一致**でのみ行う。
+ * 素の部分文字列で除去すると、許可語を部分に含む別の語 (`!rounded-full` /
+ * `sm:rounded-full` / `rounded-full/50`) まで一緒に消えて**検出漏れ**になる。
+ * 許可したのは「真に円形な UI であること」だけであり、変種の修飾や重要度の修飾が
+ * 付いた別の書き方まで許した覚えはない。
+ *
+ * トークンの前後は必ず区切り文字なので、除去によって隣り合うトークンが連結することはない。
  */
 export function stripAllowlisted(relPath: string, content: string): string {
-    let result = content;
-    for (const pattern of allowlistPatternsFor(relPath)) {
-        result = result.split(pattern).join("");
+    const allowed = allowlistPatternsFor(relPath);
+    if (allowed.length === 0) {
+        return content;
     }
-    return result;
+    const allowedTokens = new Set(allowed);
+
+    return content.replace(CLASS_TOKEN_PATTERN, (token) =>
+        allowedTokens.has(token) ? "" : token,
+    );
 }

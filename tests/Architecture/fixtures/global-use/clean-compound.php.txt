@@ -1,0 +1,11 @@
+<?php
+
+// 無違反: 複合名 / グループ取り込み / 先頭バックスラッシュ付きの複合名。
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Support\Facades\{DB, Schema};
+use function Illuminate\Support\enum_value;
+use const Illuminate\Foundation\SOME_CONST;
+use \Illuminate\Support\Str;
+use Illuminate\Support\Arr, Illuminate\Support\Collection;
+
+return [Migration::class, DB::class, Schema::class, Str::class, Arr::class, Collection::class];
