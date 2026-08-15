@@ -543,7 +543,8 @@ exit "${overall}"
       `rm -rf "${ARTIFACT_DIR}"` するので、実行前に置いたファイルは消えてしまい
       `mkdir -p` は成功してしまう。pest スタブに次の順で作らせる:
       (1) `tests/Browser/Screenshots/x.png` を書く →
-      (2) `storage/browser-test-artifacts` を**通常ファイル**として作る →
+      (2) `storage/browser-test-artifacts` を**通常ファイル**として作る
+          (sandbox には `storage/` が無いので先に `mkdir -p storage` する) →
       (3) `exit 23` で終わる。
       期待は「stderr に WARNING が出る」かつ
       **「最終終了コードが 23 のまま」** (0 で確認すると「上書きしない」ことの証明にならない)
@@ -615,7 +616,7 @@ exit "${overall}"
       # playwright の版が変われば別キーになる。**restore-keys は持たない**:
       # 部分一致で復元すると古い版のブラウザを溜め込み続けるため
       # (lockfile 更新時と初回は従来どおり取得する = 短縮効果は lockfile 不変時に限る)。
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-${{ runner.arch }}-ms-playwright-${{ hashFiles('pnpm-lock.yaml') }}
@@ -636,7 +637,7 @@ exit "${overall}"
       # 正常にありうるので job を落とさず、警告だけ残す。
       - name: Collect browser lane artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: browser-test-artifacts
           path: storage/browser-test-artifacts/
@@ -646,6 +647,9 @@ exit "${overall}"
 > **版の確認**: gate の `actionName()` は `@version` を落として突合するので gate は版に沈黙するが、
 > **存在しない版を書けば CI が即 fail する**。実装時に `actions/cache` / `actions/upload-artifact` の
 > 現行 major の実在を確認すること。
+>
+> 実装時 (2026-08-15) に確認した現行 major は `actions/cache@v6` / `actions/upload-artifact@v7` で、
+> 上のコード例もその値に更新済みである (設計当初の記述は `@v4` だった)。
 
 ### テスト計画
 

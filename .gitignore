@@ -41,6 +41,8 @@
 /storage/prism-prompt-debug/
 # bug-hunt コード到達カバレッジの出力先 (scripts/bug-hunt-shard.sh --coverage)
 /storage/bughunt-coverage/
+# Browser lane がレーン別に退避する失敗時 screenshot (CI の失敗時アップロード対象)
+/storage/browser-test-artifacts/
 /vendor
 _ide_helper.php
 Homestead.json

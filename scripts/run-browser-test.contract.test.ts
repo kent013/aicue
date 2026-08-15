@@ -7,12 +7,13 @@
  * 実プロセスで振る舞いを固定する。
  *
  * 2 層構成:
- *   層 1 (sandbox 実走): C1〜C4, C8 — mkdtemp に最小の repo 骨格を組み、pest / php を
- *         スタブへ差し替えて実スクリプトを走らせる。
- *   層 2 (静的契約):    C5〜C7 — orphan 掃除の振る舞いは「PPID が 1 に reparent する」
- *         という subreaper 依存の前提を要するため、実プロセス化すると偽赤を生む。
- *         守りたいのは「掃除ロジックが消される / bug-hunt 除外が消される / EXIT trap の
- *         所有権が奪われる」という編集による退行なので静的検査で足りる
+ *   層 1 (sandbox 実走): C1〜C4, C8, C10〜C12, C14 — mkdtemp に最小の repo 骨格を組み、
+ *         pest / php / 導入スクリプトをスタブへ差し替えて実スクリプトを走らせる。
+ *   層 2 (静的契約):    C5〜C7, C9, C13, C15 — orphan 掃除の振る舞いは「PPID が 1 に
+ *         reparent する」という subreaper 依存の前提を要するため、実プロセス化すると
+ *         偽赤を生む。守りたいのは「掃除ロジックが消される / bug-hunt 除外が消される /
+ *         EXIT trap の所有権が奪われる / 事前確認と証跡初期化の位置がずれる」という
+ *         編集による退行なので静的検査で足りる
  *         (tests/Architecture/GlobalTestLockInventoryTest.php と同方針)。
  *
  * GLOBAL_TEST_LOCK_DIR の使用について: これは scripts/global-test-lock.sh が
@@ -32,15 +33,19 @@ import {
     mkdirSync,
     mkdtempSync,
     readFileSync,
+    readdirSync,
     rmSync,
+    statSync,
     writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { codeLines, lineIndexOf, mutate } from "../tests/js/support/shell-contract";
 
 const REPO_ROOT = process.cwd();
 const SCRIPT_PATH = resolve(REPO_ROOT, "scripts/run-browser-test.sh");
 const LOCK_LIB_PATH = resolve(REPO_ROOT, "scripts/global-test-lock.sh");
+const GITIGNORE_PATH = resolve(REPO_ROOT, ".gitignore");
 
 /** 実ソース (verbatim)。層 2 の正のコントロールと層 1 の sandbox 元になる。 */
 function realSource(): string {
@@ -48,19 +53,8 @@ function realSource(): string {
 }
 
 // --------------------------------------------------------------------------
-// 層 2: 静的契約 (C5, C6, C7 + 既定値リテラル)
+// 層 2: 静的契約 (C5, C6, C7, C9, C13 + 既定値リテラル)
 // --------------------------------------------------------------------------
-
-/**
- * 行頭 (空白除く) が `#` の行を落とす。方針説明コメントで偽赤にしないため
- * (tests/Architecture/GlobalTestLockInventoryTest.php の globalTestLockCodeLines と同方針)。
- */
-export function codeLines(source: string): string {
-    return source
-        .split("\n")
-        .filter((line) => !/^\s*#/.test(line))
-        .join("\n");
-}
 
 /**
  * 静的契約の違反を列挙する純関数。
@@ -94,6 +88,33 @@ export function staticContractViolations(source: string): string[] {
         violations.push("C7: 自前の trap ... EXIT が張られている (ロックが解放されなくなる)");
     }
 
+    // C9: ブラウザ導入の事前確認は **グローバルテストロックを取る前** に行う。
+    // 後ろに置くと、先行レーンの終了を数分待たされてから「ブラウザが入っていません」と
+    // 言うことになる (bug-hunt guard と同じ理由)。
+    const provisionAt = lineIndexOf(code, "bash scripts/setup-browser-testing.sh");
+    const acquireAt = lineIndexOf(code, "global_test_lock_acquire");
+    if (provisionAt < 0) {
+        violations.push("C9: ブラウザ導入の事前確認 (setup-browser-testing.sh) が消えている");
+    } else if (acquireAt >= 0 && provisionAt > acquireAt) {
+        violations.push("C9: 事前確認がグローバルテストロック取得より後ろにある");
+    }
+
+    // C13: 証跡ディレクトリの初期化は「ロック取得後・レーンループ前」。
+    // ロックより前だと並行実行中の別レーンの証跡を消し、ループ後だと前回の残骸を
+    // 今回の失敗として拾い上げる。
+    const resetAt = lineIndexOf(code, 'rm -rf "${ARTIFACT_DIR}"');
+    const loopAt = lineIndexOf(code, "for lane in");
+    if (resetAt < 0) {
+        violations.push("C13: 証跡ディレクトリの初期化が消えている (前回の残骸を今回の失敗として扱う)");
+    } else {
+        if (acquireAt >= 0 && resetAt < acquireAt) {
+            violations.push("C13: 証跡初期化がロック取得より前にある (並行実行の証跡を消す)");
+        }
+        if (loopAt >= 0 && resetAt > loopAt) {
+            violations.push("C13: 証跡初期化がレーンループより後ろにある");
+        }
+    }
+
     // 既定値リテラル (層 1 の振る舞い検査と二重化する保険)
     if (!code.includes("${BROWSER_TEST_PROCESSES:-1}")) {
         violations.push("既定並列度が 1 でない (BROWSER_TEST_PROCESSES:-1 が消えている)");
@@ -109,30 +130,60 @@ export function staticContractViolations(source: string): string[] {
 // 層 1: sandbox 実走
 // --------------------------------------------------------------------------
 
-/** 元ソースの `from` を `to` に 1 箇所だけ置換する。置換が成立しなければ throw (空振り防止)。 */
-export function mutate(source: string, from: string, to: string): string {
-    const occurrences = source.split(from).length - 1;
-    if (occurrences !== 1) {
-        throw new Error(`mutation target must appear exactly once (found ${occurrences}): ${from}`);
-    }
-    const mutated = source.replace(from, to);
-    if (mutated === source) throw new Error(`mutation did not change the source: ${from}`);
-    if (!mutated.includes(to)) throw new Error(`mutated source lacks the expected token: ${to}`);
-    return mutated;
-}
-
 interface SandboxRun {
     /** スクリプトの終了コード。 */
     status: number;
     /** スタブ pest が記録した呼び出し (1 行 = 1 レーン、argv の JSON 配列)。 */
     pestCalls: string[][];
+    /** 導入スクリプトのスタブが呼ばれた回数。 */
+    provisionCalls: number;
+    /** 実行後に storage/browser-test-artifacts 配下に残ったファイル (相対パス・昇順)。 */
+    artifacts: string[];
     stderr: string;
+}
+
+interface SandboxOptions {
+    /** 何レーン目 (1 始まり) を失敗させるか。 */
+    failingLanes?: number[];
+    /** 失敗レーンの終了コード (既定 1)。 */
+    failExitCode?: number;
+    /** 追加の環境変数。 */
+    env?: Record<string, string>;
+    /** 導入スクリプトのスタブの終了コード (既定 0)。 */
+    provisionExitCode?: number;
+    /** pest スタブが実挙動 (起動時に Screenshots を消してから 1 枚書く) を模すか。 */
+    pestWritesScreenshots?: boolean;
+    /** pest スタブの終了直前に差し込む追加 shell 行 (異常系の作り込み用)。 */
+    pestExtraLines?: string[];
+    /** PATH の先頭へ置く追加スタブ (コマンド名 → shell 本文)。 */
+    extraStubs?: Record<string, string>;
+    /** 実行前に sandbox へ作っておくファイル (sandbox 相対パス → 内容)。 */
+    seedFiles?: Record<string, string>;
 }
 
 function writeExecutable(path: string, content: string): void {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, content, "utf-8");
     chmodSync(path, 0o755);
+}
+
+/**
+ * dir 配下のファイルを再帰列挙して相対パス (昇順) で返す。
+ * 退避先が通常ファイルとして作られている異常系 (C14a) もあるので、
+ * ディレクトリでなければ空として扱う。
+ */
+function listFilesRecursively(dir: string, prefix = ""): string[] {
+    if (!existsSync(dir) || !statSync(dir).isDirectory()) return [];
+    const found: string[] = [];
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+        if (entry.isDirectory()) {
+            found.push(...listFilesRecursively(join(dir, entry.name), relative));
+        } else {
+            found.push(relative);
+        }
+    }
+    return found.sort();
 }
 
 /**
@@ -163,13 +214,9 @@ function assertNoBughuntPorts(): void {
  * sandbox に最小の repo 骨格を組み、渡された script source を実行する。
  *
  * @param scriptSource   実行する run-browser-test.sh の内容 (verbatim または改変コピー)
- * @param failingLanes   何レーン目 (1 始まり) を exit 1 にするか
- * @param env            追加の環境変数
+ * @param options        スタブの挙動と事前状態
  */
-function runInSandbox(
-    scriptSource: string,
-    options: { failingLanes?: number[]; env?: Record<string, string> } = {},
-): SandboxRun {
+function runInSandbox(scriptSource: string, options: SandboxOptions = {}): SandboxRun {
     assertNoBughuntPorts();
 
     const sandbox = mkdtempSync(join(tmpdir(), "run-browser-test-contract-"));
@@ -188,6 +235,20 @@ function runInSandbox(
         writeFileSync(join(sandbox, "artisan"), "<?php\n", "utf-8");
         writeFileSync(join(sandbox, "phpunit.browser.xml"), "<phpunit/>\n", "utf-8");
 
+        // 導入スクリプトのスタブ: 呼び出しを記録し、指定の終了コードで終わる。
+        // 実物は Playwright を起動するので sandbox では差し替える (呼ばれたか / 呼ばれた結果を
+        // レーンがどう扱うか、が本テストの関心である)。
+        const provisionCallsPath = join(sandbox, "provision-calls.log");
+        writeExecutable(
+            join(sandbox, "scripts/setup-browser-testing.sh"),
+            [
+                "#!/usr/bin/env bash",
+                "set -u",
+                `printf 'called\\n' >> "${provisionCallsPath}"`,
+                `exit ${options.provisionExitCode ?? 0}`,
+            ].join("\n"),
+        );
+
         // php スタブ: 何もせず即座に成功する。
         //
         // **意図的に sleep を入れない**: T104 は pgid probe の race (既に終了した pid に
@@ -198,9 +259,24 @@ function runInSandbox(
         // スタブが sub-millisecond で終わって本契約テストが落ちる。
         writeExecutable(join(sandbox, "bin/php"), "#!/usr/bin/env bash\nexit 0\n");
 
+        for (const [name, body] of Object.entries(options.extraStubs ?? {})) {
+            writeExecutable(join(sandbox, "bin", name), body);
+        }
+
+        for (const [relative, content] of Object.entries(options.seedFiles ?? {})) {
+            const path = join(sandbox, relative);
+            mkdirSync(dirname(path), { recursive: true });
+            writeFileSync(path, content, "utf-8");
+        }
+
         const callsPath = join(sandbox, "pest-calls.jsonl");
         const failing = options.failingLanes ?? [];
-        // pest スタブ: argv を JSONL で追記し、指定回目の呼び出しだけ exit 1 する
+        const failExitCode = options.failExitCode ?? 1;
+        // pest スタブ: argv を JSONL で追記し、指定回目の呼び出しだけ非ゼロで終わる。
+        //
+        // pestWritesScreenshots のときは pest-plugin-browser の実挙動を模す:
+        // **起動のたびに tests/Browser/Screenshots を丸ごと消してから**書く
+        // (この挙動があるからレーンごとの退避が要る = C11 が守る不変条件そのもの)。
         writeExecutable(
             join(sandbox, "vendor/bin/pest"),
             [
@@ -210,7 +286,7 @@ function runInSandbox(
                 `CALLS="${callsPath}"`,
                 // argv を JSON 配列へ (jq に依存しない素朴なエスケープ: 実引数に " や \\ は現れない)
                 'out="["',
-                'first=1',
+                "first=1",
                 'for a in "$@"; do',
                 '  if [ "$first" = "1" ]; then first=0; else out="${out},"; fi',
                 '  esc="${a//\\\\/\\\\\\\\}"',
@@ -220,8 +296,16 @@ function runInSandbox(
                 'out="${out}]"',
                 'printf "%s\\n" "$out" >> "$CALLS"',
                 'n=$(wc -l < "$CALLS" | tr -d " ")',
+                ...(options.pestWritesScreenshots === true
+                    ? [
+                          'rm -rf "tests/Browser/Screenshots"',
+                          'mkdir -p "tests/Browser/Screenshots"',
+                          'printf "png\\n" > "tests/Browser/Screenshots/lane-${n}.png"',
+                      ]
+                    : []),
+                ...(options.pestExtraLines ?? []),
                 `for f in ${failing.join(" ") || "''"}; do`,
-                '  [ -n "$f" ] && [ "$n" = "$f" ] && exit 1',
+                `  [ -n "$f" ] && [ "$n" = "$f" ] && exit ${failExitCode}`,
                 "done",
                 "exit 0",
             ].join("\n"),
@@ -253,7 +337,17 @@ function runInSandbox(
                   .map((l) => JSON.parse(l) as string[])
             : [];
 
-        return { status: result.status ?? -1, pestCalls, stderr: result.stderr ?? "" };
+        const provisionCalls = existsSync(provisionCallsPath)
+            ? readFileSync(provisionCallsPath, "utf-8").split("\n").filter((l) => l.trim() !== "").length
+            : 0;
+
+        return {
+            status: result.status ?? -1,
+            pestCalls,
+            provisionCalls,
+            artifacts: listFilesRecursively(join(sandbox, "storage/browser-test-artifacts")),
+            stderr: result.stderr ?? "",
+        };
     } finally {
         rmSync(sandbox, { recursive: true, force: true });
     }
@@ -261,7 +355,7 @@ function runInSandbox(
 
 // --------------------------------------------------------------------------
 
-describe("run-browser-test.sh 層 2: 静的契約 (C5, C6, C7)", () => {
+describe("run-browser-test.sh 層 2: 静的契約 (C5, C6, C7, C9, C13)", () => {
     it("現行の実ソースは違反 0 件 (正のコントロール)", () => {
         expect(staticContractViolations(realSource())).toEqual([]);
     });
@@ -311,12 +405,61 @@ describe("run-browser-test.sh 層 2: 静的契約 (C5, C6, C7)", () => {
     it("既定レーンを chromium だけに狭めると違反を返す", () => {
         const broken = mutate(
             realSource(),
-            '${BROWSER_TEST_LANES:-chromium webkit}',
-            '${BROWSER_TEST_LANES:-chromium}',
+            "${BROWSER_TEST_LANES:-chromium webkit}",
+            "${BROWSER_TEST_LANES:-chromium}",
+        );
+        expect(staticContractViolations(broken)).toContain("既定レーンが chromium webkit でない");
+    });
+
+    it("C9: 事前確認をロック取得の後ろへ移すと違反を返す", () => {
+        const source = realSource();
+        const withoutProvision = mutate(source, "bash scripts/setup-browser-testing.sh\n", "");
+        const broken = mutate(
+            withoutProvision,
+            'global_test_lock_acquire "composer test:browser"',
+            'global_test_lock_acquire "composer test:browser"\nbash scripts/setup-browser-testing.sh',
         );
         expect(staticContractViolations(broken)).toContain(
-            "既定レーンが chromium webkit でない",
+            "C9: 事前確認がグローバルテストロック取得より後ろにある",
         );
+    });
+
+    it("C9: 事前確認そのものを削ると違反を返す", () => {
+        const broken = mutate(realSource(), "bash scripts/setup-browser-testing.sh\n", "");
+        expect(staticContractViolations(broken)).toContain(
+            "C9: ブラウザ導入の事前確認 (setup-browser-testing.sh) が消えている",
+        );
+    });
+
+    it("C13: 証跡初期化を削ると違反を返す", () => {
+        const broken = mutate(realSource(), 'rm -rf "${ARTIFACT_DIR}"\n', "");
+        expect(staticContractViolations(broken)).toContain(
+            "C13: 証跡ディレクトリの初期化が消えている (前回の残骸を今回の失敗として扱う)",
+        );
+    });
+
+    it("C13: 証跡初期化をロック取得より前へ移すと違反を返す", () => {
+        const source = realSource();
+        const removed = mutate(source, 'rm -rf "${ARTIFACT_DIR}"\n', "");
+        const broken = mutate(
+            removed,
+            "# --- グローバルテストロック (旧 worktree-local ロックを置き換え) ---",
+            'rm -rf "${ARTIFACT_DIR}"\n# --- グローバルテストロック (旧 worktree-local ロックを置き換え) ---',
+        );
+        expect(staticContractViolations(broken)).toContain(
+            "C13: 証跡初期化がロック取得より前にある (並行実行の証跡を消す)",
+        );
+    });
+});
+
+describe("run-browser-test.sh 層 2: C15 (.gitignore 登録)", () => {
+    it("C15: 退避先が .gitignore に登録されていること", () => {
+        // 登録漏れは Browser テスト実行後の worktree を恒常的に dirty にし、
+        // scripts/teardown-worktree.sh の dirty チェックを常時失敗させる。
+        const lines = readFileSync(GITIGNORE_PATH, "utf-8")
+            .split("\n")
+            .map((l) => l.trim());
+        expect(lines).toContain("/storage/browser-test-artifacts/");
     });
 });
 
@@ -326,6 +469,8 @@ describe("run-browser-test.sh 層 1: sandbox 実走 (C1〜C4, C8)", () => {
 
         expect(run.status).toBe(0);
         expect(run.pestCalls).toHaveLength(2);
+        // 事前確認はレーン起動前にちょうど 1 回
+        expect(run.provisionCalls).toBe(1);
         // C1: レーン名の写像と順序
         expect(run.pestCalls[0]).toContain("--browser");
         expect(run.pestCalls[0][run.pestCalls[0].indexOf("--browser") + 1]).toBe("chrome");
@@ -360,6 +505,120 @@ describe("run-browser-test.sh 層 1: sandbox 実走 (C1〜C4, C8)", () => {
     });
 });
 
+describe("run-browser-test.sh 層 1: 事前確認と証跡退避 (C10〜C12, C14)", () => {
+    it("C10: 事前確認が失敗したらレーンを 1 本も起動しない", { timeout: 30_000 }, () => {
+        const run = runInSandbox(realSource(), { provisionExitCode: 1 });
+
+        expect(run.provisionCalls).toBe(1);
+        expect(run.pestCalls).toHaveLength(0);
+        expect(run.status).not.toBe(0);
+    });
+
+    it(
+        "C11: 2 レーン走らせても先行レーンの証跡が残る (失敗レーンでも退避される)",
+        { timeout: 30_000 },
+        () => {
+            const run = runInSandbox(realSource(), {
+                failingLanes: [1],
+                pestWritesScreenshots: true,
+            });
+
+            expect(run.pestCalls).toHaveLength(2);
+            expect(run.artifacts).toEqual(["chromium/lane-1.png", "webkit/lane-2.png"]);
+        },
+    );
+
+    it(
+        "C11 負のコントロール: 退避をループの外へ移すと先行レーンの証跡が消える",
+        { timeout: 30_000 },
+        () => {
+            const broken = mutate(
+                realSource(),
+                '    collect_lane_artifacts "${lane}"\n\n    cleanup_orphan_playwright\ndone',
+                '    cleanup_orphan_playwright\ndone\n\ncollect_lane_artifacts "${lane}"',
+            );
+            const run = runInSandbox(broken, { failingLanes: [1], pestWritesScreenshots: true });
+
+            expect(run.pestCalls).toHaveLength(2);
+            expect(run.artifacts).toEqual(["webkit/lane-2.png"]);
+        },
+    );
+
+    it("C12: 前回実行の残骸を持ち越さない", { timeout: 30_000 }, () => {
+        const run = runInSandbox(realSource(), {
+            seedFiles: { "storage/browser-test-artifacts/stale/old.png": "png\n" },
+        });
+
+        expect(run.status).toBe(0);
+        expect(run.artifacts).toEqual([]);
+    });
+
+    it("C12 負のコントロール: 初期化を削ると残骸が残る", { timeout: 30_000 }, () => {
+        const broken = mutate(realSource(), 'rm -rf "${ARTIFACT_DIR}"\n', "");
+        const run = runInSandbox(broken, {
+            seedFiles: { "storage/browser-test-artifacts/stale/old.png": "png\n" },
+        });
+
+        expect(run.artifacts).toEqual(["stale/old.png"]);
+    });
+
+    it(
+        "C14a: 退避先を作れなくてもレーンの終了コードを上書きしない",
+        { timeout: 30_000 },
+        () => {
+            // **失敗条件は初期化の後に作る**: スクリプトはレーンループの前に
+            // rm -rf "${ARTIFACT_DIR}" するので、実行前に置いたファイルは消えてしまい
+            // mkdir -p が成功してしまう。pest スタブに「退避先を通常ファイルとして作る」まで
+            // やらせることで、mkdir -p を確実に失敗させる。
+            const run = runInSandbox(realSource(), {
+                env: { BROWSER_TEST_LANES: "chromium" },
+                failingLanes: [1],
+                failExitCode: 23,
+                pestWritesScreenshots: true,
+                pestExtraLines: [
+                    'mkdir -p "storage"',
+                    'printf "not-a-dir\\n" > "storage/browser-test-artifacts"',
+                ],
+            });
+
+            expect(run.stderr).toContain("WARNING");
+            expect(run.status).toBe(23);
+        },
+    );
+
+    it("C14b: 複製に失敗してもレーンの終了コードを上書きしない", { timeout: 30_000 }, () => {
+        // mkdir -p 側と cp 側は別の分岐なので、片方だけでは不変条件を固定できない。
+        //
+        // スタブは **条件付き** にする: 退避先 (storage/browser-test-artifacts/) を宛先に持つ
+        // 複製だけ非ゼロを返し、それ以外は実 cp へ委譲する。無条件スタブにすると
+        // 「退避以外で cp を使う将来の変更」にも反応してしまい、検査の意味が広がりすぎる。
+        const run = runInSandbox(realSource(), {
+            env: { BROWSER_TEST_LANES: "chromium" },
+            failingLanes: [1],
+            failExitCode: 23,
+            pestWritesScreenshots: true,
+            extraStubs: {
+                cp: [
+                    "#!/usr/bin/env bash",
+                    "set -u",
+                    'for a in "$@"; do',
+                    '  case "$a" in',
+                    "    storage/browser-test-artifacts/*|*/storage/browser-test-artifacts/*)",
+                    '      echo "cp stub: 退避の複製だけ失敗させる" >&2',
+                    "      exit 1 ;;",
+                    "  esac",
+                    "done",
+                    'exec /bin/cp "$@"',
+                    "",
+                ].join("\n"),
+            },
+        });
+
+        expect(run.stderr).toContain("WARNING");
+        expect(run.status).toBe(23);
+    });
+});
+
 describe("run-browser-test.sh 層 1 の負のコントロール (検査が空振りしていないこと)", () => {
     it("C2 検査: 失敗時に break する改変では 1 レーンしか走らない", { timeout: 30_000 }, () => {
         const broken = mutate(
@@ -390,19 +649,5 @@ describe("run-browser-test.sh 層 1 の負のコントロール (検査が空振
 
         expect(run.pestCalls).toHaveLength(2);
         expect(run.pestCalls[0]).toContain("--parallel");
-    });
-});
-
-describe("mutate() ヘルパ自身の保証 (負のコントロールが空振りしないこと)", () => {
-    it("置換対象が存在しなければ throw", () => {
-        expect(() => mutate("abc", "zzz", "yyy")).toThrow(/must appear exactly once \(found 0\)/);
-    });
-
-    it("置換対象が複数あれば throw", () => {
-        expect(() => mutate("aa", "a", "b")).toThrow(/must appear exactly once \(found 2\)/);
-    });
-
-    it("1 箇所だけなら置換して返す", () => {
-        expect(mutate("abc", "b", "X")).toBe("aXc");
     });
 });

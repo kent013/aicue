@@ -24,8 +24,10 @@
 #     プラグイン側の後始末漏れがある。orphan は親プロセスのパイプ fd を握って
 #     呼び出し元を詰まらせる + プロセスを leak するため、実行前後に掃除する。
 #
-# 前提: pnpm build 済み (実ブラウザが public/build を読む) +
-#       `pnpm exec playwright install chromium webkit` 済み。詳細は docs/testing-browser.md。
+# 前提: pnpm build 済み (実ブラウザが public/build を読む)。
+#       ブラウザ実体と OS 共有ライブラリは scripts/setup-browser-testing.sh が導入する
+#       (本スクリプトがロック取得の前に呼ぶので、手で playwright install を叩く必要は無い)。
+#       詳細は docs/testing-browser.md。
 #
 # 使い方:
 #   composer test:browser                          # 全 Browser テスト (Chromium → WebKit)
@@ -78,6 +80,18 @@ if busy_port="$(bughunt_port_in_use)"; then
     exit 1
 fi
 
+# --- ブラウザ導入の事前確認 (グローバルテストロックを取る **前**) ---
+#
+# bug-hunt guard と同じ理由でロック取得より前に置く: 取得後に落とすと、先行レーンの
+# 終了を数分待たされたあとで「ブラウザが入っていません」と言うことになる。
+# 導入が実際に走る場合も、数百 MB の取得中にグローバルテストロックを保持し続けない。
+#
+# **source ではなく子プロセスで呼ぶ**: EXIT trap の所有者を scripts/global-test-lock.sh
+# 1 箇所に固定する契約と、本スクリプトが CI 環境変数を参照しない契約
+# (GlobalTestLockInventoryTest) を、どちらも壊さないため。
+# 導入スクリプトが非ゼロで終われば set -e でここで止まる (導線はあちらが出す)。
+bash scripts/setup-browser-testing.sh
+
 # --- グローバルテストロック (旧 worktree-local ロックを置き換え) ---
 # shellcheck source=scripts/global-test-lock.sh
 . "$(pwd)/scripts/global-test-lock.sh"
@@ -112,6 +126,34 @@ cleanup_orphan_playwright() {
 cleanup_orphan_playwright
 global_test_lock_on_exit cleanup_orphan_playwright
 
+# pest-plugin-browser が失敗時 screenshot を書く場所 (vendor 側で固定)。
+SCREENSHOT_DIR="tests/Browser/Screenshots"
+# レーン別に退避した証跡の置き場 (CI の失敗時アップロード対象)。
+ARTIFACT_DIR="storage/browser-test-artifacts"
+
+# レーンの証跡を退避する。
+#
+# **必要な理由**: pest-plugin-browser は **起動のたびに** tests/Browser/Screenshots を
+# 丸ごと消す。本レーンは chromium → webkit の 2 回 pest を起動するので、退避しないと
+# **先に失敗した chromium の証跡が webkit の起動で消える**。
+collect_lane_artifacts() {
+    local lane="$1"
+    [ -d "${SCREENSHOT_DIR}" ] || return 0
+    [ -n "$(ls -A "${SCREENSHOT_DIR}" 2>/dev/null)" ] || return 0
+    # **退避の失敗でレーンの結果を上書きしない**。set -euo pipefail 下では mkdir / cp が
+    # 落ちるとスクリプトごと終了し、テスト本体の終了コードが失われる。証跡は診断の補助で
+    # あって合否ではないので、**退避先の作成と複製の両方**を受けて警告 1 行で続行する
+    # (黙って握り潰さない)。
+    if ! mkdir -p "${ARTIFACT_DIR}/${lane}"; then
+        echo "WARNING: ${lane} レーンの証跡退避先を作成できませんでした (${ARTIFACT_DIR}/${lane})" >&2
+        return 0
+    fi
+    if ! cp -R "${SCREENSHOT_DIR}/." "${ARTIFACT_DIR}/${lane}/"; then
+        echo "WARNING: ${lane} レーンの証跡を退避できませんでした (${SCREENSHOT_DIR})" >&2
+    fi
+    return 0
+}
+
 global_test_lock_run php artisan config:clear --ansi
 
 # worktree 固有の base テスト DB (<slug>_test_<worktree-hash>) を冪等に用意する。
@@ -132,6 +174,11 @@ fi
 # レーンは順に実行し、**どれかが失敗したら最後に非ゼロで終わる**
 # (先頭レーンの失敗で後続レーンを飛ばすと WebKit の回帰を見落とすため)。
 # ロックは acquire で 1 回取ったまま 2 レーンを通して保持される (run は取得しない)。
+# 前回実行の証跡を捨てる。**ロック取得後・レーンループ前**に行う:
+#   - 前回の残骸を今回の失敗としてアップロードしない
+#   - ロック配下なので、並行する別実行の証跡を消すことはない
+rm -rf "${ARTIFACT_DIR}"
+
 overall=0
 for lane in ${LANES}; do
     case "${lane}" in
@@ -152,6 +199,10 @@ for lane in ${LANES}; do
     if [ "${code}" -ne 0 ]; then
         overall="${code}"
     fi
+
+    # **終了コードを保存した後・次レーンの起動前**に退避する
+    # (失敗したレーンでも必ず通る。`|| code=$?` で受けているので set -e で飛ばない)。
+    collect_lane_artifacts "${lane}"
 
     cleanup_orphan_playwright
 done

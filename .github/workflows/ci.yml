@@ -153,6 +153,14 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      # ブラウザ実体 (数百 MB) のキャッシュ。key に pnpm-lock.yaml の hash を含めるので、
+      # playwright の版が変われば別キーになる。**restore-keys は持たない**:
+      # 部分一致で復元すると古い版のブラウザを溜め込み続けるため
+      # (lockfile 更新時と初回は従来どおり取得する = 短縮効果は lockfile 不変時に限る)。
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-${{ runner.arch }}-ms-playwright-${{ hashFiles('pnpm-lock.yaml') }}
       # php job と同じ理由で composer install より前に置く (ProductionEnvGuard の fail-fast 回避)。
       - name: Prepare .env
         run: cp .env.example .env
@@ -167,18 +175,31 @@ jobs:
       # 実ブラウザは public/build のビルド済アセットを読む (withoutVite() は Browser lane に効かない)。
       - name: Build frontend assets
         run: pnpm build
-      # ブラウザ実体は Playwright が別途 DL する。**pnpm exec** を使うこと:
-      # pest-plugin-browser が起動する run-server は root devDependency の playwright と
-      # 同一実体である必要があり、npx だと別バージョンを引きうる。
-      # 未導入だと PlaywrightOutdatedException で 2 レーンとも全 fail する (ローカル実測)。
-      # --with-deps は WebKit が Linux で要求する共有ライブラリ群 (gstreamer / gtk-4 / libwoff2 等) を入れる。
-      - name: Install Playwright browsers (chromium + webkit)
-        run: pnpm exec playwright install --with-deps chromium webkit
+      # ブラウザ実体と OS 共有ライブラリの導入。**導入の知識はスクリプト 1 本に集約する**
+      # (CI が検証するものと開発者が走らせるものを同一に保つ。T099 と同じ理由)。
+      # 対象ブラウザ集合 (chromium + webkit) と --with-deps の要否判定はスクリプト側の契約で、
+      # scripts/setup-browser-testing.contract.test.ts が固定する。
+      - name: Provision browsers (chromium + webkit)
+        run: bash scripts/setup-browser-testing.sh
       # composer test:browser = scripts/run-browser-test.sh
-      # (グローバルロック → config:clear → ensure-test-db → chromium レーン → webkit レーン)。
+      # (導入の事前確認 → グローバルロック → config:clear → ensure-test-db →
+      #  chromium レーン → webkit レーン)。
       # レーン引数は渡さない (§既定が契約)。
       - name: Pest (browser lanes)
         run: composer test:browser
+      # 失敗時だけレーン別の失敗スクリーンショットを回収する。
+      # **continue-on-error は付けない** (soft-fail 禁止 / W13)。
+      # ここでの `if` は **step-level** であり、W15 が deny-by-default で禁じている
+      # job-level の `if` とは別物である。
+      # if-no-files-found は既定 (warn) のまま: 証跡が無い失敗 (DB 起動失敗等) は
+      # 正常にありうるので job を落とさず、警告だけ残す。
+      - name: Collect browser lane artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-test-artifacts
+          path: storage/browser-test-artifacts/
+          retention-days: 7
 
   frontend:
     runs-on: ubuntu-latest

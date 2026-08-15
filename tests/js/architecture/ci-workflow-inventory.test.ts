@@ -25,6 +25,8 @@ interface WorkflowStep {
     with?: Record<string, unknown>;
     run?: string;
     env?: Record<string, unknown>;
+    /** step-level の条件式。**job-level の `if` (W15 が禁じる) とは別物**である。 */
+    if?: string;
 }
 interface WorkflowJob {
     "runs-on"?: string;
@@ -170,6 +172,11 @@ const BROWSER_JOB_ALLOWED_USES = [
     "shivammathur/setup-php",
     "pnpm/action-setup",
     "actions/setup-node",
+    // ブラウザ実体 (~/.cache/ms-playwright) のキャッシュ。復元先はキャッシュディレクトリだけで
+    // $GITHUB_ENV には書かない。
+    "actions/cache",
+    // 失敗時の証跡回収。読むだけで $GITHUB_ENV には書かない。
+    "actions/upload-artifact",
 ] as const;
 
 /** browser-tests job で実行してよいコマンド行 (完全一致)。
@@ -181,11 +188,90 @@ const BROWSER_JOB_ALLOWED_RUN_LINES = [
     "php artisan key:generate",
     "php artisan passport:keys --force",
     "pnpm build",
-    "pnpm exec playwright install --with-deps chromium webkit",
+    // 導入は scripts/setup-browser-testing.sh に一元化した (旧
+    // `pnpm exec playwright install --with-deps chromium webkit` を置き換え)。
+    // この行が BROWSER_TEST_* を設定しないことは
+    // scripts/setup-browser-testing.contract.test.ts の静的契約が固定する。
+    "bash scripts/setup-browser-testing.sh",
     "composer test:browser",
 ] as const;
 
 const LANE_ENV_VARS = ["BROWSER_TEST_LANES", "BROWSER_TEST_PROCESSES"] as const;
+
+/**
+ * 導入コマンドの検出パターン (W20)。
+ * 単純部分一致にすると `pnpm exec playwright   install chromium` のような空白差分で
+ * 迂回できるため正規表現で見る (tests/Architecture/BrowserProvisioningEntrypointTest.php と同じ規則)。
+ */
+const PLAYWRIGHT_INSTALL_PATTERN = /\bplaywright\s+install\b/;
+
+/**
+ * shell の行継続 (`\` + 改行 + 先頭空白) を 1 個の空白へ畳む純関数 (W20 用)。
+ * 行単位の照合だけでは、コマンドを 2 行に割るだけで検出を迂回できてしまう。
+ */
+export function normalizeShellContinuations(source: string): string {
+    return source.replace(/\\\r?\n\s*/g, " ");
+}
+
+/**
+ * W18: ブラウザ実体キャッシュ段の違反を列挙する純関数。
+ * 実 workflow と負のコントロールの **両方が同じ関数を通る** ようにして、
+ * 検出器が空振りしていないことを fixture で示せるようにする。
+ */
+export function browserCacheViolations(steps: readonly WorkflowStep[]): string[] {
+    const violations: string[] = [];
+    const cache = steps.filter((s) => s.uses !== undefined && actionName(s.uses) === "actions/cache");
+    if (cache.length !== 1) {
+        return [`W18: actions/cache step がちょうど 1 つでない (${cache.length} 個)`];
+    }
+
+    const step = cache[0];
+    if (String(step.with?.path ?? "") !== "~/.cache/ms-playwright") {
+        violations.push("W18: cache path が ~/.cache/ms-playwright でない");
+    }
+    // key の 3 要素を個別に見る (設計意図との対応を明示する)
+    const key = String(step.with?.key ?? "");
+    for (const token of ["runner.os", "runner.arch", "hashFiles('pnpm-lock.yaml')"]) {
+        if (!key.includes(token)) violations.push(`W18: cache key に ${token} が無い`);
+    }
+    // 部分一致復元は古い版のブラウザを溜め込む
+    if (step.with?.["restore-keys"] !== undefined) {
+        violations.push("W18: restore-keys を持っている (古い版のブラウザを溜め込む)");
+    }
+
+    return violations;
+}
+
+/**
+ * W19: 失敗時の証跡回収段の違反を列挙する純関数。
+ *
+ * 「最後の step であること」を要求するのは意図的である
+ * (回収より後ろに step を足すと、その step の失敗で証跡が回収されない窓ができる)。
+ */
+export function artifactCollectionViolations(steps: readonly WorkflowStep[]): string[] {
+    const last = steps[steps.length - 1];
+    if (last === undefined || last.uses === undefined || actionName(last.uses) !== "actions/upload-artifact") {
+        return ["W19: 最後の step が actions/upload-artifact でない"];
+    }
+
+    const violations: string[] = [];
+    // step-level の if。W15 が禁じているのは **job-level** の if であって別物である。
+    if (last.if !== "failure()") {
+        violations.push("W19: 失敗時だけ回収していない (if: failure() が無い)");
+    }
+    if (String(last.with?.path ?? "") !== "storage/browser-test-artifacts/") {
+        violations.push("W19: 回収対象が storage/browser-test-artifacts/ でない");
+    }
+    // 名前と保持日数も契約である (変更・欠落を素通りさせない)
+    if (String(last.with?.name ?? "") !== "browser-test-artifacts") {
+        violations.push("W19: artifact 名が browser-test-artifacts でない");
+    }
+    if (Number(last.with?.["retention-days"]) !== 7) {
+        violations.push("W19: retention-days が 7 でない");
+    }
+
+    return violations;
+}
 
 describe("ci.yml inventory gate", () => {
     const workflow = loadWorkflow();
@@ -236,10 +322,45 @@ describe("ci.yml inventory gate", () => {
         expect(exact).toHaveLength(1);
     });
 
-    it("W7: browser-tests が playwright install --with-deps chromium webkit を実行すること", () => {
-        expect(runScript(job(workflow, "browser-tests"))).toContain(
-            "pnpm exec playwright install --with-deps chromium webkit",
+    it("W7: browser-tests が導入スクリプトを **実行行として** 持つこと", () => {
+        // **旧 W7 からの変更点と理由**: 旧 W7 は
+        // `pnpm exec playwright install --with-deps chromium webkit` という文字列の存在を
+        // 検査していた。導入を scripts/setup-browser-testing.sh へ一元化したため、
+        // ci.yml 側で固定できるのは「導入スクリプトを呼んでいること」までになる。
+        // **対象ブラウザ集合 (chromium + webkit) と --with-deps の要否判定の固定は
+        // scripts/setup-browser-testing.contract.test.ts へ移した** —
+        // 検査を消して緑にしたのではなく、置き場所を移したうえで両方が残っている。
+        //
+        // includes ではなく完全一致の実行行を要求するのは W16 と同じ理由
+        // (`echo "bash scripts/..."` / `... || true` の soft-fail 偽装を素通りさせない)。
+        const mentions = runLines(job(workflow, "browser-tests")).filter((l) =>
+            l.includes("scripts/setup-browser-testing.sh"),
         );
+        expect(mentions).toEqual(["bash scripts/setup-browser-testing.sh"]);
+    });
+
+    it("W18: browser-tests が ~/.cache/ms-playwright をキャッシュし、restore-keys を持たないこと", () => {
+        expect(browserCacheViolations(job(workflow, "browser-tests").steps ?? [])).toEqual([]);
+    });
+
+    it("W19: browser-tests の最後の step が失敗時の証跡回収であること", () => {
+        expect(artifactCollectionViolations(job(workflow, "browser-tests").steps ?? [])).toEqual([]);
+    });
+
+    it("W20: どの job の実行行にも playwright install が現れないこと (導入はスクリプト経由)", () => {
+        // 迂回の 2 経路を先に潰す:
+        //   (a) 空白差分 `pnpm exec playwright   install chromium` → 正規表現で見る
+        //   (b) shell の行継続
+        //         run: |
+        //           pnpm exec playwright \
+        //             install chromium webkit
+        //       → runLines は行ごとに切るので素通りする。**照合前に行継続を空白へ畳む**。
+        // (tests/Architecture/BrowserProvisioningEntrypointTest.php と同じ規則にそろえる)
+        for (const name of Object.keys(workflow.jobs ?? {})) {
+            const joined = normalizeShellContinuations(runScript(job(workflow, name)));
+            const hits = joined.split("\n").filter((l) => PLAYWRIGHT_INSTALL_PATTERN.test(l));
+            expect(hits, `${name} が導入コマンドを直接叩いている`).toEqual([]);
+        }
     });
 
     it("W8: browser-tests が pnpm build を実行すること (実ブラウザが public/build を読む)", () => {
@@ -484,6 +605,112 @@ describe("走査関数の負のコントロール (検出器が空振りして�
         expect(triggerNames(fixture)).toEqual(["pull_request", "push"]);
         expect(jobsWithCondition(fixture)).toEqual([]);
         expect(workflowsWithSchedule([["ci.yml", "on:\n  push:\n  pull_request:\n"]])).toEqual([]);
+    });
+
+    /** W18 の正のコントロールに使う、合格する cache step。 */
+    const validCacheStep: WorkflowStep = {
+        uses: "actions/cache@v6",
+        with: {
+            path: "~/.cache/ms-playwright",
+            key: "${{ runner.os }}-${{ runner.arch }}-ms-playwright-${{ hashFiles('pnpm-lock.yaml') }}",
+        },
+    };
+
+    /** W19 の正のコントロールに使う、合格する回収 step。 */
+    const validArtifactStep: WorkflowStep = {
+        uses: "actions/upload-artifact@v7",
+        if: "failure()",
+        with: { name: "browser-test-artifacts", path: "storage/browser-test-artifacts/", "retention-days": 7 },
+    };
+
+    it("W18: 正常な fixture では違反 0 件 (負のコントロールの土台)", () => {
+        expect(browserCacheViolations([validCacheStep])).toEqual([]);
+    });
+
+    it("W18: cache step が無い構成を検出する", () => {
+        expect(browserCacheViolations([{ run: "composer test:browser" }])).toEqual([
+            "W18: actions/cache step がちょうど 1 つでない (0 個)",
+        ]);
+    });
+
+    it("W18: restore-keys を足した構成を検出する", () => {
+        const step: WorkflowStep = {
+            ...validCacheStep,
+            with: { ...validCacheStep.with, "restore-keys": "os-ms-playwright-" },
+        };
+        expect(browserCacheViolations([step])).toContain(
+            "W18: restore-keys を持っている (古い版のブラウザを溜め込む)",
+        );
+    });
+
+    it("W18: key から runner.arch を落とした構成を検出する", () => {
+        const step: WorkflowStep = {
+            ...validCacheStep,
+            with: { ...validCacheStep.with, key: "${{ runner.os }}-ms-playwright-${{ hashFiles('pnpm-lock.yaml') }}" },
+        };
+        expect(browserCacheViolations([step])).toContain("W18: cache key に runner.arch が無い");
+    });
+
+    it("W19: 正常な fixture では違反 0 件 (負のコントロールの土台)", () => {
+        expect(artifactCollectionViolations([{ run: "composer test:browser" }, validArtifactStep])).toEqual([]);
+    });
+
+    it("W19: 常時アップロード (if 無し) を検出する", () => {
+        const step: WorkflowStep = { ...validArtifactStep, if: undefined };
+        expect(artifactCollectionViolations([step])).toContain(
+            "W19: 失敗時だけ回収していない (if: failure() が無い)",
+        );
+    });
+
+    it("W19: upload-artifact が最後の step でない構成を検出する", () => {
+        expect(artifactCollectionViolations([validArtifactStep, { run: "echo done" }])).toEqual([
+            "W19: 最後の step が actions/upload-artifact でない",
+        ]);
+    });
+
+    it("W19: name / retention-days の欠落を検出する", () => {
+        const step: WorkflowStep = { ...validArtifactStep, with: { path: "storage/browser-test-artifacts/" } };
+        const violations = artifactCollectionViolations([step]);
+        expect(violations).toContain("W19: artifact 名が browser-test-artifacts でない");
+        expect(violations).toContain("W19: retention-days が 7 でない");
+    });
+
+    it("W20: run 行へ戻した playwright install を検出する", () => {
+        const fixture: WorkflowJob = {
+            steps: [{ run: "pnpm exec playwright install --with-deps chromium webkit" }],
+        };
+        const joined = normalizeShellContinuations(runScript(fixture));
+        expect(joined.split("\n").filter((l) => PLAYWRIGHT_INSTALL_PATTERN.test(l))).toHaveLength(1);
+    });
+
+    it("W20: 空白を増やした `playwright   install` も検出する", () => {
+        const fixture: WorkflowJob = { steps: [{ run: "pnpm exec playwright   install chromium" }] };
+        const joined = normalizeShellContinuations(runScript(fixture));
+        expect(joined.split("\n").filter((l) => PLAYWRIGHT_INSTALL_PATTERN.test(l))).toHaveLength(1);
+    });
+
+    it("W20: 行継続で 2 行に割った playwright install も検出する", () => {
+        const fixture: WorkflowJob = {
+            steps: [{ run: "pnpm exec playwright \\\n  install chromium webkit" }],
+        };
+        // 畳む前は行単位の照合を素通りする (= 正規化が必要であることの証明)
+        const raw = runScript(fixture);
+        expect(raw.split("\n").filter((l) => PLAYWRIGHT_INSTALL_PATTERN.test(l))).toEqual([]);
+        const joined = normalizeShellContinuations(raw);
+        expect(joined.split("\n").filter((l) => PLAYWRIGHT_INSTALL_PATTERN.test(l))).toHaveLength(1);
+    });
+
+    it("W20: 導入スクリプト経由の実行行は検出しない (偽陽性を作らない)", () => {
+        const fixture: WorkflowJob = { steps: [{ run: "bash scripts/setup-browser-testing.sh" }] };
+        const joined = normalizeShellContinuations(runScript(fixture));
+        expect(joined.split("\n").filter((l) => PLAYWRIGHT_INSTALL_PATTERN.test(l))).toEqual([]);
+    });
+
+    it("normalizeShellContinuations: 行継続だけを畳み、通常の改行は残す", () => {
+        expect(normalizeShellContinuations("a \\\n  b")).toBe("a  b");
+        expect(normalizeShellContinuations("a\nb")).toBe("a\nb");
+        // CRLF の行継続も畳む
+        expect(normalizeShellContinuations("a \\\r\n  b")).toBe("a  b");
     });
 
     it("composite action へ移送すると W14a と W14c の両方が違反を返す", () => {
