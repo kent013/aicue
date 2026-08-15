@@ -216,6 +216,8 @@ PHP の字句解析器は、**文でない位置に書かれた同じ綴りに�
 | `$f = Foo::echo(...);` | `T_ECHO` | `T_DOUBLE_COLON` | 違反でない |
 | `class Foo { public function echo(): void {} }` | `T_ECHO` | `T_FUNCTION` | 違反でない |
 | `class Foo { const echo = 1; const ECHO = 2; }` | `T_ECHO` | `T_CONST` | 違反でない |
+| `class A { public const string echo = 'x'; }` | `T_ECHO` | **`T_STRING`** (型の綴り) | 違反でない |
+| `class A { public function &echo(): mixed {} }` | `T_ECHO` | **`T_AMPERSAND_NOT_FOLLOWED_BY_VAR_OR_VARARG`** | 違反でない |
 | `enum E: string { case Echo = 'e'; }` | `T_ECHO` | `T_CASE` | 違反でない |
 | `enum E { case Echo; }` | `T_ECHO` | `T_CASE` | 違反でない |
 | `class Foo { const echo = 1, goto = 2; }` | `T_ECHO` / `T_GOTO` | `T_CONST` / `,` | 違反でない |
@@ -250,8 +252,8 @@ PHP の字句解析器は、**文でない位置に書かれた同じ綴りに�
 |---|---|---|---|
 | R1 | `T_DOUBLE_COLON` (`::`) | (条件なし) | `Foo::goto();` / `$c = Foo::echo;` / `Foo::echo(...)` / トレイト取り込みの元メソッド指定 `T::echo as m;` / `case A::ECHO:` |
 | R2 | `T_FUNCTION` | `(` | `class A { public function echo(): void {} }` / `interface I { public function goto(): void; }` |
-| R3 | `T_CONST` | `=` | `class A { const echo = 1; }` |
-| R3b | `,` (**定数宣言の区間に限る**) | `=` | `class A { const echo = 1, goto = 2; }` |
+| R2b | 参照の記号 + **その 1 つ前が `T_FUNCTION`** | `(` | 参照を返すメソッドの宣言 `class A { public function &echo(): mixed {} }` |
+| R3 | (**定数宣言の区間に限る**。直前は問わない) | `=` | `class A { const echo = 1; }` / `class A { const echo = 1, goto = 2; }` / 型つきクラス定数 `class A { public const string echo = 'x'; }` |
 | R4 | `T_CASE` | `=` / `;` | `enum E: string { case Echo = 'e'; }` / `enum E { case Echo; }` |
 | R6 | (条件なし) | 単独の `:` | 名前つき引数 `f(global: 2, goto: 3)` / 属性の名前つき引数 `#[Attr(echo: 1)]` |
 | R7 | `T_AS` / `T_PUBLIC` / `T_PROTECTED` / `T_PRIVATE` | `;` | トレイト取り込みの別名 `class A { use T { m as echo; } }` / `class A { use T { m as protected global; } }` |
@@ -266,19 +268,28 @@ R4 の直後に `:` を許さないのは、素の予約語を場合分けの値
 (実測: `define("echo", 1); switch ($x) { case echo: }` は Parse error)。
 `case A::ECHO:` の形は R1 が扱う。
 
-R3b だけ状態を持つ。**`T_CONST` から `;` までの区間**を真偽値 1 つで覚え、
-その区間の中で「直前が `,` かつ直後が `=`」の綴りを名前位置とする。
+R3 だけ状態を持つ。**`T_CONST` から `;` までの区間**を真偽値 1 つで覚え、
+その区間の中で「直後が `=`」の綴りを名前位置とする。**直前のトークンでは狭めない。**
+型つきクラス定数 (`const string echo = 'x';` / `const ?string goto = null;` /
+`const A|string global = 'g';`) では綴りの直前が `T_CONST` ではなく**型の綴り**になり、
+読点で繋いだ 2 つ目以降では `,` になるため、直前で狭めるとどちらも誤検出になる
+(**実装時に実測して判明した。いずれも `php -l` が通る合法な書き方である**)。
 定数の初期化式に文は書けない (PHP の定数式の制限) ので、
 この区間を名前位置扱いしても本物の文を取りこぼさない。
 配列リテラルの読点 (`const X = [1, 2], Y = 3;`) は直後が `=` にならないため一致しない
 (実測で確認済み)。
 
+R2b も**実装時に実測して足した規則**である。参照を返すメソッドの宣言
+(`public function &echo(): mixed`) では綴りの直前が `T_FUNCTION` ではなく参照の記号
+(`T_AMPERSAND_NOT_FOLLOWED_BY_VAR_OR_VARARG`) になるため、R2 だけでは誤検出になる。
+1 つ前が `T_FUNCTION` であること・直後が `(` であることの両方を課して狭めてある。
+
 R7 の可視性修飾子は**トレイト取り込みの別名指定でしか現れない**
 (通常の宣言では `public function echo` のように間に `function` が入り R2 になる)。
 直後を `;` に限ることで、修飾子の直後に文が立つ余地を消している。
 
-**この 7 規則が取りこぼしを作らないこと**は、規則の近傍に本物の違反を置いた
-検体 (S3 の F1〜F7 + F4b の 8 本) が検出されることで固定する。実測では、規則の近傍にある
+**この規則群が取りこぼしを作らないこと**は、規則の近傍に本物の違反を置いた
+検体 (S3 の F1〜F9 + F4b の 10 本) が検出されることで固定する。実測では、規則の近傍にある
 本物の `echo` の直前トークンは `{` / `}` / `:` / `;` のいずれかになり、
 どの規則にも一致しない。
 
@@ -307,11 +318,11 @@ use Tests\Support\PhpTokenScan;
  *   gate が持つ**。この走査器はどちらも知らない。
  *
  * ★**保証しないもの (誇張しない)**:
- *   - 名前の解決が要る出力 (`printf` / `var_dump` / `fwrite(STDOUT, …)` /
- *     `$out = 'echo'; $out(…)`) には**沈黙する**。この検査は完全性を主張しない
- *   - Blade の `@php … @endphp` と `{{ }}` の中は `token_get_all()` からは
+ *   - 名前の解決が要る出力 (書式つき出力 / 変数の内容の表示 / 標準出力への書き込み /
+ *     文字列に入れた綴りを変数経由で呼ぶ形) には**沈黙する**。この検査は完全性を主張しない
+ *   - Blade の `@php … @endphp` と二重波括弧の中は `token_get_all()` からは
  *     地の文 (`T_INLINE_HTML`) に見えるため届かない。
- *     **PHP 開始タグで開いた区間 (`<?= …` / `<?php …`) は見える** (実測)
+ *     **PHP 開始タグで開いた区間は見える** (実測)
  *   - ヒアドキュメント / ナウドキュメントの本文は 1 つの
  *     `T_ENCAPSED_AND_WHITESPACE` になり、中の綴りは見えない (実測)。
  *     これは本走査器の自己検査ファイルが自分自身を違反にしない理由でもある
@@ -319,41 +330,42 @@ use Tests\Support\PhpTokenScan;
 final class ForbiddenStatementScanner
 {
     /**
-     * 直前が `::` なら無条件に名前位置とみなす (R1)。
+     * 直前がこれなら無条件に名前位置とみなす (R1)。
      *
-     * ★`::` は「直後に名前しか置けない」ことが PHP の文法から言えるので、
+     * ★二重コロンは「直後に名前しか置けない」ことが PHP の文法から言えるので、
      *   直後の条件を課さなくても十分に狭い。逆に直後に来られるトークンの種類が
-     *   多い (`(` `;` `,` `)` `=` `\` …) ため、列挙するとかえって穴を作る。
-     * ★**属性 (`#[`) のための規則は持たない**。属性名に予約語は書けず
-     *   (実測: `#[Echo] class A {}` は Parse error)、属性の中で綴りが現れうるのは
-     *   名前つき引数 (`#[Attr(echo: 1)]`) だけで、それは R6 が扱うためである。
+     *   多い (`(` `;` `,` `)` `=` 名前空間の区切り …) ため、列挙するとかえって穴を作る。
+     * ★**属性のための規則は持たない**。属性名に予約語は書けず
+     *   (実測: 属性名に出力する文の綴りを置くと Parse error)、属性の中で綴りが現れうるのは
+     *   名前つき引数だけで、それは R6 が扱うためである。
      *   成立しない書き方のために規則を置くと検出力を無償で捨てることになる。
+     *
+     * @var list<int>
      */
     private const array NAME_ONLY_PREDECESSORS = [
-        T_DOUBLE_COLON,   // Foo::goto() / $c = Foo::echo; / Foo::echo(...) / T::echo as m; / case A::ECHO:
+        T_DOUBLE_COLON,   // 静的呼び出し / クラス定数の取得 / 第一級呼び出し可能 / トレイト取り込みの元メソッド指定 / 場合分けの値
     ];
 
     /**
      * 直前がこれらなら、**直後が指定のトークンのときに限り**名前位置とみなす
-     * (R2 / R3 / R4 / R7)。
+     * (R2 / R4 / R7)。
      *
      * ★字句走査は構文の妥当性を保証しないので、規則は狭いほどよい。
      *   直前だけで判定すると「構文として成立しない断片」でも黙ることになる。
      * ★可視性修飾子が現れるのは**トレイト取り込みの別名指定だけ**である
      *   (通常の宣言では間に `function` が入るので R2 になる)。
-     * ★`T_CASE` の直後に `:` を許さない。素の予約語は場合分けの値に書けず
-     *   (実測: `define("echo", 1); switch ($x) { case echo: }` は Parse error)、
-     *   `case A::ECHO:` の形は R1 が扱うためである。
+     * ★`T_CASE` の直後に単独のコロンを許さない。素の予約語は場合分けの値に書けず
+     *   (実測: 定数として定義しても場合分けの値に素の綴りは置けず Parse error)、
+     *   クラス定数経由の形は R1 が扱うためである。
      *
      * @var array<int, list<string>> トークン ID => 直後に許す単一文字トークン
      */
     private const array NAME_POSITION_PREDECESSORS = [
-        T_FUNCTION => ['('],      // class A { public function echo(): void {} }
-        T_CONST => ['='],         // class A { const echo = 1; }
-        T_CASE => ['=', ';'],     // enum E: string { case Echo = 'e'; } / enum E { case Echo; }
-        T_AS => [';'],            // class A { use T { m as echo; } }
-        T_PUBLIC => [';'],        // class A { use T { m as public echo; } }
-        T_PROTECTED => [';'],     // class A { use T { m as protected global; } }
+        T_FUNCTION => ['('],      // クラス / インターフェースのメソッド宣言
+        T_CASE => ['=', ';'],     // 列挙の場合分け (値つき / 値なし)
+        T_AS => [';'],            // トレイト取り込みの別名指定
+        T_PUBLIC => [';'],        // トレイト取り込みの別名指定 (可視性つき)
+        T_PROTECTED => [';'],     // 同上
         T_PRIVATE => [';'],       // 同上
     ];
 
@@ -365,8 +377,8 @@ final class ForbiddenStatementScanner
         $tokens = PhpTokenScan::normalize($phpSource);
         $count = count($tokens);
 
-        // R3b 用。`T_CONST` から `;` までの定数宣言区間だけ、
-        // 読点区切りの 2 つ目以降を名前位置とみなす。
+        // R3 用。`T_CONST` からセミコロンまでの定数宣言区間だけ、
+        // 直後が代入記号の綴りを名前位置とみなす。
         $inConstDeclaration = false;
 
         $sites = [];
@@ -410,21 +422,35 @@ final class ForbiddenStatementScanner
             return true;
         }
 
-        // R2 / R3 / R4 / R7: 直前と直後の組で狭める
+        // R2 / R4 / R7: 直前と直後の組で狭める
         $allowedNext = $previousId === null ? null : (self::NAME_POSITION_PREDECESSORS[$previousId] ?? null);
         if ($allowedNext !== null && $nextChar !== null && in_array($nextChar, $allowedNext, true)) {
             return true;
         }
 
-        // R3b: `const echo = 1, goto = 2;` の 2 つ目以降。
-        //      定数の初期化式に文は書けないので、この区間を名前位置扱いしても取りこぼさない。
-        //      配列リテラルの読点は直後が `=` にならないため一致しない。
-        if ($inConstDeclaration && $previousId === null && ($previous['text'] ?? null) === ',' && $nextChar === '=') {
+        // R2b: 参照を返すメソッドの宣言 (`function &echo(): mixed`)。
+        //      直前が参照の記号で、その 1 つ前が `function`、直後が開き括弧のときだけ。
+        //      ★`&` は `T_AMPERSAND_NOT_FOLLOWED_BY_VAR_OR_VARARG` になる (実測)。
+        if ($previousId === T_AMPERSAND_NOT_FOLLOWED_BY_VAR_OR_VARARG
+            && ($tokens[$index - 2]['id'] ?? null) === T_FUNCTION
+            && $nextChar === '(') {
             return true;
         }
 
-        // R6: 名前つき引数 (`f(global: 2)`) は直後が単独の `:` になる。
-        //     `::` は 1 つの `T_DOUBLE_COLON` トークンなので、ここには一致しない。
+        // R3: 定数宣言の区間 (`const` からセミコロンまで) で直後が代入記号なら定数名。
+        //     ★直前のトークンで狭めない。型つきクラス定数 (`const string echo = 'x';` /
+        //       `const ?string goto = null;` / `const A|string global = 'x';`) では
+        //       直前が `T_CONST` ではなく型の綴りになるため (実測)。
+        //     ★読点で繋いだ 2 つ目以降 (`const echo = 1, goto = 2;`) も同じ規則で覆う。
+        //     ★定数の初期化式に文は書けない (PHP の定数式の制限) ので、この区間を
+        //       名前位置扱いしても本物の文を取りこぼさない。配列リテラルの読点
+        //       (`const X = [1, 2], Y = 3;`) は直後が代入記号にならないため一致しない。
+        if ($inConstDeclaration && $nextChar === '=') {
+            return true;
+        }
+
+        // R6: 名前つき引数は直後が単独のコロンになる。
+        //     二重コロンは 1 つの `T_DOUBLE_COLON` トークンなので、ここには一致しない。
         return $nextChar === ':';
     }
 }
@@ -494,9 +520,11 @@ S3 が正負両方向を固定する (下記)。
 | N11 | 複数の定数を読点で繋いだ宣言 | `<?php class A { const echo = 1, goto = 2, global = 3; }` |
 | N12 | トレイト取り込みの別名指定 | `<?php trait T { public function m(): void {} } class A { use T { m as echo; } }` |
 | N13 | トレイト取り込みの別名指定 (可視性つき) | `<?php trait T { public function m(): void {} } class A { use T { m as protected global; } }` |
-| N14 | 定数の初期化式の配列の読点は名前位置にならない | `<?php class A { const X = [1, 2], Y = 3; }` (0 件。R3b が広がりすぎていないことの確認) |
+| N14 | 定数の初期化式の配列の読点は名前位置にならない | `<?php class A { const X = [1, 2], Y = 3; }` (0 件。R3 が広がりすぎていないことの確認) |
+| N15 | 型つきクラス定数の宣言 | `<?php class A { public const string echo = 'x'; public const ?string goto = null; public const A\|string global = 'g'; }` |
+| N16 | 参照を返すメソッドの宣言 | `<?php class A { public function &echo(): mixed { $x = 1; return $x; } }` |
 
-N1〜N14 を 1 つに連結した検体は**作らない**。各断片は `<?php` を持ち、
+N1〜N16 を 1 つに連結した検体は**作らない**。各断片は `<?php` を持ち、
 `trait T` / `class A` を重複して宣言するため、単純に繋ぐと構文・宣言が衝突して
 「全検体は構文として成立する PHP である」という約束を破る。
 連結しても各断片が個別に 0 件であること以上の保証は得られない。
@@ -518,6 +546,8 @@ N1〜N14 を 1 つに連結した検体は**作らない**。各断片は `<?php
 | F5 | 静的呼び出しの直後の違反を検出する | `<?php Foo::bar(); echo "x";` | 1 件 |
 | F6 | 名前つき引数の直後の違反を検出する | `<?php f(a: 1); global $x;` | 1 件 |
 | F7 | 括弧付きの `echo` も検出する | `<?php echo("x");` | 1 件 |
+| F8 | 型つきクラス定数の直後の違反を検出する | `<?php class A { public const string X = 'x'; } echo "y";` | 1 件 |
+| F9 | 参照を返すメソッドの本体の違反を検出する | `<?php class A { public function &m(): mixed { echo "x"; $x = 1; return $x; } }` | 1 件 |
 
 **写像の網羅**
 
@@ -558,7 +588,7 @@ gate (S5) の走査対象 `tests/` に置かれていても違反にならない
 
 ### テスト計画
 
-本施策そのものがテストである。green の条件は上表 **30 本** (P 6 本 + N 14 本 + F 8 本 + M 2 本) すべて。
+本施策そのものがテストである。green の条件は上表 **34 本** (P 6 本 + N 16 本 + F 10 本 + M 2 本) すべて。
 
 ### リスク
 
@@ -815,6 +845,11 @@ function forbiddenStatementExemptions(): array
 | G11 | 例外を登録できるのは例外可の置き場所だけ | 登録キーの最上位ディレクトリの分類が `ScannedWithExemption` | `app/` 等へ例外を書こうとした |
 | G12 | 例外の登録内容そのものが正しい | `counts` が空でない / 全キーが `ForbiddenStatementKind::cases()` の値に含まれる / 全ての値が **1 以上の整数** | 綴り間違いのキーや `0` 件登録が黙って通るのを止める |
 
+**実装上の注意 (G5 / G12)**: Pest の `toContain()` は**可変長で「すべて含む」を検査する**ため、
+第 2 引数に説明文を渡すと**説明文そのものが needle になり常に赤くなる** (実装時に実測)。
+「含むこと」を説明文つきで検査するときは `in_array()` を真偽値へ落として
+`toBeTrue($message)` にする。
+
 **G12 が要る理由**: `counts` の型は `array<string, int>` なので、
 未知の語彙キー (`'ehco' => 23`) や `0` / 負数を PHPStan は止められない。
 未知のキーは「差し引かれない = G1 が落ちる」ので静かには壊れないが、
@@ -840,13 +875,16 @@ function forbiddenStatementExemptions(): array
 ### G2 の失敗メッセージ (床値割れの原因を判別できるようにする)
 
 床値を割った理由が「分類漏れで除外が増えた」のか「単にファイルが減った」のかを
-メッセージだけで判別できるようにする。
+メッセージだけで判別できるようにする。**「分類の上で除外した置き場所」と
+「分類漏れで走査外になった置き場所」は言い分ける** (前者は `(除外)`、後者は
+`(未分類→走査外!)`)。前者は正常な状態であり、感嘆符を付けると毎回の失敗表示で
+狼少年になるためである。
 
 ```
 走査対象が床値 (1400) を下回りました: 走査 812 件
   追跡 PHP 総数: 1567 件
   除外された数: 755 件
-  置き場所ごとの内訳: app=760(走査) tests=601(除外!) devnotes=15(除外) …
+  置き場所ごとの内訳: app=760(未分類→走査外!) tests=601(走査) devnotes=15(除外) …
 分類 (forbiddenStatementRootPolicies) が意図せず除外側へ倒れていないか確認してください。
 ```
 
@@ -869,7 +907,9 @@ function forbiddenStatementExemptions(): array
 ### PHPStan 適合チェック
 
 - [x] 戻り値の型が明示されている (目録関数は phpdoc の array shape 付き)
-- [x] null 安全 (`file_get_contents()` の `false` を `is_string()` で弾く)
+- [x] null 安全 (`file_get_contents()` の `false` を `is_string()` で弾き、**skip ではなく例外で落とす**。
+      git 追跡下のファイルが読めないのは環境異常であり、黙って走査から落とすと
+      「走査していないのに緑」になる = fail-closed にする)
 - [x] 配列 shape を phpdoc で固定 (テスト専用の目録なので readonly class にはしない。
       既存 `strayHttpEgressOptOutExemptions()` と同じ作法)
 - [x] `ForbiddenStatementRootPolicy` を扱う分岐は網羅 `match`
@@ -987,15 +1027,20 @@ S3 の全検体と本リポジトリの HEAD に対して走らせた。
 **リポジトリには 1 ファイルも残していない** (設計の裏取りが目的で、
 繰り返し使う道具ではないため)。実装で使う本体は S2 / S5 のコードである。
 
-### 検体 31 通りの結果
+### 検体 31 通りの結果 (設計時。実装時に 4 通り増えた)
 
 正例 (P1a〜P6 の 9 通り) と取りこぼし対照 (F1〜F7 + F4b の 8 通り) は
 **すべて期待どおりの件数を検出**し、負の対照 (N1〜N14 の 14 通り) は
 **すべて 0 件**だった。**31 通りすべて期待どおり。**
 
-> **数の読み方**: S3 の「30 本」は Pest の `test()` の本数で、
-> ここでいう「31 通り」は 1 本の `test()` が複数の検体を持つ場合を展開した検体の数である
+> **数の読み方**: S3 の本数は Pest の `test()` の本数で、
+> ここでいう「通り」は 1 本の `test()` が複数の検体を持つ場合を展開した検体の数である
 > (P1 は 1 本の test で 4 語彙 4 検体を扱う)。食い違いではない。
+
+**実装時の追加**: 実装レビューの指摘を受けて、型つきクラス定数 (3 形) と
+参照を返すメソッドの宣言を実測したところ、**どちらも `php -l` が通る合法な書き方でありながら
+設計時の規則では誤検出になる**ことが分かった。R2b の新設と R3 の一般化で塞ぎ、
+負の対照 N15 / N16 と取りこぼし対照 F8 / F9 を足した (S3 は 34 本になった)。
 
 ### HEAD 全体の結果
 
@@ -1007,6 +1052,16 @@ S3 の全検体と本リポジトリの HEAD に対して走らせた。
 検出:
   scripts/ci/drop-test-db.php の echo × 23 (最初の行 361)
 blade ファイル数 = 24
+```
+
+**実装時の実測 (本施策の新規 6 ファイルを含む worktree の HEAD)**:
+
+```
+追跡 PHP 総数 = 1573 / 走査対象 = 1558 (除外 devnotes 15)
+  app: 760 / bootstrap: 2 / config: 38 / database: 114 / devnotes: 15 (除外)
+  lang: 5 / public: 1 / resources: 24 / routes: 4 / scripts: 3 / tests: 607
+検出: scripts/ci/drop-test-db.php の echo × 23 (設計時と同一)
+走査対象の blade = 24
 ```
 
 すなわち **例外の登録は 1 件で足り、本体コードの書き換えは要らない**。
