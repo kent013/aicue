@@ -37,6 +37,7 @@
 | `tests/test_bug_hunt_inventory.py` | `bug-hunt-inventory.py` の自己テスト (標準ライブラリのみ)。実 `php` を呼ばず fake scanner で段 1..4 と差し替えの失敗経路を検証する | `composer test` (`tests/Architecture/BughuntInventoryToolSelfTest.php` が起動) |
 | `bughunt-worktree-hook.sh` | PreToolUse(Bash) ガード。`bug-hunt-shard.sh provision` の **main 直叩き** (worktree 指紋なし) を harness 層で拒否する (拒否は終了コード 97。起動子が 97 だけを 2 へ写す)。判定は bash の組み込みだけで完結し、外部コマンドを 1 つも使わない | `.claude/settings.json` に常設配線 (AGENTS.md §常設 hook 配線) |
 | `code-review-graph-update-hook.sh` | PostToolUse(Write/Edit) hook。コード索引 (code-review-graph) を `flock` 排他 + 内側 20 秒の時間切れ付きで差分更新する。何が起きても終了コード 0 で終わり、標準出力は常に空。告知はセッションごと・理由ごとに標準エラー 1 行だけ | `.claude/settings.json` に常設配線 (AGENTS.md §常設 hook 配線) |
-| `claude` | Claude Code を VSCode 拡張のネイティブバイナリ経由で起動 | (内部スクリプト) |
+| `claude` | Claude Code を VSCode 拡張のネイティブバイナリ経由で起動 (2 つの置き場 `~/.vscode` / `~/.vscode-server` から最新版を選ぶ。platform が完全一致する拡張が無ければ拾い直して警告する) | (内部スクリプト) |
+| `claude-wrapper.test.ts` | `claude` の回帰テスト (最新版の選択 / 完全一致が無いときの拾い直しと警告 / 未検出時の終了 / 既定フラグの前置と opt-out / 引数のそのまま転送) | `pnpm test` |
 | `claude-account` | Claude Code のログインアカウントのプロファイル保存・切替・一覧 (Python 3 標準ライブラリのみ)。`(claudeAiOauth, oauthAccount)` のペアを `~/.claude/account-profiles/` に 0600 でスナップショットし、`switch` で書き戻す (切替直前に現アカウントを再スナップショットするのでトークン回転で失効しない)。`add` は使い捨ての `CLAUDE_CONFIG_DIR` で claude を起動し、現ログイン・起動中セッション無影響で別アカウントを登録する。**本リポジトリは `claude-statusline` を持たないため `autosave` の自動呼び出しは効かない** — 登録は `save` / `add` で手動に行う | 人間が実行 (`scripts/claude-account switch` 等) / `switch-account` スキルから |
 | `codex` | Codex CLI を VSCode 拡張のネイティブバイナリ経由で起動。`app-codex-review` / `app-codex-vscode` スキルの呼び出しラッパを兼ねる | スキルから自動呼び出し / 直接起動 |

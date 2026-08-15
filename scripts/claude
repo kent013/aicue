@@ -17,22 +17,47 @@ esac
 PLATFORM="$OS-$ARCH"
 
 # Search both extension roots (local VSCode and remote vscode-server),
-# pick the highest version across both.
-LATEST_EXT=$(ls -d \
-    "$HOME/.vscode/extensions/anthropic.claude-code-"*"-$PLATFORM" \
-    "$HOME/.vscode-server/extensions/anthropic.claude-code-"*"-$PLATFORM" \
-    2>/dev/null \
-  | sed 's|.*/anthropic\.claude-code-||' \
-  | sort -t- -k1 -V \
-  | tail -1)
-if [ -n "$LATEST_EXT" ]; then
-  for root in "$HOME/.vscode/extensions" "$HOME/.vscode-server/extensions"; do
-    cand="$root/anthropic.claude-code-$LATEST_EXT"
-    [ -d "$cand" ] && LATEST_EXT="$cand" && break
+# pick the highest version across both. The search lives in one function so the
+# exact-match lookup and the fallback cannot drift apart.
+#
+# Argument: the extension directory name suffix. Prints the path of the newest
+# matching extension directory under $HOME, or returns non-zero if there is none.
+# POSIX sh has no `local`, but this function is only ever called inside a command
+# substitution, so its assignments stay in the subshell. Names are prefixed with
+# `_` anyway; do not reuse those names in the caller.
+# Version comparison relies on GNU `sort -V` (same as before this change).
+find_claude_extension() {
+  _suffix="$1"
+  _version=$(ls -d \
+      "$HOME/.vscode/extensions/anthropic.claude-code-"*"$_suffix" \
+      "$HOME/.vscode-server/extensions/anthropic.claude-code-"*"$_suffix" \
+      2>/dev/null \
+    | sed 's|.*/anthropic\.claude-code-||' \
+    | sort -t- -k1 -V \
+    | tail -1)
+  [ -n "$_version" ] || return 1
+  for _root in "$HOME/.vscode/extensions" "$HOME/.vscode-server/extensions"; do
+    if [ -d "$_root/anthropic.claude-code-$_version" ]; then
+      printf '%s\n' "$_root/anthropic.claude-code-$_version"
+      return 0
+    fi
   done
+  return 1
+}
+
+LATEST_EXT=$(find_claude_extension "-$PLATFORM")
+
+if [ -z "$LATEST_EXT" ]; then
+  # No exact match: pick up whatever is installed instead of giving up. This can
+  # grab a binary built for another platform, so always warn.
+  LATEST_EXT=$(find_claude_extension "")
+  if [ -n "$LATEST_EXT" ]; then
+    echo "Warning: no Claude Code extension for platform $PLATFORM;" >&2
+    echo "         falling back to $LATEST_EXT (it may not run on this machine)." >&2
+  fi
 fi
 
-if [ -z "$LATEST_EXT" ] || [ ! -d "$LATEST_EXT" ]; then
+if [ -z "$LATEST_EXT" ]; then
   echo "Error: Claude Code VSCode extension not found (platform: $PLATFORM)." >&2
   echo "Install it from the VSCode marketplace first." >&2
   exit 1

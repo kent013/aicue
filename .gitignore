@@ -58,6 +58,9 @@ __pycache__/
 # 外部 skill (skills-lock.json から再インストール可能。.claude/skills/* は symlink)
 /.agents
 /.claude/skills/stripe-*
+# `upgrade-stripe` だけ名前が `stripe-` で始まらず上の glob に入らないため、個別行で閉じる
+# (skills-lock.json の全キーが閉じていることは SkillsLockIgnoreCoverageTest が強制する)
+/.claude/skills/upgrade-stripe
 
 # template repo specific
 /tmp
