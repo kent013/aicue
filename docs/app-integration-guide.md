@@ -11,8 +11,9 @@
    場合、要件を不変条件の上に再設計する(例外を作らない)。
 2. **変えてよい層と変えてはいけない層を区別する**(§1 の表)。
 3. **テンプレートからの構造的逸脱は `docs/template-divergence.md` に記録してからやる**。
-   aigenba/spirux 間の divergence registry と同じ規律: 逸脱が正当なのは logic-driven
-   (ドメイン要件起因)のときだけ。互換・UX・作業量を理由にした逸脱は不可。
+   逸脱が正当なのは logic-driven(ドメイン要件起因)のときだけ。互換・UX・作業量を
+   理由にした逸脱は不可。**書式の正本は `docs/template-divergence.md` の規約節**で、
+   形式は `tests/Architecture/TemplateDivergenceLedgerFormatTest.php` が機械で強制する。
 4. **フレームワークのレンジ内でやる**。自前機構を発明する前に Laravel / 同梱モジュールの
    公式の作法で実現できないか確認する。
 
@@ -535,7 +536,7 @@ CI のデプロイ job のいずれも無い)。したがって上記は**今日
 1. 概念設計 → レビュー → 詳細設計 → レビュー(app-design スキルのフロー)
 2. 設計には必ず「**テンプレートのどの構造に何をマップしたか**」の節を設ける
    (§2〜§6 の判定結果を表で明記。判定に迷った項目は理由ごと残す)
-3. テンプレ構造から逸脱する場合は `docs/template-divergence.md` に
-   aigenba/spirux divergence registry と同じ形式(なぜ logic-driven か・どの不変条件を
-   どの機構で保証し続けるか)で記録する
+3. テンプレ構造から逸脱する場合は `docs/template-divergence.md` に記録する。
+   **書式の正本は同ファイルの規約節**(登録メタ表 9 行・状態の値域・件数の明示行)で、
+   登録は逸脱を作る変更そのものに含める
 4. 中間成果物は `devnotes/YYYYMMDD-HHMM-<topic>/` に置く
