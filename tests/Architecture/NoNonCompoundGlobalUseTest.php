@@ -2,23 +2,22 @@
 
 declare(strict_types=1);
 
+use Tests\Support\GlobalUse\NonCompoundGlobalUseScanner;
+use Tests\Support\GlobalUse\PhpLintOracle;
 use Tests\Support\TrackedPhpSourceFiles;
 
 /*
- * Architecture invariant: **namespace 宣言の無い PHP ファイル**の global スコープに
- * 非複合名の `use` を書かない。
+ * Architecture invariant: **グローバル名前空間**にあるコードで非複合名の `use` を書かない。
  *
- * SoT = PHP の言語仕様。namespace 無しファイルでの非複合 use は
+ * SoT = PHP の言語仕様であり、**真値は `php -l` の警告**である (家系の正典 t1)。
  *   Warning: The use statement with non-compound name 'X' has no effect
- * を出し、**import として何の効果も持たない** (参照は global にフォールバックする)。
- * `use function` / `use const` でも **まったく同じ warning** が出る (実測):
- *   use RuntimeException;   → Warning ...'RuntimeException'...
- *   use function strlen;    → Warning ...'strlen'...
- *   use const PHP_VERSION;  → Warning ...'PHP_VERSION'...
- *   use function Foo\bar;   → (複合名なので正常)
+ * この警告が出る形は 3 種の取り込み (`use` / `use function` / `use const`) すべてで、
+ * 先頭にバックスラッシュを付けた形でも同じである (実測)。
+ * 逆に**別名が付いた形 (`use Foo as Bar;`) には警告が出ない** — 別名の付いた取り込みは
+ * 実際に効くためで、これを違反として数えるのは偽陽性である。
  *
  * なぜ「出力が汚れるだけ」で済ませないか (実測):
- *   - この warning が set_error_handler に届くかは **環境依存** (opcache 状態 /
+ *   - この警告が set_error_handler に届くかは **環境依存** (opcache 状態 /
  *     ファイルの初回コンパイル時点)。同一 devcontainer で「届く」「届かない」両方を観測した
  *   - 届いた場合、Laravel の HandleExceptions::handleError は
  *     `error_reporting() & $level` (本アプリは -1) で **ErrorException を throw する**
@@ -33,175 +32,118 @@ use Tests\Support\TrackedPhpSourceFiles;
  * **自動的に**除外できる (明示 exclude リストを保守しなくてよい)。
  * **既知の限界**: 未追跡 (git add 前) のファイルは走査されない。gate が守る境界は
  * commit / CI であり、そこでは必ず追跡下にあるため実効性は損なわれない。
- * git 不在は環境不備として silent skip せず fail させる
- * (tests/js/architecture/pages-path-case-invariant.test.ts と同じ作法)。
  *
  * allowlist は設けない: 非複合 global use に正当な用途は存在しない (常に無効な import)。
+ *
+ * ★**検出力の裏取り**: 見本 12 本 (検出 7 / 無違反 5) を `php -l` の警告と
+ *   名前・行番号まで照合する。見本は `.php.txt` で置く — `.php` にすると
+ *   本 gate 自身と `StrictTypesDeclarationGateTest` /
+ *   `ForbiddenStatementTokenInvariantTest` の母集団に入り、
+ *   **わざと違反させた見本で本番の gate が赤くなる** (`php -l` は拡張子を見ない)。
+ * ★**照合の空振りも検知する**: `php -l` の警告文が将来変わると真値が 0 件になり、
+ *   照合が「両方 0 件で一致」して静かに無力化する。真値の総数の床を別の検査で固定する。
  */
+
+/** 見本の置き場所 (走査器の自己検査の入力)。 */
+const GLOBAL_USE_FIXTURE_DIR = __DIR__.'/fixtures/global-use';
 
 /**
- * index 以降で最初の significant token の index。
+ * 見本の完全な一覧。差し替え・こっそり削除で検出力が落ちるのを止める。
  *
- * @param  list<PhpToken>  $tokens
+ * @var array<string, bool> 見本名 => 検出側か (true = 警告が出る形)
  */
-function nonCompoundUseNextSignificant(array $tokens, int $index): ?int
-{
-    $count = count($tokens);
-    for ($i = $index; $i < $count; $i++) {
-        if (! $tokens[$i]->is([T_WHITESPACE, T_COMMENT, T_DOC_COMMENT])) {
-            return $i;
-        }
-    }
+const GLOBAL_USE_FIXTURES = [
+    'detects-class' => true,
+    'detects-function-const' => true,
+    'detects-leading-backslash' => true,
+    'detects-comma-list' => true,
+    'detects-partial-alias' => true,
+    'detects-bracketed-global' => true,
+    'detects-bracketed-after-named' => true,
+    'clean-compound' => false,
+    'clean-aliased' => false,
+    'clean-named-namespace' => false,
+    'clean-bracketed-named' => false,
+    'clean-trait-and-closure' => false,
+];
 
-    return null;
+/**
+ * 見本 1 本につき `php -l` を **1 回だけ**実行した結果。
+ *
+ * ★各検査の中から `inspect()` を呼ぶ形にすると、「同じ 1 回の結果を共有する」という
+ *   契約が書いてあるだけになり、同じ見本を何度も実行しやすくなる。ここで 1 度だけ回す。
+ *
+ * @var array<string, array{
+ *     warnings: list<array{name: string, line: int}>,
+ *     syntaxValid: bool,
+ *     exitCode: int,
+ *     stdout: string,
+ *     stderr: string,
+ * }>
+ */
+$globalUseOracle = [];
+foreach (array_keys(GLOBAL_USE_FIXTURES) as $globalUseFixtureName) {
+    $globalUseOracle[$globalUseFixtureName] = PhpLintOracle::inspect(
+        GLOBAL_USE_FIXTURE_DIR.'/'.$globalUseFixtureName.'.php.txt'
+    );
 }
 
 /**
- * 1 ファイル分の PHP ソースから global スコープの非複合 use を収集する (純関数)。
+ * 名前と行の一覧を、両側で同じ規則に整列する。
  *
- * 判定手順:
- *   1. T_NAMESPACE が出現するファイルは対象外 (PHP が warning を出さない = 実際に import される)
- *   2. brace depth を追跡し **depth 0 の T_USE** のみを見る (クラス本体の trait use を除外)
- *   3. `use` 直後の `function` / `const` 修飾は読み飛ばす (同じ warning が出るため対象)
- *   4. `(` が続くならクロージャの `use ($x)` なので対象外
- *   5. カンマ区切りの各要素について、`as` の前の import 名を **1 つの文字列に正規化**し、
- *      先頭の `\` を除いた残りに区切り `\` を含まなければ非複合 = 違反
+ * ★**集合にしない**。同じ名前・同じ行の警告が 2 回出る場合に、集合化すると
+ *   走査器側の重複や欠落を隠してしまう。重複を保ったまま整列して比べる。
  *
- * **名前の正規化が必須である理由 (実測)**: PHP は `use \RuntimeException;` のような
- * 先頭 `\` 付きの単一名も受理し、**まったく同じ warning を出す**:
- *   use \RuntimeException;    → Warning ...non-compound name 'RuntimeException'...
- *   use function \strlen;     → Warning ...non-compound name 'strlen'...
- *   use const \PHP_VERSION;   → Warning ...non-compound name 'PHP_VERSION'...
- * しかも tokenizer 上は **T_STRING ではなく T_NAME_FULLY_QUALIFIED** になる:
- *   `use \RuntimeException;`  → T_USE, T_NAME_FULLY_QUALIFIED('\RuntimeException'), ';'
- *   `use RuntimeException;`   → T_USE, T_STRING('RuntimeException'), ';'
- * よって「T_STRING かどうか」で判定すると **先頭 `\` 付きを丸ごと取りこぼす** (silent hole)。
- * token 種別ではなく **名前の中身 (セグメント数)** で判定する。
- *
- * @return array{violations: list<string>, scanned: bool}
+ * @param  list<array{name: string, line: int}>  $entries
+ * @return list<string>
  */
-function nonCompoundUseCollectFromSource(string $source, string $relative): array
+function globalUseSorted(array $entries): array
 {
-    /** @var list<PhpToken> $tokens */
-    $tokens = PhpToken::tokenize($source);
-    $count = count($tokens);
+    $formatted = array_map(
+        static fn (array $entry): string => sprintf('%d:%s', $entry['line'], $entry['name']),
+        $entries,
+    );
+    sort($formatted);
 
-    // 1. namespace 付きファイルは対象外
-    foreach ($tokens as $token) {
-        if ($token->is(T_NAMESPACE)) {
-            return ['violations' => [], 'scanned' => false];
-        }
-    }
-
-    $violations = [];
-    $depth = 0;
-
-    for ($i = 0; $i < $count; $i++) {
-        $token = $tokens[$i];
-
-        if ($token->text === '{') {
-            $depth++;
-
-            continue;
-        }
-        if ($token->text === '}') {
-            $depth--;
-
-            continue;
-        }
-
-        // 2. global スコープの use だけを見る
-        if (! $token->is(T_USE) || $depth !== 0) {
-            continue;
-        }
-
-        $cursor = nonCompoundUseNextSignificant($tokens, $i + 1);
-        if ($cursor === null) {
-            continue;
-        }
-
-        // 4. クロージャの `use ($x)` は import ではない
-        if ($tokens[$cursor]->text === '(') {
-            continue;
-        }
-
-        // 3. `use function` / `use const` の修飾を読み飛ばす (対象に含める)
-        if ($tokens[$cursor]->is([T_FUNCTION, T_CONST])) {
-            $next = nonCompoundUseNextSignificant($tokens, $cursor + 1);
-            if ($next === null) {
-                continue;
-            }
-            $cursor = $next;
-        }
-
-        // 5. カンマ区切りの各 import 要素を評価する。
-        //    名前は「1 要素 = 1 文字列」に正規化してからセグメント数で判定する
-        //    (T_STRING / T_NAME_QUALIFIED / T_NAME_FULLY_QUALIFIED / T_NS_SEPARATOR 分割の
-        //     いずれの tokenizer 表現でも同じ結論になる)。
-        $name = '';
-        $nameLine = 0;
-        $collecting = true;
-
-        /** 収集済みの名前を判定して violations へ積む。 */
-        $flush = function () use (&$name, &$nameLine, &$violations, $relative): void {
-            $normalized = ltrim($name, '\\');
-            if ($normalized !== '' && ! str_contains($normalized, '\\')) {
-                $violations[] = "{$relative}:{$nameLine} → use {$name};";
-            }
-            $name = '';
-        };
-
-        for ($j = $cursor; $j < $count; $j++) {
-            $current = $tokens[$j];
-
-            if ($current->is([T_WHITESPACE, T_COMMENT, T_DOC_COMMENT])) {
-                continue;
-            }
-            if ($current->text === ';') {
-                $flush();
-                break;
-            }
-            if ($current->text === ',') {
-                $flush();
-                $collecting = true;
-
-                continue;
-            }
-            if ($current->is(T_AS)) {
-                $flush();
-                $collecting = false; // `as` 以降の別名は判定対象ではない
-
-                continue;
-            }
-            // グループ use (`use A\B\{C, D};`) は prefix に必ず `\` を含むため非複合になりえない。
-            if ($current->text === '{') {
-                $name = '';
-                break;
-            }
-            if (! $collecting) {
-                continue;
-            }
-            if ($current->is([T_STRING, T_NAME_QUALIFIED, T_NAME_FULLY_QUALIFIED, T_NS_SEPARATOR])) {
-                if ($name === '') {
-                    $nameLine = $current->line;
-                }
-                $name .= $current->text;
-            }
-        }
-    }
-
-    return ['violations' => $violations, 'scanned' => true];
+    return $formatted;
 }
 
 /**
- * git 追跡下全体の収集結果。
+ * 見本を走査器に掛ける。
  *
- * @return array{violations: list<string>, namespacelessFiles: int, totalFiles: int}
+ * @return array{
+ *     violations: list<array{name: string, line: int}>,
+ *     hasGlobalRegion: bool,
+ *     unresolved: list<string>,
+ * }
  */
-function nonCompoundUseCollectAll(): array
+function globalUseScanFixture(string $name): array
+{
+    $path = GLOBAL_USE_FIXTURE_DIR.'/'.$name.'.php.txt';
+    $source = file_get_contents($path);
+
+    if ($source === false) {
+        throw new RuntimeException('見本を読めませんでした: '.$path);
+    }
+
+    return NonCompoundGlobalUseScanner::scan($source, $name.'.php.txt');
+}
+
+/**
+ * git 追跡下全体の走査結果。
+ *
+ * @return array{
+ *     violations: list<string>,
+ *     globalRegionFiles: list<string>,
+ *     unresolved: list<string>,
+ *     totalFiles: int,
+ * }
+ */
+function globalUseScanTrackedTree(): array
 {
     $violations = [];
-    $namespaceless = 0;
+    $globalRegionFiles = [];
+    $unresolved = [];
     $total = 0;
 
     foreach (TrackedPhpSourceFiles::all(base_path()) as $target) {
@@ -210,22 +152,28 @@ function nonCompoundUseCollectAll(): array
             continue;
         }
         $total++;
-        $collected = nonCompoundUseCollectFromSource($source, $target['relative']);
-        if ($collected['scanned']) {
-            $namespaceless++;
+
+        $scanned = NonCompoundGlobalUseScanner::scan($source, $target['relative']);
+
+        if ($scanned['hasGlobalRegion']) {
+            $globalRegionFiles[] = $target['relative'];
         }
-        $violations = array_merge($violations, $collected['violations']);
+        foreach ($scanned['violations'] as $violation) {
+            $violations[] = sprintf('%s:%d → use %s;', $target['relative'], $violation['line'], $violation['name']);
+        }
+        $unresolved = array_merge($unresolved, $scanned['unresolved']);
     }
 
     return [
         'violations' => $violations,
-        'namespacelessFiles' => $namespaceless,
+        'globalRegionFiles' => $globalRegionFiles,
+        'unresolved' => $unresolved,
         'totalFiles' => $total,
     ];
 }
 
-test('namespace 無しファイルに非複合 global use が存在しない', function (): void {
-    $result = nonCompoundUseCollectAll();
+test('グローバル名前空間に非複合 use が存在しない', function (): void {
+    $result = globalUseScanTrackedTree();
 
     expect($result['violations'])->toBe([],
         '非複合 global use を検出しました。PHP は「has no effect」warning を出し import は無効です。'
@@ -233,109 +181,118 @@ test('namespace 無しファイルに非複合 global use が存在しない', f
         .PHP_EOL.implode(PHP_EOL, $result['violations']));
 });
 
-test('走査が空振りしていない (git 追跡 PHP > 0 かつ namespace 無しファイル > 0)', function (): void {
-    $result = nonCompoundUseCollectAll();
+test('走査が空振りしていない (母集団と走査域が縮退していない)', function (): void {
+    $result = globalUseScanTrackedTree();
 
     expect($result['totalFiles'])->toBeGreaterThan(0);
-    // database/migrations (60 本) や tests/Architecture など namespace 無しファイルは
-    // 構造的に必ず存在する。0 なら namespace 判定が壊れている。
-    expect($result['namespacelessFiles'])->toBeGreaterThan(0);
+
+    // 件数の床は置かない (整理で自然に減ることは正常であり、本質でない赤を生む)。
+    // 目的に直結するのは「グローバル領域を持つファイルが 1 本も無くなっていないこと」と
+    // 「構造的に名前空間を持たない置き場がどちらも生きていること」である。
+    expect($result['globalRegionFiles'])->not->toBeEmpty();
+
+    $hasMigration = array_filter(
+        $result['globalRegionFiles'],
+        static fn (string $relative): bool => str_starts_with($relative, 'database/migrations/'),
+    );
+    $hasArchitectureTest = array_filter(
+        $result['globalRegionFiles'],
+        static fn (string $relative): bool => str_starts_with($relative, 'tests/Architecture/'),
+    );
+
+    expect($hasMigration)->not->toBeEmpty('database/migrations/ が走査域から落ちています');
+    expect($hasArchitectureTest)->not->toBeEmpty('tests/Architecture/ が走査域から落ちています');
+
+    // 読めなかった namespace 宣言は黙って対象外にしない (fail-closed)。
+    expect($result['unresolved'])->toBe([], implode(PHP_EOL, $result['unresolved']));
 });
 
-/*
- * 負のコントロール: 3 形態すべて (class / function / const) が実際に同じ warning を出すため、
- * 3 形態すべてを検出できることを fixture で固定する。
- */
-test('負のコントロール: class / function / const の非複合 use を検出する', function (): void {
-    $fixture = <<<'PHP'
-    <?php
-    declare(strict_types=1);
-    use RuntimeException;
-    use function strlen;
-    use const PHP_VERSION;
-    return new class {};
-    PHP;
+test('見本の一覧が完全である (差し替え・削除で検出力が落ちない)', function (): void {
+    $onDisk = glob(GLOBAL_USE_FIXTURE_DIR.'/*.php.txt');
+    expect($onDisk)->toBeArray();
 
-    $result = nonCompoundUseCollectFromSource($fixture, 'fixture.php');
-    expect($result['scanned'])->toBeTrue();
-    expect($result['violations'])->toHaveCount(3);
+    $actual = array_map(
+        static fn (string $path): string => basename($path, '.php.txt'),
+        is_array($onDisk) ? $onDisk : [],
+    );
+    sort($actual);
+
+    $expected = array_keys(GLOBAL_USE_FIXTURES);
+    sort($expected);
+
+    expect($actual)->toBe($expected);
+    expect(count(array_filter(GLOBAL_USE_FIXTURES)))->toBe(7);
+    expect(count(array_filter(GLOBAL_USE_FIXTURES, static fn (bool $d): bool => ! $d)))->toBe(5);
 });
 
-test('負のコントロール: カンマ区切り / as 別名の非複合 use も検出する', function (): void {
-    $fixture = <<<'PHP'
-    <?php
-    use RuntimeException, LogicException;
-    use InvalidArgumentException as Bad;
-    PHP;
-
-    expect(nonCompoundUseCollectFromSource($fixture, 'fixture.php')['violations'])->toHaveCount(3);
+test('見本が構文として正しい (判定は終了コード)', function () use ($globalUseOracle): void {
+    foreach ($globalUseOracle as $name => $inspection) {
+        expect($inspection['syntaxValid'])->toBeTrue(sprintf(
+            "見本 %s が構文として正しくありません。見本が parse error になると警告が 1 件も出ず、\n"
+            ."検出力が落ちたのか見本が壊れたのかを切り分けられなくなります。\n"
+            ."PHP_VERSION=%s PHP_BINARY=%s exitCode=%d\n--- stdout ---\n%s\n--- stderr ---\n%s",
+            $name,
+            PHP_VERSION,
+            PHP_BINARY,
+            $inspection['exitCode'],
+            $inspection['stdout'],
+            $inspection['stderr'],
+        ));
+    }
 });
 
-/*
- * 負のコントロール: **先頭 `\` 付きの単一名**も PHP は同じ warning を出す (実測)。
- * tokenizer 上は T_STRING ではなく T_NAME_FULLY_QUALIFIED になるため、
- * token 種別で判定していると丸ごと取りこぼす (silent hole)。
- */
-test('負のコントロール: 先頭バックスラッシュ付きの非複合 use も検出する', function (): void {
-    $fixture = <<<'PHP'
-    <?php
-    use \RuntimeException;
-    use function \strlen;
-    use const \PHP_VERSION;
-    PHP;
+test('真値が空振りしていない (php -l の警告文の変化を検知する)', function () use ($globalUseOracle): void {
+    $total = 0;
+    $diagnostics = [];
 
-    expect(nonCompoundUseCollectFromSource($fixture, 'fixture.php')['violations'])->toHaveCount(3);
-});
-
-test('正のコントロール: 複合名 / グループ use / 先頭 \\ 付き複合名は検出しない', function (): void {
-    $fixture = <<<'PHP'
-    <?php
-    use Illuminate\Database\Migrations\Migration;
-    use Illuminate\Support\Facades\{DB, Schema};
-    use function Illuminate\Support\enum_value;
-    use const Illuminate\Foundation\SOME_CONST;
-    use App\Models\User as Account;
-    use \Illuminate\Support\Str;
-    use Illuminate\Support\Arr, Illuminate\Support\Collection;
-    PHP;
-
-    expect(nonCompoundUseCollectFromSource($fixture, 'fixture.php')['violations'])->toBe([]);
-});
-
-/*
- * 正のコントロール: namespace 付きファイルの非複合 use は PHP が warning を出さない
- * (実際に import として機能する) ため対象外。scanned=false で走査自体をスキップする。
- */
-test('正のコントロール: namespace 付きファイルは対象外', function (): void {
-    $fixture = <<<'PHP'
-    <?php
-    namespace App\Services;
-    use RuntimeException;
-    class Foo {}
-    PHP;
-
-    $result = nonCompoundUseCollectFromSource($fixture, 'fixture.php');
-    expect($result['scanned'])->toBeFalse();
-    expect($result['violations'])->toBe([]);
-});
-
-/*
- * 正のコントロール: クラス本体の trait use と、クロージャの use ($x) を誤検知しない。
- * brace depth 追跡が効いていることの証明。
- */
-test('正のコントロール: trait use / クロージャ use を誤検知しない', function (): void {
-    $fixture = <<<'PHP'
-    <?php
-    use Illuminate\Database\Migrations\Migration;
-    return new class extends Migration {
-        use SomeTrait;
-        public function up(): void {
-            $x = 1;
-            $fn = function () use ($x) { return $x; };
-            $arrow = fn () => $x;
+    foreach (GLOBAL_USE_FIXTURES as $name => $detects) {
+        if (! $detects) {
+            continue;
         }
-    };
-    PHP;
+        $total += count($globalUseOracle[$name]['warnings']);
+        $diagnostics[] = sprintf(
+            "--- %s (exitCode=%d)\n--- stdout ---\n%s\n--- stderr ---\n%s",
+            $name,
+            $globalUseOracle[$name]['exitCode'],
+            $globalUseOracle[$name]['stdout'],
+            $globalUseOracle[$name]['stderr'],
+        );
+    }
 
-    expect(nonCompoundUseCollectFromSource($fixture, 'fixture.php')['violations'])->toBe([]);
+    expect($total)->toBeGreaterThan(0, sprintf(
+        "検出側の見本から真値が 1 件も取れませんでした。php -l の警告文が変わると、\n"
+        ."照合が「両方 0 件で一致」して静かに無力化します。\n"
+        ."PHP_VERSION=%s PHP_BINARY=%s\n%s",
+        PHP_VERSION,
+        PHP_BINARY,
+        implode(PHP_EOL, $diagnostics),
+    ));
+});
+
+test('検出側の見本で、走査器の判定が php -l の真値と名前・行まで一致する', function () use ($globalUseOracle): void {
+    foreach (GLOBAL_USE_FIXTURES as $name => $detects) {
+        if (! $detects) {
+            continue;
+        }
+
+        $scanned = globalUseScanFixture($name);
+
+        expect($scanned['unresolved'])->toBe([], implode(PHP_EOL, $scanned['unresolved']));
+        expect(globalUseSorted($scanned['violations']))
+            ->toBe(globalUseSorted($globalUseOracle[$name]['warnings']), '見本 '.$name.' の判定が真値と一致しません');
+    }
+});
+
+test('無違反の見本で、真値も走査器も 0 件である', function () use ($globalUseOracle): void {
+    foreach (GLOBAL_USE_FIXTURES as $name => $detects) {
+        if ($detects) {
+            continue;
+        }
+
+        $scanned = globalUseScanFixture($name);
+
+        expect($globalUseOracle[$name]['warnings'])->toBe([], '見本 '.$name.' に php -l が警告を出しました');
+        expect($scanned['unresolved'])->toBe([], implode(PHP_EOL, $scanned['unresolved']));
+        expect(globalUseSorted($scanned['violations']))->toBe([], '見本 '.$name.' を誤検出しました');
+    }
 });

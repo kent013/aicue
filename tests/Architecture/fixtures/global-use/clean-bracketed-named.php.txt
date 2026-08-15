@@ -1,0 +1,10 @@
+<?php
+
+// 無違反: 名前つきの波括弧ブロックの中は import として実際に効く。
+namespace App {
+    use Foo;
+
+    class Thing
+    {
+    }
+}

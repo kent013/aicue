@@ -1,0 +1,7 @@
+<?php
+
+// 無違反: 別名が付いた取り込みは実際に効くので、PHP は警告を出さない (実測)。
+use Foo as Bar;
+use function strlen as sl;
+use const PHP_VERSION as PV;
+use \Baz as Qux;

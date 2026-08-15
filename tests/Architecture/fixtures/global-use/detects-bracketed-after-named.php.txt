@@ -1,0 +1,10 @@
+<?php
+
+// 検出: 名前つきの波括弧ブロックの中は対象外で、そのあとに置いたグローバルのブロックは対象。
+namespace Bar {
+    use Qux;
+}
+
+namespace {
+    use Foo;
+}

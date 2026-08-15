@@ -1,0 +1,7 @@
+<?php
+
+// 検出: 先頭のバックスラッシュが付いていても同じ警告が出る (実測)。
+// 字句としては T_STRING ではなく完全修飾名になるため、種別で判定すると取りこぼす。
+use \Foo;
+use function \strlen;
+use const \PHP_VERSION;

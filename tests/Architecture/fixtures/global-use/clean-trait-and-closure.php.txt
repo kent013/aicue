@@ -1,0 +1,24 @@
+<?php
+
+// 無違反: 名前空間の宣言が無いファイルでも、クラス本体の取り込みと
+// クロージャの use ($x) は import ではない (波括弧の深さで区別する)。
+use Illuminate\Database\Migrations\Migration;
+
+trait SomeTrait
+{
+}
+
+return new class extends Migration
+{
+    use SomeTrait;
+
+    public function up(): void
+    {
+        $x = 1;
+        $fn = function () use ($x) {
+            return $x;
+        };
+        $arrow = fn () => $x;
+        unset($fn, $arrow);
+    }
+};
