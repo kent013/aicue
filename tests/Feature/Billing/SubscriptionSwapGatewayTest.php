@@ -6,6 +6,7 @@ use App\Enums\Billing\SubscriptionSwapOutcome;
 use App\Exceptions\Billing\PlanChangeFailedException;
 use App\Models\Organization;
 use App\Services\Billing\CashierStripeGateway;
+use App\Services\Billing\SubscriptionSnapshotMapper;
 use Mockery\MockInterface;
 use Stripe\Exception\InvalidRequestException;
 use Stripe\Service\SubscriptionService as StripeSubscriptionService;
@@ -34,7 +35,10 @@ function swapGateway(StripeClient $client): CashierStripeGateway
 {
     return new class($client) extends CashierStripeGateway
     {
-        public function __construct(private readonly StripeClient $client) {}
+        public function __construct(private readonly StripeClient $client)
+        {
+            parent::__construct(new SubscriptionSnapshotMapper);
+        }
 
         protected function stripe(): StripeClient
         {
@@ -117,7 +121,7 @@ test('remote が別 Price なら既存 item id を指定した update を 1 回�
         ->once()
         ->with(
             'sub_swap_1',
-            (new CashierStripeGateway)->buildSwapPayload('si_1', 'price_target'),
+            (new CashierStripeGateway(app(SubscriptionSnapshotMapper::class)))->buildSwapPayload('si_1', 'price_target'),
             ['idempotency_key' => 'change-plan:tok:standard'],
         )
         ->andReturn(swapRemoteSubscription('sub_swap_1', [swapRemoteItem('si_1', 'price_target')]));

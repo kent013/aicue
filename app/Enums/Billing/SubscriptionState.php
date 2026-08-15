@@ -10,7 +10,7 @@ use App\Models\Billing\Subscription;
  * Subscription の派生状態。
  *
  * `Active` / `UpgradeRecovery` は流入制御を通過させる。
- * `Inactive` は `canceled` / `unpaid` / `incomplete` / `incomplete_expired` を統合した拒否状態。
+ * `Inactive` は `canceled` / `incomplete` / `incomplete_expired` を統合した拒否状態。
  * `incomplete` / `unpaid` を `Active` に含めない理由: いずれも支払いが完了していない
  * (= 顧客カードが未承認 or 失敗) 状態のため、流入制御の目的 (= LLM コスト負担確認) に反する。
  *
@@ -33,6 +33,8 @@ enum SubscriptionState: string
     case UpgradeRecovery = 'upgrade_recovery';
     case PastDue = 'past_due';
     case Paused = 'paused';
+    /** Stripe status=unpaid。督促を終えても未払いのまま契約が残っている (canceled とは別)。 */
+    case Unpaid = 'unpaid';
     case Inactive = 'inactive';
 
     /**
@@ -52,8 +54,14 @@ enum SubscriptionState: string
         if ($sub->stripe_status === 'past_due') {
             return self::PastDue;
         }
+        // unpaid は Inactive から分離する: 遮断の可否 (grantsAccess) は同じ false だが、
+        // 「支払いが未解決のまま契約が残っている」点で canceled と扱いが分かれる
+        // (hasUnsettledPayment 参照)。
+        if ($sub->stripe_status === 'unpaid') {
+            return self::Unpaid;
+        }
 
-        // trialing は試用期間として通す。それ以外の非 active 系 (canceled/unpaid/incomplete*) は Inactive。
+        // trialing は試用期間として通す。それ以外の非 active 系 (canceled/incomplete*) は Inactive。
         $activeStatuses = ['active', 'trialing'];
         if (! in_array($sub->stripe_status, $activeStatuses, true)) {
             return self::Inactive;
@@ -80,7 +88,29 @@ enum SubscriptionState: string
     {
         return match ($this) {
             self::Active, self::UpgradeRecovery, self::PastDue => true,
-            self::Paused, self::Inactive => false,
+            self::Paused, self::Unpaid, self::Inactive => false,
+        };
+    }
+
+    /**
+     * 契約が終了しておらず、支払いが未解決のまま残っているか。
+     *
+     * true のとき、次の 2 つを**同時に**禁じる (同じ問いなので述語を 2 つに割らない):
+     *   1. 無料枠 (`free_plan_code='personal'`) への読み替え (BillingAccess::state)
+     *   2. 新規契約の開始 (SubscriptionService::startCheckout)
+     *
+     * **「未回収の債権が 1 円も無いこと」は基準にしない**。督促の末に Stripe が解約した
+     * (`canceled`) 契約には未払いの請求書が残りうるが、その回収は課金事業者側の債権管理であり、
+     * アプリの利用可否とは切り離す (切り離さないと未払い請求書を追い続ける仕組みが要る)。
+     */
+    public function hasUnsettledPayment(): bool
+    {
+        return match ($this) {
+            self::PastDue, self::Unpaid => true,
+            // Paused = trial 終了時にカードが無く read-only になった状態 (未払いの請求が無い)。
+            // Inactive = 終了済み / 初回決済が通らず不成立 (incomplete 系を含む)。
+            // Active / UpgradeRecovery = 支払い失敗が起きていない。
+            self::Active, self::UpgradeRecovery, self::Paused, self::Inactive => false,
         };
     }
 }

@@ -30,8 +30,8 @@ final class AccountDeletionBillingGuard
      *           (= Active / UpgradeRecovery / PastDue) かつ $sub->ends_at === null
      *           を満たす subscription 行が 1 つでも存在する
      *
-     * - `paused` / `canceled` / `unpaid` / `incomplete*` は Paused / Inactive に写像されて通過
-     *   (請求が発生しない or 終端)。
+     * - `paused` / `unpaid` / `canceled` / `incomplete*` は Paused / Unpaid / Inactive に
+     *   写像されて通過 (いずれも grantsAccess は false = 請求が発生しない or 終端)。
      * - `ends_at !== null` (= 期末解約予約済み / 終了済み) は通過。Stripe が自動終了させるため
      *   追加請求が発生せず、ここで止めると「解約したのに退会できない」詰みを作る。
      */

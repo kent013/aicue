@@ -6,8 +6,10 @@ namespace App\Services\Billing\Contracts;
 
 use App\DataTransferObjects\Billing\CreatedCheckoutSession;
 use App\DataTransferObjects\Billing\ExternalBillingRedirect;
+use App\DataTransferObjects\Billing\RemoteSubscriptionState;
 use App\Enums\Billing\SubscriptionSwapOutcome;
 use App\Exceptions\Billing\PlanChangeFailedException;
+use App\Exceptions\Billing\SubscriptionLookupFailedException;
 use App\Models\Organization;
 
 /**
@@ -62,6 +64,16 @@ interface StripeGatewayInterface
         string $basePriceId,
         string $idempotencyKey,
     ): SubscriptionSwapOutcome;
+
+    /**
+     * Stripe の契約 1 件を読み、突き合わせ用の観測結果を返す (日次リコンサイル専用の読み取り)。
+     *
+     * - 見つからない (404 / resource_missing) → **null** (状態を変えない材料として扱う)
+     * - API 障害 → SubscriptionLookupFailedException (SDK 例外は外へ出さない)
+     *
+     * @throws SubscriptionLookupFailedException 照会に失敗したとき
+     */
+    public function retrieveSubscriptionState(string $stripeSubscriptionId): ?RemoteSubscriptionState;
 
     /**
      * Stripe 側 Checkout Session を expire する (別 plan の live pending 整理)。

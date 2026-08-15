@@ -357,3 +357,68 @@ test('customer.subscription.created で行がまだ無くても例外になら�
     expect(Subscription::query()->count())->toBe(0)
         ->and($organization->fresh()?->plan_code)->toBe('standard');
 });
+
+// ── 猶予の起点 (past_due_since) の打刻 — 唯一の writer は applySubscriptionSnapshot ──
+
+test('active → past_due の観測で past_due_since が観測時刻で打たれる', function (): void {
+    $organization = snapshotSyncOrganization();
+    $subscription = createFakeSubscription($organization, status: 'active');
+    $subscription->forceFill(['stripe_id' => 'sub_snapshot_1'])->save();
+
+    $this->travelTo(CarbonImmutable::parse('2026-08-15 10:00:00'));
+    snapshotSyncService()->applySubscriptionSnapshot($organization, snapshotSyncSnapshot(status: 'past_due'));
+
+    expect($subscription->fresh()?->past_due_since?->toDateTimeString())->toBe('2026-08-15 10:00:00');
+});
+
+test('past_due の再送では起点を上書きしない (猶予を先送りしない)', function (): void {
+    $organization = snapshotSyncOrganization();
+    $subscription = createFakeSubscription($organization, status: 'active');
+    $subscription->forceFill(['stripe_id' => 'sub_snapshot_1'])->save();
+
+    $this->travelTo(CarbonImmutable::parse('2026-08-15 10:00:00'));
+    snapshotSyncService()->applySubscriptionSnapshot($organization, snapshotSyncSnapshot(status: 'past_due'));
+
+    $this->travelTo(CarbonImmutable::parse('2026-08-18 10:00:00'));
+    snapshotSyncService()->applySubscriptionSnapshot($organization, snapshotSyncSnapshot(status: 'past_due'));
+
+    expect($subscription->fresh()?->past_due_since?->toDateTimeString())->toBe('2026-08-15 10:00:00');
+});
+
+test('past_due → active の復旧で起点が NULL に戻る', function (): void {
+    $organization = snapshotSyncOrganization();
+    $subscription = createFakeSubscription($organization, status: 'past_due');
+    $subscription->forceFill([
+        'stripe_id' => 'sub_snapshot_1',
+        'past_due_since' => CarbonImmutable::parse('2026-08-01 10:00:00'),
+    ])->save();
+
+    snapshotSyncService()->applySubscriptionSnapshot($organization, snapshotSyncSnapshot(status: 'active'));
+
+    expect($subscription->fresh()?->past_due_since)->toBeNull();
+});
+
+test('契約終了 (terminated) でも起点が NULL に戻る', function (): void {
+    $organization = snapshotSyncOrganization();
+    $subscription = createFakeSubscription($organization, status: 'past_due');
+    $subscription->forceFill([
+        'stripe_id' => 'sub_snapshot_1',
+        'past_due_since' => CarbonImmutable::parse('2026-08-01 10:00:00'),
+    ])->save();
+
+    snapshotSyncService()->applySubscriptionSnapshot(
+        $organization,
+        snapshotSyncSnapshot(status: 'canceled'),
+        terminated: true,
+    );
+
+    expect($subscription->fresh()?->past_due_since)->toBeNull();
+});
+
+test('subscription 行が無い間の past_due 観測は no-op (行を作らない)', function (): void {
+    $organization = snapshotSyncOrganization();
+
+    snapshotSyncService()->applySubscriptionSnapshot($organization, snapshotSyncSnapshot(status: 'past_due'));
+
+    expect(Subscription::query()->count())->toBe(0);
+});

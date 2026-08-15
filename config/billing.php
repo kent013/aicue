@@ -103,4 +103,22 @@ return [
         'consent_version' => env('BILLING_AUTO_RECHARGE_CONSENT_VERSION', 'v2'),
     ],
 
+    /*
+    |----------------------------------------------------------------------
+    | 支払い失敗の猶予 (AG-035 (5))
+    |----------------------------------------------------------------------
+    |
+    | 支払い失敗 (Stripe status=past_due) を**観測してから**利用を止めるまでの猶予日数。
+    | 起点は subscriptions.past_due_since で、判定の唯一の読み口は
+    | App\Support\Billing\PaymentGracePolicy (ここ以外で config を読まない)。
+    |
+    | 0 は「観測した瞬間に止める」を意味する有効な設定値である (負値は設定不備として
+    | PaymentGracePolicy が例外で落とす)。
+    |
+    | **チケット残高切れには猶予を設けない** (残高 0 は予約時点で即拒否)。前払いチケットで
+    | 猶予を作ると「借金して使わせる」ことになるため。これは未実装ではなく決定である
+    | (docs/architecture.md にも記載)。
+    */
+    'payment_grace_days' => (int) env('BILLING_PAYMENT_GRACE_DAYS', 14),
+
 ];

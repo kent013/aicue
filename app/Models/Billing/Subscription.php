@@ -22,6 +22,9 @@ use Laravel\Cashier\Subscription as CashierSubscription;
  *   (billing:reconcile-schedules が復旧する。ScheduleSetupStatus 参照)
  * - has_payment_method: 決済手段が登録済みか (monotonic snapshot。true から false へ戻さない)。
  *   SubscriptionService::deriveEntitlement が trial 終了後の遮断判定に使う
+ * - past_due_since: 支払い失敗 (stripe_status='past_due') を**観測した**時刻 =
+ *   支払い猶予の起点。期限の計算は PaymentGracePolicy が唯一の正本で、書込は
+ *   SubscriptionService に閉じる (PastDueSinceWriteInvariantTest)
  *
  * schedule 列は状態キーのため markSchedule* / clearSchedule 経由でのみ変更する。
  *
@@ -30,6 +33,7 @@ use Laravel\Cashier\Subscription as CashierSubscription;
  * @property string $stripe_id
  * @property string $stripe_status
  * @property bool $has_payment_method
+ * @property Carbon|null $past_due_since
  * @property Carbon|null $current_period_end
  * @property string|null $stripe_schedule_id
  * @property ScheduleSetupStatus $schedule_setup_status
@@ -87,6 +91,7 @@ class Subscription extends CashierSubscription
     {
         return [
             'current_period_end' => 'datetime',
+            'past_due_since' => 'datetime',
             'has_payment_method' => 'boolean',
             'schedule_setup_status' => ScheduleSetupStatus::class,
         ];

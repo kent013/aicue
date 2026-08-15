@@ -6,6 +6,7 @@ namespace App\Services\Billing\Fakes;
 
 use App\DataTransferObjects\Billing\CreatedCheckoutSession;
 use App\DataTransferObjects\Billing\ExternalBillingRedirect;
+use App\DataTransferObjects\Billing\RemoteSubscriptionState;
 use App\Enums\Billing\SubscriptionSwapOutcome;
 use App\Models\Organization;
 use App\Services\Billing\Contracts\StripeGatewayInterface;
@@ -47,6 +48,12 @@ final class FakeStripeGateway implements StripeGatewayInterface
         // (active subscription の正本は BughuntBillingSeeder。反映は webhook が担うが
         //  fake 環境では webhook が発火しないため、画面は「反映待ち」までを観測する)。
         return SubscriptionSwapOutcome::Applied;
+    }
+
+    public function retrieveSubscriptionState(string $stripeSubscriptionId): ?RemoteSubscriptionState
+    {
+        // 中立帰還: 契約状態の正本は BughuntBillingSeeder。突き合わせは何も収束させない。
+        return null;
     }
 
     public function expireCheckoutSession(string $stripeSessionId): string

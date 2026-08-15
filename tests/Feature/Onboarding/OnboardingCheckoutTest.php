@@ -7,6 +7,7 @@ use App\Models\Billing\Plan;
 use App\Models\Organization;
 use App\Models\User;
 use App\Services\Billing\TicketPricingService;
+use Carbon\CarbonImmutable;
 use Inertia\Testing\AssertableInertia as Assert;
 
 /*
@@ -154,4 +155,44 @@ test('personal 選択不可の理由はサーバー確定文言で props に載�
 
 test('未認証は login へ', function (): void {
     $this->get('/onboarding/checkout')->assertRedirect('/login');
+});
+
+// ── 支払い未解決の契約がある組織はプラン選択ではなく課金画面へ逃がす ──
+//
+// 新規契約を作らせても二重請求になるだけで、利用者の次の一手は「支払い方法の更新」である。
+// 判定は BillingAccess と同じ述語 (SubscriptionState::hasUnsettledPayment) 1 つだけを見る。
+
+/** 支払い未解決 (猶予切れ past_due) の組織 + owner。 */
+function unsettledPaymentOrganizationWithOwner(string $status = 'past_due'): array
+{
+    config()->set('billing.payment_grace_days', 14);
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    $subscription = contractPaidPlan($organization, status: $status);
+    $subscription->forceFill([
+        'past_due_since' => CarbonImmutable::now()->subDays(15),
+    ])->save();
+
+    return [$organization->fresh(), $owner];
+}
+
+test('支払い未解決 + manageBilling は billing.index へ redirect (プラン選択を出さない)', function (string $status): void {
+    [, $owner] = unsettledPaymentOrganizationWithOwner($status);
+
+    $this->actingAs($owner)->get('/onboarding/checkout')
+        ->assertRedirect(route('billing.index'));
+})->with(['past_due', 'unpaid']);
+
+test('支払い未解決 + manageBilling なし member は従来どおり billing-required へ (判定順序が変わらない)', function (): void {
+    [$organization] = unsettledPaymentOrganizationWithOwner();
+    $member = attachOrganizationMember($organization);
+    $member->forceFill(['current_organization_id' => $organization->id])->save();
+
+    $this->actingAs($member)->get('/onboarding/checkout')
+        ->assertRedirect(route('onboarding.billing-required'));
+});
+
+test('逃がし先の billing.index は課金ゲートの外なので詰まない (200 で描画される)', function (): void {
+    [, $owner] = unsettledPaymentOrganizationWithOwner();
+
+    $this->actingAs($owner)->get(route('billing.index'))->assertOk();
 });

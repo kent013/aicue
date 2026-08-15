@@ -54,7 +54,7 @@
 
 | # | 施策名 | 変更ファイル | 優先度 |
 |---|--------|------------|--------|
-| 1 | 猶予の起点列を追加する | `database/migrations/2026_08_15_000100_*`, `2026_08_15_000110_*`, `app/Models/Billing/Subscription.php` | High |
+| 1 | 猶予の起点列を追加する | `database/migrations/2026_08_15_000200_*`, `2026_08_15_000210_*`, `app/Models/Billing/Subscription.php` | High |
 | 2 | 猶予日数の設定を置く | `config/billing.php` | High |
 | 3 | 猶予期限の単一の正本を作る | `app/Support/Billing/PaymentGracePolicy.php` (新規) | High |
 | 4 | 支払い未解決の状態を明示する | `app/Enums/Billing/SubscriptionState.php`, `app/Services/Billing/AccountDeletionBillingGuard.php` (docblock) | High |
@@ -77,8 +77,13 @@
 
 ### 変更箇所
 
-- 新規: `database/migrations/2026_08_15_000100_add_past_due_since_to_subscriptions.php`
-- 新規: `database/migrations/2026_08_15_000110_backfill_past_due_since_on_subscriptions.php`
+- 新規: `database/migrations/2026_08_15_000200_add_past_due_since_to_subscriptions.php`
+- 新規: `database/migrations/2026_08_15_000210_backfill_past_due_since_on_subscriptions.php`
+
+> **実装時の訂正 (T163)**: 当初案の連番 `000100` / `000110` は、既に main にある
+> `2026_08_15_000100_add_recovery_reason_to_stripe_webhook_events_table.php` と先頭が重なる。
+> migration の実行順はファイル名順なので実害は無いが、同日同連番は読み手を迷わせるため
+> `000200` / `000210` へずらした (内容は変えていない)。
 - 変更: `app/Models/Billing/Subscription.php` (docblock の `@property` と `casts()`)
 
 ### 波及変更
@@ -90,7 +95,7 @@
 ### 変更後コード
 
 ```php
-// 2026_08_15_000100_add_past_due_since_to_subscriptions.php
+// 2026_08_15_000200_add_past_due_since_to_subscriptions.php
 /**
  * past_due_since: 支払い失敗 (stripe_status='past_due') を**観測した**時刻。
  *
@@ -118,7 +123,7 @@ return new class extends Migration
 ```
 
 ```php
-// 2026_08_15_000110_backfill_past_due_since_on_subscriptions.php
+// 2026_08_15_000210_backfill_past_due_since_on_subscriptions.php
 /**
  * 既存の past_due 行の猶予起点を **migration 実行時刻** で埋める。
  *

@@ -99,6 +99,7 @@ class StripeWebhookProcessor
         private readonly BillingNotificationDispatcher $notifications,
         private readonly SubscriptionService $subscriptions,
         private readonly AutoRechargeService $autoRecharge,
+        private readonly SubscriptionSnapshotMapper $snapshotMapper,
     ) {}
 
     public function handle(WebhookReceived $event): void
@@ -488,24 +489,15 @@ class StripeWebhookProcessor
             return;
         }
 
-        // sub id は subscription object 本体の必須フィールド。取れない payload は fail-closed
-        // (状態同期も signup grant も行わない)。
-        $stripeId = $this->stringAt($payload, 'data.object.id');
-        if ($stripeId === null) {
+        // 写像は SubscriptionSnapshotMapper が唯一の正本 (日次突き合わせと同じ規則で読む)。
+        // sub id は subscription object 本体の必須フィールドで、取れない payload では
+        // mapper が null を返す = fail-closed (状態同期も signup grant も行わない)。
+        $object = $this->subscriptionObject($payload);
+        $snapshot = $this->snapshotMapper->fromStripeSubscription($object);
+        if ($snapshot === null) {
             return;
         }
-
-        $snapshot = new SubscriptionSnapshot(
-            stripeId: $stripeId,
-            status: $this->stringAt($payload, 'data.object.status') ?? 'incomplete',
-            basePriceId: $this->stringAt($payload, 'data.object.items.data.0.price.id'),
-            baseQuantity: $this->intAt($payload, 'data.object.items.data.0.quantity'),
-            currentPeriodEnd: $this->periodEnd($payload),
-            trialEndsAt: $this->timestampToCarbon(data_get($payload, 'data.object.trial_end')),
-            endsAt: $this->timestampToCarbon(
-                data_get($payload, 'data.object.ended_at') ?? data_get($payload, 'data.object.cancel_at'),
-            ),
-        );
+        $stripeId = $snapshot->stripeId;
 
         $this->subscriptions->applySubscriptionSnapshot($organization, $snapshot, terminated: $terminated);
 
@@ -520,23 +512,26 @@ class StripeWebhookProcessor
 
         $subscription = Subscription::query()->where('stripe_id', $stripeId)->first();
         if ($subscription instanceof Subscription) {
+            // mapper の三値観測 (true / null = 観測できず) を現行の bool 契約へ落とす。
+            // monotonic writer 側が false を無視するため、`=== true` との合成で意味は同値。
             $this->subscriptions->recordPaymentMethodSnapshot(
                 $subscription,
-                $this->subscriptionHasPaymentMethod($payload),
+                $this->snapshotMapper->observePaymentMethod($object) === true,
             );
         }
     }
 
     /**
-     * subscription object が決済手段を持つか (default_payment_method / default_source)。
-     * Stripe は string id か expanded object のいずれも取り得るため union helper で抽出する。
+     * webhook payload から subscription object (data.object) を取り出す。
      *
      * @param  array<mixed>  $payload
+     * @return array<mixed>
      */
-    private function subscriptionHasPaymentMethod(array $payload): bool
+    private function subscriptionObject(array $payload): array
     {
-        return $this->resolveStripeIdField(data_get($payload, 'data.object.default_payment_method')) !== null
-            || $this->resolveStripeIdField(data_get($payload, 'data.object.default_source')) !== null;
+        $object = data_get($payload, 'data.object');
+
+        return is_array($object) ? $object : [];
     }
 
     /**
@@ -554,38 +549,6 @@ class StripeWebhookProcessor
         }
 
         return null;
-    }
-
-    /**
-     * 次回更新日時 (renewal reminder = billing:send-billing-reminders の真実源)。
-     * 新 API (basil) は item 配下、旧 API は subscription top-level に持つため両系を fallback で拾う。
-     *
-     * @param  array<mixed>  $payload
-     */
-    private function periodEnd(array $payload): ?CarbonImmutable
-    {
-        return $this->timestampToCarbon(
-            data_get($payload, 'data.object.items.data.0.current_period_end')
-                ?? data_get($payload, 'data.object.current_period_end'),
-        );
-    }
-
-    /** Stripe の epoch 秒を CarbonImmutable にする (非 int / 非正数は null)。 */
-    private function timestampToCarbon(mixed $value): ?CarbonImmutable
-    {
-        return is_int($value) && $value > 0 ? CarbonImmutable::createFromTimestamp($value) : null;
-    }
-
-    /**
-     * payload から int 値を安全に取り出す (それ以外の型は null)。
-     *
-     * @param  array<mixed>  $payload
-     */
-    private function intAt(array $payload, string $path): ?int
-    {
-        $value = data_get($payload, $path);
-
-        return is_int($value) ? $value : null;
     }
 
     /**

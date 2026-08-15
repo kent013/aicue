@@ -30,7 +30,9 @@ use App\Models\Billing\Subscription;
 use App\Models\Organization;
 use App\Models\User;
 use App\Services\Billing\Contracts\StripeGatewayInterface;
+use App\Support\Billing\PaymentGracePolicy;
 use Carbon\CarbonImmutable;
+use DateTimeInterface;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\QueryException;
@@ -56,6 +58,7 @@ class SubscriptionService
     public function __construct(
         private readonly StripeGatewayInterface $gateway,
         private readonly TicketLedgerService $tickets,
+        private readonly PaymentGracePolicy $grace,
     ) {}
 
     /**
@@ -105,11 +108,14 @@ class SubscriptionService
      *   entitled = state.grantsAccess()
      *              AND NOT (trial_ends_at <= now AND !has_payment_method)   // trial 終了 & カード無し
      *              AND status != paused                                     // Stripe 確定の read-only
+     *              AND NOT (state = PastDue AND past_due_since != null AND 猶予期限切れ)
      *
      * - Paused: grantsAccess=false で否定 (reason=Paused)。
      * - trial 終了 & PM 無し: webhook 前 (Stripe がまだ paused 化していない) でも先回りで否定する
      *   (reason=TrialEndedWithoutPaymentMethod)。
-     * - PastDue (PM 有): grantsAccess=true かつ trial 条件に該当しないため entitled=true (請求失敗中も利用継続)。
+     * - PastDue (PM 有): grantsAccess=true かつ trial 条件に該当しないため、**猶予の期限内は**
+     *   entitled=true (請求失敗中も利用継続)。猶予が切れたら否定する
+     *   (reason=PaymentGraceExpired。期限の正本は PaymentGracePolicy)。
      * - PM 無し past_due (= trial 後カード無し dunning): trial_ends_at<=now & !has_payment_method で否定。
      */
     public function deriveEntitlement(Subscription $sub): SubscriptionEntitlementDto
@@ -138,6 +144,21 @@ class SubscriptionService
         // status=paused は grantsAccess で既に弾かれているが、防御的に二重で確認する。
         if ($sub->stripe_status === 'paused') {
             return SubscriptionEntitlementDto::denied($state, EntitlementDeniedReason::Paused);
+        }
+
+        // 支払い失敗の猶予切れ (AG-035 (5))。**PastDue のときだけ**評価する
+        // (他の状態はここに到達する時点で猶予の対象ではない)。
+        //
+        // 起点が NULL のときは遮断しない: 打刻漏れという自分側の不具合をそのまま
+        // 支払い済み顧客の締め出しに変えないため。NULL が残る窓は
+        // (i) 単一 writer の打刻 (ii) 日次突き合わせの修復 (iii) 移行の backfill で有限にする。
+        if ($state === SubscriptionState::PastDue
+            && $sub->past_due_since !== null
+            && $this->grace->hasExpired(CarbonImmutable::instance($sub->past_due_since), $now)) {
+            return SubscriptionEntitlementDto::denied(
+                $state,
+                EntitlementDeniedReason::PaymentGraceExpired,
+            );
         }
 
         return SubscriptionEntitlementDto::granted($state);
@@ -182,6 +203,9 @@ class SubscriptionService
                     'quantity' => $snap->baseQuantity,
                     'trial_ends_at' => $snap->trialEndsAt,
                     'ends_at' => $snap->endsAt,
+                    // 猶予の起点。**この 1 行が past_due_since の唯一の書込点**
+                    // (PastDueSinceWriteInvariantTest が app/ 内の書込を本ファイルに固定する)。
+                    'past_due_since' => $this->resolvePastDueSince($sub, $snap->status),
                 ];
 
                 // period 欠落 payload では既存の current_period_end を維持する (renewal reminder の
@@ -214,6 +238,86 @@ class SubscriptionService
             $org->plan_code = $planCode->value;
             $org->save();
         });
+    }
+
+    /**
+     * 猶予の起点を決める (打刻規則は 3 つだけ)。
+     *
+     *  - past_due を観測 かつ 既存値が NULL → **観測時刻を打つ**
+     *  - past_due を観測 かつ 既存値あり   → **上書きしない** (再送のたびに猶予を先送りしない)
+     *  - past_due 以外を観測               → **NULL に戻す** (復旧・終了で猶予は消える)
+     *
+     * 打刻するのは「観測時刻」であって Stripe 側で実際に失敗した時刻ではない
+     * (webhook を落としていれば日次突き合わせが観測した時刻になる = 利用者に有利な側へずれる)。
+     */
+    private function resolvePastDueSince(Subscription $sub, string $status): ?CarbonImmutable
+    {
+        if ($status !== 'past_due') {
+            return null;
+        }
+
+        $existing = $sub->past_due_since;
+
+        return $existing !== null
+            ? CarbonImmutable::instance($existing)
+            : CarbonImmutable::now();
+    }
+
+    /**
+     * 突き合わせで**書き込むべきか** (食い違いがあるか) を判定する。
+     *
+     * 差分が無いのに毎日 UPDATE すると、更新時刻だけが動き、webhook との競合窓も無駄に広がる。
+     * 比較対象は **`applySubscriptionSnapshot` が書く列すべて**にする (status だけを見ると、
+     * 更新日 `current_period_end` や解約予定 `ends_at` だけが変わった webhook を落としたとき
+     * 永久に収束しない = 更新予告の真実源がずれたまま固まる)。
+     *
+     * 収束が要るのは次のいずれか:
+     *   1. status が違う (両方向)
+     *   2. stripe_price / quantity / trial_ends_at / ends_at が違う
+     *   3. current_period_end が違う (**snapshot 側が null のときは比較しない** =
+     *      「period 欠落 payload では既存値を維持する」書込規則と同じ扱いにする)
+     *   4. past_due なのに猶予起点が NULL (打刻漏れの修復)
+     *   5. Stripe 側で決済手段を観測できたのにローカルが false (**true 方向のみ**)
+     *
+     * **`organizations.plan_code` は比較対象にしない**: 同一トランザクションで同期されるため
+     * subscriptions 行と食い違わない (未知 Price のときだけ据え置かれる = その回復は本経路の
+     * 責務ではない)。
+     *
+     * @param  bool|null  $hasPaymentMethod  null は「観測できなかった」(false と区別する)
+     */
+    public function needsSnapshotConvergence(
+        Subscription $sub,
+        SubscriptionSnapshot $snap,
+        ?bool $hasPaymentMethod,
+    ): bool {
+        if ($sub->stripe_status !== $snap->status
+            || $sub->stripe_price !== $snap->basePriceId
+            || $sub->quantity !== $snap->baseQuantity) {
+            return true;
+        }
+        if ($this->timesDiffer($sub->trial_ends_at, $snap->trialEndsAt)
+            || $this->timesDiffer($sub->ends_at, $snap->endsAt)) {
+            return true;
+        }
+        if ($snap->currentPeriodEnd !== null
+            && $this->timesDiffer($sub->current_period_end, $snap->currentPeriodEnd)) {
+            return true;
+        }
+        if ($snap->status === 'past_due' && $sub->past_due_since === null) {
+            return true;
+        }
+
+        return $hasPaymentMethod === true && ! $sub->has_payment_method;
+    }
+
+    /** 日時の差分判定 (null 同士は一致。片方だけ null は差分)。秒精度で比較する。 */
+    private function timesDiffer(?DateTimeInterface $local, ?CarbonImmutable $remote): bool
+    {
+        if ($local === null || $remote === null) {
+            return $local !== $remote;
+        }
+
+        return $local->getTimestamp() !== $remote->getTimestamp();
     }
 
     /**
@@ -354,6 +458,16 @@ class SubscriptionService
         Assert::true(
             ! $existing instanceof Subscription || ! $existing->valid(),
             '既に有効なサブスクリプションがあります。プラン変更をご利用ください。'
+        );
+
+        // 段 1b: 支払いが未解決のまま残っている契約 (past_due / unpaid) があるときは新規契約を作らない。
+        // Cashier の valid() は past_due / unpaid を false と見るため段 1 を素通りするが、
+        // Stripe 側の契約は生きており、ここで作ると **2 本目の契約 = 二重請求**になる。
+        // 利用者の次の一手は「新規契約」ではなく「支払い方法の更新」なので、そこへ案内する。
+        Assert::false(
+            $existing instanceof Subscription
+                && SubscriptionState::fromSubscription($existing)->hasUnsettledPayment(),
+            'お支払いが確認できていないご契約があります。お支払い方法の更新をお願いします。'
         );
 
         // 段 2: 同 token 行 (intent=subscription_start スコープ)

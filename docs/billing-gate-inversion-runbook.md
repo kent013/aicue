@@ -60,3 +60,45 @@ backfill 完了 (残余 0 件)  →  新コード (ゲート反転) の活性化
 | `plan_code` 非 null の組織 | **結論は P4 前後で 1 ビットも変わらない** (`RequireActiveSubscriptionMiddlewareTest` が固定) |
 | 新規に発生する未契約組織 | `NoSubscription` で遮断され、onboarding へ誘導される (= ゲート反転の実体) |
 | 遮断時の着地 | `manageBilling` 保持者 → `onboarding.checkout` / 非保持者 → `onboarding.billing-required` |
+
+## 支払い猶予の導入 (T163) の移行手順
+
+支払い失敗の猶予期限化 (`subscriptions.past_due_since` + `PaymentGracePolicy`) は、
+「past_due + カード有りは無期限に利用継続」から「猶予日数まで利用継続」への**挙動の反転**を含む。
+影響を受けるのは支払い失敗が猶予日数以上続いた組織だけだが、移行の順序に契約がある。
+
+### migration は 2 本を同じデプロイで流す (非交渉)
+
+| 順 | migration | 役割 |
+|---|---|---|
+| 1 | `2026_08_15_000200_add_past_due_since_to_subscriptions` | 列追加 (nullable。既定 NULL) |
+| 2 | `2026_08_15_000210_backfill_past_due_since_on_subscriptions` | 既存の past_due 行に**実行時刻**を打つ |
+
+- backfill を流さないと既存の past_due 行は起点 NULL のままになる。起点 NULL は
+  **遮断しない**側に倒すので締め出しは起きないが、猶予がいつまでも始まらない
+  (日次突き合わせが `past_due` を再観測して打刻するまで動かない)。
+- backfill が打つのは **migration 実行時刻**であり、実際に支払いが失敗した時刻ではない。
+  よって**デプロイ直後は、既存の全 past_due 行の猶予がデプロイ時刻を起点に数え直される**。
+  これは意図した設計で、遡って遮断すると告知なしに突然止まるため採らない。
+- backfill は `whereNull('past_due_since')` ガードで**冪等**。`down()` は「どの行が
+  migration 起因か」を識別できないため**意図的に no-op**。
+
+### 手動 SQL / tinker で `past_due_since` を書かない (非交渉)
+
+この列は遮断の期日を決める状態キーで、書込は `SubscriptionService` 1 ファイルに閉じている
+(`PastDueSinceWriteInvariantTest` が機械固定)。手で書くと、猶予の起点が観測と無関係な値に
+なり、日次突き合わせも「食い違い無し」と見て直さない。値がおかしいときは
+**Stripe 側の状態を正した上で `billing:reconcile-subscription-status` を流す**。
+
+### 猶予日数を変えるとき
+
+`config/billing.php` の `payment_grace_days` (env `BILLING_PAYMENT_GRACE_DAYS`) だけを変える。
+`0` は「観測した瞬間に止める」を意味する有効な値で、負値は設定不備として起動時ではなく
+判定時に例外で落ちる。**日数を短くすると、既に猶予中の組織がその場で遮断されうる**
+(起点は動かないため)。短縮は告知とセットで行う。
+
+### 日次突き合わせを止めない
+
+`billing:reconcile-subscription-status` が止まると、webhook を落とした契約は
+**遮断も復旧もされないまま固まる**。監視対象は本コマンドの終了コードと `report()`
+(詳細は `docs/architecture.md` §支払い失敗の猶予と Stripe 契約状態の突き合わせ)。

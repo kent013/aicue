@@ -7,11 +7,13 @@ namespace App\Http\Controllers\Onboarding;
 use App\DataTransferObjects\Billing\PlanDto;
 use App\DataTransferObjects\Onboarding\OnboardingCheckoutDto;
 use App\Enums\Billing\SignupFundingChoice;
+use App\Enums\Billing\SubscriptionState;
 use App\Enums\Inquiry\InquirySource;
 use App\Enums\PlanCode;
 use App\Http\Concerns\ResolvesCurrentOrganization;
 use App\Http\Controllers\Controller;
 use App\Models\Billing\Plan;
+use App\Models\Billing\Subscription;
 use App\Models\Organization;
 use App\Models\User;
 use App\Services\Billing\AutoRechargeService;
@@ -65,6 +67,15 @@ final class OnboardingController extends Controller
         // 未契約 + manageBilling 権限なし → billing-required へ
         if (! Gate::allows('manageBilling', $organization)) {
             return new RedirectResponse(route('onboarding.billing-required'));
+        }
+
+        // 支払いが未解決のまま契約が残っている組織は、プラン選択ではなく
+        // **支払い方法を更新できる画面** (課金画面 = Customer Portal への導線) へ逃がす。
+        // 判定は BillingAccess と同じ述語 1 つだけを見る (可否の再判定はしない)。
+        $subscription = $organization->subscription('default');
+        if ($subscription instanceof Subscription
+            && SubscriptionState::fromSubscription($subscription)->hasUnsettledPayment()) {
+            return new RedirectResponse(route('billing.index'));
         }
 
         // ?plan= が来ていたら org-scoped に積み (Resolver 規約: 有効→put / 無効→forget)、

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Services\Billing\CashierStripeGateway;
+use App\Services\Billing\SubscriptionSnapshotMapper;
 
 /*
  * F-3-01: subscription swap (プラン変更) payload の invariant。**payload 変更の唯一の入口**。
@@ -14,8 +15,14 @@ use App\Services\Billing\CashierStripeGateway;
  *   (即時請求・trial 再開の誘発を構造的に避ける)。
  */
 
+/** payload builder は純関数だが gateway のメソッドなので、依存 (写像) を渡して素で組む。 */
+function swapPayloadGateway(): CashierStripeGateway
+{
+    return new CashierStripeGateway(new SubscriptionSnapshotMapper);
+}
+
 test('payload は既存 item id と price / quantity=1 と create_prorations だけを返す', function (): void {
-    $payload = (new CashierStripeGateway)->buildSwapPayload('si_existing_1', 'price_standard');
+    $payload = swapPayloadGateway()->buildSwapPayload('si_existing_1', 'price_standard');
 
     expect($payload)->toBe([
         'items' => [
@@ -28,7 +35,7 @@ test('payload は既存 item id と price / quantity=1 と create_prorations だ
 });
 
 test('payload に即時請求・trial 再開を誘発するパラメータを含めない', function (): void {
-    $payload = (new CashierStripeGateway)->buildSwapPayload('si_existing_1', 'price_standard');
+    $payload = swapPayloadGateway()->buildSwapPayload('si_existing_1', 'price_standard');
 
     expect($payload)->not->toHaveKey('billing_cycle_anchor');
     expect($payload)->not->toHaveKey('trial_end');
@@ -38,9 +45,9 @@ test('payload に即時請求・trial 再開を誘発するパラメータを含
 });
 
 test('空の item id は fail-fast する', function (): void {
-    (new CashierStripeGateway)->buildSwapPayload('', 'price_standard');
+    swapPayloadGateway()->buildSwapPayload('', 'price_standard');
 })->throws(InvalidArgumentException::class);
 
 test('空の price id は fail-fast する', function (): void {
-    (new CashierStripeGateway)->buildSwapPayload('si_existing_1', '');
+    swapPayloadGateway()->buildSwapPayload('si_existing_1', '');
 })->throws(InvalidArgumentException::class);
