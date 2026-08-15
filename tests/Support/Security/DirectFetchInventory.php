@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Support\Security;
 
+use App\Enums\Security\RecoveryFetchShape;
 use Illuminate\Database\Eloquent\Model;
 use ReflectionClass;
 use SplFileInfo;
@@ -291,23 +292,49 @@ final class DirectFetchInventory
                 .'掛けると JOIN 先までロックするため、単一テーブルの主キーロックに落としている',
             ),
 
+            // --- 滞留回収の候補列挙が返した主キー (aicue:T171 で新設した分類) ---
+            'Services/Manual/AnalysisJobService.php#lockStaleJob#AnalysisJob.whereKey:$id#1' => DirectFetchJustificationEntry::recoveryCandidate(
+                'id は滞留回収の候補列挙 (staleJobIds) が status / 経過時間で選んだ AnalysisJob の主キー。'
+                .'全テナント横断の保守処理で定期実行から呼ばれ HTTP 入力を経由しない。'
+                .'候補列挙と同じ述語を WHERE に入れて行ロック下で再評価するため誤回収も起きない',
+                entryPoint: 'App\Services\Manual\AnalysisJobService::failStaleJob',
+                stream: 'analysis_job',
+                shape: RecoveryFetchShape::DomainService,
+            ),
+            'Services/Manual/RenderJobService.php#lockStaleJob#RenderJob.whereKey:$id#1' => DirectFetchJustificationEntry::recoveryCandidate(
+                'id は滞留回収の候補列挙 (staleJobIds) が status / 経過時間で選んだ RenderJob の主キー。'
+                .'全テナント横断の保守処理で定期実行から呼ばれ HTTP 入力を経由しない。'
+                .'投入待ちと実行中で閾値が分かれるが述語は 1 か所に集約してある',
+                entryPoint: 'App\Services\Manual\RenderJobService::failStaleJob',
+                stream: 'render_job',
+                shape: RecoveryFetchShape::DomainService,
+            ),
+            'Services/Billing/TicketLedgerService.php#lockExpiredReservation#TicketReservation.whereKey:$id#1' => DirectFetchJustificationEntry::recoveryCandidate(
+                'id は滞留回収の候補列挙 (expiredReservationIds) が選んだ TicketReservation の主キー。'
+                .'期限切れ予約の解放は全テナント横断の保守処理で定期実行から呼ばれる。'
+                .'失効した月次 hold の判定式は会計の一部なので台帳サービスの中に閉じている',
+                entryPoint: 'App\Services\Billing\TicketLedgerService::releaseExpiredReservation',
+                stream: 'ticket_reservation',
+                shape: RecoveryFetchShape::DomainService,
+            ),
+            'Services/Billing/StripeWebhookProcessor.php#claimStale#StripeWebhookEvent.whereKey:$id#1' => DirectFetchJustificationEntry::recoveryCandidate(
+                'id は滞留回収の候補列挙 (staleRecordIds) が status / 経過時間で選んだ通知記録の主キー。'
+                .'受理は行ロック下で滞留の述語を再評価するため、待っている間に他の実行が'
+                .'前へ進めた行は 1 行も返らない。HTTP 入力を経由しない保守処理である',
+                entryPoint: 'App\Services\Billing\StripeWebhookProcessor::recoverStuckEvent',
+                stream: 'webhook_event',
+                shape: RecoveryFetchShape::DomainService,
+            ),
+            'Services/Recovery/Streams/StaleUploadReservationStream.php#releaseIfStillStale#TakeUploadReservation.whereKey:$id#1' => DirectFetchJustificationEntry::recoveryCandidate(
+                'id は同じ系列の候補列挙が status / 期限で選んだアップロード予約の主キー。'
+                .'解放とパスの取得を 1 本の行ロックで済ませており、登録処理が勝った行は'
+                .'述語の再評価で 0 行になる (正当なテイクの実体を消さない)',
+                entryPoint: 'App\Services\Recovery\Streams\StaleUploadReservationStream::recover',
+                stream: 'upload_reservation',
+                shape: RecoveryFetchShape::StreamInternal,
+            ),
+
             // --- 同一メソッド内の走査クエリ由来 (保守処理) ---
-            'Services/Billing/TicketLedgerService.php#releaseStale#TicketReservation.whereKey:$id#1' => DirectFetchJustificationEntry::sameMethodQuery(
-                'id は同一メソッドが status / expires_at で列挙した TicketReservation の主キー。'
-                .'期限切れ予約の解放は全テナント横断の保守処理であり cron から呼ばれる (HTTP 入力を経由しない)',
-            ),
-            'Services/Capture/StaleUploadReservationSweeper.php#sweep#TakeUploadReservation.whereKey:$reservation->id#1' => DirectFetchJustificationEntry::sameMethodQuery(
-                'id は同一メソッドが status / expires_at で列挙した予約行の主キー。孤児オブジェクト回収は'
-                .'全テナント横断の保守処理で cron から呼ばれる。whereKey は CAS 更新の対象行指定に使っている',
-            ),
-            'Services/Manual/AnalysisJobService.php#recoverStale#AnalysisJob.whereKey:$id#1' => DirectFetchJustificationEntry::sameMethodQuery(
-                'id は同一メソッドが status / 経過時間で列挙した AnalysisJob の主キー。'
-                .'stale ジョブの回復は全テナント横断の保守処理で cron から呼ばれる (HTTP 入力を経由しない)',
-            ),
-            'Services/Manual/RenderJobService.php#recoverStale#RenderJob.whereKey:$id#1' => DirectFetchJustificationEntry::sameMethodQuery(
-                'id は同一メソッドが status / 経過時間で列挙した RenderJob の主キー。'
-                .'stale ジョブの回復は全テナント横断の保守処理で cron から呼ばれる (HTTP 入力を経由しない)',
-            ),
             'Services/Manual/RenderJobService.php#reconcileOutputs#RenderJob.whereKey:$id#1' => DirectFetchJustificationEntry::sameMethodQuery(
                 'id は同一メソッドが output_path 非 NULL で列挙した RenderJob の主キー。'
                 .'世代交代済み出力の整合回復は全テナント横断の保守処理で cron から呼ばれる',

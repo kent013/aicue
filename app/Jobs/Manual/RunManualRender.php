@@ -21,7 +21,7 @@ use Throwable;
  * - payload は renderJobId のみ (モデル/チケット/org 値を payload に持たない = payload 不信任)
  * - 専用 connection database-render (retry_after=1680) で流す。運用契約:
  *   本番/ステージングは `php artisan queue:work database-render` を worker 定義に必須登録
- *   (docs/architecture.md。滞留は recoverStale cron が queued=10 分 / running=30 分で failJob する)
+ *   (docs/architecture.md。滞留は work:recover-stuck --stream=render_job が queued=10 分 / running=30 分で失敗確定する)
  */
 class RunManualRender implements ShouldQueue
 {

@@ -58,7 +58,7 @@ enum BillingRetentionExclusion: string
             self::BillingNotification => 'メール送達の重複防止台帳。UNIQUE が冪等の調停者であり、消すと同じ請求書の通知が再送される。'
                 .'保持ポリシーの所有者は課金リマインダ機能である',
             self::TicketReservation => 'TTL で解放される一時状態であって取引記録ではない。'
-                .'所有者は既存の billing:release-stale-reservations である',
+                .'所有者は既存の滞留回収 (work:recover-stuck --stream=ticket_reservation) である',
             self::Plan => '価格カタログ (現在提供している商品の定義) であって取引の記録ではない',
             self::PlanPrice => 'Stripe Price のカタログ snapshot であって取引の記録ではない。過去行は価格改定の履歴として残す',
             self::TicketVolumePrice => 'チケット単価のカタログ snapshot であって取引の記録ではない。過去行は価格改定の履歴として残す',

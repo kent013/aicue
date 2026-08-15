@@ -18,7 +18,7 @@ use Illuminate\Support\Carbon;
  * - bytes_pending = org 単位の「pending & 未失効」+「verifying 全件」の size_bytes 合計
  *   (StorageUsageService::bytesPending)
  * - status 遷移は TakeUploadService (insert) / TakeRegistrationService (claim/CAS) /
- *   StaleUploadReservationSweeper (released 化) のみが行う
+ *   滞留回収の StaleUploadReservationStream (released 化) のみが行う
  *
  * @property int $id
  * @property int $cut_id

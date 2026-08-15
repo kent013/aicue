@@ -5,8 +5,11 @@ declare(strict_types=1);
 use App\Enums\Billing\TicketCommitResult;
 use App\Enums\Billing\TicketLedgerKind;
 use App\Enums\Billing\TicketReservationStatus;
+use App\Enums\Recovery\RecoveryOutcome;
 use App\Models\Billing\TicketLedgerEntry;
+use App\Models\Billing\TicketReservation;
 use App\Services\Billing\TicketLedgerService;
+use App\Services\Recovery\Streams\ExpiredTicketReservationStream;
 use Carbon\CarbonImmutable;
 
 /*
@@ -27,7 +30,7 @@ test('TTL 切れで Released 化された生存予約でも commit は課金す�
 
     $reservation = commitWinsService()->reserve($organization, 3);
     $this->travel(31)->minutes();
-    commitWinsService()->releaseStale();
+    releaseStaleTicketReservations();
     expect($reservation->refresh()->status)->toBe(TicketReservationStatus::Released);
 
     $result = commitWinsService()->commit($reservation);
@@ -82,7 +85,7 @@ test('無期限 monthly 予約は TTL 経過後も ReleasedExpired にならず�
     expect(commitWinsService()->balance($organization)->totalAvailable())->toBe(7);
 });
 
-test('releaseStale は TTL 未超過でも失効 monthly hold を解放する', function (): void {
+test('滞留回収は TTL 未超過でも失効 monthly hold を解放する', function (): void {
     [$organization] = createOrganizationWithOwner();
     // monthly 期限 (10 分後) < reserve TTL (30 分) にして「TTL 切れ」枝と切り分ける
     $expiresAt = CarbonImmutable::now()->addMinutes(10);
@@ -93,6 +96,47 @@ test('releaseStale は TTL 未超過でも失効 monthly hold を解放する', 
 
     $this->travel(11)->minutes(); // TTL (30 分) は未超過だが monthly hold は失効
 
-    expect(commitWinsService()->releaseStale())->toBe(1);
+    expect(releaseStaleTicketReservations())->toBe(1);
     expect($reservation->refresh()->status)->toBe(TicketReservationStatus::Released);
+});
+
+/*
+ * 滞留回収の並行競合 (T171): 候補列挙とロック取得の間に状態が動いたときの振る舞い。
+ * 行ロック下で滞留の述語ごと再評価するため、競合は例外ではなく Skipped になる。
+ */
+
+test('候補列挙後に commit された予約は Skipped で、回収は成功のまま終わる', function (): void {
+    [$organization] = createOrganizationWithOwner();
+    commitWinsService()->grantPurchased($organization, 10, 'cs_race', 'pi_race', 10000);
+    $reservation = commitWinsService()->reserve($organization, 3);
+    $this->travel(31)->minutes();
+
+    $stream = app(ExpiredTicketReservationStream::class);
+    $sweptAt = CarbonImmutable::now();
+    expect($stream->candidateIds($sweptAt, null, 10))->toBe([$reservation->id]);
+
+    // 別プロセスが先に commit した状況を再現する
+    expect(commitWinsService()->commit($reservation))->toBe(TicketCommitResult::Committed);
+
+    // 例外を投げない = 運用アラートを鳴らさない (正常事象として数える)
+    expect($stream->recover($reservation->id, $sweptAt))->toBe(RecoveryOutcome::Skipped);
+    expect($reservation->refresh()->status)->toBe(TicketReservationStatus::Committed);
+});
+
+test('候補列挙後に expires_at が延長された予約は解放されない', function (): void {
+    [$organization] = createOrganizationWithOwner();
+    commitWinsService()->grantPurchased($organization, 10, 'cs_extend', 'pi_extend', 10000);
+    $reservation = commitWinsService()->reserve($organization, 3);
+    $this->travel(31)->minutes();
+
+    $stream = app(ExpiredTicketReservationStream::class);
+    $sweptAt = CarbonImmutable::now();
+    expect($stream->candidateIds($sweptAt, null, 10))->toBe([$reservation->id]);
+
+    // 述語が成立しなくなる状況 (有効期限の延長) を作る
+    TicketReservation::query()->whereKey($reservation->id)
+        ->update(['expires_at' => $sweptAt->addMinutes(30)]);
+
+    expect($stream->recover($reservation->id, $sweptAt))->toBe(RecoveryOutcome::Skipped);
+    expect($reservation->refresh()->status)->toBe(TicketReservationStatus::Reserved);
 });

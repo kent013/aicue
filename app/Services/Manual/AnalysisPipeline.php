@@ -274,7 +274,7 @@ class AnalysisPipeline
      *   - startJob:     analysis_jobs → (reserve: organizations)
      *   - finalize:     analysis_jobs → video_manuals → (commit: ticket_reservations → organizations)
      *   - failJob:      analysis_jobs → video_manuals → (release: ticket_reservations → organizations)
-     *   - releaseStale (billing cron): ticket_reservations → organizations (前方リソースを保持しない)
+     *   - 滞留予約の解放 (課金の定期実行): ticket_reservations → organizations (前方リソースを保持しない)
      *   - ScenarioService::save: video_manuals のみ
      * いずれもグローバル順の部分列であり循環待ちは構成できない。
      *

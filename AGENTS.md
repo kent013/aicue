@@ -664,3 +664,26 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
       「本番で意味のある権限差が既に存在する」とは書かない
     - 保証しないもの (撮影者は完成動画を観られない / gate はファイル粒度 / Browser lane は
       DOM 契約のみ 等) は `docs/architecture.md` §完成レンダ成果物の選択と受け取り口 が正本
+14. **滞留回収の単一入口と目録 (T171 / 家系の裁定 AG-083 標準形 v1)**: 止まったまま進まない
+    処理・予約を前へ進める入口は **`work:recover-stuck` ただ 1 本**で、対象は
+    `--stream=<key>` で指定する (`App\Enums\Recovery\RecoveryStream` が系列と実行間隔の正本)。
+    - **候補は主キーだけを返し、回収は主キーと掃引開始時刻しか受け取らない**
+      (`App\Contracts\Recovery\StuckWorkStream`)。行の内容を持ち回れないので、回収側は必ず
+      行を取り直して**候補列挙と同じ述語**を行ロック下で再評価することになる (誤回収の防止)。
+      述語は各ドメインの Service の private に 1 か所だけ置き、系列側へ複製しない
+    - 系列を増やすときは **enum の case / registry / 目録 / Schedule の 4 つを同時に**更新する
+      (`StuckWorkRecoveryInventoryTest` が deny-by-default で集合一致を強制)。
+      Schedule に載る他のコマンドは `NonRecoveryScheduleEntry` + 区分 + 30 文字以上の理由で
+      「回収ではない定期実行」として登録が必須 = **6 本目の独自回収を素通しで足せない**
+    - **既定は実行しない (数えるだけ)**。定期実行は `--apply` を明示する。付け忘れは回収が
+      全面停止しても無音なので、`--apply` / `onOneServer` / `withoutOverlapping` の**有効期限** /
+      `onFailure` の 4 点を上記 gate が機械固定する
+    - 撤去した旧実装 (5 コマンド / 2 クラス / 2 メソッド宣言) の再流入は
+      `RetiredRecoveryReferenceGateTest` が止める。**保証範囲を誇張しない** —
+      変数経由の呼び出し (`$service->recoverStale()`) は字句だけでは受信側クラスを確定できないため
+      対象外である
+    - 監視対象は 5 つ (`errors` / `deferred` / `escalated` / `cleanup-failed` / `limit-reached`)。
+      とくに **`deferred` は `errors` に出ない** (失敗を行に書き戻して次回へ回すため) ので
+      独立した監視対象である。保証しないもの (500 件上限は公平性を保証しない / S3 削除に
+      失敗した孤児は自動では拾えない / 実行しない指定の候補件数は上界にすぎない) は
+      `docs/architecture.md` §滞留回収の共通基盤 が正本

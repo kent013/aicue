@@ -169,10 +169,10 @@ route parameter を経由しない id (POST payload / MCP tool 引数 / token cl
 | `Manual/VideoManualService` | AI-CUE: 動画マニュアル create/updateMeta/delete/duplicate (created_by サーバ導出・category 保存時再解決。duplicate = 別名保存: 保存済み cuts を新 manual へ複製し takes/成果物/SOP は引き継がない) |
 | `Manual/ScenarioService` | AI-CUE: シナリオ (Cut 群) の document 単位保存 (VideoManual 行ロック → rendering/analyzing・楽観ロック guard → 2 段階 reconcile → version+1) + AI 解析結果の materialize (`materializeIntoLockedManual` = ロック済み前提メソッド)。§シナリオ整合の共有不変条件の準拠実装 |
 | `Manual/SourceDocumentService` | AI-CUE: SOP (SourceDocument) の保存。追記型 immutable (差し替え = 新規行)。専用 route 経路は VideoManual 行ロック + draft/ready guard、MIME は内容 sniff で再判定 (polyglot 対策) |
-| `Manual/AnalysisJobService` | AI-CUE: AI 解析の状態機械 (trigger = draft/ready→analyzing + in-flight 冪等 + 残高事前チェック / failJob = 行ロック + terminal guard の冪等失敗確定 / recoverStale = stale 回復 cron 本体) |
+| `Manual/AnalysisJobService` | AI-CUE: AI 解析の状態機械 (trigger = draft/ready→analyzing + in-flight 冪等 + 残高事前チェック / failJob = 行ロック + terminal guard の冪等失敗確定 / failStaleJob = 滞留回収の 1 件処理の口 (行ロック下で滞留の述語ごと再評価する)) |
 | `Manual/AnalysisPipeline` | AI-CUE: 解析パイプライン本体 (extract→decompose→generate→terminal tx)。チケット 2 フェーズ (予約冪等キー = analysis_jobs.ticket_reservation_id、materialize + commit + succeeded を単一 tx で原子化)。LLM 出力の有界リトライ (JSON 検証失敗のみ最大 2 回) |
 | `Manual/SopTextExtractor` | AI-CUE: SOP テキスト抽出 (pdf = smalot/pdfparser / xlsx·xls = phpoffice/phpspreadsheet / txt)。UTF-8 strict 検証 + **SJIS 誤解釈 (pdfparser が定義済み CJK CMap 非対応のため CP932 を Windows-1252 として decode する) の区間単位復元** (**復元は日本語本文ゲートで拒否される文書にのみ適用する**。既に日本語として読める文書は 1 バイトも変更しない = 正当なテキストの不変性を構造で保証する。区間の採否は CP1252 可逆性 / SJIS-win 妥当性 / 全角日本語が 2 文字以上増える / 区間の過半数が日本語、の 4 条件をすべて満たすこと) + **日本語本文ゲート** (`manual.analysis_min_japanese_ratio` 未満は LLM に渡さず insufficientJapaneseText。評価対象は**正規化後・空白を除いた文字数**に占める日本語文字の比率。**閾値の変更は TODO 起票 + 実測の再提出を必須とする**) + UTF-8 バイト上限 (token budget 導出。AnalysisTokenBudgetInvariantTest が算術を固定)。0 バイトは媒体で弁別する (pdf = unextractable / plain・spreadsheet = tooShort) |
-| `Manual/RenderJobService` | AI-CUE: レンダの状態機械 (trigger = ready→rendering + render 冪等 + 採用テイク/尺/残高 guard / triggerPreview = Organization 行ロックで org 同時 preview 上限を直列化 / failJob = 冪等失敗確定 / completeRenderIntoLockedManual = ロック済み前提メソッド / recoverStale・reconcileOutputs = cron 本体) |
+| `Manual/RenderJobService` | AI-CUE: レンダの状態機械 (trigger = ready→rendering + render 冪等 + 採用テイク/尺/残高 guard / triggerPreview = Organization 行ロックで org 同時 preview 上限を直列化 / failJob = 冪等失敗確定 / completeRenderIntoLockedManual = ロック済み前提メソッド / failStaleJob = 滞留回収の 1 件処理の口 / reconcileOutputs = 出力世代の収束) |
 | `Manual/RenderPipeline` | AI-CUE: レンダパイプライン本体 (startJob→buildManifest→compose→upload→finalize)。チケット 2 フェーズ (予約冪等キー = render_jobs.ticket_reservation_id、complete + commit + succeeded を terminal tx で原子化)。version スナップショット固定 (§10.8-6) |
 | `Manual/CutSequencer` | AI-CUE: カット表示順 (step→配下 point) と表示ラベル (手順N/急所N-M) の導出 (読み取り専用) |
 | `Manual/CurrentRenderArtifact` | AI-CUE: 「いま受け取れるレンダ成果物はどれか」の唯一の選択式 (読み取り専用)。playback / download / 詳細画面 props の 3 消費者が同じ行を指す。保持ポリシーと同じ世代定義 (最新 succeeded の output_path が NULL なら旧世代へフォールバックしない)。§完成レンダ成果物の選択と受け取り口 |
@@ -267,7 +267,7 @@ route parameter を経由しない id (POST payload / MCP tool 引数 / token cl
 旧実装は commit 後に dispatch していたため、その間にプロセスが落ちると
 `RunManualAnalysis` / `RunManualRender` / `DeleteRenderOutputsJob` / `DeleteTakeObjectsJob` /
 Stripe webhook 由来の 2 ジョブが「保存済み・未投入」のまま残った。
-`recoverStale` は**再投入ではなく failJob へ倒す**ため、ユーザーの再実行なしには前進しない。
+滞留回収は**再投入ではなく失敗確定へ倒す**ため、ユーザーの再実行なしには前進しない。
 
 1. **0 件 pin (commit 後ずらしの機構を使わない)** — 次の 6 種は
    `QueueDispatchAtomicityInventoryTest` が deny-by-default で **0 件**に固定する。
@@ -559,8 +559,8 @@ catch を足す必要が出たら、観測目録へ移すか免除の分類を�
   (queue=analysis、retry_after=1680) で流れる。**本番/ステージングの worker プロセス定義・
   デプロイ手順・監視対象に `php artisan queue:work database-analysis --timeout=1620` を
   必須項目として登録する** (`--timeout` は規則 1。§キューのリース期間とワーカー制限時間の規約)
-  (専用 worker が居ないとジョブは滞留する。queued 滞留は `analysis:recover-stale-jobs` cron が
-  30 分で failJob するため、滞留 = 監視で気づける)
+  (専用 worker が居ないとジョブは滞留する。queued 滞留は滞留回収
+  (`work:recover-stuck --stream=analysis_job --apply`) が 30 分で失敗確定するため、滞留 = 監視で気づける)
 - 時間 budget の連鎖 `job timeout (1,560s) < retry_after (1,680s) < 予約 TTL (1,800s) ≤ stale 閾値 (1,800s)`
   は `AnalysisTimeBudgetInvariantTest` が CI 固定する。内訳は
   `deadline D (1,080s = 3 × client timeout) + client timeout C (360s) + finalize 予算 (30s) + 安全余白 (90s)`。
@@ -586,9 +586,9 @@ catch を足す必要が出たら、観測目録へ移すか免除の分類を�
   (queue=render、retry_after=1680) で流れる。**本番/ステージングの worker プロセス定義・
   デプロイ手順・監視対象に `php artisan queue:work database-render --timeout=1620` を
   必須項目として登録する** (`--timeout` は規則 1。§キューのリース期間とワーカー制限時間の規約)
-  (専用 worker が居ないとジョブは滞留する。queued 滞留は `render:recover-stale-jobs` cron が
-  **10 分** (queued 短 SLA。enqueue 時点で編集を止めるため) / running 滞留は **30 分** で
-  failJob するため、滞留 = 監視で気づける)
+  (専用 worker が居ないとジョブは滞留する。queued 滞留は滞留回収
+  (`work:recover-stuck --stream=render_job --apply`) が **10 分** (queued 短 SLA。enqueue 時点で
+  編集を止めるため) / running 滞留は **30 分** で失敗確定するため、滞留 = 監視で気づける)
 - **worker ホスト要件**: ffmpeg / ffprobe バイナリ (`RENDER_FFMPEG_BINARY` /
   `RENDER_FFPROBE_BINARY`) と日本語対応フォント (`RENDER_SUBTITLE_FONT`。既定
   Noto Sans CJK JP) のインストールが前提 (Docker image 要件)。テストは `Process::fake()` で
@@ -951,6 +951,111 @@ webhook は落ちうる (Stripe 自身が遅延・欠落を明記している)�
   subscriptions 行と食い違わない。未知 Price のときだけ据え置かれるが、その回復は本経路の
   責務ではない)。
 
+## 滞留回収の共通基盤 (T171 / 家系の裁定 AG-083 標準形 v1)
+
+止まったまま進まなくなった処理・予約を、原因を問わず「一定時間が過ぎても状態が変わっていない」
+ことだけを手がかりに前へ進める仕組み。**入口は `work:recover-stuck` ただ 1 本**で、
+対象の系列は `--stream=<key>` で指定する (`RecoveryStream` が系列とその実行間隔の正本)。
+
+### 系列の契約 (`App\Contracts\Recovery\StuckWorkStream`)
+
+- `candidateIds()` は**主キーだけ**を昇順で返し、`recover()` は**主キーと掃引開始時刻しか
+  受け取らない**。行の内容を持ち回れないので、回収側は必ず行を取り直して述語を再評価することに
+  なる (候補を集めた後に正常へ進んだものを誤って失敗にする事故が構造的に起きない)
+- 候補列挙と行ロック下の再評価は**同じ 1 つの述語**を使う (各ドメインの Service の private に
+  集約してある)。片方だけ書き換えられると誤回収が再発するため、複製を作らない
+- 競合・条件不成立は例外ではなく `RecoveryOutcome::Skipped` を返す。例外を投げてよいのは本当の
+  不変条件違反だけで、掃引側が報告して次の候補へ進む
+
+### 実効上限とページ送りの違い
+
+- 掃引はページ送り (1 度に 200 件ずつ取り出す) で行う。**これはメモリの上界であって掃引全体の
+  上限ではない**。先頭に居座って毎回例外になる行があっても、カーソルが跨いで前進するので
+  後続に手が届く
+- 実効上限 = `min(--limit, 系列の申告)`。適用箇所は 1 つだけで、系列の実装は上限を知らない。
+  現在 上限を申告しているのは撮影アップロード (500) だけである
+- `limit-reached=yes` は「上限に達し、かつ**未処理の候補が実在する**」ときだけ出す
+  (ちょうど上限件数で候補が尽きた場合は打ち切りではない)
+
+### 実行しない指定 (既定) が数えるもの
+
+`--apply` を付けない実行は `recover()` を 1 度も呼ばず、候補の件数だけを数える。
+**「回収されるはずの件数」は出せない** (webhook の回収は受理そのものが書き込みのため)。
+出力の `candidates` は実際に回収される件数の**上界**にすぎない。
+
+### 結果の種類 (`RecoveryOutcome`。この 5 値がすべて)
+
+| 種類 | 意味 |
+|---|---|
+| `recovered` | 業務状態を前へ進めた |
+| `recovered_with_cleanup_failure` | 前へ進めたが付随する後始末に失敗した (S3 の孤児削除) |
+| `skipped` | 競合・条件不成立で何もしなかった (正常事象。失敗ではない) |
+| `deferred` | 前へ進まなかったが次回の掃引へ残した (webhook の再実行失敗) |
+| `escalated` | 自動回収の対象外へ移し人手へ渡した (webhook の `recovery_pending`) |
+
+### 監視対象 (必須。**5 つを見る**)
+
+- `errors > 0` が続く = 特定の行で回収が失敗し続けている
+- `deferred > 0` が続く = 再実行が失敗し続けている。**`errors` には出ない** —
+  失敗を行に書き戻して次回へ回すため、`errors=0` のまま滞留しうる (独立した監視対象である)
+- `escalated` の件数 = 自動回収の対象外として人手へ渡した件数
+- `cleanup-failed > 0` = S3 の孤児削除に失敗した件数。**手動確認が要る** —
+  行は解放済みなので自動では拾い直せない
+- `limit-reached=yes` が続く = 上限で打ち切っており後続候補が残っている
+
+加えて各系列の Schedule には `onFailure` → `report()` が付いており、回収が止まったことが
+無音にならないようにしてある。
+
+### 多重起動の抑止と、その限界
+
+`onOneServer()` + `withoutOverlapping()` を全系列に揃えてある。**ロックの有効期限は明示する**
+(`RecoveryStream::overlapExpiryMinutes()` = 実行間隔の 2 倍)。Laravel の既定は 24 時間で、
+異常終了でロックが残ると回収が丸 1 日止まったまま無音になるためである。
+**保証の限界を誇張しない**: 有効期限を過ぎるとロックは期限切れとして解けるので、
+正常な実行がその時間を超えて走っている間は同一系列が並行実行されうる。多重起動しても状態が
+壊れないことは各系列の行ロック下の再評価が担保するが、「重複が起きない」とは書かない。
+**想定最大実行時間が有効期限を下回っていること**は運用の監視対象 (実行時間) である。
+
+### 目録 (deny-by-default)
+
+`StuckWorkRecoveryInventoryTest` が「registry の系列集合 == `RecoveryStream` の全 case ==
+目録の申告集合」と「Schedule に載る全コマンドが回収の入口か非回収の申告のどちらかに属する」を
+機械強制する。**`--apply` の付け忘れは無音で回収を全面停止させる**ため、その検査が本 gate の
+主目的である。撤去した旧実装の再流入は `RetiredRecoveryReferenceGateTest` が止める。
+
+### 旧語彙からの対応表 (運用者が旧語彙で探して見つからない状態を作らない)
+
+| 旧 (撤去済みコマンドの出力) | 新 (`work:recover-stuck` の出力) |
+|---|---|
+| `replayed` | `recovered` |
+| `retry-scheduled` | `deferred` |
+| `moved-to-recovery-pending` | `escalated` |
+| `skipped` | `skipped` |
+| `recovered N stale analysis job(s)` / render 側の同種 | `recovered` |
+| `released N stale reservation(s)` / upload reservation 側の同種 | `recovered` |
+
+コマンド名の対応は次のとおり (旧名は 5 本ともコードにも運用の正本にも残っていない):
+解析 → `--stream=analysis_job` / レンダ → `--stream=render_job` /
+チケット予約 → `--stream=ticket_reservation` / Stripe の通知 → `--stream=webhook_event` /
+撮影アップロード → `--stream=upload_reservation`。
+アップロード予約の**保持期間の決着**だけは回収ではないため `capture:purge-upload-reservations`
+(日次) に分けてある。
+
+### 保証しないもの (誇張しない)
+
+- 撮影アップロードの 500 件上限は**公平性を保証しない** (毎回同じ先頭側だけを見る可能性がある。
+  ページ送りが効くのは 1 回の掃引の中だけである)
+- S3 の削除に失敗した孤児オブジェクトは**自動では拾い直せない** (行は解放済みで候補から外れる)。
+  `cleanup-failed` の件数を見て手で確認する
+- 実行しない指定の候補件数は、実際に回収される件数の**上界**にすぎない
+- 目録は申告の集合一致を見るだけで、`recover()` が実際に行ロック下で述語を再評価しているかは
+  検査できない (それは各系列の Feature テストが担う)
+- Schedule の検査は登録内容を見るだけで、**定期実行の仕組みが実際に動いていることは保証しない**
+  (運用側の監視対象)
+- 滞留の閾値は各ドメインの設定 (`config/manual.php` / `config/billing.php` / `config/capture.php`)
+  に置いたままである。回収側の設定へ集約すると、ジョブの制限時間・再試行間隔・予約の有効期限との
+  序列を固定している既存テストと情報源が 2 つに割れるため
+
 ## Stripe webhook の滞留回収
 
 - **状態の意味**: `received` = 受理済み・未終局 (**処理中と次の回収待ちを兼ねる**。
@@ -970,14 +1075,14 @@ webhook は落ちうる (Stripe 自身が遅延・欠落を明記している)�
 - **処理対象外の種類**: `HandledStripeWebhookEvent` に無い type は通常経路と同じく
   再実行して `processed` にする (`process()` の `null` arm は構造的に no-op)。
   回収だけ別扱いにして運用ノイズを作らない
-- **監視対象 (必須項目として登録する)**: **`php artisan billing:recover-stale-webhook-events`
+- **監視対象 (必須項目として登録する)**: **`php artisan work:recover-stuck --stream=webhook_event --apply`
   (scheduler で 5 分ごと・`onOneServer()` + `withoutOverlapping()`)**。
   失敗は `onFailure` → `report()` で運用アラート経路に載る。観測点は 3 つ:
   1. `status='received'` かつ `updated_at <= now - 閾値` の件数
      (増え続ける = scheduler か本コマンドが動いていない)
-  2. 本コマンド出力の `retry-scheduled` 件数 (再実行が失敗し続けている)
+  2. 本コマンド出力の `deferred` 件数 (再実行が失敗し続けている)
   3. `status='recovery_pending'` の件数 (理由は `recovery_reason`:
-     `order_sensitive` / `attempts_exhausted`)
+     `order_sensitive` / `attempts_exhausted`)。出力の `escalated` はここへ移した件数である
 - **運用手順**: `recovery_reason` ごとに次の行動が違う。
   `order_sensitive` は Stripe ダッシュボードで現在の契約状態を確認する /
   `attempts_exhausted` は `failure_reason` があれば確認し、ログと Stripe 上の状態と
@@ -1013,7 +1118,7 @@ webhook は落ちうる (Stripe 自身が遅延・欠落を明記している)�
   決済済み・未付与が確定した場合のみ tinker 等で `TicketLedgerService::grantPurchased()` を
   手動実行する (idempotency_key `purchase:{sessionId}` により再実行しても二重付与しない)。
   併せて `ticket_checkout_sessions` 行を completed 化する。
-  **滞留 (`received` のまま残った) 分は `billing:recover-stale-webhook-events` が回収する**ので、
+  **滞留 (`received` のまま残った) 分は `work:recover-stuck --stream=webhook_event` が回収する**ので、
   手動付与の前にその経路で決着していないかを確認する (§Stripe webhook の滞留回収)
 - **放棄 session の回収**: Stripe Checkout 自体の有効期限 (既定 24h) で Stripe 側が expire し、
   DB 行は checkout 開始時の期限切れ回収 (`status=pending AND expires_at <= now` → expired) で
@@ -1087,7 +1192,7 @@ webhook は落ちうる (Stripe 自身が遅延・欠落を明記している)�
 - **配信保証は at-most-once** (重複なし・欠落あり得る)。正はジョブ status + 既存ポーリング UI で、
   通知は補助チャネル。terminal commit 直後〜通知 insert 間のプロセス停止の欠落窓 (数 ms) は許容し、
   outbox 台帳は作らない (送達保証が要件化したときに outbox へ移行する)。worker のジョブ実行中
-  停止は `recoverStale` → `failJob` 経由で失敗通知が発火する
+  停止は滞留回収 → 失敗確定の経路で失敗通知が発火する
 - **宛先導出**: ジョブ通知 = `manual.created_by` ∪ `triggered_by` (jobs 列。Auth からの明示代入のみ =
   `MassAssignmentProtectedKeys` 登録済み) を org 所属再確認 + dedup / 招待 = `whereBlind` 一致の
   既存ユーザーのみ (平文 token 非含有) / 残高低下 = org の owner/admin
@@ -1135,11 +1240,14 @@ doc/10 §10.3 / §10.8-4/-7 の実装 (T004)。routes は `/app/projects/{projec
   プロセス定義・デプロイ手順・監視対象に `php artisan queue:work database-media --timeout=240`
   を必須項目として登録する** (専用 worker が居ないと削除ジョブは滞留する。`--timeout` は
   規則 1。§キューのリース期間とワーカー制限時間の規約)
-- **孤児掃除 cron**: `capture:release-stale-upload-reservations` (10 分毎・onOneServer) が
-  期限切れ pending / stale verifying (updated_at 15 分超過) を released 化して bytes_pending を
-  解放し、PUT 済み未登録の S3 オブジェクトを削除する (`Capture/StaleUploadReservationSweeper`。
-  fresh verifying には触れない = 登録処理の claim 契約と競合しない)。released/completed の
-  retention (30 日) 超過行は物理削除する
+- **孤児掃除の定期実行**: `work:recover-stuck --stream=upload_reservation --apply` (10 分毎・
+  onOneServer) が期限切れ pending / stale verifying (updated_at 15 分超過) を released 化して
+  bytes_pending を解放し、PUT 済み未登録の S3 オブジェクトを削除する
+  (`Recovery/Streams/StaleUploadReservationStream`。fresh verifying には触れない = 登録処理の
+  claim 契約と競合しない)。1 掃引の上限は 500 件 (S3 の入出力を有界にするため。公平性は保証しない)
+- **保持期間の決着は別コマンド**: released/completed の retention (30 日) 超過行の物理削除は
+  `capture:purge-upload-reservations` (日次・onOneServer) が行う。滞留の前進ではなく期限の決着
+  なので回収とは入口を分けている
 - **DL 済み削除不可 (D6)**: 詳細 GET が採用テイクの署名 DL URL と同時に発行する ACK トークン
   (Crypt 封緘・同 TTL) を `POST .../takes/{take}/downloaded` が検証して `takes.downloaded_at` を
   打刻する。非 null のテイクは DELETE 422

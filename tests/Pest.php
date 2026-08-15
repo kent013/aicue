@@ -2,8 +2,11 @@
 
 declare(strict_types=1);
 
+use App\DataTransferObjects\Recovery\StreamSweepResultDto;
 use App\Enums\OrganizationRole;
 use App\Enums\ProjectRole;
+use App\Enums\Recovery\RecoveryOutcome;
+use App\Enums\Recovery\RecoveryStream;
 use App\Models\ApiKey;
 use App\Models\Organization;
 use App\Models\Project;
@@ -12,6 +15,8 @@ use App\Providers\FakeExternalsServiceProvider;
 use App\Services\AI\Testing\CannedPromptFakeRegistrar;
 use App\Services\Billing\PersonalPlanService;
 use App\Services\Organization\OrganizationProvisioningService;
+use App\Services\Recovery\StuckWorkRecoverySweeper;
+use App\Services\Recovery\StuckWorkStreamRegistry;
 use App\Services\Storage\Fakes\FakeObjectStore;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -183,6 +188,38 @@ function createOrganizationWithOwner(string $name = 'テスト組織', bool $gra
     }
 
     return [$organization, $owner];
+}
+
+/**
+ * 滞留回収を 1 系列ぶん実行する (実際に回収する指定)。
+ *
+ * 定期実行と同じ経路 (registry → sweeper → stream) を通すので、テストが
+ * 系列ごとの内部実装ではなく**運用で実際に走る形**を叩くことになる。
+ */
+function sweepStuckWorkStream(RecoveryStream $stream): StreamSweepResultDto
+{
+    return app(StuckWorkRecoverySweeper::class)->sweep(
+        app(StuckWorkStreamRegistry::class)->get($stream),
+        apply: true,
+    );
+}
+
+/** 滞留した解析ジョブを回収し、実際に前へ進めた件数を返す */
+function recoverStaleAnalysisJobs(): int
+{
+    return sweepStuckWorkStream(RecoveryStream::AnalysisJob)->count(RecoveryOutcome::Recovered);
+}
+
+/** 滞留したレンダジョブを回収し、実際に前へ進めた件数を返す */
+function recoverStaleRenderJobs(): int
+{
+    return sweepStuckWorkStream(RecoveryStream::RenderJob)->count(RecoveryOutcome::Recovered);
+}
+
+/** 期限切れのチケット予約を解放し、実際に解放した件数を返す */
+function releaseStaleTicketReservations(): int
+{
+    return sweepStuckWorkStream(RecoveryStream::TicketReservation)->count(RecoveryOutcome::Recovered);
 }
 
 /**

@@ -97,6 +97,28 @@ enum DirectFetchJustification: string
      */
     case IdSuppliedByInternalCaller = 'id_supplied_by_internal_caller';
 
+    /**
+     * identity が「滞留回収の候補列挙が返した主キー」である。
+     *
+     * 想定は滞留回収の標準形 (候補は主キーだけを返し、回収は id しか受け取らない形)。
+     * 列挙と再取得が別メソッド・別クラスに分かれるため IdDerivedFromSameMethodQuery は使えず、
+     * 公開の口が生の id を受け取るため IdSuppliedByInternalCaller の前提も満たさない。
+     *
+     * 適用条件 (すべて機械検査する):
+     * - 主キークエリを含むメソッドが private で、identity がその引数である
+     * - 同一メソッドに request accessor が 1 つも無い (HTTP 入力を経由しない)
+     * - entry が申告する `entryPoint` (`Class::method`) が実在し、その本文が当該 private を呼ぶ
+     * - 申告された系列が registry と回収の目録の両方に登録済みである
+     * - **入口の形 (`RecoveryFetchShape`) ごとの封じ込め検査**を通る
+     *
+     * **保証しないもの**: 文字列で組み立てた動的な呼び出し (`$service->{$method}()`) と、
+     * `app/` の外 (テスト等) からの呼び出しは対象外である。
+     * 「回収以外から呼ばれないことが証明されている」とは書かない。
+     * ただし封じ込めの検査は「メソッド名が現れるファイルの集合」という決定可能な形なので、
+     * 「型を解決できないから沈黙する」という穴は無い (解決不能で素通しにはならない)。
+     */
+    case IdFromRecoveryCandidateEnumeration = 'id_from_recovery_candidate_enumeration';
+
     /** local 専用の診断経路。route 登録自体が local 限定で production から到達不能。 */
     case LocalOnlyDiagnostics = 'local_only_diagnostics';
 

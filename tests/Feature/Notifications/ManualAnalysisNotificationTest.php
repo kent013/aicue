@@ -25,7 +25,7 @@ use Kent013\PrismPrompt\Testing\TextResponseFake;
  * - 成功 (pipeline finalize true) → creator ∪ triggeredBy に各 1 件 (succeeded=true)
  * - creator = triggeredBy は dedup で 1 件のみ
  * - 失敗 (failJob true) → 1 件 (succeeded=false)。failJob 2 回目 no-op で二重発火しない
- * - recoverStale 経由の失敗も通知される
+ * - 滞留回収経由の失敗も通知される
  * - 退会済み (org 非所属) creator へは送らない / manual 削除競合は通知スキップ (例外なし)
  */
 
@@ -146,14 +146,14 @@ test('解析失敗 (failJob) → 1 件 (succeeded=false + error 文言)。2 回�
     expect(DB::table('notifications')->count())->toBe(1);
 });
 
-test('recoverStale 経由の失敗も通知が 1 件発火する', function (): void {
+test('滞留回収経由の失敗も通知が 1 件発火する', function (): void {
     [, $owner, , , $job] = analysisNotificationContext();
     $job->forceFill(['status' => JobStatus::Running->value])->save();
     // stale 閾値超過に細工 (updated_at を過去へ)
     DB::table('analysis_jobs')->where('id', $job->id)
         ->update(['updated_at' => now()->subHours(2)]);
 
-    expect(app(AnalysisJobService::class)->recoverStale())->toBe(1);
+    expect(recoverStaleAnalysisJobs())->toBe(1);
 
     $rows = DB::table('notifications')->where('notifiable_id', $owner->id)->get();
     expect($rows)->toHaveCount(1);

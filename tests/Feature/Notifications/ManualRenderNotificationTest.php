@@ -26,7 +26,7 @@ use Illuminate\Support\Facades\Storage;
  * レンダジョブ terminal 遷移の通知配線 (施策3/4):
  * - render 成功 (pipeline finalize true) / 失敗 (failJob true) → 1 件
  * - preview は成功/失敗とも通知 0
- * - failJob 2 回目 no-op で二重発火しない / recoverStale 経由の失敗通知
+ * - failJob 2 回目 no-op で二重発火しない / 滞留回収経由の失敗通知
  */
 
 /** テスト用 fake composer (実 ffmpeg に触れない) */
@@ -133,7 +133,7 @@ test('preview は成功/失敗とも通知 0', function (): void {
     expect(DB::table('notifications')->count())->toBe(0);
 });
 
-test('recoverStale 経由の render 失敗も通知される', function (): void {
+test('滞留回収経由の render 失敗も通知される', function (): void {
     [, $owner, $project, $manual] = renderNotificationContext();
     $job = app(RenderJobService::class)->trigger($project, $manual, $owner);
     DB::table('render_jobs')->where('id', $job->id)->update([
@@ -141,7 +141,7 @@ test('recoverStale 経由の render 失敗も通知される', function (): void
         'updated_at' => now()->subHours(2),
     ]);
 
-    expect(app(RenderJobService::class)->recoverStale())->toBe(1);
+    expect(recoverStaleRenderJobs())->toBe(1);
 
     $rows = DB::table('notifications')->where('notifiable_id', $owner->id)->get();
     expect($rows)->toHaveCount(1);

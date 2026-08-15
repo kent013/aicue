@@ -19,7 +19,7 @@ use Throwable;
  * - payload は analysisJobId のみ (モデル/チケット/org 値を payload に持たない = payload 不信任)
  * - 専用 connection database-analysis (retry_after=1680) で流す。運用契約:
  *   本番/ステージングは `php artisan queue:work database-analysis` を worker 定義に必須登録
- *   (docs/architecture.md。滞留は recoverStale cron が 30 分で failJob する)
+ *   (docs/architecture.md。滞留は work:recover-stuck --stream=analysis_job が 30 分で失敗確定する)
  */
 class RunManualAnalysis implements ShouldQueue
 {
