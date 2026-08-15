@@ -11,6 +11,7 @@ use App\DataTransferObjects\Organizations\AccountDeletionBlockerDto;
 use App\Enums\AccountDeletionBlockReason;
 use App\Enums\AdminConsoleRole;
 use App\Enums\OrganizationRole;
+use App\Enums\Security\OrgAccessRevocationReason;
 use App\Enums\SecurityEventType;
 use App\Models\Organization;
 use App\Models\OrganizationInvitation;
@@ -19,6 +20,7 @@ use App\Notifications\Account\AccountDeletionRequestedNotification;
 use App\Notifications\OrganizationInvitationNotification;
 use App\Services\Billing\AccountDeletionBillingGuard;
 use App\Services\Notification\NotificationCenterService;
+use App\Services\OAuth\OrganizationAccessRevoker;
 use App\Services\Project\DefaultProjectResolver;
 use App\Services\Security\SecurityEventRecorder;
 use App\Support\Account\AccountDeletionGrace;
@@ -56,6 +58,7 @@ class OrganizationMembershipService
         private readonly DefaultProjectResolver $defaultProjects,
         private readonly NotificationCenterService $notifications,
         private readonly AccountDeletionBillingGuard $billingGuard,
+        private readonly OrganizationAccessRevoker $accessRevoker,
     ) {}
 
     /**
@@ -442,11 +445,22 @@ class OrganizationMembershipService
      * (DB::transaction のネストは savepoint 扱いのため、changeRole の ValidationException は
      * そのまま外へ伝播し外側 tx ごと rollback される)。
      *
+     * 失効 (組織アクセスの資格情報) は**自分では呼ばない**。呼ぶと 1 操作で 2 回失効させる
+     * ことになるため、委譲先 (normalizeOrganizationRole / changeRole) が呼ぶ。
+     * よって Editor / Shooter コマンドでは順序が
+     * 「組織ロールの入れ替え → 失効 → プロジェクト側の pivot 更新」になる。
+     * 失効が最後でないのは、**プロジェクト側の役割を失効の境界に入れていない**からである
+     * (トークンの結び付き先は組織であり、pivot の更新は資格情報の広さを変えない)。
+     * 後続の pivot 更新が失敗すれば外側のひとまとまりごと巻き戻るので、
+     * 「失効だけが残る」中間状態は生まれない。
+     *
+     * @param  User|null  $actor  操作した人 (監査用。HTTP 外 = バッチ・コンソールは null が正常値)
+     *
      * @throws ValidationException 非メンバー / 最終 Owner 保護 / Default Project 不在
      */
-    public function applyConsoleRole(Organization $organization, User $target, AdminConsoleRole $role): void
+    public function applyConsoleRole(Organization $organization, User $target, AdminConsoleRole $role, ?User $actor): void
     {
-        DB::transaction(function () use ($organization, $target, $role): void {
+        DB::transaction(function () use ($organization, $target, $role, $actor): void {
             // canonical 共通ロック境界 (users 昇順 → organizations)。normalizeOrganizationRole の
             // 直接 addRole 経路も含めロック下で直列化する。
             $this->lockForMembershipWrite([$this->keyOf($target)], [$this->keyOf($organization)]);
@@ -456,7 +470,7 @@ class OrganizationMembershipService
             if ($projectRole === null) {
                 // Admin コマンド: org ロール正規化 → stale pivot 掃除
                 // (org 配下 project に限定 = cross-org 不変条件)
-                $this->normalizeOrganizationRole($organization, $target, $role);
+                $this->normalizeOrganizationRole($organization, $target, $role, $actor);
                 $this->detachProjectMemberships($organization, $target);
 
                 return;
@@ -471,7 +485,7 @@ class OrganizationMembershipService
                 ]);
             }
 
-            $this->normalizeOrganizationRole($organization, $target, $role);
+            $this->normalizeOrganizationRole($organization, $target, $role, $actor);
             $project->members()->syncWithoutDetaching([
                 $target->id => ['role' => $projectRole->value],
             ]);
@@ -483,9 +497,14 @@ class OrganizationMembershipService
      * 「未割当」= MemberRoleState::derive(null, ...)) は changeRole が「非メンバー」として
      * 拒否するため、修復経路として addRole で直接付与する (管理画面から正規化できる契約)。
      *
+     * **本メソッドは applyConsoleRole が張ったトランザクションの内側でしか呼ばれない**
+     * (private かつ呼び出し元が 1 箇所)。修復の枝で失効を呼ぶのはこの前提に依存する。
+     *
+     * @param  User|null  $actor  操作した人 (監査用)
+     *
      * @throws ValidationException 非メンバー / 最終 Owner 保護 (changeRole 継承)
      */
-    private function normalizeOrganizationRole(Organization $organization, User $target, AdminConsoleRole $role): void
+    private function normalizeOrganizationRole(Organization $organization, User $target, AdminConsoleRole $role, ?User $actor): void
     {
         if ($target->organizationRole($organization) === null) {
             // 非 attach は changeRole と同じ契約で拒否 (第 1 層は Controller の URL 整合 guard = 404)
@@ -494,23 +513,39 @@ class OrganizationMembershipService
             }
             $target->addRole($role->organizationRole()->value, $organization->laratrust_team_id);
 
+            // 修復も役割の付与である。changeRole を経ない唯一の枝なので、ここにも置く
+            // (置かないと「管理画面から役割を直したのに古いトークンが生きている」経路が残る)。
+            $this->accessRevoker->revoke(
+                $organization,
+                $target,
+                OrgAccessRevocationReason::RoleChanged,
+                $actor,
+            );
+
             return;
         }
 
         // 同値なら changeRole 内で早期 return = 冪等。最終 Owner 保護も継承
-        $this->changeRole($organization, $target, $role->organizationRole());
+        $this->changeRole($organization, $target, $role->organizationRole(), $actor);
     }
 
     /**
      * ロール変更。Owner への昇格は transferOwnership のみが正規経路
      * (Controller 側のバリデーションが Owner 指定を拒否する)。
      *
+     * **役割の入れ替えの後、同じトランザクションの中で**その人のこの組織における
+     * 機械クライアント向け資格情報を失効させる (家系の正典 v2)。昇格でも切れる —
+     * 役割の集合の差分で判断すると、権限ライブラリの役割キャッシュ依存になり
+     * 取りこぼしたときに通してしまう側へ倒れるためである。
+     *
+     * @param  User|null  $actor  操作した人 (監査用。HTTP 外は null が正常値)
+     *
      * @throws ValidationException 非メンバー / 最後の Owner の降格
      */
-    public function changeRole(Organization $organization, User $target, OrganizationRole $newRole): void
+    public function changeRole(Organization $organization, User $target, OrganizationRole $newRole, ?User $actor): void
     {
         // [TOCTOU 封じ] 事前チェックを撤廃し、検証をすべてロック取得後・ロック下で行う。
-        DB::transaction(function () use ($organization, $target, $newRole): void {
+        DB::transaction(function () use ($organization, $target, $newRole, $actor): void {
             // canonical 共通ロック境界 (users 昇順 → organizations)。deleteAccount 等と直列化。
             $this->lockForMembershipWrite([$this->keyOf($target)], [$this->keyOf($organization)]);
 
@@ -523,7 +558,7 @@ class OrganizationMembershipService
                 throw ValidationException::withMessages(['role' => ['このユーザーは組織のメンバーではありません。']]);
             }
             if ($currentRole === $newRole) {
-                return; // 冪等
+                return; // 冪等 (何も変わっていないので失効もしない)
             }
             // Owner を降格させる場合は他に Owner がいることを要求 (Owner 不在の組織を作らない)
             if ($currentRole === OrganizationRole::Owner && ! $this->hasAnotherOwner($organization, $freshTarget)) {
@@ -533,18 +568,31 @@ class OrganizationMembershipService
             }
             $freshTarget->removeRole($currentRole->value, $organization->laratrust_team_id);
             $freshTarget->addRole($newRole->value, $organization->laratrust_team_id);
+
+            // 役割の入れ替えの**後**・同一トランザクション内
+            $this->accessRevoker->revoke(
+                $organization,
+                $freshTarget,
+                OrgAccessRevocationReason::RoleChanged,
+                $actor,
+            );
         });
     }
 
     /**
      * メンバー削除。Owner は削除不可 (先に transferOwnership が必要)。
      *
+     * 除名の**後**、同じトランザクションの中でその人のこの組織における機械クライアント向け
+     * 資格情報を失効させる (家系の正典 v2)。
+     *
+     * @param  User|null  $actor  操作した人 (監査用。HTTP 外は null が正常値)
+     *
      * @throws ValidationException 非メンバー / Owner
      */
-    public function removeMember(Organization $organization, User $target): void
+    public function removeMember(Organization $organization, User $target, ?User $actor): void
     {
         // [TOCTOU 封じ] 検証をロック取得後・ロック下で行う。
-        DB::transaction(function () use ($organization, $target): void {
+        DB::transaction(function () use ($organization, $target, $actor): void {
             // canonical 共通ロック境界 (users 昇順 → organizations)。deleteAccount 等と直列化。
             $this->lockForMembershipWrite([$this->keyOf($target)], [$this->keyOf($organization)]);
 
@@ -569,6 +617,14 @@ class OrganizationMembershipService
             if ($freshTarget->current_organization_id === $organization->id) {
                 $freshTarget->forceFill(['current_organization_id' => null])->save();
             }
+
+            // 除名の後・同一トランザクション内
+            $this->accessRevoker->revoke(
+                $organization,
+                $freshTarget,
+                OrgAccessRevocationReason::MemberRemoved,
+                $actor,
+            );
         });
     }
 
@@ -596,6 +652,10 @@ class OrganizationMembershipService
     /**
      * オーナー移譲。organization_user の両者の行を lockForUpdate で直列化し、
      * 並行移譲による Owner 0 人 / 2 人の中間状態を防ぐ (spirux 方式)。
+     *
+     * 役割の入れ替えの後、同じトランザクションの中で**譲り手と受け手の両方**の
+     * 機械クライアント向け資格情報を失効させる (家系の正典 v2)。受け手は昇格だが、
+     * 役割の集合の差分で判断しないという設計判断の帰結として同じように切れる。
      *
      * @throws ValidationException from が Owner でない / to が非メンバー / 自己移譲
      */
@@ -646,6 +706,11 @@ class OrganizationMembershipService
                 $freshTo->removeRole($toRole->value, $teamId);
             }
             $freshTo->addRole(OrganizationRole::Owner->value, $teamId);
+
+            // 役割の入れ替えの後・同一トランザクション内。操作した人は譲り手 ($freshFrom)。
+            // 受け手も切る (昇格でも切る = 差分で判断しないという設計判断の帰結)。
+            $this->accessRevoker->revoke($freshOrg, $freshFrom, OrgAccessRevocationReason::OwnershipTransferredFrom, $freshFrom);
+            $this->accessRevoker->revoke($freshOrg, $freshTo, OrgAccessRevocationReason::OwnershipTransferredTo, $freshFrom);
         });
 
         $this->recorder->record(SecurityEventType::OwnershipTransferred, $from, [

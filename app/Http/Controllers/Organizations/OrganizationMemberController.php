@@ -35,8 +35,11 @@ class OrganizationMemberController extends Controller
         $this->resolveOrganizationMember($organization, $user);
         Gate::authorize('manageMembers', $organization);
 
+        $actor = $request->user();
+        Assert::isInstanceOf($actor, User::class);
+
         // 3 値遷移コマンド (admin/editor/shooter)。Owner 指定は enum 外 = 構造的に不可能
-        $membership->applyConsoleRole($organization, $user, $request->role());
+        $membership->applyConsoleRole($organization, $user, $request->role(), $actor);
 
         return back()->with('success', 'ロールを変更しました');
     }
@@ -47,7 +50,10 @@ class OrganizationMemberController extends Controller
         $this->resolveOrganizationMember($organization, $user);
         Gate::authorize('manageMembers', $organization);
 
-        $membership->removeMember($organization, $user);
+        $actor = $request->user();
+        Assert::isInstanceOf($actor, User::class);
+
+        $membership->removeMember($organization, $user, $actor);
 
         return back()->with('success', 'メンバーを削除しました');
     }

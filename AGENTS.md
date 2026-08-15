@@ -742,3 +742,21 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
       独立した監視対象である。保証しないもの (500 件上限は公平性を保証しない / S3 削除に
       失敗した孤児は自動では拾えない / 実行しない指定の候補件数は上界にすぎない) は
       `docs/architecture.md` §滞留回収の共通基盤 が正本
+15. **組織アクセスの失効の窓口と目録 (T174 / 家系の正典 v2)**: 組織の役割を書き込む経路は、
+    **その変更と同じトランザクションの中で** `Services/OAuth/OrganizationAccessRevoker` を呼ぶか、
+    `OrgAccessRevocationExemption` + 30 文字以上の根拠で免除目録へ登録する
+    (`OrganizationAccessRevocationChokePointTest` が deny-by-default で強制。
+    免除の件数は完全一致で pin する)。
+    - **境界は「役割を変える操作が成功したこと」**で、役割の集合の差分は取らない
+      (差分は役割キャッシュ依存になり、取りこぼすと通してしまう側へ倒れる)。
+      帰結として **昇格でも接続はやり直しになる** (既知の仕様)。
+    - 失効するのは 3 家族 (`oauth_sessions` / `oauth_access_tokens` と紐づく
+      `oauth_refresh_tokens` / 未交換の `oauth_auth_codes`) で**途中で打ち切らない**。
+      失効させないのは**組織の API キー**と**プロジェクト単位の役割**。
+    - 監査は握り潰さない (`SecurityEventRecorder::recordOrFail`)。書けなければ役割の変更ごと
+      巻き戻る。**失効 0 件でも 1 行残す**。`record()` (best-effort) と書き分け、
+      失効以外に `recordOrFail()` を使わない (監査の失敗でログインを落とすことになる)。
+    - **理由は観測であって制御ではない**。窓口が `$reason` を分岐に使っていないことを
+      同 gate が字句で固定する。
+    - 保証しないもの (発行との隙間 / API キーの読み取りが残ること / 静的検査の限界) は
+      `docs/architecture.md` §組織アクセスの失効 が正本。運用向けの説明は `docs/mcp-oauth.md`

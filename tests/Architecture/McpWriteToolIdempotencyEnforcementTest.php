@@ -104,6 +104,9 @@ test('MCP write tool は 0 本である (据え置きの明示的な pin)', func
         .PHP_EOL.'2. T109 を解消する (AppMcpTool::handle() の冪等判定を runTool() の'
         .'リソース解決より後へ。REST 側の api.project-in-org < idempotent と同型のハザード)'
         .PHP_EOL.'3. write tool の idempotency_key 必須化・replay・conflict の behavioral テストを追加する'
-        .PHP_EOL.'4. 本 pin をその時点の write tool 一覧へ更新する'
+        .PHP_EOL.'4. 書き込みの範囲の再評価 (ToolName::requiredPermission() の割り当て) も同時に決める'
+        .'(認可の関門そのものは McpAuthorizationChokePointTest が固定しているが、'
+        .'新しい write tool にどの権限を要求するかは人が決めるほかない)'
+        .PHP_EOL.'5. 本 pin をその時点の write tool 一覧へ更新する'
         .PHP_EOL.'設計の根拠: devnotes/20260809-0027-idempotency-concurrent-claim/');
 });

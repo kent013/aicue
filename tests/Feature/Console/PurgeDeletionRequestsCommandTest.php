@@ -8,6 +8,7 @@ use App\Notifications\Account\AccountDeletionRequestedNotification;
 use App\Services\Billing\AccountDeletionBillingGuard;
 use App\Services\Billing\Contracts\StripeGatewayInterface;
 use App\Services\Notification\NotificationCenterService;
+use App\Services\OAuth\OrganizationAccessRevoker;
 use App\Services\Organization\OrganizationMembershipService;
 use App\Services\Project\DefaultProjectResolver;
 use App\Services\Security\SecurityEventRecorder;
@@ -123,7 +124,7 @@ test('想定外例外が 1 件でもあれば report + FAILURE になり、走�
     dueUser();
     dueUser();
 
-    $this->instance(OrganizationMembershipService::class, new class(app(SecurityEventRecorder::class), app(DefaultProjectResolver::class), app(NotificationCenterService::class), app(AccountDeletionBillingGuard::class)) extends OrganizationMembershipService
+    $this->instance(OrganizationMembershipService::class, new class(app(SecurityEventRecorder::class), app(DefaultProjectResolver::class), app(NotificationCenterService::class), app(AccountDeletionBillingGuard::class), app(OrganizationAccessRevoker::class)) extends OrganizationMembershipService
     {
         public function executeAccountDeletionRequest(User $user): bool
         {
