@@ -330,11 +330,36 @@ allowlist で固定する (transport 契約の食い違いは**無言失敗**と
 
 ### 運用上の注意
 
-- 設定は `APP_URL` から導出される (relying party id = ホスト、allowed origins = `[APP_URL]`)。
-  同一オリジン PWA 前提のため専用 env は持たない。
-- **`APP_KEY` をローテートすると user handle (`hash_hmac` の鍵が `APP_KEY`) が変わり、
-  登録済みパスキーが全件無効になる**。鍵ローテートを行う場合は
-  `PASSKEYS_USER_HANDLE_SECRET` 相当の固定値を `config/passkeys.php` に持たせる設計変更が必要。
+- 設定の正本は **`config/fortify.php` の `passkeys` ブロック**(身元の識別子 = relying party id /
+  許可する接続元 = allowed origins / 利用者ハンドルの導出鍵)。
+  身元の識別子と接続元は宣言が無ければ `APP_URL` から導出する
+  (RP ID = host、接続元 = `scheme://host[:port]`)。同一オリジン PWA 前提のため通常は宣言不要。
+- **production では `PASSKEYS_USER_HANDLE_SECRET` の宣言が必須**
+  (未宣言 / 32 文字未満、および設定の書式・相互整合の違反は `App\Support\PasskeyConfigValidator`
+  が `ProductionEnvGuard` 経由で起動時 fail-fast する = **初回デプロイ前に設定が要る破壊的変更**)。
+  検査は `Features::passkeys()` が有効なときだけ走る。
+- 導出鍵を宣言しないと利用者ハンドル (`hash_hmac` の鍵) が `APP_KEY` に倒れ、
+  **`APP_KEY` をローテートした瞬間に登録済みパスキーが全件無効になる**。
+  既にパスキーが登録されている環境では、`PASSKEYS_USER_HANDLE_SECRET` に
+  **現行 `APP_KEY` の値をそのまま**宣言すれば既存パスキーは維持される
+  (検査は「宣言されているか」を見ており、値が `APP_KEY` と同じかどうかは見ない)。
+  以後 `APP_KEY` のローテートはパスキーに影響しない。
+- 起動時検査が見るのは**書式と相互整合まで**である。「その host を実際に運用しているか」
+  「証明書があるか」は検査できない。**Public Suffix List も持たない**ため、
+  `co.uk` のような public suffix を身元の識別子に置いた設定は起動時には通る
+  (ブラウザ側が PSL を見るので実際の手続きは失敗する)。
+  したがってこの検査は **WebAuthn の完全な妥当性検査ではない** (誇張しない)。
+  対象は **DNS 名のみ**で、IP リテラル・単一ラベル (`localhost`) は reject する。
+- 宣言は `config/fortify.php` の `passkeys` ブロックに置く。
+  **`config/passkeys.php` を新設してはいけない** — `FortifyServiceProvider::register()` の
+  `configurePasskeys()` が `passkeys.*` を `fortify.passkeys.*` から**無条件に上書きする**ため、
+  置いても効かない死んだ設定になる。実効値と宣言値の一致は
+  `PasskeyPackageContractTest` が固定する。
+- キー名は `laravel/fortify` / `laravel/passkeys` の契約であり、変わると宣言は
+  **無言で効かなくなり既定へ戻る**。版 pin (`composer.json` の直接要求 +
+  解決版検査) が対象にするのは **`laravel/passkeys` だけ**である
+  (`laravel/fortify` は 1.x の semver 管理なので minor pin を足さない)。
+  Fortify 側の写像は `PasskeyPackageContractTest` の**実効値の契約テスト**が守る。
 - 未認証の challenge 発行 (`GET /passkeys/login/options`) は `throttle:passkeys` (10/min) で絞る。
   `config('fortify.limiters.passkeys')` が未設定だと Fortify が throttle を外し **無制限**になる。
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Support;
 
+use Laravel\Fortify\Features;
 use RuntimeException;
 use Throwable;
 
@@ -24,6 +25,8 @@ use Throwable;
  * - TrustHosts allowlist (Host header injection 防御の allowlist 非空・書式)
  * - TrustProxies allowlist (client IP / X-Forwarded-Proto の信頼境界。未宣言・`*`・
  *   REMOTE_ADDR・書式不正を拒否。プロキシ無し構成は `none` の明示宣言を要求する)
+ * - パスキー設定 (身元の識別子 / 許可する接続元 / 利用者ハンドルの導出鍵。
+ *   書式・相互整合・導出鍵の独立宣言。Features::passkeys() 有効時のみ)
  */
 class ProductionEnvGuard
 {
@@ -125,6 +128,42 @@ class ProductionEnvGuard
             $errors[] = $e->getMessage();
         }
 
+        // パスキー (WebAuthn) の身元 / 接続元 / 利用者ハンドル導出鍵を起動時検証。
+        // **キルスイッチが有効なときだけ**検査する (機能を止めている環境に設定を要求しない)。
+        // 有効化点は config/fortify.php の Features::passkeys([...]) ただ 1 箇所。
+        if (Features::enabled(Features::passkeys())) {
+            $relyingPartyIdValue = config('passkeys.relying_party_id');
+            $relyingPartyId = is_string($relyingPartyIdValue) ? $relyingPartyIdValue : '';
+            // ★読み出し元が 2 つに分かれる理由:
+            //   - 実効値 (passkeys.*) = **実際に手続きで使われる値**。Fortify の上書き後の姿を検査する。
+            //   - 宣言の事実 (fortify.passkeys.raw_allowed_origins / user_handle_secret_declared) は
+            //     検査専用キーで Fortify は passkeys.* へ写さない。宣言元から読むしかない。
+            $originsValue = config('passkeys.allowed_origins', []);
+            $rawOriginsValue = config('fortify.passkeys.raw_allowed_origins', []);
+            $userHandleSecretValue = config('passkeys.user_handle_secret');
+            $userHandleSecret = is_string($userHandleSecretValue) ? $userHandleSecretValue : '';
+            $userHandleSecretDeclared = config('fortify.passkeys.user_handle_secret_declared') === true;
+
+            // 文字列以外が混ざった config を **黙って除去しない** (除去すると設定破損を見逃す)。
+            // trusted hosts / proxies 側の stringList() は「silent drop を raw で表面化させる」形だが、
+            // passkeys は config が必ず string 列を返す設計なので、破損はそのまま violation にする。
+            if (! $this->isStringList($originsValue) || ! $this->isStringList($rawOriginsValue)) {
+                $errors[] = 'passkeys.allowed_origins and fortify.passkeys.raw_allowed_origins must be lists of strings.';
+            } else {
+                try {
+                    (new PasskeyConfigValidator)->validateForProduction(
+                        $relyingPartyId,
+                        $originsValue,
+                        $rawOriginsValue,
+                        $userHandleSecretDeclared,
+                        $userHandleSecret,
+                    );
+                } catch (Throwable $e) {
+                    $errors[] = $e->getMessage();
+                }
+            }
+        }
+
         return $errors;
     }
 
@@ -164,5 +203,25 @@ class ProductionEnvGuard
         }
 
         return $result;
+    }
+
+    /**
+     * 値が string だけの list か (非 string を黙って除去せず、破損として扱うための判定)。
+     *
+     * @phpstan-assert-if-true list<string> $value
+     */
+    private function isStringList(mixed $value): bool
+    {
+        if (! is_array($value) || ! array_is_list($value)) {
+            return false;
+        }
+
+        foreach ($value as $item) {
+            if (! is_string($item)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

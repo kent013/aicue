@@ -27,6 +27,7 @@
         "laravel/fortify": "^1.37",
         "laravel/framework": "^13.8",
         "laravel/mcp": "^0.8.0",
+        "laravel/passkeys": "^0.2.1",
         "laravel/passport": "^13.7",
         "laravel/socialite": "^5.27",
         "laravel/tinker": "^3.0",

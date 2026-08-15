@@ -95,6 +95,14 @@
 > 総当りに無効化するため復活させない。実 hop 一覧・CIDR の管理主体・変更手順は
 > `docs/trusted-proxies-runbook.md` が正本。
 
+> **運用要件 (パスキー)**: production は `PASSKEYS_USER_HANDLE_SECRET` の**明示宣言が必須**
+> (未宣言 / 32 文字未満 / 身元の識別子・許可する接続元の書式不正・相互不整合は
+> `PasskeyConfigValidator` が `ProductionEnvGuard` 経由で起動時 fail-fast する
+> = **初回デプロイ前に設定が要る破壊的変更**)。宣言しないと利用者ハンドルが `APP_KEY` 由来になり、
+> **`APP_KEY` ローテートで登録済みパスキーが全件無効**になる。既にパスキーがある環境は
+> 現行 `APP_KEY` の値をそのまま宣言すれば維持できる。運用手順は
+> `docs/auth-security-mechanisms.md` §5。
+
 > **運用要件 (route:cache)**: production は `php artisan route:cache` を**毎デプロイ再生成する**。
 > vendor route への middleware 後付け(`RouteThrottleBinder` / `RouteMiddlewareBinder`)は
 > **cache 生成時に焼き込まれ、cached 起動では 1 本も効かない**ため、stale cache は
