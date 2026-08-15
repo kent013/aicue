@@ -442,6 +442,10 @@ PHP の `echo` / `goto` / `global` の 3 文と、開始タグ付きの出力記
 (バージョンは `config/template.php` の `template_version`)。
 テンプレート構造からの**意図的な逸脱**は `docs/template-divergence.md` に
 logic-driven な理由と「保証し続ける不変条件」を記録してから行う。
+**書式の正本は同ファイルの規約節**で、形式は
+`tests/Architecture/TemplateDivergenceLedgerFormatTest.php` が機械で強制する
+(登録メタ表の 9 行・状態の値域・対象パスの実在と重複・件数の 3 点一致)。
+書式の中身は本書に写さない (2 か所に書くと必ず食い違う)。
 
 ## ドメイン固有規約
 
