@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use Symfony\Component\Process\Process;
+use Tests\Support\TrackedPhpSourceFiles;
 
 /*
  * Architecture invariant: **namespace 宣言の無い PHP ファイル**の global スコープに
@@ -26,7 +26,9 @@ use Symfony\Component\Process\Process;
  *     RefreshDatabase が死に **全テストが全滅する**
  * つまり「今日は raw output 汚染で済んでいるが、いつ全滅へ化けてもおかしくない非決定的な地雷」。
  *
- * 走査対象: git 追跡下の *.php (ただし *.blade.php を除く)。
+ * 走査対象: git 追跡下の *.php (ただし *.blade.php を除く)。列挙は
+ * `Tests\Support\TrackedPhpSourceFiles` に集約してある (同じ列挙を 2 本持たない。
+ * 走査域の定義と限界は同クラスの docblock が正本)。
  * git 管理下に限ることで vendor/ node_modules/ .claude/worktrees/ storage/ を
  * **自動的に**除外できる (明示 exclude リストを保守しなくてよい)。
  * **既知の限界**: 未追跡 (git add 前) のファイルは走査されない。gate が守る境界は
@@ -36,39 +38,6 @@ use Symfony\Component\Process\Process;
  *
  * allowlist は設けない: 非複合 global use に正当な用途は存在しない (常に無効な import)。
  */
-
-/**
- * git 追跡下の PHP ソースファイル一覧 (blade を除く)。
- *
- * @return list<array{absolute: string, relative: string}>
- */
-function nonCompoundUseScanTargets(): array
-{
-    $root = base_path();
-    $process = new Process(['git', 'ls-files', '-z', '*.php'], $root);
-    $process->run();
-
-    if (! $process->isSuccessful()) {
-        throw new RuntimeException(
-            'git ls-files の実行に失敗しました (git worktree 前提の architecture invariant): '
-            .$process->getErrorOutput()
-        );
-    }
-
-    $files = [];
-    foreach (explode("\0", $process->getOutput()) as $relative) {
-        if ($relative === '' || str_ends_with($relative, '.blade.php')) {
-            continue;
-        }
-        $absolute = $root.'/'.$relative;
-        if (! is_file($absolute)) {
-            continue; // 削除済みだが index に残っている等
-        }
-        $files[] = ['absolute' => $absolute, 'relative' => $relative];
-    }
-
-    return $files;
-}
 
 /**
  * index 以降で最初の significant token の index。
@@ -235,7 +204,7 @@ function nonCompoundUseCollectAll(): array
     $namespaceless = 0;
     $total = 0;
 
-    foreach (nonCompoundUseScanTargets() as $target) {
+    foreach (TrackedPhpSourceFiles::all(base_path()) as $target) {
         $source = file_get_contents($target['absolute']);
         if (! is_string($source)) {
             continue;

@@ -149,7 +149,9 @@
 
 ## 実装規約
 
-- `declare(strict_types=1)` + 日本語コメント。Controller は薄く(Service 委譲)、
+- `declare(strict_types=1)` + 日本語コメント。**宣言は git 追跡下の PHP 全数が対象**で、
+  免除の登録簿は持たない(`StrictTypesDeclarationGateTest` が deny-by-default で強制。
+  `*.blade.php` は PHP ソースではないため対象外)。Controller は薄く(Service 委譲)、
   transaction は Service 内。保護キーは forceFill / relation で明示代入
 - 月 / 年 / 四半期の加減算は**暗黙 overflow メソッドを禁止**する。既定は
   `addMonthNoOverflow` / `subYearNoOverflow` 等の `*NoOverflow`、overflow が要件なら

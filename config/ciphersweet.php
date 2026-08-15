@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 return [
     /**
      * This controls which cryptographic backend will be used by CipherSweet.

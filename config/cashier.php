@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use App\Enums\Billing\HandledStripeWebhookEvent;
 use Laravel\Cashier\Console\WebhookCommand;
 use Laravel\Cashier\Invoices\DompdfInvoiceRenderer;

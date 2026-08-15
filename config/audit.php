@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use App\Auth\ResolveAuditCauser;
 use App\Models\ModelAudit;
 use OwenIt\Auditing\Resolvers\IpAddressResolver;

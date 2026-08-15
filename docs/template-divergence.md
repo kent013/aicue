@@ -604,3 +604,65 @@ route 名は `$request->route()->getName()` でその場で確定するので逆
   `.claude/skills/app-bug-hunt/coverage/build_executed.py` /
   `.claude/skills/app-bug-hunt/coverage/correlate.py`
 - 設計: `devnotes/20260815-1113-bughunt-route-capture-failclosed/`
+
+---
+
+## D15 ✅ strict_types gate の走査域を追跡下 PHP 全数にし、未宣言一覧を持たない
+
+| 観点 | テンプレート | 本アプリ |
+|---|---|---|
+| テスト名 | `StrictTypesBaselineInvariantTest` | `StrictTypesDeclarationGateTest` |
+| 走査域 | `app/` のファイル走査 | **git 追跡下の `*.php` − `*.blade.php`** (実測 1543 本) |
+| 未宣言一覧 (baseline) | 常に空を契約として保持 | **持たない** (免除機構そのものが無い) |
+| 判定器 | 構造判定 (値は数値リテラル 1 の完全一致) | 構造判定 + **実測照合器との突き合わせ** |
+
+### なぜ正当な差分か(logic-driven)
+
+走査域を `app/` に限ると、`config/` `database/` `bootstrap/` `public/` の未宣言 28 本が
+規約の外に残り続ける。本アプリは容量予約 (bytes) やチケット枚数のように、数値と文字列の
+取り違えがそのまま容量・金額の誤りになる領域を持つため、「どこか 1 枚だけ緩い」状態を
+残さないことに意味がある。実測ではこの 28 本は 1 行の追加だけで解消でき、うち 25 本は
+PHPStan level 10 の解析対象でもあるので、**追加した宣言の副作用は静的解析で機械的に確認できる**。
+
+未宣言一覧 (baseline) を持たないのは、導入時点の未宣言 32 本を同一変更で是正して 0 件から
+始めるためである。空の登録簿とそれを双方向比較する仕組みは 1 件も違反を守らないまま
+複雑さだけを足すことになる (「今必要なものだけ作る」)。既存の
+`QueueDispatchAtomicityInventoryTest` が採っているのと同じ形である。
+
+判定器が実測照合器 (`StrictTypesRuntimeProbe`) と突き合わせるのは、「判定器は宣言済みと
+言うのに実際は厳密化されない」という**逆向きの乖離 = fail-open** を機械的に 0 件へ固定する
+ためである。判定器は実効性の下界であり、安全側の乖離 (実効だが受理しない形) だけを許す。
+
+### 揃えている不変条件(これは保証し続ける)
+
+> 「宣言を欠く PHP ファイルが新しく増えない」
+
+- 走査域が広いので、テンプレートが保証する `app/` の範囲は**包含している**
+- 空の baseline と本アプリの「登録簿なし」は、守っている集合が同じ (未宣言 0 件)
+- テンプレート取り込みで `StrictTypesBaselineInvariantTest` が入ってきた場合は、
+  **2 本立てにせず本 gate へ統合する** (同じ事実を 2 箇所で宣言しない)
+- どうしても宣言できないファイルが将来出た場合も、なし崩しに allow-list を足さない。
+  設計レビューを通してから機構を新設する
+
+### 保証しないもの (誇張しない)
+
+- `artisan` など拡張子が `.php` でない PHP ファイル / 未追跡 (git add 前) のファイルは見ない
+  (gate が守る境界は commit / CI である)
+- `*.blade.php` は見ない。テンプレートであり PHP ソースファイルではないため、免除ではなく対象外
+- 宣言の有無だけを見る。型の緩さそのもの (level 10 で検出される型不一致) は PHPStan の担当
+- 実効ではあるが正準形でない書き方 (`01` / `0x1` / `declare(ticks=1, strict_types=1)` 等) は
+  **受理しない** (安全側の乖離)。**冒頭の正準形より後ろに `strict_types` を含む declare が
+  ある形も受理しない** (現行 PHP の実効は strict のままだが、表記を揃える規約であり、
+  「後に書いた方が勝つ」へ仕様が変わったときの fail-open も同時に塞ぐ)
+- `php artisan vendor:publish` 直後に宣言が失われることは防げない (検出はする)
+
+### 関連
+
+- 実装: `tests/Architecture/StrictTypesDeclarationGateTest.php` /
+  `tests/Support/StrictTypesDeclarationScanner.php` /
+  `tests/Support/StrictTypesRuntimeProbe.php` / `tests/Support/TrackedPhpSourceFiles.php`
+- 自己検査: `tests/Unit/Architecture/StrictTypesDeclarationScannerTest.php` /
+  `tests/Unit/Architecture/TrackedPhpSourceFilesTest.php`
+- 設計: `devnotes/20260815-1534-strict-types-baseline-gate/`
+- テンプレート側の根拠: `tests/Architecture/StrictTypesBaselineInvariantTest.php`
+  (家系の裁定 AG-010 (2026-08-05)「テンプレートへ還流し家系の標準装備とする」)
