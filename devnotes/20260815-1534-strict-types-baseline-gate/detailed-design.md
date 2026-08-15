@@ -810,7 +810,12 @@ class Team extends LaratrustTeam
 - [ ] 施策 3 の gate が緑になること (これが本施策の主契約)
 - [ ] `composer test` 全数 green (`bootstrap/` の 2 本は全レーンの起動が通る)
 - [ ] `composer phpstan` が `No errors` (`app` / `config` / `database` / `routes` = 29 本を覆う)
-- [ ] `composer test:browser` が green (`public/index.php` は実サーバ起動でのみ通る経路)
+- [ ] `composer test:browser` が green
+- [ ] **`public/index.php` を front controller として実サーバで起動して疎通する**
+      (`php -S <host>:<port> -t public public/index.php` に対する `GET /up` が 200)。
+      Browser lane は in-process サーバ (テストプロセス自身の HttpKernel) で走るため
+      `public/index.php` を読み込まない = `composer test:browser` はこのファイルを覆わない
+      (T167 実装時に判明。設計の当初記述を訂正した)
 - [ ] `php -l public/index.php` / `php -l bootstrap/app.php` / `php -l bootstrap/providers.php`
 - [ ] **順序を決めた起動確認** (config cache が残っていると変更後の評価を見ないため):
       1. `php artisan config:clear` (キャッシュを外す)

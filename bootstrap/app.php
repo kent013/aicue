@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use App\Exceptions\ApiExceptionRenderer;
 use App\Exceptions\Billing\InsufficientTicketsException;
 use App\Exceptions\Billing\QuotaExceededException;
