@@ -190,10 +190,14 @@ LLM を使う機能が要件に来たら、まず利用形態を分類する:
 | LLM tools / 外部アクション | web_search、関数呼び出しで実世界に作用 | + tool allowlist config(config/llm-defense レシピ) |
 
 どの形態でも必ず:
-- end-user 由来の自由テキストは **UserInput 型を経由してのみ** prompt に入れる
-  (生 string を prompt に渡すと PHPStan が落ちる構成を維持)
+- end-user 由来の自由テキストは **窓口 (`App\Support\Llm\PromptDefense`) を経由してのみ**
+  prompt に入れる。窓口が無害化 → タグ境界化 (`UserInput`) → 合言葉の合流を行い、
+  実行単位 (`GuardedPrompt`) が応答検査まで束ねる (`docs/architecture.md`
+  §LLM プロンプト防御の窓口方式 が正本)
 - prompt は YAML テンプレート(laravel-prism-prompt)。コード内に prompt 文字列を直書きしない
-- LLM 呼び出しは PromptOperation 経由(Prism Facade 直呼び禁止のguardrailテストが存在する)
+- LLM 呼び出しは `app/Prompts/` の factory → 窓口 → 実行単位の 1 本道のみ
+  (Prism Facade 直呼び禁止の guardrail テストが app/ routes/ database/ config/ bootstrap/ の
+   5 走査根で存在する)
 - コストは LlmCallLog に記録される構成を崩さない。新しい呼び出し点もテンプレの呼び出し経路を通す
 - **使わない防御 config を足さない**(読まれない config は config theater。aigenba D3 の教訓)
 
@@ -217,7 +221,9 @@ LLM を使う機能が要件に来たら、まず利用形態を分類する:
    まず relation 起点 (`$organization->users()->whereKey($id)`) で書けないかを検討する**
    (書けるなら候補にすら上がらない)。route parameter 由来の id は
    `NestedRouteIdorDefenseTest` の担当で母集団が交わらない
-4. **untrusted 文字列は安全処理を経てのみ prompt に入る**(UserInput 型強制)
+4. **untrusted 文字列は安全処理を経てのみ prompt に入る**
+   (窓口 `App\Support\Llm\PromptDefense` 強制。無害化 → タグ境界化 → 合言葉の合流 →
+   応答検査。`PromptDefenseWindowGateTest` / `LlmDefenseConfigGateTest`)
 5. **権限判定は常に呼び出し側組織の team スコープに束縛**(team 明示 + strict_check=true)
 6. **任意 class の逆シリアライズを許さない / キャッシュに入れるのは素のデータだけ**:
    `config/cache.php` の `serializable_classes` は **`false` 固定**でクラス許可一覧は作らない

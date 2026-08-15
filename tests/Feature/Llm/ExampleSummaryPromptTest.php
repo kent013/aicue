@@ -14,6 +14,7 @@ use Prism\Prism\Enums\FinishReason;
 use Prism\Prism\Text\Response as TextResponse;
 use Prism\Prism\ValueObjects\Meta;
 use Prism\Prism\ValueObjects\Usage;
+use Tests\Support\Llm\GuardedPromptInspector;
 
 beforeEach(function (): void {
     // executeSync は fake 中も PromptExecutionCompleted を発火し、listener → writer が
@@ -35,8 +36,10 @@ test('fake で実行でき、untrusted テキストが UserInput タグで区切
 
     expect($result)->toBeString();
     expect($result)->toContain('要約結果です。');
-    // UserInput はタグ区切りで描画される (prompt-injection 境界の明示)
-    expect($prompt->renderUserPromptForPool())->toContain('<user_input>');
+    // UserInput はタグ区切りで描画される (prompt-injection 境界の明示)。
+    // 実行単位 (GuardedPrompt) は vendor prompt を返す公開面を持たないため、
+    // 描画結果の確認は reflection を閉じ込めた GuardedPromptInspector 経由で行う。
+    expect(GuardedPromptInspector::renderedUserPrompt($prompt))->toContain('<user_input>');
 });
 
 test('PromptExecutionCompleted で llm_call_logs に記録される', function (): void {

@@ -666,3 +666,48 @@ PHPStan level 10 の解析対象でもあるので、**追加した宣言の副�
 - 設計: `devnotes/20260815-1534-strict-types-baseline-gate/`
 - テンプレート側の根拠: `tests/Architecture/StrictTypesBaselineInvariantTest.php`
   (家系の裁定 AG-010 (2026-08-05)「テンプレートへ還流し家系の標準装備とする」)
+
+---
+
+## D16 ✅ prompt の trusted 変数の入口を作らない (窓口の引数は untrusted だけ)
+
+| 観点 | テンプレート | 本アプリ |
+|---|---|---|
+| 窓口の引数 | `untrusted` (生 string の配列) と `trusted` (リテラル / クラス定数 / enum case の値に限る配列) の 2 系統 | **`untrusted` だけ**。`trusted` の引数そのものを持たない |
+| 窓口 gate の変数突き合わせ | untrusted ∪ trusted ∪ 合言葉 == YAML 変数集合 の**三点一致** | untrusted ∪ 合言葉 == YAML 変数集合 の**二点一致** |
+| trusted の値をリテラルへ限る字句 gate | あり | **無い** (限る対象が存在しないため) |
+
+### なぜ正当な差分か (logic-driven)
+
+本アプリの prompt YAML 4 本の変数は `text` / `extracted` / `decomposition` の 3 つで、
+いずれも SOP 由来の untrusted である。固定値・enum・locale を prompt へ渡す面は 1 つも無い。
+
+入口が無ければ「trusted に混ぜて素通しする」という迂回は**構造的に存在しない**。
+実体の無い入口と、それを守るための字句 gate と目録を先に作るのは、
+今必要でないものを作ることになる (思考原則 2)。テンプレート側の 3 系統は
+**提供元として正しく**、本アプリが縮めているのは母集団であって保証ではない。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「prompt へ入る実行時の文字列は、すべて窓口で無害化・タグ境界化される」
+
+1. prompt YAML の変数は**すべて untrusted か合言葉のいずれか**である
+   (`PromptDefenseWindowGateTest` の変数集合突き合わせが双方向で固定する)
+2. trusted の入口は存在しない (窓口の public メソッドの引数に無い)
+3. 窓口は合言葉の変数名 `llm_canary` の**上書きを拒否**し、untrusted の変数名を
+   `/\A[a-z][a-z0-9_]*\z/` に限る。**予約 namespace は作らない** — 現時点で予約したい名前が
+   `llm_canary` 以外に無く、実装より強い保証を文書に書かないため
+4. **trusted 変数を足す PR は、次の 3 つを同じ PR で足す**:
+   (a) 窓口の入口 (`trusted` 引数)、(b) 値をリテラル / クラス定数 / enum case に限る字句 gate、
+   (c) 目録。1 つでも欠けたら「実行時に決まる値が trusted 側へ紛れ込む」経路が開く。
+   窓口 gate の変数突き合わせの失敗メッセージにもこの義務を書いてある
+
+### 関連
+
+- 実装: `app/Support/Llm/PromptDefense.php` / `app/Support/Llm/GuardedPrompt.php` /
+  `config/llm-defense.php`
+- gate: `tests/Architecture/PromptDefenseWindowGateTest.php` /
+  `tests/Architecture/LlmDefenseConfigGateTest.php` /
+  `tests/Architecture/PromptYamlContractTest.php`
+- 設計: `devnotes/20260815-1537-prompt-injection-defense/`
+- 契約の正本: `docs/architecture.md` §LLM プロンプト防御の窓口方式

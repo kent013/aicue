@@ -3,16 +3,30 @@
 declare(strict_types=1);
 
 /*
- * LLM 呼び出しの guardrail (07 ガイド §6):
+ * LLM 呼び出しの操作単位ガードレール (裁定 AG-028 の「操作単位のガードレール」。07 ガイド §6):
  *
  * 1. Prism の直呼び禁止: LLM 呼び出しは kent013/laravel-prism-prompt の
  *    Prompt 経由のみ (観測 = llm_call_logs と prompt-injection 防御を迂回させない)。
  *    検出は token_get_all ベースの scanner で行い、コメント / 文字列リテラル中の
  *    "Prism::text(" や同名別クラス (Foo\Bar\Prism) を誤検出しない
- * 2. Prompt::load の呼び出しは app/Prompts/ のみ (prompt 定義の窓口を 1 箇所に集約)
+ * 2. Prism の入口型 (Prism ファサード実体 / PrismManager / Text\PendingRequest) への参照が
+ *    0 件であること。例外クラス (Prism\Prism\Exceptions\*) は AnalysisPipeline が
+ *    正当に参照するため母集団に入れない (偽陽性を作らない)
+ * 3. vendor prompt の読み込み (`Prompt::load` 等) は**窓口 1 ファイル**に限る
+ *    (窓口 = app/Support/Llm/PromptDefense.php。無害化・タグ境界化・合言葉の合流を
+ *     必ず通す。呼び出し site 全体の 1 本道は PromptDefenseWindowGateTest が担う)
+ *
+ * 走査根はいずれも **app/ + routes/ + database/ + config/ + bootstrap/ の 5 本**である。
  */
 
+use Tests\Support\Llm\PromptWindowRule;
+use Tests\Support\Llm\PromptWindowScanner;
+use Tests\Support\PhpReferenceScanner;
 use Tests\Support\Prompts\PrismDirectDispatchScanner;
+use Tests\Support\ReferenceKind;
+
+/** vendor prompt の読み込みを許す唯一のファイル (窓口)。 */
+const PROMPT_WINDOW_FILE = 'app/Support/Llm/PromptDefense.php';
 
 /**
  * @return list<string>
@@ -36,21 +50,25 @@ function phpFilesUnder(string $dir): array
     return $files;
 }
 
-test('app/ で Prism Facade の LLM 系メソッドを直接呼んでいない (Prompt 経由のみ)', function (): void {
+test('5 走査根で Prism Facade の LLM 系メソッドを直接呼んでいない (Prompt 経由のみ)', function (): void {
     $violations = PrismDirectDispatchScanner::findViolations();
 
     expect($violations)->toBe([],
         'LLM 呼び出しは Kent013\\PrismPrompt\\Prompt サブクラス経由で行ってください。'
-        .' app/ で Prism::text()/structured() 等を直叩きすると、llm_call_logs 記録と'
-        .' prompt-injection 防御 (UserInput / DefensiveInstructions) を素通りします。'
+        .' Prism::text()/structured() 等を直叩きすると、llm_call_logs 記録と'
+        .' prompt-injection 防御 (窓口 PromptDefense) を素通りします。'
         .PHP_EOL.'違反ファイル: '.implode(', ', $violations));
 });
 
-test('scanner の自己検証 (app dir が解決できる)', function (): void {
+test('scanner の自己検証 (5 走査根が解決でき、いずれも空でない)', function (): void {
     // degenerate failure (走査対象が空のまま黙って PASS) を防ぐ自己検証。
-    $appDir = realpath(__DIR__.'/../../app');
-    expect($appDir)->toBeString()
-        ->and(is_dir((string) $appDir))->toBeTrue();
+    $roots = PrismDirectDispatchScanner::roots();
+    expect(array_keys($roots))->toBe(['app', 'routes', 'database', 'config', 'bootstrap']);
+
+    foreach ($roots as $relative => $absolute) {
+        expect(is_dir($absolute))->toBeTrue("走査根 {$relative} が存在しません");
+        expect(phpFilesUnder($absolute))->not->toBeEmpty("走査根 {$relative} に PHP ファイルがありません");
+    }
 });
 
 test('scanner はコメント / 文字列リテラル中の Prism::text を誤検出しない', function (): void {
@@ -101,6 +119,16 @@ PHP;
     expect(PrismDirectDispatchScanner::containsPrismDirectCall($title))->toBeTrue();
 });
 
+test('scanner は moderation も検出する (現行 vendor に無くても deny 側に置く)', function (): void {
+    $source = <<<'PHP'
+<?php
+use Prism\Prism\Facades\Prism;
+class A { public function go() { return Prism::moderation(); } }
+PHP;
+
+    expect(PrismDirectDispatchScanner::containsPrismDirectCall($source))->toBeTrue();
+});
+
 test('scanner は alias import を検出する (case-insensitive)', function (): void {
     $alias = <<<'PHP'
 <?php
@@ -132,18 +160,48 @@ PHP;
     expect(PrismDirectDispatchScanner::containsPrismDirectCall($fqn))->toBeTrue();
 });
 
-test('Prompt::load の呼び出し箇所は app/Prompts/ に限る', function (): void {
-    $violations = [];
+test('Prism の入口型への参照が 0 件 (例外クラスは母集団に入れない)', function (): void {
+    $entryTypes = [
+        'Prism\\Prism\\Prism',
+        'Prism\\Prism\\PrismManager',
+        'Prism\\Prism\\Text\\PendingRequest',
+    ];
 
-    foreach (phpFilesUnder(app_path()) as $file) {
-        if (str_starts_with($file, app_path('Prompts'))) {
-            continue;
-        }
-        $contents = (string) file_get_contents($file);
-        if (preg_match('/(?:Prompt|TextPrompt|EmbeddingPrompt)::load\(/', $contents) === 1) {
-            $violations[] = str_replace(base_path().'/', '', $file);
+    $violations = [];
+    foreach (PrismDirectDispatchScanner::roots() as $relativeRoot => $absoluteRoot) {
+        foreach (PhpReferenceScanner::phpFiles($absoluteRoot, $relativeRoot) as $relative => $source) {
+            foreach (PhpReferenceScanner::references($relative, $source)->sites as $site) {
+                if ($site->kind === ReferenceKind::MethodCall || $site->kind === ReferenceKind::StaticCall) {
+                    continue; // 呼び出しの名前は型参照ではない
+                }
+                if (in_array($site->name, $entryTypes, true)) {
+                    $violations[] = "{$relative}:{$site->line} {$site->name}";
+                }
+            }
         }
     }
 
-    expect($violations)->toBe([]);
+    expect($violations)->toBe([],
+        'Prism の入口型を直接掴むと、Prompt 層の観測と防御を迂回する経路が作れます。'
+        .PHP_EOL.implode(PHP_EOL, $violations));
+});
+
+test('vendor prompt の読み込みは窓口 1 ファイルに限る', function (): void {
+    // ★判定は PromptWindowScanner (= PhpReferenceScanner の正規化トークン列) に委ねる。
+    //   素の正規表現でソースを見ると、窓口の仕組みを説明した docblock 中の
+    //   `Prompt::load()` に反応して常時赤になる (実測で踏んだ)。
+    $violations = [];
+    foreach (PrismDirectDispatchScanner::roots() as $relativeRoot => $absoluteRoot) {
+        foreach (PhpReferenceScanner::phpFiles($absoluteRoot, $relativeRoot) as $relative => $source) {
+            foreach (PromptWindowScanner::scan($relative, $source) as $site) {
+                if ($site->rule === PromptWindowRule::VendorPromptLoad && $relative !== PROMPT_WINDOW_FILE) {
+                    $violations[] = "{$relative}:{$site->line}";
+                }
+            }
+        }
+    }
+
+    expect($violations)->toBe([],
+        'vendor prompt の読み込みは窓口 ('.PROMPT_WINDOW_FILE.') の中だけで行ってください。'
+        .PHP_EOL.implode(PHP_EOL, $violations));
 });

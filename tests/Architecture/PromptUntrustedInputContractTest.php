@@ -8,8 +8,10 @@ use App\Prompts\ExampleSummaryPrompt;
 use App\Prompts\ScenarioGenerationPrompt;
 use App\Prompts\SopExtractPrompt;
 use App\Prompts\WorkDecompositionPrompt;
-use Kent013\PrismPrompt\Prompt;
+use App\Support\Llm\GuardedPrompt;
+use App\Support\Llm\PromptDefense;
 use Kent013\PrismPrompt\Values\UserInput;
+use Tests\Support\Llm\GuardedPromptInspector;
 
 /*
  * LLM プロンプトの untrusted 入力契約 invariant (二層防御)。
@@ -17,6 +19,9 @@ use Kent013\PrismPrompt\Values\UserInput;
  *  1. coverage(型): app/Prompts/ の各 factory が組み立てる template 変数のうち、
  *     end-user 由来の自由テキストは **UserInput 型** で渡すこと (生 string 不可)。
  *     UserInput はタグ区切り + delimiter escape で prompt-injection 境界を明示する。
+ *     窓口 (PromptDefense) を入れた後もこの保証は変わらない — factory は生 string を
+ *     渡すだけになり、UserInput へ包むのは窓口の内側になった。ここで見ているのは
+ *     **窓口が実際に効いていること** (組み立て結果が UserInput になっていること) である。
  *  2. deny-by-default: app/Prompts/ 配下の全 factory を inventory に分類する (未分類 fail)。
  *     新しい prompt を追加したら untrusted 変数名を inventory へ登録するか、
  *     end-user 入力なしなら空配列で登録する。
@@ -33,6 +38,11 @@ use Kent013\PrismPrompt\Values\UserInput;
  *
  * 検査対象クラスは dataset 化しており、prompt 追加時は inventory (= dataset の源) に
  * 1 エントリ足すだけで両層の検査に載る。
+ *
+ * ★ 組み立て済み prompt の内部を覗く reflection は tests/Support/Llm/GuardedPromptInspector.php
+ *   1 ファイルに閉じている (vendor がプロパティを改名したときに壊れる箇所を 1 つにする)。
+ * ★ factory の**戻り値型宣言**が GuardedPrompt であることは PromptDefenseWindowGateTest の
+ *   担当で、ここでは重ねて検査しない (同じ不変条件を 2 箇所で守らない)。
  */
 
 /**
@@ -51,7 +61,7 @@ function promptAttributionContext(): LlmCallContextData
  * end-user 入力なしの prompt は変数 list を空配列で登録する (exempt を明示)。
  * 帰属の対象を持たない prompt は帰属キー list を空配列で登録する (exempt を明示)。
  *
- * @return array<class-string, array{list<string>, list<string>, Closure(): Prompt}>
+ * @return array<class-string, array{list<string>, list<string>, Closure(): GuardedPrompt}>
  */
 function promptUntrustedInputInventory(): array
 {
@@ -62,23 +72,23 @@ function promptUntrustedInputInventory(): array
         ExampleSummaryPrompt::class => [
             ['text'],
             [],
-            fn (): Prompt => ExampleSummaryPrompt::make('untrusted end-user text'),
+            fn (): GuardedPrompt => ExampleSummaryPrompt::make('untrusted end-user text'),
         ],
         // AI 解析 3 段 (SOP 由来の untrusted テキスト/JSON は全段 UserInput 経由)
         SopExtractPrompt::class => [
             ['text'],
             ['organization_id', 'subject_type', 'subject_id'],
-            fn (): Prompt => SopExtractPrompt::make('untrusted sop text', $context),
+            fn (): GuardedPrompt => SopExtractPrompt::make('untrusted sop text', $context),
         ],
         WorkDecompositionPrompt::class => [
             ['extracted'],
             ['organization_id', 'subject_type', 'subject_id'],
-            fn (): Prompt => WorkDecompositionPrompt::make('{"sections":[]}', $context),
+            fn (): GuardedPrompt => WorkDecompositionPrompt::make('{"sections":[]}', $context),
         ],
         ScenarioGenerationPrompt::class => [
             ['decomposition'],
             ['organization_id', 'subject_type', 'subject_id'],
-            fn (): Prompt => ScenarioGenerationPrompt::make('{"steps":[]}', $context),
+            fn (): GuardedPrompt => ScenarioGenerationPrompt::make('{"steps":[]}', $context),
         ],
     ];
 }
@@ -123,12 +133,9 @@ dataset('untrusted_prompt_inputs', function (): iterable {
 // ── 1. coverage(型) ──────────────────────────────────────────────────
 test('untrusted template 変数は UserInput 型で渡される', function (string $class, array $untrustedVars, array $_attributionKeys, Closure $factory): void {
     $prompt = $factory();
-    expect($prompt)->toBeInstanceOf(Prompt::class);
+    expect($prompt)->toBeInstanceOf(GuardedPrompt::class);
 
-    // Prompt::load で渡された template 変数を reflection で取り出す
-    $property = new ReflectionProperty(Prompt::class, 'templateVariables');
-    /** @var array<string, mixed> $variables */
-    $variables = $property->getValue($prompt);
+    $variables = GuardedPromptInspector::templateVariables($prompt);
 
     foreach ($untrustedVars as $name) {
         expect($variables)->toHaveKey($name);
@@ -138,6 +145,16 @@ test('untrusted template 変数は UserInput 型で渡される', function (stri
             .' (生 string はタグ区切りされず prompt-injection の抜け道になる)',
         );
     }
+})->with('untrusted_prompt_inputs');
+
+test('合言葉は untrusted 区画に入らない (生 string として system 側へ渡る)', function (string $class, array $_untrustedVars, array $_attributionKeys, Closure $factory): void {
+    $variables = GuardedPromptInspector::templateVariables($factory());
+
+    expect($variables)->toHaveKey(PromptDefense::CANARY_VARIABLE);
+    expect($variables[PromptDefense::CANARY_VARIABLE])->toBeString(
+        "{$class}: 合言葉は untrusted ではないので UserInput で包まない"
+        .' (包むと <user_input> の中に合言葉が入り、検知の前提が崩れる)',
+    );
 })->with('untrusted_prompt_inputs');
 
 // ── 2. deny-by-default ───────────────────────────────────────────────
@@ -164,13 +181,9 @@ test('帰属が必要な prompt は metadata_context に organization / subject 
     array $attributionKeys,
     Closure $factory,
 ): void {
-    $prompt = $factory();
-
-    // Prompt::withMetadata() が array_merge するだけの内部バッグを reflection で取り出す
+    // Prompt::withMetadata() が array_merge するだけの内部バッグを覗く
     // (パッケージは中身を解釈せず PromptExecution* イベントへそのまま流す)。
-    $property = new ReflectionProperty(Prompt::class, 'metadata_context');
-    /** @var array<string, mixed> $metadata */
-    $metadata = $property->getValue($prompt);
+    $metadata = GuardedPromptInspector::metadataContext($factory());
 
     if ($attributionKeys === []) {
         expect($metadata)->toBe([], "{$class}: 帰属 exempt として登録されていますが metadata が付いています");
