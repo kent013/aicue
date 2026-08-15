@@ -20,7 +20,7 @@
 | **vendor (composer)** | worktree-local に独立 install | `setup-worktree.sh [4/7]` の `composer install --no-progress --no-interaction --no-scripts` (最大 3 回リトライ) |
 | **node_modules (pnpm)** | worktree-local install + GVS で実体共有 | `setup-worktree.sh [5/7]` の `pnpm install --frozen-lockfile --config.*` 強制 (同 3 回リトライ)。詳細は [`docs/pnpm-global-virtual-store-runbook.md`](pnpm-global-virtual-store-runbook.md) |
 | **テスト DB (pgsql)** | worktree ごとに別 DB (`<slug>_test_<worktree-hash>`) | `tests/Support/Ci/TestDatabaseEnv::workrootHash()` = worktree root realpath の sha1 先頭 8 桁。`scripts/ci/ensure-test-db.php` が冪等 CREATE |
-| **実行時ファイル** | 親から実コピー (共有しない) | `setup-worktree.sh [2/7]` が `.env` (無ければ `.env.example`) / `storage/oauth-*.key` / `public/build` をコピー |
+| **実行時ファイル** | 親から実供給 (共有しない) | `setup-worktree.sh [2/7]` が `.env` (必須) / `storage/oauth-*.key` / `.env.bughunt.local` を **0600 で作成**して供給し、`public/build` をコピー |
 
 ### なぜ vendor を hardlink 共有しないのか
 
@@ -60,7 +60,7 @@ leak しても dev DB には到達しない**。
 [0/7] 事前条件チェック + lock 排他 (flock、無ければ mkdir lock)
 [1/7] git worktree add .claude/worktrees/tasks/<task-id> -b todo/<task-id> main
       (+ mise trust。mise 環境で新規 worktree が untrusted だと pnpm が起動できない)
-[2/7] 実行時ファイルの provision (.env 必須 / storage/oauth-*.key・public/build は存在すれば)
+[2/7] 実行時ファイルの供給 (.env 必須 / storage/oauth-*.key・.env.bughunt.local・public/build は親にあれば)
 [3/7] git submodule update --init --recursive (.gitmodules がある場合のみ)
 [4/7] vendor:       composer install --no-scripts (最大 3 回リトライ)
 [5/7] node_modules: pnpm install --frozen-lockfile --config.* 強制 (最大 3 回リトライ)
@@ -74,11 +74,24 @@ leak しても dev DB には到達しない**。
   中途半端な worktree が残らない。
 - 工程ごとに `[timing] step=... elapsed=...s` を stderr に出す (遅い工程の切り分け用)。
 
+### 実行時ファイルの供給契約 ( `[2/7]` )
+
+秘密ファイル 4 本 (`.env` / `storage/oauth-private.key` / `storage/oauth-public.key` /
+`.env.bughunt.local`) は `provision_secret_file` 1 本を通して供給する。
+
+- **0600 は新規 worktree だけ**に効く。既に作ってある worktree の秘密ファイルには遡及しない。
+- **親の権限は直さない**。単純な cp が供給元の mode を引き継ぐ (= 親が 0644 なら worktree が
+  増えるたびに world-readable な複製が増える) のを断つのが目的で、親を締めるのは別の話である。
+- **`.env` 不在は worktree を作る前に停止する**。見本ファイル (`.env.example`) で代替すると
+  `APP_KEY` も DB 接続も無い「動くように見えて壊れている worktree」が無言で出来上がるため。
+- **契約の正本は `tests/Architecture/SetupWorktreeRuntimeFilesContractTest.php`**
+  (source 専用入口から供給関数だけを実走させる 18 ケース)。
+
 ### post-setup health check ( `[6/7]` )
 
 | # | 検査 | 何を守るか |
 |---|---|---|
-| 1 | `.env` と provision したパスの存在 | コピー漏れで後段が謎エラーになるのを防ぐ |
+| 1 | provision したパスの存在 (`.env` は必須供給なので必ず含まれる)。**mode は見ない** (0600 の保証は上記の契約テストが持つ) | 供給漏れで後段が謎エラーになるのを防ぐ |
 | 2 | `vendor/autoload.php` 経由で `App\Models\User` が解決できる | composer install の完整性 |
 | 3 | `node_modules` が実ディレクトリ (symlink でない) + `.modules.yaml` あり | pnpm install の完了 |
 | 4 | `readlink -f node_modules/svelte` が `<store-path>/links/` 配下 | **GVS の実効** (無効化されると型 identity 衝突が再発する) |
@@ -212,8 +225,9 @@ bughunt 環境の DB (`bug_hunt(_1..4)`) は本書のテスト DB 分離とは**
   `composer test` では落ちない (参照実装の aigenba は `WorktreeRuleInvariantTest` で
   regex 固定している)。導入するなら「ブランチ名固定」「teardown がブランチを触らない」
   「install 系 2 層規則」あたりが pin 対象になる。
-- `.env` は親から**実コピー**するため、親の `.env` を後から変えても worktree には反映されない
-  (worktree ごとに直す)。
+- `.env` は親から**実供給**するため、親の `.env` を後から変えても worktree には反映されない
+  (worktree ごとに直す)。供給時に mode を 0600 に確定するのは**新規 worktree だけ**で、
+  既存 worktree の秘密ファイルと親側の権限はそのまま残る。
 
 ## 参考
 
