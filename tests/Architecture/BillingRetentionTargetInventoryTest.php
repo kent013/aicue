@@ -32,7 +32,14 @@ use Illuminate\Database\Eloquent\Model;
  *   - **purge 対象テーブルの網羅性は保証しない**。母集団は `app/Models/Billing/` という
  *     **ディレクトリの人間の申告**であり、課金取引の記録が別ディレクトリ (例: app/Models/ 直下 /
  *     別ドメインのモデル) や Eloquent を経由しない表に置かれた場合、この gate は**沈黙する**。
- *     目録は「機械が見つけた全部」ではなく「人間が申告した全部」である
+ *     目録は「機械が見つけた全部」ではなく「人間が申告した全部」である。
+ *     **実スキーマの表一覧全体との集合等価は
+ *     tests/Feature/Retention/RetentionTableClassificationTest.php が持つ** (母集団が違う —
+ *     あちらは実スキーマの実測、こちらは app/Models/Billing/ という人間の申告)。
+ *     本 gate は年数・起算点列・purger の配線・実行順を持ち、あちらは**それらを 1 つも写さない**。
+ *     対象表の名前だけは両方に現れるが、それはあちらの RC-4 が本 enum と両方向で結線して
+ *     管理する (片側だけ増減したら赤くなる)。
+ *     **年数・起算点・purger を 2 か所に書かないこと** (どちらかに検査を足す前に、この境界を読み直す)
  *   - **列が実在するか**は静的には見ない。詳細設計 C1d は実在列の照合 (schema 照合) も
  *     本 gate の責務としていたが、**Architecture lane は DB を持たない** (tests/Pest.php が
  *     RefreshDatabase を Feature/Unit にしか適用しないため、ここで Schema を引いても
