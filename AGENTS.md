@@ -627,7 +627,7 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
      `SocialProviderTrustPolicyTest` へ委譲する。
    - **保証範囲を誇張しない**: これは**検知**であって**遮断ではない**。
      SSO だけは別途 fake 配線 (testing / bughunt.local) で実 IdP への遷移を塞いでいるが、
-     それは**本目録の効果ではない** (`ExternalFakeWiringInventory` が正本)。
+     それは**本目録の効果ではない** (`ExternalFakeDeclaration` が正本)。
      走査根は `app/` のみで `routes/` / `config/` は見ない。
      委譲先の assert の中身を弱める改変、次元そのものの数え落とし、部分修飾名、
      文字列キーの container 解決だけの経路、vendor 内部から出る通信、他種別の宛先集合、
@@ -635,7 +635,7 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
      **保証しないものの完全な一覧は `docs/architecture.md` §外部到達点の目録 (標準形 v1) が正本**
      (ここは要約であり、増減はそちらで管理する)。
    - 非本番の captcha は `testing.fake_externals` で `RecaptchaVerifierTestFake` へ bind される
-     (`ExternalFakeWiringInventory`)。**SSO も同じ flag で fake する**が、env allowlist は
+     (`ExternalFakeDeclaration`)。**SSO も同じ flag で fake する**が、env allowlist は
      `testing` / `bughunt.local` のみで **`local` を除く** (認証バイパス面の最小化と
      実 IdP 連携の確認手段の温存)。
    - 詳細は `docs/architecture.md` §外部到達点の目録 (標準形 v1)。

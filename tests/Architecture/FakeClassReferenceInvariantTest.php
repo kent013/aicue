@@ -28,7 +28,10 @@ use Tests\Support\ExternalFakes\FakeWiringSourceScanner;
 
 /** 参照 allowlist: fake 系クラスを参照してよい本番ファイル (**repo ルート相対**) */
 const FAKE_REFERENCE_ALLOWED = [
-    // 唯一の配線点 (何を fake にするかの決定はここに集約する)
+    // 何を偽物にするかの決定の唯一の正本 (差し替え先のクラス名はここにだけ現れる)
+    'app/Support/ExternalFakes/ExternalFakeDeclaration.php',
+    // 唯一の配線点。差し替え先は宣言から読むので、ここに現れる偽物系クラスは
+    // 配線基盤の 4 件だけである (ExternalFakeWiringInvariantTest の 3-10 が集合で固定する)
     'app/Providers/FakeExternalsServiceProvider.php',
     // fake storage signed route の受け口 (FakeStorageGate 成立時のみ route 登録される)
     'app/Http/Controllers/Testing/PutFakeStorageObjectController.php',
@@ -99,10 +102,11 @@ test('4-3 本番コードは fake クラスを参照しない', function (): voi
     expect($violations)->toBe([]);
 });
 
-test('4-4 参照 allowlist は 5 件から増えていない', function (): void {
+test('4-4 参照 allowlist は 6 件から増えていない', function (): void {
     // 増やすときは理由コメントを添えて**ここも触る** (意図的な摩擦)。
-    expect(FAKE_REFERENCE_ALLOWED)->toHaveCount(5)
+    expect(FAKE_REFERENCE_ALLOWED)->toHaveCount(6)
         ->and(FAKE_REFERENCE_ALLOWED)->toBe([
+            'app/Support/ExternalFakes/ExternalFakeDeclaration.php',
             'app/Providers/FakeExternalsServiceProvider.php',
             'app/Http/Controllers/Testing/PutFakeStorageObjectController.php',
             'app/Http/Controllers/Testing/GetFakeStorageObjectController.php',

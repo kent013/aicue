@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Support;
 
+use App\Support\ExternalFakes\ExternalFakeDeclaration;
 use Laravel\Fortify\Features;
 use RuntimeException;
 use Throwable;
@@ -19,9 +20,9 @@ use Throwable;
  * - APP_DEBUG=false (stack trace / 設定露出防止)
  * - SECURITY_HSTS_ENABLED / SECURITY_CSP_ENABLED=true (セキュリティヘッダ必須)
  * - DEBUG_LOGIN_USER / DEBUG_LOGIN_PASSWORD が空 (local 専用機構の誤投入防止)
- * - TESTING_FAKE_EXTERNALS=false (Stripe 外部 fake の本番混入防止)
- * - TESTING_FAKE_LLM=false (LLM fake の本番混入防止)
- * - TESTING_FAKE_STORAGE=false (storage fake の本番混入防止)
+ * - 偽の外部サービスのフラグが false (本番混入防止)。対象と環境変数名の正本は
+ *   App\Support\ExternalFakes\ExternalFakeDeclaration で、**設定値とプロセスの実環境変数の
+ *   両方**を見る (設定キャッシュが失われた起動で環境変数が読み直されるため)
  * - TrustHosts allowlist (Host header injection 防御の allowlist 非空・書式)
  * - TrustProxies allowlist (client IP / X-Forwarded-Proto の信頼境界。未宣言・`*`・
  *   REMOTE_ADDR・書式不正を拒否。プロキシ無し構成は `none` の明示宣言を要求する)
@@ -86,24 +87,26 @@ class ProductionEnvGuard
                 .'(both are local-dev only; presence indicates dangerous misconfiguration).';
         }
 
-        // 外部 fake flag は非本番専用。production で true なら課金 (Stripe) が fake に
-        // 差し替わり得る危険設定のため fail-fast する (FakeExternalsServiceProvider の
-        // allowlist で bind 自体は起きないが、設定として存在すること自体を拒否する)
-        if (config('testing.fake_externals') === true) {
-            $errors[] = 'TESTING_FAKE_EXTERNALS must be false in production '
-                .'(external fakes must never be enabled in production).';
-        }
+        // 偽の外部サービスのフラグは非本番専用。production で true なら課金 (Stripe) が
+        // 偽物へ差し替わり得る危険設定のため fail-fast する (配線 provider の許可環境で
+        // bind 自体は起きないが、設定として存在すること自体を拒否する)。
+        //
+        // ★**設定値とプロセスの実環境変数の両方**を見る。設定キャッシュを作った環境と
+        //   出荷先が食い違うと、キャッシュ上は false でも、キャッシュが失われた起動で
+        //   環境変数が読み直されて本番で偽物が立ちうる (経路キャッシュが古いと保護が
+        //   無音で外れるのと同じ形)。対象と環境変数名の正本は ExternalFakeDeclaration。
+        foreach (ExternalFakeDeclaration::FLAG_ENVIRONMENT_VARIABLES as $flag => $variable) {
+            if (config($flag) === true) {
+                $errors[] = "{$variable} must be false in production (configuration value).";
+            }
 
-        // LLM fake は production で real LLM を潰すため禁止 (fake_externals と同じ fail-secure)。
-        if (config('testing.fake_llm') === true) {
-            $errors[] = 'TESTING_FAKE_LLM must be false in production '
-                .'(LLM fake must never be enabled in production).';
-        }
-
-        // storage fake は production で実ストレージを潰し得るため禁止。
-        if (config('testing.fake_storage') === true) {
-            $errors[] = 'TESTING_FAKE_STORAGE must be false in production '
-                .'(storage fake must never be enabled in production).';
+            // $_SERVER / $_ENV / getenv() を独立に見る (どれか 1 つでも危険側なら違反)。
+            foreach ($this->rawEnvironmentValues($variable) as $source => $raw) {
+                if (! $this->isUnambiguouslyDisabled($raw)) {
+                    $errors[] = "{$variable} must be false in production "
+                        ."(process environment via {$source}: ".var_export($raw, true).').';
+                }
+            }
         }
 
         // Host header injection 防御の TrustHosts allowlist を起動時検証。
@@ -178,6 +181,53 @@ class ProductionEnvGuard
                 "Production env baseline violations:\n- ".implode("\n- ", $errors)
             );
         }
+    }
+
+    /**
+     * プロセスの実環境変数を 3 経路で読み、**値が存在するものだけ**を返す。
+     *
+     * 未設定は判定対象にしない。`$_SERVER` / `$_ENV` は mixed を持ちうるので
+     * **型を絞らずそのまま返す** (絞って捨てると設定破損を見逃す)。
+     *
+     * @return array<string, mixed> 経路名 => 生の値
+     */
+    private function rawEnvironmentValues(string $variable): array
+    {
+        $values = [];
+
+        if (array_key_exists($variable, $_SERVER)) {
+            $values['$_SERVER'] = $_SERVER[$variable];
+        }
+
+        if (array_key_exists($variable, $_ENV)) {
+            $values['$_ENV'] = $_ENV[$variable];
+        }
+
+        // getenv() の false は「未設定」であり、空文字とは区別する。
+        $raw = getenv($variable);
+        if ($raw !== false) {
+            $values['getenv()'] = $raw;
+        }
+
+        return $values;
+    }
+
+    /**
+     * 生の値が「間違いなく無効」と読めるか。
+     *
+     * 文字列でない値を含め、解釈できない値はすべて違反 (安全側) にする。
+     */
+    private function isUnambiguouslyDisabled(mixed $raw): bool
+    {
+        if (! is_string($raw)) {
+            return false;
+        }
+
+        return in_array(
+            strtolower($raw),
+            ['', 'false', '(false)', '0', 'off', 'no', 'null', '(null)'],
+            true
+        );
     }
 
     /**

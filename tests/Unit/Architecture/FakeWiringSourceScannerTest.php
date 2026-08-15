@@ -50,6 +50,29 @@ test('5-2: bind の第 2 引数が closure なら concrete は null (呼び出�
     ]);
 });
 
+test('5-2b: 宣言 entry のプロパティ 2 個を渡す bind は許可形である (現行 provider の実パターン)', function (): void {
+    $source = fakeWiringScannerSource('', '        $this->app->bind($swap->abstract, $swap->fake);');
+
+    expect(FakeWiringSourceScanner::disallowedContainerCalls($source))->toBe([])
+        ->and(FakeWiringSourceScanner::disallowedIndirectAccess($source))->toBe([]);
+});
+
+test('5-2c: ::class を直に書く bind は許可形から外れる (差し替え先の手書きを封じる)', function (): void {
+    // 差し替え先の決定は宣言 (ExternalFakeDeclaration) にしか無い、という摩擦の実体。
+    $classPair = fakeWiringScannerSource('', '        $this->app->bind(\App\Demo\A::class, \App\Demo\B::class);');
+    // プロパティ名違い (差し替えの向きを取り違える形)
+    $wrongProperty = fakeWiringScannerSource('', '        $this->app->bind($swap->fake, $swap->abstract);');
+    // 引数 3 個 ($shared = singleton 相当)
+    $shared = fakeWiringScannerSource('', '        $this->app->bind($swap->abstract, $swap->fake, true);');
+    // 名前付き引数
+    $named = fakeWiringScannerSource('', '        $this->app->bind(abstract: $swap->abstract, concrete: $swap->fake);');
+
+    expect(FakeWiringSourceScanner::disallowedContainerCalls($classPair))->toHaveCount(1)
+        ->and(FakeWiringSourceScanner::disallowedContainerCalls($wrongProperty))->toHaveCount(1)
+        ->and(FakeWiringSourceScanner::disallowedContainerCalls($shared))->toHaveCount(1)
+        ->and(FakeWiringSourceScanner::disallowedContainerCalls($named))->toHaveCount(1);
+});
+
 test('5-3: singleton() は許可された呼び出し形ではない', function (): void {
     $source = fakeWiringScannerSource('', '        $this->app->singleton(\App\Demo\A::class, \App\Demo\B::class);');
 
@@ -99,7 +122,7 @@ test('5-8: $this->app の非呼び出し出現 (変数への退避) を検出す
 test('5-9: コメント / docblock 中の container 呼び出しは誤検出しない', function (): void {
     $body = "        // \$this->app->singleton(\\App\\Demo\\A::class, \\App\\Demo\\B::class);\n"
         ."        /** \$this->app->singleton(\\App\\Demo\\A::class, \\App\\Demo\\B::class); */\n"
-        .'        $this->app->bind(\App\Demo\A::class, \App\Demo\B::class);';
+        .'        $this->app->bind($swap->abstract, $swap->fake);';
     $source = fakeWiringScannerSource('', $body);
 
     expect(FakeWiringSourceScanner::disallowedContainerCalls($source))->toBe([])
@@ -241,6 +264,47 @@ test('5-22: $this-> の動的メンバアクセスは fail-closed で禁止す�
     expect(FakeWiringSourceScanner::disallowedIndirectAccess($literal))->toHaveCount(1)
         ->and(FakeWiringSourceScanner::disallowedIndirectAccess($variable))->toHaveCount(1)
         ->and(FakeWiringSourceScanner::disallowedIndirectAccess($dynamicVariable))->toHaveCount(1);
+});
+
+test('5-24: bindPairs は container へ到達する 4 形と別名を読む', function (): void {
+    // レーン側 (tests/) は `app()->bind(…)` と書けるため、`$this->app->bind` だけを読む
+    // 走査器では LaneExternalFakeBindingTest が素通りする。4 形すべてを読むことを固定する。
+    $expected = [['abstract' => 'App\Demo\A', 'concrete' => 'App\Demo\B']];
+
+    $member = fakeWiringScannerSource('', '        $this->app->bind(\App\Demo\A::class, \App\Demo\B::class);');
+    $helper = fakeWiringScannerSource('', '        app()->bind(\App\Demo\A::class, \App\Demo\B::class);');
+    $facade = fakeWiringScannerSource(
+        'use Illuminate\Support\Facades\App;',
+        '        App::bind(\App\Demo\A::class, \App\Demo\B::class);'
+    );
+    $container = fakeWiringScannerSource(
+        'use Illuminate\Container\Container;',
+        '        Container::getInstance()->bind(\App\Demo\A::class, \App\Demo\B::class);'
+    );
+    $aliasedHelper = fakeWiringScannerSource(
+        'use function app as c;',
+        '        c()->bind(\App\Demo\A::class, \App\Demo\B::class);'
+    );
+    $aliasedContainer = fakeWiringScannerSource(
+        'use Illuminate\Container\Container as C;',
+        '        C::getInstance()->bind(\App\Demo\A::class, \App\Demo\B::class);'
+    );
+
+    foreach ([$member, $helper, $facade, $container, $aliasedHelper, $aliasedContainer] as $source) {
+        expect(FakeWiringSourceScanner::bindPairs($source))->toBe($expected);
+    }
+});
+
+test('5-25: bindPairs は container 以外の受け手の bind を読まない (誤検出しない)', function (): void {
+    // 走査器が「あらゆる ->bind(」を読むと、レーン側の無関係な API まで違反になる。
+    $unrelated = fakeWiringScannerSource('', '        $router->bind(\App\Demo\A::class, \App\Demo\B::class);');
+    // 第 2 引数が ::class でない形は concrete=null で返す (呼び出し側で判定する)
+    $closure = fakeWiringScannerSource('', '        app()->bind(\App\Demo\A::class, fn () => new \App\Demo\B);');
+
+    expect(FakeWiringSourceScanner::bindPairs($unrelated))->toBe([])
+        ->and(FakeWiringSourceScanner::bindPairs($closure))->toBe([
+            ['abstract' => 'App\Demo\A', 'concrete' => null],
+        ]);
 });
 
 test('5-23: 未分類の式経由で container を取り出す形も禁止する', function (): void {

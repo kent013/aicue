@@ -2,13 +2,16 @@
 
 declare(strict_types=1);
 
-namespace Tests\Support\ExternalFakes;
+namespace App\Support\ExternalFakes;
 
 /**
- * container 差し替え 1 本の宣言 (fake 配線 gate の inventory 要素)。
+ * container 差し替え 1 本の宣言 (偽の外部サービスの宣言集合の要素)。
  *
- * 「宣言 (本ファイル)」と「実証 (ExternalFakeWiringInvariantTest)」を分離する。
+ * 「宣言 (ExternalFakeDeclaration)」と「実証 (ExternalFakeWiringInvariantTest)」を分離する。
  * 本クラスは値の器であり判定ロジックを持たない。
+ *
+ * ★本番の読み込み対象 (app/) に置く。宣言を読むのは provider・gate・seeder であり、
+ *   いずれも本番側のクラスだからである (テスト側にしか無いと本番の配線が宣言を読めない)。
  */
 final readonly class ExternalFakeBinding
 {

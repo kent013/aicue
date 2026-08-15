@@ -16,10 +16,12 @@ use App\Support\FakeStorageGate;
  *    API 名の列挙は未知 API (rebinding / 将来の Container API) で必ず抜けられる。
  *  - `make()` は**引数まで**固定する。`$this->app->make(SomeRegistrar::class)->register()` という
  *    委譲で配線を別クラスへ逃がせるため (既存の CannedPromptFakeRegistrar が現に委譲パターン)。
- *  - `bind()` は「位置引数ちょうど 2 個かつ両方 `::class`」に固定する。
- *    `bind($abstract, ExistingFake::class)` は bindPairs() が読み取れず参照集合も変わらないため
- *    ここで禁止しないと**偽グリーン**になる。`bind(A::class, B::class, true)` は第 3 引数 $shared =
- *    singleton 相当なので、これも禁止しないと singleton 禁止を同じ意味の書き方で回避できる。
+ *  - `bind()` は「位置引数ちょうど 2 個で、どちらも宣言 entry のプロパティ参照
+ *    (`$swap->abstract` / `$swap->fake`)」に固定する。**`::class` を直に書く形も禁止**で、
+ *    差し替え先の決定を宣言 (`ExternalFakeDeclaration`) だけに閉じるための摩擦である
+ *    (provider に 1 組でも手書きすると、宣言を読まない差し替えが無音で増える)。
+ *    `bind(A::class, B::class, true)` は第 3 引数 $shared = singleton 相当なので、
+ *    これも禁止しないと singleton 禁止を同じ意味の書き方で回避できる。
  *  - 誤検出は分類 1 行で解消できるが検出漏れは永久に気付けない、という非対称性から
  *    **過剰検出側 (fail-closed)** へ倒す。
  *
@@ -50,17 +52,29 @@ final class FakeWiringSourceScanner
      * 許可する `$this->app-><method>(…)` の呼び出し形 (これ以外はすべて禁止 = deny-by-default)。
      *
      * value は許可する**位置引数の形**:
-     * - `classPair`: 位置引数ちょうど 2 個で両方 `::class` 定数 (差し替え本体。組は bindPairs() が inventory 照合)
+     * - `declaredPair`: 位置引数ちょうど 2 個で、どちらも変数のプロパティ参照であり、
+     *   プロパティ名が順に `abstract` / `fake` であること (= 宣言 entry を読んだ差し替えだけを許す)
      * - `allowlistedClass`: 位置引数ちょうど 1 個で MAKE_ALLOWED_ARGUMENTS のいずれか
      * - `none`: 位置引数なし
      *
      * @var array<string, string>
      */
     private const array ALLOWED_APP_CALLS = [
-        'bind' => 'classPair',
+        'bind' => 'declaredPair',
         'make' => 'allowlistedClass',
         'environment' => 'none',
     ];
+
+    /**
+     * `declaredPair` が要求するプロパティ名 (順序込み)。
+     *
+     * 宣言 entry (App\Support\ExternalFakes\ExternalFakeBinding) の
+     * 「解決キー」と「差し替え先」のプロパティ名であり、順序が入れ替わると
+     * 差し替えの向きが逆になるため位置ごとに固定する。
+     *
+     * @var list<string>
+     */
+    private const array DECLARED_PAIR_PROPERTIES = ['abstract', 'fake'];
 
     /**
      * `make()` に渡してよいクラス (container 配線を行わないことを分類済みの 2 件のみ)。
@@ -146,11 +160,13 @@ final class FakeWiringSourceScanner
                 continue;
             }
 
-            if ($shape === 'classPair') {
+            if ($shape === 'declaredPair') {
                 if (count($arguments) !== 2
-                    || ! self::isClassConstant($arguments[0])
-                    || ! self::isClassConstant($arguments[1])) {
-                    $violations[] = "{$method}(…) は位置引数ちょうど 2 個かつ両方 ::class 定数でなければならない (line {$line})";
+                    || ! self::isDeclaredProperty($arguments[0], self::DECLARED_PAIR_PROPERTIES[0])
+                    || ! self::isDeclaredProperty($arguments[1], self::DECLARED_PAIR_PROPERTIES[1])) {
+                    $violations[] = "{$method}(…) は位置引数ちょうど 2 個で、順に "
+                        .'$<変数>->'.self::DECLARED_PAIR_PROPERTIES[0].' / $<変数>->'
+                        .self::DECLARED_PAIR_PROPERTIES[1]." でなければならない (line {$line})";
                 }
 
                 continue;
@@ -174,12 +190,18 @@ final class FakeWiringSourceScanner
     }
 
     /**
-     * `$this->app->bind(A::class, B::class)` の (abstract, concrete) 組 (**FQCN 正規化済み**)。
+     * container へ `bind(A::class, B::class)` する組 (**FQCN 正規化済み**)。
+     *
+     * 読める呼び出し形は **container へ到達する 4 つ**である —
+     * `$this->app->bind` / `app()->bind` (`resolve()` と `use function … as …` の別名を含む) /
+     * `App::bind` (facade。別名解決あり) / `Container::getInstance()->bind`。
      *
      * 第 2 引数が `::class` 定数でない (closure 等) 場合は concrete を `null` として返し、
-     * 呼び出し側テストで「fake 差し替えは ::class 対 ::class の形に限る」を fail させる。
-     * 第 1 引数が `::class` 定数でない形 (変数 abstract など) は組として読み取れないため返さない
-     * (disallowedContainerCalls() が別途 fail させる = 見落としにはならない)。
+     * 呼び出し側テストで「差し替えは ::class 対 ::class の形に限る」を fail させる。
+     * 第 1 引数が `::class` 定数でない形 (変数 abstract など) は組として読み取れないため返さない。
+     *
+     * **保証範囲を誇張しない**: 読めるのは上の 4 形だけである。変数経由の結び付け
+     * (`$container->bind(…)`)・`instance()` / `swap()`・モック機構経由には**沈黙する**。
      *
      * @return list<array{abstract: class-string, concrete: class-string|null}>
      */
@@ -188,21 +210,18 @@ final class FakeWiringSourceScanner
         $scanner = self::analyze($source);
         $pairs = [];
 
-        foreach ($scanner->appMethodCalls() as $call) {
-            if ($call['method'] !== 'bind' || count($call['args']) < 2) {
-                continue;
-            }
-            if (! self::isClassConstant($call['args'][0])) {
+        foreach ($scanner->containerBindCalls() as $args) {
+            if (count($args) < 2 || ! self::isClassConstant($args[0])) {
                 continue;
             }
 
             /** @var class-string $abstract */
-            $abstract = $scanner->resolve($call['args'][0][0]['text']);
+            $abstract = $scanner->resolve($args[0][0]['text']);
 
             $concrete = null;
-            if (self::isClassConstant($call['args'][1])) {
+            if (self::isClassConstant($args[1])) {
                 /** @var class-string $concrete */
-                $concrete = $scanner->resolve($call['args'][1][0]['text']);
+                $concrete = $scanner->resolve($args[1][0]['text']);
             }
 
             $pairs[] = ['abstract' => $abstract, 'concrete' => $concrete];
@@ -654,6 +673,144 @@ final class FakeWiringSourceScanner
     }
 
     /**
+     * container へ到達する `bind(` 呼び出しの位置引数一覧。
+     *
+     * 対象は container へ到達する 4 形 — `$this->app->bind` / `app()->bind` /
+     * `App::bind` / `Container::getInstance()->bind` (別名は解決してから照合する)。
+     *
+     * @return list<list<list<array{id: int, text: string, line: int}>>>
+     */
+    private function containerBindCalls(): array
+    {
+        $calls = [];
+        $count = count($this->tokens);
+
+        for ($i = 0; $i < $count; $i++) {
+            $token = $this->tokens[$i];
+
+            if ($this->isImportToken[$i] || $token['id'] !== T_STRING || $token['text'] !== 'bind') {
+                continue;
+            }
+            if (($this->tokens[$i + 1]['text'] ?? '') !== '(') {
+                continue;
+            }
+            if (! $this->isContainerReceiverBefore($i)) {
+                continue;
+            }
+
+            $calls[] = $this->parseArguments($i + 1);
+        }
+
+        return $calls;
+    }
+
+    /**
+     * `bind` トークンの直前が container を指す受け手か。
+     */
+    private function isContainerReceiverBefore(int $index): bool
+    {
+        $operator = $this->tokens[$index - 1] ?? null;
+        if ($operator === null) {
+            return false;
+        }
+
+        // App::bind(…) (facade。use alias も解決する)
+        if ($operator['id'] === T_DOUBLE_COLON) {
+            return $this->isContainerStaticName($this->tokens[$index - 2] ?? null);
+        }
+
+        if (! in_array($operator['id'], [T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR], true)) {
+            return false;
+        }
+
+        $receiver = $this->tokens[$index - 2] ?? null;
+        if ($receiver === null) {
+            return false;
+        }
+
+        // $this->app->bind(…)
+        if ($receiver['id'] === T_STRING
+            && $receiver['text'] === 'app'
+            && in_array($this->tokens[$index - 3]['id'] ?? -1, [T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR], true)
+            && ($this->tokens[$index - 4]['id'] ?? -1) === T_VARIABLE
+            && ($this->tokens[$index - 4]['text'] ?? '') === '$this') {
+            return true;
+        }
+
+        // ここから先は `…()->bind(…)` の形だけが対象
+        if ($receiver['text'] !== ')') {
+            return false;
+        }
+
+        $open = $this->matchingOpenParen($index - 2);
+        if ($open === null) {
+            return false;
+        }
+
+        $callee = $this->tokens[$open - 1] ?? null;
+        if ($callee === null) {
+            return false;
+        }
+
+        // app()->bind(…) / resolve()->bind(…) (`use function app as …` の別名も解決する)
+        if (in_array($callee['id'], self::NAME_TOKEN_IDS, true)
+            && ! self::isMemberAccessBoundary($this->tokens[$open - 2] ?? null)
+            && in_array($this->resolveFunctionName($callee['text']), self::CONTAINER_HELPERS, true)) {
+            return true;
+        }
+
+        // Container::getInstance()->bind(…)
+        return $callee['id'] === T_STRING
+            && $callee['text'] === 'getInstance'
+            && ($this->tokens[$open - 2]['id'] ?? -1) === T_DOUBLE_COLON
+            && $this->isContainerStaticName($this->tokens[$open - 3] ?? null);
+    }
+
+    /**
+     * 静的アクセスの起点が container を指す名前か (FQCN 解決 + 末尾セグメントの二重線)。
+     *
+     * @param  array{id: int, text: string, line: int}|null  $token
+     */
+    private function isContainerStaticName(?array $token): bool
+    {
+        if ($token === null || ! in_array($token['id'], self::NAME_TOKEN_IDS, true)) {
+            return false;
+        }
+
+        $segments = explode('\\', ltrim($token['text'], '\\'));
+        $last = $segments[count($segments) - 1];
+
+        return in_array($this->resolve($token['text']), self::CONTAINER_STATIC_FQCNS, true)
+            || in_array($last, self::CONTAINER_STATIC_ROOTS, true);
+    }
+
+    /**
+     * `)` の位置に対応する `(` の位置 (見つからなければ null)。
+     */
+    private function matchingOpenParen(int $closeIndex): ?int
+    {
+        $depth = 0;
+
+        for ($i = $closeIndex; $i >= 0; $i--) {
+            $text = $this->tokens[$i]['text'];
+
+            if ($text === ')') {
+                $depth++;
+
+                continue;
+            }
+            if ($text === '(') {
+                $depth--;
+                if ($depth === 0) {
+                    return $i;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * `(` の位置から位置引数を切り出す (トップレベルの `,` で分割)。
      *
      * @return list<list<array{id: int, text: string, line: int}>>
@@ -710,6 +867,20 @@ final class FakeWiringSourceScanner
             && in_array($arg[0]['id'], self::NAME_TOKEN_IDS, true)
             && $arg[1]['id'] === T_DOUBLE_COLON
             && $arg[2]['id'] === T_CLASS;
+    }
+
+    /**
+     * 宣言 entry のプロパティ参照 (`$swap->abstract`) か。
+     *
+     * @param  list<array{id: int, text: string, line: int}>  $arg
+     */
+    private static function isDeclaredProperty(array $arg, string $property): bool
+    {
+        return count($arg) === 3
+            && $arg[0]['id'] === T_VARIABLE
+            && in_array($arg[1]['id'], [T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR], true)
+            && $arg[2]['id'] === T_STRING
+            && $arg[2]['text'] === $property;
     }
 
     /**
