@@ -541,3 +541,66 @@ phantom password (ランダム値) が入っていると:
 - 実装: `app/Services/Auth/SocialAccountService.php` / `app/Actions/Fortify/UpdateUserPassword.php` /
   `app/Services/Auth/LoginMethodInventory.php`
 - 設計: `devnotes/20260805-1244-auth-method-and-passkey/` (施策 2)
+
+---
+
+## D14 ✅ 実行済み route の記録をアプリ側の観測器で採る (退避 → 正規化 → route 名解決の 3 段を置かない)
+
+| 観点 | テンプレート | 本アプリ |
+|---|---|---|
+| 「どの操作を叩けたか」の採取 | ブラウザの通信履歴を退避 → 正規化器 → artisan コマンドで route 名解決、の 3 段 | **serve のプロセス内で middleware が 1 要求 1 行を追記**する (`BughuntExecutedRouteMiddleware`) |
+| 採取の起動 | 走行中の LLM (探索エージェント) が退避コマンドを呼ぶ | 起動時に `provision` が env で仕込み、以後は無条件 |
+| 遮断された要求の扱い | 通信履歴なので 302/403 も「叩いた」側に残り、後段で除外しきれない | 遮断 middleware より**内側**に置いてあるため、そもそも記録に現れない |
+| 主入力が欠けたとき | 照合器が「全 in_scope を未実行 candidate」として出力し 0 で終わる | **終了コード 3 で落ちる** (worklist を出さない) |
+
+### なぜ正当な差分か(logic-driven)
+
+操作到達カバレッジの出力は「次に何を叩くべきか」という作業指示であり、
+**記録が採れていないこと**と**本当に叩けていないこと**を取り違えると、
+一覧そのものが嘘になる (全機構が未実行に見える)。3 段方式はこの取り違えを
+2 か所で作っていた:
+
+1. **採取の起動が LLM に依存する**。退避コマンドを呼び忘れた走行は、
+   記録が空のまま「全部未実行」として成功終了する。
+2. **通信履歴は遮断された要求も含む**。認証・課金ゲート・step-up 再認証で
+   跳ねた 302 は「叩いた」ように見えるが、controller には到達していない。
+   route 名の再解決は URL からの逆引きなので、この差を後段では復元できない。
+
+アプリ側の観測器は、web グループの**末尾** (priority list の鎖の最後) に置くことで
+「ここに到達した = 遮断 middleware をすべて通過した」という機械的事実を得る。
+route 名は `$request->route()->getName()` でその場で確定するので逆引きも要らない。
+起動は `scripts/bug-hunt-shard.sh provision` が env で仕込むため LLM の手順に依存しない。
+
+### 揃えている不変条件(これは保証し続ける)
+
+> 「**主入力が揃わない走行は成功にしない**」
+
+- `scripts/bug-hunt-shard.sh provision` は疎通確認の要求が実際に記録されたことを
+  同期点として確認し、記録されなければ**走行前に**落ちる (`assert_executed_capture_wired`)
+- `coverage/build_executed.py` は失敗マーカー / ファイル欠落 / 壊れた行 / 別 run の混入 /
+  **名前付き route の観測行が 0** のいずれでも**終了コード 3** で落ち、`executed.json` を
+  書き出さない (`route_name: null` の行しか無い shard もここで落ちる)
+- `coverage/correlate.py` は `--executed` 未指定 / 形が契約外 / run_id 不一致 /
+  shard 宣言と実測の食い違い / 観測行 0 のいずれでも**終了コード 3** で落ち、
+  未実行 worklist を出力しない
+- 記録器が遮断 middleware より内側に居ることは
+  `tests/Architecture/BughuntExecutedRouteOrderingTest.php` が deny-by-default で固定する
+  (短絡しうる middleware の分類は `tests/Support/Routing/MiddlewareShortCircuitInventory.php`)
+- 記録器が既定 no-op であること (env 既定 false + production 除外) と ok/blocked の写像は
+  `tests/Feature/Bughunt/ExecutedRouteCaptureTest.php` が実 HTTP 要求で固定する
+
+### 保証しないもの (誇張しない)
+
+- **web グループ外は観測しない** (`api/*` / Filament `/admin` / MCP)。分母に載っていれば
+  未実行側へ倒れる (過小申告の方向)
+- **部分欠測は検出しない**。分かるのは「名前付き route の行が 1 件も無い」「別 run が混ざった」
+  「失敗マーカーが残せた」まで
+- **偽造耐性は無い**。記録ファイルは worktree 内にあり、書き換えを検出する仕組みは持たない
+
+### 関連
+
+- 実装: `app/Http/Middleware/BughuntExecutedRouteMiddleware.php` / `config/bughunt.php` /
+  `bootstrap/app.php` / `scripts/bug-hunt-shard.sh` /
+  `.claude/skills/app-bug-hunt/coverage/build_executed.py` /
+  `.claude/skills/app-bug-hunt/coverage/correlate.py`
+- 設計: `devnotes/20260815-1113-bughunt-route-capture-failclosed/`

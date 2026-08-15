@@ -84,12 +84,16 @@ if [[ -n "${BUGHUNT_SANDBOX:-}" ]]; then
     LOCK_FILE="${BUGHUNT_SANDBOX}/bug-hunt.lock"
     ENV_FILE="${BUGHUNT_SANDBOX}/.env.bughunt.local"
     MAIN_ENV_FILE="${BUGHUNT_SANDBOX}/.env"     # 親リポジトリ .env (実キー ANTHROPIC_API_KEY 由来)
+    EXECUTED_BASE="${BUGHUNT_SANDBOX}/storage/bughunt-executed"
 else
     RUN_BASE="devnotes"
     TMP_BASE="tmp/bug-hunt"
     LOCK_FILE="${WORKSPACE}/.claude/bug-hunt.lock"
     ENV_FILE=".env.bughunt.local"
     MAIN_ENV_FILE=".env"                        # 親リポジトリ .env (実キー ANTHROPIC_API_KEY 由来)
+    # 実行済み route の記録の置き場。アプリ側 (BughuntExecutedRouteMiddleware) の
+    # storage_path('bughunt-executed') と同じ場所を指す (相対パス = worktree ルート起点)。
+    EXECUTED_BASE="storage/bughunt-executed"
 fi
 
 is_dryrun() { [[ -n "${BUGHUNT_SELFTEST_DRYRUN:-}" ]]; }
@@ -498,6 +502,61 @@ cmd_verify_run() {
     verify_reports "${run_id}" "${n}" || rc=$?
     echo "verify-run: run-id=${run_id} parallel=${n} exit=${rc} (manifest: $(manifest_path "${run_id}"))"
     return "${rc}"
+}
+
+# --- 実行済み route の記録 (操作到達カバレッジの主入力) ------------------------
+#
+# 記録そのものは BughuntExecutedRouteMiddleware (アプリ側) が serve のプロセス内で行う。
+# ここでの責務は「前回の記録を消す → 配線が生きていることを確認する → 探索開始前に空にする」
+# の 3 段だけである。
+
+executed_capture_path() { echo "${EXECUTED_BASE}/$1-$2.jsonl"; }
+executed_capture_error_path() { echo "${EXECUTED_BASE}/$1-$2.error"; }
+
+# (1) serve 起動より**前**に古い記録を消す。
+#     再 provision で前回の行が残っていると、それを今回の同期点と誤認して
+#     「待たずに空にする → 今回の /login が遅れて追記される」競合が再発するため。
+prepare_executed_capture() {
+    local run_id=$1 shard=$2
+    mkdir -p "${EXECUTED_BASE}"
+    rm -f "$(executed_capture_path "${run_id}" "${shard}")" \
+          "$(executed_capture_error_path "${run_id}" "${shard}")"
+}
+
+# (2) 記録の配線が生きていることを確認する (実経路のみ)。
+#
+# 疎通確認 (curl {url}/login) は記録器を通る要求なので、**その行が現れることが同期点**になる。
+# prepare で空にしてあるので、現れた行は必ず今回のものである。
+# (サイズの静止では駄目である — 0 のまま 2 回観測してから遅れて追記される順序が実際に成立し、
+#  消したはずの /login が残る。静止は「これから来ない」ことを証明しない。)
+#
+# 上限内に行が現れない = 記録器が配線されていない / 門が閉じている。**走行前に落とす**
+# (黙って何も記録しないまま走ると、走行後に全件未実行という嘘の一覧が出るため)。
+assert_executed_capture_wired() {
+    local run_id=$1 shard=$2 i
+    local path err
+    path="$(executed_capture_path "${run_id}" "${shard}")"
+    err="$(executed_capture_error_path "${run_id}" "${shard}")"
+    for i in $(seq 1 25); do            # 0.2s × 25 = 上限 5s
+        [[ -f "${err}" ]] && die 1 "shard-${shard} 実行済み route の記録が失敗している (${err} を参照)"
+        [[ -s "${path}" ]] && return 0
+        sleep 0.2
+    done
+    die 1 "shard-${shard} 疎通確認の要求が ${path} に記録されない = 記録器が配線されていない (BUGHUNT_EXECUTED の注入と bootstrap/app.php の登録を確認すること)"
+}
+
+# (3) 配線を確認したうえで記録を空にし、探索エージェントへ引き渡す。
+#     provision の疎通確認が記録に混ざると login が毎回「実行済み」になるため。
+#
+# ⚠ dryrun では prepare と finalize だけを呼ぶ (serve が居ないので待てない。
+#    storage への副作用はこの初期化だけで、配線を自己テストから検査するために残す)。
+finalize_executed_capture() {
+    local run_id=$1 shard=$2 path
+    path="$(executed_capture_path "${run_id}" "${shard}")"
+    mkdir -p "${EXECUTED_BASE}"
+    : > "${path}"
+    rm -f "$(executed_capture_error_path "${run_id}" "${shard}")"
+    manifest_update "${run_id}" "${shard}" "executed_capture=\"${path}\""
 }
 
 # --- shard 専用 wrapper 生成 (子セッションの唯一の Bash 許可対象) --------------
@@ -1024,6 +1083,9 @@ cmd_provision() {
             "db=\"${db}\"" "port=${port}" "app_url=\"${url}\"" \
             "log_offset=0" "serve_pid=0" "stories=\"(dryrun)\"" \
             "coverage=$( [[ -n "${COVERAGE:-}" ]] && echo true || echo false )"
+        # 実行済み route の記録は serve が居ないので待てない。初期化だけ実経路と同じ順で行う。
+        prepare_executed_capture "${run_id}" "${shard}"
+        finalize_executed_capture "${run_id}" "${shard}"
         generate_wrapper "${shard}" "${run_id}"
         return 0
     fi
@@ -1146,6 +1208,16 @@ PY
         fi
     fi
 
+    # (e-exec) 実行済み route の記録 (操作到達カバレッジの主入力)。**既定 ON = 毎回採る**。
+    #   BughuntCoverageMiddleware の pcov 系と違い拡張に依存しないため、条件分岐を持たない。
+    #   古い記録は serve 起動より前に消す (後述の同期点を今回の行だけで判定するため)。
+    local -a executed_env=(
+        "BUGHUNT_EXECUTED=1"
+        "BUGHUNT_EXECUTED_RUN=${run_id}"
+        "BUGHUNT_EXECUTED_SHARD=${shard}"
+    )
+    prepare_executed_capture "${run_id}" "${shard}"
+
     # (e) serve 起動 + ヘルスチェック。--no-reload 必須 (ServeCommand が --env 時に
     #     passthrough 外の env を php -S 子から破棄する)。coverage_env は同じ env -i 行で明示展開する。
     # 秘密 (LLM_KEY_ENV) を展開するプロセス起動を xtrace ガードで挟む (-x 有効時も値を trace に出さない)。
@@ -1156,6 +1228,7 @@ PY
         DB_HOST="$(env_file_required DB_HOST)" DB_PORT="$(env_file_required DB_PORT)" \
         DB_DATABASE="${db}" DB_USERNAME=bughunt DB_PASSWORD="$(env_file_get DB_PASSWORD)" \
         APP_URL="${url}" \
+        ${executed_env[@]+"${executed_env[@]}"} \
         ${coverage_env[@]+"${coverage_env[@]}"} \
         ${MODE_ENV[@]+"${MODE_ENV[@]}"} ${LLM_KEY_ENV[@]+"${LLM_KEY_ENV[@]}"} \
         nohup php artisan serve --env=bughunt.local --port="${port}" --no-reload \
@@ -1174,6 +1247,11 @@ PY
         kill -TERM "${serve_pid}" 2>/dev/null || true
         die 1 "shard-${shard} serve (:${port}) が 30s で起動しない (last=${code}、${TMP_BASE}/serve-${shard}.log 参照)"
     fi
+
+    # (e-exec2) 疎通確認の要求が実際に記録されたことを同期点にして配線を確認し、
+    #   その 1 行を消してから探索エージェントへ引き渡す (login が毎回「実行済み」になるのを防ぐ)。
+    assert_executed_capture_wired "${run_id}" "${shard}"
+    finalize_executed_capture "${run_id}" "${shard}"
 
     # (e2) 専用 queue connection worker 起動 (F-01 対策。BUGHUNT_WORKER_CONNECTIONS 参照)
     start_shard_workers "${shard}" "${db}" "${url}"
@@ -1451,6 +1529,7 @@ cmd_self_test() {
     TMP_BASE="${sandbox}/tmp/bug-hunt"
     LOCK_FILE="${sandbox}/bug-hunt.lock"
     ENV_FILE="${sandbox}/.env.bughunt.local"
+    EXECUTED_BASE="${sandbox}/storage/bughunt-executed"
     # self-test は環境非依存であるべき (外部 env の BUGHUNT_DB_PREFIX に影響されない)。
     BUGHUNT_DB_PREFIX=bug_hunt
     SHARD_DB_RE="^${BUGHUNT_DB_PREFIX}(_[1-${BUGHUNT_SHARD_CAP}])?$"
@@ -1923,6 +2002,80 @@ CURLEOF
     [[ -f "${fg_root}/curl-called" ]] || t_fail "keepdb-check の worker 検査が serve(curl) 検査より前に来ている (後段であるべき)"
 
     t_ok "asset freshness guard (fingerprint/chunk/cycle/dangling/hot/writeback + assets-check/keepdb-check + worker liveness)"
+
+    echo "[ex] 実行済み route の記録: 初期化 / 配線確認の同期点 / 負の対照 / serve への注入"
+    # 出力先は sandbox (EXECUTED_BASE) を向いているので実資源 (worktree の storage/) を汚さない。
+
+    # (ex1) prepare は古い記録と失敗マーカーを消す (前回の行を今回の同期点と誤認しない)。
+    mkdir -p "${EXECUTED_BASE}"
+    echo '{"old":1}' > "$(executed_capture_path EXRUN 0)"
+    echo 'old failure' > "$(executed_capture_error_path EXRUN 0)"
+    prepare_executed_capture EXRUN 0
+    [[ ! -e "$(executed_capture_path EXRUN 0)" ]] \
+        || t_fail "[ex1] prepare が古い記録を消さない"
+    [[ ! -e "$(executed_capture_error_path EXRUN 0)" ]] \
+        || t_fail "[ex1] prepare が失敗マーカーを消さない"
+
+    # (ex2) assert_executed_capture_wired は**行の出現を待つ** (待ち時間の値は検査しない)。
+    #       prepare 済み = 不在なので、背景から遅れて来る行を実際に待つことになる。
+    ( sleep 0.5; echo '{"route_name":"login"}' >> "$(executed_capture_path EXRUN 0)" ) &
+    local ex_writer=$!
+    rc=0; ( assert_executed_capture_wired EXRUN 0 ) >/dev/null 2>&1 || rc=$?
+    wait "${ex_writer}" 2>/dev/null || true
+    [[ "${rc}" == 0 ]] || t_fail "[ex2] 遅延して現れた記録行を待たずに exit ${rc} で落ちた"
+
+    # (ex3) 負の対照: 行が 1 件も現れないなら非 0 で落ちる (走行前に配線不成立を検出する)。
+    prepare_executed_capture EXRUN 1
+    rc=0; ( assert_executed_capture_wired EXRUN 1 ) >/dev/null 2>&1 || rc=$?
+    [[ "${rc}" != 0 ]] || t_fail "[ex3] 記録が 1 行も無いのに配線確認が通過した (fail-open)"
+
+    # (ex4) 負の対照: 失敗マーカーがあれば非 0 で落ちる。
+    prepare_executed_capture EXRUN 2
+    echo 'disk full' > "$(executed_capture_error_path EXRUN 2)"
+    echo '{"route_name":"login"}' > "$(executed_capture_path EXRUN 2)"
+    rc=0; ( assert_executed_capture_wired EXRUN 2 ) >/dev/null 2>&1 || rc=$?
+    [[ "${rc}" != 0 ]] || t_fail "[ex4] 失敗マーカーがあるのに配線確認が通過した"
+
+    # (ex5) finalize は記録を空にし、失敗マーカーを消し、manifest に出力先を残す。
+    finalize_executed_capture 20990501-000000 0
+    [[ -f "$(executed_capture_path 20990501-000000 0)" ]] \
+        || t_fail "[ex5] finalize が記録ファイルを作らない"
+    [[ ! -s "$(executed_capture_path 20990501-000000 0)" ]] \
+        || t_fail "[ex5] finalize 後の記録ファイルが空でない"
+    [[ "$(manifest_get 20990501-000000 0 executed_capture)" == "$(executed_capture_path 20990501-000000 0)" ]] \
+        || t_fail "[ex5] manifest に executed_capture が記録されない"
+
+    # (ex6) dryrun provision は記録ファイルを空で用意し、manifest に出力先を残す
+    #       (serve が居ないので待たない = prepare と finalize だけを呼ぶ)。
+    export BUGHUNT_SELFTEST_DRYRUN=1
+    mkdir -p "${EXECUTED_BASE}"
+    echo 'stale failure' > "$(executed_capture_error_path 20990502-000000 0)"
+    rc=0; ("${SCRIPT_PATH}" provision --shard 0 --run-id 20990502-000000) >/dev/null 2>&1 || rc=$?
+    unset BUGHUNT_SELFTEST_DRYRUN
+    [[ "${rc}" == 0 ]] || t_fail "[ex6] dryrun provision が exit ${rc} (expected 0)"
+    [[ -f "$(executed_capture_path 20990502-000000 0)" && ! -s "$(executed_capture_path 20990502-000000 0)" ]] \
+        || t_fail "[ex6] dryrun provision 後に記録ファイルが空で存在しない"
+    [[ ! -e "$(executed_capture_error_path 20990502-000000 0)" ]] \
+        || t_fail "[ex6] 再 provision で古い失敗マーカーが持ち越された"
+    [[ "$(manifest_get 20990502-000000 0 executed_capture)" == "$(executed_capture_path 20990502-000000 0)" ]] \
+        || t_fail "[ex6] dryrun provision が manifest に executed_capture を残さない"
+
+    # (ex7) serve への env 注入は本文走査で見る (self-test は serve を起動しないため)。
+    #       **弱い検査**である (行が存在することしか見ない) が、配線の消失は検出できる。
+    local ex_prov_def
+    ex_prov_def="$(declare -f cmd_provision)"
+    echo "${ex_prov_def}" | grep -q 'BUGHUNT_EXECUTED=1' \
+        || t_fail "[ex7] cmd_provision に BUGHUNT_EXECUTED=1 の注入行が無い"
+    echo "${ex_prov_def}" | grep -q 'executed_env\[@\]' \
+        || t_fail "[ex7] serve 起動行で executed_env が展開されていない"
+    echo "${ex_prov_def}" | grep -q 'assert_executed_capture_wired' \
+        || t_fail "[ex7] cmd_provision に配線確認が無い"
+    local ex_wire_ln ex_worker_ln
+    ex_wire_ln="$(echo "${ex_prov_def}" | grep -n 'assert_executed_capture_wired' | head -1 | cut -d: -f1)"
+    ex_worker_ln="$(echo "${ex_prov_def}" | grep -n 'start_shard_workers' | head -1 | cut -d: -f1)"
+    [[ -n "${ex_wire_ln}" && -n "${ex_worker_ln}" && "${ex_wire_ln}" -lt "${ex_worker_ln}" ]] \
+        || t_fail "[ex7] 配線確認が worker 起動より後 (走行前に落とせない)"
+    t_ok "実行済み route の記録 (初期化 / 同期点 / 負の対照 2 種 / dryrun / serve 注入)"
 
     echo "[x] --coverage: provision/provision-all で受理 + フラグ解釈 + 既定不変 + サブコマンド制限"
     export BUGHUNT_SELFTEST_DRYRUN=1

@@ -1,8 +1,10 @@
 {
   "run_id": "20260618-test",
-  "shards": ["0", "1", "2"],
+  "shards": ["1", "2"],
   "executed_routes": [
-    {"route_name": "register.store", "shard": "2", "story": "S1", "status": "ok"},
-    {"route_name": "organizations.store", "shard": "1", "story": "S1", "status": "ok"}
-  ]
+    {"route_name": "register.store", "shard": "2", "status": "ok", "http_statuses": [302]},
+    {"route_name": "organizations.store", "shard": "1", "status": "ok", "http_statuses": [200, 302]},
+    {"route_name": "projects.update", "shard": "1", "status": "blocked", "http_statuses": [403]}
+  ],
+  "unresolved": {"1": 3}
 }

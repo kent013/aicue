@@ -4,44 +4,33 @@ declare(strict_types=1);
 
 use App\Enums\Security\NestedRouteDefenseMode;
 use App\Http\Middleware\BlockTwoFactorDisableForEnforcedOrganizations;
-use App\Http\Middleware\BughuntCoverageMiddleware;
-use App\Http\Middleware\EnforceMcpTransport;
+use App\Http\Middleware\BughuntExecutedRouteMiddleware;
 use App\Http\Middleware\EnsureAccountNotPendingDeletion;
-use App\Http\Middleware\EnsureEmailIsVerifiedOrBack;
-use App\Http\Middleware\EnsureLoginMethodRemains;
 use App\Http\Middleware\EnsureProjectBelongsToApiOrganization;
 use App\Http\Middleware\EnsureProjectBelongsToCurrentOrganization;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\IdempotentRequest;
-use App\Http\Middleware\LocalOnly;
-use App\Http\Middleware\McpConsentOrganizationBinder;
 use App\Http\Middleware\NoStoreCacheHeadersForAuthenticatedPages;
-use App\Http\Middleware\NoStoreResponse;
 use App\Http\Middleware\RequireActiveSubscription;
 use App\Http\Middleware\RequireApiKeyAbility;
-use App\Http\Middleware\RequireRecentAuth;
-use App\Http\Middleware\RequireRecentAuthOnEmailChange;
 use App\Http\Middleware\RequireTwoFactorForEnforcedOrganizations;
 use App\Http\Middleware\ResolveApiActor;
 use App\Http\Middleware\SecurityHeaders;
-use App\Http\Middleware\VerifyMcpOrigin;
-use App\Http\Middleware\VerifySnsSignature;
 use App\Http\Routing\RouteBindingTypes;
 use Illuminate\Auth\Middleware\Authenticate;
 use Illuminate\Auth\Middleware\EnsureEmailIsVerified;
-use Illuminate\Auth\Middleware\RedirectIfAuthenticated;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Routing\Middleware\ThrottleRequests;
-use Illuminate\Routing\Middleware\ValidateSignature;
 use Illuminate\Routing\Router;
 use Illuminate\Session\Middleware\AuthenticateSession;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
 use Inertia\Middleware\EncryptHistory;
+use Tests\Support\Routing\MiddlewareShortCircuitInventory;
 use Tests\Support\Routing\NestedRouteDefenseInventory;
 
 /**
@@ -71,59 +60,15 @@ use Tests\Support\Routing\NestedRouteDefenseInventory;
 /**
  * 解決済み middleware クラス => 短絡しうるか (由来を問わず全件分類必須)。
  *
- * `true` = 3xx/4xx を返して $next を呼ばない分岐を持つ。
- * **既定は true 側に倒す** (疑わしきは短絡扱い)。`false` を宣言してよいのは
- * 「$next を必ず呼び、応答の加工しかしない」ことを実装で確認したときだけ。
- * 未登録クラスの既定も true 扱い (検査 2 / 3b は `?? true`) なので、
- * 分類漏れが偽陰性にはならない。
+ * 分類の正本は {@see MiddlewareShortCircuitInventory} へ移した
+ * (BughuntExecutedRouteOrderingTest も同じ表を読むため、同じ分類を 2 か所に持たない)。
+ * 本関数はその薄い委譲であり、以下の検査の意味は移設前と変わらない。
  *
  * @return array<class-string, bool>
  */
 function middlewareShortCircuitInventory(): array
 {
-    return [
-        // --- 短絡しうる ---
-        Authenticate::class => true,
-        RedirectIfAuthenticated::class => true,
-        EnsureEmailIsVerified::class => true,
-        ThrottleRequests::class => true,
-        ValidateSignature::class => true,
-        PreventRequestForgery::class => true,
-        AuthenticateSession::class => true,
-        // binding 失敗そのものが 404 (短絡の基準点)
-        SubstituteBindings::class => true,
-        // Inertia の asset version mismatch は 409 で短絡する
-        HandleInertiaRequests::class => true,
-        RequireActiveSubscription::class => true,
-        // 退会予約中の凍結。302 (web) / 409 (XHR) で短絡する
-        EnsureAccountNotPendingDeletion::class => true,
-        RequireTwoFactorForEnforcedOrganizations::class => true,
-        BlockTwoFactorDisableForEnforcedOrganizations::class => true,
-        RequireRecentAuth::class => true,
-        RequireRecentAuthOnEmailChange::class => true,
-        RequireApiKeyAbility::class => true,
-        ResolveApiActor::class => true,
-        IdempotentRequest::class => true,
-        EnsureProjectBelongsToCurrentOrganization::class => true,
-        EnsureProjectBelongsToApiOrganization::class => true,
-        EnsureEmailIsVerifiedOrBack::class => true,
-        EnsureLoginMethodRemains::class => true,
-        LocalOnly::class => true,
-        McpConsentOrganizationBinder::class => true,
-        VerifyMcpOrigin::class => true,
-        EnforceMcpTransport::class => true,
-        VerifySnsSignature::class => true,
-        // --- 透過 (必ず $next を呼び、応答の加工のみ) ---
-        EncryptCookies::class => false,
-        AddQueuedCookiesToResponse::class => false,
-        StartSession::class => false,
-        ShareErrorsFromSession::class => false,
-        EncryptHistory::class => false,
-        SecurityHeaders::class => false,
-        NoStoreCacheHeadersForAuthenticatedPages::class => false,
-        NoStoreResponse::class => false,
-        BughuntCoverageMiddleware::class => false,
-    ];
+    return MiddlewareShortCircuitInventory::classification();
 }
 
 /**
@@ -450,6 +395,8 @@ test('検査5: 代表 route の解決後 middleware 列を完全一致で固定�
         EncryptHistory::class,
         EnsureEmailIsVerified::class,
     ];
+    // bug-hunt の実行済み route 記録器は web 鎖の**最後** (遮断 middleware より内側)。
+    $recorder = BughuntExecutedRouteMiddleware::class;
     $guard = EnsureProjectBelongsToCurrentOrganization::class;
     $billing = RequireActiveSubscription::class;
     // 退会予約中の凍結は**課金ゲートの直後**。テナント境界 404 より必ず後 (302 短絡のため)。
@@ -470,11 +417,12 @@ test('検査5: 代表 route の解決後 middleware 列を完全一致で固定�
         'api.v1.projects.items.index' => $apiHead,
         // {project} を持たない route でも guard は列に載る (no-op。group 一括付与の許容)
         'api.v1.me' => $apiHead,
-        // web: テナント境界 404 が Inertia / 2FA / verified / 課金ゲートより前
-        'projects.update' => [...$webHead, $guard, ...$webAppend, $billing, $freeze],
-        'capture.manuals.show' => [...$webHead, $guard, ...$webAppend, $billing, $freeze],
+        // web: テナント境界 404 が Inertia / 2FA / verified / 課金ゲートより前。
+        // 記録器は列の最後 (= 到達が「遮断をすべて通過した」証拠になる)
+        'projects.update' => [...$webHead, $guard, ...$webAppend, $billing, $freeze, $recorder],
+        'capture.manuals.show' => [...$webHead, $guard, ...$webAppend, $billing, $freeze, $recorder],
         // guard を持たない web route の列は変化しない (priority 追加の副作用が無いことの pin)
-        'organizations.settings' => [...$webHead, ...$webAppend, $freeze],
+        'organizations.settings' => [...$webHead, ...$webAppend, $freeze, $recorder],
     ];
 
     $routes = app('router')->getRoutes();

@@ -45,16 +45,19 @@ S8 の API/CLI 面のみ **6 列**（`| method | route | api route name | CLI | 
 
 | ファイル | 役割 |
 |---|---|
+| `build_executed.py` | **実行済み route の記録の集約器**。記録器が書いた shard ごとの JSONL を束ねて `executed.json` を作る（stdlib のみ） |
 | `correlate.py` | **操作到達カバレッジ correlator**。run_id で executed / findings / operations / graph を突合し未カバー worklist を作る（stdlib のみ） |
 | `merge_pcov.py` | **コード到達カバレッジ pcov merge**。C3 middleware が吐く shard JSONL を union し uncovered を主出力する（stdlib のみ） |
+| `test_build_executed.py` | build_executed のテスト（`python3 -m unittest`、入出力は tempfile） |
 | `test_correlate.py` | correlate のテスト（`python3 -m unittest`、graph は fixture sqlite で生成。実 operations.md / 実 graph.db があれば fix-gate #3/#4 を追加検証） |
 | `test_merge_pcov.py` | merge のテスト（全 fixture、pcov 不要） |
-| `test_naming_no_stale.py` | 旧 Stage 付番の後退防止 self-test |
+| `test_naming_no_stale.py` | 旧 Stage 付番と旧 fail-open 文言の後退防止 self-test |
 | `fixtures/` | サンプル入力（route-list / operations(5列+6列) / findings / executed）と `fixtures/pcov/` の shard JSONL |
 
 関連（このディレクトリ外）:
 - `../ledger/findings.schema.json` … Finding 台帳のスキーマ。findings.jsonl の正本。
 - `../operations.md` … 機構分母（name 列 / 区分）。
+- 記録器 = `app/Http/Middleware/BughuntExecutedRouteMiddleware.php`（実行済み route の記録。毎回 ON）。
 - C3 middleware = `app/Http/Middleware/BughuntCoverageMiddleware.php`、C5 = `scripts/bug-hunt-shard.sh --coverage`（pcov 導入時）。
 
 ---
@@ -69,24 +72,62 @@ pcov 無しで使える「軸 A 粗 proxy」。**Phase 4 レポートの後**に
 2. `operations.md` — 機構分母（5 列、name 列が join キー）。区分 `外`(対象外)=分母外、`逸`(逸脱のみ)=未実行でも警告しない材料。
 3. `findings.jsonl` — Finding Ledger（複数 shard を `cat` 連結 or glob 可、`-` で stdin）。`--run-id` で絞る。
    route 直結しない finding は `capability_tag` 経由で story 一致の機構群へブロードキャスト（`via_capability`）。
-4. `executed.json` — bug-hunt 子が「UI 経由で実際に叩いた route」を run_id・shard 単位で記録したもの。
-   複数 shard を union（どれか 1 shard で executed なら executed=true）。スキーマ:
+4. `executed.json` — **実行済み route の記録**（主入力）。走行中にアプリ側の記録器
+   （`BughuntExecutedRouteMiddleware`）が書いた shard ごとの JSONL を `build_executed.py` が束ねたもの。
+   複数 shard を union（どれか 1 shard で `ok` なら executed=true）。スキーマ:
    ```json
    {
      "run_id": "20260618-082101",
      "shards": ["0","1","2","3","4"],
      "executed_routes": [
-       {"route_name": "register.store", "shard": "1", "story": "S1", "status": "ok"}
-     ]
+       {"route_name": "register.store", "shard": "1", "status": "ok", "http_statuses": [302]}
+     ],
+     "unresolved": {"1": 3}
    }
    ```
-   `status` は `ok|blocked|skipped`。`ok` のみ executed 扱い。`--executed` 省略時は全 in_scope 機構を未実行 candidate 扱い。
+   `status` は **`ok` と `blocked` の 2 値**で、生成器が HTTP 応答から写像する
+   （2xx と errors の無い 3xx が `ok`、それ以外は `blocked`）。executed 扱いになるのは `ok` だけ。
+   `unresolved` は「記録器まで到達したが名前の無い route」の件数（shard 別）。
 5. `graph.db` — TESTED_BY を controller ファイル単位で引く（`/workspace/.code-review-graph/graph.db`）。
+
+### 記録 → 集約 → 突合 の流れ
+
+```
+serve (bughunt 環境)
+  └ BughuntExecutedRouteMiddleware        … 1 要求 1 行を追記
+       storage/bughunt-executed/{run}-{shard}.jsonl
+          └ build_executed.py             … shard を束ねて検証し executed.json を作る
+               devnotes/{run}-bug-hunt/executed.json
+                  └ correlate.py          … 機構分母と突合し未カバー worklist を出す
+```
+
+記録は `scripts/bug-hunt-shard.sh provision` が **毎回 ON** で仕込む（`--coverage` の有無に依らない）。
+provision は疎通確認の要求が記録された**ことを確認してから**その行を消して探索へ引き渡すため、
+記録器が配線されていなければ走行前に落ちる。
+
+### 終了コード規約（両ツール共通）
+
+| コード | 意味 | 理由コード（stderr に出る） |
+|---|---|---|
+| 0 | 成立 | — |
+| 1 | 読み込み・parse・I/O の失敗 | （例外メッセージ） |
+| 3 | **主入力の可用性違反**（検査を成立させられない） | `build_executed.py`: `capture_failed` / `capture_file_missing` / `capture_line_broken` / `capture_row_invalid` / `run_id_mismatch` / `capture_empty`<br>`correlate.py`: `executed_missing` / `executed_schema_invalid` / `executed_run_id_mismatch` / `executed_shards_missing` / `executed_no_rows` / `executed_shard_mismatch` |
+
+3 のときは worklist / executed.json を**書き出さない**。揃わない走行を「全件未実行」という
+嘘の一覧として返さないためである。`ok` が 1 件も無い（全操作が跳ねた）走行は 3 ではない
+—— 主入力としては成立しており、正しい結果は「全機構が未実行 worklist に残る」ことである。
 
 ### 使い方
 
 ```bash
 cd /workspace/.claude/worktrees/<worktree>   # CWD を明示
+
+# (1) 記録を束ねる (provision した shard をすべて --shard に渡す)
+python3 .claude/skills/app-bug-hunt/coverage/build_executed.py \
+  --run-id 20260618-082101 --shard 1 --shard 2 --shard 3 --shard 4 \
+  --out devnotes/20260618-082101-bug-hunt/executed.json
+
+# (2) 突合する
 python3 .claude/skills/app-bug-hunt/coverage/correlate.py \
   --operations .claude/skills/app-bug-hunt/operations.md \
   --findings 'devnotes/20260618-082101-bug-hunt/shard-*/findings.jsonl' \
@@ -101,6 +142,7 @@ python3 .../correlate.py ... --run-id 20260618-082101 --json
 
 複数 shard の findings は `cat ... | correlate.py --findings -` でも渡せる。
 `--hotspot-threshold N`（既定 2）で hotspot の閾値を変えられる。
+`--input-dir`（既定 `storage/bughunt-executed`）で記録の置き場を変えられる。
 
 ### 出力の読み方（主＝未カバー worklist、% は副）
 
@@ -124,6 +166,8 @@ markdown 本文（`coverage-operation-reach.md` 想定）の節構成:
 | `unknown_graph_gap_count` | PHP 等で TESTED_BY 判定不能（= Pest を別途見よ） | 注記 |
 | `in_scope_count` | 分母（gaming 防止のため明示） | 注記 |
 | `dropped_other_run` | run_id 不一致で捨てた行数（trend 汚染検知） | 注記 |
+| `executed_ok_count` | in_scope かつ status `ok` の機構数（内訳） | 注記 |
+| `blocked_count` | status が `blocked` だけの機構数（内訳） | 注記 |
 | `executed_pct` | 実行率 | **副・目標にしない** |
 
 > KPI の使い方は **worklist の逓減**（run を重ねて `unexecuted_count` / `cross_count` が減る）を見る。
@@ -184,8 +228,11 @@ python3 .../merge_pcov.py --shard '...-*.json' --run-id ... --json   # 機械集
 
 ```bash
 cd /workspace/.claude/worktrees/<worktree>/.claude/skills/app-bug-hunt/coverage
-python3 -m unittest test_correlate test_merge_pcov test_naming_no_stale
+python3 -m unittest test_correlate test_build_executed test_merge_pcov test_naming_no_stale
 ```
+
+`test_correlate` / `test_build_executed` / `test_naming_no_stale` の 3 本は
+`composer test`（`tests/Architecture/BughuntCoverageToolSelfTest.php`）からも実走する。
 
 いずれも **stdlib のみ・pcov 非依存**（graph は fixture sqlite を生成、pcov 入力は fixture JSONL）。
 実 `operations.md` / 実 `graph.db`（`/workspace/.code-review-graph/graph.db`）がある環境では、

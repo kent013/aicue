@@ -8,6 +8,7 @@ graph.db はテスト用 temp sqlite を実 DB のスキーマ(edges.kind/source
 """
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import tempfile
@@ -278,9 +279,12 @@ class CorrelateTest(unittest.TestCase):
         self.tb = C.tested_by_index(self.db)
 
     def _executed(self, routes_executed):
+        # status は生成器が必ず付ける (ok|blocked の 2 値)。ここでは実走 = ok を組む。
         ex = C.Executed(run_id=self.run_id, shards=["0", "1"])
         for name, shard in routes_executed:
+            ex.row_count += 1
             ex.routes.setdefault(name, set()).add(shard)
+            ex.statuses.setdefault(name, set()).add("ok")
         return ex
 
     def test_unexecuted_excludes_deviate_and_out_of_scope(self):
@@ -298,8 +302,7 @@ class CorrelateTest(unittest.TestCase):
         self.assertNotIn("billing.changePlan", names)
 
     def test_union_across_shards(self):
-        ex = C.Executed(run_id=self.run_id, shards=["0", "1"])
-        ex.routes.setdefault("login.store", set()).add("1")
+        ex = self._executed([("login.store", "1")])
         corr = C.correlate(self.routes, self.operations, ex, [], self.tb,
                            run_id=self.run_id)
         names = {r.route_name for r in corr.unexecuted}
@@ -380,29 +383,33 @@ class CorrelateTest(unittest.TestCase):
         cross_names = {r.route_name for r in corr.cross_unexec_findingful}
         self.assertEqual(cross_names, {"login.store"})
 
-    def test_skipped_status_not_executed(self):
-        # status=skipped/blocked の route は executed=false で unexecuted に残る。
+    def test_blocked_status_not_executed(self):
+        # status=blocked の route は executed=false で未実行 worklist に残る。
         ex = C.Executed(run_id=self.run_id, shards=["0"])
         ex.routes.setdefault("login.store", set()).add("0")
-        ex.statuses.setdefault("login.store", set()).add("skipped")
+        ex.statuses.setdefault("login.store", set()).add("blocked")
         ex.routes.setdefault("register.store", set()).add("0")
         ex.statuses.setdefault("register.store", set()).add("ok")
         corr = C.correlate(self.routes, self.operations, ex, [], self.tb,
                            run_id=self.run_id)
         names = {r.route_name for r in corr.unexecuted}
-        self.assertIn("login.store", names)       # skipped = 未実走扱い
+        self.assertIn("login.store", names)       # blocked = 未実走扱い
         self.assertNotIn("register.store", names)  # ok = 実走
-        self.assertEqual(corr.skipped_blocked_count, 1)
+        self.assertEqual(corr.blocked_count, 1)
 
-    def test_missing_status_treated_as_executed(self):
-        # 後方互換: status 列を持たない旧形式 (空 statuses) は従来どおり executed 扱い。
-        ex = C.Executed(run_id=self.run_id, shards=["0"])
-        ex.routes.setdefault("login.store", set()).add("0")  # statuses なし
-        corr = C.correlate(self.routes, self.operations, ex, [], self.tb,
-                           run_id=self.run_id)
-        names = {r.route_name for r in corr.unexecuted}
-        self.assertNotIn("login.store", names)
-        self.assertEqual(corr.skipped_blocked_count, 0)
+    def test_row_without_status_is_rejected(self):
+        # 旧「status 未記録なら ok とみなす」救済は無い。status 欠落行は
+        # load_executed が契約違反として弾き、集計に載らない。
+        path = Path(self.tmp.name) / "no-status.json"
+        path.write_text(json.dumps({
+            "run_id": self.run_id,
+            "shards": ["0"],
+            "executed_routes": [{"route_name": "login.store", "shard": "0"}],
+        }), encoding="utf-8")
+        ex = C.load_executed(str(path))
+        self.assertIsNotNone(ex.schema_error)
+        self.assertFalse(ex.is_executed("login.store"))
+        self.assertIn("executed_schema_invalid", C.validate_executed(ex, self.run_id) or "")
 
     def test_summary_unexecuted_count_is_primary(self):
         ex = self._executed([("register.store", "0")])
@@ -484,8 +491,14 @@ class MainTest(unittest.TestCase):
             encoding="utf-8",
         )
         self.executed_path = base / "executed.json"
-        self.executed_path.write_text(
-            '{"run_id":"R1","shards":["0"],"executed_routes":[]}', encoding="utf-8")
+        # 主入力は「有効な観測行を 1 件以上持つ」ことが成立条件 (fail-closed 契約)。
+        self.executed_path.write_text(json.dumps({
+            "run_id": "R1", "shards": ["0"],
+            "executed_routes": [
+                {"route_name": "register.store", "shard": "0", "status": "ok",
+                 "http_statuses": [302]},
+            ],
+        }), encoding="utf-8")
         self.db = str(base / "graph.db")
         make_graph_db(self.db, [("/workspace/resources/js/x.ts::x", "/workspace/resources/js/t.ts::t")])
 
@@ -521,17 +534,168 @@ class MainTest(unittest.TestCase):
         ])
         self.assertEqual(rc, 1)
 
-    def test_main_empty_inputs_no_exception(self):
+    def test_main_empty_findings_no_exception(self):
         empty = Path(self.tmp.name) / "empty.jsonl"
         empty.write_text("", encoding="utf-8")
         rc = C.main([
             "--route-list", str(self.route_path),
             "--operations", str(self.ops_path),
             "--findings", str(empty),
-            "--graph-db", self.db,  # executed 省略 = candidate モード
+            "--executed", str(self.executed_path),
+            "--graph-db", self.db,
             "--run-id", "R1",
         ])
         self.assertEqual(rc, 0)
+
+    # ------------------------------------------------------------------ #
+    # fail-closed 契約: 主入力が揃わない走行は成功にしない (終了コード 3)
+    # ------------------------------------------------------------------ #
+    def _write_executed(self, payload) -> str:
+        path = Path(self.tmp.name) / "custom-executed.json"
+        path.write_text(json.dumps(payload) if not isinstance(payload, str) else payload,
+                        encoding="utf-8")
+        return str(path)
+
+    def _main_with_executed(self, payload) -> int:
+        return C.main([
+            "--route-list", str(self.route_path),
+            "--operations", str(self.ops_path),
+            "--findings", str(self.findings_path),
+            "--executed", self._write_executed(payload),
+            "--graph-db", self.db,
+            "--run-id", "R1",
+        ])
+
+    def test_main_missing_executed_returns_3(self):
+        rc = C.main([
+            "--route-list", str(self.route_path),
+            "--operations", str(self.ops_path),
+            "--findings", str(self.findings_path),
+            "--graph-db", self.db,
+            "--run-id", "R1",
+        ])
+        self.assertEqual(rc, C.EXIT_INPUT_UNAVAILABLE)
+
+    def test_main_run_id_mismatch_returns_3(self):
+        self.assertEqual(self._main_with_executed({
+            "run_id": "OTHER", "shards": ["0"],
+            "executed_routes": [{"route_name": "register.store", "shard": "0", "status": "ok"}],
+        }), C.EXIT_INPUT_UNAVAILABLE)
+
+    def test_main_empty_executed_returns_3(self):
+        self.assertEqual(self._main_with_executed({
+            "run_id": "R1", "shards": ["0"], "executed_routes": [],
+        }), C.EXIT_INPUT_UNAVAILABLE)
+
+    def test_main_shard_mismatch_returns_3(self):
+        self.assertEqual(self._main_with_executed({
+            "run_id": "R1", "shards": ["0", "1"],
+            "executed_routes": [{"route_name": "register.store", "shard": "0", "status": "ok"}],
+        }), C.EXIT_INPUT_UNAVAILABLE)
+
+    def test_main_shards_missing_returns_3(self):
+        self.assertEqual(self._main_with_executed({
+            "run_id": "R1", "shards": [],
+            "executed_routes": [{"route_name": "register.store", "shard": "0", "status": "ok"}],
+        }), C.EXIT_INPUT_UNAVAILABLE)
+
+    def test_main_all_blocked_is_valid_input(self):
+        # `ok` が 0 件でも主入力としては成立している (全件が未実行 worklist に残るのが正)。
+        rc = self._main_with_executed({
+            "run_id": "R1", "shards": ["0"],
+            "executed_routes": [{"route_name": "register.store", "shard": "0", "status": "blocked"}],
+        })
+        self.assertEqual(rc, C.EXIT_OK)
+
+    def test_main_schema_violations_return_3(self):
+        # 契約外の形は **traceback ではなく終了コード 3** で落ちること。
+        ok_row = {"route_name": "register.store", "shard": "0", "status": "ok"}
+        cases = {
+            "root が object でない": [1, 2, 3],
+            "shards が配列でない": {"run_id": "R1", "shards": "0", "executed_routes": [ok_row]},
+            "executed_routes が配列でない": {"run_id": "R1", "shards": ["0"], "executed_routes": {}},
+            "行が object でない": {"run_id": "R1", "shards": ["0"], "executed_routes": ["x"]},
+            "status が未知値": {"run_id": "R1", "shards": ["0"],
+                            "executed_routes": [{**ok_row, "status": "skipped"}]},
+            "status が非文字列": {"run_id": "R1", "shards": ["0"],
+                             "executed_routes": [{**ok_row, "status": {"a": 1}}]},
+            "route_name が空": {"run_id": "R1", "shards": ["0"],
+                             "executed_routes": [{**ok_row, "route_name": ""}]},
+            "shard が非文字列": {"run_id": "R1", "shards": ["0"],
+                            "executed_routes": [{**ok_row, "shard": 0}]},
+            "run_id が null": {"run_id": None, "shards": ["0"], "executed_routes": [ok_row]},
+            "run_id が空文字": {"run_id": "", "shards": ["0"], "executed_routes": [ok_row]},
+            "run_id が数値": {"run_id": 1, "shards": ["0"], "executed_routes": [ok_row]},
+        }
+        for label, payload in cases.items():
+            with self.subTest(case=label):
+                self.assertEqual(self._main_with_executed(payload), C.EXIT_INPUT_UNAVAILABLE)
+
+    def test_main_broken_json_returns_1(self):
+        # 構文として読めない入力は従来どおり 1 (可用性違反 3 とは分ける)。
+        self.assertEqual(self._main_with_executed('{"run_id": '), C.EXIT_INPUT_ERROR)
+
+    def test_run_id_shape_violation_is_schema_error_not_mismatch(self):
+        # run_id が非文字列のときは run_id 不一致ではなく形の違反として報告する。
+        path = self._write_executed({"run_id": 1, "shards": ["0"], "executed_routes": []})
+        ex = C.load_executed(path)
+        reason = C.validate_executed(ex, "R1")
+        self.assertIsNotNone(reason)
+        self.assertIn("executed_schema_invalid", reason)
+
+
+class ExecutedValidationTest(unittest.TestCase):
+    """validate_executed() の単体検査 (成立 → None / 各違反 → 理由文字列)。"""
+
+    def _executed(self, **kwargs) -> C.Executed:
+        ex = C.Executed(run_id=kwargs.pop("run_id", "R1"), shards=kwargs.pop("shards", ["0"]))
+        for name, shard, status in kwargs.pop("rows", [("a", "0", "ok")]):
+            ex.row_count += 1
+            ex.routes.setdefault(name, set()).add(shard)
+            ex.statuses.setdefault(name, set()).add(status)
+        ex.schema_error = kwargs.pop("schema_error", None)
+        return ex
+
+    def test_valid_input_returns_none(self):
+        self.assertIsNone(C.validate_executed(self._executed(), "R1"))
+
+    def test_schema_error_wins_over_run_id_mismatch(self):
+        ex = self._executed(run_id="OTHER", schema_error="root が JSON object でない")
+        reason = C.validate_executed(ex, "R1")
+        self.assertIn("executed_schema_invalid", reason)
+
+    def test_run_id_mismatch(self):
+        self.assertIn("executed_run_id_mismatch",
+                      C.validate_executed(self._executed(run_id="OTHER"), "R1"))
+
+    def test_shards_missing(self):
+        self.assertIn("executed_shards_missing",
+                      C.validate_executed(self._executed(shards=[]), "R1"))
+
+    def test_no_rows(self):
+        ex = C.Executed(run_id="R1", shards=["0"])
+        self.assertIn("executed_no_rows", C.validate_executed(ex, "R1"))
+
+    def test_shard_mismatch(self):
+        ex = self._executed(shards=["0", "1"])
+        self.assertIn("executed_shard_mismatch", C.validate_executed(ex, "R1"))
+
+    def test_all_blocked_is_valid(self):
+        ex = self._executed(rows=[("a", "0", "blocked")])
+        self.assertIsNone(C.validate_executed(ex, "R1"))
+
+
+class RenderWorklistTest(unittest.TestCase):
+    """旧 fail-open の注記が二度と出力に現れないこと。"""
+
+    def test_no_missing_executed_notice(self):
+        corr = C.Correlation(
+            run_id="R1", rows=[], unexecuted=[], untested_real=[],
+            finding_hotspots=[], cross_unexec_findingful=[], unknown_graph_gap_count=0,
+        )
+        out = C.render_worklist(corr)
+        self.assertNotIn("executed.json 未指定", out)
+        self.assertNotIn("未実行 candidate", out)
 
 
 if __name__ == "__main__":

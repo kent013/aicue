@@ -16,6 +16,12 @@ declare(strict_types=1);
 |   本環境/CI/本番では常に no-op になる。run/shard は出力ファイル名に使う。
 |   scripts/bug-hunt-shard.sh provision --coverage が BUGHUNT_PCOV* を serve に渡す。
 |
+| - executed.*: 実行済み route の記録 (操作到達カバレッジの主入力) の env 入口。
+|   BughuntExecutedRouteMiddleware が参照する。enabled は env 既定 false で、
+|   production では config が真でも構造的に no-op になる。
+|   run/shard は出力ファイル名に使うため、middleware 側で書式検査を通す。
+|   scripts/bug-hunt-shard.sh provision が BUGHUNT_EXECUTED* を serve に渡す。
+|
 */
 
 return [
@@ -23,5 +29,11 @@ return [
         'enabled' => (bool) env('BUGHUNT_PCOV', false),
         'run' => env('BUGHUNT_PCOV_RUN'),
         'shard' => env('BUGHUNT_PCOV_SHARD'),
+    ],
+
+    'executed' => [
+        'enabled' => (bool) env('BUGHUNT_EXECUTED', false),
+        'run' => env('BUGHUNT_EXECUTED_RUN'),
+        'shard' => env('BUGHUNT_EXECUTED_SHARD'),
     ],
 ];
