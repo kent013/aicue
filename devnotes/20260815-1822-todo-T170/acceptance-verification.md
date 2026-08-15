@@ -68,4 +68,21 @@ OK: artisan / pest が worktree 内で動く
 
 ## V-4 マージ後の再確認
 
-Phase C でマージ直後に実施する (記録は本ファイルへ追記する)。
+1. マージ前に `.setup.lock` が空いていることを `flock -n` で確認した (取得できた = 保持者なし)。
+2. main へマージ (`32ce637`) した直後に、**main 側のスクリプト**で使い捨て worktree を作って完走を確認した。
+   mode の確認は表示ではなく終了コードに反映させた (644 のままでも `stat` は成功してしまい、
+   マージでの取り込み漏れを偽グリーンにするため):
+
+```
+cd /workspace && scripts/setup-worktree.sh merge-verify && \
+  test "$(stat -c '%a' /workspace/.claude/worktrees/tasks/merge-verify/.env)" = 600
+→ MERGE-VERIFY OK: .env=600 (rc=0)
+```
+
+3. 後片付け: `scripts/teardown-worktree.sh merge-verify` + `git branch -D todo/merge-verify` 実施済み。
+   `git worktree list` は main のみ、`git status` は clean。
+
+## 後片付けの結果
+
+- `scripts/teardown-worktree.sh T170` + `git branch -d todo/T170` 実施済み (テスト DB 5 件を回収)。
+- V-2 / V-4 の使い捨て worktree (`T170-verify` / `merge-verify`) とそのブランチ・テスト DB も回収済み。
