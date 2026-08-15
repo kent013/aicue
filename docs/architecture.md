@@ -148,7 +148,7 @@ route parameter を経由しない id (POST payload / MCP tool 引数 / token cl
 | `ModelAudit` | Critical Action 中のモデル属性 diff 監査 (owen-it/laravel-auditing。CriticalActionContext active 時のみ記録) | tenant 外 |
 | `Billing/Plan` / `Billing/PlanPrice` | プラン定義と Stripe Price 対応 | tenant 外 (マスタ) |
 | `Billing/OrganizationQuota` | 組織ごとの利用上限 | Organization 従属 |
-| `Billing/StripeWebhookEvent` | Stripe webhook の冪等マシン | tenant 外 |
+| `Billing/StripeWebhookEvent` | Stripe webhook の冪等マシン (滞留を回収待ちへ置いた理由は `recovery_reason`) | tenant 外 |
 | `Billing/TicketLedgerEntry` / `Billing/TicketReservation` | チケット台帳 (reserve→commit/release の 2 フェーズ。期限付き付与・idempotency_key 冪等付与・返金 clawback) | Organization 従属 |
 | `Billing/TicketVolumePrice` | スポット購入の数量逐減 (volume tier) 単価の Stripe Price snapshot | tenant 外 (マスタ) |
 | `Billing/TicketCheckoutSession` | チケットスポット購入の Stripe Checkout Session 追跡 (attempt_token 冪等 + 単価 pin = webhook 金額照合の出典。status: pending/completed/expired) | Organization 従属 |
@@ -860,6 +860,47 @@ catch を足す必要が出たら、観測目録へ移すか免除の分類を�
     `expired_checkout` が「有償契約後の支払い不健全」と「checkout 期限切れの未契約」を
     ともに指す多義性は残る。
 
+## Stripe webhook の滞留回収
+
+- **状態の意味**: `received` = 受理済み・未終局 (**処理中と次の回収待ちを兼ねる**。
+  どちらかは `updated_at` が `config('billing.webhook_stale_after_minutes')` (15 分) を
+  超えたかで区別する) / `processed` = 終局 / `failed` = HTTP 経路の失敗 (Stripe の再送が
+  再試行の駆動者) / `recovery_pending` = 自動再実行の対象外として置いた静止状態
+- **なぜ回収が要るか**: `claim()` が直列化するのは状態遷移だけで `process()` は
+  トランザクションの外にある。そこで落ちた行は `received` のまま残り、Stripe の再送は
+  `claim()` に弾かれて 200 で終わる → Stripe も再送を打ち切る = **付与が無音で失われる**
+- **回収してよい種類**: `HandledStripeWebhookEvent::replaySafety()` の 2 値分類が**唯一の**
+  判断材料。`SafeToReplay` の意味は「再実行しても追加の被害を生まない」であって
+  「再実行すれば復旧する」ではない。**ハンドラに副作用を足したら分類を再審査すること**
+  (順序に依存する書き込みを足したら `OrderSensitive` へ移す。機械では検出できない)
+- **回収の失敗は終局させない**: 再実行が例外になっても `received` のままにして
+  `failure_reason` だけ書く (`failed` にすると回収対象から外れ、Stripe も再送しないため
+  二度と再試行されない)。`attempts` は消費されるので上限 8 で必ず止まる
+- **処理対象外の種類**: `HandledStripeWebhookEvent` に無い type は通常経路と同じく
+  再実行して `processed` にする (`process()` の `null` arm は構造的に no-op)。
+  回収だけ別扱いにして運用ノイズを作らない
+- **監視対象 (必須項目として登録する)**: **`php artisan billing:recover-stale-webhook-events`
+  (scheduler で 5 分ごと・`onOneServer()` + `withoutOverlapping()`)**。
+  失敗は `onFailure` → `report()` で運用アラート経路に載る。観測点は 3 つ:
+  1. `status='received'` かつ `updated_at <= now - 閾値` の件数
+     (増え続ける = scheduler か本コマンドが動いていない)
+  2. 本コマンド出力の `retry-scheduled` 件数 (再実行が失敗し続けている)
+  3. `status='recovery_pending'` の件数 (理由は `recovery_reason`:
+     `order_sensitive` / `attempts_exhausted`)
+- **運用手順**: `recovery_reason` ごとに次の行動が違う。
+  `order_sensitive` は Stripe ダッシュボードで現在の契約状態を確認する /
+  `attempts_exhausted` は `failure_reason` があれば確認し、ログと Stripe 上の状態と
+  合わせて手当てする (連続クラッシュでは NULL のことがある)
+- **保証しないもの**: (1) 順序に依存する種類は自動復旧しない (契約状態は後続の
+  `customer.subscription.updated` が追随する。初回無償付与だけは失われ得るので件数で拾う)。
+  (2) 条件付き UPDATE が守るのは `stripe_webhook_events` 行の世代だけで、旧ワーカーと
+  回収側の `process()` の**同時実行そのものは防がない** (付与の一回性は台帳の
+  `idempotency_key` UNIQUE が担う)。(3) `report()` の配送は通知基盤の設定次第で、
+  常設の観測点は件数のほうである。(4) HTTP 経路で `failed` になった行は回収 cron が拾わない。
+  (5) 外部 API 遅延等で本当に閾値を超えた生存ワーカーがいた場合、順序に依存する種類の行は
+  `recovery_pending` へ置かれ、そのワーカーが成功しても行は回収待ちのまま残る
+  (業務側の副作用は正しく起きているのに、行だけ「要確認」に見える)
+
 ## チケットスポット購入 (T007) の運用契約
 
 - **経路**: `GET /purchase-tickets` (閲覧 = 組織メンバー) / `POST /purchase-tickets/checkout`
@@ -880,7 +921,9 @@ catch を足す必要が出たら、観測目録へ移すか免除の分類を�
   対応: `stripe_webhook_events.failure_reason` を参照し、Stripe ダッシュボードで決済状態を確認 →
   決済済み・未付与が確定した場合のみ tinker 等で `TicketLedgerService::grantPurchased()` を
   手動実行する (idempotency_key `purchase:{sessionId}` により再実行しても二重付与しない)。
-  併せて `ticket_checkout_sessions` 行を completed 化する
+  併せて `ticket_checkout_sessions` 行を completed 化する。
+  **滞留 (`received` のまま残った) 分は `billing:recover-stale-webhook-events` が回収する**ので、
+  手動付与の前にその経路で決着していないかを確認する (§Stripe webhook の滞留回収)
 - **放棄 session の回収**: Stripe Checkout 自体の有効期限 (既定 24h) で Stripe 側が expire し、
   DB 行は checkout 開始時の期限切れ回収 (`status=pending AND expires_at <= now` → expired) で
   局所回収する (専用 cron は作らない)

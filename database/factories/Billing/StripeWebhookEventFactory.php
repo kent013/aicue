@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Database\Factories\Billing;
 
 use App\Enums\Billing\WebhookEventStatus;
+use App\Enums\Billing\WebhookRecoveryReason;
 use App\Models\Billing\StripeWebhookEvent;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -33,6 +34,7 @@ class StripeWebhookEventFactory extends Factory
             'payload' => ['id' => 'evt_test', 'type' => 'customer.subscription.updated'],
             'attempts' => 0,
             'failure_reason' => null,
+            'recovery_reason' => null,
             'processed_at' => null,
         ];
     }
@@ -54,6 +56,32 @@ class StripeWebhookEventFactory extends Factory
             'attempts' => 1,
             'failure_reason' => 'test failure',
             'processed_at' => null,
+        ]);
+    }
+
+    /** 自動再実行の対象外として回収待ちに置かれた行。 */
+    public function recoveryPending(WebhookRecoveryReason $reason): static
+    {
+        return $this->state(fn (): array => [
+            'status' => WebhookEventStatus::RecoveryPending,
+            'recovery_reason' => $reason,
+            'processed_at' => null,
+        ]);
+    }
+
+    /**
+     * 受理済みのまま滞留している行 (updated_at を過去にずらす)。
+     *
+     * Eloquent は保存時に updated_at を now へ書き換えるため、**呼び出し側は保存後に
+     * updated_at を明示的に押し戻す**こと (この state だけでは滞留行にならない)。
+     */
+    public function stale(int $minutesAgo = 60): static
+    {
+        return $this->state(fn (): array => [
+            'status' => WebhookEventStatus::Received,
+            'recovery_reason' => null,
+            'processed_at' => null,
+            'updated_at' => CarbonImmutable::now()->subMinutes($minutesAgo),
         ]);
     }
 }

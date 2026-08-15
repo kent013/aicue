@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Services\Billing\AccountDeletionBillingGuard;
+use App\Services\Billing\StripeWebhookProcessor;
 use App\Services\Billing\TicketLedgerService;
 use App\Services\Capture\StaleUploadReservationSweeper;
 use App\Services\Manual\AnalysisJobService;
@@ -28,6 +29,41 @@ Artisan::command('billing:release-stale-reservations', function (TicketLedgerSer
 })->purpose('期限切れ (expires_at 超過) のチケット予約を解放する');
 
 Schedule::command('billing:release-stale-reservations')->everyFiveMinutes();
+
+/*
+|--------------------------------------------------------------------------
+| Stripe webhook の滞留回収
+|--------------------------------------------------------------------------
+| 本処理中にプロセスが落ちて status='received' のまま残った記録を再処理へ戻す。
+| 放置すると Stripe の再送は claim() に弾かれて 200 で終わり、Stripe 側も配信成功と
+| 判断して再送を打ち切るため、決済済みチケットの付与が**無音で失われる**。
+|
+| **監視対象 (必須)**: 本コマンドの report() と、次の 3 つの件数。
+|   1. status='received' かつ updated_at が滞留の閾値より古い行の件数
+|      (増え続ける = scheduler か本コマンドが動いていない)
+|   2. 本コマンド出力の retry-scheduled 件数 (再実行が失敗し続けている)
+|   3. status='recovery_pending' の件数 (自動再実行の対象外として置かれた行。
+|      理由は recovery_reason 列)
+| 詳細は docs/architecture.md の「Stripe webhook の滞留回収」が正本。
+*/
+Artisan::command('billing:recover-stale-webhook-events', function (StripeWebhookProcessor $webhooks) {
+    $result = $webhooks->recoverStale();
+    $this->info(sprintf(
+        'replayed %d / retry-scheduled %d / moved-to-recovery-pending %d / skipped %d',
+        $result->replayed,
+        $result->retryScheduled,
+        $result->movedToRecoveryPending,
+        $result->skipped,
+    ));
+})->purpose('処理中に滞留した Stripe webhook 記録を再処理へ戻す');
+
+Schedule::command('billing:recover-stale-webhook-events')
+    ->everyFiveMinutes()
+    ->onOneServer()
+    ->withoutOverlapping()
+    ->onFailure(static fn () => report(new RuntimeException(
+        'billing:recover-stale-webhook-events 失敗 — 決済済み・チケット未付与が滞留する可能性',
+    )));
 
 /*
 |--------------------------------------------------------------------------
