@@ -74,26 +74,43 @@ pest 終了後に orphan 化した `playwright run-server` (node) はスクリ�
 ### CI での実行
 
 `.github/workflows/ci.yml` の `browser-tests` job が、**Chromium / WebKit の 2 レーンをそのまま**
-実行する (レーン限定も並列度上書きもしない)。job は postgres service +
-`pnpm build` + `pnpm exec playwright install --with-deps chromium webkit` を前提として
-`composer test:browser` を呼ぶ。CI 専用の起動経路は作らない (T099: CI が検証するものと
-開発者が走らせるものを同一に保つ)。
+実行する (レーン限定も並列度上書きもしない)。CI 専用の起動経路は作らない
+(T099: CI が検証するものと開発者が走らせるものを同一に保つ)。
 
-workflow 側で `BROWSER_TEST_LANES` / `BROWSER_TEST_PROCESSES` を設定する退行は
-`tests/js/architecture/ci-workflow-inventory.test.ts` が、スクリプト側の契約は
-`scripts/run-browser-test.contract.test.ts` が deny-by-default で止める。
+job は postgres service と `pnpm build` を前提に、
+`~/.cache/ms-playwright` のキャッシュ (key に `pnpm-lock.yaml` の hash を含む。
+`restore-keys` は持たない) → `bash scripts/setup-browser-testing.sh` → `composer test:browser` →
+**失敗時のみ** `storage/browser-test-artifacts/` のアップロード、という順で走る。
+
+レーン別の証跡が要るのは、pest-plugin-browser が **起動のたびに**
+`tests/Browser/Screenshots/` を消すためである。`scripts/run-browser-test.sh` が
+レーン終了直後に `storage/browser-test-artifacts/<lane>/` へ退避しないと、
+先に失敗した Chromium の証跡が WebKit の起動で消える。
+
+workflow 側で `BROWSER_TEST_LANES` / `BROWSER_TEST_PROCESSES` を設定する退行と、
+workflow 側の構成 (キャッシュ / 導入スクリプト呼び出し / 失敗時アップロード) は
+`tests/js/architecture/ci-workflow-inventory.test.ts` の W7 / W9 / W14 / W18〜W20 が、
+スクリプト側の契約は `scripts/run-browser-test.contract.test.ts` と
+`scripts/setup-browser-testing.contract.test.ts` が deny-by-default で止める。
+導入コマンドを別の場所で実行し直す退行は
+`tests/Architecture/BrowserProvisioningEntrypointTest.php` が止める。
 
 ### 前提
 
 - **DB は Feature lane と同じ worktree 固有 pgsql テスト DB** (`<slug>_test_<worktree-hash>`)。
   `scripts/ci/ensure-test-db.php` が冪等に作成し、`tests/bootstrap.php` の単一点ガードが
   dev DB への接続を Laravel boot 前に fail-closed で拒否する (phpunit.xml と同一機構)。
-- ブラウザは Playwright が独自 DL する: **`pnpm exec playwright install chromium webkit`**。
-  system chromedriver は不要。
-  **WebKit は Linux で共有ライブラリ群 (gstreamer / gtk-4 / libwoff2 等) を要求する**ため、
-  devcontainer では **`sudo pnpm exec playwright install-deps webkit`**
-  (または `playwright install --with-deps webkit`) を一度実行する。未導入だと WebKit レーンが
-  "Host system is missing dependencies to run browsers" で全 fail する。
+- **ブラウザの導入は `scripts/setup-browser-testing.sh` が行う** (system chromedriver は不要)。
+  `composer test:browser` はグローバルテストロックを取る**前**にこれを呼ぶので、
+  **手で `playwright install` / `install-deps` を叩く必要は無い**。
+  導入だけ先に済ませたいときは `bash scripts/setup-browser-testing.sh` を直接実行する。
+  - WebKit は Linux で共有ライブラリ群 (gstreamer / gtk-4 / libwoff2 等) を要求する。
+    スクリプトは「不足しているか」と「管理者権限があるか」を**別々に**判定し、
+    **不足しているのに権限が無ければ導入せずに止まる**
+    (黙って OS ライブラリ無しで導入すると、後で "Host system is missing dependencies to
+    run browsers" という原因の分かりにくい失敗になるため)。
+  - 判定できないとき (Playwright の出力が想定と違う等) も止まる。メッセージが出す
+    確認コマンドで原因を見ること。
 - 実ブラウザは `public/build` のビルド済アセットを読むため、UI 変更後は
   **`pnpm build` を先に実行する**こと (`withoutVite()` は Browser lane に適用されない)。
 
@@ -199,6 +216,12 @@ Browser の役割は UI / ユーザーフロー回帰に限定する。
   待機の heartbeat が出ている間はそのまま待てばよい。
 - **bug-hunt が走行中で起動できない**: `scripts/bug-hunt-shard.sh teardown` で
   bug-hunt 環境を落としてから再実行する。
+- **`ERROR: Browser テスト用のブラウザを導入できません`**: `scripts/setup-browser-testing.sh` が
+  止めている。理由キー (`no-privilege` / `undeterminable-deps` / `unsupported-os`) ごとに
+  次の手順がメッセージに出る。**握り潰して先へ進まないこと** — 進んでも WebKit レーンが全 fail する。
+- **`storage/browser-test-artifacts/`**: レーン別に退避した失敗時 screenshot の置き場
+  (CI のアップロード対象)。`.gitignore` 済みで、ローカルでは消してよい
+  (次の `composer test:browser` が作り直す)。
 
 ## グローバルテストロックの手動復旧 runbook
 
