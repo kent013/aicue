@@ -38,8 +38,8 @@ use Webmozart\Assert\Assert;
  * - 直接デクリメントは書かない。消費を伴う処理は必ず reserve → (成功) commit / (失敗) release
  * - 全操作 transaction + organizations 行ロック (lockForUpdate) で残高判定の
  *   TOCTOU を防止する (並行 reserve のオーバーセル防止)
- * - reserve TTL 超過と失効 monthly hold は billing:release-stale-reservations cron
- *   (releaseStale) が解放する
+ * - reserve TTL 超過と失効 monthly hold は滞留回収 (work:recover-stuck --stream=ticket_reservation)
+ *   が releaseExpiredReservation 経由で解放する
  * - webhook 由来の付与 (grantMonthly / grantSignupGrant / grantPurchased) と
  *   返金逆仕訳 (clawback) は idempotency_key UNIQUE の冪等 insert で二重計上を防ぐ
  * - commit は **commit-wins**: reserve TTL 超過や stale releaser 先着でも生存 hold は課金する
@@ -567,62 +567,112 @@ class TicketLedgerService
     {
         DB::transaction(function () use ($reservation): void {
             $locked = $this->lockReservationRow($reservation);
-            $organization = $locked->organization;
-            Assert::isInstanceOf($organization, Organization::class);
-            $this->lockOrganizationRow($organization);
-
-            $this->appendEntry(
-                $organization,
-                0,
-                TicketLedgerKind::Release,
-                $locked,
-                "予約 {$locked->id} の解放",
-            );
-
-            $locked->status = TicketReservationStatus::Released;
-            $locked->save();
+            $this->releaseLockedReservation($locked);
         });
 
         $reservation->refresh();
     }
 
     /**
-     * TTL (expires_at) 超過、または失効 monthly hold (consume_expires_at 経過) の reserved 予約を
-     * 解放する (routes/console.php の billing:release-stale-reservations が 5 分毎に実行)。
+     * 滞留予約の解放 (回収経路の唯一の口)。
+     *
+     * **行ロックを取ったうえで滞留の述語ごと再評価する** — reserved であることに加えて
+     * 「TTL 超過 または 失効 monthly hold」を WHERE に入れるので、候補の列挙後に
+     * commit / release された予約や、条件を満たさなくなった予約は 1 行も返らない。
+     * その結果、競合を表す専用例外は要らない (0 行 = false で表せる)。
      *
      * 失効 monthly hold を含めるのは、消費元の grant が既に失効している hold を拘束として
      * 残すと翌期間の残高を侵食するため (commit-wins も当該 hold は no-charge にする)。
      *
-     * @return int 解放した予約数
+     * @param  positive-int  $id  滞留回収の候補列挙 (expiredReservationIds) が返した主キー
+     * @return bool 実際に解放したか
      */
-    public function releaseStale(): int
+    public function releaseExpiredReservation(int $id, CarbonImmutable $sweptAt): bool
     {
-        $now = CarbonImmutable::now();
+        return DB::transaction(function () use ($id, $sweptAt): bool {
+            $locked = $this->lockExpiredReservation($id, $sweptAt);
+            if ($locked === null) {
+                return false; // 並行 commit / release 済み / 述語が不成立になった
+            }
 
-        $staleIds = TicketReservation::query()
+            $this->releaseLockedReservation($locked);
+
+            return true;
+        });
+    }
+
+    /**
+     * 滞留候補の主キーを昇順で返す (回収の候補列挙。述語は applyExpiredPredicate が唯一の正本)。
+     *
+     * 失効 monthly hold の判定式は会計の一部なので**この台帳サービスの中に閉じる**
+     * (回収 stream 側へ複製しない)。
+     *
+     * @param  positive-int|null  $afterId
+     * @param  positive-int  $pageSize
+     * @return list<positive-int>
+     */
+    public function expiredReservationIds(CarbonImmutable $sweptAt, ?int $afterId, int $pageSize): array
+    {
+        /** @var list<positive-int> $ids */
+        $ids = $this->applyExpiredPredicate(TicketReservation::query(), $sweptAt)
+            ->when($afterId !== null, fn (Builder $query) => $query->where('id', '>', $afterId))
+            ->orderBy('id')
+            ->limit($pageSize)
+            ->pluck('id')
+            ->all();
+
+        return $ids;
+    }
+
+    /**
+     * ロック済み予約の解放の本体 (release と releaseExpiredReservation が共有する 1 つの実装)。
+     *
+     * ロック順 (予約 → 組織)、台帳への 0 行追記、Released 化を 2 か所に複製しない。
+     */
+    private function releaseLockedReservation(TicketReservation $locked): void
+    {
+        $organization = $locked->organization;
+        Assert::isInstanceOf($organization, Organization::class);
+        $this->lockOrganizationRow($organization);
+
+        $this->appendEntry(
+            $organization,
+            0,
+            TicketLedgerKind::Release,
+            $locked,
+            "予約 {$locked->id} の解放",
+        );
+
+        $locked->status = TicketReservationStatus::Released;
+        $locked->save();
+    }
+
+    /**
+     * id は回収の候補列挙由来。**候補列挙と同じ述語**を WHERE に入れることでロック後の再評価になる。
+     *
+     * @param  positive-int  $id
+     */
+    private function lockExpiredReservation(int $id, CarbonImmutable $sweptAt): ?TicketReservation
+    {
+        return $this->applyExpiredPredicate(TicketReservation::query()->whereKey($id), $sweptAt)
+            ->lockForUpdate()
+            ->first();
+    }
+
+    /**
+     * 滞留予約の述語 (**この 1 か所だけが正本**):
+     * reserved かつ「TTL (expires_at) 超過 または 失効 monthly hold (consume_expires_at 経過)」。
+     *
+     * @param  Builder<TicketReservation>  $query
+     * @return Builder<TicketReservation>
+     */
+    private function applyExpiredPredicate(Builder $query, CarbonImmutable $sweptAt): Builder
+    {
+        return $query
             ->where('status', TicketReservationStatus::Reserved)
-            ->where(function (Builder $query) use ($now): void {
-                $query->where('expires_at', '<=', $now)
-                    ->orWhere(fn (Builder $expired) => $this->expiredMonthlyHoldCondition($expired, $now));
-            })
-            ->pluck('id');
-
-        $released = 0;
-        foreach ($staleIds as $id) {
-            $reservation = TicketReservation::query()->whereKey($id)->first();
-            if ($reservation === null) {
-                continue;
-            }
-            // release 内で行ロック + 状態再検証するため、競合した予約はそこで弾かれる
-            try {
-                $this->release($reservation);
-                $released++;
-            } catch (LogicException) {
-                // 並行 commit / release 済み: 解放不要
-            }
-        }
-
-        return $released;
+            ->where(fn (Builder $outer) => $outer
+                ->where('expires_at', '<=', $sweptAt)
+                ->orWhere(fn (Builder $expired) => $this->expiredMonthlyHoldCondition($expired, $sweptAt)));
     }
 
     /** 残高判定・台帳追記の直列化点 (organizations 行ロック) */
@@ -705,7 +755,7 @@ class TicketLedgerService
      *
      * reserve TTL 切れ (expires_at <= now) でも Reserved である限り枠を保持する: commit-wins は
      * TTL 超過でも課金するため、与信側で枠を再開放すると 30 分超ジョブ中に同じ枠が二重予約され
-     * 両方 commit でオーバーセルになる。枠の解放は releaseStale の Released 化に委ねる。
+     * 両方 commit でオーバーセルになる。枠の解放は 滞留回収 (releaseExpiredReservation) の Released 化に委ねる。
      * 失効 monthly hold のみ除外する (grant 自体が消えており commit-wins も no-charge のため)。
      *
      * legacy 行 (consume_source = null) はどちらの出所にも計上されない (aigenba verbatim)。
@@ -724,7 +774,7 @@ class TicketLedgerService
 
     /**
      * 「失効 monthly hold」の PHP 述語。query 版 expiredMonthlyHoldCondition と同一定義を共有し、
-     * commit / hold 集計 / releaseStale の判定を揃える。
+     * commit / hold 集計 / 滞留回収の判定を揃える。
      *
      * legacy 行 (consume_source = null) は先頭で false になる。
      * consume_source = monthly かつ consume_expires_at = null は「無期限 monthly からの消費」で、

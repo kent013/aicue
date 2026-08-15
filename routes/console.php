@@ -2,11 +2,8 @@
 
 declare(strict_types=1);
 
+use App\Enums\Recovery\RecoveryStream;
 use App\Services\Billing\AccountDeletionBillingGuard;
-use App\Services\Billing\StripeWebhookProcessor;
-use App\Services\Billing\TicketLedgerService;
-use App\Services\Capture\StaleUploadReservationSweeper;
-use App\Services\Manual\AnalysisJobService;
 use App\Services\Manual\RenderJobService;
 use App\Services\Organization\OrganizationMembershipService;
 use Illuminate\Foundation\Inspiring;
@@ -19,51 +16,33 @@ Artisan::command('inspire', function () {
 
 /*
 |--------------------------------------------------------------------------
-| 課金 cron
+| 滞留回収 (AG-083 標準形 v1)
 |--------------------------------------------------------------------------
-| reserve TTL 超過のチケット予約を解放する (2 フェーズ消費の前提となる stale 解放)。
-*/
-Artisan::command('billing:release-stale-reservations', function (TicketLedgerService $tickets) {
-    $released = $tickets->releaseStale();
-    $this->info("released {$released} stale reservation(s)");
-})->purpose('期限切れ (expires_at 超過) のチケット予約を解放する');
-
-Schedule::command('billing:release-stale-reservations')->everyFiveMinutes();
-
-/*
-|--------------------------------------------------------------------------
-| Stripe webhook の滞留回収
-|--------------------------------------------------------------------------
-| 本処理中にプロセスが落ちて status='received' のまま残った記録を再処理へ戻す。
-| 放置すると Stripe の再送は claim() に弾かれて 200 で終わり、Stripe 側も配信成功と
-| 判断して再送を打ち切るため、決済済みチケットの付与が**無音で失われる**。
+| 系列ごとに 1 本ずつ登録する (実行間隔は RecoveryStream::cadenceMinutes が正本)。
+| **--apply の付け忘れは回収が全面停止しても無音**なので、配線は
+| StuckWorkRecoveryInventoryTest が系列のキー単位で機械固定する。
 |
-| **監視対象 (必須)**: 本コマンドの report() と、次の 3 つの件数。
-|   1. status='received' かつ updated_at が滞留の閾値より古い行の件数
-|      (増え続ける = scheduler か本コマンドが動いていない)
-|   2. 本コマンド出力の retry-scheduled 件数 (再実行が失敗し続けている)
-|   3. status='recovery_pending' の件数 (自動再実行の対象外として置かれた行。
-|      理由は recovery_reason 列)
-| 詳細は docs/architecture.md の「Stripe webhook の滞留回収」が正本。
+| 監視対象 (必須): 各実行の出力と onFailure。**5 つを見る**。
+|   - errors > 0 が続く        = 特定の行で回収が失敗し続けている
+|   - deferred > 0 が続く      = 再実行が失敗し続けている (webhook。**errors には出ない** —
+|                                失敗は行に書き戻して次回へ回すため、errors=0 のまま滞留しうる)
+|   - escalated の件数         = 自動回収の対象外として人手へ渡した件数 (webhook)
+|   - cleanup-failed > 0       = S3 の孤児削除に失敗した件数 (**手動確認が要る**。
+|                                行は解放済みなので自動では拾い直せない)
+|   - limit-reached=yes が続く = 上限で打ち切っており後続候補が残っている
+| 詳細は docs/architecture.md の「滞留回収の共通基盤」が正本。
 */
-Artisan::command('billing:recover-stale-webhook-events', function (StripeWebhookProcessor $webhooks) {
-    $result = $webhooks->recoverStale();
-    $this->info(sprintf(
-        'replayed %d / retry-scheduled %d / moved-to-recovery-pending %d / skipped %d',
-        $result->replayed,
-        $result->retryScheduled,
-        $result->movedToRecoveryPending,
-        $result->skipped,
-    ));
-})->purpose('処理中に滞留した Stripe webhook 記録を再処理へ戻す');
-
-Schedule::command('billing:recover-stale-webhook-events')
-    ->everyFiveMinutes()
-    ->onOneServer()
-    ->withoutOverlapping()
-    ->onFailure(static fn () => report(new RuntimeException(
-        'billing:recover-stale-webhook-events 失敗 — 決済済み・チケット未付与が滞留する可能性',
-    )));
+foreach (RecoveryStream::cases() as $recoveryStream) {
+    Schedule::command('work:recover-stuck --stream='.$recoveryStream->value.' --apply')
+        ->cron('*/'.$recoveryStream->cadenceMinutes().' * * * *')
+        ->onOneServer()
+        // 期限を明示する。既定 (24 時間) だと異常終了で残ったロックが丸 1 日回収を止める
+        ->withoutOverlapping($recoveryStream->overlapExpiryMinutes())
+        // RuntimeException は import しない (本ファイルは namespace 宣言が無く global 解決される)
+        ->onFailure(static fn () => report(new RuntimeException(
+            'work:recover-stuck --stream='.$recoveryStream->value.' 失敗 — 滞留が前へ進んでいない可能性',
+        )));
+}
 
 /*
 |--------------------------------------------------------------------------
@@ -179,33 +158,12 @@ Schedule::command('account:purge-deletion-requests --apply')->daily()->onOneServ
 
 /*
 |--------------------------------------------------------------------------
-| AI 解析 cron
+| レンダ出力世代の収束
 |--------------------------------------------------------------------------
-| dispatch 喪失 (queued 滞留) と worker 異常終了 (running 滞留) の回復。
-| failJob は行ロック + terminal guard で冪等 (billing:release-stale-reservations と同型)。
+| 世代交代済みの output_path を削除 job へ再投入する。**滞留の前進ではない**ため
+| 滞留回収 (work:recover-stuck) には含めず、別コマンドのまま残す
+| (StuckWorkRecoveryInventoryTest の「回収でない定期実行」へ理由付きで登録している)。
 */
-Artisan::command('analysis:recover-stale-jobs', function (AnalysisJobService $jobs) {
-    $recovered = $jobs->recoverStale();
-    $this->info("recovered {$recovered} stale analysis job(s)");
-})->purpose('滞留した解析ジョブ (queued/running が閾値超過) を失敗確定し予約を解放する');
-
-Schedule::command('analysis:recover-stale-jobs')->everyFiveMinutes();
-
-/*
-|--------------------------------------------------------------------------
-| レンダ cron
-|--------------------------------------------------------------------------
-| recover-stale-jobs: dispatch 喪失 (queued=10 分) と worker 異常終了 (running=30 分) の回復。
-| reconcile-outputs: 出力世代の収束 (世代交代済みの output_path を削除 job へ再投入。
-| stale 回復とは別責務のため command を分離する)。
-*/
-Artisan::command('render:recover-stale-jobs', function (RenderJobService $jobs) {
-    $recovered = $jobs->recoverStale();
-    $this->info("recovered {$recovered} stale render job(s)");
-})->purpose('滞留したレンダジョブ (queued/running が閾値超過) を失敗確定し予約を解放する');
-
-Schedule::command('render:recover-stale-jobs')->everyFiveMinutes();
-
 Artisan::command('render:reconcile-outputs', function (RenderJobService $jobs) {
     $result = $jobs->reconcileOutputs();
     $this->info("dispatched {$result['dispatched']} delete job(s), skipped {$result['skipped']}");
@@ -215,18 +173,13 @@ Schedule::command('render:reconcile-outputs')->everyFiveMinutes()->onOneServer()
 
 /*
 |--------------------------------------------------------------------------
-| 撮影 PWA cron (doc/10 §10.8-4 / 概念設計 D7)
+| 撮影アップロード予約の保持期間の決着 (doc/10 §10.8-4)
 |--------------------------------------------------------------------------
-| 期限切れ pending / stale verifying のアップロード予約を released 化して
-| bytes_pending を解放し、PUT 済みだが未登録の S3 孤児オブジェクトを削除する。
-| fresh verifying (検証中) には触れない (登録処理の claim 契約と競合しない)。冪等。
+| released / completed の古い行 (retention 超過) を物理削除する。**滞留の回収ではなく
+| 期限の決着**なので回収 (work:recover-stuck --stream=upload_reservation) とは入口を分ける。
+| 肥大の防止であって緊急性が無いため日次でよい (既存の purge 系と同じ扱い)。
 */
-Artisan::command('capture:release-stale-upload-reservations', function (StaleUploadReservationSweeper $sweeper) {
-    $released = $sweeper->sweep();
-    $this->info("released {$released} stale upload reservation(s)");
-})->purpose('期限切れのテイクアップロード予約を解放し S3 孤児オブジェクトを削除する');
-
-Schedule::command('capture:release-stale-upload-reservations')->everyTenMinutes()->onOneServer()->withoutOverlapping();
+Schedule::command('capture:purge-upload-reservations')->daily()->onOneServer();
 
 /*
 |--------------------------------------------------------------------------

@@ -377,7 +377,7 @@ test('インターリーブ (d): stale releaser 先着でも finalize は完走�
     $job->ticketReservation()->associate($reservation);
     $job->status = JobStatus::Running;
     $job->save();
-    // finalize 直前に予約が Released になる競合を細工 (releaseStale cron 相当)
+    // finalize 直前に予約が Released になる競合を細工 (滞留予約の解放と同じ状況)
     app(TicketLedgerService::class)->release($reservation);
 
     $generated = GeneratedScenarioData::fromLlmText(scenarioFixture());
@@ -685,7 +685,7 @@ test('(D) 会計: リトライして failed なら予約は Released で commit 
     expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(1);
 });
 
-test('(D) 強制終了 (commit 前): failed() を呼べなくても recoverStale が予約を Released へ収束させる', function (): void {
+test('(D) 強制終了 (commit 前): failed() を呼べなくても滞留回収が予約を Released へ収束させる', function (): void {
     $this->travelTo(CarbonImmutable::parse('2026-08-04 00:00:00'));
     [$organization, , , , , $job] = pipelineContext();
     $reservation = app(TicketLedgerService::class)->reserve($organization, 1);
@@ -693,9 +693,9 @@ test('(D) 強制終了 (commit 前): failed() を呼べなくても recoverStale
     $job->status = JobStatus::Running;
     $job->save();
 
-    // SIGALRM で failed() 自体が失敗したケース = cron だけが収束させる
+    // SIGALRM で failed() 自体が失敗したケース = 定期実行だけが収束させる
     $this->travelTo(CarbonImmutable::parse('2026-08-04 00:31:00'));
-    app(AnalysisJobService::class)->recoverStale();
+    recoverStaleAnalysisJobs();
 
     expect($job->refresh()->status)->toBe(JobStatus::Failed);
     expect($reservation->refresh()->status)->toBe(TicketReservationStatus::Released);
@@ -715,7 +715,7 @@ test('(D) 強制終了 (commit 後): failJob は terminal guard で no-op、予�
     expect($job->ticketReservation?->status)->toBe(TicketReservationStatus::Committed);
 });
 
-test('(D) 強制終了: failJob → recoverStale → releaseStale の順でも最終会計状態は Released', function (): void {
+test('(D) 強制終了: 失敗確定 → ジョブ回収 → 予約解放 の順でも最終会計状態は Released', function (): void {
     $this->travelTo(CarbonImmutable::parse('2026-08-04 00:00:00'));
     [$organization, , , , , $job] = pipelineContext();
     $reservation = app(TicketLedgerService::class)->reserve($organization, 1);
@@ -725,15 +725,15 @@ test('(D) 強制終了: failJob → recoverStale → releaseStale の順でも�
     $this->travelTo(CarbonImmutable::parse('2026-08-04 00:31:00'));
 
     app(AnalysisJobService::class)->failJob($job, '解析が中断されました。再実行してください。');
-    app(AnalysisJobService::class)->recoverStale();
-    app(TicketLedgerService::class)->releaseStale();
+    recoverStaleAnalysisJobs();
+    releaseStaleTicketReservations();
 
     expect($job->refresh()->status)->toBe(JobStatus::Failed);
     expect($reservation->refresh()->status)->toBe(TicketReservationStatus::Released);
     expect(TicketLedgerEntry::query()->where('kind', TicketLedgerKind::ReserveCommit)->count())->toBe(0);
 });
 
-test('(D) 強制終了: releaseStale → recoverStale → failJob の逆順でも最終会計状態は同じ', function (): void {
+test('(D) 強制終了: 予約解放 → ジョブ回収 → 失敗確定 の逆順でも最終会計状態は同じ', function (): void {
     $this->travelTo(CarbonImmutable::parse('2026-08-04 00:00:00'));
     [$organization, , , , , $job] = pipelineContext();
     $reservation = app(TicketLedgerService::class)->reserve($organization, 1);
@@ -742,8 +742,8 @@ test('(D) 強制終了: releaseStale → recoverStale → failJob の逆順で�
     $job->save();
     $this->travelTo(CarbonImmutable::parse('2026-08-04 00:31:00'));
 
-    app(TicketLedgerService::class)->releaseStale();
-    app(AnalysisJobService::class)->recoverStale();
+    releaseStaleTicketReservations();
+    recoverStaleAnalysisJobs();
     app(AnalysisJobService::class)->failJob($job, '解析が中断されました。再実行してください。');
 
     expect($job->refresh()->status)->toBe(JobStatus::Failed);

@@ -711,3 +711,53 @@ PHPStan level 10 の解析対象でもあるので、**追加した宣言の副�
   `tests/Architecture/PromptYamlContractTest.php`
 - 設計: `devnotes/20260815-1537-prompt-injection-defense/`
 - 契約の正本: `docs/architecture.md` §LLM プロンプト防御の窓口方式
+
+---
+
+## D17 ✅ 滞留回収の共通基盤を、閾値の置き場所と `recover()` の引数で正典から外す
+
+家系の裁定 AG-083 標準形 v1 (追従元 laravel-claude-template:T076) の共通基盤へ寄せ替えるにあたり、
+**3 点だけ**正典と形を変えた。骨格 (系列の契約 / 走査と作用の分離 / 既定は実行しない入口 /
+deny-by-default の目録 / 撤去済み参照の gate) はそのまま採っている。
+
+| 観点 | テンプレート | 本アプリ |
+|---|---|---|
+| 滞留の閾値の置き場所 | 回収側の設定 (`config/recovery.php` + `RecoveryThresholds`) に集約 | 各ドメインの設定 (`config/manual.php` / `config/billing.php` / `config/capture.php`) に据え置き |
+| `recover()` の引数 | 主キーだけ | 主キー + **掃引開始時刻** |
+| 遡及の下限 (look-back) と自走をやめる上限 (give-up) | 系列ごとに設定で持つ | **持たない** |
+
+### なぜ正当な差分か (logic-driven)
+
+1. **閾値**: 本アプリは「ジョブの制限時間 < 再試行間隔 < 予約の有効期限 ≤ 滞留の閾値」という
+   序列を既存の Architecture テスト 2 本 (`AnalysisTimeBudgetInvariantTest` /
+   `QueuedJobLeaseInventoryTest`) が固定している。回収側の設定へ移すと**序列の情報源が 2 つに
+   割れ**、片方だけ変えても検査が通る窓が開く。閾値はドメインの時間予算の一部である
+2. **掃引開始時刻**: 候補列挙と行ロック下の再評価で現在時刻がずれると、境界ちょうどの行を
+   取りこぼす (列挙では候補、再評価では未超過、の食い違い)。渡すのは**行の内容ではない**ので、
+   正典が狙う「行を取り直して述語を再評価させる」強制は壊れない
+3. **遡及の下限と自走の上限**: 遡及の下限は「古すぎる滞留を永久に回収しない」無音の穴を作る。
+   自走をやめる上限に当たる機構は Stripe の通知側が既に持っている
+   (`attempts >= MAX_PROCESSING_ATTEMPTS` で `recovery_pending` へ移す)。
+   今必要でないものを先回りして作らない (思考原則 2)
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「回収は必ず行を取り直し、候補列挙と同じ述語を行ロック下で再評価してから作用する」
+
+1. `recover()` の引数は**主キーと時刻だけ**で、行・モデル・述語の判定結果は渡さない
+2. 候補列挙と再評価は**同じ 1 つの述語**を共有する (各ドメインの Service の private に集約)
+3. 共通側が持つ上限は「1 掃引で扱う件数」だけで、それは**対象を失敗として確定する条件ではない**
+   (上限に達しても未処理分は終わらせず、次の掃引と人手の判断に委ねる)
+4. 閾値はドメインの設定に置き、序列を固定する既存テストを緑に保つ
+
+### 関連
+
+- 実装: `app/Contracts/Recovery/StuckWorkStream.php` /
+  `app/Services/Recovery/StuckWorkRecoverySweeper.php` /
+  `app/Services/Recovery/StuckWorkStreamRegistry.php` /
+  `app/Console/Commands/Operations/RecoverStuckWorkCommand.php` /
+  `app/Services/Recovery/Streams/`
+- gate: `tests/Architecture/StuckWorkRecoveryInventoryTest.php` /
+  `tests/Architecture/RetiredRecoveryReferenceGateTest.php`
+- 設計: `devnotes/20260815-1538-stuck-job-recovery/`
+- 契約の正本: `docs/architecture.md` §滞留回収の共通基盤

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Support\Security;
 
 use App\Enums\Security\DirectFetchJustification;
+use App\Enums\Security\RecoveryFetchShape;
 use Webmozart\Assert\Assert;
 
 /**
@@ -51,6 +52,25 @@ final readonly class DirectFetchJustificationEntry
     {
         return new self(DirectFetchJustification::IdSuppliedByInternalCaller, $reason, [
             'calledBy' => $calledBy,
+        ]);
+    }
+
+    /**
+     * 滞留回収の候補列挙が返した主キーで行を取り直すエントリ。
+     *
+     * @param  string  $entryPoint  回収の入口 `Class::method` (この本文が当該 private を呼ぶ)
+     * @param  string  $stream  回収の系列キー (registry と回収の目録の両方に実在すること)
+     */
+    public static function recoveryCandidate(
+        string $reason,
+        string $entryPoint,
+        string $stream,
+        RecoveryFetchShape $shape,
+    ): self {
+        return new self(DirectFetchJustification::IdFromRecoveryCandidateEnumeration, $reason, [
+            'entryPoint' => $entryPoint,
+            'stream' => $stream,
+            'recoveryFetchShape' => $shape->value,
         ]);
     }
 
@@ -136,6 +156,21 @@ final readonly class DirectFetchJustificationEntry
     public function commandSignature(): string
     {
         return $this->require('commandSignature');
+    }
+
+    public function entryPoint(): string
+    {
+        return $this->require('entryPoint');
+    }
+
+    public function stream(): string
+    {
+        return $this->require('stream');
+    }
+
+    public function recoveryFetchShape(): RecoveryFetchShape
+    {
+        return RecoveryFetchShape::from($this->require('recoveryFetchShape'));
     }
 
     public function verifiedBy(): string

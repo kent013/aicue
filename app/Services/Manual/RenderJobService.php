@@ -33,7 +33,7 @@ use LogicException;
 use Webmozart\Assert\Assert;
 
 /**
- * レンダジョブの状態機械 (trigger / triggerPreview / failJob / recoverStale)。doc/10 §10.8-8。
+ * レンダジョブの状態機械 (trigger / triggerPreview / failJob / failStaleJob)。doc/10 §10.8-8。
  * AnalysisJobService を見本にした個別実装 (§10.8 方針: 共通抽象化しない)。
  *
  * VideoManualStatus 遷移表 (本サービスが関与する遷移。詳細は docs/architecture.md):
@@ -167,7 +167,7 @@ class RenderJobService
     }
 
     /**
-     * ジョブの失敗確定 (冪等)。pipeline catch / Job::failed / recoverStale の合流点。
+     * ジョブの失敗確定 (冪等)。pipeline catch / Job::failed の合流点。
      *
      * - terminal (succeeded/failed) 済みは no-op (terminal tx 勝ち・二重 fail を握る)
      * - kind=render のみ: manual が rendering のときのみ ready へ復帰
@@ -181,37 +181,8 @@ class RenderJobService
         $failed = DB::transaction(function () use ($job, $code, $error): bool {
             /** @var RenderJob $locked */
             $locked = RenderJob::query()->whereKey($job->getKey())->lockForUpdate()->firstOrFail();
-            if ($locked->status->isTerminal()) {
-                return false;
-            }
 
-            // preview/render とも失敗確定時の scenario_version を snapshot する必要があるため、
-            // manual を常に lock で取得する (従来は kind=render のみ取得だった)。ロック順 job → manual。
-            /** @var VideoManual $manual */
-            $manual = VideoManual::query()->whereKey($locked->video_manual_id)->lockForUpdate()->firstOrFail();
-
-            $locked->status = JobStatus::Failed;
-            $locked->error = $error;
-            $locked->error_code = $code;
-            $locked->scenario_version_at_terminal = $manual->scenario_version;
-            $locked->save();
-
-            // manual 復帰 (kind=render かつ rendering のときのみ。preview は status を触らない)
-            if ($locked->kind === RenderKind::Render && $manual->status === VideoManualStatus::Rendering) {
-                $manual->forceFill(['status' => VideoManualStatus::Ready])->save();
-            }
-
-            // 予約 release (Reserved のみ。並行 commit/release 済みは LogicException → 握って冪等)
-            $reservation = $locked->ticketReservation;
-            if ($reservation !== null && $reservation->status === TicketReservationStatus::Reserved) {
-                try {
-                    $this->tickets->release($reservation);
-                } catch (LogicException) {
-                    // 並行 release/commit 済み
-                }
-            }
-
-            return true;
+            return $this->failLockedJob($locked, $code, $error);
         });
 
         // terminal 遷移が実際に起きたときだけ・commit 後に通知する (kind=render のみ。
@@ -225,6 +196,140 @@ class RenderJobService
         }
 
         return $failed;
+    }
+
+    /**
+     * 滞留ジョブの失敗確定 (回収経路の唯一の口)。
+     *
+     * **行ロックを取ったうえで滞留の述語ごと再評価する** — 候補を列挙してから
+     * ロックを取るまでの間に worker が進捗を書いた running ジョブは 1 行も返らないので、
+     * 正常に動いているものを失敗にしない (誤回収の防止)。レンダは誤回収を止めることが
+     * **編集ロック (manual の rendering) の誤解除を止める**ことにもなる。
+     *
+     * @param  positive-int  $id  滞留回収の候補列挙 (staleJobIds) が返した主キー
+     * @return bool 実際に failed へ遷移させたか
+     */
+    public function failStaleJob(int $id, CarbonImmutable $sweptAt): bool
+    {
+        // 通知のためにモデルを引き直さない (クラス起点の主キークエリを 1 本増やさないため)。
+        // トランザクションからロック済みモデルをそのまま返す
+        $failed = DB::transaction(function () use ($id, $sweptAt): ?RenderJob {
+            $locked = $this->lockStaleJob($id, $sweptAt);
+            if ($locked === null) {
+                return null; // 述語が成立しない (前進済み / terminal / 進捗が進んだ)
+            }
+
+            return $this->failLockedJob(
+                $locked,
+                RenderErrorCode::Timeout,
+                '書き出しがタイムアウトしました。再実行してください。',
+            ) ? $locked : null;
+        });
+
+        if ($failed !== null) {
+            $failed->refresh();
+            if ($failed->kind === RenderKind::Render) {
+                $this->notifications->notifyRenderFinished($failed);
+            }
+        }
+
+        return $failed !== null;
+    }
+
+    /**
+     * 滞留候補の主キーを昇順で返す (回収の候補列挙。述語は applyStalePredicate が唯一の正本)。
+     *
+     * @param  positive-int|null  $afterId
+     * @param  positive-int  $pageSize
+     * @return list<positive-int>
+     */
+    public function staleJobIds(CarbonImmutable $sweptAt, ?int $afterId, int $pageSize): array
+    {
+        /** @var list<positive-int> $ids */
+        $ids = $this->applyStalePredicate(RenderJob::query(), $sweptAt)
+            ->when($afterId !== null, fn (EloquentBuilder $query) => $query->where('id', '>', $afterId))
+            ->orderBy('id')
+            ->limit($pageSize)
+            ->pluck('id')
+            ->all();
+
+        return $ids;
+    }
+
+    /**
+     * ロック済みジョブの失敗確定の本体 (failJob と failStaleJob が共有する 1 つの実装)。
+     *
+     * ロック順 (job → manual)、terminal guard、manual の復帰条件、予約解放、
+     * scenario_version_at_terminal の書き込みを 2 か所に複製しないためにここへ集約する。
+     */
+    private function failLockedJob(RenderJob $locked, RenderErrorCode $code, string $error): bool
+    {
+        if ($locked->status->isTerminal()) {
+            return false;
+        }
+
+        // preview/render とも失敗確定時の scenario_version を snapshot する必要があるため、
+        // manual を常に lock で取得する。ロック順 job → manual。
+        /** @var VideoManual $manual */
+        $manual = VideoManual::query()->whereKey($locked->video_manual_id)->lockForUpdate()->firstOrFail();
+
+        $locked->status = JobStatus::Failed;
+        $locked->error = $error;
+        $locked->error_code = $code;
+        $locked->scenario_version_at_terminal = $manual->scenario_version;
+        $locked->save();
+
+        // manual 復帰 (kind=render かつ rendering のときのみ。preview は status を触らない)
+        if ($locked->kind === RenderKind::Render && $manual->status === VideoManualStatus::Rendering) {
+            $manual->forceFill(['status' => VideoManualStatus::Ready])->save();
+        }
+
+        // 予約 release (Reserved のみ。並行 commit/release 済みは LogicException → 握って冪等)
+        $reservation = $locked->ticketReservation;
+        if ($reservation !== null && $reservation->status === TicketReservationStatus::Reserved) {
+            try {
+                $this->tickets->release($reservation);
+            } catch (LogicException) {
+                // 並行 release/commit 済み
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * id は回収の候補列挙由来。**候補列挙と同じ述語**を WHERE に入れることでロック後の再評価になる。
+     *
+     * @param  positive-int  $id
+     */
+    private function lockStaleJob(int $id, CarbonImmutable $sweptAt): ?RenderJob
+    {
+        return $this->applyStalePredicate(RenderJob::query()->whereKey($id), $sweptAt)
+            ->lockForUpdate()
+            ->first();
+    }
+
+    /**
+     * 滞留の述語 (**この 1 か所だけが正本**)。閾値が 2 本あるため複製の危険が解析より高い:
+     * - queued: created_at が render_queued_stale_after_minutes (10 分) 超過 (dispatch 喪失。
+     *   render は enqueue 時点で編集を止めるため短い期限で失敗させる)
+     * - running: updated_at が render_stale_after_minutes (30 分) 超過 (worker 異常終了)
+     *
+     * @param  EloquentBuilder<RenderJob>  $query
+     * @return EloquentBuilder<RenderJob>
+     */
+    private function applyStalePredicate(EloquentBuilder $query, CarbonImmutable $sweptAt): EloquentBuilder
+    {
+        $queuedThreshold = $sweptAt->subMinutes(config()->integer('manual.render_queued_stale_after_minutes'));
+        $runningThreshold = $sweptAt->subMinutes(config()->integer('manual.render_stale_after_minutes'));
+
+        return $query->where(fn (Builder $outer) => $outer
+            ->where(fn (Builder $queued) => $queued
+                ->where('status', JobStatus::Queued->value)
+                ->where('created_at', '<=', $queuedThreshold))
+            ->orWhere(fn (Builder $running) => $running
+                ->where('status', JobStatus::Running->value)
+                ->where('updated_at', '<=', $runningThreshold)));
     }
 
     /**
@@ -255,50 +360,6 @@ class RenderJobService
             'total_length_ms' => $result->totalDurationMs,
             'status' => VideoManualStatus::Published,
         ])->save();
-    }
-
-    /**
-     * stale ジョブの回復 (cron)。queued と running で閾値を分ける (概念設計 §5):
-     * - queued: created_at が render_queued_stale_after_minutes (10 分) 超過
-     *   (dispatch 喪失。render は enqueue 時点で編集を止めるため短 SLA で fail させる)
-     * - running: updated_at が render_stale_after_minutes (30 分) 超過 (worker 異常終了)
-     *
-     * @return int 実際に回復 (failed 遷移) した件数
-     */
-    public function recoverStale(): int
-    {
-        $queuedThreshold = CarbonImmutable::now()
-            ->subMinutes(config()->integer('manual.render_queued_stale_after_minutes'));
-        $runningThreshold = CarbonImmutable::now()
-            ->subMinutes(config()->integer('manual.render_stale_after_minutes'));
-
-        $staleIds = RenderJob::query()
-            ->where(function (Builder $query) use ($queuedThreshold, $runningThreshold): void {
-                $query
-                    ->where(function (Builder $query) use ($queuedThreshold): void {
-                        $query->where('status', JobStatus::Queued->value)
-                            ->where('created_at', '<=', $queuedThreshold);
-                    })
-                    ->orWhere(function (Builder $query) use ($runningThreshold): void {
-                        $query->where('status', JobStatus::Running->value)
-                            ->where('updated_at', '<=', $runningThreshold);
-                    });
-            })
-            ->pluck('id');
-
-        $recovered = 0;
-        foreach ($staleIds as $id) {
-            $job = RenderJob::query()->whereKey($id)->first();
-            if ($job === null) {
-                continue;
-            }
-            // failJob 内で行ロック + terminal guard 再検証するため、競合したジョブはそこで no-op (false)
-            if ($this->failJob($job, RenderErrorCode::Timeout, '書き出しがタイムアウトしました。再実行してください。')) {
-                $recovered++;
-            }
-        }
-
-        return $recovered;
     }
 
     /**

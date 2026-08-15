@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Services\Billing;
 
 use App\DataTransferObjects\Billing\StaleWebhookClaimDto;
-use App\DataTransferObjects\Billing\WebhookRecoveryResultDto;
 use App\Enums\Billing\BillingNotificationType;
 use App\Enums\Billing\HandledStripeWebhookEvent;
 use App\Enums\Billing\SignupFundingChoice;
@@ -16,6 +15,7 @@ use App\Enums\Billing\WebhookReplaySafety;
 use App\Enums\Billing\WebhookStaleClaimOutcome;
 use App\Enums\CheckoutIntent;
 use App\Enums\CheckoutSessionStatus;
+use App\Enums\Recovery\RecoveryOutcome;
 use App\Jobs\Billing\HandleAutoRechargeChargeFailureJob;
 use App\Jobs\Billing\ReuseSubscriptionPaymentMethodJob;
 use App\Jobs\Billing\SetDefaultPaymentMethodJob;
@@ -28,6 +28,7 @@ use App\Models\Billing\TicketCheckoutSession;
 use App\Models\Organization;
 use App\Notifications\Billing\PaymentFailedNotification;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Laravel\Cashier\Events\WebhookReceived;
@@ -55,7 +56,7 @@ use Webmozart\Assert\Assert;
  *    MAX_PROCESSING_ATTEMPTS 到達後は処理せず skip (= 200 terminal-ack) して
  *    恒久失敗イベントの無限 500 ストームを打ち切る (運用は failure_reason で調査する)
  * 5. 滞留回収: 本処理中にプロセスが落ちて received のまま残った行を
- *    recoverStale() が拾い直す (cron: billing:recover-stale-webhook-events)。
+ *    recoverStuckEvent() が拾い直す (定期実行: work:recover-stuck --stream=webhook_event)。
  *    再実行してよい種類かは HandledStripeWebhookEvent::replaySafety() が決め、
  *    対象外・上限到達は recovery_pending + recovery_reason へ置いて止める。
  *    終局書き込みは受理した世代 (attempts) を握っている実行だけが行う条件付き UPDATE。
@@ -84,7 +85,7 @@ class StripeWebhookProcessor
      * **`claim()` の直列化は本処理までは覆わない** (守るのは状態遷移だけで `process()` は
      * トランザクションの外で走る)。そこで落ちた行は `received` のまま残り、Stripe の再送も
      * `claim()` に弾かれて 200 で終わるため付与が無音で失われる。これを塞ぐのが
-     * `recoverStale()` である。運用契約の正本は `docs/architecture.md`
+     * `recoverStuckEvent()` である。運用契約の正本は `docs/architecture.md`
      * の「Stripe webhook の滞留回収」。
      *
      * Stripe の自動再送窓 (~3 日) に対し 8 回で十分。
@@ -192,78 +193,83 @@ class StripeWebhookProcessor
     }
 
     /**
-     * 処理中に滞留した webhook 記録の回収 (cron: billing:recover-stale-webhook-events)。
+     * 滞留した webhook 記録 1 件の回収 (定期実行: work:recover-stuck --stream=webhook_event)。
      *
-     * 対象は `status=received` かつ `updated_at` が滞留の閾値より古い行**だけ**。
-     * `failed` は Stripe の再送が再試行の駆動者なので拾わない。
-     *
-     * 作法は既存の滞留回収 (`RenderJobService::recoverStale` /
-     * `TicketLedgerService::releaseStale`) と同じ = 対象を列挙 → 1 件ずつ行ロックで
-     * 取り直して再検証 → 件数を返す。**共通の回収基盤は作らない** (ドメインごとの個別実装)。
+     * **掃引 (候補の列挙とループ) は滞留回収の共通基盤が持つ**ので、本メソッドは 1 件だけを
+     * 受け持つ。判断材料と決着の規則は従来どおり:
+     *   - 再実行してよいかは HandledStripeWebhookEvent::replaySafety() だけが決める
+     *   - 回収の失敗は終局させない (received のまま次回へ回す = Deferred)
+     *   - 対象外・試行上限は recovery_pending へ置いて止める (= Escalated)
      *
      * 通知 (`Log::warning` / `report()`) は**トランザクションの外**で出す
      * (状態が保存されていないのに通知だけ出る / 同じ行に複数回出るのを避ける)。
      * ただし commit 後に落ちれば 0 回になる = 送信を 1 回試みるだけで、
      * 厳密な一回配送は保証しない (常設の観測点は `recovery_pending` の件数のほう)。
+     *
+     * @param  positive-int  $id  滞留回収の候補列挙 (StaleWebhookEventStream::candidateIds) が返した主キー
      */
-    public function recoverStale(): WebhookRecoveryResultDto
+    public function recoverStuckEvent(int $id, CarbonImmutable $sweptAt): RecoveryOutcome
     {
-        $threshold = CarbonImmutable::now()
-            ->subMinutes(config()->integer('billing.webhook_stale_after_minutes'));
+        $threshold = self::staleThreshold($sweptAt);
 
-        /** @var list<string> $staleEventIds */
-        $staleEventIds = StripeWebhookEvent::query()
-            ->where('status', WebhookEventStatus::Received->value)
-            ->where('updated_at', '<=', $threshold)
-            ->orderBy('id')
-            ->pluck('event_id')
-            ->all();
-
-        $replayed = 0;
-        $retryScheduled = 0;
-        $movedToRecoveryPending = 0;
-        $skipped = 0;
-
-        foreach ($staleEventIds as $eventId) {
-            $claim = $this->claimStale($eventId, $threshold);
-            if ($claim === null) {
-                $skipped++; // 行が消えた / 別の実行が先に進めた
-
-                continue;
-            }
-
-            if ($claim->outcome === WebhookStaleClaimOutcome::MovedToRecoveryPending) {
-                $movedToRecoveryPending++;
-                $this->reportRecoveryPending($claim);
-
-                continue;
-            }
-
-            try {
-                $this->process($claim->type, $claim->payload);
-            } catch (Throwable $exception) {
-                report($exception);
-                // **終局させない**: failed にすると回収対象 (received) から外れ、
-                // Stripe も配信成功と認識しているため二度と再試行されない。
-                // received のまま失敗理由だけ書いて次回の回収へ回す (attempts は消費済み)。
-                $this->finalize($claim->eventId, $claim->attempts, WebhookEventStatus::Received, $exception->getMessage())
-                    ? $retryScheduled++
-                    : $skipped++;
-
-                continue;
-            }
-
-            $this->finalize($claim->eventId, $claim->attempts, WebhookEventStatus::Processed, null)
-                ? $replayed++
-                : $skipped++;
+        $claim = $this->claimStale($id, $threshold);
+        if ($claim === null) {
+            return RecoveryOutcome::Skipped; // 行が消えた / 別の実行が先に進めた
         }
 
-        return new WebhookRecoveryResultDto(
-            replayed: $replayed,
-            retryScheduled: $retryScheduled,
-            movedToRecoveryPending: $movedToRecoveryPending,
-            skipped: $skipped,
-        );
+        if ($claim->outcome === WebhookStaleClaimOutcome::MovedToRecoveryPending) {
+            $this->reportRecoveryPending($claim);
+
+            return RecoveryOutcome::Escalated;
+        }
+
+        try {
+            $this->process($claim->type, $claim->payload);
+        } catch (Throwable $exception) {
+            report($exception);
+
+            // **終局させない**: failed にすると回収対象 (received) から外れ、
+            // Stripe も配信成功と認識しているため二度と再試行されない。
+            // received のまま失敗理由だけ書いて次回の回収へ回す (attempts は消費済み)。
+            return $this->finalize($claim->eventId, $claim->attempts, WebhookEventStatus::Received, $exception->getMessage())
+                ? RecoveryOutcome::Deferred
+                : RecoveryOutcome::Skipped;
+        }
+
+        return $this->finalize($claim->eventId, $claim->attempts, WebhookEventStatus::Processed, null)
+            ? RecoveryOutcome::Recovered
+            : RecoveryOutcome::Skipped;
+    }
+
+    /**
+     * 滞留候補の主キーを昇順で返す (回収の候補列挙)。
+     *
+     * 対象は `status=received` かつ `updated_at` が滞留の閾値より古い行**だけ**。
+     * `failed` は Stripe の再送が再試行の駆動者なので拾わない。
+     *
+     * @param  positive-int|null  $afterId
+     * @param  positive-int  $pageSize
+     * @return list<positive-int>
+     */
+    public function staleRecordIds(CarbonImmutable $sweptAt, ?int $afterId, int $pageSize): array
+    {
+        /** @var list<positive-int> $ids */
+        $ids = StripeWebhookEvent::query()
+            ->where('status', WebhookEventStatus::Received->value)
+            ->where('updated_at', '<=', self::staleThreshold($sweptAt))
+            ->when($afterId !== null, fn (Builder $query) => $query->where('id', '>', $afterId))
+            ->orderBy('id')
+            ->limit($pageSize)
+            ->pluck('id')
+            ->all();
+
+        return $ids;
+    }
+
+    /** 滞留とみなす境界時刻 (候補列挙と受理で同じ式を使う) */
+    private static function staleThreshold(CarbonImmutable $sweptAt): CarbonImmutable
+    {
+        return $sweptAt->subMinutes(config()->integer('billing.webhook_stale_after_minutes'));
     }
 
     /**
@@ -276,13 +282,14 @@ class StripeWebhookProcessor
      * 滞留の再検証は**クエリの WHERE に入れる** (ロック取得後に PostgreSQL が述語を
      * 再評価するため、ロック待ちの間に他の実行が前進させた行は 1 行も返らない)。
      *
+     * @param  positive-int  $id  滞留回収の候補列挙 (staleRecordIds) が返した主キー
      * @return StaleWebhookClaimDto|null 処置をしなかったとき (行が無い / 条件を満たさない) は null
      */
-    private function claimStale(string $eventId, CarbonImmutable $threshold): ?StaleWebhookClaimDto
+    private function claimStale(int $id, CarbonImmutable $threshold): ?StaleWebhookClaimDto
     {
-        return DB::transaction(function () use ($eventId, $threshold): ?StaleWebhookClaimDto {
+        return DB::transaction(function () use ($id, $threshold): ?StaleWebhookClaimDto {
             $record = StripeWebhookEvent::query()
-                ->where('event_id', $eventId)
+                ->whereKey($id)
                 ->where('status', WebhookEventStatus::Received->value)
                 ->where('updated_at', '<=', $threshold)
                 ->lockForUpdate()

@@ -26,7 +26,7 @@ return new class extends Migration
             $table->integer('amount');
             // reserved | committed | released (App\Enums\Billing\TicketReservationStatus)
             $table->string('status')->default('reserved');
-            // reserve TTL。超過分は billing:release-stale-reservations cron が解放する
+            // reserve TTL。超過分は滞留回収 (work:recover-stuck --stream=ticket_reservation) が解放する
             $table->timestamp('expires_at');
             $table->timestamps();
 

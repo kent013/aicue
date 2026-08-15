@@ -5,6 +5,8 @@ declare(strict_types=1);
 use App\Enums\Billing\PlanPriceKind;
 use App\Enums\Billing\WebhookEventStatus;
 use App\Enums\Billing\WebhookRecoveryReason;
+use App\Enums\Recovery\RecoveryOutcome;
+use App\Enums\Recovery\RecoveryStream;
 use App\Models\Billing\Plan;
 use App\Models\Billing\StripeWebhookEvent;
 use App\Models\Billing\TicketCheckoutSession;
@@ -16,13 +18,14 @@ use App\Support\Legal\BillingRetention;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Laravel\Cashier\Events\WebhookReceived;
 use Webmozart\Assert\Assert;
 
 /*
- * 滞留 webhook の回収 (StripeWebhookProcessor::recoverStale) と、
+ * 滞留 webhook の回収 (StripeWebhookProcessor::recoverStuckEvent) と、
  * 受理した世代を握っている実行だけが行う終局書き込み (finalize の条件付き UPDATE)。
  *
  * 背景: claim() が直列化するのは状態遷移だけで process() はトランザクションの外にある。
@@ -192,9 +195,9 @@ test('滞留した checkout.session.completed は回収で付与され processed
         staleRecoveryTicketPurchasePayload('evt_stale_purchase', $organization),
     );
 
-    $result = app(StripeWebhookProcessor::class)->recoverStale();
+    $result = sweepStuckWorkStream(RecoveryStream::WebhookEvent);
 
-    expect($result->replayed)->toBe(1);
+    expect($result->count(RecoveryOutcome::Recovered))->toBe(1);
     expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(30);
 
     $record = StripeWebhookEvent::query()->where('event_id', 'evt_stale_purchase')->firstOrFail();
@@ -213,9 +216,9 @@ test('滞留した invoice.paid は回収で月次付与される', function ():
         staleRecoveryInvoicePaidPayload('evt_stale_invoice'),
     );
 
-    $result = app(StripeWebhookProcessor::class)->recoverStale();
+    $result = sweepStuckWorkStream(RecoveryStream::WebhookEvent);
 
-    expect($result->replayed)->toBe(1);
+    expect($result->count(RecoveryOutcome::Recovered))->toBe(1);
     expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(100);
     expect(StripeWebhookEvent::query()->where('event_id', 'evt_stale_invoice')->firstOrFail()->status)
         ->toBe(WebhookEventStatus::Processed);
@@ -238,7 +241,7 @@ test('回収で付与した後に Stripe 再送が来ても二重付与しない
         staleRecoveryTicketPurchasePayload('evt_stale_purchase', $organization),
     );
 
-    app(StripeWebhookProcessor::class)->recoverStale();
+    sweepStuckWorkStream(RecoveryStream::WebhookEvent);
     // 別 event_id での再通知 (event_id 冪等では防げない経路)
     event(new WebhookReceived(staleRecoveryTicketPurchasePayload('evt_resend_purchase', $organization)));
 
@@ -256,10 +259,10 @@ test('順序に依存する種類の滞留は再実行せず回収待ちへ置�
         staleRecoverySubscriptionPayload('evt_stale_sub'),
     );
 
-    $result = app(StripeWebhookProcessor::class)->recoverStale();
+    $result = sweepStuckWorkStream(RecoveryStream::WebhookEvent);
 
-    expect($result->movedToRecoveryPending)->toBe(1);
-    expect($result->replayed)->toBe(0);
+    expect($result->count(RecoveryOutcome::Escalated))->toBe(1);
+    expect($result->count(RecoveryOutcome::Recovered))->toBe(0);
 
     $record = StripeWebhookEvent::query()->where('event_id', 'evt_stale_sub')->firstOrFail();
     expect($record->status)->toBe(WebhookEventStatus::RecoveryPending);
@@ -286,9 +289,9 @@ test('試行上限に到達した滞留は再実行せず回収待ちへ置く',
         attempts: StripeWebhookProcessor::MAX_PROCESSING_ATTEMPTS,
     );
 
-    $result = app(StripeWebhookProcessor::class)->recoverStale();
+    $result = sweepStuckWorkStream(RecoveryStream::WebhookEvent);
 
-    expect($result->movedToRecoveryPending)->toBe(1);
+    expect($result->count(RecoveryOutcome::Escalated))->toBe(1);
     $record = StripeWebhookEvent::query()->where('event_id', 'evt_stale_exhausted')->firstOrFail();
     expect($record->status)->toBe(WebhookEventStatus::RecoveryPending);
     expect($record->recovery_reason)->toBe(WebhookRecoveryReason::AttemptsExhausted);
@@ -304,10 +307,10 @@ test('本アプリが処理しない種類の滞留は通常経路と同じく p
         'data' => ['object' => ['id' => 'cus_stale_recovery_1']],
     ]);
 
-    $result = app(StripeWebhookProcessor::class)->recoverStale();
+    $result = sweepStuckWorkStream(RecoveryStream::WebhookEvent);
 
-    expect($result->replayed)->toBe(1);
-    expect($result->movedToRecoveryPending)->toBe(0);
+    expect($result->count(RecoveryOutcome::Recovered))->toBe(1);
+    expect($result->count(RecoveryOutcome::Escalated))->toBe(0);
     $record = StripeWebhookEvent::query()->where('event_id', 'evt_stale_unhandled')->firstOrFail();
     expect($record->status)->toBe(WebhookEventStatus::Processed);
     expect($record->recovery_reason)->toBeNull();
@@ -324,7 +327,7 @@ test('本アプリが処理しない種類は試行上限に到達していて�
         'data' => ['object' => ['id' => 'cus_stale_recovery_1']],
     ], attempts: StripeWebhookProcessor::MAX_PROCESSING_ATTEMPTS);
 
-    app(StripeWebhookProcessor::class)->recoverStale();
+    sweepStuckWorkStream(RecoveryStream::WebhookEvent);
 
     expect(StripeWebhookEvent::query()->where('event_id', 'evt_stale_unhandled_max')->firstOrFail()->status)
         ->toBe(WebhookEventStatus::Processed);
@@ -340,10 +343,10 @@ test('滞留の閾値内の received 行には触らない', function (): void {
         minutesAgo: 5,
     );
 
-    $result = app(StripeWebhookProcessor::class)->recoverStale();
+    $result = sweepStuckWorkStream(RecoveryStream::WebhookEvent);
 
-    expect($result->replayed)->toBe(0);
-    expect($result->skipped)->toBe(0);
+    expect($result->count(RecoveryOutcome::Recovered))->toBe(0);
+    expect($result->count(RecoveryOutcome::Skipped))->toBe(0);
     $record = StripeWebhookEvent::query()->where('event_id', 'evt_fresh')->firstOrFail();
     expect($record->status)->toBe(WebhookEventStatus::Received);
     expect($record->attempts)->toBe(0);
@@ -363,9 +366,9 @@ test('回収の再実行が失敗しても終局させず次回の回収へ回�
         staleRecoveryInvoicePaidPayload('evt_stale_retry'),
     );
 
-    $result = app(StripeWebhookProcessor::class)->recoverStale();
+    $result = sweepStuckWorkStream(RecoveryStream::WebhookEvent);
 
-    expect($result->retryScheduled)->toBe(1);
+    expect($result->count(RecoveryOutcome::Deferred))->toBe(1);
     $record = StripeWebhookEvent::query()->where('event_id', 'evt_stale_retry')->firstOrFail();
     expect($record->status)->toBe(WebhookEventStatus::Received); // 終局させない
     expect($record->failure_reason)->toBe('付与処理の一時故障');
@@ -374,7 +377,7 @@ test('回収の再実行が失敗しても終局させず次回の回収へ回�
     // 閾値を再び超えさせて繰り返すと attempts が上限まで進み、最後は回収待ちで止まる
     for ($i = 0; $i < StripeWebhookProcessor::MAX_PROCESSING_ATTEMPTS + 1; $i++) {
         pushBackWebhookUpdatedAt('evt_stale_retry', 60);
-        app(StripeWebhookProcessor::class)->recoverStale();
+        sweepStuckWorkStream(RecoveryStream::WebhookEvent);
     }
 
     $record = StripeWebhookEvent::query()->where('event_id', 'evt_stale_retry')->firstOrFail();
@@ -402,10 +405,10 @@ test('回収中に別の実行が世代を進めたら件数は skipped に計�
         staleRecoveryInvoicePaidPayload('evt_stale_overtaken'),
     );
 
-    $result = app(StripeWebhookProcessor::class)->recoverStale();
+    $result = sweepStuckWorkStream(RecoveryStream::WebhookEvent);
 
-    expect($result->skipped)->toBe(1);
-    expect($result->retryScheduled)->toBe(0);
+    expect($result->count(RecoveryOutcome::Skipped))->toBe(1);
+    expect($result->count(RecoveryOutcome::Deferred))->toBe(0);
     $record = StripeWebhookEvent::query()->where('event_id', 'evt_stale_overtaken')->firstOrFail();
     expect($record->attempts)->toBe(5); // 追い越した側の値が残る
     expect($record->failure_reason)->toBeNull(); // 旧世代は何も書かない
@@ -453,7 +456,7 @@ test('HTTP 経路で世代を追い越されたら処理が失敗しても例外
     expect($organization->refresh()->plan_code)->toBeNull();
 });
 
-test('回収の件数は処置と一致する (replayed / movedToRecoveryPending / skipped)', function (): void {
+test('回収の件数は処置と一致する (recovered / escalated / deferred / skipped)', function (): void {
     [$organization] = staleRecoveryFixture();
     Plan::query()->where('code', 'standard')->update(['monthly_ticket_grant' => 100]);
 
@@ -465,23 +468,25 @@ test('回収の件数は処置と一致する (replayed / movedToRecoveryPending
     );
     staleWebhookRecord('evt_count_fresh', 'invoice.paid', staleRecoveryInvoicePaidPayload('evt_count_fresh', 'in_fresh'), minutesAgo: 5);
 
-    $result = app(StripeWebhookProcessor::class)->recoverStale();
+    $result = sweepStuckWorkStream(RecoveryStream::WebhookEvent);
 
-    expect($result->replayed)->toBe(1);
-    expect($result->movedToRecoveryPending)->toBe(1);
-    expect($result->retryScheduled)->toBe(0);
-    expect($result->skipped)->toBe(0);
+    expect($result->count(RecoveryOutcome::Recovered))->toBe(1);
+    expect($result->count(RecoveryOutcome::Escalated))->toBe(1);
+    expect($result->count(RecoveryOutcome::Deferred))->toBe(0);
+    expect($result->count(RecoveryOutcome::Skipped))->toBe(0);
     expect($organization->ticketLedgerEntries()->where('idempotency_key', 'monthly:in_stale_1')->count())->toBe(1);
     assertRecoveryReasonInvariant();
 });
 
-test('cron コマンドが滞留を回収し 4 件数を出力する', function (): void {
+test('定期実行のコマンドが滞留を回収し結果の種類ごとの件数を出力する', function (): void {
     [$organization] = staleRecoveryFixture();
     Plan::query()->where('code', 'standard')->update(['monthly_ticket_grant' => 100]);
     staleWebhookRecord('evt_cron', 'invoice.paid', staleRecoveryInvoicePaidPayload('evt_cron'));
 
-    $this->artisan('billing:recover-stale-webhook-events')
-        ->expectsOutputToContain('replayed 1 / retry-scheduled 0 / moved-to-recovery-pending 0 / skipped 0')
+    $this->artisan('work:recover-stuck --stream=webhook_event --apply')
+        ->expectsOutputToContain(
+            'webhook_event: mode=apply candidates=1 recovered=1 cleanup-failed=0 skipped=0 deferred=0 escalated=0 errors=0 limit-reached=no',
+        )
         ->assertExitCode(0);
 
     expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(100);
@@ -565,4 +570,63 @@ test('migration の down() で CHECK 制約・index・列が落ち、再適用�
     expect(Schema::hasColumn('stripe_webhook_events', 'recovery_reason'))->toBeTrue();
     expect(Schema::hasIndex('stripe_webhook_events', 'stripe_webhook_events_status_updated_at_index'))
         ->toBeTrue();
+});
+
+/*
+ * 旧語彙 (replayed / retry-scheduled / moved-to-recovery-pending / skipped) から
+ * 新語彙 (recovered / deferred / escalated / skipped) への対応が、
+ * **コマンドの出力**に現れることの behavioral な固定 (docs/architecture.md の対応表と 1 対 1)。
+ */
+
+test('コマンド出力で replayed は recovered に、moved-to-recovery-pending は escalated になる', function (): void {
+    staleRecoveryFixture();
+    Plan::query()->where('code', 'standard')->update(['monthly_ticket_grant' => 100]);
+    staleWebhookRecord('evt_vocab_replay', 'invoice.paid', staleRecoveryInvoicePaidPayload('evt_vocab_replay'));
+    staleWebhookRecord(
+        'evt_vocab_pending',
+        'customer.subscription.updated',
+        staleRecoverySubscriptionPayload('evt_vocab_pending'),
+    );
+
+    Artisan::call('work:recover-stuck', ['--stream' => 'webhook_event', '--apply' => true]);
+
+    expect(Artisan::output())->toContain(
+        'webhook_event: mode=apply candidates=2 recovered=1 cleanup-failed=0 skipped=0 deferred=0 escalated=1 errors=0 limit-reached=no',
+    );
+});
+
+test('コマンド出力で retry-scheduled は deferred になる (errors には出ない)', function (): void {
+    staleRecoveryFixture();
+    Plan::query()->where('code', 'standard')->update(['monthly_ticket_grant' => 100]);
+    $this->mock(TicketLedgerService::class)
+        ->shouldReceive('grantMonthly')
+        ->andThrow(new RuntimeException('付与処理の一時故障'));
+    staleWebhookRecord('evt_vocab_defer', 'invoice.paid', staleRecoveryInvoicePaidPayload('evt_vocab_defer'));
+
+    Artisan::call('work:recover-stuck', ['--stream' => 'webhook_event', '--apply' => true]);
+
+    // 失敗を行に書き戻して次回へ回すため errors=0 のまま deferred だけが増える
+    // (deferred が errors に出ない = 独立した監視対象である、という運用契約)
+    expect(Artisan::output())->toContain(
+        'webhook_event: mode=apply candidates=1 recovered=0 cleanup-failed=0 skipped=0 deferred=1 escalated=0 errors=0 limit-reached=no',
+    );
+});
+
+test('コマンド出力で世代を追い越された回収は skipped になる', function (): void {
+    staleRecoveryFixture();
+    Plan::query()->where('code', 'standard')->update(['monthly_ticket_grant' => 100]);
+    $this->mock(TicketLedgerService::class)
+        ->shouldReceive('grantMonthly')
+        ->andReturnUsing(function (): void {
+            StripeWebhookEvent::query()->where('event_id', 'evt_vocab_skip')->update(['attempts' => 5]);
+
+            throw new RuntimeException('付与処理の一時故障');
+        });
+    staleWebhookRecord('evt_vocab_skip', 'invoice.paid', staleRecoveryInvoicePaidPayload('evt_vocab_skip'));
+
+    Artisan::call('work:recover-stuck', ['--stream' => 'webhook_event', '--apply' => true]);
+
+    expect(Artisan::output())->toContain(
+        'webhook_event: mode=apply candidates=1 recovered=0 cleanup-failed=0 skipped=1 deferred=0 escalated=0 errors=0 limit-reached=no',
+    );
 });

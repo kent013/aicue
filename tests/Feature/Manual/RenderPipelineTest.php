@@ -341,7 +341,7 @@ test('finalize 直前に released でも commit-wins で完走し課金される
     // 台帳に消費行が立てば課金は成立する (課金の真実源は台帳。status は一方向遷移を壊さない)
     [, , , $manual, $cut, $job, $fake] = renderPipelineContext();
     $fake->duringCompose = function () use ($job): void {
-        // finalize 前に予約が releaseStale cron で解放される競合を細工
+        // finalize 前に予約が滞留回収で解放される競合を細工
         $reservation = $job->refresh()->ticketReservation;
         if ($reservation !== null) {
             app(TicketLedgerService::class)->release($reservation);

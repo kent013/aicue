@@ -99,7 +99,7 @@ test('committed の再 commit は冪等 no-op / 再 release は例外 (commit-wi
     expect(ticketService()->balance($organization)->totalAvailable())->toBe(7);
 });
 
-test('releaseStale は expires_at 超過の reserved だけを解放する', function (): void {
+test('滞留回収は expires_at 超過の reserved だけを解放する', function (): void {
     [$organization] = createOrganizationWithOwner();
     ticketService()->grant($organization, 10, '初期付与');
 
@@ -110,7 +110,7 @@ test('releaseStale は expires_at 超過の reserved だけを解放する', fun
     $this->travel(31)->minutes();
     $fresh = ticketService()->reserve($organization, 2);
 
-    $released = ticketService()->releaseStale();
+    $released = releaseStaleTicketReservations();
 
     expect($released)->toBe(1);
     expect($stale->refresh()->status)->toBe(TicketReservationStatus::Released);

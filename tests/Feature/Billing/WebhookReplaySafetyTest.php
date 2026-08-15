@@ -16,7 +16,7 @@ use Webmozart\Assert\Assert;
 /*
  * 保存済み payload を再実行してよいかの分類 (HandledStripeWebhookEvent::replaySafety)。
  *
- * 分類は滞留回収 (StripeWebhookProcessor::recoverStale) が自動再実行の可否に使う唯一の判断材料
+ * 分類は滞留回収 (StripeWebhookProcessor::recoverStuckEvent) が自動再実行の可否に使う唯一の判断材料
  * なので、網羅性と個々の値に加えて **SafeToReplay の前提** (付与が下位の冪等キーで冪等であること)
  * も behavioral に固定する。
  */

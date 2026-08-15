@@ -1167,8 +1167,12 @@ private function releaseIfStillStale(int $id, CarbonImmutable $sweptAt): ?string
     });
 }
 
-/** S3 の存在確認・削除の I/O を有界にするための既存の上限 (500)。公平性は保証しない */
-public function sweepItemLimit(): ?int
+/**
+ * S3 の存在確認・削除の入出力を有界にするための既存の上限 (500)。公平性は保証しない。
+ * 実装では戻り型を `int` に narrowing する (interface の `?int` に対する共変。
+ * `?int` のままだと「null を返さない」と PHPStan level 10 が指摘する)。
+ */
+public function sweepItemLimit(): int
 {
     return 500;
 }
@@ -1231,6 +1235,8 @@ protected $signature = 'capture:purge-upload-reservations';
 - 新規: `tests/Architecture/RetiredRecoveryReferenceGateTest.php`
 - 新規: `tests/Support/Recovery/RecoveryStreamEntry.php` (stream ごとの申告)
 - 新規: `tests/Support/Recovery/NonRecoveryScheduleEntry.php` (回収でない定期実行の申告)
+- 新規: `tests/Support/Recovery/StuckWorkRecoveryInventory.php` (上記 2 種の申告の置き場所。
+  他の目録と同じく static クラスに置き、Pest のファイル読み込み順に依存する global 関数にしない)
 - 新規: `app/Enums/Recovery/NonRecoveryScheduleReasonKind.php` (区分。理由の自由文は 30 文字以上)
 
 ### 目録 gate が固定すること (deny-by-default / exact-fit)
@@ -1285,7 +1291,9 @@ protected $signature = 'capture:purge-upload-reservations';
 (a) 旧メソッドの**宣言**が存在しないこと、(b) 旧クラス名・旧コマンド名が存在しないこと、
 (c) `composer test` が緑であること (宣言が消えているので呼び出しが残れば実行時に落ちる) の
 3 つの組み合わせで得る。
-- 走査対象は `app/` `routes/` `config/` `tests/` と docs の運用正本。
+- 走査対象は `app/` `routes/` `config/` `tests/` `database/` と docs の運用正本
+  (`AGENTS.md` / `DESIGN.md` を含む)。**実装時に `database/` を足した** — migration の docblock に
+  旧コマンド名が 3 箇所実在し、直したあと再流入を止める先が無いと目録の意味が半分になるため。
   **走査対象から外す**: `devnotes/` と `docs/TODO-closed.md` (過去の記録であり書き換えさせない)
 - 走査の基盤は既存の `Tests\Support\PhpReferenceScanner` / `PhpTokenScan` を使い、
   自前の正規表現を新設しない (既存の目録群と同じ土台に乗せる)
@@ -1374,12 +1382,20 @@ case IdFromRecoveryCandidateEnumeration = 'id_from_recovery_candidate_enumeratio
 
 | 形 | 構造 | 封じ込め検査 |
 |---|---|---|
-| `DomainService` | `Stream::recover` → `Service::<entryPoint>` (public) → private ヘルパ | **`entryPoint` のメソッド名が `app/` 配下に現れるファイルが、宣言ファイルと申告 stream のファイルの 2 つだけ**であること |
+| `DomainService` | `Stream::recover` → `Service::<entryPoint>` (public) → private ヘルパ | **`entryPoint` のメソッド名が `app/` 配下に現れるファイルの集合が、同じメソッド名を申告する全 entry の「宣言ファイル + 申告 stream のファイル」の合併と一致**すること |
 | `StreamInternal` | `Stream::recover` → 同一 stream クラスの private ヘルパ | **private ヘルパのメソッド名が `app/` 配下に現れるファイルが、その stream のファイル 1 つだけ**であること (`entryPoint` は `Stream::recover` 自身) |
 
 `recover()` の呼び出し元 (sweeper) は interface 経由の多態なので、**受信側クラスの型解決には
 依存しない検査にする**。上のとおり「メソッド名が現れるファイルの集合」で判定すれば
 静的に決定でき、型推論を必要としない。
+
+> **実装時の修正 (2 つ → 合併)**: 解析とレンダは**同じ入口名 `failStaleJob` を別クラスで宣言する**
+> (用途は同じで、クラスが違えば衝突しない)。素朴に「2 つだけ」と数えると、解析側の entry が
+> レンダ側の 2 ファイルを「申告外」として落としてしまう。そこで **同じメソッド名を申告している
+> entry すべての「宣言ファイル + stream ファイル」を合併した集合**と一致することを見る形にした。
+> 検出力は落ちていない — 目録に無いファイルからその名前を呼べば依然として赤になる
+> (実装時に変異 3 種で確認済み: 入口名を実在しない名前にする / 目録外のクラスから入口を呼ぶ /
+> StreamInternal 形の private ヘルパを別ファイルから呼ぶ)。
 
 **数えるのは PHP トークン上の識別子 (メソッド宣言と呼び出し) だけ**で、
 コメントや文字列リテラルの中の同名は数えない (既存の `PhpTokenScan` を使う)。

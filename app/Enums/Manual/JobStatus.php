@@ -15,7 +15,7 @@ enum JobStatus: string
     case Succeeded = 'succeeded';
     case Failed = 'failed';
 
-    /** terminal (成否確定) か。failJob / recoverStale の guard に使う */
+    /** terminal (成否確定) か。failJob / 滞留回収の guard に使う */
     public function isTerminal(): bool
     {
         return $this === self::Succeeded || $this === self::Failed;

@@ -3,8 +3,12 @@
 declare(strict_types=1);
 
 use App\Enums\Security\DirectFetchJustification;
+use App\Enums\Security\RecoveryFetchShape;
 use App\Http\Middleware\LocalOnly;
+use App\Services\Recovery\StuckWorkStreamRegistry;
 use Illuminate\Support\Facades\Route;
+use Tests\Support\PhpTokenScan;
+use Tests\Support\Recovery\StuckWorkRecoveryInventory;
 use Tests\Support\Security\DirectFetchInventory;
 use Tests\Support\Security\DirectFetchJustificationEntry;
 use Tests\Support\Security\PrimaryKeyPredicateKind;
@@ -110,6 +114,7 @@ function modelDirectFetchAllowedPredicateKinds(): array
         DirectFetchJustification::IdDerivedFromTenantScopedQuery->value => [$single, $multi, $exclusion],
         DirectFetchJustification::IdDerivedFromSameMethodQuery->value => [$single, $multi],
         DirectFetchJustification::IdSuppliedByInternalCaller->value => [$single, $multi],
+        DirectFetchJustification::IdFromRecoveryCandidateEnumeration->value => [$single],
         DirectFetchJustification::AuthenticatedActorScope->value => [$single, $multi, $exclusion],
         DirectFetchJustification::QueuePayloadRehydration->value => [$single, $multi],
         DirectFetchJustification::LocalOnlyDiagnostics->value => [$single],
@@ -286,6 +291,139 @@ test('IdSuppliedByInternalCaller は private + 引数由来 + request 入力を�
     expect($violations)->toBe([],
         'IdSuppliedByInternalCaller は private メソッド + 引数由来 identity + request accessor 無し +'
         .'calledBy の実在呼び出しが条件です。'.PHP_EOL.implode(PHP_EOL, $violations));
+});
+
+/**
+ * `app/` 配下で、指定したメソッド名が**識別子として**現れるファイルの集合。
+ *
+ * **数えるのは PHP のトークン上の識別子 (メソッド宣言と呼び出し) だけ**で、
+ * コメントや文字列リテラルの中の同名は数えない。将来これを単純な文字列検索へ置き換えると
+ * 偽陽性・偽陰性の両方が出るので、この前提を崩さないこと。
+ *
+ * @return list<string> app/ 相対のファイルパス (昇順)
+ */
+function modelDirectFetchFilesMentioning(string $methodName): array
+{
+    $files = [];
+
+    foreach (DirectFetchInventory::sourceFiles() as $path => $source) {
+        if (! str_starts_with($path, 'app/')) {
+            continue;
+        }
+        foreach (PhpTokenScan::normalize($source) as $token) {
+            if ($token['id'] === T_STRING && $token['text'] === $methodName) {
+                $files[] = $path;
+
+                break;
+            }
+        }
+    }
+
+    sort($files);
+
+    return $files;
+}
+
+test('IdFromRecoveryCandidateEnumeration は private + 引数由来 + 入口の実在 + 形ごとの封じ込めを満たす', function (): void {
+    $pairs = modelDirectFetchPairsFor(DirectFetchJustification::IdFromRecoveryCandidateEnumeration);
+    $sources = DirectFetchInventory::sourceFiles();
+    $streams = StuckWorkRecoveryInventory::streams();
+    $registryKeys = array_map(
+        static fn (object $stream): string => $stream->stream()->value,
+        app(StuckWorkStreamRegistry::class)->all(),
+    );
+    $violations = [];
+
+    // DomainService 形は「入口のメソッド名が現れてよいファイル」を全 entry から先に集める
+    // (同じ入口名を複数のドメインが持つ場合があるため、entry 単位ではなく名前単位で束ねる)
+    $allowedByEntryPoint = [];
+    foreach ($pairs as [$candidate, $entry]) {
+        if ($entry->recoveryFetchShape() !== RecoveryFetchShape::DomainService) {
+            continue;
+        }
+        $method = modelDirectFetchMethodName($entry->entryPoint());
+        $declaring = modelDirectFetchClassPath($entry->entryPoint());
+        $streamFile = array_key_exists($entry->stream(), $streams)
+            ? 'app/'.str_replace('\\', '/', substr($streams[$entry->stream()]->implementation, 4)).'.php'
+            : null;
+        if ($method === null || $declaring === null || $streamFile === null) {
+            continue;
+        }
+        $allowedByEntryPoint[$method][] = $declaring;
+        $allowedByEntryPoint[$method][] = $streamFile;
+    }
+
+    foreach ($pairs as $key => [$candidate, $entry]) {
+        if (! PrimaryKeyStaticQueryScanner::methodIsPrivate($candidate)) {
+            $violations[] = $key.' — private メソッドでない (public は本 case を使えない)';
+        }
+        if (! PrimaryKeyStaticQueryScanner::identityDerivedFromMethodParameters($candidate)) {
+            $violations[] = $key.' — identity が引数由来でない: '.$candidate->identityArgument;
+        }
+        if (! PrimaryKeyStaticQueryScanner::methodIsFreeOfRequestAccessors($candidate)) {
+            $violations[] = $key.' — 同一メソッドに request accessor がある';
+        }
+
+        // 申告された系列が registry と回収の目録の両方に実在すること
+        if (! in_array($entry->stream(), $registryKeys, true)) {
+            $violations[] = $key.' — 申告された系列が registry に無い: '.$entry->stream();
+        }
+        if (! array_key_exists($entry->stream(), $streams)) {
+            $violations[] = $key.' — 申告された系列が回収の目録に無い: '.$entry->stream();
+        }
+
+        // 入口が実在し、その本文が当該 private を呼んでいること
+        $entryPath = modelDirectFetchClassPath($entry->entryPoint());
+        $entryMethod = modelDirectFetchMethodName($entry->entryPoint());
+        if ($entryPath === null || $entryMethod === null || ! array_key_exists($entryPath, $sources)) {
+            $violations[] = $key.' — entryPoint のクラスが実在しない: '.$entry->entryPoint();
+
+            continue;
+        }
+        $body = PrimaryKeyStaticQueryScanner::methodBody($sources[$entryPath], $entryMethod);
+        if ($body === null) {
+            $violations[] = $key.' — entryPoint のメソッドが実在しない: '.$entry->entryPoint();
+
+            continue;
+        }
+        if (! str_contains(modelDirectFetchCompact($body), '->'.$candidate->scopeName.'(')) {
+            $violations[] = $key.' — entryPoint の本文が '.$candidate->scopeName.'() を呼んでいない';
+        }
+
+        // 形ごとの封じ込め (メソッド名が現れるファイルの集合で判定する = 型推論に依存しない)
+        if ($entry->recoveryFetchShape() === RecoveryFetchShape::DomainService) {
+            $allowed = array_values(array_unique($allowedByEntryPoint[$entryMethod] ?? []));
+            sort($allowed);
+            $actual = modelDirectFetchFilesMentioning($entryMethod);
+            $unexpected = array_values(array_diff($actual, $allowed));
+            if ($unexpected !== []) {
+                $violations[] = $key.' — 入口 '.$entryMethod.'() が申告外のファイルから参照されている: '
+                    .implode(' / ', $unexpected);
+            }
+            $missing = array_values(array_diff($allowed, $actual));
+            if ($missing !== []) {
+                $violations[] = $key.' — 入口 '.$entryMethod.'() が申告したファイルに現れない: '
+                    .implode(' / ', $missing);
+            }
+
+            continue;
+        }
+
+        // StreamInternal: private ヘルパの名前が当該系列のファイル 1 つだけに現れること
+        $expected = ['app/'.$candidate->displayPath()];
+        $actual = modelDirectFetchFilesMentioning($candidate->scopeName);
+        if ($actual !== $expected) {
+            $violations[] = $key.' — private ヘルパ '.$candidate->scopeName.'() が系列のファイル以外にも現れる: '
+                .implode(' / ', $actual);
+        }
+    }
+
+    // ★保証しないもの: 文字列で組み立てた動的呼び出し ($service->{$method}()) と
+    //   app/ の外 (テスト等) からの呼び出しは対象外である。
+    //   「回収以外から呼ばれないことが証明されている」とは書かない。
+    expect($violations)->toBe([],
+        'IdFromRecoveryCandidateEnumeration は private + 引数由来 identity + request accessor 無し +'
+        .'実在する入口からの呼び出し + 形ごとの封じ込めが条件です。'.PHP_EOL.implode(PHP_EOL, $violations));
 });
 
 test('AuthenticatedActorScope は同一メソッドに request accessor を持たない', function (): void {

@@ -11,7 +11,7 @@ namespace App\Enums\Billing;
  * 「再実行すれば復旧する」ではない (復旧するかどうかは各ハンドラの事情による)。
  *
  * 分類の単一出典は `HandledStripeWebhookEvent::replaySafety()` の網羅 match で、
- * 滞留回収 (`StripeWebhookProcessor::recoverStale`) が自動再実行の可否に使う唯一の判断材料。
+ * 滞留回収 (`StripeWebhookProcessor::recoverStuckEvent`) が自動再実行の可否に使う唯一の判断材料。
  * **ハンドラに副作用を足したら分類を再審査すること** (順序に依存する書き込みを足したら
  * `OrderSensitive` へ移す)。
  */

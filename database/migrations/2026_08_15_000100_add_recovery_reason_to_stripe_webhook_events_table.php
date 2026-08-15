@@ -17,7 +17,7 @@ return new class extends Migration
      * (回収待ちの行はこの migration の時点で 1 件も存在しない)。
      * 自由文の failure_reason とは分ける (機械判定できる値と混ぜない)。
      *
-     * index: billing:recover-stale-webhook-events が 5 分ごとに
+     * index: work:recover-stuck --stream=webhook_event が 5 分ごとに
      * `status='received' AND updated_at <= 閾値` を引く。本表は保持期限 (7 年) まで
      * 残るため単調に増える = 全表走査にしない。
      * 監視で使う status='recovery_pending' の件数も同じ index の先頭列で効く。
