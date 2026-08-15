@@ -15,8 +15,9 @@ screens.md (画面 = GET×inertia) と operations.md (全書き込み操作 = �
 両方を消化するように設計されている。**発見と報告まで**が守備範囲。修正は app-design / app-implement の管轄。
 
 > **テンプレート注記**: 本スキルは spirux/aigenba の bug-hunt 基盤を汎用化したもの。アプリ名・ポート・DB 名は
-> プレースホルダ化してある。`screens.md` / `operations.md` / `stories/` は**スケルトン**で、初回に
-> `php artisan route:list` から生成する (下記 Phase 1)。オプトインで、使わなければアプリ実行には一切影響しない
+> プレースホルダ化してある。`screens.md` / `operations.md` は**生成物**で、注釈 (`inventory/annotations.toml`)
+> と散文 (`inventory/notes-*.md`) から作る (下記 Phase 1)。`stories/` はスケルトンのままである。
+> オプトインで、使わなければアプリ実行には一切影響しない
 > (config/bughunt.php + BughuntCoverageMiddleware は env + function_exists の二重 guard で完全 no-op)。
 
 ## 使命
@@ -122,7 +123,8 @@ npx --yes playwright install chromium
      **shard agent は consult しない** (子は素の `proposed` finding のみ)。
 6. **teardown**: `BUGHUNT_ORCHESTRATOR=1 scripts/bug-hunt-shard.sh teardown --run-id {ts} [--drop-db]`。
    その後、手順2 の `--hold-lock` 常駐プロセスを終了して lock 解放。
-7. **インベントリ修正の反映**: 統合 report に記録した採用分のみを screens.md / operations.md / stories に反映する。
+7. **目録修正の反映**: 統合 report に記録した採用分のみを `inventory/annotations.toml` (割当・区分・理由) /
+   `inventory/notes-*.md` (散文) / stories に反映し、`python3 scripts/bug-hunt-inventory.py generate` を走らせる。
 8. **adjudication 追記の規律 (人手判断時のみ)**: finding を誤検知 / 意図的仕様 / won't-fix と確定したら、
    cross-session の再 triage を避けるため `ledger/adjudications.jsonl` に 1 行 append (既存行は編集しない)。
    詳細スキーマは `ledger/README.md`。
@@ -198,36 +200,37 @@ BUGHUNT_ORCHESTRATOR=1 scripts/bug-hunt-shard.sh provision --shard 0 --run-id {t
 | テストアカウント | ManualTestSeeder が投入 (`{role}-{plan}@example.com` / `multi-org@example.com` / `unverified@example.com`、全員 `password123`)。管理画面 admin は `admin@example.com` / `password12345` (AdminUserSeeder) |
 | 管理画面 MFA | `.env.bughunt.local` の `ADMIN_MFA_REQUIRED=false` で無効化 (email+password でログイン可) |
 
-## Phase 1: インベントリ鮮度確認 (初回はスケルトンから生成)
+## Phase 1: 目録の鮮度確認 (生成物なので手で書かない)
 
-screens.md (画面) と operations.md (操作) が現実と乖離していないかを確認する。**テンプレート初期状態では
-両ファイルは空スケルトン**なので、初回は下記で `route:list` から生成して埋める:
+screens.md (画面) と operations.md (操作) は**生成物**である。実装の機械事実
+(`php artisan bughunt:inventory-scan`) と、人が書く注釈・散文を合成して作る。
+まずドリフトが無いことを確認する:
 
 ```bash
-# 画面 (GET × inertia)
-php artisan route:list --json | python3 -c "
-import json,sys
-for r in json.load(sys.stdin):
-    if 'GET' not in r['method']: continue
-    uri=r['uri']; mw=str(r.get('middleware',[]))
-    if uri.startswith(('api/','admin','_','.well-known','storage','sanctum','livewire','oauth','mcp')) or 'debug' in uri: continue
-    if 'web' not in mw: continue
-    print(uri, r.get('name') or '-')" | sort
-
-# 操作 (非GET × web セッション面)
-php artisan route:list --json | python3 -c "
-import json,sys
-for r in json.load(sys.stdin):
-    m=r['method'].split('|')[0]
-    if m in ('GET','HEAD','OPTIONS'): continue
-    mw=str(r.get('middleware',[])); name=r.get('name') or '-'
-    if 'web' not in mw: continue
-    if name.startswith(('cashier','passport','livewire')) or 'webhook' in name: continue
-    print(m, r['uri'], name)" | sort -k2
+scripts/bug-hunt-inventory-check.sh   # exit 0=一致 / 2=致命 / 3=ドリフト
 ```
 
-- インベントリに無い新ルートは追記し、どのストーリーに割り当てるか決める。消えたルートは落とす。
-- ドリフト検知は `scripts/bug-hunt-inventory-check.sh` でも実行できる (exit 0=差分なし / 3=差分あり)。
+- **exit 3 (ドリフト)** の出力は 3 種類に分かれる。
+  - `[注釈] 未注釈の route: …` — 実装に route が増えた。
+    `.claude/skills/app-bug-hunt/inventory/annotations.toml` に 1 行足す
+    (画面なら `kind` = 画面 / JSON、割当なら `story` = S1..S7 と `kubun` = 通常 / 逸、
+    探索の分母に載せないなら `kubun` = 外 と 30 文字以上の `reason`)。
+  - `[注釈] 実装に無い route の注釈が残っている: …` — route が消えた。注釈も消す。
+  - `[生成物] 生成物が再生成の結果と一致しない: …` — 再生成し忘れか手編集。下記を走らせる。
+- 注釈を直したら再生成する (**表の行は手で書かない**):
+
+```bash
+python3 scripts/bug-hunt-inventory.py generate
+```
+
+- **exit 2 (致命)** は抽出そのものが成立していない (抽出条件を満たさない環境 / 母集合 0 件 /
+  壊れた注釈)。目録には触れずに原因を直す。
+- 散文 (画面の既知の仕様・認可契約など) は `inventory/notes-screens.md` /
+  `inventory/notes-operations.md` に書く。**ノートに表を書かない**
+  (連結先を読む `coverage/correlate.py` が操作行として拾ってしまうため、段 2 が拒否する)。
+- 見るのは `web` group を宣言した面だけである。`web` を宣言していない面 (機械向け API /
+  管理画面 / MCP / 現在の webhook の大半) には沈黙する。`web` を宣言していれば webhook でも
+  目録に入る (`webhooks.ses` は操作表に区分 `外` で載っている)。
 - このフェーズは数分以内に留める。
 
 ## Phase 2: ストーリー実走 (本体)
@@ -456,7 +459,9 @@ scripts/teardown-worktree.sh bughunt-<date>
 
 ## メンテナンス規約
 
-- 新画面・新フローを実装したら screens.md / operations.md と該当ストーリーを更新する。
-  新しい書き込みルートは必ずいずれかのストーリーに割り当てる (ドリフト検知は inventory-check.sh)。
+- 新画面・新フローを実装したら `inventory/annotations.toml` に注釈を 1 行足して再生成し
+  (`python3 scripts/bug-hunt-inventory.py generate`)、該当ストーリーを更新する。
+  新しい書き込みルートは必ずいずれかのストーリーに割り当てる (未注釈は inventory-check.sh が exit 3)。
+  **screens.md / operations.md を直接編集しない** (生成物であり、byte 比較で赤くなる)。
 - ストーリーカードの「期待」は設計の正 (devnotes/docs) への参照を持つこと。カード自体が仕様の正本になってはならない。
 - 同じ finding が 2 回連続で「要確認」のまま放置されたら、仕様を確定させる TODO を提案する。

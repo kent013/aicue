@@ -414,8 +414,22 @@ PHP の `echo` / `goto` / `global` の 3 文と、開始タグ付きの出力記
   **保証しないもの**は `docs/architecture.md` §パイプライン通し確認 が正本。
 - **worktree 既定**: bug-hunt は worktree から走る (`scripts/bughunt-worktree-hook.sh` の PreToolUse ガードが
   main 直叩きを早期に止める。配線は `.claude/settings.json` に常設済み。§常設 hook 配線)。
-- **スケルトン**: `screens.md` / `operations.md` / `stories/` はテンプレートでは空スケルトン。初回に
-  `php artisan route:list` から生成する (SKILL.md Phase 1)。ドリフト検知は `scripts/bug-hunt-inventory-check.sh`。
+- **目録は生成物 (T176)**: `screens.md` / `operations.md` は手で書かない。実装の機械事実
+  (`php artisan bughunt:inventory-scan`) と、人が書く注釈 (`inventory/annotations.toml`) ・
+  散文 (`inventory/notes-*.md`) から `python3 scripts/bug-hunt-inventory.py generate` で作る。
+  route を足したら**注釈を 1 行足して再生成する** (表の行は手で書かない)。
+  ドリフト検査は `scripts/bug-hunt-inventory-check.sh` (判定は生成器側。exit 0=一致 /
+  2=致命 / 3=ドリフト) で、守るのは 4 つ — 再生成の忘れ・生成物の手編集 (段 3 の byte 比較) /
+  意味の欠落 = 新しい route に割当も対象外理由も無い (段 2) / 抽出の故障 = 環境違い・母集合 0 件
+  (段 1) / 機能カタログの代表機構が実在しないこと (段 4)。
+  **見るのは `web` group を宣言した面だけ**である。`web` を宣言していない面 (機械向け API /
+  Filament 管理画面 / MCP / **現在の** webhook の大半) には沈黙する。面として除くのは
+  先頭セグメントの `oauth` と `livewire-{hash}` の 2 つだけで、それ以外で `web` を宣言した
+  route は webhook であっても必ず目録に入り注釈を要求される (実例: `webhooks.ses` は
+  操作表に載り区分 `外`)。web 面のうち探索の分母に載せないものは注釈の区分 `外` として
+  **目録に見える形で**理由付きで宣言する。
+  テンプレート正典との差 (機能カタログを生成しない / 注釈は TOML / 中間 JSON を持たない) は
+  `docs/template-divergence.md` **D20**。`stories/` はテンプレートでは空スケルトンのままである。
 - **capability 語彙**: finding の `capability_tag` の正本は
   `.claude/skills/app-bug-hunt/capability-catalog.md`(SOP→シナリオ→撮影→レンダの責務境界を
   先に定義し、その上に capability_id を割り当てる。未割当は `unmapped`・tag 不能は `unknown`)。
