@@ -190,6 +190,10 @@ const CACHE_PAYLOAD_SURFACE_INVENTORY = [
         'role' => 'lock-only',
         'rationale' => '突合コマンドの多重起動を Cache::lock で抑止するのみ。payload は書かない',
     ],
+    'app/Console/Commands/Billing/ReconcileSubscriptionStatus.php' => [
+        'role' => 'lock-only',
+        'rationale' => 'Stripe 契約状態の突き合わせの多重起動を Cache::lock で抑止するのみ。payload は書かない',
+    ],
     'app/Services/Billing/AutoRechargeService.php' => [
         'role' => 'lock-only',
         'rationale' => 'org 単位のオートリチャージ排他に Cache::lock を使うのみ。payload は一切書かない',
@@ -205,6 +209,10 @@ const CACHE_PAYLOAD_SURFACE_INVENTORY = [
     'app/Services/FxRateService.php' => [
         'role' => 'write',
         'rationale' => 'FX レートの当日 cache。素の配列を put し、読み戻しで DTO へ組み立て直す唯一の経路',
+    ],
+    'tests/Feature/Billing/ReconcileSubscriptionStatusTest.php' => [
+        'role' => 'lock-only',
+        'rationale' => '突き合わせコマンドの多重起動を再現するため Cache::lock を先取するのみ。payload は書かない',
     ],
 ];
 

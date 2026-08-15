@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Models\Organization;
 use App\Services\Billing\CashierStripeGateway;
+use App\Services\Billing\SubscriptionSnapshotMapper;
 
 /*
  * P9: subscription Checkout Session payload の invariant。**payload 変更の唯一の入口**。
@@ -17,11 +18,17 @@ use App\Services\Billing\CashierStripeGateway;
  * - promo / automatic tax を含まない (金額照合の前提を壊さない = チケット側と同一方針)。
  */
 
+/** payload builder は純関数だが gateway のメソッドなので、依存 (写像) を渡して素で組む。 */
+function checkoutPayloadGateway(): CashierStripeGateway
+{
+    return new CashierStripeGateway(new SubscriptionSnapshotMapper);
+}
+
 test('payload は mode=subscription で customer / line_items / metadata を含む', function (): void {
     $organization = Organization::factory()->make();
     $organization->stripe_id = 'cus_payload_1';
 
-    $payload = (new CashierStripeGateway)->buildSubscriptionSessionPayload(
+    $payload = checkoutPayloadGateway()->buildSubscriptionSessionPayload(
         $organization,
         'price_standard',
         'https://app.test/billing?session_id={CHECKOUT_SESSION_ID}',
@@ -41,7 +48,7 @@ test('subscription_data は Cashier の name/type ラベルと save_default_paym
     $organization = Organization::factory()->make();
     $organization->stripe_id = 'cus_payload_1';
 
-    $payload = (new CashierStripeGateway)->buildSubscriptionSessionPayload(
+    $payload = checkoutPayloadGateway()->buildSubscriptionSessionPayload(
         $organization, 'price_standard', 'https://a.test', 'https://b.test', [],
     );
 
@@ -55,7 +62,7 @@ test('payload に allow_promotion_codes / automatic_tax を含めない', functi
     $organization = Organization::factory()->make();
     $organization->stripe_id = 'cus_payload_1';
 
-    $payload = (new CashierStripeGateway)->buildSubscriptionSessionPayload(
+    $payload = checkoutPayloadGateway()->buildSubscriptionSessionPayload(
         $organization, 'price_standard', 'https://a.test', 'https://b.test', [],
     );
 
@@ -64,7 +71,7 @@ test('payload に allow_promotion_codes / automatic_tax を含めない', functi
 });
 
 test('Stripe customer 未作成の組織では fail-fast する', function (): void {
-    (new CashierStripeGateway)->buildSubscriptionSessionPayload(
+    checkoutPayloadGateway()->buildSubscriptionSessionPayload(
         Organization::factory()->make(), 'price_standard', 'https://a.test', 'https://b.test', [],
     );
 })->throws(InvalidArgumentException::class);

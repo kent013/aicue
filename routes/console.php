@@ -77,6 +77,27 @@ Schedule::command('billing:reconcile-schedules')->daily();
 
 /*
 |--------------------------------------------------------------------------
+| Stripe 契約状態の突き合わせ (AG-035 (6))
+|--------------------------------------------------------------------------
+| webhook 欠落でローカルの契約状態が固まると、支払い失敗の遮断も復旧も起きない。
+| 日次で Stripe を真実として収束させる。**チケット (金銭) には触れない**。
+|
+| 既存の 2 本とは書く列が重ならない (相乗りさせない):
+|   - billing:reconcile-auto-recharge (15 分) = チケット自動購入の未決金
+|   - billing:reconcile-schedules (日次)      = 予約 (Schedule) の作りかけ
+|
+| **監視対象**: 終了コードと report() (未確認・失敗はここにしか出ない)。
+*/
+Schedule::command('billing:reconcile-subscription-status')
+    ->daily()
+    ->onOneServer()
+    ->withoutOverlapping()
+    ->onFailure(static fn () => report(new RuntimeException(
+        'billing:reconcile-subscription-status 失敗 — Stripe と契約状態が突き合わせられていない',
+    )));
+
+/*
+|--------------------------------------------------------------------------
 | 課金孤児の検知 (退会ガードの second layer)
 |--------------------------------------------------------------------------
 | 退会ガード (AccountDeletionBillingGuard) は通常経路を止めるが、webhook トランザクションと

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Billing;
 
 use App\Enums\Billing\OnboardingBillingState;
+use App\Enums\Billing\SubscriptionState;
 use App\Enums\CheckoutSessionStatus;
 use App\Models\Billing\BillingCheckoutSession;
 use App\Models\Billing\Subscription;
@@ -71,7 +72,13 @@ class BillingAccess
         // canceled 等の過去行が残っていてもよい = paid→free 経路) とき free entitlement を見る。
         // 判定は定数比較 (未知値は fail-closed で通さない)。entitled subscription があれば上で
         // Subscribed 優先 (free と併存しない invariant)。
-        if ($organization->free_plan_code === PersonalPlanService::FREE_PLAN_CODE) {
+        // 支払いが未解決のまま契約が残っている間 (past_due / unpaid) は、無料枠の申告があっても
+        // 読み替えない (支払いに失敗した利用者が無料枠と同じ状態に落ちるのを防ぐ)。
+        // 契約が終了したあとは (未払いが残っていても) 無料枠へ戻る = 現行の解約→無料枠と同じ。
+        $unsettled = $sub instanceof Subscription
+            && SubscriptionState::fromSubscription($sub)->hasUnsettledPayment();
+
+        if (! $unsettled && $organization->free_plan_code === PersonalPlanService::FREE_PLAN_CODE) {
             return OnboardingBillingState::ActiveFreePlan;
         }
 

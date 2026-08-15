@@ -6,7 +6,9 @@ namespace Tests\Support;
 
 use App\DataTransferObjects\Billing\CreatedCheckoutSession;
 use App\DataTransferObjects\Billing\ExternalBillingRedirect;
+use App\DataTransferObjects\Billing\RemoteSubscriptionState;
 use App\Enums\Billing\SubscriptionSwapOutcome;
+use App\Exceptions\Billing\SubscriptionLookupFailedException;
 use App\Models\Organization;
 use App\Services\Billing\Contracts\StripeGatewayInterface;
 use Carbon\CarbonImmutable;
@@ -19,6 +21,8 @@ use RuntimeException;
  *   session id / URL を返す (Stripe の idempotency replay と同じ収束特性を再現)
  * - expireCheckoutSession: 呼び出しを記録し、$expireResult を返す ($failOnExpire で throw)
  * - swapSubscriptionPrices: 呼び出しを記録し、$swapOutcome を返す (プラン変更 = 実 Stripe に出ない)
+ * - retrieveSubscriptionState: 照会を記録し、$remoteStates に仕込んだ観測結果を返す
+ *   (未設定は null = 未検出。$failOnLookup で照会失敗を再現する)
  */
 final class FakeStripeGateway implements StripeGatewayInterface
 {
@@ -88,6 +92,32 @@ final class FakeStripeGateway implements StripeGatewayInterface
         ];
 
         return $this->swapOutcome;
+    }
+
+    /** @var array<string, RemoteSubscriptionState|null> stripe_id => 観測結果 (未設定は null = 未検出) */
+    public array $remoteStates = [];
+
+    /** @var list<string> retrieveSubscriptionState を要求された stripe_id */
+    public array $lookedUp = [];
+
+    /** true にすると retrieveSubscriptionState が SubscriptionLookupFailedException を投げる */
+    public bool $failOnLookup = false;
+
+    /** 照会 1 回あたりに進める時計 (秒)。実行時間上限の検証で使う (0 = 進めない)。 */
+    public int $lookupElapsedSeconds = 0;
+
+    public function retrieveSubscriptionState(string $stripeSubscriptionId): ?RemoteSubscriptionState
+    {
+        $this->lookedUp[] = $stripeSubscriptionId;
+        if ($this->lookupElapsedSeconds > 0) {
+            // 実 Stripe の応答待ちを時計の進行として再現する (実際には待たない)。
+            CarbonImmutable::setTestNow(CarbonImmutable::now()->addSeconds($this->lookupElapsedSeconds));
+        }
+        if ($this->failOnLookup) {
+            throw new SubscriptionLookupFailedException('fake stripe: lookup failed');
+        }
+
+        return $this->remoteStates[$stripeSubscriptionId] ?? null;
     }
 
     public function expireCheckoutSession(string $stripeSessionId): string

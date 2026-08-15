@@ -291,3 +291,53 @@ test('state() は読み取り経路で DB を書き換えない (stale pending �
         ->and($after->status)->toBe($before->status)
         ->and($after->updated_at?->toIso8601String())->toBe($before->updated_at?->toIso8601String());
 });
+
+// ── 支払い未解決の間は無料枠へ読み替えない (AG-035 (3)) ──
+//
+// 無料枠の申告 (free_plan_code='personal') があっても、契約が終了しておらず支払いが
+// 未解決 (past_due / unpaid) の間は ActiveFreePlan に落とさない。契約が終了したあとは
+// 未払いが残っていても無料枠へ戻る (現行の解約 → 無料枠と同じ)。
+
+/** 無料枠の申告を持つ組織 (grandfather 相当)。 */
+function freeDeclaredOrganization(): Organization
+{
+    [$organization] = createOrganizationWithOwner();
+
+    return $organization;
+}
+
+test('無料枠申告 + past_due 猶予切れは ExpiredCheckout (無料枠へすり抜けない)', function (): void {
+    config()->set('billing.payment_grace_days', 14);
+    $organization = freeDeclaredOrganization();
+    $subscription = cohortSubscription($organization, status: 'past_due');
+    $subscription->forceFill(['past_due_since' => CarbonImmutable::now()->subDays(15)])->save();
+
+    expect(cohortBillingAccess()->state($organization))->toBe(OnboardingBillingState::ExpiredCheckout)
+        ->and(cohortBillingAccess()->hasActiveAccess($organization))->toBeFalse();
+});
+
+test('無料枠申告 + past_due 猶予中は Subscribed (entitled が先に立つ)', function (): void {
+    config()->set('billing.payment_grace_days', 14);
+    $organization = freeDeclaredOrganization();
+    $subscription = cohortSubscription($organization, status: 'past_due');
+    $subscription->forceFill(['past_due_since' => CarbonImmutable::now()->subDays(3)])->save();
+
+    expect(cohortBillingAccess()->state($organization))->toBe(OnboardingBillingState::Subscribed)
+        ->and(cohortBillingAccess()->hasActiveAccess($organization))->toBeTrue();
+});
+
+test('無料枠申告 + unpaid は ExpiredCheckout', function (): void {
+    $organization = freeDeclaredOrganization();
+    cohortSubscription($organization, status: 'unpaid');
+
+    expect(cohortBillingAccess()->state($organization))->toBe(OnboardingBillingState::ExpiredCheckout)
+        ->and(cohortBillingAccess()->hasActiveAccess($organization))->toBeFalse();
+});
+
+test('無料枠申告 + 契約終了・不成立・paused は ActiveFreePlan のまま (既存の paid→free 経路)', function (string $status): void {
+    $organization = freeDeclaredOrganization();
+    cohortSubscription($organization, status: $status);
+
+    expect(cohortBillingAccess()->state($organization))->toBe(OnboardingBillingState::ActiveFreePlan)
+        ->and(cohortBillingAccess()->hasActiveAccess($organization))->toBeTrue();
+})->with(['canceled', 'incomplete', 'incomplete_expired', 'paused']);

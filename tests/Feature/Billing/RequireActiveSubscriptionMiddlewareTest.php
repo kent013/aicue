@@ -80,6 +80,37 @@ test('有償契約 + past_due は業務 route に到達できる (cohort D。dun
     $this->actingAs($owner)->get('/projects')->assertOk();
 });
 
+test('past_due の猶予中は業務 route に到達できる (cohort D は猶予の期限内で維持)', function (): void {
+    config()->set('billing.payment_grace_days', 14);
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    $subscription = contractPaidPlan($organization, status: 'past_due');
+    $subscription->forceFill(['past_due_since' => CarbonImmutable::now()->subDays(13)])->save();
+
+    $this->actingAs($owner)->get('/projects')->assertOk();
+});
+
+test('past_due の猶予切れは遮断される (AG-035 (5))', function (): void {
+    config()->set('billing.payment_grace_days', 14);
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    $subscription = contractPaidPlan($organization, status: 'past_due');
+    $subscription->forceFill(['past_due_since' => CarbonImmutable::now()->subDays(15)])->save();
+
+    $this->actingAs($owner)->get('/projects')
+        ->assertRedirect(route('onboarding.checkout'))
+        ->assertSessionMissing('error');
+});
+
+test('past_due の猶予切れの JSON は 402 + 既存文言 (遮断理由の文言は増やさない)', function (): void {
+    config()->set('billing.payment_grace_days', 14);
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    $subscription = contractPaidPlan($organization, status: 'past_due');
+    $subscription->forceFill(['past_due_since' => CarbonImmutable::now()->subDays(15)])->save();
+
+    $this->actingAs($owner)->getJson('/projects')
+        ->assertStatus(402)
+        ->assertJsonPath('message', BILLING_BLOCKED_MESSAGE);
+});
+
 test('有償契約 + 支払い不健全は billing へ redirect + 理由 flash', function (string $status): void {
     [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     contractPaidPlan($organization, status: $status);

@@ -6,14 +6,17 @@ namespace App\Services\Billing;
 
 use App\DataTransferObjects\Billing\CreatedCheckoutSession;
 use App\DataTransferObjects\Billing\ExternalBillingRedirect;
+use App\DataTransferObjects\Billing\RemoteSubscriptionState;
 use App\Enums\Billing\SubscriptionSwapOutcome;
 use App\Exceptions\Billing\PlanChangeFailedException;
+use App\Exceptions\Billing\SubscriptionLookupFailedException;
 use App\Models\Billing\Subscription;
 use App\Models\Organization;
 use App\Services\Billing\Contracts\StripeGatewayInterface;
 use Carbon\CarbonImmutable;
 use Laravel\Cashier\Cashier;
 use Stripe\Exception\ApiErrorException;
+use Stripe\Exception\InvalidRequestException;
 use Stripe\StripeClient;
 use Stripe\StripeObject;
 use Stripe\Subscription as StripeSubscription;
@@ -29,6 +32,10 @@ use Webmozart\Assert\Assert;
  */
 class CashierStripeGateway implements StripeGatewayInterface
 {
+    public function __construct(
+        private readonly SubscriptionSnapshotMapper $mapper,
+    ) {}
+
     /**
      * Stripe クライアント取得の seam (テストで差し替えるためだけに切り出す)。
      * 実装は Cashier の既定クライアントをそのまま返す。
@@ -192,6 +199,41 @@ class CashierStripeGateway implements StripeGatewayInterface
             sessionId: $session->id,
             url: $session->url,
             expiresAt: CarbonImmutable::createFromTimestamp($session->expires_at),
+        );
+    }
+
+    public function retrieveSubscriptionState(string $stripeSubscriptionId): ?RemoteSubscriptionState
+    {
+        Assert::stringNotEmpty($stripeSubscriptionId);
+
+        try {
+            $remote = $this->stripe()->subscriptions->retrieve(
+                $stripeSubscriptionId,
+                ['expand' => ['items.data']],
+            );
+        } catch (InvalidRequestException $e) {
+            // resource_missing = Stripe 側に無い。API キーの環境取り違えでも同じ形になるため、
+            // ここでは「無い」とだけ返し、状態変更するかどうかは呼び出し側が決める。
+            if ($e->getStripeCode() === 'resource_missing') {
+                return null;
+            }
+
+            throw new SubscriptionLookupFailedException('Stripe 契約の照会に失敗しました', previous: $e);
+        } catch (ApiErrorException $e) {
+            throw new SubscriptionLookupFailedException('Stripe 契約の照会に失敗しました', previous: $e);
+        }
+
+        // SDK 型はここで配列へ落とす (mapper へ SDK 型を漏らさない)。
+        $object = $remote->toArray();
+        $snapshot = $this->mapper->fromStripeSubscription($object);
+        if ($snapshot === null) {
+            // id が取れない応答は「確認できなかった」として扱う (状態を変える材料にしない)。
+            throw new SubscriptionLookupFailedException('Stripe 契約の応答から契約 id を取得できません');
+        }
+
+        return new RemoteSubscriptionState(
+            snapshot: $snapshot,
+            hasPaymentMethod: $this->mapper->observePaymentMethod($object),
         );
     }
 

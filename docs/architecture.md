@@ -860,6 +860,97 @@ catch を足す必要が出たら、観測目録へ移すか免除の分類を�
     `expired_checkout` が「有償契約後の支払い不健全」と「checkout 期限切れの未契約」を
     ともに指す多義性は残る。
 
+## 支払い失敗の猶予と Stripe 契約状態の突き合わせ (T163)
+
+### 猶予 (payment grace) の定義
+
+- **猶予** = 支払い失敗 (`subscriptions.stripe_status = 'past_due'`) を**観測してから**、
+  利用を止めるまでの日数。**日数の正本は `config/billing.php` の `payment_grace_days`**
+  (既定 14 日。`BILLING_PAYMENT_GRACE_DAYS` で環境ごとに変えられる)。
+  ここに具体の数字を書き写さない (二重管理を作らない)。
+- **判定の唯一の口は `App\Support\Billing\PaymentGracePolicy`**。config を読む場所と期限を
+  計算する場所をここ 1 つに閉じる。画面文言・通知・運用スクリプトが日数を再計算しない。
+  境界 (期限ちょうどの瞬間) は**切れていない**扱い = 利用者に有利な側へ倒す。
+- **起点は `subscriptions.past_due_since`** で、これは**観測時刻であって Stripe 側で実際に
+  支払いが失敗した時刻ではない**。webhook を落としていれば日次突き合わせが観測した時刻に
+  なる (= 利用者に有利な側へずれる)。
+- 書込は `SubscriptionService::applySubscriptionSnapshot` の 1 行に閉じる
+  (`PastDueSinceWriteInvariantTest` が `app/` 内の書込を機械固定する)。打刻規則は 3 つだけ:
+  past_due 観測 + 既存値 NULL → 観測時刻を打つ / past_due 観測 + 既存値あり → 上書きしない
+  (再送で猶予を先送りしない) / past_due 以外の観測 → NULL に戻す。
+  **手動 SQL / tinker でこの列を書かない**。
+- 遮断は `SubscriptionService::deriveEntitlement` の一本道に足した 1 条件
+  (`state = PastDue` ∧ 起点が非 NULL ∧ 猶予切れ → `EntitlementDeniedReason::PaymentGraceExpired`)。
+  **起点が NULL のときは遮断しない** — 打刻漏れという自分側の不具合を、支払い済み顧客の
+  締め出しに変えないため。
+- **チケット残高切れには猶予を設けない** (残高 0 は予約時点で即拒否)。前払いチケットで猶予を
+  作ると「借金して使わせる」ことになる。**これは未実装ではなく決定である**。
+
+### 支払い未解決 (`PastDue` / `Unpaid`) の間に禁じる 2 つ
+
+`SubscriptionState::hasUnsettledPayment()` が true の間、次の 2 つを**同時に**禁じる
+(同じ問いなので述語を 2 つに割らない):
+
+1. **無料枠への読み替え** (`BillingAccess::state()`) — 支払いに失敗した利用者が、無料枠を
+   申告済みの組織で `ActiveFreePlan` に落ちて何事もなく使い続けられるのを塞ぐ。
+2. **新規契約の開始** (`SubscriptionService::startCheckout` 段 1b) — Cashier の `valid()` は
+   past_due / unpaid を false と見るため段 1 を素通りするが、Stripe 側の契約は生きており、
+   ここで作ると **2 本目の契約 = 二重請求**になる。
+
+- **契約が終了したあとは (未払いが残っていても) 無料枠へ戻る**。督促の末に Stripe が解約した
+  (`canceled`) 契約には未払いの請求書が残りうるが、その回収は課金事業者側の債権管理であり、
+  アプリの利用可否とは切り離す (切り離さないと未払い請求書を追い続ける仕組みが要る)。
+- 遮断された管理者の着地は `onboarding.checkout` → **`billing.index`** (支払い方法を更新できる
+  画面) へ `OnboardingController::show` が送り直す。ドメイン規約 4 の着地契約は **middleware の
+  着地**についてのもので、その先で画面が適切な場所へ送り直すのは既存の
+  `hasActiveAccess → billing.index` と同型。`billing.index` は課金ゲートの外なので詰まない。
+
+### 日次の突き合わせ (`billing:reconcile-subscription-status`)
+
+webhook は落ちうる (Stripe 自身が遅延・欠落を明記している)。1 通落とすとローカルの
+`stripe_status` は古いまま固まり、支払い失敗の遮断も復旧も起きない。本コマンドが
+**Stripe を真実として**食い違いを収束させる唯一の経路。
+
+- **責務の境界** (既存 2 本と書く列が重ならない。相乗りさせない):
+
+  | コマンド | 周期 | 書くもの |
+  |---|---|---|
+  | `billing:reconcile-auto-recharge` | 15 分 | チケット自動購入の未決金 (台帳) |
+  | `billing:reconcile-schedules` | 日次 | 予約 (Schedule) の作りかけ (schedule 列) |
+  | `billing:reconcile-subscription-status` | 日次 | 契約状態そのもの (`applySubscriptionSnapshot` の担当列) |
+
+- **金銭は動かさない** (チケットの付与・返金に触れない)。**列を直接書かない**
+  (書込は `SubscriptionService` の 2 メソッド経由のみ)。
+- 書くのは**食い違いがあるときだけ** (`needsSnapshotConvergence`)。比較対象は
+  `applySubscriptionSnapshot` が書く列すべてで、status だけを見ると `current_period_end` や
+  `ends_at` だけがずれた状態が永久に収束しない。
+- Stripe の subscription オブジェクト → `SubscriptionSnapshot` の写像は
+  **`SubscriptionSnapshotMapper` 1 つ**で、webhook (payload の `data.object`) と突き合わせ
+  (SDK の `toArray()`) が同じ規則で読む (写像が 2 つあると突き合わせ経路だけ別挙動になる)。
+- **実行時間上限とロックの関係**: 各契約の照会の**直前**に残り時間を見て打ち切る
+  (soft limit。最後に開始した照会 1 回分だけ超過しうる)。
+  `TIME_BUDGET_SECONDS + STRIPE_CONNECT_TIMEOUT_SECONDS + STRIPE_TIMEOUT_SECONDS < LOCK_SECONDS`
+  を定数比較テストが固定し、**Stripe SDK の再試行が 0 回であること**を前提として同時に固定する。
+- **監視対象 (必須項目として登録する)**: 本コマンドの**終了コード**と **`report()`**。
+  照会失敗 1 件以上 / ロック取得失敗 / 実行時間上限超過で `FAILURE`。未確認 (Stripe に無い) は
+  状態を変えないので `SUCCESS` だが、件数が 0 でなければ必ず `report()` する
+  (1 実行 1 回・内容は件数と organization id のみ = PII を載せない)。
+
+### 保証しないもの (誇張しない)
+
+- 起点は**観測時刻**であり、実際に支払いが失敗した時刻ではない。移行の backfill は
+  **デプロイ時刻**を起点に置く (実際の失敗時刻は復元できないため。遡って遮断しない)。
+- 未確認 (404) や照会失敗が続く契約では、猶予も遮断も**動かない** (状態を変える材料が無い)。
+- webhook と突き合わせの**観測順序は保証しない**。古い観測が後勝ちすると起点が作り直される
+  ことがある。収束は最終的なもので、Stripe の再送と翌日の突き合わせで揃う。
+- ローカルが終了扱い (`canceled` / `incomplete_expired`) の行は照会対象外なので、
+  **誤って終了と書かれた行は自動回復しない**。
+- 決済手段 (`has_payment_method`) は **true 方向のみ**修復する (観測できないことを false と
+  断定しない = 単調更新を壊さない)。
+- `organizations.plan_code` は比較対象にしない (同一トランザクションで同期されるため
+  subscriptions 行と食い違わない。未知 Price のときだけ据え置かれるが、その回復は本経路の
+  責務ではない)。
+
 ## Stripe webhook の滞留回収
 
 - **状態の意味**: `received` = 受理済み・未終局 (**処理中と次の回収待ちを兼ねる**。

@@ -14,6 +14,7 @@ use App\Services\Billing\SubscriptionService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Tests\Support\FakeStripeGateway as TestFakeStripeGateway;
 use Webmozart\Assert\Assert;
 
 /*
@@ -136,4 +137,49 @@ test('有効サブスク保持組織の /billing/checkout は 500 にせず erro
         ])
         ->assertRedirect('/billing')
         ->assertSessionHas('error', '既に有効なサブスクリプションがあります。プラン変更をご利用ください。');
+});
+
+// ── 支払い未解決の契約がある間は新規契約を作らない (二重請求の防止) ──
+//
+// Cashier の valid() は past_due / unpaid を false と見るため段 1 を素通りするが、
+// Stripe 側の契約は生きている。ここで作ると 2 本目の契約 = 二重請求になる。
+
+test('支払い未解決の契約がある組織の checkout は Stripe を呼ばずに落ちる', function (string $status): void {
+    // 「Stripe に出ていない」ことを見るため spy の fake に差し替える。
+    $spy = new TestFakeStripeGateway;
+    $this->app->instance(StripeGatewayInterface::class, $spy);
+
+    [$organization, $owner] = createOrganizationWithOwner();
+    createFakeSubscription($organization, status: $status);
+
+    try {
+        startGuardCheckout($organization, $owner);
+        $this->fail('支払い未解決の契約があるのに checkout が通ってしまった');
+    } catch (InvalidArgumentException $e) {
+        expect($e->getMessage())->toBe('お支払いが確認できていないご契約があります。お支払い方法の更新をお願いします。');
+    }
+
+    expect($spy->created)->toBe([]); // 2 本目の契約を作っていない
+})->with(['past_due', 'unpaid']);
+
+test('支払い未解決の /billing/checkout は error flash で差し戻す (押下時にエラーを出す)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    createFakeSubscription($organization, status: 'past_due');
+
+    $this->actingAs($owner)
+        ->from('/billing')
+        ->post('/billing/checkout', [
+            'plan_code' => 'standard',
+            'subscription_attempt_token' => (string) Str::ulid(),
+        ])
+        ->assertRedirect('/billing')
+        ->assertSessionHas('error', 'お支払いが確認できていないご契約があります。お支払い方法の更新をお願いします。');
+});
+
+test('解約済み (canceled) の契約がある組織は従来どおり新規契約を開始できる', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    createFakeSubscription($organization, status: 'canceled')
+        ->forceFill(['ends_at' => CarbonImmutable::now()->subDay()])->save();
+
+    expect(startGuardCheckout($organization, $owner))->toContain('fake_external=stripe');
 });
