@@ -886,3 +886,74 @@ deny-by-default の目録 / 撤去済み参照の gate) はそのまま採って
   `tests/Architecture/PostBootRouteMutationInventoryTest.php`
 - 設計: `devnotes/20260815-2100-route-cache-middleware-attach/`
 - 契約の正本: `docs/app-integration-guide.md` §7c
+
+---
+
+## D20 ✅ bug-hunt 目録の生成方式を、注釈 TOML・機能カタログ 3 列・中間 JSON 無しで実装する
+
+家系の正典 (機能台帳 `bughunt-inventory-generation` の t1) は、bug-hunt の分母 (画面一覧 /
+操作一覧 / 機能カタログ) を実装から生成し、人が書く注釈ファイルと段階的なドリフト検査で守る形である。
+本アプリはこの**方式そのものは採る**が、次の 3 点で正典と形が違うので登録する。
+
+| 観点 | 家系の正典 / テンプレート | 本アプリ |
+|---|---|---|
+| 機能カタログ (`capability-catalog.md`) | 生成物。3 列は 機能 / 対応する画面 / 対応する操作 | **生成しない**。3 列は `id` / `機能 (actor→outcome)` / `代表機構 (route name)` を維持し、参照整合だけを検査する |
+| 注釈ファイル | `inventory/annotations.yaml` | **`inventory/annotations.toml`** |
+| 中間成果物 | `inventory/inventory.json` をコミットする | **持たない** (生成・検査の実行中にだけ存在する) |
+
+### なぜ正当な差分か (logic-driven)
+
+1. **id 列は所見記録の語彙正本である**。`.claude/skills/app-bug-hunt/ledger/findings.schema.json` の
+   必須項目 `capability_tag` は機能カタログの id を値に取る。正典の 3 列には id 列が無く、
+   寄せると語彙の供給元が消えて `unknown` / `unmapped` の判定基準ごと壊れる。
+   また「機能 ↔ 画面 / 操作」の対応は注釈側が route ごとに持つので、カタログにも書くと
+   同じ対応関係が 2 か所に載る (家系が AG-044 でやめた形)。カタログ本体は
+   「機構を利用者価値で束ねた overlay であり MECE ではない」と自ら宣言しており、
+   実装から導けない = 生成対象にしても保守量は減らない。
+2. **注釈が TOML なのは Python の依存規約の帰結である**。`AGENTS.md` §bug-hunt が
+   Python ツールを標準ライブラリのみと定めており、本環境に PyYAML は無い (実測)。
+   `tomllib` は標準ライブラリにあるので、YAML を採ると依存追加か自前パーサのどちらかが要る
+   (どちらも「自前機構の前に公式作法を確認する」に反する)。
+3. **中間 JSON に読み手がいない**。下流の照合器 (`coverage/correlate.py`) が読むのは
+   `operations.md` の name 列であって中間 JSON ではない。コミットするとドリフト面が 1 つ増えるだけで、
+   守るものが無い。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「目録は実装と注釈から再生成でき、ずれていたら CI が落ちる」
+
+| 不変条件 | 担い手 |
+|---|---|
+| 抽出が成功し、宣言した抽出条件で走り、母集合が 0 件でないこと (段 1) | `scripts/bug-hunt-inventory.py` (exit 2) / `scripts/tests/test_bug_hunt_inventory.py` |
+| 注釈の集合が面の集合と一致し、語彙・必須・理由の長さを満たすこと (段 2) | 同上 (exit 3)。未注釈も残置注釈も許さない |
+| 生成物が再生成の結果と byte 一致すること (段 3) | 同上 (exit 3)。手編集と再生成の忘れをまとめて捕まえる |
+| 機能カタログの代表機構が実在し、id が重複しないこと (段 4) | 同上 (exit 3) |
+| 検査シェルが判定を持たず、終了コード 0 / 2 / 3 を実際に返すこと | `tests/Architecture/BugHuntInventoryCheckInvariantTest.php` (sandbox 実走) |
+| 生成器の自己テストが `composer test` の下で実走すること | `tests/Architecture/BughuntInventoryToolSelfTest.php` |
+| 抽出コマンドが事実だけを書き出すこと (面の判定を持たない) | `tests/Feature/Bughunt/InventoryScanCommandTest.php` |
+
+**保証範囲を誇張しない**: 見るのは `web` group を宣言した面だけである。
+沈黙するのは「`web` group を**宣言していない**面」であり、実測では機械向け API (`api/`) /
+Filament の管理画面 (`/admin`) / MCP / Stripe の webhook がこれに当たる。
+「webhook 一般に沈黙する」わけではない — `web` を宣言している `webhooks.ses` は
+操作表に載り、区分 `外` として理由付きで見える。面として除くのは先頭セグメントの
+`oauth` と `livewire-{hash}` の 2 つだけで、それ以外で `web` を宣言した route は
+必ず目録に入り注釈を要求される。
+注釈の**内容**の妥当性 (割当が適切か) は見ない。画面題名の欠落も検出しない。
+機能カタログの網羅性も見ない (代表機構の実在と id の一意性まで)。
+目録の母集合は T164 の記録器が観測しうる route の**部分集合**であり、両者は一致しない。
+
+### 再検討の条件 (解消条件)
+
+- 家系の正典が id 列を持つ形へ変わったとき (機能カタログの生成を採り直す)
+- 本リポジトリの Python に依存を足す裁定が出たとき (注釈を YAML へ寄せる)
+- 中間 JSON を読む道具が家系に現れたとき
+
+### 関連
+
+- 実装: `scripts/bug-hunt-inventory.py` / `app/Console/Commands/Bughunt/InventoryScanCommand.php` /
+  `.claude/skills/app-bug-hunt/inventory/`
+- gate: `tests/Architecture/BugHuntInventoryCheckInvariantTest.php` /
+  `tests/Architecture/BughuntInventoryToolSelfTest.php` /
+  `tests/Feature/Bughunt/InventoryScanCommandTest.php`
+- 設計: `devnotes/20260815-2100-bughunt-inventory-generator/`

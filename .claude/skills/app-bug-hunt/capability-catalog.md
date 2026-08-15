@@ -3,6 +3,12 @@
 `ledger/findings.schema.json` の必須フィールド `capability_tag` と、stories/ カードが消化する
 機能単位を指す **capability_id の語彙正本**。
 
+> **本表は生成物ではない** (人が書く。テンプレート正典との差は `docs/template-divergence.md` D20)。
+> ただし `capability_id 索引` の表については、**代表機構列の route 名が実在すること**と
+> **id が重複しないこと**を `scripts/bug-hunt-inventory-check.sh` の段 4 が検査する
+> (`*` で終わる記法は前方一致で 1 件以上。丸括弧の説明とパスは route 名候補にしない)。
+> **網羅性は検査しない** (本表は overlay であり MECE を主張しないため)。
+
 - これは「機構 (route / job / CLI) を **user-value で grouping した overlay**」であり **MECE ではない**
   (完全性を主張しない)。分母の正本は `screens.md` (画面) と `operations.md` (書き込み操作) の 2 つで、
   本表はその上に「利用者にとって何が達成できるか」を重ねたもの。
