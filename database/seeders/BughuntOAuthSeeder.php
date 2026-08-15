@@ -8,6 +8,7 @@ use App\Enums\OAuth\OAuthClientKind;
 use App\Models\OauthSession;
 use App\Models\Organization;
 use App\Models\User;
+use App\Support\ExternalFakes\ExternalFakeDeclaration;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
@@ -50,7 +51,7 @@ class BughuntOAuthSeeder extends Seeder
     {
         // fail-secure 三軸: fake_externals かつ bughunt.local かつ DB 名 bug_hunt* の全成立時のみ。
         if (
-            config('testing.fake_externals') !== true
+            config(ExternalFakeDeclaration::EXTERNALS_FLAG) !== true
             || ! app()->environment('bughunt.local')
             || ! $this->isBughuntDatabase()
         ) {

@@ -71,9 +71,15 @@
 - API Resource/DTO: なし
 - テストファイル:
   - `tests/Architecture/ExternalFakeWiringInvariantTest.php` — 参照先を宣言クラスへ。
-    3-8 (bind 組の集合一致) を**削除**し、3-10 を「provider は fake クラスを 1 つも参照しない」へ強化
-  - `tests/Architecture/FakeClassReferenceInvariantTest.php` — 参照 allowlist から provider を外し、
-    宣言クラスを足す (件数固定の 4-4 も同じ変更で直す)
+    3-8 (bind 組の集合一致) を**削除**し、3-10 を
+    「provider が参照する fake 系クラスは**配線基盤 4 件ちょうど**であり、
+    **差し替え先 (swaps() の fake) を 1 件も含まない**」へ強化
+    (**訂正**: 当初は「1 つも参照しない」と書いていたが成立しない。provider は
+    `FakeStorageGate` / `CannedPromptFakeRegistrar` / 偽の保存先の経路の受け口 2 本を
+    参照し続ける。§実装時に判明した設計の訂正 (1) を参照)
+  - `tests/Architecture/FakeClassReferenceInvariantTest.php` — 参照 allowlist に宣言クラスを足す
+    (件数固定の 4-4 も同じ変更で直す。**訂正**: provider は allowlist から外せない。
+    5 件 → 6 件になる)
   - `tests/Architecture/BughuntEnvExampleContractTest.php` — `TESTING_FAKE_EXTERNALS => 'true'` の
     直書きをやめ、`ExternalFakeDeclaration::bughuntRequiredEnvFlags()` から組み立てる
   - `tests/Unit/Architecture/FakeWiringSourceScannerTest.php` — `bind` の許可形の変更に追随
@@ -326,7 +332,8 @@ private const array ALLOWED_APP_CALLS = [
 - [x] 3-8 (bind 組の集合一致) を削除。理由をファイル冒頭のコメントに残す
       (「差し替え先の決定が宣言 1 か所になったため、比較する相手が無くなった」)
 - [x] 3-9 を維持し、走査器の許可形変更に合わせて期待値を更新
-- [x] 3-10 を強化: provider が参照する fake 系クラスは**空**であること
+- [x] 3-10 を強化: provider が参照する fake 系クラスは**配線基盤 4 件ちょうど**であり、
+      **差し替え先を 1 件も含まない**こと (期待値は同テストの定数に置く。§訂正 (1)(3))
 - [x] 新規 `3-13 宣言の健全性`: `swaps()` の abstract に重複が無く、
       各 entry の `allowedEnvironments` が capability の許可環境の部分集合であること
 - [x] 新規 `3-16 宣言集合の固定 (意図的な摩擦)`: `swaps()` の abstract 一覧が
@@ -431,6 +438,8 @@ test('レーン側は app/ の偽の実装クラスを container へ直接結ば
 ### テスト計画
 
 - [x] 正例: 現在の `tests/` 全走査で違反 0 件
+      (**訂正**: 実装時の実測では違反 8 件 / 5 ファイルが実在した。
+      例外の登録簿は作らず、レーン側を宣言 + provider の 1 本へ寄せ替えた。§訂正 (4))
 - [x] 負のコントロール: 合成ソースを 4 形 (`$this->app->bind` / `app()->bind` / `App::bind` /
       `Container::getInstance()->bind`) と別名 (`use function app as c; c()->bind(…)`) で
       渡し、**すべて検出すること** (`tests/Unit/Architecture/FakeWiringSourceScannerTest.php` 側)
@@ -978,3 +987,61 @@ public const array ALLOWED_PROCESS_ENV_KEYS = [
 3. 施策 1 の Architecture テストを更新 (3-8 削除 / 3-10 強化 / 3-13〜3-16 追加)
 4. 施策 1c → 施策 2 → 施策 3 → 施策 4 の順に積む
 5. 施策 5 の文書を書き、`mutation-evidence.md` に変異の 2 段確認の記録を残す
+
+---
+
+## 実装時に判明した設計の訂正 (T177 実装セッション)
+
+実装中に HEAD の現物と食い違った点を、設計側を直したうえで実装した。
+
+1. **3-10「provider は fake クラスを 1 つも参照しない」は成立しない**。
+   provider は差し替え先の決定を宣言へ移した後も、配線基盤として
+   `FakeStorageGate` / `CannedPromptFakeRegistrar` / 偽の保存先の署名付き経路の受け口 2 本を
+   参照し続ける (どれも container 差し替えを行わないクラスで、母集団の定義上は
+   「偽物系クラス」に入る)。したがって 3-10 は
+   **「配線基盤 4 件ちょうど、かつ差し替え先を 1 件も含まない」**に改めた。
+   後半の表明が「決定は宣言側にしかない」ことの機械的な裏付けになる。
+
+2. **参照 allowlist (4-4) から provider は外せない**。上と同じ理由。
+   allowlist は宣言クラスが増えて **5 件 → 6 件**になる (provider は残置)。
+
+3. **`providerReferenceExceptions()` は宣言クラス (app/) ではなくテスト側の定数に置いた**。
+   これは「gate が期待する参照集合」であって本番の配線が読む値ではないため、
+   本番コードへ持ち込むと宣言クラスがテスト固有の関心事を抱える。
+   先例 (`FakeClassReferenceInvariantTest` の `FAKE_REFERENCE_ALLOWED`) と同じ置き方にした。
+
+4. **施策 1c の「現在の `tests/` 全走査で違反 0 件」は誤りだった**。
+   実測では `tests/Feature/Billing/` の 5 ファイル・8 箇所が
+   `$this->app->bind(StripeGatewayInterface::class, FakeStripeGateway::class)` を直接書いていた。
+   設計の方針 (例外の登録簿を作らない) は維持し、**レーン側を単一入口へ寄せ替える**ことで解いた —
+   `tests/Pest.php` に `enableFakeExternals()` を新設し (既存の `enableFakeStorage()` と同じ形で
+   provider を実走させる)、8 箇所をそれに置き換えた。正典 v1 の「差し替え処理を 1 本に集約し、
+   全レーンがそれを共有する」に沿う形である。
+
+5. **観測用スクリプトは PHPStan の解析対象ではない**。`phpstan.neon` の `paths` は
+   `app` / `config` / `database` / `routes` で `tests` を含まない。型は同じ規律で書くが、
+   「PHPStan が解析する」という設計の記述は事実と違うので訂正する。
+
+6. **一時環境ファイルの許可キーに `APP_URL` を足した (7 → 8 件)**。
+   外部ログインの転送先ホストを照合するとき、`APP_URL` を渡さないと子の既定値
+   (`http://localhost`) に依存してしまい、照合の期待値を写経することになる。
+   起動側が値を決めて渡し、`FakeWiringProbeRunner::probeAppHost()` から期待値を導く形にした
+   (実サーバは立てない。経路の組み立てにだけ使う)。
+
+7. **P-9 / P-10 を実際に検査できる形へ寄せた**。権限判定を
+   `FakeWiringProbeRunner::assertSafePermissions()` へ切り出し、緩い権限で例外になることを
+   直接固定する。P-10 の timeout 分は一時ディレクトリの**親**を引数で渡せるようにして、
+   timeout 例外の後に親が空であることを観測する。
+
+8. **S-5 は「`DatabaseSeeder` のソースに bug-hunt 専用 seeder の名前が現れないこと」で検査する**。
+   呼び出し列を構文解析するより字面の方が簡単で、通常経路へ載せる書き方は必ずクラス名を書くため
+   目的 (事故 2 の阻止) は達成できる。保証範囲はテストのコメントに明記した。
+
+9. **`ShellFunctionWindow` の誤用と不在を S-11 として固定した** (`cmd_` 以外の名前は
+   `InvalidArgumentException`、見つからなければ `RuntimeException`)。
+
+10. **施策 5 は「1 段落追加」ではなく該当節の書き換えになった**。
+    `docs/architecture.md` の §外部 fake 配線の不変条件 は旧 inventory (テスト側) を
+    正本として説明していたため、1 段落足すだけでは節全体が誤りのまま残る。
+    節を宣言集合の形へ書き換え、投入データの配線と手順書に作業が無いことを併記した。
+    併せて `AGENTS.md` / `docs/architecture.md` に残っていた旧クラス名の参照 4 箇所を直した。

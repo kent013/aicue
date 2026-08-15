@@ -5,8 +5,8 @@ declare(strict_types=1);
 use App\Providers\FakeExternalsServiceProvider;
 use App\Services\Captcha\RecaptchaVerifier;
 use App\Services\Captcha\Testing\RecaptchaVerifierTestFake;
+use App\Support\ExternalFakes\ExternalFakeDeclaration;
 use Illuminate\Support\Facades\Http;
-use Tests\Support\ExternalFakes\ExternalFakeWiringInventory;
 
 /*
  * captcha 到達点 (Google siteverify) の fake 配線を**外向き通信の有無**で固定する。
@@ -30,7 +30,7 @@ function recaptchaFakeSiteverify(): void
 }
 
 test('fake 配線時は secret があっても Google siteverify を叩かずに true を返す', function (): void {
-    $flag = ExternalFakeWiringInventory::EXTERNALS_FLAG;
+    $flag = ExternalFakeDeclaration::EXTERNALS_FLAG;
     $originalFlag = config($flag);
     $originalEnvironment = $this->app['env'];
     $originalSecret = config('services.recaptcha.secret_key');
@@ -56,7 +56,7 @@ test('fake 配線時は secret があっても Google siteverify を叩かずに
 });
 
 test('flag off では secret がある限り siteverify へ 1 回だけ出る (負のコントロール)', function (): void {
-    $flag = ExternalFakeWiringInventory::EXTERNALS_FLAG;
+    $flag = ExternalFakeDeclaration::EXTERNALS_FLAG;
     $originalSecret = config('services.recaptcha.secret_key');
 
     try {

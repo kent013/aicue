@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use Tests\Support\Bughunt\ShellFunctionWindow;
+
 /*
  * Architecture invariant (B-HARNESS-01): bug-hunt の orchestrator gate 2 層が構造的に整合すること。
  *
@@ -31,21 +33,14 @@ function bughuntGateReadSource(string $relativePath): string
 }
 
 /**
- * `^name()` 行から次の `^cmd_` 定義 (または EOF) までの関数窓を切り出す。
+ * `^cmd_name()` 行から次の `^cmd_` 定義 (または EOF) までの関数窓を切り出す。
  *
- * 非貪欲 `\n\}` 終端は使わない: 関数本体が heredoc (`<<'PY'` 等) 内に行頭 `}` を持つと
- * 最短マッチがそこで止まり真の末尾を取り逃す。`/m` + 先読みで「次の cmd_ 定義の直前まで」
- * を取れば heredoc 持ち関数でも安全側に切り出せる。
+ * 切り出しの実体は Tests\Support\Bughunt\ShellFunctionWindow に一本化してある
+ * (BughuntSeedWiringInvariantTest と共有する。同じ切り出しを 2 本持たない)。
  */
 function bughuntGateFunctionWindow(string $source, string $name): string
 {
-    $m = [];
-    // cmd_provision と cmd_provision_all を取り違えないよう `()` まで含めてアンカーする。
-    $matched = preg_match('/^'.preg_quote($name, '/').'\(\)[\s\S]*?(?=^cmd_|\z)/m', $source, $m);
-    expect($matched)->toBe(1, "関数窓が見つからない: {$name}");
-
-    /** @var array{0: string} $m */
-    return $m[0];
+    return ShellFunctionWindow::ofCommand($source, $name);
 }
 
 /**

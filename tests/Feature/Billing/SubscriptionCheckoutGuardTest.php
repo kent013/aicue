@@ -9,7 +9,6 @@ use App\Models\Billing\PlanPrice;
 use App\Models\Organization;
 use App\Models\User;
 use App\Services\Billing\Contracts\StripeGatewayInterface;
-use App\Services\Billing\Fakes\FakeStripeGateway;
 use App\Services\Billing\SubscriptionService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Str;
@@ -63,7 +62,7 @@ function startGuardCheckout(Organization $organization, User $user, ?Plan $plan 
 }
 
 beforeEach(function (): void {
-    $this->app->bind(StripeGatewayInterface::class, FakeStripeGateway::class);
+    enableFakeExternals();
 });
 
 test('非 production では未 sync の test mode Price でも checkout できる', function (): void {

@@ -2,58 +2,48 @@
 
 declare(strict_types=1);
 
+/*
+|--------------------------------------------------------------------------
+| 偽の外部サービスの capability flag
+|--------------------------------------------------------------------------
+|
+| **何をどの偽物へ差し替えるか、どの環境で許すかの正本は
+| App\Support\ExternalFakes\ExternalFakeDeclaration である**。
+| 本ファイルが持つのは capability ごとの真偽値 3 本だけで、対象の列挙は持たない
+| (列挙をここへ写すと必ず宣言とずれる)。
+|
+| 3 本とも既定 false = 未設定の環境では完全 no-op。production では
+| ProductionEnvGuard が true を起動時 fail-fast で拒否する (設定値とプロセスの
+| 実環境変数の両方を見る)。
+|
+*/
+
 return [
 
     /*
-    |--------------------------------------------------------------------------
-    | 外部サービス fake 化の capability flag
-    |--------------------------------------------------------------------------
-    |
-    | fake_externals: **外部サービス fake の capability flag** (既定 false = no-op)。
-    | true のとき FakeExternalsServiceProvider::register() が以下を fake 実装へ bind する:
-    |   - Stripe 課金 gateway (checkout / portal / auto-recharge)
-    |   - captcha 検証器 (RecaptchaVerifier → RecaptchaVerifierTestFake)
-    |   - SSO driver 解決点 (SocialiteDriverResolver → FakeSocialiteDriverResolver)
-    | **SSO だけは env allowlist が狭い** (testing / bughunt.local のみ。**local を除外**)。
-    |  SSO fake は未認証 GET 2 本で canned アカウントへログインできる = 認証バイパスであり、
-    |  かつ local は実 IdP 連携を確認する唯一の環境であるため
-    |  (docs/architecture.md §外部到達点の目録 (標準形 v1) を参照)。
-    | Stripe / captcha の有効化は allowlist 環境 (local / testing / bughunt.local) に限定され、
-    | production では ProductionEnvGuard が true を deploy 時 fail-fast で拒否する。
-    | 既定 false = 本 flag 未設定の環境では完全 no-op。
-    |
-    | ※ LLM (Prism) fake はこの flag から分離され fake_llm が capability flag。
-    |
+    | fake_externals: 決済 gateway / 人間性確認 / 外部ログインの解決点を偽物へ差し替える。
+    | 許可環境は ExternalFakeDeclaration::EXTERNAL_ENVIRONMENTS。
+    | **外部ログインだけ許可環境が狭い** (SSO_ENVIRONMENTS。local を除く) —
+    | 未認証 GET 2 本で canned アカウントに入れる = 認証バイパスであり、かつ local は
+    | 実 IdP 連携を確かめる唯一の環境であるため。
     */
 
     'fake_externals' => (bool) env('TESTING_FAKE_EXTERNALS', false),
 
     /*
-    |--------------------------------------------------------------------------
-    | LLM (Prism) fake 化の capability flag
-    |--------------------------------------------------------------------------
-    |
-    | fake_llm: LLM (Prism) fake を install するか。config 既定 false = real LLM。
-    | bughunt は既定 real-llm (scripts/bug-hunt-shard.sh が TESTING_FAKE_LLM=false を明示注入)。
-    | --fake-llm 指定時のみ true 注入 → FakeExternalsServiceProvider::boot が
-    | CannedPromptFakeRegistrar を install (env allowlist bughunt.local のみ)。
-    | production では ProductionEnvGuard が true を fail-fast で拒否する。
-    |
+    | fake_llm: LLM (Prism) の応答を偽物へ差し替える。
+    | 許可環境は ExternalFakeDeclaration::LLM_ENVIRONMENTS (bughunt.local のみ) —
+    | Prompt::$fake はプロセス大域の static のため testing / local を外す。
+    | bug-hunt の既定は実 LLM で、--fake-llm 指定時のみ true が注入される。
     */
 
     'fake_llm' => (bool) env('TESTING_FAKE_LLM', false),
 
     /*
-    |--------------------------------------------------------------------------
-    | S3 ストレージ fake 化のトグル (骨子)
-    |--------------------------------------------------------------------------
-    |
-    | fake_storage: S3 ストレージ fake トグル (骨子)。config 既定 false = 本番安全側。
-    | bughunt は既定 fake (scripts/bug-hunt-shard.sh が TESTING_FAKE_STORAGE=true を明示注入)。
-    | --real-storage 指定時のみ false 注入。
-    | ※ 実 S3 接続の実配線は本 item スコープ外 (consumer 未実装 = inert)。
-    | production では ProductionEnvGuard が true を fail-fast で拒否する。
-    |
+    | fake_storage: S3 の保存先を偽物へ差し替える。
+    | 許可環境は ExternalFakeDeclaration::STORAGE_ENVIRONMENTS。
+    | testing は自動テスト実行中に限る (追加条件は FakeStorageGate が持つ)。
+    | bug-hunt の既定は偽物で、--real-storage 指定時のみ false が注入される。
     */
 
     'fake_storage' => (bool) env('TESTING_FAKE_STORAGE', false),

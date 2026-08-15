@@ -3,8 +3,6 @@
 declare(strict_types=1);
 
 use App\Models\User;
-use App\Services\Billing\Contracts\StripeGatewayInterface;
-use App\Services\Billing\Fakes\FakeStripeGateway;
 use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -94,7 +92,7 @@ test('current organization が無いユーザーは 404', function (): void {
 
 test('POST /billing/checkout は plan_code + subscription_attempt_token で成立する (P9 の冪等 token 必須)', function (): void {
     [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
-    $this->app->bind(StripeGatewayInterface::class, FakeStripeGateway::class);
+    enableFakeExternals();
 
     $response = $this->actingAs($owner)->post('/billing/checkout', [
         'plan_code' => 'standard',

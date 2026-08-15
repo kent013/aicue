@@ -2,9 +2,6 @@
 
 declare(strict_types=1);
 
-use App\Services\Billing\Contracts\StripeGatewayInterface;
-use App\Services\Billing\Fakes\FakeStripeGateway;
-
 /*
  * P8b (bs-11): Customer Portal の事前ガード。
  *
@@ -16,7 +13,7 @@ use App\Services\Billing\Fakes\FakeStripeGateway;
 test('未契約 org (サブスク行なし) の owner は portal に到達せず error flash で戻る', function (): void {
     [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     // Fake gateway を bind しておき「呼ばれない」ことを到達判定に使う
-    $this->app->bind(StripeGatewayInterface::class, FakeStripeGateway::class);
+    enableFakeExternals();
 
     $response = $this->from('/billing')->actingAs($owner)->post('/billing/portal');
 
@@ -29,7 +26,7 @@ test('未契約 org (サブスク行なし) の owner は portal に到達せず
 test('ActiveFreePlan (canceled サブスク行が残る) org の owner も portal に到達しない', function (): void {
     [$organization, $owner] = createOrganizationWithOwner(); // free_plan_code='personal'
     createFakeSubscription($organization, status: 'canceled');
-    $this->app->bind(StripeGatewayInterface::class, FakeStripeGateway::class);
+    enableFakeExternals();
 
     $response = $this->from('/billing')->actingAs($owner)->post('/billing/portal');
 
@@ -40,7 +37,7 @@ test('ActiveFreePlan (canceled サブスク行が残る) org の owner も porta
 test('有償サブスクを持つ owner は従来どおり Portal URL へ遷移する', function (): void {
     [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     contractPaidPlan($organization);
-    $this->app->bind(StripeGatewayInterface::class, FakeStripeGateway::class);
+    enableFakeExternals();
 
     $response = $this->actingAs($owner)->post('/billing/portal');
 
