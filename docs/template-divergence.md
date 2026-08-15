@@ -809,3 +809,80 @@ deny-by-default の目録 / 撤去済み参照の gate) はそのまま採って
 - gate: `tests/Architecture/ClaudeHooksWiringTest.php`
 - 設計: `devnotes/20260815-1539-claude-hooks-settings-wiring/`
 - 規約の正本: `AGENTS.md` §常設 hook 配線
+
+---
+
+## D19 ✅ 経路キャッシュ起動での middleware 後付けは「走らせない」側の契約を維持する (専用の実行点クラスへは移行しない)
+
+家系の正典 (機能台帳 `route-cache-safe-middleware-attach` の v1) は、経路の一覧が組み上がった後に
+走らせたい処理を**専用の実行点クラス 1 つ**へ集約し、経路キャッシュ起動でも後付けを効かせる形である。
+本アプリはそこへ**移行しない**。この判断を逸脱として登録する。
+
+| 観点 | 家系の正典 / テンプレート | 本アプリ |
+|---|---|---|
+| 実行点 | 専用クラス 1 つ (`AfterRoutesLoaded` 相当) へ集約 | 2 つの binder が各々 `Application::booted()` を使う |
+| 経路キャッシュ起動での契約 | 容器の `routes` 束縛の張り替えを捕まえ、読み込まれた直後に後付けを走らせる | **走らせない**。実効は `route:cache` 生成時の焼き込み |
+| 入口の絞り込み | 素の起動完了フックの直呼びを走査で禁止 | `PostBootRouteMutationInventoryTest` が入口を 2 binder に絞る (deny-by-default) |
+| 経路キャッシュ起動での実証 | 別プロセスで起動して後付けの残存を確認 | 同一プロセスで「焼き込みの入力」と「欠落時の剥落」を確認 (別プロセス起動は導入しない) |
+
+### なぜ正当な差分か (logic-driven)
+
+1. **前提が今は成立している**。本リポジトリにデプロイ定義の実体は無く、`route:cache` を実行する
+   記述も追跡下に 1 件も無い。ただし言えるのは「**いま定めた走査条件で検出される発生経路が無い**」
+   までである (「発生確率がゼロ」とも「管理下に発生経路が無い」とも書かない。走査条件が拾わない
+   書き方は `tests/Architecture/RouteCacheExemptionPremiseTest.php` の説明が列挙する)。
+2. **毎デプロイ再生成の機械強制は今は採れない**。`AGENTS.md` の運用要件 (route:cache) が
+   「存在しない基盤のための preflight 機構を先回りして作らないこと (思考原則 2)」と明記しており、
+   デプロイ基盤そのものが無い段階で preflight を作るのは、その規約に正面から反する。
+3. **正典の形は Laravel 13 では 4 つの問題を同時に解く必要がある** — 容器の `routes` 束縛の
+   張り替えの捕捉 / その束縛がまだ無いときに張り替えが発火しない穴の手当て / 経路一覧の実体ごとの
+   冪等 / cached 起動で起動を止めると `route:list` も `route:clear` も落ちて復旧手段を失う問題への
+   例外設計。実証には別プロセスで起動する検査基盤も要る。
+   **正典を採る利益は「運用要件を 1 つ消せること」であり、その運用要件が効く相手 (デプロイ基盤) が
+   まだ無い**。基盤を作る PR で実物の手順と突き合わせて設計する方が確実である。
+4. **これは保留ではなく明示の判断である**。期限で自然解消せず、**前提が崩れたときに解消する**。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「後付けした保護は、実効の経路に必ず載る」
+> 「後付けの入口は 2 つの binder に限られる」
+> 「経路名が消えたら起動を止める (無防備なまま公開しない)」
+
+担い手は次のとおりで、新設したのは下 3 行だけである (既存目録と二重管理にしない)。
+
+| 不変条件 | 担い手 |
+|---|---|
+| どの route に何を付けるべきか (対象と件数) | `ThrottleCoverageInventoryTest` / `RecentAuthRouteTest` / `TwoFactorStepUpInventoryTest` / `PasskeyRouteProtectionTest` |
+| 後付けの入口が 2 binder に限られること | `PostBootRouteMutationInventoryTest` |
+| 後付けの契約 (cached では resolver すら呼ばない / 経路が引けなければ起動を止める / 冪等 / 列の順) | `RouteMiddlewareBinderTest` / `RouteThrottleBinderTest` |
+| 実際に付いた middleware 列が、直列化の準備を通しても焼き込みの入力へ欠落なく移ること | `tests/Feature/Security/RouteCacheBakedProtectionTest.php` (検査 1) |
+| 焼き込みが欠けた経路一覧では保護が実際に外れること | `tests/Feature/Security/RouteCacheBakedProtectionTest.php` (検査 2) |
+| この逸脱を許す前提 (直接書かれた `route:cache` / 空白だけを挟む `artisan optimize` が無いこと。デプロイ定義の不在は早期の気づき) | `tests/Architecture/RouteCacheExemptionPremiseTest.php` |
+
+**保証範囲を誇張しない**: `RouteCacheBakedProtectionTest` が固定するのは同一プロセス内の
+「直列化の準備 → compile」までで、**cached 起動そのものの再現ではない**。
+`RouteCacheExemptionPremiseTest` が見るのは追跡下の文字列までで、動的に組み立てた実行・
+オプションを挟む書き方・リポジトリの外にある手順には沈黙する。
+説明として `route:cache` の語を持つ既存ファイルは**件数を完全一致で pin** して扱い
+(増減のどちらでも赤になる)、走査から丸ごと外れているのは**同テスト自身の 1 件だけ**である
+(自分が検出したい語を負のコントロールの入力として持つため。その 1 ファイルの中は見えない)。
+また**デプロイ定義の検出は網羅を主張しない** (新しい CI 基盤やファイル名は拾えない)。
+主前提を固定するのは `route:cache` 側の検査である。
+
+### 再検討の条件 (解消条件)
+
+- リポジトリに**デプロイ定義**の実体が入ったとき
+- `route:cache` (または `artisan optimize`) を実行する記述が入ったとき
+- 家系の機能台帳の裁定が変わったとき
+
+前の 2 つは `RouteCacheExemptionPremiseTest` の検査条件と**同じ言葉**で書いてある。
+どちらかで赤くなったら、正典の形への移行か毎デプロイ再生成の機械強制かを**同じ PR で**決めること。
+
+### 関連
+
+- 実装: `app/Support/Http/RouteMiddlewareBinder.php` / `app/Support/Http/RouteThrottleBinder.php`
+- gate: `tests/Architecture/RouteCacheExemptionPremiseTest.php` /
+  `tests/Feature/Security/RouteCacheBakedProtectionTest.php` /
+  `tests/Architecture/PostBootRouteMutationInventoryTest.php`
+- 設計: `devnotes/20260815-2100-route-cache-middleware-attach/`
+- 契約の正本: `docs/app-integration-guide.md` §7c
