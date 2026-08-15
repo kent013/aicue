@@ -23,7 +23,6 @@
 |---|---|---|---|---|---|---|---|
 | T085 | bfcache 実復元の iOS 実機受入確認 | test | Playwright 不可のため実機で確認+記録 | High | standalone | [設計](devnotes/20260803-0053-aigenba-alignment/) | 2026-08-03 03:10 |
 | T110 | 認証手段変更のメール通知ポリシーの統一設計 | backend | passkey/2FA/SSO の増減通知を一貫したポリシーとして設計する(T108 S7 は監査ログのみで通知は見送り) | Low | standalone | [設計](devnotes/20260805-1550-security-audit-remediation/) | 2026-08-05 17:45 |
-| T165 | Browser テストレーンの導入自動化 (導入スクリプト・事前確認・CI キャッシュ/失敗時証跡) | infrastructure | ブラウザ導入の自動化とCIキャッシュ/証跡収集 | High | incremental | [設計](devnotes/20260815-1113-browser-test-lane-automation/) | 2026-08-15 11:53 |
 | T166 | パスキー設定の本番 fail-fast と laravel/passkeys の版 pin | backend | パスキー設定の本番ガードと版 pin | High | standalone | [設計](devnotes/20260815-1111-passkey-config-hardening/) | 2026-08-15 11:53 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
