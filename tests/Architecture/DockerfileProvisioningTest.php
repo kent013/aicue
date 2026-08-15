@@ -35,3 +35,19 @@ test('static guard: docker/Dockerfile が字幕焼き込み用 CJK フォント 
     // 字幕 (Noto Sans CJK JP) のフォント解決前提。tofu 化を防ぐ退行ガード (独立行アンカー)
     expect(dockerfileContents())->toMatch('/^[ \t]*fonts-noto-cjk[ \t]*\\\\?[ \t]*$/m');
 });
+
+test('static guard: docker/Dockerfile がコード索引ツールを版固定で導入している', function (): void {
+    // .claude/settings.json の PostToolUse hook が差分更新を回す前提。版を上げるときは
+    // このテストも同じ変更で直す = 対象外拡張子 (ClaudeHooksWiringTest の台帳) の棚卸しが
+    // レビューで必ず見える。
+    expect(dockerfileContents())->toMatch('/^RUN uv tool install code-review-graph==2\.3\.7$/m');
+});
+
+test('static guard: docker/Dockerfile が索引ツールの導入先を固定し検索パスへ載せている', function (): void {
+    // 導入先が HOME 由来だと RUN の位置を動かしただけで別ディレクトリへ落ち、
+    // hook がセッションごとに「未導入」と告知するようになる。
+    $contents = dockerfileContents();
+
+    expect($contents)->toMatch('#^ENV UV_TOOL_BIN_DIR=/home/vscode/\.local/bin$#m');
+    expect($contents)->toMatch('#^ENV PATH="/home/vscode/\.local/bin:\$PATH"$#m');
+});
