@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Auth;
 use App\DataTransferObjects\Auth\SessionStatusDto;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\Auth\SessionStatusResource;
+use App\Support\Auth\SessionEpoch;
 use Illuminate\Http\Request;
 
 /**
@@ -20,13 +21,28 @@ use Illuminate\Http\Request;
  * guest でも 200 + `authenticated: false` を返し、判定を明示 boolean 一本にする
  * (認証状態は同一オリジンの呼び出し元が cookie で既に知りうる情報であり、
  * これ自体は新たな情報露出にならない)。
+ *
+ * **秘匿を解く唯一の根拠がこの応答である**。復元された文書が持つ描画世代の印を
+ * `X-Session-Epoch` ヘッダで受け取り、いまのセッションの世代と一致するかを
+ * `sessionEpochMatches` で返す。認証済みでも世代が違えば画面側は開示せず読み直す。
+ * **現世代の値そのものは応答に載せない** (一致か否かだけ分かればよい)。
  */
 final class SessionStatusController extends Controller
 {
     public function __invoke(Request $request): SessionStatusResource
     {
-        return SessionStatusResource::make(
-            new SessionStatusDto(authenticated: $request->user() !== null),
-        );
+        // 照合に使うのは **要求ヘッダで運ばれた描画世代** だけである。
+        // 要求の Cookie ヘッダに載る世代 cookie は画面側から書き換えられる値なので、
+        // 一致判定には一切使わない (開示の根拠に client 側の状態を混ぜない)。
+        // 受け取ったヘッダ値はログにも応答にも出さない (外部由来の可変文字列)。
+        $submitted = $request->headers->get(SessionEpoch::HEADER_NAME);
+
+        return SessionStatusResource::make(new SessionStatusDto(
+            authenticated: $request->user() !== null,
+            sessionEpochMatches: SessionEpoch::matches(
+                is_string($submitted) ? $submitted : null,
+                SessionEpoch::current($request),
+            ),
+        ));
     }
 }

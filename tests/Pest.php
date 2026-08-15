@@ -18,6 +18,7 @@ use App\Services\Organization\OrganizationProvisioningService;
 use App\Services\Recovery\StuckWorkRecoverySweeper;
 use App\Services\Recovery\StuckWorkStreamRegistry;
 use App\Services\Storage\Fakes\FakeObjectStore;
+use App\Support\ExternalFakes\ExternalFakeDeclaration;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
@@ -335,7 +336,7 @@ function attachProjectMember(
  */
 function enableFakeStorage(): void
 {
-    config()->set('testing.fake_storage', true);
+    config()->set(ExternalFakeDeclaration::STORAGE_FLAG, true);
 
     $provider = new FakeExternalsServiceProvider(app());
     $provider->register();
@@ -346,4 +347,24 @@ function enableFakeStorage(): void
     app('router')->getRoutes()->refreshNameLookups();
 
     Storage::fake(FakeObjectStore::DISK);
+}
+
+/**
+ * 宣言された外部サービスの偽物 (決済 gateway / 人間性確認 / 外部ログインの解決点) を
+ * レーンで有効にする。
+ *
+ * ★レーン側で個別の偽物を container へ直接結ばない。差し替えの入口は
+ *   「宣言 (ExternalFakeDeclaration) + 配線 provider」の 1 本だけであり、
+ *   レーンもその 1 本を共有する (LaneExternalFakeBindingTest が直結を静的に禁じる)。
+ * ★有効になるのは宣言のうち EXTERNALS_FLAG を持つ差し替え**全部**である
+ *   (1 つだけ選んで立てる口は用意しない = 宣言と実際の差し替えを一致させるため)。
+ *
+ * 各テストは setUp の refreshApplication で fresh app + fresh config を得るため、
+ * 明示的な後始末は不要 (テスト間リークしない)。
+ */
+function enableFakeExternals(): void
+{
+    config()->set(ExternalFakeDeclaration::EXTERNALS_FLAG, true);
+
+    (new FakeExternalsServiceProvider(app()))->register();
 }

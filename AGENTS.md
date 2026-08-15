@@ -414,8 +414,22 @@ PHP の `echo` / `goto` / `global` の 3 文と、開始タグ付きの出力記
   **保証しないもの**は `docs/architecture.md` §パイプライン通し確認 が正本。
 - **worktree 既定**: bug-hunt は worktree から走る (`scripts/bughunt-worktree-hook.sh` の PreToolUse ガードが
   main 直叩きを早期に止める。配線は `.claude/settings.json` に常設済み。§常設 hook 配線)。
-- **スケルトン**: `screens.md` / `operations.md` / `stories/` はテンプレートでは空スケルトン。初回に
-  `php artisan route:list` から生成する (SKILL.md Phase 1)。ドリフト検知は `scripts/bug-hunt-inventory-check.sh`。
+- **目録は生成物 (T176)**: `screens.md` / `operations.md` は手で書かない。実装の機械事実
+  (`php artisan bughunt:inventory-scan`) と、人が書く注釈 (`inventory/annotations.toml`) ・
+  散文 (`inventory/notes-*.md`) から `python3 scripts/bug-hunt-inventory.py generate` で作る。
+  route を足したら**注釈を 1 行足して再生成する** (表の行は手で書かない)。
+  ドリフト検査は `scripts/bug-hunt-inventory-check.sh` (判定は生成器側。exit 0=一致 /
+  2=致命 / 3=ドリフト) で、守るのは 4 つ — 再生成の忘れ・生成物の手編集 (段 3 の byte 比較) /
+  意味の欠落 = 新しい route に割当も対象外理由も無い (段 2) / 抽出の故障 = 環境違い・母集合 0 件
+  (段 1) / 機能カタログの代表機構が実在しないこと (段 4)。
+  **見るのは `web` group を宣言した面だけ**である。`web` を宣言していない面 (機械向け API /
+  Filament 管理画面 / MCP / **現在の** webhook の大半) には沈黙する。面として除くのは
+  先頭セグメントの `oauth` と `livewire-{hash}` の 2 つだけで、それ以外で `web` を宣言した
+  route は webhook であっても必ず目録に入り注釈を要求される (実例: `webhooks.ses` は
+  操作表に載り区分 `外`)。web 面のうち探索の分母に載せないものは注釈の区分 `外` として
+  **目録に見える形で**理由付きで宣言する。
+  テンプレート正典との差 (機能カタログを生成しない / 注釈は TOML / 中間 JSON を持たない) は
+  `docs/template-divergence.md` **D20**。`stories/` はテンプレートでは空スケルトンのままである。
 - **capability 語彙**: finding の `capability_tag` の正本は
   `.claude/skills/app-bug-hunt/capability-catalog.md`(SOP→シナリオ→撮影→レンダの責務境界を
   先に定義し、その上に capability_id を割り当てる。未割当は `unmapped`・tag 不能は `unknown`)。
@@ -428,6 +442,10 @@ PHP の `echo` / `goto` / `global` の 3 文と、開始タグ付きの出力記
 (バージョンは `config/template.php` の `template_version`)。
 テンプレート構造からの**意図的な逸脱**は `docs/template-divergence.md` に
 logic-driven な理由と「保証し続ける不変条件」を記録してから行う。
+**書式の正本は同ファイルの規約節**で、形式は
+`tests/Architecture/TemplateDivergenceLedgerFormatTest.php` が機械で強制する
+(登録メタ表の 9 行・状態の値域・対象パスの実在と重複・件数の 3 点一致)。
+書式の中身は本書に写さない (2 か所に書くと必ず食い違う)。
 
 ## ドメイン固有規約
 
@@ -613,7 +631,7 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
      `SocialProviderTrustPolicyTest` へ委譲する。
    - **保証範囲を誇張しない**: これは**検知**であって**遮断ではない**。
      SSO だけは別途 fake 配線 (testing / bughunt.local) で実 IdP への遷移を塞いでいるが、
-     それは**本目録の効果ではない** (`ExternalFakeWiringInventory` が正本)。
+     それは**本目録の効果ではない** (`ExternalFakeDeclaration` が正本)。
      走査根は `app/` のみで `routes/` / `config/` は見ない。
      委譲先の assert の中身を弱める改変、次元そのものの数え落とし、部分修飾名、
      文字列キーの container 解決だけの経路、vendor 内部から出る通信、他種別の宛先集合、
@@ -621,7 +639,7 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
      **保証しないものの完全な一覧は `docs/architecture.md` §外部到達点の目録 (標準形 v1) が正本**
      (ここは要約であり、増減はそちらで管理する)。
    - 非本番の captcha は `testing.fake_externals` で `RecaptchaVerifierTestFake` へ bind される
-     (`ExternalFakeWiringInventory`)。**SSO も同じ flag で fake する**が、env allowlist は
+     (`ExternalFakeDeclaration`)。**SSO も同じ flag で fake する**が、env allowlist は
      `testing` / `bughunt.local` のみで **`local` を除く** (認証バイパス面の最小化と
      実 IdP 連携の確認手段の温存)。
    - 詳細は `docs/architecture.md` §外部到達点の目録 (標準形 v1)。
@@ -742,7 +760,22 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
       独立した監視対象である。保証しないもの (500 件上限は公平性を保証しない / S3 削除に
       失敗した孤児は自動では拾えない / 実行しない指定の候補件数は上界にすぎない) は
       `docs/architecture.md` §滞留回収の共通基盤 が正本
-15. **組織アクセスの失効の窓口と目録 (T174 / 家系の正典 v2)**: 組織の役割を書き込む経路は、
+15. **表ごとの保持期限の分類 (T175)**: migration で表を足したら、
+    `tests/Support/Retention/RetentionTableRegistry.php` へ区分と 30 文字以上の根拠を
+    1 行足す (deny-by-default。`RetentionTableClassificationTest` が実スキーマの表一覧と
+    両方向で突き合わせる)。区分は 6 種で、期限が決まっていないなら「未確定」に載せる
+    (隠さない。件数と表名は gate が現在値ちょうどで pin する)。
+    - **年数・起算点・purger の配線は台帳に書かない**。課金 7 年の正本は
+      `BillingRetentionTarget`、各バッチの期限は各 config の解決点クラスであり、
+      台帳が持つのは区分・根拠・保持者の名前だけである
+    - **保証範囲を誇張しない**: 見るのは表単位であり列は見ない。行ごとの寿命の違いも
+      表現しない。Schedule への配線も見ない (コマンドが実在すれば RC-5 は通る)。
+      分類の意味が正しいかは人間のレビュー対象で、実データが消えることは
+      各掃除バッチの behavioral テストが担う。**外部キーをどう読むか
+      (`on delete` の動作別の扱い) は本書に写さず**、正本の
+      `docs/architecture.md` §表ごとの保持期限の分類 へ委譲する
+      (規約本文に条件を写すと必ず食い違う)
+16. **組織アクセスの失効の窓口と目録 (T174 / 家系の正典 v2)**: 組織の役割を書き込む経路は、
     **その変更と同じトランザクションの中で** `Services/OAuth/OrganizationAccessRevoker` を呼ぶか、
     `OrgAccessRevocationExemption` + 30 文字以上の根拠で免除目録へ登録する
     (`OrganizationAccessRevocationChokePointTest` が deny-by-default で強制。

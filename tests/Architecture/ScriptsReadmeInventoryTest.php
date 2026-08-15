@@ -45,6 +45,12 @@ function scriptsDirectoryFiles(string $scriptsDir): array
             continue;
         }
         $relative = str_replace('\\', '/', substr($file->getPathname(), strlen($scriptsDir) + 1));
+        // Python の bytecode キャッシュは git 管理外の生成物 (.gitignore 済み)。
+        // 台帳は「人が書いたスクリプト」の一覧なので、自己テストを手で走らせた副産物で
+        // 無関係な gate が赤くならないように母集団から外す。
+        if (str_contains($relative, '__pycache__/')) {
+            continue;
+        }
         $found[] = $relative;
     }
 

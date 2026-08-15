@@ -4,17 +4,83 @@
 逸脱が正当なのは **logic-driven(ドメイン要件起因)のときだけ**。互換・UX・作業量を理由にした
 逸脱は記録せず是正する(`docs/app-integration-guide.md` §0)。
 
+**書式の正本は本節である**。家系の統一形式 (機能台帳 lctl の feature
+`template-divergence-ledger` が 2026-08-15 に確定した形) に従う。形式は
+`tests/Architecture/TemplateDivergenceLedgerFormatTest.php` が機械で強制する。
+
+登録エントリ: 23 件
+
 ## 記録の原則
 
 - 判定軸は「ライブラリ/実装が同じか」でなく「**同じ不変条件を同じタイミング/抽象度で保証するか**」。
   不変条件が揃っていれば構文差は許容
-- 各エントリには (a) なぜ logic-driven か (b) テンプレートの不変条件をどの機構で保証し続けるか
-  を必ず書く
+- **登録は逸脱を作る変更そのものに含める**。後でまとめて書かない。まだ実在しない逸脱
+  (これから作る予定) は登録しない — 予定の管理は `docs/TODO.md` の役目である
+- **解消した逸脱は登録から消す**。全パスが戻ったならエントリごと、一部が戻ったなら
+  そのパスを対象パス欄から削る。状態の語で「解消済み」を表さない。
+  台帳の中に履歴の節を作らない (走査の対象外になる領域は回避口になるため)
+- 番号 (`D<n>`) は**再利用しない**。削除しても後続を詰めない (欠番は正常)。
+  他リポジトリから参照するときは `aicue:D<n>` と書く
+- **登録するか迷ったら登録する**。テンプレートの実物は手元に無いので「テンプレートに無い領域への
+  上積み」か「ひな形から外れた判断」かを本アプリだけで確定できないことがある。
+  誤登録はエントリを削除すれば是正できるが、登録漏れには気付けない。台帳リポジトリの巡回から
+  「記録されるべき乖離」として届いた指摘は、この理由で登録する側へ倒す
+
+## 登録メタ表 (9 行ちょうど・この順序)
+
+| 行 | 値域 |
+|---|---|
+| 対象パス | リポジトリ相対のファイルパスをバッククォート囲みで 1 件以上。区切りは半角スペースとスラッシュと半角スペース。glob・絶対パス・上位への相対指定は不可。ファイルとして実在すること。**全登録の和集合で重複しないこと** |
+| 業務要件起因の説明 | なぜドメイン要件のせいでテンプレートの形から外れたか (1〜2 文) |
+| 揃え続ける不変条件と保証機構 | 何を揃え続け、どの機構が保証するか |
+| 再判定の条件 | 何が変わったら見直すか (**恒久の登録にも必須**) |
+| 決めた日 | `YYYY-MM-DD`。逸脱を最初に決めた日 (再判断で書き換えない)。未来日は不可 |
+| 決めた人 | `オーナー` / `開発者` |
+| 根拠 | `T<n>` (3 桁以上のゼロ埋め。`docs/TODO.md` / `docs/TODO-closed.md` の表に実在) または `devnotes/<dir>/` (ディレクトリが実在) |
+| 状態 | `恒久` / `監視中` |
+| 見直し期限 | `監視中` は `YYYY-MM-DD` (基準日から 400 日以内)。`恒久` は全角ダッシュ 1 文字 |
+
+- **`恒久` も `監視中` も「今ある逸脱」を表す**。解消を意味する語は値域に無い
+- `監視中` にするのは、期限付きで能動的に見直す根拠 (期限・予定時期・追跡中の事象) が
+  あるときだけである。解消の条件が書けることは `監視中` の根拠にならない
+  (`恒久` の登録も再判定の条件を必ず持つので、条件の有無は区別にならない)
+- セルの中に縦棒を書かない (エスケープしても解釈しない)。表の区切りを使いたくなる内容は
+  エントリ本文の節へ書く
+
+## 見直し期限が切れたときの直し方 (4 通り)
+
+1. 逸脱を解消して登録を消す
+2. `恒久` へ変えて理由を足す
+3. 期限を延ばして再判断の根拠を足す
+4. 対象を分けて個別に判断する
+
+**検査を緩めることは選択肢に入れない**。期限切れで CI が赤くなるのは仕様である。
+
+## この登録簿が保証しないもの
+
+- 実ファイルがテンプレートから逸脱したのに登録が無いこと (登録漏れそのもの) は検出できない。
+  実体との突合は台帳リポジトリの巡回が行う (家系の裁定 AG-159)
+- 内容としてテンプレート準拠へ戻したのにファイルが残っている登録も検出できない
+- 登録の中身が正しいことは機械では見ない (空でないこと・値域に収まっていることだけを見る)
+- **削除した番号の再利用**は検出できない (使用済み番号の履歴を持たないため。
+  再利用しないことは人が守る規約である)
 
 ## エントリ形式
 
 ```
-## D1 ✅ <逸脱の要約>
+## D1 <逸脱の要約>
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `app/Example.php` |
+| 業務要件起因の説明 | ... |
+| 揃え続ける不変条件と保証機構 | ... |
+| 再判定の条件 | ... |
+| 決めた日 | 2026-01-01 |
+| 決めた人 | 開発者 |
+| 根拠 | T001 |
+| 状態 | 恒久 |
+| 見直し期限 | — |
 
 | 観点 | テンプレート | 本アプリ |
 |---|---|---|
@@ -29,12 +95,23 @@
 
 ### 関連
 - 実装: ...
-- テンプレート側の根拠: ...
 ```
 
 ---
 
-## D1 ✅ Tier B スキーマの先取り (Cut / Take を振る舞い無しで先行作成)
+## D1 Tier B スキーマの先取り (Cut / Take を振る舞い無しで先行作成)
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `app/Models/Cut.php` / `app/Models/Take.php` |
+| 業務要件起因の説明 | 中核集約のスキーマをフェーズ 1 で確定させ、後続フェーズが列追加なしに振る舞いだけを足せるようにするため、route と UI を伴わないモデルを先に置いた |
+| 揃え続ける不変条件と保証機構 | route を張った時点で `NestedRouteIdorDefenseTest` の登録と relation 経由解決を同時に行う。保護キーの不含は `MassAssignmentSafetyTest` が走査する |
+| 再判定の条件 | Cut / Take に route と UI が付いたとき (SourceDocument と同じく本登録から外す) |
+| 決めた日 | 2026-07-10 |
+| 決めた人 | 開発者 |
+| 根拠 | T001 |
+| 状態 | 恒久 |
+| 見直し期限 | — |
 
 | 観点 | テンプレート | 本アプリ |
 |---|---|---|
@@ -67,7 +144,19 @@ NestedRouteIdorDefenseTest inventory 登録と relation 経由解決 + 404 テ�
   `resources/js/components/features/manual/SourceDocumentUpload.svelte`
 - 設計: `devnotes/20260710-2137-aicue-domain-foundation/detailed-design.md` 施策2/4/5
 
-## D2 ✅ 循環 FK の 3 段階マイグレーション (cuts の parent_cut_id / adopted_take_id を後付け)
+## D2 循環 FK の 3 段階マイグレーション (cuts の parent_cut_id / adopted_take_id を後付け)
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `database/migrations/2026_07_10_000300_create_cuts_table.php` / `database/migrations/2026_07_10_000500_add_foreign_keys_to_cuts_table.php` |
+| 業務要件起因の説明 | 循環 FK と自己参照 FK は単一の CREATE では構築できず DB 実装に依存して不安定になるため、cuts → takes → FK 後付けの 3 段に分けた |
+| 揃え続ける不変条件と保証機構 | 親削除時の参照整合 (nullOnDelete) と down() の逆順 drop。`RefreshDatabase` が全 Feature テストで up を暗黙検証する |
+| 再判定の条件 | cuts と takes の循環参照が解消されたとき / 採用する DB が単一 CREATE での循環 FK を扱えるようになったとき |
+| 決めた日 | 2026-07-10 |
+| 決めた人 | 開発者 |
+| 根拠 | T001 |
+| 状態 | 恒久 |
+| 見直し期限 | — |
 
 | 観点 | テンプレート | 本アプリ |
 |---|---|---|
@@ -85,7 +174,19 @@ RefreshDatabase が全 Feature テストで migration の up を暗黙検証す�
 ### 関連
 - 実装: `database/migrations/2026_07_10_000300_create_cuts_table.php` / `..._000500_add_foreign_keys_to_cuts_table.php`
 
-## D3 ✅ Category `sort_order` の Service 専有 (fillable 外・Store/Update で受けない)
+## D3 Category `sort_order` の Service 専有 (fillable 外・Store/Update で受けない)
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `app/Services/Manual/CategoryService.php` / `app/Models/Category.php` |
+| 業務要件起因の説明 | 並べ替えは「送信 id 集合 = project の Category 集合」という集合契約で成立するため、任意の並び順を payload から受けると契約を迂回して順序が破綻する |
+| 揃え続ける不変条件と保証機構 | create / update / reorder / delete は Project 行ロック下で直列化され、sort_order は project 内で一意な並びを保つ。`CategoryReorderTest` が固定する |
+| 再判定の条件 | 並べ替えを行単位の操作として外部へ開く要件が出たとき |
+| 決めた日 | 2026-07-10 |
+| 決めた人 | 開発者 |
+| 根拠 | T001 |
+| 状態 | 恒久 |
+| 見直し期限 | — |
 
 | 観点 | テンプレート | 本アプリ |
 |---|---|---|
@@ -105,7 +206,19 @@ RefreshDatabase が全 Feature テストで migration の up を暗黙検証す�
 - 実装: `app/Services/Manual/CategoryService.php`, `app/Models/Category.php`
 - 設計: `devnotes/20260710-2137-aicue-domain-foundation/detailed-design.md` 施策7
 
-## D4 ✅ web `{project}` route の org スコープ guard を middleware 層に追加 (project.in-current-org)
+## D4 web `{project}` route の org スコープ guard を middleware 層に追加 (project.in-current-org)
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `app/Http/Middleware/EnsureProjectBelongsToCurrentOrganization.php` / `routes/web.php` |
+| 業務要件起因の説明 | FormRequest の DB ルールは controller の inline guard より前に走り、他組織の project に対する 422 と 404 の差がカテゴリ名や所属関係を辞書探索できる存在オラクルになる |
+| 揃え続ける不変条件と保証機構 | 他組織の project は FormRequest を含むあらゆるアプリコードより前に 404。`ProjectRouteCurrentOrgGuardTest` が deny-by-default で強制する |
+| 再判定の条件 | web と API v1 で project の解決モデルが 1 つに揃ったとき (binder 化を再検討できる) |
+| 決めた日 | 2026-07-10 |
+| 決めた人 | 開発者 |
+| 根拠 | T001 |
+| 状態 | 恒久 |
+| 見直し期限 | — |
 
 | 観点 | テンプレート | 本アプリ |
 |---|---|---|
@@ -134,7 +247,19 @@ DB ルール (categories.name の unique / category の exists) は、cross-org 
 - 実装: `app/Http/Middleware/EnsureProjectBelongsToCurrentOrganization.php`, `routes/web.php`, `bootstrap/app.php`
 - テンプレート側の根拠: `docs/app-integration-guide.md` §2 (URL 整合 guard 行を 2 層構成に更新済み)
 
-## D5 ✅ Cut のシナリオ編集は per-row CRUD でなく document 単位保存 (PUT .../scenario)
+## D5 Cut のシナリオ編集は per-row CRUD でなく document 単位保存 (PUT .../scenario)
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `app/Services/Manual/ScenarioService.php` / `app/Http/Requests/Projects/UpdateScenarioRequest.php` / `app/Http/Controllers/Projects/ManualScenarioController.php` |
+| 業務要件起因の説明 | シナリオ編集は親子カスケードと並べ替えを伴うため、行単位の CRUD では原子性が壊れ、編集途中の中間状態がサーバへ漏れる |
+| 揃え続ける不変条件と保証機構 | 保護キー不信 / 認可より前の 404 / relation 経由の作成を document 保存でも同じ機構で維持する。`ScenarioUpdateTest` と `NestedRouteIdorDefenseTest` が固定する |
+| 再判定の条件 | シナリオを行単位で編集する要件が出たとき / 楽観ロックを別の同時編集制御へ置き換えるとき |
+| 決めた日 | 2026-07-11 |
+| 決めた人 | 開発者 |
+| 根拠 | T002 |
+| 状態 | 恒久 |
+| 見直し期限 | — |
 
 | 観点 | テンプレート | 本アプリ |
 |---|---|---|
@@ -161,7 +286,19 @@ drift 防止テスト: `ScenarioUpdateTest` (保護キー 422 / 異物 id 404 / 
 - 実装: `app/Services/Manual/ScenarioService.php`, `app/Http/Requests/Projects/UpdateScenarioRequest.php`, `app/Http/Controllers/Projects/ManualScenarioController.php`
 - 設計: `devnotes/20260711-0007-scenario-editing/detailed-design.md`
 
-## D6 ✅ presigned PUT の署名対象は ChecksumSHA256 のみ (Content-Type/Length は HeadObject 照合が担う)
+## D6 presigned PUT の署名対象は ChecksumSHA256 のみ (Content-Type/Length は HeadObject 照合が担う)
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `app/Services/Capture/TakeObjectStorage.php` |
+| 業務要件起因の説明 | AWS SDK の presign は Content-Type と Content-Length を署名対象から外すため、置ける内容を 1 通りに固定する保証はハッシュの署名だけで成立させる必要がある |
+| 揃え続ける不変条件と保証機構 | presigned URL で登録済みオブジェクトを別内容に差し替えられない。`TakeObjectStorageTest` が署名対象を、`TakeRegistrationTest` が登録時の三点照合を固定する |
+| 再判定の条件 | SDK が署名対象ヘッダの扱いを変えたとき / 登録時の三点照合を外すとき |
+| 決めた日 | 2026-07-11 |
+| 決めた人 | 開発者 |
+| 根拠 | T004 |
+| 状態 | 恒久 |
+| 見直し期限 | — |
 
 | 観点 | 設計書 (T004 detailed-design) | 実装 |
 |---|---|---|
@@ -184,7 +321,19 @@ checksum query の存在を固定し、`TakeRegistrationTest` が三点照合の
 - 実装: `app/Services/Capture/TakeObjectStorage.php`
 - 設計: `devnotes/20260711-0345-capture-pwa/detailed-design.md` 施策3
 
-## D7 ✅ org 同時 preview 上限の「直列化実証テスト」は subprocess 方式を保留 (逐次境界テストで代替)
+## D7 org 同時 preview 上限の「直列化実証テスト」は subprocess 方式を保留 (逐次境界テストで代替)
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `app/Services/Manual/RenderJobService.php` / `tests/Feature/Manual/RenderPreviewConcurrencyTest.php` |
+| 業務要件起因の説明 | `RefreshDatabase` が検体を未コミットのトランザクション内に置くため、別プロセスからは検体が見えず、直列化の実証には非トランザクションの専用レーンが要る |
+| 揃え続ける不変条件と保証機構 | 組織ごとの同時 preview 上限の検査とジョブ作成は Organization 行ロック下で行う。逐次境界は `RenderPreviewConcurrencyTest` が固定する |
+| 再判定の条件 | 非トランザクションのテストレーンを導入したとき (別プロセスでの実証へ移す) |
+| 決めた日 | 2026-07-11 |
+| 決めた人 | 開発者 |
+| 根拠 | T005 |
+| 状態 | 恒久 |
+| 見直し期限 | — |
 
 | 観点 | 設計 (T005 詳細設計 施策 4/15) | 本アプリ |
 |---|---|---|
@@ -218,7 +367,19 @@ checksum query の存在を固定し、`TakeRegistrationTest` が三点照合の
 
 ---
 
-## D8 ✅ 管理メニューのユーザー管理 = 招待一本化 + 遷移コマンドロール + Settings からの UI 移設
+## D8 管理メニューのユーザー管理 = 招待一本化 + 遷移コマンドロール + Settings からの UI 移設
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `app/Enums/AdminConsoleRole.php` / `app/Enums/MemberRoleState.php` / `app/Services/Organization/OrganizationMembershipService.php` / `app/Http/Controllers/Admin/UserManagementController.php` |
+| 業務要件起因の説明 | 管理メニューの役割は組織ロールと Default Project の割当の合成で表す必要があり、保存された役割にすると非正規状態を見つけて直せなくなる |
+| 揃え続ける不変条件と保証機構 | 招待 token は hash-only 保存 / 権限判定は laratrust_team_id を明示 / Owner 昇格は transferOwnership のみ。`ConsoleRoleTransitionTest` と `ProjectMemberPivotWritePathTest` が固定する |
+| 再判定の条件 | 役割を保存概念へ戻す要件が出たとき / 家系の裁定が役割の語彙を変えたとき |
+| 決めた日 | 2026-07-11 |
+| 決めた人 | オーナー |
+| 根拠 | T006 |
+| 状態 | 恒久 |
+| 見直し期限 | — |
 
 | 観点 | テンプレート | 本アプリ |
 |---|---|---|
@@ -261,52 +422,19 @@ backfill 不要・非正規状態 (未割当 / stale pivot) の可視化と修�
 - 設計: `devnotes/20260711-1009-admin-console/` (概念設計 D1/D2/D6・詳細設計 施策 1〜7) /
   `devnotes/20260807-2032-invitation-in-app-acceptance/` (役割付き招待の撤去 = 裁定 AG-079)
 
-## D9 ✅→解消 BillingAccess の entitlement 判定への書き換え (free tier は課金ゲートを通す)
+## D10 テストレーンのグローバルロック (worktree-local flock を残さず削除)
 
-> **【解消 / 2026-08-03 (T075 = 決済 parity P4)】** 本乖離は**ゲート反転で解消した**。
-> 「free tier (= `plan_code` null) は課金ゲートを通す」という扱いをやめ、無料枠は
-> `organizations.free_plan_code = 'personal'` の**明示申告** (`ActiveFreePlan`) で表現するようになった。
-> `plan_code` は entitlement 判定に一切使わない (quota の解決キーのみ)。
-> 既存組織は grandfathering backfill が `free_plan_code` を書くため締め出しは発生しない。
-> 設計: `devnotes/20260717-0035-aigenba-billing-parity/` §P4。**記録は削除せず経緯として残す**。
-
-| 観点 | テンプレート | 本アプリ |
-|---|---|---|
-| BillingAccess::hasActiveAccess | `subscription('default')` が active/trialing のときのみ許可 (未契約 = fail-closed) | plan_code null (未契約 = 支払い不要 free tier) は許可 / plan_code 非 null (有償プラン契約状態) のみ active/trialing を要求 |
-| 遮断時の UX | billing へ redirect (理由提示なし) / JSON 402 「有効なサブスクリプションがありません」 | billing へ redirect + 理由 flash / JSON 402 (両経路とも「サブスクリプションのお支払いが確認できないため…」で統一) |
-| ダッシュボード callout | `has_active_subscription` (subscription 有無) | `billing_state` (`OnboardingBillingState` の 5 値) による状態別 callout。未契約はプラン選択 CTA / 支払い不健全は支払い方法確認 CTA (真偽値に潰さない。T150) |
-
-### なぜ正当な差分か (logic-driven)
-
-AI-CUE は「Free プランで今すぐ試せます」を掲げる freemium 設計 (pricing / home)。テンプレート
-既定の「active subscription 必須」では、未契約の新規組織が business route (/projects, /app) に
-一切到達できず、North Star フロー (SOP→シナリオ→撮影→動画) が入口で詰む
-(bug-hunt F-07: devnotes/20260712-075854-bug-hunt)。有償価値は別レイヤで gate 済み
-(チケット残高 = analyze/render、Quota = max_projects / max_storage_bytes) のため、
-本ゲートの責務は「有償プラン契約中の支払い健全性の担保」のみで足りる。
-なお BillingAccess docblock 自身が「アプリは本クラスの書き換えで gate 方針を変更する」と
-宣言する公式拡張ポイントのため、これは構造逸脱ではなくサンクション済み拡張の記録。
-
-### 揃えている不変条件 (これは保証し続ける)
-
-> 「課金による利用可否の判定は BillingAccess 経由のみ / 有償契約の支払い不健全
-> (past_due / canceled / incomplete / 行不在) は fail-closed で遮断 / billing・checkout は
-> 構造的 allowlist で遮断中も到達可能 / plan_code は Stripe Price を持つ有償プラン契約時のみ
-> webhook が set する状態キー (null = 未契約 = free tier)」
-
-- 挙動固定: `RequireActiveSubscriptionMiddlewareTest` (F-07 再現 3 本 + 有償契約マトリクス +
-  free プランが Stripe Price を持たない前提の固定 + BillingAccess 単体マトリクス)
-- 遮断 UX: 同テストが flash / 402 message の文言を両経路で固定。
-  ダッシュボード callout は `DashboardTest` + `Dashboard.test.ts` が固定
-
-### 関連
-
-- 実装: `app/Services/Billing/BillingAccess.php` /
-  `app/Http/Middleware/RequireActiveSubscription.php` /
-  `app/DataTransferObjects/Dashboard/BillingSummaryData.php`
-- 設計: `devnotes/20260712-0927-bugfix-billing-free-access/` (概念設計 + 詳細設計 施策 1〜5)
-
-## D10 ✅ テストレーンのグローバルロック (worktree-local flock を残さず削除)
+| 行 | 内容 |
+|---|---|
+| 対象パス | `scripts/global-test-lock.sh` / `scripts/with-global-test-lock.sh` / `scripts/verify-global-test-lock.sh` / `scripts/run-test.sh` / `scripts/run-browser-test.sh` / `scripts/run-vitest.sh` |
+| 業務要件起因の説明 | 実装を必ず worktree で行うため同一マシンで複数のテストレーンが同時に走るのが常態で、奪い合う資源 (PostgreSQL / CPU / ブラウザ掃除) の作用域がマシン全体である |
+| 揃え続ける不変条件と保証機構 | ブロッキング取得 / 待機中の heartbeat / 再入ガード / ロック fd の非継承の 4 要件。`scripts/verify-global-test-lock.sh` と `GlobalTestLockInventoryTest` が固定する |
+| 再判定の条件 | テストレーンの並走が起きなくなったとき / 家系がロックの標準形を別の形で確定したとき |
+| 決めた日 | 2026-08-04 |
+| 決めた人 | オーナー |
+| 根拠 | T099 |
+| 状態 | 恒久 |
+| 見直し期限 | — |
 
 | 観点 | テンプレート(正典 = spirux 形) | 本アプリ |
 |---|---|---|
@@ -375,7 +503,19 @@ bug-hunt 同時起動は `playwright-cli kill-all` で相互破壊しうる。�
 
 ---
 
-## D11 ✅ svelte-no-undef-gate を config 静的検査型で別実装 (同一不変条件・別実装)
+## D11 svelte-no-undef-gate を config 静的検査型で別実装 (同一不変条件・別実装)
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `tests/js/architecture/svelte-no-undef-gate.test.ts` / `eslint.config.js` |
+| 業務要件起因の説明 | 同じ不変条件を守る実装がテンプレート側にあるが手元で読めないため、実装を待たずに設定の静的検査で先に固定した |
+| 揃え続ける不変条件と保証機構 | resources/js 配下の全 svelte で no-undef が error / globals が実行時グローバルと完全一致 / lint 対象の全ファイルで inline の抑制が効かない |
+| 再判定の条件 | laravel-claude-template の実装を読める状態になったとき (突き合わせて寄せられるなら本登録を消す) |
+| 決めた日 | 2026-08-05 |
+| 決めた人 | 開発者 |
+| 根拠 | T102 |
+| 状態 | 恒久 |
+| 見直し期限 | — |
 
 | 観点 | テンプレート | 本アプリ |
 |---|---|---|
@@ -432,7 +572,19 @@ laravel-claude-template の mirror が取得できた時点でテンプレ実装
 
 ---
 
-## D12 ✅ ページタイトル / description はサーバ単一 SoT (helper 経由必須の JS 契約は不採用)
+## D12 ページタイトル / description はサーバ単一 SoT (helper 経由必須の JS 契約は不採用)
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `app/Support/Seo/SeoManager.php` / `app/Support/Seo/SeoRenderer.php` / `resources/js/lib/document-title.ts` / `config/seo.php` |
+| 業務要件起因の説明 | ページ題名の一次情報は controller と config が持ち、ページ側に helper を挟む層が無い。同じ契約を移植すると一次情報が 2 か所に割れ、フルロードと SPA 遷移で題名が食い違う |
+| 揃え続ける不変条件と保証機構 | 題名の正本はサーバの `SeoManager::resolveDocumentTitle` ただ 1 つで、フルロードと SPA 遷移で一致する。`DocumentTitleCoverageTest` と `svelte-head-no-title.test.ts` が固定する |
+| 再判定の条件 | ページ側が題名の一次情報を持つ要件が出たとき / description に SPA 遷移後の追従が要るようになったとき |
+| 決めた日 | 2026-08-05 |
+| 決めた人 | 開発者 |
+| 根拠 | devnotes/20260805-0101-architecture-gate-followup/ |
+| 状態 | 恒久 |
+| 見直し期限 | — |
 
 | 観点 | テンプレート | 本アプリ |
 |---|---|---|
@@ -486,7 +638,19 @@ laravel-claude-template の mirror が取得できた時点でテンプレ実装
 
 ---
 
-## D13 ✅ SSO 登録ユーザーの password を保存しない (phantom password の撤去。前方修正のみ)
+## D13 SSO 登録ユーザーの password を保存しない (phantom password の撤去。前方修正のみ)
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `app/Services/Auth/SocialAccountService.php` |
+| 業務要件起因の説明 | SSO とパスキーを第一級のログイン手段として扱うため、「ログイン手段が 0 になる操作を止める」不変条件が `hasPassword()` の真実性に依存する |
+| 揃え続ける不変条件と保証機構 | `User::hasPassword()` は password 経路の可否を fail-closed で判定する。`SocialAuthTest` / `RecentAuthTest` / `LoginMethodInventoryTest` が固定する |
+| 再判定の条件 | 既存ユーザーの遡及是正を判別できる材料 (password 変更の監査証跡) が全ユーザーぶん揃ったとき |
+| 決めた日 | 2026-08-05 |
+| 決めた人 | 開発者 |
+| 根拠 | devnotes/20260805-1244-auth-method-and-passkey/ |
+| 状態 | 恒久 |
+| 見直し期限 | — |
 
 | 観点 | テンプレート | 本アプリ |
 |---|---|---|
@@ -544,7 +708,19 @@ phantom password (ランダム値) が入っていると:
 
 ---
 
-## D14 ✅ 実行済み route の記録をアプリ側の観測器で採る (退避 → 正規化 → route 名解決の 3 段を置かない)
+## D14 実行した route の記録をアプリ側の観測器で採る (退避と正規化と route 名解決の 3 段を置かない)
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `app/Http/Middleware/BughuntExecutedRouteMiddleware.php` / `bootstrap/app.php` / `config/bughunt.php` / `.claude/skills/app-bug-hunt/coverage/build_executed.py` / `.claude/skills/app-bug-hunt/coverage/correlate.py` |
+| 業務要件起因の説明 | 記録が採れていないことと本当に叩けていないことを取り違えると操作到達の一覧そのものが嘘になるため、遮断 middleware の内側で 1 要求 1 行を機械記録する |
+| 揃え続ける不変条件と保証機構 | 主入力が揃わない走行は成功にしない。`BughuntExecutedRouteOrderingTest` が記録器の位置を、集約と照合の 2 つの Python ツールが終了コード 3 を担う |
+| 再判定の条件 | 家系の正典が退避 → 正規化 → route 名解決の 3 段へ揃える裁定を出したとき / web グループ外の面を分母に載せるとき |
+| 決めた日 | 2026-08-15 |
+| 決めた人 | 開発者 |
+| 根拠 | T164 |
+| 状態 | 恒久 |
+| 見直し期限 | — |
 
 | 観点 | テンプレート | 本アプリ |
 |---|---|---|
@@ -607,7 +783,19 @@ route 名は `$request->route()->getName()` でその場で確定するので逆
 
 ---
 
-## D15 ✅ strict_types gate の走査域を追跡下 PHP 全数にし、未宣言一覧を持たない
+## D15 strict_types gate の走査域を追跡下 PHP 全数にし、未宣言一覧を持たない
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `tests/Architecture/StrictTypesDeclarationGateTest.php` / `tests/Support/StrictTypesDeclarationScanner.php` / `tests/Support/StrictTypesRuntimeProbe.php` |
+| 業務要件起因の説明 | 容量 (bytes) やチケット枚数のように数値と文字列の取り違えがそのまま業務の誤りになる領域を持つため、走査域のどこか 1 枚だけが緩い状態を残さない |
+| 揃え続ける不変条件と保証機構 | 宣言を欠く PHP ファイルが新しく増えない。走査域はテンプレートが保証する app/ を包含し、判定器は実測照合器と突き合わせて fail-open を 0 件に固定する |
+| 再判定の条件 | どうしても宣言できないファイルが現れたとき (なし崩しに許可一覧を足さず設計レビューを通す) |
+| 決めた日 | 2026-08-15 |
+| 決めた人 | オーナー |
+| 根拠 | T167 |
+| 状態 | 恒久 |
+| 見直し期限 | — |
 
 | 観点 | テンプレート | 本アプリ |
 |---|---|---|
@@ -669,7 +857,19 @@ PHPStan level 10 の解析対象でもあるので、**追加した宣言の副�
 
 ---
 
-## D16 ✅ prompt の trusted 変数の入口を作らない (窓口の引数は untrusted だけ)
+## D16 prompt の trusted 変数の入口を作らない (窓口の引数は untrusted だけ)
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `app/Support/Llm/PromptDefense.php` / `app/Support/Llm/GuardedPrompt.php` / `config/llm-defense.php` |
+| 業務要件起因の説明 | prompt の変数はすべて作業手順書 (SOP) 由来の untrusted で、固定値や列挙型の値を prompt へ渡す面が 1 つも無いため、trusted の入口を作る対象が存在しない |
+| 揃え続ける不変条件と保証機構 | prompt へ入る実行時の文字列はすべて窓口で無害化とタグ境界化を受ける。`PromptDefenseWindowGateTest` の変数集合の突き合わせが双方向で固定する |
+| 再判定の条件 | trusted 変数を足すとき (窓口の入口・値をリテラルに限る字句検査・目録の 3 つを同じ変更で足す) |
+| 決めた日 | 2026-08-15 |
+| 決めた人 | 開発者 |
+| 根拠 | T169 |
+| 状態 | 恒久 |
+| 見直し期限 | — |
 
 | 観点 | テンプレート | 本アプリ |
 |---|---|---|
@@ -714,7 +914,19 @@ PHPStan level 10 の解析対象でもあるので、**追加した宣言の副�
 
 ---
 
-## D17 ✅ 滞留回収の共通基盤を、閾値の置き場所と `recover()` の引数で正典から外す
+## D17 滞留回収の共通基盤を、閾値の置き場所と `recover()` の引数で正典から外す
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `app/Contracts/Recovery/StuckWorkStream.php` / `app/Services/Recovery/StuckWorkRecoverySweeper.php` / `app/Services/Recovery/StuckWorkStreamRegistry.php` / `app/Console/Commands/Operations/RecoverStuckWorkCommand.php` |
+| 業務要件起因の説明 | 「ジョブの制限時間 < 再試行間隔 < 予約の有効期限 ≤ 滞留の閾値」の序列を既存の検査 2 本が固定しており、閾値を回収側の設定へ移すと序列の情報源が 2 つに割れる |
+| 揃え続ける不変条件と保証機構 | 回収は必ず行を取り直し、候補列挙と同じ述語を行ロック下で再評価してから作用する。`StuckWorkRecoveryInventoryTest` が系列の集合一致を deny-by-default で強制する |
+| 再判定の条件 | 家系の正典が閾値の置き場所を変えたとき / 遡及の下限や自走をやめる上限が要る事象が実際に起きたとき |
+| 決めた日 | 2026-08-15 |
+| 決めた人 | オーナー |
+| 根拠 | T171 |
+| 状態 | 恒久 |
+| 見直し期限 | — |
 
 家系の裁定 AG-083 標準形 v1 (追従元 laravel-claude-template:T076) の共通基盤へ寄せ替えるにあたり、
 **3 点だけ**正典と形を変えた。骨格 (系列の契約 / 走査と作用の分離 / 既定は実行しない入口 /
@@ -764,7 +976,19 @@ deny-by-default の目録 / 撤去済み参照の gate) はそのまま採って
 
 ---
 
-## D18 ✅ hook の起動子を「起動先の検証 + 終了コードの写像器」にする
+## D18 hook の起動子を「起動先の検証 + 終了コードの写像器」にする
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `.claude/settings.json` / `scripts/bughunt-worktree-hook.sh` / `scripts/code-review-graph-update-hook.sh` |
+| 業務要件起因の説明 | hook の故障がセッションの操作を止めてはならず、起動先の検証は起動された後では手遅れなので起動子にしか置けない |
+| 揃え続ける不変条件と保証機構 | 配線は常設で起動子は絶対パス、排他はスクリプト内にあり、配線は台帳テストで完全一致 pin される。`ClaudeHooksWiringTest` が固定する |
+| 再判定の条件 | Claude Code が hook の終了コードの扱いを変えたとき / 家系が起動子の形を確定したとき |
+| 決めた日 | 2026-08-15 |
+| 決めた人 | 開発者 |
+| 根拠 | T172 |
+| 状態 | 恒久 |
+| 見直し期限 | — |
 
 常設 hook 配線 (家系の feature `claude-hooks-wiring`) を取り込むにあたり、**起動子の形だけ**
 テンプレートと変えた。配線されている hook の本数・対象・スクリプトの置き場所は正典どおりである。
@@ -812,7 +1036,19 @@ deny-by-default の目録 / 撤去済み参照の gate) はそのまま採って
 
 ---
 
-## D19 ✅ 経路キャッシュ起動での middleware 後付けは「走らせない」側の契約を維持する (専用の実行点クラスへは移行しない)
+## D19 経路キャッシュ起動での middleware 後付けは「走らせない」側の契約を維持する (専用の実行点クラスへは移行しない)
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `app/Support/Http/RouteMiddlewareBinder.php` / `app/Support/Http/RouteThrottleBinder.php` |
+| 業務要件起因の説明 | 本リポジトリにデプロイ定義の実体が無く、存在しない基盤のための preflight を先回りして作らない規約があるため、正典の専用実行点へ移行する利益が今は無い |
+| 揃え続ける不変条件と保証機構 | 後付けした保護は実効の経路に必ず載る / 後付けの入口は 2 つの binder に限られる / 経路名が消えたら起動を止める。`PostBootRouteMutationInventoryTest` と `RouteCacheBakedProtectionTest` が固定する |
+| 再判定の条件 | デプロイ定義が入ったとき / route:cache を実行する記述が入ったとき / 家系の機能台帳の裁定が変わったとき |
+| 決めた日 | 2026-08-15 |
+| 決めた人 | 開発者 |
+| 根拠 | devnotes/20260815-2100-route-cache-middleware-attach/ |
+| 状態 | 恒久 |
+| 見直し期限 | — |
 
 家系の正典 (機能台帳 `route-cache-safe-middleware-attach` の v1) は、経路の一覧が組み上がった後に
 走らせたい処理を**専用の実行点クラス 1 つ**へ集約し、経路キャッシュ起動でも後付けを効かせる形である。
@@ -886,3 +1122,267 @@ deny-by-default の目録 / 撤去済み参照の gate) はそのまま採って
   `tests/Architecture/PostBootRouteMutationInventoryTest.php`
 - 設計: `devnotes/20260815-2100-route-cache-middleware-attach/`
 - 契約の正本: `docs/app-integration-guide.md` §7c
+
+---
+
+## D20 bug-hunt 目録の生成方式を、注釈 TOML・機能カタログ 3 列・中間 JSON 無しで実装する
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `scripts/bug-hunt-inventory.py` / `app/Console/Commands/Bughunt/InventoryScanCommand.php` / `.claude/skills/app-bug-hunt/inventory/annotations.toml` |
+| 業務要件起因の説明 | 機能カタログの id 列が所見記録の語彙の正本であり、Python ツールを標準ライブラリだけで書く規約から注釈は TOML になる |
+| 揃え続ける不変条件と保証機構 | 目録は実装と注釈から再生成でき、ずれていたら CI が落ちる。`BugHuntInventoryCheckInvariantTest` と生成器の自己テストが 4 段の判定を固定する |
+| 再判定の条件 | 家系の正典が id 列を持つ形へ変わったとき / Python に依存を足す裁定が出たとき / 中間 JSON を読む道具が家系に現れたとき |
+| 決めた日 | 2026-08-15 |
+| 決めた人 | 開発者 |
+| 根拠 | T176 |
+| 状態 | 恒久 |
+| 見直し期限 | — |
+
+家系の正典 (機能台帳 `bughunt-inventory-generation` の t1) は、bug-hunt の分母 (画面一覧 /
+操作一覧 / 機能カタログ) を実装から生成し、人が書く注釈ファイルと段階的なドリフト検査で守る形である。
+本アプリはこの**方式そのものは採る**が、次の 3 点で正典と形が違うので登録する。
+
+| 観点 | 家系の正典 / テンプレート | 本アプリ |
+|---|---|---|
+| 機能カタログ (`capability-catalog.md`) | 生成物。3 列は 機能 / 対応する画面 / 対応する操作 | **生成しない**。3 列は `id` / `機能 (actor→outcome)` / `代表機構 (route name)` を維持し、参照整合だけを検査する |
+| 注釈ファイル | `inventory/annotations.yaml` | **`inventory/annotations.toml`** |
+| 中間成果物 | `inventory/inventory.json` をコミットする | **持たない** (生成・検査の実行中にだけ存在する) |
+
+### なぜ正当な差分か (logic-driven)
+
+1. **id 列は所見記録の語彙正本である**。`.claude/skills/app-bug-hunt/ledger/findings.schema.json` の
+   必須項目 `capability_tag` は機能カタログの id を値に取る。正典の 3 列には id 列が無く、
+   寄せると語彙の供給元が消えて `unknown` / `unmapped` の判定基準ごと壊れる。
+   また「機能 ↔ 画面 / 操作」の対応は注釈側が route ごとに持つので、カタログにも書くと
+   同じ対応関係が 2 か所に載る (家系が AG-044 でやめた形)。カタログ本体は
+   「機構を利用者価値で束ねた overlay であり MECE ではない」と自ら宣言しており、
+   実装から導けない = 生成対象にしても保守量は減らない。
+2. **注釈が TOML なのは Python の依存規約の帰結である**。`AGENTS.md` §bug-hunt が
+   Python ツールを標準ライブラリのみと定めており、本環境に PyYAML は無い (実測)。
+   `tomllib` は標準ライブラリにあるので、YAML を採ると依存追加か自前パーサのどちらかが要る
+   (どちらも「自前機構の前に公式作法を確認する」に反する)。
+3. **中間 JSON に読み手がいない**。下流の照合器 (`coverage/correlate.py`) が読むのは
+   `operations.md` の name 列であって中間 JSON ではない。コミットするとドリフト面が 1 つ増えるだけで、
+   守るものが無い。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「目録は実装と注釈から再生成でき、ずれていたら CI が落ちる」
+
+| 不変条件 | 担い手 |
+|---|---|
+| 抽出が成功し、宣言した抽出条件で走り、母集合が 0 件でないこと (段 1) | `scripts/bug-hunt-inventory.py` (exit 2) / `scripts/tests/test_bug_hunt_inventory.py` |
+| 注釈の集合が面の集合と一致し、語彙・必須・理由の長さを満たすこと (段 2) | 同上 (exit 3)。未注釈も残置注釈も許さない |
+| 生成物が再生成の結果と byte 一致すること (段 3) | 同上 (exit 3)。手編集と再生成の忘れをまとめて捕まえる |
+| 機能カタログの代表機構が実在し、id が重複しないこと (段 4) | 同上 (exit 3) |
+| 検査シェルが判定を持たず、終了コード 0 / 2 / 3 を実際に返すこと | `tests/Architecture/BugHuntInventoryCheckInvariantTest.php` (sandbox 実走) |
+| 生成器の自己テストが `composer test` の下で実走すること | `tests/Architecture/BughuntInventoryToolSelfTest.php` |
+| 抽出コマンドが事実だけを書き出すこと (面の判定を持たない) | `tests/Feature/Bughunt/InventoryScanCommandTest.php` |
+
+**保証範囲を誇張しない**: 見るのは `web` group を宣言した面だけである。
+沈黙するのは「`web` group を**宣言していない**面」であり、実測では機械向け API (`api/`) /
+Filament の管理画面 (`/admin`) / MCP / Stripe の webhook がこれに当たる。
+「webhook 一般に沈黙する」わけではない — `web` を宣言している `webhooks.ses` は
+操作表に載り、区分 `外` として理由付きで見える。面として除くのは先頭セグメントの
+`oauth` と `livewire-{hash}` の 2 つだけで、それ以外で `web` を宣言した route は
+必ず目録に入り注釈を要求される。
+注釈の**内容**の妥当性 (割当が適切か) は見ない。画面題名の欠落も検出しない。
+機能カタログの網羅性も見ない (代表機構の実在と id の一意性まで)。
+目録の母集合は T164 の記録器が観測しうる route の**部分集合**であり、両者は一致しない。
+
+### 再検討の条件 (解消条件)
+
+- 家系の正典が id 列を持つ形へ変わったとき (機能カタログの生成を採り直す)
+- 本リポジトリの Python に依存を足す裁定が出たとき (注釈を YAML へ寄せる)
+- 中間 JSON を読む道具が家系に現れたとき
+
+### 関連
+
+- 実装: `scripts/bug-hunt-inventory.py` / `app/Console/Commands/Bughunt/InventoryScanCommand.php` /
+  `.claude/skills/app-bug-hunt/inventory/`
+- gate: `tests/Architecture/BugHuntInventoryCheckInvariantTest.php` /
+  `tests/Architecture/BughuntInventoryToolSelfTest.php` /
+  `tests/Feature/Bughunt/InventoryScanCommandTest.php`
+- 設計: `devnotes/20260815-2100-bughunt-inventory-generator/`
+
+---
+
+## D21 bug-hunt の自己検証を CI の専用ステップでなく composer test の配線に載せる
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `tests/Architecture/BughuntSelfTestExecutionTest.php` |
+| 業務要件起因の説明 | bug-hunt の自己検証はどこからも自動実行されておらず二段防御の片側が眠っていた。CI の責務を同期検査に限る裁定があるため、専用ステップではなくテストの配線へ載せた |
+| 揃え続ける不変条件と保証機構 | 自己検証が毎回のテスト実行で実走し、実資源に触れない。隔離境界はテスト側が握り、専用マーカーのある空き地しか受け付けない |
+| 再判定の条件 | CI に bug-hunt 専用のステップを設ける判断が出たとき / 自己検証の実行時間がテスト実行の妨げになったとき |
+| 決めた日 | 2026-08-10 |
+| 決めた人 | 開発者 |
+| 根拠 | T142 |
+| 状態 | 恒久 |
+| 見直し期限 | — |
+
+| 観点 | 家系の他リポジトリ / テンプレート | 本アプリ |
+|---|---|---|
+| 自己検証の実行点 | CI の専用ステップ | `composer test` が走らせる Architecture テスト (`BughuntSelfTestExecutionTest`) |
+| 隔離境界の持ち主 | 自己検証スクリプト自身 | テスト側が「捨ててよい空き地」を作って渡す (専用マーカー必須・借り物は消さない) |
+
+### なぜ正当な差分か (logic-driven)
+
+bug-hunt の自己検証は guard と資源導出と環境変数の隔離という**実行時の挙動**を見る側で、
+静的構造を見る Architecture テストと二段防御をなす。ところが導入時はどこからも自動実行されておらず、
+片側が眠ったまま緑になっていた。本アプリの CI は同期検査に責務を限る裁定を採っており
+(依存脆弱性の gate と同じ考え方)、専用ステップを増やすと「CI でしか走らない検査」が生まれて
+手元の `composer test` と CI で守られる範囲が食い違う。実行点を 1 つにするほうが、
+実行され続けることを保証しやすい。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「自己検証は毎回のテスト実行で実走し、実資源には触れない」
+
+- 隔離境界はテスト側が握る。自己検証は外から渡された空き地を使い、未指定のときだけ自分で作る
+- 外から渡せるのは専用マーカーを置いた空き地だけで、リポジトリのルートを渡す事故を構造的に防ぐ
+- 借り物の空き地は削除しない (作った側が片付ける)
+
+### 関連
+
+- 実装: `tests/Architecture/BughuntSelfTestExecutionTest.php` / `scripts/bug-hunt-shard.sh`
+- 設計: `devnotes/20260810-0251-bughunt-harness-hardening/`
+
+---
+
+## D22 退会は利用者の行を消さず凍結で表す (猶予 30 日)
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `app/Http/Middleware/EnsureAccountNotPendingDeletion.php` / `app/Http/Controllers/Settings/AccountDeletionRequestController.php` |
+| 業務要件起因の説明 | 退会後も課金記録の保持義務が残るため利用者の行を消せない。猶予中の取消をそのまま元の状態へ戻せる形にする必要もある |
+| 揃え続ける不変条件と保証機構 | 凍結は deny-by-default で auth と verified の group 全体に掛かり、開けるのは救済経路だけである。退会の予約と取消は監査記録に残る |
+| 再判定の条件 | 猶予期間や保持義務の前提が変わったとき / 家系が退会の標準形を確定したとき |
+| 決めた日 | 2026-08-09 |
+| 決めた人 | オーナー |
+| 根拠 | devnotes/20260809-0908-account-deletion-grace/ |
+| 状態 | 恒久 |
+| 見直し期限 | — |
+
+| 観点 | テンプレート | 本アプリ |
+|---|---|---|
+| 退会の表現 | 相当する仕組みを持たない (退会の入口も猶予も凍結も同梱していない) | 利用者の行の生死を変えない**凍結** (論理削除も使わない) + 30 日の猶予 |
+| 猶予中の到達性 | — | `auth` + `verified` の group 全体に凍結 middleware を付け、取消などの救済経路だけを許可一覧で開ける |
+
+### なぜ正当な差分か (logic-driven)
+
+退会しても課金記録には保持義務が残る (D23) ため、利用者の行を消す形にすると
+「消えた利用者に紐づく課金記録」という参照の切れた状態を作ってしまう。
+凍結なら猶予中の取消がそのまま元の状態に戻り、保持義務のある記録も参照を保ったまま残る。
+
+**登録する理由 (テンプレートに相当物が無いのに登録する根拠)**: 判定の出所は本アプリではなく
+**台帳リポジトリの巡回 (2026-08-12) が「記録されるべき乖離」として受信箱へ届けた判定**である。
+決定はオーナーで、**ひな形ではなく家系の別リポジトリの先例に揃えた**形であり、
+統一形式の不変条件 i14 (登録簿の守備範囲には「ひな形が家系の先例から外れた判断」も含む) に当たる。
+テンプレートに無い領域への上積みか、ひな形から外れた判断かの線引きは、テンプレートの実物が
+手元に無いので本アプリだけでは確定できない。過剰検出寄りに倒す原則 (誤登録はエントリを
+削除すれば是正できるが、登録漏れは気付けない) に従い、登録する側へ倒している。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「凍結は deny-by-default で、開けるのは救済経路だけである」
+
+- 凍結 middleware は route ごとの付け忘れが起きないよう group 全体に付ける
+- 取消 (救済) には再認証を課さない。詰みを作らないための例外であり、目録に理由付きで載る
+- 退会の予約と取消は監査記録に残る
+
+### 関連
+
+- 実装: `app/Http/Middleware/EnsureAccountNotPendingDeletion.php` /
+  `app/Http/Controllers/Settings/AccountDeletionRequestController.php`
+- 設計: `devnotes/20260809-0908-account-deletion-grace/` (PR-B)
+
+---
+
+## D23 課金記録は退会後も 7 年保持し、対象と年数を 1 か所で持つ
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `app/Enums/Billing/BillingRetentionTarget.php` / `app/Enums/Billing/BillingRetentionExclusion.php` / `app/Services/Billing/Retention/BillingRetentionPurgerRegistry.php` / `app/Services/Billing/Retention/AbstractBillingRetentionPurger.php` / `app/Services/Billing/Retention/BillingCheckoutSessionPurger.php` / `app/Services/Billing/Retention/StripeWebhookEventPurger.php` / `app/Services/Billing/Retention/SubscriptionItemPurger.php` / `app/Services/Billing/Retention/SubscriptionPurger.php` / `app/Services/Billing/Retention/TicketAutoRechargeAttemptPurger.php` / `app/Services/Billing/Retention/TicketCheckoutSessionPurger.php` / `app/Services/Billing/Retention/TicketLedgerEntryPurger.php` |
+| 業務要件起因の説明 | 課金記録の保持義務は退会より寿命が長く、利用者データと同じ掃除の対象にできない。年数を各所に書くと必ず食い違う |
+| 揃え続ける不変条件と保証機構 | 保持年数の正本は 1 か所で、掃除の対象は宣言された表だけである。`BillingRetentionConfigSingleSourceTest` と `BillingRetentionTargetInventoryTest` が固定する |
+| 再判定の条件 | 保持義務の年数が変わったとき / 家系が保持期間の標準形を確定したとき |
+| 決めた日 | 2026-08-09 |
+| 決めた人 | オーナー |
+| 根拠 | devnotes/20260809-0908-account-deletion-grace/ |
+| 状態 | 恒久 |
+| 見直し期限 | — |
+
+| 観点 | テンプレート | 本アプリ |
+|---|---|---|
+| 課金記録の寿命 | 相当する仕組みを持たない (保持年数の宣言も掃除器も同梱していない) | 保持年数の正本を列挙型 1 か所に置き、表ごとの掃除を登録した掃除器だけが行う |
+| 利用者データとの関係 | — | 退会で消えるものと 7 年残るものを分け、残す側は掃除の対象から除外する理由を宣言する |
+
+### なぜ正当な差分か (logic-driven)
+
+課金記録の保持義務は退会よりも寿命が長く、利用者データと同じ掃除の対象にできない。
+年数を各所に書くと必ず食い違うため、年数と対象表の対応を 1 か所に集約し、
+掃除の実処理はその宣言からしか作れないようにした。
+
+**登録する理由 (テンプレートに相当物が無いのに登録する根拠)**: D22 と同じで、判定の出所は
+**台帳リポジトリの巡回 (2026-08-12) が受信箱へ届けた判定**であり、決定はオーナー
+(保持 7 年) で家系の先例に揃えた形である (統一形式の不変条件 i14)。
+D22 と別の登録にしているのは、対象パスが交わらず解消の条件も別だからである
+(退会の表現と、課金記録の寿命は別の判断)。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「保持年数の正本は 1 か所で、掃除の対象は宣言された表だけである」
+
+- `BillingRetentionConfigSingleSourceTest` が単一出典を固定する
+- `BillingRetentionTargetInventoryTest` が対象表と掃除器の対応を deny-by-default で強制する
+- 表を足したときの分類は `RetentionTableClassificationTest` が実スキーマと突き合わせる
+
+### 関連
+
+- 実装: `app/Enums/Billing/BillingRetentionTarget.php` /
+  `app/Services/Billing/Retention/` 配下の掃除器
+- 設計: `devnotes/20260809-0908-account-deletion-grace/` (PR-C)
+
+---
+
+## D24 SSO の driver 解決点を自前クラス 1 つへ切り出す
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `app/Services/Auth/SocialiteDriverResolver.php` |
+| 業務要件起因の説明 | bug-hunt の走行が実際の外部 ID 基盤へ出ていくのを塞ぐ必要があるが、Socialite の Factory を丸ごと差し替えると本番経路の解決まで置き換わる |
+| 揃え続ける不変条件と保証機構 | SSO の driver 解決は 1 クラスに集約され、他クラスからの直呼びは登録も免除もできない。`ExternalSeamInventoryTest` と `ExternalFakeWiringInvariantTest` が固定する |
+| 再判定の条件 | 家系の外部到達点の標準形が解決点の形を定めたとき / Socialite が差し替え点を公式に提供したとき |
+| 決めた日 | 2026-08-11 |
+| 決めた人 | 開発者 |
+| 根拠 | T153 |
+| 状態 | 恒久 |
+| 見直し期限 | — |
+
+| 観点 | テンプレート | 本アプリ |
+|---|---|---|
+| SSO の driver 取得 | 呼び出し側が Socialite の facade から直接取る | `SocialiteDriverResolver` 1 クラスに集約し、他クラスからの直呼びを目録が拒否する |
+| 非本番での差し替え | — | 解決点クラスを container で差し替える (Socialite の Factory そのものは差し替えない) |
+
+### なぜ正当な差分か (logic-driven)
+
+bug-hunt の走行が実際の外部 ID 基盤へ遷移すると、探索が本アプリの外へ出て戻れなくなる。
+これを塞ぐには driver の解決点が要るが、Socialite の Factory を丸ごと差し替えると
+本番経路の解決まで置き換わり、差し替えの影響範囲が読めなくなる。
+薄い解決点を 1 つ置くほうが、差し替えの範囲を非本番だけに閉じられる。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「SSO の driver 解決は 1 クラスに集約され、他クラスからの直呼びは登録も免除もできない」
+
+- `ExternalSeamInventoryTest` が解決点を名指しで固定する (他クラスの直呼びは目録に載せられない)
+- 非本番の差し替えは `ExternalFakeWiringInvariantTest` が配線ごと固定する
+- 差し替えを許す環境は testing と bug-hunt だけで、local は含めない
+
+### 関連
+
+- 実装: `app/Services/Auth/SocialiteDriverResolver.php` /
+  `app/Services/Auth/Fakes/FakeSocialiteDriverResolver.php`
+- 設計: `devnotes/20260811-1736-bughunt-sso-egress/`

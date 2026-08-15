@@ -1,74 +1,111 @@
 # 画面インベントリ (screens.md) — AI-CUE
 
-> bug-hunt カバレッジの分母となる「画面」(GET × inertia × web) の一覧。`php artisan route:list` から生成し
-> ストーリー (S1..S7) を割り当てた。ドリフト検知は `scripts/bug-hunt-inventory-check.sh`。
-> 対象外 (seo/social/sso/2fa下位/legal confirmation 等) は OUT_OF_SCOPE_PREFIXES で除外済み。
+> **このファイルは生成物である。手で編集しない。**
+> 直し方: `.claude/skills/app-bug-hunt/inventory/annotations.toml` (割当・区分・理由) か
+> `inventory/notes-*.md` (散文) を直してから `python3 scripts/bug-hunt-inventory.py generate` を走らせる。
+> 抽出条件: 開発環境 (local) またはテスト実行中に登録される route 集合。
+> ドリフト検査: `scripts/bug-hunt-inventory-check.sh` (exit 3 = ドリフト)。
+
+bug-hunt カバレッジの分母となる「画面」(GET × web セッション面) の一覧。全 68 件 (うち対象外 13 件)。
 
 ## GET × web 一覧 (画面 + 画面に付随する JSON GET)
 
-> 本表は「GET × web セッション面」の一覧であり、**Inertia 画面だけではない**。
-> 以下は画面ではなく**画面に付随する JSON GET** として載せている
-> (bug-hunt は単独で開かず、対応する画面操作の副作用として通過させる):
-> `capture.csrf-cookie` / `session.status` / `passkey.registration-options` /
-> `passkey.login-options` / `passkey.confirm-options`
+| route (URL) | name | 種別 | 画面名 | 割当ストーリー | 区分 |
+|---|---|---|---|---|---|
+| billing | billing.index | 画面 | プランとお支払い | S5 | 通常 |
+| billing/plans | billing.plans | 画面 | プラン比較 | S5 | 通常 |
+| purchase-tickets | billing.tickets.show | 画面 | チケットを購入 | S5 | 通常 |
+| app/csrf-cookie | capture.csrf-cookie | JSON | - | S3 | 通常 |
+| app | capture.home | 画面 | - | S3 | 通常 |
+| app/projects/{project}/manuals | capture.manuals.index | 画面 | 撮影するマニュアルを選ぶ | S3 | 通常 |
+| app/projects/{project}/manuals/{manual} | capture.manuals.show | 画面 | - | S3 | 通常 |
+| app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take}/playback | capture.takes.playback | 画面 | - | S3 | 通常 |
+| contact | contact | 画面 | お問い合わせ | S1 | 通常 |
+| contact/thanks | contact.thanks | 画面 | お問い合わせ完了 | S1 | 通常 |
+| dashboard | dashboard | 画面 | ダッシュボード | S1 | 通常 |
+| debug/bfcache-trial | debug.bfcache-trial | 画面 | - | - | 外 |
+| debug/bfcache-trial/away | debug.bfcache-trial.away | 画面 | - | - | 外 |
+| debug/login | debug.login | 画面 | - | - | 外 |
+| / | home | 画面 | - | S1 | 通常 |
+| invitations/accept | invitations.accept | 画面 | 組織への招待 | S2 | 通常 |
+| commerce-disclosure | legal.commerce-disclosure | 画面 | - | S1 | 通常 |
+| privacy | legal.privacy | 画面 | - | S1 | 通常 |
+| terms | legal.terms | 画面 | - | S1 | 通常 |
+| login | login | 画面 | ログイン | S1 | 通常 |
+| manage/users | manage.users.index | 画面 | ユーザー管理 | S4 | 通常 |
+| notifications | notifications.index | 画面 | 通知 | S6 | 通常 |
+| billing-required | onboarding.billing-required | 画面 | 課金手続き中です | S2 | 通常 |
+| onboarding/checkout | onboarding.checkout | 画面 | プランの選択 | S1 | 通常 |
+| organizations/{organization}/api-keys | organizations.api-keys.index | 画面 | API キー | S4 | 通常 |
+| organizations/{organization}/api-keys/sessions | organizations.api-keys.sessions.index | 画面 | 接続セッション | S4 | 通常 |
+| organizations/create | organizations.create | 画面 | 組織の作成 | S4 | 通常 |
+| organizations/{organization}/onboarding/cli | organizations.onboarding.cli | 画面 | CLI 導入ガイド | S4 | 通常 |
+| organizations/{organization}/onboarding/mcp | organizations.onboarding.mcp | 画面 | MCP 導入ガイド | S4 | 通常 |
+| organizations/{organization}/settings | organizations.settings | 画面 | 組織設定 | S4 | 通常 |
+| passkeys/confirm/options | passkey.confirm-options | JSON | - | S6 | 通常 |
+| passkeys/login/options | passkey.login-options | JSON | - | S1 | 通常 |
+| user/passkeys/options | passkey.registration-options | JSON | - | S6 | 通常 |
+| user/confirm-password | password.confirm | 画面 | パスワードの確認 | S6 | 通常 |
+| user/confirmed-password-status | password.confirmation | JSON | - | - | 外 |
+| forgot-password | password.request | 画面 | パスワードリセット | S1 | 通常 |
+| reset-password/{token} | password.reset | 画面 | パスワードリセット | S1 | 通常 |
+| pricing | pricing | 画面 | - | S5 | 通常 |
+| projects/{project}/categories | projects.categories.index | 画面 | カテゴリ管理 | S4 | 通常 |
+| projects/create | projects.create | 画面 | プロジェクトの作成 | S4 | 通常 |
+| projects/{project}/edit | projects.edit | 画面 | プロジェクトの編集 | S4 | 通常 |
+| projects | projects.index | 画面 | プロジェクト | S4 | 通常 |
+| projects/{project}/manuals/create | projects.manuals.create | 画面 | 動画マニュアルの作成 | S3 | 通常 |
+| projects/{project}/manuals/{manual}/download | projects.manuals.download | 画面 | - | S3 | 通常 |
+| projects/{project}/manuals/{manual}/edit | projects.manuals.edit | 画面 | - | S3 | 通常 |
+| projects/{project}/manuals/{manual}/jobs/{analysisJob} | projects.manuals.jobs.show | 画面 | - | S3 | 通常 |
+| projects/{project}/manuals/{manual}/render-jobs/{renderJob}/playback | projects.manuals.render-jobs.playback | 画面 | - | S3 | 通常 |
+| projects/{project}/manuals/{manual}/render-jobs/{renderJob} | projects.manuals.render-jobs.show | 画面 | - | S3 | 通常 |
+| projects/{project}/manuals/{manual} | projects.manuals.show | 画面 | - | S3 | 通常 |
+| projects/{project} | projects.show | 画面 | - | S3 | 通常 |
+| recent-auth/confirm | recent-auth.confirm | 画面 | 本人確認 | S6 | 通常 |
+| recent-auth/status | recent-auth.status | 画面 | - | S6 | 通常 |
+| register | register | 画面 | アカウント登録 | S1 | 通常 |
+| ai.txt | seo.ai | JSON | - | - | 外 |
+| llms.txt | seo.llms | JSON | - | - | 外 |
+| robots.txt | seo.robots | JSON | - | - | 外 |
+| sitemap.xml | seo.sitemap | JSON | - | - | 外 |
+| session/status | session.status | JSON | - | S6 | 通常 |
+| settings | settings | 画面 | 設定 | S6 | 通常 |
+| settings/security | settings.security | 画面 | セキュリティ設定 | S6 | 通常 |
+| auth/{provider}/callback | social.callback | 画面 | - | - | 外 |
+| auth/{provider}/redirect/{intent} | social.redirect | 画面 | - | - | 外 |
+| two-factor-challenge | two-factor.login | 画面 | 2要素認証 | S1 | 通常 |
+| user/two-factor-qr-code | two-factor.qr-code | JSON | - | - | 外 |
+| user/two-factor-recovery-codes | two-factor.recovery-codes | JSON | - | - | 外 |
+| user/two-factor-secret-key | two-factor.secret-key | JSON | - | - | 外 |
+| email/verify | verification.notice | 画面 | メール認証 | S1 | 通常 |
+| email/verify/{id}/{hash} | verification.verify | 画面 | - | S1 | 通常 |
 
-| route (URL) | name | 割当ストーリー |
-|---|---|---|
-| / | home | S1 |
-| app | capture.home | S3 |
-| app/csrf-cookie | capture.csrf-cookie | S3 |
-| app/projects/{project}/manuals | capture.manuals.index | S3 |
-| app/projects/{project}/manuals/{manual} | capture.manuals.show | S3 |
-| app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take}/playback | capture.takes.playback | S3 |
-| billing | billing.index | S5 |
-| billing-required | onboarding.billing-required | S2 |
-| billing/plans | billing.plans | S5 |
-| commerce-disclosure | legal.commerce-disclosure | S1 |
-| contact | contact | S1 |
-| contact/thanks | contact.thanks | S1 |
-| dashboard | dashboard | S1 |
-| email/verify | verification.notice | S1 |
-| email/verify/{id}/{hash} | verification.verify | S1 |
-| forgot-password | password.request | S1 |
-| invitations/accept | invitations.accept | S2 |
-| login | login | S1 |
-| manage/users | manage.users.index | S4 |
-| notifications | notifications.index | S6 |
-| onboarding/checkout | onboarding.checkout | S1 |
-| organizations/create | organizations.create | S4 |
-| organizations/{organization:slug}/api-keys | organizations.api-keys.index | S4 |
-| organizations/{organization:slug}/api-keys/sessions | organizations.api-keys.sessions.index | S4 |
-| organizations/{organization:slug}/onboarding/cli | organizations.onboarding.cli | S4 |
-| organizations/{organization:slug}/onboarding/mcp | organizations.onboarding.mcp | S4 |
-| organizations/{organization:slug}/settings | organizations.settings | S4 |
-| passkeys/confirm/options | passkey.confirm-options | S6 |
-| passkeys/login/options | passkey.login-options | S1 |
-| pricing | pricing | S5 |
-| privacy | legal.privacy | S1 |
-| purchase-tickets | billing.tickets.show | S5 |
-| projects | projects.index | S4 |
-| projects/create | projects.create | S4 |
-| projects/{project} | projects.show | S3 |
-| projects/{project}/categories | projects.categories.index | S4 |
-| projects/{project}/edit | projects.edit | S4 |
-| projects/{project}/manuals/create | projects.manuals.create | S3 |
-| projects/{project}/manuals/{manual} | projects.manuals.show | S3 |
-| projects/{project}/manuals/{manual}/download | projects.manuals.download | S3 |
-| projects/{project}/manuals/{manual}/edit | projects.manuals.edit | S3 |
-| projects/{project}/manuals/{manual}/jobs/{analysisJob} | projects.manuals.jobs.show | S3 |
-| projects/{project}/manuals/{manual}/render-jobs/{renderJob} | projects.manuals.render-jobs.show | S3 |
-| projects/{project}/manuals/{manual}/render-jobs/{renderJob}/playback | projects.manuals.render-jobs.playback | S3 |
-| recent-auth/confirm | recent-auth.confirm | S6 |
-| recent-auth/status | recent-auth.status | S6 |
-| register | register | S1 |
-| reset-password/{token} | password.reset | S1 |
-| session/status | session.status | S6 |
-| settings | settings | S6 |
-| settings/security | settings.security | S6 |
-| terms | legal.terms | S1 |
-| two-factor-challenge | two-factor.login | S1 |
-| user/confirm-password | password.confirm | S6 |
-| user/passkeys/options | passkey.registration-options | S6 |
+## 対象外の理由
+
+- `debug.bfcache-trial` — 履歴復元の実機受入確認のための検証ページであり製品の利用者が到達する画面ではないため分母に載せない
+- `debug.bfcache-trial.away` — 履歴復元の実機受入確認で離脱先に使う検証ページであり製品の利用者が到達する画面ではないため分母に載せない
+- `debug.login` — 開発環境専用のログイン補助画面であり探索は POST の debug.login-as で前提を組むため分母に載せない
+- `password.confirmation` — 再認証が有効かどうかだけを返す状態問い合わせであり画面として開く経路ではないため分母に載せない
+- `seo.ai` — 生成 AI のクローラ向けの機械可読 route であり人が操作する画面ではないため分母に載せない
+- `seo.llms` — 生成 AI のクローラ向けの機械可読 route であり人が操作する画面ではないため分母に載せない
+- `seo.robots` — クローラ向けの機械可読 route であり人が操作する画面ではないため探索の分母に載せない
+- `seo.sitemap` — クローラ向けの機械可読 route であり人が操作する画面ではないため探索の分母に載せない
+- `social.callback` — 外部の識別提供者から戻る受け口であり実際の識別提供者なしには到達できないため分母に載せない
+- `social.redirect` — 外部の識別提供者へ出ていく遷移であり隔離した探索環境の外へ出てしまうため分母に載せない
+- `two-factor.qr-code` — 第二要素の秘密を図として返す開示 endpoint であり単独で開くと秘密が走行記録に残るため分母に載せない
+- `two-factor.recovery-codes` — 復旧コードを返す開示 endpoint であり単独で開くと秘密が走行記録に残るため分母に載せない
+- `two-factor.secret-key` — 第二要素の秘密そのものを返す開示 endpoint であり単独で開くと秘密が走行記録に残るため分母に載せない
+
+<!--
+  screens.md の末尾へそのまま連結される散文。人が書く (生成器は中身を読まない)。
+  **表を書かないこと** — notes-operations.md と同じ規則である。あちらは
+  coverage/correlate.py が操作行として拾ってしまうのが直接の理由で、こちらは
+  連結先ごとに規則が変わる方が事故のもとになるため同じ規則を課している。
+  段 2 が表の混入を drift として拒否する。
+-->
+
+## 画面に関する既知の仕様 (散文)
 
 **非 Inertia の GET (画面ではないが分母に載せているもの)**:
 `capture.csrf-cookie` (撮影 PWA の CSRF cookie 発行) と `session.status`

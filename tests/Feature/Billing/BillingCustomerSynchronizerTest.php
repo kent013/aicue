@@ -8,7 +8,6 @@ use App\DataTransferObjects\Billing\UpdateBillingContactData;
 use App\Jobs\Billing\SyncBillingCustomerDetails;
 use App\Services\Billing\BillingCustomerSynchronizer;
 use App\Services\Billing\Contracts\StripeGatewayInterface;
-use App\Services\Billing\Fakes\FakeStripeGateway;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Tests\Support\Queue\RecordsJobQueueingTransactionLevel;
@@ -159,7 +158,7 @@ test('業務 tx の内側で dispatch した job は commit 後に jobs 行と�
 test('job は StripeGatewayInterface へ委譲する (fake bind 時は実 Stripe を叩かない)', function (): void {
     [$organization] = createOrganizationWithOwner();
     $organization->forceFill(['stripe_id' => 'cus_test_3'])->save();
-    $this->app->bind(StripeGatewayInterface::class, FakeStripeGateway::class);
+    enableFakeExternals();
 
     // fake gateway の syncCustomerDetails は no-op。例外なく完走することを固定する
     (new SyncBillingCustomerDetails($organization))->handle(app(StripeGatewayInterface::class));

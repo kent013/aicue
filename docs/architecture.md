@@ -1472,38 +1472,85 @@ Vitest (`OrganizationsSettings.test.ts`) と Feature 両面で回帰固定する
 | MCP | `routes/ai.php` → `Mcp/Servers` | Passport OAuth 2.1 (`auth:mcp-oauth`) |
 | 管理画面 | Filament (`app/Filament`) | AdminUser guard |
 
-## 外部 fake 配線の不変条件 (T119)
+## 偽の外部サービスの宣言と配線の不変条件 (T119 / T177)
 
-外部サービス (Stripe / S3 / LLM) の fake 差し替えは、**登録漏れが例外にならず本物が静かに動く**
-という性質を持つ (Laravel は abstract が具象クラスなら設定が無くても自動組み立てする)。
-撮影データと課金は取り返しがつかない副作用を持つため、以下を不変条件として固定する
-(gate は `tests/Architecture/ExternalFakeWiringInvariantTest` と
-`tests/Architecture/FakeClassReferenceInvariantTest`、走査器の固定は
-`tests/Unit/Architecture/FakeWiringSourceScannerTest`)。
+外部サービス (決済 / 保存先 / LLM) を偽物へ差し替える配線は、**登録漏れが例外にならず
+本物が静かに動く**という性質を持つ (Laravel は abstract が具象クラスなら設定が無くても
+自動組み立てする)。撮影データと課金は取り返しがつかない副作用を持つため、以下を不変条件として
+固定する (gate は `tests/Architecture/ExternalFakeWiringInvariantTest` /
+`FakeClassReferenceInvariantTest` / `LaneExternalFakeBindingTest` / `ExternalFakeBootProbeTest`、
+走査器の固定は `tests/Unit/Architecture/FakeWiringSourceScannerTest`)。
 
+- **「何をどの偽物へ差し替えるか」の唯一の正本は
+  `App\Support\ExternalFakes\ExternalFakeDeclaration`** (本番の読み込み対象に置く)。
+  差し替え 1 本は `ExternalFakeBinding` の値オブジェクトで表し、
+  capability flag / 許可環境 / 差し替えない対象もここが持つ。
+  provider・`FakeStorageGate`・bug-hunt の seeder・`ProductionEnvGuard`・
+  bug-hunt の環境ひな型検査は**すべてこの宣言を読む** (同じ集合を 2 か所に書かない)。
 - **差し替えの唯一の配線点は `App\Providers\FakeExternalsServiceProvider`**。container 差し替えは
-  `$this->app->bind(A::class, B::class)` の形だけで行う (`singleton()` / `bind()` の第 3 引数
-  (= singleton 相当) / 変数 abstract / closure concrete / `app()`・`resolve()`・`App::`・
-  `Container::getInstance()` 経由は deny-by-default で fail する)。登録は
-  `bootstrap/providers.php` で **`AppServiceProvider` より後**に置く (後勝ち rebind)。
-- **新しい差し替えを足したら `tests/Support/ExternalFakes/ExternalFakeWiringInventory::bindings()`
-  に登録する**。未登録の bind 組は集合一致で検出される。登録すると「flag off で real /
-  flag on + allowlist env で fake / allowlist 外 env で real」の**実証**検査が自動で増える。
-  判定は必ず**厳密クラス一致** (`$resolved::class === $expected`) — storage fake は real の
-  サブクラスなので `instanceof` では偽グリーンになる。Architecture lane は `RefreshDatabase` を
-  使わないため、**解決対象の constructor が DB 非依存**であることを確認すること。
-- **capability flag は 3 系統で allowlist が異なる**: `testing.fake_externals` (課金。
-  local / testing / bughunt.local)、`testing.fake_storage` (`App\Support\FakeStorageGate` が
-  predicate の SSOT。bughunt.local ∨ (testing ∧ runningUnitTests))、`testing.fake_llm`
-  (bughunt.local のみ。`Prompt::$fake` は container ではなくプロセスグローバル static)。
+  `$this->app->bind($swap->abstract, $swap->fake)` の形**だけ**で行う。
+  **`::class` を直に書く bind は許可形から外れる** = 差し替え先の決定は宣言側にしか無い
+  (`singleton()` / 第 3 引数 (= singleton 相当) / 変数 abstract / closure concrete /
+  `app()`・`resolve()`・`App::`・`Container::getInstance()` 経由も deny-by-default で fail する)。
+  登録は `bootstrap/providers.php` で **`AppServiceProvider` より後**に置く (後勝ち rebind)。
+- **新しい差し替えを足したら `ExternalFakeDeclaration::swaps()` に entry を足す**。
+  足すと「flag off で real / flag on + allowlist env で fake / allowlist 外 env で real」の
+  **実証**検査が自動で増える。判定は必ず**厳密クラス一致** (`$resolved::class === $expected`) —
+  保存先の偽物は本物のサブクラスなので `instanceof` では偽グリーンになる。
+  Architecture lane は `RefreshDatabase` を使わないため、**解決対象の constructor が DB 非依存**で
+  あることを確認すること。**entry を消す変異を映すのは `3-16` (abstract 一覧の件数付き pin) だけ**で、
+  増減させるときは宣言と gate の 2 か所を同時に触る (意図的な摩擦)。
+- **レーン側 (`tests/`) から偽の実装クラスを container へ直接結ばない**
+  (`LaneExternalFakeBindingTest` が静的に禁じる。例外の登録簿は持たない)。
+  レーンで偽物を有効にするときは `tests/Pest.php` の `enableFakeExternals()` /
+  `enableFakeStorage()` を使い、宣言 + provider の 1 本を共有する。
+  per-test の代役 (`tests/Support/Fake*`) は Laravel 公式作法のテストダブルであり本規約の対象外。
+- **capability flag は 3 系統で許可環境が異なる**: `testing.fake_externals` (決済 + 人間性確認 +
+  外部ログイン。local / testing / bughunt.local。ただし**外部ログインだけ local を除く**)、
+  `testing.fake_storage` (`App\Support\FakeStorageGate` が有効化条件の単一正本。
+  bughunt.local ∨ (testing ∧ 自動テスト実行中))、`testing.fake_llm`
+  (bughunt.local のみ。`Prompt::$fake` は container ではなくプロセス大域の static)。
+- **差し替えない対象**は `ExternalFakeDeclaration::neverSwapped()` に理由付きで宣言する
+  (受信通知の署名検証 / 外部 URL の安全検査)。宣言集合と交わったら gate が落ちる。
 - **本番混入防止の正本は `App\Support\ProductionEnvGuard`** (配備前 = `production:preflight` /
-  起動時 = `AppServiceProvider::boot`)。fake 配線 gate はこれを二重実装しない。
+  起動時 = `AppServiceProvider::boot`)。**設定値とプロセスの実環境変数 (`$_SERVER` / `$_ENV` /
+  `getenv()`) の両方**を見る — 設定キャッシュを作った環境と出荷先が食い違うと、キャッシュ上は
+  false でも、キャッシュが失われた起動で環境変数が読み直されて本番で偽物が立ちうるため。
+  解釈できない値 (`maybe` / 非文字列) は安全側で違反にする。fake 配線 gate はこれを二重実装しない。
 - **fake 実装クラスは `app/**/Fakes/` か `app/**/Testing/` に置く**。配置例外は
-  `FakeExternalsServiceProvider` (唯一の配線点) と `FakeStorageGate` (有効化 predicate) の 2 件のみ。
+  `FakeExternalsServiceProvider` (唯一の配線点) と `FakeStorageGate` (有効化条件) の 2 件のみ。
 - **本番コード (`app/` • `routes/` • `config/` • `bootstrap/`) は fake クラスを参照しない**。
-  参照してよいのは配線点と fake storage signed route の受け口を含む 4 ファイルだけで、
+  参照してよいのは宣言・配線点・偽の保存先の署名付き経路の受け口を含む 6 ファイルだけで、
   allowlist の件数はテストが固定している (増やすには理由コメントと併せて 2 箇所を触る摩擦がかかる)。
   **誤検出が出ても allowlist を足す方向へ倒さない** — それが gate の目的である。
+- **別プロセスでの実測** (`ExternalFakeBootProbeTest`): 実際の起動の下で宣言の全件が
+  偽物 / 本物へ解決されること、外部ログインの転送先が自ホストへ閉じること、
+  production + フラグ有効なら起動そのものが失敗することを子プロセスで観測する。
+  子の環境は `env -i` で空にし、設定は使い捨ての鍵だけを書いた一時環境ファイル 1 つから読む
+  (親のチェックアウトの `.env` を読ませない = 実資格情報を子へ渡さない)。
+  **観測できるのは設定キャッシュ無しの起動だけ**である (キャッシュが古いときの事故は
+  上の二重判定が受け持つ)。
+
+### bug-hunt の投入データ (seeder) の配線 (T177)
+
+偽の外部サービスの配線と**同じ理由** (登録漏れが無音) が投入データにも当てはまるため、
+`tests/Architecture/BughuntSeedWiringInvariantTest` が deny-by-default で固定する。
+区分の目録は `tests/Support/Bughunt/BughuntSeedWiringInventory`
+(母集団は `database/seeders/` の全 seeder で、過不足なく一致することを要求する)。
+
+- `scripts/bug-hunt-shard.sh` の `cmd_provision` と `cmd_reseed` の投入列が**順序込みで一致**する
+  (順序に意味がある。並べ替えるときは 2 か所を同時に直す)
+- その列の集合が目録の「bug-hunt で明示投入する」区分と過不足なく一致する
+- bug-hunt 専用の seeder は `DatabaseSeeder` に現れない (全環境の `migrate:fresh --seed` で走らない)
+- 環境ガードを要求する区分は `run()` の**最初の実効文が `if`** で、条件に区分ごとの判定語が
+  すべて現れ、本体に早期 `return` がある
+- **静的走査は条件の論理 (かつ / または) を読めない**ため、ガードを要求する区分には
+  その論理を実際に動かして固定している振る舞いテストを目録から紐づける (前提テストが消えたら赤くなる)
+
+**bug-hunt の手順書 (`.claude/skills/app-bug-hunt/`) 側に投入データの検査は置かない。**
+手順書が守るのは走行の型 (禁止事項・走る順・異常の見分け方) であり、
+「どの投入データがどの入口に配線されているか」は実行時の配線の関心事である。
+配線の検査は上の Architecture テストが持つ。
 
 ## 外部 SDK の待ち上限の規約 (T126)
 
@@ -1744,7 +1791,7 @@ T126 の `ExternalClientBoundaryScanner` も本目録の `ExternalSeamScanner` �
   **T153 で集約先を controller からこの薄い解決点へ切り出した** — container の差し替えキーに
   なれるのは controller ではなく解決点だからである。
 - 非本番の captcha は `testing.fake_externals` で `RecaptchaVerifier` →
-  `RecaptchaVerifierTestFake` へ container bind される (`ExternalFakeWiringInventory`)。
+  `RecaptchaVerifierTestFake` へ container bind される (`ExternalFakeDeclaration`)。
   abstract が**具象クラス**のため bind を消しても Laravel が本物を自動組み立てし、
   `RECAPTCHA_SECRET_KEY` が設定された環境では**無言で** Google siteverify を叩く
   (`StrayHttpRequestGuard` は bug-hunt の別プロセス実行には効かない)。
@@ -1755,7 +1802,7 @@ T126 の `ExternalClientBoundaryScanner` も本目録の `ExternalSeamScanner` �
   canned 値 (`fake-{provider}-user` / `fake-{provider}-sso@example.com`) で、
   外部入力では切り替えられない。
   - **env allowlist は `testing` / `bughunt.local` のみで `local` を除く**
-    (`FakeExternalsServiceProvider::SSO_FAKE_ENVIRONMENTS`)。SSO fake は未認証 GET 2 本
+    (`ExternalFakeDeclaration::SSO_ENVIRONMENTS`)。SSO fake は未認証 GET 2 本
     (`/auth/{p}/redirect/login` → `/auth/{p}/callback`) で canned アカウントへログインできる
     = **認証バイパス**であり、かつ `local` は開発者が実 IdP 連携を確認する唯一の環境である。
     この除外は**誤設定ではなく設計上の除外**なので warning ログを出さない (LLM fake と同じ扱い)。
@@ -1964,6 +2011,71 @@ lctl 台帳 feature `account-deletion-billing-guard` の標準形 v1 (裁定 AG-
   本番で日次処理が止まっていないことも保証しない (責務は終了コードと scheduler 運用)。
   畳み込みで失われるもの (返金逆仕訳の逆引き / 消費の冪等キー / signup grant の部分 UNIQUE
   index の保護範囲) は `docs/billing-retention-runbook.md` §7 が一覧を持つ。
+
+## 表ごとの保持期限の分類 (T175)
+
+**実スキーマの全表**を「保持期限を誰が持つか」の区分へ分類し、その分類が実際の表の構成と
+食い違っていないことを機械で確かめる層である。台帳は
+`tests/Support/Retention/RetentionTableRegistry.php`、検査は
+`tests/Feature/Retention/RetentionTableClassificationTest.php` (Feature lane =
+実スキーマを引くため DB が要る)。
+
+- **区分は 6 種** (`Tests\Support\Retention\RetentionClass`):
+  課金取引の記録 / 定期実行が消す / 親と一緒に消える / 基準データ / 基盤が寿命を持つ / 未確定。
+  **除外一覧を持たない** — 基盤の表 (`migrations` / `cache` / `sessions` / `jobs`) も
+  区分の 1 つとして必ず載る (除外の口を作ると、そこへ名前を足すだけで検査から逃げられる)。
+- **年数・起算点・purger の配線は台帳に書かない**。課金 7 年の正本は
+  `App\Enums\Billing\BillingRetentionTarget`、各バッチの期限は各 config の解決点クラスであり、
+  台帳が持つのは区分・根拠・保持者の名前だけである (同じ事実を 2 か所に書かない)。
+- **未確定は隠さない**。期限が決まっていない表は「未確定」として載せ、件数と表名を
+  検査が現在値ちょうどで pin する (増えるときも減るときもテストの差分としてレビューに出る)。
+- **検査が保証するもの**: 台帳と実スキーマの表一覧が両方向で集合等価であること (RC-1 / RC-2)、
+  二重宣言が無く根拠が 30 文字以上あること (RC-3)、課金 7 年の表集合が
+  `BillingRetentionTarget` と両方向で一致すること (RC-4)、宣言した保持者が
+  識別先として実在すること (RC-5)、区分と外部キーの構造が矛盾しないこと (RC-6 / RC-7)、
+  総件数と未確定の表名が現在値ちょうどであること (RC-8)。
+
+**外部キーの読み方 (RC-7)**: 「期限が要る表への外部キーを一律禁止」ではない。
+**親が消えたときに子がどうなるか**で判断する。
+
+| `on delete` | 親の削除時に起きること | 扱い |
+|---|---|---|
+| `cascade` | 子も消える | 矛盾 (「期限を持たない」と両立しない) |
+| `restrict` / `no action` | 親の削除を拒否する | 矛盾 (親の期限の執行を止めうる) |
+| `set null` (**列がすべて nullable**) | 子は残り外部キー列が空になる | 矛盾ではない |
+| `set null` (`NOT NULL` が混ざる) | 制約違反で親の削除が失敗する | 矛盾 (結果は `restrict` と同じ) |
+| `set default` | 既定値が制約を満たさなければ親の削除が失敗する | 矛盾 (本リポジトリに 1 本も無い) |
+| 取得できない | 不明 | 矛盾 (保守的に倒す) |
+
+実例として `llm_call_logs` / `security_audit_events` は組織・利用者への外部キーを
+`nullOnDelete()` で持ち、**退会・組織削除の後も行が残る**。ここを一律違反にすると、
+残る表を「親と一緒に消える」と偽って分類させることになり、検査が事実と逆に働く。
+**足りない情報 (参照先が台帳に無い / 外部キーの列が空 / 列の nullable が取れない) は
+すべて違反へ倒す** (fail-closed)。
+
+**保証しないもの (誇張しない)**:
+
+- **列は見ない**。単位は表であり、どの列が個人情報かは扱わない。
+- **行ごとの寿命の違いは表現しない**。`users` は退会予約が入った行だけが猶予後に消えるが、
+  表としては 1 つの区分に丸められる。
+- **Schedule への配線は見ない**。コマンドが実在しさえすれば RC-5 は通る
+  (`oauth_*` を未確定に置いているのはこのためである)。
+- **保持者として宣言したクラス / コマンドが実際にその表を消すことは検査していない**。
+  見ているのは識別先の実在だけである。
+- **`on delete cascade` の存在は「親が実際に消される」ことを意味しない**。
+  親を消す経路が存在するかは見ていない。
+- **実データが実際に消えることは保証しない**。それは各掃除バッチの behavioral テストの担当。
+- **区分の意味が正しいかは人間のレビュー対象**である。
+- S3 上の実体 (レンダ出力・撮影テイク) / ビュー / 他スキーマの表は対象外である。
+
+**`BillingRetentionTargetInventoryTest` との責務境界**: あちらは
+`app/Models/Billing/` という人間の申告を母集団に、年数・起算点列・purger の配線・実行順を持つ。
+本層は**それらを 1 つも写さず**、表集合の一致 (RC-4) だけで結線する。
+
+**家系の正典との差**: lctl 台帳の正典 (aigenba v1) は `config/retention.php` を保存年数の
+正本として持つが、**本リポジトリでは作らない**。保存年数は既に 4 か所の config に分かれて
+置かれ、それぞれに唯一の解決点クラスと直読禁止の検査が付いているため、5 つ目の置き場を
+作ると値が二重管理になる。**本層が持つのは「分類」であって「値」ではない**。
 
 ## パイプライン通し確認 (pipeline smoke) と LLM コストレポート (T147)
 

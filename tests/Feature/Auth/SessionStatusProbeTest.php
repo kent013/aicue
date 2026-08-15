@@ -4,15 +4,20 @@ declare(strict_types=1);
 
 use App\Http\Middleware\RequireTwoFactorForEnforcedOrganizations;
 use App\Models\User;
+use App\Support\Auth\SessionEpoch;
+use Illuminate\Support\Str;
 
 /*
  * bfcache 秘匿・再検証 (詳細設計 施策 6) の軽量プローブ endpoint。
  *
  * 契約:
- *   - auth グループの外。guest でも 200 + { "authenticated": false } (top-level / $wrap = null)。
- *     ステータスコードではなく明示 boolean を見せることで、クライアント guard が
- *     「セッション無効」と「endpoint 不在 / エラー」を取り違えないようにする。
- *   - 応答は `{ "authenticated": bool }` のみ = PII を一切含まない。
+ *   - auth グループの外。guest でも 200 + { "authenticated": false, "sessionEpochMatches": false }
+ *     (top-level / $wrap = null)。ステータスコードではなく明示 boolean を見せることで、
+ *     クライアント guard が「セッション無効」と「endpoint 不在 / エラー」を取り違えないようにする。
+ *   - 応答は `{ "authenticated": bool, "sessionEpochMatches": bool }` のみ = PII を一切含まない。
+ *   - 世代の照合に使うのは **要求ヘッダ X-Session-Epoch だけ**。要求の Cookie ヘッダに載る
+ *     世代 cookie は画面側から書き換えられる値なので一致判定に使わない。
+ *   - 印を運ばない要求は一致にしない (既定は開示しない側)。
  *   - `no-store, private` を Resource 側 (withResponse) で付与する (guest 応答も対象のため
  *     認証済み限定の baseline middleware には委ねない)。
  *   - 2FA 強制中 / recent-auth 期限切れ / 組織未選択でも必ず 200 + boolean。
@@ -22,15 +27,15 @@ use App\Models\User;
 test('guest でも 200 で authenticated:false を返す', function (): void {
     $this->get('/session/status')
         ->assertOk()
-        ->assertExactJson(['authenticated' => false]);
+        ->assertExactJson(['authenticated' => false, 'sessionEpochMatches' => false]);
 });
 
-test('認証済みは 200 で authenticated:true を返す (top-level / data ラップなし)', function (): void {
+test('認証済み・印を運ばない要求は authenticated:true / sessionEpochMatches:false (既定は開示しない側)', function (): void {
     [, $owner] = createOrganizationWithOwner();
 
     $this->actingAs($owner)->get('/session/status')
         ->assertOk()
-        ->assertExactJson(['authenticated' => true]);
+        ->assertExactJson(['authenticated' => true, 'sessionEpochMatches' => false]);
 });
 
 test('応答に no-store と private が付く', function (): void {
@@ -72,7 +77,7 @@ test('2FA 強制中の未準拠ユーザーでも 200 + boolean を返す (ゲ�
 
     $this->actingAs($owner)->get('/session/status')
         ->assertOk()
-        ->assertExactJson(['authenticated' => true]);
+        ->assertExactJson(['authenticated' => true, 'sessionEpochMatches' => false]);
 });
 
 test('プローブ route は 2FA ゲートの allowlist に理由付きで登録されている', function (): void {
@@ -90,7 +95,7 @@ test('recent-auth の鮮度が切れていても 200 + boolean を返す', funct
         ->withSession(['recent_auth_at' => now()->subDay()->timestamp])
         ->get('/session/status')
         ->assertOk()
-        ->assertExactJson(['authenticated' => true]);
+        ->assertExactJson(['authenticated' => true, 'sessionEpochMatches' => false]);
 });
 
 test('組織未選択 (current_organization_id が null) でも 200 + boolean を返す', function (): void {
@@ -99,7 +104,7 @@ test('組織未選択 (current_organization_id が null) でも 200 + boolean �
 
     $this->actingAs($user)->get('/session/status')
         ->assertOk()
-        ->assertExactJson(['authenticated' => true]);
+        ->assertExactJson(['authenticated' => true, 'sessionEpochMatches' => false]);
 });
 
 test('メール未検証ユーザーでも 200 + boolean を返す (verified ゲート外)', function (): void {
@@ -107,5 +112,73 @@ test('メール未検証ユーザーでも 200 + boolean を返す (verified ゲ
 
     $this->actingAs($user)->get('/session/status')
         ->assertOk()
-        ->assertExactJson(['authenticated' => true]);
+        ->assertExactJson(['authenticated' => true, 'sessionEpochMatches' => false]);
+});
+
+test('正しい印をヘッダで運ぶと sessionEpochMatches:true になる', function (): void {
+    [, $owner] = createOrganizationWithOwner();
+    $sessionId = Str::random(40);
+
+    $this->actingAs($owner)
+        ->withCookie((string) config('session.cookie'), $sessionId)
+        ->withHeader(SessionEpoch::HEADER_NAME, SessionEpoch::forSession($sessionId))
+        ->get('/session/status')
+        ->assertOk()
+        ->assertExactJson(['authenticated' => true, 'sessionEpochMatches' => true]);
+});
+
+test('別の印・書式違い・空文字・長すぎる値は sessionEpochMatches:false', function (string $submitted): void {
+    [, $owner] = createOrganizationWithOwner();
+    $sessionId = Str::random(40);
+
+    $this->actingAs($owner)
+        ->withCookie((string) config('session.cookie'), $sessionId)
+        ->withHeader(SessionEpoch::HEADER_NAME, $submitted)
+        ->get('/session/status')
+        ->assertOk()
+        ->assertExactJson(['authenticated' => true, 'sessionEpochMatches' => false]);
+})->with([
+    '別の印' => '0123456789abcdef0123456789abcdef',
+    '空文字' => '',
+    '大文字' => '0123456789ABCDEF0123456789ABCDEF',
+    '長すぎる' => '0123456789abcdef0123456789abcdef0',
+]);
+
+test('世代 cookie に正しい印を積んでもヘッダが無ければ sessionEpochMatches:false', function (): void {
+    // Cookie ヘッダを照合に使っていないことの behavioral な固定
+    // (画面側から書き換えられる値を開示の根拠に混ぜない)。
+    [, $owner] = createOrganizationWithOwner();
+    $sessionId = Str::random(40);
+
+    $this->actingAs($owner)
+        ->withCookie((string) config('session.cookie'), $sessionId)
+        ->withUnencryptedCookie(SessionEpoch::COOKIE_NAME, SessionEpoch::forSession($sessionId))
+        ->get('/session/status')
+        ->assertOk()
+        ->assertExactJson(['authenticated' => true, 'sessionEpochMatches' => false]);
+});
+
+test('guest が正しい印を運んでも authenticated は false のまま', function (): void {
+    $sessionId = Str::random(40);
+
+    $this->withCookie((string) config('session.cookie'), $sessionId)
+        ->withHeader(SessionEpoch::HEADER_NAME, SessionEpoch::forSession($sessionId))
+        ->get('/session/status')
+        ->assertOk()
+        ->assertExactJson(['authenticated' => false, 'sessionEpochMatches' => true]);
+});
+
+test('応答本文に印そのものが現れない (値を返していないことの固定)', function (): void {
+    [, $owner] = createOrganizationWithOwner();
+    $sessionId = Str::random(40);
+    $epoch = SessionEpoch::forSession($sessionId);
+
+    $body = $this->actingAs($owner)
+        ->withCookie((string) config('session.cookie'), $sessionId)
+        ->withHeader(SessionEpoch::HEADER_NAME, $epoch)
+        ->get('/session/status')
+        ->getContent();
+
+    expect($body)->toBeString()
+        ->and($body)->not->toContain($epoch);
 });

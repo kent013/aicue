@@ -317,10 +317,11 @@ Laravel の `migrations` 表のように migration 定義に現れない表が�
 | `idempotency_keys` `mcp_idempotency_keys` | 定期実行が消す | `App\Support\Idempotency\IdempotencyRetention` / `idempotency:prune` |
 | `take_upload_reservations` | 定期実行が消す | `PurgeUploadReservationsCommand` / `capture:purge-upload-reservations` |
 | `users` | 定期実行が消す | `App\Support\Account\AccountDeletionGrace` / `account:purge-deletion-requests`。根拠に「**退会予約が入った行だけ**が猶予後に物理削除される。予約の無い行に期限は無い = **表の中で行ごとに寿命が違う**」と書く |
-| `organizations` `custom_teams` `teams` `projects` `organization_user` `project_members` `organization_invitations` `role_user` `permission_user` `social_accounts` `passkeys` `api_keys` `notifications` `items` `categories` `video_manuals` `source_documents` `cuts` `takes` `analysis_jobs` `render_jobs` `ticket_reservations` `ticket_auto_recharges` `organization_quotas` `billing_notifications` | 親と一緒に消える | 親 (organizations / projects / users / video_manuals …) の cascade。**`teams` は cascade FK を持たない可能性が高い**ので、その場合は削除責務クラスを宣言する (OR 条件) |
+| `custom_teams` `projects` `organization_user` `project_members` `organization_invitations` `role_user` `permission_user` `social_accounts` `passkeys` `api_keys` `notifications` `items` `categories` `video_manuals` `source_documents` `cuts` `takes` `analysis_jobs` `render_jobs` `ticket_reservations` `ticket_auto_recharges` `organization_quotas` `billing_notifications` | 親と一緒に消える | 親 (organizations / projects / users / video_manuals …) の cascade |
+| `blind_indexes` | 親と一緒に消える | 外部キーを持たないが、`Spatie\LaravelCipherSweet\Observers\ModelObserver` が親モデルの Eloquent 削除に合わせて索引行を消す (OR 条件の (b) = 削除責務クラスの宣言) |
 | `plans` `plan_prices` `ticket_volume_prices` `roles` `permissions` `permission_role` | 基準データ | 運用者が入れ替えるまで残る。個人に紐づかない |
 | `migrations` `cache` `cache_locks` `jobs` `job_batches` `failed_jobs` `sessions` `password_reset_tokens` | 基盤が寿命を持つ | フレームワーク / キュー / セッションの実装が寿命を決める |
-| `llm_call_logs` `security_audit_events` `model_audits` `email_suppressions` `blind_indexes` `admin_users` `oauth_access_tokens` `oauth_refresh_tokens` `oauth_auth_codes` `oauth_device_codes` `oauth_clients` `oauth_sessions` | **未確定** | 下記 |
+| `organizations` `teams` `llm_call_logs` `security_audit_events` `model_audits` `email_suppressions` `admin_users` `oauth_access_tokens` `oauth_refresh_tokens` `oauth_auth_codes` `oauth_device_codes` `oauth_clients` `oauth_sessions` | **未確定** | 下記 |
 
 **未確定に置く理由 (根拠欄に書く内容)**:
 
@@ -328,8 +329,8 @@ Laravel の `migrations` 表のように migration 定義に現れない表が�
   退会・組織削除の後も**行は残る**。費用分析・監査の必要期間が決まっていない。
 - `model_audits`: 監査証跡。外部キーを持たない (`morphs`) ので親の削除に連動しない。保持期間が未決。
 - `email_suppressions`: メールアドレスそのものを保持する。送達抑制の必要期間が未決。
-- `blind_indexes`: 暗号化列の検索用索引。親行の削除に連動するかを実装で確認していない。
 - `admin_users`: 運用者アカウント。退任時の扱いが手順として決まっていない。
+- `organizations` / `teams`: **実装時の実測で分類を変えた** (下記「実装時に確定した差分」)。
 - `oauth_*`: **本リポジトリの保持期限の責任者が決まっていない**。失効・期限切れのトークンを
   誰がいつ消すかの決着 (掃除の配線を含む) が未決である。
   **gate は Schedule への登録有無を見ない**ので、ここを「定期実行が消す」と分類すると
@@ -338,6 +339,39 @@ Laravel の `migrations` 表のように migration 定義に現れない表が�
 > **未確定は「まだ何もしていない」の可視化であって、放置の許可ではない**。
 > 件数と表名を RC-8 が現在値ちょうどで pin するため、増えるときも減るときも
 > テストの変更として必ずレビューに出る。
+
+### 実装時に確定した差分 (実スキーマと app/ の実測で設計案を直した箇所)
+
+実スキーマは **63 表**で、初期分類の想定と一致した。ただし次の 3 点は実測の結果が
+設計案と食い違ったため、**実測に合わせて設計を直した**。
+
+1. **`organizations` を「親と一緒に消える」→「未確定」へ**。`organizations` の外部キーは
+   `teams` への `restrict` と `users` への `set null` だけで **cascade を 1 本も持たず**、
+   `app/` 配下に organization の行を削除する経路も 1 つも無い (実測)。つまり
+   「親が消えれば一緒に消える」も「定期実行が消す」も成り立たない。RC-6 を通すために
+   実在しない削除責務クラスを宣言するのは**嘘の根拠**になるため、未確定に載せる。
+2. **`teams` を「親と一緒に消える」→「未確定」へ**。`teams` は外部キーを 1 本も持たず、
+   行を削除する経路も `app/` に無い。`organizations` の決着が付くまでこの表の期限も決まらない。
+3. **`blind_indexes` を「未確定」→「親と一緒に消える (削除責務クラスの宣言)」へ**。
+   設計時は「親行の削除に連動するかを確認していない」としていたが、
+   `vendor/spatie/laravel-ciphersweet` の `Observers\ModelObserver::deleting()` が
+   `deleteBlindIndexes()` を呼ぶことを実読で確認した (連動は DB ではなくアプリ側にある)。
+   よって RC-6 の通り道 (b) で通す。
+   **注意**: 連動が効くのは Eloquent の削除経路だけで、DB の連鎖削除で親モデルの行が
+   消えた場合は観測者を通らない。現時点で暗号化列を持つモデル (`users` /
+   `organizations` / `organization_invitations` / `inquiries` / `admin_users`) を
+   連鎖削除で消す経路は稼働していないため実害は無いが、**この非対称は根拠に書く**。
+
+**区分ごとの件数 (実装後の確定値)**: 課金取引の記録 7 / 定期実行が消す 5 /
+親と一緒に消える 24 / 基準データ 6 / 基盤が寿命を持つ 8 / 未確定 13 = **63**。
+(件数の正本は台帳と gate の pin であり、本書の数字は実装時点の記録である。)
+
+### 検査の追加 (設計の骨格に対する上積み)
+
+- **RC-7 は「参照先の表が台帳に無い」場合も違反へ倒す** (fail-closed)。区分が決まらない
+  参照を黙って通さないため。負のコントロール NC-6 が点灯を固定する。
+- **RC-3 の二重宣言に負のコントロールを付けた** (NC-2b)。純関数
+  `retentionClassify()` が同じ表の 2 回目の宣言を検出することを合成入力で確かめる。
 
 ### 波及変更
 
@@ -378,7 +412,7 @@ migration 前の空スキーマしか見えず**常に空振り**する
 | RC-5 | 宣言された保持者が実在する (`class_exists()` / `Artisan::all()` のキーに存在) | クラス改名・コマンド廃止に追随していない |
 | RC-6 | 「親と一緒に消える」の裏取り: **`on delete cascade` の FK を 1 本以上持つ**、**または**削除責務クラスを宣言している | 孤立した表を「親に連動する」と言い張った |
 | RC-7 | 「基準データ」「基盤が寿命を持つ」が、期限が要る区分の表を**矛盾する削除動作で**参照していない | 期限の連鎖の中にある表を「期限を持たない」と分類した |
-| RC-8 | 空振り検知: 総件数 / 区分ごとの件数 / **未確定の表名一覧**を現在値ちょうどで pin | 台帳が空になった / 未確定が無音で増えた |
+| RC-8 | 空振り検知: 総件数と**未確定の表名一覧**を現在値ちょうどで pin (**区分ごとの件数は pin しない**。下の理由を参照) | 台帳が空になった / 未確定が無音で増えた |
 | NC-1〜4 | 負のコントロール (合成入力で RC-1 / RC-2 / RC-6 / RC-7 を 1 つずつ点灯させる) | 検査が形だけになった |
 
 > RC-6 の条件は **OR** である。DB の cascade で連動する表は保持者を書かなくてよく、
@@ -408,7 +442,7 @@ use Tests\Support\Retention\RetentionTableRegistry;
  *   - RC-4: 課金 7 年の表集合が App\Enums\Billing\BillingRetentionTarget と一致する
  *   - RC-5: 宣言された保持者 (クラス / コマンド) が**識別先として実在する**
  *   - RC-6 / RC-7: 区分と実スキーマの外部キーの構造が矛盾していない
- *   - RC-8: 未確定の表が**無音で増えない** (件数と表名を現在値ちょうどで pin)
+ *   - RC-8: 台帳の総件数と未確定の表名が**現在値ちょうど**である (無音で増えない)
  *
  * ★この gate が保証しないもの (誇張しない):
  *   - **列の内容が個人情報かどうかは見ない**。単位は表であり、列は見ない

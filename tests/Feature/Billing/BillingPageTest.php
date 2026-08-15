@@ -3,8 +3,6 @@
 declare(strict_types=1);
 
 use App\Models\User;
-use App\Services\Billing\Contracts\StripeGatewayInterface;
-use App\Services\Billing\Fakes\FakeStripeGateway;
 use App\Services\Billing\TicketLedgerService;
 use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -111,7 +109,7 @@ test('current organization が無いユーザーは 404', function (): void {
 
 test('owner の checkout は fake gateway 経由で中立帰還 URL へ遷移する (happy path)', function (): void {
     [, $owner] = createOrganizationWithOwner();
-    $this->app->bind(StripeGatewayInterface::class, FakeStripeGateway::class);
+    enableFakeExternals();
 
     $response = $this->actingAs($owner)->post('/billing/checkout', [
         'plan_code' => 'standard',
@@ -131,7 +129,7 @@ test('owner の portal は fake gateway 経由で中立帰還 URL へ遷移す�
     // (未契約 / ActiveFreePlan の遮断は BillingPortalGuardTest が固定)。
     [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     contractPaidPlan($organization);
-    $this->app->bind(StripeGatewayInterface::class, FakeStripeGateway::class);
+    enableFakeExternals();
 
     $response = $this->actingAs($owner)->post('/billing/portal');
 

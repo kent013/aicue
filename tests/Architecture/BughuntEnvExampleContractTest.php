@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use App\Support\ExternalFakes\ExternalFakeDeclaration;
+
 /*
  * Architecture invariant: .env.bughunt.local.example が bug-hunt 環境の
  * 「production 同等性の最小セット」を保持すること。
@@ -16,7 +18,9 @@ declare(strict_types=1);
  *   - APP_LOCALE=ja              : bug-hunt はユーザー向け文言 (日本語) の検証環境。en のままだと
  *                                  production と異なる文言を検証してしまう
  *   - DB_DATABASE=bug_hunt       : dev DB 隔離の核 (^bug_hunt(_[1-4])?$ のみ許可)
- *   - TESTING_FAKE_EXTERNALS=true: 決済等の外部を fake に落とす (実課金を踏まない)
+ *   - 偽物を外せないフラグ    : 決済等の外部を偽物に落とす (実課金を踏まない)。
+ *                                  対象と期待値は ExternalFakeDeclaration::bughuntRequiredEnvFlags()
+ *                                  が正本で、本テストは写経せず宣言から組み立てる
  *   - ADMIN_MFA_REQUIRED=false   : true だと admin ログイン後 TOTP 強制で探索が詰む
  *
  * 併せて「秘密値を example に焼き込まない」ことも固定する (APP_KEY / CIPHERSWEET_KEY /
@@ -41,7 +45,9 @@ function bughuntEnvExampleViolations(string $content): array
         'APP_ENV' => 'bughunt.local',
         'APP_LOCALE' => 'ja',
         'DB_DATABASE' => 'bug_hunt',
-        'TESTING_FAKE_EXTERNALS' => 'true',
+        // 偽物を外せないフラグ (安全下限集合) は宣言から組み立てる。
+        // ここへ環境変数名を写経すると、宣言が増えても env ひな型の検査が追随しない。
+        ...ExternalFakeDeclaration::bughuntRequiredEnvFlags(),
         'ADMIN_MFA_REQUIRED' => 'false',
     ];
     foreach ($exactValues as $key => $expected) {

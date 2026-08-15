@@ -10,6 +10,7 @@ use App\Models\Billing\Subscription;
 use App\Models\Organization;
 use App\Services\Billing\PersonalPlanService;
 use App\Services\Billing\TicketLedgerService;
+use App\Support\ExternalFakes\ExternalFakeDeclaration;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
@@ -48,7 +49,7 @@ class BughuntBillingSeeder extends Seeder
     public function run(TicketLedgerService $tickets): void
     {
         if (
-            config('testing.fake_externals') !== true
+            config(ExternalFakeDeclaration::EXTERNALS_FLAG) !== true
             || ! app()->environment('bughunt.local')
             || ! $this->isBughuntDatabase()
         ) {

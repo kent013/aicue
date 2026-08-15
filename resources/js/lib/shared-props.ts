@@ -54,6 +54,20 @@ export function hasAuthenticatedUser(props: unknown): boolean {
     return typeof user === "object" && user !== null;
 }
 
+/** サーバが配る描画世代の書式 (PHP の SessionEpoch::VALUE_PATTERN と対)。 */
+const SESSION_EPOCH_PATTERN = /^[0-9a-f]{32}$/;
+
+/**
+ * 共有 props から描画世代を読む。**書式が違えば null に倒す**
+ * (「読めない」は bfcache guard 側で「開示しない」に写る)。
+ */
+export function readSessionEpoch(props: unknown): string | null {
+    if (typeof props !== "object" || props === null) return null;
+    const value = (props as { sessionEpoch?: unknown }).sessionEpoch;
+    if (typeof value !== "string") return null;
+    return SESSION_EPOCH_PATTERN.test(value) ? value : null;
+}
+
 export interface SharedProps {
     appName: string;
     auth: { user: AuthUser | null };
@@ -70,4 +84,9 @@ export interface SharedProps {
     invitationInbox: InvitationSharedProps;
     /** サーバ描画 <title> と同一の完成タイトル (document-title.ts が SPA 遷移時に同期する) */
     title: string;
+    /**
+     * この応答を作ったセッションの世代の印 (32 文字の 16 進)。bfcache 復元時の同期判定で
+     * 世代 cookie と突き合わせる。session を持たない要求では null。
+     */
+    sessionEpoch: string | null;
 }

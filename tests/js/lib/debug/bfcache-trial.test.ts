@@ -880,3 +880,116 @@ describe("storage", () => {
         expect(loadTrials().size).toBe(0);
     });
 });
+
+// ---------------------------------------------------------------------------
+
+/*
+ * T178: guard に「秘匿を維持したまま読み直す」状態 (reloading) が増えた。
+ * 検証ページはこれを軸 2 の終端候補 stale-session-reloaded として扱う。
+ * **新終端は単独では PASS にならない** (目視確認の記録が要る)。
+ */
+describe("軸 2: 読み直しに倒れた終端 (reloading)", () => {
+    /** 軸 1 window を成立させたうえで、復元後のイベントを足す (thunk で sequence を保つ)。 */
+    function afterRestore(...makeAfter: Array<() => TrialEvent>): TrialEvent[] {
+        const events: TrialEvent[] = [started(), away(), hide(true), show(true)];
+        for (const make of makeAfter) events.push(make());
+        return events;
+    }
+
+    it("pending → reloading は stale-session-reloaded (同期判定で読み直した)", () => {
+        expect(
+            deriveGuardVerdict(afterRestore(() => guard("pending"), () => guard("reloading"))),
+        ).toBe("stale-session-reloaded");
+    });
+
+    it("同じ列に redirect-observed が付くと unauthenticated-redirected", () => {
+        expect(
+            deriveGuardVerdict(
+                afterRestore(
+                    () => guard("pending"),
+                    () => guard("reloading"),
+                    () => redirect(),
+                ),
+            ),
+        ).toBe("unauthenticated-redirected");
+    });
+
+    it("pending → verifying → reloading でも同じ終端 (プローブ経由の読み直し)", () => {
+        expect(
+            deriveGuardVerdict(
+                afterRestore(
+                    () => guard("pending"),
+                    () => guard("verifying"),
+                    () => guard("reloading"),
+                ),
+            ),
+        ).toBe("stale-session-reloaded");
+    });
+
+    it("page-hide の guardState が reloading なら単独でも同じ終端 (取りこぼし時の裏取り)", () => {
+        expect(
+            deriveGuardVerdict(afterRestore(() => hide(true, TRIAL, "reloading"))),
+        ).toBe("stale-session-reloaded");
+    });
+
+    it("reloading から始まる列 (先頭が pending でない) は failed-transition", () => {
+        expect(deriveGuardVerdict(afterRestore(() => guard("reloading")))).toBe(
+            "failed-transition",
+        );
+        expect(
+            deriveGuardVerdict(afterRestore(() => guard("verifying"), () => guard("reloading"))),
+        ).toBe("failed-transition");
+    });
+
+    it("読み直し終端の後に guard イベントが追記されても崩れない", () => {
+        const events = afterRestore(
+            () => guard("pending"),
+            () => guard("reloading"),
+            // 読み直した先の fresh load で観測される列
+            () => guard("pending"),
+            () => guard("verifying"),
+            () => guard(null),
+        );
+        expect(deriveGuardVerdict(events)).toBe("stale-session-reloaded");
+    });
+
+    it("総合判定は undetermined、phase は awaiting-manual-confirmation (自動追記が止まる)", () => {
+        const events = afterRestore(() => guard("pending"), () => guard("reloading"));
+
+        expect(
+            deriveOverallVerdict("expired-session", "valid-bfcache", "stale-session-reloaded"),
+        ).toBe("undetermined");
+        expect(deriveTrialPhase(events)).toBe("awaiting-manual-confirmation");
+        expect(canAppend("awaiting-manual-confirmation", "guard-state-changed")).toBe(false);
+        expect(canAppend("awaiting-manual-confirmation", "redirect-observed")).toBe(true);
+    });
+
+    it("合格終端は unauthenticated-redirected のまま (T085 の完了条件は変わらない)", () => {
+        expect(expectedGuardVerdict("expired-session")).toBe("unauthenticated-redirected");
+    });
+
+    it("有効セッション経路 (pending → verifying → null) の判定は変わらない", () => {
+        expect(
+            deriveGuardVerdict(
+                afterRestore(
+                    () => guard("pending"),
+                    () => guard("verifying"),
+                    () => guard(null),
+                ),
+            ),
+        ).toBe("authenticated-unhidden");
+    });
+
+    it("schemaVersion 1 の旧記録は読み捨てられる (状態語彙が違うため)", () => {
+        expect(TRIAL_SCHEMA_VERSION).toBe(2);
+        expect(parseTrialEvent({ ...started(), schemaVersion: 1 })).toBeNull();
+        expect(
+            parseTrialLog(JSON.stringify([{ ...started(), schemaVersion: 1 }])),
+        ).toBeNull();
+    });
+
+    it("reloading は guard-state-changed / page-hide の許可値である", () => {
+        expect(parseTrialEvent(guard("reloading"))).not.toBeNull();
+        expect(parseTrialEvent(hide(true, TRIAL, "reloading"))).not.toBeNull();
+    });
+});
