@@ -24,7 +24,6 @@
 | T085 | bfcache 実復元の iOS 実機受入確認 | test | Playwright 不可のため実機で確認+記録 | High | standalone | [設計](devnotes/20260803-0053-aigenba-alignment/) | 2026-08-03 03:10 |
 | T110 | 認証手段変更のメール通知ポリシーの統一設計 | backend | passkey/2FA/SSO の増減通知を一貫したポリシーとして設計する(T108 S7 は監査ログのみで通知は見送り) | Low | standalone | [設計](devnotes/20260805-1550-security-audit-remediation/) | 2026-08-05 17:45 |
 | T174 | 組織の役割変更に同期したトークン失効 (正典 v2 の導入) | backend | 役割変更と同一tx内でOAuth資格を失効 | Medium | standalone | [設計](devnotes/20260815-2058-mcp-org-scope-revocation/) | 2026-08-15 21:35 |
-| T176 | bug-hunt 目録の生成器化とドリフト検査の作り替え | test | bug-hunt 目録を生成物へ移す | Medium | standalone | [設計](devnotes/20260815-2100-bughunt-inventory-generator/) | 2026-08-15 21:35 |
 | T177 | 偽の外部サービスの宣言集合の一元化と、投入データ配線検査の新設 | test | 外部fake宣言の一元化と投入配線検査 | Medium | standalone | [設計](devnotes/20260815-2100-external-fakes-declaration-bundle/) | 2026-08-15 21:35 |
 | T178 | bfcache 復元時のセッション世代照合と同期判定の前置 | backend | bfcache復元に世代照合と同期判定を前置 | High | standalone | [設計](devnotes/20260815-2103-bfcache-session-generation-cookie/) | 2026-08-15 21:35 |
 | T179 | テンプレート乖離台帳の統一形式への移行と形式検査の新設 | docs | 乖離台帳を統一形式へ移行し形式検査を新設 | Medium | standalone | [設計](devnotes/20260815-2059-template-divergence-machine-layer/) | 2026-08-15 21:35 |
