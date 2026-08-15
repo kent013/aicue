@@ -20,8 +20,11 @@
  * 全体設計は devnotes/20260812-1931-bfcache-device-verification-page/detailed-design.md。
  */
 
-/** schema 変更時に必ず上げる。復元時に不一致なら破棄する。 */
-export const TRIAL_SCHEMA_VERSION = 1;
+/**
+ * schema 変更時に必ず上げる。復元時に不一致なら破棄する。
+ * 2 = guard の状態語彙に `reloading` が増えた版 (旧記録は読み捨てる)。
+ */
+export const TRIAL_SCHEMA_VERSION = 2;
 
 /** sessionStorage のキー。 */
 export const TRIAL_STORAGE_KEY = "bfcache-trial:v1";
@@ -30,7 +33,7 @@ export const TRIAL_STORAGE_KEY = "bfcache-trial:v1";
 export type TrialScenario = "expired-session" | "active-session";
 
 /** guard の秘匿属性がとりうる値 (属性削除は null で表す)。 */
-export type GuardState = "pending" | "verifying" | "retry" | null;
+export type GuardState = "pending" | "verifying" | "retry" | "reloading" | null;
 
 /** 利用者申告フィールドの制約 (自由記述の抜け道にしない)。 */
 export const DEVICE_MODEL_MAX_LENGTH = 40;
@@ -177,6 +180,8 @@ export type GuardVerdict =
     | "authenticated-unhidden"
     | "unauthenticated-redirected"
     | "hidden-then-left"
+    /** 秘匿を維持したまま読み直しに倒れた (目視確認待ち)。 */
+    | "stale-session-reloaded"
     | "retry-hidden"
     | "failed-transition"
     | "not-observed";
@@ -238,6 +243,7 @@ const GUARD_STATES: readonly GuardState[] = [
     "pending",
     "verifying",
     "retry",
+    "reloading",
     null,
 ] as const;
 
@@ -272,7 +278,7 @@ function isEventType(value: unknown): value is TrialEventType {
 /**
  * 1 イベントを厳密に検証する。shape が少しでも崩れていたら `null` を返す。
  *
- * `bfcache-guard.ts` の `readAuthenticatedFlag()` と同じ
+ * `bfcache-guard.ts` の `readSessionStatus()` と同じ
  * 「shape を厳密判定し、崩れていたら採用しない」idiom に揃えている。
  */
 export function parseTrialEvent(value: unknown): TrialEvent | null {
@@ -531,29 +537,55 @@ export function deriveGuardVerdict(events: TrialEvent[]): GuardVerdict {
     const states: GuardState[] = [];
     let hiddenThenLeft = false;
     let contradiction = false;
+    let reloaded = false;
 
     for (const event of after) {
         if (event.type === "guard-state-changed") {
             states.push(event.state);
+            // 読み直しは終端候補。ここで走査を打ち切る (読み直し後の fresh load の
+            // イベントが追記されても判定が崩れないようにするため)
+            if (event.state === "reloading") {
+                reloaded = true;
+                break;
+            }
             if (states.length === 3) break; // 3 つ目で終端か異常かが決まる
             continue;
         }
-        if (
-            event.type === "page-hide" &&
-            states.length === 2 &&
-            states[0] === "pending" &&
-            states[1] === "verifying"
-        ) {
-            // **離脱時点で実際に秘匿されていたか**を page-hide のスナップショットで確かめる。
-            // guardState が null (= 秘匿解除済み) の離脱は「秘匿維持のまま離脱した」証拠に
-            // ならない。証跡どうしの矛盾なので合格側へ倒さない
-            if (event.guardState === "verifying") {
-                hiddenThenLeft = true;
-            } else {
-                contradiction = true;
+        if (event.type === "page-hide") {
+            // 属性変化の観測を取りこぼしても、離脱時点のスナップショットが裏取りになる
+            if (event.guardState === "reloading") {
+                reloaded = true;
+                break;
             }
-            break;
+            if (
+                states.length === 2 &&
+                states[0] === "pending" &&
+                states[1] === "verifying"
+            ) {
+                // **離脱時点で実際に秘匿されていたか**を page-hide のスナップショットで確かめる。
+                // guardState が null (= 秘匿解除済み) の離脱は「秘匿維持のまま離脱した」証拠に
+                // ならない。証跡どうしの矛盾なので合格側へ倒さない
+                if (event.guardState === "verifying") {
+                    hiddenThenLeft = true;
+                } else {
+                    contradiction = true;
+                }
+                break;
+            }
         }
+    }
+
+    if (reloaded) {
+        // 正常遷移は必ず pending から始まる。状態変化を 1 つも観測できていない
+        // (page-hide の裏取りだけ) 場合は先頭を問わない
+        if (states.length > 0 && states[0] !== "pending") return "failed-transition";
+
+        // `redirect-observed` は「利用者が /login 到達を確認して記録する」手入力イベントである。
+        // 別の利用者としてアプリ画面へ着地した試行では /login に着かないので記録できず、
+        // 判定は目視確認待ちに留まる (= 合格にならない安全側の挙動)
+        return events.some((event) => event.type === "redirect-observed")
+            ? "unauthenticated-redirected"
+            : "stale-session-reloaded";
     }
 
     if (contradiction) return "failed-transition";
@@ -593,10 +625,13 @@ export function expectedGuardVerdict(scenario: TrialScenario): GuardVerdict {
 /**
  * 総合判定。**軸 1 と軸 2 から導出するだけで、保存しない**。
  *
- * `in-progress` / `not-observed` / `hidden-then-left` を `undetermined` に落とすのが要点。
+ * `in-progress` / `not-observed` / `hidden-then-left` / `stale-session-reloaded` を
+ * `undetermined` に落とすのが要点。
  * - `in-progress`: 観測途中。ここを fail にすると復元直後の正常な状態が FAIL 表示になる
  * - `not-observed`: guard が発火しなかったのか利用者が早く中止したのか**区別できない**
  * - `hidden-then-left`: `redirect-observed` が入るまで終端していない
+ * - `stale-session-reloaded`: 読み直しに倒れただけでは着地先が分からない
+ *   (未認証で /login に着いたのか、別の利用者としてアプリ画面に着いたのかを A から観測できない)
  */
 export function deriveOverallVerdict(
     scenario: TrialScenario,
@@ -607,7 +642,8 @@ export function deriveOverallVerdict(
     if (
         guard === "in-progress" ||
         guard === "not-observed" ||
-        guard === "hidden-then-left"
+        guard === "hidden-then-left" ||
+        guard === "stale-session-reloaded"
     ) {
         return "undetermined";
     }
@@ -633,7 +669,9 @@ export function deriveTrialPhase(events: TrialEvent[]): TrialPhase {
 
     const guard = deriveGuardVerdict(events);
     if (guard === "in-progress") return "collecting-axis2";
-    if (guard === "hidden-then-left") return "awaiting-manual-confirmation";
+    if (guard === "hidden-then-left" || guard === "stale-session-reloaded") {
+        return "awaiting-manual-confirmation";
+    }
     return "complete";
 }
 

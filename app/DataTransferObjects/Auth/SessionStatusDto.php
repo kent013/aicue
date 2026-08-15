@@ -15,5 +15,7 @@ final readonly class SessionStatusDto
 {
     public function __construct(
         public bool $authenticated,
+        /** 要求が運んだ描画世代が、現在のセッションの世代と一致するか。 */
+        public bool $sessionEpochMatches,
     ) {}
 }

@@ -13,14 +13,24 @@
  * ただし hard reload は常用しない。撮影中の media stream・未送信フォーム・Inertia 履歴を
  * 破棄してしまい、撮影 PWA という使命に直撃するため。有効なら **秘匿を外すだけ**にする。
  *
- * | # | 契機                | 動作                                                        |
- * |---|---------------------|-------------------------------------------------------------|
- * | 1 | pagehide            | documentElement に秘匿属性を同期付与 (この DOM ごと bfcache へ) |
- * | 2 | pageshow (属性あり) | 秘匿のまま軽量プローブ (/session/status)                      |
- * | 3 | セッション有効       | 秘匿属性を外すだけ (DOM / フォーム / Inertia 履歴は温存)       |
- * | 4 | セッション無効       | login へ hard navigation (遷移先は固定の相対パス)             |
- * | 5 | プローブ失敗         | 秘匿維持 + 再試行ボタン表示 (自動再試行はしない)              |
- * | 6 | 再試行押下           | 現在 URL を hard reload (サーバに再判定させる)                |
+ * | # | 契機                     | 動作                                                        |
+ * |---|--------------------------|-------------------------------------------------------------|
+ * | 1 | pagehide                 | documentElement に秘匿属性を同期付与 (この DOM ごと bfcache へ) |
+ * | 2 | pageshow (属性あり)      | まず同期判定 → 一致したときだけ軽量プローブ (/session/status)  |
+ * | 3 | 同期判定が不一致・不明   | 秘匿を維持したまま同じ URL を読み直す (通信を待たない)         |
+ * | 4 | 認証済み + 世代が一致    | 秘匿属性を外すだけ (DOM / フォーム / Inertia 履歴は温存)       |
+ * | 5 | 認証済み + 世代が不一致  | 秘匿を維持したまま読み直す (別のセッションの文書だった)        |
+ * | 6 | セッション無効           | login へ hard navigation (遷移先は固定の相対パス)             |
+ * | 7 | プローブ失敗             | 秘匿維持 + 再試行ボタン表示 (自動再試行はしない)              |
+ * | 8 | 再試行押下               | 現在 URL を hard reload (サーバに再判定させる)                |
+ *
+ * **開示 (秘匿の解除) に到達する経路はただ 1 本** — プローブが「認証済み **かつ**
+ * 描画世代が現世代と一致」と答えたときだけである。同期判定は通信を待たずに
+ * 「読み直す」へ倒すためだけにあり、開示を表す結論を持たない (型で表現している)。
+ *
+ * 読み直しは 1 つの文書につき高々 1 回で、ループにはならない (読み直した先の文書は
+ * 復元ではないので秘匿属性を持たず、ガードは何もしない)。保証するのはここまでで、
+ * 読み直し自体が通信障害で完了しないことは塞がない (既存の /login 置換遷移も同じ性質)。
  *
  * 復元マーカーは **documentElement の秘匿属性そのもの**。sessionStorage は使わない
  * (タブ単位で共有されるため、ページ A の pagehide が立てたフラグを通常遷移先のページ B が
@@ -68,6 +78,16 @@ export const BFCACHE_HIDDEN_ATTRIBUTE = "data-bfcache-hidden";
 export const BFCACHE_STATE_PENDING = "pending";
 export const BFCACHE_STATE_VERIFYING = "verifying";
 export const BFCACHE_STATE_RETRY = "retry";
+/** 世代が変わっていたので、秘匿したまま同じ URL を読み直している状態。 */
+export const BFCACHE_STATE_RELOADING = "reloading";
+
+/** セッション世代の印を運ぶヘッダ (PHP の SessionEpoch::HEADER_NAME と対)。 */
+export const SESSION_EPOCH_HEADER = "X-Session-Epoch";
+/** 現世代の写しを運ぶ cookie (PHP の SessionEpoch::COOKIE_NAME と対)。 */
+export const SESSION_EPOCH_COOKIE = "session_epoch";
+
+/** 印の書式 (PHP の SessionEpoch::VALUE_PATTERN と対)。 */
+const SESSION_EPOCH_PATTERN = /^[0-9a-f]{32}$/;
 
 /** プローブ endpoint。サーバ側は routes/web.php の `session.status` (auth グループ外)。 */
 export const SESSION_STATUS_PATH = "/session/status";
@@ -103,10 +123,64 @@ export interface BfcacheGuardDeps {
      * 公開ページ (LP / login / SEO) では秘匿もプローブも行わない。
      */
     isAuthenticated?: () => boolean;
+    /**
+     * いま画面に出ている内容がどのセッション世代の応答で来たか (描画世代)。
+     * 出所は Inertia 共有 prop `sessionEpoch` であり、**cookie ではない**。
+     */
+    readRenderedEpoch?: () => string | null;
+    /** 現世代の写し (世代 cookie)。同期判定でしか使わない。 */
+    readCurrentEpoch?: () => string | null;
 }
 
-/** プローブの判定結果。`failed` は「セッション無効」ではなく「判定不能」。 */
-export type SessionProbeOutcome = "authenticated" | "unauthenticated" | "failed";
+/** 同期判定の結論。**開示を表す値を持たない** (開示はプローブだけが決める)。 */
+export type SyncEpochDecision = "must-reload" | "undecided";
+
+/**
+ * 通信を待たない前置判定。
+ *
+ * 一致しても "undecided" (= プローブへ進む) にしかならない。
+ * この関数が返しうる値に「開示」が無いことが、
+ * 「同期判定は開示しない側にしか到達しない」という不変条件の型による表現である。
+ */
+export function decideBySyncEpoch(
+    rendered: string | null,
+    current: string | null,
+): SyncEpochDecision {
+    if (rendered === null || current === null) return "must-reload";
+    return rendered === current ? "undecided" : "must-reload";
+}
+
+/**
+ * document.cookie から現世代の写しを読む。書式が違えば null。
+ *
+ * **例外を投げない**。壊れた百分率エンコード (`%E0%A4%A` 等) で
+ * `decodeURIComponent` は例外を投げるが、ここで落ちると秘匿属性が `pending` のまま
+ * 誰も先へ進めない画面ができる。読めないものは null (= 読み直し) に倒す。
+ */
+export function readSessionEpochCookie(cookieHeader: string): string | null {
+    for (const part of cookieHeader.split(";")) {
+        const [name, ...rest] = part.split("=");
+        if (name?.trim() !== SESSION_EPOCH_COOKIE) continue;
+        let value: string;
+        try {
+            value = decodeURIComponent(rest.join("=").trim());
+        } catch {
+            return null;
+        }
+        return SESSION_EPOCH_PATTERN.test(value) ? value : null;
+    }
+    return null;
+}
+
+/**
+ * プローブの判定結果。`failed` は「セッション無効」ではなく「判定不能」。
+ * `stale` = 認証済みだが世代が違う (別の利用者・別の世代の文書だった)。
+ */
+export type SessionProbeOutcome =
+    | "authenticated"
+    | "stale"
+    | "unauthenticated"
+    | "failed";
 
 /** Content-Type の media type 判定 (charset 等のパラメータは許容する)。 */
 export function isJsonMediaType(contentType: string | null): boolean {
@@ -116,40 +190,57 @@ export function isJsonMediaType(contentType: string | null): boolean {
 }
 
 /**
- * プローブ応答の shape 厳密判定。top-level に boolean の `authenticated` を持つ
- * plain object のみ受理する (data ラップ・型違いは判定不能として弾く)。
+ * プローブ応答の shape 厳密判定。top-level に boolean の `authenticated` と
+ * `sessionEpochMatches` が**両方**揃った plain object のみ受理する
+ * (data ラップ・型違い・旧 shape は判定不能として弾く = 契約ずれが開示に倒れない)。
  */
-export function readAuthenticatedFlag(payload: unknown): boolean | null {
+export function readSessionStatus(
+    payload: unknown,
+): { authenticated: boolean; sessionEpochMatches: boolean } | null {
     if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
         return null;
     }
-    const value = (payload as Record<string, unknown>).authenticated;
-    return typeof value === "boolean" ? value : null;
+    const record = payload as Record<string, unknown>;
+    const authenticated = record.authenticated;
+    const matches = record.sessionEpochMatches;
+    if (typeof authenticated !== "boolean" || typeof matches !== "boolean") {
+        return null;
+    }
+    return { authenticated, sessionEpochMatches: matches };
 }
 
 /**
- * セッション有効性を問い合わせる。
+ * セッション有効性と世代の一致を問い合わせる。
  * (1) response.ok (2) Content-Type が JSON (3) JSON shape が厳密 — の全てを満たした時のみ
  * 結果を採用し、1 つでも崩れたら `failed` (秘匿維持) に倒す。
+ *
+ * 描画世代は `X-Session-Epoch` ヘッダで運ぶ。**サーバはこのヘッダだけを照合に使う**
+ * (要求の Cookie ヘッダに載る世代 cookie は一致判定に使わない)。
+ * 描画世代が無いときはヘッダを付けない (空文字を送らない = サーバ側は不一致に倒す)。
  */
 export async function probeSessionStatus(
     fetchImpl: ProbeFetch,
+    renderedEpoch: string | null,
     url: string = SESSION_STATUS_PATH,
 ): Promise<SessionProbeOutcome> {
+    const headers: Record<string, string> = { Accept: "application/json" };
+    if (renderedEpoch !== null) headers[SESSION_EPOCH_HEADER] = renderedEpoch;
+
     try {
         const response = await fetchImpl(url, {
             credentials: "same-origin",
             cache: "no-store",
-            headers: { Accept: "application/json" },
+            headers,
         });
 
         if (!response.ok) return "failed";
         if (!isJsonMediaType(response.headers.get("Content-Type"))) return "failed";
 
-        const authenticated = readAuthenticatedFlag(await response.json());
-        if (authenticated === null) return "failed";
+        const status = readSessionStatus(await response.json());
+        if (status === null) return "failed";
+        if (!status.authenticated) return "unauthenticated";
 
-        return authenticated ? "authenticated" : "unauthenticated";
+        return status.sessionEpochMatches ? "authenticated" : "stale";
     } catch {
         return "failed";
     }
@@ -232,6 +323,11 @@ export function registerBfcacheGuard(deps: BfcacheGuardDeps = {}): () => void {
     const fetchImpl: ProbeFetch =
         deps.fetchImpl ?? ((input, init) => fetch(input, init) as Promise<ProbeResponseLike>);
     const isAuthenticated = deps.isAuthenticated ?? (() => false);
+    // **描画世代の既定を cookie にしてはならない**。両方が同じ出所になると常に一致し、
+    // 同期判定が素通しになる (前置がある振りだけになる)。既定は安全側 (= 読み直し)。
+    const readRenderedEpoch = deps.readRenderedEpoch ?? (() => null);
+    const readCurrentEpoch =
+        deps.readCurrentEpoch ?? (() => readSessionEpochCookie(doc.cookie));
 
     const overlay = ensureOverlay(doc);
     const retryButton = overlay.querySelector<HTMLButtonElement>(`#${BFCACHE_RETRY_BUTTON_ID}`);
@@ -242,10 +338,21 @@ export function registerBfcacheGuard(deps: BfcacheGuardDeps = {}): () => void {
     };
     retryButton?.addEventListener("click", onRetry);
 
+    const reloadHidden = (): void => {
+        // 秘匿を維持したまま同じ URL を読み直す。読み直した文書には秘匿属性が無いので
+        // ガードは何もせず、1 文書につき読み直しは高々 1 回でループにならない。
+        setHiddenState(doc, BFCACHE_STATE_RELOADING);
+        win.location.reload();
+    };
+
     const verify = async (): Promise<void> => {
         setHiddenState(doc, BFCACHE_STATE_VERIFYING);
 
-        const outcome = await probeSessionStatus(fetchImpl, SESSION_STATUS_PATH);
+        const outcome = await probeSessionStatus(
+            fetchImpl,
+            readRenderedEpoch(),
+            SESSION_STATUS_PATH,
+        );
         if (outcome === "authenticated") {
             clearHiddenState(doc);
             return;
@@ -253,6 +360,11 @@ export function registerBfcacheGuard(deps: BfcacheGuardDeps = {}): () => void {
         if (outcome === "unauthenticated") {
             // 秘匿したまま login へ。replace で秘匿済み履歴エントリを残さない。
             win.location.replace(LOGIN_PATH);
+            return;
+        }
+        if (outcome === "stale") {
+            // いまの利用者は認証済みなので /login へは倒さない (嘘の着地を作らない)。
+            reloadHidden();
             return;
         }
         setHiddenState(doc, BFCACHE_STATE_RETRY);
@@ -268,6 +380,12 @@ export function registerBfcacheGuard(deps: BfcacheGuardDeps = {}): () => void {
         // 復元マーカーは秘匿属性そのもの。通常ロードではサーバ由来の新しい HTML に
         // 属性が無いため、ここで抜ける。
         if (!isHidden(doc)) return;
+        // 通信を待たない前置判定。描画世代と世代 cookie が食い違う (または読めない) なら
+        // プローブを 1 度も呼ばずに読み直す。一致しても開示はせず、プローブへ進むだけ。
+        if (decideBySyncEpoch(readRenderedEpoch(), readCurrentEpoch()) === "must-reload") {
+            reloadHidden();
+            return;
+        }
         void verify();
     };
 

@@ -10,7 +10,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * セッション有効性プローブの XHR 応答 ({ authenticated })。
+ * セッション有効性プローブの XHR 応答 ({ authenticated, sessionEpochMatches })。
  *
  * top-level (data ラップなし) にするのは、クライアント guard が JSON shape を厳密判定
  * するため (RecentAuthStatusResource と同じ作法)。
@@ -27,12 +27,13 @@ final class SessionStatusResource extends JsonResource
     public static $wrap = null;
 
     /**
-     * @return array{authenticated: bool}
+     * @return array{authenticated: bool, sessionEpochMatches: bool}
      */
     public function toArray(Request $request): array
     {
         return [
             'authenticated' => $this->resource->authenticated,
+            'sessionEpochMatches' => $this->resource->sessionEpochMatches,
         ];
     }
 

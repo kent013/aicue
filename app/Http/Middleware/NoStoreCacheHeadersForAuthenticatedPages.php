@@ -12,14 +12,15 @@ use Symfony\Component\HttpFoundation\Response;
  * 認証済みリクエストの web 応答に `no-store` を保証する baseline middleware。
  *
  * 目的: ログアウト後のブラウザ「戻る」で認証済み画面 (メンバー一覧等の PII) が
- * bfcache から再表示されるのを防ぐ。`no-store` により Firefox は bfcache 格納自体を
- * 拒否し、Chrome は cookie 変更 (= ログアウト) 時に CCNS ページを bfcache から
- * eviction する。副次的に disk / proxy cache への認証済み応答残留も禁止される。
+ * 再表示されるのを防ぐ。あわせて disk / proxy cache への認証済み応答の残留も禁じる。
  *
- * **Safari は `no-store` でも bfcache に格納しうる**ため本 middleware だけでは
- * 抑止できない。AI-CUE は撮影が PWA (iOS Safari が主要プラットフォーム) であるため、
- * クライアント側の bfcache 秘匿・再検証 (resources/js/lib/bfcache-guard.ts) と
- * **セットで** 主便益を達成する。対象ブラウザは docs/supported-browsers.md。
+ * **保存禁止ヘッダは「戻る」用の一時保存 (bfcache) への格納を禁じる指示ではない。**
+ * 格納するか・いつ捨てるかはブラウザの実装判断であり、このヘッダだけで復元を止められる
+ * 保証はどのブラウザについても持っていない。ブラウザごとの観測と一次情報の日付は
+ * docs/supported-browsers.md が正本である。
+ * したがって本 middleware は復元経路 B を単独では塞げず、クライアント側の
+ * bfcache 秘匿・再検証 (resources/js/lib/bfcache-guard.ts +
+ * セッション世代の印 App\Support\Auth\SessionEpoch) と **セットで** 主便益を達成する。
  *
  * さらに Inertia SPA のクライアント履歴復元 (popstate) はサーバへリクエストが飛ばないため
  * 本 middleware も bfcache guard も発火しない。その経路は Inertia 公式機構

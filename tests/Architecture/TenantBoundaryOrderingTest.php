@@ -10,6 +10,7 @@ use App\Http\Middleware\EnsureProjectBelongsToApiOrganization;
 use App\Http\Middleware\EnsureProjectBelongsToCurrentOrganization;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\IdempotentRequest;
+use App\Http\Middleware\IssueSessionEpochCookie;
 use App\Http\Middleware\NoStoreCacheHeadersForAuthenticatedPages;
 use App\Http\Middleware\RequireActiveSubscription;
 use App\Http\Middleware\RequireApiKeyAbility;
@@ -392,6 +393,7 @@ test('検査5: 代表 route の解決後 middleware 列を完全一致で固定�
         RequireTwoFactorForEnforcedOrganizations::class,
         BlockTwoFactorDisableForEnforcedOrganizations::class,
         NoStoreCacheHeadersForAuthenticatedPages::class,
+        IssueSessionEpochCookie::class,
         EncryptHistory::class,
         EnsureEmailIsVerified::class,
     ];
