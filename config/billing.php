@@ -50,6 +50,17 @@ return [
     'purchase_resume_window_minutes' => (int) env('BILLING_PURCHASE_RESUME_WINDOW_MINUTES', 30),
 
     /*
+    | webhook 処理の滞留判定 (分)。`stripe_webhook_events.status='received'` のまま
+    | この時間を超えた行を「本処理中にプロセスが落ちた残留」とみなして回収する
+    | (billing:recover-stale-webhook-events)。
+    |
+    | env で振らない (環境ごとに変えてよい運用値ではない)。webhook の HTTP 処理は
+    | 秒オーダーで終わるため、生存中のワーカーを追い越さない十分な余裕を取ってある。
+    | 短くすると処理中の行を追い越し、長くすると付与の回復が遅れる。
+    */
+    'webhook_stale_after_minutes' => 15,
+
+    /*
     |----------------------------------------------------------------------
     | オートリチャージ (裏チャージ。P8a)
     |----------------------------------------------------------------------

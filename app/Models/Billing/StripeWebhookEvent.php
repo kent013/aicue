@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models\Billing;
 
 use App\Enums\Billing\WebhookEventStatus;
+use App\Enums\Billing\WebhookRecoveryReason;
 use Carbon\CarbonImmutable;
 use Database\Factories\Billing\StripeWebhookEventFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -23,6 +24,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property array<mixed> $payload
  * @property int $attempts
  * @property string|null $failure_reason
+ * @property WebhookRecoveryReason|null $recovery_reason
  * @property CarbonImmutable|null $processed_at
  */
 class StripeWebhookEvent extends Model
@@ -37,6 +39,7 @@ class StripeWebhookEvent extends Model
     {
         return [
             'status' => WebhookEventStatus::class,
+            'recovery_reason' => WebhookRecoveryReason::class,
             'payload' => 'array',
             'attempts' => 'integer',
             'processed_at' => 'immutable_datetime',

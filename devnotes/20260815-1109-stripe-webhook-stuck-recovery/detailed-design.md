@@ -496,14 +496,26 @@ Factory (追加 state):
         try {
             $this->process($type, $payload);
         } catch (Throwable $exception) {
-            $this->finalize($eventId, $claimedAttempts, WebhookEventStatus::Failed, $exception->getMessage());
+            $finalized = $this->finalize($eventId, $claimedAttempts, WebhookEventStatus::Failed, $exception->getMessage());
             report($exception);
+
+            if (! $finalized) {
+                // 行は既に別の世代 (滞留回収など) が持っている。こちらから再送を促す理由が無い
+                // — 再送しても claim() に弾かれて 200 で終わり、500 の運用ノイズだけが残る。
+                // 成功経路と同じ扱いにする (世代を失った実行は行の決着に関与しない)。
+                return;
+            }
 
             throw $exception; // 200 を返さず Stripe の再送を促す (failed は再送で再処理)
         }
 
         $this->finalize($eventId, $claimedAttempts, WebhookEventStatus::Processed, null);
 ```
+
+> **失敗経路も成功経路と同じ扱いにする** (Codex 実装レビュー Round 1 の指摘)。
+> 世代を追い越された実行は行の決着に関与しないので、`process()` が失敗していても
+> Stripe へ 500 を返さない。返しても再送は `claim()` に弾かれて 200 で終わるため、
+> 得られるものは無く運用ノイズだけが残る。
 
 ```php
     /**
@@ -580,7 +592,9 @@ Factory (追加 state):
       (単一プロセスで「追い越し」だけを再現する)
 - [ ] 同じケースで **HTTP 経路は例外を投げずに完走する** こと
       (`finalize()` の戻り値 false は throw に変換しない = Stripe には 200 が返る。
-      その行は既に別の世代が持っているので、こちらから再送を促す理由が無い)
+      その行は既に別の世代が持っているので、こちらから再送を促す理由が無い)。
+      **`process()` が成功した場合と失敗した場合の両方**を固定する
+      (失敗経路だけ 500 を返すと契約が非対称になる)
 - [ ] `finalize()` へ `RecoveryPending` を**渡さない**ことを固定する
       (型では閉じていない。回収失敗の据え置きで行が `recovery_pending` にならないことを
       最終状態で assert する)

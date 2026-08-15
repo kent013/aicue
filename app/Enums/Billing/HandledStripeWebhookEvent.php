@@ -34,6 +34,31 @@ enum HandledStripeWebhookEvent: string
     case ChargeRefunded = 'charge.refunded';
 
     /**
+     * 保存済み payload を再実行してよいか (滞留回収の判断材料。単一出典)。
+     *
+     * - `customer.subscription.*` は `SubscriptionService::applySubscriptionSnapshot` が
+     *   **後勝ちで上書きする** (イベントの新旧を判定する条件を持たない) ため、古い payload を
+     *   後から流すと `plan_code` / `current_period_end` / `stripe_status` が巻き戻る
+     * - それ以外は付与が台帳の `idempotency_key` UNIQUE (`monthly:` / `purchase:` /
+     *   `recharge:` / `refund:`) で冪等、`checkout` 行の遷移は `Completed` が終局で no-op、
+     *   `invoice.payment_failed` の通知は台帳 dedup、自動購入の失敗 Job は pending 限定
+     *
+     * **arm を足したら分類も足す** (網羅 match のため case 追加で必ず落ちる)。
+     */
+    public function replaySafety(): WebhookReplaySafety
+    {
+        return match ($this) {
+            self::SubscriptionCreated,
+            self::SubscriptionUpdated,
+            self::SubscriptionDeleted => WebhookReplaySafety::OrderSensitive,
+            self::InvoicePaid,
+            self::InvoicePaymentFailed,
+            self::CheckoutSessionCompleted,
+            self::ChargeRefunded => WebhookReplaySafety::SafeToReplay,
+        };
+    }
+
+    /**
      * processor が明示処理する全イベント値。config 購読集合の導出と invariant に使う。
      *
      * @return list<string>

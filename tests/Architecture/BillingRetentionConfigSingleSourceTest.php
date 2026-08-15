@@ -125,6 +125,9 @@ const BILLING_RETENTION_CALLERS = [
     'tests/Architecture/BillingRetentionConfigSingleSourceTest.php',
     'tests/Feature/Billing/BillingRetentionHorizonTest.php',
     'tests/Feature/Billing/BillingRetentionPurgeTest.php',
+    // 滞留回収の行 (recovery_pending / received) が保持期限を超えても消えないことの固定。
+    // 期限超過の起点を SSOT から作るため threshold() に依存する。
+    'tests/Feature/Billing/StripeWebhookStaleRecoveryTest.php',
     'tests/Feature/Billing/TicketLedgerCarryForwardTest.php',
     'tests/Feature/Legal/PrivacyRetentionDeclarationTest.php',
 ];
