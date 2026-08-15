@@ -8,6 +8,8 @@
 .phpactor.json
 .phpunit.result.cache
 /.claude/bug-hunt.lock
+# PostToolUse 索引更新 hook の作業ファイル置き場 (ロック / 告知フラグ)
+/.claude/code-review-graph-update-hook/
 # worktree 実体と setup/teardown lock (scripts/setup-worktree.sh / teardown-worktree.sh)
 /.claude/worktrees/
 /.code-review-graph/

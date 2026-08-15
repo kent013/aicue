@@ -761,3 +761,51 @@ deny-by-default の目録 / 撤去済み参照の gate) はそのまま採って
   `tests/Architecture/RetiredRecoveryReferenceGateTest.php`
 - 設計: `devnotes/20260815-1538-stuck-job-recovery/`
 - 契約の正本: `docs/architecture.md` §滞留回収の共通基盤
+
+---
+
+## D18 ✅ hook の起動子を「起動先の検証 + 終了コードの写像器」にする
+
+常設 hook 配線 (家系の feature `claude-hooks-wiring`) を取り込むにあたり、**起動子の形だけ**
+テンプレートと変えた。配線されている hook の本数・対象・スクリプトの置き場所は正典どおりである。
+
+| 観点 | テンプレート | 本アプリ |
+|---|---|---|
+| 起動子 | `/bin/bash "$CLAUDE_PROJECT_DIR/scripts/…"` (スクリプトを直に起動) | `/bin/bash -p -c '…'` で起動先を検証してから起動し、終了コードを写像する |
+| hook の終了コードの扱い | スクリプトの終了コードがそのまま harness へ届く | PreToolUse は **97 だけ**を 2 (ブロック) へ写し、それ以外はすべて 0 に畳む |
+| 環境からのシェル関数 | 内側へ継承される | `-p` (privileged mode) で遮断する |
+
+### なぜ正当な差分か (logic-driven)
+
+1. **hook の故障がセッションを止めてはならない**。bash は構文エラーでも 2 を返し、
+   PreToolUse の 2 は Bash ツールをブロックする。テンプレートの形では hook スクリプトの
+   1 文字のタイプミスが、そのセッションの Bash 操作を全滅させうる。
+   写像器を**設定ファイル側**に置くと、スクリプトの退行から独立して「拒否できるのは
+   意図した 97 だけ」を保てる。
+2. **起動先の検証は起動子にしか置けない**。`CLAUDE_PROJECT_DIR` が相対値・`..` 入り・
+   `scripts/` が symlink・起動先が symlink のいずれかなら、内側を起動しないのが正しい。
+   これはスクリプトが起動された後では手遅れである。
+3. **シェル関数の注入**は、判定を組み込みだけで書いても環境から乗っ取れる。
+   遮断は起動の瞬間 (`-p`) にしかできない。
+
+検査はすべて bash の組み込み (`[` / パラメータ展開) で行い、外部コマンドを 1 つも使わない。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「配線は常設で、起動子は絶対パスで、排他はスクリプト内にあり、配線は台帳テストで
+> 完全一致 pin される」
+
+1. `.claude/settings.json` は git 追跡下の配線の正本で、見本ファイル方式は復活させない
+   (`ClaudeHooksWiringTest` の S02 / S08)
+2. 起動子は `/bin/bash` の絶対パスで始まる (S06b)
+3. 索引更新の排他は hook スクリプト内の `flock` が持つ (B16 / B17)
+4. hook 種別 / matcher / 起動コマンド文字列 / timeout / トップレベルキーを完全一致で pin する
+   (S03〜S06)。97 → 2 の写像そのものも実起動で固定する (B41〜B50)
+
+### 関連
+
+- 実装: `.claude/settings.json` / `scripts/bughunt-worktree-hook.sh` /
+  `scripts/code-review-graph-update-hook.sh`
+- gate: `tests/Architecture/ClaudeHooksWiringTest.php`
+- 設計: `devnotes/20260815-1539-claude-hooks-settings-wiring/`
+- 規約の正本: `AGENTS.md` §常設 hook 配線

@@ -21,6 +21,12 @@ composer dev       # mprocs で dev server (8001) / queue / logs / vite を並�
 Stripe 公式 skill(`skills-lock.json` に lock 済み)は `npx skills add docs.stripe.com` で
 `.claude/skills/` 配下に導入する(git 管理外)。
 
+コード索引ツール(`code-review-graph`)は開発コンテナに版を固定して同梱済みで、
+`.claude/settings.json` の hook が編集のたびに差分更新する(`AGENTS.md` §常設 hook 配線)。
+コンテナを作り直していない環境だけ `uv tool install code-review-graph==2.3.7` を 1 度実行し、
+`code-review-graph build` で索引を初回ビルドする(未導入でもセッションごとに 1 行告知が出るだけで、
+編集作業は止まらない)。
+
 管理者(Filament `/admin`)の発行(env / seeder による本番初期投入は廃止済み):
 
 ```bash

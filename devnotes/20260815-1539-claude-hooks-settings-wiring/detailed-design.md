@@ -53,6 +53,20 @@
 
 M1〜M9 の再現手順は本設計の各節に書いたコマンドそのものである。
 
+## 実装中に判明した設計の誤り (この節が本設計への訂正である)
+
+実装 (T172) の途中で本設計の記述が誤っていた箇所が 6 件見つかった。いずれも本文側を訂正済みで、
+以下はその一覧である (後から差分を追えるように、何をどう直したかを残す)。
+
+| # | 誤っていた記述 | 実測 | 訂正 |
+|---|---|---|---|
+| E1 | 施策 1 段 6 の `exec 9> "${lock_file}" 2> /dev/null` | コマンドを伴わない `exec` のリダイレクトは**シェル全体へ永続適用**され、段 7・段 8 の告知がすべて `/dev/null` へ消える (実行契約 3 が壊れる) | 波括弧のグループ `{ exec 9> "${lock_file}"; } 2> /dev/null` に直した。fd 9 だけが残り、標準エラーの差し替えはグループの外で戻る |
+| E2 | 施策 6 の逸脱番号 `D15` | `docs/template-divergence.md` は既に D17 まで使用済み | **D18** に直した |
+| E3 | S06 の「`$CLAUDE_PROJECT_DIR` を検証する 5 条件」 | 起動子が持つ検証は 7 条件 (未設定 / 絶対パス / `..` 不在 / `scripts` が実ディレクトリ / `scripts` が symlink でない / 起動先が通常ファイル / 起動先が symlink でない) | 「7 条件」に直した。検査も 7 つ全部を見る |
+| E4 | 共有プロローグの開始マーカーが相手ファイルの名前を書く形 | 2 本でマーカー行そのものが違うと、byte 一致の比較対象を「マーカーの内側だけ」に限る必要があり、検査が 1 段複雑になる | マーカー行を 2 本で同一の中立な文言にした (`# ---8< SHARED_PATH_PROLOGUE (2 本の hook で byte 一致。台帳テストが固定する) >8---`)。マーカーごと byte 比較できる |
+| E5 | 実起動層の検索パスを `$sandbox/bin:/usr/local/bin:/usr/bin:/bin` にする案 | 索引ツールが `/home/vscode/.local/bin` 以外へ導入された環境では「未導入」を再現できず、B02〜B05 が環境依存になる | sandbox 内に 3 種類の bin (`bin` / `bin-notool` / `bin-notimeout`) を作り、必要な外部コマンド (`mkdir` / `flock` / `timeout` / `sleep`) だけを symlink で持たせる。システムディレクトリは検索パスに一切入れない = 完全に決定的になる |
+| E6 | 「公式の説明はツール名の正確な文字列を書く形であり、部分一致で派生ツールも拾うという前提は置けない」という**根拠の無い**理由付け | Claude Code 本体 (2.1.233) の判定関数を実読した。matcher が `[a-zA-Z0-9_|]` だけなら正規表現にせず `|` で分割して**完全一致**で比べる。`Write|Edit` はこの経路に入るので `NotebookEdit` には一致しない | 実測を根拠として書き直した。記録は `devnotes/20260815-2015-todo-T172/matcher-semantics-evidence.md`。`^(Write|Edit)$` へのアンカー追加は**採らない** (文字集合から外れて正規表現の経路へ移るだけで、意味論の変化を防げない)。**台帳テストは設定の文字列しか見ないので、本体側の判定機序の変化は検出しない** — 再確認は Claude Code 更新時の人手の運用で担う |
+
 ## 施策一覧
 
 | # | 施策名 | 変更ファイル | 優先度 |
@@ -133,7 +147,7 @@ M1〜M9 の再現手順は本設計の各節に書いたコマンドそのもの
 #
 # 索引ツール自身の install / uninstall は実行しないこと (配線の正本が二重化する。AGENTS.md)。
 
-# ---8< SHARED_PATH_PROLOGUE (bughunt-worktree-hook.sh と byte 一致。台帳テストが固定する) >8---
+# ---8< SHARED_PATH_PROLOGUE (2 本の hook で byte 一致。台帳テストが固定する) >8---
 # set -e は使わない: 途中の失敗で暗黙に終了すると「常に 0 で終わる」契約を守れない。
 set -uo pipefail
 export LC_ALL=C
@@ -236,7 +250,10 @@ if ! command -v flock > /dev/null 2>&1; then
     emit_warning 'no-flock' 'flock が無いため索引を更新しません (排他できない環境では更新しない契約です)'
     exit 0
 fi
-exec 9> "${lock_file}" 2> /dev/null || exit 0
+# ★ `exec 9> file 2>/dev/null` と書いてはいけない: コマンドを伴わない exec の
+#   リダイレクトは**シェル全体へ永続適用**され、以降の告知 (契約 3) が消える。
+#   波括弧のグループなら fd 9 だけが残り、標準エラーの差し替えはグループの外で戻る。
+{ exec 9> "${lock_file}"; } 2> /dev/null || exit 0
 flock -n 9 || exit 0
 
 # --- 段 7: 前提コマンドの在否 ------------------------------------------------
@@ -324,12 +341,18 @@ exit 0
 `code-review-graph` は sandbox の `bin/` に置いた stub を PATH で見せる
 (stub は起動された事実と引数を記録するファイルを書く)。
 
-**PATH の作り方**: stub ディレクトリは**システムパスの前に足す**
-(`$sandbox/bin:/usr/local/bin:/usr/bin:/bin`)。`mkdir` / `flock` / `timeout` は本物が要るため、
-stub だけの PATH にすると段 5 で終わってしまい、検証したい経路に到達しない。
-「索引ツール未導入」を作るときは、stub ディレクトリから `code-review-graph` を**置かない**
-(PATH からシステムパスを外すのではない) — この区別をテストのヘルパ名でも明示する
-(`claudeHooksPathWithTool()` / `claudeHooksPathWithoutTool()`)。
+**PATH の作り方**: sandbox の中に bin を 3 つ作り、検索パスには**そのどれか 1 つだけ**を置く
+(システムディレクトリは 1 つも入れない = 実行環境に左右されない)。必要な外部コマンド
+(`mkdir` / `flock` / `timeout` / `sleep`) は絶対パスを解決して symlink で持たせる。
+
+| bin | 中身 | 作る状況 |
+|---|---|---|
+| `bin` | 索引ツールの stub + 4 コマンド | 正常 (`claudeHooksPathWithTool()`) |
+| `bin-notool` | 4 コマンドのみ | 索引ツール未導入 (`claudeHooksPathWithoutTool()`) |
+| `bin-notimeout` | 索引ツールの stub + `timeout` 以外の 3 コマンド | `timeout` 不在 (`claudeHooksPathWithoutTimeout()`) |
+
+「索引ツール未導入」をシステムパスの有無で作らないのが要点である
+(索引ツールの導入先は環境によって変わるため、そこに依存させると検査が環境依存になる)。
 
 ### リスク
 
@@ -380,7 +403,7 @@ exit 2
 ### 変更後コード (判定部)
 
 ```bash
-# ---8< SHARED_PATH_PROLOGUE (code-review-graph-update-hook.sh と byte 一致) >8---
+# ---8< SHARED_PATH_PROLOGUE (2 本の hook で byte 一致。台帳テストが固定する) >8---
 （施策 1 と完全に同じブロックをここに置く）
 # ---8< /SHARED_PATH_PROLOGUE >8---
 
@@ -551,8 +574,12 @@ exit "${DENY_EXIT_CODE}"
 
 ### matcher の対象 (`Write` と `Edit` の 2 つだけ)
 
-`Write|Edit` は **`Write` と `Edit` のときだけ発火する**。公式の説明はツール名の正確な文字列を
-書く形であり、「部分一致で派生ツールも拾う」という前提は置けない。したがって:
+`Write|Edit` は **`Write` と `Edit` のときだけ発火する**。根拠は実測である (E6。
+matcher が英数字・下線・`|` だけで出来ているときは正規表現にされず、`|` で分割して
+**完全一致**で比べられる。Claude Code 2.1.233 で本体を実読した)。
+**この挙動は台帳テストでは守れない** — テストが見るのは設定の文字列だけで、本体側の
+判定機序が変わっても気づけないので、再確認は Claude Code 更新時の人手の運用で担う。
+したがって:
 
 - 台帳のコメントには「**対象はこの 2 ツールだけ**」と書く。将来の派生ツールを自動で拾うとは
   書かない (書くと嘘になる)。
@@ -603,7 +630,7 @@ const CLAUDE_HOOKS_SKIP_EXTENSIONS = ['md', 'txt', 'json', 'yaml', 'yml', 'lock'
 | S03 | トップレベルキーが `CLAUDE_HOOKS_TOP_LEVEL_KEYS` と完全一致 (順不同・過不足なし) |
 | S04 | hooks のイベント集合が台帳と完全一致 |
 | S05 | 各イベントの matcher / command / timeout が台帳と完全一致 (1 文字でも違えば落ちる) |
-| S06 | 起動文字列が `/bin/bash -p -c ` で始まり、`$CLAUDE_PROJECT_DIR` を検証する 5 条件をすべて含み、PreToolUse は `= 97` の写像を、PostToolUse は無条件 `exit 0` を持つ |
+| S06 | 起動文字列が `/bin/bash -p -c ` で始まり、`$CLAUDE_PROJECT_DIR` を検証する 7 条件をすべて含み、PreToolUse は `= 97` の写像を、PostToolUse は無条件 `exit 0` を持つ |
 | S07 | `.claude/settings.local.json` が存在する場合、`hooks` キーを持たない |
 | S08 | `.claude/settings.bughunt-hook.example.json` が存在しない (見本方式の復活禁止) |
 | S09 | 台帳の 2 スクリプトが実在し `bash -n` を通る |
@@ -739,7 +766,7 @@ ENV PATH="/home/vscode/.local/bin:$PATH"
 | `AGENTS.md` | (a) §bug-hunt の「見本をマージ」記述を「常設済み」へ差し替え (b) §コードベース探索を自動更新前提へ書き換え + 実行環境前提の明示 (c) **新設**「常設 hook 配線」節 — 2 本の一覧と、索引ツール自身に配線を書かせない明文 (マーカー付き) |
 | `README.md` | セットアップ節に索引ツールの前提を 2 行追記 |
 | `scripts/README.md` | `code-review-graph-update-hook.sh` の台帳行を追加。`bughunt-worktree-hook.sh` の行の「見本をマージ」を「常設配線」へ更新 |
-| `docs/template-divergence.md` | **D15** として起動子の逸脱を記録 |
+| `docs/template-divergence.md` | **D18** として起動子の逸脱を記録 (D17 まで使用済みのため) |
 
 ### `AGENTS.md` に置く明文 (マーカー付き)
 
@@ -770,7 +797,7 @@ ENV PATH="/home/vscode/.local/bin:$PATH"
 
 マーカーは S12 が存在を検査する (明文ごと消せない)。
 
-### `docs/template-divergence.md` D15 の骨子
+### `docs/template-divergence.md` D18 の骨子
 
 - **逸脱**: hook の起動子を追従元の `/bin/bash "$CLAUDE_PROJECT_DIR/scripts/…"` ではなく、
   起動先を検証して終了コードを写像する形にした。

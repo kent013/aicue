@@ -229,10 +229,50 @@ PHP の `echo` / `goto` / `global` の 3 文と、開始タグ付きの出力記
   grep / 全ファイル read より先に code-review-graph の MCP tools を試す
 - ただし機械的な文字列検索(TODO コメント抽出、特定リテラル探索など)は
   そのまま `rg` / `grep` を使う方が速い。code-review-graph はあくまで構造把握用
-- セットアップ: `uv tool install code-review-graph` → `code-review-graph build` で
-  初回ビルド(中規模アプリで ~50 秒)。以降は hook で自動更新されない場合
-  `code-review-graph update` で差分更新(~2 秒)
-- SQLite キャッシュ(`.code-review-graph/`)は `.gitignore` 済みでクローン毎に各自再生成
+- セットアップ: 開発コンテナには `docker/Dockerfile` が版を固定して導入済み
+  (`code-review-graph==2.3.7`)。コンテナを作り直していない環境だけ手で
+  `uv tool install code-review-graph==2.3.7` を 1 度実行する。索引の初回ビルドは
+  `code-review-graph build`(中規模アプリで ~15 秒)
+- 以降の差分更新は **`.claude/settings.json` の PostToolUse hook が自動で回す**
+  (§常設 hook 配線)。実行環境の前提は `flock` と `timeout` の 2 つで、
+  どちらか欠けると更新は走らず**セッションごとに 1 行だけ**告知する
+  (手で回すときは `code-review-graph update`。~0.5 秒)
+- SQLite キャッシュ(`.code-review-graph/`)は `.gitignore` 済みでクローン毎に各自再生成。
+  hook の作業ファイル置き場(`.claude/code-review-graph-update-hook/`)も同様で、
+  中身はロックと告知の目印だけなので消して構わない(消せば次のセッションで再告知される)
+
+<!-- CLAUDE_HOOKS_WIRING:BEGIN -->
+## 常設 hook 配線
+
+`.claude/settings.json` は git 追跡下の**配線の正本**である。配線されている hook は 2 本:
+
+| イベント | 対象 | スクリプト | 役割 |
+|---|---|---|---|
+| PreToolUse | Bash | `scripts/bughunt-worktree-hook.sh` | bug-hunt provision の main 直叩きを止める |
+| PostToolUse | Write / Edit | `scripts/code-review-graph-update-hook.sh` | コード索引の差分更新 |
+
+- 対象は **`Write` と `Edit` の 2 つだけ**である。matcher が英数字・下線・`|` だけで
+  出来ているときは正規表現にされず、`|` で分割して**完全一致**で比べられるためで、
+  `NotebookEdit` のような派生ツールには一致しない。これは **Claude Code 2.1.233 で
+  本体を実読して確かめた挙動**であり(記録は
+  `devnotes/20260815-2015-todo-T172/matcher-semantics-evidence.md`)、
+  **Claude Code を更新したら人手で再確認する**。
+  台帳テスト(`ClaudeHooksWiringTest`)が固定するのは**設定に書かれた matcher 文字列だけ**で、
+  本体側の判定機序が変わったことは**検出しない**(文字列が同じまま意味だけ変われば緑のままである)。
+  `^(…)$` のようなアンカーは足さない(文字集合から外れて正規表現の経路へ移るだけで、
+  意味論の変化を防げるわけではない)。
+- 起動子は終了コードの写像器を兼ねる。**PreToolUse をブロックできるのはスクリプトが
+  意図して返す 97 だけ**で、構文エラー・ファイル不在・実行不能はすべて 0 に畳まれる
+  (hook の故障がセッションの Bash 操作を止めない)。
+- 前提コマンド: `flock` / `timeout`(どちらも欠けると索引更新は走らず、セッションごとに
+  1 行だけ告知する)。
+- **`code-review-graph install` / `init` / `uninstall` を実行しないこと**。これらは MCP 設定・
+  hook 配線・本ファイルへの指示注入まで行い、**配線の正本が二重化する**。配線を変えるときは
+  `.claude/settings.json` と `tests/Architecture/ClaudeHooksWiringTest.php` の台帳を同じ
+  変更で直す。
+- 配線を変えたら**新しいセッションを開始するまで反映されない**(設定はセッション開始時に
+  1 度だけ読まれる)。
+<!-- CLAUDE_HOOKS_WIRING:END -->
 
 ## 設計・TODO・devnotes の運用
 
@@ -358,7 +398,7 @@ PHP の `echo` / `goto` / `global` の 3 文と、開始タグ付きの出力記
   wrapper `tmp/bug-hunt/shard-{i}-cmd.sh` には**露出しない**。段の定義・合否条件・失敗分類の語彙・
   **保証しないもの**は `docs/architecture.md` §パイプライン通し確認 が正本。
 - **worktree 既定**: bug-hunt は worktree から走る (`scripts/bughunt-worktree-hook.sh` の PreToolUse ガードが
-  main 直叩きを早期に止める。配線は `.claude/settings.bughunt-hook.example.json` を `.claude/settings.json` にマージ)。
+  main 直叩きを早期に止める。配線は `.claude/settings.json` に常設済み。§常設 hook 配線)。
 - **スケルトン**: `screens.md` / `operations.md` / `stories/` はテンプレートでは空スケルトン。初回に
   `php artisan route:list` から生成する (SKILL.md Phase 1)。ドリフト検知は `scripts/bug-hunt-inventory-check.sh`。
 - **capability 語彙**: finding の `capability_tag` の正本は

@@ -99,3 +99,16 @@ RUN echo 'eval "$(mise activate bash)"' >> /home/vscode/.bashrc
 # /home/vscode/.local/share/mise/installs に残るため起動直後から使える。
 COPY --chown=vscode:vscode mise.toml /workspace/mise.toml
 RUN mise trust /workspace/mise.toml && mise install
+
+# コード索引 (code-review-graph)。AGENTS.md がコードベース探索の第一選択と定めており、
+# .claude/settings.json の PostToolUse hook が差分更新を回すため、版を固定して導入する。
+# 版を上げるときは scripts/code-review-graph-update-hook.sh の対象外拡張子の棚卸しも行うこと。
+#
+# 導入先は USER に依存させず明示する (HOME 由来だと RUN の位置を動かしただけで
+# /root/.local/bin へ落ち、hook が「未導入」と告知するようになるため)。
+ENV UV_TOOL_DIR=/home/vscode/.local/share/uv/tools
+ENV UV_TOOL_BIN_DIR=/home/vscode/.local/bin
+RUN uv tool install code-review-graph==2.3.7
+
+# 導入先を検索パスへ載せる (hook 側は導入先を知らない = 環境固有の知識を持たせない)
+ENV PATH="/home/vscode/.local/bin:$PATH"
