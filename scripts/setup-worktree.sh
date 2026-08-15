@@ -11,7 +11,8 @@
 # 責務:
 #   0) 入力バリデーション + lock 排他
 #   1) git worktree add (.claude/worktrees/tasks/<task-id>, todo/<task-id>, main 起点)
-#   2) 実行時ファイルのプロビジョニング (.env 必須 / storage/oauth-*.key・public/build は存在すればコピー)
+#   2) 実行時ファイルの供給 (秘密ファイル 4 本は 0600 で作成。.env は必須 /
+#      storage/oauth-*.key・.env.bughunt.local・public/build は親にあれば供給)
 #   3) git submodule update --init --recursive (.gitmodules がある場合のみ)
 #   4) vendor: worktree 内 composer install (worktree-local。独立 vendor)
 #   5) node_modules: worktree 内 pnpm install (global virtual store 共有。LLM 自律運用で局所安全)
@@ -30,20 +31,67 @@
 
 set -euo pipefail
 
-# --- bug-hunt 専用 env の provisioning (契約テストから source して単体で叩けるよう関数化) ---
-# .env.bughunt.local は .gitignore 対象で worktree には決して現れない = コピーが唯一の供給路。
-# bug-hunt は worktree 走行が既定 (AGENTS.md) なので、無いと provision が必ず止まる。
+# --- worktree へ供給する実行時ファイルの provisioning (契約テストから source して単体で叩ける) ---
 #
-# ★ mode は親に追随させず 0600 に固定する。親が 0644 だと `cp -p` は
-#   **world-readable な秘密ファイルを新たに作る**ため契約として弱い。
-#   `install -m 600` は作成時点で mode を確定するので、`cp` → `chmod` の 2 段にある
-#   「一瞬だけ広く読める窓」も無い。
-# ★ 今回 0600 を固定する対象は **.env.bughunt.local だけ**である。
-#   既存の .env / storage/oauth-*.key の権限契約は変更しない (別施策)。
-provision_bughunt_env_file() {
-    local repo_root=$1 worktree_dir=$2
-    [[ -f "${repo_root}/.env.bughunt.local" ]] || return 0   # 非利用リポジトリでは no-op
-    install -m 600 "${repo_root}/.env.bughunt.local" "${worktree_dir}/.env.bughunt.local"
+# 契約:
+#   1) 供給先の mode は**作成時点で 0600 に確定**する。供給元の mode に追随させない。
+#      単純な cp は新規作成時に供給元の mode を引き継ぐため、親の .env が 0644 だと
+#      worktree を作るたびに world-readable な秘密ファイルが 1 つ増える (実測)。
+#      さらに cp は**供給先が既に存在するとその mode を変えない**ので、一度広く置かれたら締まらない。
+#      `install -m 600` は作成時点で mode を確定するので、cp → chmod の 2 段にある
+#      「一瞬だけ広く読める窓」も作らない。
+#   2) 供給元が無いとき: required なら止める / optional なら何もしない (空ファイルを作らない)。
+#   3) **供給先の親ディレクトリは作らない**。作ると、供給先のパスを間違えたときに worktree の外へ
+#      静かにディレクトリを作る経路ができる。worktree には storage/ が追跡下で必ず存在する。
+#   4) 要否指定は required / optional だけを受理し、それ以外は落とす (fail-closed)。
+#   5) **供給先が symlink なら落とす**。install は symlink を辿ってリンク先へ書き込むため、
+#      辿った先が worktree の外でも 0600 の秘密ファイルを置いてしまう。
+#      ★ 保証範囲を誇張しない: 見るのは**供給先のファイル自身**だけである。
+#        親ディレクトリが symlink の場合 (例: worktree/storage が外を指す) は検出しない。
+#        新規 worktree の storage/ は git 追跡下の実ディレクトリとして作られるため今は起き得ず、
+#        起こすには作成後に人手で張り替える必要がある。今必要でない防御は作らない (思考原則 2)。
+#
+# なぜ公開鍵 (storage/oauth-public.key) まで 0600 なのか:
+#   worktree へ供給する実行時ファイルは配布物ではなく、**作業者本人の PHP プロセスだけが読む**。
+#   1 本だけ例外にすると「どれを狭く置くか」の判断がこのスクリプトに 2 種類生まれ、
+#   次に供給行を足す人が毎回判断させられる。狭く置いて壊れる利用者は現構成に存在しない。
+#   (別の OS ユーザーのプロセスが worktree の鍵を読む構成は本スクリプトの対象外)
+#
+# なぜ public/build は対象外なのか:
+#   秘密ではないフロントのビルド成果物 (ディレクトリ) だから。ここで扱うのは単一ファイルだけである。
+#
+# 使い方: provision_secret_file <required|optional> <repo_root> <worktree_dir> <relative_path> [hint]
+provision_secret_file() {
+    local requirement=$1 repo_root=$2 worktree_dir=$3 relative=$4 hint=${5:-}
+    local src="${repo_root}/${relative}" dst="${worktree_dir}/${relative}"
+
+    case "${requirement}" in
+        required)
+            if [[ ! -f "${src}" ]]; then
+                echo "error: 必須の供給元がありません: ${src}" >&2
+                [[ -n "${hint}" ]] && echo "       ${hint}" >&2
+                return 1
+            fi
+            ;;
+        optional)
+            if [[ ! -f "${src}" ]]; then
+                echo "    note: ${relative} が親に無いため供給をスキップ${hint:+ (${hint})}" >&2
+                return 0
+            fi
+            ;;
+        *)
+            echo "error: provision_secret_file: 要否指定は required か optional のみ (受け取った値: '${requirement}')" >&2
+            return 2
+            ;;
+    esac
+
+    if [[ -L "${dst}" ]]; then
+        echo "error: 供給先がシンボリックリンクです: ${dst}" >&2
+        return 1
+    fi
+
+    install -m 600 -- "${src}" "${dst}"
+    PROVISIONED_PATHS+=("${relative}")   # health check が存在を再検証する
 }
 
 # ★ source 専用モード: 関数定義だけ取り込んで抜ける (契約テスト用)。
@@ -104,8 +152,9 @@ PROVISIONED_PATHS=()
 # --- post-setup health check ---
 post_setup_health_check() {
     local wt="$1" rc=0 f store_path store_links dep_real
-    # 1. 必須ファイル + provision したファイルの存在
-    for f in .env "${PROVISIONED_PATHS[@]+"${PROVISIONED_PATHS[@]}"}"; do
+    # 1. provision したパスの存在 (.env は required 供給なのでここに必ず含まれる。
+    #    含まれない = [2/7] を通っていないということなので、そもそもここへ到達しない)
+    for f in "${PROVISIONED_PATHS[@]+"${PROVISIONED_PATHS[@]}"}"; do
         if [[ ! -e "${wt}/${f}" ]]; then
             echo "  health-check FAIL: 必須パスが存在しない: ${f}" >&2
             rc=1
@@ -188,11 +237,23 @@ cleanup_on_exit() {
 }
 trap cleanup_on_exit EXIT
 
+# .env が無いときの復旧案内 (事前確認と供給関数の hint で同じ文言を使う)
+ENV_SETUP_HINT="親のチェックアウトで 'cp .env.example .env' → 'php artisan key:generate' を実行してから再実行してください"
+
 # === [0/7] 事前条件チェック + lock ===
 echo ">>> [0/7] 事前条件チェック"
 acquire_lock
 if [[ -e "${WORKTREE_DIR}" ]]; then
     echo "error: ${WORKTREE_DIR} は既に存在します。teardown 先に: scripts/teardown-worktree.sh ${TASK_ID}" >&2
+    exit 1
+fi
+# 必須の供給元が無いなら worktree を作る前に止める (作りかけの片付けを発生させない)。
+# ★ これは早く止めるための事前確認であって判定の正本ではない。
+#   決着は [2/7] の provision_secret_file (required) にある。
+if [[ ! -f "${REPO_ROOT}/.env" ]]; then
+    echo "error: 親のチェックアウトに .env がありません: ${REPO_ROOT}/.env" >&2
+    echo "       ${ENV_SETUP_HINT}" >&2
+    echo "       (worktree はまだ作っていないので後片付けは要りません)" >&2
     exit 1
 fi
 TIMING_LAST=$(date +%s)
@@ -215,32 +276,21 @@ if command -v mise >/dev/null 2>&1; then
 fi
 
 # === [2/7] 実行時ファイルのプロビジョニング ===
-# .env は必須 (workspace の .env、無ければ committed の .env.example をコピー)。
-# storage/oauth-*.key / public/build は runtime artifact (.gitignore 対象) で、workspace に
-# あればコピー / 無ければ note して続行 (テンプレート初期状態では未生成のことがある。
-# 必要になった時点で worktree 内 `php artisan passport:keys` / `pnpm build` で生成できる)。
-echo ">>> [2/7] .env / .env.bughunt.local / storage/oauth-*.key / public/build を親からコピー"
-if [[ -f "${REPO_ROOT}/.env" ]]; then
-    cp "${REPO_ROOT}/.env" "${WORKTREE_DIR}/.env"
-else
-    cp "${REPO_ROOT}/.env.example" "${WORKTREE_DIR}/.env"   # .env 不在時は committed の .env.example をコピー
-fi
-for f in storage/oauth-private.key storage/oauth-public.key; do
-    if [[ -f "${REPO_ROOT}/${f}" ]]; then
-        cp "${REPO_ROOT}/${f}" "${WORKTREE_DIR}/${f}"
-        PROVISIONED_PATHS+=("${f}")
-    else
-        echo "    note: ${f} が親に無いためコピーをスキップ (必要なら worktree 内で 'php artisan passport:keys')" >&2
-    fi
-done
-# ★ 関数呼び出しを if の条件に置かない。条件内では set -e が効かず、
-#   install の失敗が「無いためスキップ」に化けて秘密ファイルのコピー失敗を隠す。
-if [[ -f "${REPO_ROOT}/.env.bughunt.local" ]]; then
-    provision_bughunt_env_file "${REPO_ROOT}" "${WORKTREE_DIR}"
-    PROVISIONED_PATHS+=(".env.bughunt.local")
-else
-    echo "    note: .env.bughunt.local が親に無いためコピーをスキップ (bug-hunt 未使用なら不要)" >&2
-fi
+# 秘密ファイル 4 本は provision_secret_file 経由で供給する (作成時点で mode を 0600 に確定)。
+# .env は必須で、無ければ止める (見本ファイルで代替すると、動くように見えて壊れている
+# worktree が無言で出来上がる)。storage/oauth-*.key / .env.bughunt.local は runtime artifact
+# (.gitignore 対象) で、親にあれば供給 / 無ければ note して続行 (必要になった時点で worktree 内
+# `php artisan passport:keys` で生成できる)。
+# public/build は秘密でないビルド成果物のディレクトリなので対象外 (cp -r のまま)。
+#
+# ★ 関数呼び出しを if / while / && / || の条件位置に置かない。
+#   条件の中では set -e が効かず、install の失敗が「無いためスキップ」に化けて
+#   秘密ファイルの供給失敗を隠す。要否の判定は関数の中にある。
+echo ">>> [2/7] .env / storage/oauth-*.key / .env.bughunt.local / public/build を親から供給"
+provision_secret_file required "${REPO_ROOT}" "${WORKTREE_DIR}" ".env" "${ENV_SETUP_HINT}"
+provision_secret_file optional "${REPO_ROOT}" "${WORKTREE_DIR}" "storage/oauth-private.key" "必要なら worktree 内で 'php artisan passport:keys'"
+provision_secret_file optional "${REPO_ROOT}" "${WORKTREE_DIR}" "storage/oauth-public.key" "必要なら worktree 内で 'php artisan passport:keys'"
+provision_secret_file optional "${REPO_ROOT}" "${WORKTREE_DIR}" ".env.bughunt.local" "bug-hunt 未使用なら不要"
 if [[ -d "${REPO_ROOT}/public/build" ]]; then
     cp -r "${REPO_ROOT}/public/build" "${WORKTREE_DIR}/public/build"
     PROVISIONED_PATHS+=("public/build")

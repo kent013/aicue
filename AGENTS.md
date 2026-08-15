@@ -274,10 +274,15 @@ PHP の `echo` / `goto` / `global` の 3 文と、開始タグ付きの出力記
 - **セットアップ**: `scripts/setup-worktree.sh <task-id>` が
   `.claude/worktrees/tasks/<task-id>` に worktree を作成し `todo/<task-id>` ブランチを切る
   (main 起点・ブランチ名固定、custom branch 非対応)。実行時ファイル
-  (`.env` / `storage/oauth-*.key` / `public/build`)のコピー、worktree 内
+  (`.env` / `storage/oauth-*.key` / `.env.bughunt.local` / `public/build`)の供給、worktree 内
   `composer install --no-scripts`、`pnpm install --frozen-lockfile`、
   post-setup health check、pgsql テスト DB の ensure まで自動で行う。
   失敗時は EXIT trap が作成途中の worktree とブランチを自動削除する
+  - **秘密ファイル 4 本 (`.env` / `storage/oauth-*.key` / `.env.bughunt.local`) は
+    作成時点で mode 0600 に確定**して供給する(供給元の mode に追随させない)。
+    `.env` は必須で、親のチェックアウトに無ければ**worktree を作らずに停止**する
+    (見本ファイルでの代替はしない)。**既存の worktree には遡及しない**(新規作成分だけ 0600)。
+    契約の正本は `tests/Architecture/SetupWorktreeRuntimeFilesContractTest.php`
 - **依存は worktree-local**: `vendor/` は worktree 内 `composer install` の独立ディレクトリ。
   `node_modules` は `pnpm-workspace.yaml#enableGlobalVirtualStore` で実体を共有 store
   (`<store-path>/links/`)に置き、worktree 内 `pnpm install`/`pnpm add` の影響を
