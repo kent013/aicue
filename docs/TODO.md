@@ -21,10 +21,9 @@
 
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
-| T085 | bfcache 実復元の iOS 実機受入確認 | test | Playwright 不可のため実機で確認+記録 | High | standalone | [設計](devnotes/20260803-0053-aigenba-alignment/) | 2026-08-03 03:10 |
+| T085 | bfcache 実復元の iOS 実機受入確認 | test | Playwright 不可のため実機で確認+記録。**T178 (同期判定の前置) のマージ後に実施する** — guard 本体・プローブ応答契約・秘匿状態の語彙が変わり、`docs/supported-browsers.md` の実機受入確認の再確認条件に当たるため。失効セッション経路の観測は「秘匿を維持したまま読み直す」に変わるが、合格終端 (`unauthenticated-redirected` = /login 到達の目視確認込み) は変わらない | High | standalone | [設計](devnotes/20260803-0053-aigenba-alignment/) | 2026-08-03 03:10 |
 | T110 | 認証手段変更のメール通知ポリシーの統一設計 | backend | passkey/2FA/SSO の増減通知を一貫したポリシーとして設計する(T108 S7 は監査ログのみで通知は見送り) | Low | standalone | [設計](devnotes/20260805-1550-security-audit-remediation/) | 2026-08-05 17:45 |
 | T174 | 組織の役割変更に同期したトークン失効 (正典 v2 の導入) | backend | 役割変更と同一tx内でOAuth資格を失効 | Medium | standalone | [設計](devnotes/20260815-2058-mcp-org-scope-revocation/) | 2026-08-15 21:35 |
-| T178 | bfcache 復元時のセッション世代照合と同期判定の前置 | backend | bfcache復元に世代照合と同期判定を前置 | High | standalone | [設計](devnotes/20260815-2103-bfcache-session-generation-cookie/) | 2026-08-15 21:35 |
 | T179 | テンプレート乖離台帳の統一形式への移行と形式検査の新設 | docs | 乖離台帳を統一形式へ移行し形式検査を新設 | Medium | standalone | [設計](devnotes/20260815-2059-template-divergence-machine-layer/) | 2026-08-15 21:35 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
