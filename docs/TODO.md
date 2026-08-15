@@ -23,7 +23,6 @@
 |---|---|---|---|---|---|---|---|
 | T085 | bfcache 実復元の iOS 実機受入確認 | test | Playwright 不可のため実機で確認+記録 | High | standalone | [設計](devnotes/20260803-0053-aigenba-alignment/) | 2026-08-03 03:10 |
 | T110 | 認証手段変更のメール通知ポリシーの統一設計 | backend | passkey/2FA/SSO の増減通知を一貫したポリシーとして設計する(T108 S7 は監査ログのみで通知は見送り) | Low | standalone | [設計](devnotes/20260805-1550-security-audit-remediation/) | 2026-08-05 17:45 |
-| T167 | declare(strict_types=1) の全数強制 gate 新設 | test | strict_types 宣言の全数 gate 新設 | Medium | standalone | [設計](devnotes/20260815-1534-strict-types-baseline-gate/) | 2026-08-15 16:18 |
 | T168 | 禁止する文 (echo / goto / global / 開始タグ付き出力記法) の字句走査 gate | test | 禁止する文の字句走査 gate を追加する | Medium | incremental | [設計](devnotes/20260815-1537-forbidden-statement-token-gate/) | 2026-08-15 16:18 |
 | T169 | プロンプトインジェクション防御の窓口方式一式を追加する | backend | LLM プロンプト防御の窓口方式一式を追加 | High | standalone | [設計](devnotes/20260815-1537-prompt-injection-defense/) | 2026-08-15 16:18 |
 | T170 | worktree へ供給する秘密ファイルの作成時モード確定 (t1 化) | infrastructure | worktree 秘密ファイルを 0600 供給 | Medium | standalone | [設計](devnotes/20260815-1536-worktree-secret-file-mode/) | 2026-08-15 16:18 |
