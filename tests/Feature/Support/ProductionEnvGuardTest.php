@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Support\ProductionEnvGuard;
+use Laravel\Fortify\Features;
 
 beforeEach(function (): void {
     // production 必須項目の baseline (すべて有効値)。各テストで 1 項目ずつ崩す。
@@ -23,6 +24,13 @@ beforeEach(function (): void {
     config(['trusted_hosts.raw_wildcard_suffixes' => []]);
     config(['trustedproxy.proxies' => ['10.0.0.0/8']]);
     config(['trustedproxy.raw_proxies' => ['10.0.0.0/8']]);
+    // パスキー設定 (T166)。**読み出し元が 2 系統に分かれる**ので取り違えないこと:
+    // 実効値は passkeys.* (Fortify の上書き後)、検査専用キーは fortify.passkeys.*。
+    config(['passkeys.relying_party_id' => 'app.example.com']);
+    config(['passkeys.allowed_origins' => ['https://app.example.com']]);
+    config(['passkeys.user_handle_secret' => str_repeat('a', 32)]);
+    config(['fortify.passkeys.raw_allowed_origins' => ['https://app.example.com']]);
+    config(['fortify.passkeys.user_handle_secret_declared' => true]);
 });
 
 test('全 production 必須項目が埋まっていれば violations は空', function (): void {
@@ -245,4 +253,84 @@ test('TRUSTED_PROXIES 未設定なら enforce() が起動を止める (productio
 
     expect(fn () => (new ProductionEnvGuard)->enforce())
         ->toThrow(RuntimeException::class, 'TRUSTED_PROXIES is not set');
+});
+
+/*
+ * パスキー (WebAuthn) 設定 (T166)。`PASSKEYS_USER_HANDLE_SECRET` 未宣言のまま production を
+ * 起動すると fail-fast するのは **意図した破壊的変更**。検査は Features::passkeys() が
+ * 有効なときだけ走る。
+ */
+
+test('passkeys feature が有効 (検査が空振りしていないことの前提固定)', function (): void {
+    expect(Features::enabled(Features::passkeys()))->toBeTrue();
+});
+
+test('PASSKEYS_USER_HANDLE_SECRET が未宣言なら violation', function (): void {
+    config(['fortify.passkeys.user_handle_secret_declared' => false]);
+    $errors = (new ProductionEnvGuard)->violations();
+    expect($errors)->toHaveCount(1);
+    expect($errors[0])->toContain('PASSKEYS_USER_HANDLE_SECRET is not set');
+});
+
+test('導出鍵が 32 文字未満なら violation', function (): void {
+    config(['passkeys.user_handle_secret' => str_repeat('a', 31)]);
+    $errors = (new ProductionEnvGuard)->violations();
+    expect($errors)->toHaveCount(1);
+    expect($errors[0])->toContain('shorter than 32 characters');
+});
+
+test('接続元が身元の識別子に属さないなら violation', function (): void {
+    config(['passkeys.allowed_origins' => ['https://evil.example.net']]);
+    config(['fortify.passkeys.raw_allowed_origins' => ['https://evil.example.net']]);
+    $errors = (new ProductionEnvGuard)->violations();
+    expect($errors)->toHaveCount(1);
+    expect($errors[0])->toContain('does not belong to');
+});
+
+test('接続元の宣言に空要素があれば violation (末尾カンマの表面化)', function (): void {
+    config(['fortify.passkeys.raw_allowed_origins' => ['https://app.example.com', '']]);
+    $errors = (new ProductionEnvGuard)->violations();
+    expect($errors)->toHaveCount(1);
+    expect($errors[0])->toContain('empty entry');
+});
+
+test('passkeys を無効化すると不正設定でも violation は出ない (キルスイッチ)', function (): void {
+    // Features::passkeys([...]) は options 付きで呼ぶと fortify-options を書き換えるため、
+    // 無効化には使わない。Features::enabled() の実装 (fortify.features の in_array) に合わせて外す。
+    /** @var array<int, mixed> $features */
+    $features = (array) config('fortify.features');
+    config(['fortify.features' => array_values(array_diff($features, ['passkeys']))]);
+
+    config(['fortify.passkeys.user_handle_secret_declared' => false]);
+    config(['passkeys.relying_party_id' => '']);
+
+    expect((new ProductionEnvGuard)->violations())->toBe([]);
+});
+
+test('passkeys.allowed_origins に非 string が混ざったら violation (fail-closed)', function (): void {
+    config(['passkeys.allowed_origins' => ['https://app.example.com', 123]]);
+    $errors = (new ProductionEnvGuard)->violations();
+    expect($errors)->toHaveCount(1);
+    expect($errors[0])->toContain('must be lists of strings');
+});
+
+test('fortify.passkeys.raw_allowed_origins に非 string が混ざったら violation (読み出し元の取り違え検出)', function (): void {
+    config(['fortify.passkeys.raw_allowed_origins' => ['https://app.example.com', 123]]);
+    $errors = (new ProductionEnvGuard)->violations();
+    expect($errors)->toHaveCount(1);
+    expect($errors[0])->toContain('must be lists of strings');
+});
+
+test('passkeys.allowed_origins が配列ですらないなら violation', function (): void {
+    config(['passkeys.allowed_origins' => 'https://app.example.com']);
+    $errors = (new ProductionEnvGuard)->violations();
+    expect($errors)->toHaveCount(1);
+    expect($errors[0])->toContain('must be lists of strings');
+});
+
+test('passkeys.allowed_origins が null なら violation', function (): void {
+    config(['passkeys.allowed_origins' => null]);
+    $errors = (new ProductionEnvGuard)->violations();
+    expect($errors)->toHaveCount(1);
+    expect($errors[0])->toContain('must be lists of strings');
 });

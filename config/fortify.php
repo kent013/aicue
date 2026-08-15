@@ -2,6 +2,65 @@
 
 use Laravel\Fortify\Features;
 
+/*
+|--------------------------------------------------------------------------
+| パスキー (WebAuthn) の設定
+|--------------------------------------------------------------------------
+|
+| ⚠ **宣言場所がここである理由**: Laravel\Fortify\FortifyServiceProvider::register() の
+| configurePasskeys() が `passkeys.*` を `config('fortify.passkeys.*')` から
+| **無条件に上書きする**ため、アプリ側 config/passkeys.php を置いても効かない。
+| Fortify が読むこのキーが唯一の宣言点である。
+|
+| ⚠ **他の config ファイルを config() で読まない** (読み込み順に依存するため)。
+| ここでは env() だけを見る (APP_KEY / APP_URL は config/app.php と同じ env を読む)。
+|
+| 既定値は APP_URL / APP_KEY からの導出で、同一オリジン PWA (v1 スコープ) では
+| 通常 env の宣言なしで正しく動く。ただし **PASSKEYS_USER_HANDLE_SECRET だけは
+| production で宣言が必須** (未宣言だと APP_KEY ローテートで登録済みパスキーが全件無効)。
+| 検査は App\Support\PasskeyConfigValidator (ProductionEnvGuard 経由) が起動時に行う。
+| 運用契約は docs/auth-security-mechanisms.md §5。
+|
+*/
+
+$appUrl = parse_url((string) env('APP_URL', ''));
+
+$appUrlScheme = is_array($appUrl) && is_string($appUrl['scheme'] ?? null) ? strtolower($appUrl['scheme']) : '';
+$appUrlHost = is_array($appUrl) && is_string($appUrl['host'] ?? null) ? strtolower($appUrl['host']) : '';
+$appUrlPort = is_array($appUrl) && is_int($appUrl['port'] ?? null) ? ':'.$appUrl['port'] : '';
+
+// APP_URL の origin (scheme://host[:port])。path / query は落とす。
+$derivedOrigin = ($appUrlScheme !== '' && $appUrlHost !== '')
+    ? $appUrlScheme.'://'.$appUrlHost.$appUrlPort
+    : '';
+
+$declaredRelyingPartyIdValue = env('PASSKEYS_RELYING_PARTY_ID');
+$declaredRelyingPartyId = is_string($declaredRelyingPartyIdValue) ? strtolower(trim($declaredRelyingPartyIdValue)) : '';
+
+$declaredOriginsValue = env('PASSKEYS_ALLOWED_ORIGINS');
+$declaredOrigins = is_string($declaredOriginsValue) ? trim($declaredOriginsValue) : '';
+
+// 宣言があれば CSV を trim + **小文字化**して保持する (空要素は落とさない)。
+// ★小文字化は load-bearing である。webauthn-lib の照合は
+//   `in_array($normalizedOrigin, $this->fullOrigins, true)` = **strict な文字列比較**で
+//   (vendor/web-auth/webauthn-lib/src/CeremonyStep/CheckAllowedOrigins.php 実測)、
+//   ブラウザは常に小文字の origin を申告する。`HTTPS://App.Example.com` と書かれた設定は
+//   一致せず**全ての手続きが無言で失敗する**ため、宣言の時点で小文字へ正規化する
+//   (scheme と host は RFC 3986 上 case-insensitive なので、正規化は意味を変えない)。
+// 宣言が無い / 空文字なら APP_URL からの導出 1 件に倒す
+// (env ファイルにキーだけ残す運用を壊さないため、空文字は「未宣言」と同じ扱い)。
+$rawAllowedOrigins = $declaredOrigins !== ''
+    ? array_map(static fn (string $v): string => strtolower(trim($v)), explode(',', $declaredOrigins))
+    : [$derivedOrigin];
+
+// ⚠ **値そのものは trim しない**。「既にパスキーがある環境は現行 APP_KEY の値を
+//    そのまま宣言すれば維持できる」という運用契約を守るため
+//    (APP_KEY に前後空白が含まれていた場合、trim すると別の鍵になり全件無効になる)。
+//    trim を使うのは「宣言されたか (空白だけではないか)」の判定にだけ留める。
+$declaredUserHandleSecretValue = env('PASSKEYS_USER_HANDLE_SECRET');
+$declaredUserHandleSecret = is_string($declaredUserHandleSecretValue) ? $declaredUserHandleSecretValue : '';
+$userHandleSecretDeclared = trim($declaredUserHandleSecret) !== '';
+
 return [
 
     /*
@@ -187,6 +246,62 @@ return [
         // step-up は App\Providers\PasskeyServiceProvider が recent-auth を後付け配線する
         // (PasskeyRouteProtectionTest / PasswordConfirmMiddlewareAbsenceTest が CI 固定)。
         Features::passkeys(['confirmPassword' => false]),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Passkeys
+    |--------------------------------------------------------------------------
+    |
+    | ファイル冒頭のコメント参照。FortifyServiceProvider::configurePasskeys() が
+    | このブロックを passkeys.* へ写す (アプリ側 config/passkeys.php は効かない)。
+    |
+    */
+
+    'passkeys' => [
+        /*
+        | 身元の識別子 (relying party id)。パスキーはこの値に束縛され、
+        | 一致するドメインでしか検証できない。host のみ (scheme / port を含めない)。
+        | 未宣言なら APP_URL の host。Fortify が passkeys.relying_party_id へ写す。
+        */
+        'relying_party_id' => $declaredRelyingPartyId !== '' ? $declaredRelyingPartyId : $appUrlHost,
+
+        /*
+        | 許可する接続元 (allowed origins)。ブラウザが申告した origin がこの列に無ければ
+        | WebAuthn の手続きを受け付けない。`scheme://host[:port]` 形式。
+        | Fortify が passkeys.allowed_origins へ写し、webauthn-lib が読む。**空要素を除いた列**。
+        */
+        'allowed_origins' => array_values(array_filter(
+            $rawAllowedOrigins,
+            static fn (string $v): bool => $v !== '',
+        )),
+
+        /*
+        | フィルタ前の接続元列 (trim・小文字化済み。**空要素を保持する**)。
+        | ここでの「生」は「env の原文」ではなく「空要素を除去する前」の意味である。config 段で落ちた空要素を
+        | 起動時 fail-fast で表面化させるために PasskeyConfigValidator が読む
+        | (trustedproxy.raw_proxies と同じ役割)。**Fortify は本キーを読まない**
+        | (検査専用。passkeys.* へは写らない)。
+        */
+        'raw_allowed_origins' => $rawAllowedOrigins,
+
+        /*
+        | 利用者ハンドルの導出鍵。hash_hmac の鍵として使われ、**変わると
+        | 登録済みパスキーが全件無効になる**。未宣言なら APP_KEY に倒れるため、
+        | APP_KEY ローテートがパスキー全件失効を意味してしまう。
+        | production では宣言必須 (PasskeyConfigValidator が起動時に検査)。
+        */
+        'user_handle_secret' => $userHandleSecretDeclared
+            ? $declaredUserHandleSecret
+            : (string) env('APP_KEY', ''),
+
+        /*
+        | 導出鍵が **APP_KEY と独立して宣言されたか**。値の一致では判定しない
+        | (既存パスキーを維持するために現行 APP_KEY と同じ値を意図して宣言する
+        |  移行が正当なため)。config:cache 後も真偽値として残る。
+        | **Fortify は本キーを読まない** (検査専用)。
+        */
+        'user_handle_secret_declared' => $userHandleSecretDeclared,
     ],
 
 ];

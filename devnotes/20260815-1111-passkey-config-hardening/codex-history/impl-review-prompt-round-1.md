@@ -1,3 +1,63 @@
+【アプリの使命 (North Star) — AGENTS.md より】
+
+**AI-CUE** は、現場に既にある**作業手順書(SOP)を起点に**、AI が撮るべきカットを設計した**動画シナリオ**を生成し、そのシナリオを**スマホ(PWA)でナビゲーション撮影**することで、専門知識ゼロの現場作業者でも**標準化されたマニュアル動画**を作れるようにする。
+
+- 「思考ゼロ・編集ゼロ」— 台本作成・撮影判断・編集の 3 ハードルを AI とナビ撮影で肩代わりする。
+- 競合(OJT を撮って形式化する tebiki)と異なり、**標準作業を起点に AI が教材設計し撮影を指示する**（撮影者・教える人のスキルに品質を依存させない）。
+- 熟練者の暗黙知を動画マニュアルという形式知へ変換する装置（SECI）。
+
+> **v1 スコープ**: 字幕のみ(TTS 後回し) / 撮影は PWA(同一オリジン・セッション認証) / 動画合成は自前 ffmpeg / 単一 Default Project。
+
+【禁止事項 — AGENTS.md より】
+
+1. テストなしの実装完了報告(不変条件は対応する Architecture/Feature テストへの登録まで含めて「実装済み」)
+2. PHPStan エラーの widen(型を緩めて黙らせる)・baseline 化
+3. dev DB への破壊操作(`migrate:fresh` 等)をエージェント判断で実行すること
+4. `response()->json()` の直書き(DTO / JsonResource / Inertia を使う。仕様固定 endpoint のみ例外)
+5. LLM 呼び出しの Prism 直呼び(`app/Prompts/` の factory 経由のみ)
+6. prompt 文字列のコード直書き(`resources/prompts/*.yaml` に置く)
+7. 操作系 POST の応答での `redirect()->intended()`
+8. 必須条件未充足を理由にボタンを disabled にする UI(押下時にエラー表示する。DESIGN.md)
+9. Artifact の使用(成果物はリポジトリ内のファイルとして出力する)
+
+【思考原則 — 全議論に適用】
+まず仮説を立てろ。何を検証したいのか、なぜそう考えるのか、どうなれば成功と判断するのかを明確にしてから手を動かせ。仮説なき改善はただの試行錯誤であり、結果から学ぶことができない。
+
+データに真摯に向き合え。成果だけでなく、多様性の変化、構造の揺らぎ、想定外のパターン — 全てが判断材料になる。数値を見て即座に閾値を弄るな。何が起きているのかを理解し、なぜそうなったのかを考え、どの方向に進むべきかを判断してから手を動かせ。
+
+先人の知恵を探せ。自分たちだけで登る必要はない。乗るべき巨人の肩があるなら乗れ。
+
+機能の名前に立ち返れ。名前はその機能が果たすべき役割を示している。現在の設計がその役割を果たしているか、常に問え。
+
+仕組みが機能していない段階で値を弄るな。閾値チューニングやフィールド追加は、設計の方向性が正しいと確認できてから行え。方向性が間違っているなら、値をいくら調整しても意味はない。設計そのものを見直せ。成果が出なければ早期に見切り、次の仮説へ進め。
+
+【ツール使用制限】
+コマンド実行・ファイル書き込みは一切行わず、提供されたテキストの分析に集中すること。ファイル読み込みは許可。
+
+---
+
+あなたは Laravel 12/13 + Svelte 5 + Inertia のコードレビュアーである。以下の詳細設計書と実装差分をレビューせよ。
+
+## レビュー観点
+
+1. **設計との一致性**: 詳細設計書に書かれた内容と実装が一致しているか。設計から逸脱している箇所があれば、それが改善か劣化かを判断する
+2. **正確性**: ロジックの誤り、境界条件、正規表現の穴、判定順序の誤り
+3. **PHPStan level 10 適合性**: `app/` `config/` `database/` `routes/` が解析対象。`env()` / `parse_url()` の `mixed` 絞り込み、`@phpstan-assert-if-true` の妥当性
+4. **DTO / JsonResource パターン**: `response()->json()` 直書きが無いか
+5. **テスト網羅性**: 各施策にテストが付いているか。負のコントロール(通ってはいけないものが確かに落ちる)があるか。既存テストを壊していないか
+6. **セキュリティ**: fail-open になっていないか。fail-closed の判定が本当に閉じているか
+7. **DESIGN.md 準拠 / Atomic Design 準拠**: 本差分にフロントエンド変更は無い(該当なし)
+
+## 出力形式
+
+- ファイルごとに判定を書く
+- 指摘は [Critical] / [Warning] / [Suggestion] に分類する
+- 最後に全体判定を **APPROVED** または **CHANGES_REQUESTED** の 1 語で明記する
+
+---
+
+## 詳細設計書
+
 # 詳細設計: passkey-config-hardening
 
 ## 使命・制約（絶対遵守）
@@ -987,10 +1047,8 @@ function lockedPackageVersion(string $name): ?string
 test('composer.json が laravel/passkeys を直接要求する (直接 import しているため)', function (): void {
     $require = composerRequireBlock();
 
-    // ★`toHaveKey($key, $value)` の第 2 引数は**期待値**であってメッセージではない
-    //   (当初案はここへ説明文を渡していたが、制約文字列 '^0.2.1' と比較され必ず落ちた。
-    //    実装時に実測して訂正した)。見たいのは「キーが在ること」なので明示検査にする。
-    expect(array_key_exists('laravel/passkeys', $require))->toBeTrue(
+    expect($require)->toHaveKey(
+        'laravel/passkeys',
         'laravel/passkeys を直接 import しているのに直接要求が無い。'
         .'laravel/fortify の推移要求が緩むと 0.3 系が無言で入る'
     );
@@ -1173,3 +1231,1196 @@ pin を惰性で書き換える運用に堕ちる。0.x で契約が壊れる境
   `timeout` / `guard` / `middleware` 等は vendor 既定のまま。パスキー専用 runbook も新設しない
 - 思考原則 3（後方互換の並走を残さない）: 期限付きの移行 flag を作らず、
   判定式そのものを「宣言の有無」に正すことで移行と恒久状態を同じ形にした
+
+## 実装差分 (git diff)
+
+```diff
+diff --git a/.env.example b/.env.example
+index 58bd1c4..9840ba3 100644
+--- a/.env.example
++++ b/.env.example
+@@ -195,11 +195,22 @@ GOOGLE_CLIENT_ID=
+ GOOGLE_CLIENT_SECRET=
+ GOOGLE_REDIRECT_URI="${APP_URL}/auth/google/callback"
+ 
+-# パスキー (WebAuthn) は専用の env を持たない。Fortify が APP_URL から
+-# relying party id (ホスト) と allowed origins ([APP_URL]) を、user handle secret を
+-# APP_KEY から導出する (同一オリジン PWA 前提)。
+-# ⚠ APP_KEY をローテートすると既存パスキーの user handle が変わり全件無効になる。
+-#    運用契約は docs/auth-security-mechanisms.md §5 パスキー (WebAuthn) の「運用上の注意」。
++# パスキー (WebAuthn) の設定 (config/fortify.php の passkeys ブロック)。
++# 利用者ハンドルの導出鍵。**production では宣言が必須** (未宣言だと起動時に fail-fast する)。
++# 未宣言のときは APP_KEY から導出されるため、APP_KEY をローテートすると
++# 登録済みパスキーが全件無効になる (利用者から見ると「昨日まで使えた生体認証が通らない」)。
++# **この行は空のプレースホルダである。production では必ず値を入れること** (空欄のままだと起動しない)。
++# 32 文字以上のランダム値を生成して固定する: php -r "echo bin2hex(random_bytes(32));"
++# 既にパスキーが登録されている環境を移行する場合は **現行 APP_KEY の値をそのまま**入れると
++# 既存パスキーを維持できる (以後 APP_KEY のローテートはパスキーに影響しなくなる)。
++# 運用手順は docs/auth-security-mechanisms.md §5。
++PASSKEYS_USER_HANDLE_SECRET=
++# 身元の識別子 (RP ID) と許可する接続元。未宣言なら APP_URL から導出する
++# (RP ID = APP_URL の host、接続元 = scheme://host[:port])。
++# 同一オリジン PWA 前提のため通常は宣言不要。別ホストから撮影 PWA を配信するときだけ宣言する。
++# 接続元は CSV で、各 host は RP ID と一致するか RP ID の下位ドメインであること。
++# PASSKEYS_RELYING_PARTY_ID=
++# PASSKEYS_ALLOWED_ORIGINS=
+ 
+ # reCAPTCHA v2 invisible (site_key 未設定時は captcha 無しで動く。
+ # secret_key は production では未設定 = fail-closed)
+diff --git a/AGENTS.md b/AGENTS.md
+index 9e67bd8..0d0076b 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -95,6 +95,14 @@ ## セキュリティ不変条件(アプリ都合で緩めない)
+ > 総当りに無効化するため復活させない。実 hop 一覧・CIDR の管理主体・変更手順は
+ > `docs/trusted-proxies-runbook.md` が正本。
+ 
++> **運用要件 (パスキー)**: production は `PASSKEYS_USER_HANDLE_SECRET` の**明示宣言が必須**
++> (未宣言 / 32 文字未満 / 身元の識別子・許可する接続元の書式不正・相互不整合は
++> `PasskeyConfigValidator` が `ProductionEnvGuard` 経由で起動時 fail-fast する
++> = **初回デプロイ前に設定が要る破壊的変更**)。宣言しないと利用者ハンドルが `APP_KEY` 由来になり、
++> **`APP_KEY` ローテートで登録済みパスキーが全件無効**になる。既にパスキーがある環境は
++> 現行 `APP_KEY` の値をそのまま宣言すれば維持できる。運用手順は
++> `docs/auth-security-mechanisms.md` §5。
++
+ > **運用要件 (route:cache)**: production は `php artisan route:cache` を**毎デプロイ再生成する**。
+ > vendor route への middleware 後付け(`RouteThrottleBinder` / `RouteMiddlewareBinder`)は
+ > **cache 生成時に焼き込まれ、cached 起動では 1 本も効かない**ため、stale cache は
+diff --git a/app/Support/PasskeyConfigValidator.php b/app/Support/PasskeyConfigValidator.php
+new file mode 100644
+index 0000000..607d51a
+--- /dev/null
++++ b/app/Support/PasskeyConfigValidator.php
+@@ -0,0 +1,220 @@
++<?php
++
++declare(strict_types=1);
++
++namespace App\Support;
++
++use RuntimeException;
++
++/**
++ * パスキー (WebAuthn) 設定 (config/fortify.php の passkeys ブロック → Fortify が passkeys.* へ写す)
++ * の production 起動時検証。
++ *
++ * `TrustedProxiesConfigValidator` / `TrustedHostsConfigValidator` と同形
++ * (final / 純粋クラス / RuntimeException / ProductionEnvGuard から try-catch で写像)。
++ *
++ * 背景: パスキーは**単独でログインできる強い資格**であり、正しさが 3 つの設定値に依存する。
++ * これらは既定で APP_URL / APP_KEY から導出されるため、設定事故が
++ * **利用者が認証しようとした瞬間まで表面化しない** (登録はできるのに検証が全件失敗する、
++ * あるいは APP_KEY ローテートで登録済みパスキーが全件無効になる)。
++ * production では起動時に落として、デプロイ前に気づけるようにする。
++ *
++ * ⚠ 本 validator は **意図的にデプロイ時の破壊的変更**である
++ * (TRUSTED_PROXIES と同性質)。`PASSKEYS_USER_HANDLE_SECRET` を宣言せずに
++ * production を起動すると fail-fast する。既にパスキーが登録済みの環境では
++ * **現行 APP_KEY の値をそのまま宣言すれば既存パスキーは維持される**
++ * (宣言の有無で判定し、値の一致では判定しないため)。
++ * 運用契約は docs/auth-security-mechanisms.md §5。
++ *
++ * 限界 (誇張しない): 本 validator は **書式と相互整合**しか見ない。
++ * 「その host を本当に運用しているか」「TLS 証明書があるか」は検査できない。
++ * **Public Suffix List を持たないため、`co.uk` のような public suffix を身元の識別子に
++ * 置いた設定は通ってしまう** (ブラウザ側は PSL を見るので実際の手続きは失敗する)。
++ * したがって本 validator は **WebAuthn の完全な妥当性検査ではない**。
++ * PSL 判定のために依存を足すことはしない (TrustedHostsConfigValidator と同じ判断。
++ * 誤設定の結果は「パスキーが使えない」であって権限昇格ではなく、
++ * 設定するのは攻撃者ではなく運用者であるため)。この限界は
++ * PasskeyConfigValidatorTest に**既知の限界として明示的なテストで記録する**。
++ * production の身元の識別子・接続元は **DNS 名のみ**を対象とする
++ * (IPv4 / IPv6 リテラルと単一ラベルは reject する = WebAuthn の relying party id にできない)。
++ */
++final class PasskeyConfigValidator
++{
++    /** DNS 名の最大長 (末尾ドットを含まない) */
++    private const MAX_DNS_NAME_LENGTH = 253;
++
++    /** DNS ラベルの最大長 */
++    private const MAX_DNS_LABEL_LENGTH = 63;
++
++    /** 導出鍵の最小長 (短い値は typo / placeholder の可能性が高い) */
++    private const MIN_USER_HANDLE_SECRET_LENGTH = 32;
++
++    /**
++     * @param  string  $relyingPartyId  config 通過後の身元の識別子 (host のみ)
++     * @param  list<string>  $allowedOrigins  config 通過後の許可する接続元 (空要素除去済み)
++     * @param  list<string>  $rawAllowedOrigins  フィルタ前の接続元列 (trim・小文字化済み、空要素を保持)
++     * @param  bool  $userHandleSecretDeclared  導出鍵が専用 env で宣言されたか
++     * @param  string  $userHandleSecret  解決後の導出鍵
++     *
++     * @throws RuntimeException
++     */
++    public function validateForProduction(
++        string $relyingPartyId,
++        array $allowedOrigins,
++        array $rawAllowedOrigins,
++        bool $userHandleSecretDeclared,
++        string $userHandleSecret,
++    ): void {
++        // 1. 身元の識別子。空 = APP_URL に host が無い (パスキーの手続きが実行時例外になる)。
++        if ($relyingPartyId === '') {
++            throw new RuntimeException(
++                'Passkey relying party id is empty in production. '
++                .'Set PASSKEYS_RELYING_PARTY_ID, or make sure APP_URL contains a host. '
++                .'See docs/auth-security-mechanisms.md.'
++            );
++        }
++
++        // 2. 身元の識別子は production で受け付ける dotted DNS 名でなければならない。
++        //    IP リテラル / localhost / 単一ラベルは WebAuthn の relying party id にできない。
++        //    (public suffix かどうかはここでは見ない = PSL を持たない。docblock の限界を参照)
++        if (! $this->isDnsName($relyingPartyId) || ! str_contains($relyingPartyId, '.')) {
++            throw new RuntimeException(sprintf(
++                'Passkey relying party id "%s" is not an accepted production DNS name. '
++                .'It must be a dotted DNS name (e.g. app.example.com), not an IP address, '
++                .'"localhost" or a single label. '
++                .'(Public suffixes such as "co.uk" are not rejected here: this check has no Public Suffix List.)',
++                $relyingPartyId,
++            ));
++        }
++
++        // 3. 接続元の宣言に空要素がある = 設定の書き損じ (末尾カンマ / 連続カンマ)。
++        //    config 段で落ちた事実を黙って正規化せず、起動時に表面化させる。
++        foreach ($rawAllowedOrigins as $raw) {
++            if (trim($raw) === '') {
++                throw new RuntimeException(
++                    'PASSKEYS_ALLOWED_ORIGINS contains an empty entry '
++                    .'(a stray or trailing comma). List each origin exactly once as '
++                    .'"https://host[:port]".'
++                );
++            }
++        }
++
++        // 4. 接続元が 1 件も無いと vendor が手続き実行時に例外を投げる (起動時には落ちない)。
++        if ($allowedOrigins === []) {
++            throw new RuntimeException(
++                'Passkey allowed origins are empty in production. '
++                .'Set PASSKEYS_ALLOWED_ORIGINS, or make sure APP_URL contains a scheme and host.'
++            );
++        }
++
++        foreach ($allowedOrigins as $origin) {
++            // 5. 書式。scheme は**小文字 https のみ** (production の WebAuthn は TLS 必須)。
++            //    path / query / fragment / userinfo / 末尾スラッシュを弾く。
++            //    ★大文字を通さないのは意図的である: 宣言側 (config/fortify.php) が小文字へ
++            //      正規化するので、ここに大文字が届くのは「別経路が正規化せずに設定した」場合だけ。
++            //      webauthn-lib は strict 比較なので、その値は**全手続きを無言で失敗させる**。
++            //      黙って受理せず起動時に落とす (運用者が env へ書く大文字は config が吸収する)。
++            if (preg_match('#^https://([a-z0-9.-]+)(?::(\d{1,5}))?$#', $origin, $m) !== 1) {
++                throw new RuntimeException(sprintf(
++                    'Passkey allowed origin "%s" is invalid. '
++                    .'Each origin must be "https://dns-name[:port]" with no path, query or trailing slash. '
++                    .'Plain http, IPv4/IPv6 literals and bracketed hosts are not accepted in production.',
++                    $origin,
++                ));
++            }
++
++            $host = $m[1];   // 正規表現が小文字だけを通すので strtolower しない
++            $port = $m[2] ?? '';
++
++            if (! $this->isDnsName($host)) {
++                throw new RuntimeException(sprintf(
++                    'Passkey allowed origin "%s" has an invalid host. '
++                    .'Each label must be 1-63 alphanumeric/hyphen characters and must not start or end with a hyphen.',
++                    $origin,
++                ));
++            }
++
++            if ($port !== '' && ((int) $port < 1 || (int) $port > 65535)) {
++                throw new RuntimeException(sprintf(
++                    'Passkey allowed origin "%s" has an out-of-range port.',
++                    $origin,
++                ));
++            }
++
++            // 6. WebAuthn は「身元の識別子が接続元 host と一致するか、その上位ドメインである」
++            //    ことを要求する。ここが食い違うと**全ての手続きが失敗する** (登録も検証も)。
++            if ($host !== $relyingPartyId && ! str_ends_with($host, '.'.$relyingPartyId)) {
++                throw new RuntimeException(sprintf(
++                    'Passkey allowed origin "%s" does not belong to the relying party id "%s". '
++                    .'The origin host must equal the relying party id or be a subdomain of it, '
++                    .'otherwise every passkey ceremony fails.',
++                    $origin,
++                    $relyingPartyId,
++                ));
++            }
++        }
++
++        // 7. 導出鍵は **APP_KEY から独立して宣言されている**こと。
++        //    未宣言だと APP_KEY に倒れ、鍵ローテートで登録済みパスキーが全件無効になる。
++        if (! $userHandleSecretDeclared) {
++            throw new RuntimeException(
++                'PASSKEYS_USER_HANDLE_SECRET is not set in production. '
++                .'Without it the passkey user handle is derived from APP_KEY, so rotating APP_KEY '
++                .'silently invalidates every registered passkey. '
++                .'When migrating an environment that already has passkeys, declare the current APP_KEY value. '
++                .'See docs/auth-security-mechanisms.md.'
++            );
++        }
++
++        if (strlen($userHandleSecret) < self::MIN_USER_HANDLE_SECRET_LENGTH) {
++            throw new RuntimeException(sprintf(
++                'PASSKEYS_USER_HANDLE_SECRET is shorter than %d characters. '
++                .'Use a long random value (e.g. php -r "echo bin2hex(random_bytes(32));").',
++                self::MIN_USER_HANDLE_SECRET_LENGTH,
++            ));
++        }
++    }
++
++    /**
++     * DNS 名として妥当か (ラベル単位で検査する)。
++     *
++     * 包含正規表現 `[A-Za-z0-9.-]+` だけでは `-example.com` / `example..com` /
++     * `example.com.` が通ってしまうため、ドットで分割して 1 ラベルずつ見る。
++     *
++     * ⚠ これは純粋な DNS 構文検証ではなく **production の WebAuthn 用に採用する DNS 名の方針**である
++     * (DNS 構文自体は全数字の末尾ラベルも大文字も禁止していない)。
++     *
++     * **大文字を受理しない**のは、宣言側 (config/fortify.php) が小文字へ正規化するためである。
++     * ここに大文字が届くのは別経路が未正規化のまま設定した場合で、その値は
++     * webauthn-lib の strict 比較に一致せず**全手続きを無言で失敗させる**。
++     *
++     * **末尾ラベルに英字を 1 文字以上要求する**のは、`192.168.001.001` のような
++     * 「filter_var では IP と認められないが実質 IP アドレスの書き損じ」を弾くため
++     * (全数字の TLD は存在しない)。punycode (`xn--p1ai`) は英字を含むので通る。
++     */
++    private function isDnsName(string $host): bool
++    {
++        if ($host === '' || strlen($host) > self::MAX_DNS_NAME_LENGTH) {
++            return false;
++        }
++
++        // IPv4 / IPv6 リテラルは relying party id にも origin host にも使えない。
++        if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
++            return false;
++        }
++
++        $labels = explode('.', $host);
++
++        foreach ($labels as $label) {
++            if ($label === '' || strlen($label) > self::MAX_DNS_LABEL_LENGTH) {
++                return false;   // 空ラベル = 連続ドット / 先頭ドット / 末尾ドット
++            }
++            if (preg_match('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/', $label) !== 1) {
++                return false;   // ハイフン開始 / ハイフン終了 / 大文字 / 不正文字
++            }
++        }
++
++        // 末尾ラベル (TLD 相当) は英字を含むこと。
++        return preg_match('/[a-z]/', $labels[count($labels) - 1]) === 1;
++    }
++}
+diff --git a/app/Support/ProductionEnvGuard.php b/app/Support/ProductionEnvGuard.php
+index 7a89a8e..ef9d1a2 100644
+--- a/app/Support/ProductionEnvGuard.php
++++ b/app/Support/ProductionEnvGuard.php
+@@ -4,6 +4,7 @@
+ 
+ namespace App\Support;
+ 
++use Laravel\Fortify\Features;
+ use RuntimeException;
+ use Throwable;
+ 
+@@ -24,6 +25,8 @@
+  * - TrustHosts allowlist (Host header injection 防御の allowlist 非空・書式)
+  * - TrustProxies allowlist (client IP / X-Forwarded-Proto の信頼境界。未宣言・`*`・
+  *   REMOTE_ADDR・書式不正を拒否。プロキシ無し構成は `none` の明示宣言を要求する)
++ * - パスキー設定 (身元の識別子 / 許可する接続元 / 利用者ハンドルの導出鍵。
++ *   書式・相互整合・導出鍵の独立宣言。Features::passkeys() 有効時のみ)
+  */
+ class ProductionEnvGuard
+ {
+@@ -125,6 +128,42 @@ public function violations(): array
+             $errors[] = $e->getMessage();
+         }
+ 
++        // パスキー (WebAuthn) の身元 / 接続元 / 利用者ハンドル導出鍵を起動時検証。
++        // **キルスイッチが有効なときだけ**検査する (機能を止めている環境に設定を要求しない)。
++        // 有効化点は config/fortify.php の Features::passkeys([...]) ただ 1 箇所。
++        if (Features::enabled(Features::passkeys())) {
++            $relyingPartyIdValue = config('passkeys.relying_party_id');
++            $relyingPartyId = is_string($relyingPartyIdValue) ? $relyingPartyIdValue : '';
++            // ★読み出し元が 2 つに分かれる理由:
++            //   - 実効値 (passkeys.*) = **実際に手続きで使われる値**。Fortify の上書き後の姿を検査する。
++            //   - 宣言の事実 (fortify.passkeys.raw_allowed_origins / user_handle_secret_declared) は
++            //     検査専用キーで Fortify は passkeys.* へ写さない。宣言元から読むしかない。
++            $originsValue = config('passkeys.allowed_origins', []);
++            $rawOriginsValue = config('fortify.passkeys.raw_allowed_origins', []);
++            $userHandleSecretValue = config('passkeys.user_handle_secret');
++            $userHandleSecret = is_string($userHandleSecretValue) ? $userHandleSecretValue : '';
++            $userHandleSecretDeclared = config('fortify.passkeys.user_handle_secret_declared') === true;
++
++            // 文字列以外が混ざった config を **黙って除去しない** (除去すると設定破損を見逃す)。
++            // trusted hosts / proxies 側の stringList() は「silent drop を raw で表面化させる」形だが、
++            // passkeys は config が必ず string 列を返す設計なので、破損はそのまま violation にする。
++            if (! $this->isStringList($originsValue) || ! $this->isStringList($rawOriginsValue)) {
++                $errors[] = 'passkeys.allowed_origins and fortify.passkeys.raw_allowed_origins must be lists of strings.';
++            } else {
++                try {
++                    (new PasskeyConfigValidator)->validateForProduction(
++                        $relyingPartyId,
++                        $originsValue,
++                        $rawOriginsValue,
++                        $userHandleSecretDeclared,
++                        $userHandleSecret,
++                    );
++                } catch (Throwable $e) {
++                    $errors[] = $e->getMessage();
++                }
++            }
++        }
++
+         return $errors;
+     }
+ 
+@@ -165,4 +204,24 @@ private function stringList(mixed $value, bool $keepEmpty = false): array
+ 
+         return $result;
+     }
++
++    /**
++     * 値が string だけの list か (非 string を黙って除去せず、破損として扱うための判定)。
++     *
++     * @phpstan-assert-if-true list<string> $value
++     */
++    private function isStringList(mixed $value): bool
++    {
++        if (! is_array($value) || ! array_is_list($value)) {
++            return false;
++        }
++
++        foreach ($value as $item) {
++            if (! is_string($item)) {
++                return false;
++            }
++        }
++
++        return true;
++    }
+ }
+diff --git a/composer.json b/composer.json
+index 575b939..ec75732 100644
+--- a/composer.json
++++ b/composer.json
+@@ -27,6 +27,7 @@
+         "laravel/fortify": "^1.37",
+         "laravel/framework": "^13.8",
+         "laravel/mcp": "^0.8.0",
++        "laravel/passkeys": "^0.2.1",
+         "laravel/passport": "^13.7",
+         "laravel/socialite": "^5.27",
+         "laravel/tinker": "^3.0",
+diff --git a/config/fortify.php b/config/fortify.php
+index 10cc164..c3d91b7 100644
+--- a/config/fortify.php
++++ b/config/fortify.php
+@@ -2,6 +2,65 @@
+ 
+ use Laravel\Fortify\Features;
+ 
++/*
++|--------------------------------------------------------------------------
++| パスキー (WebAuthn) の設定
++|--------------------------------------------------------------------------
++|
++| ⚠ **宣言場所がここである理由**: Laravel\Fortify\FortifyServiceProvider::register() の
++| configurePasskeys() が `passkeys.*` を `config('fortify.passkeys.*')` から
++| **無条件に上書きする**ため、アプリ側 config/passkeys.php を置いても効かない。
++| Fortify が読むこのキーが唯一の宣言点である。
++|
++| ⚠ **他の config ファイルを config() で読まない** (読み込み順に依存するため)。
++| ここでは env() だけを見る (APP_KEY / APP_URL は config/app.php と同じ env を読む)。
++|
++| 既定値は APP_URL / APP_KEY からの導出で、同一オリジン PWA (v1 スコープ) では
++| 通常 env の宣言なしで正しく動く。ただし **PASSKEYS_USER_HANDLE_SECRET だけは
++| production で宣言が必須** (未宣言だと APP_KEY ローテートで登録済みパスキーが全件無効)。
++| 検査は App\Support\PasskeyConfigValidator (ProductionEnvGuard 経由) が起動時に行う。
++| 運用契約は docs/auth-security-mechanisms.md §5。
++|
++*/
++
++$appUrl = parse_url((string) env('APP_URL', ''));
++
++$appUrlScheme = is_array($appUrl) && is_string($appUrl['scheme'] ?? null) ? strtolower($appUrl['scheme']) : '';
++$appUrlHost = is_array($appUrl) && is_string($appUrl['host'] ?? null) ? strtolower($appUrl['host']) : '';
++$appUrlPort = is_array($appUrl) && is_int($appUrl['port'] ?? null) ? ':'.$appUrl['port'] : '';
++
++// APP_URL の origin (scheme://host[:port])。path / query は落とす。
++$derivedOrigin = ($appUrlScheme !== '' && $appUrlHost !== '')
++    ? $appUrlScheme.'://'.$appUrlHost.$appUrlPort
++    : '';
++
++$declaredRelyingPartyIdValue = env('PASSKEYS_RELYING_PARTY_ID');
++$declaredRelyingPartyId = is_string($declaredRelyingPartyIdValue) ? strtolower(trim($declaredRelyingPartyIdValue)) : '';
++
++$declaredOriginsValue = env('PASSKEYS_ALLOWED_ORIGINS');
++$declaredOrigins = is_string($declaredOriginsValue) ? trim($declaredOriginsValue) : '';
++
++// 宣言があれば CSV を trim + **小文字化**して保持する (空要素は落とさない)。
++// ★小文字化は load-bearing である。webauthn-lib の照合は
++//   `in_array($normalizedOrigin, $this->fullOrigins, true)` = **strict な文字列比較**で
++//   (vendor/web-auth/webauthn-lib/src/CeremonyStep/CheckAllowedOrigins.php 実測)、
++//   ブラウザは常に小文字の origin を申告する。`HTTPS://App.Example.com` と書かれた設定は
++//   一致せず**全ての手続きが無言で失敗する**ため、宣言の時点で小文字へ正規化する
++//   (scheme と host は RFC 3986 上 case-insensitive なので、正規化は意味を変えない)。
++// 宣言が無い / 空文字なら APP_URL からの導出 1 件に倒す
++// (env ファイルにキーだけ残す運用を壊さないため、空文字は「未宣言」と同じ扱い)。
++$rawAllowedOrigins = $declaredOrigins !== ''
++    ? array_map(static fn (string $v): string => strtolower(trim($v)), explode(',', $declaredOrigins))
++    : [$derivedOrigin];
++
++// ⚠ **値そのものは trim しない**。「既にパスキーがある環境は現行 APP_KEY の値を
++//    そのまま宣言すれば維持できる」という運用契約を守るため
++//    (APP_KEY に前後空白が含まれていた場合、trim すると別の鍵になり全件無効になる)。
++//    trim を使うのは「宣言されたか (空白だけではないか)」の判定にだけ留める。
++$declaredUserHandleSecretValue = env('PASSKEYS_USER_HANDLE_SECRET');
++$declaredUserHandleSecret = is_string($declaredUserHandleSecretValue) ? $declaredUserHandleSecretValue : '';
++$userHandleSecretDeclared = trim($declaredUserHandleSecret) !== '';
++
+ return [
+ 
+     /*
+@@ -189,4 +248,60 @@
+         Features::passkeys(['confirmPassword' => false]),
+     ],
+ 
++    /*
++    |--------------------------------------------------------------------------
++    | Passkeys
++    |--------------------------------------------------------------------------
++    |
++    | ファイル冒頭のコメント参照。FortifyServiceProvider::configurePasskeys() が
++    | このブロックを passkeys.* へ写す (アプリ側 config/passkeys.php は効かない)。
++    |
++    */
++
++    'passkeys' => [
++        /*
++        | 身元の識別子 (relying party id)。パスキーはこの値に束縛され、
++        | 一致するドメインでしか検証できない。host のみ (scheme / port を含めない)。
++        | 未宣言なら APP_URL の host。Fortify が passkeys.relying_party_id へ写す。
++        */
++        'relying_party_id' => $declaredRelyingPartyId !== '' ? $declaredRelyingPartyId : $appUrlHost,
++
++        /*
++        | 許可する接続元 (allowed origins)。ブラウザが申告した origin がこの列に無ければ
++        | WebAuthn の手続きを受け付けない。`scheme://host[:port]` 形式。
++        | Fortify が passkeys.allowed_origins へ写し、webauthn-lib が読む。**空要素を除いた列**。
++        */
++        'allowed_origins' => array_values(array_filter(
++            $rawAllowedOrigins,
++            static fn (string $v): bool => $v !== '',
++        )),
++
++        /*
++        | フィルタ前の接続元列 (trim・小文字化済み。**空要素を保持する**)。
++        | ここでの「生」は「env の原文」ではなく「空要素を除去する前」の意味である。config 段で落ちた空要素を
++        | 起動時 fail-fast で表面化させるために PasskeyConfigValidator が読む
++        | (trustedproxy.raw_proxies と同じ役割)。**Fortify は本キーを読まない**
++        | (検査専用。passkeys.* へは写らない)。
++        */
++        'raw_allowed_origins' => $rawAllowedOrigins,
++
++        /*
++        | 利用者ハンドルの導出鍵。hash_hmac の鍵として使われ、**変わると
++        | 登録済みパスキーが全件無効になる**。未宣言なら APP_KEY に倒れるため、
++        | APP_KEY ローテートがパスキー全件失効を意味してしまう。
++        | production では宣言必須 (PasskeyConfigValidator が起動時に検査)。
++        */
++        'user_handle_secret' => $userHandleSecretDeclared
++            ? $declaredUserHandleSecret
++            : (string) env('APP_KEY', ''),
++
++        /*
++        | 導出鍵が **APP_KEY と独立して宣言されたか**。値の一致では判定しない
++        | (既存パスキーを維持するために現行 APP_KEY と同じ値を意図して宣言する
++        |  移行が正当なため)。config:cache 後も真偽値として残る。
++        | **Fortify は本キーを読まない** (検査専用)。
++        */
++        'user_handle_secret_declared' => $userHandleSecretDeclared,
++    ],
++
+ ];
+diff --git a/docs/auth-security-mechanisms.md b/docs/auth-security-mechanisms.md
+index 80e5db5..68a50a3 100644
+--- a/docs/auth-security-mechanisms.md
++++ b/docs/auth-security-mechanisms.md
+@@ -330,11 +330,36 @@ ### transport 契約 (client ↔ server)
+ 
+ ### 運用上の注意
+ 
+-- 設定は `APP_URL` から導出される (relying party id = ホスト、allowed origins = `[APP_URL]`)。
+-  同一オリジン PWA 前提のため専用 env は持たない。
+-- **`APP_KEY` をローテートすると user handle (`hash_hmac` の鍵が `APP_KEY`) が変わり、
+-  登録済みパスキーが全件無効になる**。鍵ローテートを行う場合は
+-  `PASSKEYS_USER_HANDLE_SECRET` 相当の固定値を `config/passkeys.php` に持たせる設計変更が必要。
++- 設定の正本は **`config/fortify.php` の `passkeys` ブロック**(身元の識別子 = relying party id /
++  許可する接続元 = allowed origins / 利用者ハンドルの導出鍵)。
++  身元の識別子と接続元は宣言が無ければ `APP_URL` から導出する
++  (RP ID = host、接続元 = `scheme://host[:port]`)。同一オリジン PWA 前提のため通常は宣言不要。
++- **production では `PASSKEYS_USER_HANDLE_SECRET` の宣言が必須**
++  (未宣言 / 32 文字未満、および設定の書式・相互整合の違反は `App\Support\PasskeyConfigValidator`
++  が `ProductionEnvGuard` 経由で起動時 fail-fast する = **初回デプロイ前に設定が要る破壊的変更**)。
++  検査は `Features::passkeys()` が有効なときだけ走る。
++- 導出鍵を宣言しないと利用者ハンドル (`hash_hmac` の鍵) が `APP_KEY` に倒れ、
++  **`APP_KEY` をローテートした瞬間に登録済みパスキーが全件無効になる**。
++  既にパスキーが登録されている環境では、`PASSKEYS_USER_HANDLE_SECRET` に
++  **現行 `APP_KEY` の値をそのまま**宣言すれば既存パスキーは維持される
++  (検査は「宣言されているか」を見ており、値が `APP_KEY` と同じかどうかは見ない)。
++  以後 `APP_KEY` のローテートはパスキーに影響しない。
++- 起動時検査が見るのは**書式と相互整合まで**である。「その host を実際に運用しているか」
++  「証明書があるか」は検査できない。**Public Suffix List も持たない**ため、
++  `co.uk` のような public suffix を身元の識別子に置いた設定は起動時には通る
++  (ブラウザ側が PSL を見るので実際の手続きは失敗する)。
++  したがってこの検査は **WebAuthn の完全な妥当性検査ではない** (誇張しない)。
++  対象は **DNS 名のみ**で、IP リテラル・単一ラベル (`localhost`) は reject する。
++- 宣言は `config/fortify.php` の `passkeys` ブロックに置く。
++  **`config/passkeys.php` を新設してはいけない** — `FortifyServiceProvider::register()` の
++  `configurePasskeys()` が `passkeys.*` を `fortify.passkeys.*` から**無条件に上書きする**ため、
++  置いても効かない死んだ設定になる。実効値と宣言値の一致は
++  `PasskeyPackageContractTest` が固定する。
++- キー名は `laravel/fortify` / `laravel/passkeys` の契約であり、変わると宣言は
++  **無言で効かなくなり既定へ戻る**。版 pin (`composer.json` の直接要求 +
++  解決版検査) が対象にするのは **`laravel/passkeys` だけ**である
++  (`laravel/fortify` は 1.x の semver 管理なので minor pin を足さない)。
++  Fortify 側の写像は `PasskeyPackageContractTest` の**実効値の契約テスト**が守る。
+ - 未認証の challenge 発行 (`GET /passkeys/login/options`) は `throttle:passkeys` (10/min) で絞る。
+   `config('fortify.limiters.passkeys')` が未設定だと Fortify が throttle を外し **無制限**になる。
+ 
+diff --git a/tests/Architecture/EnvExampleInvariantTest.php b/tests/Architecture/EnvExampleInvariantTest.php
+index 28861c2..143d4c5 100644
+--- a/tests/Architecture/EnvExampleInvariantTest.php
++++ b/tests/Architecture/EnvExampleInvariantTest.php
+@@ -33,6 +33,21 @@
+     expect($contents)->toContain('TRUSTED_PROXIES=');
+ });
+ 
++/*
++ * パスキーの利用者ハンドル導出鍵。production で未宣言だと起動時 fail-fast するため
++ * (App\Support\PasskeyConfigValidator)、.env.example に必ず提示して
++ * 「設定し忘れてデプロイが落ちる」事故を減らす (TRUSTED_PROXIES と同じ理由)。
++ */
++
++test('.env.example に PASSKEYS_USER_HANDLE_SECRET が含まれる', function (): void {
++    $contents = file_get_contents(base_path('.env.example'));
++    expect($contents)->toBeString();
++    /** @var string $contents */
++    // **行頭一致**で見る (toContain だとコメント行 `# PASSKEYS_USER_HANDLE_SECRET=` でも通り、
++    // 「宣言行として提示されている」ことを固定できないため)。
++    expect($contents)->toMatch('/^PASSKEYS_USER_HANDLE_SECRET=/m');
++});
++
+ /*
+  * テンプレート規約: 環境座標 (config/template.php) のキーは .env.example に必ず提示する。
+  */
+diff --git a/tests/Architecture/PasskeyPackageContractTest.php b/tests/Architecture/PasskeyPackageContractTest.php
+index 925eb5b..d1e2245 100644
+--- a/tests/Architecture/PasskeyPackageContractTest.php
++++ b/tests/Architecture/PasskeyPackageContractTest.php
+@@ -10,6 +10,7 @@
+ use App\Models\User;
+ use Illuminate\Database\Eloquent\ModelNotFoundException;
+ use Laravel\Fortify\Features;
++use Laravel\Fortify\FortifyServiceProvider;
+ use Laravel\Passkeys\Contracts\PasskeyConfirmationResponse as PasskeyConfirmationResponseContract;
+ use Laravel\Passkeys\Contracts\PasskeyDeletedResponse as PasskeyDeletedResponseContract;
+ use Laravel\Passkeys\Contracts\PasskeyLoginResponse as PasskeyLoginResponseContract;
+@@ -143,3 +144,156 @@ function passkeyRouteNames(): array
+     // class binding は Router::createClassBinding により ($value, $route) の 2 引数 closure になる
+     expect(fn () => $callback('1', null))->toThrow(ModelNotFoundException::class);
+ });
++
++/*
++ * ★本設計 (T166) で最も重要な検査★
++ * FortifyServiceProvider::register() の configurePasskeys() が
++ * `passkeys.*` を `fortify.passkeys.*` から**無条件に上書きする**。
++ * この写しが切れると、アプリの宣言は**無言で無視され APP_URL / APP_KEY 由来の
++ * 既定へ戻る** (= 設定したのに効かない事故。設計中に実際に踏みかけた経路)。
++ * 実効値と宣言値の一致を固定する。
++ */
++test('Fortify が fortify.passkeys.* を passkeys.* へ写している (fallback と区別できる値で検査)', function (): void {
++    // ★**素の一致比較では偽陰性になる**。通常環境では宣言値も fallback も同じ
++    //   APP_URL / APP_KEY 由来なので、Fortify が fortify.passkeys.* を読まなくなっても
++    //   両者は一致してしまう。fallback では絶対に生まれない sentinel を宣言してから写像を実行する。
++    config([
++        'fortify.passkeys.relying_party_id' => 'sentinel.example.com',
++        'fortify.passkeys.allowed_origins' => ['https://sentinel.example.com'],
++        'fortify.passkeys.user_handle_secret' => str_repeat('s', 32),
++    ]);
++
++    // configurePasskeys() は protected。**vendor の写像そのもの**が検査対象なので
++    // Reflection で直接叩く (register() 全体を再実行すると Response contract の
++    // アプリ実装への差し替えまで Fortify 既定へ戻ってしまうため、対象を最小に絞る)。
++    // 名前が変わればこのテストが落ちる = 版を上げたときに写像を再確認する契機になる。
++    $provider = new FortifyServiceProvider(app());
++    $configure = new ReflectionMethod($provider, 'configurePasskeys');
++    $configure->setAccessible(true);
++    $configure->invoke($provider);
++
++    expect(config('passkeys.relying_party_id'))->toBe('sentinel.example.com');
++    expect(config('passkeys.allowed_origins'))->toBe(['https://sentinel.example.com']);
++    expect(config('passkeys.user_handle_secret'))->toBe(str_repeat('s', 32));
++});
++
++test('config cache 往復後もアプリ側の passkeys 宣言が残る', function (): void {
++    $subset = ['fortify' => config('fortify'), 'passkeys' => config('passkeys')];
++    $exported = var_export($subset, true);
++    /** @var array<string, mixed> $roundTripped */
++    $roundTripped = eval('return '.$exported.';');
++
++    expect(data_get($roundTripped, 'fortify.passkeys.relying_party_id'))->toBeString();
++    expect(data_get($roundTripped, 'fortify.passkeys.allowed_origins'))->toBeArray();
++    expect(data_get($roundTripped, 'fortify.passkeys.raw_allowed_origins'))->toBeArray();
++    expect(data_get($roundTripped, 'fortify.passkeys.user_handle_secret'))->toBeString();
++    expect(data_get($roundTripped, 'fortify.passkeys.user_handle_secret_declared'))->toBeBool();
++    expect(data_get($roundTripped, 'passkeys.relying_party_id'))->toBeString();
++});
++
++/*
++ * アプリは passkeys の一部キーしか宣言しない。残りは Fortify の configurePasskeys() が
++ * アプリ設定から組み立てるか、laravel/passkeys の既定が供給する。
++ * この結線が崩れると **management_middleware / throttle が消えて保護が外れる**ため、
++ * アプリ宣言を足した後も**実効キーが揃っている**ことを明示的に固定する。
++ * (management_middleware / throttle は vendor 既定値ではなく Fortify の組み立て結果である)
++ */
++test('アプリ宣言を足しても Fortify 結線後の実効キーが揃っている', function (): void {
++    expect(config('passkeys.timeout'))->toBe(60000);
++    expect(config('passkeys.guard'))->toBe('web');
++    expect(config('passkeys.middleware'))->toBe(['web']);
++    expect(config('passkeys.redirect'))->toBeString();
++    // confirmPassword=false のため空配列になる (既存の「password.confirm 無効化」契約と対)。
++    expect(config('passkeys.management_middleware'))->toBe([]);
++    // limiters.passkeys から Fortify が組み立てる (既存の throttle 契約と対)。
++    expect(config('passkeys.throttle'))->toBe('throttle:passkeys');
++});
++
++/*
++ * 版 pin。laravel/passkeys は **0.x** であり semver の後方互換保証が無い
++ * (0.3.0 で設定キー名・contract・route 名が予告なく変わりうる)。
++ * 本ファイルの他の契約検査と config/fortify.php の passkeys ブロックのキー名は
++ * **0.2 系に対して検証する契約**であり、その前提が黙って動かないように 2 つの側面を固定する:
++ *
++ *   - composer.json の直接要求 = 「直接 import しているので直接要求する」設計意思と許容範囲。
++ *     これが無いと laravel/fortify の推移要求が緩んだ瞬間に 0.3 系が無言で入る。
++ *   - composer.lock の解決値 = **いま実際に動いている版**。
++ *     制約だけ見ても、lock が手で書き換えられた / platform 設定で別版が入った場合を捕まえられない。
++ *
++ * 0.2.x を外れるときは、本ファイルの契約検査 (route 名 7 本 / confirmPassword /
++ * limiter / モデル差し替え / Response contract 4 本 / binder / 写像 sentinel) と
++ * Fortify の configurePasskeys() が読むキー名 (fortify.passkeys.*) を
++ * 再確認してから、この pin を更新すること。
++ */
++
++/** @return array<string, mixed> composer.json の require ブロック */
++function composerRequireBlock(): array
++{
++    $raw = file_get_contents(base_path('composer.json'));
++    expect($raw)->toBeString();
++    /** @var string $raw */
++    $decoded = json_decode($raw, true);
++    expect($decoded)->toBeArray();
++    /** @var array<string, mixed> $decoded */
++    $require = $decoded['require'] ?? null;
++    expect($require)->toBeArray();
++
++    /** @var array<string, mixed> $require */
++    return $require;
++}
++
++/** composer.lock の解決版 (例 "v0.2.1") を返す */
++function lockedPackageVersion(string $name): ?string
++{
++    $raw = file_get_contents(base_path('composer.lock'));
++    expect($raw)->toBeString();
++    /** @var string $raw */
++    $decoded = json_decode($raw, true);
++    expect($decoded)->toBeArray();
++
++    /** @var array<string, mixed> $decoded */
++    $packages = $decoded['packages'] ?? [];
++    expect($packages)->toBeArray();
++
++    /** @var array<int, array<string, mixed>> $packages */
++    foreach ($packages as $package) {
++        if (($package['name'] ?? null) === $name && is_string($package['version'] ?? null)) {
++            return $package['version'];
++        }
++    }
++
++    return null;
++}
++
++test('composer.json が laravel/passkeys を直接要求する (直接 import しているため)', function (): void {
++    $require = composerRequireBlock();
++
++    // ★`toHaveKey($key, $value)` の第 2 引数は**期待値**であってメッセージではない。
++    //   ここで見たいのは「キーが在ること」なので array_key_exists を明示的に検査する。
++    expect(array_key_exists('laravel/passkeys', $require))->toBeTrue(
++        'laravel/passkeys を直接 import しているのに直接要求が無い。'
++        .'laravel/fortify の推移要求が緩むと 0.3 系が無言で入る'
++    );
++
++    $constraint = $require['laravel/passkeys'];
++    expect($constraint)->toBeString();
++    /** @var string $constraint */
++    // 書き方は caret 1 種類に絞る (composer.json の他 20 件超がすべて caret のため)。
++    // **前方一致では不十分**: `^0.20` / `^0.2 || ^1.0` / `^0.2.1 || ^0.3` / `^0.2@dev` が通り、
++    // 特に `|| ^0.3` は「0.3 系を入れない」というこの検査の目的を破る。
++    expect(preg_match('/^\^0\.2(?:\.\d+)?$/', $constraint))->toBe(
++        1,
++        "laravel/passkeys の制約は '^0.2' か '^0.2.<patch>' の形だけを許す: {$constraint}"
++    );
++});
++
++test('composer.lock の laravel/passkeys が 0.2 系 (契約検査の検証済み範囲)', function (): void {
++    $version = lockedPackageVersion('laravel/passkeys');
++
++    expect($version)->toBeString('composer.lock に laravel/passkeys が無い');
++    /** @var string $version */
++    expect(str_starts_with(ltrim($version, 'v'), '0.2.'))->toBeTrue(
++        "laravel/passkeys の解決版が 0.2 系を外れている: {$version}。"
++        .'本ファイルの契約検査と fortify.passkeys.* のキー名を再確認してから pin を更新すること'
++    );
++});
+diff --git a/tests/Feature/Config/ConfigHardeningTest.php b/tests/Feature/Config/ConfigHardeningTest.php
+index 4b7274a..9126b5c 100644
+--- a/tests/Feature/Config/ConfigHardeningTest.php
++++ b/tests/Feature/Config/ConfigHardeningTest.php
+@@ -143,3 +143,138 @@ function evaluateConfigFileWithEnv(string $configFile, array $env): array
+     expect($config['serializable_classes'])->toBeFalse(
+         'クラス許可一覧は作らない (lctl 標準形 v1 / AGENTS.md セキュリティ不変条件 11)');
+ });
++
++// ========== fortify: passkeys ブロックの env 派生 (T166) ==========
++
++/*
++ * パスキーの宣言点は config/fortify.php の passkeys ブロックただ 1 つである
++ * (FortifyServiceProvider::configurePasskeys() が passkeys.* を無条件に上書きするため)。
++ * env からの導出規則を固定する。
++ *
++ * 注: config/fortify.php の features は Features::passkeys(['confirmPassword' => false]) を
++ * 評価する = fortify-options.passkeys へ書き込む副作用がある。書き込まれる値は本番 config と
++ * 同一なのでテストへの影響は無い。
++ */
++
++/**
++ * config/fortify.php を env 指定で再評価し passkeys ブロックを返す。
++ *
++ * @param  array<string, string|null>  $env
++ * @return array<string, mixed>
++ */
++function evaluateFortifyPasskeysWithEnv(array $env): array
++{
++    $config = evaluateConfigFileWithEnv('fortify.php', $env + [
++        'APP_URL' => 'https://app.example.com',
++        'PASSKEYS_RELYING_PARTY_ID' => null,
++        'PASSKEYS_ALLOWED_ORIGINS' => null,
++        'PASSKEYS_USER_HANDLE_SECRET' => null,
++    ]);
++
++    expect($config['passkeys'])->toBeArray();
++
++    /** @var array<string, mixed> $passkeys */
++    $passkeys = $config['passkeys'];
++
++    return $passkeys;
++}
++
++test('PASSKEYS_* 未設定なら APP_URL から導出する (path は落ちる)', function (): void {
++    $passkeys = evaluateFortifyPasskeysWithEnv([
++        'APP_URL' => 'https://app.example.com/sub',
++    ]);
++
++    expect($passkeys['relying_party_id'])->toBe('app.example.com');
++    expect($passkeys['allowed_origins'])->toBe(['https://app.example.com']);
++    expect($passkeys['user_handle_secret_declared'])->toBeFalse();
++});
++
++test('APP_URL の port は接続元に残る', function (): void {
++    $passkeys = evaluateFortifyPasskeysWithEnv([
++        'APP_URL' => 'http://localhost:8000',
++    ]);
++
++    expect($passkeys['allowed_origins'])->toBe(['http://localhost:8000']);
++});
++
++test('APP_URL が空なら身元の識別子と接続元は空に倒れる (例外を投げない)', function (): void {
++    $passkeys = evaluateFortifyPasskeysWithEnv([
++        'APP_URL' => '',
++    ]);
++
++    expect($passkeys['relying_party_id'])->toBe('');
++    expect($passkeys['allowed_origins'])->toBe([]);
++});
++
++test('APP_URL が URL でない文字列でも空に倒れる (production では起動時 fail-fast が拾う)', function (): void {
++    $passkeys = evaluateFortifyPasskeysWithEnv([
++        'APP_URL' => 'not-a-url',
++    ]);
++
++    expect($passkeys['relying_party_id'])->toBe('');
++    expect($passkeys['allowed_origins'])->toBe([]);
++});
++
++test('PASSKEYS_RELYING_PARTY_ID は小文字化される', function (): void {
++    $passkeys = evaluateFortifyPasskeysWithEnv([
++        'PASSKEYS_RELYING_PARTY_ID' => 'App.Example.COM',
++    ]);
++
++    expect($passkeys['relying_party_id'])->toBe('app.example.com');
++});
++
++test('PASSKEYS_ALLOWED_ORIGINS の CSV は trim される', function (): void {
++    $passkeys = evaluateFortifyPasskeysWithEnv([
++        'PASSKEYS_ALLOWED_ORIGINS' => 'https://a.example.com, https://b.example.com',
++    ]);
++
++    expect($passkeys['allowed_origins'])->toBe(['https://a.example.com', 'https://b.example.com']);
++});
++
++test('PASSKEYS_ALLOWED_ORIGINS は小文字化される (webauthn-lib の strict 比較に一致させる)', function (): void {
++    // ここを外すと運用者が大文字で書いた瞬間に全ての手続きが無言で失敗する。
++    $passkeys = evaluateFortifyPasskeysWithEnv([
++        'PASSKEYS_ALLOWED_ORIGINS' => 'HTTPS://App.Example.com',
++    ]);
++
++    expect($passkeys['allowed_origins'])->toBe(['https://app.example.com']);
++});
++
++test('PASSKEYS_ALLOWED_ORIGINS の末尾カンマは raw 側に空要素として残る', function (): void {
++    $passkeys = evaluateFortifyPasskeysWithEnv([
++        'PASSKEYS_ALLOWED_ORIGINS' => 'https://a.example.com,',
++    ]);
++
++    expect($passkeys['allowed_origins'])->toBe(['https://a.example.com']);
++    expect($passkeys['raw_allowed_origins'])->toBe(['https://a.example.com', '']);
++});
++
++test('PASSKEYS_USER_HANDLE_SECRET を宣言すると declared=true になり値が入る', function (): void {
++    $secret = str_repeat('z', 40);
++    $passkeys = evaluateFortifyPasskeysWithEnv([
++        'PASSKEYS_USER_HANDLE_SECRET' => $secret,
++    ]);
++
++    expect($passkeys['user_handle_secret_declared'])->toBeTrue();
++    expect($passkeys['user_handle_secret'])->toBe($secret);
++});
++
++test('PASSKEYS_USER_HANDLE_SECRET が空白のみなら未宣言と同じ扱い', function (): void {
++    $passkeys = evaluateFortifyPasskeysWithEnv([
++        'PASSKEYS_USER_HANDLE_SECRET' => '   ',
++    ]);
++
++    expect($passkeys['user_handle_secret_declared'])->toBeFalse();
++});
++
++test('PASSKEYS_USER_HANDLE_SECRET の値は trim されない (既存パスキー維持の運用契約)', function (): void {
++    // 現行 APP_KEY の値をそのまま宣言すれば既存パスキーを維持できる、という契約を守るため
++    // 値は一切加工しない (trim すると別の鍵になり全件無効になる)。
++    $secret = ' '.str_repeat('k', 40).' ';
++    $passkeys = evaluateFortifyPasskeysWithEnv([
++        'PASSKEYS_USER_HANDLE_SECRET' => $secret,
++    ]);
++
++    expect($passkeys['user_handle_secret_declared'])->toBeTrue();
++    expect($passkeys['user_handle_secret'])->toBe($secret);
++});
+diff --git a/tests/Feature/Support/ProductionEnvGuardTest.php b/tests/Feature/Support/ProductionEnvGuardTest.php
+index 1bb4add..c5b0d6c 100644
+--- a/tests/Feature/Support/ProductionEnvGuardTest.php
++++ b/tests/Feature/Support/ProductionEnvGuardTest.php
+@@ -3,6 +3,7 @@
+ declare(strict_types=1);
+ 
+ use App\Support\ProductionEnvGuard;
++use Laravel\Fortify\Features;
+ 
+ beforeEach(function (): void {
+     // production 必須項目の baseline (すべて有効値)。各テストで 1 項目ずつ崩す。
+@@ -23,6 +24,13 @@
+     config(['trusted_hosts.raw_wildcard_suffixes' => []]);
+     config(['trustedproxy.proxies' => ['10.0.0.0/8']]);
+     config(['trustedproxy.raw_proxies' => ['10.0.0.0/8']]);
++    // パスキー設定 (T166)。**読み出し元が 2 系統に分かれる**ので取り違えないこと:
++    // 実効値は passkeys.* (Fortify の上書き後)、検査専用キーは fortify.passkeys.*。
++    config(['passkeys.relying_party_id' => 'app.example.com']);
++    config(['passkeys.allowed_origins' => ['https://app.example.com']]);
++    config(['passkeys.user_handle_secret' => str_repeat('a', 32)]);
++    config(['fortify.passkeys.raw_allowed_origins' => ['https://app.example.com']]);
++    config(['fortify.passkeys.user_handle_secret_declared' => true]);
+ });
+ 
+ test('全 production 必須項目が埋まっていれば violations は空', function (): void {
+@@ -246,3 +254,83 @@
+     expect(fn () => (new ProductionEnvGuard)->enforce())
+         ->toThrow(RuntimeException::class, 'TRUSTED_PROXIES is not set');
+ });
++
++/*
++ * パスキー (WebAuthn) 設定 (T166)。`PASSKEYS_USER_HANDLE_SECRET` 未宣言のまま production を
++ * 起動すると fail-fast するのは **意図した破壊的変更**。検査は Features::passkeys() が
++ * 有効なときだけ走る。
++ */
++
++test('passkeys feature が有効 (検査が空振りしていないことの前提固定)', function (): void {
++    expect(Features::enabled(Features::passkeys()))->toBeTrue();
++});
++
++test('PASSKEYS_USER_HANDLE_SECRET が未宣言なら violation', function (): void {
++    config(['fortify.passkeys.user_handle_secret_declared' => false]);
++    $errors = (new ProductionEnvGuard)->violations();
++    expect($errors)->toHaveCount(1);
++    expect($errors[0])->toContain('PASSKEYS_USER_HANDLE_SECRET is not set');
++});
++
++test('導出鍵が 32 文字未満なら violation', function (): void {
++    config(['passkeys.user_handle_secret' => str_repeat('a', 31)]);
++    $errors = (new ProductionEnvGuard)->violations();
++    expect($errors)->toHaveCount(1);
++    expect($errors[0])->toContain('shorter than 32 characters');
++});
++
++test('接続元が身元の識別子に属さないなら violation', function (): void {
++    config(['passkeys.allowed_origins' => ['https://evil.example.net']]);
++    config(['fortify.passkeys.raw_allowed_origins' => ['https://evil.example.net']]);
++    $errors = (new ProductionEnvGuard)->violations();
++    expect($errors)->toHaveCount(1);
++    expect($errors[0])->toContain('does not belong to');
++});
++
++test('接続元の宣言に空要素があれば violation (末尾カンマの表面化)', function (): void {
++    config(['fortify.passkeys.raw_allowed_origins' => ['https://app.example.com', '']]);
++    $errors = (new ProductionEnvGuard)->violations();
++    expect($errors)->toHaveCount(1);
++    expect($errors[0])->toContain('empty entry');
++});
++
++test('passkeys を無効化すると不正設定でも violation は出ない (キルスイッチ)', function (): void {
++    // Features::passkeys([...]) は options 付きで呼ぶと fortify-options を書き換えるため、
++    // 無効化には使わない。Features::enabled() の実装 (fortify.features の in_array) に合わせて外す。
++    /** @var array<int, mixed> $features */
++    $features = (array) config('fortify.features');
++    config(['fortify.features' => array_values(array_diff($features, ['passkeys']))]);
++
++    config(['fortify.passkeys.user_handle_secret_declared' => false]);
++    config(['passkeys.relying_party_id' => '']);
++
++    expect((new ProductionEnvGuard)->violations())->toBe([]);
++});
++
++test('passkeys.allowed_origins に非 string が混ざったら violation (fail-closed)', function (): void {
++    config(['passkeys.allowed_origins' => ['https://app.example.com', 123]]);
++    $errors = (new ProductionEnvGuard)->violations();
++    expect($errors)->toHaveCount(1);
++    expect($errors[0])->toContain('must be lists of strings');
++});
++
++test('fortify.passkeys.raw_allowed_origins に非 string が混ざったら violation (読み出し元の取り違え検出)', function (): void {
++    config(['fortify.passkeys.raw_allowed_origins' => ['https://app.example.com', 123]]);
++    $errors = (new ProductionEnvGuard)->violations();
++    expect($errors)->toHaveCount(1);
++    expect($errors[0])->toContain('must be lists of strings');
++});
++
++test('passkeys.allowed_origins が配列ですらないなら violation', function (): void {
++    config(['passkeys.allowed_origins' => 'https://app.example.com']);
++    $errors = (new ProductionEnvGuard)->violations();
++    expect($errors)->toHaveCount(1);
++    expect($errors[0])->toContain('must be lists of strings');
++});
++
++test('passkeys.allowed_origins が null なら violation', function (): void {
++    config(['passkeys.allowed_origins' => null]);
++    $errors = (new ProductionEnvGuard)->violations();
++    expect($errors)->toHaveCount(1);
++    expect($errors[0])->toContain('must be lists of strings');
++});
+diff --git a/tests/Unit/Support/PasskeyConfigValidatorTest.php b/tests/Unit/Support/PasskeyConfigValidatorTest.php
+new file mode 100644
+index 0000000..8dc9dfa
+--- /dev/null
++++ b/tests/Unit/Support/PasskeyConfigValidatorTest.php
+@@ -0,0 +1,169 @@
++<?php
++
++declare(strict_types=1);
++
++use App\Support\PasskeyConfigValidator;
++
++/*
++ * パスキー (WebAuthn) 設定の production 起動時検証 (T166)。
++ *
++ * 検査するのは **書式と相互整合**まで。「その host を実際に運用しているか」
++ * 「証明書があるか」は検査できない (誇張しない)。
++ */
++
++/** 有効な baseline を作り、指定引数だけ差し替えて検証を実行する */
++function validatePasskeyConfig(
++    string $relyingPartyId = 'app.example.com',
++    ?array $allowedOrigins = null,
++    ?array $rawAllowedOrigins = null,
++    bool $userHandleSecretDeclared = true,
++    ?string $userHandleSecret = null,
++): void {
++    $allowedOrigins ??= ['https://app.example.com'];
++    $rawAllowedOrigins ??= $allowedOrigins;
++    $userHandleSecret ??= str_repeat('a', 32);
++
++    (new PasskeyConfigValidator)->validateForProduction(
++        $relyingPartyId,
++        array_values($allowedOrigins),
++        array_values($rawAllowedOrigins),
++        $userHandleSecretDeclared,
++        $userHandleSecret,
++    );
++}
++
++test('有効な設定は例外を投げない', function (): void {
++    expect(fn () => validatePasskeyConfig())->not->toThrow(RuntimeException::class);
++});
++
++test('接続元が身元の識別子の下位ドメインでも通る', function (): void {
++    expect(fn () => validatePasskeyConfig(allowedOrigins: ['https://pwa.app.example.com']))
++        ->not->toThrow(RuntimeException::class);
++});
++
++test('接続元の port 付き宣言が通る', function (): void {
++    expect(fn () => validatePasskeyConfig(allowedOrigins: ['https://app.example.com:8443']))
++        ->not->toThrow(RuntimeException::class);
++});
++
++// --- 検査 1: 身元の識別子が空 ---
++
++test('身元の識別子が空なら例外', function (): void {
++    expect(fn () => validatePasskeyConfig(relyingPartyId: ''))
++        ->toThrow(RuntimeException::class, 'relying party id is empty');
++});
++
++// --- 検査 2: 身元の識別子の DNS 名検査 (負のコントロール) ---
++
++test('身元の識別子が production の DNS 名でないなら例外', function (string $relyingPartyId): void {
++    expect(fn () => validatePasskeyConfig(
++        relyingPartyId: $relyingPartyId,
++        // 接続元は身元の識別子と一致させ、検査 6 ではなく検査 2 で落ちることを確かめる
++        allowedOrigins: ['https://'.$relyingPartyId],
++    ))->toThrow(RuntimeException::class, 'not an accepted production DNS name');
++})->with([
++    'localhost (単一ラベル)' => 'localhost',
++    'IPv4 リテラル' => '192.0.2.1',
++    'IPv4 の書き損じ (filter_var では IP と認められない)' => '192.168.001.001',
++    'ハイフン開始' => '-example.com',
++    'ハイフン終了' => 'example-.com',
++    '連続ドット' => 'example..com',
++    '先頭ドット' => '.example.com',
++    '末尾ドット' => 'example.com.',
++    '空白混じり' => 'exam ple.com',
++    'IPv6 リテラル' => '2001:db8::1',
++    // 宣言側 (config/fortify.php) は小文字化するので、ここに大文字が届くのは
++    // 別経路が未正規化のまま設定した場合だけ。その値は webauthn-lib の strict 比較に
++    // 一致せず全手続きを無言で失敗させるため、起動時に落とす。
++    '大文字を含む (別経路の未正規化値)' => 'APP.example.com',
++]);
++
++/*
++ * 既知の限界 (documented limitation)。
++ * 本 validator は Public Suffix List を持たないため、`co.uk` のような public suffix を
++ * 身元の識別子に置いた設定は通ってしまう (ブラウザ側は PSL を見るので実際の手続きは失敗する)。
++ * PSL 判定のために依存を足すことはしない (誤設定の結果は「パスキーが使えない」であって
++ * 権限昇格ではなく、設定するのは攻撃者ではなく運用者であるため)。
++ * PSL 判定を入れたらこのテストが赤くなり、設計変更に気づける。
++ */
++test('既知の限界 (documented limitation): public suffix の身元識別子は通る', function (): void {
++    expect(fn () => validatePasskeyConfig(
++        relyingPartyId: 'co.uk',
++        allowedOrigins: ['https://co.uk'],
++    ))->not->toThrow(RuntimeException::class);
++});
++
++// --- 検査 3: 生の接続元列に空要素 ---
++
++test('生の接続元列に空要素があれば例外 (有効値と併存していても落ちる)', function (): void {
++    expect(fn () => validatePasskeyConfig(
++        allowedOrigins: ['https://app.example.com'],
++        rawAllowedOrigins: ['https://app.example.com', ''],
++    ))->toThrow(RuntimeException::class, 'empty entry');
++});
++
++// --- 検査 4: 接続元が空 ---
++
++test('接続元が 1 件も無ければ例外', function (): void {
++    expect(fn () => validatePasskeyConfig(allowedOrigins: [], rawAllowedOrigins: []))
++        ->toThrow(RuntimeException::class, 'allowed origins are empty');
++});
++
++// --- 検査 5: 接続元の書式 ---
++
++test('接続元の書式が不正なら例外', function (string $origin): void {
++    expect(fn () => validatePasskeyConfig(allowedOrigins: [$origin]))
++        ->toThrow(RuntimeException::class, 'is invalid');
++})->with([
++    '平文 http' => 'http://app.example.com',
++    'scheme が大文字' => 'HTTPS://app.example.com',
++    'host が大文字' => 'https://APP.example.com',
++    '末尾スラッシュ' => 'https://app.example.com/',
++    'path 付き' => 'https://app.example.com/path',
++    'userinfo 付き' => 'https://user@app.example.com',
++    'query 付き' => 'https://app.example.com?x=1',
++]);
++
++test('接続元の port が範囲外なら例外', function (string $origin): void {
++    expect(fn () => validatePasskeyConfig(allowedOrigins: [$origin]))
++        ->toThrow(RuntimeException::class, 'out-of-range port');
++})->with([
++    'port 0' => 'https://app.example.com:0',
++    'port 70000' => 'https://app.example.com:70000',
++]);
++
++// --- 検査 6: 身元の識別子と接続元の相互整合 ---
++
++test('接続元が別ドメインなら例外', function (): void {
++    expect(fn () => validatePasskeyConfig(allowedOrigins: ['https://evil.example.net']))
++        ->toThrow(RuntimeException::class, 'does not belong to');
++});
++
++test('接尾辞が一致するだけの host は例外 (接尾辞一致だけの実装なら通ってしまう境界)', function (): void {
++    // "notapp.example.com" は ".app.example.com" で終わらないので下位ドメインではない。
++    expect(fn () => validatePasskeyConfig(allowedOrigins: ['https://notapp.example.com']))
++        ->toThrow(RuntimeException::class, 'does not belong to');
++});
++
++// --- 検査 7: 導出鍵 ---
++
++test('導出鍵が未宣言なら例外 (値が十分長くても落ちる)', function (): void {
++    expect(fn () => validatePasskeyConfig(
++        userHandleSecretDeclared: false,
++        userHandleSecret: str_repeat('a', 64),
++    ))->toThrow(RuntimeException::class, 'PASSKEYS_USER_HANDLE_SECRET is not set');
++});
++
++test('導出鍵が 32 文字未満なら例外', function (): void {
++    expect(fn () => validatePasskeyConfig(userHandleSecret: str_repeat('a', 31)))
++        ->toThrow(RuntimeException::class, 'shorter than 32 characters');
++});
++
++// --- 検査の順序 ---
++
++test('複数違反があるときは最初の違反 (身元の識別子) を報告する', function (): void {
++    expect(fn () => validatePasskeyConfig(
++        relyingPartyId: '',
++        userHandleSecretDeclared: false,
++    ))->toThrow(RuntimeException::class, 'relying party id is empty');
++});
+```
+
+## テスト結果
+
+- composer test: 4792 tests, 4790 passed, 2 skipped, 0 failed (20283 assertions)
+- composer phpstan (level 10): No errors
+- vendor/bin/pint --test: passed
+- pnpm lint / typecheck / test (1501 passed) / build: すべて green
+- pnpm typecheck:packages / build:packages / test:packages (106 passed): すべて green
+- composer validate: ./composer.json is valid
+- composer.lock の差分は content-hash 1 行のみ (解決版 laravel/passkeys v0.2.1 は不変)

@@ -34,6 +34,21 @@ test('.env.example に TRUSTED_PROXIES が含まれる', function (): void {
 });
 
 /*
+ * パスキーの利用者ハンドル導出鍵。production で未宣言だと起動時 fail-fast するため
+ * (App\Support\PasskeyConfigValidator)、.env.example に必ず提示して
+ * 「設定し忘れてデプロイが落ちる」事故を減らす (TRUSTED_PROXIES と同じ理由)。
+ */
+
+test('.env.example に PASSKEYS_USER_HANDLE_SECRET が含まれる', function (): void {
+    $contents = file_get_contents(base_path('.env.example'));
+    expect($contents)->toBeString();
+    /** @var string $contents */
+    // **行頭一致**で見る (toContain だとコメント行 `# PASSKEYS_USER_HANDLE_SECRET=` でも通り、
+    // 「宣言行として提示されている」ことを固定できないため)。
+    expect($contents)->toMatch('/^PASSKEYS_USER_HANDLE_SECRET=/m');
+});
+
+/*
  * テンプレート規約: 環境座標 (config/template.php) のキーは .env.example に必ず提示する。
  */
 
