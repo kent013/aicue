@@ -78,6 +78,37 @@ grant の mutable プロパティを呼び出し前の値へ復元する (Octane
 - scope は `mcp:use` (MCP) + CLI user token 用 `CliOAuthScope` 群 (`cli:use` / `read` / `write` / `session.revoke`)。
   tool / ability 粒度の認可は runtime 再評価で行う (`Mcp/Auth/McpAuthorizationContext`)。
 
+### 組織の役割変更に同期した失効
+
+組織の中で誰かの役割が変わったら、**その変更と同じひとまとまり (トランザクション) の中で**
+その人のその組織における資格情報を失効させる (窓口は `app/Services/OAuth/OrganizationAccessRevoker.php`)。
+
+- **境界は「役割を変える操作が成功したこと」**。役割の集合の差分は取らない。差分で判断すると
+  権限ライブラリの役割キャッシュ (本番で 1 時間有効) に依存し、取りこぼしたときに通してしまう側へ倒れる。
+  帰結として **昇格でも接続はやり直しになる**。これは既知の仕様である
+  (監査の理由に `ownership_transferred_to` があるのはこの説明のため)。
+- **失効するもの (3 家族。途中で打ち切らない)**: `oauth_sessions` /
+  `oauth_access_tokens` と紐づく `oauth_refresh_tokens` / 未交換の `oauth_auth_codes`。
+  認可コードを落とすと「失効の直前に発行された code を失効の後に交換して新しいトークンを得る」
+  経路が残るため、3 家族目まで必ず撃つ。
+- **失効しないもの**: 組織の API キー (`api_keys`) と、プロジェクト単位の役割。
+- 監査は握り潰さない (`SecurityEventRecorder::recordOrFail`)。書けなければ役割の変更ごと巻き戻る。
+  **失効 0 件でも 1 行残す** (「対象が無かった」ことも監査上の事実である)。
+
+**保証しないもの**
+
+- 失効の選択と確定の間に新しい資格情報が発行される隙間は閉じていない
+  (発行の経路は組織行・利用者行のロックを取らない)。最後の拒否線は要求ごとの再評価
+  (`ResolveApiActor` / `McpAuthorizationContext`) である。
+- **API キーの残余リスク**: **発行した人が組織から外れても、その鍵の読み取り権限は残る**。
+  書き込みは認可 (`ProjectPolicy` が発行者の現在の組織ロールを評価する) で 403 になる。
+  この非対称を「防御がある」と丸めないこと。鍵を止める手段は組織管理者による失効操作
+  (API キー画面) である。所属の再評価を足すと発行者の退職で組織の自動連携が無言で止まるため、
+  **別の判断として独立に起こす**。
+- 静的検査 (`OrganizationAccessRevocationChokePointTest`) が固定するのは
+  「呼び出しの字句が在ること」と「その位置」までで、すべての制御経路で失効が走ることは
+  保証しない。実挙動は `tests/Feature/Organizations/OrganizationAccessRevocationTest.php` が担う。
+
 ### transport / Origin ガード
 
 - `EnforceMcpTransport` (`mcp.transport`): MCP Streamable HTTP の前提 (POST のみ / `Accept: application/json` /
@@ -96,6 +127,8 @@ grant の mutable プロパティを呼び出し前の値へ復元する (Octane
 | `app/Passport/Grants/McpRefreshTokenGrant.php` | refresh_token grant 拡張。org/session 継承 + CLI セッション失効 / membership 再検証 |
 | `app/Passport/McpAuthCodeRepository.php` | auth code 発行時に consent 組織を書き込み、CLI は `oauth_sessions` を同トランザクションで作成 |
 | `app/Passport/McpAccessTokenRepository.php` | access token 発行時に継承された org/session を書き込み |
+| `app/Services/OAuth/OrganizationAccessRevoker.php` | 組織アクセス失効の唯一の窓口 (役割変更と同一トランザクション) |
+| `app/Services/Organization/OrganizationMembershipService.php` | 役割変更 4 経路。失効を同一トランザクション内で呼ぶ |
 | `app/Http/Middleware/McpConsentOrganizationBinder.php` | consent の `organization_id` 検証 (非 member を 403) と attribute バインド |
 | `app/Http/Middleware/VerifyMcpOrigin.php` | `mcp.origin`。Origin allowlist 検証 (fail-closed) |
 | `app/Http/Middleware/EnforceMcpTransport.php` | `mcp.transport`。POST + JSON 強制 |

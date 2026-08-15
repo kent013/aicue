@@ -113,6 +113,13 @@ const DELETION_PATH_CLOSURE = [
     'App\DataTransferObjects\Notification\ManualJobPayload',
     'App\DataTransferObjects\Notification\TicketBalanceLowPayload',
     'App\DataTransferObjects\Organizations\AccountDeletionBlockerDto',
+    // ↓ T174 (組織の役割変更に同期したトークン失効) で閉包に入った 3 クラス。
+    //   閉包はクラス粒度なので、退会そのものが失効を呼ばなくても
+    //   OrganizationMembershipService が失効の窓口を注入した時点で入る。
+    //   3 つとも oauth_* 表の失効列の更新と監査の記録しか行わず、
+    //   決済事業者 SDK への到達辺を持たない (検査 2 が機械的に固定する)。
+    'App\DataTransferObjects\Security\OrgAccessRevocationResult',
+    'App\Enums\Security\OrgAccessRevocationReason',
     'App\Enums\AccountDeletionBlockReason',
     'App\Enums\AccountDeletionBlockerAction',
     'App\Enums\AdminConsoleRole',
@@ -160,6 +167,7 @@ const DELETION_PATH_CLOSURE = [
     'App\Notifications\OrganizationInvitationNotification',
     'App\Services\Billing\AccountDeletionBillingGuard',
     'App\Services\Notification\NotificationCenterService',
+    'App\Services\OAuth\OrganizationAccessRevoker',
     'App\Services\Organization\OrganizationMembershipService',
     'App\Services\Project\DefaultProjectResolver',
     'App\Services\Security\SecurityEventRecorder',

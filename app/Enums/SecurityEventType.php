@@ -41,6 +41,9 @@ enum SecurityEventType: string
     // パスキー (単独でログインできる強い資格) の増減。vendor イベントを購読して記録する
     case PasskeyRegistered = 'passkey_registered';
     case PasskeyDeleted = 'passkey_deleted';
+    // 組織の役割変更に同期した機械クライアント向け資格情報の失効
+    // (OrganizationAccessRevoker が recordOrFail で直接記録する)
+    case OrganizationAccessRevoked = 'organization_access_revoked';
 
     public function label(): string
     {
@@ -65,6 +68,7 @@ enum SecurityEventType: string
             self::OrgMemberTwoFactorReset => '組織管理者によるメンバー 2FA リセット',
             self::PasskeyRegistered => 'パスキーの登録',
             self::PasskeyDeleted => 'パスキーの削除',
+            self::OrganizationAccessRevoked => '組織アクセスの失効',
         };
     }
 }

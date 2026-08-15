@@ -126,7 +126,7 @@ test('2オーナー→片方降格後は唯一オーナー+メンバーで削除
     $second = attachOrganizationMember($organization, OrganizationRole::Owner);
     attachOrganizationMember($organization, OrganizationRole::Member); // 孤児化するメンバー
     // service 正規経路で 2 人目 Owner を Admin へ降格 (owner を 1 人に戻す)
-    app(OrganizationMembershipService::class)->changeRole($organization, $second, OrganizationRole::Admin);
+    app(OrganizationMembershipService::class)->changeRole($organization, $second, OrganizationRole::Admin, null);
 
     $response = $this->actingAs($owner)
         ->withSession(['recent_auth_at' => time()])

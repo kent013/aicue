@@ -36,7 +36,7 @@ test('editor → shooter: pivot role が project_member に更新され org ロ�
     $member = attachOrganizationMember($organization);
     attachProjectMember($project, $member, ProjectRole::Admin);
 
-    app(OrganizationMembershipService::class)->applyConsoleRole($organization, $member, AdminConsoleRole::Shooter);
+    app(OrganizationMembershipService::class)->applyConsoleRole($organization, $member, AdminConsoleRole::Shooter, null);
 
     expect($member->fresh()->organizationRole($organization))->toBe(OrganizationRole::Member);
     expect($project->memberRole($member))->toBe(ProjectRole::Member);
@@ -47,7 +47,7 @@ test('shooter → admin: org Admin へ昇格し pivot は detach される (stal
     $member = attachOrganizationMember($organization);
     attachProjectMember($project, $member, ProjectRole::Member);
 
-    app(OrganizationMembershipService::class)->applyConsoleRole($organization, $member, AdminConsoleRole::Admin);
+    app(OrganizationMembershipService::class)->applyConsoleRole($organization, $member, AdminConsoleRole::Admin, null);
 
     expect($member->fresh()->organizationRole($organization))->toBe(OrganizationRole::Admin);
     expect($project->memberRole($member))->toBeNull();
@@ -57,7 +57,7 @@ test('admin → editor: org Member へ降格し pivot project_admin が付与さ
     [$organization, , $project] = createOrgWithDefaultProject();
     $member = attachOrganizationMember($organization, OrganizationRole::Admin);
 
-    app(OrganizationMembershipService::class)->applyConsoleRole($organization, $member, AdminConsoleRole::Editor);
+    app(OrganizationMembershipService::class)->applyConsoleRole($organization, $member, AdminConsoleRole::Editor, null);
 
     expect($member->fresh()->organizationRole($organization))->toBe(OrganizationRole::Member);
     expect($project->memberRole($member))->toBe(ProjectRole::Admin);
@@ -67,7 +67,7 @@ test('未割当 (org Member + pivot なし) → editor: pivot が付与される
     [$organization, , $project] = createOrgWithDefaultProject();
     $member = attachOrganizationMember($organization);
 
-    app(OrganizationMembershipService::class)->applyConsoleRole($organization, $member, AdminConsoleRole::Editor);
+    app(OrganizationMembershipService::class)->applyConsoleRole($organization, $member, AdminConsoleRole::Editor, null);
 
     expect($member->fresh()->organizationRole($organization))->toBe(OrganizationRole::Member);
     expect($project->memberRole($member))->toBe(ProjectRole::Admin);
@@ -77,7 +77,7 @@ test('editor/shooter コマンドは Default Project 不在なら ValidationExce
     [$organization] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization);
 
-    expect(fn () => app(OrganizationMembershipService::class)->applyConsoleRole($organization, $member, $role))
+    expect(fn () => app(OrganizationMembershipService::class)->applyConsoleRole($organization, $member, $role, null))
         ->toThrow(ValidationException::class);
     // org ロールは変更されない (1 tx = 中間状態を残さない)
     expect($member->fresh()->organizationRole($organization))->toBe(OrganizationRole::Member);
@@ -118,7 +118,7 @@ test('最終 Owner への admin コマンドは changeRole の最終 Owner 保�
     [$organization, $owner, $project] = createOrgWithDefaultProject();
     attachProjectMember($project, $owner, ProjectRole::Admin);
 
-    expect(fn () => app(OrganizationMembershipService::class)->applyConsoleRole($organization, $owner, AdminConsoleRole::Admin))
+    expect(fn () => app(OrganizationMembershipService::class)->applyConsoleRole($organization, $owner, AdminConsoleRole::Admin, null))
         ->toThrow(ValidationException::class);
     expect($owner->fresh()->organizationRole($organization))->toBe(OrganizationRole::Owner);
     // ロール変更が拒否されたら pivot 掃除にも到達しない (最終状態が部分適用されない)
@@ -129,7 +129,7 @@ test('非メンバー (organization_user 非 attach) への適用は ValidationE
     [$organization] = createOrgWithDefaultProject();
     $outsider = User::factory()->create();
 
-    expect(fn () => app(OrganizationMembershipService::class)->applyConsoleRole($organization, $outsider, AdminConsoleRole::Shooter))
+    expect(fn () => app(OrganizationMembershipService::class)->applyConsoleRole($organization, $outsider, AdminConsoleRole::Shooter, null))
         ->toThrow(ValidationException::class);
     expect($organization->users()->whereKey($outsider->getKey())->exists())->toBeFalse();
 });
@@ -140,7 +140,7 @@ test('修復経路: attach 済み + Laratrust ロール未付与の異常行へ 
     $broken = User::factory()->create();
     $organization->users()->attach($broken);
 
-    app(OrganizationMembershipService::class)->applyConsoleRole($organization, $broken, AdminConsoleRole::Shooter);
+    app(OrganizationMembershipService::class)->applyConsoleRole($organization, $broken, AdminConsoleRole::Shooter, null);
 
     expect($broken->fresh()->organizationRole($organization))->toBe(OrganizationRole::Member);
     expect($project->memberRole($broken))->toBe(ProjectRole::Member);
@@ -151,7 +151,7 @@ test('同値コマンドは冪等 (editor → editor で pivot / org ロール�
     $member = attachOrganizationMember($organization);
     attachProjectMember($project, $member, ProjectRole::Admin);
 
-    app(OrganizationMembershipService::class)->applyConsoleRole($organization, $member, AdminConsoleRole::Editor);
+    app(OrganizationMembershipService::class)->applyConsoleRole($organization, $member, AdminConsoleRole::Editor, null);
 
     expect($member->fresh()->organizationRole($organization))->toBe(OrganizationRole::Member);
     expect($project->memberRole($member))->toBe(ProjectRole::Admin);
@@ -171,7 +171,7 @@ test('admin コマンドは org 配下の全 project の stale pivot を掃除�
     $member->addRole(OrganizationRole::Member->value, $otherOrg->laratrust_team_id);
     attachProjectMember($otherProject, $member, ProjectRole::Member);
 
-    app(OrganizationMembershipService::class)->applyConsoleRole($organization, $member, AdminConsoleRole::Admin);
+    app(OrganizationMembershipService::class)->applyConsoleRole($organization, $member, AdminConsoleRole::Admin, null);
 
     expect($project->memberRole($member))->toBeNull();
     expect($second->memberRole($member))->toBeNull();
@@ -189,7 +189,7 @@ test('removeMember は org 配下 project の pivot を掃除し、別 org の p
     $member->addRole(OrganizationRole::Member->value, $otherOrg->laratrust_team_id);
     attachProjectMember($otherProject, $member, ProjectRole::Admin);
 
-    app(OrganizationMembershipService::class)->removeMember($organization, $member);
+    app(OrganizationMembershipService::class)->removeMember($organization, $member, null);
 
     expect($organization->users()->whereKey($member->getKey())->exists())->toBeFalse();
     expect($project->memberRole($member))->toBeNull();

@@ -9,6 +9,7 @@ use App\Http\Controllers\Organizations\OrganizationApiKeyController;
 use App\Http\Controllers\Organizations\OrganizationMemberController;
 use App\Services\Auth\PasswordCredentialService;
 use App\Services\Auth\SocialAccountService;
+use App\Services\OAuth\OrganizationAccessRevoker;
 use App\Services\Organization\OrganizationMembershipService;
 use Illuminate\Auth\Events\Failed;
 use Illuminate\Auth\Events\Login;
@@ -130,6 +131,10 @@ function securityEventRecordingMap(): array
         SecurityEventType::PasskeyDeleted->value => [
             'event' => PasskeyDeleted::class,
             'covered_by' => 'tests/Feature/Auth/PasskeyAuditTrailTest.php',
+        ],
+        SecurityEventType::OrganizationAccessRevoked->value => [
+            'caller' => OrganizationAccessRevoker::class,
+            'covered_by' => 'tests/Feature/Organizations/OrganizationAccessRevocationTest.php',
         ],
     ];
 }
