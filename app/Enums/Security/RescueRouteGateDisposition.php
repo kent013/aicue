@@ -35,6 +35,7 @@ enum RescueRouteGateDisposition: string
     case BlockTwoFactorDisable = 'App\Http\Middleware\BlockTwoFactorDisableForEnforcedOrganizations';
     case NoStoreCacheHeaders = 'App\Http\Middleware\NoStoreCacheHeadersForAuthenticatedPages';
     case NotPendingDeletion = 'App\Http\Middleware\EnsureAccountNotPendingDeletion';
+    case BughuntExecutedRoute = 'App\Http\Middleware\BughuntExecutedRouteMiddleware';
 
     /** この middleware が救済 route をどう扱うかの分類。 */
     public function disposition(): RescueRouteGateKind
@@ -43,7 +44,7 @@ enum RescueRouteGateDisposition: string
             self::RequireTwoFactor, self::NotPendingDeletion => RescueRouteGateKind::PassesRescueRoute,
             self::Authenticate, self::AuthenticateSession, self::EnsureEmailIsVerified => RescueRouteGateKind::ShortCircuitsButEscapable,
             self::HandleInertiaRequests, self::SecurityHeaders, self::BlockTwoFactorDisable,
-            self::NoStoreCacheHeaders => RescueRouteGateKind::NeverShortCircuitsRescueRoute,
+            self::NoStoreCacheHeaders, self::BughuntExecutedRoute => RescueRouteGateKind::NeverShortCircuitsRescueRoute,
         };
     }
 
@@ -79,6 +80,9 @@ enum RescueRouteGateDisposition: string
             self::NotPendingDeletion => '退会予約中の凍結ゲート。救済 route は '
                 .'AccountDeletionFreezeAllowance::DeletionRequestDestroy として登録済みで、'
                 .'凍結中に必ず実行できなければ猶予期間の意味が消える。**non-exemptible**。',
+            self::BughuntExecutedRoute => 'bug-hunt の実行済み route 記録器。必ず $next を呼び、'
+                .'応答も加工しない観測器であり、リクエストを短絡させる分岐を持たない。'
+                .'加えて既定 no-op (env 既定 false + production 除外) なので救済の到達性に影響しない。',
         };
     }
 

@@ -6,6 +6,7 @@ use App\Exceptions\Billing\QuotaExceededException;
 use App\Exceptions\InertiaExceptionRenderer;
 use App\Http\Middleware\BlockTwoFactorDisableForEnforcedOrganizations;
 use App\Http\Middleware\BughuntCoverageMiddleware;
+use App\Http\Middleware\BughuntExecutedRouteMiddleware;
 use App\Http\Middleware\EnforceMcpTransport;
 use App\Http\Middleware\EnsureAccountNotPendingDeletion;
 use App\Http\Middleware\EnsureEmailIsVerifiedOrBack;
@@ -14,6 +15,7 @@ use App\Http\Middleware\EnsureProjectBelongsToApiOrganization;
 use App\Http\Middleware\EnsureProjectBelongsToCurrentOrganization;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\IdempotentRequest;
+use App\Http\Middleware\LocalOnly;
 use App\Http\Middleware\McpConsentOrganizationBinder;
 use App\Http\Middleware\NoStoreCacheHeadersForAuthenticatedPages;
 use App\Http\Middleware\NoStoreResponse;
@@ -34,6 +36,7 @@ use App\Support\Http\AdminPanelPath;
 use App\Support\Http\NotFoundMessage;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Auth\Middleware\EnsureEmailIsVerified;
+use Illuminate\Auth\Middleware\RedirectIfAuthenticated;
 use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -41,8 +44,10 @@ use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Middleware\SubstituteBindings;
+use Illuminate\Routing\Middleware\ValidateSignature;
 use Inertia\Inertia;
 use Inertia\Middleware\EncryptHistory;
+use Livewire\Mechanisms\HandleRequests\RequireLivewireHeaders;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
@@ -145,6 +150,10 @@ return Application::configure(basePath: dirname(__DIR__))
             // 公開ページの履歴も暗号化されるが PII は無く、コストはログアウト前エントリの
             // 再取得と remember/scroll 喪失に限られる。
             EncryptHistory::class,
+            // bug-hunt: 実行済み route の記録。**列の最後**に置き、priority list でも鎖の最後に固定する
+            // (= ここへ到達したことが「遮断 middleware をすべて通過した」証拠になる)。
+            // 既定 no-op (config('bughunt.executed.enabled') 既定 false + production 除外)。
+            BughuntExecutedRouteMiddleware::class,
         ]);
 
         // パスワード変更/リセット時に他デバイスのセッション・remember-me を確実に失効させるため、
@@ -264,6 +273,10 @@ return Application::configure(basePath: dirname(__DIR__))
             // (AGENTS.md セキュリティ不変条件 10)。課金ゲートの直後に置き、未契約組織の
             // ユーザーは 課金ゲート → onboarding → 凍結 → /settings の 2 hop で取消 UI に着く。
             [RequireActiveSubscription::class, EnsureAccountNotPendingDeletion::class],
+            // bug-hunt の記録器は鎖の最後 (遮断 middleware より内側) に固定する。
+            // 「短絡しうる middleware はすべて記録器より前」は
+            // BughuntExecutedRouteOrderingTest が deny-by-default で強制する。
+            [EnsureAccountNotPendingDeletion::class, BughuntExecutedRouteMiddleware::class],
         ] as [$after, $append]) {
             $middleware->appendToPriorityList($after, $append);
         }
@@ -271,6 +284,39 @@ return Application::configure(basePath: dirname(__DIR__))
             SubstituteBindings::class,
             ResolveApiActor::class,
         );
+
+        /*
+         | bug-hunt の記録器より前で走ることを確定させる「route 個別の短絡 middleware」。
+         |
+         | web グループの middleware は route 個別 middleware より**前**に並ぶため、
+         | priority list に載っていない route 個別の短絡 (recent-auth / signed / guest 等) は
+         | 既定では記録器より**後ろ**で走る。その状態で 302 を返されると、session に errors が
+         | 無いため記録器が `ok` と誤記録する = 到達していない操作を実行済みに数える。
+         |
+         | ここでは記録器の直前へ差し込む (= 既存の実行順は変えず、記録器だけを最後に保つ)。
+         | 対象は BughuntExecutedRouteOrderingTest が赤で示した実測ベースの一覧であり、
+         | 新しい短絡 middleware を足すと同テストが未登録として落ちる (deny-by-default)。
+         |
+         | ⚠ appendToPriorityList は `[$append => $after]` の連想配列で持つため、
+         |   同じ middleware を複数の anchor で append できない (後勝ちで消える)。
+         |   よって「多数の短絡 → 1 つの記録器」は prepend 側 (`[$prepend => $before]`) で宣言する。
+         */
+        foreach ([
+            RedirectIfAuthenticated::class,     // guest
+            ValidateSignature::class,           // signed
+            EnsureEmailIsVerifiedOrBack::class, // verified.or-back
+            RequireRecentAuth::class,           // recent-auth
+            RequireRecentAuthOnEmailChange::class, // recent-auth.on-email-change
+            EnsureLoginMethodRemains::class,    // ensure-login-method
+            LocalOnly::class,                   // local 専用デバッグ route
+            VerifySnsSignature::class,          // sns.signature
+            RequireLivewireHeaders::class,      // vendor (Livewire) の 404 短絡
+        ] as $shortCircuit) {
+            $middleware->prependToPriorityList(
+                BughuntExecutedRouteMiddleware::class,
+                $shortCircuit,
+            );
+        }
 
         // Stripe webhook は署名検証 (Cashier middleware)、SES/SNS webhook は
         // SNS 署名検証 (VerifySnsSignature) で保護されるため CSRF 対象外

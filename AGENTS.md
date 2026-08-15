@@ -281,6 +281,14 @@
   pcov 未導入の本番/CI/dev では常に no-op。`BughuntOAuthSeeder` は fake_externals + bughunt.local +
   `DetectsBughuntDatabase` の DB 名判定を含む三重 fail-secure ガードで、条件不成立なら no-op
   (dev DB に認証状態をばら撒かない)。判定側の regex は残留 DB も検出するため cap より広い。
+- **実行済み route の記録 (毎回 ON・fail-closed)**: 「どの操作を実際に叩けたか」は走行中に
+  `BughuntExecutedRouteMiddleware` が JSONL へ機械記録する (`config/bughunt.php` の `executed.*`。
+  env 既定 false + production 除外で**既定 no-op**)。web グループの**末尾**かつ priority list の
+  鎖の最後に固定してあるため、記録に現れることが「遮断 middleware をすべて通過した」証拠になる
+  (`BughuntExecutedRouteOrderingTest` が deny-by-default で位置を強制)。集約は
+  `coverage/build_executed.py`、突合は `coverage/correlate.py` で、**主入力が揃わない走行は
+  終了コード 3 で落ちる** (未実行 worklist を出さない)。テンプレートとの逸脱理由は
+  `docs/template-divergence.md` D14。
 - **dev DB 防御 (非交渉)**: 全 DB 操作は `scripts/bug-hunt-shard.sh` の用途別 wrapper (`env -i` で
   shell の `DB_*`/`PG*` を遮断 + DB名 regex + role guard) 経由のみ。生 artisan/psql/tinker/createdb/dropdb 禁止。
   `provision`/`teardown` は `BUGHUNT_ORCHESTRATOR=1` を持つ親のみ (worker は default-deny)。

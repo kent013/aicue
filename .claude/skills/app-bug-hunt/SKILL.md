@@ -420,8 +420,26 @@ findings.jsonl は分類の正本。同じ説明文を両方に書かない)。
 
 レポート確定後、run の網羅を **未カバー worklist** として機械突合する (`coverage/README.md` が正本)。
 
-- **操作到達カバレッジ (operation-reach、毎回)** — `coverage/correlate.py`。run_id で executed / findings /
-  operations.md / graph.db を突合し「未実行機構 / ★cross / hotspot」を出す。pcov 不要。
+- **操作到達カバレッジ (operation-reach、毎回)** — 2 コマンド。走行中にアプリ側の記録器
+  (`BughuntExecutedRouteMiddleware`) が書いた JSONL を `coverage/build_executed.py` が束ね、
+  `coverage/correlate.py` が機構分母と突合して「未実行機構 / ★cross / hotspot」を出す。pcov 不要。
+
+  ```bash
+  # provision した shard をすべて --shard に渡す (manifest の shard 番号が正本。直列走行は 0)
+  python3 .claude/skills/app-bug-hunt/coverage/build_executed.py \
+    --run-id {ts} --shard 1 --shard 2 --shard 3 --shard 4 \
+    --out devnotes/{ts}-bug-hunt/executed.json
+  python3 .claude/skills/app-bug-hunt/coverage/correlate.py \
+    --operations .claude/skills/app-bug-hunt/operations.md \
+    --findings 'devnotes/{ts}-bug-hunt/shard-*/findings.jsonl' \
+    --executed devnotes/{ts}-bug-hunt/executed.json \
+    --graph-db /workspace/.code-review-graph/graph.db \
+    --run-id {ts} > devnotes/{ts}-bug-hunt/coverage-operation-reach.md
+  ```
+
+  **どちらかが終了コード 3 で落ちたら、レポートに「カバレッジ突合できず」と明記する**
+  (理由コードを添える)。**未実行一覧は載せない** — 記録が揃っていない走行の一覧は
+  「全部やっていない」という嘘になるためである。
 - **コード到達カバレッジ (code-reach、`--coverage` 時のみ)** — `coverage/merge_pcov.py`。C3 middleware が吐く
   shard JSONL を union し uncovered を主出力する。**pcov 未導入なら OFF** (middleware が no-op)。
 

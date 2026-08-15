@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """操作到達カバレッジ correlator — bug-hunt の「叩いた操作 (route) の網羅」proxy。
 
-run_id を軸に route インベントリ / operations.md(機構分母) / executed.json(走行ログ) /
+run_id を軸に route インベントリ / operations.md(機構分母) /
+executed.json(実行済み route の記録。build_executed.py が作る) /
 findings.jsonl / graph.db(TESTED_BY) を join し、**未カバー worklist** を出す。
+
+**主入力が揃わない走行は成功にしない** (終了コード 3)。executed.json が無い / 別 run /
+形が契約外 / 観測行 0 のときは worklist を出さずに落ちる (揃わない走行を
+「全件未実行」という嘘の一覧として返さないため)。
 
 主出力 = worklist (未実行機構 / TESTED_BY untested(TS面のみ) / finding hotspot /
 ★cross: 未実行∧finding多)。絶対 % は副 (`*_pct` フィールドに添えるのみ・目標にしない)。
@@ -37,7 +42,7 @@ operations.md のフォーマット (fix-gate #3):
       --run-id 20260618-082101 [--json] [--hotspot-threshold 2]
 
   --route-list を省くと `php artisan route:list --json` を subprocess 取得する。
-  --executed を省くと「全 in_scope 機構を未実行 candidate」として表示する。
+  --executed は必須 (build_executed.py が作った executed.json を渡す)。
 """
 from __future__ import annotations
 
@@ -51,6 +56,14 @@ import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
+
+# 終了コード規約 (scripts/bug-hunt-inventory-check.sh と同じ 3 = 契約違反)
+EXIT_OK = 0
+EXIT_INPUT_ERROR = 1        # 読み込み・parse の失敗 (従来どおり)
+EXIT_INPUT_UNAVAILABLE = 3  # 主入力の可用性違反 = 検査を成立させられない
+
+# 記録器が書く status の語彙。ok|blocked の 2 値だけを受け付ける。
+VALID_STATUSES = {"ok", "blocked"}
 
 # TESTED_BY status 三値
 TESTED = "tested"
@@ -259,50 +272,94 @@ class Executed:
     shards: list[str]
     # route_name -> set(shard) (どれか 1 shard で executed なら executed=true)
     routes: dict[str, set[str]] = field(default_factory=dict)
-    statuses: dict[str, set[str]] = field(default_factory=dict)  # route -> {ok,blocked,..}
-    present: bool = True  # executed.json が与えられたか
+    statuses: dict[str, set[str]] = field(default_factory=dict)  # route -> {ok,blocked}
+    row_count: int = 0               # executed_routes の有効行数 (可用性検証に使う)
+    schema_error: str | None = None  # 最初に見つかった契約違反 (形・run_id) の説明
 
     def is_executed(self, route_name: str) -> bool:
-        """実走した (= status 'ok' が 1 つでもある) route のみ executed=true。
+        """status 'ok' を 1 つでも持つ route だけ executed=true。
 
-        executed.json の status は ok|blocked|skipped。skipped/blocked は
-        「UI で叩けなかった = 触っていない」意味なので executed=false とし unexecuted worklist に
-        残す。route_name in routes (status 無視) だと skipped/blocked も executed 扱いになり
+        blocked は「到達できなかった = 触っていない」意味なので executed=false とし
+        未実行 worklist に残す。route_name の存在だけで executed 扱いにすると
         executed_pct を不当に押し上げる (coverage 信号汚染)。
-        後方互換: status 未記録 (空集合) の route は ok とみなす (旧 executed.json 形の救済)。
+        status を持たない行は入力エラー (executed_schema_invalid) なのでここには来ない。
         """
-        if route_name not in self.routes:
-            return False
-        st = self.statuses.get(route_name)
-        if not st:
-            return True  # status 列を持たない旧形式は従来どおり executed 扱い
-        return "ok" in st
+        return "ok" in self.statuses.get(route_name, set())
 
-    def skipped_blocked_count(self) -> int:
-        """routes には居るが ok status が 1 つも無い (= skip/block のみ) route 数 (可視化)。"""
+    def blocked_count(self) -> int:
+        """routes には居るが ok status が 1 つも無い (= blocked のみ) route 数 (可視化)。"""
         return sum(
             1 for name in self.routes
-            if self.statuses.get(name) and "ok" not in self.statuses[name]
+            if "ok" not in self.statuses.get(name, set())
         )
 
 
-def load_executed(path: str | None) -> Executed:
-    """executed.json をロード。
+def load_executed(path: str) -> Executed:
+    """executed.json をロードする。path の省略は受け付けない。
 
-    path が None の場合 present=False の空 Executed を返す
-    (= 全 in_scope 機構を未実行 candidate 扱い)。
+    **入れ物の型から検証する**。dict でない root、list でない shards/executed_routes、
+    dict でない行を素通しすると `.get()` や反復で AttributeError / TypeError になり、
+    main() の捕捉対象外なので終了コード規約 (1 / 3) から外れて traceback で落ちる。
+    `status` も isinstance(str) を確認してから集合照合する (非 hashable で TypeError になるため)。
+    **JSON 構文エラーと I/O は 1、構文上は読めるが形が契約外なら 3**。
     """
-    if path is None:
-        return Executed(run_id=None, shards=[], present=False)
     data = json.loads(Path(path).read_text(encoding="utf-8"))
-    ex = Executed(run_id=data.get("run_id"), shards=list(data.get("shards", [])))
-    for row in data.get("executed_routes", []):
-        name = row.get("route_name")
-        if not name:
-            continue
-        ex.routes.setdefault(name, set()).add(str(row.get("shard", "")))
-        ex.statuses.setdefault(name, set()).add(row.get("status", "ok"))
+    if not isinstance(data, dict):
+        return Executed(run_id=None, shards=[], schema_error="root が JSON object でない")
+
+    raw_shards = data.get("shards")
+    raw_rows = data.get("executed_routes")
+    run_id = data.get("run_id")
+    ex = Executed(run_id=run_id if isinstance(run_id, str) else None, shards=[])
+    if not isinstance(run_id, str) or run_id == "":
+        ex.schema_error = f"run_id が非空文字列でない: {run_id!r}"
+        return ex
+    if not isinstance(raw_shards, list) or not isinstance(raw_rows, list):
+        ex.schema_error = "shards / executed_routes が配列でない"
+        return ex
+    for s in raw_shards:
+        if not isinstance(s, str) or s == "":
+            ex.schema_error = f"shards に非空文字列でない要素がある: {s!r}"
+            return ex
+        ex.shards.append(s)
+
+    for row in raw_rows:
+        if not isinstance(row, dict):
+            ex.schema_error = f"executed_routes の要素が object でない: {row!r}"[:200]
+            break
+        name, shard, status = row.get("route_name"), row.get("shard"), row.get("status")
+        if not isinstance(name, str) or name == "" \
+                or not isinstance(shard, str) or shard == "" \
+                or not isinstance(status, str) or status not in VALID_STATUSES:
+            ex.schema_error = repr(row)[:200]
+            break
+        ex.row_count += 1
+        ex.routes.setdefault(name, set()).add(shard)
+        ex.statuses.setdefault(name, set()).add(status)
     return ex
+
+
+def validate_executed(ex: Executed, run_id: str) -> str | None:
+    """主入力 (実行済み route の記録) の可用性を検証する。
+
+    返値は違反理由。None なら成立している。
+    **`ok` が 0 件は違反にしない** — 全操作が 403/422/500 で跳ねた走行は、
+    主入力としては成立しており、正しい結果は「全件を未実行 worklist に残す」ことである。
+    """
+    # 形の違反を先に見る (root が object でない等のとき run_id 不一致と誤報しないため)
+    if ex.schema_error is not None:
+        return f"executed_schema_invalid (契約外の形: {ex.schema_error})"
+    if ex.run_id != run_id:
+        return f"executed_run_id_mismatch (executed.json={ex.run_id!r} / --run-id={run_id!r})"
+    if not ex.shards:
+        return "executed_shards_missing (shards が空 = どの shard の記録か分からない)"
+    if ex.row_count == 0:
+        return "executed_no_rows (有効な観測行が 1 件も無い = 記録が採れていない)"
+    seen = {s for shards in ex.routes.values() for s in shards}
+    declared = set(ex.shards)
+    if declared != seen:
+        return f"executed_shard_mismatch (宣言={sorted(declared)} / 実際={sorted(seen)})"
+    return None
 
 
 @dataclass
@@ -403,10 +460,9 @@ class Correlation:
     cross_unexec_findingful: list[MechanismRow]
     unknown_graph_gap_count: int
     in_scope_count: int = 0
-    executed_present: bool = True
     dropped_other_run: int = 0
     hotspot_threshold: int = 2
-    skipped_blocked_count: int = 0  # status skip/block のみで実走でない route 数
+    blocked_count: int = 0  # status blocked のみで実走でない route 数
 
 
 def correlate(routes, operations, executed, findings, tb_index, *,
@@ -501,10 +557,9 @@ def correlate(routes, operations, executed, findings, tb_index, *,
         cross_unexec_findingful=cross,
         unknown_graph_gap_count=unknown_gap,
         in_scope_count=len(in_scope_rows),
-        executed_present=executed.present,
         dropped_other_run=dropped_other_run,
         hotspot_threshold=hotspot_threshold,
-        skipped_blocked_count=executed.skipped_blocked_count(),
+        blocked_count=executed.blocked_count(),
     )
 
 
@@ -523,8 +578,9 @@ def to_summary(corr: Correlation) -> dict:
         "unknown_graph_gap_count": corr.unknown_graph_gap_count,
         "in_scope_count": n_scope,
         "dropped_other_run": corr.dropped_other_run,
-        "executed_present": corr.executed_present,
-        "skipped_blocked_count": corr.skipped_blocked_count,
+        # 内訳 (可視化のみ。終了コードには影響しない)
+        "executed_ok_count": n_exec,
+        "blocked_count": corr.blocked_count,
         # 副 (% は目標にしない・gaming 防止)
         "executed_pct": executed_pct,
     }
@@ -550,9 +606,6 @@ def render_worklist(corr: Correlation) -> str:
     L.append("> 主出力 = **未カバー worklist**。絶対 % は副 (summary の `*_pct` のみ)・目標にしない。")
     L.append(f"> 分母 (in_scope 機構) = **{corr.in_scope_count}** 件 (区分 '外' を除く)。"
              " 分母変更時はこの値の差分を注記すること (gaming 防止)。")
-    if not corr.executed_present:
-        L.append("> ⚠ executed.json 未指定 = 全 in_scope 機構を **未実行 candidate** として列挙"
-                 " (走行ログ未連携)。")
     if corr.dropped_other_run:
         L.append(f"> ℹ run_id 不一致で除外した finding: {corr.dropped_other_run} 件"
                  " (別 run の混入防止)。")
@@ -627,7 +680,8 @@ def render_worklist(corr: Correlation) -> str:
     L.append(f"- hotspot_count: {s['hotspot_count']}")
     L.append(f"- untested_real_count (TS): {s['untested_real_count']}")
     L.append(f"- unknown_graph_gap_count (PHP): {s['unknown_graph_gap_count']}")
-    L.append(f"- skipped_blocked_count (status skip/block = 未実走扱い): {s['skipped_blocked_count']}")
+    L.append(f"- executed_ok_count (in_scope ∧ status ok): {s['executed_ok_count']}")
+    L.append(f"- blocked_count (status blocked のみ = 未実走扱い): {s['blocked_count']}")
     L.append(f"- executed_pct (副・目標にしない): {s['executed_pct']:.0%}")
     L.append("")
     return "\n".join(L)
@@ -638,13 +692,21 @@ def main(argv=None) -> int:
     ap.add_argument("--route-list", help="route:list --json path (省略時 php artisan route:list を実行)")
     ap.add_argument("--operations", required=True, help="operations.md path")
     ap.add_argument("--findings", required=True, help="findings.jsonl path or - for stdin")
-    ap.add_argument("--executed", help="executed.json path (省略時 全 in_scope を未実行 candidate)")
+    ap.add_argument("--executed", help="executed.json path (build_executed.py が生成する)")
     ap.add_argument("--graph-db", required=True, help="graph.db path")
     ap.add_argument("--run-id", required=True, help="run_id for join")
     ap.add_argument("--project-dir", help="route:list 取得時の cwd (省略時 cwd)")
     ap.add_argument("--hotspot-threshold", type=int, default=2)
     ap.add_argument("--json", action="store_true", help="machine summary as JSON")
     args = ap.parse_args(argv)
+
+    # argparse の required=True にはしない。required にすると argparse 自身が exit 2 で落ち、
+    # 「主入力の可用性違反 = 3」という規約から外れるため、main 内で明示的に検査する。
+    if args.executed is None:
+        print("ERROR: 主入力が揃わない (reason=executed_missing): "
+              "--executed が指定されていない。build_executed.py で executed.json を作ってから渡すこと。",
+              file=sys.stderr)
+        return EXIT_INPUT_UNAVAILABLE
 
     try:
         routes = load_route_list(args.route_list, project_dir=args.project_dir)
@@ -655,7 +717,14 @@ def main(argv=None) -> int:
     except (ValueError, json.JSONDecodeError, OSError, sqlite3.Error,
             subprocess.CalledProcessError) as e:
         print(f"ERROR: {e}", file=sys.stderr)
-        return 1
+        return EXIT_INPUT_ERROR
+
+    reason = validate_executed(executed, args.run_id)
+    if reason is not None:
+        print(f"ERROR: 主入力が揃わない (reason={reason})。"
+              " 未実行 worklist は出力しない (揃わない走行を成功として返さないため)。",
+              file=sys.stderr)
+        return EXIT_INPUT_UNAVAILABLE
 
     corr = correlate(
         routes, operations, executed, findings, tb_index,
@@ -667,7 +736,7 @@ def main(argv=None) -> int:
         print(json.dumps(to_summary(corr), ensure_ascii=False, indent=2))
     else:
         print(render_worklist(corr))
-    return 0
+    return EXIT_OK
 
 
 if __name__ == "__main__":
