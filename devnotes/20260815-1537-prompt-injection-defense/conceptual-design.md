@@ -1,0 +1,180 @@
+# 概念設計: prompt-injection-defense (窓口方式一式の追従)
+
+- 台帳 feature: `prompt-injection-defense` (裁定 AG-028。標準形 t1)
+- aicue の現在地: `t0` = 雛形検査 3 本 + Prism 直呼び禁止。窓口方式一式は 0 件
+- 参照した正典: lctl `get_feature(prompt-injection-defense)` の
+  laravel-claude-template セル (t1 の要素 a〜j) と spirux セル (窓口方式の提供元)
+
+## 背景・課題
+
+### なぜ aicue で最も重いのか
+
+家系 6 リポジトリのうち、**実運用の LLM 解析パイプラインを持つのは aicue だけ**である。
+`app/Services/Manual/AnalysisPipeline.php` が 4 段 (抽出 → 分解 → 生成 → 反映) を
+1 ジョブで終端まで走らせ、その入口は**利用者がアップロードした作業手順書 (SOP)** という
+完全な外部由来の文字列である。しかも成果物は「現場作業者が観て真似する教材動画」なので、
+乗っ取られた出力は**現場の作業そのもの**に反映される (例: 安全上の急所カットを落とさせる)。
+
+### 4 段のどこに外部由来の文字列が入るか (実読)
+
+| 段 | 実装 | 外部由来の文字列 | 現在の防御 |
+|----|------|------------------|-----------|
+| 抽出 (extract) | `SopExtractPrompt::make($text->text, $context)` | `SopTextExtractor` が PDF/xlsx/txt から取り出した SOP 本文 | `UserInput::from()` + YAML の防御指示 |
+| 分解 (decompose) | `WorkDecompositionPrompt::make($extracted->toJsonString(), $context)` | 1 段目の LLM 出力 (= SOP 由来 + モデル生成) | 同上 |
+| 生成 (generate) | `ScenarioGenerationPrompt::make($decomposition->toJsonString(), $context)` | 2 段目の LLM 出力 | 同上 |
+| 反映 (materialize) | `ScenarioBookendBuilder::wrap()` → `ScenarioService::materializeIntoLockedManual()` | 3 段目の LLM 出力 (カット行として DB へ) | LLM 呼び出しなし (DTO スキーマ検証のみ) |
+
+`app/` 全体で `executeSync()` を呼ぶ箇所はこの 3 箇所だけで、いずれも
+`app/Prompts/` の factory 経由である (実読で確認済み)。
+
+### 既にあるもの (壊さずに積む)
+
+1. `AGENTS.md` セキュリティ不変条件 4「untrusted 文字列は UserInput 型経由でのみ prompt に入れる」
+2. 禁止事項 5「Prism 直呼び禁止 (`app/Prompts/` の factory 経由のみ)」— `PromptGuardrailTest`
+3. `PromptUntrustedInputContractTest` の inventory (deny-by-default + 型 + 帰属)
+4. `DefensiveInstructionsPresenceTest` / `PromptYamlContractTest` / `PromptClientTimeoutInvariantTest`
+5. prompt 文字列の `resources/prompts/*.yaml` 外出し
+
+### それでも残っている穴 (これが今回の対象)
+
+- **(穴 1) 無害化が無い**。`UserInput` はタグ境界化と breakout エスケープだけを行い、
+  制御文字・不可視文字・双方向制御文字 (U+202E 等) を素通しする。SOP は PDF/xlsx から
+  抽出したテキストなので、これらは**正常な経路で普通に混入しうる**。
+- **(穴 2) 「UserInput で渡す」が書き手の規律**であって構造ではない。inventory は
+  「未分類なら fail」だが、新しい factory を**変数リスト空**で登録して生 string を
+  `Prompt::load()` に渡す経路は現行 gate をすべて通過する (実装を読んで確認)。
+  経路が増えたときの迂回に対して deny-by-default になっていない。
+- **(穴 3) 応答の検査が無い**。モデルが乗っ取られてシステムプロンプトを吐いても、
+  出力が JSON として妥当なら DTO 検証を通ってしまう。「乗っ取られた」という事実が
+  どこにも観測されない (失敗しても `invalid_json` に見えるだけ)。
+- **(穴 4) 防御パラメータの置き場が無い**。長さ上限は `config/manual.php` の
+  `analysis_max_text_bytes` (SOP 経路の運用ポリシー) しか無く、
+  「防御としての最後の砦」を置く場所が無い。
+
+## 改善アイデア — 窓口方式一式
+
+**1 本の窓口を通らないと LLM に文字列を渡せない形**にする。窓口の内側で
+「無害化 → タグ境界化 → カナリア合流」を行い、実行単位が「vendor 実行 → 応答検査」を
+1 メソッドに束ねて fail-closed にする。構造検査 gate が「窓口以外から vendor の prompt を
+読み込めない」ことを機械的に固定する。
+
+```
+app/Prompts/*Prompt.php            ← 各 prompt の factory (YAML 名と変数名を宣言するだけ)
+        │  PromptDefense::load(name, untrusted: [...])   ← ここ以外から vendor prompt へ到達できない
+        ▼
+app/Support/Llm/PromptDefense.php  ← 窓口 (無害化 → UserInput 化 → カナリア合流 → 実行単位を返す)
+        │
+        ▼
+app/Support/Llm/GuardedPrompt.php  ← 実行単位 (executeSync = vendor 実行 + 応答検査。fail-closed)
+```
+
+### 足すもの (差分だけ)
+
+| # | 施策 | 正典 t1 の対応要素 |
+|---|------|--------------------|
+| A | 窓口クラス `App\Support\Llm\PromptDefense` | (a) 窓口クラス |
+| B | 実行単位 `App\Support\Llm\GuardedPrompt` (応答検査を束ねる) | (b) 実行単位 |
+| C | 無害化 `App\Support\Llm\UntrustedTextSanitizer` (制御文字・不可視文字・長さ) | (c) 入力の無害化 |
+| D | 応答カナリア `App\Support\Llm\PromptCanary` + YAML への slot 追加 | (d) 応答カナリア |
+| E | `config/llm-defense.php` (防御パラメータの集約。env なし) | (e) 防御設定の集約 |
+| F | 窓口通過の構造検査 gate `PromptDefenseWindowGateTest` | (f) 構造検査 gate |
+| G | 集約設定の gate `LlmDefenseConfigGateTest` | (g) 設定 gate |
+| H | 既存 3 gate の射程更新 (置き換えない・保証を縮めない) | (h)(i) 雛形検査 / 操作単位ガードレール |
+| I | 実行時の振る舞いテスト + 攻撃コーパス | (j) 実行時テスト |
+| J | 規約文書の更新 (`AGENTS.md` / `docs/architecture.md` / `docs/template-divergence.md`) | — |
+
+### 二重に守らないための整理 (思考原則 2・4)
+
+- **「untrusted は UserInput 型」の宣言を factory から窓口へ 1 本化する**。
+  窓口の引数型が「生 string の連想配列」なので、factory 側は `UserInput` を
+  **作れないし作る必要もない**。同じ不変条件を 2 箇所で宣言する状態を作らない。
+- **`PromptUntrustedInputContractTest` は消さずに役割を純化する** (裁定は
+  「窓口方式を持つなら雛形検査は不要という但し書きは付けない」)。分類 (deny-by-default) と
+  帰属 (`llm_call_logs` の organization / subject) は aicue 固有の資産なのでそのまま残し、
+  型検査は「窓口を通した**結果**が `UserInput` になっていること」の behavioral 確認に読み替える
+  (宣言は窓口、確認は inventory、構造は窓口 gate — 3 者の役割が重ならない)。
+- **長さ上限を 2 つ持つが、母集団が違う**ことを明示し機械で固定する。
+  `manual.analysis_max_text_bytes` (150,000) は **SOP 経路の運用ポリシー**で
+  ユーザー向け文言 (「分割してアップロードしてください」) を伴う。窓口の上限は
+  **全 untrusted 値 (2・3 段目の中間 JSON も含む) にかかる構造的な最後の砦**である。
+  「窓口上限 >= SOP 上限」を gate で pin し、SOP 経路では必ず先に運用ポリシー側の
+  文言が出る (窓口が先に落として文言が退化することが無い) ようにする。
+
+### aicue 固有の設計判断
+
+1. **trusted 変数の入口を作らない**。テンプレートの窓口は `untrusted` と `trusted` の
+   2 引数を持ち、「trusted の値はリテラル / クラス定数 / enum case のみ」という字句 gate で
+   守っている。aicue の prompt YAML の変数は**現在 4 本すべてが untrusted** で trusted は 0 件。
+   入口そのものを作らなければ「trusted に混ぜて素通しする」経路は**構造的に存在しない**
+   (テンプレートより強い側への逸脱)。必要になった時点で引数と字句 gate を同時に足す。
+   `docs/template-divergence.md` に理由と「保証し続ける不変条件」を登録する。
+2. **カナリア漏洩は再試行しない**。`AnalysisPipeline::isTransient()` は deny-by-default なので
+   新例外は自動的に非 retryable になる。ユーザー向け文言だけを追加し、
+   「入力を変えずに再実行しても同じ」ことが伝わる文にする。
+3. **4 段目 (反映) は窓口の対象外**。LLM を呼ばないため。ただし反映で DB へ入る文字列は
+   すべて LLM 出力由来 = untrusted であり、**それを再び prompt へ戻す経路を作らない**ことを
+   規約として書く (会話履歴を prompt に入れる形へ進化したら窓口の対象に含める、という
+   AG-028 の監視条件の aicue 版)。窓口の引数が生 string なので、戻す経路を作ったとしても
+   窓口を通るしかない = 規約を忘れても無害化とタグ境界化は効く。
+
+## 期待効果
+
+- **使命への貢献**: AI-CUE は「現場にある SOP を起点に AI が教材を設計する」製品である。
+  起点の SOP は常に外部由来なので、そこに紛れ込ませた命令でシナリオ生成が乗っ取られると、
+  **安全の急所カットが落ちた教材**が現場に配られうる。防御は使命の前提条件であり、
+  「思考ゼロ・編集ゼロ」で作業者が結果をそのまま信じる製品では特に外せない。
+  ただし効能は誇張しない — この設計が与えるのは
+  **(1) 経路の迂回を構造で塞ぐこと、(2) 入力の構造的な無害化、(3) system prompt 漏洩の
+  fail-closed な観測**の 3 つであって、「乗っ取りを防げる」とは書かない
+  (JSON として妥当な悪性シナリオはカナリアでは止まらない)。
+- **経路が増えたときの迂回を構造で塞ぐ**: 新しい prompt を足す人が規約を知らなくても、
+  窓口を通らないと LLM に到達できない (gate が赤くなる)。
+- **家系の統一**: 裁定 AG-028 の t1 に到達し、テンプレート更新の取り込みが素直になる。
+
+## 実装方針 (概要)
+
+1. `config/llm-defense.php` を新設 (キーは 2 つ: `max_untrusted_bytes` / `canary_bytes`。
+   文言も on/off スイッチも env も置かない)。
+2. `UntrustedTextSanitizer` を新設。**構造だけ**を扱う (制御文字・不可視文字・双方向制御文字の
+   除去、長さ超過の拒否)。**指示文らしい文言の除去はしない** (偽陰性と回避のいたちごっこ)。
+   改行・タブは SOP の本文構造なので保持する。
+3. `PromptCanary` を新設 (乱数 hex。応答に現れたら system prompt 漏洩とみなす。
+   照合は大小無視 + 空白除去の 2 パス)。
+4. `PromptDefense::load(string $template, array $untrusted): GuardedPrompt` を新設。
+   内側で 無害化 → `UserInput::from()` → カナリア変数の合流 → `Prompt::load()` を行う。
+5. `GuardedPrompt` を新設。`executeSync(): string` が vendor 実行 → カナリア照合 →
+   漏洩なら `PromptResponseRejectedException` を投げて**応答を呼び出し元へ渡さない**。
+   vendor prompt 型を返す public メソッドを持たない (迂回経路を構造的に消す)。
+   帰属 metadata (`llm_call_logs` の organization / subject) は窓口の引数で受け、
+   `GuardedPrompt` の内側で vendor の `withMetadata()` に渡す
+   (= 帰属が窓口経由でも維持されることを inventory が引き続き固定する)。
+   `Prompt::load()` を呼んでよい場所は `PromptDefense` **ただ 1 ファイル**へ縮小する
+   (現行の「`app/Prompts/` に限る」からの強化であり、緩和ではない)。
+6. `app/Prompts/` の 4 factory を窓口経由へ書き換え、戻り値型を `GuardedPrompt` にする
+   (`AnalysisPipeline` の 3 箇所は `->executeSync()` のままで型だけが変わる)。
+   **旧経路 (`Prompt::load()` 直呼び) は同じ PR で全廃**する (思考原則 3)。
+7. 4 つの YAML の `system_prompt` にカナリア slot を足す (`prompt` 側には**置かない**)。
+8. gate 群 (F/G/H) とテスト (I) を追加・更新する。
+9. 文書 (J) を更新する。
+
+## 制約・前提
+
+- vendor (`kent013/laravel-prism-prompt`) の `Prompt::load()` は
+  `templateVariables` を `system_prompt` と `prompt` の両方の Blade 描画に使う
+  (実読で確認)。カナリア変数を system 側だけで参照する形が成立する。
+- `Prompt::fake()` / `CannedPromptResponses` は system prompt の**役割文 (signature)** で
+  canned を引くため、カナリア (乱数) の混入で解決が壊れない (signature は YAML 固有句)。
+- prompt キャッシュ (`cacheBreakpoints`) は 4 YAML とも未使用なので、
+  呼び出しごとに変わるカナリアがキャッシュヒット率を壊す問題は起きない。
+- `ExternalSeamInventory::delegations()` が `PrismDirectDispatchScanner::scannedFiles()` を
+  生存確認に使っているため、scanner に手を入れるときは委譲側の前提を壊さない。
+- テストレーンは外部 HTTP / LLM を既定拒否 (`StrayHttpRequestGuard` / `StrayLlmCallGuard`)。
+  新規テストは `Prompt::fake()` で閉じる。
+
+## スコープ外
+
+- ffmpeg の字幕描画 (drawtext) へ流れる文字列の扱い — 層が違う (レンダ側の別テーマ)。
+- MCP の write tool (現在 0 本) と会話履歴を持つ対話面 (aicue に存在しない)。
+- 文言ベースのインジェクション検出 (「ignore previous instructions」等の語句フィルタ)。
+- LLM 出力の内容審査 (「この手順は安全か」の判定)。
+- prompt の多言語化・モデル変更・費用最適化。
