@@ -119,9 +119,11 @@ class VideoManual extends Model
      * 世代の選び方は `CurrentRenderArtifact::currentSucceeded($manual, RenderKind::Render)` と
      * **同一**である (同 manual・同 kind の最新 succeeded。旧世代へフォールバックしない)。
      * 違いは 1 点だけで、**こちらは受け取れるかを判断しない** — `output_path` を見ないため
-     * NULL (掃除済み) の行も返す。受け取れるかの決定は呼び出し側 (ManualListItemData) が
-     * `output_path !== null` を足して行い、両者が同じ行を指すことは
-     * `ManualRowDownloadableParityTest` が固定する。
+     * NULL (掃除済み) の行も返す。受け取れるかの決定 (`output_path` を含む) は
+     * `CurrentRenderArtifact` が行い、一覧向けの入口は
+     * `CurrentRenderArtifact::fromLoadedRenderCandidate($manual)` である
+     * (`ManualListItemData` が合成するのは published 判定と ability 判定だけ)。
+     * 候補行と選択式が同じ行を指すことは `ManualRowFinishedVideoParityTest` が固定する。
      *
      * 一覧が行ごとに `currentSucceeded()` を呼ぶと N+1 になるため、eager load できる形を用意する
      * (`ManualListQueryCountTest` がクエリ数の行数非依存を固定する)。

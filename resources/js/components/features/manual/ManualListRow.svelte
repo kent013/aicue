@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { Download, Trash2 } from "@lucide/svelte";
+    import { Download, Play, Trash2 } from "@lucide/svelte";
     import Badge from "@/components/atoms/Badge.svelte";
     import Button from "@/components/atoms/Button.svelte";
     import TextLink from "@/components/atoms/TextLink.svelte";
@@ -8,22 +8,28 @@
     import { STATUS_TONES, VIDEO_MANUAL_STATUS_LABELS } from "@/types/manual";
 
     /**
-     * 動画マニュアル一覧の 1 行 (doc/04: 状態 / タイトル / カテゴリ / 再生時間 / 更新日 / DL / 削除)。
+     * 動画マニュアル一覧の 1 行 (doc/04: 状態 / タイトル / カテゴリ / 再生時間 / 更新日 /
+     * プレビュー / DL / 削除)。
      *
      * 表示の出し分けは**サーバが決めた行 props だけ**で行う
-     * (downloadable / deletable。published も ability も UI 側で再判定しない)。
-     * 削除の実行は一覧ページが持つ (この component は確認ダイアログを開く要求を上へ返すだけ)。
+     * (current_finished_render_job_id / deletable。published も ability も UI 側で再判定しない)。
+     * プレビューと DL は**同じ props 1 本**で出し分ける (再生条件は download と完全同一 = T154)。
+     * 実行は一覧ページが持つ (この component は要求を上へ返すだけ)。
      */
     interface Props {
         projectId: number;
         manual: ManualListItem;
+        /** プレビュー (オーバーレイ再生) を開く要求 */
+        onRequestPreview: (manual: ManualListItem) => void;
         /** 削除確認ダイアログを開く要求 */
         onRequestDelete: (manual: ManualListItem) => void;
     }
 
-    let { projectId, manual, onRequestDelete }: Props = $props();
+    let { projectId, manual, onRequestPreview, onRequestDelete }: Props = $props();
 
     const durationLabel = $derived(formatDurationMs(manual.duration_ms));
+    /** 受け取れる完成動画があるか (プレビュー / DL の唯一の出し分け根拠) */
+    const finishedRenderJobId = $derived(manual.current_finished_render_job_id);
 </script>
 
 <!-- 狭い画面では縦積み (操作群を次行へ逃がす)、sm 以上で現行と同じ横並びに戻す。
@@ -57,11 +63,23 @@
         <Badge tone={STATUS_TONES[manual.status]} testId={`manual-status-${manual.id}`}>
             {VIDEO_MANUAL_STATUS_LABELS[manual.status]}
         </Badge>
-        {#if manual.downloadable}
-            <!-- 受け取れるとサーバが判断した行にだけ出す。押せない (disabled) ボタンは作らない。
-                 出ていない行の理由は状態バッジと再生時間「—」が語り、書き出しの CTA は
-                 詳細画面 (RenderPanel) が唯一持つ。
-                 素の <a> (inertia なし) = 非 Inertia 遷移。成功時は attachment 応答のため
+        <!-- 受け取れるとサーバが判断した行にだけ出す。押せない (disabled) ボタンは作らない。
+             出ていない行の理由は状態バッジと再生時間「—」が語り、書き出しの CTA は
+             詳細画面 (RenderPanel) が唯一持つ。
+             プレビューと DL は同じ条件 (playback の完成動画条件 = download 条件) なので
+             同じ枝に置く = 2 つの条件を持たない。 -->
+        {#if finishedRenderJobId !== null}
+            <Button
+                variant="ghost"
+                size="sm"
+                onclick={() => onRequestPreview(manual)}
+                ariaLabel={`${manual.title} の完成動画をプレビュー`}
+                testId={`manual-preview-${manual.id}`}
+            >
+                <Play class="size-4" />
+                プレビュー
+            </Button>
+            <!-- 素の <a> (inertia なし) = 非 Inertia 遷移。成功時は attachment 応答のため
                  画面は遷移しない。 -->
             <Button
                 variant="ghost"

@@ -23,7 +23,7 @@ const manualsFixture: ManualListItem[] = [
         created_at: "2026-07-10 12:00",
         updated_at: "2026-07-11 09:00",
         duration_ms: null,
-        downloadable: false,
+        current_finished_render_job_id: null,
         deletable: true,
     },
     {
@@ -35,7 +35,7 @@ const manualsFixture: ManualListItem[] = [
         created_at: "2026-07-10 13:00",
         updated_at: "2026-07-11 10:00",
         duration_ms: 185_000,
-        downloadable: true,
+        current_finished_render_job_id: 9,
         deletable: true,
     },
 ];
@@ -300,17 +300,28 @@ describe("Projects/Show 動画マニュアルの行内操作", () => {
         vi.restoreAllMocks();
     });
 
-    it("行の再生時間と DL 導線をサーバの props どおりに出し分ける", () => {
+    it("行の再生時間とプレビュー / DL 導線をサーバの props どおりに出し分ける", () => {
         render(Show, { props: baseProps });
 
         // duration_ms=null の行は「—」、値のある行は整形して出す
         expect(screen.getByTestId("manual-duration-1")).toHaveTextContent("—");
         expect(screen.getByTestId("manual-duration-2")).toHaveTextContent("3:05");
-        // downloadable の行にだけ DL 導線が出る
+        // 受け取れる行にだけプレビュー / DL 導線が出る
+        expect(screen.queryByTestId("manual-preview-1")).toBeNull();
         expect(screen.queryByTestId("manual-download-1")).toBeNull();
+        expect(screen.getByTestId("manual-preview-2")).toBeInTheDocument();
         expect(screen.getByTestId("manual-download-2").getAttribute("href")).toMatch(
             /\/projects\/1\/manuals\/2\/download$/,
         );
+    });
+
+    it("プレビューを押すとオーバーレイが開き、その行の playback URL の video が出る", async () => {
+        render(Show, { props: baseProps });
+
+        await fireEvent.click(screen.getByTestId("manual-preview-2"));
+
+        const video = await screen.findByTestId("manual-preview-video");
+        expect(video.getAttribute("src")).toBe("/projects/1/manuals/2/render-jobs/9/playback");
     });
 
     it("deletable=false の行には削除導線を出さない", () => {

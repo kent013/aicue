@@ -275,8 +275,8 @@ test('mine と category/status/q/sort の併用で結合絞り込みできる', 
 });
 
 /*
- * T182: 行の再生時間 (duration_ms) と行内操作の可否 (downloadable / deletable)、
- * 範囲外ページの丸め、q の 200 文字上限。
+ * T182 + T189: 行の再生時間 (duration_ms) と行内操作の可否
+ * (current_finished_render_job_id / deletable)、範囲外ページの丸め、q の 200 文字上限。
  */
 
 test('duration_ms は published の総尺のみ供給する (それ以外は null)', function (): void {
@@ -303,12 +303,12 @@ test('duration_ms は published の総尺のみ供給する (それ以外は nul
     expect($byId[$ready->id]['duration_ms'])->toBeNull();
 });
 
-test('downloadable は published × 現行世代の succeeded render (output_path あり) のときだけ true', function (): void {
+test('current_finished_render_job_id は published × 現行世代の succeeded render (kind=render / output_path あり) のときだけ id を返す', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $project = Project::factory()->forOrganization($organization)->create();
 
     $ok = VideoManual::factory()->forProject($project)->published(60_000)->create(['title' => '受取可']);
-    RenderJob::factory()->forManual($ok)->succeeded('renders/ok.mp4')->create();
+    $okJob = RenderJob::factory()->forManual($ok)->succeeded('renders/ok.mp4')->create();
 
     // 最新 succeeded の実体が消えている (掃除済み) → 旧世代へフォールバックしない
     $stale = VideoManual::factory()->forProject($project)->published(60_000)->create(['title' => '実体なし']);
@@ -330,29 +330,41 @@ test('downloadable は published × 現行世代の succeeded render (output_pat
         ->inertiaPage()['props']['manuals']['data'];
     $byId = array_column($rows, null, 'id');
 
-    expect($byId[$ok->id]['downloadable'])->toBeTrue();
-    expect($byId[$stale->id]['downloadable'])->toBeFalse();
-    expect($byId[$previewOnly->id]['downloadable'])->toBeFalse();
-    expect($byId[$notPublished->id]['downloadable'])->toBeFalse();
+    expect($byId[$ok->id]['current_finished_render_job_id'])->toBe($okJob->id);
+    expect($byId[$stale->id]['current_finished_render_job_id'])->toBeNull();
+    expect($byId[$previewOnly->id]['current_finished_render_job_id'])->toBeNull();
+    expect($byId[$notPublished->id]['current_finished_render_job_id'])->toBeNull();
 });
 
-test('撮影者は downloadable / deletable ともに false、編集者は deletable=true', function (): void {
+test('一覧の行 props に旧キー downloadable が残っていない', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+    VideoManual::factory()->forProject($project)->published(60_000)->create();
+
+    $rows = $this->actingAs($owner)->get("/projects/{$project->id}")
+        ->inertiaPage()['props']['manuals']['data'];
+
+    expect($rows[0])->toHaveKey('current_finished_render_job_id');
+    expect(array_key_exists('downloadable', $rows[0]))->toBeFalse();
+});
+
+test('撮影者は current_finished_render_job_id=null / deletable=false、編集者は id と deletable=true', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization);
     $member->forceFill(['current_organization_id' => $organization->id])->save();
     $project = Project::factory()->forOrganization($organization)->create();
     attachProjectMember($project, $member, ProjectRole::Member);
     $manual = VideoManual::factory()->forProject($project)->published(60_000)->create();
-    RenderJob::factory()->forManual($manual)->succeeded('renders/ok.mp4')->create();
+    $job = RenderJob::factory()->forManual($manual)->succeeded('renders/ok.mp4')->create();
 
     $this->actingAs($member)->get("/projects/{$project->id}")
         ->assertInertia(fn (Assert $page) => $page
-            ->where('manuals.data.0.downloadable', false)
+            ->where('manuals.data.0.current_finished_render_job_id', null)
             ->where('manuals.data.0.deletable', false));
 
     $this->actingAs($owner)->get("/projects/{$project->id}")
         ->assertInertia(fn (Assert $page) => $page
-            ->where('manuals.data.0.downloadable', true)
+            ->where('manuals.data.0.current_finished_render_job_id', $job->id)
             ->where('manuals.data.0.deletable', true));
 });
 

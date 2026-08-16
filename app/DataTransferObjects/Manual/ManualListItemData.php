@@ -6,6 +6,7 @@ namespace App\DataTransferObjects\Manual;
 
 use App\Enums\Manual\VideoManualStatus;
 use App\Models\VideoManual;
+use App\Services\Manual\CurrentRenderArtifact;
 use App\Services\Manual\ManualRowAbilities;
 
 /**
@@ -20,7 +21,12 @@ final readonly class ManualListItemData
      * @param  ManualListRefData|null  $category  null = 未分類
      * @param  ManualListRefData|null  $creator  null = 退会/削除で解決不可
      * @param  int|null  $durationMs  いま公開されている完成動画の長さ (ms)。null = 未確定
-     * @param  bool  $downloadable  download endpoint が 302 を返す条件と 1 対 1
+     * @param  int|null  $currentFinishedRenderJobId  いま受け取れる完成動画 (kind=render) の
+     *                                                render job id。**null = 受け取れない**。非 null であることは download endpoint が
+     *                                                302 を返す条件と 1 対 1 (download ability × published × 現行世代の succeeded render に
+     *                                                output_path がある)。値は再生 endpoint
+     *                                                `projects.manuals.render-jobs.playback` のパスにそのまま使える
+     *                                                (完成動画の再生条件は download と完全同一 = ドメイン規約 13 / T154)
      */
     public function __construct(
         public int $id,
@@ -31,7 +37,7 @@ final readonly class ManualListItemData
         public string $createdAt,
         public string $updatedAt,
         public ?int $durationMs,
-        public bool $downloadable,
+        public ?int $currentFinishedRenderJobId,
         public bool $deletable,
     ) {}
 
@@ -46,15 +52,13 @@ final readonly class ManualListItemData
         // 最新シナリオと対応しない古い尺なので出さない。
         $durationMs = $isPublished ? $manual->total_length_ms : null;
 
-        // 受け取れる完成動画: download ability × published × 現行世代の succeeded render に
-        // output_path がある。**ストレージ実体の存在確認ではない** (それは download endpoint も
-        // していない。ここは endpoint が 302 を返す条件と同じものを見ているだけ)。
-        // 世代の選び方は CurrentRenderArtifact と同一 (latestSucceededRender の docblock 参照)。
-        $currentRender = $manual->latestSucceededRender;
-        $downloadable = $abilities->canDownload
-            && $isPublished
-            && $currentRender !== null
-            && $currentRender->output_path !== null;
+        // 「どの行か」の選択は **CurrentRenderArtifact ただ 1 箇所**に委ねる (T154)。
+        // 一覧は eager load 済み候補から選ぶ入口を使う (行数に比例したクエリを撃たない)。
+        // ここに残るのは Canonical が持たない責務 = published 判定と ability 判定だけである。
+        // **ストレージ実体の存在確認ではない** (download / playback endpoint もしていない)。
+        $currentFinishedRenderJobId = $abilities->canDownload && $isPublished
+            ? CurrentRenderArtifact::fromLoadedRenderCandidate($manual)?->id
+            : null;
 
         return new self(
             id: $manual->id,
@@ -65,7 +69,7 @@ final readonly class ManualListItemData
             createdAt: $manual->created_at?->format('Y-m-d H:i') ?? '',
             updatedAt: $manual->updated_at?->format('Y-m-d H:i') ?? '',
             durationMs: $durationMs,
-            downloadable: $downloadable,
+            currentFinishedRenderJobId: $currentFinishedRenderJobId,
             deletable: $abilities->canDelete,
         );
     }
@@ -75,7 +79,7 @@ final readonly class ManualListItemData
      *   category: array{id: int, name: string}|null,
      *   creator: array{id: int, name: string}|null,
      *   created_at: string, updated_at: string,
-     *   duration_ms: int|null, downloadable: bool, deletable: bool}
+     *   duration_ms: int|null, current_finished_render_job_id: int|null, deletable: bool}
      */
     public function toArray(): array
     {
@@ -88,7 +92,7 @@ final readonly class ManualListItemData
             'created_at' => $this->createdAt,
             'updated_at' => $this->updatedAt,
             'duration_ms' => $this->durationMs,
-            'downloadable' => $this->downloadable,
+            'current_finished_render_job_id' => $this->currentFinishedRenderJobId,
             'deletable' => $this->deletable,
         ];
     }
