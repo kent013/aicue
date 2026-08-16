@@ -23,6 +23,12 @@ final readonly class CutTakeSummaryData
         public int $takesCount,
         public ?int $adoptedId,
         public ?string $adoptedStatus,
+        /**
+         * 採用テイクのサムネイルが生成済みか。採用テイクが無いときは false。
+         * 生成は非同期なので、録画直後・生成失敗・過去分は false になる。
+         * true のときだけ画像 URL (capture.takes.thumbnail) を張る = 404 を踏まない。
+         */
+        public bool $adoptedHasThumbnail,
     ) {}
 
     /** withCount('takes') + with('adoptedTake') 済みの cut から生成する */
@@ -37,11 +43,15 @@ final readonly class CutTakeSummaryData
             takesCount: $takesCount,
             adoptedId: $adopted?->id,
             adoptedStatus: $adopted?->status->value,
+            // thumbnail_path は takes 表の列なので追加クエリは発生しない。
+            // 採用テイクが無いときは null !== null = false へ落ちる (意味が一致する)
+            adoptedHasThumbnail: $adopted?->thumbnail_path !== null,
         );
     }
 
     /**
-     * @return array{cut_id: int, takes_count: int, adopted: array{id: int, status: string}|null}
+     * @return array{cut_id: int, takes_count: int,
+     *   adopted: array{id: int, status: string, has_thumbnail: bool}|null}
      */
     public function toArray(): array
     {
@@ -51,7 +61,11 @@ final readonly class CutTakeSummaryData
             // id と status は同時に決まる (両方 null か両方非 null)
             'adopted' => $this->adoptedId === null || $this->adoptedStatus === null
                 ? null
-                : ['id' => $this->adoptedId, 'status' => $this->adoptedStatus],
+                : [
+                    'id' => $this->adoptedId,
+                    'status' => $this->adoptedStatus,
+                    'has_thumbnail' => $this->adoptedHasThumbnail,
+                ],
         ];
     }
 }

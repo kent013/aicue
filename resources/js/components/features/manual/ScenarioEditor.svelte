@@ -23,6 +23,8 @@
     import EmptyState from "@/components/molecules/EmptyState.svelte";
     import FormField from "@/components/molecules/FormField.svelte";
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
+    import TakeHoverPreview from "@/components/features/manual/TakeHoverPreview.svelte";
+    import { takeUrl as buildTakeUrl } from "@/lib/capture/take-endpoints";
     import { csrfToken } from "@/lib/csrf";
     import { moveItem } from "@/lib/dnd/list-reorder";
     import { createPointerDrag, type PointerDragState } from "@/lib/dnd/pointer-drag";
@@ -1057,7 +1059,16 @@
 
 {#snippet videoCell(cutId: number | null, testIdSuffix: string)}
     <!-- 動画列 (doc/04)。未保存行はリンクを出さず、押せるのに詰むボタンを作らない。
-         行 Card の中に角丸カードを入れ子にせず、区切り線で段を分ける -->
+         行 Card の中に角丸カードを入れ子にせず、区切り線で段を分ける。
+
+         サムネイルを出すのは**採用テイク 1 件だけ**である (doc/04 の
+         「登録済みテイクはサムネイル表示」に対する意図的な狭め)。動画列の意味は
+         「このカットの成果は何か」であり、候補テイクを見比べるのはテイク選択画面の仕事。
+         未採用テイクの一覧表示は残ギャップとして扱う
+         (devnotes/20260816-1757-take-thumbnail-hover-preview/conceptual-design.md)。
+         has_thumbnail は**描画時点のスナップショット**である。生成は非同期なので、
+         採用直後は false になりうる。その場合は今までどおり要約テキストだけになる
+         (詰まないので、この画面に再取得ポーリングは持ち込まない)。 -->
     <div class="mt-3 border-t border-border pt-3" data-testid={`video-cell-${testIdSuffix}`}>
         <p class="text-caption text-text-secondary">動画</p>
         {#if cutId === null}
@@ -1066,23 +1077,50 @@
             </p>
         {:else}
             {@const summary = summaryByCutId.get(cutId)}
-            <p class="mt-1 flex items-center gap-2 text-caption text-text">
-                <span data-testid="video-cell-count">テイク {summary?.takes_count ?? 0} 件</span>
-                {#if summary?.adopted}
-                    <Badge tone="primary" testId="video-cell-adopted">採用済み</Badge>
+            {@const takesHref = `/projects/${projectId}/manuals/${manualId}/cuts/${cutId}/takes`}
+            {@const adopted = summary?.adopted ?? null}
+            <div class="mt-1 flex items-start gap-2">
+                <!-- サムネイル表示条件 = サーバが 404 を返す状態へ URL を張らないための 3 条件
+                     (採用がある / ready / サムネイル生成済み)。充足判定ではない -->
+                {#if adopted !== null && adopted.status === "ready" && adopted.has_thumbnail}
+                    <TakeHoverPreview
+                        thumbnailUrl={buildTakeUrl(
+                            { projectId, manualId, cutId },
+                            adopted.id,
+                            "/thumbnail",
+                        )}
+                        playbackUrl={buildTakeUrl(
+                            { projectId, manualId, cutId },
+                            adopted.id,
+                            "/playback",
+                        )}
+                        href={takesHref}
+                        label="採用テイクを開く"
+                        testId={`video-cell-preview-${testIdSuffix}`}
+                    />
                 {/if}
-            </p>
-            <div class="mt-2">
-                <Button
-                    variant="neutral"
-                    size="sm"
-                    href={`/projects/${projectId}/manuals/${manualId}/cuts/${cutId}/takes`}
-                    inertia
-                    testId="video-cell-link"
-                >
-                    <Film class="size-4" aria-hidden="true" />
-                    {summary && summary.takes_count > 0 ? "テイクを選択" : "ファイルの選択"}
-                </Button>
+                <div class="min-w-0 flex-1">
+                    <p class="flex items-center gap-2 text-caption text-text">
+                        <span data-testid="video-cell-count">
+                            テイク {summary?.takes_count ?? 0} 件
+                        </span>
+                        {#if adopted !== null}
+                            <Badge tone="primary" testId="video-cell-adopted">採用済み</Badge>
+                        {/if}
+                    </p>
+                    <div class="mt-2">
+                        <Button
+                            variant="neutral"
+                            size="sm"
+                            href={takesHref}
+                            inertia
+                            testId="video-cell-link"
+                        >
+                            <Film class="size-4" aria-hidden="true" />
+                            {summary && summary.takes_count > 0 ? "テイクを選択" : "ファイルの選択"}
+                        </Button>
+                    </div>
+                </div>
             </div>
         {/if}
     </div>
