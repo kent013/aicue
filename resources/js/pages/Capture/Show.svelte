@@ -23,8 +23,9 @@
         prefersReducedMotion,
     } from "@/lib/capture/panel-navigation";
     import { createIdbPendingStore } from "@/lib/capture/idb";
+    import { ThumbnailRefreshScheduler } from "@/lib/capture/thumbnail-refresh";
     import { generateClientTakeId, UploadQueue } from "@/lib/capture/upload-queue";
-    import type { PendingStore } from "@/lib/capture/upload-queue";
+    import type { PendingStore, UploadOutcome } from "@/lib/capture/upload-queue";
     import type { SharedProps } from "@/lib/shared-props";
     import type { CaptureManualDetail } from "@/types/capture";
 
@@ -86,9 +87,37 @@
         quotaMessage = queue.quotaMessage;
     }
 
-    function reloadManual(): void {
-        router.reload({ only: ["manual"] });
+    /* ---- manual 再取得は single-flight ----
+     * アップロード成功 / キュー再開 / 自動 DL / サムネイル反映の 4 経路が同じ 1 本を通る。
+     * 直列化しないと、古い応答での上書きと監視集合の判定ずれが起きる。 */
+    // ★ in-flight の Promise を**保持して返す**。即解決する Promise を返すと、
+    //   scheduler が「再取得が終わった」と誤認して古い manual のまま次の試行を消費する。
+    let inFlight: Promise<void> | null = null;
+    function reloadManual(): Promise<void> {
+        if (inFlight !== null) return inFlight; // 並行呼び出しには同じ Promise を返す
+        inFlight = new Promise<void>((resolve) => {
+            router.reload({
+                only: ["manual"],
+                // onFinish は成功・失敗・キャンセルのいずれでも呼ばれる契約に依存している
+                onFinish: () => {
+                    inFlight = null;
+                    resolve();
+                },
+            });
+        });
+
+        return inFlight;
     }
+
+    /* ---- サムネイル生成の有界な反映 (T183) ----
+     * この端末がこのセッションで登録したテイクだけを監視し、生成完了で画像へ差し替える。
+     * 停止条件・有界性の単位は lib/capture/thumbnail-refresh.ts の docblock が正本。 */
+    const thumbnails = new ThumbnailRefreshScheduler(reloadManual);
+
+    // reload 後の最新 manual だけで監視集合を更新する
+    $effect(() => {
+        thumbnails.sync(manual);
+    });
 
     /* ---- 撮影パネルへの視点/フォーカス移送 (F-1-03) ----
      * 1 カラム表示ではシナリオ一覧の下に撮影パネルが縦積みされるため、カットをタップしても
@@ -155,7 +184,8 @@
                 capturedAt: new Date().toISOString(),
             });
             if (outcome.status === "uploaded") {
-                reloadManual();
+                thumbnails.watch(outcome.clientTakeId); // この端末が登録したテイクだけを監視する
+                void reloadManual();
             }
         } finally {
             uploading = false;
@@ -168,15 +198,25 @@
     // reload 後は downloaded=true で対象が空になるため再 DL は起きない (冪等)。
     async function runAutoDownload(): Promise<void> {
         const { changed } = await autoDownloader.run(manual);
-        if (changed) reloadManual();
+        if (changed) void reloadManual();
     }
 
     async function resumeUploads(): Promise<void> {
         uploading = true;
         try {
             const outcomes = await queue.resume();
-            if (outcomes.some((outcome) => outcome.status === "uploaded")) {
-                reloadManual();
+            // ★ キュー経由は**複数件**が一度に確定しうる。uploaded を 1 件も watch しないと、
+            //   最初の reload 時点で未生成だったテイクは以後まったく反映されない
+            //   (= オフライン撮影の主経路が取り残される)。
+            const uploaded = outcomes.filter(
+                (outcome): outcome is Extract<UploadOutcome, { status: "uploaded" }> =>
+                    outcome.status === "uploaded",
+            );
+            for (const outcome of uploaded) {
+                thumbnails.watch(outcome.clientTakeId);
+            }
+            if (uploaded.length > 0) {
+                void reloadManual(); // 件数によらず 1 回だけ (single-flight とも整合する)
             }
         } finally {
             uploading = false;
@@ -203,11 +243,18 @@
             if ("serviceWorker" in navigator) {
                 navigator.serviceWorker.removeEventListener("message", handleSwMessage);
             }
+            thumbnails.stop(); // unmount 後に再取得が走らないようにする
         };
     });
 
     function handleVisibility(): void {
-        if (document.visibilityState === "visible") void resumeUploads();
+        // 非表示の間は再取得を止める (停止条件の 1 つ)。復帰でキュー再開と一緒に再開する
+        if (document.visibilityState !== "visible") {
+            thumbnails.pause();
+            return;
+        }
+        thumbnails.resume();
+        void resumeUploads();
     }
 
     function handleOnline(): void {

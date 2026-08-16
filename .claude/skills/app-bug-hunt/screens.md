@@ -6,7 +6,7 @@
 > 抽出条件: 開発環境 (local) またはテスト実行中に登録される route 集合。
 > ドリフト検査: `scripts/bug-hunt-inventory-check.sh` (exit 3 = ドリフト)。
 
-bug-hunt カバレッジの分母となる「画面」(GET × web セッション面) の一覧。全 68 件 (うち対象外 13 件)。
+bug-hunt カバレッジの分母となる「画面」(GET × web セッション面) の一覧。全 69 件 (うち対象外 13 件)。
 
 ## GET × web 一覧 (画面 + 画面に付随する JSON GET)
 
@@ -20,6 +20,7 @@ bug-hunt カバレッジの分母となる「画面」(GET × web セッショ�
 | app/projects/{project}/manuals | capture.manuals.index | 画面 | 撮影するマニュアルを選ぶ | S3 | 通常 |
 | app/projects/{project}/manuals/{manual} | capture.manuals.show | 画面 | - | S3 | 通常 |
 | app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take}/playback | capture.takes.playback | 画面 | - | S3 | 通常 |
+| app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take}/thumbnail | capture.takes.thumbnail | 画面 | - | S3 | 通常 |
 | contact | contact | 画面 | お問い合わせ | S1 | 通常 |
 | contact/thanks | contact.thanks | 画面 | お問い合わせ完了 | S1 | 通常 |
 | dashboard | dashboard | 画面 | ダッシュボード | S1 | 通常 |

@@ -21,7 +21,8 @@ final class CaptureTakeResource extends JsonResource
     /**
      * @return array{id: int, client_take_id: string, status: string, size_bytes: int,
      *   duration_ms: int|null, comment: string|null, captured_at: string|null, sort_order: int,
-     *   downloaded: bool, playback_url: string|null, download_ack_token: string|null}
+     *   downloaded: bool, has_thumbnail: bool, playback_url: string|null,
+     *   download_ack_token: string|null}
      */
     public function toArray(Request $request): array
     {

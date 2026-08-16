@@ -28,6 +28,7 @@ class TakeFactory extends Factory
             'client_take_id' => (string) Str::ulid(),
             'video_path' => 'takes/'.fake()->uuid().'.mp4',
             'thumbnail_path' => null,
+            'thumbnail_size_bytes' => null,
             'size_bytes' => fake()->numberBetween(100_000, 50_000_000),
             'duration_ms' => fake()->numberBetween(1_000, 60_000),
             'status' => TakeStatus::Ready->value,
@@ -41,6 +42,15 @@ class TakeFactory extends Factory
     public function forCut(Cut $cut): static
     {
         return $this->state(fn () => ['cut_id' => $cut->id]);
+    }
+
+    /** サムネイル生成済み (容量集計・一覧表示のテスト用) */
+    public function withThumbnail(int $sizeBytes = 40_000): static
+    {
+        return $this->state(fn (): array => [
+            'thumbnail_path' => 'takes/thumbnails/'.fake()->uuid().'.jpg',
+            'thumbnail_size_bytes' => $sizeBytes,
+        ]);
     }
 
     /** DL 済み ACK 打刻済み (削除不可) の状態 (概念設計 D6) */

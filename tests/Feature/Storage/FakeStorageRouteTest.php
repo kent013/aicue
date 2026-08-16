@@ -128,6 +128,30 @@ test('temporaryPlaybackUrl の signed GET が bytes を返し Range に応答す
     expect($partial->streamedContent())->toBe(substr($body, 0, 4));
 });
 
+test('fake の upload はサムネイルの sidecar content_type を書き temporaryThumbnailUrl の GET が image/jpeg を返す', function (): void {
+    unsetRealS3Region();
+    $key = 'projects/1/manuals/2/cuts/3/takes/thumbnails/9.jpg';
+    $local = tempnam(sys_get_temp_dir(), 'fake-thumb');
+    assert(is_string($local));
+    file_put_contents($local, 'jpeg-bytes');
+
+    fakeTakeStorage()->upload($local, $key, 'image/jpeg');
+
+    $response = test()->get(fakeTakeStorage()->temporaryThumbnailUrl($key));
+    $response->assertOk();
+    $response->assertHeader('Content-Type', 'image/jpeg');
+    expect($response->streamedContent())->toBe('jpeg-bytes');
+
+    // 生成物をローカルへ戻せる (サムネイル生成の入力取得と同じ経路)
+    $back = tempnam(sys_get_temp_dir(), 'fake-thumb-back');
+    assert(is_string($back));
+    fakeTakeStorage()->downloadToLocal($key, $back);
+    expect(file_get_contents($back))->toBe('jpeg-bytes');
+
+    unlink($local);
+    unlink($back);
+});
+
 test('未登録 object の GET は 404 (sidecar 欠損=未完了も 404)', function (): void {
     $getUrl = fakeTakeStorage()->temporaryPlaybackUrl('projects/1/manuals/2/cuts/3/takes/MISSING.mp4');
     test()->get($getUrl)->assertNotFound();

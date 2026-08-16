@@ -20,6 +20,7 @@ function makeTake(overrides: Partial<CaptureTake> = {}): CaptureTake {
         captured_at: null,
         sort_order: 0,
         downloaded: false,
+        has_thumbnail: false,
         playback_url: null,
         download_ack_token: null,
         ...overrides,

@@ -11,6 +11,7 @@ use App\Enums\Capture\CaptureConflictType;
 use App\Enums\Capture\TakeUploadReservationStatus;
 use App\Enums\Manual\TakeStatus;
 use App\Exceptions\Capture\CaptureConflictException;
+use App\Jobs\Capture\GenerateTakeThumbnailJob;
 use App\Models\Cut;
 use App\Models\Project;
 use App\Models\Take;
@@ -31,6 +32,7 @@ use Illuminate\Validation\ValidationException;
  * 4. 予約 claim (pending → verifying の原子的 UPDATE。cron と競合しない)
  * 5. HeadObject 三点照合 (size / content_type / ChecksumSHA256)
  * 6. tx: VideoManual 行ロック → sibling shift + Take insert (先頭) + 予約 completed (CAS)
+ *    + サムネイル生成ジョブの投入 (同一 tx 内。ドメイン固有規約 11)
  */
 class TakeRegistrationService
 {
@@ -167,6 +169,12 @@ class TakeRegistrationService
                 'captured_at' => $input->capturedAt,
             ]);
             $take->forceFill(['status' => TakeStatus::Ready, 'sort_order' => 0])->save();
+
+            // サムネイル生成の投入を**同一 tx 内**で行う (AGENTS.md ドメイン固有規約 11。
+            // afterCommit に依存しない)。保証するのは「take 行を作ったのに生成 job が投入されない窓」の
+            // 解消だけである (worker 停止 / ffmpeg 失敗 / S3 失敗ではサムネイルは付かない = 誇張しない)。
+            // 冪等再送 (resolveDuplicate) では投入しない — 既存テイクは登録時に投入済みである。
+            GenerateTakeThumbnailJob::dispatch($take->id); // media queue へ
 
             return TakeRegistrationResult::created($take);
         });

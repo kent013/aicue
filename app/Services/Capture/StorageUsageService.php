@@ -9,6 +9,7 @@ use App\Models\Organization;
 use App\Models\Take;
 use App\Models\TakeUploadReservation;
 use Illuminate\Contracts\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 
 /**
  * 容量 Quota の使用量集計 (doc/10 §10.8-4 の真実源)。
@@ -37,16 +38,41 @@ class StorageUsageService
         return $used > PHP_INT_MAX - $pending ? PHP_INT_MAX : $used + $pending;
     }
 
-    /** takes.size_bytes の org 合計 (takes→cuts→video_manuals→projects→custom_teams join) */
+    /**
+     * 動画本文 + サムネイルの org 合計 (takes→cuts→video_manuals→projects→custom_teams join)。
+     *
+     * ★ **サムネイルは予約 (take_upload_reservations) を経ない事後計上**である。
+     *   上限の強制点は presigned URL 発行時 (TakeUploadService::issue) のままで、
+     *   サムネイル生成が上限を跨ぐことはありうる (受容。超過表示は QuotaStatusDto が既に持つ)。
+     * ★ 合成を SQL 式でなく PHP 側で行うのは、`(int) …->sum('列名')` という
+     *   **既に PHPStan level 10 を通っている形**から外れないため
+     *   (生の式を sum() へ渡す形は新しい型の不確実性を持ち込む)。
+     * ★ overflow は occupiedBytes() と同じく上限側へ丸める。
+     */
     public function bytesUsed(Organization $organization): int
     {
-        return (int) Take::query()
+        $video = (int) $this->takesForOrganization($organization)->sum('takes.size_bytes');
+        $thumbnails = (int) $this->takesForOrganization($organization)->sum('takes.thumbnail_size_bytes');
+
+        return $video > PHP_INT_MAX - $thumbnails ? PHP_INT_MAX : $video + $thumbnails;
+    }
+
+    /**
+     * org 配下の takes を引く builder。
+     *
+     * ★ **呼び出しごとに新しい Builder を返す** (同一インスタンスを 2 回の集計で使い回すと
+     *   1 本目の集計が builder を汚し、2 本目の結果が変わる)。
+     *
+     * @return EloquentBuilder<Take>
+     */
+    private function takesForOrganization(Organization $organization): EloquentBuilder
+    {
+        return Take::query()
             ->join('cuts', 'cuts.id', '=', 'takes.cut_id')
             ->join('video_manuals', 'video_manuals.id', '=', 'cuts.video_manual_id')
             ->join('projects', 'projects.id', '=', 'video_manuals.project_id')
             ->join('custom_teams', 'custom_teams.id', '=', 'projects.custom_team_id')
-            ->where('custom_teams.organization_id', $organization->id)
-            ->sum('takes.size_bytes');
+            ->where('custom_teams.organization_id', $organization->id);
     }
 
     /**

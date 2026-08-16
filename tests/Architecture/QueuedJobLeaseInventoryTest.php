@@ -9,6 +9,7 @@ use App\Jobs\Billing\ReuseSubscriptionPaymentMethodJob;
 use App\Jobs\Billing\SetDefaultPaymentMethodJob;
 use App\Jobs\Billing\SyncBillingCustomerDetails;
 use App\Jobs\Capture\DeleteTakeObjectsJob;
+use App\Jobs\Capture\GenerateTakeThumbnailJob;
 use App\Jobs\Manual\DeleteRenderOutputsJob;
 use App\Jobs\Manual\RunManualAnalysis;
 use App\Jobs\Manual\RunManualRender;
@@ -65,6 +66,7 @@ const QUEUED_JOB_LEASE_INVENTORY = [
     SetDefaultPaymentMethodJob::class => null,
     SyncBillingCustomerDetails::class => null,
     DeleteTakeObjectsJob::class => 'database-media',
+    GenerateTakeThumbnailJob::class => 'database-media',
     DeleteRenderOutputsJob::class => 'database-media',
     RunManualAnalysis::class => 'database-analysis',
     RunManualRender::class => 'database-render',

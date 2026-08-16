@@ -7,6 +7,7 @@ use App\DataTransferObjects\Capture\UploadTicketClaims;
 use App\Enums\Capture\TakeUploadReservationStatus;
 use App\Enums\Manual\TakeStatus;
 use App\Enums\ProjectRole;
+use App\Jobs\Capture\GenerateTakeThumbnailJob;
 use App\Models\Cut;
 use App\Models\Organization;
 use App\Models\Project;
@@ -18,6 +19,7 @@ use App\Services\Capture\StorageUsageService;
 use App\Services\Capture\TakeObjectStorage;
 use App\Services\Capture\UploadTicketCodec;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Mockery\MockInterface;
 
@@ -420,4 +422,76 @@ test('claim 中 (verifying) の予約は bytesPending に計上され続け並�
 
     $response->assertStatus(422);
     $response->assertJsonPath('code', 'quota_exceeded');
+});
+
+/*
+|--------------------------------------------------------------------------
+| サムネイル生成ジョブの投入 (T183 / S5)
+|--------------------------------------------------------------------------
+|
+| 投入するのは新規登録のときだけである (冪等再送では既に投入済み)。
+| 「業務 tx の内側で投入される」ことは TakeThumbnailQueueAtomicityTest が固定する
+| (Queue::fake では原子性を検証できない = AGENTS.md ドメイン固有規約 11)。
+*/
+
+test('新規登録は GenerateTakeThumbnailJob をちょうど 1 件投入する (payload は take id)', function (): void {
+    Queue::fake();
+    [, $owner, $project, $manual, $cut] = registrationContext();
+    [$reservation, $ticket] = reservationWithTicket($cut);
+    mockHeadObjectMatching($reservation);
+
+    $this->actingAs($owner)
+        ->postJson(takesPath($project, $manual, $cut), takesPayload($reservation, $ticket))
+        ->assertCreated();
+
+    $take = $cut->takes()->where('client_take_id', $reservation->client_take_id)->sole();
+    Queue::assertPushed(GenerateTakeThumbnailJob::class, 1);
+    Queue::assertPushed(
+        GenerateTakeThumbnailJob::class,
+        fn (GenerateTakeThumbnailJob $job): bool => $job->takeId === $take->id,
+    );
+});
+
+test('冪等再送 (200 既存返却) では生成ジョブを 1 件も投入しない', function (): void {
+    Queue::fake();
+    [, $owner, $project, $manual, $cut] = registrationContext();
+    [$reservation, $ticket] = reservationWithTicket($cut);
+    $reservation->forceFill(['status' => TakeUploadReservationStatus::Completed])->save();
+    Take::factory()->forCut($cut)->create([
+        'client_take_id' => $reservation->client_take_id,
+        'video_path' => $reservation->video_path,
+    ]);
+    $mock = Mockery::mock(TakeObjectStorage::class);
+    $mock->shouldNotReceive('delete');
+    app()->instance(TakeObjectStorage::class, $mock);
+
+    $this->actingAs($owner)
+        ->postJson(takesPath($project, $manual, $cut), takesPayload($reservation, $ticket))
+        ->assertOk();
+
+    Queue::assertNotPushed(GenerateTakeThumbnailJob::class);
+});
+
+test('確定 CAS に負けた登録 (422) では生成ジョブを投入しない', function (): void {
+    Queue::fake();
+    [, $owner, $project, $manual, $cut] = registrationContext();
+    [$reservation, $ticket] = reservationWithTicket($cut);
+    $mock = Mockery::mock(TakeObjectStorage::class);
+    $mock->shouldReceive('headObject')->andReturnUsing(function () use ($reservation): ObjectMetadataData {
+        TakeUploadReservation::query()->whereKey($reservation->id)
+            ->update(['status' => TakeUploadReservationStatus::Released]);
+
+        return new ObjectMetadataData(
+            contentLength: $reservation->size_bytes,
+            contentType: $reservation->content_type,
+            checksumSha256: $reservation->checksum_sha256,
+        );
+    });
+    app()->instance(TakeObjectStorage::class, $mock);
+
+    $this->actingAs($owner)
+        ->postJson(takesPath($project, $manual, $cut), takesPayload($reservation, $ticket))
+        ->assertStatus(422);
+
+    Queue::assertNotPushed(GenerateTakeThumbnailJob::class);
 });

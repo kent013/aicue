@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\DataTransferObjects\Capture;
 
+use App\Enums\Manual\TakeStatus;
 use App\Models\Take;
 
 /**
@@ -29,7 +30,8 @@ final readonly class CaptureTakeData
     /**
      * @return array{id: int, client_take_id: string, status: string, size_bytes: int,
      *   duration_ms: int|null, comment: string|null, captured_at: string|null, sort_order: int,
-     *   downloaded: bool, playback_url: string|null, download_ack_token: string|null}
+     *   downloaded: bool, has_thumbnail: bool, playback_url: string|null,
+     *   download_ack_token: string|null}
      */
     public function toArray(): array
     {
@@ -43,6 +45,13 @@ final readonly class CaptureTakeData
             'captured_at' => $this->take->captured_at?->toIso8601String(),
             'sort_order' => $this->take->sort_order,
             'downloaded' => $this->take->downloaded_at !== null,
+            // サムネイルの**有無だけ**を出す (パスも署名 URL も出さない)。UI はこの 1 つで
+            // <img> とプレースホルダを出し分け、未生成テイクへ 404 のリクエストを出さない。
+            // ★ 述語は **GET .../thumbnail が 302 を返す条件と 1 対 1** にする
+            //   (ready でないテイクで true を返すと、必ず 404 になる <img> を描画してしまう)。
+            //   T154 の「秘匿境界は props 側」「props と endpoint は 1 対 1」と同じ作法
+            'has_thumbnail' => $this->take->status === TakeStatus::Ready
+                && $this->take->thumbnail_path !== null,
             'playback_url' => $this->playbackUrl,
             'download_ack_token' => $this->downloadAckToken,
         ];

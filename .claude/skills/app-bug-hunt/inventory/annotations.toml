@@ -96,6 +96,11 @@ kubun = "通常"
 story = "S3"
 kubun = "通常"
 
+[routes."capture.takes.thumbnail"]
+kind = "画面"
+story = "S3"
+kubun = "通常"
+
 [routes."capture.takes.update"]
 story = "S3"
 kubun = "通常"

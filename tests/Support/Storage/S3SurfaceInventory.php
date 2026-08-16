@@ -41,6 +41,18 @@ final class S3SurfaceInventory
                     'surface' => S3OperationSurface::NoObjectRequest,
                     'rationale' => '署名 URL の文字列生成のみでオブジェクト API をまったく送らない',
                 ],
+                'downloadToLocal' => [
+                    'surface' => S3OperationSurface::Bulk,
+                    'rationale' => '本文転送であり所要時間がオブジェクトサイズに比例して伸びるサムネイル生成専用の取得',
+                ],
+                'upload' => [
+                    'surface' => S3OperationSurface::Bulk,
+                    'rationale' => '本文転送でありサムネイル生成ジョブ専用の PUT で web 同期経路からは呼ばない',
+                ],
+                'temporaryThumbnailUrl' => [
+                    'surface' => S3OperationSurface::NoObjectRequest,
+                    'rationale' => '署名 URL の文字列生成のみでオブジェクト API をまったく送らない',
+                ],
                 'delete' => [
                     'surface' => S3OperationSurface::Bulk,
                     'rationale' => 'Flysystem 経由で per-command option を注入できない掃除ジョブ専用の操作',

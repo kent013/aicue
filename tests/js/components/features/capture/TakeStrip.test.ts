@@ -22,6 +22,7 @@ function makeTake(overrides: Partial<CaptureTake> = {}): CaptureTake {
         captured_at: null,
         sort_order: 0,
         downloaded: false,
+        has_thumbnail: false,
         playback_url: null,
         download_ack_token: null,
         ...overrides,
@@ -356,5 +357,56 @@ describe("mobile 375px レイアウト構造 (F-1-05)", () => {
         const label = within(screen.getByTestId("take-label-10"));
         expect(label.queryByTestId("take-adopted-10")).not.toBeInTheDocument();
         expect(label.queryByText("DL 済み")).not.toBeInTheDocument();
+    });
+});
+
+describe("サムネイル表示 (T183)", () => {
+    it("has_thumbnail=false ではプレースホルダを出し <img> を描画しない (404 を出さない)", () => {
+        render(TakeStrip, {
+            projectId: 1,
+            manualId: 2,
+            cut: makeCut([makeTake({ has_thumbnail: false })]),
+            onChanged: vi.fn(),
+        });
+
+        expect(screen.getByTestId("take-thumbnail-placeholder-10")).toBeInTheDocument();
+        expect(screen.queryByTestId("take-thumbnail-10")).not.toBeInTheDocument();
+    });
+
+    it("has_thumbnail=true では配信 endpoint を src に持つ <img> を描画する", () => {
+        render(TakeStrip, {
+            projectId: 1,
+            manualId: 2,
+            cut: makeCut([makeTake({ has_thumbnail: true })]),
+            onChanged: vi.fn(),
+        });
+
+        const img = screen.getByTestId("take-thumbnail-10");
+        expect(img.getAttribute("src")).toBe(
+            "/app/projects/1/manuals/2/cuts/3/takes/10/thumbnail",
+        );
+        // 行に「テイク N」の見出しがあるため画像は装飾 (alt="")
+        expect(img.getAttribute("alt")).toBe("");
+        expect(screen.queryByTestId("take-thumbnail-placeholder-10")).not.toBeInTheDocument();
+    });
+
+    it("false → true への props 更新で同じ take の枠が画像へ置き換わる", async () => {
+        const { rerender } = render(TakeStrip, {
+            projectId: 1,
+            manualId: 2,
+            cut: makeCut([makeTake({ has_thumbnail: false })]),
+            onChanged: vi.fn(),
+        });
+        expect(screen.getByTestId("take-thumbnail-placeholder-10")).toBeInTheDocument();
+
+        await rerender({
+            projectId: 1,
+            manualId: 2,
+            cut: makeCut([makeTake({ has_thumbnail: true })]),
+            onChanged: vi.fn(),
+        });
+
+        expect(screen.getByTestId("take-thumbnail-10")).toBeInTheDocument();
+        expect(screen.queryByTestId("take-thumbnail-placeholder-10")).not.toBeInTheDocument();
     });
 });

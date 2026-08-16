@@ -20,12 +20,15 @@ use Illuminate\Support\Carbon;
  * - sort_order はテイク登録 Service が採番するため $fillable 外
  * - downloaded_at はサーバ打刻 (POST .../downloaded の ACK トークン検証経由のみ) のため
  *   $fillable 外。非 null は削除不可 (概念設計 D6)
+ * - thumbnail_path / thumbnail_size_bytes は**サーバ生成の会計値**のため $fillable 外。
+ *   書き込みは TakeThumbnailPipeline の条件付き UPDATE (query builder) だけである
  *
  * @property int $id
  * @property int $cut_id
  * @property string $client_take_id
  * @property string $video_path
  * @property string|null $thumbnail_path
+ * @property int|null $thumbnail_size_bytes
  * @property int $size_bytes
  * @property int|null $duration_ms
  * @property TakeStatus $status
@@ -43,7 +46,6 @@ class Take extends Model
     protected $fillable = [
         'client_take_id',
         'video_path',
-        'thumbnail_path',
         'size_bytes',
         'duration_ms',
         'comment',
@@ -59,6 +61,10 @@ class Take extends Model
             'status' => TakeStatus::class,
             'captured_at' => 'datetime',
             'downloaded_at' => 'datetime',
+            // 読み取り型を driver 依存にしない (DTO / Resource / PHPStan が int|null で安定する)。
+            // size_bytes 側には cast を足さない — 既存の比較箇所への影響を本タスクへ持ち込まないため。
+            // 非対称は意図的である
+            'thumbnail_size_bytes' => 'integer',
         ];
     }
 

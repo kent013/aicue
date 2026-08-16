@@ -105,3 +105,54 @@ test('occupiedBytes は pending → used の順で読む (finalize 競合時に�
 
     expect($service->readOrder)->toBe(['pending', 'used']);
 });
+
+/*
+|--------------------------------------------------------------------------
+| サムネイル容量の事後計上 (T183 / S1)
+|--------------------------------------------------------------------------
+|
+| サムネイルは予約 (take_upload_reservations) を経ない事後計上であり、
+| bytes_used 側にだけ現れる (bytes_pending には対応物を持たない)。
+*/
+
+test('bytesUsed は thumbnail_size_bytes を加算する', function (): void {
+    [$organization, , , , $cut] = storageUsageContext();
+    Take::factory()->forCut($cut)->withThumbnail(40_000)->create(['size_bytes' => 1_000]);
+
+    expect(app(StorageUsageService::class)->bytesUsed($organization))->toBe(41_000);
+});
+
+test('thumbnail_size_bytes が NULL のテイクは 0 として数える (既存行の回帰)', function (): void {
+    [$organization, , , , $cut] = storageUsageContext();
+    $take = Take::factory()->forCut($cut)->create(['size_bytes' => 1_000]);
+    expect($take->thumbnail_size_bytes)->toBeNull();
+
+    expect(app(StorageUsageService::class)->bytesUsed($organization))->toBe(1_000);
+});
+
+test('bytesUsed を 2 回呼んでも同じ値になる (集計ごとに独立した builder を使う)', function (): void {
+    [$organization, , , , $cut] = storageUsageContext();
+    Take::factory()->forCut($cut)->withThumbnail(2_000)->create(['size_bytes' => 5_000]);
+
+    $service = app(StorageUsageService::class);
+    expect($service->bytesUsed($organization))->toBe(7_000);
+    expect($service->bytesUsed($organization))->toBe(7_000);
+});
+
+test('他組織のサムネイルは加算されない (join 条件の回帰)', function (): void {
+    [$organization, , , , $cut] = storageUsageContext();
+    Take::factory()->forCut($cut)->withThumbnail(1_000)->create(['size_bytes' => 2_000]);
+
+    [, , , , $otherCut] = storageUsageContext();
+    Take::factory()->forCut($otherCut)->withThumbnail(500_000)->create(['size_bytes' => 900_000]);
+
+    expect(app(StorageUsageService::class)->bytesUsed($organization))->toBe(3_000);
+});
+
+test('occupiedBytes はサムネイル分を含んだ bytes_used と bytes_pending の和になる', function (): void {
+    [$organization, , , , $cut] = storageUsageContext();
+    Take::factory()->forCut($cut)->withThumbnail(300)->create(['size_bytes' => 1_000]);
+    TakeUploadReservation::factory()->forCut($cut)->create(['size_bytes' => 700]);
+
+    expect(app(StorageUsageService::class)->occupiedBytes($organization))->toBe(2_000);
+});
