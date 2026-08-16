@@ -61,6 +61,13 @@ class CaptureManualController extends Controller
         $search = $request->filled('q') ? $request->string('q')->value() : null;
         $mine = $request->boolean('mine'); // "1"/"true" を bool 正規化
 
+        // 代表サムネイルの可視性は **project 単位に 1 回**だけ決める (行ごとに評価しない)。
+        // 一覧の閲覧は組織メンバーなら可 (view) だが、サムネイル endpoint は
+        // ProjectPolicy::capture (project メンバー以上) を要求する。この差を props 側で吸収し、
+        // 撮れない利用者には 403 になる <img> を 1 つも描かせない (秘匿境界は props 側)。
+        // Gate::allows は例外を投げないため、撮れない利用者の一覧表示は現状どおり成功する。
+        $canViewCover = Gate::allows('capture', $project);
+
         $manuals = $project->manuals()
             ->whereIn('status', [VideoManualStatus::Ready, VideoManualStatus::Published])
             ->when($categoryId !== null, fn (Builder $query) => $query->where('category_id', $categoryId))
@@ -72,6 +79,10 @@ class CaptureManualController extends Controller
             // 自作フィルタ: 自ユーザー id のみ (payload 非受領 = tenant/actor キー不信)
             ->when($mine, fn (Builder $query) => $query->where('created_by', $userId))
             ->with(['category', 'creator'])
+            // 代表サムネイル: 候補カットと**その採用テイクまで**入れ子で eager load する。
+            // adoptedTake を載せ忘れると AdoptedReadyTakeCoverage::readyTakeId() が
+            // 行ごとに lazy load して N+1 になる。見せない利用者には積まない。
+            ->when($canViewCover, fn (Builder $query) => $query->with(['coverCut.adoptedTake']))
             ->withCount([
                 'cuts',
                 // 採用済み cut 数 (relation 経由 = 'adopted_take_id' リテラルを撮影経路に増やさない)
@@ -80,7 +91,7 @@ class CaptureManualController extends Controller
             ])
             ->orderByDesc('updated_at')
             ->get()
-            ->map(static fn (VideoManual $manual): array => CaptureManualSummaryData::fromManual($manual)->toArray())
+            ->map(static fn (VideoManual $manual): array => CaptureManualSummaryData::fromManual($manual, $canViewCover)->toArray())
             ->all();
 
         return Inertia::render('Capture/Index', [

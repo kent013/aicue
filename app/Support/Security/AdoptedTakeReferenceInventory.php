@@ -75,10 +75,19 @@ final class AdoptedTakeReferenceInventory
                     .'eager load を張るだけで、判定も読み取りも持たない。値の取り出しは'
                     .'CutTakeSummaryData 側にあり、そちらが別基準として登録済みである。',
             ],
+            'Models/VideoManual.php' => [
+                'kind' => AdoptedTakeReferenceKind::DifferentCriterion,
+                'rationale' => 'coverCut() が一覧カードの代表サムネイル候補を絞る条件として'
+                    .'whereHas(adoptedTake, thumbnail_path 非 null) を持つ。'
+                    .'見るのはサムネイルの生成有無だけで ready 状態は見ない別基準であり、'
+                    .'採用済み ready テイクの充足判定 (AdoptedReadyTakeCoverage) とは意図的に統合しない。',
+            ],
             'Http/Controllers/Capture/CaptureManualController.php' => [
                 'kind' => AdoptedTakeReferenceKind::DifferentCriterion,
                 'rationale' => 'whereHas(adoptedTake) による採用済みカット数の集計。'
-                    .'ready を見ない別基準であり、レンダの充足判定とは意図的に統合しない。',
+                    .'ready を見ない別基準であり、レンダの充足判定とは意図的に統合しない。'
+                    .'代表サムネイルの eager load (coverCut.adoptedTake) も同ファイルに並ぶが、'
+                    .'こちらは N+1 を防ぐ構造上の指定で判定を持たない。',
             ],
             'Services/Dashboard/DashboardService.php' => [
                 'kind' => AdoptedTakeReferenceKind::DifferentCriterion,

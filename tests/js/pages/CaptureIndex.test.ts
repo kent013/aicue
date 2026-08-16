@@ -20,6 +20,7 @@ function makeSummary(overrides: Partial<CaptureManualSummary> = {}): CaptureManu
         cuts_with_takes: 2,
         updated_at: "2026-07-11T09:00:00+09:00",
         creator_name: "編集 花子",
+        cover: null,
         ...overrides,
     };
 }
@@ -94,5 +95,30 @@ describe("Capture/Index 自作フィルタ・作成者表示", () => {
         });
 
         expect((screen.getByTestId("capture-mine") as HTMLInputElement).checked).toBe(true);
+    });
+
+    /*
+     * T198: 代表サムネイル。URL は take-endpoints の規則ただ 1 つで組み立てる
+     * (リテラル比較が落ちたら URL 規則の破壊的変更であり、落ちるのが正しい)。
+     */
+    it("cover が非 null なら代表サムネイルの URL を組み立てて描く", () => {
+        render(CaptureIndex, {
+            props: {
+                ...baseProps,
+                manuals: [makeSummary({ cover: { cut_id: 7, take_id: 9 } })],
+            },
+        });
+
+        const element = screen.getByTestId("capture-cover-1");
+        expect(element.dataset.state).toBe("image");
+        expect(element.getAttribute("src")).toBe(
+            "/app/projects/1/manuals/1/cuts/7/takes/9/thumbnail",
+        );
+    });
+
+    it("cover が null ならプレースホルダを描く", () => {
+        render(CaptureIndex, { props: baseProps });
+
+        expect(screen.getByTestId("capture-cover-1").dataset.state).toBe("placeholder");
     });
 });

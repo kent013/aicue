@@ -32,6 +32,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * @property int $scenario_version
  * @property int|null $total_length_ms
  * @property-read RenderJob|null $latestSucceededRender
+ * @property-read Cut|null $coverCut
  */
 class VideoManual extends Model
 {
@@ -139,6 +140,45 @@ class VideoManual extends Model
             function (Builder $query): void {
                 $query->where('kind', RenderKind::Render->value)
                     ->where('status', JobStatus::Succeeded->value);
+            }
+        );
+    }
+
+    /**
+     * 一覧カードの代表サムネイルに使う**候補カット** (撮影 PWA のシナリオ選択画面。doc/05 §5.2)。
+     *
+     * 規則は「**表示順で最初に来る、採用テイクのサムネイルが出来ているカット**」ちょうど 1 件である。
+     * 表示順は `sort_order` 昇順、同値は `id` 昇順 (シナリオ編集・撮影ナビと同じ規則)。
+     *
+     * **この relation は状態 (ready) を判定しない**。判定できる位置に置くと
+     * `adoptedTake` と `TakeStatus::Ready` が同居し、ドメイン固有規約 12 (T148) が閉じた
+     * 「判定式は `AdoptedReadyTakeCoverage` ただ 1 ファイル」という不変条件を壊す。
+     * ここが持つのは「候補の絞り込み条件 (`thumbnail_path` が非 null)」と「順序」だけで、
+     * 「採用済みかつ ready か」の決定は `AdoptedReadyTakeCoverage::readyTakeId()` に残る
+     * (合成は `CaptureManualCoverData` を組む `CaptureManualSummaryData` 側で行う)。
+     *
+     * 一覧が行ごとにカットを走査すると N+1 になるため eager load できる形を用意する
+     * (`CaptureManualListQueryCountTest` がクエリ数の行数非依存を固定する)。
+     * 消費側は `with(['coverCut.adoptedTake'])` の**入れ子まで**張ること —
+     * `adoptedTake` を載せ忘れると `AdoptedReadyTakeCoverage::readyTakeId()` が
+     * 行ごとに lazy load して N+1 が復活する。
+     * 目録登録は `AdoptedTakeReferenceInventory` (区分 DifferentCriterion)。
+     *
+     * @return HasOne<Cut, $this>
+     */
+    public function coverCut(): HasOne
+    {
+        return $this->hasOne(Cut::class)->ofMany(
+            ['sort_order' => 'min', 'id' => 'min'],
+            /** @param Builder<Cut> $query */
+            function (Builder $query): void {
+                $query->whereHas(
+                    'adoptedTake',
+                    /** @param Builder<Take> $take */
+                    function (Builder $take): void {
+                        $take->whereNotNull('thumbnail_path');
+                    }
+                );
             }
         );
     }
