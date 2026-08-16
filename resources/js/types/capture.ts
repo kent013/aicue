@@ -34,6 +34,12 @@ export interface CaptureCut {
     subtitle_primary: string | null;
     subtitle_secondary: string;
     adopted_take_id: number | null;
+    /**
+     * 通し再生が再生するテイクの id (サーバが `AdoptedReadyTakeCoverage` で決めた値)。
+     * null = そのカットはプレースホルダになる。**クライアントでこの判定を組み立て直さない**
+     * (`adopted_take_id` と take.status から導出するコードを書かない = T148)。
+     */
+    adopted_ready_take_id: number | null;
     takes: CaptureTake[];
 }
 

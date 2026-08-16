@@ -45,6 +45,7 @@ function makeManual(takes: CaptureTake[]): CaptureManualDetail {
                 subtitle_primary: null,
                 subtitle_secondary: "準備",
                 adopted_take_id: null,
+                adopted_ready_take_id: null,
                 takes,
             },
         ],

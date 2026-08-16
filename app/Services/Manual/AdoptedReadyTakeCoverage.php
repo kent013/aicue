@@ -23,21 +23,43 @@ use App\Models\VideoManual;
 final class AdoptedReadyTakeCoverage
 {
     /**
+     * 「使用できる採用テイク」の **id** (無ければ null)。**この式が唯一の実体**である。
+     *
+     * `isMissing()` は本メソッドの上に載る (bool しか返さない述語のままだと、id が要る側が
+     * `adopted_take_id` と `TakeStatus::Ready` を組み直すことになり、T148 が閉じた二重化が
+     * そのまま復活する)。撮影 PWA の通し再生はこの id を props 経由で受け取り、
+     * TypeScript 側で述語を再実装しない。
+     *
+     * 前提 ($cut の adoptedTake の鮮度。3 段で読むこと):
+     *   1. **一覧の直列化では eager load 必須** (`with('adoptedTake')`)。無いと N+1 になる
+     *      (CutSequencer::orderedWithLabels / CaptureManualDetailData::fromManual が張っている)。
+     *   2. **単一 Cut の直列化では lazy load を許容する** — relation 未ロードで、かつ最新の
+     *      `adopted_take_id` を持つインスタンスなら結果は同じである (adopt 応答の経路)。
+     *   3. **古い relation cache を持つインスタンスは不可**。ロード後に `adopted_take_id` を
+     *      書き換えたインスタンスをそのまま渡さないこと (呼び出し側の責務)。
+     */
+    public static function readyTakeId(Cut $cut): ?int
+    {
+        $take = $cut->adoptedTake;
+        if ($take === null || $take->status !== TakeStatus::Ready) {
+            return null;
+        }
+
+        return $take->id;
+    }
+
+    /**
      * 唯一の述語。**この式を他所へ写経しない**。
      *
      * TakeStatus は uploading / processing / ready / failed の 4 値を持つため、
      * 本述語が真になるのは「まだ撮っていない」だけではない
      * (採用済みだがアップロード中・処理中・失敗も含む = 「使用できる採用テイクがない」)。
      *
-     * 前提: $cut は adoptedTake を eager load 済みで呼ぶこと
-     * (CutSequencer::orderedWithLabels が `with('adoptedTake')` を張っている)。
-     * lazy load でも結果は同じだが N+1 になる。
+     * 実体は readyTakeId() 側にある (述語の意味は同じ)。
      */
     public static function isMissing(Cut $cut): bool
     {
-        $take = $cut->adoptedTake;
-
-        return $take === null || $take->status !== TakeStatus::Ready;
+        return self::readyTakeId($cut) === null;
     }
 
     /**

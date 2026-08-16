@@ -44,6 +44,7 @@ function makeCut(overrides: Partial<CaptureCut> = {}): CaptureCut {
         subtitle_primary: null,
         subtitle_secondary: "",
         adopted_take_id: takes[0]?.id ?? null,
+        adopted_ready_take_id: takes[0]?.id ?? null,
         takes,
         ...overrides,
     };

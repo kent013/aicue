@@ -1333,6 +1333,34 @@ doc/10 §10.3 / §10.8-4/-7 の実装 (T004)。routes は `/app/projects/{projec
     (`SelectableTakeData`) は撮影 PWA の `CaptureTakeData` と**合流させない**
     (「今は null だから安全」を作らない)。再生は `playback` の 302 経由のみである
 
+### 撮影 PWA の通し再生 (端末側連結再生) (T191)
+
+撮影者向けの全体連結プレビューは**端末側でテイクを順に再生する**方式である
+(サーバ生成プレビューを撮影者に開く方式は採らなかった。比較と決定理由は
+`devnotes/20260816-1754-capture-full-scenario-preview/conceptual-design.md`)。
+
+- **素材は採用テイク**である。選択は `AdoptedReadyTakeCoverage::readyTakeId()` が決め、
+  `cuts.*.adopted_ready_take_id` として props に載る (クライアントは述語を持たない = ドメイン規約 12)。
+  同じ述語が**署名 playback URL / DL ACK トークンの発行条件**にもなっており、非 ready の採用テイクへは
+  URL を出さない (`capture.takes.playback` が非 ready を 404 にしているのと同じゲート)。
+  帰結として自動 DL は ready になってから走る (`downloaded_at` が立つ時点が後ろへずれる。
+  取りこぼしは入室 / online 復帰の冪等な既存経路が拾う)。
+- **route も ability も増やさない**。既存の `capture.takes.playback` (`TakePolicy::preview` =
+  撮影者可) をカット順に叩くだけである。**サーバ生成プレビューの起動は編集者専用のまま**で、
+  `render_max_inflight_previews_per_org` (org 同時 preview 上限) を**消費しない**。
+  チケットも消費しない (preview は元から非消費)。
+- **判断は `lib/capture/scenario-preview.ts` (純関数) が持ち**、component は配線とメディア要素の
+  操作だけを行う。**1 本の失敗で止まらない** — 再生できなかったカットはプレースホルダに落ちて次へ進む。
+  プレースホルダ尺はサーバ生成プレビューと同じ `config('manual.preview_placeholder_seconds')` である。
+- **カメラ資源と同居しない**: 撮影中は開かず、押下時にエラーを出す (ボタンは disabled にしない)。
+  開くときに `releaseForPreview()`、閉じるときに `resumeAfterPreview()` を通す
+  (個別テイク preview と同じ 1 組の関数)。
+- **保証しないもの**: オフライン再生 / 完成動画と同じ見え方 (字幕は overlay、正規化なし) /
+  プレースホルダ尺の厳密一致 / 1 クリップ 1 回取得 (再試行では増える) /
+  停滞判定の閾値の妥当性 (固定するのは「表示中かつ再生要求中なら有限時間で必ず次へ進む」ことだけ) /
+  `blocked` (自動再生制限) から自動で抜けること (出口は利用者操作のみ) /
+  実機での連続再生の滑らかさ (component テストが見るのは DOM 契約とイベント配線まで)。
+
 ## 退会 (アカウント削除) の課金ガード (T115)
 
 - **不変条件**: 「**唯一 Owner** かつ (**他メンバーが残る** ∨ **生きた課金責務がある**) 組織」が

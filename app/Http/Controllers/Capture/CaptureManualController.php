@@ -117,6 +117,9 @@ class CaptureManualController extends Controller
         return Inertia::render('Capture/Show', [
             'project' => ['id' => $project->id, 'name' => $project->name],
             'manual' => CaptureManualDetailData::fromManual($manual, $user, $storage, $codec)->toArray(),
+            // 通し再生でプレースホルダを表示する秒数。サーバ生成プレビューの黒背景尺と
+            // **同じ設定値**を使う (2 つのプレビューの構造を揃える。単位は秒・正の整数)。
+            'previewPlaceholderSeconds' => config()->integer('manual.preview_placeholder_seconds'),
         ]);
     }
 }

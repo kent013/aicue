@@ -190,7 +190,8 @@ test('show の take shape は TS CaptureTake と対のキー集合 (PHP↔TS 契
     $cutShape = $response->inertiaPage()['props']['manual']['cuts'][0];
     expect(array_keys($cutShape))->toBe([
         'id', 'type', 'parent_cut_id', 'scene', 'shot_type', 'shooting_point',
-        'narration', 'subtitle_primary', 'subtitle_secondary', 'adopted_take_id', 'takes',
+        'narration', 'subtitle_primary', 'subtitle_secondary', 'adopted_take_id',
+        'adopted_ready_take_id', 'takes',
     ]);
 });
 
