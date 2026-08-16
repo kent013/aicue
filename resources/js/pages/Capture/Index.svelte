@@ -1,14 +1,15 @@
 <script lang="ts">
     import { page, router } from "@inertiajs/svelte";
-    import { Camera, Search } from "@lucide/svelte";
+    import { Camera, Search, UserRound } from "@lucide/svelte";
     import Badge from "@/components/atoms/Badge.svelte";
     import Card from "@/components/atoms/Card.svelte";
     import Checkbox from "@/components/atoms/Checkbox.svelte";
     import Input from "@/components/atoms/Input.svelte";
     import Select from "@/components/atoms/Select.svelte";
+    import TextLink from "@/components/atoms/TextLink.svelte";
     import ManualCoverThumbnail from "@/components/features/capture/ManualCoverThumbnail.svelte";
     import EmptyState from "@/components/molecules/EmptyState.svelte";
-    import PageHeader from "@/components/molecules/PageHeader.svelte";
+    import PageHeaderSection from "@/components/molecules/PageHeaderSection.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
     import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
@@ -69,12 +70,21 @@
 
 <AppLayout {appName}>
     <PageContainer>
-        <PageHeader
+        <!-- actions を持つため PageHeader (shorthand) ではなく PageHeaderSection を使う。
+             アカウント確認導線は**この一覧画面にだけ**置く (Capture/Show には置かない —
+             既に「一覧へ戻る」「マニュアル詳細へ」の 2 本があり狭幅で 3 本目が折り返す。
+             撮影中にアカウントを確かめる場面は想定しない)。 -->
+        <PageHeaderSection
             title="撮影するマニュアルを選ぶ"
             description={project.name}
             icon={Camera}
             testId="capture-heading"
-        />
+        >
+            <TextLink href="/app/account" testId="capture-account-link">
+                <UserRound class="inline size-3" aria-hidden="true" />
+                アカウント
+            </TextLink>
+        </PageHeaderSection>
         <PageContent>
             <div class="flex flex-col gap-2 sm:flex-row">
                 <form

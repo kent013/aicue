@@ -142,9 +142,11 @@ return [
         'notifications.index' => '通知',
         /*
         | 撮影 PWA (/app/*)。manuals.show は controller が setPrivateTitle で
-        | マニュアル名を供給するため、静的名が必要なのは一覧 (index) のみ。
+        | マニュアル名を供給するため、静的名が必要なのは一覧 (index) と
+        | アカウント確認画面 (account) の 2 つ。
         | スマホで複数タブ / ホーム画面から戻る現場ユースケースではタブ名が唯一の識別子。
         */
+        'capture.account' => 'アカウント',
         'capture.manuals.index' => '撮影するマニュアルを選ぶ',
     ],
 

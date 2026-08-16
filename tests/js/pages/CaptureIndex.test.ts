@@ -116,6 +116,19 @@ describe("Capture/Index 自作フィルタ・作成者表示", () => {
         );
     });
 
+    /*
+     * T199: 撮影 PWA からアカウント確認画面への入口。共有端末で「今このアプリに
+     * ログインしているのは誰か」を確かめる導線がここにしか無いので、リンク先を固定する。
+     */
+    it("見出しにアカウント確認画面への導線がある", () => {
+        render(CaptureIndex, { props: baseProps });
+
+        // Inertia の Link は jsdom で href を絶対 URL に解決するため末尾一致で固定する
+        expect(screen.getByTestId("capture-account-link").getAttribute("href")).toMatch(
+            /\/app\/account$/,
+        );
+    });
+
     it("cover が null ならプレースホルダを描く", () => {
         render(CaptureIndex, { props: baseProps });
 

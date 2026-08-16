@@ -21,17 +21,21 @@ const JS_ROOT = path.resolve(__dirname, "../../../resources/js");
 
 /**
  * `/logout` を参照してよいファイル (resources/js からの相対パス)。
- * 現状 3 箇所あり、いずれも router.post = Inertia visit
+ * 現状 4 箇所あり、いずれも router.post = Inertia visit
  * (AppLayout: 通常画面のユーザーメニュー / VerifyEmail: メール認証待ち画面の離脱導線 /
  *  RecentAuthRecoveryNotice: 再認証手段が無いユーザーの回復導線 = ログアウトして guest として
  *  パスワードを再設定する。/forgot-password は guest middleware 付きで直リンクできない。
  *  全画面 confirm (pages/Auth/ConfirmRecentAuth) とインラインモーダル
- *  (organisms/RecentAuthModal) の双方が本 molecule を使う)。
+ *  (organisms/RecentAuthModal) の双方が本 molecule を使う /
+ *  Capture/Account: 撮影 PWA のアカウント確認画面。共有端末の引き渡し時に
+ *  「自分のアカウントか確認してログアウトする」だけを行う面で、doc/05 §5.2 が要求する
+ *  ログアウトをこの画面自身が持つ)。
  */
 const LOGOUT_CALL_SITE_INVENTORY: readonly string[] = [
   "components/templates/AppLayout.svelte",
   "pages/Auth/VerifyEmail.svelte",
   "components/molecules/RecentAuthRecoveryNotice.svelte",
+  "pages/Capture/Account.svelte",
 ] as const;
 
 const LOGOUT_PATH_PATTERN = /["'`]\/logout["'`]/;

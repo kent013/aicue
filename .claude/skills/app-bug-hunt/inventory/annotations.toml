@@ -55,6 +55,11 @@ kind = "画面"
 story = "S5"
 kubun = "通常"
 
+[routes."capture.account"]
+kind = "画面"
+story = "S3"
+kubun = "通常"
+
 [routes."capture.csrf-cookie"]
 kind = "JSON"
 story = "S3"
