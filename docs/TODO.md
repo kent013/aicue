@@ -23,7 +23,6 @@
 |---|---|---|---|---|---|---|---|
 | T085 | bfcache 実復元の iOS 実機受入確認 | test | Playwright 不可のため実機で確認+記録。**T178 (同期判定の前置) のマージ後に実施する** — guard 本体・プローブ応答契約・秘匿状態の語彙が変わり、`docs/supported-browsers.md` の実機受入確認の再確認条件に当たるため。失効セッション経路の観測は「秘匿を維持したまま読み直す」に変わるが、合格終端 (`unauthenticated-redirected` = /login 到達の目視確認込み) は変わらない | High | standalone | [設計](devnotes/20260803-0053-aigenba-alignment/) | 2026-08-03 03:10 |
 | T110 | 認証手段変更のメール通知ポリシーの統一設計 | backend | passkey/2FA/SSO の増減通知を一貫したポリシーとして設計する(T108 S7 は監査ログのみで通知は見送り) | Low | standalone | [設計](devnotes/20260805-1550-security-audit-remediation/) | 2026-08-05 17:45 |
-| T182 | 動画一覧の再生時間表示と行内操作 | frontend | 一覧に再生時間とDL/削除の行内操作を追加 | Medium | standalone | [設計](devnotes/20260816-1021-manual-list-duration-and-row-actions/) | 2026-08-16 11:02 |
 | T183 | テイクのサムネイル生成 | backend | テイク登録後にサムネイルを生成し配信する | Medium | standalone | [設計](devnotes/20260816-1021-take-thumbnail-generation/) | 2026-08-16 11:02 |
 | T184 | PC 側のテイク選択・採用画面 | frontend | PCでテイクを確認し採用・追加できる画面 | High | standalone | [設計](devnotes/20260816-1026-pc-take-selection-and-adoption/) | 2026-08-16 11:02 |
 | T185 | シナリオ行とテイクのドラッグ&ドロップ並べ替え | frontend | 手順行とテイクをD&Dで並べ替え可能にする | Low | standalone | [設計](devnotes/20260816-1021-drag-and-drop-reordering/) | 2026-08-16 11:02 |
