@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Projects;
 
 use App\DataTransferObjects\Manual\AnalysisJobData;
+use App\DataTransferObjects\Manual\CutTakeSummaryData;
 use App\DataTransferObjects\Manual\ManualListQuery;
 use App\DataTransferObjects\Manual\RenderJobData;
 use App\DataTransferObjects\Manual\ScenarioDocumentData;
@@ -16,6 +17,7 @@ use App\Http\Requests\Projects\DuplicateVideoManualRequest;
 use App\Http\Requests\Projects\StoreVideoManualRequest;
 use App\Http\Requests\Projects\UpdateVideoManualRequest;
 use App\Models\Category;
+use App\Models\Cut;
 use App\Models\Project;
 use App\Models\User;
 use App\Models\VideoManual;
@@ -214,7 +216,31 @@ class VideoManualController extends Controller
             'categories' => $this->categoryOptions($project),
             // シナリオ document (保存成功応答 ScenarioResource と同一 shape)
             'scenario' => ScenarioDocumentData::fromManual($manual)->toArray(),
+            // 動画列 (カットごとのテイク要約)。描画時点のスナップショットであり常に最新ではない
+            // (採用は他タブ / 撮影 PWA からも起きる。判断はサーバの行ロックが直列化する)
+            'takeSummaries' => $this->takeSummaries($manual),
         ]);
+    }
+
+    /**
+     * 動画列用のカット別テイク要約。
+     *
+     * cut 件数に依存しない**定数本のクエリ**で取る (withCount は cuts の SELECT に畳まれ、
+     * adoptedTake は eager load の 1 本。cut ごとの追加クエリ = N+1 を作らない)。
+     * 並びは CutSequencer と同じ (sort_order, id) にする (同値 sort_order で揺れないため)。
+     *
+     * @return list<array{cut_id: int, takes_count: int, adopted: array{id: int, status: string}|null}>
+     */
+    private function takeSummaries(VideoManual $manual): array
+    {
+        return array_values($manual->cuts()
+            ->withCount('takes')
+            ->with('adoptedTake')
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get()
+            ->map(static fn (Cut $cut): array => CutTakeSummaryData::fromCut($cut)->toArray())
+            ->all());
     }
 
     /** メタデータ更新 (title / category)。category null は未分類化 */

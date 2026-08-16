@@ -1,15 +1,18 @@
 <script lang="ts">
-    import type { CaptureCut } from "@/types/capture";
-
     /**
-     * 撮影中カメラプレビューへ重畳する字幕ガイド (doc/05 §5.2 の字幕重畳要件)。
-     * 焼込ではなく撮影ガイド overlay: MediaRecorder が録る MediaStream には含まれない。
+     * 映像へ重畳する字幕 overlay (doc/05 §5.2 の字幕重畳要件)。
+     * 焼込ではなく DOM overlay: MediaRecorder が録る MediaStream には含まれない。
      * primary=上部帯 (名称・数値) / secondary=下部メイン。位置は AssSubtitleWriter (ASS) と一致。
      * 位置・占有領域の確認用であり全文確認用ではない (長文は line-clamp で省略)。
+     *
+     * 利用者は 2 つ:
+     * - 撮影中カメラプレビューの字幕ガイド (features/capture/CameraRecorder)
+     * - PC テイク選択画面のプレビュー字幕表示 ON/OFF (features/manual/TakePreviewPanel)
+     * features の domain 間横参照を作らないため molecules に置く (複製しない)。
      */
     interface Props {
-        primary: CaptureCut["subtitle_primary"];
-        secondary: CaptureCut["subtitle_secondary"];
+        primary: string | null;
+        secondary: string;
         visible: boolean;
     }
 

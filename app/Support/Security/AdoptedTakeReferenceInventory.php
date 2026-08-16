@@ -56,6 +56,24 @@ final class AdoptedTakeReferenceInventory
                 'rationale' => '撮影ナビの表示用に採用テイクの実体を読むだけで ready 判定はしない。'
                     .'撮影中の端末に「今どれを採用しているか」を見せる別概念の面である。',
             ],
+            'DataTransferObjects/Manual/CutTakeSummaryData.php' => [
+                'kind' => AdoptedTakeReferenceKind::DifferentCriterion,
+                'rationale' => 'シナリオ編集画面の動画列が、カットごとに採用テイクの id と status を'
+                    .'表示するために読むだけで ready 判定はしない。レンダの充足判定'
+                    .'(AdoptedReadyTakeCoverage) とは基準が違うため意図的に統合しない。',
+            ],
+            'DataTransferObjects/Manual/TakeSelectionPageData.php' => [
+                'kind' => AdoptedTakeReferenceKind::DifferentCriterion,
+                'rationale' => 'PC テイク選択画面が「今どれを採用しているか」を示すために'
+                    .'採用テイクの id と status を読むだけで、ready 判定も充足判定もしない。'
+                    .'レンダの充足判定 (AdoptedReadyTakeCoverage) とは意図的に統合しない。',
+            ],
+            'Http/Controllers/Projects/VideoManualController.php' => [
+                'kind' => AdoptedTakeReferenceKind::RelationWiring,
+                'rationale' => 'シナリオ編集画面の動画列を N+1 なしで取るため with(adoptedTake) の'
+                    .'eager load を張るだけで、判定も読み取りも持たない。値の取り出しは'
+                    .'CutTakeSummaryData 側にあり、そちらが別基準として登録済みである。',
+            ],
             'Http/Controllers/Capture/CaptureManualController.php' => [
                 'kind' => AdoptedTakeReferenceKind::DifferentCriterion,
                 'rationale' => 'whereHas(adoptedTake) による採用済みカット数の集計。'

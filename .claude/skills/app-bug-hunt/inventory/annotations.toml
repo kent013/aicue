@@ -440,6 +440,11 @@ kind = "画面"
 story = "S3"
 kubun = "通常"
 
+[routes."projects.manuals.cuts.takes.index"]
+kind = "画面"
+story = "S3"
+kubun = "通常"
+
 [routes."projects.manuals.destroy"]
 story = "S3"
 kubun = "通常"

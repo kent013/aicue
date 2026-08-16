@@ -32,6 +32,7 @@ use App\Http\Controllers\Organizations\OrganizationOnboardingController;
 use App\Http\Controllers\Organizations\OrganizationOwnershipController;
 use App\Http\Controllers\Organizations\OrganizationSwitchController;
 use App\Http\Controllers\Projects\CategoryController;
+use App\Http\Controllers\Projects\CutTakeController;
 use App\Http\Controllers\Projects\ItemController;
 use App\Http\Controllers\Projects\ManualAnalysisController;
 use App\Http\Controllers\Projects\ManualDownloadController;
@@ -562,6 +563,12 @@ Route::middleware(['auth', 'verified', 'not-pending-deletion'])->group(function 
             // {manual} は $project->manuals() 経由 (scopeBindings) = cross-manual/cross-project は 404。
             Route::post('/projects/{project}/manuals/{manual}/duplicate', [VideoManualController::class, 'duplicate'])
                 ->name('projects.manuals.duplicate');
+            // テイク選択・採用画面 (doc/04 「テイクのプレビュー / 選択画面」)。編集者のみ (撮影者は 403)。
+            // **この GET は画面 props を返すだけ**で、採用・削除・アップロード・再生は
+            // capture.takes.* を再利用する (テイク資源の API 面を 2 本にしない)。
+            // {cut} は $manual->cuts() 経由 (scopeBindings) = cross-manual/cross-project は認可より前に 404。
+            Route::get('/projects/{project}/manuals/{manual}/cuts/{cut}/takes', [CutTakeController::class, 'index'])
+                ->name('projects.manuals.cuts.takes.index');
         });
 
         /*
@@ -590,6 +597,13 @@ Route::middleware(['auth', 'verified', 'not-pending-deletion'])->group(function 
     | tx 内で $project->manuals()->…->cuts()->…->takes() の連鎖再解決 (firstOrFail) を必須とし、
     | 推論が外れても cross-parent は 404 に落ちる。挙動担保は各エンドポイントの
     | cross-org/project/manual/cut 404 Feature テスト。
+    | ★**takes.* は PC 編集面とも共用である (T184)**。PC のテイク選択・採用画面
+    | (projects.manuals.cuts.takes.index) は画面 props を返す GET を業務 group 側に 1 本持つだけで、
+    | 採用・削除・アップロード・再生・サムネイルはここの takes.* をそのまま叩く
+    | (テイク資源の API 面を 2 本にしない)。よって この prefix は「撮影 PWA 専用」を意味しない —
+    | ここへ PWA 固有の middleware を足すと PC 面にも掛かる。
+    | 認可は意図的に非対称で、画面は編集者限定 (撮影者 403) / takes.* は撮影者にも開く
+    | (doc/10 §10.5)。固定は tests/Feature/Manual/PcTakeOperationTest.php。
     */
     Route::middleware(['require-active-subscription', 'project.in-current-org'])
         ->prefix('app')->as('capture.')->group(function (): void {

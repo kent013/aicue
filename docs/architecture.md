@@ -1310,6 +1310,28 @@ doc/10 §10.3 / §10.8-4/-7 の実装 (T004)。routes は `/app/projects/{projec
   (即時アップロード優先・IndexedDB は失敗/オフライン時の一時バッファ・419 は csrf-cookie
   再取得 1 回リトライ)。SW (`public/capture-sw.js`) は同一オリジン GET `/build/*` のみ
   stale-while-revalidate (アプリ応答・S3 は素通し)
+- **`/app/*` のテイク API は PC 編集面と共用である (T184)**: PC のテイク選択・採用画面
+  (`projects.manuals.cuts.takes.index` → `pages/Manuals/Takes.svelte`) は**画面 props だけを返す
+  GET を 1 本足し**、採用・削除・アップロード・再生・サムネイル取得は `capture.takes.*` を
+  そのまま叩く (テイク資源の API 面を 2 本にしない)。URL prefix が `/app` なのは歴史的経緯であり、
+  **`/app/*` は「撮影 PWA 専用」ではない**。URL 導出は `lib/capture/take-endpoints.ts` の 1 箇所に
+  集約してある (PWA の `TakeStrip` / `UploadQueue` と PC 面が同じ規則を使う)。
+  帰結として、**将来 `/app` へ PWA 固有の middleware を足すと PC 面にも掛かる** (足すときは
+  この段を読み直すこと)。
+  - **権限境界は意図的に非対称である**: 画面 (`projects.manuals.cuts.takes.index`) は
+    `VideoManualPolicy::update` = 編集者のみで**撮影者は 403**、テイク操作 API は
+    `TakePolicy` → `ProjectPolicy::capture` で**撮影者にも開いている** (doc/10 §10.5 の確定仕様)。
+    詰みではない (撮影者には PWA 側の採用導線がある)。非対称は
+    `tests/Feature/Manual/PcTakeOperationTest.php` が固定する
+  - **PC 側はオフライン保持を持たない**: `UploadQueue` の `PendingStore` に
+    `createMemoryPendingStore()` (インスタンス生存中のみ) を注入し、`queued` になった Blob は
+    即 `delete` する。撮影 PWA は従来どおり IndexedDB 実装のままである
+  - **尺 1 分の事前チェックは保証ではない**: 判定はクライアントの `loadedmetadata` だけで、
+    読めない形式・timeout・改竄された `duration_ms` では 1 分超も登録される
+    (**サーバは尺を強制しない**)。UI 文言もテスト名も「登録できない」とは書かない
+  - **props に署名 URL / 保存パス / ACK トークンのスロットを持たない**: PC の shape
+    (`SelectableTakeData`) は撮影 PWA の `CaptureTakeData` と**合流させない**
+    (「今は null だから安全」を作らない)。再生は `playback` の 302 経由のみである
 
 ## 退会 (アカウント削除) の課金ガード (T115)
 

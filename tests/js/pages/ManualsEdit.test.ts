@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/svelte";
+import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import Edit from "@/pages/Manuals/Edit.svelte";
 import type { ScenarioDocument } from "@/types/manual";
 
@@ -7,6 +7,10 @@ const scenario: ScenarioDocument = {
     scenario_version: 0,
     steps: [],
 };
+
+afterEach(() => {
+    cleanup();
+});
 
 const baseProps = {
     project: { id: 1, name: "サンプルプロジェクト" },
@@ -16,6 +20,7 @@ const baseProps = {
         { id: 2, name: "仕上げ" },
     ],
     scenario,
+    takeSummaries: [],
 };
 
 describe("Manuals/Edit", () => {
@@ -74,5 +79,83 @@ describe("Manuals/Edit", () => {
         render(Edit, { props: baseProps });
 
         expect(screen.queryByTestId("capture-manual-link")).toBeNull();
+    });
+});
+
+/*
+ * 動画列 (doc/04)。保存済みカットだけがテイク選択画面へのリンクを持ち、
+ * 未保存行 (id=null) はリンクを出さずに保存を促す (押せるのに詰むボタンを作らない)。
+ */
+describe("Manuals/Edit — 動画列", () => {
+    const savedScenario: ScenarioDocument = {
+        scenario_version: 3,
+        steps: [
+            {
+                id: 41,
+                scene: "工具を準備する",
+                shot_type: "hiki",
+                shooting_point: null,
+                narration: "工具を準備します。",
+                subtitle_primary: null,
+                subtitle_secondary: "工具を準備する",
+                material_type: null,
+                static_display_seconds: null,
+                points: [],
+            },
+        ],
+    };
+
+    it("保存済み行にテイク選択画面へのリンクと件数が出る", () => {
+        render(Edit, {
+            props: {
+                ...baseProps,
+                scenario: savedScenario,
+                takeSummaries: [{ cut_id: 41, takes_count: 2, adopted: null }],
+            },
+        });
+
+        expect(screen.getByTestId("video-cell-count")).toHaveTextContent("テイク 2 件");
+        const link = screen.getByTestId("video-cell-link");
+        expect(link).toHaveTextContent("テイクを選択");
+        expect(link.getAttribute("href")).toMatch(
+            /^https?:\/\/[^/]+\/projects\/1\/manuals\/5\/cuts\/41\/takes$/,
+        );
+    });
+
+    it("テイク 0 件のカットは「ファイルの選択」を出す (導線は消さない)", () => {
+        render(Edit, {
+            props: {
+                ...baseProps,
+                scenario: savedScenario,
+                takeSummaries: [{ cut_id: 41, takes_count: 0, adopted: null }],
+            },
+        });
+
+        expect(screen.getByTestId("video-cell-link")).toHaveTextContent("ファイルの選択");
+    });
+
+    it("採用済みカットには「採用済み」バッジが出る", () => {
+        render(Edit, {
+            props: {
+                ...baseProps,
+                scenario: savedScenario,
+                takeSummaries: [
+                    { cut_id: 41, takes_count: 2, adopted: { id: 9, status: "ready" as const } },
+                ],
+            },
+        });
+
+        expect(screen.getByTestId("video-cell-adopted")).toHaveTextContent("採用済み");
+    });
+
+    it("未保存行 (手順を追加した直後) にはリンクが出ず、保存を促す文言が出る", async () => {
+        render(Edit, { props: { ...baseProps, scenario: { scenario_version: 0, steps: [] } } });
+
+        await fireEvent.click(screen.getByRole("button", { name: "最初の手順を追加" }));
+
+        expect(await screen.findByTestId("video-cell-unsaved")).toHaveTextContent(
+            "「シナリオを更新」で保存すると",
+        );
+        expect(screen.queryByTestId("video-cell-link")).toBeNull();
     });
 });

@@ -6,6 +6,7 @@
     import TakePreviewDialog from "@/components/features/capture/TakePreviewDialog.svelte";
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
     import { captureJson, extractErrorMessage } from "@/lib/capture/http";
+    import { takeUrl as buildTakeUrl } from "@/lib/capture/take-endpoints";
     import type { CaptureCut, CaptureTake } from "@/types/capture";
 
     /**
@@ -82,8 +83,9 @@
         deleteLabel = ""; // 再オープン時の古い文言混入を防ぐ (design-review S1 Suggestion)
     }
 
+    // URL 規則は lib/capture/take-endpoints に 1 箇所化してある (PC 編集面と共用の API 面)
     function takeUrl(take: CaptureTake, suffix = ""): string {
-        return `/app/projects/${projectId}/manuals/${manualId}/cuts/${cut.id}/takes/${take.id}${suffix}`;
+        return buildTakeUrl({ projectId, manualId, cutId: cut.id }, take.id, suffix);
     }
 
     async function run(take: CaptureTake, action: () => Promise<Response>): Promise<void> {

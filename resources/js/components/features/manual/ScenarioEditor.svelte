@@ -5,6 +5,7 @@
         Check,
         ChevronDown,
         ChevronUp,
+        Film,
         ListPlus,
         Plus,
         Redo2,
@@ -12,6 +13,7 @@
         Undo2,
     } from "@lucide/svelte";
     import Alert from "@/components/atoms/Alert.svelte";
+    import Badge from "@/components/atoms/Badge.svelte";
     import Button from "@/components/atoms/Button.svelte";
     import Card from "@/components/atoms/Card.svelte";
     import Input from "@/components/atoms/Input.svelte";
@@ -24,6 +26,7 @@
     import { boundHistory, parseHistorySnapshot, pushHistory } from "@/lib/manual/scenario-history";
     import { addToast } from "@/lib/stores/toast";
     import type {
+        CutTakeSummary,
         DraftPoint,
         DraftStep,
         ScenarioConflictBody,
@@ -41,9 +44,16 @@
         projectId: number;
         manualId: number;
         scenario: ScenarioDocument;
+        /** 動画列 (カットごとのテイク要約)。未保存行 (id=null) には対応する要約が無い */
+        takeSummaries: CutTakeSummary[];
     }
 
-    let { projectId, manualId, scenario }: Props = $props();
+    let { projectId, manualId, scenario, takeSummaries }: Props = $props();
+
+    /** cut_id → 要約の索引 (行ごとの線形探索を避ける) */
+    const summaryByCutId = $derived(
+        new Map(takeSummaries.map((summary) => [summary.cut_id, summary])),
+    );
 
     // インスタンス内カウンタ (instance script 宣言 = コンポーネントインスタンスごとに独立)。
     // 採番値は履歴文字列に保存され undo/redo で round-trip する。
@@ -819,6 +829,39 @@
     </div>
 {/snippet}
 
+{#snippet videoCell(cutId: number | null, testIdSuffix: string)}
+    <!-- 動画列 (doc/04)。未保存行はリンクを出さず、押せるのに詰むボタンを作らない。
+         行 Card の中に角丸カードを入れ子にせず、区切り線で段を分ける -->
+    <div class="mt-3 border-t border-border pt-3" data-testid={`video-cell-${testIdSuffix}`}>
+        <p class="text-caption text-text-secondary">動画</p>
+        {#if cutId === null}
+            <p class="mt-1 text-caption text-text-secondary" data-testid="video-cell-unsaved">
+                「シナリオを更新」で保存すると、このカットに動画を登録できます。
+            </p>
+        {:else}
+            {@const summary = summaryByCutId.get(cutId)}
+            <p class="mt-1 flex items-center gap-2 text-caption text-text">
+                <span data-testid="video-cell-count">テイク {summary?.takes_count ?? 0} 件</span>
+                {#if summary?.adopted}
+                    <Badge tone="primary" testId="video-cell-adopted">採用済み</Badge>
+                {/if}
+            </p>
+            <div class="mt-2">
+                <Button
+                    variant="neutral"
+                    size="sm"
+                    href={`/projects/${projectId}/manuals/${manualId}/cuts/${cutId}/takes`}
+                    inertia
+                    testId="video-cell-link"
+                >
+                    <Film class="size-4" aria-hidden="true" />
+                    {summary && summary.takes_count > 0 ? "テイクを選択" : "ファイルの選択"}
+                </Button>
+            </div>
+        {/if}
+    </div>
+{/snippet}
+
 <section
     aria-label="シナリオ編集"
     onfocusin={onEditorFocusIn}
@@ -880,6 +923,7 @@
                         <div class="mt-3">
                             {@render rowFields(step, `steps.${stepIndex}`, `step-${stepIndex}`)}
                         </div>
+                        {@render videoCell(step.id, `step-${stepIndex}`)}
 
                         {#if step.points.length > 0}
                             <ol class="mt-4 flex flex-col gap-3 border-l-2 border-border pl-4">
@@ -929,6 +973,10 @@
                                                 `point-${stepIndex}-${pointIndex}`,
                                             )}
                                         </div>
+                                        {@render videoCell(
+                                            point.id,
+                                            `point-${stepIndex}-${pointIndex}`,
+                                        )}
                                     </li>
                                 {/each}
                             </ol>

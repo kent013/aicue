@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
     computeChecksumBase64,
+    createMemoryPendingStore,
     generateClientTakeId,
     UploadQueue,
     type PendingStore,
@@ -219,5 +220,32 @@ describe("UploadQueue", () => {
 
         expect(outcome.status).toBe("queued");
         expect(store.items.size).toBe(1);
+    });
+});
+
+describe("createMemoryPendingStore", () => {
+    it("put / list / delete の PendingStore 契約を満たす", async () => {
+        const store = createMemoryPendingStore();
+        const item = pendingItem();
+
+        expect(await store.list()).toEqual([]);
+        await store.put(item);
+        expect(await store.list()).toEqual([item]);
+        // 同じ clientTakeId の put は置き換え (重複しない)
+        await store.put(item);
+        expect(await store.list()).toHaveLength(1);
+        await store.delete(item.clientTakeId);
+        expect(await store.list()).toEqual([]);
+    });
+
+    it("オフラインの enqueue は queued になり list() に載る (既存クラスの振る舞い不変)", async () => {
+        const store = createMemoryPendingStore();
+        const queue = new UploadQueue({ store, fetcher: vi.fn(), isOnline: () => false });
+        const item = pendingItem();
+
+        const outcome = await queue.enqueue(item);
+
+        expect(outcome.status).toBe("queued");
+        expect(await store.list()).toHaveLength(1);
     });
 });
