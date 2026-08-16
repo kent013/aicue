@@ -1,11 +1,14 @@
 <script lang="ts">
+    import { onMount } from "svelte";
     import { Check, ChevronDown, ChevronUp, Download, Film, Pencil, Play, Trash2 } from "@lucide/svelte";
     import Badge from "@/components/atoms/Badge.svelte";
     import Button from "@/components/atoms/Button.svelte";
+    import DragHandle from "@/components/atoms/DragHandle.svelte";
     import TakeCommentDialog from "@/components/features/capture/TakeCommentDialog.svelte";
     import TakePreviewDialog from "@/components/features/capture/TakePreviewDialog.svelte";
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
     import { captureJson, extractErrorMessage } from "@/lib/capture/http";
+    import { createPointerDrag, type PointerDragState } from "@/lib/dnd/pointer-drag";
     import { takeUrl as buildTakeUrl } from "@/lib/capture/take-endpoints";
     import type { CaptureCut, CaptureTake } from "@/types/capture";
 
@@ -88,18 +91,28 @@
         return buildTakeUrl({ projectId, manualId, cutId: cut.id }, take.id, suffix);
     }
 
-    async function run(take: CaptureTake, action: () => Promise<Response>): Promise<void> {
+    /**
+     * 共通の XHR 実行。**成功したら true** を返す。
+     * 戻り値を足したのは、並べ替えの読み上げ (aria-live) を**成功時だけ**にするためである。
+     * 失敗しても「移動しました」と読み上げると、スクリーンリーダ利用者にだけ嘘をつくことになる
+     * (視覚利用者は role="alert" のエラーを見る)。
+     * 既存の呼び出し側 (adopt / remove / downloadAndAck / confirmDelete) は戻り値を無視するだけで
+     * 無変更のまま動く。
+     */
+    async function run(take: CaptureTake, action: () => Promise<Response>): Promise<boolean> {
         error = null;
         busyTakeId = take.id;
         try {
             const response = await action();
             if (!response.ok) {
                 error = await extractErrorMessage(response);
-                return;
+                return false;
             }
             onChanged();
+            return true;
         } catch {
             error = "通信に失敗しました。ネットワークを確認してください。";
+            return false;
         } finally {
             busyTakeId = null;
         }
@@ -109,6 +122,69 @@
     const remove = (take: CaptureTake) => run(take, () => captureJson(takeUrl(take), "DELETE"));
     const move = (take: CaptureTake, position: number) =>
         run(take, () => captureJson(takeUrl(take), "PATCH", { position: Math.max(0, position) }));
+
+    // --- 並べ替え (▲▼ / ハンドルのキーボード / D&D の合流点) ---
+
+    let reorderStatus = $state("");
+    function announce(message: string): void {
+        reorderStatus = message;
+    }
+
+    /**
+     * テイクの並べ替え。▲▼・ハンドルのキーボード・D&D のすべてがここへ合流する。
+     * position は**最終 index** (移動後の全体配列での 0 始まり index)。
+     * サーバの reorderWithinCut が対象を除いた配列へ splice するため両者は一致する。
+     *
+     * クライアント側で楽観的に並べ替えない (サーバ権威)。理由は 2 つ:
+     *   1. 採用テイク (adopted_take_id) と親の再取得 (onChanged) が同じ経路で更新されるため、
+     *      ローカル順序を別に持つと 2 つの真実ができる
+     *   2. 既存の ▲▼ と同じ挙動になり、並べ替え手段ごとに体感が割れない
+     *
+     * 告知は**成功後**に行う (失敗は既存の role="alert" が伝えるので二重に出さない)。
+     */
+    async function reorderTo(from: number, to: number): Promise<void> {
+        const take = cut.takes[from];
+        if (take === undefined || from === to || to < 0 || to >= cut.takes.length) return;
+        const label = `テイク ${from + 1} を ${to + 1} 番目に移動しました`;
+        if (await move(take, to)) announce(label);
+    }
+
+    /** ▲▼ とハンドルのキーボードの共通経路 (1 段移動)。端は disabled にせず告知する */
+    function moveBy(index: number, delta: -1 | 1): void {
+        const to = index + delta;
+        if (to < 0 || to >= cut.takes.length) {
+            // 端: 通信しない / busy にしない / 再取得しない。理由だけ告知する
+            announce(delta < 0 ? "これ以上、上へは移動できません" : "これ以上、下へは移動できません");
+            return;
+        }
+        void reorderTo(index, to);
+    }
+
+    let takeDrag = $state<PointerDragState>({ activeIndex: null, insertionIndex: null });
+    let listEl = $state<HTMLDivElement | null>(null);
+    let dragCtl: ReturnType<typeof createPointerDrag> | null = null;
+
+    // $effect ではなく onMount (マウント期間だけ持つブラウザ資源であり、派生状態ではない)。
+    onMount(() => {
+        dragCtl = createPointerDrag({
+            rows: () =>
+                listEl === null
+                    ? []
+                    : [...listEl.querySelectorAll<HTMLElement>(":scope > [data-reorder-index]")],
+            onState: (state) => (takeDrag = state),
+            onCommit: (from, to) => void reorderTo(from, to),
+        });
+        return () => {
+            dragCtl?.destroy();
+            dragCtl = null;
+        };
+    });
+
+    function onHandleKeydown(event: KeyboardEvent, index: number): void {
+        if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+        event.preventDefault();
+        moveBy(index, event.key === "ArrowUp" ? -1 : 1);
+    }
 
     // 再生ボタン押下: 撮影中はエラー表示して開かない (押下時エラー。disabled 禁止)。
     function openPreview(take: CaptureTake): void {
@@ -187,17 +263,28 @@
     }
 </script>
 
-<div class="flex flex-col gap-2" data-testid={`take-strip-${cut.id}`}>
+<div class="flex flex-col gap-2" data-testid={`take-strip-${cut.id}`} bind:this={listEl}>
     {#if cut.takes.length === 0}
         <p class="text-caption text-text-secondary">テイクはまだありません。撮影してください。</p>
     {/if}
     {#each cut.takes as take, index (take.id)}
         <div
-            class="flex flex-wrap items-center gap-x-2 gap-y-2 rounded-md border border-border bg-surface px-3 py-2 sm:flex-nowrap {take.downloaded
+            class="relative flex flex-wrap items-center gap-x-2 gap-y-2 rounded-md border border-border bg-surface px-3 py-2 sm:flex-nowrap {take.downloaded
                 ? 'border-border-strong'
-                : ''}"
+                : ''} {takeDrag.activeIndex === index ? 'opacity-50' : ''}"
             data-testid={`take-item-${take.id}`}
+            data-reorder-index={index}
         >
+            {#if takeDrag.insertionIndex === index}
+                <!-- 落とし先の目印。影・scale は使わない (DESIGN.md §Elevation) -->
+                <div class="absolute inset-x-0 -top-1 h-0.5 bg-primary" aria-hidden="true"></div>
+            {/if}
+            <DragHandle
+                ariaLabel={`テイク ${index + 1} の並び順を変更 (ドラッグ、または上下キー)`}
+                onpointerdown={(event) => void dragCtl?.start(index, event)}
+                onkeydown={(event) => onHandleKeydown(event, index)}
+                testId={`take-drag-${take.id}`}
+            />
             <!--
               サムネイル (doc/04 動画列 / doc/05 撮影後の確認)。
               生成は非同期なので、録画直後・生成失敗・過去分のテイクは has_thumbnail=false になる。
@@ -229,7 +316,7 @@
                     size="sm"
                     iconOnly
                     ariaLabel="上へ"
-                    onclick={() => move(take, index - 1)}
+                    onclick={() => moveBy(index, -1)}
                     testId={`take-up-${take.id}`}
                 >
                     <ChevronUp class="size-4" aria-hidden="true" />
@@ -239,7 +326,7 @@
                     size="sm"
                     iconOnly
                     ariaLabel="下へ"
-                    onclick={() => move(take, index + 1)}
+                    onclick={() => moveBy(index, 1)}
                     testId={`take-down-${take.id}`}
                 >
                     <ChevronDown class="size-4" aria-hidden="true" />
@@ -338,6 +425,11 @@
             </div>
         </div>
     {/each}
+    {#if takeDrag.insertionIndex === cut.takes.length}
+        <div class="h-0.5 bg-primary" aria-hidden="true"></div>
+    {/if}
+    <!-- 並べ替え結果の読み上げ (視覚的には出さない)。data-reorder-index を持たないので行に混ざらない -->
+    <p class="sr-only" aria-live="polite" data-testid="take-reorder-status">{reorderStatus}</p>
     {#if error}
         <p class="text-caption text-danger" role="alert" data-testid="take-strip-error">{error}</p>
     {/if}

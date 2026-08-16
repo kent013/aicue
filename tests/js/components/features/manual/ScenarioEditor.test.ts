@@ -1210,3 +1210,324 @@ describe("ScenarioEditor", () => {
         });
     });
 });
+
+/*
+ * ドラッグ&ドロップ並べ替え (T185)。層 3 = 配線:
+ * 落としたら既存の保存経路 (payloadSteps の配列順) / 履歴 / dirty 判定が期待どおり動くか。
+ * 意味論 (どこに落ちたら何番目か) は tests/js/lib/dnd/list-reorder.test.ts が持つ。
+ */
+describe("ドラッグ&ドロップ並べ替え (T185)", () => {
+    let rectSpy: ReturnType<typeof vi.spyOn> | null = null;
+
+    /** 行の実測を data-reorder-index から固定値へ差し替える (top = index * 100, height = 100) */
+    function stubRowRects(): void {
+        rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+            function (this: HTMLElement): DOMRect {
+                const raw = this.dataset.reorderIndex;
+                const index = raw === undefined ? -1 : Number(raw);
+                const top = index < 0 ? 0 : index * 100;
+                const height = index < 0 ? 0 : 100;
+                // 素の型アサーションを使わずに実体を作る (new DOMRect が top/bottom を導出する)
+                return new DOMRect(0, top, 0, height);
+            },
+        );
+    }
+
+    function pointerEvent(type: string, clientY: number, pointerId = 1): PointerEvent {
+        return new PointerEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            pointerId,
+            clientY,
+            button: 0,
+            pointerType: "touch",
+        });
+    }
+
+    async function grab(testId: string, clientY: number, pointerId = 1): Promise<void> {
+        await fireEvent(screen.getByTestId(testId), pointerEvent("pointerdown", clientY, pointerId));
+    }
+
+    async function dragTo(clientY: number, pointerId = 1): Promise<void> {
+        await fireEvent(window, pointerEvent("pointermove", clientY, pointerId));
+    }
+
+    async function drop(clientY: number, pointerId = 1): Promise<void> {
+        await fireEvent(window, pointerEvent("pointerup", clientY, pointerId));
+    }
+
+    /** 掴む → 動かす → 落とす */
+    async function dragHandle(testId: string, startY: number, endY: number): Promise<void> {
+        await grab(testId, startY);
+        await dragTo(endY);
+        await drop(endY);
+    }
+
+    /** 2 手順 × 2 急所 (急所の同一スコープ性を検証できる形) */
+    function makeDndDocument(): ScenarioDocument {
+        const row = (id: number, scene: string) => ({
+            id,
+            scene,
+            shot_type: "yori" as const,
+            shooting_point: null,
+            narration: "",
+            subtitle_primary: null,
+            subtitle_secondary: "",
+            material_type: null,
+            static_display_seconds: null,
+        });
+        return {
+            scenario_version: 3,
+            steps: [
+                {
+                    ...row(11, "手順シーンA"),
+                    shot_type: "hiki",
+                    points: [row(21, "急所A-1"), row(22, "急所A-2")],
+                },
+                {
+                    ...row(12, "手順シーンB"),
+                    shot_type: "hiki",
+                    points: [row(23, "急所B-1"), row(24, "急所B-2")],
+                },
+            ],
+        };
+    }
+
+    function renderDnd(): void {
+        render(ScenarioEditor, { props: { ...baseProps, scenario: makeDndDocument() } });
+    }
+
+    /** 現在の手順の scene 値 (表示順) */
+    function stepScenes(): string[] {
+        return screen
+            .getAllByTestId(/^step-\d+-scene$/)
+            .filter((el): el is HTMLInputElement => el instanceof HTMLInputElement)
+            .map((el) => el.value);
+    }
+
+    beforeEach(() => {
+        stubRowRects();
+    });
+
+    afterEach(() => {
+        rectSpy?.mockRestore();
+        rectSpy = null;
+    });
+
+    it("手順のハンドルをドラッグすると順序が入れ替わり、保存 payload の並びも変わる", async () => {
+        const saved: ScenarioDocument = { ...makeDndDocument(), scenario_version: 4 };
+        fetchMock.mockResolvedValueOnce(jsonResponse(200, saved));
+        renderDnd();
+
+        // 手順 1 を掴んで手順 2 の中点 (150) より下へ落とす → 挿入 index 2 → 最終 index 1
+        await dragHandle("step-0-drag-handle", 50, 160);
+
+        expect(stepScenes()).toEqual(["手順シーンB", "手順シーンA"]);
+
+        await fireEvent.click(screen.getByTestId("scenario-submit"));
+        await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+        expect(lastPutPayload().steps.map((step) => step.id)).toEqual([12, 11]);
+    });
+
+    it("D&D の直後は未保存の変更として表示される", async () => {
+        renderDnd();
+
+        await dragHandle("step-0-drag-handle", 50, 160);
+
+        expect(screen.getByTestId("scenario-dirty-indicator")).toBeInTheDocument();
+    });
+
+    it("D&D の直後に『元に戻す』で元の順序へ戻る", async () => {
+        renderDnd();
+
+        await dragHandle("step-0-drag-handle", 50, 160);
+        expect(stepScenes()).toEqual(["手順シーンB", "手順シーンA"]);
+
+        await fireEvent.click(screen.getByTestId("scenario-undo"));
+
+        expect(stepScenes()).toEqual(["手順シーンA", "手順シーンB"]);
+    });
+
+    it("成功した並べ替えは aria-live で告知する", async () => {
+        renderDnd();
+
+        await dragHandle("step-0-drag-handle", 50, 160);
+
+        expect(screen.getByTestId("scenario-reorder-status")).toHaveTextContent(
+            "手順 1 を 2 番目に移動しました",
+        );
+    });
+
+    it("急所の D&D は同じ手順の中だけで完結する", async () => {
+        renderDnd();
+
+        await dragHandle("point-0-0-drag-handle", 50, 160);
+
+        expect(screen.getByTestId("point-0-0-scene")).toHaveValue("急所A-2");
+        expect(screen.getByTestId("point-0-1-scene")).toHaveValue("急所A-1");
+        // 別手順の急所は無変更 (closest による絞り込みが効いている)
+        expect(screen.getByTestId("point-1-0-scene")).toHaveValue("急所B-1");
+        expect(screen.getByTestId("point-1-1-scene")).toHaveValue("急所B-2");
+    });
+
+    it("ドラッグ中に Escape を押すと順序が変わらない", async () => {
+        renderDnd();
+
+        await grab("step-0-drag-handle", 50);
+        await dragTo(160);
+        await fireEvent.keyDown(window, { key: "Escape" });
+        await drop(160);
+
+        expect(stepScenes()).toEqual(["手順シーンA", "手順シーンB"]);
+        expect(screen.getByTestId("scenario-reorder-status")).toHaveTextContent("");
+    });
+
+    it("2 本目の指は 1 本目のドラッグ対象をすり替えない (同一 controller)", async () => {
+        renderDnd();
+
+        // 手順 A の急所を pointerId=1 で掴んで動かす
+        await grab("point-0-0-drag-handle", 50, 1);
+        await dragTo(160, 1);
+        // その最中に手順 B の急所ハンドルを別の指 (pointerId=2) で押す
+        await grab("point-1-0-drag-handle", 50, 2);
+        // 1 本目を drop する
+        await drop(160, 1);
+
+        // 手順 A の急所だけが動き、手順 B は無変更
+        expect(screen.getByTestId("point-0-0-scene")).toHaveValue("急所A-2");
+        expect(screen.getByTestId("point-0-1-scene")).toHaveValue("急所A-1");
+        expect(screen.getByTestId("point-1-0-scene")).toHaveValue("急所B-1");
+        expect(screen.getByTestId("point-1-1-scene")).toHaveValue("急所B-2");
+    });
+
+    it("手順ドラッグ中は急所ドラッグが始まらない (controller またぎの排他)", async () => {
+        renderDnd();
+
+        await grab("step-0-drag-handle", 50, 1);
+        await dragTo(160, 1);
+        // 急所ハンドルを別の指で押し、急所の drop 相当まで出しても始まらない
+        await grab("point-1-0-drag-handle", 50, 2);
+        await dragTo(160, 2);
+        await drop(160, 2);
+
+        expect(screen.getByTestId("point-1-0-scene")).toHaveValue("急所B-1");
+        expect(stepScenes()).toEqual(["手順シーンA", "手順シーンB"]); // 1 本目はまだ drop していない
+
+        await drop(160, 1);
+
+        // 1 本目は掴んだとおりの行が期待どおりの位置へ動く
+        expect(stepScenes()).toEqual(["手順シーンB", "手順シーンA"]);
+    });
+
+    it("急所ドラッグ中は手順ドラッグが始まらない (逆向き)", async () => {
+        renderDnd();
+
+        await grab("point-0-0-drag-handle", 50, 1);
+        await dragTo(160, 1);
+        await grab("step-0-drag-handle", 50, 2);
+        await dragTo(160, 2);
+        await drop(160, 2);
+
+        expect(stepScenes()).toEqual(["手順シーンA", "手順シーンB"]);
+
+        await drop(160, 1);
+
+        expect(screen.getByTestId("point-0-0-scene")).toHaveValue("急所A-2");
+        expect(screen.getByTestId("point-0-1-scene")).toHaveValue("急所A-1");
+        expect(stepScenes()).toEqual(["手順シーンA", "手順シーンB"]);
+    });
+
+    it("IME 変換中に確定した D&D は compositionend まで順序も告知も変わらない", async () => {
+        renderDnd();
+
+        await fireEvent.compositionStart(screen.getByTestId("step-0-scene"));
+        await dragHandle("step-0-drag-handle", 50, 160);
+
+        expect(stepScenes()).toEqual(["手順シーンA", "手順シーンB"]);
+        expect(screen.getByTestId("scenario-reorder-status")).toHaveTextContent("");
+
+        await fireEvent.compositionEnd(screen.getByTestId("step-0-scene"));
+
+        expect(stepScenes()).toEqual(["手順シーンB", "手順シーンA"]);
+        expect(screen.getByTestId("scenario-reorder-status")).toHaveTextContent(
+            "手順 1 を 2 番目に移動しました",
+        );
+    });
+
+    it("IME 変換中に手順の並べ替えと急所の並べ替えを続けて確定しても、掴んだ手順の急所が動く", async () => {
+        renderDnd();
+
+        await fireEvent.compositionStart(screen.getByTestId("step-0-scene"));
+        // (1) 手順 1 (手順シーンA) を 2 番目へ
+        await dragHandle("step-0-drag-handle", 50, 160);
+        // (2) その手順シーンA の急所 1 を 2 番目へ (この時点では手順シーンA はまだ index 0)
+        await dragHandle("point-0-0-drag-handle", 50, 160);
+
+        // どちらも compositionend まで保留される
+        expect(stepScenes()).toEqual(["手順シーンA", "手順シーンB"]);
+
+        await fireEvent.compositionEnd(screen.getByTestId("step-0-scene"));
+
+        // (1) が先に効いて並びが変わっても、(2) は**掴んだ手順シーンA の急所**に適用される。
+        // 数値 index を持ち回っていると手順シーンB の急所が入れ替わってしまう。
+        expect(stepScenes()).toEqual(["手順シーンB", "手順シーンA"]);
+        expect(screen.getByTestId("point-0-0-scene")).toHaveValue("急所B-1");
+        expect(screen.getByTestId("point-0-1-scene")).toHaveValue("急所B-2");
+        expect(screen.getByTestId("point-1-0-scene")).toHaveValue("急所A-2");
+        expect(screen.getByTestId("point-1-1-scene")).toHaveValue("急所A-1");
+    });
+
+    it("ハンドル上の ArrowDown / ArrowUp で 1 段移動する", async () => {
+        renderDnd();
+
+        await fireEvent.keyDown(screen.getByTestId("step-0-drag-handle"), { key: "ArrowDown" });
+        expect(stepScenes()).toEqual(["手順シーンB", "手順シーンA"]);
+
+        await fireEvent.keyDown(screen.getByTestId("step-1-drag-handle"), { key: "ArrowUp" });
+        expect(stepScenes()).toEqual(["手順シーンA", "手順シーンB"]);
+    });
+
+    it("急所ハンドル上の ArrowDown でも 1 段移動する", async () => {
+        renderDnd();
+
+        await fireEvent.keyDown(screen.getByTestId("point-0-0-drag-handle"), { key: "ArrowDown" });
+
+        expect(screen.getByTestId("point-0-0-scene")).toHaveValue("急所A-2");
+        expect(screen.getByTestId("point-0-1-scene")).toHaveValue("急所A-1");
+    });
+
+    it("先頭行の ArrowUp は順序を変えず、理由を告知する (disabled にしない)", async () => {
+        renderDnd();
+
+        await fireEvent.keyDown(screen.getByTestId("step-0-drag-handle"), { key: "ArrowUp" });
+
+        expect(stepScenes()).toEqual(["手順シーンA", "手順シーンB"]);
+        expect(screen.getByTestId("scenario-reorder-status")).toHaveTextContent(
+            "これ以上、上へは移動できません",
+        );
+    });
+
+    it("末尾行の ▼ ボタンも順序を変えず理由を告知する", async () => {
+        renderDnd();
+
+        await fireEvent.click(screen.getByTestId("step-1-move-down"));
+
+        expect(stepScenes()).toEqual(["手順シーンA", "手順シーンB"]);
+        expect(screen.getByTestId("scenario-reorder-status")).toHaveTextContent(
+            "これ以上、下へは移動できません",
+        );
+    });
+
+    it("ハンドルは disabled 属性を持たない (禁止事項 8)", () => {
+        renderDnd();
+
+        for (const id of [
+            "step-0-drag-handle",
+            "step-1-drag-handle",
+            "point-0-0-drag-handle",
+            "point-1-1-drag-handle",
+        ]) {
+            expect(screen.getByTestId(id)).not.toHaveAttribute("disabled");
+        }
+    });
+});
