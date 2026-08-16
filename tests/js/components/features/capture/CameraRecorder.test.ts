@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import CameraRecorder from "@/components/features/capture/CameraRecorder.svelte";
+import {
+    FakeMediaRecorder,
+    createTrackingRecorderClass,
+    fakeStream,
+} from "../../../support/fake-media-recorder";
 
 /*
  * CameraRecorder: 録画不能な恒久失敗 (権限拒否・デバイス無し・API 不適合) は
@@ -8,125 +13,19 @@ import CameraRecorder from "@/components/features/capture/CameraRecorder.svelte"
  * 成功パスは onCaptured(blob, mimeType, durationMs) の契約を保つ。
  */
 
-/** 手動発火できる最小 MediaRecorder stub (start/stop → ondataavailable/onstop) */
-class FakeMediaRecorder {
-    static supportedTypes: string[] = ["video/webm"];
-    static isTypeSupported(type: string): boolean {
-        return FakeMediaRecorder.supportedTypes.includes(type);
-    }
-    static shouldThrowOnConstruct = false;
-    static shouldThrowOnStart = false;
-    static shouldThrowOnPause = false;
-    /** false のとき stop() は onstop を自動発火せず、テストが手動で駆動する (stopping 観測用) */
-    static autoStop = true;
-    /** false のとき pause()/resume() は onpause/onresume を自動発火せず、テストが手動で駆動する */
-    static autoPauseResume = true;
-
-    ondataavailable: ((event: { data: Blob }) => void) | null = null;
-    onstop: (() => void) | null = null;
-    onerror: (() => void) | null = null;
-    onpause: (() => void) | null = null;
-    onresume: (() => void) | null = null;
-    stopCalls = 0;
-    pauseCalls = 0;
-    resumeCalls = 0;
-    /** RecordingState 相当 (recoverPhaseFromRecorderState が参照する真実源) */
-    state: "inactive" | "recording" | "paused" = "inactive";
-
-    constructor(
-        public stream: unknown,
-        public options: { mimeType: string },
-    ) {
-        if (FakeMediaRecorder.shouldThrowOnConstruct) {
-            throw new DOMException("unsupported", "NotSupportedError");
-        }
-    }
-
-    start(): void {
-        if (FakeMediaRecorder.shouldThrowOnStart) {
-            throw new DOMException("invalid state", "InvalidStateError");
-        }
-        this.state = "recording";
-        // no-op (テストは stop() で明示的に onstop を駆動する)
-    }
-
-    stop(): void {
-        this.stopCalls += 1;
-        this.state = "inactive";
-        if (!FakeMediaRecorder.autoStop) return; // 手動駆動モード
-        this.ondataavailable?.({ data: new Blob(["frame"], { type: this.options.mimeType }) });
-        this.onstop?.();
-    }
-
-    pause(): void {
-        if (FakeMediaRecorder.shouldThrowOnPause) {
-            throw new DOMException("invalid state", "InvalidStateError");
-        }
-        this.pauseCalls += 1;
-        this.state = "paused";
-        if (FakeMediaRecorder.autoPauseResume) this.onpause?.();
-    }
-
-    resume(): void {
-        this.resumeCalls += 1;
-        this.state = "recording";
-        if (FakeMediaRecorder.autoPauseResume) this.onresume?.();
-    }
-
-    /** 手動モードで onstop を駆動する (blob 生成 → onstop) */
-    fireStop(): void {
-        this.state = "inactive";
-        this.ondataavailable?.({ data: new Blob(["frame"], { type: this.options.mimeType }) });
-        this.onstop?.();
-    }
-
-    /** 手動モードで onpause/onresume を駆動する */
-    firePause(): void {
-        this.onpause?.();
-    }
-    fireResume(): void {
-        this.onresume?.();
-    }
-}
+/*
+ * MediaRecorder / MediaStream の stub は tests/js/support/fake-media-recorder.ts へ移設し、
+ * 撮影ページ (CaptureShow.test.ts) と共有する。**移設だけで挙動は変えていない**ので、
+ * 以下の it ブロックが 1 行も変わらず緑であることがその証拠になる。
+ */
 
 /** 直近に構築された FakeMediaRecorder を捕捉する (onerror/onstop 手動駆動用) */
 let lastRecorder: FakeMediaRecorder | null = null;
-class TrackingFakeMediaRecorder extends FakeMediaRecorder {
-    constructor(stream: unknown, options: { mimeType: string }) {
-        super(stream, options);
-        lastRecorder = this;
-    }
-}
+const TrackingFakeMediaRecorder = createTrackingRecorderClass((recorder) => {
+    lastRecorder = recorder;
+});
 
 const getUserMediaMock = vi.fn<() => Promise<MediaStream>>();
-
-interface FakeTrack {
-    stop: ReturnType<typeof vi.fn>;
-    onended: (() => void) | null;
-    applyConstraints: ReturnType<typeof vi.fn>;
-    getSettings: ReturnType<typeof vi.fn>;
-}
-
-/** getTracks()/getVideoTracks() が stop spy 付き track を返す fake stream (解放・flip 検証用) */
-function fakeStream(facing: "environment" | "user" = "environment"): {
-    stream: MediaStream;
-    stop: ReturnType<typeof vi.fn>;
-    track: FakeTrack;
-} {
-    const stop = vi.fn();
-    const track: FakeTrack = {
-        stop,
-        onended: null,
-        // 既定は制約適用成功 + getSettings が要求 facingMode を返す (段階1 成功)
-        applyConstraints: vi.fn().mockResolvedValue(undefined),
-        getSettings: vi.fn(() => ({ facingMode: facing })),
-    };
-    const stream = {
-        getTracks: () => [track],
-        getVideoTracks: () => [track],
-    } as unknown as MediaStream;
-    return { stream, stop, track };
-}
 
 beforeEach(() => {
     FakeMediaRecorder.supportedTypes = ["video/webm"];
@@ -1018,5 +917,130 @@ describe("CameraRecorder", () => {
         await vi.waitFor(() =>
             expect(onCameraUnavailable).toHaveBeenCalledWith("device_missing"),
         );
+    });
+});
+
+/*
+ * 横持ち全画面レイアウトと撮影ガイド overlay (T186 施策 C)。
+ *
+ * layout は **class の切替にしか使わない**ため、phase マシン・stream 管理の既存テストは
+ * 1 件も変更していない (変更したら不変条件が緩んだ証拠)。
+ */
+describe("CameraRecorder 全画面レイアウトと撮影ガイド", () => {
+    /** camera-preview を内包する overlay コンテナ (position: relative の親) */
+    function previewContainer(): HTMLElement {
+        const parent = screen.getByTestId("camera-preview").parentElement;
+        expect(parent).not.toBeNull();
+
+        return parent as HTMLElement;
+    }
+
+    it("既定 (layout 省略) は従来どおり: 撮影ガイドを出さず aspect-video を保つ", () => {
+        render(CameraRecorder, {
+            props: {
+                onCaptured: vi.fn(),
+                onCameraUnavailable: vi.fn(),
+                shootingPoint: "手元を寄りで撮る",
+            },
+        });
+
+        expect(screen.queryByTestId("shooting-guide-overlay")).not.toBeInTheDocument();
+        expect(screen.getByTestId("camera-preview").className).toContain("aspect-video");
+    });
+
+    it("全画面 + 非空の shootingPoint で撮影ガイドが出る", () => {
+        render(CameraRecorder, {
+            props: {
+                onCaptured: vi.fn(),
+                onCameraUnavailable: vi.fn(),
+                layout: "fullscreen",
+                shootingPoint: "手元を寄りで撮る",
+            },
+        });
+
+        expect(screen.getByTestId("shooting-guide-overlay")).toHaveTextContent("手元を寄りで撮る");
+    });
+
+    it.each([
+        ["null", null],
+        ["空文字列", ""],
+        ["空白のみ", "   "],
+    ])("全画面でも shootingPoint が %s なら撮影ガイドを出さない", (_label, shootingPoint) => {
+        render(CameraRecorder, {
+            props: {
+                onCaptured: vi.fn(),
+                onCameraUnavailable: vi.fn(),
+                layout: "fullscreen",
+                shootingPoint,
+            },
+        });
+
+        expect(screen.queryByTestId("shooting-guide-overlay")).not.toBeInTheDocument();
+    });
+
+    it("前後空白を含む shootingPoint は trim せずそのまま描画する (trim は空判定専用)", () => {
+        render(CameraRecorder, {
+            props: {
+                onCaptured: vi.fn(),
+                onCameraUnavailable: vi.fn(),
+                layout: "fullscreen",
+                shootingPoint: "  手元を寄りで撮る  ",
+            },
+        });
+
+        expect(
+            screen.getByTestId("shooting-guide-overlay").querySelector("span")?.textContent,
+        ).toBe("  手元を寄りで撮る  ");
+    });
+
+    it("全画面では映像が object-cover で伸び aspect-video を持たない", () => {
+        render(CameraRecorder, {
+            props: {
+                onCaptured: vi.fn(),
+                onCameraUnavailable: vi.fn(),
+                layout: "fullscreen",
+            },
+        });
+
+        const preview = screen.getByTestId("camera-preview");
+        expect(preview.className).toContain("object-cover");
+        expect(preview.className).not.toContain("aspect-video");
+    });
+
+    it("DOM 順が グリッド < 撮影ガイド < 字幕帯 (z 順の回帰検出)", async () => {
+        render(CameraRecorder, {
+            props: {
+                onCaptured: vi.fn(),
+                onCameraUnavailable: vi.fn(),
+                layout: "fullscreen",
+                shootingPoint: "手元を寄りで撮る",
+                subtitlePrimary: "ネジ締め",
+                subtitleSecondary: "ドライバーで締めます",
+            },
+        });
+        await fireEvent.click(screen.getByTestId("toggle-grid")); // グリッドは既定 OFF
+
+        const grid = screen.getByTestId("grid-overlay");
+        const guide = screen.getByTestId("shooting-guide-overlay");
+        const subtitle = screen.getByTestId("subtitle-overlay");
+
+        expect(grid.compareDocumentPosition(guide) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+            Node.DOCUMENT_POSITION_FOLLOWING,
+        );
+        expect(guide.compareDocumentPosition(subtitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+            Node.DOCUMENT_POSITION_FOLLOWING,
+        );
+    });
+
+    it("全画面でも操作行は映像コンテナの外にある (映像へ重ねない判断の固定)", () => {
+        render(CameraRecorder, {
+            props: {
+                onCaptured: vi.fn(),
+                onCameraUnavailable: vi.fn(),
+                layout: "fullscreen",
+            },
+        });
+
+        expect(previewContainer().contains(screen.getByTestId("start-recording"))).toBe(false);
     });
 });
