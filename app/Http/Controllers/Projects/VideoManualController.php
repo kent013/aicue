@@ -23,6 +23,7 @@ use App\Models\User;
 use App\Models\VideoManual;
 use App\Services\Manual\AdoptedReadyTakeCoverage;
 use App\Services\Manual\CurrentRenderArtifact;
+use App\Services\Manual\ScenarioReportBuilder;
 use App\Services\Manual\VideoManualService;
 use App\Support\Seo\SeoManager;
 use Illuminate\Http\RedirectResponse;
@@ -95,8 +96,14 @@ class VideoManualController extends Controller
     }
 
     /** 詳細 (撮影者も閲覧可) */
-    public function show(Request $request, Project $project, VideoManual $manual, SeoManager $seo, VideoManualService $manuals): Response
-    {
+    public function show(
+        Request $request,
+        Project $project,
+        VideoManual $manual,
+        SeoManager $seo,
+        VideoManualService $manuals,
+        ScenarioReportBuilder $reports,
+    ): Response {
         $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404 ({manual} ∈ {project} は scopeBindings が担保済み)
         $this->resolveOrganizationProject($organization, $project);
@@ -147,6 +154,9 @@ class VideoManualController extends Controller
                     ? null
                     : AnalysisJobData::fromJob($analysisJob, $manual)->toArray(),
                 'hasDocument' => $manual->sourceDocuments()->exists(),
+                // 生成結果の確認 (LLM の所見 + 現在の cuts への決定的検査)。null = 出す材料が無い。
+                // 描画時点のスナップショットであり常に最新ではない (render.coverage と同じ性質)。
+                'report' => $reports->build($manual)?->toArray(),
             ],
             // レンダパネル (最新 render job / 最新 preview job / 再生可能 preview / 完成動画)。RenderProps と対
             'render' => [

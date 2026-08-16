@@ -244,10 +244,41 @@ export interface AnalysisJobProps {
     manual_status: VideoManualStatus;
 }
 
+/** PHP: App\Enums\Manual\ScenarioVerdict と対 (値集合同期テストあり) */
+export type ScenarioVerdict = "valid" | "needs_review" | "invalid";
+
+/** PHP: App\Enums\Manual\ScenarioRuleCode と対 (値集合同期テストあり) */
+export type ScenarioRuleCode =
+    | "narration_missing"
+    | "narration_not_polite"
+    | "narration_directive"
+    | "subtitle_primary_sentence"
+    | "subtitle_secondary_missing";
+
+/** PHP: ScenarioReportData::toArray() と対 */
+export interface ScenarioReportProps {
+    verdict: {
+        verdict: ScenarioVerdict;
+        reason: string;
+        works: string[];
+        work_count: number;
+        split_recommended: boolean;
+        is_current_document: boolean;
+    } | null;
+    counts: { steps: number; points: number; total: number };
+    findings: {
+        code: ScenarioRuleCode;
+        count: number;
+        positions: { step: number; point: number | null }[];
+    }[];
+}
+
 /** PHP: VideoManualController::show の analysis props と対 */
 export interface AnalysisProps {
     job: AnalysisJobProps | null;
     hasDocument: boolean;
+    /** null = 出す材料が無い (cuts も所見も無い) */
+    report: ScenarioReportProps | null;
 }
 
 /** PHP: App\Enums\Manual\AnalysisConflictType と対 */

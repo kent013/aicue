@@ -18,6 +18,8 @@ final class LlmOutputInvalidException extends RuntimeException
     public function __construct(
         public readonly LlmOutputInvalidReason $reason,
         string $detail,
+        /** 違反位置 (例: validation.works.2)。観測専用で制御フローには使わない */
+        public readonly ?string $path = null,
     ) {
         parent::__construct("AI の応答を解釈できませんでした。再実行してください。({$reason->value}: {$detail})");
     }

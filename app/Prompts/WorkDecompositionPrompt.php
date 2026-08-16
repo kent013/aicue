@@ -9,9 +9,10 @@ use App\Support\Llm\GuardedPrompt;
 use App\Support\Llm\PromptDefense;
 
 /**
- * 作業分解プロンプト (AI 解析 2 段目)。統一 JSON → 作業分解表。
+ * 作業分解プロンプト (AI 解析 2 段目)。統一 JSON → 作業分解表 + 手順書への所見。
  * 入力 JSON は untrusted な SOP 由来なので窓口 (PromptDefense) を通す。
- * 出力は WorkDecompositionData::fromLlmText() で検証する。
+ * 出力は WorkDecompositionResponseData::fromLlmText() で検証する
+ * (steps = WorkDecompositionData / validation = SopValidationData)。
  */
 final class WorkDecompositionPrompt
 {

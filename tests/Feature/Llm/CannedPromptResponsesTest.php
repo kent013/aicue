@@ -5,7 +5,8 @@ declare(strict_types=1);
 use App\DataTransferObjects\LlmCallContextData;
 use App\DataTransferObjects\Manual\Analysis\ExtractedSopData;
 use App\DataTransferObjects\Manual\Analysis\GeneratedScenarioData;
-use App\DataTransferObjects\Manual\Analysis\WorkDecompositionData;
+use App\DataTransferObjects\Manual\Analysis\WorkDecompositionResponseData;
+use App\Enums\Manual\ScenarioVerdict;
 use App\Prompts\ExampleSummaryPrompt;
 use App\Prompts\ScenarioGenerationPrompt;
 use App\Prompts\SopExtractPrompt;
@@ -102,12 +103,15 @@ test('sop-extract の canned が ExtractedSopData::fromLlmText を通過する',
     expect($dto->sections[0]['steps'])->toHaveCount(1);
 });
 
-test('work-decomposition の canned が WorkDecompositionData::fromLlmText を通過する', function (): void {
+test('work-decomposition の canned が WorkDecompositionResponseData::fromLlmText を通過する', function (): void {
     $text = WorkDecompositionPrompt::make('{"header":{},"sections":[]}', LlmCallContextData::none())->executeSync();
     Assert::string($text);
 
-    $dto = WorkDecompositionData::fromLlmText($text);
-    expect($dto->steps)->toHaveCount(1);
+    $dto = WorkDecompositionResponseData::fromLlmText($text);
+    expect($dto->decomposition->steps)->toHaveCount(1);
+    // 妥当性の所見も同じ 1 応答から取り出せる (steps と validation を 1 回の decode で組む)
+    expect($dto->validation->verdict)->toBe(ScenarioVerdict::Valid);
+    expect($dto->validation->works)->toHaveCount(1);
 });
 
 test('scenario-generation の canned が GeneratedScenarioData::fromLlmText を通過する', function (): void {

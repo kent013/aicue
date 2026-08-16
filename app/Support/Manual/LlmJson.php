@@ -37,9 +37,13 @@ final class LlmJson
         return $decoded;
     }
 
-    /** スキーマ違反の例外を生成する (DTO 検証用の短縮形) */
-    public static function schemaViolation(string $detail): LlmOutputInvalidException
+    /**
+     * スキーマ違反の例外を生成する (DTO 検証用の短縮形)。
+     * $path は観測用の違反位置 (例: validation.works.2)。省略時は null で、
+     * 既存の呼び出し側は無変更のまま動く。
+     */
+    public static function schemaViolation(string $detail, ?string $path = null): LlmOutputInvalidException
     {
-        return new LlmOutputInvalidException(LlmOutputInvalidReason::SchemaViolation, $detail);
+        return new LlmOutputInvalidException(LlmOutputInvalidReason::SchemaViolation, $detail, $path);
     }
 }

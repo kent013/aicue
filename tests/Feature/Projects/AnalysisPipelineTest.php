@@ -36,6 +36,7 @@ use Kent013\PrismPrompt\Testing\TextResponseFake;
 use Prism\Prism\Exceptions\PrismProviderOverloadedException;
 use Prism\Prism\Exceptions\PrismRateLimitedException;
 use Prism\Prism\Exceptions\PrismRequestTooLargeException;
+use Prism\Prism\ValueObjects\Messages\UserMessage;
 use Tests\Support\PrismHttpExceptionFactory;
 use Tests\Support\ThrowingPromptFake;
 
@@ -96,13 +97,25 @@ function extractFixture(): string
     ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
 }
 
-function decompositionFixture(): string
+/**
+ * work-decomposition 応答 ({steps, validation})。上書きしたいキーだけ差し替える
+ * (validation を欠落・破損させたケースを組み立てるため)。
+ *
+ * @param  array<string, mixed>  $overrides
+ */
+function decompositionFixture(array $overrides = []): string
 {
-    return json_encode([
+    return json_encode([...[
         'steps' => [
             ['no' => 1, 'action' => 'ネジを締める', 'points' => ['トルクは 5Nm']],
         ],
-    ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        'validation' => [
+            'verdict' => 'needs_review',
+            'reason' => 'トルク値は読み取れましたが工具の指定が曖昧です。',
+            'works' => ['ネジ締め作業'],
+            'split_recommended' => false,
+        ],
+    ], ...$overrides], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
 }
 
 function scenarioFixture(): string
@@ -215,6 +228,119 @@ test('成功パス: cuts materialize / ready / version+1 / succeeded / committed
     // 監査スナップショット
     expect($document->refresh()->extracted_json)->toHaveKey('sections');
     expect($job->result_json)->toHaveKey('steps');
+
+    // 手順書への所見 (表示契約)。result_json とは別カラムで、互いに混ざらない
+    expect($job->validation_json)->toBe([
+        'verdict' => 'needs_review',
+        'reason' => 'トルク値は読み取れましたが工具の指定が曖昧です。',
+        'works' => ['ネジ締め作業'],
+        'split_recommended' => false,
+    ]);
+    expect($job->result_json)->not->toHaveKey('validation');
+});
+
+test('3 段目へ渡す入力 JSON に validation は含まれない (所見を次段に混ぜない)', function (): void {
+    [, , , , , $job] = pipelineContext();
+    fakeSuccessfulLlm();
+
+    app(AnalysisPipeline::class)->run($job->id);
+
+    expect($job->refresh()->status)->toBe(JobStatus::Succeeded);
+    // 3 段目 (scenario-generation) のプロンプトへ実際に載った本文を読む
+    $fake = Prompt::getFake();
+    expect($fake)->not->toBeNull();
+    $recorded = $fake->recorded();
+    expect($recorded)->toHaveCount(3);
+
+    $generateText = '';
+    foreach ($recorded[2]['messages'] as $message) {
+        if ($message instanceof UserMessage) {
+            $generateText .= $message->text()."\n";
+        }
+    }
+
+    expect($generateText)->toContain('ネジを締める');       // 作業分解表は渡る
+    expect($generateText)->not->toContain('needs_review');  // 所見は渡らない
+    expect($generateText)->not->toContain('split_recommended');
+});
+
+test('validation 不正は有界リトライののち failed (validation_json は NULL のまま)', function (): void {
+    [, , , , , $job] = pipelineContext();
+    $brokenDecomposition = decompositionFixture(['validation' => ['verdict' => 'unknown']]);
+    Prompt::fake([
+        TextResponseFake::make()->withText(extractFixture()),
+        TextResponseFake::make()->withText($brokenDecomposition),
+        TextResponseFake::make()->withText($brokenDecomposition),
+        TextResponseFake::make()->withText($brokenDecomposition),
+    ]);
+    Log::spy();
+
+    app(AnalysisPipeline::class)->run($job->id);
+
+    $job->refresh();
+    expect($job->status)->toBe(JobStatus::Failed);
+    expect($job->validation_json)->toBeNull();
+    expect($job->result_json)->toBeNull(); // 所見が通らない限り作業分解表も保存しない (1 応答 1 保存)
+
+    // 再試行ログに違反位置が載る (validation 起因かを集計で分けられる)
+    Log::shouldHaveReceived('warning')->withArgs(
+        fn (string $message, array $context): bool => $message === 'AI 解析の LLM 呼び出しを再試行します'
+            && $context['failure_category'] === 'schema_violation'
+            && is_string($context['failure_path'])
+            && str_starts_with($context['failure_path'], 'validation.'),
+    );
+    // 最終失敗にも同じ観測キーが残る (再試行ログとは別の 1 行)
+    Log::shouldHaveReceived('warning')->withArgs(
+        fn (string $message, array $context): bool => $message === 'AI 解析が LLM 応答のスキーマ違反で失敗しました'
+            && $context['analysis_job_id'] === $job->id
+            && $context['failure_category'] === 'schema_violation'
+            && $context['failure_path'] === 'validation.verdict',
+    )->once();
+});
+
+test('validation キーの欠落そのものも failed になる (failure_path=validation)', function (): void {
+    [, , , , , $job] = pipelineContext();
+    // 旧プロンプト時代の応答形 ({steps} だけ) が返ってきた状況
+    $withoutValidation = json_encode([
+        'steps' => [['no' => 1, 'action' => 'ネジを締める', 'points' => ['トルクは 5Nm']]],
+    ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+    Prompt::fake([
+        TextResponseFake::make()->withText(extractFixture()),
+        TextResponseFake::make()->withText($withoutValidation),
+        TextResponseFake::make()->withText($withoutValidation),
+        TextResponseFake::make()->withText($withoutValidation),
+    ]);
+    Log::spy();
+
+    app(AnalysisPipeline::class)->run($job->id);
+
+    $job->refresh();
+    expect($job->status)->toBe(JobStatus::Failed);
+    expect($job->validation_json)->toBeNull();
+    Log::shouldHaveReceived('warning')->withArgs(
+        fn (string $message, array $context): bool => $message === 'AI 解析が LLM 応答のスキーマ違反で失敗しました'
+            && $context['failure_path'] === 'validation',
+    )->once();
+});
+
+test('steps 側の違反は failure_path が steps. で始まる (validation 側と識別できる)', function (): void {
+    [, , , , , $job] = pipelineContext();
+    $brokenSteps = decompositionFixture(['steps' => [['no' => 1, 'action' => '', 'points' => []]]]);
+    Prompt::fake([
+        TextResponseFake::make()->withText(extractFixture()),
+        TextResponseFake::make()->withText($brokenSteps),
+        TextResponseFake::make()->withText($brokenSteps),
+        TextResponseFake::make()->withText($brokenSteps),
+    ]);
+    Log::spy();
+
+    app(AnalysisPipeline::class)->run($job->id);
+
+    expect($job->refresh()->status)->toBe(JobStatus::Failed);
+    Log::shouldHaveReceived('warning')->withArgs(
+        fn (string $message, array $context): bool => $message === 'AI 解析が LLM 応答のスキーマ違反で失敗しました'
+            && $context['failure_path'] === 'steps.0.action',
+    )->once();
 });
 
 test('再試行で二重予約しない (有効な Reserved は再利用) + queued guard の no-op', function (): void {

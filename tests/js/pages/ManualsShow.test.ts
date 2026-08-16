@@ -12,7 +12,7 @@ const baseProps = {
         category: { id: 2, name: "仕上げ" },
         created_at: "2026-07-10 12:00",
     },
-    analysis: { job: null, hasDocument: false },
+    analysis: { job: null, hasDocument: false, report: null },
     render: {
         job: null,
         previewJob: null,
@@ -146,12 +146,40 @@ describe("Manuals/Show", () => {
                         manual_status: "analyzing" as VideoManualStatus,
                     },
                     hasDocument: true,
+                    report: null,
                 },
             },
         });
 
         expect(screen.queryByTestId("source-document-upload")).toBeNull();
         expect(screen.getByTestId("analysis-progress")).toBeInTheDocument();
+    });
+
+    // --- T200: 生成結果の確認パネルの配線 ---
+
+    it("analysis.report=null ではパネルを描画しない", () => {
+        render(Show, { props: baseProps });
+
+        expect(screen.queryByTestId("scenario-report")).toBeNull();
+    });
+
+    it("analysis.report があるとパネルを描画する", () => {
+        render(Show, {
+            props: {
+                ...baseProps,
+                analysis: {
+                    ...baseProps.analysis,
+                    report: {
+                        verdict: null,
+                        counts: { steps: 2, points: 3, total: 5 },
+                        findings: [],
+                    },
+                },
+            },
+        });
+
+        expect(screen.getByTestId("scenario-report")).toBeInTheDocument();
+        expect(screen.getByTestId("scenario-counts")).toHaveTextContent("手順 2");
     });
 
     // --- T148 (bug-hunt F-1-01): render props の配線 ---

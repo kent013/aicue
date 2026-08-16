@@ -121,7 +121,7 @@ final class CannedPromptResponses
         ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
     }
 
-    /** work-decomposition: WorkDecompositionData::fromLlmText を通過 (1 step / points 1) */
+    /** work-decomposition: WorkDecompositionResponseData::fromLlmText を通過 (1 step / points 1 / 所見つき) */
     private static function workDecompositionCanned(): string
     {
         return json_encode([
@@ -130,6 +130,12 @@ final class CannedPromptResponses
                 'action' => 'バルブを閉じる',
                 'points' => ['ハンドルが止まるまで回す'],
             ]],
+            'validation' => [
+                'verdict' => 'valid',
+                'reason' => '手順と急所が読み取れており、動画マニュアルの元資料として成立しています。',
+                'works' => ['バルブ閉止作業'],
+                'split_recommended' => false,
+            ],
         ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
     }
 

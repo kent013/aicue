@@ -17,45 +17,55 @@ final readonly class WorkDecompositionData
     /** @param list<WorkDecompositionStepData> $steps */
     public function __construct(public array $steps) {}
 
-    public static function fromLlmText(string $text): self
+    /**
+     * 応答全体 (decode 済み) から `steps` を検証して取り出す。
+     * decode は呼び出し側 (WorkDecompositionResponseData) が 1 回だけ行う。
+     *
+     * @param  array<array-key, mixed>  $decoded
+     */
+    public static function fromPayload(array $decoded): self
     {
-        $decoded = LlmJson::decode($text);
-
         $rawSteps = $decoded['steps'] ?? null;
         if (! is_array($rawSteps) || ! array_is_list($rawSteps)) {
-            throw LlmJson::schemaViolation('steps は配列でなければなりません');
+            throw LlmJson::schemaViolation('steps は配列でなければなりません', 'steps');
         }
         if (count($rawSteps) < 1) {
-            throw LlmJson::schemaViolation('steps は 1 件以上でなければなりません');
+            throw LlmJson::schemaViolation('steps は 1 件以上でなければなりません', 'steps');
         }
         if (count($rawSteps) > ScenarioLimits::MAX_STEPS) {
-            throw LlmJson::schemaViolation('steps が上限 ('.ScenarioLimits::MAX_STEPS.') を超えています');
+            throw LlmJson::schemaViolation('steps が上限 ('.ScenarioLimits::MAX_STEPS.') を超えています', 'steps');
         }
 
         $steps = [];
         foreach ($rawSteps as $index => $rawStep) {
             if (! is_array($rawStep)) {
-                throw LlmJson::schemaViolation("steps.{$index} は object でなければなりません");
+                throw LlmJson::schemaViolation("steps.{$index} は object でなければなりません", "steps.{$index}");
             }
             $no = $rawStep['no'] ?? null;
             if (! is_int($no)) {
-                throw LlmJson::schemaViolation("steps.{$index}.no は整数でなければなりません");
+                throw LlmJson::schemaViolation("steps.{$index}.no は整数でなければなりません", "steps.{$index}.no");
             }
             $action = $rawStep['action'] ?? null;
             if (! is_string($action) || trim($action) === '') {
-                throw LlmJson::schemaViolation("steps.{$index}.action は非空文字列でなければなりません");
+                throw LlmJson::schemaViolation("steps.{$index}.action は非空文字列でなければなりません", "steps.{$index}.action");
             }
             $rawPoints = $rawStep['points'] ?? [];
             if (! is_array($rawPoints) || ! array_is_list($rawPoints)) {
-                throw LlmJson::schemaViolation("steps.{$index}.points は配列でなければなりません");
+                throw LlmJson::schemaViolation("steps.{$index}.points は配列でなければなりません", "steps.{$index}.points");
             }
             if (count($rawPoints) > ScenarioLimits::MAX_POINTS_PER_STEP) {
-                throw LlmJson::schemaViolation("steps.{$index}.points が上限 (".ScenarioLimits::MAX_POINTS_PER_STEP.') を超えています');
+                throw LlmJson::schemaViolation(
+                    "steps.{$index}.points が上限 (".ScenarioLimits::MAX_POINTS_PER_STEP.') を超えています',
+                    "steps.{$index}.points",
+                );
             }
             $points = [];
             foreach ($rawPoints as $pointIndex => $rawPoint) {
                 if (! is_string($rawPoint) || trim($rawPoint) === '') {
-                    throw LlmJson::schemaViolation("steps.{$index}.points.{$pointIndex} は非空文字列でなければなりません");
+                    throw LlmJson::schemaViolation(
+                        "steps.{$index}.points.{$pointIndex} は非空文字列でなければなりません",
+                        "steps.{$index}.points.{$pointIndex}",
+                    );
                 }
                 $points[] = $rawPoint;
             }

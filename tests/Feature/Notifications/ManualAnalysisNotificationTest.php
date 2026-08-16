@@ -79,6 +79,12 @@ function fakeAnalysisLlmSuccess(): void
         ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)),
         TextResponseFake::make()->withText(json_encode([
             'steps' => [['no' => 1, 'action' => 'ネジを締める', 'points' => []]],
+            'validation' => [
+                'verdict' => 'valid',
+                'reason' => '手順が読み取れています。',
+                'works' => ['ネジ締め作業'],
+                'split_recommended' => false,
+            ],
         ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)),
         TextResponseFake::make()->withText(json_encode([
             'cuts' => [[

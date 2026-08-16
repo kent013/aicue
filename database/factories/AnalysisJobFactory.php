@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Database\Factories;
 
+use App\DataTransferObjects\Manual\Analysis\SopValidationData;
 use App\Enums\Manual\AnalysisStep;
 use App\Enums\Manual\JobStatus;
+use App\Enums\Manual\ScenarioVerdict;
 use App\Models\AnalysisJob;
 use App\Models\SourceDocument;
 use App\Models\VideoManual;
@@ -31,8 +33,24 @@ class AnalysisJobFactory extends Factory
             'progress' => null,
             'ticket_reservation_id' => null,
             'result_json' => null,
+            'validation_json' => null,
             'error' => null,
         ];
+    }
+
+    /** 妥当性所見つき (表示テスト用)。既定は valid / 作業 1 件 */
+    public function withValidation(
+        ScenarioVerdict $verdict = ScenarioVerdict::Valid,
+        bool $splitRecommended = false,
+    ): static {
+        return $this->state(fn (): array => [
+            'validation_json' => (new SopValidationData(
+                verdict: $verdict,
+                reason: 'テスト用の所見です。',
+                works: ['バルブ閉止作業'],
+                splitRecommended: $splitRecommended,
+            ))->toArray(),
+        ]);
     }
 
     /** 指定マニュアル配下に作る */

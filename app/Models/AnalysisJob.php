@@ -17,7 +17,7 @@ use Illuminate\Support\Carbon;
  * AnalysisJob (VideoManual 配下の AI 解析ジョブ)。doc/10 §10.1。
  *
  * - video_manual_id / source_document_id / ticket_reservation_id は保護キーのため $fillable 外
- * - status / step / progress / result_json / error は AnalysisJobService / AnalysisPipeline が
+ * - status / step / progress / result_json / validation_json / error は AnalysisJobService / AnalysisPipeline が
  *   管理する状態のため $fillable を持たない (TicketReservation と同じ明示代入のみの規約)
  *
  * @property int $id
@@ -29,6 +29,7 @@ use Illuminate\Support\Carbon;
  * @property int|null $ticket_reservation_id
  * @property int|null $triggered_by
  * @property array<array-key, mixed>|null $result_json
+ * @property array<array-key, mixed>|null $validation_json
  * @property string|null $error
  * @property int|null $scenario_version_at_terminal
  * @property Carbon|null $created_at
@@ -49,6 +50,7 @@ class AnalysisJob extends Model
             'step' => AnalysisStep::class,
             'progress' => 'integer',
             'result_json' => 'array',
+            'validation_json' => 'array',
         ];
     }
 
