@@ -10,6 +10,7 @@
     import AnalysisPanel from "@/components/features/manual/AnalysisPanel.svelte";
     import DuplicateManualDialog from "@/components/features/manual/DuplicateManualDialog.svelte";
     import RenderPanel from "@/components/features/manual/RenderPanel.svelte";
+    import ScenarioReportPanel from "@/components/features/manual/ScenarioReportPanel.svelte";
     import SourceDocumentUpload from "@/components/features/manual/SourceDocumentUpload.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
     import PageContainer from "@/components/templates/PageContainer.svelte";
@@ -126,6 +127,15 @@
                 hasDocument={analysis.hasDocument}
                 {canManage}
             />
+
+            {#if analysis.report}
+                <ScenarioReportPanel
+                    projectId={project.id}
+                    manualId={manual.id}
+                    report={analysis.report}
+                    {canManage}
+                />
+            {/if}
 
             <RenderPanel
                 projectId={project.id}

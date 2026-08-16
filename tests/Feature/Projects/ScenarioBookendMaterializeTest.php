@@ -80,6 +80,12 @@ function bookendDecomposeJson(): string
 {
     return json_encode([
         'steps' => [['no' => 1, 'action' => 'ネジを締める', 'points' => ['トルクは 5Nm']]],
+        'validation' => [
+            'verdict' => 'valid',
+            'reason' => '手順と急所が読み取れています。',
+            'works' => ['ネジ締め作業'],
+            'split_recommended' => false,
+        ],
     ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
 }
 

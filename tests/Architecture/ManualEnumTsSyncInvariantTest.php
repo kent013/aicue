@@ -9,6 +9,8 @@ use App\Enums\Manual\RenderConflictType;
 use App\Enums\Manual\RenderErrorCode;
 use App\Enums\Manual\RenderKind;
 use App\Enums\Manual\RenderStep;
+use App\Enums\Manual\ScenarioRuleCode;
+use App\Enums\Manual\ScenarioVerdict;
 use App\Enums\Manual\VideoManualStatus;
 use Tests\Support\TsUnionValues;
 
@@ -56,6 +58,14 @@ test('RenderErrorCode の PHP enum ⇔ TS union 値集合が一致する', funct
 
 test('RenderConflictType の PHP enum ⇔ TS union 値集合が一致する', function (): void {
     expect(extractTsUnionValues('RenderConflictType'))->toBe(TsUnionValues::enumStringValues(RenderConflictType::cases()));
+});
+
+test('ScenarioVerdict の PHP enum ⇔ TS union 値集合が一致する', function (): void {
+    expect(extractTsUnionValues('ScenarioVerdict'))->toBe(TsUnionValues::enumStringValues(ScenarioVerdict::cases()));
+});
+
+test('ScenarioRuleCode の PHP enum ⇔ TS union 値集合が一致する', function (): void {
+    expect(extractTsUnionValues('ScenarioRuleCode'))->toBe(TsUnionValues::enumStringValues(ScenarioRuleCode::cases()));
 });
 
 test('AnalysisJobStatus (JobStatus 共用) の PHP enum ⇔ TS union 値集合が一致する', function (): void {

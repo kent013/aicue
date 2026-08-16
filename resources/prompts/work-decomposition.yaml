@@ -1,5 +1,10 @@
 # 作業分解プロンプト (AI 解析 2 段目。doc/10 §10.4 / doc/03 §3.3)。
 # 統一 JSON (untrusted 由来。UserInput 経由) から「作業分解表」を作る。
+#
+# validation は doc/03 §3.4 のバリデーション結果のうち **LLM にしか判断できない項目**
+# だけを載せる。件数・文体検査は PHP 側 (App\Support\Manual\ScenarioRuleCheck) が
+# 決定的に算出する。
+# **この判定は表示専用で制御フローには使わない** (保存・撮影・レンダを止めない)。
 # max_tokens: 16000 は token budget の出力予約 (AnalysisTokenBudgetInvariantTest が固定)。
 # client_options.timeout: 360 は時間 budget の 1 呼び出し上限 C
 # (AnalysisTimeBudgetInvariantTest / AnalysisTokenBudgetInvariantTest が固定)。
@@ -29,17 +34,35 @@ system_prompt: |
   出力は JSON のみ (前後に説明文・コードフェンスを付けない)。
 
 prompt: |
-  次の抽出済み手順書データから「作業分解表」を作成し、JSON で出力してください。
+  次の抽出済み手順書データから「作業分解表」と「妥当性の所見」を作成し、JSON で出力してください。
 
-  ルール:
+  ルール (作業分解表):
   - 一動作・一 No (1 文に複数動詞があれば行を分ける)
   - 手順 (action) は物理的な動詞のみ (「〇〇の清掃」等の括りは禁止)
   - 急所 (points) は判断基準・数値・良否境界・資料の注釈のみ。1 急所 1 要素
   - 資料にない語を足さない (指差呼称含め忠実に)
   - steps は 100 行以内、points は 1 行あたり 20 要素以内
 
+  ルール (妥当性の所見。人が最終確認するための材料であり、作業分解表の内容は変えない):
+  - verdict は 3 値。"valid" = 動画マニュアルの元資料として成立している /
+    "needs_review" = 成立しているが確認すべき欠落・曖昧さがある /
+    "invalid" = 手順書として読み取れず動画マニュアルの元にできない
+  - reason は判定の理由を 1 文 (200 文字以内) で書く。資料にない事実を足さない
+  - works はこの資料に含まれる「作業」の仮タイトル一覧 (1〜10 件、各 60 文字以内)。
+    1 資料に 1 作業しか無ければ 1 件だけ返す
+  - split_recommended は「1 マニュアル 1 作業に分けた方がよいか」の真偽。
+    works が 2 件以上でも 1 本の動画が妥当なら false でよい
+
   出力スキーマ:
-  { "steps": [ { "no": int, "action": string, "points": [string] } ] }
+  {
+    "steps": [ { "no": int, "action": string, "points": [string] } ],
+    "validation": {
+      "verdict": "valid"|"needs_review"|"invalid",
+      "reason": string,
+      "works": [string],
+      "split_recommended": bool
+    }
+  }
 
   抽出済み手順書データ:
   {{ $extracted }}

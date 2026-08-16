@@ -54,12 +54,11 @@ test('WorkDecompositionData: steps 上限超過・非空 action を検証する'
         static fn (int $no): array => ['no' => $no, 'action' => "動作 {$no}", 'points' => []],
         range(1, ScenarioLimits::MAX_STEPS + 1),
     );
-    expect(fn (): WorkDecompositionData => WorkDecompositionData::fromLlmText(
-        json_encode(['steps' => $steps], JSON_THROW_ON_ERROR),
-    ))->toThrow(LlmOutputInvalidException::class);
+    expect(fn (): WorkDecompositionData => WorkDecompositionData::fromPayload(['steps' => $steps]))
+        ->toThrow(LlmOutputInvalidException::class);
 
-    expect(fn (): WorkDecompositionData => WorkDecompositionData::fromLlmText(
-        '{"steps": [{"no": 1, "action": "", "points": []}]}',
+    expect(fn (): WorkDecompositionData => WorkDecompositionData::fromPayload(
+        ['steps' => [['no' => 1, 'action' => '', 'points' => []]]],
     ))->toThrow(LlmOutputInvalidException::class);
 });
 

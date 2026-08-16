@@ -9,6 +9,7 @@ use App\DataTransferObjects\Manual\Analysis\ExtractedSopData;
 use App\DataTransferObjects\Manual\Analysis\ExtractedText;
 use App\DataTransferObjects\Manual\Analysis\GeneratedScenarioData;
 use App\DataTransferObjects\Manual\Analysis\WorkDecompositionData;
+use App\DataTransferObjects\Manual\Analysis\WorkDecompositionResponseData;
 use App\Enums\Billing\TicketReservationStatus;
 use App\Enums\Llm\UntrustedInputRejectionReason;
 use App\Enums\Manual\AnalysisStep;
@@ -127,6 +128,17 @@ class AnalysisPipeline
             return;
         } catch (Throwable $exception) {
             report($exception);
+            // 観測: スキーマ違反で最終失敗したときも再試行ログと同じキーを残す (集計で突き合わせるため)。
+            // 応答本文は載せない。分岐には使わない (failJob の文言は userMessageFor が決める)。
+            // stage は失敗時点の analysis_jobs.step 列から分かるため、ここでは job id を出して
+            // 段の情報を 2 系統で持たない。
+            if ($exception instanceof LlmOutputInvalidException) {
+                Log::warning('AI 解析が LLM 応答のスキーマ違反で失敗しました', [
+                    'analysis_job_id' => $job->id,
+                    'failure_category' => $exception->reason->value,
+                    'failure_path' => $exception->path,
+                ]);
+            }
             $this->jobs->failJob($job, $this->userMessageFor($exception));
         }
     }
@@ -212,30 +224,37 @@ class AnalysisPipeline
         return $extracted;
     }
 
-    /** decompose 段: 作業分解表 + result_json 保存 (write-only 監査スナップショット) */
+    /**
+     * decompose 段: 作業分解表 (result_json) + 手順書への所見 (validation_json) を 1 回の
+     * LLM 呼び出しで受け取り、**同じ条件付き UPDATE で**保存する。
+     *
+     * ★ 次段 (generate) へ渡すのは `decomposition` **だけ**である。
+     *   所見を次段の入力 JSON に混ぜない (入力 token を無駄にせず、生成器の指示も汚さない)。
+     */
     private function runDecomposeStep(
         AnalysisJob $job,
         ExtractedSopData $extracted,
         CarbonImmutable $deadline,
         LlmCallContextData $context,
     ): WorkDecompositionData {
-        $decomposition = $this->withBoundedRetry(
+        $response = $this->withBoundedRetry(
             $job,
             $deadline,
             AnalysisStep::Decompose,
-            fn (): WorkDecompositionData => WorkDecompositionData::fromLlmText(
+            fn (): WorkDecompositionResponseData => WorkDecompositionResponseData::fromLlmText(
                 WorkDecompositionPrompt::make($extracted->toJsonString(), $context)->executeSync(),
             ),
         );
 
-        // 終端後の自前書き込みを塞ぐ: 進捗と result_json は running のときだけ書く
+        // 終端後の自前書き込みを塞ぐ: 進捗と 2 つの JSON は running のときだけ書く
         $this->writeProgress($job, [
-            'result_json' => $decomposition->toArray(),
+            'result_json' => $response->decomposition->toArray(),
+            'validation_json' => $response->validation->toArray(),
             'step' => AnalysisStep::Generate->value,
             'progress' => 65,
         ]);
 
-        return $decomposition;
+        return $response->decomposition;
     }
 
     /** generate 段: カット群生成 */
@@ -369,6 +388,14 @@ class AnalysisPipeline
                     'attempt' => $tryCount + 1,
                     'max_attempts' => $maxRetries + 1,
                     'exception' => $exception::class,
+                    // スキーマ違反のときだけ分類と違反位置が入る (validation 起因かを集計で分けるため)。
+                    // **応答本文は載せない** (LLM 由来の可変文字列)
+                    'failure_category' => $exception instanceof LlmOutputInvalidException
+                        ? $exception->reason->value
+                        : null,
+                    'failure_path' => $exception instanceof LlmOutputInvalidException
+                        ? $exception->path
+                        : null,
                 ]);
             }
         }
@@ -478,7 +505,9 @@ class AnalysisPipeline
      *   そこでモデルへ `forceFill()` してから `getAttributes()` を取り、**cast 済みの生値**を
      *   UPDATE に渡す (Laravel 自身が `addUpdatedAtColumn()` で使っているのと同じ手口)。
      *
-     * @param  array{step: string, progress: int, result_json?: array<string, mixed>}  $attributes
+     * @param  array{step: string, progress: int, result_json?: array<string, mixed>,
+     *   validation_json?: array{verdict: string, reason: string, works: list<string>,
+     *   split_recommended: bool}}  $attributes
      */
     private function writeProgress(AnalysisJob $job, array $attributes): void
     {
