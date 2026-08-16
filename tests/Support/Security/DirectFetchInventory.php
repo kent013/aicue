@@ -281,6 +281,12 @@ final class DirectFetchInventory
                 .'サーバ確定値で HTTP 入力を経由しない',
                 enqueuedBy: 'App\Jobs\Manual\RunManualRender::handle',
             ),
+            'Services/Capture/TakeThumbnailPipeline.php#run#Take.find:$takeId#1' => DirectFetchJustificationEntry::queuePayload(
+                'GenerateTakeThumbnailJob::handle が $this->takeId をそのまま渡す委譲先。id はテナント検証済みの'
+                .'登録 tx (TakeRegistrationService::finalize) がサーバ採番した主キーで HTTP 入力を経由しない。'
+                .'worker 側は再水和したうえで status / thumbnail_path を検査してから外部へ出る',
+                enqueuedBy: 'App\Jobs\Capture\GenerateTakeThumbnailJob::handle',
+            ),
 
             // --- テナントスコープ済みの解決から確定した id ---
             'Services/Billing/PersonalPlanService.php#activateWithinTransaction#Organization.findOrFail:$organizationId#1' => DirectFetchJustificationEntry::idFromTenantScopedQuery(

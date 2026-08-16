@@ -64,6 +64,7 @@ final class NestedRouteDefenseInventory
             'capture.takes.adopt' => [...$project, 'manual' => $scoped, 'cut' => $scoped, 'take' => $scoped],
             'capture.takes.downloaded' => [...$project, 'manual' => $scoped, 'cut' => $scoped, 'take' => $scoped],
             'capture.takes.playback' => [...$project, 'manual' => $scoped, 'cut' => $scoped, 'take' => $scoped],
+            'capture.takes.thumbnail' => [...$project, 'manual' => $scoped, 'cut' => $scoped, 'take' => $scoped],
 
             // --- 業務 route (web) ---
             'projects.show' => $project,

@@ -12,14 +12,14 @@ import { VIDEO_MANUAL_STATUS_LABELS, type VideoManualStatus } from "@/types/manu
  * enqueue 後の HTTP 経路は upload-queue.test.ts が担うため、本テストは enqueue 引き渡しまで。
  */
 
-const { routerReloadMock, enqueueMock, autoDownloadRunMock, navigateToPanelMock } = vi.hoisted(
-    () => ({
+const { routerReloadMock, enqueueMock, resumeMock, autoDownloadRunMock, navigateToPanelMock } =
+    vi.hoisted(() => ({
         routerReloadMock: vi.fn(),
         enqueueMock: vi.fn(),
+        resumeMock: vi.fn(),
         autoDownloadRunMock: vi.fn(),
         navigateToPanelMock: vi.fn(),
-    }),
-);
+    }));
 
 // 撮影パネルへのナビゲーション (F-1-03) は panel-navigation.ts が副作用ごと担い、
 // その抑止契約は panel-navigation.test.ts が固定する。ここで固定するのは
@@ -58,9 +58,7 @@ vi.mock("@/lib/capture/upload-queue", async (importOriginal) => ({
     UploadQueue: class {
         quotaMessage: string | null = null;
         enqueue = enqueueMock;
-        async resume(): Promise<unknown[]> {
-            return [];
-        }
+        resume = resumeMock;
     },
 }));
 
@@ -111,6 +109,7 @@ function makeAdoptedManual(): CaptureManualDetail {
         captured_at: "2026-07-11T00:00:00Z",
         sort_order: 0,
         downloaded: false,
+        has_thumbnail: false,
         playback_url: "https://s3.example.test/take-900.mp4?sig=1",
         download_ack_token: "ack-900",
     };
@@ -145,7 +144,14 @@ const getUserMediaMock = vi.fn<() => Promise<MediaStream>>();
 
 beforeEach(() => {
     routerReloadMock.mockReset();
+    // reload は Inertia の onFinish で解決する契約。既定では即座に完了させる
+    // (single-flight の in-flight が張り付いたままにならないようにする)
+    routerReloadMock.mockImplementation((options: { onFinish?: () => void }) => {
+        options.onFinish?.();
+    });
     enqueueMock.mockReset();
+    resumeMock.mockReset();
+    resumeMock.mockResolvedValue([]);
     enqueueMock.mockImplementation((item: { clientTakeId: string }) =>
         Promise.resolve({ status: "uploaded", clientTakeId: item.clientTakeId }),
     );
@@ -222,7 +228,10 @@ describe("Capture/Show カメラフォールバック", () => {
         expect(arg.blob).toBe(file);
         expect(arg.contentType).toBe("video/mp4");
         expect(arg.durationMs).toBeNull();
-        expect(routerReloadMock).toHaveBeenCalledWith({ only: ["manual"] });
+        expect(routerReloadMock).toHaveBeenCalledWith({
+            only: ["manual"],
+            onFinish: expect.any(Function),
+        });
     });
 
     it("(e) permission_denied 以外 (device_missing) は汎用の切替 notice を出す", async () => {
@@ -281,7 +290,10 @@ describe("Capture/Show 採用済みテイク自動 DL 結線 (T051)", () => {
         });
         expect(autoDownloadRunMock).toHaveBeenCalledWith(adoptedProps.manual);
         await vi.waitFor(() => {
-            expect(routerReloadMock).toHaveBeenCalledWith({ only: ["manual"] });
+            expect(routerReloadMock).toHaveBeenCalledWith({
+                only: ["manual"],
+                onFinish: expect.any(Function),
+            });
         });
     });
 
@@ -470,4 +482,54 @@ describe("Capture/Show マニュアル詳細への復路 (T155)", () => {
             expect(screen.getByRole("link", { name: "マニュアル詳細へ" })).toBeTruthy();
         },
     );
+});
+
+/*
+ * サムネイル反映の**ページ配線** (T183 / S10)。
+ *
+ * 有界性・停止条件そのものは thumbnail-refresh.test.ts が固定する。
+ * ここで固定するのは **reload の回数** — uploaded が何件あっても single-flight で 1 回、
+ * uploaded が 0 件なら 0 回 — だけである。
+ *
+ * ★ **保証しないもの (誇張しない)**: 「uploaded の outcome が**すべて** watch へ渡ること」は
+ *   本テストでは固定していない。scheduler は page が直接 new する具象で観測点が無く、
+ *   ループが先頭 1 件だけに変わっても本テストは緑のままである。ここを固定するには
+ *   scheduler を差し替え可能な collaborator にする必要があり、今それを作らない
+ *   (AGENTS.md 思考原則 2)。
+ */
+describe("Capture/Show サムネイル反映の配線 (T183)", () => {
+    it("キュー再開で uploaded が複数でも reload は 1 回だけ通る (single-flight)", async () => {
+        stubCameraSupported(false);
+        resumeMock.mockResolvedValue([
+            { status: "uploaded", clientTakeId: "q1" },
+            { status: "uploaded", clientTakeId: "q2" },
+            { status: "queued", clientTakeId: "q3", reason: "offline" },
+        ]);
+
+        render(CaptureShow, { props: baseProps });
+        await fireEvent(window, new Event("online"));
+
+        await vi.waitFor(() => {
+            expect(resumeMock).toHaveBeenCalled();
+        });
+        await vi.waitFor(() => {
+            expect(routerReloadMock).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    it("uploaded が 1 件も無いキュー再開では reload しない", async () => {
+        stubCameraSupported(false);
+        resumeMock.mockResolvedValue([
+            { status: "queued", clientTakeId: "q1", reason: "offline" },
+            { status: "quota_exceeded", clientTakeId: "q2", message: "上限です" },
+        ]);
+
+        render(CaptureShow, { props: baseProps });
+        await fireEvent(window, new Event("online"));
+
+        await vi.waitFor(() => {
+            expect(resumeMock).toHaveBeenCalled();
+        });
+        expect(routerReloadMock).not.toHaveBeenCalled();
+    });
 });

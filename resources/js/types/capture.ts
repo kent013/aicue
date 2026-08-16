@@ -15,6 +15,8 @@ export interface CaptureTake {
     captured_at: string | null;
     sort_order: number;
     downloaded: boolean;
+    /** サムネイルが生成済みか。true のときだけ GET .../takes/{id}/thumbnail を表示に使う */
+    has_thumbnail: boolean;
     /** 採用テイクのみ非 null (doc/10 §10.3) */
     playback_url: string | null;
     /** 採用テイクのみ非 null。DL 完了時に POST .../downloaded へ送る署名 ACK トークン (D6) */

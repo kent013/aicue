@@ -184,7 +184,8 @@ test('show の take shape は TS CaptureTake と対のキー集合 (PHP↔TS 契
     $take = $response->inertiaPage()['props']['manual']['cuts'][0]['takes'][0];
     expect(array_keys($take))->toBe([
         'id', 'client_take_id', 'status', 'size_bytes', 'duration_ms', 'comment',
-        'captured_at', 'sort_order', 'downloaded', 'playback_url', 'download_ack_token',
+        'captured_at', 'sort_order', 'downloaded', 'has_thumbnail', 'playback_url',
+        'download_ack_token',
     ]);
     $cutShape = $response->inertiaPage()['props']['manual']['cuts'][0];
     expect(array_keys($cutShape))->toBe([
@@ -221,4 +222,34 @@ test('PC ルート (/projects/...) の manual 詳細は影響を受けない (�
     $manual = VideoManual::factory()->forProject($project)->create();
 
     $this->actingAs($owner)->get("/projects/{$project->id}/manuals/{$manual->id}")->assertOk();
+});
+
+/*
+|--------------------------------------------------------------------------
+| has_thumbnail (T183 / S8)
+|--------------------------------------------------------------------------
+|
+| props の述語は **GET .../thumbnail が 302 を返す条件と 1 対 1** である
+| (ready でないテイクで true を返すと、必ず 404 になる <img> を描画してしまう)。
+*/
+
+test('has_thumbnail は「ready かつ生成済み」のときだけ true になる', function (): void {
+    [, $owner, $project] = browsingContext();
+    $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
+    $cut = Cut::factory()->forManual($manual)->create();
+    $generated = Take::factory()->forCut($cut)->withThumbnail()->create(['sort_order' => 0]);
+    $pending = Take::factory()->forCut($cut)->create(['sort_order' => 1]);
+    // 生成済みだが ready ではない = endpoint は 404 を返すので false でなければならない
+    $notReady = Take::factory()->forCut($cut)->withThumbnail()->create([
+        'status' => 'processing',
+        'sort_order' => 2,
+    ]);
+
+    $response = $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals/{$manual->id}");
+    $takes = collect($response->inertiaPage()['props']['manual']['cuts'][0]['takes'])
+        ->keyBy('id');
+
+    expect($takes[$generated->id]['has_thumbnail'])->toBeTrue();
+    expect($takes[$pending->id]['has_thumbnail'])->toBeFalse();
+    expect($takes[$notReady->id]['has_thumbnail'])->toBeFalse();
 });

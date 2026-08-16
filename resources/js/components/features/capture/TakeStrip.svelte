@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { Check, ChevronDown, ChevronUp, Download, Pencil, Play, Trash2 } from "@lucide/svelte";
+    import { Check, ChevronDown, ChevronUp, Download, Film, Pencil, Play, Trash2 } from "@lucide/svelte";
     import Badge from "@/components/atoms/Badge.svelte";
     import Button from "@/components/atoms/Button.svelte";
     import TakeCommentDialog from "@/components/features/capture/TakeCommentDialog.svelte";
@@ -196,6 +196,31 @@
                 : ''}"
             data-testid={`take-item-${take.id}`}
         >
+            <!--
+              サムネイル (doc/04 動画列 / doc/05 撮影後の確認)。
+              生成は非同期なので、録画直後・生成失敗・過去分のテイクは has_thumbnail=false になる。
+              その場合は同じ寸法のプレースホルダを出し、枠の大きさを変えない
+              (生成完了後の再取得で同じ枠が画像へ置き換わる = レイアウトが跳ねない)。
+              画像は装飾 (行に「テイク N」の見出しが既にある) なので alt="" にする。
+            -->
+            {#if take.has_thumbnail}
+                <img
+                    src={takeUrl(take, "/thumbnail")}
+                    alt=""
+                    loading="lazy"
+                    decoding="async"
+                    class="size-12 shrink-0 rounded-md border border-border object-cover"
+                    data-testid={`take-thumbnail-${take.id}`}
+                />
+            {:else}
+                <div
+                    class="flex size-12 shrink-0 items-center justify-center rounded-md border border-border bg-neutral"
+                    data-testid={`take-thumbnail-placeholder-${take.id}`}
+                    aria-hidden="true"
+                >
+                    <Film class="size-4 text-text-secondary" aria-hidden="true" />
+                </div>
+            {/if}
             <div class="flex shrink-0 flex-col gap-1">
                 <Button
                     variant="ghost"

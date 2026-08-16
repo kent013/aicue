@@ -176,4 +176,47 @@ class CaptureTakeController extends Controller
             ->away($storage->temporaryPlaybackUrl($take->video_path))
             ->withHeaders(['Cache-Control' => 'no-store, private']);
     }
+
+    /**
+     * テイクのサムネイル表示 (302 → S3 署名 URL)。撮影者/編集者 (capture ability)。
+     * doc/04 動画列 / doc/05 撮影後の下部サムネイル確認。
+     *
+     * 層の順序は playback と同一 (認可より前に 404):
+     * 1. {project} ∈ current org (project.in-current-org middleware + resolveOrganizationProject)
+     * 2. {manual}∈{project}, {cut}∈{manual}, {take}∈{cut} は Route::scopeBindings()
+     * 3. 認可 (preview ability。動画の再生と同じ権限で見せる)
+     *
+     * 404 にするのは 2 つ: ready でないテイク (内部状態を存在有無として漏らさない) と、
+     * **サムネイル未生成** (生成前・生成失敗・過去分)。UI は has_thumbnail で出し分けるため
+     * 通常この 404 は起きないが、生成前の取得競合を安全側に倒すために閉じておく。
+     *
+     * 302 応答は Cache-Control: no-store, private (期限付き署名 URL の再利用防止)。
+     * ※ リダイレクト先の画像本体の cache までは保証しない (動画側と同じ扱い)。
+     */
+    public function thumbnail(
+        Request $request,
+        Project $project,
+        VideoManual $manual,
+        Cut $cut,
+        Take $take,
+        TakeObjectStorage $storage,
+    ): RedirectResponse {
+        $organization = $this->resolveCurrentOrganization($request);
+        // URL 整合 guard: 認可より前に 404
+        $this->resolveOrganizationProject($organization, $project);
+        Gate::authorize('preview', $take);
+
+        if ($take->status !== TakeStatus::Ready) {
+            abort(404);
+        }
+        // ローカル変数へ取ってから早期 return する (プロパティのままだと level 10 が narrowing を保持しない)
+        $path = $take->thumbnail_path;
+        if ($path === null) {
+            abort(404); // 未生成 (生成前 / 失敗 / 過去分)
+        }
+
+        return redirect()
+            ->away($storage->temporaryThumbnailUrl($path))
+            ->withHeaders(['Cache-Control' => 'no-store, private']);
+    }
 }

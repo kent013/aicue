@@ -29,6 +29,8 @@ use App\Services\Billing\Contracts\AutoRechargeGatewayInterface;
 use App\Services\Billing\Contracts\StripeGatewayInterface;
 use App\Services\Billing\StripeWebhookProcessor;
 use App\Services\Billing\TicketCheckoutGateway;
+use App\Services\Capture\FfmpegTakeThumbnailExtractor;
+use App\Services\Capture\TakeThumbnailExtractor;
 use App\Services\Mail\Sns\AwsSnsSignatureVerifier;
 use App\Services\Mail\Sns\SnsSignatureVerifier;
 use App\Services\Render\FfmpegVideoComposer;
@@ -117,6 +119,9 @@ class AppServiceProvider extends ServiceProvider
 
         // 動画合成の抽象 (doc/09 §9.7)。v1 は ffmpeg 実装。テストは fake 実装へ swap する
         $this->app->bind(VideoComposer::class, FfmpegVideoComposer::class);
+
+        // テイクのサムネイル抽出の抽象。v1 は ffmpeg 実装。テストは fake 実装へ swap する
+        $this->app->bind(TakeThumbnailExtractor::class, FfmpegTakeThumbnailExtractor::class);
 
         // チケットスポット購入の Stripe Checkout 抽象 (T007)。テストは fake を bind する
         $this->app->bind(TicketCheckoutGateway::class, CashierTicketCheckoutGateway::class);

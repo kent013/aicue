@@ -1233,8 +1233,34 @@ doc/10 §10.3 / §10.8-4/-7 の実装 (T004)。routes は `/app/projects/{projec
   `Capture/TakeRegistrationService` がチケット検証 + 予約 claim (pending→verifying の原子的
   UPDATE) + HeadObject 三点照合 (size/content_type/checksum) + `(cut_id, client_take_id)` 冪等
   登録を行う (確定は verifying→completed の CAS = sweeper と競合しない)
-- **使用量の真実源は集計クエリ** (`Capture/StorageUsageService`。bytes_used = takes.size_bytes の
-  org 合計 / bytes_pending = pending 未失効 + verifying 全件。カウンタキャッシュは持たない)
+- **使用量の真実源は集計クエリ** (`Capture/StorageUsageService`。bytes_used = takes.size_bytes と
+  takes.thumbnail_size_bytes の org 合計 / bytes_pending = pending 未失効 + verifying 全件。
+  カウンタキャッシュは持たない)
+- **サムネイル生成 (media queue。T183)**: テイク登録の確定 tx が
+  `Jobs/Capture/GenerateTakeThumbnailJob` を投入し (同一 tx 内 = ドメイン固有規約 11)、
+  `Services/Capture/TakeThumbnailPipeline` が S3 GET → ffmpeg 1 フレーム抽出
+  (`Capture/TakeThumbnailExtractor` の抽象。v1 実装は `FfmpegTakeThumbnailExtractor`) →
+  **S3 PUT の直前に所有権再検証 (preflight)** → 条件付き UPDATE
+  (`where status=ready and thumbnail_path is null`) で `takes.thumbnail_path` /
+  `takes.thumbnail_size_bytes` を確定する。S3 キーは take の主キーから決定的に組むため、
+  重複配送は同じキーへ同じ意味の PUT に収束する (**0 行更新でもオブジェクトを削除しない** —
+  消すと勝者の実体を壊す)。worker は削除ジョブと同じ `queue:work database-media --timeout=240`
+  を共用する。時間予算は ffmpeg 60 < job 180 < worker 240 < retry_after 300。
+  配信は `GET .../takes/{take}/thumbnail` (302 → 署名 URL。ready かつ生成済みのときだけ 302 で、
+  それ以外は 404)。props の `has_thumbnail` はこの 302 条件と 1 対 1 である
+- **サムネイルは容量 Quota に計上する (事後計上)**: `takes.thumbnail_size_bytes` を
+  `StorageUsageService::bytesUsed()` が加算する。**予約 (bytes_pending) は経ない**ため、
+  生成が上限を跨ぐことはありうる (上限の強制点は presigned URL 発行時のまま。
+  超過は QuotaStatusDto の既存表示が受ける)。`takes.size_bytes` の意味 (三点照合の確定値) は不変
+- **サムネイルについて保証しないもの**: 生成の成功 (失敗しても take は `ready` のままで、
+  UI はプレースホルダへ degrade する) / 過去分の一括バックフィル (行わない) /
+  孤児オブジェクトと work dir 残骸の自動回収 (行わない) / 重複配送時に DB の記録バイト数と
+  S3 の実体が完全一致すること / 撮影画面での反映が有界であること
+  (**最後に監視集合へ追加されたテイクを起点に最大 4 回・~29 秒**の再取得。
+  既に監視中の ID の再追加では予算は戻らず、キュー再開で複数件を追加した場合は最後の 1 件が起点になる。
+  撮影を続ける限り予算は更新され、撮影を止めれば必ず停止する) / 実 S3 の応答ヘッダに
+  `Content-Type: image/jpeg` が載ること (`writeStream` の option 名の読解までが根拠で、
+  テストが固定できるのは fake adapter の sidecar までである)
 - **media queue**: S3 オブジェクト削除 (`Jobs/Capture/DeleteTakeObjectsJob`) は専用 connection
   **`database-media`** (queue=media、retry_after=300) で流れる。**本番/ステージングの worker
   プロセス定義・デプロイ手順・監視対象に `php artisan queue:work database-media --timeout=240`

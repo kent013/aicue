@@ -74,6 +74,23 @@ test('テイク登録エンドポイントは BoundedControl / NoObjectRequest �
 
             return true;
         }
+
+        public function downloadToLocal(string $path, string $localPath): void
+        {
+            $this->calls[] = __FUNCTION__;
+        }
+
+        public function upload(string $localPath, string $path, string $contentType): void
+        {
+            $this->calls[] = __FUNCTION__;
+        }
+
+        public function temporaryThumbnailUrl(string $path): string
+        {
+            $this->calls[] = __FUNCTION__;
+
+            return 'https://spy.invalid/thumbnail';
+        }
     };
     $spy->headResult = new ObjectMetadataData(
         contentLength: $reservation->size_bytes,

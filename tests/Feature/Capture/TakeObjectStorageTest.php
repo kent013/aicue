@@ -194,6 +194,58 @@ test('temporaryPlaybackUrl は config TTL の署名 GET URL を返す', function
     expect($url)->toContain('X-Amz-Signature=');
 });
 
+test('temporaryThumbnailUrl は config TTL の署名 GET URL を返す (playback と同じ TTL)', function (): void {
+    fakeS3DiskConfig();
+
+    $key = 'projects/1/manuals/2/cuts/3/takes/thumbnails/9.jpg';
+    $url = app(TakeObjectStorage::class)->temporaryThumbnailUrl($key);
+
+    expect($url)->toContain($key);
+    expect($url)->toContain('X-Amz-Signature=');
+    // TTL は動画再生と同じ config キーから引く (2 つの TTL を持たない)
+    expect($url)->toContain('X-Amz-Expires='.(config()->integer('capture.playback_url_ttl_minutes') * 60));
+});
+
+test('upload → downloadToLocal の往復が同一バイト列になる', function (): void {
+    Storage::fake('s3');
+    $storage = app(TakeObjectStorage::class);
+
+    $local = tempnam(sys_get_temp_dir(), 'thumb');
+    expect($local)->toBeString();
+    assert(is_string($local));
+    file_put_contents($local, 'jpeg-bytes-of-a-thumbnail');
+
+    $key = 'projects/1/manuals/2/cuts/3/takes/thumbnails/9.jpg';
+    $storage->upload($local, $key, 'image/jpeg');
+    expect(Storage::disk('s3')->exists($key))->toBeTrue();
+
+    $roundTrip = tempnam(sys_get_temp_dir(), 'thumb-back');
+    expect($roundTrip)->toBeString();
+    assert(is_string($roundTrip));
+    $storage->downloadToLocal($key, $roundTrip);
+
+    expect(file_get_contents($roundTrip))->toBe('jpeg-bytes-of-a-thumbnail');
+    // ★ **ContentType はここでは検査しない**。`Storage::fake('s3')` はローカル disk であり
+    //   `writeStream()` の option を metadata として保持しない (`mimeType()` は拡張子から
+    //   導出されるので、option を渡さなくても image/jpeg になってしまう = 負のコントロールが無い)。
+    //   ContentType が実際に記録されることの検査は fake adapter の sidecar を見る
+    //   FakeStorageRouteTest 側が担う。実 S3 の応答ヘッダに載ることは本タスクでは保証しない。
+
+    unlink($local);
+    unlink($roundTrip);
+});
+
+test('downloadToLocal は存在しないキーで例外を投げる (無音で 0 バイトを作らない)', function (): void {
+    Storage::fake('s3');
+    $target = tempnam(sys_get_temp_dir(), 'thumb-missing');
+    assert(is_string($target));
+
+    expect(fn () => app(TakeObjectStorage::class)->downloadToLocal('missing/key.mp4', $target))
+        ->toThrow(RuntimeException::class);
+
+    unlink($target);
+});
+
 test('config capture の値が typed accessor で読める', function (): void {
     expect(config()->integer('capture.upload_ticket_ttl_minutes'))->toBe(30);
     expect(config()->integer('capture.max_take_bytes'))->toBe(500 * 1024 * 1024);
@@ -201,4 +253,9 @@ test('config capture の値が typed accessor で読める', function (): void {
     expect(config()->integer('capture.playback_url_ttl_minutes'))->toBe(60);
     expect(config()->integer('capture.released_reservation_retention_days'))->toBe(30);
     expect(config()->integer('capture.stale_verifying_minutes'))->toBe(15);
+    expect(config()->integer('capture.thumbnail_seek_ms'))->toBe(1000);
+    expect(config()->integer('capture.thumbnail_max_edge'))->toBe(640);
+    expect(config()->integer('capture.thumbnail_jpeg_quality'))->toBe(5);
+    // 時間予算の連鎖: ffmpeg 60 < job timeout 180 < worker 240 < retry_after 300
+    expect(config()->integer('capture.thumbnail_ffmpeg_timeout_seconds'))->toBe(60);
 });

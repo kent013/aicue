@@ -12,6 +12,7 @@ use App\Jobs\Billing\ReuseSubscriptionPaymentMethodJob;
 use App\Jobs\Billing\SetDefaultPaymentMethodJob;
 use App\Jobs\Billing\SyncBillingCustomerDetails;
 use App\Jobs\Capture\DeleteTakeObjectsJob;
+use App\Jobs\Capture\GenerateTakeThumbnailJob;
 use App\Jobs\Manual\DeleteRenderOutputsJob;
 use App\Jobs\Manual\RunManualAnalysis;
 use App\Jobs\Manual\RunManualRender;
@@ -24,6 +25,7 @@ use App\Notifications\Billing\AutoRechargeEnabledNotification;
 use App\Notifications\Billing\AutoRechargeFailedNotification;
 use App\Notifications\Billing\PaymentFailedNotification;
 use App\Notifications\Billing\RenewalReminderNotification;
+use App\Services\Capture\TakeThumbnailPipeline;
 use App\Services\Manual\AnalysisPipeline;
 use App\Services\Manual\RenderPipeline;
 use App\Support\JobExecution\AttemptOwnershipPreflight;
@@ -83,6 +85,17 @@ function jobDedupGuarantees(): array
             )],
             rationale: 'startJob / finalize が AnalysisPipeline と同型。S3 PUT は取り消せない'
                 .'外部副作用なので、updateProgress の後・upload の直前に preflight を置く。',
+        ),
+        GenerateTakeThumbnailJob::class => new GuaranteeEntry(
+            mechanisms: [JobDedupGuarantee::ConditionalStatusUpdate],
+            preflights: [new PreflightCheckpoint(
+                TakeThumbnailPipeline::class, 'stillEligible',
+                ExternalCallKind::ObjectStoragePut, PreflightControlFlow::ReturnsBoolean,
+            )],
+            rationale: '結果の一回性は where status=ready and thumbnail_path is null の条件付き UPDATE が担う '
+                .'(0 行更新なら先着の結果を壊さない)。S3 キーは take の主キーから決定的に組むため、'
+                .'重複配送は同じキーへ同じ意味の PUT に収束し、敗者が勝者の実体を消すこともない。'
+                .'取り消せない S3 PUT の直前に structured return の preflight を置く。',
         ),
         ExecuteAutoRechargeAttemptJob::class => new GuaranteeEntry(
             // ★軸の違う 2 本の保証を**両方**登録する
@@ -153,6 +166,7 @@ function jobDedupRequiredExternalCalls(): array
     return [
         RunManualAnalysis::class => [ExternalCallKind::LlmCompletion],
         RunManualRender::class => [ExternalCallKind::ObjectStoragePut],
+        GenerateTakeThumbnailJob::class => [ExternalCallKind::ObjectStoragePut],
         ExecuteAutoRechargeAttemptJob::class => [
             ExternalCallKind::StripeInvoiceCreate,
             ExternalCallKind::StripeInvoicePay,

@@ -24,6 +24,7 @@ function makeTake(overrides: Partial<CaptureTake> = {}): CaptureTake {
         captured_at: "2026-07-11T00:00:00Z",
         sort_order: 0,
         downloaded: false,
+        has_thumbnail: false,
         playback_url: "https://s3.example.test/take-11.mp4?sig=1",
         download_ack_token: "ack-token-11",
         ...overrides,

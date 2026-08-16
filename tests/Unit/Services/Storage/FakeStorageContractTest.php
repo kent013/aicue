@@ -26,6 +26,9 @@ test('FakeTakeObjectStorage は S3 到達メソッドをすべて override す�
     'presignUpload',
     'headObject',
     'temporaryPlaybackUrl',
+    'downloadToLocal', // サムネイル生成の入力取得 (T183)
+    'upload',          // サムネイルの PUT (T183)
+    'temporaryThumbnailUrl',
     'delete',
     'exists',
     'client', // 実 S3 client を構築しない (fail-loud)

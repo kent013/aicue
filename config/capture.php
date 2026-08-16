@@ -31,4 +31,14 @@ return [
     // verifying 予約を stale とみなす閾値 (登録リクエストの異常終了の回収。概念設計 D7)
     'stale_verifying_minutes' => 15,
 
+    // サムネイル生成 (テイク登録後に media queue の GenerateTakeThumbnailJob が 1 フレーム抽出する)
+    // 抽出位置。0 だと黒画面になりやすいので既定 1 秒。尺が足りなければ実装が 0 で 1 回だけ再試行する
+    'thumbnail_seek_ms' => 1000,
+    // 出力の長辺上限 (両辺に効く。巨大入力から巨大 JPEG を作らない)
+    'thumbnail_max_edge' => 640,
+    // JPEG 品質 (ffmpeg -q:v。小さいほど高品質・大きいほど低容量)
+    'thumbnail_jpeg_quality' => 5,
+    // ffmpeg 1 回の実行上限 (秒)。ジョブの $timeout=180 より十分短く取る
+    'thumbnail_ffmpeg_timeout_seconds' => 60,
+
 ];

@@ -12,6 +12,7 @@ use Aws\S3\S3Client;
 use Carbon\CarbonImmutable;
 use Illuminate\Filesystem\AwsS3V3Adapter;
 use Illuminate\Support\Facades\Storage;
+use RuntimeException;
 use Webmozart\Assert\Assert;
 
 /**
@@ -100,6 +101,61 @@ class TakeObjectStorage
         );
     }
 
+    /**
+     * テイク動画本文をローカル一時ファイルへ取得する (サムネイル生成の入力)。
+     *
+     * 面分類は Bulk (本文転送 = 所要時間がサイズに比例する)。**web 同期経路から呼ばない** —
+     * 呼び出し元は media queue の GenerateTakeThumbnailJob だけである。
+     * 実装は RenderObjectStorage::downloadToLocal と同型 (readStream → ローカル書き込み)。
+     */
+    public function downloadToLocal(string $path, string $localPath): void
+    {
+        $stream = Storage::disk('s3')->readStream($path);
+        if ($stream === null) {
+            throw new RuntimeException("S3 オブジェクトを読めません: {$path}");
+        }
+
+        $this->copyStreamToLocalFile($stream, $localPath, $path);
+    }
+
+    /**
+     * サーバ生成物 (サムネイル) を S3 へ PUT する。
+     *
+     * ★ `ContentType` を必ず指定する。指定しないと S3 が既定の binary/octet-stream を返し、
+     *   署名 GET へリダイレクトした先で `<img>` が描画できない
+     *   (`ContentType` は Flysystem AwsS3V3Adapter の受理オプションに含まれる)。
+     * 面分類は Bulk (本文転送)。**web 同期経路から呼ばない**。
+     */
+    public function upload(string $localPath, string $path, string $contentType): void
+    {
+        $stream = fopen($localPath, 'rb');
+        if ($stream === false) {
+            throw new RuntimeException("ローカルファイルを開けません: {$localPath}");
+        }
+
+        try {
+            Storage::disk('s3')->writeStream($path, $stream, ['ContentType' => $contentType]);
+        } finally {
+            if (is_resource($stream)) {
+                fclose($stream);
+            }
+        }
+    }
+
+    /**
+     * サムネイル表示用の署名 GET URL (TTL は動画再生と同じ capture.playback_url_ttl_minutes)。
+     *
+     * ★ `temporaryPlaybackUrl()` を流用しない。中身は同じ署名 URL 生成だが、
+     *   "playback" (再生) の語を静止画へ広げると public API の名前が実体と食い違う。
+     */
+    public function temporaryThumbnailUrl(string $path): string
+    {
+        return Storage::disk('s3')->temporaryUrl(
+            $path,
+            now()->addMinutes(config()->integer('capture.playback_url_ttl_minutes')),
+        );
+    }
+
     /** オブジェクト削除 (存在しないキーは no-op = 冪等) */
     public function delete(string $path): void
     {
@@ -110,6 +166,35 @@ class TakeObjectStorage
     public function exists(string $path): bool
     {
         return Storage::disk('s3')->exists($path);
+    }
+
+    /**
+     * 読み出しストリームをローカルファイルへ写す (downloadToLocal の共通部)。
+     * fake も同じ処理を使うため protected に置く (面分類の対象は public メソッドのみ)。
+     *
+     * @param  resource  $stream
+     */
+    protected function copyStreamToLocalFile(mixed $stream, string $localPath, string $sourcePath): void
+    {
+        $local = fopen($localPath, 'wb');
+        if ($local === false) {
+            if (is_resource($stream)) {
+                fclose($stream);
+            }
+
+            throw new RuntimeException("ローカルファイルを開けません: {$localPath}");
+        }
+
+        try {
+            if (stream_copy_to_stream($stream, $local) === false) {
+                throw new RuntimeException("S3 オブジェクトのコピーに失敗しました: {$sourcePath}");
+            }
+        } finally {
+            fclose($local);
+            if (is_resource($stream)) {
+                fclose($stream);
+            }
+        }
     }
 
     /**

@@ -618,6 +618,8 @@ Route::middleware(['auth', 'verified', 'not-pending-deletion'])->group(function 
                     ->name('takes.downloaded');
                 Route::get('/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take}/playback', [CaptureTakeController::class, 'playback'])
                     ->name('takes.playback');
+                Route::get('/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take}/thumbnail', [CaptureTakeController::class, 'thumbnail'])
+                    ->name('takes.thumbnail');
             });
         });
 });
