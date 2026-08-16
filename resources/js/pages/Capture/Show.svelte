@@ -1,7 +1,8 @@
 <script lang="ts">
-    import { onMount, tick } from "svelte";
+    import { onMount, tick, untrack } from "svelte";
     import { page, router } from "@inertiajs/svelte";
-    import { ArrowLeft, BookOpen, Video } from "@lucide/svelte";
+    import { ArrowLeft, BookOpen, Maximize, Minimize, Video } from "@lucide/svelte";
+    import Button from "@/components/atoms/Button.svelte";
     import TextLink from "@/components/atoms/TextLink.svelte";
     import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageHeaderSection from "@/components/molecules/PageHeaderSection.svelte";
@@ -9,6 +10,7 @@
     import type CameraRecorderType from "@/components/features/capture/CameraRecorder.svelte";
     import CaptureFileFallback from "@/components/features/capture/CaptureFileFallback.svelte";
     import CutNavigator from "@/components/features/capture/CutNavigator.svelte";
+    import CutSwipeBar from "@/components/features/capture/CutSwipeBar.svelte";
     import TakeStrip from "@/components/features/capture/TakeStrip.svelte";
     import UploadQueueBar from "@/components/features/capture/UploadQueueBar.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
@@ -16,6 +18,13 @@
     import { supportsMediaRecorder } from "@/lib/capture/camera";
     import type { CameraUnavailableReason } from "@/lib/capture/camera";
     import { buildCutLabels } from "@/lib/capture/cut-labels";
+    import {
+        decideCutNavigation,
+        lockBackgroundScroll,
+        matchesLandscapeCapture,
+        subscribeLandscapeCapture,
+        type NavigationDirection,
+    } from "@/lib/capture/landscape-capture";
     import {
         isStackedLayout,
         navigateBackToList,
@@ -44,7 +53,21 @@
     const shared = $derived(page.props as unknown as SharedProps);
     const appName = $derived(shared.appName ?? "");
 
-    let selectedCutId = $state<number | null>(null);
+    /**
+     * 横持ち全画面の初期判定。**テンプレートの初回描画より前**に確定させるため、
+     * script のこの位置 (props 受領直後) で 1 度だけ評価する。
+     * これより後ろで宣言すると selectedCutId の初期化が宣言前参照 (TDZ) になる。
+     */
+    const initialLandscape = matchesLandscapeCapture();
+
+    /* 初期描画で全画面になる場合は、**同じ script 評価の中で**先頭カットも選んでおく。
+     * 選ばずに全画面へ入ると、最初の 1 描画だけ「カットを選び直してください。」が出る。
+     * mount 時点の値で確定させるのが意図どおりなので state_referenced_locally を明示的に無視する
+     * (以降の追従は横持ち購読の $effect が担う)。 */
+    // svelte-ignore state_referenced_locally
+    let selectedCutId = $state<number | null>(
+        initialLandscape ? (manual.cuts[0]?.id ?? null) : null,
+    );
     const selectedCut = $derived(manual.cuts.find((cut) => cut.id === selectedCutId) ?? null);
     /** 手順 N / 急所 N-M。CutNavigator の行ラベルと同じ導出元を共有する (二重管理を避ける) */
     const cutLabels = $derived(buildCutLabels(manual.cuts));
@@ -138,7 +161,144 @@
         );
     }
 
+    /* ---- 横持ち全画面 (doc/05 §5.2 / T186) ----
+     * 判定・ジェスチャ解釈・移動判断・スクロール抑止は lib/capture/landscape-capture.ts が持ち、
+     * ここは配線だけを行う (panel-navigation.ts と同じ役割分担)。 */
+    /**
+     * 横持ち全画面の条件 (向き + 高さ + 粗いポインタ) を満たすか。
+     *
+     * **初期値は script 評価時に確定させる** (initialLandscape)。`$effect` はテンプレートの
+     * 初回描画の**後**に走るため、`$state(false)` から effect で入れる形にすると
+     * 「最初の 1 描画だけ inline レイアウト」というちらつきが必ず残る。
+     *
+     * **この方式は「Inertia SSR が配線されていない」ことに依存する**。
+     * SSR を入れるとサーバは inline、クライアントの初期評価は fullscreen になり得るため
+     * hydration が食い違う (詳細設計の「再確認条件」)。
+     */
+    let landscapeMatches = $state(initialLandscape);
+    /** 利用者が明示的に全画面を終了したか。**縦に戻すまで自動で入り直さない**ためのラッチ */
+    let fullscreenDismissed = $state(false);
+    /**
+     * 実際に全画面を描くか。
+     * **選択状態ではなく「撮るものがあるか」で決める** (`manual.cuts.length > 0`)。
+     * `selectedCut !== null` を条件にすると、自動選択が反映される前の 1 フレームだけ
+     * inline レイアウトが描かれてちらつく。また全画面中に reload で選択中カットが
+     * 消えたときに「全画面なのに終了ボタンが無い」状態を作りかねない。
+     */
+    const fullscreenActive = $derived(
+        landscapeMatches && !fullscreenDismissed && manual.cuts.length > 0,
+    );
+    /** 端の告知 (status) / 録画中の移動拒否 (alert)。文言の出所は landscape-capture.ts */
+    let navigationNotice = $state<{ tone: "status" | "alert"; message: string } | null>(null);
+    /** 全画面の現在位置表示 (1 起点)。cuts の並び順そのものを使う */
+    const cutPosition = $derived({
+        index: selectedCut === null ? 0 : manual.cuts.findIndex((c) => c.id === selectedCut.id) + 1,
+        total: manual.cuts.length,
+    });
+    /** 全画面へ入った直後のフォーカス着地点 (背後に取り残さない)。tabindex="-1" */
+    let fullscreenHeadingEl = $state<HTMLElement | null>(null);
+    /** 直前に運んだ全画面状態。true への遷移でちょうど 1 回だけフォーカスを運ぶ */
+    let lastFullscreenFocused = false;
+
+    // 横持ち判定の購読。**初期値は script 評価時に確定済み**なので、この effect が担うのは
+    // 「向きが変わったときの追従」だけである。追従に伴う後始末は同じ同期ブロックの中で済ませる
+    // (2 本の effect に分けると、landscapeMatches が反映された描画と selectedCutId が
+    //  入った描画の間に 1 フレーム挟まり、inline レイアウトが一瞬見えてしまう)。
+    //  - 縦に戻ったらラッチを解除する (次に横へ倒せばまた自動で全画面に入る)
+    //  - 横持ちでカット未選択なら先頭カットを自動選択する (何も撮れない全画面を作らない)
+    // manual / selectedCutId は untrack で読む (選択やリロードで購読を張り直さない)。
+    $effect(() =>
+        subscribeLandscapeCapture((matches) => {
+            landscapeMatches = matches;
+            if (!matches) {
+                fullscreenDismissed = false;
+
+                return;
+            }
+            const first = untrack(() => manual.cuts)[0];
+            if (first !== undefined && untrack(() => selectedCutId) === null) {
+                selectedCutId = first.id;
+            }
+        }),
+    );
+
+    // 全画面へ入ったらフォーカスを全画面内へ運ぶ。
+    // 背後 (ヘッダ / 左 pane) は inert にするが、AppLayout の chrome は覆わないため、
+    // 開始位置を明示的に全画面内へ置くことでキーボード利用者が背後から始まらないようにする。
+    $effect(() => {
+        if (fullscreenActive === lastFullscreenFocused) return;
+        lastFullscreenFocused = fullscreenActive;
+        if (!fullscreenActive) return;
+        fullscreenHeadingEl?.focus({ preventScroll: true });
+    });
+
+    // 全画面中だけ背後のスクロールを止める。**解除は戻り値の 1 か所に集約**する
+    // (終了ボタン / 縦復帰 / ページ離脱のどれでも必ず外れる = スクロール不能の詰みを作らない)。
+    $effect(() => {
+        if (!fullscreenActive) return;
+
+        return lockBackgroundScroll();
+    });
+
+    /**
+     * 全画面でのカット移動 (スワイプ / 前後ボタン / 左右矢印キーの共通の受け口)。
+     * 可否と文言の判断は decideCutNavigation が 1 か所で持つ (ここは配線だけ)。
+     * **録画中は移動せずその場でエラーを出す** — 自動停止しない (誤スワイプで録画を確定させない)。
+     */
+    function handleCutNavigate(direction: NavigationDirection): void {
+        const decision = decideCutNavigation({
+            captureActive,
+            cuts: manual.cuts,
+            currentCutId: selectedCutId,
+            direction,
+        });
+        if (decision.kind === "move") {
+            navigationNotice = null;
+            selectedCutId = decision.cutId;
+
+            return;
+        }
+        if (decision.kind === "notice") {
+            navigationNotice = { tone: decision.tone, message: decision.message };
+
+            return;
+        }
+        navigationNotice = null; // ignore: 移動対象が無い (自動選択があるため通常は到達しない)
+    }
+
+    /**
+     * 全画面を終了する。横持ちのまま既存レイアウトへ戻るので、
+     * **現在位置を見失わせない**よう視点とフォーカスを撮影パネルへ運ぶ (既存機構を再利用)。
+     */
+    function exitFullscreen(): void {
+        fullscreenDismissed = true;
+        navigationNotice = null;
+        void tick().then(() => {
+            updateStacked();
+            navigateToPanelIfNeeded({
+                captureActive,
+                leftEl: leftPaneEl,
+                rightEl: rightPaneEl,
+                headingEl: recordingHeadingEl,
+                reducedMotion: prefersReducedMotion(),
+            });
+        });
+    }
+
+    /**
+     * 全画面へ戻る手動の再入路。ラッチ (fullscreenDismissed) を解除する。
+     * これが無いと「端末を一度縦に倒し直さないと全画面へ帰れない」行き止まりになる。
+     * 未選択なら先頭カットを選ぶ (押しても何も起きない、を作らない)。
+     */
+    function enterFullscreen(): void {
+        const first = manual.cuts[0];
+        if (selectedCutId === null && first !== undefined) selectedCutId = first.id;
+        navigationNotice = null;
+        fullscreenDismissed = false;
+    }
+
     function handleSelectCut(cutId: number): void {
+        navigationNotice = null; // カットを選び直したら古い告知を捨てる
         selectedCutId = cutId;
         // DOM 反映後に測る (撮影パネルは選択で初めて描画される)
         void tick().then(() => {
@@ -270,121 +430,240 @@
 
 <AppLayout {appName}>
     <PageContainer>
-        <PageHeaderSection title={manual.title} icon={Video} testId="capture-manual-title">
-            <TextLink href={`/app/projects/${project.id}/manuals`}>
-                <ArrowLeft class="inline size-3" aria-hidden="true" />
-                一覧へ戻る
-            </TextLink>
-            <!-- PC 側詳細への復路 (T155)。**この画面へ到達できた利用者に対しては、追加の
-                 status / ability 条件で出し分けない**。根拠と保証範囲は
-                 docs/architecture.md §撮影 PWA の運用契約。 -->
-            <TextLink
-                href={`/projects/${project.id}/manuals/${manual.id}`}
-                testId="manual-detail-link"
-            >
-                <BookOpen class="inline size-3" aria-hidden="true" />
-                マニュアル詳細へ
-            </TextLink>
-        </PageHeaderSection>
+        <!-- 全画面中は背後を inert にして、覆われた面へ Tab で入り込めないようにする -->
+        <div inert={fullscreenActive}>
+            <PageHeaderSection title={manual.title} icon={Video} testId="capture-manual-title">
+                <TextLink href={`/app/projects/${project.id}/manuals`}>
+                    <ArrowLeft class="inline size-3" aria-hidden="true" />
+                    一覧へ戻る
+                </TextLink>
+                <!-- PC 側詳細への復路 (T155)。**この画面へ到達できた利用者に対しては、追加の
+                     status / ability 条件で出し分けない**。根拠と保証範囲は
+                     docs/architecture.md §撮影 PWA の運用契約。 -->
+                <TextLink
+                    href={`/projects/${project.id}/manuals/${manual.id}`}
+                    testId="manual-detail-link"
+                >
+                    <BookOpen class="inline size-3" aria-hidden="true" />
+                    マニュアル詳細へ
+                </TextLink>
+            </PageHeaderSection>
+        </div>
 
-        <div class="mt-3">
-        <UploadQueueBar {pendingCount} {pendingBytes} {uploading} {quotaMessage} onResume={resumeUploads} />
-    </div>
+        <!-- UploadQueueBar は全画面かどうかで **どちらか一方にだけ** 置く
+             (両方に置くと data-testid が重複してテストの指し先が曖昧になる)。
+             UploadQueueBar は props だけの表示 component なので、
+             切替時に作り直されても失われる状態が無い。 -->
+        {#if !fullscreenActive}
+            <div class="mt-3">
+                <UploadQueueBar {pendingCount} {pendingBytes} {uploading} {quotaMessage} onResume={resumeUploads} />
+            </div>
+        {/if}
 
     <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2" data-testid="capture-grid">
         <section
             bind:this={leftPaneEl}
+            inert={fullscreenActive}
             class="min-w-0 rounded-md border border-border bg-surface"
             data-testid="capture-left-pane"
         >
-            <!-- 「カット一覧へ戻る」のフォーカス着地点。tabindex="-1" でプログラムからのみ
-                 フォーカス可能にする (Tab 順には入れない)。 -->
-            <h2
-                bind:this={cutListHeadingEl}
-                tabindex="-1"
-                class="border-b border-border px-3 py-2 text-caption text-text-secondary focus-visible:ring-3 focus-visible:ring-primary/35 focus-visible:outline-none"
-                data-testid="capture-cut-list-heading"
-            >
-                シナリオ (タップして撮影)
-            </h2>
+            <div class="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+                <!-- 「カット一覧へ戻る」のフォーカス着地点。tabindex="-1" でプログラムからのみ
+                     フォーカス可能にする (Tab 順には入れない)。 -->
+                <h2
+                    bind:this={cutListHeadingEl}
+                    tabindex="-1"
+                    class="text-caption text-text-secondary focus-visible:ring-3 focus-visible:ring-primary/35 focus-visible:outline-none"
+                    data-testid="capture-cut-list-heading"
+                >
+                    シナリオ (タップして撮影)
+                </h2>
+                <!-- 横持ちなのに全画面でないとき (= 明示終了した後) の再入路。
+                     文脈非該当時は非表示にする (disabled ではない)。 -->
+                {#if landscapeMatches && !fullscreenActive && manual.cuts.length > 0}
+                    <Button
+                        variant="neutral"
+                        size="sm"
+                        onclick={enterFullscreen}
+                        testId="enter-fullscreen-capture"
+                    >
+                        <Maximize class="size-4" aria-hidden="true" />
+                        全画面で撮影
+                    </Button>
+                {/if}
+            </div>
             <CutNavigator cuts={manual.cuts} {selectedCutId} onSelect={handleSelectCut} />
         </section>
 
+        <!--
+          全画面は **この section の class を差し替えるだけ**で作る。
+          CameraRecorder を別の {#if} ブランチへ移すと unmount され、録画中の
+          MediaStream / MediaRecorder が破棄されて録ったデータが消えるため。
+          fixed + h-dvh: iOS Safari の動的ツールバーで下端が隠れないようにする
+          (inset-0 だと bottom がツールバー下へ潜りうる)。
+          z-40: AppLayout のモバイルヘッダ (sticky z-30) を覆い、
+          Toast (z-50) は上に残す (アップロード失敗の告知を隠さない)。
+        -->
         <section
             bind:this={rightPaneEl}
-            class="flex min-w-0 flex-col gap-4"
+            class={fullscreenActive
+                ? "fixed inset-x-0 top-0 z-40 flex h-dvh min-w-0 flex-col gap-2 bg-surface p-2"
+                : "flex min-w-0 flex-col gap-4"}
             data-testid="capture-right-pane"
+            data-fullscreen={fullscreenActive ? "true" : "false"}
         >
+            {#if fullscreenActive}
+                <!-- 全画面へ入った直後のフォーカス着地点。読み上げ順の先頭に置く -->
+                <h2
+                    bind:this={fullscreenHeadingEl}
+                    tabindex="-1"
+                    class="sr-only"
+                    data-testid="capture-fullscreen-heading"
+                >
+                    全画面撮影
+                </h2>
+                <UploadQueueBar {pendingCount} {pendingBytes} {uploading} {quotaMessage} onResume={resumeUploads} />
+                <!--
+                  **終了ボタンは selectedCut の有無に依らずここに置く**。
+                  出口の有無を選択状態という別の軸に結び付けない
+                  (結び付けると「全画面なのに出口が無い」状態を作りうる)。
+                -->
+                <div class="flex items-center gap-2">
+                    <div class="min-w-0 flex-1">
+                        {#if selectedCut !== null}
+                            <CutSwipeBar
+                                label={cutLabels[selectedCut.id] ?? "選択中カット"}
+                                scene={selectedCut.scene}
+                                position={cutPosition}
+                                onNavigate={handleCutNavigate}
+                            />
+                        {:else}
+                            <p class="text-caption text-text-secondary">
+                                カットを選び直してください。
+                            </p>
+                        {/if}
+                    </div>
+                    <Button
+                        variant="neutral"
+                        size="sm"
+                        onclick={exitFullscreen}
+                        testId="exit-fullscreen-capture"
+                    >
+                        <Minimize class="size-4" aria-hidden="true" />
+                        全画面を終了
+                    </Button>
+                </div>
+                {#if navigationNotice !== null}
+                    {#if navigationNotice.tone === "alert"}
+                        <p
+                            class="text-caption text-danger"
+                            role="alert"
+                            data-testid="cut-navigation-error"
+                        >
+                            {navigationNotice.message}
+                        </p>
+                    {:else}
+                        <p
+                            class="text-caption text-text-secondary"
+                            role="status"
+                            data-testid="cut-navigation-notice"
+                        >
+                            {navigationNotice.message}
+                        </p>
+                    {/if}
+                {/if}
+            {/if}
+
             {#if selectedCut === null}
                 <p class="text-caption text-text-secondary">
                     左のシナリオからカットを選ぶと撮影パネルが開きます。
                 </p>
             {:else}
-                <div class="flex items-center justify-between gap-2">
-                    <!-- カット選択時のフォーカス着地点。ラベルを含めて「どのカットの撮影か」を
-                         名前で伝える (視点だけ運んでフォーカスを残すと a11y 欠落を作るため)。 -->
-                    <h2
-                        bind:this={recordingHeadingEl}
-                        tabindex="-1"
-                        class="text-caption text-text-secondary focus-visible:ring-3 focus-visible:ring-primary/35 focus-visible:outline-none"
-                        data-testid="capture-recording-heading"
-                    >
-                        {cutLabels[selectedCut.id] ?? "選択中カット"} の撮影
-                    </h2>
-                    {#if stacked}
-                        <!-- 1 カラムのときだけ出す (2 カラムでは一覧が常に見えているので不要)。
-                             TextLink のボタンモード (href なし + onclick) = <button type="button">。 -->
-                        <TextLink onclick={backToCutList} testId="back-to-cut-list">
-                            カット一覧へ戻る
-                        </TextLink>
-                    {/if}
-                </div>
-
-                <div class="rounded-md border border-border bg-surface p-3">
-                    <p class="text-caption text-text-secondary">ナレーション</p>
-                    <p class="mt-1 text-body">{selectedCut.narration}</p>
-                    {#if selectedCut.shooting_point}
-                        <p class="mt-2 text-caption text-text-secondary">
-                            撮影ポイント: {selectedCut.shooting_point}
-                        </p>
-                    {/if}
-                </div>
-
-                {#if showRecorder}
-                    <CameraRecorder
-                        bind:this={recorderRef}
-                        onCaptured={(blob, mimeType, durationMs) =>
-                            handleCaptured(blob, mimeType, durationMs)}
-                        onCameraUnavailable={(reason) => (cameraUnavailableReason = reason)}
-                        subtitlePrimary={selectedCut.subtitle_primary}
-                        subtitleSecondary={selectedCut.subtitle_secondary}
-                        onCaptureActiveChange={(active) => (captureActive = active)}
-                    />
-                {:else}
-                    {#if fallbackNotice !== null}
-                        <p
-                            class="text-caption text-text-secondary"
-                            role="status"
-                            data-testid="camera-fallback-notice"
+                <!-- 全画面では見出し・ナレーション・テイク一覧を出さない
+                     (撮影ガイドと字幕は映像上の overlay が担う)。
+                     **CameraRecorder はこの {#if} を跨がない** = 位置が変わらない。 -->
+                {#if !fullscreenActive}
+                    <div class="flex items-center justify-between gap-2">
+                        <!-- カット選択時のフォーカス着地点。ラベルを含めて「どのカットの撮影か」を
+                             名前で伝える (視点だけ運んでフォーカスを残すと a11y 欠落を作るため)。 -->
+                        <h2
+                            bind:this={recordingHeadingEl}
+                            tabindex="-1"
+                            class="text-caption text-text-secondary focus-visible:ring-3 focus-visible:ring-primary/35 focus-visible:outline-none"
+                            data-testid="capture-recording-heading"
                         >
-                            {fallbackNotice}
-                        </p>
-                    {/if}
-                    <CaptureFileFallback
-                        onCaptured={(file) => handleCaptured(file, file.type, null)}
-                    />
+                            {cutLabels[selectedCut.id] ?? "選択中カット"} の撮影
+                        </h2>
+                        {#if stacked}
+                            <!-- 1 カラムのときだけ出す (2 カラムでは一覧が常に見えているので不要)。
+                                 TextLink のボタンモード (href なし + onclick) = <button type="button">。 -->
+                            <TextLink onclick={backToCutList} testId="back-to-cut-list">
+                                カット一覧へ戻る
+                            </TextLink>
+                        {/if}
+                    </div>
+
+                    <div class="rounded-md border border-border bg-surface p-3">
+                        <p class="text-caption text-text-secondary">ナレーション</p>
+                        <p class="mt-1 text-body">{selectedCut.narration}</p>
+                        {#if selectedCut.shooting_point}
+                            <p class="mt-2 text-caption text-text-secondary">
+                                撮影ポイント: {selectedCut.shooting_point}
+                            </p>
+                        {/if}
+                    </div>
                 {/if}
 
-                <TakeStrip
-                    projectId={project.id}
-                    manualId={manual.id}
-                    cut={selectedCut}
-                    cutLabel={cutLabels[selectedCut.id] ?? "選択中カット"}
-                    onChanged={reloadManual}
-                    {captureActive}
-                    onRequestCameraRelease={() => recorderRef?.releaseForPreview()}
-                    onCameraResume={() => void recorderRef?.resumeAfterPreview()}
-                />
+                <!-- 全画面では残り高さいっぱいに広げる。**要素そのものは同じ** (class だけ変わる)。
+                     inline 側を素の div にせず flex-col gap-4 にしてあるのは、この wrapper を
+                     挟んだことで fallback 経路 (notice + ファイル選択) の間隔が消えるのを防ぐため
+                     (従来は section 直下の兄弟として gap-4 が効いていた)。 -->
+                <div class={fullscreenActive ? "relative min-h-0 flex-1" : "flex flex-col gap-4"}>
+                    {#if showRecorder}
+                        <CameraRecorder
+                            bind:this={recorderRef}
+                            onCaptured={(blob, mimeType, durationMs) =>
+                                handleCaptured(blob, mimeType, durationMs)}
+                            onCameraUnavailable={(reason) => (cameraUnavailableReason = reason)}
+                            subtitlePrimary={selectedCut.subtitle_primary}
+                            subtitleSecondary={selectedCut.subtitle_secondary}
+                            onCaptureActiveChange={(active) => {
+                                captureActive = active;
+                                // 録画の開始でも停止でも古い告知を捨てる。とくに停止後に
+                                // 「録画中は移動できません」が残らないようにする。
+                                navigationNotice = null;
+                            }}
+                            layout={fullscreenActive ? "fullscreen" : "inline"}
+                            shootingPoint={selectedCut.shooting_point}
+                        />
+                    {:else}
+                        {#if fallbackNotice !== null}
+                            <p
+                                class="text-caption text-text-secondary"
+                                role="status"
+                                data-testid="camera-fallback-notice"
+                            >
+                                {fallbackNotice}
+                            </p>
+                        {/if}
+                        <CaptureFileFallback
+                            onCaptured={(file) => handleCaptured(file, file.type, null)}
+                        />
+                    {/if}
+                </div>
+
+                {#if !fullscreenActive}
+                    <TakeStrip
+                        projectId={project.id}
+                        manualId={manual.id}
+                        cut={selectedCut}
+                        cutLabel={cutLabels[selectedCut.id] ?? "選択中カット"}
+                        onChanged={reloadManual}
+                        {captureActive}
+                        onRequestCameraRelease={() => recorderRef?.releaseForPreview()}
+                        onCameraResume={() => void recorderRef?.resumeAfterPreview()}
+                    />
+                {/if}
             {/if}
         </section>
         </div>

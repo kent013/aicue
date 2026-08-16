@@ -28,7 +28,9 @@ const PAGES_DIR = path.resolve(HERE, "../../../resources/js/pages");
 const PAGECONTENT_ALLOWLIST: ReadonlyArray<{ path: string; reason: string }> = [
     {
         path: "Capture/Show.svelte",
-        reason: "2 カラム grid の撮影レコーダー面。全幅のため PageContent の max-w-7xl 中央寄せを課さない。",
+        reason:
+            "2 カラム grid の撮影レコーダー面。全幅のため PageContent の max-w-7xl 中央寄せを課さない。" +
+            "横持ち時は撮影パネルが fixed の全画面へ切り替わるため、中央寄せの外枠を前提にできない。",
     },
 ];
 const PAGECONTENT_ALLOWLIST_PATHS = new Set(PAGECONTENT_ALLOWLIST.map((e) => e.path));

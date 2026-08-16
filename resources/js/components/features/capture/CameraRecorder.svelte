@@ -13,6 +13,7 @@
     } from "@lucide/svelte";
     import Button from "@/components/atoms/Button.svelte";
     import GridOverlay from "@/components/features/capture/GridOverlay.svelte";
+    import ShootingGuideOverlay from "@/components/features/capture/ShootingGuideOverlay.svelte";
     import SubtitleOverlay from "@/components/molecules/SubtitleOverlay.svelte";
     import {
         classifyGetUserMediaError,
@@ -27,6 +28,7 @@
         CameraUnavailableReason,
         FacingMode,
     } from "@/lib/capture/camera";
+    import type { LayoutMode } from "@/lib/capture/landscape-capture";
     import type { CaptureCut } from "@/types/capture";
 
     /**
@@ -54,6 +56,17 @@
         subtitleSecondary?: CaptureCut["subtitle_secondary"];
         /** 撮影 active (starting || resuming || phase !== "idle") の変化通知。preview 排他制御に使う (T050) */
         onCaptureActiveChange?: (active: boolean) => void;
+        /**
+         * 表示レイアウト (T186: 横持ち全画面)。**既定は従来どおり inline** で、
+         * 縦持ちの見た目は 1px も変わらない。
+         * 本 props は class の切替にしか使わず、**phase マシン・stream 管理には一切触れない**。
+         */
+        layout?: LayoutMode;
+        /**
+         * 撮影ガイド (撮影方法)。上流の CaptureCut["shooting_point"] の nullable 契約に合わせる。
+         * 非 null かつ非空へ絞る判定は本 component の内側 1 か所で行う。
+         */
+        shootingPoint?: CaptureCut["shooting_point"];
     }
 
     let {
@@ -62,7 +75,18 @@
         subtitlePrimary = null,
         subtitleSecondary = "",
         onCaptureActiveChange,
+        layout = "inline",
+        shootingPoint = null,
     }: Props = $props();
+
+    // --- 全画面レイアウト (表示のみ。phase マシンとは独立) ---
+    const isFullscreen = $derived(layout === "fullscreen");
+    /**
+     * trim は**空判定にのみ**使い、描画には元文字列をそのまま渡す
+     * (SubtitleOverlay と同じ作法。内容を書き換えない)。
+     */
+    const hasShootingGuide = $derived((shootingPoint ?? "").trim() !== "");
+    const showShootingGuide = $derived(isFullscreen && hasShootingGuide);
 
     // 単一ソース union (R2 反映: paused を追加)
     type Phase = "idle" | "recording" | "paused" | "stopping";
@@ -492,19 +516,35 @@
     });
 </script>
 
-<div class="flex flex-col gap-3">
-    <div class="relative">
+<!--
+  全画面と inline の切替は **class の差し替えだけ**で行う。
+  {#if} で描き分けると <video> が unmount され、録画中の MediaStream / MediaRecorder が
+  破棄されて録ったデータが消えるため。
+
+  **操作行は全画面でも映像に重ねない**。映像を flex-1 で伸ばし、操作行は不透明な面の上に
+  そのまま置く。半透明の帯を敷いてアイコンのコントラストを別途担保する道を採らないのは、
+  「仕組みが機能していない段階で値 (色) を弄るな」という原則と、
+  contrast-invariant の検査対象を無駄に増やさないためである。
+-->
+<div class={isFullscreen ? "flex h-full min-h-0 flex-col gap-2" : "flex flex-col gap-3"}>
+    <div class={isFullscreen ? "relative min-h-0 flex-1 overflow-hidden rounded-md" : "relative"}>
         <!-- svelte-ignore a11y_media_has_caption -->
         <video
             bind:this={video}
             autoplay
             playsinline
             muted
-            class="aspect-video w-full rounded-md bg-surface object-cover"
+            class={isFullscreen
+                ? "size-full bg-surface object-cover"
+                : "aspect-video w-full rounded-md bg-surface object-cover"}
             data-testid="camera-preview"
         ></video>
-        <!-- overlay の z 順 (DOM 順で映像 < grid < 字幕帯): グリッドは字幕より先 = 下層 -->
+        <!-- overlay の z 順 (DOM 順で 映像 < grid < 撮影ガイド < 字幕帯) -->
         <GridOverlay visible={showGrid} />
+        {#if showShootingGuide}
+            <!-- 描画には元文字列を渡す (trim は showShootingGuide の空判定にだけ使う) -->
+            <ShootingGuideOverlay text={shootingPoint ?? ""} />
+        {/if}
         <SubtitleOverlay
             primary={subtitlePrimary}
             secondary={subtitleSecondary}
@@ -522,7 +562,11 @@
             </div>
         {/if}
     </div>
-    <div class="flex items-center justify-center gap-3">
+    <div
+        class={isFullscreen
+            ? "flex shrink-0 items-center justify-center gap-3"
+            : "flex items-center justify-center gap-3"}
+    >
         {#if phase === "idle"}
             <Button variant="primary" onclick={startRecording} testId="start-recording">
                 <Circle class="size-4" aria-hidden="true" />
@@ -597,6 +641,7 @@
         </button>
     </div>
     {#if error}
-        <p class="text-center text-caption text-danger" role="alert">{error}</p>
+        <!-- 全画面でも重ねないので class は共通のまま (経験値の位置合わせが不要になった) -->
+        <p class="shrink-0 text-center text-caption text-danger" role="alert">{error}</p>
     {/if}
 </div>

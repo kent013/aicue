@@ -280,6 +280,24 @@ T085 の完了条件は変わらない** — 目視確認の記録が入って�
   `window.crypto.subtle` が無い環境で Inertia は履歴を平文で保存する (`console.warn` のみ)。
   撮影 PWA は `getUserMedia` / Service Worker のためセキュアコンテキスト必須であり、
   degrade するのは中核機能が既に動かない環境に限られる。
+- **横持ち全画面の撮影 UI は、自動レーンでは DOM 契約と条件分岐だけを固定している**。
+  Browser レーン (Chromium + WebKit) が固定するのは「横持ちスマホ相当の context で
+  全画面へ切り替わること」「前後ボタンでカットが移動すること」「全画面を終了して
+  再入路から戻れること」「デスクトップ相当・高さ超過・細いポインタの 3 通りでは
+  切り替わらないこと」までである。
+  **「撮影ガイドの矩形が上下の字幕帯のいずれとも交差しないこと」は Chromium レーンだけが固定する** —
+  Playwright WebKit (Linux) には `MediaRecorder` が無く (実測: `typeof window.MediaRecorder`
+  が `"undefined"`)、撮影パネルがファイル選択フォールバックへ倒れて overlay が 1 つも
+  描画されないため、当該テストは前提を明示して skip する
+  (`tests/Browser/CaptureLandscapeFullscreenTest.php`)。
+  **これはレーンの能力差であって iOS Safari 実機の性質ではない**。
+  **実カメラを伴う挙動 (録画中に向きが変わったときの録画継続、CSS 全画面での
+  カメラプレビューの見え方、iOS Safari の動的ツールバーと `h-dvh` の相互作用、
+  端末の戻るジェスチャとスワイプの競合、`inert` 非対応環境でのフォーカス漏れ) は
+  どちらのレーンでも再現していない**。これらは実機受入確認の対象である。
+  依存する Web 機能と最低バージョン前提は
+  `devnotes/20260816-1021-landscape-fullscreen-capture/detailed-design.md` の
+  **「依存する Web 機能と最低バージョン前提」を正本とする** (版番号を本書に写さない)。
 
 ## Target — 到達目標 (未達)
 
