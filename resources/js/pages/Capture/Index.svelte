@@ -6,11 +6,13 @@
     import Checkbox from "@/components/atoms/Checkbox.svelte";
     import Input from "@/components/atoms/Input.svelte";
     import Select from "@/components/atoms/Select.svelte";
+    import ManualCoverThumbnail from "@/components/features/capture/ManualCoverThumbnail.svelte";
     import EmptyState from "@/components/molecules/EmptyState.svelte";
     import PageHeader from "@/components/molecules/PageHeader.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
     import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
+    import { takeUrl } from "@/lib/capture/take-endpoints";
     import { formatDate } from "@/lib/date-format";
     import type { SharedProps } from "@/lib/shared-props";
     import type { CaptureManualSummary } from "@/types/capture";
@@ -49,6 +51,19 @@
             preserveState: true,
             preserveScroll: true,
         });
+    }
+
+    /**
+     * 代表サムネイルの URL。cover が null なら null (= プレースホルダ)。
+     * **判断材料は cover の null 判定だけ**で、権限も状態もサーバ側で解決済みである。
+     */
+    function coverUrl(manual: CaptureManualSummary): string | null {
+        if (manual.cover === null) return null;
+        return takeUrl(
+            { projectId: project.id, manualId: manual.id, cutId: manual.cover.cut_id },
+            manual.cover.take_id,
+            "/thumbnail",
+        );
     }
 </script>
 
@@ -114,7 +129,15 @@
                     {@const captureProgress = captureProgressOf(manual)}
                     <a href={`/app/projects/${project.id}/manuals/${manual.id}`} class="block">
                         <Card>
-                            <div class="flex items-center justify-between gap-3">
+                            <!-- 3 列 grid: サムネイルは固有幅・本文だけが縮んで truncate・
+                                 バッジは潰れない (minmax(0,1fr) が本文列に最小幅 0 を与える) -->
+                            <div
+                                class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3"
+                            >
+                                <ManualCoverThumbnail
+                                    src={coverUrl(manual)}
+                                    testId={`capture-cover-${manual.id}`}
+                                />
                                 <div class="min-w-0">
                                     <p class="truncate text-body font-medium">{manual.title}</p>
                                     <p class="mt-1 text-caption text-text-secondary">

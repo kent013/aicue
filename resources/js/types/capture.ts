@@ -59,6 +59,12 @@ export interface CaptureManualDetail {
     cuts: CaptureCut[];
 }
 
+/** PHP: App\DataTransferObjects\Capture\CaptureManualCoverData と対 */
+export interface CaptureManualCover {
+    cut_id: number;
+    take_id: number;
+}
+
 export interface CaptureManualSummary {
     id: number;
     title: string;
@@ -70,6 +76,12 @@ export interface CaptureManualSummary {
     updated_at: string | null;
     /** 作成者名。退会/削除で解決不可のときは null (UI は「不明」) */
     creator_name: string | null;
+    /**
+     * 代表サムネイル 1 枚の座標 (無ければ null = プレースホルダ)。
+     * URL ではなく id を持つ。組み立ては lib/capture/take-endpoints.ts#takeUrl() が唯一の規則。
+     * **null 判定以外の条件を UI 側で足さない** — 権限も状態もサーバ側で解決済みである。
+     */
+    cover: CaptureManualCover | null;
 }
 
 /**

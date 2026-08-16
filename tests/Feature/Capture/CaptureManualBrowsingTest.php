@@ -127,6 +127,9 @@ test('index の summary shape は TS CaptureManualSummary と対のキー集合 
     expect(array_keys($summary))->toBe([
         'id', 'title', 'category_id', 'category_name',
         'cuts_total', 'cuts_adopted', 'cuts_with_takes', 'updated_at', 'creator_name',
+        // 代表サムネイルの座標 (T198)。無ければ null で、内側のキーと型は
+        // CaptureCoverThumbnailTest が固定する
+        'cover',
     ]);
 });
 

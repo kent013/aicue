@@ -444,17 +444,33 @@ test('ケース 8: EagerLoadCandidate の前提 (受け取れるかを判断し�
         'Models/VideoManual.php が output_path を参照しました。候補行の relation が「受け取れるか」の'
         .'判断を持ち始めた可能性があります (選択式の単一化が崩れるため区分を再審査してください)');
 
-    // (b) 候補行はちょうど 1 本 (「1 ファイルまるごと免除」にしない = 2 本目の選択式を足せない)
+    // (b) **成果物の候補行**はちょうど 1 本 (「1 ファイルまるごと免除」にしない = 2 本目の選択式を足せない)。
+    //
+    // 成果物の概念に効く検査はこの succeeded 条件の件数である (coverCut は render_jobs を
+    // 1 バイトも見ないため 1 のまま)。ここが 2 になったら候補行 relation が増えている。
     expect(RenderArtifactSelectionScanner::countSucceededStatusMarkers($tokens))->toBe(1,
         'succeeded 条件が 2 つ以上あります。候補行 relation が増えた可能性があるため区分を再審査してください');
-    expect(RenderArtifactSelectionScanner::countCalls($tokens, 'ofMany'))->toBe(1,
-        'ofMany( が 1 回ではありません (候補行の選び方が増減しています)');
-    expect(RenderArtifactSelectionScanner::countCalls($tokens, 'hasOne'))->toBe(1,
-        'hasOne( が 1 回ではありません (候補行 relation が増減しています)');
+
+    // ofMany( / hasOne( の件数は**ファイル単位の粗い代理検査**である。T198 で
+    // 一覧カードの代表サムネイル候補 (coverCut。cuts が対象で render_jobs とは無関係) が
+    // 同じ形の relation として増えたため、現在値は 2 本ちょうどである。
+    // 完全一致で pin してあるので、3 本目が増えても 1 本に減っても赤くなる。
+    // **どちらが成果物側かは (c) の名前 pin が固定する**ので、代理検査が 2 になっても
+    // 「2 本目の成果物選択式を足せない」という不変条件の検出力は落ちていない。
+    expect(RenderArtifactSelectionScanner::countCalls($tokens, 'ofMany'))->toBe(2,
+        'ofMany( が 2 回ではありません (one-of-many relation の本数が増減しています。'
+        .'成果物側が増えたのか別概念が増えたのかを名前で確かめて区分を再審査してください)');
+    expect(RenderArtifactSelectionScanner::countCalls($tokens, 'hasOne'))->toBe(2,
+        'hasOne( が 2 回ではありません (one-of-many relation の本数が増減しています)');
 
     // (c) 候補行の名前と対象種別を pin する (rename / kind 変更は再審査の合図)
     expect(RenderArtifactSelectionScanner::declaresFunction($tokens, 'latestSucceededRender'))->toBeTrue(
         '候補行 relation latestSucceededRender() が見つかりません (rename したら目録と parity テストを見直すこと)');
+    // 成果物と無関係な 2 本目 (T198 の代表サムネイル候補) も名前で pin する =
+    // (b) の件数 2 の内訳が「成果物 1 本 + coverCut 1 本」であることを機械で固定する。
+    expect(RenderArtifactSelectionScanner::declaresFunction($tokens, 'coverCut'))->toBeTrue(
+        '代表サムネイル候補 relation coverCut() が見つかりません。'
+        .'(b) の件数 2 の内訳が変わっているため、成果物側が増えていないかを再審査してください');
     expect(RenderArtifactSelectionScanner::countEnumCaseReferences($tokens, 'RenderKind', 'Render'))->toBe(1,
         '候補行が見る種別 (RenderKind::Render) の参照数が変わりました (preview を混ぜていないか再審査)');
 

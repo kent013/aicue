@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\DataTransferObjects\Capture;
 
 use App\Models\VideoManual;
+use App\Services\Manual\AdoptedReadyTakeCoverage;
 use Webmozart\Assert\Assert;
 
 /**
@@ -30,13 +31,23 @@ final readonly class CaptureManualSummaryData
         public int $cutsWithTakes,
         public ?string $updatedAt,
         public ?string $creatorName,
+        /**
+         * 代表サムネイル 1 枚の座標。無い場合は null で、UI はプレースホルダを描く。
+         * **UI はこの 1 つの値だけで判断する** (権限も状態もここで解決済み = 判断を 2 箇所に持たない)。
+         */
+        public ?CaptureManualCoverData $cover,
     ) {}
 
     /**
      * withCount('cuts', 'cuts as cuts_adopted_count', 'cuts as cuts_with_takes_count') +
      * with('category', 'creator') 済みの manual から生成する (Capture/IndexController の一覧クエリと対)。
+     *
+     * @param  bool  $canViewCover  代表サムネイルを見せてよいか
+     *                              (`ProjectPolicy::capture` を **project 単位に 1 回**評価した結果。行ごとに評価しない)。
+     *                              false のときは `coverCut` relation に**触れない** — 触ると relation 未ロード時に
+     *                              行ごとの lazy load が走り N+1 になる (権限の無い利用者には eager load を張らないため)。
      */
-    public static function fromManual(VideoManual $manual): self
+    public static function fromManual(VideoManual $manual, bool $canViewCover): self
     {
         $cutsTotal = $manual->getAttribute('cuts_count');
         $cutsAdopted = $manual->getAttribute('cuts_adopted_count');
@@ -55,13 +66,50 @@ final readonly class CaptureManualSummaryData
             cutsWithTakes: $cutsWithTakes,
             updatedAt: $manual->updated_at?->toIso8601String(),
             creatorName: $manual->creator?->name, // 退会/削除で null (実運用では FK RESTRICT)
+            cover: self::resolveCover($manual, $canViewCover),
         );
+    }
+
+    /**
+     * 代表サムネイルの座標を決める (概念設計 D1-1 の層 (c) = 合成のみ)。
+     *
+     * 層の分担:
+     *   (a) 候補選択 … `VideoManual::coverCut()` (表示順 + サムネイル生成済み)
+     *   (b) 状態判定 … `AdoptedReadyTakeCoverage::readyTakeId()` へ**委譲** (自前の述語を持たない)
+     *   (c) 合成    … 本メソッド
+     *
+     * (b) は eager load 済み relation を読むだけで **DB へ問い合わせない**
+     * (`with(['coverCut.adoptedTake'])` を張るのが呼び出し側の義務)。
+     *
+     * (a) が選んだカットで (b) が null を返したときは**次のカットを探さずに null を返す**。
+     * 候補条件 (サムネイル生成済み) と表示条件 (採用済みかつ ready) は現行コードでは一致する
+     * (`thumbnail_path` は `where status=ready` の条件付き UPDATE でしか非 null にならず、
+     * ready から離れる遷移が存在しない) が、一致を前提にせず安全側 = 壊れた画像を出さない側へ倒す。
+     */
+    private static function resolveCover(VideoManual $manual, bool $canViewCover): ?CaptureManualCoverData
+    {
+        if (! $canViewCover) {
+            return null; // relation に触れない (未ロードのため触ると lazy load = N+1)
+        }
+
+        $cut = $manual->coverCut;
+        if ($cut === null) {
+            return null; // 採用テイク付き + サムネイル生成済みのカットが 1 つも無い
+        }
+
+        $takeId = AdoptedReadyTakeCoverage::readyTakeId($cut);
+        if ($takeId === null) {
+            return null; // 候補条件と表示条件の食い違い → 出さない
+        }
+
+        return new CaptureManualCoverData(cutId: $cut->id, takeId: $takeId);
     }
 
     /**
      * @return array{id: int, title: string, category_id: int|null,
      *   category_name: string|null, cuts_total: int, cuts_adopted: int, cuts_with_takes: int,
-     *   updated_at: string|null, creator_name: string|null}
+     *   updated_at: string|null, creator_name: string|null,
+     *   cover: array{cut_id: int, take_id: int}|null}
      */
     public function toArray(): array
     {
@@ -75,6 +123,7 @@ final readonly class CaptureManualSummaryData
             'cuts_with_takes' => $this->cutsWithTakes,
             'updated_at' => $this->updatedAt,
             'creator_name' => $this->creatorName,
+            'cover' => $this->cover?->toArray(),
         ];
     }
 }

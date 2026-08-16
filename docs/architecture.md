@@ -1261,6 +1261,21 @@ doc/10 §10.3 / §10.8-4/-7 の実装 (T004)。routes は `/app/projects/{projec
   撮影を続ける限り予算は更新され、撮影を止めれば必ず停止する) / 実 S3 の応答ヘッダに
   `Content-Type: image/jpeg` が載ること (`writeStream` の option 名の読解までが根拠で、
   テストが固定できるのは fake adapter の sidecar までである)
+- **一覧カードの代表サムネイル (撮影 PWA。doc/05 §5.2。T198)**: 代表は
+  「**表示順 (`cuts.sort_order` 昇順 → `cuts.id` 昇順) で最初に来る、採用テイクの
+  `thumbnail_path` が非 null のカット**」の、その採用テイク 1 枚である
+  (`VideoManual::coverCut()` が候補を 1 件選び、`AdoptedReadyTakeCoverage::readyTakeId()` が
+  採用済みかつ ready かを決める = 判定式は増やさない)。**配信は既存の
+  `GET .../takes/{take}/thumbnail` をそのまま使い、route を増やさない**。props は URL ではなく
+  `cut_id` / `take_id` を持ち、組み立て規則はフロントの `take-endpoints.ts` に 1 本化されている。
+  **可視性は project 単位に 1 回**だけ `ProjectPolicy::capture` で決める (一覧の閲覧は
+  組織メンバーなら可だが、サムネイル endpoint は project メンバー以上を要求するため、
+  撮れない利用者には代表を出さない = 403 になる `<img>` を描かない)
+- **代表サムネイルについて保証しないもの**: 代表が「内容を最もよく表すカット」であること
+  (規則は表示順であり内容を見ない) / 候補条件と表示条件が食い違ったときに次のカットへ
+  探しに行くこと (**行わない**。安全側に倒して代表なしにする) / 一覧の取得枚数の上限
+  (`loading="lazy"` は初期取得を抑制するヒントであり上限を保証しない。一覧はページネーションを持たない) /
+  PC 一覧への表示 (doc/04 の一覧要件にサムネイル列が無いため出さない)
 - **media queue**: S3 オブジェクト削除 (`Jobs/Capture/DeleteTakeObjectsJob`) は専用 connection
   **`database-media`** (queue=media、retry_after=300) で流れる。**本番/ステージングの worker
   プロセス定義・デプロイ手順・監視対象に `php artisan queue:work database-media --timeout=240`
