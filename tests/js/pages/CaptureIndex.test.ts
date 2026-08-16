@@ -13,7 +13,6 @@ function makeSummary(overrides: Partial<CaptureManualSummary> = {}): CaptureManu
     return {
         id: 1,
         title: "ネジ締め作業",
-        status: "ready",
         category_id: 1,
         category_name: "準備作業",
         cuts_total: 3,
@@ -49,6 +48,33 @@ describe("Capture/Index 自作フィルタ・作成者表示", () => {
         });
 
         expect(screen.getByText(/不明 ・ 更新/)).toBeInTheDocument();
+    });
+
+    /*
+     * T197: 撮影 PWA の進捗語彙 (撮影完了 / 撮影中 / 未撮影) は PC 一覧の 3 値
+     * (作成済 / 作成中 / 未着手) とは**別の量**なので寄せない。判定の境界も現行のまま固定する。
+     */
+    it("撮影進捗バッジは撮影語彙のまま (判定境界も現行どおり)", () => {
+        const cases = [
+            { counts: { cuts_total: 0, cuts_adopted: 0, cuts_with_takes: 0 }, label: "未撮影" },
+            // 構造上生じない不整合 (take は cut に属する)。生じたら現行の三項式どおり「撮影中」
+            { counts: { cuts_total: 0, cuts_adopted: 0, cuts_with_takes: 1 }, label: "撮影中" },
+            { counts: { cuts_total: 3, cuts_adopted: 1, cuts_with_takes: 2 }, label: "撮影中" },
+            { counts: { cuts_total: 3, cuts_adopted: 3, cuts_with_takes: 3 }, label: "撮影完了" },
+        ];
+
+        for (const { counts, label } of cases) {
+            const { unmount } = render(CaptureIndex, {
+                props: { ...baseProps, manuals: [makeSummary(counts)] },
+            });
+
+            expect(screen.getByText(label)).toBeInTheDocument();
+            // PC 一覧の語彙へ寄せていないこと (別の量なので統合しない)
+            for (const pcLabel of ["未着手", "作成中", "作成済"]) {
+                expect(screen.queryByText(pcLabel)).toBeNull();
+            }
+            unmount();
+        }
     });
 
     it("自作トグルで GET クエリに mine=1 が載る", async () => {

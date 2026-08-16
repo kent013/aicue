@@ -26,9 +26,10 @@
         CategoryOption,
         ManualFilters,
         ManualListItem,
+        ManualProgress,
         PaginationMeta,
     } from "@/types/manual";
-    import { VIDEO_MANUAL_STATUS_LABELS } from "@/types/manual";
+    import { MANUAL_PROGRESS_LABELS } from "@/types/manual";
 
     /**
      * プロジェクト詳細。動画マニュアル一覧 (フィルタ + paginate)・カテゴリ管理・
@@ -88,7 +89,9 @@
 
     /* ---- 動画マニュアル: フィルタ (GET クエリで manuals のみ部分更新) ---- */
     let filterCategory = $state(manualFilters.category ?? "");
-    let filterStatus = $state(manualFilters.status ?? "");
+    // 状態の絞り込み (doc/04 の 3 値)。制作状態 5 値では絞らない。
+    // "" = すべて。union で受けることで select の値が型で閉じる
+    let filterProgress = $state<ManualProgress | "">(manualFilters.progress ?? "");
     let filterQ = $state(manualFilters.q ?? "");
     let filterSort = $state<string>(manualFilters.sort ?? "");
     let filterMine = $state(manualFilters.mine);
@@ -105,7 +108,7 @@
     function manualQuery(pageNumber?: number): Record<string, string | number> {
         const query: Record<string, string | number> = {};
         if (filterCategory !== "") query.category = filterCategory;
-        if (filterStatus !== "") query.status = filterStatus;
+        if (filterProgress !== "") query.progress = filterProgress;
         if (filterQ.trim() !== "") query.q = filterQ.trim();
         if (filterSort !== "") query.sort = filterSort;
         if (filterMine) query.mine = 1;
@@ -420,17 +423,17 @@
                         </Select>
                     </div>
                     <div class="flex flex-col gap-1">
-                        <label class="text-caption text-text-secondary" for="manual-filter-status">
+                        <label class="text-caption text-text-secondary" for="manual-filter-progress">
                             状態
                         </label>
                         <Select
-                            id="manual-filter-status"
-                            bind:value={filterStatus}
+                            id="manual-filter-progress"
+                            bind:value={filterProgress}
                             onchange={() => applyManualFilters()}
-                            testId="manual-filter-status"
+                            testId="manual-filter-progress"
                         >
                             <option value="">すべて</option>
-                            {#each Object.entries(VIDEO_MANUAL_STATUS_LABELS) as [value, label] (value)}
+                            {#each Object.entries(MANUAL_PROGRESS_LABELS) as [value, label] (value)}
                                 <option {value}>{label}</option>
                             {/each}
                         </Select>

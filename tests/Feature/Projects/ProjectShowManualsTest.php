@@ -12,7 +12,8 @@ use Inertia\Testing\AssertableInertia as Assert;
 
 /*
  * Projects/Show に内包する動画マニュアル一覧 (manuals/categories/manualFilters props)。
- * GET クエリ (?category=&status=&q=) の絞り込みと paginate の shape を固定する。
+ * GET クエリ (?category=&progress=&q=) の絞り込みと paginate の shape を固定する。
+ * 状態の語彙は一覧の 3 値 (ManualProgress)。制作状態 5 値は行にも絞り込みにも出さない (T197)。
  */
 
 test('projects.show は manuals / categories / manualFilters を供給する', function (): void {
@@ -35,7 +36,7 @@ test('projects.show は manuals / categories / manualFilters を供給する', f
             ->has('categories', 1)
             ->where('categories.0.name', '準備作業')
             ->where('manualFilters.category', null)
-            ->where('manualFilters.status', null)
+            ->where('manualFilters.progress', null)
             ->where('manualFilters.q', null));
 });
 
@@ -47,7 +48,7 @@ test('未分類 manual は category=null で返る (フロントは「未分類�
     $this->actingAs($owner)->get("/projects/{$project->id}")
         ->assertInertia(fn (Assert $page) => $page
             ->where('manuals.data.0.category', null)
-            ->where('manuals.data.0.status', 'draft'));
+            ->where('manuals.data.0.progress', 'not_started'));
 });
 
 test('category フィルタ (id / uncategorized sentinel) で絞り込める', function (): void {
@@ -70,26 +71,94 @@ test('category フィルタ (id / uncategorized sentinel) で絞り込める', f
             ->where('manualFilters.category', 'uncategorized'));
 });
 
-test('status フィルタで絞り込める (不正値は無視)', function (): void {
+/**
+ * 制作状態 5 値をそれぞれ 1 本ずつ持つ一覧を作る (T197 の写像を Inertia payload で見るための fixture)。
+ * title は status ごとに固有にする (件数だけの assertion にしない = 対象を同定する)。
+ */
+function seedManualsForEachStatus(Project $project): void
+{
+    foreach ([
+        '下書き' => VideoManualStatus::Draft,
+        '解析中' => VideoManualStatus::Analyzing,
+        '準備完了' => VideoManualStatus::Ready,
+        '書き出し中' => VideoManualStatus::Rendering,
+        '公開済み' => VideoManualStatus::Published,
+    ] as $title => $status) {
+        VideoManual::factory()->forProject($project)->create([
+            'title' => $title,
+            'status' => $status->value,
+        ]);
+    }
+}
+
+test('progress=in_progress は analyzing / ready / rendering の 3 件を返す', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $project = Project::factory()->forOrganization($organization)->create();
-    VideoManual::factory()->forProject($project)->create(['title' => '下書き']);
-    VideoManual::factory()->forProject($project)->create([
-        'title' => '公開済み',
-        'status' => VideoManualStatus::Published->value,
-    ]);
+    seedManualsForEachStatus($project);
 
-    $this->actingAs($owner)->get("/projects/{$project->id}?status=published")
+    $response = $this->actingAs($owner)->get("/projects/{$project->id}?progress=in_progress");
+
+    $response->assertInertia(fn (Assert $page) => $page
+        ->has('manuals.data', 3)
+        ->where('manualFilters.progress', 'in_progress'));
+
+    // 対象の同定は title の集合で行う (件数一致だけに頼らない)
+    $titles = array_column($response->inertiaPage()['props']['manuals']['data'], 'title');
+    sort($titles);
+    expect($titles)->toBe(['書き出し中', '準備完了', '解析中']);
+});
+
+test('progress=not_started は draft のみ / progress=completed は published のみ', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+    seedManualsForEachStatus($project);
+
+    $this->actingAs($owner)->get("/projects/{$project->id}?progress=not_started")
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('manuals.data', 1)
+            ->where('manuals.data.0.title', '下書き')
+            ->where('manuals.data.0.progress', 'not_started'));
+
+    $this->actingAs($owner)->get("/projects/{$project->id}?progress=completed")
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 1)
             ->where('manuals.data.0.title', '公開済み')
-            ->where('manualFilters.status', 'published'));
+            ->where('manuals.data.0.progress', 'completed'));
+});
 
-    // enum に無い値は無視 (全件)
-    $this->actingAs($owner)->get("/projects/{$project->id}?status=bogus")
+test('allowlist 外の値と旧 ?status= は無視して全件になる (互換は残さない)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+    seedManualsForEachStatus($project);
+
+    // 旧 5 値をそのまま渡しても progress の allowlist は通らない
+    $this->actingAs($owner)->get("/projects/{$project->id}?progress=ready")
         ->assertInertia(fn (Assert $page) => $page
-            ->has('manuals.data', 2)
-            ->where('manualFilters.status', null));
+            ->has('manuals.data', 5)
+            ->where('manualFilters.progress', null));
+
+    // **旧 URL の互換は無い** (?status=published は未知キーとして無視される)
+    $this->actingAs($owner)->get("/projects/{$project->id}?status=published")
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('manuals.data', 5)
+            ->where('manualFilters.progress', null)
+            ->missing('manualFilters.status'));
+});
+
+test('行 payload は progress を持ち status を持たない', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+    // 並び順への依存を避けるため manual 1 本だけの fixture で契約を見る
+    VideoManual::factory()->forProject($project)->create(['title' => '下書き']);
+
+    $this->actingAs($owner)->get("/projects/{$project->id}")
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('manuals.data', 1)
+            ->where('manuals.data.0.title', '下書き')
+            ->where('manuals.data.0.progress', 'not_started')
+            ->missing('manuals.data.0.status')
+            // paginator の query が外に出ないことの構造的確認 (links を props に出していない)
+            ->missing('manuals.links'));
 });
 
 test('q フィルタは title 部分一致 (LIKE メタ文字はリテラル扱い)', function (): void {
@@ -247,7 +316,7 @@ test('mine=1 は自ユーザー作成分のみに絞る', function (): void {
             ->where('manualFilters.mine', true));
 });
 
-test('mine と category/status/q/sort の併用で結合絞り込みできる', function (): void {
+test('mine と category/progress/q/sort の併用で結合絞り込みできる', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $other = attachOrganizationMember($organization);
     $project = Project::factory()->forOrganization($organization)->create();
@@ -268,7 +337,7 @@ test('mine と category/status/q/sort の併用で結合絞り込みできる', 
     ]);
 
     $this->actingAs($owner)
-        ->get("/projects/{$project->id}?mine=1&category={$category->id}&status=published&q=ネジ&sort=updated_desc")
+        ->get("/projects/{$project->id}?mine=1&category={$category->id}&progress=completed&q=ネジ&sort=updated_desc")
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 1)
             ->where('manuals.data.0.id', $target->id));

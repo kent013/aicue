@@ -3,6 +3,8 @@
  * (キー集合の契約は tests/Feature/Capture/CaptureManualBrowsingTest が固定する)。
  */
 
+import type { BadgeTone } from "@/components/atoms/Badge.types";
+
 export type TakeStatus = "uploading" | "processing" | "ready" | "failed";
 
 /** PHP: App\Enums\Manual\MaterialType と値集合を一致させる */
@@ -60,7 +62,6 @@ export interface CaptureManualDetail {
 export interface CaptureManualSummary {
     id: number;
     title: string;
-    status: string;
     category_id: number | null;
     category_name: string | null;
     cuts_total: number;
@@ -69,6 +70,44 @@ export interface CaptureManualSummary {
     updated_at: string | null;
     /** 作成者名。退会/削除で解決不可のときは null (UI は「不明」) */
     creator_name: string | null;
+}
+
+/**
+ * 撮影進捗 (この 1 本のマニュアルの撮影がどこまで進んだか)。
+ * **PC 一覧の ManualProgress (制作の到達段階) とは別の量である** —
+ * 導出元 (カットの採用状況 vs video_manuals.status)、更新契機、値の動きが独立している
+ * (例: 制作は「作成中」でも撮影は「撮影完了」は正常な組合せ)。語が似ていても統合しないこと。
+ */
+export type CaptureProgress = "captured" | "capturing" | "not_captured";
+
+export const CAPTURE_PROGRESS_LABELS = {
+    captured: "撮影完了",
+    capturing: "撮影中",
+    not_captured: "未撮影",
+} as const satisfies Record<CaptureProgress, string>;
+
+export const CAPTURE_PROGRESS_TONES = {
+    captured: "success",
+    capturing: "tertiary",
+    not_captured: "neutral",
+} as const satisfies Record<CaptureProgress, BadgeTone>;
+
+/**
+ * 撮影進捗の導出 (現行の三項式と**同一の判定**を名前付きにしたもの。判定は 1 ビットも変えない)。
+ *
+ * 判定順序の帰結を正確に書く:
+ * - `cuts_total === 0 && cuts_with_takes === 0` → 未撮影 (カットが無い = 撮影の分母が無い)
+ * - **`cuts_total === 0 && cuts_with_takes > 0` → 撮影中**。take は cut に属するため
+ *   この組合せは構造上生じないが、生じた場合は 2 つ目の条件に掛かって「撮影中」になる。
+ *   本施策は**表示語彙の整理であり判定の変更ではない**ので、この帰結もそのまま残す
+ *   (直したくなったら別タスクとして根拠付きで起こすこと)。
+ */
+export function captureProgressOf(
+    summary: Pick<CaptureManualSummary, "cuts_total" | "cuts_adopted" | "cuts_with_takes">,
+): CaptureProgress {
+    if (summary.cuts_total > 0 && summary.cuts_adopted === summary.cuts_total) return "captured";
+    if (summary.cuts_with_takes > 0) return "capturing";
+    return "not_captured";
 }
 
 /** POST .../takes/upload-url の応答 (TakeUploadTicketResource と対) */

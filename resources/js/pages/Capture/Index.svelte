@@ -14,6 +14,11 @@
     import { formatDate } from "@/lib/date-format";
     import type { SharedProps } from "@/lib/shared-props";
     import type { CaptureManualSummary } from "@/types/capture";
+    import {
+        CAPTURE_PROGRESS_LABELS,
+        CAPTURE_PROGRESS_TONES,
+        captureProgressOf,
+    } from "@/types/capture";
 
     /**
      * 撮影 PWA: シナリオ (動画マニュアル) 一覧。カテゴリ / キーワードで絞り込み、
@@ -104,6 +109,9 @@
                     />
                 {/if}
                 {#each manuals as manual (manual.id)}
+                    <!-- 撮影進捗は PC 一覧の制作状態 (ManualProgress) とは別の量。
+                         導出は captureProgressOf ただ 1 か所に置く -->
+                    {@const captureProgress = captureProgressOf(manual)}
                     <a href={`/app/projects/${project.id}/manuals/${manual.id}`} class="block">
                         <Card>
                             <div class="flex items-center justify-between gap-3">
@@ -120,13 +128,9 @@
                                     </p>
                                 </div>
                                 <div class="shrink-0">
-                                    {#if manual.cuts_total > 0 && manual.cuts_adopted === manual.cuts_total}
-                                        <Badge tone="success">撮影完了</Badge>
-                                    {:else if manual.cuts_with_takes > 0}
-                                        <Badge tone="tertiary">撮影中</Badge>
-                                    {:else}
-                                        <Badge tone="neutral">未撮影</Badge>
-                                    {/if}
+                                    <Badge tone={CAPTURE_PROGRESS_TONES[captureProgress]}>
+                                        {CAPTURE_PROGRESS_LABELS[captureProgress]}
+                                    </Badge>
                                 </div>
                             </div>
                         </Card>

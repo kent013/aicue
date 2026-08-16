@@ -149,7 +149,7 @@ class ProjectController extends Controller
      * creator は退会/削除で解決不可のとき null (実運用では FK RESTRICT で常に解決)。
      *
      * @return array{
-     *   data: list<array{id: int, title: string, status: string,
+     *   data: list<array{id: int, title: string, progress: string,
      *     category: array{id: int, name: string}|null,
      *     creator: array{id: int, name: string}|null,
      *     created_at: string, updated_at: string,
@@ -178,8 +178,9 @@ class ProjectController extends Controller
         } elseif ($listQuery->category !== null) {
             $baseQuery->where('category_id', (int) $listQuery->category);
         }
-        if ($listQuery->status !== null) {
-            $baseQuery->where('status', $listQuery->status);
+        if ($listQuery->progress !== null) {
+            // 3 値 → 制作状態の集合は ManualProgress が唯一の正本 (ここに写像表を書かない)
+            $baseQuery->whereIn('status', $listQuery->progress->statusValues());
         }
         if ($listQuery->keyword !== null) {
             // LIKE メタ文字 (%/_/\) はリテラル検索として扱う
@@ -188,7 +189,10 @@ class ProjectController extends Controller
 
         $paginated = (clone $baseQuery)
             ->paginate(perPage: ManualListQuery::PER_PAGE, page: $listQuery->page)
-            ->withQueryString();
+            // 生クエリをそのまま拾う withQueryString ではなく、**allowlist を通った値だけ**を載せる
+            // (未知キー・旧 `?status=` を paginator の query に持ち込まない)。
+            // `page` は AbstractPaginator::appends() が pageName として除外するため衝突しない
+            ->appends($listQuery->toQueryParams());
 
         // 範囲外ページ (行内削除で件数が減った / 古いブックマーク) は最終ページへ丸める。
         // 「空の一覧」に着地させない (行き先のない詰みを作らない)。
@@ -199,7 +203,7 @@ class ProjectController extends Controller
         if ($paginated->currentPage() > $paginated->lastPage()) {
             $paginated = (clone $baseQuery)
                 ->paginate(perPage: ManualListQuery::PER_PAGE, page: $paginated->lastPage())
-                ->withQueryString();
+                ->appends($listQuery->toQueryParams());
         }
 
         /** @var list<VideoManual> $manuals */

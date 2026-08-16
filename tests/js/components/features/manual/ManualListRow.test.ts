@@ -26,7 +26,7 @@ function manualItem(overrides: Partial<ManualListItem> = {}): ManualListItem {
     return {
         id: 1,
         title: "ネジ締め作業",
-        status: "published",
+        progress: "completed",
         category: { id: 1, name: "準備作業" },
         creator: { id: 2, name: "編集 花子" },
         created_at: "2026-07-10 12:00",
@@ -55,8 +55,28 @@ describe("features/manual/ManualListRow", () => {
         renderRow();
 
         expect(screen.getByTestId("manual-duration-1")).toHaveTextContent("3:05");
-        expect(screen.getByTestId("manual-status-1")).toHaveTextContent("公開済み");
+        expect(screen.getByTestId("manual-progress-1")).toHaveTextContent("作成済");
         expect(screen.getByText(/準備作業 ・ 編集 花子 ・ 更新 2026-07-11 09:00/)).toBeInTheDocument();
+    });
+
+    it("状態バッジは一覧の 3 値語彙で出す (制作状態 5 値のラベルは使わない)", () => {
+        for (const [progress, label] of [
+            ["not_started", "未着手"],
+            ["in_progress", "作成中"],
+            ["completed", "作成済"],
+        ] as const) {
+            const { unmount } = render(ManualListRow, {
+                props: {
+                    projectId: 7,
+                    manual: manualItem({ progress }),
+                    onRequestPreview: vi.fn(),
+                    onRequestDelete: vi.fn(),
+                },
+            });
+
+            expect(screen.getByTestId("manual-progress-1")).toHaveTextContent(label);
+            unmount();
+        }
     });
 
     it("duration_ms が null のときは「—」を表示する (0:00 と書かない)", () => {

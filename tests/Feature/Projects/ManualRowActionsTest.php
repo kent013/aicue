@@ -21,14 +21,14 @@ test('絞り込み付きの削除は同じ絞り込み・同じページへ着�
     $category = Category::factory()->forProject($project)->create();
     $manual = VideoManual::factory()->forProject($project)->forCategory($category)->create();
 
-    $query = "category={$category->id}&status=published&q=".urlencode('ネジ')
+    $query = "category={$category->id}&progress=completed&q=".urlencode('ネジ')
         .'&sort=title_asc&mine=1&page=2';
 
     $response = $this->actingAs($owner)
         ->delete("/projects/{$project->id}/manuals/{$manual->id}?{$query}");
 
     $response->assertRedirect(
-        "/projects/{$project->id}?category={$category->id}&status=published&q=".urlencode('ネジ')
+        "/projects/{$project->id}?category={$category->id}&progress=completed&q=".urlencode('ネジ')
         .'&sort=title_asc&mine=1&page=2'
     );
     $response->assertSessionHas('success');
@@ -50,8 +50,9 @@ test('allowlist 外のクエリは着地先の URL に載らない', function ()
     $manual = VideoManual::factory()->forProject($project)->create();
 
     $this->actingAs($owner)
+        // 旧 `?status=` (制作状態 5 値) も allowlist 外なので着地先には載らない (互換を残さない)
         ->delete("/projects/{$project->id}/manuals/{$manual->id}?sort=".urlencode(';DROP')
-            .'&category=abc&status=bogus')
+            .'&category=abc&progress=bogus&status=published')
         ->assertRedirect("/projects/{$project->id}");
 });
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\DataTransferObjects\Manual;
 
+use App\Enums\Manual\ManualProgress;
 use App\Enums\Manual\VideoManualStatus;
 use App\Models\VideoManual;
 use App\Services\Manual\CurrentRenderArtifact;
@@ -31,7 +32,11 @@ final readonly class ManualListItemData
     public function __construct(
         public int $id,
         public string $title,
-        public VideoManualStatus $status,
+        /**
+         * 一覧の状態 (3 値)。**制作状態 5 値は一覧行に載せない** (行バッジ以外の用途が無く、
+         * 絞り込みと語彙が食い違うため。実況は詳細画面 / ダッシュボードの責務)
+         */
+        public ManualProgress $progress,
         public ?ManualListRefData $category,
         public ?ManualListRefData $creator,
         public string $createdAt,
@@ -63,7 +68,7 @@ final readonly class ManualListItemData
         return new self(
             id: $manual->id,
             title: $manual->title,
-            status: $manual->status,
+            progress: ManualProgress::forStatus($manual->status),
             category: $category === null ? null : new ManualListRefData($category->id, $category->name),
             creator: $creator === null ? null : new ManualListRefData($creator->id, $creator->name),
             createdAt: $manual->created_at?->format('Y-m-d H:i') ?? '',
@@ -75,7 +80,7 @@ final readonly class ManualListItemData
     }
 
     /**
-     * @return array{id: int, title: string, status: string,
+     * @return array{id: int, title: string, progress: string,
      *   category: array{id: int, name: string}|null,
      *   creator: array{id: int, name: string}|null,
      *   created_at: string, updated_at: string,
@@ -86,7 +91,7 @@ final readonly class ManualListItemData
         return [
             'id' => $this->id,
             'title' => $this->title,
-            'status' => $this->status->value,
+            'progress' => $this->progress->value,
             'category' => $this->category?->toArray(),
             'creator' => $this->creator?->toArray(),
             'created_at' => $this->createdAt,

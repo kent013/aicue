@@ -123,8 +123,9 @@ test('index の summary shape は TS CaptureManualSummary と対のキー集合 
 
     $summary = $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals")
         ->inertiaPage()['props']['manuals'][0];
+    // 制作状態 (status) は載せない (T197: 撮影 PWA の進捗はカットの採用状況から導出する別の量)
     expect(array_keys($summary))->toBe([
-        'id', 'title', 'status', 'category_id', 'category_name',
+        'id', 'title', 'category_id', 'category_name',
         'cuts_total', 'cuts_adopted', 'cuts_with_takes', 'updated_at', 'creator_name',
     ]);
 });
