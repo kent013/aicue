@@ -27,9 +27,16 @@ use Tests\Support\PhpTokenScan;
  *   **連続 token 列**を持つ (= 世代の大小比較であって最新 1 件の選択ではない)。
  *   前提が崩れた瞬間に区分ごと再審査になる。
  *
+ * 免除区分 (EagerLoadCandidate = 一覧が eager load する候補行の relation) の前提:
+ *   `output_path` を 1 度も参照しない (= 受け取れるかを判断しない。決定は Canonical に残る)。
+ *   候補行と Canonical が同じ行を指すことは behavioral な parity テストの担当で、
+ *   ここが固定するのは「判断を持ち込んでいない」ことだけである。
+ *
  * 保証しないもの (誇張しない):
- * - 閉じるのは**ファイル粒度**の直接クエリだけである。登録済みファイル内でメソッドを増やして
- *   選択式を書く経路は検出しない (fail-first は behavioral テストが担う)
+ * - 閉じるのは基本的に**ファイル粒度**の直接クエリである。登録済みファイル内でメソッドを増やして
+ *   選択式を書く経路は、**EagerLoadCandidate だけ**個数 pin (succeeded 条件 / `ofMany(` /
+ *   `hasOne(` / `RenderKind::Render` が各 1) で赤くなるが、**他の区分では検出しない**
+ *   (fail-first は behavioral テストが担う)
  * - 文字列変数経由 (`$s = 'suc'.'ceeded'`)・動的呼び出し・別ファイルへ切り出した同義式・
  *   repository を挟む間接経路には**沈黙する**
  * - succeeded 条件を伴わない別基準の選択 (表示用の最新 job など) は母集団に入らない
@@ -161,6 +168,117 @@ final class RenderArtifactSelectionScanner
                 continue;
             }
             if (in_array(trim($tokens[$i + 4]['text'], "'\""), ['>', '<'], true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * EagerLoadCandidate の前提: `output_path` を 1 度も参照しない
+     * (受け取れるかの判断を持ち込んでいない = 決定は Canonical に残っている)。
+     *
+     * @param  list<array{id: int|null, text: string, line: int}>  $tokens
+     */
+    public static function hasOutputPathReference(array $tokens): bool
+    {
+        foreach ($tokens as $token) {
+            if ($token['id'] === T_STRING && $token['text'] === 'output_path') {
+                return true;
+            }
+            if ($token['id'] === T_CONSTANT_ENCAPSED_STRING && trim($token['text'], "'\"") === 'output_path') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * status 群の出現**数** (JobStatus::Succeeded と 'succeeded' リテラルの合計)。
+     * 候補行が 1 つだけであることを数で固定するために使う
+     * (「1 ファイルまるごと免除」にしない = 同じファイルに 2 本目の選択式を足せない)。
+     *
+     * @param  list<array{id: int|null, text: string, line: int}>  $tokens
+     */
+    public static function countSucceededStatusMarkers(array $tokens): int
+    {
+        $count = 0;
+        $total = count($tokens);
+        for ($i = 0; $i < $total; $i++) {
+            $token = $tokens[$i];
+            if ($token['id'] === T_CONSTANT_ENCAPSED_STRING && trim($token['text'], "'\"") === 'succeeded') {
+                $count++;
+
+                continue;
+            }
+            if (self::classNameAt($tokens, $i) !== 'JobStatus') {
+                continue;
+            }
+            if ($i + 2 < $total && $tokens[$i + 1]['id'] === T_DOUBLE_COLON
+                && $tokens[$i + 2]['id'] === T_STRING && $tokens[$i + 2]['text'] === 'Succeeded') {
+                $count++;
+            }
+        }
+
+        return $count;
+    }
+
+    /**
+     * `{name}(` の呼び出し回数。
+     *
+     * @param  list<array{id: int|null, text: string, line: int}>  $tokens
+     */
+    public static function countCalls(array $tokens, string $name): int
+    {
+        $count = 0;
+        $total = count($tokens);
+        for ($i = 0; $i < $total - 1; $i++) {
+            if ($tokens[$i]['id'] === T_STRING && $tokens[$i]['text'] === $name
+                && $tokens[$i + 1]['id'] === null && $tokens[$i + 1]['text'] === '(') {
+                $count++;
+            }
+        }
+
+        return $count;
+    }
+
+    /**
+     * `{Enum}::{Case}` の参照回数 (部分修飾・完全修飾も末尾セグメントで判定)。
+     *
+     * @param  list<array{id: int|null, text: string, line: int}>  $tokens
+     */
+    public static function countEnumCaseReferences(array $tokens, string $enum, string $case): int
+    {
+        $count = 0;
+        $total = count($tokens);
+        for ($i = 0; $i < $total - 2; $i++) {
+            if (self::classNameAt($tokens, $i) !== $enum) {
+                continue;
+            }
+            if ($tokens[$i + 1]['id'] !== T_DOUBLE_COLON) {
+                continue;
+            }
+            if ($tokens[$i + 2]['id'] === T_STRING && $tokens[$i + 2]['text'] === $case) {
+                $count++;
+            }
+        }
+
+        return $count;
+    }
+
+    /**
+     * `function {name}` の宣言があるか (候補行 relation の名前を pin する)。
+     *
+     * @param  list<array{id: int|null, text: string, line: int}>  $tokens
+     */
+    public static function declaresFunction(array $tokens, string $name): bool
+    {
+        $total = count($tokens);
+        for ($i = 0; $i < $total - 1; $i++) {
+            if ($tokens[$i]['id'] === T_FUNCTION
+                && $tokens[$i + 1]['id'] === T_STRING && $tokens[$i + 1]['text'] === $name) {
                 return true;
             }
         }
@@ -311,6 +429,68 @@ test('ケース 6: SupersessionCriterion は「最新 1 件の選択」を持た
             "{$relative} に where('id', '>' | '<', …) の世代比較がありません。"
             .'SupersessionCriterion の前提が崩れています');
     }
+});
+
+test('ケース 7: EagerLoadCandidate は Models/VideoManual.php ただ 1 ファイルである', function (): void {
+    expect(RenderArtifactSelectionScanner::filesOfKind(RenderArtifactSelectionKind::EagerLoadCandidate))
+        ->toBe(['Models/VideoManual.php']);
+});
+
+test('ケース 8: EagerLoadCandidate の前提 (受け取れるかを判断しない / 候補行はちょうど 1 本)', function (): void {
+    $tokens = RenderArtifactSelectionScanner::tokensOf('Models/VideoManual.php');
+
+    // (a) 受け取れるかの判断を持ち込んでいない (決定は Canonical に残る)
+    expect(RenderArtifactSelectionScanner::hasOutputPathReference($tokens))->toBeFalse(
+        'Models/VideoManual.php が output_path を参照しました。候補行の relation が「受け取れるか」の'
+        .'判断を持ち始めた可能性があります (選択式の単一化が崩れるため区分を再審査してください)');
+
+    // (b) 候補行はちょうど 1 本 (「1 ファイルまるごと免除」にしない = 2 本目の選択式を足せない)
+    expect(RenderArtifactSelectionScanner::countSucceededStatusMarkers($tokens))->toBe(1,
+        'succeeded 条件が 2 つ以上あります。候補行 relation が増えた可能性があるため区分を再審査してください');
+    expect(RenderArtifactSelectionScanner::countCalls($tokens, 'ofMany'))->toBe(1,
+        'ofMany( が 1 回ではありません (候補行の選び方が増減しています)');
+    expect(RenderArtifactSelectionScanner::countCalls($tokens, 'hasOne'))->toBe(1,
+        'hasOne( が 1 回ではありません (候補行 relation が増減しています)');
+
+    // (c) 候補行の名前と対象種別を pin する (rename / kind 変更は再審査の合図)
+    expect(RenderArtifactSelectionScanner::declaresFunction($tokens, 'latestSucceededRender'))->toBeTrue(
+        '候補行 relation latestSucceededRender() が見つかりません (rename したら目録と parity テストを見直すこと)');
+    expect(RenderArtifactSelectionScanner::countEnumCaseReferences($tokens, 'RenderKind', 'Render'))->toBe(1,
+        '候補行が見る種別 (RenderKind::Render) の参照数が変わりました (preview を混ぜていないか再審査)');
+
+    // **保証しないもの**: これは字句の検査であり、helper へ切り出した同義式・動的呼び出し・
+    // 別ファイルへ移した候補 relation は捉えない (母集団の検査は ケース 2 が担う)。
+});
+
+test('scanner 自己検証: EagerLoadCandidate の前提検査 (output_path / 個数 / 宣言名)', function (): void {
+    $propertyAccess = PhpTokenScan::normalize('<?php $p = $job->output_path;');
+    $literal = PhpTokenScan::normalize("<?php \$q->whereNotNull('output_path');");
+    $none = PhpTokenScan::normalize("<?php \$q->where('kind', 'render');");
+    $commentOnly = PhpTokenScan::normalize("<?php\n// output_path はコメント\nclass Example {}");
+
+    expect(RenderArtifactSelectionScanner::hasOutputPathReference($propertyAccess))->toBeTrue();
+    expect(RenderArtifactSelectionScanner::hasOutputPathReference($literal))->toBeTrue();
+    expect(RenderArtifactSelectionScanner::hasOutputPathReference($none))->toBeFalse();
+    expect(RenderArtifactSelectionScanner::hasOutputPathReference($commentOnly))->toBeFalse();
+
+    $twoMarkers = PhpTokenScan::normalize(
+        "<?php \$a = JobStatus::Succeeded; \$b = 'succeeded';",
+    );
+    expect(RenderArtifactSelectionScanner::countSucceededStatusMarkers($twoMarkers))->toBe(2);
+    expect(RenderArtifactSelectionScanner::countSucceededStatusMarkers($none))->toBe(0);
+
+    $calls = PhpTokenScan::normalize('<?php $q->ofMany([])->ofMany([]);');
+    expect(RenderArtifactSelectionScanner::countCalls($calls, 'ofMany'))->toBe(2);
+    expect(RenderArtifactSelectionScanner::countCalls($calls, 'hasOne'))->toBe(0);
+
+    $kinds = PhpTokenScan::normalize('<?php $a = RenderKind::Render; $b = RenderKind::Preview;');
+    expect(RenderArtifactSelectionScanner::countEnumCaseReferences($kinds, 'RenderKind', 'Render'))->toBe(1);
+    expect(RenderArtifactSelectionScanner::countEnumCaseReferences($kinds, 'RenderKind', 'Preview'))->toBe(1);
+    expect(RenderArtifactSelectionScanner::countEnumCaseReferences($none, 'RenderKind', 'Render'))->toBe(0);
+
+    $declaration = PhpTokenScan::normalize('<?php class E { public function latestSucceededRender() {} }');
+    expect(RenderArtifactSelectionScanner::declaresFunction($declaration, 'latestSucceededRender'))->toBeTrue();
+    expect(RenderArtifactSelectionScanner::declaresFunction($declaration, 'other'))->toBeFalse();
 });
 
 test('scanner 自己検証: コメント / docblock 内の出現は数えない', function (): void {

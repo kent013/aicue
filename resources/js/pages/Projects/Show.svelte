@@ -15,6 +15,7 @@
     import PageHeaderSection from "@/components/molecules/PageHeaderSection.svelte";
     import Pagination from "@/components/molecules/Pagination.svelte";
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
+    import ManualListRow from "@/components/features/manual/ManualListRow.svelte";
     import Modal from "@/components/organisms/Modal.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
     import PageContainer from "@/components/templates/PageContainer.svelte";
@@ -26,7 +27,7 @@
         ManualListItem,
         PaginationMeta,
     } from "@/types/manual";
-    import { STATUS_TONES, VIDEO_MANUAL_STATUS_LABELS } from "@/types/manual";
+    import { VIDEO_MANUAL_STATUS_LABELS } from "@/types/manual";
 
     /**
      * プロジェクト詳細。動画マニュアル一覧 (フィルタ + paginate)・カテゴリ管理・
@@ -126,6 +127,48 @@
             preserveState: true,
             preserveScroll: true,
             only: ["manuals", "manualFilters"],
+        });
+    }
+
+    /* ---- 動画マニュアル: 行内削除 (ConfirmDialog → destroy) ---- */
+    let removeManualTarget = $state<ManualListItem | null>(null);
+    let removeManualDialogOpen = $state(false);
+    let removingManual = $state(false);
+
+    function openRemoveManualDialog(manual: ManualListItem): void {
+        removeManualTarget = manual;
+        removeManualDialogOpen = true;
+    }
+
+    /** 現在の絞り込み + 表示中ページを query string 化する (削除の着地先を保つため) */
+    function manualQueryString(): string {
+        // 使い捨ての組み立てなので URLSearchParams / SvelteURLSearchParams は使わない
+        // (反応性の要らない場面で反応クラスを持ち込まない。svelte/prefer-svelte-reactivity)
+        const serialized = Object.entries(manualQuery(manuals.meta.current_page))
+            .map(
+                ([key, value]) =>
+                    `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`,
+            )
+            .join("&");
+
+        return serialized === "" ? "" : `?${serialized}`;
+    }
+
+    function removeManual(): void {
+        const target = removeManualTarget;
+        // 二重送信ガードは handler 早期 return で行う (ボタンに disabled を付けない = 禁止事項 8)
+        if (target === null || removingManual) return;
+        // 絞り込み・ページを付けて送る。サーバは同じ allowlist を通して着地先に載せ直すため、
+        // 削除後も同じ絞り込み・同じページに戻る (そのページが消えたらサーバが最終ページへ丸める)
+        router.delete(`/projects/${project.id}/manuals/${target.id}${manualQueryString()}`, {
+            preserveScroll: true,
+            onStart: () => {
+                removingManual = true;
+            },
+            onFinish: () => {
+                removingManual = false;
+                removeManualDialogOpen = false;
+            },
         });
     }
 
@@ -424,26 +467,11 @@
                 {:else}
                     <ul class="mt-4 flex flex-col divide-y divide-border" data-testid="manual-list">
                         {#each manuals.data as manual (manual.id)}
-                            <li class="flex items-center justify-between gap-4 py-3">
-                                <div class="min-w-0">
-                                    <TextLink
-                                        href={`/projects/${project.id}/manuals/${manual.id}`}
-                                        testId={`manual-link-${manual.id}`}
-                                    >
-                                        {manual.title}
-                                    </TextLink>
-                                    <p class="mt-1 text-caption text-text-secondary">
-                                        {manual.category?.name ?? "未分類"} ・ {manual.creator?.name ??
-                                            "不明"} ・ 更新 {manual.updated_at}
-                                    </p>
-                                </div>
-                                <Badge
-                                    tone={STATUS_TONES[manual.status]}
-                                    testId={`manual-status-${manual.id}`}
-                                >
-                                    {VIDEO_MANUAL_STATUS_LABELS[manual.status]}
-                                </Badge>
-                            </li>
+                            <ManualListRow
+                                projectId={project.id}
+                                {manual}
+                                onRequestDelete={openRemoveManualDialog}
+                            />
                         {/each}
                     </ul>
                     <div class="mt-4">
@@ -766,6 +794,17 @@
             processing={removing}
             onConfirm={removeItem}
             testId="remove-item-dialog"
+        />
+
+        <ConfirmDialog
+            bind:open={removeManualDialogOpen}
+            title="動画マニュアル削除"
+            message={`「${removeManualTarget?.title ?? ""}」を削除しますか？ 撮影テイクや完成動画も削除され、この操作は取り消せません。`}
+            confirmLabel="削除する"
+            confirmVariant="danger"
+            processing={removingManual}
+            onConfirm={removeManual}
+            testId="remove-manual-dialog"
         />
 
         <ConfirmDialog

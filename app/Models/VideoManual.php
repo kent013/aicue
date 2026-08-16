@@ -4,12 +4,16 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Enums\Manual\JobStatus;
+use App\Enums\Manual\RenderKind;
 use App\Enums\Manual\VideoManualStatus;
 use Database\Factories\VideoManualFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * VideoManual (Project 配下の動画マニュアル)。
@@ -27,6 +31,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property VideoManualStatus $status
  * @property int $scenario_version
  * @property int|null $total_length_ms
+ * @property-read RenderJob|null $latestSucceededRender
  */
 class VideoManual extends Model
 {
@@ -106,5 +111,33 @@ class VideoManual extends Model
     public function renderJobs(): HasMany
     {
         return $this->hasMany(RenderJob::class);
+    }
+
+    /**
+     * 「いま受け取れる完成動画」の**候補行** (kind=render の最新 succeeded 1 行)。
+     *
+     * 世代の選び方は `CurrentRenderArtifact::currentSucceeded($manual, RenderKind::Render)` と
+     * **同一**である (同 manual・同 kind の最新 succeeded。旧世代へフォールバックしない)。
+     * 違いは 1 点だけで、**こちらは受け取れるかを判断しない** — `output_path` を見ないため
+     * NULL (掃除済み) の行も返す。受け取れるかの決定は呼び出し側 (ManualListItemData) が
+     * `output_path !== null` を足して行い、両者が同じ行を指すことは
+     * `ManualRowDownloadableParityTest` が固定する。
+     *
+     * 一覧が行ごとに `currentSucceeded()` を呼ぶと N+1 になるため、eager load できる形を用意する
+     * (`ManualListQueryCountTest` がクエリ数の行数非依存を固定する)。
+     * 目録登録は `RenderArtifactSelectionInventory` (区分 EagerLoadCandidate)。
+     *
+     * @return HasOne<RenderJob, $this>
+     */
+    public function latestSucceededRender(): HasOne
+    {
+        return $this->hasOne(RenderJob::class)->ofMany(
+            ['id' => 'max'],
+            /** @param Builder<RenderJob> $query */
+            function (Builder $query): void {
+                $query->where('kind', RenderKind::Render->value)
+                    ->where('status', JobStatus::Succeeded->value);
+            }
+        );
     }
 }

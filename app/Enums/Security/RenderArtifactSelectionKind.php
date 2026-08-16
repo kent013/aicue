@@ -24,4 +24,12 @@ enum RenderArtifactSelectionKind: string
      * **選択ではない** — id の大小比較だけで「どれを受け取るか」を決めない。
      */
     case SupersessionCriterion = 'supersession_criterion';
+
+    /**
+     * 一覧が eager load する**候補行**の relation (最新 succeeded 1 行)。
+     * **受け取れるかを判断しない** — `output_path` を見ないため、
+     * 「受け取れる成果物はどれか」の決定は Canonical に残る
+     * (両者が同じ行を指すことは behavioral な parity テストが固定する)。
+     */
+    case EagerLoadCandidate = 'eager_load_candidate';
 }

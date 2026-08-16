@@ -46,6 +46,19 @@ class VideoManualFactory extends Factory
         return $this->state(fn () => ['category_id' => $category->id]);
     }
 
+    /**
+     * 公開済み (レンダ完了) の状態。
+     * $totalLengthMs = null は「総尺が記録されていない published 行」の再現
+     * (一覧の duration_ms が null になるケース)。
+     */
+    public function published(?int $totalLengthMs = null): static
+    {
+        return $this->state(fn (): array => [
+            'status' => VideoManualStatus::Published->value,
+            'total_length_ms' => $totalLengthMs,
+        ]);
+    }
+
     /** 作成者を指定する */
     public function createdBy(User $user): static
     {

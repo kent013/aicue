@@ -3,8 +3,10 @@
 declare(strict_types=1);
 
 use App\Enums\Manual\VideoManualStatus;
+use App\Enums\ProjectRole;
 use App\Models\Category;
 use App\Models\Project;
+use App\Models\RenderJob;
 use App\Models\VideoManual;
 use Inertia\Testing\AssertableInertia as Assert;
 
@@ -270,4 +272,188 @@ test('mine と category/status/q/sort の併用で結合絞り込みできる', 
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 1)
             ->where('manuals.data.0.id', $target->id));
+});
+
+/*
+ * T182: 行の再生時間 (duration_ms) と行内操作の可否 (downloadable / deletable)、
+ * 範囲外ページの丸め、q の 200 文字上限。
+ */
+
+test('duration_ms は published の総尺のみ供給する (それ以外は null)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+    $published = VideoManual::factory()->forProject($project)->published(185_000)
+        ->create(['title' => '公開済み']);
+    // published だが総尺が記録されていない行 (duration_ms = null)
+    $noLength = VideoManual::factory()->forProject($project)->published()
+        ->create(['title' => '尺なし']);
+    // published でない行は総尺が入っていても出さない (古い尺で語らない)
+    $ready = VideoManual::factory()->forProject($project)->create([
+        'title' => '準備完了',
+        'status' => VideoManualStatus::Ready->value,
+        'total_length_ms' => 999_000,
+    ]);
+
+    $rows = $this->actingAs($owner)->get("/projects/{$project->id}")
+        ->inertiaPage()['props']['manuals']['data'];
+    $byId = array_column($rows, null, 'id');
+
+    expect($byId[$published->id]['duration_ms'])->toBe(185_000);
+    expect($byId[$noLength->id]['duration_ms'])->toBeNull();
+    expect($byId[$ready->id]['duration_ms'])->toBeNull();
+});
+
+test('downloadable は published × 現行世代の succeeded render (output_path あり) のときだけ true', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+
+    $ok = VideoManual::factory()->forProject($project)->published(60_000)->create(['title' => '受取可']);
+    RenderJob::factory()->forManual($ok)->succeeded('renders/ok.mp4')->create();
+
+    // 最新 succeeded の実体が消えている (掃除済み) → 旧世代へフォールバックしない
+    $stale = VideoManual::factory()->forProject($project)->published(60_000)->create(['title' => '実体なし']);
+    RenderJob::factory()->forManual($stale)->succeeded('renders/old.mp4')->create();
+    RenderJob::factory()->forManual($stale)->succeeded('renders/new.mp4')
+        ->state(fn (): array => ['output_path' => null])->create();
+
+    // preview の succeeded しか無い
+    $previewOnly = VideoManual::factory()->forProject($project)->published(60_000)->create(['title' => 'preview のみ']);
+    RenderJob::factory()->forManual($previewOnly)->preview()->succeeded('renders/preview.mp4')->create();
+
+    // published でない (succeeded render はある)
+    $notPublished = VideoManual::factory()->forProject($project)->create([
+        'title' => '未公開', 'status' => VideoManualStatus::Ready->value,
+    ]);
+    RenderJob::factory()->forManual($notPublished)->succeeded('renders/ready.mp4')->create();
+
+    $rows = $this->actingAs($owner)->get("/projects/{$project->id}")
+        ->inertiaPage()['props']['manuals']['data'];
+    $byId = array_column($rows, null, 'id');
+
+    expect($byId[$ok->id]['downloadable'])->toBeTrue();
+    expect($byId[$stale->id]['downloadable'])->toBeFalse();
+    expect($byId[$previewOnly->id]['downloadable'])->toBeFalse();
+    expect($byId[$notPublished->id]['downloadable'])->toBeFalse();
+});
+
+test('撮影者は downloadable / deletable ともに false、編集者は deletable=true', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $member = attachOrganizationMember($organization);
+    $member->forceFill(['current_organization_id' => $organization->id])->save();
+    $project = Project::factory()->forOrganization($organization)->create();
+    attachProjectMember($project, $member, ProjectRole::Member);
+    $manual = VideoManual::factory()->forProject($project)->published(60_000)->create();
+    RenderJob::factory()->forManual($manual)->succeeded('renders/ok.mp4')->create();
+
+    $this->actingAs($member)->get("/projects/{$project->id}")
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('manuals.data.0.downloadable', false)
+            ->where('manuals.data.0.deletable', false));
+
+    $this->actingAs($owner)->get("/projects/{$project->id}")
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('manuals.data.0.downloadable', true)
+            ->where('manuals.data.0.deletable', true));
+});
+
+test('一覧が 0 件でも props が壊れない (data: [] / meta.total: 0)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+
+    $this->actingAs($owner)->get("/projects/{$project->id}")
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('manuals.data', 0)
+            ->where('manuals.meta.total', 0)
+            ->where('manuals.meta.current_page', 1));
+});
+
+test('範囲外ページは最終ページへ丸める (空の一覧に着地させない)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+    VideoManual::factory()->forProject($project)->count(12)->create();
+
+    $this->actingAs($owner)->get("/projects/{$project->id}?page=99")
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('manuals.data', 2)
+            ->where('manuals.meta.current_page', 2)
+            ->where('manuals.meta.last_page', 2));
+});
+
+test('page が数字でない / 0 のときは 1 ページ目として扱う', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+    VideoManual::factory()->forProject($project)->count(12)->create();
+
+    foreach (['abc', '0', '-3'] as $raw) {
+        $this->actingAs($owner)->get("/projects/{$project->id}?page={$raw}")
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('manuals.data', 10)
+                ->where('manuals.meta.current_page', 1));
+    }
+});
+
+test('PHP_INT_MAX 超の page でも 500 にならず最終ページへ着地する (offset の float 化なし)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+    VideoManual::factory()->forProject($project)->count(12)->create();
+
+    foreach (['99999999999999999999999', (string) PHP_INT_MAX] as $raw) {
+        $this->actingAs($owner)->get("/projects/{$project->id}?page={$raw}")
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('manuals.data', 2)
+                ->where('manuals.meta.current_page', 2));
+    }
+});
+
+test('q は先頭 200 文字で絞り込む (201 文字目以降は一致に寄与しない)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+    $title = str_repeat('あ', 200);
+    VideoManual::factory()->forProject($project)->create(['title' => $title]);
+    VideoManual::factory()->forProject($project)->create(['title' => '別のマニュアル']);
+
+    // 200 文字を超える検索語は先頭 200 文字へ切り詰められるため、上記 title に一致する
+    $this->actingAs($owner)->get("/projects/{$project->id}?q=".urlencode($title.'ZZZ'))
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('manuals.data', 1)
+            ->where('manuals.data.0.title', $title)
+            ->where('manualFilters.q', $title));
+});
+
+test('一覧 0 件でも範囲外ページは 1 ページ目へ丸める (meta が食い違わない)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+
+    foreach (['99', '99999999999999999999999'] as $raw) {
+        $this->actingAs($owner)->get("/projects/{$project->id}?page={$raw}")
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('manuals.data', 0)
+                ->where('manuals.meta.total', 0)
+                ->where('manuals.meta.current_page', 1)
+                ->where('manuals.meta.last_page', 1));
+    }
+});
+
+test('category は正規形へ畳まれる (0003 → 3。フィルタ select の値と一致する)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+    $category = Category::factory()->forProject($project)->create();
+    VideoManual::factory()->forProject($project)->forCategory($category)->create(['title' => '分類済み']);
+    VideoManual::factory()->forProject($project)->create(['title' => '未分類マニュアル']);
+
+    $padded = str_pad((string) $category->id, 6, '0', STR_PAD_LEFT);
+    $this->actingAs($owner)->get("/projects/{$project->id}?category={$padded}")
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('manuals.data', 1)
+            ->where('manuals.data.0.title', '分類済み')
+            ->where('manualFilters.category', (string) $category->id));
+
+    // 桁溢れする数字列は該当なしへ倒れる (全件が出る方向へは倒さない)
+    $this->actingAs($owner)->get("/projects/{$project->id}?category=99999999999999999999999")
+        ->assertInertia(fn (Assert $page) => $page->has('manuals.data', 0));
 });
