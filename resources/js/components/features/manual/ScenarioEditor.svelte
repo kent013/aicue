@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { tick } from "svelte";
+    import { onMount, tick } from "svelte";
     import { router } from "@inertiajs/svelte";
     import {
         Check,
@@ -16,6 +16,7 @@
     import Badge from "@/components/atoms/Badge.svelte";
     import Button from "@/components/atoms/Button.svelte";
     import Card from "@/components/atoms/Card.svelte";
+    import DragHandle from "@/components/atoms/DragHandle.svelte";
     import Input from "@/components/atoms/Input.svelte";
     import Select from "@/components/atoms/Select.svelte";
     import Textarea from "@/components/atoms/Textarea.svelte";
@@ -23,6 +24,8 @@
     import FormField from "@/components/molecules/FormField.svelte";
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
     import { csrfToken } from "@/lib/csrf";
+    import { moveItem } from "@/lib/dnd/list-reorder";
+    import { createPointerDrag, type PointerDragState } from "@/lib/dnd/pointer-drag";
     import { boundHistory, parseHistorySnapshot, pushHistory } from "@/lib/manual/scenario-history";
     import { addToast } from "@/lib/stores/toast";
     import type {
@@ -231,26 +234,210 @@
         runSettled(() => commitStructural(() => steps[stepIndex].points.splice(pointIndex, 1)));
     }
 
-    /** ▲▼ 並べ替え (同一スコープ内のみ。階層をまたぐ移動は提供しない) */
+    // --- 並べ替え (同一スコープ内のみ。階層をまたぐ移動は提供しない) ---
+
+    /** 並べ替え結果のスクリーンリーダ告知 (視覚的には出さない) */
+    let reorderStatus = $state("");
+    function announce(message: string): void {
+        reorderStatus = message;
+    }
+
+    /**
+     * 並べ替えは「任意位置への移動」1 本に集約する。
+     * ▲▼ ボタン・ハンドルのキーボード操作・D&D のすべてがここへ合流するので、
+     * undo/redo 履歴・dirty 判定・IME ゲート (runSettled) との整合が 1 箇所で保たれる。
+     * 保存 payload は配列順がそのまま順序 (sort_order はサーバ採番) なので、
+     * ここで順序表現を作る必要はない。
+     */
+    function moveStepTo(from: number, to: number): void {
+        const target = steps[from];
+        if (target === undefined || from === to || to < 0 || to >= steps.length) return;
+        // 掴んだ行を**安定キーで覚える**。runSettled は IME 変換中なら実行を compositionend まで
+        // 遅らせるので、その間に先行する構造操作が実行されると数値 index は別の行を指す。
+        const key = target.clientKey;
+        // 告知は runSettled の**中**に置く。実行時の再検査で no-op になることもあるため、
+        // 外に置くと「移動していないのに移動しましたと読み上げる」ことになる (design-review R2)。
+        runSettled(() => {
+            const at = steps.findIndex((step) => step.clientKey === key); // 実行時点で解決し直す
+            if (at < 0 || at === to || to >= steps.length) return;
+            commitStructural(() => {
+                steps = moveItem(steps, at, to);
+            });
+            announce(`手順 ${at + 1} を ${to + 1} 番目に移動しました`);
+        });
+    }
+
+    /**
+     * 急所の移動。
+     * **対象は数値 index ではなく安定キー (clientKey) で持ち回る**。`runSettled` は IME 変換中に
+     * 実行を compositionend まで遅らせるため、実行時点では手順の並びが変わっていることがあり、
+     * 数値 index を持ち回ると「掴んだのとは別の手順の急所」を並べ替えてしまう
+     * (impl-review R1 Critical)。呼び出し時点と実行時点の両方で検査する。
+     */
+    function movePointTo(stepIndex: number, from: number, to: number): void {
+        const step = steps[stepIndex];
+        if (step === undefined) return;
+        const point = step.points[from];
+        if (point === undefined || from === to || to < 0 || to >= step.points.length) return;
+        const stepKey = step.clientKey;
+        const pointKey = point.clientKey;
+        runSettled(() => {
+            const stepAt = steps.findIndex((row) => row.clientKey === stepKey);
+            if (stepAt < 0) return;
+            const current = steps[stepAt];
+            const at = current.points.findIndex((row) => row.clientKey === pointKey);
+            if (at < 0 || at === to || to >= current.points.length) return;
+            commitStructural(() => {
+                current.points = moveItem(current.points, at, to);
+            });
+            announce(`急所 ${stepAt + 1}-${at + 1} を ${to + 1} 番目に移動しました`);
+        });
+    }
+
+    /** ▲▼ (既存 UI。挙動は現行と同じ = 1 段移動 + 端は無変更) */
     function moveStep(index: number, delta: -1 | 1): void {
         const next = index + delta;
-        if (next < 0 || next >= steps.length) return; // 境界: 履歴も積まない
-        runSettled(() =>
-            commitStructural(() => {
-                [steps[index], steps[next]] = [steps[next], steps[index]];
-            }),
-        );
+        if (next < 0 || next >= steps.length) {
+            // disabled にはしない (禁止事項 8)。押されたら「なぜ動かないか」を告知する
+            announce(delta < 0 ? "これ以上、上へは移動できません" : "これ以上、下へは移動できません");
+            return;
+        }
+        moveStepTo(index, next);
     }
 
     function movePoint(stepIndex: number, index: number, delta: -1 | 1): void {
-        const points = steps[stepIndex].points;
+        const step = steps[stepIndex];
+        if (step === undefined) return;
         const next = index + delta;
-        if (next < 0 || next >= points.length) return;
-        runSettled(() =>
-            commitStructural(() => {
-                [points[index], points[next]] = [points[next], points[index]];
-            }),
-        );
+        if (next < 0 || next >= step.points.length) {
+            announce(delta < 0 ? "これ以上、上へは移動できません" : "これ以上、下へは移動できません");
+            return;
+        }
+        movePointTo(stepIndex, index, next);
+    }
+
+    /** ドラッグ表示状態 (手順リスト / 急所リストで別々に持つ) */
+    let stepDrag = $state<PointerDragState>({ activeIndex: null, insertionIndex: null });
+    let pointDrag = $state<PointerDragState>({ activeIndex: null, insertionIndex: null });
+    /** 急所ドラッグ中の親手順 index (急所は手順をまたがないので 1 つで足りる) */
+    let pointDragStep = $state<number | null>(null);
+
+    /** 手順 <ol> / ドラッグ中の急所 <ol> の実体 (行の実測に使う) */
+    let stepListEl = $state<HTMLOListElement | null>(null);
+    let pointListEl: HTMLOListElement | null = null; // ドラッグ中のみ有効 (非 reactive で足りる)
+
+    /**
+     * リスト直下の**行だけ**を表示順で採る。
+     * `data-reorder-index` で絞るのは、落とし先の目印として末尾に差し込む `<li>` を
+     * 測定対象から外すためである (混ざると目印の出現でリスト長が変わり、
+     * 挿入位置が n と n+1 の間で振動する)。
+     */
+    function directRows(list: HTMLElement | null): HTMLElement[] {
+        if (list === null) return [];
+        return [...list.querySelectorAll<HTMLElement>(":scope > li[data-reorder-index]")];
+    }
+
+    // controller は**マウント時に 1 度だけ**作り、破棄時に必ず destroy する (受け入れ条件 A2)。
+    // $effect ではなく onMount を使う: これは「派生状態」ではなく
+    // 「ブラウザ資源 (window listener) をマウント期間だけ持つ」ことであり、
+    // $effect だと「本体で $state を同期 read しなければ再実行されない」という
+    // 実装者の注意力に依存した不変条件になる (多重生成のリスク)。
+    let stepDragCtl: ReturnType<typeof createPointerDrag> | null = null;
+    let pointDragCtl: ReturnType<typeof createPointerDrag> | null = null;
+
+    /**
+     * **コンポーネント全体で 1 つだけドラッグを許す所有権**。
+     * controller は自分の pointerId しか知らないため、手順用と急所用の 2 つは
+     * 互いを排他できない。所有権を持たないと
+     * 「手順のドラッグ中に急所のドラッグを開始 → 手順を先に drop して並びが変わる →
+     * 急所の drop が指す `pointDragStep` の数値 index が別の手順を指す」
+     * という取り違えが起きる (design-review R3 Critical)。
+     * 判定の基準は `start()` が**受理した瞬間**である (閾値超えではない)。
+     * UI には出さないので非 reactive な local で足りる (既存の `composing` と同じ扱い)。
+     */
+    type DragOwner = "step" | "point";
+    let dragOwner: DragOwner | null = null;
+
+    /** ドラッグに紐づく状態 (所有権 + 急所スコープ) を 1 箇所で捨てる */
+    function releaseDrag(): void {
+        dragOwner = null;
+        pointListEl = null;
+        pointDragStep = null;
+    }
+
+    onMount(() => {
+        stepDragCtl = createPointerDrag({
+            rows: () => directRows(stepListEl),
+            onState: (state) => (stepDrag = state),
+            onCommit: (from, to) => {
+                try {
+                    moveStepTo(from, to);
+                } finally {
+                    releaseDrag();
+                }
+            },
+            onCancel: releaseDrag,
+        });
+        pointDragCtl = createPointerDrag({
+            rows: () => directRows(pointListEl),
+            onState: (state) => (pointDrag = state),
+            onCommit: (from, to) => {
+                // 確定でも取消でも所有権とスコープは必ず捨てる (finally で漏れを塞ぐ)
+                try {
+                    if (pointDragStep !== null) movePointTo(pointDragStep, from, to);
+                } finally {
+                    releaseDrag();
+                }
+            },
+            onCancel: releaseDrag,
+        });
+        return () => {
+            stepDragCtl?.destroy();
+            pointDragCtl?.destroy();
+            stepDragCtl = null;
+            pointDragCtl = null;
+            releaseDrag(); // destroy は onCancel を呼ばないので、ここで明示的に捨てる
+        };
+    });
+
+    /**
+     * 手順ドラッグの開始。
+     * 所有権 (`dragOwner`) が空いているときだけ開始し、**受理されたときだけ**所有権を確定する。
+     */
+    function onStepHandleDown(index: number, event: PointerEvent): void {
+        if (dragOwner !== null || stepDragCtl === null) return; // 急所ドラッグ中は開始しない
+        if (!stepDragCtl.start(index, event)) return;
+        dragOwner = "step";
+    }
+
+    /**
+     * 急所ドラッグの開始。
+     * **スコープ (どの手順の <ol> を掴んでいるか) は `start()` が受理したときだけ確定する。**
+     * 先に書き換えてしまうと、1 本目のドラッグが進行中に 2 本目の指で別の手順のハンドルを
+     * 押したとき、1 本目の drop が**別の手順**へ適用される (iOS の多点入力で起きる
+     * データ整合性バグ。design-review R2 Critical)。
+     * さらに `dragOwner` により**手順ドラッグとの同時進行も断つ** (design-review R3 Critical)。
+     */
+    function onPointHandleDown(stepIndex: number, pointIndex: number, event: PointerEvent): void {
+        if (dragOwner !== null || pointDragCtl === null) return; // 手順ドラッグ中は開始しない
+        const target = event.currentTarget;
+        const list =
+            target instanceof HTMLElement
+                ? target.closest<HTMLOListElement>("ol[data-point-list]")
+                : null;
+        if (list === null) return;
+        // 一時変数で受け、受理されたときだけ反映する (順序が本質)
+        if (!pointDragCtl.start(pointIndex, event)) return;
+        dragOwner = "point";
+        pointListEl = list;
+        pointDragStep = stepIndex;
+    }
+
+    /** ハンドル上のキーボード操作 (▲▼ と同じ 1 段移動へ写す) */
+    function onHandleKeydown(event: KeyboardEvent, move: (delta: -1 | 1) => void): void {
+        if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+        event.preventDefault();
+        move(event.key === "ArrowUp" ? -1 : 1);
     }
 
     // --- 履歴コア (保存前ローカル編集のみ対象。undo/redo は steps を再代入し安定 clientKey で差分描画) ---
@@ -869,6 +1056,9 @@
     oncompositionstart={onCompositionStart}
     oncompositionend={onCompositionEnd}
 >
+    <!-- 並べ替え結果の読み上げ (視覚的には出さない。端で動かせない理由もここへ出す) -->
+    <p class="sr-only" aria-live="polite" data-testid="scenario-reorder-status">{reorderStatus}</p>
+
     {#if steps.length === 0}
         <div class="mt-4">
             <EmptyState
@@ -881,12 +1071,30 @@
             />
         </div>
     {:else}
-        <ol class="mt-4 flex flex-col gap-4" data-testid="scenario-steps">
+        <ol
+            class="mt-4 flex flex-col gap-4 {stepDrag.activeIndex !== null ? 'select-none' : ''}"
+            data-testid="scenario-steps"
+            bind:this={stepListEl}
+        >
             {#each steps as step, stepIndex (step.clientKey)}
-                <li>
+                <li class="relative" data-reorder-index={stepIndex}>
+                    {#if stepDrag.insertionIndex === stepIndex}
+                        <!-- 落とし先の目印。影・scale は使わない (DESIGN.md §Elevation) -->
+                        <div class="absolute inset-x-0 -top-2 h-0.5 bg-primary" aria-hidden="true"></div>
+                    {/if}
+                    <div class={stepDrag.activeIndex === stepIndex ? "opacity-50" : ""}>
                     <Card padding="md">
                         <div class="flex items-start justify-between gap-2">
-                            <h3 class="text-body font-medium text-text">手順 {stepIndex + 1}</h3>
+                            <div class="flex items-center gap-2">
+                                <DragHandle
+                                    ariaLabel={`手順 ${stepIndex + 1} の並び順を変更 (ドラッグ、または上下キー)`}
+                                    onpointerdown={(event) => onStepHandleDown(stepIndex, event)}
+                                    onkeydown={(event) =>
+                                        onHandleKeydown(event, (delta) => moveStep(stepIndex, delta))}
+                                    testId="step-{stepIndex}-drag-handle"
+                                />
+                                <h3 class="text-body font-medium text-text">手順 {stepIndex + 1}</h3>
+                            </div>
                             <div class="flex items-center gap-1">
                                 <Button
                                     variant="ghost"
@@ -926,13 +1134,42 @@
                         {@render videoCell(step.id, `step-${stepIndex}`)}
 
                         {#if step.points.length > 0}
-                            <ol class="mt-4 flex flex-col gap-3 border-l-2 border-border pl-4">
+                            <ol
+                                class="mt-4 flex flex-col gap-3 border-l-2 border-border pl-4"
+                                data-point-list
+                            >
                                 {#each step.points as point, pointIndex (point.clientKey)}
-                                    <li>
+                                    {@const dragging = pointDragStep === stepIndex}
+                                    <li class="relative" data-reorder-index={pointIndex}>
+                                        {#if dragging && pointDrag.insertionIndex === pointIndex}
+                                            <div
+                                                class="absolute inset-x-0 -top-1.5 h-0.5 bg-primary"
+                                                aria-hidden="true"
+                                            ></div>
+                                        {/if}
+                                        <div
+                                            class={dragging && pointDrag.activeIndex === pointIndex
+                                                ? "opacity-50"
+                                                : ""}
+                                        >
                                         <div class="flex items-start justify-between gap-2">
-                                            <h4 class="text-caption font-medium text-text-secondary">
-                                                急所 {stepIndex + 1}-{pointIndex + 1}
-                                            </h4>
+                                            <div class="flex items-center gap-2">
+                                                <DragHandle
+                                                    ariaLabel={`急所 ${stepIndex + 1}-${pointIndex + 1} の並び順を変更 (ドラッグ、または上下キー)`}
+                                                    onpointerdown={(event) =>
+                                                        onPointHandleDown(stepIndex, pointIndex, event)}
+                                                    onkeydown={(event) =>
+                                                        onHandleKeydown(event, (delta) =>
+                                                            movePoint(stepIndex, pointIndex, delta),
+                                                        )}
+                                                    testId="point-{stepIndex}-{pointIndex}-drag-handle"
+                                                />
+                                                <h4
+                                                    class="text-caption font-medium text-text-secondary"
+                                                >
+                                                    急所 {stepIndex + 1}-{pointIndex + 1}
+                                                </h4>
+                                            </div>
                                             <div class="flex items-center gap-1">
                                                 <Button
                                                     variant="ghost"
@@ -977,8 +1214,12 @@
                                             point.id,
                                             `point-${stepIndex}-${pointIndex}`,
                                         )}
+                                        </div>
                                     </li>
                                 {/each}
+                                {#if pointDragStep === stepIndex && pointDrag.insertionIndex === step.points.length}
+                                    <li class="h-0.5 bg-primary" aria-hidden="true"></li>
+                                {/if}
                             </ol>
                         {/if}
 
@@ -994,8 +1235,12 @@
                             </Button>
                         </div>
                     </Card>
+                    </div>
                 </li>
             {/each}
+            {#if stepDrag.insertionIndex === steps.length}
+                <li class="h-0.5 bg-primary" aria-hidden="true"></li>
+            {/if}
         </ol>
 
         <div class="mt-4">

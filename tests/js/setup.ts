@@ -72,6 +72,25 @@ if (typeof Element !== "undefined") {
     }
 }
 
+// jsdom は Pointer capture (setPointerCapture / releasePointerCapture / hasPointerCapture) を
+// 実装しない。並べ替えの制御 (resources/js/lib/dnd/pointer-drag.ts) は機能検出して
+// 無い環境でも完走するが、「capture がある環境」の分岐もテストで通せるよう
+// 実際の捕捉状態を覚える最小スタブを入れる。
+if (typeof Element !== "undefined" && typeof Element.prototype.setPointerCapture !== "function") {
+    const captured = new WeakMap<Element, Set<number>>();
+    Element.prototype.setPointerCapture = function (pointerId: number): void {
+        const ids = captured.get(this) ?? new Set<number>();
+        ids.add(pointerId);
+        captured.set(this, ids);
+    };
+    Element.prototype.releasePointerCapture = function (pointerId: number): void {
+        captured.get(this)?.delete(pointerId);
+    };
+    Element.prototype.hasPointerCapture = function (pointerId: number): boolean {
+        return captured.get(this)?.has(pointerId) ?? false;
+    };
+}
+
 // テスト間の DOM 汚染を防ぐ明示 cleanup。
 // さらに bits-ui の body-scroll-lock は Dialog/Popover/Select の unmount 時に
 // `<body>` スタイルを戻す setTimeout(~24ms) を予約する (huntabyte/bits-ui#1639)。

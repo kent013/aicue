@@ -410,3 +410,210 @@ describe("サムネイル表示 (T183)", () => {
         expect(screen.queryByTestId("take-thumbnail-placeholder-10")).not.toBeInTheDocument();
     });
 });
+
+/*
+ * 並べ替え (T185)。層 3 = 配線: 落としたら既存の PATCH 経路が期待どおりの position を出すか。
+ * position は**最終 index** (移動後の全体配列での 0 始まり index)。サーバの reorderWithinCut が
+ * 対象を除いた配列へ splice するため両者は一致する。
+ */
+describe("テイクの並べ替え (T185)", () => {
+    /** 行の実測を data-reorder-index から固定値へ差し替える (top = index * 100, height = 100) */
+    function stubRowRects(): void {
+        vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+            this: HTMLElement,
+        ): DOMRect {
+            const raw = this.dataset.reorderIndex;
+            const index = raw === undefined ? -1 : Number(raw);
+            const top = index < 0 ? 0 : index * 100;
+            const height = index < 0 ? 0 : 100;
+            // 素の型アサーションを使わずに実体を作る (new DOMRect が top/bottom を導出する)
+            return new DOMRect(0, top, 0, height);
+        });
+    }
+
+    function pointerEvent(type: string, clientY: number, pointerId = 1): PointerEvent {
+        return new PointerEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            pointerId,
+            clientY,
+            button: 0,
+            pointerType: "touch",
+        });
+    }
+
+    /** 3 テイク (id 10 / 11 / 12) */
+    function threeTakes(): CaptureTake[] {
+        return [makeTake({ id: 10 }), makeTake({ id: 11 }), makeTake({ id: 12 })];
+    }
+
+    function renderStrip(onChanged = vi.fn()): { onChanged: ReturnType<typeof vi.fn> } {
+        render(TakeStrip, {
+            projectId: 1,
+            manualId: 2,
+            cut: makeCut(threeTakes()),
+            cutLabel: "手順 1",
+            onChanged,
+        });
+        return { onChanged };
+    }
+
+    /** ハンドルを掴んで pointerY まで動かし drop する */
+    async function dragHandle(testId: string, startY: number, endY: number): Promise<void> {
+        await fireEvent(screen.getByTestId(testId), pointerEvent("pointerdown", startY));
+        await fireEvent(window, pointerEvent("pointermove", endY));
+        await fireEvent(window, pointerEvent("pointerup", endY));
+    }
+
+    /** 直近の PATCH の URL と body */
+    function lastPatch(): { url: string; body: unknown } {
+        const call = fetchMock.mock.calls.filter((c) => c[1]?.method === "PATCH").at(-1);
+        if (!call) throw new Error("PATCH リクエストがありません");
+        return { url: String(call[0]), body: JSON.parse(String(call[1].body)) as unknown };
+    }
+
+    beforeEach(() => {
+        stubRowRects();
+    });
+
+    it("1 番目のテイクを 3 番目へ落とすと position: 2 の PATCH が飛び、親が再取得する", async () => {
+        fetchMock.mockResolvedValue(jsonResponse(200, {}));
+        const { onChanged } = renderStrip();
+
+        // 掴んだ行 index 0 → 最終行の中点 (250) より下 = 挿入 index 3 → 最終 index 2
+        await dragHandle("take-drag-10", 50, 260);
+
+        await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+        expect(lastPatch().url).toBe("/app/projects/1/manuals/2/cuts/3/takes/10");
+        expect(lastPatch().body).toEqual({ position: 2 });
+        // 楽観更新はせずサーバ権威。成功したら親が最新を取り直す
+        await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    });
+
+    it("3 番目のテイクを 1 番目へ落とすと position: 0 の PATCH が飛ぶ", async () => {
+        fetchMock.mockResolvedValue(jsonResponse(200, {}));
+        renderStrip();
+
+        await dragHandle("take-drag-12", 250, 10);
+
+        await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+        expect(lastPatch().url).toBe("/app/projects/1/manuals/2/cuts/3/takes/12");
+        expect(lastPatch().body).toEqual({ position: 0 });
+    });
+
+    it("位置が変わらない drop では通信しない", async () => {
+        renderStrip();
+
+        // 掴んだ行 index 0 の直後の隙間 (挿入 index 1) → 最終 index 0 = from
+        await dragHandle("take-drag-10", 50, 120);
+
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("ドラッグ中の Escape では通信しない", async () => {
+        renderStrip();
+
+        await fireEvent(screen.getByTestId("take-drag-10"), pointerEvent("pointerdown", 50));
+        await fireEvent(window, pointerEvent("pointermove", 260));
+        await fireEvent.keyDown(window, { key: "Escape" });
+        await fireEvent(window, pointerEvent("pointerup", 260));
+
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("ドラッグ中の pointercancel では通信しない", async () => {
+        renderStrip();
+
+        await fireEvent(screen.getByTestId("take-drag-10"), pointerEvent("pointerdown", 50));
+        await fireEvent(window, pointerEvent("pointermove", 260));
+        await fireEvent(window, pointerEvent("pointercancel", 260));
+
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("ハンドル上の ArrowDown は ▼ と同じ 1 段移動の PATCH を出す", async () => {
+        fetchMock.mockResolvedValue(jsonResponse(200, {}));
+        renderStrip();
+
+        await fireEvent.keyDown(screen.getByTestId("take-drag-10"), { key: "ArrowDown" });
+
+        await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+        expect(lastPatch().url).toBe("/app/projects/1/manuals/2/cuts/3/takes/10");
+        expect(lastPatch().body).toEqual({ position: 1 });
+    });
+
+    it("ハンドル上の ArrowUp は ▲ と同じ 1 段移動の PATCH を出す", async () => {
+        fetchMock.mockResolvedValue(jsonResponse(200, {}));
+        renderStrip();
+
+        await fireEvent.keyDown(screen.getByTestId("take-drag-12"), { key: "ArrowUp" });
+
+        await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+        expect(lastPatch().url).toBe("/app/projects/1/manuals/2/cuts/3/takes/12");
+        expect(lastPatch().body).toEqual({ position: 1 });
+    });
+
+    it.each([
+        ["先頭で ▲", "take-up-10", "take-adopt-10", "これ以上、上へは移動できません"],
+        ["末尾で ▼", "take-down-12", "take-adopt-12", "これ以上、下へは移動できません"],
+    ])(
+        "%s は通信せず・busy にせず・再取得せず、理由を告知する",
+        async (_label, testId, adoptTestId, message) => {
+            const { onChanged } = renderStrip();
+
+            await fireEvent.click(screen.getByTestId(testId));
+
+            expect(fetchMock).not.toHaveBeenCalled();
+            expect(onChanged).not.toHaveBeenCalled();
+            // busy は**操作した行**で見る (別の行を見ると空振りする)
+            expect(screen.getByTestId(adoptTestId)).not.toHaveAttribute("aria-busy");
+            expect(screen.getByTestId("take-reorder-status")).toHaveTextContent(message);
+        },
+    );
+
+    it("端のハンドル操作 (ArrowUp) も同じく通信せず理由を告知する", async () => {
+        renderStrip();
+
+        await fireEvent.keyDown(screen.getByTestId("take-drag-10"), { key: "ArrowUp" });
+
+        expect(fetchMock).not.toHaveBeenCalled();
+        expect(screen.getByTestId("take-reorder-status")).toHaveTextContent(
+            "これ以上、上へは移動できません",
+        );
+    });
+
+    it("成功した並べ替えは aria-live で告知する", async () => {
+        fetchMock.mockResolvedValue(jsonResponse(200, {}));
+        renderStrip();
+
+        await dragHandle("take-drag-10", 50, 260);
+
+        await waitFor(() =>
+            expect(screen.getByTestId("take-reorder-status")).toHaveTextContent(
+                "テイク 1 を 3 番目に移動しました",
+            ),
+        );
+    });
+
+    it("PATCH が 422 ならサーバ文言を role=alert に出し、告知はしない", async () => {
+        fetchMock.mockResolvedValue(jsonResponse(422, { message: "処理中のため並べ替えできません" }));
+        renderStrip();
+
+        await dragHandle("take-drag-10", 50, 260);
+
+        await waitFor(() =>
+            expect(screen.getByTestId("take-strip-error")).toHaveTextContent(
+                "処理中のため並べ替えできません",
+            ),
+        );
+        expect(screen.getByTestId("take-reorder-status")).toHaveTextContent("");
+    });
+
+    it("ハンドルは disabled 属性を持たない (禁止事項 8)", () => {
+        renderStrip();
+
+        for (const id of ["take-drag-10", "take-drag-11", "take-drag-12"]) {
+            expect(screen.getByTestId(id)).not.toHaveAttribute("disabled");
+        }
+    });
+});
