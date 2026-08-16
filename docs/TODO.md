@@ -24,9 +24,9 @@
 | T085 | bfcache 実復元の iOS 実機受入確認 | test | Playwright 不可のため実機で確認+記録。**T178 (同期判定の前置) のマージ後に実施する** — guard 本体・プローブ応答契約・秘匿状態の語彙が変わり、`docs/supported-browsers.md` の実機受入確認の再確認条件に当たるため。失効セッション経路の観測は「秘匿を維持したまま読み直す」に変わるが、合格終端 (`unauthenticated-redirected` = /login 到達の目視確認込み) は変わらない | High | standalone | [設計](devnotes/20260803-0053-aigenba-alignment/) | 2026-08-03 03:10 |
 | T110 | 認証手段変更のメール通知ポリシーの統一設計 | backend | passkey/2FA/SSO の増減通知を一貫したポリシーとして設計する(T108 S7 は監査ログのみで通知は見送り) | Low | standalone | [設計](devnotes/20260805-1550-security-audit-remediation/) | 2026-08-05 17:45 |
 | T187 | D&D 並べ替えの iOS 実機受入確認 | test | jsdom / Browser lane では代替できないため実機で確認+記録。**T185 は実機確認を待たずにマージ済み**(ユーザーの明示判断)であり、本 TODO がその未達分を引き継ぐ。記録先は `devnotes/20260816-1021-drag-and-drop-reordering/ios-acceptance.md` の 7 項目チェックリストと状態表 | High | standalone | [設計](devnotes/20260816-1021-drag-and-drop-reordering/) | 2026-08-16 17:45 |
-| T190 | テイクサムネイルのホバー自動再生 | frontend | サムネイルにホバーで動画を自動再生する | Low | incremental | [設計](devnotes/20260816-1757-take-thumbnail-hover-preview/) | 2026-08-16 18:35 |
 | T191 | 撮影 PWA の全体連結プレビュー | frontend | 撮影画面から通しプレビューを確認する | High | incremental | [設計](devnotes/20260816-1754-capture-full-scenario-preview/) | 2026-08-16 18:35 |
 | T192 | 静止画カットの撮影と反映 | frontend | 静止画素材のカットを撮影し合成に載せる | Medium | incremental | [設計](devnotes/20260816-1758-still-image-cut-capture/) | 2026-08-16 18:35 |
+| T194 | ホバー自動再生の実ブラウザ受入確認 | test | 実ブラウザでホバー再生とD&Dを確認。jsdom は `HTMLMediaElement.play()` を実装しておらずテストでは差し替えているため、**実際に映像が再生されること・自動再生ポリシーの実挙動・滞留 200ms の体感**は自動レーンの守備範囲の外にある。**T190 は実ブラウザ確認を待たずにマージ済み**であり、本 TODO がその未達分を引き継ぐ。記録先は `devnotes/20260816-1954-todo-T190/manual-browser-acceptance.md` の 9 項目チェックリストと状態表 (マウスの使えるデスクトップ Chrome / Safari で実施し、採用済みかつ ready かつサムネイル生成済みのテイクを持つカットが要る) | High | standalone | [設計](devnotes/20260816-1757-take-thumbnail-hover-preview/) | 2026-08-16 20:19 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
