@@ -388,5 +388,10 @@ export interface TakeSelectionPageProps {
 export interface CutTakeSummary {
     cut_id: number;
     takes_count: number;
-    adopted: { id: number; status: SelectableTakeStatus } | null;
+    adopted: {
+        id: number;
+        status: SelectableTakeStatus;
+        /** サムネイル生成済みか。true のときだけ .../takes/{id}/thumbnail を表示に使う */
+        has_thumbnail: boolean;
+    } | null;
 }

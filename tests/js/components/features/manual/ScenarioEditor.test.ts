@@ -1712,3 +1712,76 @@ describe("IME 変換中の構造操作は安定キーで解決する (T188)", ()
         expect(pointScenes(0)).toEqual(["急所B-1", "急所B-2", ""]);
     });
 });
+
+/*
+ * 動画列のサムネイル表示条件 (T190)。
+ * サーバが 404 を返す状態 (非 ready / サムネイル未生成) へは最初から URL を張らない。
+ * サムネイルが出ないケースでも導線 (テイクを選択 / ファイルの選択) は常に押せる。
+ */
+describe("動画列のサムネイル表示条件 (T190)", () => {
+    /** 採用テイクの要約 (step id=11 のカット) */
+    function summary(
+        adopted: { id: number; status: "ready" | "processing"; has_thumbnail: boolean } | null,
+    ) {
+        return [{ cut_id: 11, takes_count: 2, adopted }];
+    }
+
+    function renderWith(takeSummaries: ReturnType<typeof summary>) {
+        return render(ScenarioEditor, {
+            props: { ...baseProps, scenario: makeDocument(), takeSummaries },
+        });
+    }
+
+    it("採用テイクが ready かつサムネイル生成済みならサムネイルが出る", () => {
+        renderWith(summary({ id: 9, status: "ready", has_thumbnail: true }));
+
+        expect(screen.getByTestId("video-cell-preview-step-0")).toBeInTheDocument();
+        expect(screen.getByTestId("video-cell-preview-step-0-image")).toHaveAttribute(
+            "src",
+            "/app/projects/1/manuals/5/cuts/11/takes/9/thumbnail",
+        );
+    });
+
+    it("採用テイクが無いカットにはサムネイルが出ない", () => {
+        renderWith(summary(null));
+
+        expect(screen.queryByTestId("video-cell-preview-step-0")).toBeNull();
+    });
+
+    it("サムネイル未生成の採用テイクにはサムネイルが出ない", () => {
+        const { container } = renderWith(summary({ id: 9, status: "ready", has_thumbnail: false }));
+
+        expect(screen.queryByTestId("video-cell-preview-step-0")).toBeNull();
+        // 404 になる URL を 1 つも張らない (属性へ直接問い合わせる)
+        expect(container.querySelector('img[src*="/thumbnail"]')).toBeNull();
+        expect(container.querySelector('video[src*="/playback"]')).toBeNull();
+    });
+
+    it("非 ready の採用テイクにはサムネイルが出ない", () => {
+        const { container } = renderWith(
+            summary({ id: 9, status: "processing", has_thumbnail: true }),
+        );
+
+        expect(screen.queryByTestId("video-cell-preview-step-0")).toBeNull();
+        expect(container.querySelector('img[src*="/thumbnail"]')).toBeNull();
+        expect(container.querySelector('video[src*="/playback"]')).toBeNull();
+    });
+
+    it("サムネイルが出ないケースでも「テイクを選択」は押せる (条件未充足で操作を塞がない)", () => {
+        renderWith(summary({ id: 9, status: "processing", has_thumbnail: false }));
+
+        const links = screen.getAllByTestId("video-cell-link");
+        expect(links[0]).toHaveTextContent("テイクを選択");
+        expect(links[0]).not.toHaveAttribute("disabled");
+        expect(links[0].getAttribute("href")).toMatch(
+            /^https?:\/\/[^/]+\/projects\/1\/manuals\/5\/cuts\/11\/takes$/,
+        );
+    });
+
+    it("採用済みバッジとテイク件数は従来どおり出る", () => {
+        renderWith(summary({ id: 9, status: "ready", has_thumbnail: true }));
+
+        expect(screen.getAllByTestId("video-cell-count")[0]).toHaveTextContent("テイク 2 件");
+        expect(screen.getAllByTestId("video-cell-adopted")[0]).toHaveTextContent("採用済み");
+    });
+});

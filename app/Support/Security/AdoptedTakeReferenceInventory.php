@@ -58,9 +58,9 @@ final class AdoptedTakeReferenceInventory
             ],
             'DataTransferObjects/Manual/CutTakeSummaryData.php' => [
                 'kind' => AdoptedTakeReferenceKind::DifferentCriterion,
-                'rationale' => 'シナリオ編集画面の動画列が、カットごとに採用テイクの id と status を'
-                    .'表示するために読むだけで ready 判定はしない。レンダの充足判定'
-                    .'(AdoptedReadyTakeCoverage) とは基準が違うため意図的に統合しない。',
+                'rationale' => 'シナリオ編集画面の動画列が、カットごとに採用テイクの id / status / '
+                    .'サムネイル生成有無を表示条件として読むだけで、採用済み ready テイクの充足判定はしない。'
+                    .'レンダの充足判定 (AdoptedReadyTakeCoverage) とは基準が違うため意図的に統合しない。',
             ],
             'DataTransferObjects/Manual/TakeSelectionPageData.php' => [
                 'kind' => AdoptedTakeReferenceKind::DifferentCriterion,

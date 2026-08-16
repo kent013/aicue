@@ -229,7 +229,8 @@ class VideoManualController extends Controller
      * adoptedTake は eager load の 1 本。cut ごとの追加クエリ = N+1 を作らない)。
      * 並びは CutSequencer と同じ (sort_order, id) にする (同値 sort_order で揺れないため)。
      *
-     * @return list<array{cut_id: int, takes_count: int, adopted: array{id: int, status: string}|null}>
+     * @return list<array{cut_id: int, takes_count: int,
+     *   adopted: array{id: int, status: string, has_thumbnail: bool}|null}>
      */
     private function takeSummaries(VideoManual $manual): array
     {

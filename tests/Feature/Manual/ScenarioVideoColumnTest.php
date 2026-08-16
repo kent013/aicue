@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\Manual\TakeStatus;
 use App\Models\Cut;
 use App\Models\Project;
 use App\Models\Take;
@@ -46,6 +47,67 @@ test('採用テイクのあるカットは adopted.id / adopted.status が入る
         ->assertInertia(fn ($page) => $page
             ->where('takeSummaries.0.adopted.id', $take->id)
             ->where('takeSummaries.0.adopted.status', 'ready'));
+});
+
+test('サムネイル表示条件: 採用テイクにサムネイルがあれば adopted.has_thumbnail が true', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+    $manual = VideoManual::factory()->forProject($project)->create();
+    $cut = Cut::factory()->forManual($manual)->create();
+    $take = Take::factory()->forCut($cut)->withThumbnail()->create();
+    $cut->forceFill(['adopted_take_id' => $take->id])->save();
+
+    $this->actingAs($owner)
+        ->get("/projects/{$project->id}/manuals/{$manual->id}/edit")
+        ->assertInertia(fn ($page) => $page
+            ->where('takeSummaries.0.adopted.id', $take->id)
+            ->where('takeSummaries.0.adopted.has_thumbnail', true));
+});
+
+test('サムネイル表示条件: 採用テイクにサムネイルが無ければ adopted.has_thumbnail が false', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+    $manual = VideoManual::factory()->forProject($project)->create();
+    $cut = Cut::factory()->forManual($manual)->create();
+    $take = Take::factory()->forCut($cut)->create();
+    $cut->forceFill(['adopted_take_id' => $take->id])->save();
+
+    $this->actingAs($owner)
+        ->get("/projects/{$project->id}/manuals/{$manual->id}/edit")
+        ->assertInertia(fn ($page) => $page
+            ->where('takeSummaries.0.adopted.has_thumbnail', false));
+});
+
+test('サムネイル表示条件: 採用テイクが無いカットは adopted が null のまま (キー追加で shape が壊れない)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+    $manual = VideoManual::factory()->forProject($project)->create();
+    $cut = Cut::factory()->forManual($manual)->create();
+    Take::factory()->forCut($cut)->withThumbnail()->create();
+
+    $this->actingAs($owner)
+        ->get("/projects/{$project->id}/manuals/{$manual->id}/edit")
+        ->assertInertia(fn ($page) => $page
+            ->where('takeSummaries.0.takes_count', 1)
+            ->where('takeSummaries.0.adopted', null));
+});
+
+test('サムネイル表示条件: 非 ready の採用テイクでも status と has_thumbnail はそのまま出る (サーバ側で AND を取らない)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+    $manual = VideoManual::factory()->forProject($project)->create();
+    $cut = Cut::factory()->forManual($manual)->create();
+    $take = Take::factory()->forCut($cut)->withThumbnail()->create([
+        'status' => TakeStatus::Processing->value,
+    ]);
+    $cut->forceFill(['adopted_take_id' => $take->id])->save();
+
+    // status と has_thumbnail は独立に返す。表示可否の AND は UI 側の責務
+    $this->actingAs($owner)
+        ->get("/projects/{$project->id}/manuals/{$manual->id}/edit")
+        ->assertInertia(fn ($page) => $page
+            ->where('takeSummaries.0.adopted.status', 'processing')
+            ->where('takeSummaries.0.adopted.has_thumbnail', true));
 });
 
 test('takeSummaries のキーに採用テイク外部キーの識別子が現れない (gate 回避の命名の固定)', function (): void {

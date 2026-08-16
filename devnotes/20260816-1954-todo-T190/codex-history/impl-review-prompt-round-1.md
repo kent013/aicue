@@ -1,0 +1,1726 @@
+## 使命 (North Star)
+
+<!-- app-codex-review スキルはこのセクションをレビュー使命として参照する。 -->
+
+**AI-CUE** は、現場に既にある**作業手順書(SOP)を起点に**、AI が撮るべきカットを設計した**動画シナリオ**を生成し、そのシナリオを**スマホ(PWA)でナビゲーション撮影**することで、専門知識ゼロの現場作業者でも**標準化されたマニュアル動画**を作れるようにする。
+
+- 「思考ゼロ・編集ゼロ」— 台本作成・撮影判断・編集の 3 ハードルを AI とナビ撮影で肩代わりする。
+- 競合(OJT を撮って形式化する tebiki)と異なり、**標準作業を起点に AI が教材設計し撮影を指示する**（撮影者・教える人のスキルに品質を依存させない）。
+- 熟練者の暗黙知を動画マニュアルという形式知へ変換する装置（SECI）。
+
+> 詳細な設計は本リポジトリの `doc/`（01〜10）に置く。ドメインをテンプレート構造へどうマップしたかは `doc/08`〜`doc/10`（特に `doc/10 §10.8` に設計レビュー反映済み）。
+> **v1 スコープ**: 字幕のみ(TTS 後回し) / 撮影は PWA(同一オリジン・セッション認証) / 動画合成は自前 ffmpeg / 単一 Default Project。
+
+## 思考原則
+
+## 禁止事項
+
+1. テストなしの実装完了報告(不変条件は対応する Architecture/Feature テストへの登録まで含めて「実装済み」)
+2. PHPStan エラーの widen(型を緩めて黙らせる)・baseline 化
+3. dev DB への破壊操作(`migrate:fresh` 等)をエージェント判断で実行すること
+4. `response()->json()` の直書き(DTO / JsonResource / Inertia を使う。仕様固定 endpoint のみ例外)
+5. LLM 呼び出しの Prism 直呼び(`app/Prompts/` の factory → 窓口 (`PromptDefense`) →
+   実行単位 (`GuardedPrompt`) の**1 本道のみ**。`PromptGuardrailTest` が
+   app/ routes/ database/ config/ bootstrap/ の 5 走査根で検出する)。
+   **実行経路を持つ prompt factory は `LlmCallContextData` を必須引数で受け、
+   `PromptDefense::load()` へ渡して帰属 (organization / subject) を付ける** — 付け忘れは
+   PHPStan level 10 が落とす。帰属の対象を持たない見本 (`ExampleSummaryPrompt`) だけが
+   `PromptDefense::loadUnattributed()` を使え、窓口 gate が**この 1 件を名指しで pin** する。
+   併せて `PromptUntrustedInputContractTest` の inventory へ**帰属キーを空配列で exempt 登録**する
+   (deny-by-default なので exempt にする操作がレビューで必ず見える)。
+   欠けると `llm_call_logs.metadata_missing` になり組織別・対象別の費用が出せない
+6. prompt 文字列のコード直書き(`resources/prompts/*.yaml` に置く)
+7. 操作系 POST の応答での `redirect()->intended()`(ログイン直後フロー専用。
+   招待送信等は `back()->with(...)` で完結させる)
+8. 必須条件未充足を理由にボタンを disabled にする UI(押下時にエラー表示する。DESIGN.md)
+9. Artifact の使用(Artifact ツールでの成果物公開を行わない。成果物はリポジトリ内のファイルとして出力する)
+
+## セキュリティ不変条件(アプリ都合で緩めない)
+
+【思考原則 — 全議論に適用】
+まず仮説を立てろ。何を検証したいのか、なぜそう考えるのか、どうなれば成功と判断するのかを明確にしてから手を動かせ。仮説なき改善はただの試行錯誤であり、結果から学ぶことができない。
+
+データに真摯に向き合え。成果だけでなく、多様性の変化、構造の揺らぎ、想定外のパターン — 全てが判断材料になる。数値を見て即座に閾値を弄るな。何が起きているのかを理解し、なぜそうなったのかを考え、どの方向に進むべきかを判断してから手を動かせ。
+
+先人の知恵を探せ。自分たちだけで登る必要はない。乗るべき巨人の肩があるなら乗れ。
+
+機能の名前に立ち返れ。名前はその機能が果たすべき役割を示している。現在の設計がその役割を果たしているか、常に問え。
+
+仕組みが機能していない段階で値を弄るな。閾値チューニングやフィールド追加は、設計の方向性が正しいと確認できてから行え。方向性が間違っているなら、値をいくら調整しても意味はない。設計そのものを見直せ。成果が出なければ早期に見切り、次の仮説へ進め。
+
+【ツール使用制限】
+コマンド実行・ファイル書き込みは一切行わず、提供されたテキストの分析に集中すること。ファイル読み込みは許可。
+
+---
+
+あなたは Laravel 12 + Svelte 5 (runes) + Inertia.js のコードレビュアーである。
+TODO T190「テイクサムネイルのホバー自動再生」の実装差分をレビューせよ。
+
+## レビュー観点
+
+1. 詳細設計との一致性 (逸脱があれば、その逸脱が妥当かを判定する)
+2. 正確性 (競合状態・世代管理・タイマー・listener の対称性・冪等性)
+3. PHPStan level 10 適合性 (型の widen / ignore が無いか)
+4. DTO / JsonResource パターン (response()->json() 直書きが無いか)
+5. テスト網羅性 (Pest / Vitest。Factory 経由のテストデータ生成。既存テストの削除が無いか)
+6. セキュリティ (署名 URL / 404 を踏まない条件 / テナント境界)
+7. DESIGN.md 準拠 (color / radius / typography は DS token 経由。hex 直書き `#RRGGBB` を増やさない)
+8. Atomic Design 準拠 (atoms → molecules → organisms → features/{domain} → templates → pages の
+   単方向 import。アイコンは @lucide/svelte のみで SVG 直書きを増やさない)
+
+## 出力形式
+
+- ファイルごとに判定を書く
+- 指摘は [Critical] / [Warning] / [Suggestion] に分類する
+- 最後に全体判定を **APPROVED** または **CHANGES_REQUESTED** の 1 語で書く
+
+---
+
+## 詳細設計書
+
+# 詳細設計: take-thumbnail-hover-preview (テイクサムネイルのホバー自動再生)
+
+## 使命・制約（絶対遵守）
+
+### アプリの使命（North Star）
+
+**AI-CUE** は、現場に既にある**作業手順書(SOP)を起点に**、AI が撮るべきカットを設計した**動画シナリオ**を生成し、そのシナリオを**スマホ(PWA)でナビゲーション撮影**することで、専門知識ゼロの現場作業者でも**標準化されたマニュアル動画**を作れるようにする。
+
+- 「思考ゼロ・編集ゼロ」— 台本作成・撮影判断・編集の 3 ハードルを AI とナビ撮影で肩代わりする。
+- 競合(OJT を撮って形式化する tebiki)と異なり、**標準作業を起点に AI が教材設計し撮影を指示する**（撮影者・教える人のスキルに品質を依存させない）。
+- 熟練者の暗黙知を動画マニュアルという形式知へ変換する装置（SECI）。
+
+> **v1 スコープ**: 字幕のみ(TTS 後回し) / 撮影は PWA(同一オリジン・セッション認証) / 動画合成は自前 ffmpeg / 単一 Default Project。
+
+### 禁止事項
+
+1. テストなしの実装完了報告(不変条件は対応する Architecture/Feature テストへの登録まで含めて「実装済み」)
+2. PHPStan エラーの widen(型を緩めて黙らせる)・baseline 化
+3. dev DB への破壊操作(`migrate:fresh` 等)をエージェント判断で実行すること
+4. `response()->json()` の直書き(DTO / JsonResource / Inertia を使う。仕様固定 endpoint のみ例外)
+5. LLM 呼び出しの Prism 直呼び(`app/Prompts/` の factory → `PromptDefense` → `GuardedPrompt` の 1 本道のみ)
+6. prompt 文字列のコード直書き(`resources/prompts/*.yaml` に置く)
+7. 操作系 POST の応答での `redirect()->intended()`
+8. **必須条件未充足を理由にボタンを disabled にする UI**(押下時にエラー表示する。DESIGN.md)
+9. Artifact の使用
+
+### コーディングルール
+
+- **PHPStan level 10** 必須（`composer phpstan`）
+- **Pest** テストフレームワーク（`composer test`）
+- **RefreshDatabase** + `--parallel` 並列実行（`tests/Pest.php` でグローバル適用、個別 `DatabaseTransactions` 使用禁止）
+- **テストデータは必ず Factory で生成**（`Model::create()` 手組み禁止）
+- **DTO + JsonResource** パターン
+- **アーリーリターン** 推奨 / `declare(strict_types=1)` + 日本語コメント
+- **コードフォーマット**: `composer fix`（Pint）/ `pnpm lint:fix`
+- PHP 8.4 + Laravel 12 + Svelte 5 (runes) + Inertia.js + TypeScript
+- フロントは **DS token のみ** (DESIGN.md canonical / `ds-purity.test.ts`)、アイコンは `@lucide/svelte` のみ
+- component 階層は `atoms → molecules → organisms → features/{domain} → templates → pages` の**単方向 import**
+  (`tests/js/architecture/atomic-import-graph.test.ts`)
+
+## 概念設計リファレンス
+
+- `devnotes/20260816-1757-take-thumbnail-hover-preview/conceptual-design.md` (Round 5 で APPROVED)
+
+## 施策一覧
+
+| # | 施策名 | 変更ファイル | 優先度 |
+|---|--------|------------|--------|
+| 1 | `CutTakeSummaryData` に採用テイクの `has_thumbnail` を足す | `app/DataTransferObjects/Manual/CutTakeSummaryData.php` / `resources/js/types/manual.ts` / `app/Http/Controllers/Projects/VideoManualController.php` (docblock 1 行) / `app/Support/Security/AdoptedTakeReferenceInventory.php` (根拠文) | 高 |
+| 2 | ホバー自動再生の component を新設する | `resources/js/components/features/manual/TakeHoverPreview.svelte` (新規) | 高 |
+| 3 | シナリオ編集の動画列へ組み込む | `resources/js/components/features/manual/ScenarioEditor.svelte` | 高 |
+| 4 | テスト整備 | `tests/Feature/Manual/ScenarioVideoColumnTest.php` / `tests/js/components/features/manual/TakeHoverPreview.test.ts` (新規) / `tests/js/components/features/manual/ScenarioEditor.test.ts` | 高 |
+
+---
+
+## 施策 1: `CutTakeSummaryData` に採用テイクの `has_thumbnail` を足す
+
+### 変更箇所
+
+- `app/DataTransferObjects/Manual/CutTakeSummaryData.php` (全体)
+- `resources/js/types/manual.ts` (L384-389 `CutTakeSummary`)
+
+### 波及変更
+
+- TypeScript 型定義: `CutTakeSummary.adopted` に `has_thumbnail: boolean` を追加 (**必須**)
+- API Resource/DTO: `CutTakeSummaryData` のみ。`SelectableTakeData` / `CaptureTakeData` は**触らない**
+  (別 shape であり合流させない既存判断を維持する)
+- テストファイル: `tests/Feature/Manual/ScenarioVideoColumnTest.php` に 4 ケース追加
+- **クエリは変えない**。`VideoManualController::takeSummaries()` は既に `with('adoptedTake')` 済みで、
+  `thumbnail_path` は takes 表の列なので**追加クエリ 0 本**。同ファイルは変更しない
+- `AdoptedTakeReferenceInventory` は**区分は `DifferentCriterion` のまま / 根拠文は更新する**。
+  現行の根拠文は「id と status を表示するため」と書いており、`thumbnail_path` を読むようになると
+  事実とずれる (目録の根拠文はレビューで読まれる説明なので、実態と食い違わせない):
+
+  ```php
+  'DataTransferObjects/Manual/CutTakeSummaryData.php' => [
+      'kind' => AdoptedTakeReferenceKind::DifferentCriterion,
+      'rationale' => 'シナリオ編集画面の動画列が、カットごとに採用テイクの id / status / '
+          .'サムネイル生成有無を表示条件として読むだけで、採用済み ready テイクの充足判定はしない。'
+          .'レンダの充足判定(AdoptedReadyTakeCoverage)とは基準が違うため意図的に統合しない。',
+  ],
+  ```
+
+### 現行コード
+
+```php
+final readonly class CutTakeSummaryData
+{
+    public function __construct(
+        public int $cutId,
+        public int $takesCount,
+        public ?int $adoptedId,
+        public ?string $adoptedStatus,
+    ) {}
+
+    /** withCount('takes') + with('adoptedTake') 済みの cut から生成する */
+    public static function fromCut(Cut $cut): self
+    {
+        $takesCount = $cut->getAttribute('takes_count');
+        Assert::integer($takesCount, 'withCount(takes) 済みの cut を渡してください');
+        $adopted = $cut->adoptedTake;
+
+        return new self(
+            cutId: $cut->id,
+            takesCount: $takesCount,
+            adoptedId: $adopted?->id,
+            adoptedStatus: $adopted?->status->value,
+        );
+    }
+
+    /**
+     * @return array{cut_id: int, takes_count: int, adopted: array{id: int, status: string}|null}
+     */
+    public function toArray(): array
+    {
+        return [
+            'cut_id' => $this->cutId,
+            'takes_count' => $this->takesCount,
+            // id と status は同時に決まる (両方 null か両方非 null)
+            'adopted' => $this->adoptedId === null || $this->adoptedStatus === null
+                ? null
+                : ['id' => $this->adoptedId, 'status' => $this->adoptedStatus],
+        ];
+    }
+}
+```
+
+### 変更後コード
+
+```php
+final readonly class CutTakeSummaryData
+{
+    public function __construct(
+        public int $cutId,
+        public int $takesCount,
+        public ?int $adoptedId,
+        public ?string $adoptedStatus,
+        /**
+         * 採用テイクのサムネイルが生成済みか。採用テイクが無いときは false。
+         * ★ 生成は非同期なので、録画直後・生成失敗・過去分は false になる。
+         *   true のときだけ画像 URL (capture.takes.thumbnail) を張る = 404 を踏まない。
+         */
+        public bool $adoptedHasThumbnail,
+    ) {}
+
+    /** withCount('takes') + with('adoptedTake') 済みの cut から生成する */
+    public static function fromCut(Cut $cut): self
+    {
+        $takesCount = $cut->getAttribute('takes_count');
+        Assert::integer($takesCount, 'withCount(takes) 済みの cut を渡してください');
+        $adopted = $cut->adoptedTake;
+
+        return new self(
+            cutId: $cut->id,
+            takesCount: $takesCount,
+            adoptedId: $adopted?->id,
+            adoptedStatus: $adopted?->status->value,
+            // thumbnail_path は takes 表の列なので追加クエリは発生しない
+            adoptedHasThumbnail: $adopted?->thumbnail_path !== null,
+        );
+    }
+
+    /**
+     * @return array{cut_id: int, takes_count: int,
+     *   adopted: array{id: int, status: string, has_thumbnail: bool}|null}
+     */
+    public function toArray(): array
+    {
+        return [
+            'cut_id' => $this->cutId,
+            'takes_count' => $this->takesCount,
+            // id と status は同時に決まる (両方 null か両方非 null)
+            'adopted' => $this->adoptedId === null || $this->adoptedStatus === null
+                ? null
+                : [
+                    'id' => $this->adoptedId,
+                    'status' => $this->adoptedStatus,
+                    'has_thumbnail' => $this->adoptedHasThumbnail,
+                ],
+        ];
+    }
+}
+```
+
+> **`$adopted?->thumbnail_path !== null` の意味**: `$adopted` が null のときは
+> `null !== null` = `false` に落ちる。「採用テイクが無い ⇒ サムネイルも無い」で意味が一致するため、
+> 三項で書き分けない。PHPStan level 10 でも `?->` の結果は `string|null` で `!== null` は `bool` に
+> 確定するので narrowing 問題は起きない。
+
+### TypeScript 型 (変更後)
+
+```ts
+/** PHP: CutTakeSummaryData と対 (シナリオ編集画面「動画」列の 1 カット分) */
+export interface CutTakeSummary {
+    cut_id: number;
+    takes_count: number;
+    adopted: {
+        id: number;
+        status: SelectableTakeStatus;
+        /** サムネイル生成済みか。true のときだけ .../takes/{id}/thumbnail を表示に使う */
+        has_thumbnail: boolean;
+    } | null;
+}
+```
+
+### PHPStan適合チェック
+
+- [x] 戻り値の型が明示されている (`toArray(): array` + `@return` の array shape 更新)
+- [x] null 安全 (`Assert::integer` は既存のまま。`?->` の結果を `!== null` で bool へ確定)
+- [x] DTO を返している (配列返却は `toArray()` の Inertia props 化のみ。`response()->json()` は無い)
+- [x] Generics の型パラメータ: `Collection::map` の callable 戻り値型は既存の
+      `VideoManualController::takeSummaries()` の `@return list<array{...}>` を**同じ shape へ更新**する
+      (**この 1 行だけコントローラも触る**。docblock を直さないと level 10 が食い違いを検出する)
+
+> ⚠ 上表「変更ファイル」に `app/Http/Controllers/Projects/VideoManualController.php` を追加する
+> (`takeSummaries()` の `@return` docblock 1 行のみ。実行コードは変更しない)。
+
+### テスト計画
+
+`tests/Feature/Manual/ScenarioVideoColumnTest.php` に追加 (既存テストは削除・上書きしない):
+
+- [ ] 新規: `採用テイクにサムネイルがあれば adopted.has_thumbnail が true` —
+      `Take::factory()->forCut($cut)->withThumbnail()->create()` を採用させ `true` を確認
+- [ ] 新規: `採用テイクにサムネイルが無ければ adopted.has_thumbnail が false` —
+      `withThumbnail()` を付けずに採用させ `false` を確認
+- [ ] 新規: `採用テイクが無いカットは adopted が null のまま` (既存テストで担保済みだが、
+      `has_thumbnail` 追加で shape が壊れていないことを `adopted` が `null` であることで確認)
+- [ ] 新規: `非 ready の採用テイクでも adopted.status がそのまま出る` —
+      `has_thumbnail` は status と独立であること (UI 側が `ready && has_thumbnail` で
+      AND を取る前提を、サーバ側で先取りして潰していないことの固定)
+- [ ] 既存の N+1 テスト (`cut を増やしてもクエリ本数が増えない`) が緑のままであること = 追加クエリ 0 本の証拠
+- [ ] 個別の `DatabaseTransactions` を使っていないことを確認
+
+### リスク
+
+- 既存の `takeSummaries` shape に**キーが 1 つ増える**。破壊的ではない (既存キーは不変) が、
+  TS 型を更新しないと `pnpm typecheck` が落ちる → 同じ PR で必ず更新する。
+- `adopted.has_thumbnail` は**描画時点のスナップショット**である。サムネイル生成は非同期なので、
+  採用直後にこの画面を開くと `false` になりうる。シナリオ編集画面には T183 の再取得スケジューラ
+  (`ThumbnailRefreshScheduler`) を持ち込まない (撮影 PWA 専用の機構であり、編集画面に
+  ポーリングを新設するのはこの施策の範囲外)。**その場合は今と同じ要約テキスト表示に落ちるだけ**で
+  詰まない。この非対称は component の日本語コメントに残す。
+
+---
+
+## 施策 2: ホバー自動再生の component を新設する
+
+### 変更箇所
+
+- `resources/js/components/features/manual/TakeHoverPreview.svelte` (**新規**)
+
+### 波及変更
+
+- TypeScript 型定義: component の `Props` interface (新規ファイル内)。既存型の変更なし
+- API Resource/DTO: なし (既存 endpoint をそのまま叩く)
+- テストファイル: `tests/js/components/features/manual/TakeHoverPreview.test.ts` (**新規**)
+
+### 設計の要点 (概念設計の確定事項)
+
+| 項目 | 決定 |
+|---|---|
+| 既定表示 | `<img>` (静止サムネイル。`capture.takes.thumbnail`) |
+| 起動条件 (3 つ全て) | `pointerType === "mouse"` / `event.buttons === 0` / `prefersReducedMotion() === false` |
+| 滞留 | 200ms。満了時に **(a) タイマー無効化されていない (b) ホバー継続中 (c) reduced-motion でない** を再確認 |
+| 再生開始 | **`play()` の明示呼び出し**。`autoplay` 属性は使わない |
+| 属性 | `muted loop playsinline preload="metadata"`、`controls` なし、`poster` に同じサムネイル URL |
+| 失敗 | 自動再生拒否 = `play()` の rejection / 取得・デコード失敗 = `error` イベント。**どちらも `stopPreview()`**。文言・トーストは出さない |
+| 世代管理 | 失敗処理は**現在 mount されている video 要素と同一のときだけ**実行する |
+| 停止条件 (5 つ) | `pointerleave` / `pointercancel` / `pointerdown` / component 破棄 / `visibilitychange` (非表示) |
+| タッチ | 起動しない。ラッパの `<a>` (Inertia Link) がテイク選択画面へ運ぶ |
+| キーボード | フォーカスで自動再生しない (Enter でリンクを辿れば `controls` 付きで観られる) |
+
+### 現行コード
+
+新規ファイルのため無し。既存の類似実装は `TakeThumbnail.svelte` (静止画のみ) と
+`TakePreviewPanel.svelte` (`controls` 付き `<video>`)。**どちらも変更しない**
+(役割が違うため合流させない)。
+
+### 変更後コード
+
+```svelte
+<script lang="ts">
+    import { onDestroy, onMount } from "svelte";
+    import { Link } from "@inertiajs/svelte";
+    import { Film } from "@lucide/svelte";
+    import { prefersReducedMotion } from "@/lib/capture/panel-navigation";
+
+    /**
+     * サムネイルにマウスを載せている間だけ、そのテイクを**無音・ループ**で自動再生する
+     * (doc/04 動画列「登録済みテイクはサムネイル表示 (ホバーで自動再生)」)。
+     *
+     * 設計上の約束 (誇張しない):
+     * - <video> は**ホバー中しか DOM に存在しない**ので、**1 コンポーネントにつき高々 1 本**である。
+     *   画面全体で 1 本に収まるのは「マウスが同時に 1 か所しかホバーできない」ことに依る性質で、
+     *   この component が画面横断の相互排他を保証しているわけではない。
+     * - **タッチ・ペンでは起動しない**。ホバーの無い環境ではリンク (タップ = 遷移) として働く。
+     *   同じ場所のタップに「遷移」と「再生」の 2 つの意味を持たせない。
+     * - `prefers-reduced-motion: reduce` では起動しない (静止画のまま)。
+     * - 失敗は静かに静止画へ戻す。**エラー文言・トーストは出さない**
+     *   (ホバーは補助的な確認手段であり、失敗が編集作業を妨げてはならない)。
+     */
+    interface Props {
+        /** 静止サムネイルの URL (capture.takes.thumbnail)。未生成なら null */
+        thumbnailUrl: string | null;
+        /** 再生 URL (capture.takes.playback)。ready でなければ null */
+        playbackUrl: string | null;
+        /** クリック / タップの行き先 (テイク選択画面) */
+        href: string;
+        /** リンクの読み上げ名 (画像は装飾扱いで alt="") */
+        label: string;
+        testId?: string;
+    }
+
+    let { thumbnailUrl, playbackUrl, href, label, testId }: Props = $props();
+
+    /** 滞留タイマー。null = 予約なし */
+    let dwellTimer = $state<ReturnType<typeof setTimeout> | null>(null);
+    /** ポインタがまだ載っているか (満了時の再確認に使う) */
+    let hovering = $state(false);
+    /** 再生中か = <video> を mount しているか */
+    let playing = $state(false);
+    /** 世代判定の基準。現在 mount されている video 要素 */
+    let videoEl = $state<HTMLVideoElement | null>(null);
+
+    const DWELL_MS = 200;
+
+    /** 起動条件を満たすポインタか (タッチ・ペン / ボタン押下中は起動しない) */
+    function isPreviewablePointer(event: PointerEvent): boolean {
+        return event.pointerType === "mouse" && event.buttons === 0;
+    }
+
+    function onPointerEnter(event: PointerEvent): void {
+        hovering = true;
+        if (playbackUrl === null) return;
+        if (!isPreviewablePointer(event)) return;
+        if (prefersReducedMotion()) return;
+        clearDwell();
+        dwellTimer = setTimeout(startPreview, DWELL_MS);
+    }
+
+    /**
+     * 満了時の再確認は 3 つだけ:
+     * (a) タイマーが無効化されていない (pointerdown 等は clearDwell でここへ来なくする)
+     * (b) ホバーが継続している
+     * (c) reduced-motion でない (200ms の間に設定が変わることがある)
+     * ★ ボタンの押下状態は**読み直さない**。pointerdown が停止条件として
+     *   タイマーそのものを破棄することで保証する (過去のイベントを現在の状態の代理にしない)。
+     */
+    function startPreview(): void {
+        dwellTimer = null;
+        if (!hovering) return;
+        if (playbackUrl === null) return; // props が入れ替わった場合に備えて再確認する
+        if (prefersReducedMotion()) return;
+        playing = true;
+    }
+
+    /** 停止 (冪等)。タイマー clear と video unmount を必ず両方行う */
+    function stopPreview(): void {
+        clearDwell();
+        playing = false;
+        videoEl = null;
+    }
+
+    function clearDwell(): void {
+        if (dwellTimer === null) return;
+        clearTimeout(dwellTimer);
+        dwellTimer = null;
+    }
+
+    function onPointerLeave(): void {
+        hovering = false;
+        stopPreview();
+    }
+
+    /** mount 後に再生を開始する。開始の正本は play() で、autoplay 属性は使わない */
+    function onVideoMounted(el: HTMLVideoElement): void {
+        videoEl = el;
+        el.muted = true; // 属性だけでなく property でも立てる (自動再生の許可条件)
+        void el.play().catch(() => {
+            // 自動再生ポリシーによる拒否。error イベントでは飛んでこない経路。
+            // ★ 古い試行の rejection が新しい試行を止めないよう、要素の同一性で世代を判定する
+            if (videoEl === el) stopPreview();
+        });
+    }
+
+    /** 取得・デコード失敗。世代判定は play() の catch と同じ規則 */
+    function onVideoError(event: Event): void {
+        if (videoEl === event.currentTarget) stopPreview();
+    }
+
+    /** タブが隠れたら止める (見えない場所で再生し続けない) */
+    function onVisibilityChange(): void {
+        if (document.visibilityState === "hidden") stopPreview();
+    }
+
+    // ★ 登録と解除を onMount の中で対にする。onMount はブラウザでしか走らず、
+    //   返した後始末もブラウザでしか走らないため、`typeof document !== "undefined"` の
+    //   自前 guard を書かずに非ブラウザ環境と対称になる (フレームワークのレンジ内でやる)。
+    onMount(() => {
+        document.addEventListener("visibilitychange", onVisibilityChange);
+        return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+    });
+
+    // document に触らない後始末だけを onDestroy に置く (予約済みタイマーを捨てる)
+    onDestroy(clearDwell);
+</script>
+
+<Link
+    {href}
+    class="relative block size-16 shrink-0 overflow-hidden rounded-md border border-border bg-neutral"
+    aria-label={label}
+    data-testid={testId}
+    onpointerenter={onPointerEnter}
+    onpointerleave={onPointerLeave}
+    onpointercancel={onPointerLeave}
+    onpointerdown={stopPreview}
+>
+    {#if playing && playbackUrl !== null}
+        <!-- svelte-ignore a11y_media_has_caption (無音・装飾のホバープレビュー) -->
+        <video
+            {@attach onVideoMounted}
+            src={playbackUrl}
+            poster={thumbnailUrl}
+            muted
+            loop
+            playsinline
+            preload="metadata"
+            class="size-full object-cover"
+            aria-hidden="true"
+            onerror={onVideoError}
+            data-testid={testId ? `${testId}-video` : undefined}
+        ></video>
+    {:else if thumbnailUrl !== null}
+        <img
+            src={thumbnailUrl}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            class="size-full object-cover"
+            data-testid={testId ? `${testId}-image` : undefined}
+        />
+    {:else}
+        <span class="flex size-full items-center justify-center" aria-hidden="true">
+            <Film class="size-4 text-text-secondary" />
+        </span>
+    {/if}
+</Link>
+```
+
+> **`{@attach ...}` について**: Svelte 5 の attachment (要素が mount された直後に呼ばれる) を使う。
+> `package.json` の `svelte` は `^5.56.2` で attachment (5.29 で導入) が使えることを実読で確認済み。
+
+### PHPStan適合チェック
+
+- 該当なし (フロントのみ)。`pnpm typecheck` / `pnpm lint` / `pnpm test` が対象。
+- DS purity: 色・角丸・タイポは token 由来のクラス (`border-border` / `bg-neutral` /
+  `text-text-secondary` / `rounded-md`) のみ。**hex 直書き・inline style は無い**。
+- アイコンは `@lucide/svelte` の `Film` のみ (SVG 直書きなし)。
+- Atomic 階層: `features/manual` から参照するのは `@/lib/*` と `@inertiajs/svelte` と
+  `@lucide/svelte` だけで、**下層 (atoms/molecules) からの参照も上層 (pages) への参照も作らない**。
+
+### テスト計画
+
+`tests/js/components/features/manual/TakeHoverPreview.test.ts` (**新規**):
+
+- [ ] 既定は `<img>` を描画し `<video>` は存在しない
+- [ ] `pointerType: "mouse"` の `pointerenter` → 200ms 経過で `<video>` が現れる (fake timers)
+- [ ] `pointerType: "touch"` の `pointerenter` → 200ms 経っても `<video>` は現れない
+- [ ] `buttons: 1` (押下中) の `pointerenter` → `<video>` は現れない
+- [ ] `pointerenter` の 100ms 後に `pointerdown` → 満了しても `<video>` は現れない (**D&D の競合**)
+- [ ] `prefersReducedMotion()` を `true` にモック → `<video>` は現れない
+- [ ] 満了直前に reduced-motion が `true` へ変わったら `<video>` は現れない (満了時の再評価)
+- [ ] `pointerleave` で `<video>` が消え `<img>` へ戻る
+- [ ] `visibilitychange` (hidden) で `<video>` が消える
+- [ ] `play()` が reject → `<video>` が消え `<img>` へ戻る。**トーストが 1 件も出ない**
+- [ ] `error` イベント → `<video>` が消え `<img>` へ戻る
+- [ ] **世代判定**: A を再生 → `pointerleave` → 再ホバーで B を mount → A の rejection が遅れて到着しても
+      B は消えない
+- [ ] `stopPreview()` の**冪等性**: `pointerleave` を 2 回続けても例外を出さず状態が壊れない
+- [ ] unmount 後に `visibilitychange` を発火しても例外が出ない (listener が外れている)
+- [ ] `playbackUrl === null` (非 ready) のときはホバーしても `<video>` を作らない
+- [ ] `thumbnailUrl === null` のときは `<img>` ではなく Film アイコンのプレースホルダを出す
+- [ ] **listener の対称性**は**外部から観測できる契約**で固定する (内部関数 `stopPreview` を
+      直接覗かない):
+      - `document.removeEventListener` に `addEventListener` と**同じ関数参照**が渡されたこと
+        (`vi.spyOn(document, "addEventListener" / "removeEventListener")` で参照を突き合わせる)
+      - unmount 後に `visibilitychange` を発火しても**例外が出ず DOM も変化しない**こと
+
+      **SSR レーンはこのリポジトリに存在しない**
+      (`vite.config.ts` / `package.json` に ssr entry が無く `config/inertia.php` も無い = 実読で確認) ため、
+      非ブラウザ実行の検証はテストではなく**登録と解除を `onMount` の対で書く構造**で担保する
+
+### リスク
+
+- **jsdom は `HTMLMediaElement.play()` を実装していない**。テストでは
+  `HTMLMediaElement.prototype.play` を `vi.fn()` で差し替える (既存 `TakePreviewDialog.test.ts` /
+  `RenderPanel.test.ts` の作法を確認して合わせる)。差し替えを忘れると
+  「play is not a function」で落ちるため、テスト冒頭の共通 setup に置く。
+- ホバーのたびに `/playback` の 302 が 1 本走る。連続ホバーで署名 URL の発行回数が増えるが、
+  **200ms の滞留**で素通りは抑制され、発行はユーザーの意図的操作と 1:1 で対応する。
+  署名 URL のキャッシュは**しない** (`no-store, private` の既存判断を緩めない)。
+- `<a>` (Inertia `Link`) の中に `<video>` を入れる。動画上のクリックはリンクの遷移になる
+  (`controls` を出していないので再生操作と競合しない)。これは意図した挙動である。
+
+---
+
+## 施策 3: シナリオ編集の動画列へ組み込む
+
+### 変更箇所
+
+- `resources/js/components/features/manual/ScenarioEditor.svelte`
+  - import 追加 (`TakeHoverPreview` / `takeUrl`)
+  - `videoCell` snippet (L1019-1050) の書き換え
+
+### 波及変更
+
+- TypeScript 型定義: 施策 1 で更新済みの `CutTakeSummary` をそのまま読む (追加変更なし)
+- API Resource/DTO: なし
+- テストファイル: `tests/js/components/features/manual/ScenarioEditor.test.ts` に
+  「採用テイクがあればサムネイルが出る / 無ければ出ない」を追加。
+  既存の `video-cell-count` / `video-cell-link` / `video-cell-unsaved` の testId は**変えない**
+  (既存テストを壊さない)
+
+### 現行コード
+
+```svelte
+{#snippet videoCell(cutId: number | null, testIdSuffix: string)}
+    <!-- 動画列 (doc/04)。未保存行はリンクを出さず、押せるのに詰むボタンを作らない。
+         行 Card の中に角丸カードを入れ子にせず、区切り線で段を分ける -->
+    <div class="mt-3 border-t border-border pt-3" data-testid={`video-cell-${testIdSuffix}`}>
+        <p class="text-caption text-text-secondary">動画</p>
+        {#if cutId === null}
+            <p class="mt-1 text-caption text-text-secondary" data-testid="video-cell-unsaved">
+                「シナリオを更新」で保存すると、このカットに動画を登録できます。
+            </p>
+        {:else}
+            {@const summary = summaryByCutId.get(cutId)}
+            <p class="mt-1 flex items-center gap-2 text-caption text-text">
+                <span data-testid="video-cell-count">テイク {summary?.takes_count ?? 0} 件</span>
+                {#if summary?.adopted}
+                    <Badge tone="primary" testId="video-cell-adopted">採用済み</Badge>
+                {/if}
+            </p>
+            <div class="mt-2">
+                <Button
+                    variant="neutral"
+                    size="sm"
+                    href={`/projects/${projectId}/manuals/${manualId}/cuts/${cutId}/takes`}
+                    inertia
+                    testId="video-cell-link"
+                >
+                    <Film class="size-4" aria-hidden="true" />
+                    {summary && summary.takes_count > 0 ? "テイクを選択" : "ファイルの選択"}
+                </Button>
+            </div>
+        {/if}
+    </div>
+{/snippet}
+```
+
+### 変更後コード
+
+```svelte
+{#snippet videoCell(cutId: number | null, testIdSuffix: string)}
+    <!-- 動画列 (doc/04)。未保存行はリンクを出さず、押せるのに詰むボタンを作らない。
+         行 Card の中に角丸カードを入れ子にせず、区切り線で段を分ける。
+
+         ★ サムネイルを出すのは**採用テイク 1 件だけ**である (doc/04 の
+           「登録済みテイクはサムネイル表示」に対する意図的な狭め)。動画列の意味は
+           「このカットの成果は何か」であり、候補テイクを見比べるのはテイク選択画面の仕事。
+           未採用テイクの一覧表示は残ギャップとして扱う
+           (devnotes/20260816-1757-take-thumbnail-hover-preview/conceptual-design.md)。
+         ★ has_thumbnail は**描画時点のスナップショット**である。生成は非同期なので、
+           採用直後は false になりうる。その場合は今までどおり要約テキストだけになる
+           (詰まないので、この画面に再取得ポーリングは持ち込まない)。 -->
+    <div class="mt-3 border-t border-border pt-3" data-testid={`video-cell-${testIdSuffix}`}>
+        <p class="text-caption text-text-secondary">動画</p>
+        {#if cutId === null}
+            <p class="mt-1 text-caption text-text-secondary" data-testid="video-cell-unsaved">
+                「シナリオを更新」で保存すると、このカットに動画を登録できます。
+            </p>
+        {:else}
+            {@const summary = summaryByCutId.get(cutId)}
+            {@const takesHref = `/projects/${projectId}/manuals/${manualId}/cuts/${cutId}/takes`}
+            {@const adopted = summary?.adopted ?? null}
+            {@const previewable = adopted !== null && adopted.status === "ready"}
+            <div class="mt-1 flex items-start gap-2">
+                {#if adopted !== null && previewable && adopted.has_thumbnail}
+                    <TakeHoverPreview
+                        thumbnailUrl={takeUrl(
+                            { projectId, manualId, cutId },
+                            adopted.id,
+                            "/thumbnail",
+                        )}
+                        playbackUrl={takeUrl({ projectId, manualId, cutId }, adopted.id, "/playback")}
+                        href={takesHref}
+                        label="採用テイクを開く"
+                        testId={`video-cell-preview-${testIdSuffix}`}
+                    />
+                {/if}
+                <div class="min-w-0 flex-1">
+                    <p class="flex items-center gap-2 text-caption text-text">
+                        <span data-testid="video-cell-count">
+                            テイク {summary?.takes_count ?? 0} 件
+                        </span>
+                        {#if adopted !== null}
+                            <Badge tone="primary" testId="video-cell-adopted">採用済み</Badge>
+                        {/if}
+                    </p>
+                    <div class="mt-2">
+                        <Button
+                            variant="neutral"
+                            size="sm"
+                            href={takesHref}
+                            inertia
+                            testId="video-cell-link"
+                        >
+                            <Film class="size-4" aria-hidden="true" />
+                            {summary && summary.takes_count > 0 ? "テイクを選択" : "ファイルの選択"}
+                        </Button>
+                    </div>
+                </div>
+            </div>
+        {/if}
+    </div>
+{/snippet}
+```
+
+追加 import:
+
+```ts
+import TakeHoverPreview from "@/components/features/manual/TakeHoverPreview.svelte";
+import { takeUrl } from "@/lib/capture/take-endpoints";
+```
+
+> **サムネイルを出す条件が 3 つある理由**: `adopted !== null` (採用がある) /
+> `status === "ready"` (`/thumbnail` も `/playback` も ready 以外は 404) /
+> `has_thumbnail` (未生成は `/thumbnail` が 404)。**サーバが 404 を返す状態へは
+> 最初から URL を張らない** — 既存 `TakePickerList` / `TakePreviewPanel` と同じ判断規則である。
+>
+> ⚠ **語彙の分離 (ドメイン規約 12)**: この 3 条件は「**サムネイル表示条件 / 404 を踏まない条件**」であって、
+> 「採用済みかつ ready のテイクを持つか」という**充足判定ではない**。
+> コメント・変数名・テスト名に `coverage` / `充足` / `ready coverage` の語を使わない
+> (`AdoptedReadyTakeCoverage` と概念が混ざるため)。変数名も `previewable`
+> (= プレビューを張ってよい状態か) とし、充足を連想させない。
+
+> **禁止事項 8 (disabled にしない) との関係**: この施策は**ボタンを disabled にしない**。
+> サムネイルが出ないケースでも「テイクを選択 / ファイルの選択」ボタンは今までどおり常に押せる。
+> 条件未充足で消えるのは**補助的なサムネイル表示だけ**であり、操作を塞いでいない。
+
+### PHPStan適合チェック
+
+- 該当なし (フロントのみ)。`pnpm typecheck` は `CutTakeSummary.adopted.has_thumbnail` の
+  追加で型が通ること、`adopted` の narrowing (`adopted !== null` の後で `adopted.id` を読む) が
+  通ることを確認する。
+
+### テスト計画
+
+`tests/js/components/features/manual/ScenarioEditor.test.ts` に追加:
+
+- [ ] 新規: `採用テイクが ready かつ has_thumbnail のとき動画列にサムネイルが出る`
+      (`video-cell-preview-step-0` が存在し、`-image` が `/thumbnail` を指す)
+- [ ] 新規: `採用テイクが無いカットにはサムネイルが出ない` (要素が存在しない)
+- [ ] 新規: `has_thumbnail=false の採用テイクにはサムネイルが出ない`
+- [ ] 新規: `非 ready の採用テイクにはサムネイルが出ない` (404 になる URL を張らないことの固定)
+- [ ] 新規: `サムネイルが出ない場合でも「テイクを選択」ボタンは押せる` (禁止事項 8 の固定)
+- [ ] 新規: `非 ready / has_thumbnail=false のとき 404 になる URL を 1 つも張らない`。
+      検査は `innerHTML` の文字列一致ではなく**属性への直接問い合わせ**で書く
+      (`container.querySelector('img[src*="/thumbnail"]')` /
+      `container.querySelector('video[src*="/playback"]')` が `null` であること) —
+      `textContent` では属性値を見られないため意図が曖昧になる
+- [ ] 既存: `video-cell-count` / `video-cell-adopted` / `video-cell-link` / `video-cell-unsaved` の
+      既存アサーションが緑のままであること (**既存テストは削除・上書きしない**)
+- [ ] `tests/js/pages/ManualsEdit.test.ts` が緑のままであること (props shape 追加の影響確認)
+
+### リスク
+
+- **D&D との干渉**: 行の並べ替えは `DragHandle` の `pointerdown` から始まり
+  `lib/dnd/pointer-drag.ts` が `setPointerCapture()` を張る。加えて本 component 側で
+  `buttons !== 0` と `pointerdown` の両方を停止条件にしているため、ドラッグ中に再生が始まる経路は
+  閉じている (テスト計画にケースあり)。ただし**「ブラウザ実機で並べ替えの体感が変わらないこと」は
+  自動テストでは保証しない** — 実装時に手で 1 度確認する。
+- **行の縦幅が増える**。サムネイルは `size-16` (64px) で、既存の要約テキスト + ボタンの段
+  (おおよそ 60px) とほぼ同じ高さに収まるため、増分は小さい。採用テイクが無い行は**今と同じ**。
+- 1 画面に多数のカットが並ぶと `<img>` の数が増える。`loading="lazy"` を付けているので
+  画面外は取得されない (既存 `TakeThumbnail` / `TakeStrip` と同じ作法)。
+
+---
+
+## 施策 4: テスト整備 (施策 1-3 の計画をまとめたもの)
+
+| ファイル | 種別 | 追加内容 |
+|---|---|---|
+| `tests/Feature/Manual/ScenarioVideoColumnTest.php` | Pest Feature | `has_thumbnail` の 4 ケース (採用なし / ready+あり / ready+なし / 非 ready)。既存 N+1 テストは変更せず緑を維持。テスト名には「サムネイル表示条件」と書き、`充足` / `coverage` の語を使わない |
+| `tests/js/components/features/manual/TakeHoverPreview.test.ts` | Vitest (新規) | 施策 2 の 15 ケース |
+| `tests/js/components/features/manual/ScenarioEditor.test.ts` | Vitest | 施策 3 の 5 ケース追加 |
+
+- 新しいモデル・新しい Factory は**追加しない** (`TakeFactory::withThumbnail()` が既にある)。
+- Architecture テストへの**新規登録**は不要だが、**既存登録の根拠文の更新は要る** (施策 1)。
+  「登録不要」ではなく「**区分は維持・根拠文は更新**」である。理由:
+  - `AdoptedTakeReferenceInventory`: `CutTakeSummaryData.php` は登録済みで、
+    読む列が 1 つ増えても区分 (`DifferentCriterion`) は変わらない (充足判定を持ち込まない)。
+    ただし根拠文は `thumbnail_path` を読む事実を含む文へ差し替える。新規ファイルは PHP ではない
+  - `NestedRouteIdorDefenseTest` / `ControllerAuthorizationGateTest`: **route を 1 本も足さない**
+  - `ThrottleCoverageInventoryTest`: 同上
+  - `ScenarioWritePathInventoryTest`: `cuts` / `scenario_version` / `status` を**書かない** (読み取りのみ)
+  - `atomic-import-graph.test.ts` / `ds-purity.test.ts` / `lucide-scoped-import.test.ts`:
+    **既存の deny-by-default が新規ファイルを自動的に走査する** (登録作業は不要。緑であることを確認する)
+
+## 実装モード
+
+| 項目 | 内容 |
+|------|------|
+| 推奨モード | **incremental** |
+| 判断根拠 | 変更点が 4 ファイル (うち新規 2) と局所的で、既存の endpoint / route / 認可 / クエリを 1 つも変えない。DTO へのキー追加は後方互換 (既存キー不変) であり、段階的に main へ載せても他タスクの動作を壊さない。standalone にするほどの構造変更が無い。 |
+| 競合リスク | `ScenarioEditor.svelte` は T185 (D&D 並べ替え) が直近で触った大きいファイルで、他タスクが同時に触ると衝突しうる。ただし本施策が触るのは `videoCell` snippet と import 行だけで、drag 関連コードには一切触れない。`types/manual.ts` の `CutTakeSummary` は本施策以外に触る予定が無い。`CutTakeSummaryData.php` も同様。 |
+
+## 実装順序
+
+1. 施策 1 (DTO + TS 型) → `composer phpstan` / `pnpm typecheck` が通ることを確認
+2. 施策 1 のテストを**先に**書いて fail を見る (テストファースト。思考原則 5)
+3. 施策 2 (component 新規 + テスト)。component 単体で緑にする
+4. 施策 3 (組み込み + テスト)
+5. 全検証コマンド: `composer test` / `composer phpstan` / `vendor/bin/pint --test` /
+   `pnpm lint` / `pnpm typecheck` / `pnpm test` / `pnpm build`
+6. 実機で 1 度、シナリオ編集画面のホバー再生と D&D の並べ替えを手で確認する
+
+## 前提の確認結果 (設計時に実読で確定済み)
+
+- **`{@attach}` は使える**: `package.json` の `svelte` は `^5.56.2` で、attachment は 5.29 で入った機能。
+  代替 (`bind:this` + `$effect`) へ落とす必要は無い。
+- **jsdom の `HTMLMediaElement` スタブは既存の作法をそのまま使う**:
+  `tests/js/components/features/capture/TakePreviewDialog.test.ts` L48-51 が
+  `vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined)` /
+  `"pause"` / `"load"` の 3 本を `beforeEach` で張っている。新規テストも同じ 3 本を張り、
+  拒否のテストだけ `mockRejectedValueOnce(new DOMException("NotAllowedError"))` で上書きする。
+
+---
+
+## 実装差分 (git diff)
+
+```diff
+diff --git a/app/DataTransferObjects/Manual/CutTakeSummaryData.php b/app/DataTransferObjects/Manual/CutTakeSummaryData.php
+index a7aaed5..d99c2db 100644
+--- a/app/DataTransferObjects/Manual/CutTakeSummaryData.php
++++ b/app/DataTransferObjects/Manual/CutTakeSummaryData.php
+@@ -23,6 +23,12 @@ public function __construct(
+         public int $takesCount,
+         public ?int $adoptedId,
+         public ?string $adoptedStatus,
++        /**
++         * 採用テイクのサムネイルが生成済みか。採用テイクが無いときは false。
++         * 生成は非同期なので、録画直後・生成失敗・過去分は false になる。
++         * true のときだけ画像 URL (capture.takes.thumbnail) を張る = 404 を踏まない。
++         */
++        public bool $adoptedHasThumbnail,
+     ) {}
+ 
+     /** withCount('takes') + with('adoptedTake') 済みの cut から生成する */
+@@ -37,11 +43,15 @@ public static function fromCut(Cut $cut): self
+             takesCount: $takesCount,
+             adoptedId: $adopted?->id,
+             adoptedStatus: $adopted?->status->value,
++            // thumbnail_path は takes 表の列なので追加クエリは発生しない。
++            // 採用テイクが無いときは null !== null = false へ落ちる (意味が一致する)
++            adoptedHasThumbnail: $adopted?->thumbnail_path !== null,
+         );
+     }
+ 
+     /**
+-     * @return array{cut_id: int, takes_count: int, adopted: array{id: int, status: string}|null}
++     * @return array{cut_id: int, takes_count: int,
++     *   adopted: array{id: int, status: string, has_thumbnail: bool}|null}
+      */
+     public function toArray(): array
+     {
+@@ -51,7 +61,11 @@ public function toArray(): array
+             // id と status は同時に決まる (両方 null か両方非 null)
+             'adopted' => $this->adoptedId === null || $this->adoptedStatus === null
+                 ? null
+-                : ['id' => $this->adoptedId, 'status' => $this->adoptedStatus],
++                : [
++                    'id' => $this->adoptedId,
++                    'status' => $this->adoptedStatus,
++                    'has_thumbnail' => $this->adoptedHasThumbnail,
++                ],
+         ];
+     }
+ }
+diff --git a/app/Http/Controllers/Projects/VideoManualController.php b/app/Http/Controllers/Projects/VideoManualController.php
+index 3dc31bf..2f661a4 100644
+--- a/app/Http/Controllers/Projects/VideoManualController.php
++++ b/app/Http/Controllers/Projects/VideoManualController.php
+@@ -229,7 +229,8 @@ public function edit(Request $request, Project $project, VideoManual $manual, Se
+      * adoptedTake は eager load の 1 本。cut ごとの追加クエリ = N+1 を作らない)。
+      * 並びは CutSequencer と同じ (sort_order, id) にする (同値 sort_order で揺れないため)。
+      *
+-     * @return list<array{cut_id: int, takes_count: int, adopted: array{id: int, status: string}|null}>
++     * @return list<array{cut_id: int, takes_count: int,
++     *   adopted: array{id: int, status: string, has_thumbnail: bool}|null}>
+      */
+     private function takeSummaries(VideoManual $manual): array
+     {
+diff --git a/app/Support/Security/AdoptedTakeReferenceInventory.php b/app/Support/Security/AdoptedTakeReferenceInventory.php
+index 443c9ec..36824e8 100644
+--- a/app/Support/Security/AdoptedTakeReferenceInventory.php
++++ b/app/Support/Security/AdoptedTakeReferenceInventory.php
+@@ -58,9 +58,9 @@ public static function entries(): array
+             ],
+             'DataTransferObjects/Manual/CutTakeSummaryData.php' => [
+                 'kind' => AdoptedTakeReferenceKind::DifferentCriterion,
+-                'rationale' => 'シナリオ編集画面の動画列が、カットごとに採用テイクの id と status を'
+-                    .'表示するために読むだけで ready 判定はしない。レンダの充足判定'
+-                    .'(AdoptedReadyTakeCoverage) とは基準が違うため意図的に統合しない。',
++                'rationale' => 'シナリオ編集画面の動画列が、カットごとに採用テイクの id / status / '
++                    .'サムネイル生成有無を表示条件として読むだけで、採用済み ready テイクの充足判定はしない。'
++                    .'レンダの充足判定 (AdoptedReadyTakeCoverage) とは基準が違うため意図的に統合しない。',
+             ],
+             'DataTransferObjects/Manual/TakeSelectionPageData.php' => [
+                 'kind' => AdoptedTakeReferenceKind::DifferentCriterion,
+diff --git a/resources/js/components/features/manual/ScenarioEditor.svelte b/resources/js/components/features/manual/ScenarioEditor.svelte
+index 69a78c9..138bb94 100644
+--- a/resources/js/components/features/manual/ScenarioEditor.svelte
++++ b/resources/js/components/features/manual/ScenarioEditor.svelte
+@@ -23,6 +23,8 @@
+     import EmptyState from "@/components/molecules/EmptyState.svelte";
+     import FormField from "@/components/molecules/FormField.svelte";
+     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
++    import TakeHoverPreview from "@/components/features/manual/TakeHoverPreview.svelte";
++    import { takeUrl as buildTakeUrl } from "@/lib/capture/take-endpoints";
+     import { csrfToken } from "@/lib/csrf";
+     import { moveItem } from "@/lib/dnd/list-reorder";
+     import { createPointerDrag, type PointerDragState } from "@/lib/dnd/pointer-drag";
+@@ -1057,7 +1059,16 @@
+ 
+ {#snippet videoCell(cutId: number | null, testIdSuffix: string)}
+     <!-- 動画列 (doc/04)。未保存行はリンクを出さず、押せるのに詰むボタンを作らない。
+-         行 Card の中に角丸カードを入れ子にせず、区切り線で段を分ける -->
++         行 Card の中に角丸カードを入れ子にせず、区切り線で段を分ける。
++
++         サムネイルを出すのは**採用テイク 1 件だけ**である (doc/04 の
++         「登録済みテイクはサムネイル表示」に対する意図的な狭め)。動画列の意味は
++         「このカットの成果は何か」であり、候補テイクを見比べるのはテイク選択画面の仕事。
++         未採用テイクの一覧表示は残ギャップとして扱う
++         (devnotes/20260816-1757-take-thumbnail-hover-preview/conceptual-design.md)。
++         has_thumbnail は**描画時点のスナップショット**である。生成は非同期なので、
++         採用直後は false になりうる。その場合は今までどおり要約テキストだけになる
++         (詰まないので、この画面に再取得ポーリングは持ち込まない)。 -->
+     <div class="mt-3 border-t border-border pt-3" data-testid={`video-cell-${testIdSuffix}`}>
+         <p class="text-caption text-text-secondary">動画</p>
+         {#if cutId === null}
+@@ -1066,23 +1077,50 @@
+             </p>
+         {:else}
+             {@const summary = summaryByCutId.get(cutId)}
+-            <p class="mt-1 flex items-center gap-2 text-caption text-text">
+-                <span data-testid="video-cell-count">テイク {summary?.takes_count ?? 0} 件</span>
+-                {#if summary?.adopted}
+-                    <Badge tone="primary" testId="video-cell-adopted">採用済み</Badge>
++            {@const takesHref = `/projects/${projectId}/manuals/${manualId}/cuts/${cutId}/takes`}
++            {@const adopted = summary?.adopted ?? null}
++            <div class="mt-1 flex items-start gap-2">
++                <!-- サムネイル表示条件 = サーバが 404 を返す状態へ URL を張らないための 3 条件
++                     (採用がある / ready / サムネイル生成済み)。充足判定ではない -->
++                {#if adopted !== null && adopted.status === "ready" && adopted.has_thumbnail}
++                    <TakeHoverPreview
++                        thumbnailUrl={buildTakeUrl(
++                            { projectId, manualId, cutId },
++                            adopted.id,
++                            "/thumbnail",
++                        )}
++                        playbackUrl={buildTakeUrl(
++                            { projectId, manualId, cutId },
++                            adopted.id,
++                            "/playback",
++                        )}
++                        href={takesHref}
++                        label="採用テイクを開く"
++                        testId={`video-cell-preview-${testIdSuffix}`}
++                    />
+                 {/if}
+-            </p>
+-            <div class="mt-2">
+-                <Button
+-                    variant="neutral"
+-                    size="sm"
+-                    href={`/projects/${projectId}/manuals/${manualId}/cuts/${cutId}/takes`}
+-                    inertia
+-                    testId="video-cell-link"
+-                >
+-                    <Film class="size-4" aria-hidden="true" />
+-                    {summary && summary.takes_count > 0 ? "テイクを選択" : "ファイルの選択"}
+-                </Button>
++                <div class="min-w-0 flex-1">
++                    <p class="flex items-center gap-2 text-caption text-text">
++                        <span data-testid="video-cell-count">
++                            テイク {summary?.takes_count ?? 0} 件
++                        </span>
++                        {#if adopted !== null}
++                            <Badge tone="primary" testId="video-cell-adopted">採用済み</Badge>
++                        {/if}
++                    </p>
++                    <div class="mt-2">
++                        <Button
++                            variant="neutral"
++                            size="sm"
++                            href={takesHref}
++                            inertia
++                            testId="video-cell-link"
++                        >
++                            <Film class="size-4" aria-hidden="true" />
++                            {summary && summary.takes_count > 0 ? "テイクを選択" : "ファイルの選択"}
++                        </Button>
++                    </div>
++                </div>
+             </div>
+         {/if}
+     </div>
+diff --git a/resources/js/components/features/manual/TakeHoverPreview.svelte b/resources/js/components/features/manual/TakeHoverPreview.svelte
+new file mode 100644
+index 0000000..751e718
+--- /dev/null
++++ b/resources/js/components/features/manual/TakeHoverPreview.svelte
+@@ -0,0 +1,167 @@
++<script lang="ts">
++    import { onDestroy, onMount } from "svelte";
++    import { Link } from "@inertiajs/svelte";
++    import { Film } from "@lucide/svelte";
++    import { prefersReducedMotion } from "@/lib/capture/panel-navigation";
++
++    /**
++     * サムネイルにマウスを載せている間だけ、そのテイクを**無音・ループ**で自動再生する
++     * (doc/04 動画列「登録済みテイクはサムネイル表示 (ホバーで自動再生)」)。
++     *
++     * 設計上の約束 (誇張しない):
++     * - <video> は**ホバー中しか DOM に存在しない**ので、**1 コンポーネントにつき高々 1 本**である。
++     *   画面全体で 1 本に収まるのは「マウスが同時に 1 か所しかホバーできない」ことに依る性質で、
++     *   この component が画面横断の相互排他を保証しているわけではない。
++     * - **タッチ・ペンでは起動しない**。ホバーの無い環境ではリンク (タップ = 遷移) として働く。
++     *   同じ場所のタップに「遷移」と「再生」の 2 つの意味を持たせない。
++     * - `prefers-reduced-motion: reduce` では起動しない (静止画のまま)。
++     * - 失敗は静かに静止画へ戻す。**エラー文言・トーストは出さない**
++     *   (ホバーは補助的な確認手段であり、失敗が編集作業を妨げてはならない)。
++     */
++    interface Props {
++        /** 静止サムネイルの URL (capture.takes.thumbnail)。未生成なら null */
++        thumbnailUrl: string | null;
++        /** 再生 URL (capture.takes.playback)。ready でなければ null */
++        playbackUrl: string | null;
++        /** クリック / タップの行き先 (テイク選択画面) */
++        href: string;
++        /** リンクの読み上げ名 (画像は装飾扱いで alt="") */
++        label: string;
++        testId?: string;
++    }
++
++    let { thumbnailUrl, playbackUrl, href, label, testId }: Props = $props();
++
++    /** 滞留タイマー。null = 予約なし */
++    let dwellTimer: ReturnType<typeof setTimeout> | null = null;
++    /** ポインタがまだ載っているか (満了時の再確認に使う) */
++    let hovering = false;
++    /** 再生中か = <video> を mount しているか */
++    let playing = $state(false);
++    /** 世代判定の基準。現在 mount されている video 要素 */
++    let videoEl: HTMLVideoElement | null = null;
++
++    const DWELL_MS = 200;
++
++    /** 起動条件を満たすポインタか (タッチ・ペン / ボタン押下中は起動しない) */
++    function isPreviewablePointer(event: PointerEvent): boolean {
++        return event.pointerType === "mouse" && event.buttons === 0;
++    }
++
++    function onPointerEnter(event: PointerEvent): void {
++        hovering = true;
++        if (playbackUrl === null) return;
++        if (!isPreviewablePointer(event)) return;
++        if (prefersReducedMotion()) return;
++        clearDwell();
++        dwellTimer = setTimeout(startPreview, DWELL_MS);
++    }
++
++    /**
++     * 満了時の再確認は 3 つだけ:
++     * (a) タイマーが無効化されていない (pointerdown 等は clearDwell でここへ来なくする)
++     * (b) ホバーが継続している
++     * (c) reduced-motion でない (200ms の間に設定が変わることがある)
++     * ボタンの押下状態は**読み直さない**。pointerdown が停止条件としてタイマーそのものを
++     * 破棄することで保証する (過去のイベントを現在の状態の代理にしない)。
++     */
++    function startPreview(): void {
++        dwellTimer = null;
++        if (!hovering) return;
++        if (playbackUrl === null) return; // props が入れ替わった場合に備えて再確認する
++        if (prefersReducedMotion()) return;
++        playing = true;
++    }
++
++    /** 停止 (冪等)。タイマー clear と video unmount を必ず両方行う */
++    function stopPreview(): void {
++        clearDwell();
++        playing = false;
++        videoEl = null;
++    }
++
++    function clearDwell(): void {
++        if (dwellTimer === null) return;
++        clearTimeout(dwellTimer);
++        dwellTimer = null;
++    }
++
++    function onPointerLeave(): void {
++        hovering = false;
++        stopPreview();
++    }
++
++    /** mount 後に再生を開始する。開始の正本は play() で、autoplay 属性は使わない */
++    function onVideoMounted(el: Element): void {
++        if (!(el instanceof HTMLVideoElement)) return;
++        videoEl = el;
++        el.muted = true; // 属性だけでなく property でも立てる (自動再生の許可条件)
++        void el.play().catch(() => {
++            // 自動再生ポリシーによる拒否。error イベントでは飛んでこない経路。
++            // 古い試行の rejection が新しい試行を止めないよう、要素の同一性で世代を判定する
++            if (videoEl === el) stopPreview();
++        });
++    }
++
++    /** 取得・デコード失敗。世代判定は play() の catch と同じ規則 */
++    function onVideoError(event: Event): void {
++        if (videoEl === event.currentTarget) stopPreview();
++    }
++
++    /** タブが隠れたら止める (見えない場所で再生し続けない) */
++    function onVisibilityChange(): void {
++        if (document.visibilityState === "hidden") stopPreview();
++    }
++
++    // 登録と解除を onMount の中で対にする。onMount はブラウザでしか走らず、
++    // 返した後始末もブラウザでしか走らないため、`typeof document !== "undefined"` の
++    // 自前 guard を書かずに非ブラウザ環境と対称になる (フレームワークのレンジ内でやる)。
++    onMount(() => {
++        document.addEventListener("visibilitychange", onVisibilityChange);
++        return () => document.removeEventListener("visibilitychange", onVisibilityChange);
++    });
++
++    // document に触らない後始末だけを onDestroy に置く (予約済みタイマーを捨てる)
++    onDestroy(clearDwell);
++</script>
++
++<Link
++    {href}
++    class="relative block size-16 shrink-0 overflow-hidden rounded-md border border-border bg-neutral"
++    aria-label={label}
++    data-testid={testId}
++    onpointerenter={onPointerEnter}
++    onpointerleave={onPointerLeave}
++    onpointercancel={onPointerLeave}
++    onpointerdown={stopPreview}
++>
++    {#if playing && playbackUrl !== null}
++        <!-- svelte-ignore a11y_media_has_caption -->
++        <video
++            {@attach onVideoMounted}
++            src={playbackUrl}
++            poster={thumbnailUrl}
++            muted
++            loop
++            playsinline
++            preload="metadata"
++            class="size-full object-cover"
++            aria-hidden="true"
++            onerror={onVideoError}
++            data-testid={testId ? `${testId}-video` : undefined}
++        ></video>
++    {:else if thumbnailUrl !== null}
++        <img
++            src={thumbnailUrl}
++            alt=""
++            loading="lazy"
++            decoding="async"
++            class="size-full object-cover"
++            data-testid={testId ? `${testId}-image` : undefined}
++        />
++    {:else}
++        <span class="flex size-full items-center justify-center" aria-hidden="true">
++            <Film class="size-4 text-text-secondary" />
++        </span>
++    {/if}
++</Link>
+diff --git a/resources/js/types/manual.ts b/resources/js/types/manual.ts
+index 50f9d68..2c6da10 100644
+--- a/resources/js/types/manual.ts
++++ b/resources/js/types/manual.ts
+@@ -388,5 +388,10 @@ export interface TakeSelectionPageProps {
+ export interface CutTakeSummary {
+     cut_id: number;
+     takes_count: number;
+-    adopted: { id: number; status: SelectableTakeStatus } | null;
++    adopted: {
++        id: number;
++        status: SelectableTakeStatus;
++        /** サムネイル生成済みか。true のときだけ .../takes/{id}/thumbnail を表示に使う */
++        has_thumbnail: boolean;
++    } | null;
+ }
+diff --git a/tests/Feature/Manual/ScenarioVideoColumnTest.php b/tests/Feature/Manual/ScenarioVideoColumnTest.php
+index 8b7bea8..0f52912 100644
+--- a/tests/Feature/Manual/ScenarioVideoColumnTest.php
++++ b/tests/Feature/Manual/ScenarioVideoColumnTest.php
+@@ -2,6 +2,7 @@
+ 
+ declare(strict_types=1);
+ 
++use App\Enums\Manual\TakeStatus;
+ use App\Models\Cut;
+ use App\Models\Project;
+ use App\Models\Take;
+@@ -48,6 +49,67 @@
+             ->where('takeSummaries.0.adopted.status', 'ready'));
+ });
+ 
++test('サムネイル表示条件: 採用テイクにサムネイルがあれば adopted.has_thumbnail が true', function (): void {
++    [$organization, $owner] = createOrganizationWithOwner();
++    $project = Project::factory()->forOrganization($organization)->create();
++    $manual = VideoManual::factory()->forProject($project)->create();
++    $cut = Cut::factory()->forManual($manual)->create();
++    $take = Take::factory()->forCut($cut)->withThumbnail()->create();
++    $cut->forceFill(['adopted_take_id' => $take->id])->save();
++
++    $this->actingAs($owner)
++        ->get("/projects/{$project->id}/manuals/{$manual->id}/edit")
++        ->assertInertia(fn ($page) => $page
++            ->where('takeSummaries.0.adopted.id', $take->id)
++            ->where('takeSummaries.0.adopted.has_thumbnail', true));
++});
++
++test('サムネイル表示条件: 採用テイクにサムネイルが無ければ adopted.has_thumbnail が false', function (): void {
++    [$organization, $owner] = createOrganizationWithOwner();
++    $project = Project::factory()->forOrganization($organization)->create();
++    $manual = VideoManual::factory()->forProject($project)->create();
++    $cut = Cut::factory()->forManual($manual)->create();
++    $take = Take::factory()->forCut($cut)->create();
++    $cut->forceFill(['adopted_take_id' => $take->id])->save();
++
++    $this->actingAs($owner)
++        ->get("/projects/{$project->id}/manuals/{$manual->id}/edit")
++        ->assertInertia(fn ($page) => $page
++            ->where('takeSummaries.0.adopted.has_thumbnail', false));
++});
++
++test('サムネイル表示条件: 採用テイクが無いカットは adopted が null のまま (キー追加で shape が壊れない)', function (): void {
++    [$organization, $owner] = createOrganizationWithOwner();
++    $project = Project::factory()->forOrganization($organization)->create();
++    $manual = VideoManual::factory()->forProject($project)->create();
++    $cut = Cut::factory()->forManual($manual)->create();
++    Take::factory()->forCut($cut)->withThumbnail()->create();
++
++    $this->actingAs($owner)
++        ->get("/projects/{$project->id}/manuals/{$manual->id}/edit")
++        ->assertInertia(fn ($page) => $page
++            ->where('takeSummaries.0.takes_count', 1)
++            ->where('takeSummaries.0.adopted', null));
++});
++
++test('サムネイル表示条件: 非 ready の採用テイクでも status と has_thumbnail はそのまま出る (サーバ側で AND を取らない)', function (): void {
++    [$organization, $owner] = createOrganizationWithOwner();
++    $project = Project::factory()->forOrganization($organization)->create();
++    $manual = VideoManual::factory()->forProject($project)->create();
++    $cut = Cut::factory()->forManual($manual)->create();
++    $take = Take::factory()->forCut($cut)->withThumbnail()->create([
++        'status' => TakeStatus::Processing->value,
++    ]);
++    $cut->forceFill(['adopted_take_id' => $take->id])->save();
++
++    // status と has_thumbnail は独立に返す。表示可否の AND は UI 側の責務
++    $this->actingAs($owner)
++        ->get("/projects/{$project->id}/manuals/{$manual->id}/edit")
++        ->assertInertia(fn ($page) => $page
++            ->where('takeSummaries.0.adopted.status', 'processing')
++            ->where('takeSummaries.0.adopted.has_thumbnail', true));
++});
++
+ test('takeSummaries のキーに採用テイク外部キーの識別子が現れない (gate 回避の命名の固定)', function (): void {
+     [$organization, $owner] = createOrganizationWithOwner();
+     $project = Project::factory()->forOrganization($organization)->create();
+diff --git a/tests/js/components/features/manual/ScenarioEditor.test.ts b/tests/js/components/features/manual/ScenarioEditor.test.ts
+index 3810ad2..c21980b 100644
+--- a/tests/js/components/features/manual/ScenarioEditor.test.ts
++++ b/tests/js/components/features/manual/ScenarioEditor.test.ts
+@@ -1712,3 +1712,76 @@ describe("IME 変換中の構造操作は安定キーで解決する (T188)", ()
+         expect(pointScenes(0)).toEqual(["急所B-1", "急所B-2", ""]);
+     });
+ });
++
++/*
++ * 動画列のサムネイル表示条件 (T190)。
++ * サーバが 404 を返す状態 (非 ready / サムネイル未生成) へは最初から URL を張らない。
++ * サムネイルが出ないケースでも導線 (テイクを選択 / ファイルの選択) は常に押せる。
++ */
++describe("動画列のサムネイル表示条件 (T190)", () => {
++    /** 採用テイクの要約 (step id=11 のカット) */
++    function summary(
++        adopted: { id: number; status: "ready" | "processing"; has_thumbnail: boolean } | null,
++    ) {
++        return [{ cut_id: 11, takes_count: 2, adopted }];
++    }
++
++    function renderWith(takeSummaries: ReturnType<typeof summary>) {
++        return render(ScenarioEditor, {
++            props: { ...baseProps, scenario: makeDocument(), takeSummaries },
++        });
++    }
++
++    it("採用テイクが ready かつサムネイル生成済みならサムネイルが出る", () => {
++        renderWith(summary({ id: 9, status: "ready", has_thumbnail: true }));
++
++        expect(screen.getByTestId("video-cell-preview-step-0")).toBeInTheDocument();
++        expect(screen.getByTestId("video-cell-preview-step-0-image")).toHaveAttribute(
++            "src",
++            "/app/projects/1/manuals/5/cuts/11/takes/9/thumbnail",
++        );
++    });
++
++    it("採用テイクが無いカットにはサムネイルが出ない", () => {
++        renderWith(summary(null));
++
++        expect(screen.queryByTestId("video-cell-preview-step-0")).toBeNull();
++    });
++
++    it("サムネイル未生成の採用テイクにはサムネイルが出ない", () => {
++        const { container } = renderWith(summary({ id: 9, status: "ready", has_thumbnail: false }));
++
++        expect(screen.queryByTestId("video-cell-preview-step-0")).toBeNull();
++        // 404 になる URL を 1 つも張らない (属性へ直接問い合わせる)
++        expect(container.querySelector('img[src*="/thumbnail"]')).toBeNull();
++        expect(container.querySelector('video[src*="/playback"]')).toBeNull();
++    });
++
++    it("非 ready の採用テイクにはサムネイルが出ない", () => {
++        const { container } = renderWith(
++            summary({ id: 9, status: "processing", has_thumbnail: true }),
++        );
++
++        expect(screen.queryByTestId("video-cell-preview-step-0")).toBeNull();
++        expect(container.querySelector('img[src*="/thumbnail"]')).toBeNull();
++        expect(container.querySelector('video[src*="/playback"]')).toBeNull();
++    });
++
++    it("サムネイルが出ないケースでも「テイクを選択」は押せる (条件未充足で操作を塞がない)", () => {
++        renderWith(summary({ id: 9, status: "processing", has_thumbnail: false }));
++
++        const links = screen.getAllByTestId("video-cell-link");
++        expect(links[0]).toHaveTextContent("テイクを選択");
++        expect(links[0]).not.toHaveAttribute("disabled");
++        expect(links[0].getAttribute("href")).toMatch(
++            /^https?:\/\/[^/]+\/projects\/1\/manuals\/5\/cuts\/11\/takes$/,
++        );
++    });
++
++    it("採用済みバッジとテイク件数は従来どおり出る", () => {
++        renderWith(summary({ id: 9, status: "ready", has_thumbnail: true }));
++
++        expect(screen.getAllByTestId("video-cell-count")[0]).toHaveTextContent("テイク 2 件");
++        expect(screen.getAllByTestId("video-cell-adopted")[0]).toHaveTextContent("採用済み");
++    });
++});
+diff --git a/tests/js/components/features/manual/TakeHoverPreview.test.ts b/tests/js/components/features/manual/TakeHoverPreview.test.ts
+new file mode 100644
+index 0000000..f04865e
+--- /dev/null
++++ b/tests/js/components/features/manual/TakeHoverPreview.test.ts
+@@ -0,0 +1,290 @@
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
++import { get } from "svelte/store";
++import { tick } from "svelte";
++import TakeHoverPreview from "@/components/features/manual/TakeHoverPreview.svelte";
++import { clearToasts, toasts } from "@/lib/stores/toast";
++
++/*
++ * TakeHoverPreview: 採用テイクのサムネイルにマウスを載せている間だけ
++ * 無音・ループで自動再生する。タッチ / ペン・押下中・reduced-motion では起動しない。
++ * 失敗 (自動再生拒否 / 取得失敗) は静かに静止画へ戻す (文言・トーストを出さない)。
++ */
++
++// prefers-reduced-motion はテストごとに切り替えるためモックする (既定は false = 動かしてよい)
++const { reducedMotionMock } = vi.hoisted(() => ({ reducedMotionMock: vi.fn(() => false) }));
++vi.mock("@/lib/capture/panel-navigation", async (importOriginal) => ({
++    ...(await importOriginal<typeof import("@/lib/capture/panel-navigation")>()),
++    prefersReducedMotion: reducedMotionMock,
++}));
++
++const THUMBNAIL_URL = "/app/projects/1/manuals/2/cuts/3/takes/9/thumbnail";
++const PLAYBACK_URL = "/app/projects/1/manuals/2/cuts/3/takes/9/playback";
++
++function makeProps(overrides: Record<string, unknown> = {}) {
++    return {
++        thumbnailUrl: THUMBNAIL_URL,
++        playbackUrl: PLAYBACK_URL,
++        href: "/projects/1/manuals/2/cuts/3/takes",
++        label: "採用テイクを開く",
++        testId: "preview",
++        ...overrides,
++    };
++}
++
++/** ポインタイベントを組み立てる (pointerType / buttons が起動条件) */
++function pointerEvent(
++    type: string,
++    init: { pointerType?: string; buttons?: number } = {},
++): PointerEvent {
++    return new PointerEvent(type, {
++        bubbles: true,
++        cancelable: true,
++        pointerId: 1,
++        pointerType: init.pointerType ?? "mouse",
++        buttons: init.buttons ?? 0,
++    });
++}
++
++/** ラッパ (Link) へポインタイベントを送る */
++async function sendPointer(
++    type: string,
++    init: { pointerType?: string; buttons?: number } = {},
++): Promise<void> {
++    await fireEvent(screen.getByTestId("preview"), pointerEvent(type, init));
++}
++
++/** 滞留時間を進めて Svelte の反映を待つ */
++async function advance(ms: number): Promise<void> {
++    vi.advanceTimersByTime(ms);
++    await tick();
++    await tick();
++}
++
++const DWELL_MS = 200;
++
++beforeEach(() => {
++    vi.useFakeTimers();
++    reducedMotionMock.mockReturnValue(false);
++    clearToasts();
++    // jsdom は HTMLMediaElement の再生系メソッドを未実装
++    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
++    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
++    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
++});
++
++afterEach(() => {
++    cleanup();
++    vi.restoreAllMocks();
++    vi.useRealTimers();
++    clearToasts();
++});
++
++describe("TakeHoverPreview", () => {
++    it("既定は静止サムネイルを描画し <video> は存在しない", () => {
++        render(TakeHoverPreview, makeProps());
++
++        expect(screen.getByTestId("preview-image")).toHaveAttribute("src", THUMBNAIL_URL);
++        expect(screen.queryByTestId("preview-video")).toBeNull();
++    });
++
++    it("マウスのホバーが滞留時間を超えると <video> が現れる", async () => {
++        render(TakeHoverPreview, makeProps());
++
++        await sendPointer("pointerenter");
++        expect(screen.queryByTestId("preview-video")).toBeNull(); // 滞留前は静止画のまま
++
++        await advance(DWELL_MS);
++
++        const video = screen.getByTestId("preview-video");
++        expect(video).toHaveAttribute("src", PLAYBACK_URL);
++        expect(video).toHaveAttribute("poster", THUMBNAIL_URL);
++        expect(video).toHaveAttribute("loop");
++        expect(HTMLMediaElement.prototype.play).toHaveBeenCalled();
++    });
++
++    it("タッチのホバーでは再生しない (タップは遷移の意味だけを持つ)", async () => {
++        render(TakeHoverPreview, makeProps());
++
++        await sendPointer("pointerenter", { pointerType: "touch" });
++        await advance(DWELL_MS);
++
++        expect(screen.queryByTestId("preview-video")).toBeNull();
++    });
++
++    it("ボタン押下中のホバーでは再生しない", async () => {
++        render(TakeHoverPreview, makeProps());
++
++        await sendPointer("pointerenter", { buttons: 1 });
++        await advance(DWELL_MS);
++
++        expect(screen.queryByTestId("preview-video")).toBeNull();
++    });
++
++    it("滞留中に pointerdown が来たら再生しない (並べ替えドラッグとの競合を作らない)", async () => {
++        render(TakeHoverPreview, makeProps());
++
++        await sendPointer("pointerenter");
++        await advance(100);
++        await sendPointer("pointerdown");
++        await advance(DWELL_MS);
++
++        expect(screen.queryByTestId("preview-video")).toBeNull();
++    });
++
++    it("prefers-reduced-motion では再生しない", async () => {
++        reducedMotionMock.mockReturnValue(true);
++        render(TakeHoverPreview, makeProps());
++
++        await sendPointer("pointerenter");
++        await advance(DWELL_MS);
++
++        expect(screen.queryByTestId("preview-video")).toBeNull();
++    });
++
++    it("滞留中に reduced-motion へ変わったら満了時に再生しない (満了時の再評価)", async () => {
++        render(TakeHoverPreview, makeProps());
++
++        await sendPointer("pointerenter");
++        reducedMotionMock.mockReturnValue(true);
++        await advance(DWELL_MS);
++
++        expect(screen.queryByTestId("preview-video")).toBeNull();
++    });
++
++    it("pointerleave で <video> が消えて静止サムネイルへ戻る", async () => {
++        render(TakeHoverPreview, makeProps());
++
++        await sendPointer("pointerenter");
++        await advance(DWELL_MS);
++        expect(screen.getByTestId("preview-video")).toBeInTheDocument();
++
++        await sendPointer("pointerleave");
++        await tick();
++
++        expect(screen.queryByTestId("preview-video")).toBeNull();
++        expect(screen.getByTestId("preview-image")).toBeInTheDocument();
++    });
++
++    it("pointerleave を続けて 2 回受けても壊れない (停止は冪等)", async () => {
++        render(TakeHoverPreview, makeProps());
++
++        await sendPointer("pointerenter");
++        await advance(DWELL_MS);
++        await sendPointer("pointerleave");
++        await sendPointer("pointerleave");
++        await tick();
++
++        expect(screen.queryByTestId("preview-video")).toBeNull();
++        expect(screen.getByTestId("preview-image")).toBeInTheDocument();
++    });
++
++    it("タブが隠れたら <video> が消える (見えない場所で再生し続けない)", async () => {
++        render(TakeHoverPreview, makeProps());
++
++        await sendPointer("pointerenter");
++        await advance(DWELL_MS);
++        expect(screen.getByTestId("preview-video")).toBeInTheDocument();
++
++        vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
++        await fireEvent(document, new Event("visibilitychange"));
++        await tick();
++
++        expect(screen.queryByTestId("preview-video")).toBeNull();
++    });
++
++    it("自動再生が拒否されたら静止画へ戻り、トーストは 1 件も出ない", async () => {
++        vi.spyOn(HTMLMediaElement.prototype, "play").mockRejectedValue(
++            new DOMException("NotAllowedError"),
++        );
++        render(TakeHoverPreview, makeProps());
++
++        await sendPointer("pointerenter");
++        await advance(DWELL_MS);
++        await tick();
++
++        expect(screen.queryByTestId("preview-video")).toBeNull();
++        expect(screen.getByTestId("preview-image")).toBeInTheDocument();
++        expect(get(toasts)).toHaveLength(0);
++    });
++
++    it("取得・デコードに失敗したら静止画へ戻る", async () => {
++        render(TakeHoverPreview, makeProps());
++
++        await sendPointer("pointerenter");
++        await advance(DWELL_MS);
++        await fireEvent.error(screen.getByTestId("preview-video"));
++        await tick();
++
++        expect(screen.queryByTestId("preview-video")).toBeNull();
++        expect(screen.getByTestId("preview-image")).toBeInTheDocument();
++    });
++
++    it("古い再生試行の失敗が、新しい <video> を止めない (世代判定)", async () => {
++        // play() の決着をテスト側で握り、1 本目の rejection を 2 本目の mount 後に届かせる
++        const pending: Array<(reason: unknown) => void> = [];
++        vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(
++            () =>
++                new Promise<void>((_resolve, reject) => {
++                    pending.push(reject);
++                }),
++        );
++        render(TakeHoverPreview, makeProps());
++
++        await sendPointer("pointerenter");
++        await advance(DWELL_MS);
++        const first = screen.getByTestId("preview-video");
++
++        await sendPointer("pointerleave");
++        await tick();
++        await sendPointer("pointerenter");
++        await advance(DWELL_MS);
++        const second = screen.getByTestId("preview-video");
++        expect(second).not.toBe(first);
++
++        // 1 本目の rejection が遅れて到着する
++        pending[0](new DOMException("NotAllowedError"));
++        await tick();
++        await tick();
++
++        expect(screen.getByTestId("preview-video")).toBe(second);
++    });
++
++    it("unmount 後の visibilitychange で例外が出ない (listener を同じ参照で外している)", async () => {
++        const addSpy = vi.spyOn(document, "addEventListener");
++        const removeSpy = vi.spyOn(document, "removeEventListener");
++
++        const { unmount } = render(TakeHoverPreview, makeProps());
++
++        const added = addSpy.mock.calls.filter(([type]) => type === "visibilitychange");
++        expect(added).toHaveLength(1);
++
++        unmount();
++        await tick();
++
++        const removed = removeSpy.mock.calls.filter(([type]) => type === "visibilitychange");
++        expect(removed).toHaveLength(1);
++        expect(removed[0][1]).toBe(added[0][1]);
++
++        // 外れているので、破棄後に発火しても何も起きない
++        document.dispatchEvent(new Event("visibilitychange"));
++        await tick();
++    });
++
++    it("再生 URL が無い (非 ready) ときはホバーしても <video> を作らない", async () => {
++        render(TakeHoverPreview, makeProps({ playbackUrl: null }));
++
++        await sendPointer("pointerenter");
++        await advance(DWELL_MS);
++
++        expect(screen.queryByTestId("preview-video")).toBeNull();
++        expect(screen.getByTestId("preview-image")).toBeInTheDocument();
++    });
++
++    it("サムネイル URL が無いときは画像ではなくプレースホルダを出す", () => {
++        const { container } = render(TakeHoverPreview, makeProps({ thumbnailUrl: null }));
++
++        expect(screen.queryByTestId("preview-image")).toBeNull();
++        expect(container.querySelector("svg")).not.toBeNull();
++    });
++});
+```
+
+---
+
+## design system 参照 (DESIGN.md 抜粋)
+
+```
+  1 画面の主要 CTA 以外には濫用しない。
+  - tailwind: `bg-primary`, `text-primary`, `border-primary`、hover は `hover:bg-primary-hover`
+- **Tertiary(#0F766E)**: 強いアクセント。緊急性・重要性のある前向き CTA、特別なバッジに限定。
+  1 画面に 1 箇所が原則。
+  - tailwind: `bg-tertiary`, `text-tertiary`, `border-tertiary`、hover は `hover:bg-tertiary-hover`
+- **Neutral(#F4F4F5)**: 主要な背景色。画面全体はこの色で塗る。
+  - tailwind: `bg-neutral`
+- **Surface(#FFFFFF)**: カード・モーダル・浮いた要素の背景。Neutral との明度差で奥行きを出す。
+  - tailwind: `bg-surface`
+- **Border(#E4E4E7)**: 区切り線、入力欄の枠。常に細く(1px)。
+  - tailwind: `border-border`
+- **Border Strong(#A1A1AA)**: 区切りの強調、ghost ボタンの枠。
+  - tailwind: `border-border-strong`
+- **Text Primary(#18181B)**: 本文・見出しの主たる色。純黒は使わない。
+  - tailwind: `text-text`(`--color-text` を参照)
+- **Text Secondary(#52525B)**: 補足文、キャプション、ラベル。
+  - tailwind: `text-text-secondary`
+
+### 状態色
+
+- **Success(#15803D)**: 完了・正常・公開済み。
+## Shapes
+
+角丸 ramp は **`rounded-sm`(4px)/ `rounded-md`(6px)/ `rounded-lg`(8px)の 3 段のみ**。
+DOM 役割で選ぶ(上から優先): カード・モーダル=`lg` / 中間 box(パネル・`<pre>`)=`md` /
+ボタン・入力・バッジ等の小コントロール=`sm`。
+素の `rounded`・`rounded-xl` 以上・任意値・方向別(`rounded-t-*` 等)は使わない。
+完全円(`rounded-full`)はアバター/status dot/トグル等の**真に円形な UI に限る** ramp 外の例外で、
+```
+
+### 触れた atomic ディレクトリ (resources/js/components/features/manual/)
+
+```
+AnalysisPanel.svelte
+DuplicateManualDialog.svelte
+ManualListRow.svelte
+ManualPreviewModal.svelte
+RenderPanel.svelte
+ScenarioEditor.svelte
+SourceDocumentUpload.svelte
+TakeFileUpload.svelte
+TakeHoverPreview.svelte
+TakePickerList.svelte
+TakePreviewPanel.svelte
+TakeThumbnail.svelte
+insufficient-tickets.ts
+```
+
+---
+
+## テスト結果
+
+- composer test: 5428 tests / 5426 passed / 2 skipped / 0 failed (23409 assertions)
+- composer phpstan: No errors (level 10)
+- vendor/bin/pint --test: passed
+- pnpm lint: OK / pnpm typecheck: OK
+- pnpm test: 151 files / 1823 passed / 0 failed
+  (うち新規 TakeHoverPreview.test.ts 16 件、ScenarioEditor.test.ts に 6 件追加)
+- pnpm build: OK
+- pnpm typecheck:packages / build:packages: OK
+- pnpm test:packages: 10 files / 106 passed
+
+## 実装時に設計から意図的に逸脱した点 (レビューして妥当性を判定してほしい)
+
+1. `TakeHoverPreview.svelte` の `dwellTimer` / `hovering` / `videoEl` を設計の `$state(...)` ではなく
+   素の `let` にした。いずれもテンプレートから読まれず (描画に使うのは `playing` だけ)、
+   `videoEl` は attachment (effect) の中から書き込むため、$state にすると
+   描画に使わない値のために effect の依存を増やすことになると判断した。
+2. attachment のコールバック引数を `HTMLVideoElement` ではなく `Element` で受け、
+   `instanceof HTMLVideoElement` で絞ってから使う形にした (型の付き方に合わせたため)。
+3. ScenarioEditor 側の `previewable` という中間定数を置かず、
+   `adopted !== null && adopted.status === "ready" && adopted.has_thumbnail` を
+   `{#if}` に直接書いた (Svelte の narrowing が効く形にするため)。
+4. ScenarioEditor のテストは `takeUrl` を `buildTakeUrl` の別名で import した
+   (同ファイル内の既存 import 規約 = TakePickerList / TakePreviewPanel と同じ別名に揃えた)。
