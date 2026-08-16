@@ -37,6 +37,19 @@
 
     let video: HTMLVideoElement | undefined = $state();
     let subtitlesOn = $state(true);
+    /**
+     * 読み込みに失敗した <img> の URL。素材種別は**申告 Content-Type からの分類**であり
+     * 実体の形式を保証しないため (docs/architecture.md の非保証)、
+     * still と申告された実体がデコードできない場合に「何も出ない」状態を作らない。
+     * <video> 側には足さない (既存挙動を変えないため。非対称は意図的)。
+     *
+     * 真偽値ではなく**失敗した URL** を持つ: 失敗は「その URL の性質」であって component の
+     * 状態ではない。{#key} に頼る形も採らない (DOM は作り直されても <script> の $state は
+     * 再生成されないので前のテイクの失敗が残る)。この形なら、テイクの切り替えでも
+     * 同じテイクの署名 URL 再取得でも、リセットのための購読を書かずに構造的に外れる。
+     */
+    let failedUrl = $state<string | null>(null);
+    const imageFailed = $derived(failedUrl !== null && failedUrl === playbackUrl);
 
     // 再オープン時に字幕を初期 ON へ戻す (撮影 PWA は初期 ON。doc/05)。
     $effect(() => {
@@ -55,7 +68,7 @@
     // close / 採用成功で閉じる / take 差し替え / component 破棄を同一 cleanup で扱う。
     // effect 実行時の要素を固定し、差し替え時に新要素を誤 teardown しない。
     $effect(() => {
-        if (!open || take === null || video === undefined) return;
+        if (!open || take === null || take.material_type === "still" || video === undefined) return;
         const target = video;
         return () => teardownVideo(target);
     });
@@ -76,18 +89,38 @@
     <div class="flex flex-col gap-3">
         <div class="relative w-full overflow-hidden rounded-md bg-text/5">
             {#if open && take !== null}
-                {#key take.id}
-                    <!-- svelte-ignore a11y_media_has_caption -->
-                    <video
-                        bind:this={video}
-                        controls
-                        playsinline
-                        src={playbackUrl ?? undefined}
-                        class="w-full"
-                        aria-label={`${cutLabel} のテイク再生`}
-                        data-testid="take-preview-video"
-                    ></video>
-                {/key}
+                {#if take.material_type === "still"}
+                    {#if imageFailed}
+                        <p
+                            class="p-6 text-center text-caption text-text-secondary"
+                            role="status"
+                            data-testid="take-preview-unavailable"
+                        >
+                            このテイクはプレビューできません。
+                        </p>
+                    {:else}
+                        <img
+                            src={playbackUrl ?? undefined}
+                            alt={`${cutLabel} のテイク`}
+                            class="w-full"
+                            onerror={() => (failedUrl = playbackUrl)}
+                            data-testid="take-preview-image"
+                        />
+                    {/if}
+                {:else}
+                    {#key take.id}
+                        <!-- svelte-ignore a11y_media_has_caption -->
+                        <video
+                            bind:this={video}
+                            controls
+                            playsinline
+                            src={playbackUrl ?? undefined}
+                            class="w-full"
+                            aria-label={`${cutLabel} のテイク再生`}
+                            data-testid="take-preview-video"
+                        ></video>
+                    {/key}
+                {/if}
             {/if}
 
             {#if subtitlesOn}

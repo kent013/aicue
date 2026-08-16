@@ -14,6 +14,7 @@ function makeCut(overrides: Partial<CaptureCut> = {}): CaptureCut {
         narration: "",
         subtitle_primary: null,
         subtitle_secondary: "",
+        material_type: null,
         adopted_take_id: null,
         adopted_ready_take_id: null,
         takes: [],

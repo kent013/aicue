@@ -59,9 +59,9 @@ final readonly class CaptureCutData
     /**
      * @return array{id: int, type: string, parent_cut_id: int|null, scene: string,
      *   shot_type: string, shooting_point: string|null, narration: string,
-     *   subtitle_primary: string|null, subtitle_secondary: string, adopted_take_id: int|null,
-     *   adopted_ready_take_id: int|null,
-     *   takes: list<array{id: int, client_take_id: string, status: string, size_bytes: int,
+     *   subtitle_primary: string|null, subtitle_secondary: string, material_type: string|null,
+     *   adopted_take_id: int|null, adopted_ready_take_id: int|null,
+     *   takes: list<array{id: int, client_take_id: string, status: string, material_type: string, size_bytes: int,
      *     duration_ms: int|null, comment: string|null, captured_at: string|null, sort_order: int,
      *     downloaded: bool, has_thumbnail: bool, playback_url: string|null,
      *     download_ack_token: string|null}>}
@@ -78,6 +78,8 @@ final readonly class CaptureCutData
             'narration' => $this->cut->narration,
             'subtitle_primary' => $this->cut->subtitle_primary,
             'subtitle_secondary' => $this->cut->subtitle_secondary,
+            // カットの**計画** (未指定あり)。撮影 UI の出し分け (シャッター / 録画) に使う
+            'material_type' => $this->cut->material_type?->value,
             'adopted_take_id' => $this->cut->adopted_take_id,
             // 通し再生が再生する対象。null = そのカットはプレースホルダになる
             // (「採用されていない」と「採用済みだが ready でない」を区別しない = 述語の意味そのまま)

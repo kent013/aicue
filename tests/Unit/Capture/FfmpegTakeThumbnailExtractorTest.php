@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\Manual\MaterialType;
 use App\Exceptions\Capture\TakeThumbnailExtractionException;
 use App\Services\Capture\FfmpegTakeThumbnailExtractor;
 use Illuminate\Process\PendingProcess;
@@ -14,6 +15,8 @@ use Illuminate\Support\Facades\Process;
  * - 出力寸法・品質が config 固定
  * - 尺不足で 0 バイトなら seek=0 で 1 回だけ再試行する
  * - 実行前に出力先を消す (1 回目の残骸を成功と誤認しない)
+ * - 安全境界の -max_alloc が**バイナリ直後**に付く (画素数爆弾で worker を落とさない)
+ * - 静止画は seek=0 の 1 回だけ (「1 秒地点」が存在しない)
  *
  * ★ 実バイナリの挙動差 (`-frames:v 1` + `-f image2` の出力有無) は本テストでは検出しない。
  *   実バイナリでの通し確認は bug-hunt の pipeline-smoke (別基盤) の領域である。
@@ -59,7 +62,7 @@ test('コマンド構造: 安全境界の引数と config 由来の寸法・品�
     });
     $workDir = thumbnailWorkDir();
 
-    app(FfmpegTakeThumbnailExtractor::class)->extract("{$workDir}/source", "{$workDir}/thumbnail.jpg");
+    app(FfmpegTakeThumbnailExtractor::class)->extract("{$workDir}/source", "{$workDir}/thumbnail.jpg", MaterialType::Video);
 
     expect($recorded)->toHaveCount(1);
     $line = $recorded[0];
@@ -76,6 +79,55 @@ test('コマンド構造: 安全境界の引数と config 由来の寸法・品�
     expect($line)->toContain("{$workDir}/thumbnail.jpg");
 });
 
+test('安全境界の -max_alloc がバイナリ直後 (argv[1], argv[2]) に付く', function (): void {
+    // 配置を「最初の -i より前」ではなくバイナリ直後で固定する。ffprobe は入力を位置引数で
+    // 受けるため、-i を基準にすると同じ検査が別コマンドで空振りする。
+    $commands = [];
+    Process::fake(function (PendingProcess $process) use (&$commands) {
+        $command = $process->command;
+        $commands[] = is_array($command) ? array_map(strval(...), $command) : [(string) $command];
+        file_put_contents(is_array($command) ? (string) $command[count($command) - 1] : '', 'jpeg');
+
+        return Process::result(output: '', errorOutput: '', exitCode: 0);
+    });
+    $workDir = thumbnailWorkDir();
+
+    app(FfmpegTakeThumbnailExtractor::class)
+        ->extract("{$workDir}/source", "{$workDir}/thumbnail.jpg", MaterialType::Video);
+
+    expect($commands)->toHaveCount(1);
+    expect($commands[0][1])->toBe('-max_alloc');
+    expect($commands[0][2])->toBe((string) config()->integer('manual.ffmpeg_max_alloc_bytes'));
+});
+
+test('静止画は seek=0 の 1 回だけ実行する (再試行しない)', function (): void {
+    $recorded = [];
+    fakeThumbnailFfmpeg($recorded, function (int $attempt, string $destination): int {
+        file_put_contents($destination, 'jpeg');
+
+        return 0;
+    });
+    $workDir = thumbnailWorkDir();
+
+    app(FfmpegTakeThumbnailExtractor::class)
+        ->extract("{$workDir}/source", "{$workDir}/thumbnail.jpg", MaterialType::Still);
+
+    expect($recorded)->toHaveCount(1);
+    expect($recorded[0])->toContain('-ss 0.000'); // 動画既定の 1000ms を当てない
+});
+
+test('静止画で失敗したら再試行せずそのまま例外にする', function (): void {
+    $recorded = [];
+    fakeThumbnailFfmpeg($recorded, fn (int $attempt, string $destination): int => 1);
+    $workDir = thumbnailWorkDir();
+
+    expect(fn () => app(FfmpegTakeThumbnailExtractor::class)
+        ->extract("{$workDir}/source", "{$workDir}/thumbnail.jpg", MaterialType::Still))
+        ->toThrow(TakeThumbnailExtractionException::class, 'ffmpeg failed (thumbnail): ffmpeg boom');
+
+    expect($recorded)->toHaveCount(1);
+});
+
 test('尺不足で 1 回目が 0 バイトなら seek=0 で 1 回だけ再試行し、成功すれば例外を投げない', function (): void {
     $recorded = [];
     fakeThumbnailFfmpeg($recorded, function (int $attempt, string $destination): int {
@@ -89,7 +141,7 @@ test('尺不足で 1 回目が 0 バイトなら seek=0 で 1 回だけ再試行
     });
     $workDir = thumbnailWorkDir();
 
-    app(FfmpegTakeThumbnailExtractor::class)->extract("{$workDir}/source", "{$workDir}/thumbnail.jpg");
+    app(FfmpegTakeThumbnailExtractor::class)->extract("{$workDir}/source", "{$workDir}/thumbnail.jpg", MaterialType::Video);
 
     expect($recorded)->toHaveCount(2);
     expect($recorded[0])->toContain('-ss 1.000');
@@ -102,7 +154,7 @@ test('2 回とも失敗すると TakeThumbnailExtractionException で stderr の
     $workDir = thumbnailWorkDir();
 
     expect(fn () => app(FfmpegTakeThumbnailExtractor::class)
-        ->extract("{$workDir}/source", "{$workDir}/thumbnail.jpg"))
+        ->extract("{$workDir}/source", "{$workDir}/thumbnail.jpg", MaterialType::Video))
         ->toThrow(TakeThumbnailExtractionException::class, 'ffmpeg failed (thumbnail): ffmpeg boom');
 
     expect($recorded)->toHaveCount(2);
@@ -124,7 +176,7 @@ test('1 回目の残骸を成功と誤認しない (実行前に出力先を削�
     $workDir = thumbnailWorkDir();
 
     expect(fn () => app(FfmpegTakeThumbnailExtractor::class)
-        ->extract("{$workDir}/source", "{$workDir}/thumbnail.jpg"))
+        ->extract("{$workDir}/source", "{$workDir}/thumbnail.jpg", MaterialType::Video))
         ->toThrow(TakeThumbnailExtractionException::class, 'ffmpeg produced no frame (seek=0ms)');
 });
 
@@ -140,7 +192,7 @@ test('出力先を削除できない場合も失敗として扱う (OS 権限に
     File::shouldReceive('delete')->andReturnFalse();
 
     expect(fn () => app(FfmpegTakeThumbnailExtractor::class)
-        ->extract('/tmp/thumb-source', '/tmp/thumb-out.jpg'))
+        ->extract('/tmp/thumb-source', '/tmp/thumb-out.jpg', MaterialType::Video))
         ->toThrow(TakeThumbnailExtractionException::class, 'failed to remove stale thumbnail output');
 
     // 削除できなかった時点で ffmpeg を 1 回も起動しない

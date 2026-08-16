@@ -56,7 +56,7 @@ class TakeThumbnailPipeline
 
             // S3 GET は冪等な読み取り / ffmpeg はローカル CPU = どちらも preflight の対象ではない
             $this->storage->downloadToLocal($take->video_path, $source);
-            $this->extractor->extract($source, $thumbnail);
+            $this->extractor->extract($source, $thumbnail, $take->material_type);
 
             $size = File::isFile($thumbnail) ? File::size($thumbnail) : 0;
             if ($size === 0) {

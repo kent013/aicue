@@ -1,6 +1,16 @@
 <script lang="ts">
     import { onMount } from "svelte";
-    import { Check, ChevronDown, ChevronUp, Download, Film, Pencil, Play, Trash2 } from "@lucide/svelte";
+    import {
+        Check,
+        ChevronDown,
+        ChevronUp,
+        Download,
+        Film,
+        Image,
+        Pencil,
+        Play,
+        Trash2,
+    } from "@lucide/svelte";
     import Badge from "@/components/atoms/Badge.svelte";
     import Button from "@/components/atoms/Button.svelte";
     import DragHandle from "@/components/atoms/DragHandle.svelte";
@@ -307,7 +317,12 @@
                     data-testid={`take-thumbnail-placeholder-${take.id}`}
                     aria-hidden="true"
                 >
-                    <Film class="size-4 text-text-secondary" aria-hidden="true" />
+                    <!-- 未生成プレースホルダのアイコンだけ素材種別で替える (寸法は同じ = 跳ねない) -->
+                    {#if take.material_type === "still"}
+                        <Image class="size-4 text-text-secondary" aria-hidden="true" />
+                    {:else}
+                        <Film class="size-4 text-text-secondary" aria-hidden="true" />
+                    {/if}
                 </div>
             {/if}
             <div class="flex shrink-0 flex-col gap-1">

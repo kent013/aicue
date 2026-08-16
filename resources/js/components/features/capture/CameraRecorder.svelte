@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onDestroy } from "svelte";
     import {
+        Camera,
         Captions,
         CaptionsOff,
         Circle,
@@ -28,6 +29,7 @@
         CameraUnavailableReason,
         FacingMode,
     } from "@/lib/capture/camera";
+    import { encodeStillJpeg, STILL_CONTENT_TYPE } from "@/lib/capture/still-encode";
     import type { LayoutMode } from "@/lib/capture/landscape-capture";
     import type { CaptureCut } from "@/types/capture";
 
@@ -48,7 +50,8 @@
      * paused も非 idle のため active=true を維持し preview 排他を保つ。
      */
     interface Props {
-        onCaptured: (blob: Blob, mimeType: string, durationMs: number) => void | Promise<void>;
+        /** 撮影データの引き渡し。静止画には尺が無いので durationMs は null になる */
+        onCaptured: (blob: Blob, mimeType: string, durationMs: number | null) => void | Promise<void>;
         /** カメラが恒久的に使えないと判明したときの通知 (親がフォールバックへ切替) */
         onCameraUnavailable: (reason: CameraUnavailableReason) => void;
         /** 選択中カットの字幕 (撮影ガイド overlay 用。焼込ではない)。既定は空 (字幕なし) */
@@ -67,6 +70,15 @@
          * 非 null かつ非空へ絞る判定は本 component の内側 1 か所で行う。
          */
         shootingPoint?: CaptureCut["shooting_point"];
+        /**
+         * 撮影モード (静止画カット対応)。**既定は従来どおり "video"**。
+         * "still" では MediaRecorder を一切使わず、phase は idle のまま
+         * 「録画開始」の位置にシャッターを出す。
+         * 本 props は表示分岐と shootStill の 1 経路だけを足し、
+         * phase マシン・stream 管理・flip・grid・字幕 overlay・カメラ喪失時の
+         * フォールバック委譲には**一切触れない** (layout props と同じ作法)。
+         */
+        mode?: "video" | "still";
     }
 
     let {
@@ -77,7 +89,10 @@
         onCaptureActiveChange,
         layout = "inline",
         shootingPoint = null,
+        mode = "video",
     }: Props = $props();
+
+    const isStillMode = $derived(mode === "still");
 
     // --- 全画面レイアウト (表示のみ。phase マシンとは独立) ---
     const isFullscreen = $derived(layout === "fullscreen");
@@ -315,6 +330,40 @@
             starting = false;
             // 開始成功時: phase=recording のため active は true 維持 (重複通知しない)。
             // 開始失敗/恒久失敗時: phase=idle のため active=false へ戻す。
+            syncActive();
+        }
+    }
+
+    /**
+     * 静止画の撮影。live preview の現在フレームを 1 枚取り出して親へ渡す。
+     * ImageCapture API は iOS Safari が未対応で、撮影 PWA の主戦場が iOS Safari のため
+     * canvas 経路を採る。
+     *
+     * 再入ガードと active 通知は **startRecording() と完全に同じ形**にする (独自フラグを増やさない)。
+     * `starting` は「grant 待ちの窓でも preview を開けない」ための公開 active の構成要素であり、
+     * `acquirePreviewStream()` 側には starting の再入ガードが無いので、先に立てても stream 取得は
+     * 塞がらない (startRecording が `starting = true` → `syncActive()` → `acquirePreviewStream()` の順)。
+     */
+    async function shootStill(): Promise<void> {
+        if (starting || resuming || phase !== "idle") return;
+        starting = true;
+        syncActive(); // 押下時点で active=true (取得中に preview を開かせない)
+        try {
+            error = null;
+            if (stream === null && !(await acquirePreviewStream())) return;
+            if (video === null) return;
+            // encodeStillJpeg は reject しない契約 (失敗は null)
+            const blob = await encodeStillJpeg(video, video.videoWidth, video.videoHeight);
+            if (blob === null || blob.size === 0) {
+                error = "写真を取得できませんでした。もう一度お試しください。";
+                return;
+            }
+            await onCaptured(blob, STILL_CONTENT_TYPE, null);
+        } catch {
+            // onCaptured (アップロード) 側の失敗を未処理 rejection にしない (録画経路の onstop と同じ)
+            error = "撮影データの処理に失敗しました。もう一度お試しください。";
+        } finally {
+            starting = false;
             syncActive();
         }
     }
@@ -568,10 +617,17 @@
             : "flex items-center justify-center gap-3"}
     >
         {#if phase === "idle"}
-            <Button variant="primary" onclick={startRecording} testId="start-recording">
-                <Circle class="size-4" aria-hidden="true" />
-                録画開始
-            </Button>
+            {#if isStillMode}
+                <Button variant="primary" onclick={shootStill} testId="shoot-still">
+                    <Camera class="size-4" aria-hidden="true" />
+                    写真を撮る
+                </Button>
+            {:else}
+                <Button variant="primary" onclick={startRecording} testId="start-recording">
+                    <Circle class="size-4" aria-hidden="true" />
+                    録画開始
+                </Button>
+            {/if}
             <!-- カメラ反転 (idle のみ表示 = 文脈非該当時は非表示。disabled ではない) -->
             <button
                 type="button"

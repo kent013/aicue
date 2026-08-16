@@ -9,6 +9,7 @@ use App\DataTransferObjects\Manual\Render\RenderClipSource;
 use App\DataTransferObjects\Manual\Render\RenderClipSpec;
 use App\DataTransferObjects\Manual\Render\RenderManifest;
 use App\Exceptions\Manual\RenderCompositionException;
+use App\Support\Media\FfmpegSafetyArguments;
 use Illuminate\Support\Facades\Process;
 use RuntimeException;
 use Webmozart\Assert\Assert;
@@ -114,7 +115,16 @@ class FfmpegVideoComposer implements VideoComposer
     }
 
     /**
-     * 静止画クリップ (採用テイク先頭フレームを static_display_seconds 尺で保持 + 無音声)。
+     * 静止画クリップ (素材の**先頭フレーム**を stillDisplaySeconds 尺で保持 + 無音声)。
+     *
+     * 入力契約: 「1 枚目のフレームを取り出せる入力」であれば動画でも画像でもよい。
+     * 1 段目の `-frames:v 1` は画像入力でも 1 枚の PNG を出すため、
+     * 動画テイク由来の still と画像テイク由来の still を**同じ経路**で扱える。
+     * 「画像なら中間 PNG 化を省く」最適化はしない (通る経路を 2 本にすると片方だけ壊れる形を作る)。
+     *
+     * 2 段目 (`-loop 1 -i frame{n}.png`) が読むのはサーバ生成 PNG だが、その画素数は
+     * **入力素材と同じ**である。画素数の防波堤は FfmpegSafetyArguments の -max_alloc が
+     * 全コマンドに一律で掛ける。
      *
      * @param  array<int, string>  $localSources
      * @return array{list<string>, list<string>, string, int}
@@ -202,7 +212,7 @@ class FfmpegVideoComposer implements VideoComposer
         $binary = config()->string('manual.render_ffmpeg_binary');
         $result = Process::path($workDir)
             ->timeout(self::ENCODE_TIMEOUT_SECONDS)
-            ->run([$binary, ...$arguments]);
+            ->run([$binary, ...FfmpegSafetyArguments::all(), ...$arguments]);
 
         if (! $result->successful()) {
             throw new RenderCompositionException(
@@ -216,7 +226,8 @@ class FfmpegVideoComposer implements VideoComposer
     {
         $binary = config()->string('manual.render_ffprobe_binary');
         $result = Process::timeout(self::PROBE_TIMEOUT_SECONDS)->run([
-            $binary, '-v', 'error',
+            $binary, ...FfmpegSafetyArguments::all(),
+            '-v', 'error',
             '-show_entries', 'format=duration',
             '-of', 'default=noprint_wrappers=1:nokey=1',
             $path,
@@ -241,7 +252,8 @@ class FfmpegVideoComposer implements VideoComposer
     {
         $binary = config()->string('manual.render_ffprobe_binary');
         $result = Process::timeout(self::PROBE_TIMEOUT_SECONDS)->run([
-            $binary, '-v', 'error',
+            $binary, ...FfmpegSafetyArguments::all(),
+            '-v', 'error',
             '-select_streams', 'a',
             '-show_entries', 'stream=index',
             '-of', 'csv=p=0',

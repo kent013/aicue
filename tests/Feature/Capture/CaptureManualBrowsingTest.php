@@ -183,15 +183,15 @@ test('show の take shape は TS CaptureTake と対のキー集合 (PHP↔TS 契
 
     $take = $response->inertiaPage()['props']['manual']['cuts'][0]['takes'][0];
     expect(array_keys($take))->toBe([
-        'id', 'client_take_id', 'status', 'size_bytes', 'duration_ms', 'comment',
+        'id', 'client_take_id', 'status', 'material_type', 'size_bytes', 'duration_ms', 'comment',
         'captured_at', 'sort_order', 'downloaded', 'has_thumbnail', 'playback_url',
         'download_ack_token',
     ]);
     $cutShape = $response->inertiaPage()['props']['manual']['cuts'][0];
     expect(array_keys($cutShape))->toBe([
         'id', 'type', 'parent_cut_id', 'scene', 'shot_type', 'shooting_point',
-        'narration', 'subtitle_primary', 'subtitle_secondary', 'adopted_take_id',
-        'adopted_ready_take_id', 'takes',
+        'narration', 'subtitle_primary', 'subtitle_secondary', 'material_type',
+        'adopted_take_id', 'adopted_ready_take_id', 'takes',
     ]);
 });
 

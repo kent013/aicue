@@ -63,9 +63,9 @@ final readonly class TakeSelectionPageData
      * @return array{project: array{id: int, name: string},
      *   manual: array{id: int, title: string, status: string},
      *   cut: array{id: int, type: string, label: string, scene: string, narration: string,
-     *     subtitle_primary: string|null, subtitle_secondary: string,
-     *     adopted: array{id: int, status: string}|null},
-     *   takes: list<array{id: int, status: string, size_bytes: int, duration_ms: int|null,
+     *     subtitle_primary: string|null, subtitle_secondary: string, material_type: string|null,
+     *     adopted: array{id: int, status: string, material_type: string}|null},
+     *   takes: list<array{id: int, status: string, material_type: string, size_bytes: int, duration_ms: int|null,
      *     comment: string|null, captured_at: string|null, sort_order: int, downloaded: bool,
      *     has_thumbnail: bool}>}
      */
@@ -89,9 +89,16 @@ final readonly class TakeSelectionPageData
                 'narration' => $this->cut->narration,
                 'subtitle_primary' => $this->cut->subtitle_primary,
                 'subtitle_secondary' => $this->cut->subtitle_secondary,
+                // カットの**計画** (未指定あり)。ファイル選択の accept 切替に使う
+                'material_type' => $this->cut->material_type?->value,
                 'adopted' => $adopted === null
                     ? null
-                    : ['id' => $adopted->id, 'status' => $adopted->status->value],
+                    : [
+                        'id' => $adopted->id,
+                        'status' => $adopted->status->value,
+                        // 採用テイクの**実体**種別 (NOT NULL)
+                        'material_type' => $adopted->material_type->value,
+                    ],
             ],
             'takes' => array_map(
                 static fn (SelectableTakeData $take): array => $take->toArray(),

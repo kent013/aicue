@@ -28,7 +28,7 @@ final readonly class CaptureTakeData
     }
 
     /**
-     * @return array{id: int, client_take_id: string, status: string, size_bytes: int,
+     * @return array{id: int, client_take_id: string, status: string, material_type: string, size_bytes: int,
      *   duration_ms: int|null, comment: string|null, captured_at: string|null, sort_order: int,
      *   downloaded: bool, has_thumbnail: bool, playback_url: string|null,
      *   download_ack_token: string|null}
@@ -39,6 +39,9 @@ final readonly class CaptureTakeData
             'id' => $this->take->id,
             'client_take_id' => $this->take->client_take_id,
             'status' => $this->take->status->value,
+            // 登録された素材の実体 (NOT NULL)。cut 側の計画 (nullable) とは別のキーである。
+            // UI はこの値で <video> と <img> を出し分ける
+            'material_type' => $this->take->material_type->value,
             'size_bytes' => $this->take->size_bytes,
             'duration_ms' => $this->take->duration_ms,
             'comment' => $this->take->comment,

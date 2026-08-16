@@ -66,7 +66,7 @@ test('実 ffmpeg で日本語字幕を焼き込んだ最小合成が成功し mp
                 cutId: 1,
                 label: '手順1',
                 source: RenderClipSource::Placeholder, // 素材ダウンロード不要 (黒背景 + 字幕)
-                takeVideoPath: null,
+                takeSourcePath: null,
                 stillDisplaySeconds: null,
                 subtitlePrimary: null,
                 subtitleSecondary: 'これは疎通確認用の日本語字幕です。', // libass + フォント解決を通す

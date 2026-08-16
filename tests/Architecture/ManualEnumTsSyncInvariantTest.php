@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Enums\Manual\JobStatus;
+use App\Enums\Manual\MaterialType;
 use App\Enums\Manual\RenderConflictType;
 use App\Enums\Manual\RenderErrorCode;
 use App\Enums\Manual\RenderKind;
@@ -52,4 +53,20 @@ test('AnalysisJobStatus (JobStatus 共用) の PHP enum ⇔ TS union 値集合�
 test('抽出不能な union 名は fail する (degenerate PASS 防止の自己検証)', function (): void {
     expect(fn (): array => extractTsUnionValues('NoSuchUnionName'))
         ->toThrow(RuntimeException::class, 'degenerate PASS');
+});
+
+/*
+ * MaterialType の TS 側の写しは **2 ファイルにある** (PC 側 types/manual.ts の CutMaterialType /
+ * 撮影 PWA 側 types/capture.ts の MaterialType)。2 つの types ファイルは
+ * 「PC は署名 URL の口を持たない」という理由で意図的に分けてあり、片方が他方を import すると
+ * その分離が崩れる。したがって**写しは 2 つ残し、両方を enum と突き合わせる**
+ * (片方だけ pin すると drift が起きる)。
+ */
+test('CutMaterialType (types/manual.ts) の PHP enum ⇔ TS union 値集合が一致する', function (): void {
+    expect(extractTsUnionValues('CutMaterialType'))->toBe(TsUnionValues::enumStringValues(MaterialType::cases()));
+});
+
+test('MaterialType (types/capture.ts) の PHP enum ⇔ TS union 値集合が一致する', function (): void {
+    expect(TsUnionValues::extract('resources/js/types/capture.ts', 'MaterialType'))
+        ->toBe(TsUnionValues::enumStringValues(MaterialType::cases()));
 });

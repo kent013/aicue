@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\DataTransferObjects\Manual;
 
+use App\Enums\Manual\MaterialType;
 use App\Models\Cut;
 use Webmozart\Assert\Assert;
 
@@ -15,6 +16,10 @@ use Webmozart\Assert\Assert;
  * ScenarioWritePathInventoryTest 検出 4 の deny-by-default 走査対象であり、
  * 表示のために security gate の allowlist を広げないための命名である。
  * 読み取りは adoptedTake relation 経由で行う。
+ *
+ * **素材登録状況 (doc/02 §2.4 の 3 値) の材料をここで出す**。
+ * 判定に使うのは「採用テイクが在るか」と「その material_type」の 2 つだけで、
+ * **ready 判定 (AdoptedReadyTakeCoverage の述語) は再実装しない** (ドメイン固有規約 12)。
  */
 final readonly class CutTakeSummaryData
 {
@@ -29,6 +34,8 @@ final readonly class CutTakeSummaryData
          * true のときだけ画像 URL (capture.takes.thumbnail) を張る = 404 を踏まない。
          */
         public bool $adoptedHasThumbnail,
+        /** 採用テイクの**実体**種別 (NOT NULL)。採用テイクが無いときは null */
+        public ?MaterialType $adoptedMaterialType,
     ) {}
 
     /** withCount('takes') + with('adoptedTake') 済みの cut から生成する */
@@ -46,26 +53,30 @@ final readonly class CutTakeSummaryData
             // thumbnail_path は takes 表の列なので追加クエリは発生しない。
             // 採用テイクが無いときは null !== null = false へ落ちる (意味が一致する)
             adoptedHasThumbnail: $adopted?->thumbnail_path !== null,
+            adoptedMaterialType: $adopted?->material_type,
         );
     }
 
     /**
      * @return array{cut_id: int, takes_count: int,
-     *   adopted: array{id: int, status: string, has_thumbnail: bool}|null}
+     *   adopted: array{id: int, status: string, has_thumbnail: bool, material_type: string}|null}
      */
     public function toArray(): array
     {
+        // id / status / material_type は同時に決まる (すべて null か、すべて非 null)
+        if ($this->adoptedId === null || $this->adoptedStatus === null || $this->adoptedMaterialType === null) {
+            return ['cut_id' => $this->cutId, 'takes_count' => $this->takesCount, 'adopted' => null];
+        }
+
         return [
             'cut_id' => $this->cutId,
             'takes_count' => $this->takesCount,
-            // id と status は同時に決まる (両方 null か両方非 null)
-            'adopted' => $this->adoptedId === null || $this->adoptedStatus === null
-                ? null
-                : [
-                    'id' => $this->adoptedId,
-                    'status' => $this->adoptedStatus,
-                    'has_thumbnail' => $this->adoptedHasThumbnail,
-                ],
+            'adopted' => [
+                'id' => $this->adoptedId,
+                'status' => $this->adoptedStatus,
+                'has_thumbnail' => $this->adoptedHasThumbnail,
+                'material_type' => $this->adoptedMaterialType->value,
+            ],
         ];
     }
 }

@@ -2,11 +2,13 @@
     import { Upload } from "@lucide/svelte";
     import Button from "@/components/atoms/Button.svelte";
     import Card from "@/components/atoms/Card.svelte";
+    import { normalizeStillFile, STILL_CONTENT_TYPE } from "@/lib/capture/still-encode";
     import {
         createMemoryPendingStore,
         generateClientTakeId,
         UploadQueue,
     } from "@/lib/capture/upload-queue";
+    import type { CutMaterialType } from "@/types/manual";
 
     /**
      * PC ローカル動画の追加アップロード (doc/04)。
@@ -18,10 +20,17 @@
         projectId: number;
         manualId: number;
         cutId: number;
+        /**
+         * カットの**計画**。still なら画像を選ばせ、正規化してから送る (尺チェックは行わない)。
+         * 未指定 (null) は従来どおり動画として扱う。
+         */
+        material?: CutMaterialType | null;
         onUploaded: () => void;
     }
 
-    let { projectId, manualId, cutId, onUploaded }: Props = $props();
+    let { projectId, manualId, cutId, material = null, onUploaded }: Props = $props();
+
+    const isStill = $derived(material === "still");
 
     // store を自前で保持するのは、queued (オフライン等) の Blob を PC 側に残さないため
     const store = createMemoryPendingStore();
@@ -72,17 +81,34 @@
         // どの経路を通っても input を空に戻す (同じファイルの再選択で change が出ない問題を避ける)
         try {
             if (!file) return;
-            if (!file.type.startsWith("video/")) {
-                error = "動画ファイルを選択してください。";
+            if (!file.type.startsWith(isStill ? "image/" : "video/")) {
+                error = isStill
+                    ? "画像ファイルを選択してください。"
+                    : "動画ファイルを選択してください。";
                 return;
             }
-            const durationMs = await readDurationMs(file);
-            // 押下は受けてからエラーを出す (disabled にしない)。
-            // 断定形にしない = サーバ強制ではないため「登録できません」とは書かない
-            if (durationMs !== null && durationMs > MAX_DURATION_MS) {
-                error =
-                    "動画の長さが 1 分を超えています。1 分以内に切り出してからアップロードしてください。";
-                return; // upload-url を呼ばない = quota を消費しない
+            // 送信ペイロード。静止画に尺は無いので readDurationMs を通さず、
+            // 必ず再エンコードして送る (寸法上限 + EXIF を落とす)
+            let blob: Blob = file;
+            let contentType = file.type.split(";")[0];
+            let durationMs: number | null = null;
+            if (isStill) {
+                const normalized = await normalizeStillFile(file);
+                if (normalized === null) {
+                    error = "画像を読み込めませんでした。別のファイルをお試しください。";
+                    return; // 原本は送らない
+                }
+                blob = normalized;
+                contentType = STILL_CONTENT_TYPE;
+            } else {
+                durationMs = await readDurationMs(file);
+                // 押下は受けてからエラーを出す (disabled にしない)。
+                // 断定形にしない = サーバ強制ではないため「登録できません」とは書かない
+                if (durationMs !== null && durationMs > MAX_DURATION_MS) {
+                    error =
+                        "動画の長さが 1 分を超えています。1 分以内に切り出してからアップロードしてください。";
+                    return; // upload-url を呼ばない = quota を消費しない
+                }
             }
             uploading = true;
             const clientTakeId = generateClientTakeId();
@@ -91,8 +117,8 @@
                 projectId,
                 manualId,
                 cutId,
-                blob: file,
-                contentType: file.type.split(";")[0],
+                blob,
+                contentType,
                 durationMs,
                 capturedAt: new Date().toISOString(),
             });
@@ -119,9 +145,13 @@
 </script>
 
 <Card padding="md" testId="take-file-upload">
-    <h2 class="text-body font-medium text-text">動画ファイルを追加</h2>
+    <h2 class="text-body font-medium text-text">
+        {isStill ? "画像ファイルを追加" : "動画ファイルを追加"}
+    </h2>
     <p class="mt-1 text-caption text-text-secondary">
-        PC にある動画を、このカットのテイクとして追加できます (1 分以内が目安です)。
+        {isStill
+            ? "PC にある画像を、このカットのテイクとして追加できます。"
+            : "PC にある動画を、このカットのテイクとして追加できます (1 分以内が目安です)。"}
     </p>
     <!--
       file input は視覚的に隠し、押下導線は Button atom に寄せる
@@ -131,7 +161,7 @@
     <input
         bind:this={input}
         type="file"
-        accept="video/*"
+        accept={isStill ? "image/*" : "video/*"}
         class="hidden"
         onchange={handleChange}
         data-testid="take-file-input"
@@ -144,7 +174,7 @@
             testId="take-file-select"
         >
             <Upload class="size-4" aria-hidden="true" />
-            動画ファイルを選ぶ
+            {isStill ? "画像ファイルを選ぶ" : "動画ファイルを選ぶ"}
         </Button>
     </div>
     {#if error}

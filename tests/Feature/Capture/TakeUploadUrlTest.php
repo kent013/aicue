@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\DataTransferObjects\Capture\PresignedUploadData;
 use App\Enums\Capture\TakeUploadReservationStatus;
+use App\Enums\Manual\MaterialType;
 use App\Enums\Manual\VideoManualStatus;
 use App\Enums\ProjectRole;
 use App\Models\Cut;
@@ -278,4 +279,93 @@ test('issue() が保持する予約インスタンスは refresh なしで statu
     expect($captured->status)->toBe(TakeUploadReservationStatus::Pending);
     // enum → backing value の往復が効いていること (DB 実値も pending)
     expect(DB::table('take_upload_reservations')->where('id', $captured->id)->value('status'))->toBe('pending');
+});
+
+/*
+ * 静止画カットの受け入れ (受け入れは非対称):
+ * - still カット: 画像も動画も受ける (動画は先頭フレーム抽出で従来どおり合成できる)
+ * - video / 未指定カット: 動画のみ。画像は入口 (presign) で 422 = 容量を消費させない
+ */
+
+test('still カット + image/jpeg は 200 で、S3 キーが .jpg になる', function (): void {
+    [, $owner, $project, $manual, $cut] = uploadUrlContext();
+    $cut->forceFill(['material_type' => MaterialType::Still->value])->save();
+    mockPresign();
+
+    $this->actingAs($owner)
+        ->postJson(uploadUrlPath($project, $manual, $cut), uploadUrlPayload(['content_type' => 'image/jpeg']))
+        ->assertOk();
+
+    $reservation = $cut->uploadReservations()->sole();
+    expect($reservation->content_type)->toBe('image/jpeg');
+    expect($reservation->video_path)->toEndWith('.jpg');
+});
+
+test('video カットへ画像を上げようとすると 422 で、予約行が 1 件も作られない (容量を消費しない)', function (): void {
+    [, $owner, $project, $manual, $cut] = uploadUrlContext();
+    $cut->forceFill(['material_type' => MaterialType::Video->value])->save();
+    mockPresign();
+
+    $this->actingAs($owner)
+        ->postJson(uploadUrlPath($project, $manual, $cut), uploadUrlPayload(['content_type' => 'image/jpeg']))
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('content_type');
+
+    expect($cut->uploadReservations()->count())->toBe(0);
+});
+
+test('material_type 未指定カットも画像は 422 (計画が無いカットは動画のみ)', function (): void {
+    [, $owner, $project, $manual, $cut] = uploadUrlContext();
+    expect($cut->material_type)->toBeNull();
+    mockPresign();
+
+    $this->actingAs($owner)
+        ->postJson(uploadUrlPath($project, $manual, $cut), uploadUrlPayload(['content_type' => 'image/jpeg']))
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('content_type');
+});
+
+test('material_type を payload に入れると 422 (サーバ確定値なので受け取らない)', function (): void {
+    [, $owner, $project, $manual, $cut] = uploadUrlContext();
+    mockPresign();
+
+    $this->actingAs($owner)
+        ->postJson(uploadUrlPath($project, $manual, $cut), uploadUrlPayload(['material_type' => 'still']))
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('material_type');
+});
+
+test('バイト上限は種別で非対称: 同じサイズでも image は 422 / video は通る', function (): void {
+    [, $owner, $project, $manual, $cut] = uploadUrlContext();
+    $cut->forceFill(['material_type' => MaterialType::Still->value])->save();
+    mockPresign();
+    $overStill = config()->integer('capture.max_still_bytes') + 1;
+    expect($overStill)->toBeLessThanOrEqual(config()->integer('capture.max_take_bytes'));
+
+    $this->actingAs($owner)
+        ->postJson(uploadUrlPath($project, $manual, $cut), uploadUrlPayload([
+            'content_type' => 'image/jpeg',
+            'size_bytes' => $overStill,
+        ]))
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('size_bytes');
+
+    // 同じサイズを動画として送ると通る (静止画にだけ厳しい上限が効いている)
+    $this->actingAs($owner)
+        ->postJson(uploadUrlPath($project, $manual, $cut), uploadUrlPayload([
+            'content_type' => 'video/mp4',
+            'size_bytes' => $overStill,
+        ]))
+        ->assertOk();
+});
+
+test('allowlist 外の画像形式 (image/webp) は 422', function (): void {
+    [, $owner, $project, $manual, $cut] = uploadUrlContext();
+    $cut->forceFill(['material_type' => MaterialType::Still->value])->save();
+    mockPresign();
+
+    $this->actingAs($owner)
+        ->postJson(uploadUrlPath($project, $manual, $cut), uploadUrlPayload(['content_type' => 'image/webp']))
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('content_type');
 });

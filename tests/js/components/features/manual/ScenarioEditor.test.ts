@@ -1721,9 +1721,20 @@ describe("IME 変換中の構造操作は安定キーで解決する (T188)", ()
 describe("動画列のサムネイル表示条件 (T190)", () => {
     /** 採用テイクの要約 (step id=11 のカット) */
     function summary(
-        adopted: { id: number; status: "ready" | "processing"; has_thumbnail: boolean } | null,
+        adopted: {
+            id: number;
+            status: "ready" | "processing";
+            has_thumbnail: boolean;
+            material_type?: "video" | "still";
+        } | null,
     ) {
-        return [{ cut_id: 11, takes_count: 2, adopted }];
+        return [
+            {
+                cut_id: 11,
+                takes_count: 2,
+                adopted: adopted === null ? null : { material_type: "video" as const, ...adopted },
+            },
+        ];
     }
 
     function renderWith(takeSummaries: ReturnType<typeof summary>) {
@@ -1782,6 +1793,32 @@ describe("動画列のサムネイル表示条件 (T190)", () => {
         renderWith(summary({ id: 9, status: "ready", has_thumbnail: true }));
 
         expect(screen.getAllByTestId("video-cell-count")[0]).toHaveTextContent("テイク 2 件");
-        expect(screen.getAllByTestId("video-cell-adopted")[0]).toHaveTextContent("採用済み");
+        // 素材登録状況 (未登録 / 動画登録済 / 静止画登録済) のバッジへ置き換わった
+        expect(screen.getAllByTestId("video-cell-material")[0]).toHaveTextContent("動画登録済");
+    });
+    /*
+     * 素材登録状況 (doc/02 §2.4 の 3 値)。「採用テイクが在るか」と「その素材種別」だけで決める。
+     * ready かどうか (使えるか) は別軸なので、このバッジには混ぜない。
+     */
+    it("未採用は「未登録」バッジ", () => {
+        renderWith(summary(null));
+
+        expect(screen.getAllByTestId("video-cell-material")[0]).toHaveTextContent("未登録");
+    });
+
+    it("静止画テイクを採用していれば「静止画登録済」バッジ", () => {
+        renderWith(
+            summary({ id: 9, status: "ready", has_thumbnail: true, material_type: "still" }),
+        );
+
+        expect(screen.getAllByTestId("video-cell-material")[0]).toHaveTextContent("静止画登録済");
+    });
+
+    it("processing の採用テイクでも「登録済」と出す (登録されたか / 使えるかは別軸)", () => {
+        renderWith(
+            summary({ id: 9, status: "processing", has_thumbnail: false, material_type: "video" }),
+        );
+
+        expect(screen.getAllByTestId("video-cell-material")[0]).toHaveTextContent("動画登録済");
     });
 });

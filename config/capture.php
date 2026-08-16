@@ -16,11 +16,21 @@ return [
     // 予約 expires_at = 署名チケット TTL (§10.8-4 の「一定時間」)
     'upload_ticket_ttl_minutes' => 30,
 
-    // 1 テイクの上限サイズ (バリデーション用)
+    // 1 テイクの上限サイズ (バリデーション用。動画)
     'max_take_bytes' => 500 * 1024 * 1024, // 500 MiB
 
     // presigned PUT を許可する動画 Content-Type
     'allowed_video_content_types' => ['video/mp4', 'video/webm', 'video/quicktime'],
+
+    // presigned PUT を許可する静止画 Content-Type。
+    // WebP / HEIC は入れない — クライアントが canvas で JPEG へ再エンコードして送るため不要であり、
+    // ffmpeg のビルド依存 (デコーダの有無) を持ち込まない。
+    'allowed_still_content_types' => ['image/jpeg', 'image/png'],
+
+    // 1 テイクの上限サイズ (静止画)。動画と同じ 500 MiB を許す理由が無い。
+    // これは**バイト数**の上限であり、画素数は縛らない (画素数の防波堤は
+    // manual.ffmpeg_max_alloc_bytes)。
+    'max_still_bytes' => 16 * 1024 * 1024, // 16 MiB
 
     // 採用テイク署名 GET URL (と DL 済み ACK トークン) の TTL
     'playback_url_ttl_minutes' => 60,

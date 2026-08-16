@@ -1361,6 +1361,77 @@ doc/10 §10.3 / §10.8-4/-7 の実装 (T004)。routes は `/app/projects/{projec
   `blocked` (自動再生制限) から自動で抜けること (出口は利用者操作のみ) /
   実機での連続再生の滑らかさ (component テストが見るのは DOM 契約とイベント配線まで)。
 
+### 静止画カットの素材と実効判定 (T192)
+
+静止画カットを PWA / PC から撮影・アップロードし、完成動画へ載せるまでの契約。
+
+- **素材種別の 2 層**: `cuts.material_type` は**計画** (nullable。AI 解析と編集者が決める) で、
+  `takes.material_type` は**登録された素材の実体** (NOT NULL) である。別概念なので合流させない。
+  実体は**予約行の `content_type`** から `Support/Capture/TakeMaterialClassifier` が導き、
+  テイク登録の確定 tx が INSERT 時に明示代入する (payload からは受けない = `$fillable` 外)。
+  DB カラム default は置いていないので、ここが唯一の設定点である。
+- **実効判定は実体優先**: 「このカットを実際にどちらの素材として合成するか」は
+  `Services/Manual/EffectiveMaterialType` が唯一の所在で、**cut の計画が `video` でも
+  採用テイクの実体が画像なら `Still`** を返す。採用した後に編集者がシナリオ編集で
+  `cuts.material_type` を `video` へ戻せるため、入口検証でも採用 API でもこの状態は防げず、
+  画像を動画クリップ経路 (ffprobe で尺を測る) に流すと必ず壊れるからである。
+  レンダ (`RenderPipeline::clipSpecFor`) と尺ゲート (`RenderJobService`) が**同じクラス**を通るので、
+  ゲートとレンダで尺が食い違わない。**ready 判定は持たない** (`AdoptedReadyTakeCoverage` の専権)。
+- **受け入れの非対称**: 入口 (presign) は `still` カットなら画像も動画も受け、
+  `video` / 未指定カットへの画像は 422 で止める (指示と違う素材で容量を消費させない)。
+  一方レンダは実体優先で受ける (既にあるデータで詰ませない)。
+  バイト上限も非対称で、動画は `capture.max_take_bytes` (500 MiB) / 静止画は
+  `capture.max_still_bytes` (16 MiB)。**画素数は縛らない** (画素数の防波堤は下記 `-max_alloc`)。
+- **静止画の表示秒**: `Services/Manual/StillDisplayDuration` が唯一の所在で、
+  `cuts.static_display_seconds` があればその値、無ければ `manual.default_still_display_seconds` (5)。
+  以前 `RenderPipeline` が流用していた `manual.preview_placeholder_seconds`
+  (= 採用テイク欠落 cut のプレースホルダ尺) は別概念なので**撤去した**。
+  **挙動変更**: 秒未指定の静止画カットの尺ゲート計上が 60 秒 (`duration_ms` 欠落の保守的既定) から
+  5 秒になる = 上限が緩む方向に動く。これはレンダの実尺と一致させる是正である。
+- **doc/02 §2.2 の「ナレーション尺より短ければナレーション尺が優先」は v1 では実装しない**。
+  v1 は字幕のみで TTS を持たず、ナレーション文に再生時間という属性が存在しないため
+  (doc/09 の v1 尺算出も静止画は `static_display_seconds*1000`)。再検討の条件は
+  「TTS を導入してナレーション音声の実尺が確定したとき」で、変更点は同クラス 1 か所に閉じる。
+- **サムネイル**: 静止画テイクも生成対象に含める (一覧に原本を貼らないため)。
+  seek は still で 0 固定 (「1 秒地点」が存在しないため、動画既定の 1000ms を当てると
+  1 回目が必ず空振りする)。素材種別は `TakeThumbnailExtractor::extract()` の引数で渡す。
+- **ffmpeg / ffprobe の安全境界**: `Support/Media/FfmpegSafetyArguments` が
+  `-max_alloc` (`manual.ffmpeg_max_alloc_bytes` = 512 MiB) を**バイナリ直後**に一律で付ける。
+  ffprobe は入力を位置引数で受けるため「最初の `-i` より前」を基準にすると検査が空振りする。
+  母集団は `tests/Architecture/FfmpegProcessLaunchInventoryTest` が pin する。
+- **クライアント側の正規化**: 撮影 PWA / PC のどちらも、静止画は canvas で JPEG へ
+  再エンコードしてから送る (`resources/js/lib/capture/still-encode.ts`。長辺 1920 / q0.85)。
+  出力は EXIF を持たないので、サーバ / ffmpeg 側で向きを解釈する必要が無い。
+  エンコードに失敗したら**原本は送らずエラー表示**する。
+
+#### 保証しないもの (誇張しない)
+
+1. **`takes.material_type` は申告 Content-Type からの分類**であり、オブジェクトストレージに
+   置かれたバイト列の実際の形式を保証しない。同期の実体検証 (GET + ffprobe) は採らない
+   (登録は一括再送される経路であり、数十 MB のダウンロードを同期で挟むと 409 の窓が開く)。
+   誤申告の帰結は**向きによって非対称**である:
+   「`image/jpeg` と申告して動画を置いた」場合は先頭フレーム抽出が動画からも 1 枚出すため
+   **成功しうる** (計画 still × 実体 video と同じ経路。害は無い) /
+   「`video/mp4` と申告して画像を置いた」場合は ffprobe が尺を取れず**失敗ジョブ**になる。
+   また `<img>` プレビューは実体がデコード不能なら壊れ得るため、UI に読み込み失敗の受け皿を置いている
+   (`<video>` 側には足していない = 非対称は意図的)。
+2. **`-max_alloc` は 1 回の heap 確保の上限**であって、プロセス全体の RSS 上限でも
+   同時実行数の上限でもない。worker のメモリ cgroup 制限は本リポジトリに存在せず、新設もしない
+   (デプロイ定義が無いため)。**未軽減リスクとして記録する**。
+3. `FfmpegProcessLaunchInventoryTest` は**字句走査**であり、動的に組み立てたコマンド配列や
+   vendor 内部からのプロセス起動には沈黙する。引数の並びの実体は Unit テスト
+   (`Process::fake` の引数列) が固定する。
+4. **レンダ成果物の `upload()` が途中で失敗したときの部分オブジェクトは削除されない**。
+   `RenderPipeline::run()` の `$uploadedKey` への代入は `upload()` の**次の行**にあり、
+   `finally` の後始末は「アップロードが完了したが succeeded に到達しなかった」場合しか拾わない。
+   これは本施策が作った問題ではなく現行構造の性質である (**未軽減**)。
+5. **migration の backfill は「既存テイクは全件動画」という前提に立つ**。根拠は presign が
+   `capture.allowed_video_content_types` しか通していなかったことで、前提が崩れた場合は誤分類になる。
+6. **EXIF 向きの解釈**。「`<img>` デコード時にブラウザが必ず EXIF 向きを適用する」ことは
+   断定しない (デコード API とブラウザで差がある)。断定できるのは出力 JPEG が EXIF を持たないことまで。
+7. **実機 (iOS Safari) での撮影・表示**。component テストが見るのは DOM 契約とイベント配線までである。
+
+
 ## 退会 (アカウント削除) の課金ガード (T115)
 
 - **不変条件**: 「**唯一 Owner** かつ (**他メンバーが残る** ∨ **生きた課金責務がある**) 組織」が

@@ -151,3 +151,40 @@ test('cut を増やしてもクエリ本数が増えない (N+1 を作らない)
     // 本数の完全一致では固定しない (無関係な最適化で赤くしない)。増えないことだけを見る
     expect($large)->toBeLessThanOrEqual($small);
 });
+
+/*
+ * 素材登録状況 (未登録 / 動画登録済 / 静止画登録済) の材料。
+ * 判定に使うのは「採用テイクが在るか」と「その material_type」の 2 つだけで、
+ * ready かどうか (使えるか) は別軸である。
+ */
+
+test('未採用のカットは adopted が null (未登録)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+    $manual = VideoManual::factory()->forProject($project)->create();
+    $cut = Cut::factory()->forManual($manual)->create();
+    Take::factory()->forCut($cut)->create();
+
+    $this->actingAs($owner)
+        ->get("/projects/{$project->id}/manuals/{$manual->id}/edit")
+        ->assertInertia(fn ($page) => $page->where('takeSummaries.0.adopted', null));
+});
+
+test('採用テイクの material_type が props に載る (動画 / 静止画)', function (string $state, string $expected): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+    $manual = VideoManual::factory()->forProject($project)->create();
+    $cut = Cut::factory()->forManual($manual)->create();
+    $take = $state === 'still'
+        ? Take::factory()->forCut($cut)->still()->create()
+        : Take::factory()->forCut($cut)->create();
+    $cut->forceFill(['adopted_take_id' => $take->id])->save();
+
+    $this->actingAs($owner)
+        ->get("/projects/{$project->id}/manuals/{$manual->id}/edit")
+        ->assertInertia(fn ($page) => $page
+            ->where('takeSummaries.0.adopted.material_type', $expected));
+})->with([
+    ['video', 'video'],
+    ['still', 'still'],
+]);

@@ -79,6 +79,7 @@
                         projectId={project.id}
                         manualId={manual.id}
                         cutId={cut.id}
+                        material={cut.material_type}
                         onUploaded={refresh}
                     />
                 </div>

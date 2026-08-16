@@ -188,7 +188,11 @@ test('preview: 採用テイク欠落 cut は Placeholder として合成され�
 });
 
 test('Still カット (material_type=still) は TakeStill としてマニフェストへ載る (秒指定 + 未指定 fallback)', function (): void {
+    // 未指定 still の尺は StillDisplayDuration が唯一の所在で、
+    // manual.preview_placeholder_seconds (プレースホルダ尺) の流用は撤去済みである。
+    // 別値を入れて「流用が復活していない」ことも同時に固定する。
     config()->set('manual.preview_placeholder_seconds', 3);
+    config()->set('manual.default_still_display_seconds', 5);
     [, , $project, $manual, $cut, , $fake] = renderPipelineContext(tickets: 0, trigger: false);
     // 1 本目: 秒指定あり
     $cut->forceFill([
@@ -214,7 +218,7 @@ test('Still カット (material_type=still) は TakeStill としてマニフェ�
     expect($still?->stillDisplaySeconds)->toBe(4);
     $fallback = $clips->firstWhere('cutId', $fallbackCut->id);
     expect($fallback?->source)->toBe(RenderClipSource::TakeStill);
-    expect($fallback?->stillDisplaySeconds)->toBe(3); // config fallback
+    expect($fallback?->stillDisplaySeconds)->toBe(5); // manual.default_still_display_seconds
     // Still でも採用テイク素材 (先頭フレーム抽出元) はローカル供給される
     expect($fake->lastSources)->toHaveKey($cut->id);
     expect($fake->lastSources)->toHaveKey($fallbackCut->id);
@@ -575,4 +579,17 @@ test('preflight: 行が消えていても所有権喪失として扱う (deny-by
 
     expect(RenderJob::query()->whereKey($job->id)->exists())->toBeFalse();
     expect(Storage::disk('s3')->allFiles())->toBe([Take::query()->firstOrFail()->video_path]);
+});
+
+test('素材のローカル名は拡張子なし (src{index}) で落ちる', function (): void {
+    // 拡張子は以前から既に嘘だった (webm / mov も .mp4 という名前で落ちていた)。
+    // 画像素材を足すにあたって嘘を増やさないため、名前から拡張子ごと外している。
+    // 合成が ffmpeg の内容プローブに依存している事実を名前でも表す。
+    [, , $project, $manual, $cut, , $fake] = renderPipelineContext(tickets: 0, trigger: false);
+    $previewJob = app(RenderJobService::class)->triggerPreview($project, $manual);
+
+    app(RenderPipeline::class)->run($previewJob->id);
+
+    expect($fake->lastSources[$cut->id] ?? null)->not->toBeNull();
+    expect(basename((string) $fake->lastSources[$cut->id]))->toBe('src0');
 });

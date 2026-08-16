@@ -35,6 +35,8 @@ class StoreCaptureTakeRequest extends FormRequest
             'size_bytes' => ['missing'],
             'status' => ['missing'],
             'sort_order' => ['missing'],
+            // 素材種別はサーバが予約行の content_type から確定する
+            'material_type' => ['missing'],
         ], $this->protectedKeyMissingRules());
     }
 
