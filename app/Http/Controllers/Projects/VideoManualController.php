@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Projects;
 
 use App\DataTransferObjects\Manual\AnalysisJobData;
+use App\DataTransferObjects\Manual\ManualListQuery;
 use App\DataTransferObjects\Manual\RenderJobData;
 use App\DataTransferObjects\Manual\ScenarioDocumentData;
 use App\Enums\Manual\RenderKind;
@@ -235,7 +236,17 @@ class VideoManualController extends Controller
         return back()->with('success', '動画マニュアルを更新しました');
     }
 
-    /** 削除 */
+    /**
+     * 削除。
+     *
+     * 一覧の行から消したときは、削除要求に一覧の絞り込み・ページが付いてくる
+     * (`?category=…&status=…&q=…&sort=…&mine=1&page=2`)。受け取った値は**一覧と同じ allowlist**
+     * (ManualListQuery) を通してから着地先に載せ直す = 生のユーザー入力を Location に素通ししない。
+     * クエリが無いとき (詳細画面からの削除) は現行と同じ `/projects/{project}` へ着地する。
+     * 消した結果そのページが範囲外になった場合は、着地先の一覧が最終ページへ丸める。
+     *
+     * 付いてくるクエリは**対象の決定には一切使わない** (対象は route パラメータのみが決める)。
+     */
     public function destroy(Request $request, Project $project, VideoManual $manual, VideoManualService $manuals): RedirectResponse
     {
         $organization = $this->resolveCurrentOrganization($request);
@@ -243,10 +254,12 @@ class VideoManualController extends Controller
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('delete', $manual);
 
+        $listQuery = ManualListQuery::fromRequest($request);
+
         $manuals->delete($project, $manual);
 
         return redirect()
-            ->route('projects.show', $project)
+            ->route('projects.show', ['project' => $project, ...$listQuery->toQueryParams()])
             ->with('success', '動画マニュアルを削除しました');
     }
 

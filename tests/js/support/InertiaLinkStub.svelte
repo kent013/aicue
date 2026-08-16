@@ -10,7 +10,12 @@
      * 本スタブを `vi.mock` で注入し、**描画されたら判別できる印**を残すことで
      * SPA 遷移化への退行を確実に赤くする (Codex impl-review R1 [Critical])。
      */
-    let { href, children }: { href?: string; children?: Snippet } = $props();
+    let {
+        href,
+        class: className = "",
+        children,
+    }: { href?: string; class?: string; children?: Snippet } = $props();
 </script>
 
-<a {href} data-testid="inertia-link-stub">{@render children?.()}</a>
+<!-- class は素通しする (呼び出し側が付けた表示契約 = 省略スタイル等をテストから検証できるように) -->
+<a {href} class={className} data-testid="inertia-link-stub">{@render children?.()}</a>

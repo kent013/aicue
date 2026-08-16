@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Projects;
 
+use App\DataTransferObjects\Manual\ManualListItemData;
+use App\DataTransferObjects\Manual\ManualListQuery;
 use App\Enums\Manual\ManualSortOption;
-use App\Enums\Manual\VideoManualStatus;
 use App\Http\Concerns\ResolvesCurrentOrganization;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Projects\StoreProjectRequest;
@@ -16,6 +17,7 @@ use App\Models\Organization;
 use App\Models\Project;
 use App\Models\User;
 use App\Models\VideoManual;
+use App\Services\Manual\ManualRowAbilities;
 use App\Services\Project\ProjectService;
 use App\Support\Seo\SeoManager;
 use Illuminate\Http\RedirectResponse;
@@ -112,7 +114,7 @@ class ProjectController extends Controller
             ->values()
             ->all();
 
-        $filters = $this->parseManualFilters($request);
+        $listQuery = ManualListQuery::fromRequest($request);
 
         // memberRows は members prop と assignableUsers 導出の双方で使うため 1 度だけ算出する
         $memberRows = $this->memberRows($organization, $project, $canManage);
@@ -133,135 +135,88 @@ class ProjectController extends Controller
             // payload 生成時点で絞る = canViewMemberEmails と同じ流儀)
             'assignableUsers' => $this->assignableUserRows($organization, $memberRows, $canManage),
             // 動画マニュアル一覧 (専用 index は持たず本画面に内包。GET クエリで絞り込み + paginate)
-            'manuals' => $this->manualRows($project, $filters, $user->id),
+            'manuals' => $this->manualRows($project, $listQuery, $user),
             'categories' => $this->categoryRows($project),
-            'manualFilters' => $this->toManualFilterProps($filters),
+            'manualFilters' => $listQuery->toProps(),
             // 管理メニュー導線 (doc/04: 管理者のみサイドバー表示)。単一根拠は Gate
             'canManageMembers' => $user->can('manageMembers', $organization),
         ]);
     }
 
     /**
-     * 動画マニュアル一覧の GET クエリ絞り込み条件。
-     * category は「数値 id 文字列 | 'uncategorized' (未分類 sentinel) | null」、
-     * status は VideoManualStatus の値のみ許容 (不正値は無視 = null)、
-     * sort は ManualSortOption の allowlist のみ (不正値は null = 既定順)、
-     * mine は自分の作成分のみに絞る bool。
-     *
-     * @return array{category: string|null, status: string|null, q: string|null,
-     *   sort: ManualSortOption|null, mine: bool}
-     */
-    private function parseManualFilters(Request $request): array
-    {
-        $category = $request->query('category');
-        $category = is_string($category) && $category !== '' ? $category : null;
-        if ($category !== null && $category !== 'uncategorized' && ! ctype_digit($category)) {
-            $category = null;
-        }
-
-        $status = $request->query('status');
-        $status = is_string($status) && VideoManualStatus::tryFrom($status) !== null ? $status : null;
-
-        $q = $request->query('q');
-        $q = is_string($q) && trim($q) !== '' ? trim($q) : null;
-
-        $sortRaw = $request->query('sort');
-        // allowlist 外は null (= 既定順)。ユーザー入力をカラム名に渡さない
-        $sort = is_string($sortRaw) ? ManualSortOption::tryFrom($sortRaw) : null;
-
-        return [
-            'category' => $category,
-            'status' => $status,
-            'q' => $q,
-            'sort' => $sort,
-            'mine' => $request->boolean('mine'), // "1"/"true" を bool 正規化
-        ];
-    }
-
-    /**
-     * Inertia へ返す manualFilters prop (sort enum → string 値へ落とす単一変換点)。
-     * PHP 内部表現は ManualSortOption を持つため、prop 化時に string|null へ落とす。
-     *
-     * @param  array{category: string|null, status: string|null, q: string|null, sort: ManualSortOption|null, mine: bool}  $filters
-     * @return array{category: string|null, status: string|null, q: string|null, sort: string|null, mine: bool}
-     */
-    private function toManualFilterProps(array $filters): array
-    {
-        return [
-            'category' => $filters['category'],
-            'status' => $filters['status'],
-            'q' => $filters['q'],
-            'sort' => $filters['sort']?->value, // string|null (TS の ManualFilters.sort と一致)
-            'mine' => $filters['mine'],
-        ];
-    }
-
-    /**
-     * 動画マニュアル一覧 rows (paginate + typed array で shape を固定)。
+     * 動画マニュアル一覧 rows (paginate + DTO で shape を固定)。
      * 未分類は category => null (フロントは「未分類」を表示する)。
      * creator は退会/削除で解決不可のとき null (実運用では FK RESTRICT で常に解決)。
      *
-     * @param  array{category: string|null, status: string|null, q: string|null, sort: ManualSortOption|null, mine: bool}  $filters
      * @return array{
      *   data: list<array{id: int, title: string, status: string,
      *     category: array{id: int, name: string}|null,
      *     creator: array{id: int, name: string}|null,
-     *     created_at: string, updated_at: string}>,
+     *     created_at: string, updated_at: string,
+     *     duration_ms: int|null, downloadable: bool, deletable: bool}>,
      *   meta: array{current_page: int, last_page: int, per_page: int, total: int}
      * }
      */
-    private function manualRows(Project $project, array $filters, int $viewerId): array
+    private function manualRows(Project $project, ManualListQuery $listQuery, User $user): array
     {
-        $query = $project->manuals()->with(['category', 'creator']);
+        // latestSucceededRender も eager load する (行ごとの現行世代判定で N+1 を作らない)
+        $baseQuery = $project->manuals()->with(['category', 'creator', 'latestSucceededRender']);
 
         // 並べ替え (allowlist enum 由来のカラム名のみ。既定は現行踏襲 created_at desc, id desc)
-        $orderings = $filters['sort']?->orderings() ?? ManualSortOption::defaultOrderings();
+        $orderings = $listQuery->sort?->orderings() ?? ManualSortOption::defaultOrderings();
         foreach ($orderings as $ordering) {
             /** @var ManualOrdering $ordering */
-            $query->orderBy($ordering['column'], $ordering['direction']);
+            $baseQuery->orderBy($ordering['column'], $ordering['direction']);
         }
 
-        if ($filters['mine']) {
+        if ($listQuery->mine) {
             // 自ユーザー id のみ (payload 非受領 = tenant/actor キー不信)
-            $query->where('created_by', $viewerId);
+            $baseQuery->where('created_by', $user->id);
         }
-        if ($filters['category'] === 'uncategorized') {
-            $query->whereNull('category_id');
-        } elseif ($filters['category'] !== null) {
-            $query->where('category_id', (int) $filters['category']);
+        if ($listQuery->category === 'uncategorized') {
+            $baseQuery->whereNull('category_id');
+        } elseif ($listQuery->category !== null) {
+            $baseQuery->where('category_id', (int) $listQuery->category);
         }
-        if ($filters['status'] !== null) {
-            $query->where('status', $filters['status']);
+        if ($listQuery->status !== null) {
+            $baseQuery->where('status', $listQuery->status);
         }
-        if ($filters['q'] !== null) {
+        if ($listQuery->keyword !== null) {
             // LIKE メタ文字 (%/_/\) はリテラル検索として扱う
-            $query->where('title', 'like', '%'.addcslashes($filters['q'], '%_\\').'%');
+            $baseQuery->where('title', 'like', '%'.addcslashes($listQuery->keyword, '%_\\').'%');
         }
 
-        $paginated = $query->paginate(10)->withQueryString();
+        $paginated = (clone $baseQuery)
+            ->paginate(perPage: ManualListQuery::PER_PAGE, page: $listQuery->page)
+            ->withQueryString();
 
-        $data = [];
+        // 範囲外ページ (行内削除で件数が減った / 古いブックマーク) は最終ページへ丸める。
+        // 「空の一覧」に着地させない (行き先のない詰みを作らない)。
+        // **0 件のときも丸める**: 一覧が空でも lastPage() は 1 なので、丸めないと
+        // current_page=99 / last_page=1 という食い違った meta を渡すことになる。
+        // URL の ?page=99 と meta.current_page は食い違うが、ページ送り UI は
+        // meta.current_page を見る (**props が正本**であり redirect はしない)。
+        if ($paginated->currentPage() > $paginated->lastPage()) {
+            $paginated = (clone $baseQuery)
+                ->paginate(perPage: ManualListQuery::PER_PAGE, page: $paginated->lastPage())
+                ->withQueryString();
+        }
+
+        /** @var list<VideoManual> $manuals */
+        $manuals = [];
         foreach ($paginated->items() as $manual) {
             Assert::isInstanceOf($manual, VideoManual::class);
-            $category = $manual->category;
-            $creator = $manual->creator; // 退会/削除で null になり得る (実運用では FK RESTRICT)
-            $data[] = [
-                'id' => $manual->id,
-                'title' => $manual->title,
-                'status' => $manual->status->value,
-                'category' => $category === null
-                    ? null
-                    : ['id' => $category->id, 'name' => $category->name],
-                'creator' => $creator === null
-                    ? null
-                    : ['id' => $creator->id, 'name' => $creator->name],
-                'created_at' => $manual->created_at?->format('Y-m-d H:i') ?? '',
-                'updated_at' => $manual->updated_at?->format('Y-m-d H:i') ?? '',
-            ];
+            $manuals[] = $manual;
         }
 
+        // ability はページで 1 回だけ評価する (理由は ManualRowAbilities の docblock)
+        $abilities = ManualRowAbilities::forPage($user, $project, $manuals);
+
         return [
-            'data' => $data,
+            'data' => array_map(
+                fn (VideoManual $manual): array => ManualListItemData::fromManual($manual, $abilities)->toArray(),
+                $manuals,
+            ),
             'meta' => [
                 'current_page' => $paginated->currentPage(),
                 'last_page' => $paginated->lastPage(),

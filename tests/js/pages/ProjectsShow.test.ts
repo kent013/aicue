@@ -22,6 +22,9 @@ const manualsFixture: ManualListItem[] = [
         creator: { id: 2, name: "編集 花子" },
         created_at: "2026-07-10 12:00",
         updated_at: "2026-07-11 09:00",
+        duration_ms: null,
+        downloadable: false,
+        deletable: true,
     },
     {
         id: 2,
@@ -31,6 +34,9 @@ const manualsFixture: ManualListItem[] = [
         creator: null,
         created_at: "2026-07-10 13:00",
         updated_at: "2026-07-11 10:00",
+        duration_ms: 185_000,
+        downloadable: true,
+        deletable: true,
     },
 ];
 
@@ -286,6 +292,88 @@ describe("Projects/Show 並べ替え・自作フィルタ", () => {
             "title_desc",
         );
         expect((screen.getByTestId("manual-filter-mine") as HTMLInputElement).checked).toBe(true);
+    });
+});
+
+describe("Projects/Show 動画マニュアルの行内操作", () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it("行の再生時間と DL 導線をサーバの props どおりに出し分ける", () => {
+        render(Show, { props: baseProps });
+
+        // duration_ms=null の行は「—」、値のある行は整形して出す
+        expect(screen.getByTestId("manual-duration-1")).toHaveTextContent("—");
+        expect(screen.getByTestId("manual-duration-2")).toHaveTextContent("3:05");
+        // downloadable の行にだけ DL 導線が出る
+        expect(screen.queryByTestId("manual-download-1")).toBeNull();
+        expect(screen.getByTestId("manual-download-2").getAttribute("href")).toMatch(
+            /\/projects\/1\/manuals\/2\/download$/,
+        );
+    });
+
+    it("deletable=false の行には削除導線を出さない", () => {
+        render(Show, {
+            props: {
+                ...baseProps,
+                manuals: {
+                    data: manualsFixture.map((manual) => ({ ...manual, deletable: false })),
+                    meta: { ...emptyMeta, total: 2 },
+                },
+            },
+        });
+
+        expect(screen.queryByTestId("manual-remove-1")).toBeNull();
+        expect(screen.queryByTestId("manual-remove-2")).toBeNull();
+    });
+
+    it("削除ボタン → 確認ダイアログ確定で router.delete が対象 URL で発火する (絞り込み無しなら query なし)", async () => {
+        const deleteSpy = vi.spyOn(router, "delete").mockImplementation(() => {});
+        render(Show, { props: baseProps });
+
+        await fireEvent.click(screen.getByTestId("manual-remove-1"));
+        const dialog = screen.getByTestId("remove-manual-dialog");
+        await fireEvent.click(within(dialog).getByRole("button", { name: "削除する" }));
+
+        expect(deleteSpy).toHaveBeenCalledTimes(1);
+        expect(deleteSpy.mock.calls[0][0]).toBe("/projects/1/manuals/1");
+    });
+
+    it("削除 URL に現在の絞り込みと表示中ページが載る (着地先を保つため)", async () => {
+        const deleteSpy = vi.spyOn(router, "delete").mockImplementation(() => {});
+        render(Show, {
+            props: {
+                ...baseProps,
+                manualFilters: {
+                    category: "3",
+                    status: "published",
+                    q: "ネジ",
+                    sort: "title_asc",
+                    mine: true,
+                },
+                manuals: {
+                    data: manualsFixture,
+                    meta: { current_page: 2, last_page: 3, per_page: 10, total: 25 },
+                },
+            },
+        });
+
+        await fireEvent.click(screen.getByTestId("manual-remove-2"));
+        const dialog = screen.getByTestId("remove-manual-dialog");
+        await fireEvent.click(within(dialog).getByRole("button", { name: "削除する" }));
+
+        expect(deleteSpy).toHaveBeenCalledTimes(1);
+        const url = new URL(deleteSpy.mock.calls[0][0] as string, "http://localhost");
+        expect(url.pathname).toBe("/projects/1/manuals/2");
+        expect(Object.fromEntries(url.searchParams.entries())).toEqual({
+            category: "3",
+            status: "published",
+            q: "ネジ",
+            sort: "title_asc",
+            mine: "1",
+            page: "2",
+        });
     });
 });
 

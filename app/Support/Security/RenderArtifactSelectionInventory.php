@@ -41,6 +41,12 @@ final class RenderArtifactSelectionInventory
                 'rationale' => 'newerSucceededExists() は「より新しい succeeded が在るか」の世代交代判定であり、'
                     .'受け取り対象を 1 件選ぶ式ではない (削除 job と reconcile の前提条件)。',
             ],
+            'Models/VideoManual.php' => [
+                'kind' => RenderArtifactSelectionKind::EagerLoadCandidate,
+                'rationale' => 'latestSucceededRender() は一覧が eager load する候補行の relation であり、'
+                    .'output_path を見ないため受け取れるかを判断しない (決定は Canonical に残る)。'
+                    .'世代定義の一致は ManualRowDownloadableParityTest が固定する。',
+            ],
             'Services/Manual/RenderPipeline.php' => [
                 'kind' => RenderArtifactSelectionKind::SupersessionCriterion,
                 'rationale' => 'finalize が自分より古い succeeded 行を集めて削除 job を投入するための収集であり、'

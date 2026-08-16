@@ -99,6 +99,7 @@ export interface PaginationMeta {
 /** PHP App\Enums\Manual\ManualSortOption と値集合を一致させる (allowlist) */
 export type ManualSortOption = "updated_desc" | "updated_asc" | "title_asc" | "title_desc";
 
+/** PHP: App\DataTransferObjects\Manual\ManualListItemData::toArray() と対 */
 export interface ManualListItem {
     id: number;
     title: string;
@@ -109,6 +110,22 @@ export interface ManualListItem {
     creator: { id: number; name: string } | null;
     created_at: string;
     updated_at: string;
+    /**
+     * いま公開されている完成動画の長さ (ms)。**null = 未確定**
+     * (published でない / 総尺が記録されていない)。
+     * published が外れた行の古い総尺はサーバが null に畳んでいるため、
+     * UI 側で status を見て再判定しない。
+     */
+    duration_ms: number | null;
+    /**
+     * 完成動画を受け取れるか。サーバが「download ability × published ×
+     * 現行世代の succeeded render に output_path がある」を判定した結果そのもので、
+     * **UI 側で条件を再判定しない**。download endpoint が 302 を返す条件と 1 対 1
+     * (描画時点のスナップショットであり、ストレージ実体の存在確認ではない)。
+     */
+    downloadable: boolean;
+    /** 削除できるか (サーバの delete ability 判定結果。撮影者は false) */
+    deletable: boolean;
 }
 
 export interface CategoryOption {
