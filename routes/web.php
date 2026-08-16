@@ -8,6 +8,7 @@ use App\Http\Controllers\Auth\SessionStatusController;
 use App\Http\Controllers\Auth\SocialAuthController;
 use App\Http\Controllers\Billing\BillingController;
 use App\Http\Controllers\Billing\TicketPurchaseController;
+use App\Http\Controllers\Capture\CaptureAccountController;
 use App\Http\Controllers\Capture\CaptureManualController;
 use App\Http\Controllers\Capture\CaptureTakeController;
 use App\Http\Controllers\Capture\TakeUploadUrlController;
@@ -613,6 +614,16 @@ Route::middleware(['auth', 'verified', 'not-pending-deletion'])->group(function 
             // XSRF-TOKEN cookie が更新される。204 = 仕様固定 endpoint、body なし)
             Route::get('/csrf-cookie', fn (): Response => response()->noContent())
                 ->name('csrf-cookie');
+            /*
+            | 撮影 PWA のアカウント確認画面 (doc/05 §5.1 / §5.2)。表示名・ログイン ID
+            | (= メールアドレス)・所属組織を省略なく読み、ログアウトするためだけの面。
+            | **route parameter を持たない** — project のデータを 1 つも表示しないため、
+            | project 配下 (/app/projects/{project}/account) には置かない
+            | (親を持たせると nested route IDOR 目録と scopeBindings を負うだけで意味も歪む)。
+            | 復路は capture.home 1 本 (start_url と同じ)。return_to / history.back() は使わない。
+            | 変更操作は一切持たない (プロフィール変更・パスワード・2FA・退会は /settings の責務)。
+            */
+            Route::get('/account', CaptureAccountController::class)->name('account');
             Route::get('/projects/{project}/manuals', [CaptureManualController::class, 'index'])
                 ->name('manuals.index');
             Route::scopeBindings()->group(function (): void {
