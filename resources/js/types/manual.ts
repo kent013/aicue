@@ -160,7 +160,7 @@ export interface ScenarioPoint {
     narration: string;
     subtitle_primary: string | null;
     subtitle_secondary: string;
-    material_type: "video" | "still" | null;
+    material_type: CutMaterialType | null;
     static_display_seconds: number | null;
 }
 
@@ -333,6 +333,9 @@ export interface ScenarioConflictBody {
 /** PHP: App\Enums\Manual\TakeStatus と値集合を一致させる (literal union) */
 export type SelectableTakeStatus = "uploading" | "processing" | "ready" | "failed";
 
+/** PHP: App\Enums\Manual\MaterialType と値集合を一致させる */
+export type CutMaterialType = "video" | "still";
+
 /** テイクの状態ラベル (UI 共通)。satisfies でキー漏れをコンパイル時検出する */
 export const TAKE_STATUS_LABELS = {
     uploading: "アップロード中",
@@ -353,6 +356,8 @@ export const TAKE_ADOPTABLE_BY_STATUS = {
 export interface SelectableTake {
     id: number;
     status: SelectableTakeStatus;
+    /** 登録された素材の**実体** (NOT NULL)。UI はこの値で <video> と <img> を出し分ける */
+    material_type: CutMaterialType;
     size_bytes: number;
     duration_ms: number | null;
     comment: string | null;
@@ -373,7 +378,9 @@ export interface TakeSelectionCut {
     narration: string;
     subtitle_primary: string | null;
     subtitle_secondary: string;
-    adopted: { id: number; status: SelectableTakeStatus } | null;
+    /** カットの**計画** (未指定あり)。ファイル選択の accept 切替に使う */
+    material_type: CutMaterialType | null;
+    adopted: { id: number; status: SelectableTakeStatus; material_type: CutMaterialType } | null;
 }
 
 /** PHP: TakeSelectionPageData::toArray() 全体と対 (Manuals/Takes の props) */
@@ -393,5 +400,7 @@ export interface CutTakeSummary {
         status: SelectableTakeStatus;
         /** サムネイル生成済みか。true のときだけ .../takes/{id}/thumbnail を表示に使う */
         has_thumbnail: boolean;
+        /** 採用テイクの**実体**種別 (NOT NULL)。素材登録状況バッジの文言に使う */
+        material_type: CutMaterialType;
     } | null;
 }

@@ -37,6 +37,7 @@ function cut(id: number, readyTakeId: number | null, type: "step" | "point" = "s
         narration: "",
         subtitle_primary: null,
         subtitle_secondary: `字幕 ${id}`,
+        material_type: null,
         adopted_take_id: readyTakeId,
         adopted_ready_take_id: readyTakeId,
         takes: [],

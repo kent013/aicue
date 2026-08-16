@@ -16,7 +16,7 @@
     import UploadQueueBar from "@/components/features/capture/UploadQueueBar.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
     import { AdoptedTakeAutoDownloader } from "@/lib/capture/auto-download";
-    import { supportsMediaRecorder } from "@/lib/capture/camera";
+    import { supportsMediaRecorder, supportsStillCapture } from "@/lib/capture/camera";
     import type { CameraUnavailableReason } from "@/lib/capture/camera";
     import { buildCutLabels } from "@/lib/capture/cut-labels";
     import {
@@ -74,10 +74,16 @@
     const selectedCut = $derived(manual.cuts.find((cut) => cut.id === selectedCutId) ?? null);
     /** 手順 N / 急所 N-M。CutNavigator の行ラベルと同じ導出元を共有する (二重管理を避ける) */
     const cutLabels = $derived(buildCutLabels(manual.cuts));
-    // 静的 feature-detect (従来) + 実行時失敗による上書き (F-03: doc/10 §10.8-3)
-    const canRecord = typeof window !== "undefined" && supportsMediaRecorder();
+    /** cut の計画で撮影モードを決める (撮影者に判断させない = 使命) */
+    const captureMode = $derived(selectedCut?.material_type === "still" ? "still" : "video");
+    // 静的 feature-detect (従来) + 実行時失敗による上書き (F-03: doc/10 §10.8-3)。
+    // 静止画は MediaRecorder を必要としないので判定を分ける
+    const canCapture = $derived(
+        typeof window !== "undefined" &&
+            (captureMode === "still" ? supportsStillCapture() : supportsMediaRecorder()),
+    );
     let cameraUnavailableReason = $state<CameraUnavailableReason | null>(null);
-    const showRecorder = $derived(canRecord && cameraUnavailableReason === null);
+    const showRecorder = $derived(canCapture && cameraUnavailableReason === null);
     // 撮影 active (recording|stopping) と recorder 参照 (preview の資源競合制御。T050 / S4)
     let captureActive = $state(false);
     let recorderRef = $state<CameraRecorderType | null>(null);
@@ -700,6 +706,7 @@
                             }}
                             layout={fullscreenActive ? "fullscreen" : "inline"}
                             shootingPoint={selectedCut.shooting_point}
+                            mode={captureMode}
                         />
                     {:else}
                         {#if fallbackNotice !== null}
@@ -712,7 +719,9 @@
                             </p>
                         {/if}
                         <CaptureFileFallback
-                            onCaptured={(file) => handleCaptured(file, file.type, null)}
+                            material={captureMode}
+                            onCaptured={(blob, contentType) =>
+                                handleCaptured(blob, contentType, null)}
                         />
                     {/if}
                 </div>

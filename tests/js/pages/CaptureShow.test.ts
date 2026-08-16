@@ -99,6 +99,7 @@ function makeCut(overrides: Partial<CaptureCut> = {}): CaptureCut {
         narration: "ドライバーでネジを締めます",
         subtitle_primary: null,
         subtitle_secondary: "",
+        material_type: null,
         adopted_take_id: null,
         adopted_ready_take_id: null,
         takes: [],
@@ -121,6 +122,7 @@ function makeAdoptedManual(): CaptureManualDetail {
         id: 900,
         client_take_id: "01J0ADOPT",
         status: "ready",
+        material_type: "video",
         size_bytes: 2048,
         duration_ms: 3000,
         comment: null,
@@ -191,6 +193,66 @@ afterEach(() => {
 async function selectCut(): Promise<void> {
     await fireEvent.click(screen.getByTestId("cut-row-101"));
 }
+
+/*
+ * 撮影モードは**カットの計画**で決める (撮影者に判断させない = 使命)。
+ * 静止画は MediaRecorder を必要としないため、能力判定も録画とは別軸である。
+ */
+describe("Capture/Show 撮影モードの出し分け", () => {
+    /** material_type=still のカット 1 枚だけを持つ props */
+    function stillProps() {
+        const cut = makeCut({ material_type: "still" });
+        return {
+            ...baseProps,
+            manual: { id: 5, title: "ネジ締め作業", status: "ready", cuts: [cut] },
+        };
+    }
+
+    it("still カットではシャッターが出て録画開始は出ない", async () => {
+        stubCameraSupported(true);
+
+        render(CaptureShow, { props: stillProps() });
+        await selectCut();
+
+        expect(screen.getByTestId("shoot-still")).toBeInTheDocument();
+        expect(screen.queryByTestId("start-recording")).not.toBeInTheDocument();
+    });
+
+    it("video カットでは従来どおり録画開始が出る (回帰)", async () => {
+        stubCameraSupported(true);
+
+        render(CaptureShow, { props: baseProps });
+        await selectCut();
+
+        expect(screen.getByTestId("start-recording")).toBeInTheDocument();
+        expect(screen.queryByTestId("shoot-still")).not.toBeInTheDocument();
+    });
+
+    it("MediaRecorder 非対応でも still カットならカメラを出す (getUserMedia があれば足りる)", async () => {
+        // supportsMediaRecorder() を静止画へ流用すると、撮れるはずの写真まで file input へ落ちる
+        vi.stubGlobal("MediaRecorder", undefined);
+        vi.stubGlobal("navigator", {
+            ...navigator,
+            mediaDevices: { getUserMedia: getUserMediaMock },
+        });
+
+        render(CaptureShow, { props: stillProps() });
+        await selectCut();
+
+        expect(screen.getByTestId("camera-preview")).toBeInTheDocument();
+        expect(screen.getByTestId("shoot-still")).toBeInTheDocument();
+    });
+
+    it("getUserMedia も無い端末では still でもファイル選択へ落ち、accept が image/* になる", async () => {
+        vi.stubGlobal("MediaRecorder", undefined);
+        vi.stubGlobal("navigator", { ...navigator, mediaDevices: undefined });
+
+        render(CaptureShow, { props: stillProps() });
+        await selectCut();
+
+        expect(screen.getByTestId("capture-file-input")).toHaveAttribute("accept", "image/*");
+    });
+});
 
 describe("Capture/Show カメラフォールバック", () => {
     it("(a) 静的 canRecord=false は file input のみ (notice を出さない)", async () => {

@@ -36,7 +36,7 @@ function takeVideoClip(int $cutId = 1): RenderClipSpec
         cutId: $cutId,
         label: '手順1',
         source: RenderClipSource::TakeVideo,
-        takeVideoPath: 'takes/src.mp4',
+        takeSourcePath: 'takes/src.mp4',
         stillDisplaySeconds: null,
         subtitlePrimary: null,
         subtitleSecondary: ATTACK_SUBTITLE,
@@ -49,7 +49,7 @@ function takeStillClip(int $cutId = 1, int $seconds = 4): RenderClipSpec
         cutId: $cutId,
         label: '手順1',
         source: RenderClipSource::TakeStill,
-        takeVideoPath: 'takes/src-still.mp4',
+        takeSourcePath: 'takes/src-still.mp4',
         stillDisplaySeconds: $seconds,
         subtitlePrimary: null,
         subtitleSecondary: ATTACK_SUBTITLE,
@@ -62,7 +62,7 @@ function placeholderClip(int $cutId = 2): RenderClipSpec
         cutId: $cutId,
         label: '手順2',
         source: RenderClipSource::Placeholder,
-        takeVideoPath: null,
+        takeSourcePath: null,
         stillDisplaySeconds: null,
         subtitlePrimary: null,
         subtitleSecondary: ATTACK_SUBTITLE,
@@ -262,4 +262,42 @@ test('ffprobe が非数値を返したら RenderCompositionException', function 
         $workDir,
         function (): void {},
     ))->toThrow(RenderCompositionException::class, 'non-numeric');
+});
+
+test('全 ffmpeg / ffprobe コマンドの argv[1..2] が -max_alloc + config 値である', function (): void {
+    // 画素数爆弾 (小さいファイルで巨大な画素数を宣言する画像) で worker を落とさないための
+    // 安全境界。**バイナリ直後**に置くのは、ffprobe が入力を位置引数で受けるため
+    // 「最初の -i より前」を基準にすると検査が空振りするからである。
+    // 母集団は静止画抽出 / 静止画ループ / 動画クリップ / プレースホルダ / concat の 5 本 +
+    // ffprobe (尺 / 音声トラック) である。
+    $commands = [];
+    Process::fake(function (PendingProcess $process) use (&$commands) {
+        $command = $process->command;
+        $parts = is_array($command) ? array_map(strval(...), $command) : [(string) $command];
+        $commands[] = $parts;
+        $line = implode(' ', $parts);
+        if (str_contains($line, '-select_streams')) {
+            return Process::result(output: '');
+        }
+        if (str_contains($line, '-show_entries')) {
+            return Process::result(output: "2.500000\n");
+        }
+
+        return Process::result(output: '');
+    });
+    $workDir = composerWorkDir();
+
+    app(FfmpegVideoComposer::class)->compose(
+        composerManifest(takeVideoClip(1), takeStillClip(2), placeholderClip(3)),
+        [1 => "{$workDir}/src0", 2 => "{$workDir}/src1"],
+        $workDir,
+        function (): void {},
+    );
+
+    $expected = (string) config()->integer('manual.ffmpeg_max_alloc_bytes');
+    expect(count($commands))->toBeGreaterThanOrEqual(7);
+    foreach ($commands as $parts) {
+        expect($parts[1] ?? null)->toBe('-max_alloc');
+        expect($parts[2] ?? null)->toBe($expected);
+    }
 });

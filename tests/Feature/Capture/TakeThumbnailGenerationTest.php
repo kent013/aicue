@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\Manual\MaterialType;
 use App\Enums\Manual\TakeStatus;
 use App\Enums\Security\ExternalCallKind;
 use App\Exceptions\Capture\TakeThumbnailExtractionException;
@@ -45,9 +46,13 @@ final class ThumbnailPipelineFakeExtractor implements TakeThumbnailExtractor
     /** @var list<string> 実行ごとの作業ディレクトリ */
     public array $workDirs = [];
 
-    public function extract(string $localVideoPath, string $localThumbnailPath): void
+    /** @var list<MaterialType> extract が受け取った素材種別 */
+    public array $materials = [];
+
+    public function extract(string $localSourcePath, string $localThumbnailPath, MaterialType $material): void
     {
         $this->calls++;
+        $this->materials[] = $material;
         $this->workDirs[] = dirname($localThumbnailPath);
         if ($this->duringExtract !== null) {
             ($this->duringExtract)();
@@ -270,4 +275,31 @@ test('ジョブは薄い殻でパイプラインへ take id を渡すだけ', fu
     (new GenerateTakeThumbnailJob($take->id))->handle(app(TakeThumbnailPipeline::class));
 
     expect($take->fresh()?->thumbnail_path)->toBe(expectedThumbnailKey($take, $cut, $manual));
+});
+
+test('素材種別が extractor へ渡る (動画テイク)', function (): void {
+    [$take, , , $extractor] = thumbnailPipelineContext();
+
+    app(TakeThumbnailPipeline::class)->run($take->id);
+
+    expect($extractor->materials)->toBe([MaterialType::Video]);
+});
+
+test('静止画テイクもサムネイルが生成され、Still として extractor へ渡る', function (): void {
+    // 一覧に原本 (フル解像度の画像) を貼らないため、静止画も生成対象に含める。
+    Storage::fake('s3');
+    [$organization] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+    $manual = VideoManual::factory()->forProject($project)->create();
+    $cut = Cut::factory()->forManual($manual)->create();
+    $take = Take::factory()->forCut($cut)->still()->create();
+    Storage::disk('s3')->put($take->video_path, 'fake-take-image');
+    $extractor = new ThumbnailPipelineFakeExtractor;
+    app()->instance(TakeThumbnailExtractor::class, $extractor);
+    app()->instance(TakeObjectStorage::class, new ThumbnailPipelineRecordingStorage);
+
+    app(TakeThumbnailPipeline::class)->run($take->id);
+
+    expect($extractor->materials)->toBe([MaterialType::Still]);
+    expect($take->refresh()->thumbnail_path)->toBe(expectedThumbnailKey($take, $cut, $manual));
 });

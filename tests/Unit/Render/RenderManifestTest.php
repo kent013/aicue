@@ -22,7 +22,7 @@ function renderManifestWithSources(array $sources): RenderManifest
             cutId: $index + 1,
             label: '手順'.($index + 1),
             source: $source,
-            takeVideoPath: $source === RenderClipSource::Placeholder ? null : 'takes/x.mp4',
+            takeSourcePath: $source === RenderClipSource::Placeholder ? null : 'takes/x.mp4',
             stillDisplaySeconds: null,
             subtitlePrimary: null,
             subtitleSecondary: 'テロップ',

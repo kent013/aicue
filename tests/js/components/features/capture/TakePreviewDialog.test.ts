@@ -14,6 +14,7 @@ function makeTake(overrides: Partial<CaptureTake> = {}): CaptureTake {
         id: 10,
         client_take_id: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
         status: "ready",
+        material_type: "video",
         size_bytes: 1024 * 1024,
         duration_ms: 4000,
         comment: null,
@@ -38,6 +39,7 @@ function makeCut(overrides: Partial<CaptureCut> = {}): CaptureCut {
         narration: "作業台の準備を行います",
         subtitle_primary: "STEP 1",
         subtitle_secondary: "作業台を準備する",
+        material_type: null,
         adopted_take_id: null,
         adopted_ready_take_id: null,
         takes: [],
@@ -227,5 +229,80 @@ describe("TakePreviewDialog", () => {
                 "/signed/take-20",
             ),
         );
+    });
+    /*
+     * 静止画テイクは <video> ではなく <img> で出す。素材種別は**申告 Content-Type からの分類**
+     * であって実体の形式を保証しないため、読み込み失敗の受け皿を必ず置く
+     * (「何も出ない」状態を作らない)。<video> 側には足さない = 非対称は意図的。
+     */
+    describe("静止画テイク", () => {
+        function renderStill(id = 10) {
+            return render(TakePreviewDialog, {
+                open: true,
+                take: makeTake({ id, material_type: "still" }),
+                cut: makeCut(),
+                cutLabel: "手順1",
+                playbackUrl: `/signed/take-${id}`,
+                adopting: false,
+                error: null,
+                onAdopt: vi.fn(),
+                onClose: vi.fn(),
+            });
+        }
+
+        it("still は <img> を出し <video> を出さない", async () => {
+            renderStill();
+
+            const image = await screen.findByTestId("take-preview-image");
+            expect(image).toHaveAttribute("src", "/signed/take-10");
+            expect(screen.queryByTestId("take-preview-video")).not.toBeInTheDocument();
+        });
+
+        it("video は従来どおり <video> (回帰)", async () => {
+            render(TakePreviewDialog, {
+                open: true,
+                take: makeTake(),
+                cut: makeCut(),
+                cutLabel: "手順1",
+                playbackUrl: "/signed/take-10",
+                adopting: false,
+                error: null,
+                onAdopt: vi.fn(),
+                onClose: vi.fn(),
+            });
+
+            expect(await screen.findByTestId("take-preview-video")).toBeInTheDocument();
+            expect(screen.queryByTestId("take-preview-image")).not.toBeInTheDocument();
+        });
+
+        it("読み込み失敗で受け皿に差し替わる", async () => {
+            renderStill();
+
+            await fireEvent.error(await screen.findByTestId("take-preview-image"));
+
+            await waitFor(() =>
+                expect(screen.getByTestId("take-preview-unavailable")).toHaveTextContent(
+                    "このテイクはプレビューできません。",
+                ),
+            );
+        });
+
+        it("テイクを切り替えると失敗状態がリセットされる", async () => {
+            const { rerender } = renderStill(10);
+            await fireEvent.error(await screen.findByTestId("take-preview-image"));
+            await screen.findByTestId("take-preview-unavailable");
+
+            await rerender({
+                take: makeTake({ id: 20, material_type: "still" }),
+                playbackUrl: "/signed/take-20",
+            });
+
+            await waitFor(() =>
+                expect(screen.getByTestId("take-preview-image")).toHaveAttribute(
+                    "src",
+                    "/signed/take-20",
+                ),
+            );
+        });
     });
 });

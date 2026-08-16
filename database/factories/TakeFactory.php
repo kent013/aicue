@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Database\Factories;
 
+use App\Enums\Manual\MaterialType;
 use App\Enums\Manual\TakeStatus;
 use App\Models\Cut;
 use App\Models\Take;
@@ -27,6 +28,8 @@ class TakeFactory extends Factory
             'cut_id' => Cut::factory(),
             'client_take_id' => (string) Str::ulid(),
             'video_path' => 'takes/'.fake()->uuid().'.mp4',
+            // 既定は動画 (既存テイクは全件動画。既存テストの意味を変えない)
+            'material_type' => MaterialType::Video->value,
             'thumbnail_path' => null,
             'thumbnail_size_bytes' => null,
             'size_bytes' => fake()->numberBetween(100_000, 50_000_000),
@@ -42,6 +45,16 @@ class TakeFactory extends Factory
     public function forCut(Cut $cut): static
     {
         return $this->state(fn () => ['cut_id' => $cut->id]);
+    }
+
+    /** 静止画テイク (画像キー + duration_ms は null) */
+    public function still(): static
+    {
+        return $this->state(fn (): array => [
+            'video_path' => 'takes/'.fake()->uuid().'.jpg',
+            'material_type' => MaterialType::Still->value,
+            'duration_ms' => null,
+        ]);
     }
 
     /** サムネイル生成済み (容量集計・一覧表示のテスト用) */

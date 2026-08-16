@@ -1043,4 +1043,134 @@ describe("CameraRecorder 全画面レイアウトと撮影ガイド", () => {
 
         expect(previewContainer().contains(screen.getByTestId("start-recording"))).toBe(false);
     });
+    /*
+     * 静止画モード (mode="still")。MediaRecorder を一切使わず、phase は idle のまま
+     * 「録画開始」の位置にシャッターを出す。上の録画モードのテストが 1 件も変わっていないことが
+     * 「phase マシン・stream 管理に触れていない」ことの証拠になる。
+     */
+    describe("mode=still", () => {
+        /**
+         * jsdom の <video> は videoWidth/videoHeight を持たない (常に 0) ため、
+         * 「preview が映っている」状態を作る。0 のままだと encodeStillJpeg が
+         * 仕様どおり null を返し、撮影成功の経路に入らない。
+         */
+        function stubVideoDimensions(width: number, height: number): void {
+            vi.spyOn(HTMLVideoElement.prototype, "videoWidth", "get").mockReturnValue(width);
+            vi.spyOn(HTMLVideoElement.prototype, "videoHeight", "get").mockReturnValue(height);
+        }
+
+        /** canvas を差し替える (jsdom は toBlob / 2d context を持たない) */
+        function stubStillCanvas(blob: Blob | null): void {
+            vi.spyOn(document, "createElement").mockImplementation((tag: string) => {
+                if (tag !== "canvas") {
+                    return document.createElementNS(
+                        "http://www.w3.org/1999/xhtml",
+                        tag,
+                    ) as HTMLElement;
+                }
+                return {
+                    width: 0,
+                    height: 0,
+                    getContext: () => ({ drawImage: vi.fn() }),
+                    toBlob: (callback: (value: Blob | null) => void) => callback(blob),
+                } as unknown as HTMLElement;
+            });
+        }
+
+        it("シャッターを出し、録画開始ボタンは出さない", () => {
+            render(CameraRecorder, {
+                props: { onCaptured: vi.fn(), onCameraUnavailable: vi.fn(), mode: "still" },
+            });
+
+            expect(screen.getByTestId("shoot-still")).toBeInTheDocument();
+            expect(screen.queryByTestId("start-recording")).not.toBeInTheDocument();
+        });
+
+        it("押下で onCaptured(blob, 'image/jpeg', null) を呼び、phase は idle のまま", async () => {
+            const { stream } = fakeStream();
+            getUserMediaMock.mockResolvedValue(stream);
+            stubVideoDimensions(1280, 720);
+            stubStillCanvas(new Blob(["jpeg"], { type: "image/jpeg" }));
+            const onCaptured = vi.fn();
+
+            render(CameraRecorder, {
+                props: { onCaptured, onCameraUnavailable: vi.fn(), mode: "still" },
+            });
+            await fireEvent.click(screen.getByTestId("shoot-still"));
+
+            await vi.waitFor(() => {
+                expect(onCaptured).toHaveBeenCalledTimes(1);
+            });
+            const [blob, mimeType, durationMs] = onCaptured.mock.calls[0];
+            expect(blob).toBeInstanceOf(Blob);
+            expect(mimeType).toBe("image/jpeg");
+            expect(durationMs).toBeNull();
+            // 録画に入っていない = 停止ボタンは出ず、シャッターのまま
+            expect(screen.getByTestId("shoot-still")).toBeInTheDocument();
+            expect(screen.queryByTestId("stop-recording")).not.toBeInTheDocument();
+        });
+
+        it("撮影中は active を通知し、完了で false へ戻す (preview 排他は録画と同じ)", async () => {
+            const { stream } = fakeStream();
+            getUserMediaMock.mockResolvedValue(stream);
+            stubVideoDimensions(1280, 720);
+            stubStillCanvas(new Blob(["jpeg"], { type: "image/jpeg" }));
+            const onCaptureActiveChange = vi.fn();
+
+            render(CameraRecorder, {
+                props: {
+                    onCaptured: vi.fn(),
+                    onCameraUnavailable: vi.fn(),
+                    onCaptureActiveChange,
+                    mode: "still",
+                },
+            });
+            await fireEvent.click(screen.getByTestId("shoot-still"));
+
+            await vi.waitFor(() => {
+                expect(onCaptureActiveChange).toHaveBeenCalledWith(false);
+            });
+            expect(onCaptureActiveChange.mock.calls.map(([active]) => active)).toEqual([true, false]);
+        });
+
+        it("エンコードに失敗したら送らずエラー表示する", async () => {
+            const { stream } = fakeStream();
+            getUserMediaMock.mockResolvedValue(stream);
+            stubVideoDimensions(1280, 720);
+            stubStillCanvas(null);
+            const onCaptured = vi.fn();
+
+            render(CameraRecorder, {
+                props: { onCaptured, onCameraUnavailable: vi.fn(), mode: "still" },
+            });
+            await fireEvent.click(screen.getByTestId("shoot-still"));
+
+            await vi.waitFor(() => {
+                expect(screen.getByRole("alert")).toHaveTextContent(
+                    "写真を取得できませんでした。もう一度お試しください。",
+                );
+            });
+            expect(onCaptured).not.toHaveBeenCalled();
+        });
+
+        it("MediaRecorder が使えない端末でもシャッターは機能する (録画能力に依存しない)", async () => {
+            FakeMediaRecorder.supportedTypes = [];
+            const { stream } = fakeStream();
+            getUserMediaMock.mockResolvedValue(stream);
+            stubVideoDimensions(1280, 720);
+            stubStillCanvas(new Blob(["jpeg"], { type: "image/jpeg" }));
+            const onCaptured = vi.fn();
+            const onCameraUnavailable = vi.fn();
+
+            render(CameraRecorder, {
+                props: { onCaptured, onCameraUnavailable, mode: "still" },
+            });
+            await fireEvent.click(screen.getByTestId("shoot-still"));
+
+            await vi.waitFor(() => {
+                expect(onCaptured).toHaveBeenCalledTimes(1);
+            });
+            expect(onCameraUnavailable).not.toHaveBeenCalled();
+        });
+    });
 });

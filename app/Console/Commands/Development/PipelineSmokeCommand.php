@@ -40,6 +40,7 @@ use App\Services\Project\ProjectService;
 use App\Services\Storage\Fakes\FakeObjectStore;
 use App\Support\BughuntDatabaseGuard;
 use App\Support\FakeStorageGate;
+use App\Support\Media\FfmpegSafetyArguments;
 use App\Support\Smoke\SmokeFailureClassifier;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
@@ -318,7 +319,8 @@ class PipelineSmokeCommand extends Command
     private function probeBinary(string $binary): ?string
     {
         try {
-            $result = Process::timeout(self::PROCESS_TIMEOUT_SECONDS)->run([$binary, '-version']);
+            $result = Process::timeout(self::PROCESS_TIMEOUT_SECONDS)
+                ->run([$binary, ...FfmpegSafetyArguments::all(), '-version']);
         } catch (Throwable) {
             return null;
         }
@@ -639,7 +641,7 @@ class PipelineSmokeCommand extends Command
     {
         $path = $workDir.'/take.mp4';
         $result = Process::path($workDir)->timeout(self::PROCESS_TIMEOUT_SECONDS)->run([
-            config()->string('manual.render_ffmpeg_binary'), '-y',
+            config()->string('manual.render_ffmpeg_binary'), ...FfmpegSafetyArguments::all(), '-y',
             '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=30:duration='.self::TAKE_SECONDS,
             '-f', 'lavfi', '-i', 'sine=frequency=440:duration='.self::TAKE_SECONDS,
             '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
@@ -709,7 +711,7 @@ class PipelineSmokeCommand extends Command
         File::copy($store->absolutePath($outputPath), $local);
 
         $probe = Process::timeout(self::PROCESS_TIMEOUT_SECONDS)->run([
-            config()->string('manual.render_ffprobe_binary'),
+            config()->string('manual.render_ffprobe_binary'), ...FfmpegSafetyArguments::all(),
             '-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', $local,
         ]);
         if (! $probe->successful()) {

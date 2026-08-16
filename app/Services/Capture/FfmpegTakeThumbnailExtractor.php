@@ -4,14 +4,16 @@ declare(strict_types=1);
 
 namespace App\Services\Capture;
 
+use App\Enums\Manual\MaterialType;
 use App\Exceptions\Capture\TakeThumbnailExtractionException;
+use App\Support\Media\FfmpegSafetyArguments;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Process;
 
 /**
  * ffmpeg による 1 フレーム抽出 (実行は Process facade 経由。テストは Process::fake())。
  *
- * 安全境界 (入力は**利用者がアップロードした動画**である):
+ * 安全境界 (入力は**利用者がアップロードした素材** = 動画または静止画である):
  * - 引数は配列で渡す (シェル連結なし)。入力・出力ともサーバ生成のパスだけで、
  *   利用者由来の文字列は 1 つも引数に入らない
  * - `-nostdin` で標準入力待ちに落ちない / `Process::timeout()` で実行を有界にする
@@ -24,15 +26,26 @@ use Illuminate\Support\Facades\Process;
  */
 final class FfmpegTakeThumbnailExtractor implements TakeThumbnailExtractor
 {
-    public function extract(string $localVideoPath, string $localThumbnailPath): void
+    public function extract(string $localSourcePath, string $localThumbnailPath, MaterialType $material): void
     {
+        // 静止画に「1 秒地点」は無い。seek=0 の 1 回で決める
+        // (動画既定の 1000ms を当てると 1 回目が必ず空振りし、無駄な ffmpeg 実行が 1 回増える)
+        if ($material === MaterialType::Still) {
+            $failure = $this->attempt($localSourcePath, $localThumbnailPath, 0);
+            if ($failure !== null) {
+                throw new TakeThumbnailExtractionException($failure);
+            }
+
+            return;
+        }
+
         $seekMs = config()->integer('capture.thumbnail_seek_ms');
 
-        $failure = $this->attempt($localVideoPath, $localThumbnailPath, $seekMs);
+        $failure = $this->attempt($localSourcePath, $localThumbnailPath, $seekMs);
         if ($failure !== null && $seekMs > 0) {
             // 尺が seek より短いと 1 フレームも出力されない。先頭で 1 回だけ再試行する
             // (これ以上の探索はしない = 尺の推定に ffprobe を足さない)
-            $failure = $this->attempt($localVideoPath, $localThumbnailPath, 0);
+            $failure = $this->attempt($localSourcePath, $localThumbnailPath, 0);
         }
         if ($failure !== null) {
             throw new TakeThumbnailExtractionException($failure);
@@ -58,6 +71,7 @@ final class FfmpegTakeThumbnailExtractor implements TakeThumbnailExtractor
         $result = Process::timeout(config()->integer('capture.thumbnail_ffmpeg_timeout_seconds'))
             ->run([
                 config()->string('manual.render_ffmpeg_binary'),
+                ...FfmpegSafetyArguments::all(),
                 '-nostdin', '-y',
                 '-protocol_whitelist', 'file',
                 '-ss', sprintf('%.3f', $seekMs / 1000),

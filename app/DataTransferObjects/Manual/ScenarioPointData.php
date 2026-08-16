@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\DataTransferObjects\Manual;
 
+use App\Enums\Manual\MaterialType;
 use App\Models\Cut;
 
 /**
@@ -21,7 +22,7 @@ final readonly class ScenarioPointData
         public string $narration,
         public ?string $subtitlePrimary,
         public string $subtitleSecondary,
-        public ?string $materialType,
+        public ?MaterialType $materialType,
         public ?int $staticDisplaySeconds,
     ) {}
 
@@ -35,7 +36,7 @@ final readonly class ScenarioPointData
             narration: $cut->narration,
             subtitlePrimary: $cut->subtitle_primary,
             subtitleSecondary: $cut->subtitle_secondary,
-            materialType: $cut->material_type?->value,
+            materialType: $cut->material_type,
             staticDisplaySeconds: $cut->static_display_seconds,
         );
     }
@@ -55,7 +56,7 @@ final readonly class ScenarioPointData
             'narration' => $this->narration,
             'subtitle_primary' => $this->subtitlePrimary,
             'subtitle_secondary' => $this->subtitleSecondary,
-            'material_type' => $this->materialType,
+            'material_type' => $this->materialType?->value,
             'static_display_seconds' => $this->staticDisplaySeconds,
         ];
     }

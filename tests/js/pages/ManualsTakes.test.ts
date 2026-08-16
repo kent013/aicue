@@ -55,6 +55,7 @@ function take(overrides: Partial<SelectableTake> = {}): SelectableTake {
     return {
         id: 101,
         status: "ready",
+        material_type: "video",
         size_bytes: 2 * 1024 * 1024,
         duration_ms: 12_000,
         comment: null,
@@ -74,6 +75,7 @@ const cut: TakeSelectionCut = {
     narration: "はじめに工具を準備します。",
     subtitle_primary: "トルク 12N・m",
     subtitle_secondary: "工具を準備する",
+    material_type: null,
     adopted: null,
 };
 
@@ -130,7 +132,14 @@ describe("Manuals/Takes — テイクの選択と採用", () => {
         render(Takes, {
             props: baseProps({
                 takes: [adopted, other],
-                cut: { ...cut, adopted: { id: adopted.id, status: "ready" as const } },
+                cut: {
+                    ...cut,
+                    adopted: {
+                        id: adopted.id,
+                        status: "ready" as const,
+                        material_type: "video" as const,
+                    },
+                },
             }),
         });
 

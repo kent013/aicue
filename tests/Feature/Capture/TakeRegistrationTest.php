@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\DataTransferObjects\Capture\ObjectMetadataData;
 use App\DataTransferObjects\Capture\UploadTicketClaims;
 use App\Enums\Capture\TakeUploadReservationStatus;
+use App\Enums\Manual\MaterialType;
 use App\Enums\Manual\TakeStatus;
 use App\Enums\ProjectRole;
 use App\Jobs\Capture\GenerateTakeThumbnailJob;
@@ -494,4 +495,61 @@ test('確定 CAS に負けた登録 (422) では生成ジョブを投入しな�
         ->assertStatus(422);
 
     Queue::assertNotPushed(GenerateTakeThumbnailJob::class);
+});
+
+/*
+ * 静止画テイクの登録: 素材種別は**予約行の content_type** から導く
+ * (チケット偽装で差し替えられない)。静止画に尺は無いので申告があっても捨てる。
+ */
+
+test('画像で登録すると material_type=still になり duration_ms は申告があっても null', function (): void {
+    [$organization, $owner, $project, $manual, $cut] = registrationContext();
+    $cut->forceFill(['material_type' => MaterialType::Still->value])->save();
+    [$reservation, $ticket] = reservationWithTicket($cut, [
+        'content_type' => 'image/jpeg',
+        'video_path' => "projects/{$project->id}/manuals/{$manual->id}/cuts/{$cut->id}/takes/".Str::ulid().'.jpg',
+    ]);
+    mockHeadObjectMatching($reservation);
+
+    $this->actingAs($owner)
+        ->postJson(takesPath($project, $manual, $cut), takesPayload($reservation, $ticket, ['duration_ms' => 5_000]))
+        ->assertCreated()
+        ->assertJsonPath('duration_ms', null);
+
+    $take = $cut->takes()->sole();
+    expect($take->material_type)->toBe(MaterialType::Still);
+    expect($take->duration_ms)->toBeNull();
+    // Quota の 1 巡は静止画でも同じ経路 (pending 解放 → used 加算)
+    expect($reservation->fresh()?->status)->toBe(TakeUploadReservationStatus::Completed);
+    expect(app(StorageUsageService::class)->bytesPending($organization))->toBe(0);
+    expect(app(StorageUsageService::class)->occupiedBytes($organization))->toBe($reservation->size_bytes);
+});
+
+test('動画で登録すると material_type=video のまま (回帰)', function (): void {
+    [, $owner, $project, $manual, $cut] = registrationContext();
+    [$reservation, $ticket] = reservationWithTicket($cut);
+    mockHeadObjectMatching($reservation);
+
+    $this->actingAs($owner)
+        ->postJson(takesPath($project, $manual, $cut), takesPayload($reservation, $ticket))
+        ->assertCreated()
+        ->assertJsonPath('duration_ms', 5_000);
+
+    expect($cut->takes()->sole()->material_type)->toBe(MaterialType::Video);
+});
+
+test('material_type を payload に入れると 422 (サーバ確定値なので受け取らない)', function (): void {
+    [, $owner, $project, $manual, $cut] = registrationContext();
+    [$reservation, $ticket] = reservationWithTicket($cut);
+    mockHeadObjectMatching($reservation);
+
+    $this->actingAs($owner)
+        ->postJson(
+            takesPath($project, $manual, $cut),
+            takesPayload($reservation, $ticket, ['material_type' => 'video']),
+        )
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('material_type');
+
+    expect($cut->takes()->count())->toBe(0);
 });

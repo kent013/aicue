@@ -43,6 +43,18 @@
 
     let error = $state<string | null>(null);
     let busy = $state(false);
+    /**
+     * 読み込みに失敗した <img> の URL。素材種別は**申告 Content-Type からの分類**であり
+     * 実体の形式を保証しないため、still と申告された実体がデコードできない場合に
+     * 「何も出ない」状態を作らない。<video> 側には足さない (非対称は意図的)。
+     *
+     * 真偽値ではなく**失敗した URL** を持つ: 失敗は「その URL の性質」であって component の
+     * 状態ではない。こうすると、テイクの切り替えでも同じテイクの署名 URL 再取得でも、
+     * リセットのための購読 ($effect) を書かずに**構造的に**失敗表示が外れる
+     * (購読の書き漏らしという失敗様式そのものを消す)。
+     */
+    let failedUrl = $state<string | null>(null);
+    const isStill = $derived(take?.material_type === "still");
 
     // ready 以外はサーバが 404 を返すため src を張らず <video> 自体を描かない
     // (無駄な要素とネットワーク要求を出さない)
@@ -51,6 +63,8 @@
             ? buildTakeUrl({ projectId, manualId, cutId: cut.id }, take.id, "/playback")
             : null,
     );
+
+    const imageFailed = $derived(failedUrl !== null && failedUrl === playbackUrl);
 
     const thumbnailUrl = $derived(
         take !== null && take.has_thumbnail
@@ -100,17 +114,37 @@
 <Card padding="md" testId="take-preview-panel">
     <div class="relative w-full overflow-hidden rounded-md bg-text/5">
         {#if playbackUrl !== null && take !== null}
-            {#key take.id}
-                <!-- svelte-ignore a11y_media_has_caption -->
-                <video
-                    controls
-                    playsinline
-                    src={playbackUrl}
-                    class="w-full"
-                    aria-label={`${cut.label} のテイク ${(takeIndex ?? 0) + 1}`}
-                    data-testid="take-preview-video"
-                ></video>
-            {/key}
+            {#if isStill}
+                {#if imageFailed}
+                    <p
+                        class="p-6 text-center text-caption text-text-secondary"
+                        role="status"
+                        data-testid="take-preview-unavailable"
+                    >
+                        このテイクはプレビューできません。
+                    </p>
+                {:else}
+                    <img
+                        src={playbackUrl}
+                        alt={`${cut.label} のテイク ${(takeIndex ?? 0) + 1}`}
+                        class="w-full"
+                        onerror={() => (failedUrl = playbackUrl)}
+                        data-testid="take-preview-image"
+                    />
+                {/if}
+            {:else}
+                {#key take.id}
+                    <!-- svelte-ignore a11y_media_has_caption -->
+                    <video
+                        controls
+                        playsinline
+                        src={playbackUrl}
+                        class="w-full"
+                        aria-label={`${cut.label} のテイク ${(takeIndex ?? 0) + 1}`}
+                        data-testid="take-preview-video"
+                    ></video>
+                {/key}
+            {/if}
             <SubtitleOverlay
                 primary={cut.subtitle_primary}
                 secondary={cut.subtitle_secondary}
@@ -132,7 +166,7 @@
         <p class="mt-2 text-caption text-text-secondary" data-testid="take-not-playable">
             {take === null
                 ? "左の一覧からテイクを選ぶと再生できます。"
-                : `このテイクはまだ再生できません（${TAKE_STATUS_LABELS[take.status]}）。`}
+                : `このテイクはまだ${isStill ? "表示" : "再生"}できません（${TAKE_STATUS_LABELS[take.status]}）。`}
         </p>
     {/if}
 

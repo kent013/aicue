@@ -61,6 +61,11 @@ return [
     'render_default_take_duration_ms' => 60_000,  // duration_ms NULL テイクの保守的代用値
     'render_max_inflight_previews_per_org' => 3,  // org 同時 preview 上限
     'preview_placeholder_seconds' => 3,           // 採用テイク欠落 cut のプレースホルダ尺
+    // 静止画カットの表示秒 (cuts.static_display_seconds 未指定時)。
+    // 編集画面の入力範囲 (1〜60) の内側に置く。env() は持たせない (運用で変える値ではない)
+    'default_still_display_seconds' => 5,
+    // ffmpeg / ffprobe の 1 回あたり heap 確保上限 (バイト)。画素数爆弾で worker を落とさない
+    'ffmpeg_max_alloc_bytes' => 536_870_912,      // 512 MiB
     'render_resolution' => '1920x1080',
     'render_fps' => 30,
     'render_ffmpeg_binary' => env('RENDER_FFMPEG_BINARY', 'ffmpeg'),

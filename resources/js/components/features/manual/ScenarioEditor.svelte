@@ -1104,8 +1104,17 @@
                         <span data-testid="video-cell-count">
                             テイク {summary?.takes_count ?? 0} 件
                         </span>
+                        <!--
+                          素材登録状況 (doc/02 §2.4 の 3 値)。「採用テイクが在るか」と
+                          「その素材種別」だけで決める。ready かどうかは別軸なので、ここでは
+                          言わない (充足の告知は既存の詳細画面 props が担当)。
+                        -->
                         {#if adopted !== null}
-                            <Badge tone="primary" testId="video-cell-adopted">採用済み</Badge>
+                            <Badge tone="primary" testId="video-cell-material">
+                                {adopted.material_type === "still" ? "静止画登録済" : "動画登録済"}
+                            </Badge>
+                        {:else}
+                            <Badge tone="neutral" testId="video-cell-material">未登録</Badge>
                         {/if}
                     </p>
                     <div class="mt-2">

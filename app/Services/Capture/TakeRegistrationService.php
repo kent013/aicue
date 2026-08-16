@@ -9,6 +9,7 @@ use App\DataTransferObjects\Capture\TakeRegistrationResult;
 use App\DataTransferObjects\Capture\UploadTicketClaims;
 use App\Enums\Capture\CaptureConflictType;
 use App\Enums\Capture\TakeUploadReservationStatus;
+use App\Enums\Manual\MaterialType;
 use App\Enums\Manual\TakeStatus;
 use App\Exceptions\Capture\CaptureConflictException;
 use App\Jobs\Capture\GenerateTakeThumbnailJob;
@@ -17,6 +18,7 @@ use App\Models\Project;
 use App\Models\Take;
 use App\Models\TakeUploadReservation;
 use App\Models\VideoManual;
+use App\Support\Capture\TakeMaterialClassifier;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
@@ -160,15 +162,25 @@ class TakeRegistrationService
                 ]);
             }
 
+            // 素材種別は**予約行の content_type**から導く (チケット偽装で差し替えられない)
+            $material = TakeMaterialClassifier::fromContentType($reservation->content_type);
+
             $lockedCut->takes()->increment('sort_order'); // 既存を後ろへ (先頭 = 0。行ロック下で競合なし)
             $take = $lockedCut->takes()->make([
                 'client_take_id' => $reservation->client_take_id,
                 'video_path' => $reservation->video_path,
                 'size_bytes' => $reservation->size_bytes,   // 予約 = HeadObject 照合済み確定値
-                'duration_ms' => $input->durationMs,        // クライアント申告 (表示用)
+                // 静止画に尺は無い。クライアント申告があっても捨てる (表示・尺ゲートの両方で嘘をつかせない)
+                'duration_ms' => $material === MaterialType::Still ? null : $input->durationMs,
                 'captured_at' => $input->capturedAt,
             ]);
-            $take->forceFill(['status' => TakeStatus::Ready, 'sort_order' => 0])->save();
+            // material_type は保護された確定値のため forceFill で**INSERT 時に明示代入**する
+            // (ドメイン規約 1 (ii)/2 と同じ理由。DB default を置いていないので、ここが唯一の設定点である)
+            $take->forceFill([
+                'status' => TakeStatus::Ready,
+                'sort_order' => 0,
+                'material_type' => $material,
+            ])->save();
 
             // サムネイル生成の投入を**同一 tx 内**で行う (AGENTS.md ドメイン固有規約 11。
             // afterCommit に依存しない)。保証するのは「take 行を作ったのに生成 job が投入されない窓」の

@@ -145,7 +145,7 @@ describe("Manuals/Edit — 動画列", () => {
             },
         });
 
-        expect(screen.getByTestId("video-cell-adopted")).toHaveTextContent("採用済み");
+        expect(screen.getByTestId("video-cell-material")).toHaveTextContent("動画登録済");
     });
 
     it("未保存行 (手順を追加した直後) にはリンクが出ず、保存を促す文言が出る", async () => {

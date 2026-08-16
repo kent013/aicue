@@ -254,7 +254,7 @@ class RenderPipeline
                 cutId: $cut->id,
                 label: $label,
                 source: RenderClipSource::Placeholder,
-                takeVideoPath: null,
+                takeSourcePath: null,
                 stillDisplaySeconds: null,
                 subtitlePrimary: $cut->subtitle_primary,
                 subtitleSecondary: $cut->subtitle_secondary,
@@ -266,16 +266,16 @@ class RenderPipeline
         $take = $cut->adoptedTake;
         Assert::notNull($take, 'isMissing() が false なら採用テイクは必ず存在する');
 
-        $isStill = $cut->material_type === MaterialType::Still;
+        // 実効素材種別の式は EffectiveMaterialType が唯一の所在 (ここに書き直さない)。
+        // 尺ゲート (RenderJobService) も同じ 2 クラスを呼ぶ = ゲートとレンダで尺が食い違わない
+        $isStill = EffectiveMaterialType::of($cut, $take) === MaterialType::Still;
 
         return new RenderClipSpec(
             cutId: $cut->id,
             label: $label,
             source: $isStill ? RenderClipSource::TakeStill : RenderClipSource::TakeVideo,
-            takeVideoPath: $take->video_path,
-            stillDisplaySeconds: $isStill
-                ? ($cut->static_display_seconds ?? config()->integer('manual.preview_placeholder_seconds'))
-                : null,
+            takeSourcePath: $take->video_path,
+            stillDisplaySeconds: $isStill ? StillDisplayDuration::secondsFor($cut) : null,
             subtitlePrimary: $cut->subtitle_primary,
             subtitleSecondary: $cut->subtitle_secondary,
         );
@@ -374,17 +374,23 @@ class RenderPipeline
     /**
      * S3 から採用テイク素材を work dir へ取得する (cutId => local path。Placeholder cut は不在)。
      *
+     * ローカル名から拡張子を落としている (旧: `src{$index}.mp4`)。
+     * 拡張子は**以前から既に嘘**だった — `video/webm` / `video/quicktime` のテイクも
+     * `.mp4` という名前で落ちており、合成は最初から **ffmpeg の内容プローブ**に依存している。
+     * 画像素材を足すにあたって嘘を増やす理由が無いので、名前から拡張子ごと外す。
+     * 前例は TakeThumbnailPipeline の `"{$workDir}/source"` (同じく拡張子なしで ffmpeg に渡す)。
+     *
      * @return array<int, string>
      */
     private function downloadSources(RenderManifest $manifest, string $workDir): array
     {
         $localSources = [];
         foreach ($manifest->clips as $index => $clip) {
-            if ($clip->takeVideoPath === null) {
+            if ($clip->takeSourcePath === null) {
                 continue;
             }
-            $localPath = "{$workDir}/src{$index}.mp4";
-            $this->storage->downloadToLocal($clip->takeVideoPath, $localPath);
+            $localPath = "{$workDir}/src{$index}";
+            $this->storage->downloadToLocal($clip->takeSourcePath, $localPath);
             $localSources[$clip->cutId] = $localPath;
         }
 

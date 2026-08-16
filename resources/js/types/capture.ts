@@ -5,10 +5,15 @@
 
 export type TakeStatus = "uploading" | "processing" | "ready" | "failed";
 
+/** PHP: App\Enums\Manual\MaterialType と値集合を一致させる */
+export type MaterialType = "video" | "still";
+
 export interface CaptureTake {
     id: number;
     client_take_id: string;
     status: TakeStatus;
+    /** 登録された素材の**実体** (NOT NULL)。UI はこの値で <video> と <img> を出し分ける */
+    material_type: MaterialType;
     size_bytes: number;
     duration_ms: number | null;
     comment: string | null;
@@ -33,6 +38,8 @@ export interface CaptureCut {
     narration: string;
     subtitle_primary: string | null;
     subtitle_secondary: string;
+    /** カットの**計画** (未指定あり)。撮影 UI (シャッター / 録画) の出し分けに使う */
+    material_type: MaterialType | null;
     adopted_take_id: number | null;
     /**
      * 通し再生が再生するテイクの id (サーバが `AdoptedReadyTakeCoverage` で決めた値)。

@@ -12,6 +12,15 @@ export function supportsMediaRecorder(): boolean {
     );
 }
 
+/**
+ * 静止画撮影に必要な能力 (getUserMedia のみ。**MediaRecorder は要らない**)。
+ * supportsMediaRecorder() を静止画にも流用すると、MediaRecorder 非対応端末で
+ * 撮れるはずの写真まで file input へ落ちてしまう。
+ */
+export function supportsStillCapture(): boolean {
+    return typeof navigator.mediaDevices?.getUserMedia === "function";
+}
+
 /** 録画に使う MIME type (mp4 優先。どちらも不可なら null) */
 export function preferredRecordingMimeType(): string | null {
     if (typeof window.MediaRecorder === "undefined") return null;

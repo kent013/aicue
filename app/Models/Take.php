@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Enums\Manual\MaterialType;
 use App\Enums\Manual\TakeStatus;
 use Database\Factories\TakeFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -22,11 +23,15 @@ use Illuminate\Support\Carbon;
  *   $fillable 外。非 null は削除不可 (概念設計 D6)
  * - thumbnail_path / thumbnail_size_bytes は**サーバ生成の会計値**のため $fillable 外。
  *   書き込みは TakeThumbnailPipeline の条件付き UPDATE (query builder) だけである
+ * - material_type は**サーバ確定値** ($fillable 外)。予約行の content_type から
+ *   TakeMaterialClassifier が導き、INSERT 時に forceFill で明示代入する。
+ *   cuts.material_type (計画) とは別概念で、値域だけを共有する
  *
  * @property int $id
  * @property int $cut_id
  * @property string $client_take_id
  * @property string $video_path
+ * @property MaterialType $material_type
  * @property string|null $thumbnail_path
  * @property int|null $thumbnail_size_bytes
  * @property int $size_bytes
@@ -59,6 +64,7 @@ class Take extends Model
     {
         return [
             'status' => TakeStatus::class,
+            'material_type' => MaterialType::class,
             'captured_at' => 'datetime',
             'downloaded_at' => 'datetime',
             // 読み取り型を driver 依存にしない (DTO / Resource / PHPStan が int|null で安定する)。

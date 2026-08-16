@@ -20,7 +20,7 @@ function subtitleClip(?string $primary, string $secondary): RenderClipSpec
         cutId: 1,
         label: '手順1',
         source: RenderClipSource::TakeVideo,
-        takeVideoPath: 'takes/x.mp4',
+        takeSourcePath: 'takes/x.mp4',
         stillDisplaySeconds: null,
         subtitlePrimary: $primary,
         subtitleSecondary: $secondary,

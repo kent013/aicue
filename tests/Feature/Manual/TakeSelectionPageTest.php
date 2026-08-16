@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\Manual\MaterialType;
 use App\Enums\Manual\TakeStatus;
 use App\Enums\ProjectRole;
 use App\Models\Cut;
@@ -172,4 +173,31 @@ test('未契約組織は onboarding へ遮断される (課金ゲートの中に
     $this->actingAs($owner)
         ->get(takeSelectionPath($project, $manual, $cut))
         ->assertRedirect(route('onboarding.checkout'));
+});
+
+test('cut の計画 (material_type) と採用テイクの実体が props に載る', function (): void {
+    // cut 側は**計画** (未指定あり。ファイル選択の accept 切替に使う) /
+    // take 側は**実体** (NOT NULL。<video> と <img> の出し分けに使う)。別のキーである。
+    [, $owner, $project, $manual, $cut] = takeSelectionContext();
+    $cut->forceFill(['material_type' => MaterialType::Still->value])->save();
+    $take = Take::factory()->forCut($cut)->still()->create();
+    $cut->forceFill(['adopted_take_id' => $take->id])->save();
+
+    $this->actingAs($owner)
+        ->get(takeSelectionPath($project, $manual, $cut))
+        ->assertInertia(fn ($page) => $page
+            ->where('cut.material_type', 'still')
+            ->where('cut.adopted.material_type', 'still')
+            ->where('takes.0.material_type', 'still'));
+});
+
+test('計画未指定 + 動画テイクでは cut.material_type が null / take は video', function (): void {
+    [, $owner, $project, $manual, $cut] = takeSelectionContext();
+    Take::factory()->forCut($cut)->create();
+
+    $this->actingAs($owner)
+        ->get(takeSelectionPath($project, $manual, $cut))
+        ->assertInertia(fn ($page) => $page
+            ->where('cut.material_type', null)
+            ->where('takes.0.material_type', 'video'));
 });

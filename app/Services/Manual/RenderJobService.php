@@ -448,12 +448,16 @@ class RenderJobService
         $totalMs = 0;
         foreach ($ordered as $entry) {
             $cut = $entry->cut;
-            if ($cut->material_type === MaterialType::Still && $cut->static_display_seconds !== null) {
-                $totalMs += $cut->static_display_seconds * 1000;
+            $take = $cut->adoptedTake;
+            // ここへ来る時点で採用テイクは確定している (充足判定 = AdoptedReadyTakeCoverage が先に 422 を出す)
+            Assert::notNull($take, '充足判定を通った cut には採用テイクが必ず存在する');
 
-                continue;
-            }
-            $totalMs += $cut->adoptedTake->duration_ms ?? $defaultMs;
+            // レンダ (RenderPipeline::clipSpecFor) と**同じ 2 クラス**を通す。
+            // 片方だけ実効判定を持つと、cut=video/take=still の組み合わせで
+            // ゲート 60 秒 / レンダ 5 秒という新しい二重管理が生まれる
+            $totalMs += EffectiveMaterialType::of($cut, $take) === MaterialType::Still
+                ? StillDisplayDuration::secondsFor($cut) * 1000
+                : ($take->duration_ms ?? $defaultMs);
         }
 
         if ($totalMs > config()->integer('manual.render_max_total_source_ms')) {
