@@ -179,7 +179,12 @@
     let saveFailure = $state<SaveFailure | null>(null);
     /** 失敗アラートの focus 対象 wrapper (tabindex=-1) */
     let failureEl = $state<HTMLDivElement | null>(null);
-    let confirmingStepIndex = $state<number | null>(null);
+    /**
+     * 削除確認ダイアログが対象にしている手順の**安定キー** (null = 閉じている)。
+     * 数値 index を持つと、ダイアログを開いている間に compositionend で遅延中の並べ替えが
+     * 実行されたとき、確定した時点で index が別の手順を指す。
+     */
+    let confirmingStepKey = $state<string | null>(null);
     let confirmingReload = $state(false);
     /** 明示同意済みの最新取得中フラグ (dirty 離脱確認を二重に出さない) */
     let reloading = false;
@@ -219,19 +224,53 @@
         );
     }
 
-    function addPoint(stepIndex: number): void {
-        runSettled(() =>
-            commitStructural(() => steps[stepIndex].points.push({ ...emptyRow("yori"), id: null })),
-        );
+    /**
+     * 急所の追加。
+     * **親手順は数値 index ではなく安定キー (clientKey) で持ち回る**。`runSettled` は IME 変換中に
+     * 実行を compositionend まで遅らせるため、実行時点では手順の並びが変わっていることがある
+     * (moveStepTo / movePointTo と同じ理由)。実行時に親手順が消えていたら**何もしない** —
+     * 「この手順に足す」という意図が無効になったので、別の手順や末尾へ足さない。
+     */
+    function addPoint(stepKey: string): void {
+        runSettled(() => {
+            const at = steps.findIndex((step) => step.clientKey === stepKey); // 実行時点で解決し直す
+            if (at < 0) return;
+            const parent = steps[at];
+            commitStructural(() => parent.points.push({ ...emptyRow("yori"), id: null }));
+        });
     }
 
-    function removeStep(index: number): void {
-        runSettled(() => commitStructural(() => steps.splice(index, 1)));
-        confirmingStepIndex = null; // 確認ダイアログを閉じるのは即時 (履歴とは独立)
+    /**
+     * 手順の削除。
+     * **対象は数値 index ではなく安定キー (clientKey) で持ち回る** (理由は addPoint と同じ)。
+     * 見つからなければ何もしない。**早期 return は必須** (落とすと splice(-1,1) で末尾が消える)。
+     * ダイアログを閉じるのは解決の成否によらず即時に行う。
+     */
+    function removeStep(stepKey: string): void {
+        runSettled(() => {
+            const at = steps.findIndex((step) => step.clientKey === stepKey); // 実行時点で解決し直す
+            if (at < 0) return; // ← 落とすと splice(-1,1) で末尾を消す
+            commitStructural(() => steps.splice(at, 1));
+        });
+        confirmingStepKey = null; // 確認ダイアログを閉じるのは即時 (履歴とは独立)
     }
 
-    function removePoint(stepIndex: number, pointIndex: number): void {
-        runSettled(() => commitStructural(() => steps[stepIndex].points.splice(pointIndex, 1)));
+    /**
+     * 急所の削除。
+     * **親手順・対象の急所とも安定キー (clientKey) で持ち回る** (理由は addPoint と同じ)。
+     * 見つからなければ**何もしない** — もう消えているなら意図は満たされている。
+     * 親を先に解決してからその配下だけを探すのは、「急所は手順をまたがない」という
+     * 既存のドメイン制約をコードに残すためである (movePointTo と同じ形)。
+     */
+    function removePoint(stepKey: string, pointKey: string): void {
+        runSettled(() => {
+            const stepAt = steps.findIndex((step) => step.clientKey === stepKey);
+            if (stepAt < 0) return; // ← 落とすと steps[-1] が undefined で TypeError になり drain が中断する
+            const parent = steps[stepAt];
+            const at = parent.points.findIndex((point) => point.clientKey === pointKey);
+            if (at < 0) return; // ← 落とすと splice(-1,1) で末尾の急所を消す
+            commitStructural(() => parent.points.splice(at, 1));
+        });
     }
 
     // --- 並べ替え (同一スコープ内のみ。階層をまたぐ移動は提供しない) ---
@@ -585,7 +624,7 @@
         const onKeydown = (event: KeyboardEvent): void => {
             if (event.isComposing) return; // IME 変換中は無視
             if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "z") return;
-            if (saving || confirmingStepIndex !== null || confirmingReload) return;
+            if (saving || confirmingStepKey !== null || confirmingReload) return;
             // 編集フィールドに focus がある間は native の文字単位 undo に委ねる (R1 決定)
             if (isEditableField(document.activeElement)) return;
             event.preventDefault();
@@ -1121,7 +1160,7 @@
                                     size="sm"
                                     iconOnly
                                     ariaLabel={`手順 ${stepIndex + 1} を削除`}
-                                    onclick={() => (confirmingStepIndex = stepIndex)}
+                                    onclick={() => (confirmingStepKey = step.clientKey)}
                                     testId="step-{stepIndex}-remove"
                                 >
                                     <Trash2 class="size-4" aria-hidden="true" />
@@ -1196,7 +1235,8 @@
                                                     size="sm"
                                                     iconOnly
                                                     ariaLabel={`急所 ${stepIndex + 1}-${pointIndex + 1} を削除`}
-                                                    onclick={() => removePoint(stepIndex, pointIndex)}
+                                                    onclick={() =>
+                                                        removePoint(step.clientKey, point.clientKey)}
                                                     testId="point-{stepIndex}-{pointIndex}-remove"
                                                 >
                                                     <Trash2 class="size-4" aria-hidden="true" />
@@ -1227,7 +1267,7 @@
                             <Button
                                 variant="ghost"
                                 size="sm"
-                                onclick={() => addPoint(stepIndex)}
+                                onclick={() => addPoint(step.clientKey)}
                                 testId="step-{stepIndex}-add-point"
                             >
                                 <Plus class="size-4" aria-hidden="true" />
@@ -1321,13 +1361,13 @@
 </section>
 
 <ConfirmDialog
-    open={confirmingStepIndex !== null}
+    open={confirmingStepKey !== null}
     title="手順を削除しますか?"
     message="この手順を削除すると、配下の急所と登録済みのテイク (撮影動画) も一緒に削除されます。この操作は「シナリオを更新」で保存すると元に戻せません。"
     confirmLabel="削除する"
     confirmVariant="danger"
-    onConfirm={() => confirmingStepIndex !== null && removeStep(confirmingStepIndex)}
-    onCancel={() => (confirmingStepIndex = null)}
+    onConfirm={() => confirmingStepKey !== null && removeStep(confirmingStepKey)}
+    onCancel={() => (confirmingStepKey = null)}
     testId="scenario-step-remove-dialog"
 />
 

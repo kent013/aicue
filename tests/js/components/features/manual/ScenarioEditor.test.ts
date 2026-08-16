@@ -167,6 +167,102 @@ async function typeInto(testId: string, value: string): Promise<void> {
     await fireEvent.input(screen.getByTestId(testId), { target: { value } });
 }
 
+// --- 並べ替え / 遅延構造操作の共有ヘルパ (T185 の D&D と T188 の安定キー解決で共有する) ---
+
+let rectSpy: ReturnType<typeof vi.spyOn> | null = null;
+
+/** 行の実測を data-reorder-index から固定値へ差し替える (top = index * 100, height = 100) */
+function stubRowRects(): void {
+    rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+        function (this: HTMLElement): DOMRect {
+            const raw = this.dataset.reorderIndex;
+            const index = raw === undefined ? -1 : Number(raw);
+            const top = index < 0 ? 0 : index * 100;
+            const height = index < 0 ? 0 : 100;
+            // 素の型アサーションを使わずに実体を作る (new DOMRect が top/bottom を導出する)
+            return new DOMRect(0, top, 0, height);
+        },
+    );
+}
+
+/** stubRowRects() で差し替えた実測を元へ戻す */
+function restoreRowRects(): void {
+    rectSpy?.mockRestore();
+    rectSpy = null;
+}
+
+function pointerEvent(type: string, clientY: number, pointerId = 1): PointerEvent {
+    return new PointerEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        pointerId,
+        clientY,
+        button: 0,
+        pointerType: "touch",
+    });
+}
+
+async function grab(testId: string, clientY: number, pointerId = 1): Promise<void> {
+    await fireEvent(screen.getByTestId(testId), pointerEvent("pointerdown", clientY, pointerId));
+}
+
+async function dragTo(clientY: number, pointerId = 1): Promise<void> {
+    await fireEvent(window, pointerEvent("pointermove", clientY, pointerId));
+}
+
+async function drop(clientY: number, pointerId = 1): Promise<void> {
+    await fireEvent(window, pointerEvent("pointerup", clientY, pointerId));
+}
+
+/** 掴む → 動かす → 落とす */
+async function dragHandle(testId: string, startY: number, endY: number): Promise<void> {
+    await grab(testId, startY);
+    await dragTo(endY);
+    await drop(endY);
+}
+
+/** 2 手順 × 2 急所 (急所の同一スコープ性を検証できる形) */
+function makeDndDocument(): ScenarioDocument {
+    const row = (id: number, scene: string) => ({
+        id,
+        scene,
+        shot_type: "yori" as const,
+        shooting_point: null,
+        narration: "",
+        subtitle_primary: null,
+        subtitle_secondary: "",
+        material_type: null,
+        static_display_seconds: null,
+    });
+    return {
+        scenario_version: 3,
+        steps: [
+            {
+                ...row(11, "手順シーンA"),
+                shot_type: "hiki",
+                points: [row(21, "急所A-1"), row(22, "急所A-2")],
+            },
+            {
+                ...row(12, "手順シーンB"),
+                shot_type: "hiki",
+                points: [row(23, "急所B-1"), row(24, "急所B-2")],
+            },
+        ],
+    };
+}
+
+function renderDnd(): void {
+    render(ScenarioEditor, { props: { ...baseProps, scenario: makeDndDocument() } });
+}
+
+/** 現在の手順の scene 値 (表示順) */
+function stepScenes(): string[] {
+    return screen
+        .getAllByTestId(/^step-\d+-scene$/)
+        .filter((el): el is HTMLInputElement => el instanceof HTMLInputElement)
+        .map((el) => el.value);
+}
+
 describe("ScenarioEditor", () => {
     it("空シナリオは EmptyState を表示し、最初の手順を追加できる", async () => {
         render(ScenarioEditor, {
@@ -1217,101 +1313,12 @@ describe("ScenarioEditor", () => {
  * 意味論 (どこに落ちたら何番目か) は tests/js/lib/dnd/list-reorder.test.ts が持つ。
  */
 describe("ドラッグ&ドロップ並べ替え (T185)", () => {
-    let rectSpy: ReturnType<typeof vi.spyOn> | null = null;
-
-    /** 行の実測を data-reorder-index から固定値へ差し替える (top = index * 100, height = 100) */
-    function stubRowRects(): void {
-        rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
-            function (this: HTMLElement): DOMRect {
-                const raw = this.dataset.reorderIndex;
-                const index = raw === undefined ? -1 : Number(raw);
-                const top = index < 0 ? 0 : index * 100;
-                const height = index < 0 ? 0 : 100;
-                // 素の型アサーションを使わずに実体を作る (new DOMRect が top/bottom を導出する)
-                return new DOMRect(0, top, 0, height);
-            },
-        );
-    }
-
-    function pointerEvent(type: string, clientY: number, pointerId = 1): PointerEvent {
-        return new PointerEvent(type, {
-            bubbles: true,
-            cancelable: true,
-            pointerId,
-            clientY,
-            button: 0,
-            pointerType: "touch",
-        });
-    }
-
-    async function grab(testId: string, clientY: number, pointerId = 1): Promise<void> {
-        await fireEvent(screen.getByTestId(testId), pointerEvent("pointerdown", clientY, pointerId));
-    }
-
-    async function dragTo(clientY: number, pointerId = 1): Promise<void> {
-        await fireEvent(window, pointerEvent("pointermove", clientY, pointerId));
-    }
-
-    async function drop(clientY: number, pointerId = 1): Promise<void> {
-        await fireEvent(window, pointerEvent("pointerup", clientY, pointerId));
-    }
-
-    /** 掴む → 動かす → 落とす */
-    async function dragHandle(testId: string, startY: number, endY: number): Promise<void> {
-        await grab(testId, startY);
-        await dragTo(endY);
-        await drop(endY);
-    }
-
-    /** 2 手順 × 2 急所 (急所の同一スコープ性を検証できる形) */
-    function makeDndDocument(): ScenarioDocument {
-        const row = (id: number, scene: string) => ({
-            id,
-            scene,
-            shot_type: "yori" as const,
-            shooting_point: null,
-            narration: "",
-            subtitle_primary: null,
-            subtitle_secondary: "",
-            material_type: null,
-            static_display_seconds: null,
-        });
-        return {
-            scenario_version: 3,
-            steps: [
-                {
-                    ...row(11, "手順シーンA"),
-                    shot_type: "hiki",
-                    points: [row(21, "急所A-1"), row(22, "急所A-2")],
-                },
-                {
-                    ...row(12, "手順シーンB"),
-                    shot_type: "hiki",
-                    points: [row(23, "急所B-1"), row(24, "急所B-2")],
-                },
-            ],
-        };
-    }
-
-    function renderDnd(): void {
-        render(ScenarioEditor, { props: { ...baseProps, scenario: makeDndDocument() } });
-    }
-
-    /** 現在の手順の scene 値 (表示順) */
-    function stepScenes(): string[] {
-        return screen
-            .getAllByTestId(/^step-\d+-scene$/)
-            .filter((el): el is HTMLInputElement => el instanceof HTMLInputElement)
-            .map((el) => el.value);
-    }
-
     beforeEach(() => {
         stubRowRects();
     });
 
     afterEach(() => {
-        rectSpy?.mockRestore();
-        rectSpy = null;
+        restoreRowRects();
     });
 
     it("手順のハンドルをドラッグすると順序が入れ替わり、保存 payload の並びも変わる", async () => {
@@ -1529,5 +1536,179 @@ describe("ドラッグ&ドロップ並べ替え (T185)", () => {
         ]) {
             expect(screen.getByTestId(id)).not.toHaveAttribute("disabled");
         }
+    });
+});
+
+/*
+ * IME 変換中に積まれた構造操作 (削除・追加) が、実行時点の並びに影響されず
+ * **押したときの対象**へ当たることを固定する (T188)。
+ * 数値 index を closure が捕捉していると、先行する遅延操作で添字がずれ、
+ * 別の行を消す / 別の手順へ急所を足す / 範囲外アクセスで drain が中断する。
+ */
+describe("IME 変換中の構造操作は安定キーで解決する (T188)", () => {
+    beforeEach(() => {
+        stubRowRects();
+    });
+
+    afterEach(() => {
+        restoreRowRects();
+    });
+
+    const undoBtn = (): HTMLElement => screen.getByTestId("scenario-undo");
+
+    /** IME 変換を開始する (以降の構造操作は compositionend まで保留される) */
+    async function startComposition(): Promise<void> {
+        await fireEvent.compositionStart(screen.getByTestId("step-0-scene"));
+    }
+
+    /** 変換を確定して保留中の構造操作を発行順に実行させる */
+    async function endComposition(): Promise<void> {
+        await fireEvent.compositionEnd(screen.getByTestId("step-0-scene"));
+    }
+
+    /** 手順の削除 (確認ダイアログの「削除する」まで) */
+    async function confirmRemoveStep(stepIndex: number): Promise<void> {
+        await fireEvent.click(screen.getByTestId(`step-${stepIndex}-remove`));
+        await fireEvent.click(screen.getByRole("button", { name: "削除する" }));
+    }
+
+    /** 指定手順の急所の scene 値 (表示順) */
+    function pointScenes(stepIndex: number): string[] {
+        return screen
+            .queryAllByTestId(new RegExp(`^point-${stepIndex}-\\d+-scene$`))
+            .filter((el): el is HTMLInputElement => el instanceof HTMLInputElement)
+            .map((el) => el.value);
+    }
+
+    it("変換中に「並べ替え → 手順削除」を続けて確定すると、確定した手順が消える", async () => {
+        renderDnd();
+        await startComposition();
+
+        await dragHandle("step-0-drag-handle", 50, 160); // 手順A を 2 番目へ (保留)
+        await confirmRemoveStep(1); // 手順B の削除を確定 (保留)
+
+        expect(stepScenes()).toEqual(["手順シーンA", "手順シーンB"]); // まだ何も起きない
+
+        await endComposition();
+
+        // 並べ替えが先に効いても、消えるのは押した手順B である
+        // (数値 index を持ち回っていると index 1 = 手順A が消える)
+        expect(stepScenes()).toEqual(["手順シーンA"]);
+    });
+
+    it("変換中に「並べ替え → 急所追加」を続けて確定すると、押した手順に急所が付く", async () => {
+        renderDnd();
+        await startComposition();
+
+        await dragHandle("step-0-drag-handle", 50, 160); // 手順A を 2 番目へ (保留)
+        await fireEvent.click(screen.getByTestId("step-1-add-point")); // 手順B に急所追加 (保留)
+
+        await endComposition();
+
+        expect(stepScenes()).toEqual(["手順シーンB", "手順シーンA"]);
+        expect(pointScenes(0)).toEqual(["急所B-1", "急所B-2", ""]); // 押した手順B に付く
+        expect(pointScenes(1)).toEqual(["急所A-1", "急所A-2"]); // 手順A は無変更
+    });
+
+    it("変換中に「並べ替え → 急所削除」を続けて確定すると、掴んだ手順の急所が消える", async () => {
+        renderDnd();
+        await startComposition();
+
+        await dragHandle("step-0-drag-handle", 50, 160); // 手順A を 2 番目へ (保留)
+        await fireEvent.click(screen.getByTestId("point-0-0-remove")); // 手順A の急所 1 を削除 (保留)
+
+        await endComposition();
+
+        expect(stepScenes()).toEqual(["手順シーンB", "手順シーンA"]);
+        expect(pointScenes(0)).toEqual(["急所B-1", "急所B-2"]); // 手順B は無変更
+        expect(pointScenes(1)).toEqual(["急所A-2"]); // 掴んだ手順A の急所 1 が消える
+    });
+
+    it("遅延中に対象手順が消えていたら、急所追加は何も起こさず後続の遅延操作も走る", async () => {
+        renderDnd();
+        await startComposition();
+
+        await confirmRemoveStep(0); // 手順A の削除 (保留)
+        await fireEvent.click(screen.getByTestId("step-0-add-point")); // 消える手順A へ追加 (保留)
+        // 後続が確かに走ることを見るため、手順B への追加を 2 回積む
+        // (1 回だけだと、壊れた実装が「消えた手順の分を手順B へ足した」場合と区別できない)
+        await fireEvent.click(screen.getByTestId("step-1-add-point"));
+        await fireEvent.click(screen.getByTestId("step-1-add-point"));
+
+        await endComposition();
+
+        expect(stepScenes()).toEqual(["手順シーンB"]);
+        // 手順A への追加は no-op。手順B への 2 回は両方とも届く (drain が中断していない)
+        expect(pointScenes(0)).toEqual(["急所B-1", "急所B-2", "", ""]);
+    });
+
+    it("削除ダイアログを開いている間に遅延中の並べ替えが確定しても、開いたときの手順が消える", async () => {
+        renderDnd();
+        await startComposition();
+
+        await dragHandle("step-0-drag-handle", 50, 160); // 手順A を 2 番目へ (保留)
+        await fireEvent.click(screen.getByTestId("step-1-remove")); // 手順B のダイアログを開く
+
+        await endComposition(); // 並べ替えだけ実行され、手順B は index 0 になる
+
+        expect(stepScenes()).toEqual(["手順シーンB", "手順シーンA"]);
+
+        await fireEvent.click(screen.getByRole("button", { name: "削除する" }));
+
+        // ダイアログを開いたときの手順B が消える (数値 index なら手順A が消える)
+        expect(stepScenes()).toEqual(["手順シーンA"]);
+    });
+
+    it("対象が既に消えている手順削除は、末尾の手順を巻き添えにしない", async () => {
+        renderDnd();
+        await startComposition();
+
+        await confirmRemoveStep(0); // 手順A の削除 (保留)
+        await confirmRemoveStep(0); // 同じ手順A の削除をもう 1 度 (保留)
+
+        await endComposition();
+
+        // 2 回目は解決できず no-op。splice(-1, 1) で末尾の手順B を巻き添えにしない
+        expect(stepScenes()).toEqual(["手順シーンB"]);
+
+        await fireEvent.click(undoBtn());
+
+        // 誤変異が無いので履歴は 1 エントリ = Undo 1 回で初期状態へ戻る
+        expect(stepScenes()).toEqual(["手順シーンA", "手順シーンB"]);
+        expect(undoBtn()).toBeDisabled();
+    });
+
+    it("対象が既に消えている急所削除は、末尾の急所を巻き添えにしない", async () => {
+        renderDnd();
+        await startComposition();
+
+        await fireEvent.click(screen.getByTestId("point-0-0-remove")); // 急所A-1 の削除 (保留)
+        await fireEvent.click(screen.getByTestId("point-0-0-remove")); // 同じ急所をもう 1 度 (保留)
+
+        await endComposition();
+
+        // 2 回目は no-op。splice(-1, 1) で末尾の急所A-2 を巻き添えにしない
+        expect(pointScenes(0)).toEqual(["急所A-2"]);
+
+        await fireEvent.click(undoBtn());
+
+        expect(pointScenes(0)).toEqual(["急所A-1", "急所A-2"]);
+        expect(undoBtn()).toBeDisabled();
+    });
+
+    it("親手順が消えた後の急所削除は no-op で、後続の遅延操作は正しい手順へ届く", async () => {
+        renderDnd();
+        await startComposition();
+
+        await confirmRemoveStep(0); // 手順A の削除 (保留)
+        await fireEvent.click(screen.getByTestId("point-0-0-remove")); // 手順A の急所 1 を削除 (保留)
+        await fireEvent.click(screen.getByTestId("step-1-add-point")); // 手順B に急所追加 (保留)
+
+        await endComposition();
+
+        expect(stepScenes()).toEqual(["手順シーンB"]);
+        // 親が解決できない急所削除は何もせず、後続の追加は手順B へ届く
+        // (親の未検出をガードしないと steps[-1] が undefined で TypeError になり追加が失われる)
+        expect(pointScenes(0)).toEqual(["急所B-1", "急所B-2", ""]);
     });
 });
