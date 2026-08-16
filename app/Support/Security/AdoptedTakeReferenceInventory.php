@@ -52,9 +52,10 @@ final class AdoptedTakeReferenceInventory
                     .'判定式は一切持たず、参照の起点を提供するだけのモデル定義である。',
             ],
             'DataTransferObjects/Capture/CaptureManualDetailData.php' => [
-                'kind' => AdoptedTakeReferenceKind::DifferentCriterion,
-                'rationale' => '撮影ナビの表示用に採用テイクの実体を読むだけで ready 判定はしない。'
-                    .'撮影中の端末に「今どれを採用しているか」を見せる別概念の面である。',
+                'kind' => AdoptedTakeReferenceKind::DelegatedToCoverage,
+                'rationale' => '採用テイクの署名 URL / ACK を出すかどうかを'
+                    .'AdoptedReadyTakeCoverage::readyTakeId() へ委譲し、自前の ready 判定は持たない。'
+                    .'残る参照は非欠落側で素材パスと take id を読む 1 箇所と、N+1 を防ぐ eager load である。',
             ],
             'DataTransferObjects/Manual/CutTakeSummaryData.php' => [
                 'kind' => AdoptedTakeReferenceKind::DifferentCriterion,

@@ -41,6 +41,7 @@ function makeCut(takes: CaptureTake[], adopted: number | null = null): CaptureCu
         subtitle_primary: null,
         subtitle_secondary: "作業台を準備",
         adopted_take_id: adopted,
+        adopted_ready_take_id: adopted,
         takes,
     };
 }

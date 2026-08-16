@@ -39,6 +39,7 @@ function makeCut(overrides: Partial<CaptureCut> = {}): CaptureCut {
         subtitle_primary: "STEP 1",
         subtitle_secondary: "作業台を準備する",
         adopted_take_id: null,
+        adopted_ready_take_id: null,
         takes: [],
         ...overrides,
     };

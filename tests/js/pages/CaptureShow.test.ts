@@ -100,6 +100,7 @@ function makeCut(overrides: Partial<CaptureCut> = {}): CaptureCut {
         subtitle_primary: null,
         subtitle_secondary: "",
         adopted_take_id: null,
+        adopted_ready_take_id: null,
         takes: [],
         ...overrides,
     };
@@ -134,13 +135,14 @@ function makeAdoptedManual(): CaptureManualDetail {
         id: 5,
         title: "ネジ締め作業",
         status: "ready",
-        cuts: [makeCut({ adopted_take_id: take.id, takes: [take] })],
+        cuts: [makeCut({ adopted_take_id: take.id, adopted_ready_take_id: take.id, takes: [take] })],
     };
 }
 
 const baseProps = {
     project: { id: 1, name: "現場A" },
     manual: makeManual(),
+    previewPlaceholderSeconds: 3,
 };
 
 function stubCameraSupported(supported: boolean): void {
@@ -295,7 +297,11 @@ describe("Capture/Show カメラフォールバック", () => {
 });
 
 describe("Capture/Show 採用済みテイク自動 DL 結線 (T051)", () => {
-    const adoptedProps = { project: { id: 1, name: "現場A" }, manual: makeAdoptedManual() };
+    const adoptedProps = {
+        project: { id: 1, name: "現場A" },
+        manual: makeAdoptedManual(),
+        previewPlaceholderSeconds: 3,
+    };
 
     it("入室時に run(manual) が発火し、changed=true なら manual reload される", async () => {
         stubCameraSupported(false);
@@ -364,7 +370,9 @@ describe("Capture/Show 採用済みテイク自動 DL 結線 (T051)", () => {
         stubCameraSupported(true);
         getUserMediaMock.mockRejectedValue(new DOMException("denied", "NotAllowedError"));
 
-        render(CaptureShow, { props: { project: { id: 1, name: "現場A" }, manual: makeManual() } });
+        render(CaptureShow, {
+            props: { project: { id: 1, name: "現場A" }, manual: makeManual(), previewPlaceholderSeconds: 3 },
+        });
         await selectCut();
         await fireEvent.click(screen.getByTestId("start-recording"));
         await vi.waitFor(() => {
@@ -607,8 +615,16 @@ function makeLandscapeManual(count: number): CaptureManualDetail {
     };
 }
 
-function landscapeProps(count = 3): { project: { id: number; name: string }; manual: CaptureManualDetail } {
-    return { project: { id: 1, name: "現場A" }, manual: makeLandscapeManual(count) };
+function landscapeProps(count = 3): {
+    project: { id: number; name: string };
+    manual: CaptureManualDetail;
+    previewPlaceholderSeconds: number;
+} {
+    return {
+        project: { id: 1, name: "現場A" },
+        manual: makeLandscapeManual(count),
+        previewPlaceholderSeconds: 3,
+    };
 }
 
 /** 実 CameraRecorder を録画状態まで駆動できる stub 一式 (component は本物のまま使う) */
@@ -929,5 +945,112 @@ describe("Capture/Show 全画面での録画中カット移動抑止 (T186)", ()
         await fireEvent.click(screen.getByTestId("cut-swipe-next"));
 
         expect(screen.getByTestId("cut-swipe-label")).toHaveTextContent("手順 2");
+    });
+});
+
+/*
+ * 通し再生 (全体連結プレビュー / T191) のページ配線。
+ * 再生そのものの契約は ScenarioPreviewDialog.test.ts / scenario-preview.test.ts が持つ。
+ * ここで固定するのは **ページが何を渡し、いつ開き、カメラ資源をどう明け渡すか** だけ。
+ */
+describe("Capture/Show 通し再生の配線 (T191)", () => {
+    beforeEach(() => {
+        // jsdom は HTMLMediaElement の再生系を未実装 (ダイアログの teardown / 再生要求が呼ぶ)
+        vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+        vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
+        vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it("通し再生ボタンを押すとダイアログが開く", async () => {
+        stubCameraSupported(false);
+        render(CaptureShow, { props: baseProps });
+
+        const button = screen.getByTestId("scenario-preview-button");
+        expect(button).not.toBeDisabled();
+
+        await fireEvent.click(button);
+
+        expect(screen.getByTestId("scenario-preview-dialog")).toBeInTheDocument();
+    });
+
+    it("カットが 0 件ならボタンを出さない (disabled ではなく非表示)", () => {
+        stubCameraSupported(false);
+        render(CaptureShow, {
+            props: { ...baseProps, manual: { ...makeManual(), cuts: [] } },
+        });
+
+        expect(screen.queryByTestId("scenario-preview-button")).not.toBeInTheDocument();
+    });
+
+    it("録画中に押すとエラーを出しダイアログは開かない (ボタンは常に押せる)", async () => {
+        stubCameraRecordable();
+        render(CaptureShow, { props: baseProps });
+        await selectCut();
+        await fireEvent.click(screen.getByTestId("start-recording"));
+        await vi.waitFor(() => {
+            expect(screen.getByTestId("stop-recording")).toBeInTheDocument();
+        });
+
+        const button = screen.getByTestId("scenario-preview-button");
+        expect(button).not.toBeDisabled();
+        await fireEvent.click(button);
+
+        expect(screen.getByTestId("scenario-preview-error")).toHaveTextContent(
+            "撮影中は通し再生を開始できません。撮影を停止してからお試しください。",
+        );
+        expect(screen.queryByTestId("scenario-preview-dialog")).not.toBeInTheDocument();
+    });
+
+    it("録画中のエラー文言は個別 preview と同じ言い回しである (制約を別の言葉で説明しない)", async () => {
+        stubCameraRecordable();
+        render(CaptureShow, { props: baseProps });
+        await selectCut();
+        await fireEvent.click(screen.getByTestId("start-recording"));
+        await vi.waitFor(() => {
+            expect(screen.getByTestId("stop-recording")).toBeInTheDocument();
+        });
+
+        await fireEvent.click(screen.getByTestId("scenario-preview-button"));
+        const scenarioMessage = (screen.getByTestId("scenario-preview-error").textContent ?? "").trim();
+
+        // 個別 preview (TakeStrip) は「撮影中はプレビューを再生できません。撮影を停止してからお試しください。」
+        // で、対になる文言は TakeStrip.test.ts が固定している。**共通節が同一**であることと、
+        // 通し再生側の全文がこの 1 文であることの両方を固定する (別の言い回しへ分岐したら赤くなる)。
+        const SHARED_CLAUSE = "撮影を停止してからお試しください。";
+        expect(scenarioMessage).toBe(`撮影中は通し再生を開始できません。${SHARED_CLAUSE}`);
+        expect(scenarioMessage.endsWith(SHARED_CLAUSE)).toBe(true);
+    });
+
+    it("開くとカメラを解放し、閉じると復帰する", async () => {
+        stubCameraRecordable();
+        const camera = fakeStream();
+        getUserMediaMock.mockResolvedValue(camera.stream);
+        render(CaptureShow, { props: baseProps });
+        await selectCut();
+        // カメラは録画開始で初めて取得される。撮影を停止すると stream は live のまま idle へ戻る
+        await fireEvent.click(screen.getByTestId("start-recording"));
+        await vi.waitFor(() => {
+            expect(screen.getByTestId("stop-recording")).toBeInTheDocument();
+        });
+        await fireEvent.click(screen.getByTestId("stop-recording"));
+        await vi.waitFor(() => {
+            expect(screen.getByTestId("start-recording")).toBeInTheDocument();
+        });
+        expect(getUserMediaMock).toHaveBeenCalledTimes(1);
+
+        await fireEvent.click(screen.getByTestId("scenario-preview-button"));
+
+        expect(camera.stop).toHaveBeenCalled(); // releaseForPreview 経由でトラックが止まる
+
+        await fireEvent.click(screen.getByTestId("scenario-preview-close"));
+
+        // resumeAfterPreview による再取得 (解放前に live だったときだけ走る)
+        await vi.waitFor(() => {
+            expect(getUserMediaMock).toHaveBeenCalledTimes(2);
+        });
     });
 });

@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, tick, untrack } from "svelte";
     import { page, router } from "@inertiajs/svelte";
-    import { ArrowLeft, BookOpen, Maximize, Minimize, Video } from "@lucide/svelte";
+    import { ArrowLeft, BookOpen, ListVideo, Maximize, Minimize, Video } from "@lucide/svelte";
     import Button from "@/components/atoms/Button.svelte";
     import TextLink from "@/components/atoms/TextLink.svelte";
     import PageContainer from "@/components/templates/PageContainer.svelte";
@@ -11,6 +11,7 @@
     import CaptureFileFallback from "@/components/features/capture/CaptureFileFallback.svelte";
     import CutNavigator from "@/components/features/capture/CutNavigator.svelte";
     import CutSwipeBar from "@/components/features/capture/CutSwipeBar.svelte";
+    import ScenarioPreviewDialog from "@/components/features/capture/ScenarioPreviewDialog.svelte";
     import TakeStrip from "@/components/features/capture/TakeStrip.svelte";
     import UploadQueueBar from "@/components/features/capture/UploadQueueBar.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
@@ -46,9 +47,11 @@
     interface Props {
         project: { id: number; name: string };
         manual: CaptureManualDetail;
+        /** プレースホルダ表示秒数 (config manual.preview_placeholder_seconds)。単位は秒 */
+        previewPlaceholderSeconds: number;
     }
 
-    let { project, manual }: Props = $props();
+    let { project, manual, previewPlaceholderSeconds }: Props = $props();
 
     const shared = $derived(page.props as unknown as SharedProps);
     const appName = $derived(shared.appName ?? "");
@@ -318,6 +321,42 @@
         navigateBackToList(cutListHeadingEl, prefersReducedMotion());
     }
 
+    /* ---- 通し再生 (全体連結プレビュー / T191) ---- */
+    let scenarioPreviewOpen = $state(false);
+    let scenarioPreviewError = $state<string | null>(null);
+
+    /** カメラ資源の解放・復帰は page 側に 1 つずつ持つ (TakeStrip と同じ関数を渡す = 2 か所に書かない) */
+    function releaseCameraForPreview(): void {
+        recorderRef?.releaseForPreview();
+    }
+
+    function resumeCameraAfterPreview(): void {
+        void recorderRef?.resumeAfterPreview();
+    }
+
+    /**
+     * 撮影中はカメラ資源と競合するため開かない。**ボタンは disabled にせず、押下時に伝える**
+     * (禁止事項 8)。判定条件・呼び出し順・文言は**既存の個別 preview (TakeStrip.openPreview) と
+     * 同じ言い回し**に揃える (同じ制約を別の言葉で言わない)。
+     *
+     * `captureActive` は recording|stopping を含む。`releaseForPreview()` は同期の void 関数で、
+     * 録画中・取得中は自分で早期 return するため await も失敗ハンドリングも要らない。
+     */
+    function openScenarioPreview(): void {
+        scenarioPreviewError = null;
+        if (captureActive) {
+            scenarioPreviewError = "撮影中は通し再生を開始できません。撮影を停止してからお試しください。";
+
+            return;
+        }
+        releaseCameraForPreview();
+        scenarioPreviewOpen = true;
+    }
+
+    function closeScenarioPreview(): void {
+        resumeCameraAfterPreview();
+    }
+
     $effect(() => {
         if (leftPaneEl === null || rightPaneEl === null) return;
         // observer の初回 callback はタイミング差があるため当てにせず、登録前に必ず 1 回測る
@@ -478,20 +517,46 @@
                 >
                     シナリオ (タップして撮影)
                 </h2>
-                <!-- 横持ちなのに全画面でないとき (= 明示終了した後) の再入路。
-                     文脈非該当時は非表示にする (disabled ではない)。 -->
-                {#if landscapeMatches && !fullscreenActive && manual.cuts.length > 0}
-                    <Button
-                        variant="neutral"
-                        size="sm"
-                        onclick={enterFullscreen}
-                        testId="enter-fullscreen-capture"
-                    >
-                        <Maximize class="size-4" aria-hidden="true" />
-                        全画面で撮影
-                    </Button>
-                {/if}
+                <!-- 狭幅で 2 つのボタンが詰まらないよう折り返しを許す (justify-end で右寄せを保つ) -->
+                <div class="flex flex-wrap items-center justify-end gap-2">
+                    <!-- 通し再生 (doc/05 §5.2 [プレビュー])。**カットが 1 枚も無いときは出さない**
+                         (文脈非該当の非表示であって、条件未充足の disabled ではない)。
+                         撮影中の押下は開かずにエラーを出す (資源競合。TakeStrip の個別 preview と同じ規則)。 -->
+                    {#if manual.cuts.length > 0}
+                        <Button
+                            variant="neutral"
+                            size="sm"
+                            onclick={openScenarioPreview}
+                            testId="scenario-preview-button"
+                        >
+                            <ListVideo class="size-4" aria-hidden="true" />
+                            通し再生
+                        </Button>
+                    {/if}
+                    <!-- 横持ちなのに全画面でないとき (= 明示終了した後) の再入路。
+                         文脈非該当時は非表示にする (disabled ではない)。 -->
+                    {#if landscapeMatches && !fullscreenActive && manual.cuts.length > 0}
+                        <Button
+                            variant="neutral"
+                            size="sm"
+                            onclick={enterFullscreen}
+                            testId="enter-fullscreen-capture"
+                        >
+                            <Maximize class="size-4" aria-hidden="true" />
+                            全画面で撮影
+                        </Button>
+                    {/if}
+                </div>
             </div>
+            {#if scenarioPreviewError !== null}
+                <p
+                    class="px-3 py-2 text-caption text-danger"
+                    role="alert"
+                    data-testid="scenario-preview-error"
+                >
+                    {scenarioPreviewError}
+                </p>
+            {/if}
             <CutNavigator cuts={manual.cuts} {selectedCutId} onSelect={handleSelectCut} />
         </section>
 
@@ -660,12 +725,23 @@
                         cutLabel={cutLabels[selectedCut.id] ?? "選択中カット"}
                         onChanged={reloadManual}
                         {captureActive}
-                        onRequestCameraRelease={() => recorderRef?.releaseForPreview()}
-                        onCameraResume={() => void recorderRef?.resumeAfterPreview()}
+                        onRequestCameraRelease={releaseCameraForPreview}
+                        onCameraResume={resumeCameraAfterPreview}
                     />
                 {/if}
             {/if}
         </section>
         </div>
+
+        <!-- Modal は Portal で描画されるため設置位置に依存しない (全画面 section の外に置く) -->
+        <ScenarioPreviewDialog
+            bind:open={scenarioPreviewOpen}
+            projectId={project.id}
+            manualId={manual.id}
+            cuts={manual.cuts}
+            labels={cutLabels}
+            placeholderSeconds={previewPlaceholderSeconds}
+            onClose={closeScenarioPreview}
+        />
     </PageContainer>
 </AppLayout>

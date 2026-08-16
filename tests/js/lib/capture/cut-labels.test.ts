@@ -30,6 +30,7 @@ function cut(id: number, type: "step" | "point"): CaptureCut {
         subtitle_primary: null,
         subtitle_secondary: "",
         adopted_take_id: null,
+        adopted_ready_take_id: null,
         takes: [],
     };
 }
