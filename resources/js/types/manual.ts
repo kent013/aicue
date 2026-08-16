@@ -118,12 +118,15 @@ export interface ManualListItem {
      */
     duration_ms: number | null;
     /**
-     * 完成動画を受け取れるか。サーバが「download ability × published ×
-     * 現行世代の succeeded render に output_path がある」を判定した結果そのもので、
-     * **UI 側で条件を再判定しない**。download endpoint が 302 を返す条件と 1 対 1
-     * (描画時点のスナップショットであり、ストレージ実体の存在確認ではない)。
+     * いま受け取れる完成動画 (kind=render) の render job id。**null = 受け取れない**。
+     * サーバが「download ability × published × 現行世代の succeeded render に output_path がある」を
+     * 判定した結果そのもので、**UI 側で条件を再判定しない**。
+     * 非 null は download endpoint が 302 を返す条件と 1 対 1 であり、
+     * 値は再生 endpoint `/projects/{p}/manuals/{m}/render-jobs/{id}/playback` にそのまま使う
+     * (完成動画の再生条件は download と完全同一)。
+     * 描画時点のスナップショットであり、ストレージ実体の存在確認ではない。
      */
-    downloadable: boolean;
+    current_finished_render_job_id: number | null;
     /** 削除できるか (サーバの delete ability 判定結果。撮影者は false) */
     deletable: boolean;
 }

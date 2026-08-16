@@ -16,6 +16,7 @@
     import Pagination from "@/components/molecules/Pagination.svelte";
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
     import ManualListRow from "@/components/features/manual/ManualListRow.svelte";
+    import ManualPreviewModal from "@/components/features/manual/ManualPreviewModal.svelte";
     import Modal from "@/components/organisms/Modal.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
     import PageContainer from "@/components/templates/PageContainer.svelte";
@@ -128,6 +129,18 @@
             preserveScroll: true,
             only: ["manuals", "manualFilters"],
         });
+    }
+
+    /* ---- 動画マニュアル: 行内プレビュー (オーバーレイ再生) ---- */
+    // モーダルは**ページに 1 つ**だけ持つ (行ごとに Dialog を作らない = 行内削除と同じ流儀)。
+    // 対象行を state に持つので、閉じた後も最後に開いた行が残るが、開く操作は必ず
+    // openPreviewManualDialog を通るため取り違えは起きない。
+    let previewManualTarget = $state<ManualListItem | null>(null);
+    let previewManualDialogOpen = $state(false);
+
+    function openPreviewManualDialog(manual: ManualListItem): void {
+        previewManualTarget = manual;
+        previewManualDialogOpen = true;
     }
 
     /* ---- 動画マニュアル: 行内削除 (ConfirmDialog → destroy) ---- */
@@ -470,6 +483,7 @@
                             <ManualListRow
                                 projectId={project.id}
                                 {manual}
+                                onRequestPreview={openPreviewManualDialog}
                                 onRequestDelete={openRemoveManualDialog}
                             />
                         {/each}
@@ -794,6 +808,14 @@
             processing={removing}
             onConfirm={removeItem}
             testId="remove-item-dialog"
+        />
+
+        <!-- 完成動画のオーバーレイ再生 (doc/04 一覧ページの「プレビュー」)。
+             ページに 1 つだけ置き、対象行を差し替えて使い回す -->
+        <ManualPreviewModal
+            bind:open={previewManualDialogOpen}
+            projectId={project.id}
+            manual={previewManualTarget}
         />
 
         <ConfirmDialog

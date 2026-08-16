@@ -33,8 +33,8 @@ final class RenderArtifactSelectionInventory
         return [
             'Services/Manual/CurrentRenderArtifact.php' => [
                 'kind' => RenderArtifactSelectionKind::Canonical,
-                'rationale' => '「いま受け取れる成果物はどれか」の唯一の選択式。playback / download / 詳細画面 props の'
-                    .'3 消費者が同じ行を指すための場所であり、保持ポリシーと同じ世代定義を持つ。',
+                'rationale' => '「いま受け取れる成果物はどれか」の唯一の選択式。playback / download / 詳細画面 props /'
+                    .'一覧行 props の 4 消費者が同じ行を指すための場所であり、保持ポリシーと同じ世代定義を持つ。',
             ],
             'Services/Manual/RenderJobService.php' => [
                 'kind' => RenderArtifactSelectionKind::SupersessionCriterion,
@@ -45,7 +45,7 @@ final class RenderArtifactSelectionInventory
                 'kind' => RenderArtifactSelectionKind::EagerLoadCandidate,
                 'rationale' => 'latestSucceededRender() は一覧が eager load する候補行の relation であり、'
                     .'output_path を見ないため受け取れるかを判断しない (決定は Canonical に残る)。'
-                    .'世代定義の一致は ManualRowDownloadableParityTest が固定する。',
+                    .'世代定義の一致は ManualRowFinishedVideoParityTest が固定する。',
             ],
             'Services/Manual/RenderPipeline.php' => [
                 'kind' => RenderArtifactSelectionKind::SupersessionCriterion,

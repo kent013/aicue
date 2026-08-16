@@ -153,7 +153,7 @@ class ProjectController extends Controller
      *     category: array{id: int, name: string}|null,
      *     creator: array{id: int, name: string}|null,
      *     created_at: string, updated_at: string,
-     *     duration_ms: int|null, downloadable: bool, deletable: bool}>,
+     *     duration_ms: int|null, current_finished_render_job_id: int|null, deletable: bool}>,
      *   meta: array{current_page: int, last_page: int, per_page: int, total: int}
      * }
      */

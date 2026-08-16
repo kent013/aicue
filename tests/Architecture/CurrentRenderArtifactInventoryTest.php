@@ -462,6 +462,29 @@ test('ケース 8: EagerLoadCandidate の前提 (受け取れるかを判断し�
     // 別ファイルへ移した候補 relation は捉えない (母集団の検査は ケース 2 が担う)。
 });
 
+test('一覧行 DTO は成果物行の選択を Canonical へ委譲する', function (): void {
+    // T189: 一覧が bool ではなく render job id を運ぶようになったため、DTO 側に
+    // 「どの行か」「実体が残っているか」の規則を書き戻すと選択式が 2 箇所になる。
+    // 禁じているのは**成果物行の選択**であって、ability / published の判定は DTO に残る
+    // (Canonical が持たない責務なので当然に残る)。
+    //
+    // **保証範囲を誇張しない**: 閉じるのはこの 1 ファイルについてだけである。
+    // 別ファイルへ同義式を切り出す経路・動的呼び出し・文字列変数経由には沈黙する
+    // (fail-first は behavioral な parity テストが担う)。
+    $tokens = RenderArtifactSelectionScanner::tokensOf(
+        'DataTransferObjects/Manual/ManualListItemData.php',
+    );
+    $texts = array_column($tokens, 'text');
+
+    // toContain は追加引数を「もう 1 つの needle」として扱うため、説明文は toBeTrue/toBeFalse 側に置く
+    expect(in_array('output_path', $texts, true))->toBeFalse(
+        'ManualListItemData が output_path を参照しました (実体判定は Canonical の責務です)');
+    expect(in_array('latestSucceededRender', $texts, true))->toBeFalse(
+        'ManualListItemData が候補行 relation を直接読みました (選択は Canonical へ委譲してください)');
+    expect(in_array('CurrentRenderArtifact', $texts, true))->toBeTrue(
+        'ManualListItemData が Canonical へ委譲していません (選択式が複製されている可能性があります)');
+});
+
 test('scanner 自己検証: EagerLoadCandidate の前提検査 (output_path / 個数 / 宣言名)', function (): void {
     $propertyAccess = PhpTokenScan::normalize('<?php $p = $job->output_path;');
     $literal = PhpTokenScan::normalize("<?php \$q->whereNotNull('output_path');");
