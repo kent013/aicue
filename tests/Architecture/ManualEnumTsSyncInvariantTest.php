@@ -3,11 +3,13 @@
 declare(strict_types=1);
 
 use App\Enums\Manual\JobStatus;
+use App\Enums\Manual\ManualProgress;
 use App\Enums\Manual\MaterialType;
 use App\Enums\Manual\RenderConflictType;
 use App\Enums\Manual\RenderErrorCode;
 use App\Enums\Manual\RenderKind;
 use App\Enums\Manual\RenderStep;
+use App\Enums\Manual\VideoManualStatus;
 use Tests\Support\TsUnionValues;
 
 /*
@@ -29,6 +31,16 @@ function extractTsUnionValues(string $typeName): array
 {
     return TsUnionValues::extract('resources/js/types/manual.ts', $typeName);
 }
+
+test('VideoManualStatus の PHP enum ⇔ TS union 値集合が一致する', function (): void {
+    expect(extractTsUnionValues('VideoManualStatus'))
+        ->toBe(TsUnionValues::enumStringValues(VideoManualStatus::cases()));
+});
+
+test('ManualProgress の PHP enum ⇔ TS union 値集合が一致する', function (): void {
+    expect(extractTsUnionValues('ManualProgress'))
+        ->toBe(TsUnionValues::enumStringValues(ManualProgress::cases()));
+});
 
 test('RenderKind の PHP enum ⇔ TS union 値集合が一致する', function (): void {
     expect(extractTsUnionValues('RenderKind'))->toBe(TsUnionValues::enumStringValues(RenderKind::cases()));

@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\DataTransferObjects\Manual;
 
+use App\Enums\Manual\ManualProgress;
 use App\Enums\Manual\ManualSortOption;
-use App\Enums\Manual\VideoManualStatus;
 use Illuminate\Http\Request;
 
 /**
@@ -17,7 +17,10 @@ use Illuminate\Http\Request;
  *
  * 値の約束:
  * - `category`: 数値 id 文字列 | 'uncategorized' (未分類 sentinel) | null。それ以外は null
- * - `status`: VideoManualStatus の値のみ。それ以外は null
+ * - `progress`: ManualProgress の値のみ (not_started / in_progress / completed)。それ以外は null。
+ *   **旧 `?status=` (制作状態 5 値) は受け付けない**。値域が変わった時点で意味を保てないため、
+ *   互換の受理経路を残さない (思考原則 3)。旧 URL は未知キーとして無視され「すべて」になる
+ *   (allowlist 外は絞り込み無し = より広く当たる方向へ倒す、という本 VO の既定方針と一致)
  * - `keyword`: 前後の空白を除いた検索語。**先頭 MAX_KEYWORD_LENGTH 文字だけを使う (truncate)**。
  *   破棄 (= 絞り込み無し) にしないのは「全件が出る」驚きの方向へ倒れるためで、
  *   切り詰めは「より広く当たる」方向にしか倒れない。title の validation が max:200 なので、
@@ -37,7 +40,7 @@ final readonly class ManualListQuery
 
     public function __construct(
         public ?string $category,
-        public ?string $status,
+        public ?ManualProgress $progress,
         public ?string $keyword,
         public ?ManualSortOption $sort,
         public bool $mine,
@@ -73,8 +76,9 @@ final readonly class ManualListQuery
             $category = ctype_digit($category) ? (string) (int) $category : null;
         }
 
-        $status = $request->query('status');
-        $status = is_string($status) && VideoManualStatus::tryFrom($status) !== null ? $status : null;
+        // allowlist 外は null (= 既定「すべて」)。旧 `?status=` (5 値) は未知キーとして無視される
+        $progressRaw = $request->query('progress');
+        $progress = is_string($progressRaw) ? ManualProgress::tryFrom($progressRaw) : null;
 
         $keyword = $request->query('q');
         $keyword = is_string($keyword) && trim($keyword) !== ''
@@ -94,7 +98,7 @@ final readonly class ManualListQuery
 
         return new self(
             category: $category,
-            status: $status,
+            progress: $progress,
             keyword: $keyword,
             sort: $sort,
             mine: $request->boolean('mine'), // "1"/"true" を bool 正規化
@@ -107,13 +111,13 @@ final readonly class ManualListQuery
      * **page を含めない**: ページ位置は manuals.meta.current_page が唯一の正本である
      * (2 か所に持つと必ず食い違う)。
      *
-     * @return array{category: string|null, status: string|null, q: string|null, sort: string|null, mine: bool}
+     * @return array{category: string|null, progress: string|null, q: string|null, sort: string|null, mine: bool}
      */
     public function toProps(): array
     {
         return [
             'category' => $this->category,
-            'status' => $this->status,
+            'progress' => $this->progress?->value, // string|null (TS の ManualFilters.progress と一致)
             'q' => $this->keyword,
             'sort' => $this->sort?->value, // string|null (TS の ManualFilters.sort と一致)
             'mine' => $this->mine,
@@ -132,8 +136,8 @@ final readonly class ManualListQuery
         if ($this->category !== null) {
             $params['category'] = $this->category;
         }
-        if ($this->status !== null) {
-            $params['status'] = $this->status;
+        if ($this->progress !== null) {
+            $params['progress'] = $this->progress->value;
         }
         if ($this->keyword !== null) {
             $params['q'] = $this->keyword;

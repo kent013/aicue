@@ -5,7 +5,7 @@
     import TextLink from "@/components/atoms/TextLink.svelte";
     import { formatDurationMs } from "@/lib/manual/format-duration";
     import type { ManualListItem } from "@/types/manual";
-    import { STATUS_TONES, VIDEO_MANUAL_STATUS_LABELS } from "@/types/manual";
+    import { MANUAL_PROGRESS_LABELS, MANUAL_PROGRESS_TONES } from "@/types/manual";
 
     /**
      * 動画マニュアル一覧の 1 行 (doc/04: 状態 / タイトル / カテゴリ / 再生時間 / 更新日 /
@@ -60,8 +60,10 @@
         >
             {durationLabel}
         </span>
-        <Badge tone={STATUS_TONES[manual.status]} testId={`manual-status-${manual.id}`}>
-            {VIDEO_MANUAL_STATUS_LABELS[manual.status]}
+        <!-- 一覧の状態は 3 値 (絞り込みと同じ語彙でないと絞り込み結果を説明できない)。
+             「解析中 / 書き出し中」の実況は詳細画面 (AnalysisPanel / RenderPanel) が持つ -->
+        <Badge tone={MANUAL_PROGRESS_TONES[manual.progress]} testId={`manual-progress-${manual.id}`}>
+            {MANUAL_PROGRESS_LABELS[manual.progress]}
         </Badge>
         <!-- 受け取れるとサーバが判断した行にだけ出す。押せない (disabled) ボタンは作らない。
              出ていない行の理由は状態バッジと再生時間「—」が語り、書き出しの CTA は

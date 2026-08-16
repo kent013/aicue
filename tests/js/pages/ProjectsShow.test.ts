@@ -7,7 +7,7 @@ import type { ManualFilters, ManualListItem, PaginationMeta } from "@/types/manu
 const emptyMeta: PaginationMeta = { current_page: 1, last_page: 1, per_page: 10, total: 0 };
 const emptyFilters: ManualFilters = {
     category: null,
-    status: null,
+    progress: null,
     q: null,
     sort: null,
     mine: false,
@@ -17,7 +17,7 @@ const manualsFixture: ManualListItem[] = [
     {
         id: 1,
         title: "ネジ締め作業",
-        status: "draft",
+        progress: "not_started",
         category: { id: 1, name: "準備作業" },
         creator: { id: 2, name: "編集 花子" },
         created_at: "2026-07-10 12:00",
@@ -29,7 +29,7 @@ const manualsFixture: ManualListItem[] = [
     {
         id: 2,
         title: "洗浄手順",
-        status: "published",
+        progress: "completed",
         category: null,
         creator: null,
         created_at: "2026-07-10 13:00",
@@ -140,10 +140,10 @@ describe("Projects/Show", () => {
         expect(screen.getByTestId("manual-link-1").getAttribute("href")).toMatch(
             /\/projects\/1\/manuals\/1$/,
         );
-        expect(screen.getByTestId("manual-status-1")).toHaveTextContent("下書き");
+        expect(screen.getByTestId("manual-progress-1")).toHaveTextContent("未着手");
         // カテゴリ ・ 作成者 ・ 更新日 (作成者 null は「不明」)
         expect(screen.getByText(/準備作業 ・ 編集 花子 ・ 更新 2026-07-11 09:00/)).toBeInTheDocument();
-        expect(screen.getByTestId("manual-status-2")).toHaveTextContent("公開済み");
+        expect(screen.getByTestId("manual-progress-2")).toHaveTextContent("作成済");
         expect(screen.getByText(/未分類 ・ 不明 ・ 更新 2026-07-11 10:00/)).toBeInTheDocument();
     });
 
@@ -165,9 +165,16 @@ describe("Projects/Show", () => {
         expect(screen.getByRole("option", { name: "未分類" })).toBeInTheDocument();
         expect(screen.getByRole("option", { name: "準備作業" })).toBeInTheDocument();
 
-        const statusSelect = screen.getByTestId("manual-filter-status");
-        expect(statusSelect).not.toBeDisabled();
-        expect(screen.getByRole("option", { name: "下書き" })).toBeInTheDocument();
+        // 状態は一覧の 3 値 (doc/04)。制作状態 5 値のラベルは一覧に出さない
+        const progressSelect = screen.getByTestId("manual-filter-progress");
+        expect(progressSelect).not.toBeDisabled();
+        // 「すべて」はカテゴリ select にもあるため、状態 select の中に限定して見る
+        for (const label of ["すべて", "未着手", "作成中", "作成済"]) {
+            expect(within(progressSelect).getByRole("option", { name: label })).toBeInTheDocument();
+        }
+        for (const label of ["下書き", "解析中", "準備完了", "書き出し中", "公開済み"]) {
+            expect(screen.queryByRole("option", { name: label })).toBeNull();
+        }
 
         const submit = screen.getByTestId("manual-filter-submit");
         expect(submit).toBeInTheDocument();
@@ -254,6 +261,29 @@ describe("Projects/Show 並べ替え・自作フィルタ", () => {
         expect(getSpy.mock.calls[0][0]).toBe("/projects/1");
         expect(getSpy.mock.calls[0][1]).toEqual({ sort: "updated_desc" });
         expect(getSpy.mock.calls[0][1]).not.toHaveProperty("page");
+    });
+
+    it("状態変更で GET クエリに progress が載る (旧 status は載せない)", async () => {
+        const getSpy = vi.spyOn(router, "get").mockImplementation(() => {});
+        render(Show, { props: baseProps });
+
+        await fireEvent.change(screen.getByTestId("manual-filter-progress"), {
+            target: { value: "in_progress" },
+        });
+
+        expect(getSpy).toHaveBeenCalledTimes(1);
+        expect(getSpy.mock.calls[0][1]).toEqual({ progress: "in_progress" });
+        expect(getSpy.mock.calls[0][1]).not.toHaveProperty("status");
+    });
+
+    it("既存の状態絞り込みは props から復元される", () => {
+        render(Show, {
+            props: { ...baseProps, manualFilters: { ...emptyFilters, progress: "completed" } },
+        });
+
+        expect((screen.getByTestId("manual-filter-progress") as HTMLSelectElement).value).toBe(
+            "completed",
+        );
     });
 
     it("自作 checkbox で GET クエリに mine=1 が載る", async () => {
@@ -358,7 +388,7 @@ describe("Projects/Show 動画マニュアルの行内操作", () => {
                 ...baseProps,
                 manualFilters: {
                     category: "3",
-                    status: "published",
+                    progress: "completed",
                     q: "ネジ",
                     sort: "title_asc",
                     mine: true,
@@ -379,7 +409,7 @@ describe("Projects/Show 動画マニュアルの行内操作", () => {
         expect(url.pathname).toBe("/projects/1/manuals/2");
         expect(Object.fromEntries(url.searchParams.entries())).toEqual({
             category: "3",
-            status: "published",
+            progress: "completed",
             q: "ネジ",
             sort: "title_asc",
             mine: "1",

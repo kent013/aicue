@@ -12,13 +12,17 @@ use Webmozart\Assert\Assert;
  * 進捗カウント (cuts_total / cuts_adopted / cuts_with_takes) は withCount 済みモデルから読む。
  * creator は表示目的のみ (検索対象外)。User.name は CipherSweet PII のため whereBlind 検索の
  * 対象にはしない (自作フィルタは created_by の id 一致で行う)。
+ *
+ * **制作状態 (video_manuals.status) は載せない** (T197)。撮影 PWA が出す進捗バッジは
+ * カットの採用状況から導出する別の量 (types/capture.ts の captureProgressOf) であり、
+ * 制作状態は表示にも分岐にも使われていなかったため。撮影対象の母集団を
+ * ready / published に絞るのは CaptureManualController の責務で、こちらは変えていない。
  */
 final readonly class CaptureManualSummaryData
 {
     public function __construct(
         public int $id,
         public string $title,
-        public string $status,
         public ?int $categoryId,
         public ?string $categoryName,
         public int $cutsTotal,
@@ -44,7 +48,6 @@ final readonly class CaptureManualSummaryData
         return new self(
             id: $manual->id,
             title: $manual->title,
-            status: $manual->status->value,
             categoryId: $manual->category?->id,
             categoryName: $manual->category?->name,
             cutsTotal: $cutsTotal,
@@ -56,7 +59,7 @@ final readonly class CaptureManualSummaryData
     }
 
     /**
-     * @return array{id: int, title: string, status: string, category_id: int|null,
+     * @return array{id: int, title: string, category_id: int|null,
      *   category_name: string|null, cuts_total: int, cuts_adopted: int, cuts_with_takes: int,
      *   updated_at: string|null, creator_name: string|null}
      */
@@ -65,7 +68,6 @@ final readonly class CaptureManualSummaryData
         return [
             'id' => $this->id,
             'title' => $this->title,
-            'status' => $this->status,
             'category_id' => $this->categoryId,
             'category_name' => $this->categoryName,
             'cuts_total' => $this->cutsTotal,

@@ -17,7 +17,7 @@ function item(overrides: Partial<ManualListItem> = {}): ManualListItem {
     return {
         id: 2,
         title: "洗浄手順",
-        status: "published",
+        progress: "completed",
         category: null,
         creator: null,
         created_at: "2026-07-10 13:00",

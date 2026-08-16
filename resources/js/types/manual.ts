@@ -2,14 +2,25 @@
  * 動画マニュアル (VideoManual) / カテゴリ関連の Inertia props 型。
  * PHP 側の typed array PHPDoc (ProjectController::manualRows 等) と対で保守する。
  * status は PHP enum App\Enums\Manual\VideoManualStatus と値集合を一致させる
- * (literal union で UI 分岐漏れを検出する。乖離検知は当面手動確認)。
+ * (literal union で UI 分岐漏れを検出する)。**乖離検知の正本は
+ * tests/Architecture/ManualEnumTsSyncInvariantTest.php** (VideoManualStatus /
+ * ManualProgress を含む値集合同期テスト) であり、手動確認ではない。
  */
 
 import type { BadgeTone } from "@/components/atoms/Badge.types";
 
 export type VideoManualStatus = "draft" | "analyzing" | "ready" | "rendering" | "published";
 
-/** VideoManualStatus の表示ラベル (UI 共通) */
+/**
+ * VideoManualStatus の**表示ラベル**。
+ * **一覧 (Projects/Show の行バッジと絞り込み) では使わない** — 一覧はポーリングせず、
+ * 短命な遷移状態を出すと再読込まで嘘になるため。一覧は MANUAL_PROGRESS_LABELS を使う。
+ * 実況する面 (詳細画面 Manuals/Show / ダッシュボード) では引き続きこれを使う。
+ *
+ * 注: 制限しているのは**表示語彙 (このラベル表とトーン表) の使用面**だけである。
+ * 5 値の型そのものを使う判定 (CAPTURE_NAVIGABLE_BY_STATUS / SCENARIO_ESTABLISHED_BY_STATUS /
+ * SCENARIO_ANALYZABLE_BY_STATUS など) は正当な用途であり、本制限の対象外。
+ */
 export const VIDEO_MANUAL_STATUS_LABELS: Record<VideoManualStatus, string> = {
     draft: "下書き",
     analyzing: "解析中",
@@ -19,7 +30,7 @@ export const VIDEO_MANUAL_STATUS_LABELS: Record<VideoManualStatus, string> = {
 };
 
 /**
- * 状態バッジの tone (結果表示の意味色。UI 共通)。
+ * 状態バッジの tone (結果表示の意味色。**実況する面**で使う。一覧は MANUAL_PROGRESS_TONES)。
  * satisfies でキー漏れ (status 追加時) をコンパイル時検出する。
  */
 export const STATUS_TONES = {
@@ -29,6 +40,27 @@ export const STATUS_TONES = {
     rendering: "warning",
     published: "primary",
 } as const satisfies Record<VideoManualStatus, BadgeTone>;
+
+/**
+ * PHP App\Enums\Manual\ManualProgress と値集合を一致させる (doc/04 の 3 値)。
+ * 5 値 → 3 値の**写像規則は PHP 側 ManualProgress::forStatus() だけが持つ**。
+ * TS 側は写像を書かず、サーバが決めた値を表示するだけである (2 か所に写像を持たない)。
+ */
+export type ManualProgress = "not_started" | "in_progress" | "completed";
+
+/** 一覧の状態ラベル (doc/04 の語)。satisfies でキー漏れをコンパイル時検出する */
+export const MANUAL_PROGRESS_LABELS = {
+    not_started: "未着手",
+    in_progress: "作成中",
+    completed: "作成済",
+} as const satisfies Record<ManualProgress, string>;
+
+/** 一覧の状態バッジの tone (結果表示の意味色) */
+export const MANUAL_PROGRESS_TONES = {
+    not_started: "neutral",
+    in_progress: "tertiary",
+    completed: "success",
+} as const satisfies Record<ManualProgress, BadgeTone>;
 
 /**
  * 撮影ナビ (capture.manuals.show) へ導線を出してよい状態か。
@@ -103,7 +135,8 @@ export type ManualSortOption = "updated_desc" | "updated_asc" | "title_asc" | "t
 export interface ManualListItem {
     id: number;
     title: string;
-    status: VideoManualStatus;
+    /** 一覧の状態 (3 値)。サーバが写像済みの値であり、UI 側で再写像しない */
+    progress: ManualProgress;
     /** null = 未分類 */
     category: { id: number; name: string } | null;
     /** 作成者。退会/削除で解決不可のときは null (UI は「不明」) */
@@ -139,7 +172,8 @@ export interface CategoryOption {
 /** 一覧絞り込み条件 (GET クエリ)。category は id 文字列 | "uncategorized" | null */
 export interface ManualFilters {
     category: string | null;
-    status: string | null;
+    /** 状態の絞り込み (3 値)。null = すべて。旧 `status` (5 値) は廃止 */
+    progress: ManualProgress | null;
     q: string | null;
     /** 並べ替え。null = 既定 (作成日降順) */
     sort: ManualSortOption | null;
