@@ -12,7 +12,12 @@
     import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
     import type { SharedProps } from "@/lib/shared-props";
-    import type { CategoryOption, ScenarioDocument, VideoManualStatus } from "@/types/manual";
+    import type {
+        CategoryOption,
+        CutTakeSummary,
+        ScenarioDocument,
+        VideoManualStatus,
+    } from "@/types/manual";
     import { isCaptureNavigable } from "@/types/manual";
 
     /**
@@ -32,9 +37,11 @@
         };
         categories: CategoryOption[];
         scenario: ScenarioDocument;
+        /** 動画列 (カットごとのテイク要約)。描画時点のスナップショット */
+        takeSummaries: CutTakeSummary[];
     }
 
-    let { project, manual, categories, scenario }: Props = $props();
+    let { project, manual, categories, scenario, takeSummaries }: Props = $props();
 
     const shared = $derived(page.props as unknown as SharedProps);
     const appName = $derived(shared.appName ?? "");
@@ -129,7 +136,12 @@
             <p class="mt-1 text-caption text-text-secondary">
                 手順と急所のカットを編集し、「シナリオを更新」でまとめて保存します。
             </p>
-            <ScenarioEditor {scenario} projectId={project.id} manualId={manual.id} />
+            <ScenarioEditor
+                {scenario}
+                {takeSummaries}
+                projectId={project.id}
+                manualId={manual.id}
+            />
         </div>
         </PageContent>
     </PageContainer>

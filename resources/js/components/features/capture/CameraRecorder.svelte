@@ -13,7 +13,7 @@
     } from "@lucide/svelte";
     import Button from "@/components/atoms/Button.svelte";
     import GridOverlay from "@/components/features/capture/GridOverlay.svelte";
-    import SubtitleOverlay from "@/components/features/capture/SubtitleOverlay.svelte";
+    import SubtitleOverlay from "@/components/molecules/SubtitleOverlay.svelte";
     import {
         classifyGetUserMediaError,
         formatElapsed,

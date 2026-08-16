@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/svelte";
-import SubtitleOverlay from "@/components/features/capture/SubtitleOverlay.svelte";
+import SubtitleOverlay from "@/components/molecules/SubtitleOverlay.svelte";
 
 /*
  * SubtitleOverlay: 撮影中プレビューへ重畳する字幕ガイド (焼込ではない DOM overlay)。

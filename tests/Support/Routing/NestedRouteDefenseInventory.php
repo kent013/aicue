@@ -86,6 +86,8 @@ final class NestedRouteDefenseInventory
             'projects.manuals.update' => [...$project, 'manual' => $scoped],
             'projects.manuals.destroy' => [...$project, 'manual' => $scoped],
             'projects.manuals.duplicate' => [...$project, 'manual' => $scoped],
+            // {cut} は $manual->cuts() 経由 (PC テイク選択画面)
+            'projects.manuals.cuts.takes.index' => [...$project, 'manual' => $scoped, 'cut' => $scoped],
             'projects.manuals.scenario.update' => [...$project, 'manual' => $scoped],
             'projects.manuals.source-documents.store' => [...$project, 'manual' => $scoped],
             'projects.manuals.analyze' => [...$project, 'manual' => $scoped],

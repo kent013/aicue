@@ -27,7 +27,10 @@ const { routerReloadMock, routerOnMock } = vi.hoisted(() => ({
     routerOnMock: vi.fn((..._args: unknown[]) => () => {}),
 }));
 
-vi.mock("@inertiajs/svelte", () => ({
+// 動画列が Inertia Link (Button href + inertia) を描画するため、
+// router 以外の実 export (Link 等) は本物を残す
+vi.mock("@inertiajs/svelte", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("@inertiajs/svelte")>()),
     router: {
         reload: routerReloadMock,
         on: routerOnMock,
@@ -106,7 +109,8 @@ function makeDocument(): ScenarioDocument {
     };
 }
 
-const baseProps = { projectId: 1, manualId: 5 };
+// 動画列 (takeSummaries) は既定で空 = 保存済み行でも「テイク 0 件」表示になる
+const baseProps = { projectId: 1, manualId: 5, takeSummaries: [] };
 
 /** fetch Response の最小スタブ */
 function jsonResponse(status: number, body: unknown): Response {

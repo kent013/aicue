@@ -320,3 +320,70 @@ export interface ScenarioConflictBody {
     message: string;
     current_version: number;
 }
+
+/**
+ * PC テイク選択画面 (Manuals/Takes) の型。PHP 側 App\DataTransferObjects\Manual\
+ * {TakeSelectionPageData, SelectableTakeData, CutTakeSummaryData} と対で保守する。
+ * 撮影 PWA の types/capture.ts とは**別 shape** (PC は署名 URL の口を持たない)。
+ */
+
+/** PHP: App\Enums\Manual\TakeStatus と値集合を一致させる (literal union) */
+export type SelectableTakeStatus = "uploading" | "processing" | "ready" | "failed";
+
+/** テイクの状態ラベル (UI 共通)。satisfies でキー漏れをコンパイル時検出する */
+export const TAKE_STATUS_LABELS = {
+    uploading: "アップロード中",
+    processing: "処理中",
+    ready: "使用できます",
+    failed: "失敗",
+} as const satisfies Record<SelectableTakeStatus, string>;
+
+/** 採用できる状態か (サーバ CaptureTakeService::adopt の ready 条件と一致させる) */
+export const TAKE_ADOPTABLE_BY_STATUS = {
+    uploading: false,
+    processing: false,
+    ready: true,
+    failed: false,
+} as const satisfies Record<SelectableTakeStatus, boolean>;
+
+/** PHP: SelectableTakeData と対 */
+export interface SelectableTake {
+    id: number;
+    status: SelectableTakeStatus;
+    size_bytes: number;
+    duration_ms: number | null;
+    comment: string | null;
+    captured_at: string | null;
+    sort_order: number;
+    /** DL 済み (削除できない。押下前に理由を説明するために出す) */
+    downloaded: boolean;
+    /** サムネイル生成済みか。true のときだけ GET .../takes/{id}/thumbnail を表示に使う */
+    has_thumbnail: boolean;
+}
+
+/** PHP: TakeSelectionPageData の cut キーと対 */
+export interface TakeSelectionCut {
+    id: number;
+    type: "step" | "point";
+    label: string;
+    scene: string;
+    narration: string;
+    subtitle_primary: string | null;
+    subtitle_secondary: string;
+    adopted: { id: number; status: SelectableTakeStatus } | null;
+}
+
+/** PHP: TakeSelectionPageData::toArray() 全体と対 (Manuals/Takes の props) */
+export interface TakeSelectionPageProps {
+    project: { id: number; name: string };
+    manual: { id: number; title: string; status: VideoManualStatus };
+    cut: TakeSelectionCut;
+    takes: SelectableTake[];
+}
+
+/** PHP: CutTakeSummaryData と対 (シナリオ編集画面「動画」列の 1 カット分) */
+export interface CutTakeSummary {
+    cut_id: number;
+    takes_count: number;
+    adopted: { id: number; status: SelectableTakeStatus } | null;
+}

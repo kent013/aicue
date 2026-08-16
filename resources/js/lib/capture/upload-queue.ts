@@ -1,4 +1,5 @@
 import { captureFetch } from "@/lib/capture/http";
+import { cutTakesUrl, takeUploadUrlEndpoint } from "@/lib/capture/take-endpoints";
 import type { CaptureConflictBody, QuotaExceededBody, UploadTicket } from "@/types/capture";
 
 /**
@@ -26,6 +27,25 @@ export interface PendingStore {
     put(item: PendingUpload): Promise<void>;
     delete(clientTakeId: string): Promise<void>;
     list(): Promise<PendingUpload[]>;
+}
+
+/**
+ * インスタンス生存中だけ保持する PendingStore (PC 面用)。
+ * PC にはオフライン撮影の要件が無く、ページ遷移で失われてよい。
+ * 撮影 PWA は従来どおり IndexedDB 実装 (lib/capture/idb.ts) を使う。
+ */
+export function createMemoryPendingStore(): PendingStore {
+    const items = new Map<string, PendingUpload>();
+
+    return {
+        put: async (item) => {
+            items.set(item.clientTakeId, item);
+        },
+        delete: async (clientTakeId) => {
+            items.delete(clientTakeId);
+        },
+        list: async () => [...items.values()],
+    };
 }
 
 export type UploadOutcome =
@@ -165,10 +185,11 @@ export class UploadQueue {
 
     /** upload-url → S3 PUT → POST takes の 3 段 (D2-D4 経路) */
     private async upload(item: PendingUpload): Promise<void> {
-        const base = `/app/projects/${item.projectId}/manuals/${item.manualId}/cuts/${item.cutId}/takes`;
+        const target = { projectId: item.projectId, manualId: item.manualId, cutId: item.cutId };
+        const base = cutTakesUrl(target);
         const checksum = await computeChecksumBase64(item.blob);
 
-        const ticketResponse = await this.fetcher(`${base}/upload-url`, {
+        const ticketResponse = await this.fetcher(takeUploadUrlEndpoint(target), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
