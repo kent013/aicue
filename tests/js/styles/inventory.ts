@@ -99,3 +99,97 @@ export const PENDING_CONTRAST_PAIRS = [
     "alpha 合成ペア: Badge の bg-<tone>/10 + text-<tone>、bg-primary-soft、ring-primary/35、" +
         "bg-text/70 + text-surface (合成後の実効色が親背景に依存しトークン単体では定まらない)",
 ] as const;
+
+/*
+ * ===== 生成 CSS 検査の入力 (tokens.test.ts) =====
+ */
+
+/**
+ * tokens.css が持つ `--color-<suffix>` の全件。
+ *
+ * COLOR_TOKEN_MAP (DESIGN.md 由来) と DERIVED_COLOR_TOKENS (tokens.css 固有の派生) の和。
+ * これが tokens.css の `--color-*` 全件と一致することは canonical-source-parity の
+ * 集合一致テストが固定しているので、この配列は「定義上の全件」である。
+ */
+export const CSS_COLOR_SUFFIXES: readonly string[] = [
+    ...Object.values(COLOR_TOKEN_MAP),
+    ...DERIVED_COLOR_TOKENS,
+];
+
+/**
+ * 生成 CSS で**値**の一致を検査しないトークン (理由必須)。
+ *
+ * 契約: **派生トークンは全件が値免除である** (DESIGN.md に期待値が無いため)。
+ * キー集合が DERIVED_COLOR_TOKENS と一致することを canonical-source-parity が固定する
+ * = 派生トークンを足したのに「値も見ていない・免除にも入っていない」状態を作れない。
+ * 免除しているのは**値だけ**で、生成 CSS への出現は検査する。
+ */
+export const COMPILED_VALUE_EXEMPT_TOKENS = {
+    "primary-soft":
+        "DESIGN.md frontmatter に現れない派生トークン (rgba)。期待値を正本から導出できないため" +
+        "値の突き合わせは行わず、生成 CSS への出現までを検査する。値の正本は tokens.css で、" +
+        "集合としての存在は canonical-source-parity が固定している",
+} as const;
+
+/**
+ * 経路の層 (実 app.css のコンパイル) で**必ず現れることを求める**トークン。
+ *
+ * これは**アンカー集合であって全件ではない**。経路の層の生成物はアプリ側の class 使用状況に
+ * 依存するため、全件の網羅は密閉の層が担う。ここに並べるのは画面の土台
+ * (面・本文・主 CTA) が使う 4 件に限る
+ * (実測の使用回数: bg-primary 17 / text-text 106 / bg-surface 47 / bg-neutral 35)。
+ *
+ * **アンカーが使われなくなったときの直し方**: テストを緩めるのではなく、
+ * 土台に相当する別のトークンへ差し替える (集合を縮めて緑にしない)。
+ */
+export const ROUTE_LAYER_ANCHOR_TOKENS = ["primary", "text", "surface", "neutral"] as const;
+
+/*
+ * ===== DESIGN.md frontmatter の節ごとの担当宣言 (既定拒否) =====
+ *
+ * frontmatter の最上位の節は下の 3 分類の**いずれかに必ず属する**。
+ * 未分類の節があれば canonical-source-parity が fail する
+ * = 正本に節を足したのに誰も見ていない状態を作れない。
+ *
+ * **`checked` は「担当がいる」ことを表すのであって、節の中身を全項目網羅しているという
+ * 主張ではない**。母集団の網羅は節ごとの集合一致テストが別に固定する。
+ */
+
+/** 節を検査している gate の識別子 (ファイル名の語幹に合わせる)。 */
+export type DesignGateName = "canonical-source-parity" | "tokens" | "contrast-invariant";
+
+export type FrontmatterSectionOwner =
+    /** 担当のいる節。どの gate が見ているかを列挙する */
+    | { readonly kind: "checked"; readonly by: readonly DesignGateName[] }
+    /** 実装写像を持たないメタ情報 (理由必須) */
+    | { readonly kind: "metadata"; readonly reason: string }
+    /**
+     * 未検査であることの明示宣言 (理由・解消条件・追跡先の 3 つが必須)。
+     * 追跡先は `T<3 桁以上>` (TODO の表の ID 列に実在) か
+     * `devnotes/<dir>/` (実在するディレクトリ) のどちらか。
+     */
+    | {
+          readonly kind: "pending";
+          readonly reason: string;
+          readonly exit: string;
+          readonly tracking: string;
+      };
+
+export const FRONTMATTER_SECTION_OWNERS: Readonly<Record<string, FrontmatterSectionOwner>> = {
+    version: { kind: "metadata", reason: "テーマの版。実装写像を持たない" },
+    name: { kind: "metadata", reason: "テーマの名前。実装写像を持たない" },
+    description: { kind: "metadata", reason: "テーマの説明文。実装写像を持たない" },
+    colors: { kind: "checked", by: ["canonical-source-parity", "tokens", "contrast-invariant"] },
+    typography: { kind: "checked", by: ["canonical-source-parity", "tokens"] },
+    rounded: { kind: "checked", by: ["canonical-source-parity", "tokens"] },
+    spacing: {
+        kind: "pending",
+        reason:
+            "tokens.css に --spacing-* の写像が無く、値も写像の有無もどの検査も見ていない。" +
+            "Tailwind 既定の spacing で足りているのか写像の作り忘れなのかが未決である",
+        exit:
+            "tokens.css に写像を作って canonical-source-parity と tokens の担当に移すか、" +
+            "frontmatter から spacing を外すかを決めたら、本項目を削る",
+        tracking: "devnotes/20260818-0248-design-token-t1-tests/",
+    },
+};
