@@ -12,6 +12,7 @@ use App\Http\Controllers\Controller;
 use App\Models\OrganizationInvitation;
 use App\Models\User;
 use App\Services\Project\DefaultProjectResolver;
+use App\Services\Security\LastLoginLookup;
 use Illuminate\Database\Eloquent\Relations\Pivot;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -29,8 +30,11 @@ class UserManagementController extends Controller
 {
     use ResolvesCurrentOrganization;
 
-    public function index(Request $request, DefaultProjectResolver $defaultProjects): Response
-    {
+    public function index(
+        Request $request,
+        DefaultProjectResolver $defaultProjects,
+        LastLoginLookup $lastLogins,
+    ): Response {
         $organization = $this->resolveCurrentOrganization($request);
         Gate::authorize('manageMembers', $organization); // 撮影者・一般メンバーは 403
 
@@ -52,8 +56,21 @@ class UserManagementController extends Controller
             }
         }
 
+        // メンバー集合は org relation 経由でのみ解決する (cross-org 越境不能)
+        $organizationMembers = $organization->users()->get();
+
+        // 最終ログインは行ごとに引かず、id 集合に対して 1 クエリで写像を作る (N+1 を作らない)。
+        // 渡す id 集合は上の relation の結果そのものなので、他組織の利用者は構造的に入らない。
+        // pluck() は Collection<int, mixed> に落ちて list<int> の narrowing が自己申告になるため、
+        // 型が閉じる array_map + array_values で作る (型を緩めて黙らせない = 禁止事項 2)
+        $memberIds = array_values(array_map(
+            static fn (User $member): int => $member->id,
+            $organizationMembers->all(),
+        ));
+        $lastLoginMap = $lastLogins->forUserIds($memberIds);
+
         $members = [];
-        foreach ($organization->users()->get() as $member) {
+        foreach ($organizationMembers as $member) {
             // organizationRole null (attach 済みだが Laratrust ロール未付与の異常行) も
             // 非表示にせず「未割当」として可視化する (derive が null を Unassigned へ丸める。
             // 管理者はロール割当コマンドでこの行を修復できる = applyConsoleRole の修復経路)
@@ -62,6 +79,7 @@ class UserManagementController extends Controller
                 $member->organizationRole($organization),
                 $pivotRoles[$member->id] ?? null,
                 $user->id,
+                $lastLoginMap[$member->id] ?? null,
             );
         }
 

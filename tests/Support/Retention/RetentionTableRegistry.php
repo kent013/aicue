@@ -279,7 +279,10 @@ final class RetentionTableRegistry
             RetentionTableEntry::undecided(
                 'security_audit_events',
                 '認証と権限に関わる操作の証跡。利用者への外部キーが空値化のため退会後も行が残る。'
-                .'監査に必要な保持期間が未決である',
+                .'監査に必要な保持期間が未決である。'
+                .'なおこの表の login 行は /manage/users の最終ログイン表示の唯一の出所であり、'
+                .'期限を決めて古い行を消すと、休眠の判定に必要な古い値から先に失われる。'
+                .'期限を決めるときは devnotes/20260817-0909-user-last-login-at/ を読み直すこと',
             ),
             RetentionTableEntry::undecided(
                 'model_audits',

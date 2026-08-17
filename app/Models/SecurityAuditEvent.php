@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\SecurityEventType;
+use Database\Factories\SecurityAuditEventFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -15,6 +17,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class SecurityAuditEvent extends Model
 {
+    /** @use HasFactory<SecurityAuditEventFactory> */
+    use HasFactory;
+
     /** @var list<string> */
     protected $fillable = [
         'event_type',
