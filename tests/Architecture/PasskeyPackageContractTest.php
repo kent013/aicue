@@ -6,16 +6,24 @@ use App\Http\Responses\Passkey\PasskeyConfirmationResponse;
 use App\Http\Responses\Passkey\PasskeyDeletedResponse;
 use App\Http\Responses\Passkey\PasskeyLoginResponse;
 use App\Http\Responses\Passkey\PasskeyRegistrationResponse;
+use App\Listeners\Auth\ClearRecentAuthOnPasskeyChange;
+use App\Listeners\RecordSecurityEvent;
 use App\Models\Passkey;
 use App\Models\User;
+use App\Support\PasskeyOriginCanonicalizer;
+use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Events\Dispatcher;
 use Laravel\Fortify\Features;
 use Laravel\Fortify\FortifyServiceProvider;
+use Laravel\Passkeys\Actions\DeletePasskey;
+use Laravel\Passkeys\Actions\StorePasskey;
 use Laravel\Passkeys\Contracts\PasskeyConfirmationResponse as PasskeyConfirmationResponseContract;
 use Laravel\Passkeys\Contracts\PasskeyDeletedResponse as PasskeyDeletedResponseContract;
 use Laravel\Passkeys\Contracts\PasskeyLoginResponse as PasskeyLoginResponseContract;
 use Laravel\Passkeys\Contracts\PasskeyRegistrationResponse as PasskeyRegistrationResponseContract;
 use Laravel\Passkeys\Contracts\PasskeyUser;
+use Laravel\Passkeys\Events\PasskeyDeleted;
 use Laravel\Passkeys\Http\Controllers\PasskeyConfirmationController;
 use Laravel\Passkeys\Http\Controllers\PasskeyLoginController;
 use Laravel\Passkeys\Http\Controllers\PasskeyRegistrationController;
@@ -295,5 +303,216 @@ test('composer.lock の laravel/passkeys が 0.2 系 (契約検査の検証済�
     expect(str_starts_with(ltrim($version, 'v'), '0.2.'))->toBeTrue(
         "laravel/passkeys の解決版が 0.2 系を外れている: {$version}。"
         .'本ファイルの契約検査と fortify.passkeys.* のキー名を再確認してから pin を更新すること'
+    );
+});
+
+/*
+ * 版の固定 (下限側)。laravel/passkeys は laravel/fortify の推移依存であり、
+ * **パスキーの公式統合が入ったのは fortify 1.37 である**。1.37 未満へ退行すると
+ * `Features::passkeys()` という有効化点そのものが消え、本ファイルの他の契約検査
+ * (route 名 7 本 / 写像 sentinel / 実効キー) が母集団を失う。
+ * したがって「上限を締める」ためではなく **退行を遮断する**ために固定する。
+ *
+ * 解決値まで見るのは、制約だけでは lock が手で書き換えられた場合を捕まえられないため
+ * (laravel/passkeys 側と同じ理由・同じ規約形)。
+ * 1.37 系を外れるとき (minor 更新 / 脆弱性対応の版上げ) は、
+ * FortifyServiceProvider::configurePasskeys() の写像と fortify.passkeys.* のキー名を
+ * 再確認してから、同じ変更でこの固定値を直すこと。
+ */
+test('composer.json の laravel/fortify が 1.37 系を下限に固定している', function (): void {
+    $require = composerRequireBlock();
+
+    expect(array_key_exists('laravel/fortify', $require))->toBeTrue(
+        'laravel/fortify の直接要求が無い。パスキーの公式統合はこのパッケージが供給する'
+    );
+
+    $constraint = $require['laravel/fortify'];
+    expect($constraint)->toBeString();
+    /** @var string $constraint */
+    // laravel/passkeys 側と同じ規約形。前方一致では `^1.37 || ^2.0` のような
+    // 「下限を実質無効化する書き方」を通してしまうため、書き方を 1 種類へ絞る。
+    expect(preg_match('/^\^1\.37(?:\.\d+)?$/', $constraint))->toBe(
+        1,
+        "laravel/fortify の制約は '^1.37' か '^1.37.<patch>' の形だけを許す: {$constraint}"
+    );
+});
+
+test('composer.lock の laravel/fortify が 1.37 系 (公式パスキー統合が入った系列)', function (): void {
+    $version = lockedPackageVersion('laravel/fortify');
+
+    expect($version)->toBeString('composer.lock に laravel/fortify が無い');
+    /** @var string $version */
+    expect(str_starts_with(ltrim($version, 'v'), '1.37.'))->toBeTrue(
+        "laravel/fortify の解決版が 1.37 系を外れている: {$version}。"
+        .'configurePasskeys() の写像と fortify.passkeys.* のキー名を再確認してから固定値を更新すること'
+    );
+});
+
+/*
+ * 実効値の許可する接続元が**正規形**であること (T216 施策 B の配線が生きていることの検査)。
+ * 宣言経路そのものの再評価は tests/Feature/Auth/PasskeyOriginDeclarationTest が担う
+ * (こちらは「いま動いている実効値」の側から見る)。
+ */
+test('実効値の許可する接続元が正規形である (宣言側が正規化器を通っている)', function (): void {
+    $origins = config('passkeys.allowed_origins');
+    expect($origins)->toBeArray();
+
+    /** @var array<int, mixed> $origins */
+    foreach ($origins as $origin) {
+        expect($origin)->toBeString();
+        /** @var string $origin */
+        expect(PasskeyOriginCanonicalizer::canonicalize($origin))->toBe(
+            $origin,
+            '宣言側 (config/fortify.php) が正規化器を通っていない可能性がある'
+        );
+    }
+});
+
+/*
+ * パッケージ側の削除処理の非原子性 (台帳 auth-passkey-hardening 施策 3b)。
+ *
+ * vendor の DeletePasskey は「行を消してからイベントを発火する」形で、2 つを
+ * トランザクションで包まない。本アプリではこの性質を **EnsureLoginMethodRemains が
+ * 削除 route 全体を transaction で包むこと**で埋めている
+ * (route への付与は PasskeyRouteProtectionTest / LoginMethodRemovalRouteTest が固定済み。
+ *  巻き戻りの実挙動は tests/Feature/Auth/PasskeyDeletionAtomicityTest が固定する)。
+ *
+ * ここで固定するのは**前提そのもの** = 「埋め合わせが要る状態が続いていること」である。
+ * パッケージ側が自前で transaction を持つようになったら赤くなり、
+ * 二重の境界になっていないかを読み直す契機になる。
+ */
+
+/** 指定メソッドの vendor 実装の本文 (行範囲を実ファイルから取り出す) */
+function passkeyVendorMethodSource(string $class, string $method): string
+{
+    $reflection = new ReflectionMethod($class, $method);
+    $file = $reflection->getFileName();
+    expect($file)->toBeString();
+    /** @var string $file */
+    $lines = file($file);
+    expect($lines)->toBeArray();
+    /** @var list<string> $lines */
+
+    return implode('', array_slice(
+        $lines,
+        $reflection->getStartLine() - 1,
+        $reflection->getEndLine() - $reflection->getStartLine() + 1,
+    ));
+}
+
+/**
+ * 代表的なトランザクション境界の書き方を含むか (**字句の包含判定**)。
+ *
+ * 名前のとおり「代表的な書き方の検知」であって網羅ではない。
+ * `beginTransaction` は部分一致なので `DB::beginTransaction()` /
+ * `$connection->beginTransaction()` / `$this->getConnection()->beginTransaction()` の
+ * いずれにも当たるが、helper 経由で開く書き方には**沈黙する**。
+ */
+function declaresCommonTransactionBoundary(string $source): bool
+{
+    foreach (['DB::transaction', '->transaction(', 'beginTransaction', 'transactional('] as $token) {
+        if (str_contains($source, $token)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+test('トランザクション境界の検出器の自己テスト (正例 4 種・負例 1 種)', function (): void {
+    expect(declaresCommonTransactionBoundary('DB::transaction(function () { $x->delete(); });'))->toBeTrue();
+    expect(declaresCommonTransactionBoundary('DB::beginTransaction();'))->toBeTrue();
+    expect(declaresCommonTransactionBoundary('$connection->beginTransaction();'))->toBeTrue();
+    expect(declaresCommonTransactionBoundary('$this->getConnection()->transaction(fn () => null);'))->toBeTrue();
+    expect(declaresCommonTransactionBoundary("\$passkey->delete();\nPasskeyDeleted::dispatch(\$user, \$passkey);"))->toBeFalse();
+});
+
+test('パッケージ側の削除処理は行削除とイベント発火をトランザクションで包まない (埋め合わせの前提)', function (): void {
+    $source = passkeyVendorMethodSource(DeletePasskey::class, '__invoke');
+
+    expect($source)->toContain('->delete()')
+        ->and($source)->toContain('PasskeyDeleted::dispatch');
+    expect(declaresCommonTransactionBoundary($source))->toBeFalse(
+        'vendor が自前で transaction を持つようになった。EnsureLoginMethodRemains の '
+        .'transaction と二重の境界になっていないか読み直すこと'
+    );
+});
+
+/*
+ * 既知の窓 (登録経路)。**本タスクは登録経路を是正しないと決めている**ので、
+ * ここは「窓が開いたままであること」を可視化するだけの検査である。
+ * 赤くなったとき (= vendor が登録処理を transaction で包んだとき) の対応は
+ * 「窓が閉じたので本テストと docs/auth-security-mechanisms.md §5 の記述を削る」であり、
+ * アプリ側の実装変更は要らない。
+ */
+test('既知の窓: パッケージ側の登録処理も包まない (登録経路には埋め合わせが無い)', function (): void {
+    $source = passkeyVendorMethodSource(StorePasskey::class, '__invoke');
+
+    expect(declaresCommonTransactionBoundary($source))->toBeFalse(
+        'vendor が登録処理を transaction で包んだ。既知の窓が閉じたので本テストと '
+        .'docs/auth-security-mechanisms.md §5 の「登録経路には埋め合わせが無い」記述を消すこと'
+    );
+});
+
+/**
+ * 購読の登録値から「クラス名」を取り出す。
+ *
+ * 期待する形は `[クラス名, メソッド名]` **だけ**である。無名関数・オブジェクト・
+ * 要素数の違う配列が来たら、未定義オフセットではなく**明示的な失敗**にする
+ * (同期かどうかを機械的に判定できない形を通さないため)。
+ */
+function passkeyListenerClass(mixed $listener): string
+{
+    expect(is_array($listener))->toBeTrue('購読が [クラス名, メソッド名] の形ではない');
+    /** @var array<mixed> $listener */
+    expect(array_is_list($listener))->toBeTrue('購読の登録値が list ではない');
+    expect(count($listener))->toBe(2, '購読の登録値の要素数が 2 ではない');
+    expect(is_string($listener[0]))->toBeTrue('購読のクラス名が文字列ではない');
+    expect(is_string($listener[1]))->toBeTrue('購読のメソッド名が文字列ではない');
+
+    /** @var string $class */
+    $class = $listener[0];
+
+    return $class;
+}
+
+test('パスキー削除イベントの直接購読は同期で走る 2 つだけである (巻き戻りの前提)', function (): void {
+    // ★`app('events')` は文字列キー解決なので level 10 では型が確定しない。
+    //   具体クラスであることを**検査してから**絞る (docblock だけで断定しない)。
+    $dispatcherValue = app('events');
+    expect($dispatcherValue)->toBeInstanceOf(Dispatcher::class);
+    /** @var Dispatcher $dispatcher */
+    $dispatcher = $dispatcherValue;
+
+    $raw = $dispatcher->getRawListeners();
+
+    expect($raw)->toHaveKey(PasskeyDeleted::class);
+    $direct = $raw[PasskeyDeleted::class];
+    expect(is_array($direct))->toBeTrue();
+    /** @var array<mixed> $direct */
+    $classes = [];
+
+    foreach ($direct as $listener) {
+        $class = passkeyListenerClass($listener);
+        $classes[] = $class;
+
+        // ShouldQueue を実装した購読はキューへ載り、削除の transaction の外で走る。
+        expect(is_a($class, ShouldQueue::class, true))->toBeFalse(
+            "{$class} がキュー化された。削除の巻き戻りの前提 (同期購読) が崩れる"
+        );
+    }
+
+    // 顔ぶれを完全一致で固定する (増減のどちらでも赤くなる)。
+    expect($classes)->toBe([RecordSecurityEvent::class, ClearRecentAuthOnPasskeyChange::class]);
+
+    // ★**直接購読だけを見ても閉じない**。Dispatcher は
+    //   ワイルドカード購読 (`Laravel\Passkeys\Events\*`) を別の集合で持ち、
+    //   getRawListeners() には現れない。実装 (Dispatcher::getListeners) は
+    //   直接購読 + ワイルドカード + インタフェース経由の購読を合成して返すので、
+    //   **件数の一致**を見れば、そのどれが増えても赤くなる。
+    expect(count($dispatcher->getListeners(PasskeyDeleted::class)))->toBe(
+        count($classes),
+        'ワイルドカードまたはインタフェース経由の購読が増えている。'
+        .'キュー化されていないか (削除の巻き戻りの前提) を確かめること'
     );
 });
