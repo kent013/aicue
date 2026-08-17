@@ -49,7 +49,7 @@
 | 2 回目 | 1108 ms |
 | 3 回目 | 1059 ms |
 
-gate 2 ファイル (108 件) 全体で 3.4 秒 (`pnpm test tests/js/architecture/enum-ts-sync`)。
+gate 2 ファイル (負例の追加後は 120 件) 全体で 3.4 秒 (`pnpm test tests/js/architecture/enum-ts-sync`)。
 **起点を縮める必要は無かった** (縮めれば偽陰性になることは T25a/T25b が固定している)。
 
 ## 3. 旧検査からの引き継ぎの対応表
@@ -63,7 +63,7 @@ gate 2 ファイル (108 件) 全体で 3.4 秒 (`pnpm test tests/js/architectur
 | `NotificationTypeTsSyncInvariantTest` の値集合比較 1 件 | 目録の `notification.ts` 行 |
 | `OnboardingBillingStateTsSyncInvariantTest` の値集合比較 1 件 | 目録の `billing.ts::BillingStateValue` 行 |
 | `AccountDeletionBlockerActionTsSyncInvariantTest` の値集合比較 1 件 | 目録の `account.ts` 行 |
-| 各テストの「抽出できないと落ちる」自己検査 4 件 | 負例行列の T7 (宣言が無い) ほか TS 27 件 / PHP 38 件 |
+| 各テストの「抽出できないと落ちる」自己検査 4 件 | 負例行列の T7 (宣言が無い) ほか TS 27 件 / PHP 40 件 |
 | 配列比較なので backing の値の重複を検出できた | `readPhpEnumValuesFromText` が**明示的に**例外にする (P36) |
 
 **引き継がないもの**: 旧テストは PHP のクラスを実際に読み込んで `::cases()` を呼んでいた。
@@ -115,3 +115,23 @@ TS 側のソース上の重複 (`"a" | "a"`) は値集合の意味では区別�
 `docs/TODO-closed.md` の T197 の記録に `ManualEnumTsSyncInvariantTest` の名前が残っている。
 これは**その時点で何をしたかの歴史の記録**であり、`devnotes/` と同じ扱いで直さない
 (直すと当時の作業内容の記述が事実と食い違う)。現在の案内としての参照は 0 件である。
+
+## 7. 検証コマンドの結果 (main を取り込んだ後の worktree で実行)
+
+| コマンド | 結果 |
+|---|---|
+| `composer test` | 5777 tests / 5775 passed / 2 skipped / 0 failed / 25409 assertions |
+| `composer phpstan` (level 10) | No errors |
+| `vendor/bin/pint --test` | passed |
+| `pnpm lint` | passed |
+| `pnpm typecheck` | passed |
+| `pnpm test` | 165 files / 2224 tests passed |
+| `pnpm build` | 成功 |
+| `pnpm typecheck:packages` / `pnpm build:packages` | 成功 |
+| `pnpm test:packages` | 10 files / 106 tests passed |
+
+main の取り込みで直したのは 3 箇所 —
+`docs/TODO.md` (T224 と T225 の両方を残す) /
+`docs/template-divergence.md` (登録を **D29** へ、件数を **28 件** へ) /
+`TemplateDivergenceLedgerFormatTest` の件数の定数 (28)。
+D 番号の参照 (`AGENTS.md` / `docs/architecture.md` / gate の docblock) も同じ変更で D29 へ直した。
