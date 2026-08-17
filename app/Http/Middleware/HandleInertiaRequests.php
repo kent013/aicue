@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Services\Marketing\ContactUrl;
 use App\Services\Organization\OrganizationMembershipService;
 use App\Support\Auth\SessionEpoch;
+use App\Support\Http\FlashNotificationRelay;
 use App\Support\Seo\SeoManager;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -35,6 +36,7 @@ class HandleInertiaRequests extends Middleware
 
     /**
      * 全ページ共有 props。
+     * 通知 flash のキー集合の SoT は FlashNotificationRelay::NOTIFICATION_KEYS。
      * flash.visitKey は flash-to-toast の de-dup 用 (同一 flash の二重表示防止)。
      *
      * @return array<string, mixed>
@@ -80,11 +82,11 @@ class HandleInertiaRequests extends Middleware
                 'pendingCount' => fn (): int => app(OrganizationMembershipService::class)
                     ->pendingInvitationCountFor($user),
             ],
+            // 通知キー集合の SoT は FlashNotificationRelay::NOTIFICATION_KEYS
+            // (FlashNotificationRelayDriftTest が一致を固定)。visitKey は通知ではなく
+            // 二重表示を抑える見分け用のため中継の対象外で別建て
             'flash' => [
-                'success' => $request->session()->get('success'),
-                'error' => $request->session()->get('error'),
-                'info' => $request->session()->get('info'),
-                'warning' => $request->session()->get('warning'),
+                ...$this->notificationFlashProps($request),
                 'visitKey' => Str::uuid()->toString(),
             ],
             // 問い合わせ CTA の宛先 (内部 /contact / 外部 URL / mailto を config 駆動で切替)。
@@ -110,6 +112,21 @@ class HandleInertiaRequests extends Middleware
                 fn (): ?string => SessionEpoch::current($request),
             ),
         ];
+    }
+
+    /**
+     * 通知の一時メッセージ (キー集合は FlashNotificationRelay::NOTIFICATION_KEYS から導出)。
+     *
+     * @return array<string, mixed>
+     */
+    private function notificationFlashProps(Request $request): array
+    {
+        $flash = [];
+        foreach (FlashNotificationRelay::NOTIFICATION_KEYS as $key) {
+            $flash[$key] = $request->session()->get($key);
+        }
+
+        return $flash;
     }
 
     /**

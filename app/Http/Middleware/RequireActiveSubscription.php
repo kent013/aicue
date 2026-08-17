@@ -9,6 +9,7 @@ use App\Models\Organization;
 use App\Models\User;
 use App\Services\Billing\BillingAccess;
 use App\Services\Onboarding\OnboardingReturnResolver;
+use App\Support\Http\FlashNotificationRelay;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -99,9 +100,10 @@ final class RequireActiveSubscription
             $this->returnResolver->rememberForOrganization($organization, '/'.ltrim($request->path(), '/'));
         }
 
-        // 直前 hop で積まれた flash (例: 招待受諾の success) が、この gate-redirect の
-        // 1 hop で消費され失われないよう延命する。
-        $request->session()->reflash();
+        // 直前 hop で積まれた通知 (例: 招待受諾の success) が、この gate-redirect の
+        // 1 hop で消費され失われないよう延命する。**通知だけ**を延命する (reflash() にしない):
+        // API キー平文のような 1 度きり表示の内部状態まで持ち越さないため。
+        FlashNotificationRelay::relayTo($request->session());
 
         // 遮断理由は着地ページが持つ (middleware は error flash を積まない)。
         return redirect()->route(
