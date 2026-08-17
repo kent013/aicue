@@ -13,6 +13,10 @@ bug-hunt の全体像・運用は `.claude/skills/app-bug-hunt/SKILL.md` を参�
 | `validate_findings.py` | findings.jsonl を検証し success/kill KPI を出力（stdlib のみ、jsonschema 不要） |
 | `test_validate_findings.py` | validator のテスト（`python3 -m unittest`） |
 | `example.findings.jsonl` | デモ用サンプル（app S1..S8） |
+| `adjudications.jsonl` | 裁定登録（機械照合の正本）。各行の任意項目 `context` に経緯を書く |
+| `render_spec_ledger.py` | 申し送り `../spec-ledger.md` の生成器（stdlib のみ） |
+| `spec-ledger-migration.json` | 手書き時代の申し送りが痩せずに移ったことの検査（移行台帳） |
+| `test_spec_ledger.py` | 生成器と移行台帳の契約テスト（`python3 -m unittest`） |
 
 ## 正本の分離（重複させない）
 - `report.md` … 人間向け本文・再現手順・証跡の正本。
@@ -182,8 +186,59 @@ AI-CUE でも同じ状態で、2026-08-02 の監査時に旧 A-008 が `bad cond
    python3 validate_findings.py ledger/example.findings.jsonl --adjudications ledger/adjudications.jsonl
    python3 -m unittest discover -s ledger -p 'test_*.py'
    ```
-6. 人間可読の申し送り（「過去 run で SPEC / DOC と確定した事象を再起票しない」）は
-   機械 registry の対として `.claude/skills/app-bug-hunt/spec-ledger.md` に書く。
+6. 人間可読の申し送りは**別ファイルに手書きしない**。経緯は同じ行の `context` に書く
+   （`title` / `spec_basis` / `narrative` / 任意の `reopen_condition`。
+   キーはこの 4 つで閉じており、未知キーは生成器が拒否する）。書いたら再生成する:
+
+   ```bash
+   python3 .claude/skills/app-bug-hunt/ledger/render_spec_ledger.py
+   ```
+
+   `context` が無い登録も、**正常に再生成すれば**「経緯は未記入」として必ず載る
+   （掲載の完全性契約）。ただし**再生成を忘れた状態は CI では検出されない**ので、
+   登録を足したら必ず上のコマンドを走らせること。
+
+### 申し送りの生成物化
+
+`.claude/skills/app-bug-hunt/spec-ledger.md` は **生成物**である（手で編集しない）。
+
+1. **入力は 3 つに分かれる** — 登録一覧の入力は `adjudications.jsonl`、経緯本文の入力は
+   その行の `context`、移行検査の入力は `spec-ledger-migration.json` である。
+2. **検証責務の二層分離**:
+
+   | | 検証するもの | 失敗したときに起きること |
+   |---|---|---|
+   | `validate_findings.py`（照合器） | 抑制判断に要る機械項目 | registry 全体が無効 = 抑制が止まる（既存の挙動） |
+   | `render_spec_ledger.py`（生成器） | `context` の形・移行台帳・断片・掲載の完全性 | 生成物を 1 バイトも書かずに落ちる |
+
+   > **境界の正確な位置**: 照合器から隔離されているのは
+   > 「**JSON として妥当なまま `context` の形だけが壊れている**」場合である。
+   > **JSONL の構文そのものを壊した場合は従来どおり `json parse error` になり、
+   > registry 全体が fail-closed で無効になる**（経緯の欄も同じ 1 行に載っているため）。
+   > 構文エラーまで隔離したければ経緯を別ファイルへ分けるしかないが、本設計はその形を採らない。
+
+3. **有効性の扱い**: 「再起票しない」は `active` の登録にだけ効く。
+   `superseded` は履歴であり、照合器の annotate も `active` だけを見る。
+4. **append-only の適用範囲**: 抑制判断に関わる機械項目は append-only + supersede、
+   `context` は Git 履歴下で追記・訂正できる（照合に一切関与しないため）。
+   機械項目の黙った書き換えは、移行台帳の `provenance.machine_projection_sha256` の pin と
+   `test_spec_ledger.py` の `EXPECTED_MACHINE_PROJECTION_SHA256` の**三点一致**が検出する。
+5. **検証コマンドと、その保証の限界**:
+
+   ```bash
+   python3 .claude/skills/app-bug-hunt/ledger/render_spec_ledger.py --check
+   python3 -m unittest discover -s .claude/skills/app-bug-hunt/ledger -p 'test_*.py'
+   ```
+
+   > **これらは CI では走らない。** `.github/workflows/ci.yml` が起動する bug-hunt 関連の検査は
+   > 目録のドリフト検査（`scripts/bug-hunt-inventory-check.sh`）だけで、`ledger/` と `coverage/` の
+   > Python レーンはどの job からも実行されていない。したがって生成物のドリフトは
+   > **人が上のコマンドを走らせたときにだけ**見つかる。
+
+6. **移行台帳の役割と保証しないもの**: 移行元は消えているので再照合はできない。
+   見られるのは「移行時に決めた断片と下限文字数が以後も保たれること」だけである。
+   台帳自身を弱める変更は `test_spec_ledger.py` の `EXPECTED_MIGRATION` と
+   `EXPECTED_MACHINE_PROJECTION_SHA256` が赤にする（**意図した二重管理**である）。
 
 ### 運用ガード (d) spirux 由来 18 件 (A-001〜A-018) を削除した理由
 
