@@ -33,6 +33,7 @@
 | T218 | PHP 列挙 ⇔ TypeScript 値域の汎用同期 gate (型情報による抽出への置き換え / AG-099 前半) | test | 列挙値の同期検査を型情報抽出のvitest gateへ移行 | Medium | standalone | [設計](devnotes/20260817-1748-enum-ts-generic-sync-gate/) | 2026-08-18 03:25 |
 | T219 | 静的検査 (gate) と走査器の共通規約を AGENTS.md へ成文化する (正典 static-scanner-substrate v1 / 裁定 AG-154 (2) の解消) | docs | AGENTS.mdへ走査器共通規約5条を追記 | Medium | standalone | [設計](devnotes/20260818-0303-scanner-common-conventions/) | 2026-08-18 03:29 |
 | T220 | bug-hunt 網羅監査文書と「コード到達の対象外」宣言の新設 (家系の裁定 2026-08-05 の条件解消) | test | 対象外宣言(JSON)と監査文書を新設 | Medium | standalone | [設計](devnotes/20260818-0243-bughunt-coverage-audit-doc/) | 2026-08-18 03:32 |
+| T221 | デザイントークン検査を正典 t1 へ追従 (tokens.test.ts / design-system-docs.test.ts 新設) | test | 正典t1のトークン検査2本を新設 | Medium | standalone | [設計](devnotes/20260818-0248-design-token-t1-tests/) | 2026-08-18 03:35 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
