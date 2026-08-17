@@ -5,7 +5,9 @@ declare(strict_types=1);
 use App\Enums\SecurityEventType;
 use App\Models\SecurityAuditEvent;
 use App\Models\User;
+use App\Support\EmailHash;
 use Illuminate\Auth\Events\PasswordReset;
+use Illuminate\Support\Facades\DB;
 use Laravel\Fortify\Events\TwoFactorAuthenticationConfirmed;
 use Laravel\Fortify\Events\TwoFactorAuthenticationDisabled;
 use Laravel\Socialite\Contracts\Provider;
@@ -50,7 +52,7 @@ test('ログイン失敗が login_failed として記録される', function ():
     )->toBeTrue();
 });
 
-test('メールアドレス変更が email_changed として記録される', function (): void {
+test('メールアドレス変更が email_changed として記録され metadata に鍵つきハッシュ 2 値が残る', function (): void {
     $user = User::factory()->create(['email' => 'before@example.com']);
 
     $this->actingAs($user)
@@ -64,12 +66,51 @@ test('メールアドレス変更が email_changed として記録される', fu
     expect($user->fresh()?->email)->toBe('after@example.com');
     expect(auditTrailCount(SecurityEventType::EmailChanged))->toBe(1);
 
-    // 平文 email を監査行に落とさない (PII は CipherSweet 管理の users 側に閉じる)
+    // 家系の裁定 AG-195: 変更前後のアドレスの鍵つきハッシュ 2 値を残す
+    // (生アドレスと鍵なしの変換値は載せない)。キー名は家系で共通。
     $event = SecurityAuditEvent::query()
         ->where('event_type', 'email_changed')
         ->firstOrFail();
     expect($event->user_id)->toBe($user->id)
-        ->and($event->metadata)->toBeNull();
+        ->and($event->metadata)->toBe([
+            'old_email_hash' => EmailHash::compute('before@example.com'),
+            'new_email_hash' => EmailHash::compute('after@example.com'),
+        ]);
+});
+
+test('email_changed の監査 metadata は鍵つきハッシュだけで生アドレスを含まない', function (): void {
+    $user = User::factory()->create(['email' => 'before@example.com']);
+
+    $this->actingAs($user)
+        ->withSession(freshRecentAuthSession())
+        ->put('/user/profile-information', [
+            'name' => '変更後の名前',
+            'email' => 'after@example.com',
+        ])
+        ->assertSessionHasNoErrors();
+
+    // モデルの cast を通した配列ではなく、**DB に保存された JSON 文字列**を見る
+    // (cast 越しでは「保存された文字列に平文が混ざっていないこと」を言えないため)。
+    $raw = DB::table('security_audit_events')
+        ->where('event_type', 'email_changed')
+        ->where('user_id', $user->id)
+        ->value('metadata');
+    expect($raw)->toBeString();
+    $json = (string) $raw;
+
+    // 局所部・ドメインのいずれも現れない。3 語とも hex (0-9a-f) 以外の文字を含むため、
+    // 64 桁のハッシュ値に偶然含まれることはない ('o' / 't' / 'x' が hex ではない)。
+    expect($json)->not->toContain('before')
+        ->and($json)->not->toContain('after')
+        ->and($json)->not->toContain('example.com');
+
+    /** @var array<string, mixed> $decoded */
+    $decoded = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+    // 2 値が互いに異なることは**検査しない**。変更判定が正規化を挟まないため、
+    // 大文字小文字だけが違う変更では 2 値が一致し得る (観測専用なので一致に意味を持たせない)。
+    expect(array_keys($decoded))->toBe(['old_email_hash', 'new_email_hash']);
+    expect($decoded['old_email_hash'])->toMatch('/^[0-9a-f]{64}$/')
+        ->and($decoded['new_email_hash'])->toMatch('/^[0-9a-f]{64}$/');
 });
 
 test('ソーシャルアカウント連携が social_account_linked として記録される', function (): void {
