@@ -21,6 +21,7 @@
     import AppLayout from "@/components/templates/AppLayout.svelte";
     import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
+    import { MANUAL_SEARCH_PLACEHOLDER } from "@/lib/manual/search";
     import type { SharedProps } from "@/lib/shared-props";
     import type {
         CategoryOption,
@@ -461,6 +462,7 @@
                             id="manual-filter-q"
                             type="search"
                             bind:value={filterQ}
+                            placeholder={MANUAL_SEARCH_PLACEHOLDER}
                             testId="manual-filter-q"
                         />
                     </div>

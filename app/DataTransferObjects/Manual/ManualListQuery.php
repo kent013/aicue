@@ -6,6 +6,7 @@ namespace App\DataTransferObjects\Manual;
 
 use App\Enums\Manual\ManualProgress;
 use App\Enums\Manual\ManualSortOption;
+use App\Services\Manual\ManualKeywordSearch;
 use Illuminate\Http\Request;
 
 /**
@@ -21,10 +22,12 @@ use Illuminate\Http\Request;
  *   **旧 `?status=` (制作状態 5 値) は受け付けない**。値域が変わった時点で意味を保てないため、
  *   互換の受理経路を残さない (思考原則 3)。旧 URL は未知キーとして無視され「すべて」になる
  *   (allowlist 外は絞り込み無し = より広く当たる方向へ倒す、という本 VO の既定方針と一致)
- * - `keyword`: 前後の空白を除いた検索語。**先頭 MAX_KEYWORD_LENGTH 文字だけを使う (truncate)**。
- *   破棄 (= 絞り込み無し) にしないのは「全件が出る」驚きの方向へ倒れるためで、
- *   切り詰めは「より広く当たる」方向にしか倒れない。title の validation が max:200 なので、
- *   201 文字目以降が一致に寄与することは無い
+ * - `keyword`: 検索語。正規化 (前後の空白を除く / 先頭 ManualKeywordSearch::MAX_LENGTH 文字)
+ *   の正本は ManualKeywordSearch::normalize であり、撮影 PWA 一覧も同じ関数を通る。
+ *   空白のみ・空文字は null (= 絞り込み無し)。**上限は負荷制御のためであり、
+ *   超えた分は検索に寄与しない** (打った語と違う条件で検索されることになる)。
+ *   かつて書かれていた「title の max:200 なので 201 文字目以降は寄与しない」という根拠は
+ *   カット本文 (narration / subtitle_secondary は max:2000) を対象に含めた時点で成立しない
  * - `sort`: ManualSortOption の allowlist のみ (ユーザー入力をカラム名に渡さない)
  * - `mine`: 自分の作成分のみ
  * - `page`: 1 以上 maxPage() 以下。数字以外は 1、上限超過は maxPage()
@@ -32,8 +35,8 @@ use Illuminate\Http\Request;
  */
 final readonly class ManualListQuery
 {
-    /** 検索語の最大長 (StoreVideoManualRequest の title max:200 と一致させる) */
-    public const int MAX_KEYWORD_LENGTH = 200;
+    // 検索語の最大長は ManualKeywordSearch::MAX_LENGTH へ移した。
+    // 「検索語とは何か」の定義を 1 箇所に持たせるため (撮影 PWA も同じ定義を使う)。
 
     /** 1 ページあたり件数 (現行踏襲)。**一覧の perPage はここだけが正本** */
     public const int PER_PAGE = 10;
@@ -80,10 +83,10 @@ final readonly class ManualListQuery
         $progressRaw = $request->query('progress');
         $progress = is_string($progressRaw) ? ManualProgress::tryFrom($progressRaw) : null;
 
-        $keyword = $request->query('q');
-        $keyword = is_string($keyword) && trim($keyword) !== ''
-            ? mb_substr(trim($keyword), 0, self::MAX_KEYWORD_LENGTH)
-            : null;
+        $rawKeyword = $request->query('q');
+        // 正規化 (trim + 先頭 MAX_LENGTH 文字) の正本は ManualKeywordSearch。
+        // 撮影 PWA 一覧と**同じ関数**を通す (面ごとに検索語の定義が違う状態を作らない)
+        $keyword = ManualKeywordSearch::normalize(is_string($rawKeyword) ? $rawKeyword : null);
 
         $sortRaw = $request->query('sort');
         // allowlist 外は null (= 既定順)。ユーザー入力をカラム名に渡さない

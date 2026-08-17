@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Enums\Manual\VideoManualStatus;
 use App\Enums\ProjectRole;
 use App\Models\Category;
+use App\Models\Cut;
 use App\Models\Project;
 use App\Models\RenderJob;
 use App\Models\VideoManual;
@@ -537,4 +538,212 @@ test('category は正規形へ畳まれる (0003 → 3。フィルタ select の
     // 桁溢れする数字列は該当なしへ倒れる (全件が出る方向へは倒さない)
     $this->actingAs($owner)->get("/projects/{$project->id}?category=99999999999999999999999")
         ->assertInertia(fn (Assert $page) => $page->has('manuals.data', 0));
+});
+
+/*
+ * T202: 一覧検索の対象範囲がカット本文 (scene / narration / subtitle_primary /
+ * subtitle_secondary) に広がったこと。述語の正本は ManualKeywordSearch で、
+ * 撮影 PWA 一覧と**同じ関数**を通る。
+ */
+
+test('q は narration に部分一致する (title に語が無くても hit する)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+
+    $target = VideoManual::factory()->forProject($project)->create(['title' => '第一工程']);
+    Cut::factory()->forManual($target)->create(['narration' => 'ここでトルクレンチを使います']);
+    $other = VideoManual::factory()->forProject($project)->create(['title' => '第二工程']);
+    Cut::factory()->forManual($other)->create(['narration' => '清掃して終了します']);
+
+    $this->actingAs($owner)->get("/projects/{$project->id}?q=".urlencode('トルクレンチ'))
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('manuals.data', 1)
+            ->where('manuals.data.0.id', $target->id));
+});
+
+test('q は scene / narration / subtitle_primary / subtitle_secondary のいずれに一致しても hit する', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+
+    // 4 列それぞれ「その列にしか語を持たない」manual を 1 本ずつ作る (列単位の取りこぼしを見る)
+    $columns = [
+        'scene' => 'ゴウセイ',
+        'narration' => 'ナレゴ',
+        'subtitle_primary' => 'ジマクイチ',
+        'subtitle_secondary' => 'ジマクニ',
+    ];
+    $ids = [];
+    foreach ($columns as $column => $word) {
+        $manual = VideoManual::factory()->forProject($project)->create(['title' => "{$column} の手順"]);
+        Cut::factory()->forManual($manual)->create([
+            // 他の 3 列に語が漏れないよう、対象列だけへ固有語を置く
+            'scene' => '既定のシーン',
+            'narration' => '既定のナレーション',
+            'subtitle_primary' => '既定の字幕',
+            'subtitle_secondary' => '既定の補助字幕',
+            $column => "作業で{$word}を使う",
+        ]);
+        $ids[$column] = $manual->id;
+    }
+
+    foreach ($columns as $column => $word) {
+        $this->actingAs($owner)->get("/projects/{$project->id}?q=".urlencode($word))
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('manuals.data', 1)
+                ->where('manuals.data.0.id', $ids[$column]));
+    }
+});
+
+test('q は shooting_point には一致しない (対象外列)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+
+    $manual = VideoManual::factory()->forProject($project)->create(['title' => '構図の手順']);
+    Cut::factory()->forManual($manual)->create([
+        'scene' => '既定のシーン',
+        'narration' => '既定のナレーション',
+        'subtitle_primary' => null,
+        'subtitle_secondary' => '既定の補助字幕',
+        'shooting_point' => '手元をヨリデトルコト',
+    ]);
+
+    $this->actingAs($owner)->get("/projects/{$project->id}?q=".urlencode('ヨリデトルコト'))
+        ->assertInertia(fn (Assert $page) => $page->has('manuals.data', 0));
+});
+
+test('q はカット本文にも title にも一致しない manual を除外する', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+
+    $manual = VideoManual::factory()->forProject($project)->create(['title' => '無関係の手順']);
+    Cut::factory()->forManual($manual)->create(['narration' => '無関係の本文']);
+
+    $this->actingAs($owner)->get("/projects/{$project->id}?q=".urlencode('存在しない語'))
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('manuals.data', 0)
+            ->where('manuals.meta.total', 0));
+});
+
+test('本文が複数カットに一致しても manual は 1 行だけ返る (join 化して行が重複していない)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+
+    $manual = VideoManual::factory()->forProject($project)->create(['title' => '同語が並ぶ手順']);
+    foreach (range(0, 2) as $sortOrder) {
+        Cut::factory()->forManual($manual)->withSortOrder($sortOrder)
+            ->create(['narration' => 'ここでカクニンゴを言う']);
+    }
+
+    $this->actingAs($owner)->get("/projects/{$project->id}?q=".urlencode('カクニンゴ'))
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('manuals.data', 1)
+            ->where('manuals.data.0.id', $manual->id)
+            ->where('manuals.meta.total', 1));
+});
+
+test('q はカット本文でも LIKE メタ文字 (%/_/\\) をリテラル扱いする', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+
+    $percent = VideoManual::factory()->forProject($project)->create(['title' => 'パーセント']);
+    Cut::factory()->forManual($percent)->create(['narration' => '洗浄 100% 完全版']);
+    $notPercent = VideoManual::factory()->forProject($project)->create(['title' => '数字']);
+    Cut::factory()->forManual($notPercent)->create(['narration' => '洗浄 1005 完全版']);
+
+    $underscore = VideoManual::factory()->forProject($project)->create(['title' => 'アンダースコア']);
+    Cut::factory()->forManual($underscore)->create(['narration' => '型番 A_B を使う']);
+    $notUnderscore = VideoManual::factory()->forProject($project)->create(['title' => '別型番']);
+    Cut::factory()->forManual($notUnderscore)->create(['narration' => '型番 AXB を使う']);
+
+    $backslash = VideoManual::factory()->forProject($project)->create(['title' => 'バックスラッシュ']);
+    Cut::factory()->forManual($backslash)->create(['narration' => '経路 C\\D を通る']);
+
+    // % がワイルドカード化していない (1005 は hit しない)
+    $this->actingAs($owner)->get("/projects/{$project->id}?q=".urlencode('100%'))
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('manuals.data', 1)
+            ->where('manuals.data.0.id', $percent->id));
+
+    // _ が任意 1 文字になっていない (AXB は hit しない)
+    $this->actingAs($owner)->get("/projects/{$project->id}?q=".urlencode('A_B'))
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('manuals.data', 1)
+            ->where('manuals.data.0.id', $underscore->id));
+
+    // エスケープ文字自身がリテラルとして通る
+    $this->actingAs($owner)->get("/projects/{$project->id}?q=".urlencode('C\\D'))
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('manuals.data', 1)
+            ->where('manuals.data.0.id', $backslash->id));
+});
+
+test('mine=1 / progress / category と q は AND で効く (カット本文一致でも)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $other = attachOrganizationMember($organization);
+    $project = Project::factory()->forOrganization($organization)->create();
+    $category = Category::factory()->forProject($project)->create();
+
+    // 自作 / 分類済み / published (= progress completed) かつ本文一致
+    $target = VideoManual::factory()->forProject($project)->forCategory($category)
+        ->createdBy($owner)->published(60_000)->create(['title' => '対象']);
+    Cut::factory()->forManual($target)->create(['narration' => 'ここでフクゴウゴを使う']);
+
+    // 他人作 (mine で外れる)
+    $byOther = VideoManual::factory()->forProject($project)->forCategory($category)
+        ->createdBy($other)->published(60_000)->create(['title' => '他人作']);
+    Cut::factory()->forManual($byOther)->create(['narration' => 'ここでフクゴウゴを使う']);
+
+    // 自作だが未分類 (category で外れる)
+    $uncategorized = VideoManual::factory()->forProject($project)
+        ->createdBy($owner)->published(60_000)->create(['title' => '未分類']);
+    Cut::factory()->forManual($uncategorized)->create(['narration' => 'ここでフクゴウゴを使う']);
+
+    // 自作・分類済みだが draft (progress で外れる)
+    $draft = VideoManual::factory()->forProject($project)->forCategory($category)
+        ->createdBy($owner)->create(['title' => '下書き', 'status' => VideoManualStatus::Draft->value]);
+    Cut::factory()->forManual($draft)->create(['narration' => 'ここでフクゴウゴを使う']);
+
+    $this->actingAs($owner)
+        ->get("/projects/{$project->id}?mine=1&category={$category->id}&progress=completed&q=".urlencode('フクゴウゴ'))
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('manuals.data', 1)
+            ->where('manuals.data.0.id', $target->id));
+});
+
+test('q は先頭 200 文字で切られる (カット本文でも)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+
+    $body = str_repeat('あ', 200);
+    $target = VideoManual::factory()->forProject($project)->create(['title' => '長文本文']);
+    Cut::factory()->forManual($target)->create(['narration' => $body.'ZZZ']);
+    VideoManual::factory()->forProject($project)->create(['title' => '別のマニュアル']);
+
+    // 203 文字を渡しても先頭 200 文字で検索されるため上記 narration に一致する
+    $this->actingAs($owner)->get("/projects/{$project->id}?q=".urlencode($body.'YYY'))
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('manuals.data', 1)
+            ->where('manuals.data.0.id', $target->id)
+            ->where('manualFilters.q', $body));
+});
+
+test('検索条件付きでも範囲外ページは丸められ meta が食い違わない', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $project = Project::factory()->forOrganization($organization)->create();
+
+    foreach (range(1, 11) as $index) {
+        $manual = VideoManual::factory()->forProject($project)->create(['title' => "手順 {$index}"]);
+        Cut::factory()->forManual($manual)->create(['narration' => 'すべてにマルメゴがある']);
+    }
+    // 一致しない manual (total に混ざらないこと)
+    VideoManual::factory()->forProject($project)->create(['title' => '無関係']);
+
+    // 丸めは (clone $baseQuery) を 2 回叩く。キーワードが片方にしか乗っていないと total が食い違う
+    $this->actingAs($owner)->get("/projects/{$project->id}?q=".urlencode('マルメゴ').'&page=999')
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('manuals.data', 1)
+            ->where('manuals.meta.current_page', 2)
+            ->where('manuals.meta.last_page', 2)
+            ->where('manuals.meta.total', 11));
 });

@@ -15,6 +15,7 @@ use App\Models\User;
 use App\Models\VideoManual;
 use App\Services\Capture\TakeObjectStorage;
 use App\Services\Capture\UploadTicketCodec;
+use App\Services\Manual\ManualKeywordSearch;
 use App\Services\Project\DefaultProjectResolver;
 use App\Support\Seo\SeoManager;
 use Illuminate\Contracts\Database\Eloquent\Builder;
@@ -58,7 +59,10 @@ class CaptureManualController extends Controller
         $userId = $user->id;
 
         $categoryId = $request->filled('category') ? (int) $request->string('category')->value() : null;
-        $search = $request->filled('q') ? $request->string('q')->value() : null;
+        // 検索語の正規化 (trim + 先頭 200 文字) の正本は ManualKeywordSearch。
+        // PC 一覧 (ManualListQuery 経由) と**同じ関数**を通す
+        $rawSearch = $request->query('q');
+        $search = ManualKeywordSearch::normalize(is_string($rawSearch) ? $rawSearch : null);
         $mine = $request->boolean('mine'); // "1"/"true" を bool 正規化
 
         // 代表サムネイルの可視性は **project 単位に 1 回**だけ決める (行ごとに評価しない)。
@@ -71,10 +75,13 @@ class CaptureManualController extends Controller
         $manuals = $project->manuals()
             ->whereIn('status', [VideoManualStatus::Ready, VideoManualStatus::Published])
             ->when($categoryId !== null, fn (Builder $query) => $query->where('category_id', $categoryId))
-            // LIKE メタ文字 (%/_/\) はリテラル検索として扱う (PC 一覧 manualRows と統一)
+            // title + カット本文 (scene / narration / subtitle_*) の部分一致。
+            // 述語の正本は ManualKeywordSearch (PC 一覧と同じ関数を通る)。
+            // **入れ子 group で括られる**ため、ready/published の母集団制限と
+            // category / mine の絞り込みは OR に押し出されない
             ->when($search !== null, function (Builder $query) use ($search): void {
                 Assert::string($search);
-                $query->where('title', 'like', '%'.addcslashes($search, '%_\\').'%');
+                ManualKeywordSearch::apply($query, $search);
             })
             // 自作フィルタ: 自ユーザー id のみ (payload 非受領 = tenant/actor キー不信)
             ->when($mine, fn (Builder $query) => $query->where('created_by', $userId))

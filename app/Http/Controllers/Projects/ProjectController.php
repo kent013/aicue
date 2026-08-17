@@ -17,6 +17,7 @@ use App\Models\Organization;
 use App\Models\Project;
 use App\Models\User;
 use App\Models\VideoManual;
+use App\Services\Manual\ManualKeywordSearch;
 use App\Services\Manual\ManualRowAbilities;
 use App\Services\Project\ProjectService;
 use App\Support\Seo\SeoManager;
@@ -183,8 +184,11 @@ class ProjectController extends Controller
             $baseQuery->whereIn('status', $listQuery->progress->statusValues());
         }
         if ($listQuery->keyword !== null) {
-            // LIKE メタ文字 (%/_/\) はリテラル検索として扱う
-            $baseQuery->where('title', 'like', '%'.addcslashes($listQuery->keyword, '%_\\').'%');
+            // title + カット本文 (scene / narration / subtitle_*) の部分一致。
+            // 述語の正本は ManualKeywordSearch (撮影 PWA 一覧と同じ関数を通る)。
+            // **入れ子 group で括られる**ため、上で積んだ mine / category / progress と
+            // relation の project_id 制約は OR に押し出されない
+            ManualKeywordSearch::apply($baseQuery, $listQuery->keyword);
         }
 
         $paginated = (clone $baseQuery)

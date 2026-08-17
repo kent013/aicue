@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
 import { router } from "@inertiajs/svelte";
 import Show from "@/pages/Projects/Show.svelte";
+import { MANUAL_SEARCH_PLACEHOLDER } from "@/lib/manual/search";
 import type { ManualFilters, ManualListItem, PaginationMeta } from "@/types/manual";
 
 const emptyMeta: PaginationMeta = { current_page: 1, last_page: 1, per_page: 10, total: 0 };
@@ -628,5 +629,18 @@ describe("Projects/Show メンバー追加の client error 自動解消 (T044)",
             expect(screen.queryByText("追加するメンバーを選択してください。")).toBeNull();
         });
         expect(screen.getByText(serverMsg)).toBeInTheDocument();
+    });
+});
+
+/*
+ * T202: 検索欄の説明文言は撮影 PWA 一覧と共有の定数を使う (両画面で同じ対象を説明する)。
+ */
+describe("Projects/Show 検索欄の文言", () => {
+    it("キーワード欄の placeholder は共有定数を使う", () => {
+        render(Show, { props: baseProps });
+
+        expect(screen.getByTestId("manual-filter-q").getAttribute("placeholder")).toBe(
+            MANUAL_SEARCH_PLACEHOLDER,
+        );
     });
 });

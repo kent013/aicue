@@ -258,3 +258,151 @@ test('has_thumbnail は「ready かつ生成済み」のときだけ true にな
     expect($takes[$pending->id]['has_thumbnail'])->toBeFalse();
     expect($takes[$notReady->id]['has_thumbnail'])->toBeFalse();
 });
+
+/*
+ * T202: 撮影 PWA 一覧の検索もカット本文 (scene / narration / subtitle_*) を対象にし、
+ * 検索語の正規化 (trim + 先頭 200 文字) が PC 一覧と**同じ関数**を通ること。
+ * 正規化は本改善で撮影 PWA に**新しく入る契約**である (従来は trim も上限も無かった)。
+ */
+
+/** 本文 (指定列) にだけ検索語を持つカットを 1 本ぶら下げた manual を作る */
+function captureManualWithBody(Project $project, string $column, string $word, string $status = 'ready'): VideoManual
+{
+    $manual = VideoManual::factory()->forProject($project)->create([
+        'title' => "{$column} の手順", 'status' => $status,
+    ]);
+    Cut::factory()->forManual($manual)->create([
+        'scene' => '既定のシーン',
+        'narration' => '既定のナレーション',
+        'subtitle_primary' => '既定の字幕',
+        'subtitle_secondary' => '既定の補助字幕',
+        $column => "作業で{$word}を使う",
+    ]);
+
+    return $manual;
+}
+
+test('index の q は narration に部分一致する (撮影 PWA でも本文で当たる)', function (): void {
+    [, $owner, $project] = browsingContext();
+    $target = captureManualWithBody($project, 'narration', 'トルクレンチ');
+    captureManualWithBody($project, 'narration', 'ホウキ');
+
+    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals?q=".urlencode('トルクレンチ'))
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('manuals', 1)
+            ->where('manuals.0.id', $target->id));
+});
+
+test('index の q は scene / narration / subtitle_primary / subtitle_secondary のいずれでも hit する', function (): void {
+    [, $owner, $project] = browsingContext();
+
+    $columns = [
+        'scene' => 'ゴウセイ',
+        'narration' => 'ナレゴ',
+        'subtitle_primary' => 'ジマクイチ',
+        'subtitle_secondary' => 'ジマクニ',
+    ];
+    $ids = [];
+    foreach ($columns as $column => $word) {
+        $ids[$column] = captureManualWithBody($project, $column, $word)->id;
+    }
+
+    foreach ($columns as $column => $word) {
+        $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals?q=".urlencode($word))
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('manuals', 1)
+                ->where('manuals.0.id', $ids[$column]));
+    }
+});
+
+test('index の q は shooting_point には一致しない (対象外列)', function (): void {
+    [, $owner, $project] = browsingContext();
+    $manual = VideoManual::factory()->forProject($project)->create([
+        'title' => '構図の手順', 'status' => 'ready',
+    ]);
+    Cut::factory()->forManual($manual)->create([
+        'scene' => '既定のシーン',
+        'narration' => '既定のナレーション',
+        'subtitle_primary' => null,
+        'subtitle_secondary' => '既定の補助字幕',
+        'shooting_point' => '手元をヨリデトルコト',
+    ]);
+
+    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals?q=".urlencode('ヨリデトルコト'))
+        ->assertInertia(fn (Assert $page) => $page->has('manuals', 0));
+});
+
+test('index の q は draft / analyzing を拾わない (ready/published の母集団が保たれる)', function (): void {
+    [, $owner, $project] = browsingContext();
+    $ready = captureManualWithBody($project, 'narration', 'ボゴタイ', 'ready');
+    captureManualWithBody($project, 'narration', 'ボゴタイ', 'draft');
+    captureManualWithBody($project, 'narration', 'ボゴタイ', 'analyzing');
+
+    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals?q=".urlencode('ボゴタイ'))
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('manuals', 1)
+            ->where('manuals.0.id', $ready->id));
+});
+
+test('index の q は mine=1 / category と AND で効く (カット本文一致でも)', function (): void {
+    [$organization, $owner, $project] = browsingContext();
+    $other = attachOrganizationMember($organization);
+    $category = Category::factory()->forProject($project)->create();
+
+    $target = VideoManual::factory()->forProject($project)->forCategory($category)
+        ->createdBy($owner)->create(['title' => '対象', 'status' => 'ready']);
+    Cut::factory()->forManual($target)->create(['narration' => 'ここでフクゴウゴを使う']);
+
+    // 他人作 (mine で外れる)
+    $byOther = VideoManual::factory()->forProject($project)->forCategory($category)
+        ->createdBy($other)->create(['title' => '他人作', 'status' => 'ready']);
+    Cut::factory()->forManual($byOther)->create(['narration' => 'ここでフクゴウゴを使う']);
+
+    // 自作だが未分類 (category で外れる)
+    $uncategorized = VideoManual::factory()->forProject($project)
+        ->createdBy($owner)->create(['title' => '未分類', 'status' => 'ready']);
+    Cut::factory()->forManual($uncategorized)->create(['narration' => 'ここでフクゴウゴを使う']);
+
+    $this->actingAs($owner)
+        ->get("/app/projects/{$project->id}/manuals?mine=1&category={$category->id}&q=".urlencode('フクゴウゴ'))
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('manuals', 1)
+            ->where('manuals.0.id', $target->id));
+});
+
+test('index の q は前後の空白を trim する (filters.q も trim 後を返す)', function (): void {
+    [, $owner, $project] = browsingContext();
+    $target = captureManualWithBody($project, 'narration', 'ネジシメ');
+
+    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals?q=".urlencode('  ネジシメ  '))
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('manuals', 1)
+            ->where('manuals.0.id', $target->id)
+            ->where('filters.q', 'ネジシメ'));
+});
+
+test('index の q が空白のみなら絞り込まない (filters.q は null)', function (): void {
+    [, $owner, $project] = browsingContext();
+    captureManualWithBody($project, 'narration', 'ネジシメ');
+    captureManualWithBody($project, 'narration', 'ホウキ');
+
+    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals?q=".urlencode('   '))
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('manuals', 2)
+            ->where('filters.q', null));
+});
+
+test('index の q は先頭 200 文字 (文字数) で切られ filters.q も切り詰め後を返す', function (): void {
+    [, $owner, $project] = browsingContext();
+    $body = str_repeat('あ', 200);
+    $manual = VideoManual::factory()->forProject($project)->create([
+        'title' => '長文本文', 'status' => 'ready',
+    ]);
+    Cut::factory()->forManual($manual)->create(['narration' => $body.'ZZZ']);
+
+    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals?q=".urlencode($body.'YYY'))
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('manuals', 1)
+            ->where('manuals.0.id', $manual->id)
+            ->where('filters.q', fn (mixed $q): bool => is_string($q) && mb_strlen($q) === 200 && $q === $body));
+});

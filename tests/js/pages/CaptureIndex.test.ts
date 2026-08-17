@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/svelte";
 import { router } from "@inertiajs/svelte";
 import CaptureIndex from "@/pages/Capture/Index.svelte";
+import { MANUAL_SEARCH_PLACEHOLDER } from "@/lib/manual/search";
 import type { CaptureManualSummary } from "@/types/capture";
 
 /*
@@ -133,5 +134,16 @@ describe("Capture/Index 自作フィルタ・作成者表示", () => {
         render(CaptureIndex, { props: baseProps });
 
         expect(screen.getByTestId("capture-cover-1").dataset.state).toBe("placeholder");
+    });
+    /*
+     * T202: 検索欄の説明文言は PC 一覧と共有の定数 (MANUAL_SEARCH_PLACEHOLDER) を使う。
+     * 文字列リテラルを写さず定数と比較するので、片方の画面だけ文言を直したら赤くなる。
+     */
+    it("検索欄の placeholder は共有定数を使う", () => {
+        render(CaptureIndex, { props: baseProps });
+
+        expect(screen.getByTestId("capture-search").getAttribute("placeholder")).toBe(
+            MANUAL_SEARCH_PLACEHOLDER,
+        );
     });
 });

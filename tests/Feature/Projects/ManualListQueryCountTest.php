@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Models\Cut;
 use App\Models\Project;
 use App\Models\RenderJob;
 use App\Models\VideoManual;
@@ -50,6 +51,55 @@ test('一覧のクエリ数は行数に比例しない (1 行のページと 10 
     expect(count($tenQueries))->toBe(
         count($singleQueries),
         '一覧のクエリ数が行数に比例しました (1 行: '.count($singleQueries).' 件 / 10 行: '
+        .count($tenQueries)." 件)。\n10 行ページの SQL:\n".implode("\n", $tenQueries)
+    );
+});
+
+/*
+ * T202: カット本文検索 (相関 EXISTS) を足してもクエリ数が行数に比例しないこと。
+ * orWhereHas は同一 SQL 内の副問い合わせなので、行ごとの追加クエリを生まない。
+ * ここが赤くなるのは「本文検索が行ごとの lazy load に落ちた」ときである。
+ */
+test('検索ありでも一覧のクエリ数は行数に比例しない', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+
+    /** 全行が本文で一致する project を作る */
+    $seed = function (Project $project, int $rows): void {
+        foreach (range(1, $rows) as $i) {
+            $manual = VideoManual::factory()->forProject($project)->published(60_000)->create();
+            RenderJob::factory()->forManual($manual)->succeeded("renders/q{$i}.mp4")->create();
+            Cut::factory()->forManual($manual)->create(['narration' => 'すべてにケンサクゴがある']);
+        }
+    };
+
+    $singleRowProject = Project::factory()->forOrganization($organization)->create();
+    $seed($singleRowProject, 1);
+
+    $tenRowsProject = Project::factory()->forOrganization($organization)->create();
+    $seed($tenRowsProject, 10);
+
+    /** @return list<string> 実行された SQL */
+    $measure = function (Project $project) use ($owner): array {
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+        $this->actingAs($owner)
+            ->get("/projects/{$project->id}?q=".urlencode('ケンサクゴ'))
+            ->assertOk();
+        $log = DB::getQueryLog();
+        DB::disableQueryLog();
+
+        return array_map(fn (array $entry): string => (string) $entry['query'], $log);
+    };
+
+    $measure($singleRowProject); // 暖機
+
+    $singleQueries = $measure($singleRowProject);
+    $tenQueries = $measure($tenRowsProject);
+
+    expect($singleQueries)->not->toBeEmpty();
+    expect(count($tenQueries))->toBe(
+        count($singleQueries),
+        '検索付き一覧のクエリ数が行数に比例しました (1 行: '.count($singleQueries).' 件 / 10 行: '
         .count($tenQueries)." 件)。\n10 行ページの SQL:\n".implode("\n", $tenQueries)
     );
 });
