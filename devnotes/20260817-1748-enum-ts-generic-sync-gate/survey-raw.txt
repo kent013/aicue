@@ -1,0 +1,52 @@
+php string-backed enums: 112
+ts pure literal value-sets: 48
+
+=== TS 値集合 -> 一致する PHP enum ===
+resources/js/components/atoms/Alert.svelte::AlertType = ['danger', 'info', 'success', 'warning']  -> NO EXACT PHP MATCH
+resources/js/components/atoms/Badge.types.ts::BadgeSize = ['md', 'sm']  -> NO EXACT PHP MATCH
+resources/js/components/atoms/Badge.types.ts::BadgeTone = ['danger', 'neutral', 'primary', 'success', 'tertiary', 'warning']  -> NO EXACT PHP MATCH
+resources/js/components/atoms/Button.types.ts::ButtonSize = ['lg', 'md', 'sm']  -> NO EXACT PHP MATCH
+resources/js/components/atoms/Button.types.ts::ButtonVariant = ['danger', 'danger-ghost', 'danger-outline', 'ghost', 'neutral', 'primary', 'success', 'tertiary']  -> NO EXACT PHP MATCH
+resources/js/components/organisms/ConfirmDialog.types.ts::ConfirmVariant = ['danger', 'primary']  -> NO EXACT PHP MATCH
+resources/js/components/organisms/Modal.types.ts::ModalSize = ['lg', 'md', 'sm']  -> NO EXACT PHP MATCH
+resources/js/lib/bfcache-guard.ts::SessionProbeOutcome = ['authenticated', 'failed', 'stale', 'unauthenticated']  -> NO EXACT PHP MATCH
+resources/js/lib/bfcache-guard.ts::SyncEpochDecision = ['must-reload', 'undecided']  -> NO EXACT PHP MATCH
+resources/js/lib/capture/camera.ts::FacingMode = ['environment', 'user']  -> NO EXACT PHP MATCH
+resources/js/lib/capture/landscape-capture.ts::LayoutMode = ['fullscreen', 'inline']  -> NO EXACT PHP MATCH
+resources/js/lib/capture/landscape-capture.ts::SwipeOutcome = ['next', 'none', 'previous']  -> NO EXACT PHP MATCH
+resources/js/lib/capture/scenario-preview.ts::ClipState = ['blocked', 'failed', 'loading', 'paused', 'placeholder', 'playing']  -> NO EXACT PHP MATCH
+resources/js/lib/debug/bfcache-trial.ts::OverallVerdict = ['expectation-mismatch', 'fail', 'pass', 'undetermined']  -> NO EXACT PHP MATCH
+resources/js/lib/debug/bfcache-trial.ts::TrialPhase = ['aborted', 'awaiting-manual-confirmation', 'collecting-axis1', 'collecting-axis2', 'complete', 'invalid']  -> NO EXACT PHP MATCH
+resources/js/lib/debug/bfcache-trial.ts::TrialScenario = ['active-session', 'expired-session']  -> NO EXACT PHP MATCH
+resources/js/lib/debug/bfcache-trial.ts::TrialVerdict = ['incomplete', 'inconsistent', 'invalid-not-bfcache', 'invalid-wrong-route', 'valid-bfcache']  -> NO EXACT PHP MATCH
+resources/js/lib/shared-props.ts::OrganizationRoleValue = ['organization_admin', 'organization_member', 'organization_owner']  -> ['OrganizationRole']
+resources/js/lib/stores/flash-to-toast.ts::FLASH_KEYS (const array) = ['error', 'info', 'success', 'warning']  -> NO EXACT PHP MATCH
+resources/js/lib/stores/toast.ts::ToastType = ['error', 'info', 'success', 'warning']  -> NO EXACT PHP MATCH
+resources/js/types/Auth.ts::PlanCode = ['business', 'enterprise', 'personal', 'standard', 'starter']  -> ['PlanCode']
+resources/js/types/account.ts::AccountDeletionBlockerAction = ['open_billing', 'switch_organization_then_open_billing', 'transfer_ownership']  -> ['AccountDeletionBlockerAction']
+resources/js/types/admin.ts::ConsoleRole = ['admin', 'editor', 'shooter']  -> ['AdminConsoleRole']
+resources/js/types/billing.ts::BillingFeedbackKind = ['checkout_retry_required', 'portal_returned', 'purchase_already_received', 'purchase_processing', 'purchase_received']  -> ['BillingFeedbackKind']
+resources/js/types/billing.ts::BillingStateValue = ['active_free_plan', 'expired_checkout', 'no_subscription', 'pending_checkout', 'subscribed']  -> ['OnboardingBillingState']
+resources/js/types/billing.ts::PurchaseFormStateValue = ['normal', 'resume']  -> ['PurchaseFormState']
+resources/js/types/capture.ts::CaptureProgress = ['captured', 'capturing', 'not_captured']  -> NO EXACT PHP MATCH
+resources/js/types/capture.ts::MaterialType = ['still', 'video']  -> ['MaterialType']
+resources/js/types/capture.ts::TakeStatus = ['failed', 'processing', 'ready', 'uploading']  -> ['TakeStatus']
+resources/js/types/dashboard.ts::DashboardJobStatus = ['queued', 'running']  -> NO EXACT PHP MATCH
+resources/js/types/dashboard.ts::DashboardRole = ['editor', 'shooter', 'viewer']  -> ['DashboardRole']
+resources/js/types/dashboard.ts::DashboardState = ['no_organization', 'no_project', 'ready']  -> ['DashboardState']
+resources/js/types/manual.ts::AnalysisConflictType = ['in_flight', 'status_not_analyzable']  -> ['AnalysisConflictType']
+resources/js/types/manual.ts::AnalysisJobStatus = ['failed', 'queued', 'running', 'succeeded']  -> ['JobStatus']
+resources/js/types/manual.ts::AnalysisStep = ['decompose', 'extract', 'generate']  -> ['AnalysisStep']
+resources/js/types/manual.ts::CutMaterialType = ['still', 'video']  -> ['MaterialType']
+resources/js/types/manual.ts::ManualProgress = ['completed', 'in_progress', 'not_started']  -> ['ManualProgress']
+resources/js/types/manual.ts::ManualSortOption = ['title_asc', 'title_desc', 'updated_asc', 'updated_desc']  -> ['ManualSortOption']
+resources/js/types/manual.ts::RenderConflictType = ['in_flight', 'org_preview_limit', 'status_not_previewable', 'status_not_renderable']  -> ['RenderConflictType']
+resources/js/types/manual.ts::RenderErrorCode = ['internal', 'scenario_version_changed', 'timeout']  -> ['RenderErrorCode']
+resources/js/types/manual.ts::RenderKind = ['preview', 'render']  -> ['RenderKind']
+resources/js/types/manual.ts::RenderStep = ['compose', 'concat']  -> ['RenderStep']
+resources/js/types/manual.ts::ScenarioConflictType = ['analyzing', 'rendering', 'version_mismatch']  -> ['ScenarioConflictType']
+resources/js/types/manual.ts::ScenarioRuleCode = ['narration_directive', 'narration_missing', 'narration_not_polite', 'subtitle_primary_sentence', 'subtitle_secondary_missing']  -> ['ScenarioRuleCode']
+resources/js/types/manual.ts::ScenarioVerdict = ['invalid', 'needs_review', 'valid']  -> ['ScenarioVerdict']
+resources/js/types/manual.ts::SelectableTakeStatus = ['failed', 'processing', 'ready', 'uploading']  -> ['TakeStatus']
+resources/js/types/manual.ts::VideoManualStatus = ['analyzing', 'draft', 'published', 'ready', 'rendering']  -> ['VideoManualStatus']
+resources/js/types/notification.ts::NotificationType = ['account_deletion_requested', 'invitation_received', 'manual_analyzed', 'manual_rendered', 'ticket_balance_low']  -> ['NotificationType']
