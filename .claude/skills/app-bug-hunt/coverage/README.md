@@ -6,15 +6,30 @@ bug-hunt の探索が「**どの操作 (route) を叩き、どのコード行に
 **絶対 % は副**（`*_pct` に添えるだけ・目標にしない＝gaming 防止）。
 「機能カバレッジ%」「品質保証%」という表現は出力にもこの README にも書かない。
 
-> 静的棚卸しの `coverage-audit.md`（route/operation の机上対応表）とは役割が違う。
+> 静的棚卸しの `coverage-audit.md` とは役割が違う。あちらが扱うのは
+> **コード到達で対象外と判断する面・その理由・代替検証**（実装から導けない人の判断）で、
+> 面の一覧そのものは `coverage/out-of-scope.json` が正本である。
 > こちらは **run 突合の動的 proxy**（実際に走った run の結果と機構分母を突き合わせる）。
-> audit = 静的棚卸し / `coverage/` = run 突合の動的 proxy、と区別すること。
+> 3 者の責務分担はこう分かれている:
+>
+> | 文書 / 道具 | 扱うもの | 単位 |
+> |---|---|---|
+> | `coverage-audit.md` + `coverage/out-of-scope.json` | コード到達で対象外と判断する面の理由と代替検証 | `app/` 配下のパス |
+> | `inventory/annotations.toml` | 探索の分母から外す操作・画面 | route 名 |
+> | `correlate.py` / `merge_pcov.py` | 走行ごとの突合結果 | run |
 
 ## 正直な前提（最重要・読み飛ばさない）
 
-- **pcov は本環境未導入**。コード到達カバレッジ (merge_pcov.py) は pcov 非依存の純ロジック
+- **拡張の有無と収集の有効化は別の話である**。開発コンテナ（`docker/Dockerfile`）では pcov を
+  使える。bug-hunt は **serve の起動時にだけ**収集を有効にする（`scripts/bug-hunt-shard.sh` が
+  `PHP_INI_SCAN_DIR` と `BUGHUNT_PCOV` を serve の起動行へ渡す）。
+  一方で**本リポジトリには、CI または本番でコード到達の収集を有効にする構成が存在しない**
+  （CI の workflow に pcov の導入記述は無く、デプロイ定義そのものが無い）。
+  リポジトリの外にある本番構成がどうなっているかは**分からない**。
+  したがって**拡張の有無に関わらず、設定 (`config('bughunt.pcov.enabled')`) と
+  関数の存在 (`function_exists('\pcov\start')`) の二重 guard は引き続き必要**である。
+- コード到達カバレッジ (merge_pcov.py) は pcov 非依存の純ロジック
   (入力は C3 middleware 出力形の JSON) であり、テストは fixture の shard を union して検証する。
-  pcov を入れたら C3/C4/C5 の end-to-end を実機で検証してから運用する。
 - **graph の TESTED_BY は TypeScript 専用**。`/workspace/.code-review-graph/graph.db` 実測
   (2026-06-20): **TESTED_BY=15787 全て TS、PHP(.php::)=0**。
   → PHP web route の TESTED_BY は **「false」ではなく `unknown_graph_gap`**（unknown）として扱う。
@@ -179,7 +194,8 @@ markdown 本文（`coverage-operation-reach.md` 想定）の節構成:
 ## コード到達カバレッジ（code-reach / pcov / merge_pcov.py、`--coverage` 時限定）
 
 実装到達カバレッジを行レベルで採る。**既定 OFF**。`--coverage` フラグ到達時のみ使う。
-**pcov 未導入のため本環境では実 coverage が出ない** → merge は fixture で検証する純ロジック。
+merge は pcov 非依存の純ロジックなので、単体では fixture の shard で検証する
+（二重 guard を満たさない環境では middleware が完全 no-op になり、入力そのものが出ない）。
 
 ### 収集 → merge の流れ（pcov 導入時）
 

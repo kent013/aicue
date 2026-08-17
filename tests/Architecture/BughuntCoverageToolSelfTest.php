@@ -8,10 +8,12 @@ use Symfony\Component\Process\Process;
  * Architecture invariant: bug-hunt のカバレッジ道具 (Python) の自己テストを
  * `composer test` の下で実走させる。
  *
- * 対象は 3 モジュール:
+ * 対象は 4 モジュール:
  *   - test_correlate      … 照合器の fail-closed 契約 (主入力が揃わない走行を成功にしない)
  *   - test_build_executed … 実行済み route の記録の集約器 (同上)
  *   - test_naming_no_stale … 旧 fail-open 文言・旧語彙の再混入検知
+ *   - test_out_of_scope   … コード到達で未到達でよい面の宣言の契約
+ *                            (理由と代替検証の実在・承認済み範囲との一致)
  *
  * ここに結線しないと「不変条件はテストへの登録まで含めて実装済み」を満たさない
  * (禁止事項 1)。禁止語が戻っても、照合器が fail-open へ戻っても、緑のままになるため。
@@ -49,10 +51,12 @@ test('python3 が PATH にあること (環境不備を skip で隠さない)', 
     );
 });
 
-test('カバレッジ道具の Python 自己テスト 3 本が composer test の下で通ること', function (): void {
+test('カバレッジ道具の Python 自己テスト 4 本が composer test の下で通ること', function (): void {
     expect(is_dir(bctCoverageDir()))->toBeTrue('coverage ディレクトリが見つからない: '.bctCoverageDir());
 
-    [$code, $out] = bctRunUnittest(['test_correlate', 'test_build_executed', 'test_naming_no_stale']);
+    [$code, $out] = bctRunUnittest([
+        'test_correlate', 'test_build_executed', 'test_naming_no_stale', 'test_out_of_scope',
+    ]);
 
     expect($code)->toBe(0, "bug-hunt カバレッジ道具の自己テストが失敗しました:\n".$out);
 });
