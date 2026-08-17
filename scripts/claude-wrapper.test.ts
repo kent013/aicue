@@ -257,7 +257,7 @@ describe("scripts/claude の引数の組み立て", () => {
         expect(recordedInvocation(optedOut).args).toEqual(["--dangerously-skip-permissions", "--print"]);
     });
 
-    it("W6: 状態表示行が無ければ --settings は付かない (本リポジトリの実態)", () => {
+    it("W6: 状態表示行が無ければ --settings は付かない (不在の環境の負のコントロール)", () => {
         const scratch = scratchWithExtension();
 
         expect(runWrapper(scratch, ["--print"]).status).toBe(0);
