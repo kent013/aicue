@@ -478,7 +478,8 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
    新しい書き込み経路は inventory 登録が必須。**ただし allowlist はファイル粒度**であり、
    同一ファイル内のメソッド追加は検出しない (メソッド単位の fail-first は behavioral テストが担う)。
    テイク採用 API は検出 4 (`adopted_take_id` の deny-by-default 走査) で inventory 準拠済み。
-   詳細は `docs/architecture.md` §シナリオ整合の共有不変条件
+   詳細は `docs/architecture.md` §シナリオ整合の共有不変条件。
+   **NULL 自体が初期状態を表す列 (DB 既定値を持たない列) は本規約の母集団外**で、規約 17 の担当である
 2. **容量 Quota (max_storage_bytes) の予約規約**: presigned アップロードの容量判定は
    `Billing/QuotaService::checkAddition` + `Capture/StorageUsageService::occupiedBytes`
    (bytes_used + bytes_pending) 経由のみ。予約 (`take_upload_reservations`) の状態遷移は
@@ -488,7 +489,8 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
    `save()` 直後の in-memory instance の属性欠落の両方を防ぐ。ドメイン規約 1 (ii) と同じ理由)。
    **これは状態遷移ではないので上の CAS 規約とは独立である**。
    migration の `default('pending')` は既存行と Factory 以外の INSERT 経路のために残す。
-   運用契約 (media queue worker / 孤児掃除 cron) は `docs/architecture.md` §撮影 PWA
+   運用契約 (media queue worker / 孤児掃除 cron) は `docs/architecture.md` §撮影 PWA。
+   **NULL 自体が初期状態を表す列 (DB 既定値を持たない列) は本規約の母集団外**で、規約 17 の担当である
 3. **サポート対象ブラウザと履歴復元の扱い**: 「どのブラウザで何をどこまで保証しているか」の
    正本は **`docs/supported-browsers.md`**。**Inertia が描画する認証済み画面**が
    ログアウト後に復元される経路は 3 本あり、**3 枚セット**で守る
@@ -793,3 +795,19 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
       同 gate が字句で固定する。
     - 保証しないもの (発行との隙間 / API キーの読み取りが残ること / 静的検査の限界) は
       `docs/architecture.md` §組織アクセスの失効 が正本。運用向けの説明は `docs/mcp-oauth.md`
+17. **NULL が初期状態を表す列の分類 (aicue:T212 / 家系の正典 v2、裁定 AG-191)**:
+    実スキーマの **nullable かつ DB 既定値を持たない**列のうち、**時刻型の列**と
+    **BackedEnum へ cast された列**は、`tests/Support/InitialState/NullableStateColumnRegistry.php`
+    へ区分と 30 文字以上の根拠を 1 行足す (deny-by-default。
+    `NullInitialStateColumnClassificationTest` が実スキーマと両方向で突き合わせる)。
+    区分は 3 つで、判定は**「その行が生まれた時点で、この列は必ず NULL か」の 1 問**で決まる。
+    決められないなら「未確定」に載せる (隠さない。件数と列名を検査が pin する)。
+    - **登録済みの列に migration で DB 既定値を後付けすると赤くなる**。その列が母集団の条件
+      (`default === null`) から外れて「実在しない登録」になるためで、**CHECK 制約は使わない**
+      (制約を義務化しないという正典 i7 と衝突させない)
+    - **DB 既定値を持つ状態列は 規約 1 (ii) / 規約 2 の担当**であり本目録の母集団外である
+      (同じ事実を 2 か所で検査しない)。v1 の資産
+      (`ScenarioWritePathInventoryTest` / `VideoManualService` / `TakeUploadService`) は変えない
+    - **保証しないものの正本は検査の docblock** であり、本書と `docs/architecture.md` には
+      写さない (2 か所に書くと必ず食い違う)。運用の説明は
+      `docs/architecture.md` §NULL が初期状態を表す列の分類
