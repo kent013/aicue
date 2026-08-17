@@ -161,7 +161,7 @@ test('availableTrueBalance は per-source clamp 後の合算で常に 0 以上',
  *
  * **現行の AI-CUE では構造的に到達不能**: D28 により全 tier の monthly_ticket_grant は 0
  * (PlanSeederPriceInvariantTest が pin) で、有限期限の monthly は org 生涯 1 回の signup grant のみ。
- * BughuntBillingSeeder の 100 枚は無期限 (expires_at IS NULL) で nearestMonthlyExpiry の対象外。
+ * BughuntStripeSyncSeeder の 100 枚は無期限 (expires_at IS NULL) で nearestMonthlyExpiry の対象外。
  * よって「生きた有限期限 monthly が 2 本」は Filament PlanResource で monthly_ticket_grant を
  * 戻したときにだけ成立する。
  *

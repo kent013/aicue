@@ -11,7 +11,7 @@ use App\Models\ApiKey;
 use App\Models\Organization;
 use App\Models\Project;
 use App\Models\User;
-use App\Providers\FakeExternalsServiceProvider;
+use App\Providers\BughuntFakesServiceProvider;
 use App\Services\AI\Testing\CannedPromptFakeRegistrar;
 use App\Services\Billing\PersonalPlanService;
 use App\Services\Organization\OrganizationProvisioningService;
@@ -338,7 +338,7 @@ function enableFakeStorage(): void
 {
     config()->set(ExternalFakeDeclaration::STORAGE_FLAG, true);
 
-    $provider = new FakeExternalsServiceProvider(app());
+    $provider = new BughuntFakesServiceProvider(app());
     $provider->register();
     $provider->boot();
     // provider の register()/boot() は本来 bootstrap 時に走り、フレームワークが route 読込後に
@@ -366,5 +366,5 @@ function enableFakeExternals(): void
 {
     config()->set(ExternalFakeDeclaration::EXTERNALS_FLAG, true);
 
-    (new FakeExternalsServiceProvider(app()))->register();
+    (new BughuntFakesServiceProvider(app()))->register();
 }

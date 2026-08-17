@@ -10,7 +10,7 @@ use Illuminate\Contracts\Foundation\Application;
 /**
  * 偽の保存先の有効化条件の単一正本 (fail-secure 二軸)。
  *
- * 経路登録 (FakeExternalsServiceProvider) と署名付き経路の action guard の双方が
+ * 経路登録 (BughuntFakesServiceProvider) と署名付き経路の action guard の双方が
  * 本メソッドを参照する (登録条件より実行時条件が弱いと経路キャッシュ残存で素通りするため
  * 完全一致させる)。
  *

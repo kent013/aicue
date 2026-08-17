@@ -11,7 +11,7 @@ use Laravel\Socialite\Contracts\Provider;
  * SSO (Socialite) driver 解決点の fake。
  *
  * bug-hunt / 自動テストレーンのブラウザが SSO ボタンから**実 IdP へ出ないようにする**ための
- * 差し替え先。配線条件は `FakeExternalsServiceProvider::registerSocialAuthFake()`
+ * 差し替え先。配線条件は `BughuntFakesServiceProvider::registerSocialAuthFake()`
  * (`config('testing.fake_externals') === true` ∧ env ∈ {testing, bughunt.local})。
  */
 final class FakeSocialiteDriverResolver extends SocialiteDriverResolver

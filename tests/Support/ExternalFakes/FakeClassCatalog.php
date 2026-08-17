@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Support\ExternalFakes;
 
-use App\Providers\FakeExternalsServiceProvider;
+use App\Providers\BughuntFakesServiceProvider;
 use App\Support\FakeStorageGate;
 use FilesystemIterator;
 use InvalidArgumentException;
@@ -49,14 +49,22 @@ final class FakeClassCatalog
     }
 
     /**
-     * 定義 2 のうち定義 1 に属さなくてよい例外 (fake の実体ではなく配線基盤)。
+     * 「fake の実体ではない配線基盤」の目録。用途は 2 つある。
+     *
+     * 1. 定義 2 (Fake 命名) に当たるが定義 1 (Fakes/ • Testing/ 配下) に属さなくてよい**配置の例外**
+     * 2. **参照走査 (FakeClassReferenceInvariantTest 4-3) の候補**に必ず含める集合
+     *
+     * ★BughuntFakesServiceProvider は家系の名前へ改名した結果、名前の規則 (定義 2) では
+     *   拾えなくなった。それでも本目録に残すのは用途 2 のためである — ここから落とすと、
+     *   業務コードが唯一の配線点を直接参照しても検出できず**偽グリーン**になる
+     *   (4-3 の docblock が名指しで警告している事故)。この包含は 4-3 の明示 assertion が固定する。
      *
      * @return array<class-string, string> class => 理由
      */
     public static function placementExceptions(): array
     {
         return [
-            FakeExternalsServiceProvider::class => 'fake の実装ではなく唯一の配線 provider。Providers/ 配下にある必然性がある。',
+            BughuntFakesServiceProvider::class => 'fake の実装ではなく唯一の配線 provider。Providers/ 配下にある必然性がある。',
             FakeStorageGate::class => 'fake の実装ではなく gate predicate (有効化条件の SSOT)。provider と action guard の双方が参照する。',
         ];
     }
@@ -108,7 +116,7 @@ final class FakeClassCatalog
      * 走査根は 4 つ: app/ • routes/ • config/ • bootstrap/。
      * 対象は `.php` 拡張子のファイルのみ。
      *
-     * @return list<string> 例: 'app/Providers/FakeExternalsServiceProvider.php', 'routes/web.php'
+     * @return list<string> 例: 'app/Providers/BughuntFakesServiceProvider.php', 'routes/web.php'
      */
     public static function scanFiles(): array
     {

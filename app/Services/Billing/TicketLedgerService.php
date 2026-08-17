@@ -402,7 +402,7 @@ class TicketLedgerService
 
             $consumeSource = $availableMonthly >= $amount ? TicketSource::Monthly : TicketSource::Purchased;
             // monthly は最短の生きた月次期限を境界にする。AI-CUE には無期限 monthly grant
-            // (BughuntBillingSeeder / monthly_ticket_grant を戻した場合の invoice.paid) が実在するため
+            // (BughuntStripeSyncSeeder / monthly_ticket_grant を戻した場合の invoice.paid) が実在するため
             // null を許容する (null = 無期限 monthly からの消費 = 失効しない hold)
             $consumeExpiresAt = $consumeSource === TicketSource::Monthly
                 ? $this->nearestMonthlyExpiry($organization, $now)
@@ -819,7 +819,7 @@ class TicketLedgerService
      *
      * **現行は構造的に到達不能**: D28 で全 tier の monthly_ticket_grant = 0
      * (PlanSeederPriceInvariantTest が pin) のため、有限期限の monthly は org 生涯 1 回の
-     * signup grant のみ。BughuntBillingSeeder の 100 枚は無期限で本メソッドの対象外。
+     * signup grant のみ。BughuntStripeSyncSeeder の 100 枚は無期限で本メソッドの対象外。
      * **Filament PlanResource で monthly_ticket_grant を 1 以上へ戻すと窓が開く** ので、
      * その際は本メソッドの契約から見直すこと。挙動は TicketBalanceAccountingTest の
      * 「[既知窓]」2 本が機械的に固定している。

@@ -8,7 +8,7 @@ use App\Services\AI\Testing\CannedPromptFakeRegistrar;
 use App\Support\FakeStorageGate;
 
 /**
- * FakeExternalsServiceProvider の container 呼び出し形と、本番コードのクラス参照を
+ * BughuntFakesServiceProvider の container 呼び出し形と、本番コードのクラス参照を
  * token ベースで抽出する純粋 helper (I/O を持たない。引数は PHP ソース文字列)。
  *
  * ★設計判断

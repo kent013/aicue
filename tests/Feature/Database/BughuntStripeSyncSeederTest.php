@@ -6,11 +6,11 @@ use App\Models\Billing\Subscription;
 use App\Models\Organization;
 use App\Services\Billing\BillingAccess;
 use App\Services\Billing\TicketLedgerService;
-use Database\Seeders\BughuntBillingSeeder;
+use Database\Seeders\BughuntStripeSyncSeeder;
 use Illuminate\Support\Facades\DB;
 
 /*
- * BughuntBillingSeeder: bug-hunt env 専用の課金 fixture (有料プラン組織のみ
+ * BughuntStripeSyncSeeder: bug-hunt env 専用の課金 fixture (有料プラン組織のみ
  * active subscription + 初期チケット 100。free 組織は未契約のまま温存)。
  * 三重 fail-secure (fake_externals / bughunt.local / bug_hunt DB 名) を固定する。
  *
@@ -44,7 +44,7 @@ test('guard 不成立 (既定の testing env / 非 bughunt DB 名) では no-op'
     [$organization] = createOrganizationWithOwner('標準組織');
     $organization->forceFill(['plan_code' => 'standard'])->save();
 
-    $this->seed(BughuntBillingSeeder::class);
+    $this->seed(BughuntStripeSyncSeeder::class);
 
     expect(Subscription::query()->count())->toBe(0);
     expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(0);
@@ -55,7 +55,7 @@ test('fake_externals=true でも env=testing のままなら no-op (flag 単独�
     $organization->forceFill(['plan_code' => 'standard'])->save();
 
     config(['testing.fake_externals' => true]);
-    $this->seed(BughuntBillingSeeder::class);
+    $this->seed(BughuntStripeSyncSeeder::class);
 
     expect(Subscription::query()->count())->toBe(0);
     expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(0);
@@ -68,9 +68,9 @@ test('guard 成立時: standard 組織のみ active sub + チケット 100 を�
     $freeOrg->forceFill(['plan_code' => 'free'])->save();
 
     runWithBughuntGuardSatisfied(function (): void {
-        $this->seed(BughuntBillingSeeder::class);
+        $this->seed(BughuntStripeSyncSeeder::class);
         // 冪等: 再実行しても subscription 1 行・残高 100 のまま増えない
-        $this->seed(BughuntBillingSeeder::class);
+        $this->seed(BughuntStripeSyncSeeder::class);
     });
 
     $standardOrg = Organization::query()->findOrFail($standardOrg->id);
@@ -93,7 +93,7 @@ test('既存 subscription が past_due でも再実行で active に回復する
     createFakeSubscription($organization, 'past_due');
 
     runWithBughuntGuardSatisfied(function (): void {
-        $this->seed(BughuntBillingSeeder::class);
+        $this->seed(BughuntStripeSyncSeeder::class);
     });
 
     $organization = Organization::query()->findOrFail($organization->id);

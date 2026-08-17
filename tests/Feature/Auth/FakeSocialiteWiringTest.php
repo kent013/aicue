@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 use App\Models\SocialAccount;
 use App\Models\User;
-use App\Providers\FakeExternalsServiceProvider;
+use App\Providers\BughuntFakesServiceProvider;
 use App\Services\Auth\Fakes\FakeSocialiteProvider;
 use App\Services\Auth\SocialiteDriverResolver;
 use Illuminate\Testing\TestResponse;
@@ -30,7 +30,7 @@ use Laravel\Socialite\Contracts\Provider;
  */
 $enableSsoFake = function (): void {
     config(['testing.fake_externals' => true]);
-    (new FakeExternalsServiceProvider(app()))->register();
+    (new BughuntFakesServiceProvider(app()))->register();
 };
 
 /** リダイレクト先 URL の host 部を取り出す (Location ヘッダ不在は null) */
@@ -176,7 +176,7 @@ test('fake は local 環境では配線されない (実 IdP 連携の確認手�
         $this->app['env'] = 'local';
         config(['testing.fake_externals' => true]);
 
-        (new FakeExternalsServiceProvider($this->app))->register();
+        (new BughuntFakesServiceProvider($this->app))->register();
 
         // ★厳密一致 (fake は real のサブクラスなので instanceof では対照が無意味になる)
         expect(app(SocialiteDriverResolver::class)::class)->toBe(SocialiteDriverResolver::class);

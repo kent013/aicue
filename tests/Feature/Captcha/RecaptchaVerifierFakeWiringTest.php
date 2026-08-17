@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use App\Providers\FakeExternalsServiceProvider;
+use App\Providers\BughuntFakesServiceProvider;
 use App\Services\Captcha\RecaptchaVerifier;
 use App\Services\Captcha\Testing\RecaptchaVerifierTestFake;
 use App\Support\ExternalFakes\ExternalFakeDeclaration;
@@ -41,7 +41,7 @@ test('fake 配線時は secret があっても Google siteverify を叩かずに
         $this->app['env'] = 'bughunt.local';
         config([$flag => true, 'services.recaptcha.secret_key' => 'dummy-secret']);
 
-        (new FakeExternalsServiceProvider($this->app))->register();
+        (new BughuntFakesServiceProvider($this->app))->register();
 
         $verifier = app(RecaptchaVerifier::class);
 

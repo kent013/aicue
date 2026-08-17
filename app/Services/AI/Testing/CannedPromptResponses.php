@@ -19,7 +19,7 @@ use Webmozart\Assert\Assert;
  * signature は各 YAML 固有の一意句 (DefensiveInstructions preamble は全 YAML 共通なので使わない)。
  *
  * 未一致 (0 件) / 曖昧 (2 件以上) はいずれも fail-fast で例外を投げ、silent false-positive を防ぐ。
- * Browser lane (tests/Pest.php) と bughunt 実行時 (FakeExternalsServiceProvider) の双方で共有される。
+ * Browser lane (tests/Pest.php) と bughunt 実行時 (BughuntFakesServiceProvider) の双方で共有される。
  */
 final class CannedPromptResponses
 {

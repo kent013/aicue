@@ -127,11 +127,11 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(TicketCheckoutGateway::class, CashierTicketCheckoutGateway::class);
 
         // サブスク Checkout / Customer Portal の Stripe 抽象。fake_externals 時は
-        // FakeExternalsServiceProvider が fake に rebind する (providers.php で後勝ち)
+        // BughuntFakesServiceProvider が fake に rebind する (providers.php で後勝ち)
         $this->app->bind(StripeGatewayInterface::class, CashierStripeGateway::class);
 
         // オートリチャージ (P8a) の Stripe 抽象 (setup Checkout / off-session invoice)。
-        // fake_externals 時は FakeExternalsServiceProvider が fake に rebind する
+        // fake_externals 時は BughuntFakesServiceProvider が fake に rebind する
         $this->app->bind(AutoRechargeGatewayInterface::class, CashierAutoRechargeGateway::class);
 
         // アプリ内通知 (T008): database channel を薄い拡張へ差し替え、AppNotification の

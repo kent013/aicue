@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Tests\Support\Bughunt;
 
 use Database\Seeders\AdminUserSeeder;
-use Database\Seeders\BughuntBillingSeeder;
 use Database\Seeders\BughuntOAuthSeeder;
+use Database\Seeders\BughuntStripeSyncSeeder;
 use Database\Seeders\DatabaseSeeder;
 use Database\Seeders\ManualTestSeeder;
 use Database\Seeders\PermissionSeeder;
@@ -47,10 +47,10 @@ final class BughuntSeedWiringInventory
     public static function entries(): array
     {
         return [
-            BughuntBillingSeeder::class => [
+            BughuntStripeSyncSeeder::class => [
                 'role' => BughuntSeedRole::BughuntOnly,
                 'reason' => '有料プラン組織へ購読とチケットを投入する。通常経路に載せると開発 DB へ課金状態が漏れる。',
-                'guardPremiseTest' => 'tests/Feature/Database/BughuntBillingSeederTest.php',
+                'guardPremiseTest' => 'tests/Feature/Database/BughuntStripeSyncSeederTest.php',
             ],
             BughuntOAuthSeeder::class => [
                 'role' => BughuntSeedRole::BughuntOnly,

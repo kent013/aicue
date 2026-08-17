@@ -28,11 +28,11 @@ use Kent013\SsrfPin\UrlSafetyInspector;
 /**
  * 「どの外部到達点を、どのフラグと許可環境で、どの偽の実装へ差し替えるか」の唯一の正本。
  *
- * ★本番の読み込み対象 (app/) に置く。差し替えの配線 (FakeExternalsServiceProvider)・
+ * ★本番の読み込み対象 (app/) に置く。差し替えの配線 (BughuntFakesServiceProvider)・
  *   storage の有効化条件 (FakeStorageGate)・bug-hunt の投入データ (seeder)・
  *   本番混入防止 (ProductionEnvGuard) が**すべてここだけを読む** (同じ集合を 2 か所に書かない)。
  * ★本クラスは値を返すだけで判定を持たない。有効・無効の判定は
- *   FakeExternalsServiceProvider (container 差し替え) と FakeStorageGate (storage) が行う。
+ *   BughuntFakesServiceProvider (container 差し替え) と FakeStorageGate (storage) が行う。
  *
  * 関連する目録との責務境界:
  * - 本番コードが偽の実装のクラス名を参照しないことの全走査は FakeClassReferenceInvariantTest

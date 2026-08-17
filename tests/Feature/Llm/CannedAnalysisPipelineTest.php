@@ -47,7 +47,7 @@ test('canned fake 配線下で AnalysisPipeline が succeeded し cuts (step+poi
     $job = AnalysisJob::factory()->forManual($manual)->forDocument($document)->create();
     app(TicketLedgerService::class)->grant($organization, 1, 'テスト残高');
 
-    // bughunt 実行時 (FakeExternalsServiceProvider::boot) と同一の install 経路。
+    // bughunt 実行時 (BughuntFakesServiceProvider::boot) と同一の install 経路。
     app(CannedPromptFakeRegistrar::class)->install();
     app(AnalysisPipeline::class)->run($job->id);
 

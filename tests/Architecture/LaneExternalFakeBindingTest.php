@@ -11,7 +11,7 @@ use Tests\Support\TrackedPhpSourceFiles;
  * (正典 v1 の「差し替え処理を 1 本に集約し、レーン側からの直呼びを静的に禁じる」)。
  *
  * 差し替えの入口は「宣言 (App\Support\ExternalFakes\ExternalFakeDeclaration) +
- * 配線 provider (FakeExternalsServiceProvider)」の 1 本だけである。レーン側で同じことを
+ * 配線 provider (BughuntFakesServiceProvider)」の 1 本だけである。レーン側で同じことを
  * 書けると、宣言に載っていない差し替えがテストの中だけで成立し、
  * 「宣言と実際の差し替えが一致している」という保証が意味を失う。
  *
