@@ -97,7 +97,7 @@ scripts/codex exec --ephemeral --sandbox read-only -m {model} \
 
 - `--ephemeral`: セッションファイルを永続化しない
 - `--sandbox read-only`: コマンド実行・ファイル書き込みを禁止（読み込みは許可）
-- `-m {model}`: モデルを指定（`gpt-5.5`）
+- `-m {model}`: モデルを指定（本スキルが指定する既定値は `gpt-5.6-sol`。用途別の割当は `app-codex-vscode` が正本）
 - `-c 'model_reasoning_effort="{reasoning}"'`: reasoning effortを指定（モデル互換性のため常に明示指定。詳細は `app-codex-vscode` 参照）
 - `-o {出力ファイル}`: 結果をファイルに保存
 
