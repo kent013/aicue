@@ -63,7 +63,8 @@ const BROWSER_PROVISIONING_PATTERN = '/\bplaywright\s+install\b/';
  * 行頭 (空白を除く) が `#` の行を落とし、**行継続を畳んでから**実行行を返す (純関数)。
  *
  * `/u` は必須: 非 UTF-8 モードの `\R` はバイト 0x85 (NEL) にも一致し、日本語コメントを
- * 文字途中で分断する (既存 ScriptsReadmeInventoryTest と同方針で、改行は明示列挙する)。
+ * 文字途中で分断する (`PcreUnicodeModifierGateTest` が全数を固定している。本ファイルは
+ * `\R` を使わず改行を明示列挙する)。
  *
  * 順序は「コメント除去 → 行継続の畳み込み」。逆にすると、継続行の途中にある `#` の扱いが
  * 変わって取りこぼす。
@@ -98,7 +99,7 @@ function browserProvisioningCodeLines(string $source): array
  * `scripts/` 配下の shell スクリプトを **再帰的に** 列挙する (純関数)。
  *
  * `glob('scripts/*.sh')` では `scripts/tools/install-browser.sh` を取りこぼす
- * (ScriptsReadmeInventoryTest::scriptsDirectoryFiles と同じ理由・同じ道具を使う)。
+ * (2 階層だけを見る実装は将来のサブディレクトリを黙って漏らすので、再帰列挙を使う)。
  *
  * @return list<string> 引数ディレクトリからの相対パス (昇順)
  */
