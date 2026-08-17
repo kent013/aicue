@@ -32,8 +32,9 @@ function bitsTestsDir(): string
  */
 function bitsRunUnittest(array $modules): array
 {
-    // PYTHONDONTWRITEBYTECODE: __pycache__ を作らせない (scripts/ 配下の台帳検査
-    // ScriptsReadmeInventoryTest の母集団を生成物で汚さないため)。
+    // PYTHONDONTWRITEBYTECODE: __pycache__ を作らせない (scripts/ 配下に git 管理外の
+    // 生成物を残さないため。scripts/README.md の台帳の突合は git 追跡下を数えるので
+    // 母集団には入らないが、実ディレクトリと目視の一覧を汚す)。
     $process = new Process(
         ['python3', '-m', 'unittest', ...$modules],
         bitsTestsDir(),

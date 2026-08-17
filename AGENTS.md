@@ -298,7 +298,9 @@ PHP の `echo` / `goto` / `global` の 3 文と、開始タグ付きの出力記
 - 実装は worktree(`.claude/worktrees/tasks/<id>`)で行い、テスト green + レビュー後に main へ
   (§worktree 運用ルール)
 - 一時スクリプトは devnotes へ、恒久スクリプトのみ `scripts/` へ
-  (昇格時は `scripts/README.md` の台帳に追記する)
+  (昇格時は `scripts/README.md` の台帳に追記する)。
+  **この整合を CI で落ちる検査にしない** (家系の裁定 AG-076b / その執行を命じた AG-192)。
+  突合は `app-update-docs` スキルの「2-1. scripts/ 台帳の整合確認」が人手で行う
 - 外部 skill (Stripe 公式) は `skills-lock.json` で管理する。
   `npx skills add docs.stripe.com` で `.claude/skills/` 配下に再導入できる(git 管理外)
 

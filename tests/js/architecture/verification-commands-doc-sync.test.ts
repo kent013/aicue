@@ -9,8 +9,7 @@
  * worktree は packages のビルド破壊をローカルで検出できず、CI で初めて赤くなる。
  *
  * 免除は「理由付き」でしか書けない (EXEMPT)。免除エントリが package.json から消えたら
- * 逆方向検査 (V3) が落ちる = stale 免除の残置を許さない
- * (tests/Architecture/ScriptsReadmeInventoryTest.php と同じ作法)。
+ * 逆方向検査 (V3) が落ちる = stale 免除の残置を許さない。
  *
  * 照合範囲は VERIFICATION_COMMANDS:BEGIN 〜 END の内側のみ。文書全体を検索すると
  * 別文脈で `pnpm build` に言及しただけで green になり形骸化する
