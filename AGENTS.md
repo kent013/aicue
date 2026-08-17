@@ -521,6 +521,17 @@ PHP の `echo` / `goto` / `global` の 3 文と、開始タグ付きの出力記
   **目録に見える形で**理由付きで宣言する。
   テンプレート正典との差 (機能カタログを生成しない / 注釈は TOML / 中間 JSON を持たない) は
   `docs/template-divergence.md` **D20**。`stories/` はテンプレートでは空スケルトンのままである。
+- **申し送りも生成物**: `spec-ledger.md` は手で書かない。経緯は
+  `ledger/adjudications.jsonl` の `context` (`title` / `spec_basis` / `narrative` /
+  任意の `reopen_condition`。未知キーは拒否) に書き、
+  `python3 .claude/skills/app-bug-hunt/ledger/render_spec_ledger.py` で再生成する。
+  **正常に再生成された出力**では、経緯を書いていない登録も「経緯は未記入」として
+  ちょうど 1 回載る。ただし**再生成忘れは CI では捕まらない**
+  (`--check` と `python3 -m unittest` を人が走らせたときにだけ分かる)。
+  `context` は**照合器 (`validate_findings.py`) が読まない** —
+  **JSON として妥当なまま形だけ壊した**場合は抑制機構は止まらず、止まるのは生成だけである。
+  **JSONL の構文を壊した場合は従来どおり registry 全体が fail-closed になる**。
+  「再起票しない」の案内は有効性が `active` の登録にだけ効く (`superseded` は履歴)。
 - **capability 語彙**: finding の `capability_tag` の正本は
   `.claude/skills/app-bug-hunt/capability-catalog.md`(SOP→シナリオ→撮影→レンダの責務境界を
   先に定義し、その上に capability_id を割り当てる。未割当は `unmapped`・tag 不能は `unknown`)。
