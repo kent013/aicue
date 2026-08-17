@@ -1,0 +1,11 @@
+--- a/tests/Support/Queue/JobDeferralScanner.php
++++ b/tests/Support/Queue/JobDeferralScanner.php
+@@ -539,6 +539,8 @@
+      */
+     private static function hasDirectDontRelease(array $tokens, int $newIndex, int $end): bool
+     {
++        return true;
++
+         // (a) 括弧なし形
+         if (self::isDontReleaseChainAt($tokens, $end + 1)) {
+             return true;

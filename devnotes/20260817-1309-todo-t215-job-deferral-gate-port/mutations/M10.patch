@@ -1,0 +1,11 @@
+--- a/tests/Support/Queue/DeferringThrowProbeJob.php
++++ b/tests/Support/Queue/DeferringThrowProbeJob.php
+@@ -27,7 +27,7 @@
+     /** 例外メッセージ。failed_jobs の理由がこの例外であることの判定に使う。 */
+     public const FAILURE_MARKER = 'deferral-probe-unhandled-exception';
+ 
+-    public int $maxExceptions = 3;
++    public int $maxExceptions = 99;
+ 
+     private const HORIZON_MINUTES = 30;
+ 

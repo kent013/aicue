@@ -1,0 +1,11 @@
+--- a/tests/Support/Queue/DeferringJobTemplate.php
++++ b/tests/Support/Queue/DeferringJobTemplate.php
+@@ -57,7 +57,7 @@
+      * 退避 (正常系) はこのカウンタを増やさないので、期限で有界化しつつ
+      * **本当の失敗は期限を待たずに止められる** (裁定の必須点 3)。
+      */
+-    public int $maxExceptions = 3;
++    public int $maxExceptions = 0;
+ 
+     /** 期限の地平線 (分)。自ドメインでは設定キーから読むこと (docblock 3.)。 */
+     private const HORIZON_MINUTES = 30;

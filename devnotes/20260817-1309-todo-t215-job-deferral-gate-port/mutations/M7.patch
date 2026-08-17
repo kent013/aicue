@@ -1,0 +1,10 @@
+--- a/tests/Support/Queue/JobDeferralContract.php
++++ b/tests/Support/Queue/JobDeferralContract.php
+@@ -36,7 +36,6 @@
+         'RateLimitedWithRedis',
+         'ThrottlesExceptions',
+         'ThrottlesExceptionsWithRedis',
+-        'WithoutOverlapping',
+     ];
+ 
+     /**
