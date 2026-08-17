@@ -15,6 +15,7 @@
     import PageContent from "@/components/templates/PageContent.svelte";
     import { takeUrl } from "@/lib/capture/take-endpoints";
     import { formatDate } from "@/lib/date-format";
+    import { MANUAL_SEARCH_PLACEHOLDER } from "@/lib/manual/search";
     import type { SharedProps } from "@/lib/shared-props";
     import type { CaptureManualSummary } from "@/types/capture";
     import {
@@ -98,7 +99,7 @@
                     <Input
                         type="search"
                         bind:value={search}
-                        placeholder="タイトルで検索"
+                        placeholder={MANUAL_SEARCH_PLACEHOLDER}
                         testId="capture-search"
                     />
                     <button type="submit" class="shrink-0 text-text-secondary" aria-label="検索">

@@ -140,3 +140,51 @@ test('代表を見られない利用者でもクエリ数は行数に比例し�
         measureCaptureIndexQueries($orgMember, $tenRowsProject),
     );
 });
+
+/*
+ * T202: カット本文検索 (相関 EXISTS) を足しても撮影一覧のクエリ数が行数に比例しないこと。
+ */
+
+/**
+ * 検索付き一覧 GET 1 回ぶんに実行された SQL。
+ *
+ * @return list<string>
+ */
+function measureCaptureIndexQueriesWithKeyword(User $actor, Project $project, string $keyword): array
+{
+    DB::enableQueryLog();
+    DB::flushQueryLog();
+    test()->actingAs($actor)
+        ->get("/app/projects/{$project->id}/manuals?q=".urlencode($keyword))
+        ->assertOk();
+    $log = DB::getQueryLog();
+    DB::disableQueryLog();
+
+    return array_map(static fn (array $entry): string => (string) $entry['query'], $log);
+}
+
+test('検索ありでも撮影一覧のクエリ数は行数に比例しない', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+
+    /** 代表サムネイルを持ち、本文が検索語に一致する manual を 1 本作る */
+    $seed = function (Project $project): void {
+        $manual = manualWithCover($project);
+        Cut::factory()->forManual($manual)->withSortOrder(1)
+            ->create(['narration' => 'すべてにケンサクゴがある']);
+    };
+
+    $singleRowProject = Project::factory()->forOrganization($organization)->create();
+    $seed($singleRowProject);
+
+    $tenRowsProject = Project::factory()->forOrganization($organization)->create();
+    foreach (range(1, 10) as $ignored) {
+        $seed($tenRowsProject);
+    }
+
+    measureCaptureIndexQueriesWithKeyword($owner, $singleRowProject, 'ケンサクゴ'); // 暖機
+
+    expectSameQueryCount(
+        measureCaptureIndexQueriesWithKeyword($owner, $singleRowProject, 'ケンサクゴ'),
+        measureCaptureIndexQueriesWithKeyword($owner, $tenRowsProject, 'ケンサクゴ'),
+    );
+});
