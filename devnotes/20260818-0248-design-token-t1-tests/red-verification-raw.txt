@@ -1,0 +1,153 @@
+====================================================================
+== R0 基準 (無変異。全緑であること)
+====================================================================
+ Test Files  4 passed (4)
+      Tests  130 passed (130)
+====================================================================
+== R1 app.css から @import './tokens.css' を消す
+====================================================================
+ ❯ tests/js/styles/tokens.test.ts (64 tests | 6 failed) 920ms
+     × アンカー --color-primary が DESIGN.md の値で現れる 3ms
+     × アンカー --color-text が DESIGN.md の値で現れる 0ms
+     × アンカー --color-surface が DESIGN.md の値で現れる 0ms
+     × アンカー --color-neutral が DESIGN.md の値で現れる 0ms
+     × 主 CTA の塗り (.bg-primary) が生成される 1ms
+     × 最初の 2 つの at-rule が tailwindcss → ./tokens.css の @import である 1ms
+ ❯ tests/js/styles/tokens.test.ts:529:76
+ ❯ tests/js/styles/tokens.test.ts:529:76
+ ❯ tests/js/styles/tokens.test.ts:529:76
+ ❯ tests/js/styles/tokens.test.ts:529:76
+ ❯ tests/js/styles/tokens.test.ts:536:35
+ ❯ tests/js/styles/tokens.test.ts:575:29
+ Test Files  1 failed | 3 passed (4)
+      Tests  6 failed | 124 passed (130)
+====================================================================
+== R2 tokens.css の @theme を :root にする
+====================================================================
+ ❯ tests/js/styles/tokens.test.ts (64 tests | 39 failed) 898ms
+     × DESIGN.md colors.primary の値が --color-primary に届く 3ms
+     × DESIGN.md colors.primary-hover の値が --color-primary-hover に届く 0ms
+     × DESIGN.md colors.tertiary の値が --color-tertiary に届く 0ms
+     × DESIGN.md colors.tertiary-hover の値が --color-tertiary-hover に届く 0ms
+     × DESIGN.md colors.neutral の値が --color-neutral に届く 0ms
+     × DESIGN.md colors.surface の値が --color-surface に届く 0ms
+     × DESIGN.md colors.border の値が --color-border に届く 0ms
+     × DESIGN.md colors.border-strong の値が --color-border-strong に届く 0ms
+     × DESIGN.md colors.text-primary の値が --color-text に届く 0ms
+     × DESIGN.md colors.text-secondary の値が --color-text-secondary に届く 0ms
+     × DESIGN.md colors.success の値が --color-success に届く 0ms
+     × DESIGN.md colors.warning の値が --color-warning に届く 0ms
+     × DESIGN.md colors.danger の値が --color-danger に届く 0ms
+     × 派生トークン --color-primary-soft は出現までを検査する (値は免除) 1ms
+     × DESIGN.md rounded.sm の値が対応する --radius-* に届く 1ms
+     × DESIGN.md rounded.md の値が対応する --radius-* に届く 0ms
+     × DESIGN.md rounded.lg の値が対応する --radius-* に届く 0ms
+     × ramp の font-family が 1 つに揃っており、--font-sans の**先頭 family**と一致する 1ms
+     × primary の bg / text / border が解決する 0ms
+     × primary-hover の bg / text / border が解決する 0ms
+     × tertiary の bg / text / border が解決する 0ms
+     × tertiary-hover の bg / text / border が解決する 0ms
+     × neutral の bg / text / border が解決する 0ms
+     × surface の bg / text / border が解決する 0ms
+     × border の bg / text / border が解決する 0ms
+     × border-strong の bg / text / border が解決する 0ms
+     × text の bg / text / border が解決する 0ms
+     × text-secondary の bg / text / border が解決する 0ms
+     × success の bg / text / border が解決する 0ms
+     × warning の bg / text / border が解決する 0ms
+     × danger の bg / text / border が解決する 0ms
+     × primary-soft の bg / text / border が解決する 0ms
+     × hover:bg-primary-hover が hover 時の背景色になる 0ms
+     × hover:bg-tertiary-hover が hover 時の背景色になる 0ms
+     × アンカー --color-primary が DESIGN.md の値で現れる 0ms
+     × アンカー --color-text が DESIGN.md の値で現れる 0ms
+     × アンカー --color-surface が DESIGN.md の値で現れる 0ms
+     × アンカー --color-neutral が DESIGN.md の値で現れる 2ms
+     × 主 CTA の塗り (.bg-primary) が生成される 0ms
+ ❯ tests/js/styles/tokens.test.ts:408:79
+ ❯ tests/js/styles/tokens.test.ts:408:79
+ ❯ tests/js/styles/tokens.test.ts:408:79
+ ❯ tests/js/styles/tokens.test.ts:408:79
+ ❯ tests/js/styles/tokens.test.ts:408:79
+ ❯ tests/js/styles/tokens.test.ts:408:79
+ ❯ tests/js/styles/tokens.test.ts:408:79
+ ❯ tests/js/styles/tokens.test.ts:408:79
+ ❯ tests/js/styles/tokens.test.ts:408:79
+ ❯ tests/js/styles/tokens.test.ts:408:79
+ ❯ tests/js/styles/tokens.test.ts:408:79
+ ❯ tests/js/styles/tokens.test.ts:408:79
+ ❯ tests/js/styles/tokens.test.ts:408:79
+ ❯ tests/js/styles/tokens.test.ts:417:76
+ ❯ tests/js/styles/tokens.test.ts:424:70
+ ❯ tests/js/styles/tokens.test.ts:424:70
+ ❯ tests/js/styles/tokens.test.ts:424:70
+ ❯ tests/js/styles/tokens.test.ts:436:45
+ ❯ tests/js/styles/tokens.test.ts:468:35
+ ❯ tests/js/styles/tokens.test.ts:468:35
+ ❯ tests/js/styles/tokens.test.ts:468:35
+ ❯ tests/js/styles/tokens.test.ts:468:35
+ ❯ tests/js/styles/tokens.test.ts:468:35
+ ❯ tests/js/styles/tokens.test.ts:468:35
+ ❯ tests/js/styles/tokens.test.ts:468:35
+ ❯ tests/js/styles/tokens.test.ts:468:35
+ ❯ tests/js/styles/tokens.test.ts:468:35
+ ❯ tests/js/styles/tokens.test.ts:468:35
+ ❯ tests/js/styles/tokens.test.ts:468:35
+ ❯ tests/js/styles/tokens.test.ts:468:35
+ ❯ tests/js/styles/tokens.test.ts:468:35
+ ❯ tests/js/styles/tokens.test.ts:468:35
+ ❯ tests/js/styles/tokens.test.ts:492:51
+ ❯ tests/js/styles/tokens.test.ts:492:51
+ ❯ tests/js/styles/tokens.test.ts:529:76
+ ❯ tests/js/styles/tokens.test.ts:529:76
+ ❯ tests/js/styles/tokens.test.ts:529:76
+ ❯ tests/js/styles/tokens.test.ts:529:76
+ ❯ tests/js/styles/tokens.test.ts:536:35
+ Test Files  1 failed | 3 passed (4)
+      Tests  39 failed | 91 passed (130)
+====================================================================
+== R3 tokens.css の @utility text-body を消す
+====================================================================
+ ❯ tests/js/styles/canonical-source-parity.test.ts (20 tests | 3 failed) 13ms
+     × text-body の size/weight/line-height が DESIGN.md と一致する 2ms
+     × ramp の font-weight は 400/500 のみ (DESIGN.md §Typography) 1ms
+     × tokens.css の @utility text-* と TYPOGRAPHY_RAMPS が集合一致する 2ms
+ ❯ tests/js/styles/tokens.test.ts (64 tests | 1 failed) 936ms
+     × text-body の宣言が DESIGN.md と過不足なく一致する 4ms
+ ❯ tests/js/styles/canonical-source-parity.test.ts:90:21
+ ❯ tests/js/styles/canonical-source-parity.test.ts:102:25
+ ❯ tests/js/styles/canonical-source-parity.test.ts:126:39
+ ❯ tests/js/styles/tokens.test.ts:445:23
+ Test Files  2 failed | 2 passed (4)
+      Tests  4 failed | 126 passed (130)
+====================================================================
+== R4 tokens.css の --color-danger の値を変える
+====================================================================
+ ❯ tests/js/styles/canonical-source-parity.test.ts (20 tests | 1 failed) 13ms
+     × DESIGN.md と tokens.css の色の値が一致する (value parity) 5ms
+ ❯ tests/js/styles/tokens.test.ts (64 tests | 2 failed) 1029ms
+     × DESIGN.md colors.danger の値が --color-danger に届く 4ms
+     × 生成された自前トークンの値はすべて DESIGN.md と一致する 2ms
+ ❯ tests/js/styles/canonical-source-parity.test.ts:55:64
+ ❯ tests/js/styles/tokens.test.ts:408:79
+ ❯ tests/js/styles/tokens.test.ts:547:52
+ Test Files  2 failed | 2 passed (4)
+      Tests  3 failed | 127 passed (130)
+====================================================================
+== R5 docs/design-system.md の '## file-scoped allowlist の運用' を改名する
+====================================================================
+ ❯ tests/js/styles/design-system-docs.test.ts (20 tests | 2 failed) 11ms
+     × ## file-scoped allowlist の運用 が存在し、本文を持つ 3ms
+     × ## file-scoped allowlist の運用 の本文が規範の最小断片を保っている 1ms
+ ❯ tests/js/styles/design-system-docs.test.ts:304:51
+ ❯ tests/js/styles/design-system-docs.test.ts:323:63
+ Test Files  1 failed | 3 passed (4)
+      Tests  2 failed | 128 passed (130)
+====================================================================
+== R6 tests/js/styles/ にダミーの .test.ts を置く
+====================================================================
+ ❯ tests/js/styles/design-system-docs.test.ts (20 tests | 1 failed) 11ms
+     × 責務境界表の 1 列目と実在する検査ファイルが集合一致する (双方向) 4ms
+ ❯ tests/js/styles/design-system-docs.test.ts:361:55
+ Test Files  1 failed | 4 passed (5)
+      Tests  1 failed | 130 passed (131)

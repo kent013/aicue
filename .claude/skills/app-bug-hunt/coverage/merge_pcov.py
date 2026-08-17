@@ -6,10 +6,10 @@ C3 middleware (BughuntCoverageMiddleware) が per-request で書き出す JSONL 
 **未カバー (uncovered) を主出力** とする。絶対 % (line_pct) は補助フィールドに
 添えるのみで目標にしない (gaming 防止 / 命名「コード到達カバレッジ」)。
 
-HONEST 注記: 本環境は pcov 未導入のため実 coverage は取得できない。
-本スクリプトは pcov 非依存の純ロジック (入力は C3 出力形の JSON) であり、
-テストは fixture の shard を union して検証する。app の shard は 0-4
-(直列 shard-0 :8010 / 並列 shard-1..4 :8011..8014)。
+HONEST 注記: 本スクリプトは pcov 非依存の純ロジック (入力は C3 出力形の JSON) であり、
+テストは fixture の shard を union して検証する。収集の有効化は serve 側の話で、
+二重 guard (設定 + 関数の存在) を満たさない環境では入力そのものが出ない。
+app の shard は 0-4 (直列 shard-0 :8010 / 並列 shard-1..4 :8011..8014)。
 
 依存は標準ライブラリのみ (json, argparse, glob, sys, pathlib, dataclasses)。
 

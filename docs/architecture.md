@@ -2829,7 +2829,7 @@ env も置かない** (切れる防御は防御ではない / 環境ごとに緩
 
 - **登録していない写しは 1 件も検査していない**。全数走査による既定拒否の分類と
   逆走査 2 規則は裁定 AG-099 の後半の担当で、本 gate には無い
-  (`docs/template-divergence.md` **D27**)。現在意図的に登録していないのは
+  (`docs/template-divergence.md` **D29**)。現在意図的に登録していないのは
   `types/manual.ts::SelectableTakeStatus` (部分集合の意図) /
   `types/dashboard.ts::DashboardJobStatus` (`JobStatus` の真部分集合) /
   `types/capture.ts::CaptureProgress` ほか画面側だけの語彙 (対応する PHP 列挙が無い) である。

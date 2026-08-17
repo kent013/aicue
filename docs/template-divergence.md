@@ -8,7 +8,7 @@
 `template-divergence-ledger` が 2026-08-15 に確定した形) に従う。形式は
 `tests/Architecture/TemplateDivergenceLedgerFormatTest.php` が機械で強制する。
 
-登録エントリ: 26 件
+登録エントリ: 28 件
 
 ## 記録の原則
 
@@ -1507,7 +1507,147 @@ bug-hunt の走行が実際の外部 ID 基盤へ遷移すると、探索が本�
 - 設計: `devnotes/20260815-1111-passkey-config-hardening/` /
   `devnotes/20260817-1309-todo-t216-passkey-hardening-completion/`
 
-## D27 PHP 列挙と TS 値域の同期を「登録した写しだけ」で守る (全数走査と逆走査は持たない)
+---
+
+## D27 コード到達の対象外の宣言を、route 名の接頭辞を持たないコード軸だけの形にする
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `.claude/skills/app-bug-hunt/coverage/out-of-scope.json` / `.claude/skills/app-bug-hunt/coverage/out_of_scope.py` / `.claude/skills/app-bug-hunt/coverage-audit.md` |
+| 業務要件起因の説明 | 探索の分母は route 単位の注釈が正本であり、コード到達の未到達は `app/` のパス単位でしか説明できないため、対象外の宣言を軸で 2 本に分ける |
+| 揃え続ける不変条件と保証機構 | 対象外は理由と代替検証と実在する参照を伴う。増減は承認済み範囲のスナップショットとの完全一致で必ずレビューに出る。`BughuntCoverageToolSelfTest` から `test_out_of_scope` が実走する |
+| 再判定の条件 | 家系の正典が route 名接頭辞を必須にしたとき / 注釈側へ代替検証の欄が入ったとき / 集計器が宣言を読む形になったとき |
+| 決めた日 | 2026-08-17 |
+| 決めた人 | 開発者 |
+| 根拠 | T220 |
+| 状態 | 恒久 |
+| 見直し期限 | — |
+
+家系の参照実装は対象外の宣言に **route 名の接頭辞**を持たせ、目録のドリフト検査をそこから
+導出している。本アプリは route 単位の判断を `inventory/annotations.toml` (区分 外) が持つため、
+宣言を**コード到達の軸だけ**に絞る。
+
+| 観点 | 家系の参照実装 | 本アプリ |
+|---|---|---|
+| 宣言が持つ軸 | route 名の接頭辞と `app/` のパスの両方 | `app/` のパスだけ |
+| 目録のドリフト検査の対象外 | 宣言から導出する | 注釈 TOML の区分 外 が正本 (D20) |
+| 代替検証の実在 | 散文で書く | `verification_refs` として機械が実在を見る |
+
+### なぜ正当な差分か (logic-driven)
+
+1. **route 単位の対象外は既に別の正本を持っている**。本アプリの目録は注釈 TOML から生成する形
+   (D20) で、区分 外 の行は 30 文字以上の理由付きで目録に見える。宣言にも route 名接頭辞を
+   置くと、同じ判断が 2 か所に載って必ず食い違う。
+2. **導出先が無い**。参照実装が接頭辞を持つのは、検査スクリプトが宣言から選択の正規表現を
+   導出するためである。本アプリの検査は生成器側で判定するので、導出する相手がいない。
+   使われない出力を作らない (思考原則 2)。
+3. **代替検証は実在を機械で見るほうが腐りにくい**。散文で「別のテストが見ている」と書くと、
+   その参照先が消えても気付けない。パスとして宣言すれば、少なくとも参照先が丸ごと消えたことは
+   検出できる。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「対象外は理由と代替検証と実在する参照を伴い、増減は必ずレビューに出る」
+
+| 不変条件 | 担い手 |
+|---|---|
+| 理由と代替検証が中身のある文であること (30 文字以上・無内容な値でない) | `test_out_of_scope` (必須キー / 型 / 文の中身) |
+| 代替検証が実在し、追跡下にあり、自己言及でないこと | 同上 (実在・追跡・循環参照) |
+| 対象パスが実在し、幹や包含や正規形の迂回で無制限に広がらないこと | 同上 (幹の禁止・antichain・層 1 の正規形) |
+| 対象外の静かな増減が起きないこと | 同上 (承認済み範囲のスナップショットとの完全一致) |
+| 宣言不正が fail-closed であること (標準出力を汚さない) | 同上 (CLI の終了コード契約を実プロセスで検査) |
+| これらが `composer test` から実走すること | `tests/Architecture/BughuntCoverageToolSelfTest.php` |
+
+### 保証しないもの
+
+- **集計器との自動照合は持たない**。`merge_pcov.py` は宣言を読まないので、
+  まだ通れていないものの一覧と宣言の突合は人が読んで行う。
+- 機械が見るのは宣言の形式と参照先の実在までで、代替検証がその面を本当に守っているか
+  (テストの意味的十分性) は人のレビューの担当である。
+- 古い断定の再混入を見る走査 (`test_naming_no_stale`) の射程はスキル配下の `.md` / `.py` で、
+  `app/` のコメントは見ない。
+
+### 関連
+
+- 実装: `.claude/skills/app-bug-hunt/coverage/out-of-scope.json` /
+  `.claude/skills/app-bug-hunt/coverage/out_of_scope.py` /
+  `.claude/skills/app-bug-hunt/coverage-audit.md`
+- gate: `tests/Architecture/BughuntCoverageToolSelfTest.php` /
+  `.claude/skills/app-bug-hunt/coverage/test_out_of_scope.py`
+- 設計: `devnotes/20260818-0243-bughunt-coverage-audit-doc/`
+
+---
+
+## D28 デザイントークンの生成 CSS 検査を、値の写しを持たず実 app.css も通す形で実装する
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `tests/js/styles/tokens.test.ts` / `tests/js/styles/design-system-docs.test.ts` |
+| 業務要件起因の説明 | 撮影 PWA は現場作業者が屋外のスマホで使う面であり、状態色と本文が読めることが業務の前提になる。テンプレート家系の正典実装は期待値を検査側の表に literal で持つが、本アプリは DESIGN.md を唯一の正本と定めており、値の写しを 3 か所へ増やすと正本の一元化と衝突する |
+| 揃え続ける不変条件と保証機構 | inventory に登録された DESIGN.md 対応の色・角丸・文字組が Tailwind の生成 CSS に期待する値で現れ、色と角丸の utility は対応する変数を参照し、typography の utility は期待する宣言を過不足なく持つこと。および運用契約の文書が検査ファイルの実体と同期していること。`tests/js/styles/tokens.test.ts` (密閉の層 = 母集団の全件 / 経路の層 = 実 app.css のアンカー) と `tests/js/styles/design-system-docs.test.ts` (双方向の集合一致) が保証する |
+| 再判定の条件 | 正典が literal 期待値表の保持そのものを不変条件として明文化したとき。または Tailwind の生成 CSS の構造 (テーマ層の置き場所や hover の入れ子の形) が変わって構文木の走査で読めなくなったとき。selector の綴りそのものは検査の完全一致対象ではないので再判定の契機にしない |
+| 決めた日 | 2026-08-17 |
+| 決めた人 | 開発者 |
+| 根拠 | devnotes/20260818-0248-design-token-t1-tests/ |
+| 状態 | 恒久 |
+| 見直し期限 | — |
+
+| 観点 | テンプレート | 本アプリ |
+|---|---|---|
+| 期待値の置き場所 | 検査側の inventory に literal の表 | DESIGN.md から共有パーサ経由で導出 |
+| 入力 CSS | 静的な fixture ファイル | inventory から組み立てた文字列 |
+| 自動ソース走査 | 止めていない (アプリ全体の class を拾う) | `source(none)` と `@source inline` で候補を明示供給 |
+| 生成 CSS の読み方 | 文字列の正規表現 | postcss の構文木を `@layer theme` の `:root, :host` 直下に絞って走査 |
+| 実 app.css の検査 | 先頭 2 行のテキスト検査のみ | 構文木でのテキスト検査 + 実コンパイル (経路の層) |
+| 文書の検査 | 散文の完全一致フレーズ | 節・表のセル・パス・検査目録の構造検査 + 節ごとの規範の最小断片 (描画されない領域を先に除く) |
+
+### なぜ正当な差分か (logic-driven)
+
+家系の裁定 (機能 `design-token-system` の AG-022b) は「原本の逐語移植は求めず、
+原本が確かめている内容を実測して有用な部分を取り込む」と定めている。
+正典の literal 表が持つ「DESIGN.md とは独立に値を pin する」性質は、この裁定に照らせば
+**追従が要る不変条件ではなく正典実装の副次的な性質**である。本アプリは DESIGN.md を
+唯一の正本としており、トークンの値の変更は「気付くべき事故」ではなく正規の変更手順であるため、
+独立 pin を採らない。
+
+静的 fixture を持たない判断も同様に、fixture の目的
+(アプリ全体の class 変動から検査を独立させる) を `source(none)` と `@source inline` が満たす。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「inventory に登録された DESIGN.md 対応の色・角丸・文字組が、Tailwind のコンパイルを通って
+> 生成 CSS に期待する値で現れること。色と角丸の utility は対応する変数を参照し、
+> typography の utility は期待する宣言を過不足なく持つこと」
+
+> **色・角丸と typography で形が違う**: 色と角丸の utility は `var(--color-*)` と
+> `var(--radius-*)` を参照するが、typography の ramp は `font-size` / `font-weight` /
+> `line-height` を literal で出し、変数を参照するのは `font-family` だけである。
+> 「utility 名が変数へ解決する」と一括りに書かない。
+
+密閉の層が母集団の全件を、経路の層が実 app.css からの到達をアンカーで保証する。
+正本との drift は `tests/js/styles/canonical-source-parity.test.ts` の集合一致と値一致が
+別の段で保証する。
+
+### 保証しないもの
+
+- 派生トークン `--color-primary-soft` の値 (生成 CSS への出現までしか見ていない)
+- font-family の先頭以外のフォールバック列
+- 生成 CSS より先 (Vite のビルド・アセット配信・ブラウザでの適用)
+- 文書側は構造と節ごとの規範の最小断片までを見る。最小断片が在っても
+  周りの説明が骨抜きになっていることは検出できない。
+  描画されない領域として除くのは HTML コメントと fenced code の 2 つだけで、
+  4 空白字下げのコードブロックと HTML 要素による非表示は見ていない
+
+### 関連
+
+- 実装: `tests/js/styles/tokens.test.ts` / `tests/js/styles/design-system-docs.test.ts` /
+  `tests/js/styles/inventory.ts` / `tests/js/styles/design-md.ts` /
+  `tests/js/styles/canonical-source-parity.test.ts` / `docs/design-system.md`
+- 設計: `devnotes/20260818-0248-design-token-t1-tests/`
+
+---
+
+## D29 PHP 列挙と TS 値域の同期を「登録した写しだけ」で守る (全数走査と逆走査は持たない)
 
 | 行 | 内容 |
 |---|---|

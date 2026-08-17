@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "note": "bug-hunt のコード到達カバレッジで未到達でよい面の唯一の正本。人の判断であり機械生成しない。理由として認めるのは 3 型 (利用者が到達しない面 / ブラウザ操作では発火しない面 / 計測の到達点の外) だけで、それ以外は穴として残す。",
+  "entries": [
+    {
+      "id": "filament-admin",
+      "title": "運営向け Filament 管理画面",
+      "reason": "運営 (社内) 向けの管理画面であり、現場作業者が手順書から動画を作る導線ではない。探索ストーリー S1..S7 はいずれもこの面を走らない設計になっている。",
+      "alternative_verification": "画面の表示と認可の実挙動を tests/Feature/Filament と tests/Feature/Admin の Feature テストが検査する。",
+      "verification_refs": ["tests/Feature/Filament", "tests/Feature/Admin"],
+      "path_prefixes": ["app/Filament", "app/Providers/Filament", "app/Http/Controllers/Admin"]
+    },
+    {
+      "id": "seo-static-delivery",
+      "title": "クローラ向けの静的配信",
+      "reason": "認証もセッションも持たない機械可読の配信で、人が操作する画面ではない。目録でも区分 外 として探索の分母から外している。",
+      "alternative_verification": "配信内容とヘッダを tests/Feature/Seo の Feature テストが検査する。",
+      "verification_refs": ["tests/Feature/Seo"],
+      "path_prefixes": ["app/Http/Controllers/Seo", "app/Providers/SeoServiceProvider.php"]
+    },
+    {
+      "id": "inbound-webhook",
+      "title": "外部サービスから届く受信通知",
+      "reason": "外部サービスが送ってくる受信要求で、署名検証が前提のためブラウザ操作からは発火しない。",
+      "alternative_verification": "署名検証と副作用を tests/Feature/Mail の受信通知まわりの Feature テストが検査する。",
+      "verification_refs": [
+        "tests/Feature/Mail/SesNotificationControllerTest.php",
+        "tests/Feature/Mail/SesSignatureMiddlewareTest.php"
+      ],
+      "path_prefixes": ["app/Http/Controllers/Webhooks"]
+    },
+    {
+      "id": "mcp-oauth-interface",
+      "title": "外部クライアントが接続する MCP と OAuth 認可の面",
+      "reason": "外部の機械が接続する機械間の面で、ブラウザの画面と操作として存在しない。",
+      "alternative_verification": "接続の流れと道具の契約を tests/Feature/Mcp の Feature テストが検査する。",
+      "verification_refs": ["tests/Feature/Mcp"],
+      "path_prefixes": ["app/Mcp", "app/Passport"]
+    },
+    {
+      "id": "rest-api",
+      "title": "API キーで認証する機械向けの REST 面",
+      "reason": "セッションではなく API キーで認証する機械向けの面で、ブラウザのセッションからはたどれない。",
+      "alternative_verification": "認証と冪等性と応答契約を tests/Feature/Api の Feature テストが検査する。",
+      "verification_refs": ["tests/Feature/Api"],
+      "path_prefixes": ["app/Http/Controllers/Api"]
+    },
+    {
+      "id": "artisan-command",
+      "title": "手動と定時で走る artisan コマンド",
+      "reason": "コマンドは serve とは別のプロセスで走るため、走行中に実行されても行の到達として記録されない (計測の到達点の外)。",
+      "alternative_verification": "各コマンドの挙動を tests/Feature/Console の Feature テストが検査する。",
+      "verification_refs": ["tests/Feature/Console"],
+      "path_prefixes": ["app/Console"]
+    },
+    {
+      "id": "queued-job",
+      "title": "キューのワーカーが処理する実行単位",
+      "reason": "ワーカーは serve とは別のプロセスで走るため、走行中に実際へ処理されても行の到達として記録されない (計測の到達点の外)。動いていないのではなく見えていない。",
+      "alternative_verification": "各ジョブの業務挙動はドメイン側の Feature テスト (合成の一連の流れ / テイクの実体削除 / 自動チャージ) が検査し、待ち時間の扱いと重複実行の全数目録は tests/Feature/Queue と tests/Architecture/JobExecutionDedupInventoryTest.php が検査する。",
+      "verification_refs": [
+        "tests/Feature/Manual/RenderPipelineTest.php",
+        "tests/Feature/Capture/DeleteTakeObjectsJobTest.php",
+        "tests/Feature/Billing/AutoRechargeTriggerTest.php",
+        "tests/Feature/Queue",
+        "tests/Architecture/JobExecutionDedupInventoryTest.php"
+      ],
+      "path_prefixes": ["app/Jobs"]
+    },
+    {
+      "id": "bughunt-external-fake",
+      "title": "bug-hunt 専用の外部代替 (保存先の偽物)",
+      "reason": "bug-hunt 環境でだけ差し替わる外部代替であり、製品の利用者が触る面ではない。",
+      "alternative_verification": "差し替えの配線と条件を tests/Feature/Providers と tests/Architecture/ExternalFakeWiringInvariantTest.php が検査する。",
+      "verification_refs": [
+        "tests/Feature/Providers/BughuntFakesServiceProviderTest.php",
+        "tests/Architecture/ExternalFakeWiringInvariantTest.php"
+      ],
+      "path_prefixes": [
+        "app/Http/Controllers/Testing",
+        "app/Providers/BughuntFakesServiceProvider.php"
+      ]
+    }
+  ]
+}
