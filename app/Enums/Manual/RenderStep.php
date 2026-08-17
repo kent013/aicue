@@ -6,7 +6,8 @@ namespace App\Enums\Manual;
 
 /**
  * レンダジョブの進行段階 (doc/10 §10.1)。
- * TS 側 types/manual.ts の RenderStep union と対で保守する (ManualEnumTsSyncInvariantTest)。
+ * TS 側 types/manual.ts の RenderStep union と対で保守する
+ * (tests/js/architecture/enum-ts-sync.test.ts の目録が固定)。
  */
 enum RenderStep: string
 {

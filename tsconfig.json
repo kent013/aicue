@@ -23,5 +23,9 @@
         "tests/js/**/*.ts",
         "scripts/**/*.ts"
     ],
-    "exclude": ["node_modules", "tmp"]
+    "exclude": [
+        "node_modules",
+        "tmp",
+        "tests/js/support/enum-ts-sync/fixtures/**"
+    ]
 }

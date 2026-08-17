@@ -3,7 +3,7 @@
  *
  * PHP 側 App\Enums\AccountDeletionBlockerAction /
  * App\DataTransferObjects\Organizations\AccountDeletionBlockerDto::toArray() と対で保守する
- * (値集合の一致は tests/Architecture/AccountDeletionBlockerActionTsSyncInvariantTest が固定する)。
+ * (値集合の一致は tests/js/architecture/enum-ts-sync.test.ts の目録が固定する)。
  */
 
 /** PHP: App\Enums\AccountDeletionBlockerAction と対 (値集合を一致させる) */

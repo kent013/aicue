@@ -8,7 +8,7 @@
 `template-divergence-ledger` が 2026-08-15 に確定した形) に従う。形式は
 `tests/Architecture/TemplateDivergenceLedgerFormatTest.php` が機械で強制する。
 
-登録エントリ: 25 件
+登録エントリ: 26 件
 
 ## 記録の原則
 
@@ -1506,3 +1506,55 @@ bug-hunt の走行が実際の外部 ID 基盤へ遷移すると、探索が本�
 - 実装: `app/Support/PasskeyConfigValidator.php` / `app/Support/PasskeyOriginCanonicalizer.php`
 - 設計: `devnotes/20260815-1111-passkey-config-hardening/` /
   `devnotes/20260817-1309-todo-t216-passkey-hardening-completion/`
+
+## D27 PHP 列挙と TS 値域の同期を「登録した写しだけ」で守る (全数走査と逆走査は持たない)
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `tests/js/architecture/enum-ts-sync.test.ts` |
+| 業務要件起因の説明 | 正規表現で二重引用符の literal union だけを読んでいた旧抽出器を型情報の抽出へ作り直すことが先に要り、全数走査による既定拒否の分類と逆走査まで 1 度に入れると 1 変更が扱えない大きさになる。まず登録した写しだけを見る形で着地させた |
+| 揃え続ける不変条件と保証機構 | 登録した写しの値集合が PHP 側と完全一致すること (同ファイルの目録 + 件数 pin)。抽出器が静かに間違えないことは `tests/js/architecture/enum-ts-sync-extractor.test.ts` の負例行列 |
+| 再判定の条件 | 家系の裁定 AG-099 の後半 (PHP の文字列付き列挙の全数走査による既定拒否の分類 + 逆走査 2 規則) を入れたとき |
+| 決めた日 | 2026-08-17 |
+| 決めた人 | 開発者 |
+| 根拠 | devnotes/20260817-1748-enum-ts-generic-sync-gate/ |
+| 状態 | 監視中 |
+| 見直し期限 | 2027-02-13 |
+
+| 観点 | テンプレート | 本アプリ |
+|---|---|---|
+| 母集団の決め方 | PHP の文字列付き列挙を全数走査し、既定拒否で分類する | 目録へ登録した写しだけを見る |
+| 未登録の写しの扱い | 分類されていない残余として赤くなる | 検査されない (沈黙する) |
+| 逆走査 (未登録の一致候補 / 既に食い違った写しの検出) | 2 規則を持つ | 持たない |
+| 抽出の基盤 | 型情報 | 同じ (型情報。ここは正典と揃えた) |
+
+### なぜ正当な差分か (logic-driven)
+
+置き換え前の抽出器 (本変更で削除した `tests/Support/TsUnionValues.php`) は
+「二重引用符の文字列を正規表現で拾う」実装で、別名参照を含む宣言 (`ConsoleRole | "owner" | "unassigned"`) を読めず、
+注釈の中の引用符を値として拾い、`(string & {})` を閉じた union と誤認していた。
+この抽出器の上に全数走査を載せると、**分類の入力そのものが間違ったまま母集団だけが増える**。
+先に抽出を型情報へ移し、母集団の拡張 (14 組 → 27 組) までを 1 つの変更として着地させ、
+全数走査と逆走査は後半の TODO へ分けた。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「登録した写しについては、PHP の列挙と TS の型別名の値集合が完全一致する」
+
+- 目録の件数は完全一致で pin する (写しが黙って消えるのを防ぐ)
+- 抽出は**型情報**で行う (正典と同じ基盤)。受理できない形は空集合ではなく例外にする
+- 抽出器の受理・拒否の境界は負例行列 (TS 27 件 / PHP 40 件) が固定する
+
+### 保証しないもの
+
+- **登録していない写しは 1 件も検査していない**。未登録の写しが食い違っても沈黙する
+- 逆走査を持たないので、「値集合が完全一致するのに未登録」の候補も、
+  「名前が対応するのに既に食い違っている写し」も自動では見つからない
+- 保証しないものの完全な一覧は `docs/architecture.md` §PHP 列挙と TypeScript 値域の同期
+
+### 関連
+
+- 実装: `tests/js/architecture/enum-ts-sync.test.ts` /
+  `tests/js/architecture/enum-ts-sync-extractor.test.ts` /
+  `tests/js/support/enum-ts-sync/`
+- 設計: `devnotes/20260817-1748-enum-ts-generic-sync-gate/`

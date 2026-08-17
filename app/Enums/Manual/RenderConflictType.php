@@ -6,7 +6,8 @@ namespace App\Enums\Manual;
 
 /**
  * レンダ/プレビュートリガーが 409 になる理由の判別子 (doc/10 §10.8-8 / 概念設計 §4)。
- * TS 側 types/manual.ts の RenderConflictType union と対で保守する (ManualEnumTsSyncInvariantTest)。
+ * TS 側 types/manual.ts の RenderConflictType union と対で保守する
+ * (tests/js/architecture/enum-ts-sync.test.ts の目録が固定)。
  */
 enum RenderConflictType: string
 {

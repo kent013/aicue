@@ -13,7 +13,7 @@ namespace App\Enums\Manual;
  * **閾値 (文字数上限等) を持つ検査も入れない** (根拠となる実データが無いため)。
  *
  * TS 側 resources/js/types/manual.ts の ScenarioRuleCode union と値集合を一致させる
- * (ManualEnumTsSyncInvariantTest が固定)。
+ * (tests/js/architecture/enum-ts-sync.test.ts の目録が固定)。
  */
 enum ScenarioRuleCode: string
 {

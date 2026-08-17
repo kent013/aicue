@@ -9,7 +9,7 @@ namespace App\Enums\Manual;
  *
  * **制御フローには使わない** (表示のみ。保存・撮影・レンダを止めない)。
  * TS 側 resources/js/types/manual.ts の ScenarioVerdict union と値集合を一致させる
- * (ManualEnumTsSyncInvariantTest が固定)。
+ * (tests/js/architecture/enum-ts-sync.test.ts の目録が固定)。
  */
 enum ScenarioVerdict: string
 {
