@@ -60,12 +60,12 @@ const BUGHUNT_RETIRED_NAMES = [
  */
 const BUGHUNT_NAMING_KNOWN_MENTIONS = [
     'docs/TODO-closed.md' => [
-        'BughuntBillingSeeder' => 1,
-        'FakeExternalsServiceProvider' => 2,
+        'BughuntBillingSeeder' => 2,
+        'FakeExternalsServiceProvider' => 3,
     ],
     'docs/TODO.md' => [
-        'BughuntBillingSeeder' => 1,
-        'FakeExternalsServiceProvider' => 1,
+        'BughuntBillingSeeder' => 0,
+        'FakeExternalsServiceProvider' => 0,
     ],
 ];
 
@@ -254,17 +254,18 @@ test('N-4 負のコントロール: 同じ述語が検出する / しないの�
     expect(bughuntNamingViolationsIn(BUGHUNT_NAMING_SELF_PATH, "{$seeder} {$provider}"))->toBe([]);
 
     // (d) pin したファイルで件数がずれたら検出する (少なくても多くても)
-    expect(bughuntNamingViolationsIn('docs/TODO-closed.md', "{$seeder} {$provider} {$provider}"))->toBe([]);
-    expect(bughuntNamingViolationsIn('docs/TODO-closed.md', "{$provider} {$provider}"))->toHaveCount(1);
-    expect(bughuntNamingViolationsIn('docs/TODO-closed.md', "{$seeder} {$seeder} {$seeder} {$provider} {$provider}"))->toHaveCount(1);
+    // docs/TODO-closed.md の pin は T214 クローズ後の値 (seeder=2 / provider=3)。
+    expect(bughuntNamingViolationsIn('docs/TODO-closed.md', "{$seeder} {$seeder} {$provider} {$provider} {$provider}"))->toBe([]);
+    expect(bughuntNamingViolationsIn('docs/TODO-closed.md', "{$provider} {$provider} {$provider}"))->toHaveCount(1);
+    expect(bughuntNamingViolationsIn('docs/TODO-closed.md', "{$seeder} {$seeder} {$seeder} {$provider} {$provider} {$provider}"))->toHaveCount(1);
 
     // (e) 合計は同じだが内訳が違う入力も検出する (旧名ごとに固定しているため)
-    expect(bughuntNamingViolationsIn('docs/TODO-closed.md', "{$provider} {$provider} {$provider}"))->toHaveCount(2);
+    expect(bughuntNamingViolationsIn('docs/TODO-closed.md', "{$seeder} {$seeder} {$seeder} {$provider} {$provider}"))->toHaveCount(2);
 
-    // (f) もう 1 冊の TODO 台帳 (docs/TODO.md は旧名ごとに 1 件ずつ) でも同じ境界が働く
-    expect(bughuntNamingViolationsIn('docs/TODO.md', "{$seeder} {$provider}"))->toBe([]);
-    expect(bughuntNamingViolationsIn('docs/TODO.md', "{$seeder} {$seeder} {$provider}"))->toHaveCount(1);
-    expect(bughuntNamingViolationsIn('docs/TODO.md', "{$seeder} {$seeder}"))->toHaveCount(2);
+    // (f) もう 1 冊の TODO 台帳 (docs/TODO.md は T214 クローズ後、旧名ともに 0 件) でも同じ境界が働く
+    expect(bughuntNamingViolationsIn('docs/TODO.md', ''))->toBe([]);
+    expect(bughuntNamingViolationsIn('docs/TODO.md', "{$seeder}"))->toHaveCount(1);
+    expect(bughuntNamingViolationsIn('docs/TODO.md', "{$seeder} {$provider}"))->toHaveCount(2);
 });
 
 test('N-5 旧名のクラスは存在せず、家系名のクラスが存在する', function (): void {
