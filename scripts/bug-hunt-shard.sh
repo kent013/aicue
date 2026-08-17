@@ -1118,7 +1118,7 @@ cmd_provision() {
     artisan_for_shard "${db}" "${url}" db:seed --class=ManualTestSeeder --force
     # 有料プラン組織に active subscription + 初期チケットを付与 (三重ガード付き)。
     # free 組織は未契約のまま = 課金なし経路の探索能力を温存する。
-    artisan_for_shard "${db}" "${url}" db:seed --class=BughuntBillingSeeder --force
+    artisan_for_shard "${db}" "${url}" db:seed --class=BughuntStripeSyncSeeder --force
     # 管理画面 (Filament admin) 探索用 admin user。AdminUserSeeder は local 限定 (DatabaseSeeder が
     # local でしか呼ばない) のため bughunt では明示 seed する。admin MFA は .env.bughunt.local の
     # ADMIN_MFA_REQUIRED=false で無効化済 (email+password ログイン可)。
@@ -1344,7 +1344,7 @@ cmd_reseed() {
     artisan_for_shard "${db}" "${url}" db:seed --class=ManualTestSeeder --force
     # 有料プラン組織に active subscription + 初期チケットを付与 (三重ガード付き)。
     # free 組織は未契約のまま = 課金なし経路の探索能力を温存する。
-    artisan_for_shard "${db}" "${url}" db:seed --class=BughuntBillingSeeder --force
+    artisan_for_shard "${db}" "${url}" db:seed --class=BughuntStripeSyncSeeder --force
     artisan_for_shard "${db}" "${url}" db:seed --class=AdminUserSeeder --force
     artisan_for_shard "${db}" "${url}" db:seed --class=BughuntOAuthSeeder --force
     echo "reseeded: ${db}"

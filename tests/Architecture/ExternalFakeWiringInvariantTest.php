@@ -5,7 +5,7 @@ declare(strict_types=1);
 use App\Http\Controllers\Testing\GetFakeStorageObjectController;
 use App\Http\Controllers\Testing\PutFakeStorageObjectController;
 use App\Providers\AppServiceProvider;
-use App\Providers\FakeExternalsServiceProvider;
+use App\Providers\BughuntFakesServiceProvider;
 use App\Services\AI\Testing\CannedPromptFakeRegistrar;
 use App\Services\Auth\SocialiteDriverResolver;
 use App\Services\Billing\Contracts\AutoRechargeGatewayInterface;
@@ -66,8 +66,8 @@ use Tests\Support\ExternalFakes\FakeWiringSourceScanner;
  * (Pest のファイル直下 const / function はグローバル空間に出る)。
  */
 const EXTERNAL_FAKE_WIRING_MUTATION_COVERAGE = [
-    'M3' => 'bootstrap/providers.php に FakeExternalsServiceProvider が登録されている',
-    'M4' => 'FakeExternalsServiceProvider は AppServiceProvider より後に登録される (後勝ち)',
+    'M3' => 'bootstrap/providers.php に BughuntFakesServiceProvider が登録されている',
+    'M4' => 'BughuntFakesServiceProvider は AppServiceProvider より後に登録される (後勝ち)',
     'M5' => 'provider は差し替え先のクラス名を 1 つも参照しない (決定は宣言側だけにある)',
     'M6' => 'provider の container 呼び出しは許可された形だけ',
     'M7' => '本番コードは fake クラスを参照しない (FakeClassReferenceInvariantTest が担当)',
@@ -96,7 +96,7 @@ const EXTERNAL_FAKE_WIRING_PROVIDER_REFERENCE_EXCEPTIONS = [
 /** 配線 provider のソース (走査系テストの共通入力。読み取り失敗は例外で落ちる) */
 function externalFakeWiringProviderSource(): string
 {
-    return FakeClassCatalog::sourceOf('app/Providers/FakeExternalsServiceProvider.php');
+    return FakeClassCatalog::sourceOf('app/Providers/BughuntFakesServiceProvider.php');
 }
 
 /**
@@ -161,7 +161,7 @@ test('3-2 実証: flag on + allowlist 環境で fake が厳密一致で解決さ
             $this->app['env'] = $environment;
             config([$binding->flag => true]);
 
-            (new FakeExternalsServiceProvider($this->app))->register();
+            (new BughuntFakesServiceProvider($this->app))->register();
 
             // ★厳密一致 (instanceof は使わない。storage fake は real のサブクラス)
             expect(app($binding->abstract)::class)->toBe($binding->fake);
@@ -181,7 +181,7 @@ test('3-3 provider 単体: flag on でも allowlist 外 env では real のま�
             $this->app['env'] = $environment;
             config([$binding->flag => true]);
 
-            (new FakeExternalsServiceProvider($this->app))->register();
+            (new BughuntFakesServiceProvider($this->app))->register();
 
             expect(app($binding->abstract)::class)->toBe($binding->real);
         } finally {
@@ -201,7 +201,7 @@ test('3-4 provider 単体: 外部サービス fake flag on + allowlist 外 env �
         $this->app['env'] = 'staging';
         config([ExternalFakeDeclaration::EXTERNALS_FLAG => true]);
 
-        (new FakeExternalsServiceProvider($this->app))->register();
+        (new BughuntFakesServiceProvider($this->app))->register();
 
         Log::shouldHaveReceived('warning')->once();
     } finally {
@@ -210,14 +210,14 @@ test('3-4 provider 単体: 外部サービス fake flag on + allowlist 外 env �
     }
 });
 
-test('3-5 登録点: bootstrap/providers.php に FakeExternalsServiceProvider が登録されている', function (): void {
-    expect(externalFakeWiringRegisteredProviders())->toContain(FakeExternalsServiceProvider::class);
+test('3-5 登録点: bootstrap/providers.php に BughuntFakesServiceProvider が登録されている', function (): void {
+    expect(externalFakeWiringRegisteredProviders())->toContain(BughuntFakesServiceProvider::class);
 });
 
-test('3-6 登録点: FakeExternalsServiceProvider は AppServiceProvider より後 (後勝ち)', function (): void {
+test('3-6 登録点: BughuntFakesServiceProvider は AppServiceProvider より後 (後勝ち)', function (): void {
     $providers = externalFakeWiringRegisteredProviders();
 
-    $fakeIndex = array_search(FakeExternalsServiceProvider::class, $providers, true);
+    $fakeIndex = array_search(BughuntFakesServiceProvider::class, $providers, true);
     $appIndex = array_search(AppServiceProvider::class, $providers, true);
 
     expect($fakeIndex)->toBeInt()
@@ -226,7 +226,7 @@ test('3-6 登録点: FakeExternalsServiceProvider は AppServiceProvider より�
 });
 
 test('3-7 登録点: 起動済み container に provider がロードされている', function (): void {
-    expect(array_key_exists(FakeExternalsServiceProvider::class, $this->app->getLoadedProviders()))->toBeTrue();
+    expect(array_key_exists(BughuntFakesServiceProvider::class, $this->app->getLoadedProviders()))->toBeTrue();
 });
 
 test('3-9 網羅性: provider の container 呼び出しは許可された形だけ', function (): void {
@@ -237,9 +237,13 @@ test('3-9 網羅性: provider の container 呼び出しは許可された形だ
 });
 
 test('3-10 網羅性: provider が参照する fake 系クラスは配線基盤 4 件ちょうど (差し替え先を含まない)', function (): void {
+    // ★配置例外のキーも候補に足す。配線 provider は家系名への改名で名前の規則 (定義 2) から
+    //   外れたため、namedClasses() だけでは候補から静かに脱落する。いまの結果は変わらない
+    //   (走査器はクラス宣言名を参照として数えない) が、候補集合が黙って狭まること自体を防ぐ。
     $candidates = array_values(array_unique(array_merge(
         FakeClassCatalog::implementationClasses(),
         FakeClassCatalog::namedClasses(),
+        array_keys(FakeClassCatalog::placementExceptions()),
     )));
 
     // 走査器 / 母集団導出が壊れて「空走査で緑」になるのを防ぐ (fail-closed)
@@ -271,25 +275,25 @@ test('3-11 LLM: bughunt.local ∧ fake_llm=true でのみ Prompt fake が立ち�
         // (1) bughunt.local ∧ on → 立つ
         $this->app['env'] = 'bughunt.local';
         config([ExternalFakeDeclaration::LLM_FLAG => true]);
-        (new FakeExternalsServiceProvider($this->app))->boot();
+        (new BughuntFakesServiceProvider($this->app))->boot();
         expect(Prompt::isFaking())->toBeTrue();
 
         Prompt::stopFaking();
 
         // (2) testing ∧ on → 立たない (static をテストプロセスで占有させない)
         $this->app['env'] = 'testing';
-        (new FakeExternalsServiceProvider($this->app))->boot();
+        (new BughuntFakesServiceProvider($this->app))->boot();
         expect(Prompt::isFaking())->toBeFalse();
 
         // (3) local ∧ on → 立たない (実 API 検証を潰さない)
         $this->app['env'] = 'local';
-        (new FakeExternalsServiceProvider($this->app))->boot();
+        (new BughuntFakesServiceProvider($this->app))->boot();
         expect(Prompt::isFaking())->toBeFalse();
 
         // (4) bughunt.local ∧ off → 立たない (既定 real LLM)
         $this->app['env'] = 'bughunt.local';
         config([ExternalFakeDeclaration::LLM_FLAG => false]);
-        (new FakeExternalsServiceProvider($this->app))->boot();
+        (new BughuntFakesServiceProvider($this->app))->boot();
         expect(Prompt::isFaking())->toBeFalse();
     } finally {
         // static の往復を**同一 test case 内で** assert する (afterEach はフェイルセーフ)

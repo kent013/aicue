@@ -39,7 +39,7 @@ use Illuminate\Support\Facades\DB;
  *
  * 依存は Seeder の method injection (run() 引数) で受ける (Laravel 公式作法。型安全)。
  */
-class BughuntBillingSeeder extends Seeder
+class BughuntStripeSyncSeeder extends Seeder
 {
     use Concerns\DetectsBughuntDatabase;
 
@@ -53,7 +53,7 @@ class BughuntBillingSeeder extends Seeder
             || ! app()->environment('bughunt.local')
             || ! $this->isBughuntDatabase()
         ) {
-            $this->command->warn('BughuntBillingSeeder: fake_externals / bughunt.local / bug_hunt DB のいずれか不成立のため skip (production/dev safety)。');
+            $this->command->warn('BughuntStripeSyncSeeder: fake_externals / bughunt.local / bug_hunt DB のいずれか不成立のため skip (production/dev safety)。');
 
             return;
         }
@@ -62,7 +62,7 @@ class BughuntBillingSeeder extends Seeder
 
         $paidPlanCodes = $this->paidPlanCodes();
         if ($paidPlanCodes === []) {
-            $this->command->warn('BughuntBillingSeeder: 有料プランが無いため skip。先に PlanSeeder を流すこと。');
+            $this->command->warn('BughuntStripeSyncSeeder: 有料プランが無いため skip。先に PlanSeeder を流すこと。');
 
             return;
         }
@@ -80,7 +80,7 @@ class BughuntBillingSeeder extends Seeder
             );
         }
 
-        $this->command->info("BughuntBillingSeeder: {$organizations->count()} 組織に active subscription + チケット".self::INITIAL_TICKET_GRANT.' 枚を付与。');
+        $this->command->info("BughuntStripeSyncSeeder: {$organizations->count()} 組織に active subscription + チケット".self::INITIAL_TICKET_GRANT.' 枚を付与。');
     }
 
     /**
@@ -103,7 +103,7 @@ class BughuntBillingSeeder extends Seeder
                 'updated_at' => $now,
             ]);
 
-        $this->command->info("BughuntBillingSeeder: 未契約 {$count} 組織に declarer-less な free entitlement を付与。");
+        $this->command->info("BughuntStripeSyncSeeder: 未契約 {$count} 組織に declarer-less な free entitlement を付与。");
     }
 
     /**

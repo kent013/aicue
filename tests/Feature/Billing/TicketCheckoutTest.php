@@ -62,7 +62,7 @@ test('owner は購入画面で tiers / per-bucket 残高 / canManage / ticketAtt
 test('fake_external marker query は purchased 表示に転用されない (アプリ非解釈)', function (): void {
     [, $owner] = createOrganizationWithOwner();
 
-    // runtime fake (FakeExternalsServiceProvider) の中立帰還 URL に付く観測用 marker。
+    // runtime fake (BughuntFakesServiceProvider) の中立帰還 URL に付く観測用 marker。
     // アプリはこの query を一切解釈しない = purchased 偽装にならないことを固定する
     $this->actingAs($owner)->get('/purchase-tickets?fake_external=stripe')
         ->assertOk()

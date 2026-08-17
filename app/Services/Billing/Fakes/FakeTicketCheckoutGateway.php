@@ -16,7 +16,7 @@ use Carbon\CarbonImmutable;
  * - session id は idempotency key から決定的に導出 (Stripe の idempotency replay と同じ収束特性)
  * - 遷移先はアプリ内帰還画面 ($cancelUrl) + 観測用 marker query `fake_external=stripe`。
  *   アプリはこの query を一切解釈しない (purchased 偽装なし / cancel の意味付けもなし)
- * - 決済・チケット付与・状態変更は一切行わない (課金状態の正本は BughuntBillingSeeder)
+ * - 決済・チケット付与・状態変更は一切行わない (課金状態の正本は BughuntStripeSyncSeeder)
  *
  * テスト専用 spy (Tests\Support\FakeTicketCheckoutGateway) とは責務が異なる:
  * spy は呼び出し記録と失敗注入を持つが、本クラスは無状態 stub (serve プロセスで動く前提)。

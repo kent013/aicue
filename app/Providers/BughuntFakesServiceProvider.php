@@ -34,7 +34,7 @@ use Illuminate\Support\ServiceProvider;
  * - LLM (Prism): LLM_FLAG。Prompt::$fake はプロセス大域の static のため container 差し替えではなく
  *   boot() で install する (宣言の swaps() には現れない)。
  */
-class FakeExternalsServiceProvider extends ServiceProvider
+class BughuntFakesServiceProvider extends ServiceProvider
 {
     public function register(): void
     {

@@ -1683,7 +1683,7 @@ Vitest (`OrganizationsSettings.test.ts`) と Feature 両面で回帰固定する
   capability flag / 許可環境 / 差し替えない対象もここが持つ。
   provider・`FakeStorageGate`・bug-hunt の seeder・`ProductionEnvGuard`・
   bug-hunt の環境ひな型検査は**すべてこの宣言を読む** (同じ集合を 2 か所に書かない)。
-- **差し替えの唯一の配線点は `App\Providers\FakeExternalsServiceProvider`**。container 差し替えは
+- **差し替えの唯一の配線点は `App\Providers\BughuntFakesServiceProvider`**。container 差し替えは
   `$this->app->bind($swap->abstract, $swap->fake)` の形**だけ**で行う。
   **`::class` を直に書く bind は許可形から外れる** = 差し替え先の決定は宣言側にしか無い
   (`singleton()` / 第 3 引数 (= singleton 相当) / 変数 abstract / closure concrete /
@@ -1714,7 +1714,7 @@ Vitest (`OrganizationsSettings.test.ts`) と Feature 両面で回帰固定する
   false でも、キャッシュが失われた起動で環境変数が読み直されて本番で偽物が立ちうるため。
   解釈できない値 (`maybe` / 非文字列) は安全側で違反にする。fake 配線 gate はこれを二重実装しない。
 - **fake 実装クラスは `app/**/Fakes/` か `app/**/Testing/` に置く**。配置例外は
-  `FakeExternalsServiceProvider` (唯一の配線点) と `FakeStorageGate` (有効化条件) の 2 件のみ。
+  `BughuntFakesServiceProvider` (唯一の配線点) と `FakeStorageGate` (有効化条件) の 2 件のみ。
 - **本番コード (`app/` • `routes/` • `config/` • `bootstrap/`) は fake クラスを参照しない**。
   参照してよいのは宣言・配線点・偽の保存先の署名付き経路の受け口を含む 6 ファイルだけで、
   allowlist の件数はテストが固定している (増やすには理由コメントと併せて 2 箇所を触る摩擦がかかる)。

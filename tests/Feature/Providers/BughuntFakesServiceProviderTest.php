@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 use App\Prompts\ExampleSummaryPrompt;
-use App\Providers\FakeExternalsServiceProvider;
+use App\Providers\BughuntFakesServiceProvider;
 use App\Services\Billing\CashierStripeGateway;
 use App\Services\Billing\CashierTicketCheckoutGateway;
 use App\Services\Billing\Contracts\StripeGatewayInterface;
@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\Log;
 use Kent013\PrismPrompt\Prompt;
 
 /*
- * FakeExternalsServiceProvider: config('testing.fake_externals') が capability flag。
+ * BughuntFakesServiceProvider: config('testing.fake_externals') が capability flag。
  * fail-secure 二軸 (flag 既定 false = 完全 no-op / 環境 allowlist) を固定する。
  * Pest はテスト毎に app を再構築するため register() 再実行の container 汚染は漏れない。
  *
@@ -37,7 +37,7 @@ test('既定 (flag=false) では両 gateway とも Cashier 実装に解決され
 
 test('flag=true かつ allowlist 環境 (testing) では両 gateway が fake に解決される', function (): void {
     config(['testing.fake_externals' => true]);
-    (new FakeExternalsServiceProvider($this->app))->register();
+    (new BughuntFakesServiceProvider($this->app))->register();
 
     expect(app(TicketCheckoutGateway::class))->toBeInstanceOf(FakeTicketCheckoutGateway::class);
     expect(app(StripeGatewayInterface::class))->toBeInstanceOf(FakeStripeGateway::class);
@@ -50,7 +50,7 @@ test('flag=true でも allowlist 外の環境 (production) では fake に bind 
     $originalEnv = $this->app['env'];
     try {
         $this->app['env'] = 'production';
-        (new FakeExternalsServiceProvider($this->app))->register();
+        (new BughuntFakesServiceProvider($this->app))->register();
     } finally {
         $this->app['env'] = $originalEnv;
     }
@@ -75,7 +75,7 @@ test('boot: env=bughunt.local ∧ fake_llm=true で Prompt fake が有効にな�
     try {
         config(['testing.fake_llm' => true]);
         $this->app['env'] = 'bughunt.local';
-        (new FakeExternalsServiceProvider($this->app))->boot();
+        (new BughuntFakesServiceProvider($this->app))->boot();
 
         expect(Prompt::isFaking())->toBeTrue();
 
@@ -95,7 +95,7 @@ test('boot: env=testing ∧ fake_llm=true では Prompt::$fake に触れない (
     try {
         // env は既定の testing のまま。
         config(['testing.fake_llm' => true]);
-        (new FakeExternalsServiceProvider($this->app))->boot();
+        (new BughuntFakesServiceProvider($this->app))->boot();
 
         expect(Prompt::isFaking())->toBeFalse();
     } finally {
@@ -109,7 +109,7 @@ test('boot: env=local ∧ fake_llm=true では Prompt::$fake に触れない (�
     try {
         config(['testing.fake_llm' => true]);
         $this->app['env'] = 'local';
-        (new FakeExternalsServiceProvider($this->app))->boot();
+        (new BughuntFakesServiceProvider($this->app))->boot();
 
         expect(Prompt::isFaking())->toBeFalse();
     } finally {
@@ -124,7 +124,7 @@ test('boot: fake_llm=false では bughunt.local でも Prompt fake を配線し�
     try {
         config(['testing.fake_llm' => false]);
         $this->app['env'] = 'bughunt.local';
-        (new FakeExternalsServiceProvider($this->app))->boot();
+        (new BughuntFakesServiceProvider($this->app))->boot();
 
         expect(Prompt::isFaking())->toBeFalse();
     } finally {
@@ -142,7 +142,7 @@ test('boot: fake_externals=true でも fake_llm=false なら install しない (
         config(['testing.fake_externals' => true]);
         config(['testing.fake_llm' => false]);
         $this->app['env'] = 'bughunt.local';
-        (new FakeExternalsServiceProvider($this->app))->boot();
+        (new BughuntFakesServiceProvider($this->app))->boot();
 
         expect(Prompt::isFaking())->toBeFalse();
     } finally {

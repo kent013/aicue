@@ -157,7 +157,7 @@ Browser lane では LLM 呼び出しを二層で遮断する (`tests/Pest.php` �
 2. **CannedPromptFake** (`app/Services/AI/Testing/`): `Prompt` 実行を SystemMessage の役割文
    (signature) 単位の決定論 canned response に差し替える (sequence 枯渇しない無限供給)。
    `CannedPromptFakeRegistrar` が `Prompt::installFake()` で beforeEach ごとにインストールする。
-   この canned 機構は bughunt 実行時 (`FakeExternalsServiceProvider::boot`) とも共有される。
+   この canned 機構は bughunt 実行時 (`BughuntFakesServiceProvider::boot`) とも共有される。
 
 さらに `phpunit.browser.xml` が LLM provider API キーをダミー値で `<server force>` する
 (guard が万一無効化された場合の最終防壁。phpunit.xml と同じ 3 プロバイダ)。

@@ -186,7 +186,7 @@ test(
             ApiRequestor::setHttpClient($counting);
             // 実 Cashier クライアントを構築するため API キーが要る (送信は fake client が受ける)。
             config(['cashier.secret' => 'sk_test_external_client_timeout_gate']);
-            // テストレーンの fake 配線 (FakeExternalsServiceProvider) が rebind しうるため、
+            // テストレーンの fake 配線 (BughuntFakesServiceProvider) が rebind しうるため、
             // **実装へ明示的に戻す** (前提が変わっても本テストが無意味にならないようにする)。
             $this->app->bind(AutoRechargeGatewayInterface::class, CashierAutoRechargeGateway::class);
 

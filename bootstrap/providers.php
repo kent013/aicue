@@ -3,8 +3,8 @@
 declare(strict_types=1);
 
 use App\Providers\AppServiceProvider;
+use App\Providers\BughuntFakesServiceProvider;
 use App\Providers\ExternalClientTimeoutServiceProvider;
-use App\Providers\FakeExternalsServiceProvider;
 use App\Providers\Filament\AdminPanelProvider;
 use App\Providers\FortifyServiceProvider;
 use App\Providers\McpPassportServiceProvider;
@@ -28,5 +28,5 @@ return [
     SeoServiceProvider::class,
     // 外部 fake の条件付き rebind (flag 既定 false = no-op)。
     // AppServiceProvider の実装 bind を後勝ちで上書きするため必ず末尾側に置く
-    FakeExternalsServiceProvider::class,
+    BughuntFakesServiceProvider::class,
 ];

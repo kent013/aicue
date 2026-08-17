@@ -12,7 +12,7 @@ use Kent013\PrismPrompt\Prompt;
  * `laravel-prism-prompt` が提供する `Prompt::installFake(PromptFake)` 公開 API を使う。
  * 将来この API が変わった場合も影響範囲はここだけ。
  *
- * Browser lane (tests/Pest.php) と bughunt 実行時 (FakeExternalsServiceProvider::boot) の
+ * Browser lane (tests/Pest.php) と bughunt 実行時 (BughuntFakesServiceProvider::boot) の
  * 両方から共有される (Browser 専用ではない)。
  */
 final class CannedPromptFakeRegistrar

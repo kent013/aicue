@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use App\Providers\FakeExternalsServiceProvider;
+use App\Providers\BughuntFakesServiceProvider;
 use App\Support\FakeStorageGate;
 use Tests\Support\ExternalFakes\FakeClassCatalog;
 use Tests\Support\ExternalFakes\FakeWiringSourceScanner;
@@ -15,7 +15,7 @@ use Tests\Support\ExternalFakes\FakeWiringSourceScanner;
  * 現時点の違反は 0 件 = 「増えないこと」を今固定するのが最安。
  *
  * ★走査候補: 「fake 実装クラス」だけでは足りない。配置例外
- *   (FakeExternalsServiceProvider / FakeStorageGate) を業務コードが参照しても検出できず
+ *   (BughuntFakesServiceProvider / FakeStorageGate) を業務コードが参照しても検出できず
  *   偽グリーンになるため、候補は implementationClasses() ∪ placementExceptions() のキーとする。
  *
  * ★走査根: app/ だけだと routes/ に Testing controller を直書きする、config/ にクラス名を書く、
@@ -32,7 +32,7 @@ const FAKE_REFERENCE_ALLOWED = [
     'app/Support/ExternalFakes/ExternalFakeDeclaration.php',
     // 唯一の配線点。差し替え先は宣言から読むので、ここに現れる偽物系クラスは
     // 配線基盤の 4 件だけである (ExternalFakeWiringInvariantTest の 3-10 が集合で固定する)
-    'app/Providers/FakeExternalsServiceProvider.php',
+    'app/Providers/BughuntFakesServiceProvider.php',
     // fake storage signed route の受け口 (FakeStorageGate 成立時のみ route 登録される)
     'app/Http/Controllers/Testing/PutFakeStorageObjectController.php',
     'app/Http/Controllers/Testing/GetFakeStorageObjectController.php',
@@ -42,7 +42,7 @@ const FAKE_REFERENCE_ALLOWED = [
     // ★実装条件: constructor 引数を持たず、fake は handle() の fail-secure 4 条件を
     //   通過した**後**にのみ app() で遅延解決する。
     'app/Console/Commands/Development/PipelineSmokeCommand.php',
-    // provider 登録点。FakeExternalsServiceProvider (配置例外クラス) を必ず参照する
+    // provider 登録点。BughuntFakesServiceProvider (配置例外クラス) を必ず参照する
     'bootstrap/providers.php',
 ];
 
@@ -60,7 +60,7 @@ test('4-1 配置規約: Fake 命名クラスは Fakes/ か Testing/ 配下にの
 test('4-2 配置例外は 2 件から増えていない', function (): void {
     // 増やすときは placementExceptions() に理由を書いたうえで**ここも触る** (意図的な摩擦)。
     expect(array_keys(FakeClassCatalog::placementExceptions()))->toBe([
-        FakeExternalsServiceProvider::class,
+        BughuntFakesServiceProvider::class,
         FakeStorageGate::class,
     ]);
 });
@@ -76,6 +76,11 @@ test('4-3 本番コードは fake クラスを参照しない', function (): voi
     // 走査器 / 母集団導出が壊れて「空走査で緑」になるのを防ぐ (fail-closed)
     expect($candidates)->not->toBeEmpty()
         ->and($files)->not->toBeEmpty();
+
+    // ★名前の規則 (定義 2) では拾えなくなった配線 provider が、候補集合に必ず残っていること。
+    //   ここが落ちると「本番コードが唯一の配線点を参照しても検出できない」偽グリーンになる。
+    expect($candidates)->toContain(BughuntFakesServiceProvider::class)
+        ->and($candidates)->toContain(FakeStorageGate::class);
 
     $violations = [];
     foreach ($files as $file) {
@@ -107,7 +112,7 @@ test('4-4 参照 allowlist は 6 件から増えていない', function (): void
     expect(FAKE_REFERENCE_ALLOWED)->toHaveCount(6)
         ->and(FAKE_REFERENCE_ALLOWED)->toBe([
             'app/Support/ExternalFakes/ExternalFakeDeclaration.php',
-            'app/Providers/FakeExternalsServiceProvider.php',
+            'app/Providers/BughuntFakesServiceProvider.php',
             'app/Http/Controllers/Testing/PutFakeStorageObjectController.php',
             'app/Http/Controllers/Testing/GetFakeStorageObjectController.php',
             'app/Console/Commands/Development/PipelineSmokeCommand.php',

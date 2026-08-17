@@ -22,7 +22,7 @@ use RuntimeException;
  * record() は executePrism()/executePrismStructured() の fake 分岐で nextResponse() の
  * 直前に必ず呼ばれるため、$this->recorded の最新 entry が「今実行中の Prompt」を指す。
  *
- * Browser lane (tests/Pest.php) と bughunt 実行時 (FakeExternalsServiceProvider::boot) の
+ * Browser lane (tests/Pest.php) と bughunt 実行時 (BughuntFakesServiceProvider::boot) の
  * 両方で共有される (Browser 専用ではない)。
  */
 final class CannedPromptFake extends PromptFake

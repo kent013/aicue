@@ -15,7 +15,7 @@ use Carbon\CarbonImmutable;
 /**
  * StripeGatewayInterface の runtime fake (fake_externals 環境専用)。
  * 契約は FakeTicketCheckoutGateway と同じ「中立帰還」。subscription 状態は変更しない
- * (active subscription の正本は BughuntBillingSeeder)。
+ * (active subscription の正本は BughuntStripeSyncSeeder)。
  *
  * session id は **idempotency key から決定的に導出**する (Stripe の idempotency replay と
  * 同じ収束特性 = 同一 key の再呼び出しで同一 sessionId)。
@@ -45,14 +45,14 @@ final class FakeStripeGateway implements StripeGatewayInterface
         string $idempotencyKey,
     ): SubscriptionSwapOutcome {
         // 中立帰還: 実 Stripe を叩かず、subscription 状態も変えない
-        // (active subscription の正本は BughuntBillingSeeder。反映は webhook が担うが
+        // (active subscription の正本は BughuntStripeSyncSeeder。反映は webhook が担うが
         //  fake 環境では webhook が発火しないため、画面は「反映待ち」までを観測する)。
         return SubscriptionSwapOutcome::Applied;
     }
 
     public function retrieveSubscriptionState(string $stripeSubscriptionId): ?RemoteSubscriptionState
     {
-        // 中立帰還: 契約状態の正本は BughuntBillingSeeder。突き合わせは何も収束させない。
+        // 中立帰還: 契約状態の正本は BughuntStripeSyncSeeder。突き合わせは何も収束させない。
         return null;
     }
 
