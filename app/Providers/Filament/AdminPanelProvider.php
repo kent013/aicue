@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers\Filament;
 
+use App\Filament\Auth\Login;
 use App\Filament\Support\LocalInitialsAvatarProvider;
 use Filament\Auth\MultiFactor\App\AppAuthentication;
 use Filament\Http\Middleware\Authenticate;
@@ -39,7 +40,8 @@ class AdminPanelProvider extends PanelProvider
             ->id('admin')
             ->path('admin')
             ->authGuard('admin')
-            ->login()
+            // 上限到達時に前の試行の入力エラーを残さず、残り秒数の案内を出す独自ログインページ
+            ->login(Login::class)
             ->profile()
             // MFA (TOTP)。運用者アカウントは既定で必須 (config/admin.php)
             ->multiFactorAuthentication([

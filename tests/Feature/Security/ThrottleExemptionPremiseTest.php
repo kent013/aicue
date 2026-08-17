@@ -10,6 +10,7 @@ use Filament\Auth\MultiFactor\App\Actions\RegenerateAppAuthenticationRecoveryCod
 use Filament\Auth\MultiFactor\App\Actions\SetUpAppAuthenticationAction;
 use Filament\Auth\Pages\EditProfile as FilamentEditProfile;
 use Filament\Auth\Pages\Login as FilamentLogin;
+use Filament\Facades\Filament;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
@@ -172,8 +173,16 @@ function throttlePremiseMethodRateLimits(string $class, string $method): bool
 test('default-livewire.update の前提: Filament の credential 操作が component 内で rateLimit を掛けている', function (): void {
     // panel が公開する credential 面 (login / profile / MFA 管理) の**実行メソッド**に
     // rate limit があること。1 つでも消えたら route 側の防御を設計し直す必要がある。
+    //
+    // login は panel が実際に使うクラスを実行時に解決して対象にする (独自ログインページへ
+    // 差し替えても前提が保たれていることを確かめるため。vendor クラス固定だと、独自クラス側で
+    // 上限を外しても緑のままになる)。
+    $loginPage = Filament::getPanel('admin')->getLoginRouteAction();
+    expect($loginPage)->toBeString();
+    expect(class_exists((string) $loginPage))->toBeTrue();
+
     $targets = [
-        [FilamentLogin::class, 'authenticate'],
+        [(string) $loginPage, 'authenticate'],
         [FilamentEditProfile::class, 'save'],
         [SetUpAppAuthenticationAction::class, 'make'],
         [DisableAppAuthenticationAction::class, 'make'],
@@ -186,6 +195,21 @@ test('default-livewire.update の前提: Filament の credential 操作が compo
             .'default-livewire.update の exemption 根拠が崩れているため、route 側の防御を設計し直すこと。',
         );
     }
+
+    // ログインページが独自クラスでも、認証処理そのものは vendor の宣言のままであること。
+    // 上書きされた瞬間に赤くなる = 上限値 (5) と判定順序の複写を検出する。
+    // **保証範囲を誇張しない**: 見ているのは authenticate() の宣言元と本文だけであり、
+    // 独自クラス側が rateLimit() / getRateLimitKey() 等を上書きして上限を骨抜きにする形は
+    // 本検査では拾えない。現在の実装について「同一コンポーネント上で実際に上限へ到達すること」は
+    // tests/Feature/Filament/AdminLoginThrottleDisplayTest.php が別途固定する
+    // (鍵の単位を画面ごとに変えるような改変までは、そちらでも検出できるとは限らない)。
+    expect((new ReflectionMethod((string) $loginPage, 'authenticate'))->getDeclaringClass()->getName())
+        ->toBe(
+            FilamentLogin::class,
+            'ログインページが authenticate() を上書きしています。'
+            .'上限値 (5) と判定順序が vendor から複写されていないか確認し、'
+            .'複写するなら default-livewire.update の免除根拠を設計し直すこと。',
+        );
 
     // negative control: 走査器が「どのメソッドでも true」になっていないこと
     // (常に true を返す検査は deny-by-default を無意味にする)

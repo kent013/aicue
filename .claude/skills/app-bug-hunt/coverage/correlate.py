@@ -21,7 +21,7 @@ findings.jsonl / graph.db(TESTED_BY) を join し、**未カバー worklist** �
   - route 名は graph に無い。route -> graph の join は action(FQCN@method) ->
     controller ファイル相対パス -> graph node の file_path 経由で行う。
     action='Closure' / null は join 不能 = unknown_graph_gap。
-  - pcov 未導入のため本コンポーネントは pcov 非依存 (executed.json は別途記録)。
+  - 本コンポーネントは pcov 非依存 (executed.json は別途記録)。
 
 依存は標準ライブラリのみ。参考スタイル: ledger/findings.schema.json (finding 形)。
 
