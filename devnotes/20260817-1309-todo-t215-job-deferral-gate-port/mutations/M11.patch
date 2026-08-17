@@ -1,0 +1,14 @@
+diff --git a/tests/Feature/Queue/DeferredRetryHorizonTest.php b/tests/Feature/Queue/DeferredRetryHorizonTest.php
+index b28cd58..c89a1b4 100644
+--- a/tests/Feature/Queue/DeferredRetryHorizonTest.php
++++ b/tests/Feature/Queue/DeferredRetryHorizonTest.php
+@@ -119,8 +119,7 @@ function deferredHorizonRunWorker(int $maxTries): void
+     //   「呼び出し 0 件」で落ちる (docblock の `@var` 型注釈はトークン解析の対象外)。
+     //   1 式に直結すれば `app()` 呼び出しへ直接連鎖するチェーンとして検出され、
+     //   読み出し・書き込みを一切行わず driver を解決するだけであることを実測で裏取りできる。
+-    $worker->setCache(app('cache')->driver())
+-        ->runNextJob('database', 'default', new WorkerOptions(maxTries: $maxTries, sleep: 0));
++    $worker->runNextJob('database', 'default', new WorkerOptions(maxTries: $maxTries, sleep: 0));
+ }
+ 
+ /**

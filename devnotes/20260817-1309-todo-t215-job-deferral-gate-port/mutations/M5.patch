@@ -1,0 +1,11 @@
+--- a/tests/Support/Queue/DeferringJobTemplate.php
++++ b/tests/Support/Queue/DeferringJobTemplate.php
+@@ -59,6 +59,8 @@
+      */
+     public int $maxExceptions = 3;
+ 
++    public int $tries = 3;
++
+     /** 期限の地平線 (分)。自ドメインでは設定キーから読むこと (docblock 3.)。 */
+     private const HORIZON_MINUTES = 30;
+ 

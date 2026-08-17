@@ -813,3 +813,26 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
     - **保証しないものの正本は検査の docblock** であり、本書と `docs/architecture.md` には
       写さない (2 か所に書くと必ず食い違う)。運用の説明は
       `docs/architecture.md` §NULL が初期状態を表す列の分類
+18. **退避を正常系に持つジョブの終端方式 (T215 / 家系の裁定 AG-081・AG-081b 標準形 v1)**:
+    キューに載るクラス (`ShouldQueue` 実装の全数。Mailable / Notification を含む) は、
+    `tests/Architecture/JobDeferralTerminationGateTest.php` の全数申告へ
+    `NO_DEFERRAL` か `DEFERS` のどちらかで登録する (deny-by-default。allowlist の口は無い。
+    母集団は既存の正本 `Tests\Support\QueuedJobPopulation` から取る = `docs/template-divergence.md` D25)。
+    - **`NO_DEFERRAL` の申告は信じない**。走査根 (クラス自身 + 祖先 + trait の推移閉包。
+      vendor を含む) に退避マーカーが 0 件であることを E4 が毎回裏取りする。
+      現在 `DEFERS` は **0 件**で、適用対象が無いまま gate が緑であることは裁定 AG-081b の
+      想定どおりである (「0 件だから何も見ていない」わけではないことを E2 / E10 / E11-E16 が毎回示す)。
+    - **`DEFERS` にしたら標準形 v1 が要る** — 絶対時刻の期限 (`retryUntil()`) を持ち、
+      `$tries` / `#[Tries]` / `tries()` を**書かない** (期限があるとワーカーは試行回数を
+      一切参照しないため、書いても効かず誤読しか生まない)。未処理例外は
+      `$maxExceptions` (1 以上) で別に数える。期限の基準時刻は**投入時刻**である。
+      雛形は `tests/Support/Queue/DeferringJobTemplate.php` を `app/Jobs/` へ写して使う。
+    - **退避したジョブの回収まで考える**。回収の入口は `work:recover-stuck` ただ 1 本
+      (ドメイン規約 14)。系列を足すかどうかを必ず判断する。
+    - 契約表 (`tests/Support/Queue/JobDeferralContract.php`) の棚卸しは
+      **Laravel / Carbon を更新したときの PR レビューの義務**である (機械検出できない)。
+    - **保証範囲を誇張しない**: サービスへの委譲 / 動的呼び出し / 自作の job middleware /
+      factory 経由 / 投入サイトでの後付けは**検出できない**。`app/` の外 (vendor が登録する
+      キュークラス) は母集団に入らない。**保証しないものの正本は
+      `docs/architecture.md` §退避を正常系に持つジョブの終端方式**
+      (ここは要約であり、増減はそちらで管理する)。

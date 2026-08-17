@@ -1,0 +1,11 @@
+--- a/tests/Feature/Queue/DeferredRetryHorizonTest.php
++++ b/tests/Feature/Queue/DeferredRetryHorizonTest.php
+@@ -92,7 +92,7 @@
+     QueueFacade::connection('database')->push(new DeferringJobTemplate);
+ 
+     $payload = deferredHorizonJobPayload();
+-    expect($payload['retryUntil'])->toBe($second->copy()->addMinutes(30)->getTimestamp());
++    expect($payload['retryUntil'])->toBe($first->copy()->addMinutes(30)->getTimestamp());
+ });
+ 
+ /**

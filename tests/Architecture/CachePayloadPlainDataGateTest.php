@@ -29,7 +29,8 @@ declare(strict_types=1);
  *     未登録も、実在しない登録も、件数のズレも fail。各 entry は payload の説明・
  *     往復を固定する単体テストのパス (実在検証つき)・30 文字以上の根拠を持つ
  *   - 検査 4-5 (L3 面): **キャッシュ記号に触れているファイル集合**が目録と exact-fit で、
- *     宣言した role (write / no-payload-write / lock-only) が実測と整合する (規則自体も検査 5b で固定)
+ *     宣言した role (write / no-payload-write / lock-only / driver-handoff) が実測と整合する
+ *     (規則自体も検査 5b で固定)
  *   - 検査 6: 実行時 config('cache.serializable_classes') === false、store 単位の上書きなし
  *   - 検査 5b: role 判定規則そのものの正負コントロール (実在ファイルの構成に依存させない)
  *   - 検査 6b: 語彙表の健全性 (4 分類が互いに素 / 除外型が受け手型に混ざっていない)
@@ -180,7 +181,9 @@ const CACHE_PAYLOAD_WRITE_INVENTORY = [
  *
  * role: write = 任意 payload を書く (L2 にも登録が要る) /
  *       no-payload-write = キャッシュに触れるが任意 payload を書く API を呼ばない (読み出し / 削除 / flush 等) /
- *       lock-only = 排他だけ
+ *       lock-only = 排他だけ /
+ *       driver-handoff = 受け手 (driver/store) を解決するだけで、読み出し・書き込み・削除の
+ *       いずれも行わず他のコンポーネントへそのまま渡す (T215: キューワーカーへの cache 注入が該当)
  * ※「read-only」ではなく no-payload-write と呼ぶ。forget / flush を含む実態と名前を一致させるため
  *
  * @var array<string, array{role: string, rationale: string}>
@@ -213,6 +216,10 @@ const CACHE_PAYLOAD_SURFACE_INVENTORY = [
     'tests/Feature/Billing/ReconcileSubscriptionStatusTest.php' => [
         'role' => 'lock-only',
         'rationale' => '突き合わせコマンドの多重起動を再現するため Cache::lock を先取するのみ。payload は書かない',
+    ],
+    'tests/Feature/Queue/DeferredRetryHorizonTest.php' => [
+        'role' => 'driver-handoff',
+        'rationale' => 'Worker::setCache() へ渡すため app(\'cache\')->driver() で driver を解決するだけで、読み出し・書き込み・削除のいずれも行わない。未処理例外の計数は framework 側が整数で行う',
     ],
 ];
 
@@ -765,14 +772,17 @@ function cachePayloadCollectFromSource(string $source, string $relative): array
  *                      (読み出し / 削除 / flush / increment などが該当。
  *                        「read-only」という名前は flush や forget を含む実態と合わないため使わない)
  *   lock-only        = 排他 (`lock` / `restoreLock`) しか使わない
+ *   driver-handoff   = 受け手 (driver/store) を**解決するだけ**で、読み出し・書き込み・削除を
+ *                      一切行わず他のコンポーネントへそのまま渡す (CHAIN 分類のメソッドのみを許す。
+ *                      T215: `Worker::setCache()` へ渡すためだけに `app('cache')->driver()` を呼ぶ形が該当)
  *
  * @param  list<string>  $methods  実測メソッド (全小文字)
  * @return list<string> 違反理由。空なら整合
  */
 function cachePayloadRoleViolations(string $role, array $methods, bool $hasWriteEntry): array
 {
-    if (! in_array($role, ['write', 'no-payload-write', 'lock-only'], true)) {
-        return ["role は write / no-payload-write / lock-only のいずれか (宣言値: {$role})"];
+    if (! in_array($role, ['write', 'no-payload-write', 'lock-only', 'driver-handoff'], true)) {
+        return ["role は write / no-payload-write / lock-only / driver-handoff のいずれか (宣言値: {$role})"];
     }
 
     if ($role === 'write') {
@@ -792,6 +802,18 @@ function cachePayloadRoleViolations(string $role, array $methods, bool $hasWrite
         $extra = array_values(array_diff($methods, ['lock', 'restorelock']));
         if ($extra !== []) {
             $violations[] = 'role=lock-only なのに排他以外のキャッシュ API を呼んでいます: '.implode(', ', $extra);
+        }
+
+        return $violations;
+    }
+
+    if ($role === 'driver-handoff') {
+        // 連鎖 (CHAIN) 分類のメソッドだけを許す。読み出し・書き込み・削除・排他・mock は
+        // 1 件でも現れたら違反 (「解決して渡すだけ」という申告を裏切るため)。
+        $extra = array_values(array_diff($methods, CACHE_PAYLOAD_CHAIN_METHODS));
+        if ($extra !== []) {
+            $violations[] = 'role=driver-handoff なのに解決 (連鎖) 以外のキャッシュ API を呼んでいます: '
+                .implode(', ', $extra);
         }
 
         return $violations;
@@ -987,6 +1009,16 @@ test('検査 5b: role 判定規則そのものの正負コントロール', func
     expect(cachePayloadRoleViolations('no-payload-write', ['lock'], false))->not->toBe([]);
     expect(cachePayloadRoleViolations('no-payload-write', ['put'], false))->not->toBe([]);
     expect(cachePayloadRoleViolations('no-payload-write', ['get'], true))->not->toBe([]);
+
+    // driver-handoff (T215): CHAIN 分類のメソッドだけを許す。読み出し・書き込み・削除・排他が
+    // 1 件でも混ざったら「解決して渡すだけ」という申告を裏切るので違反にする。
+    expect(cachePayloadRoleViolations('driver-handoff', ['driver'], false))->toBe([]);
+    expect(cachePayloadRoleViolations('driver-handoff', ['store', 'driver'], false))->toBe([]);
+    expect(cachePayloadRoleViolations('driver-handoff', [], false))->not->toBe([]);
+    expect(cachePayloadRoleViolations('driver-handoff', ['get'], false))->not->toBe([]);
+    expect(cachePayloadRoleViolations('driver-handoff', ['driver', 'put'], false))->not->toBe([]);
+    expect(cachePayloadRoleViolations('driver-handoff', ['driver', 'lock'], false))->not->toBe([]);
+    expect(cachePayloadRoleViolations('driver-handoff', ['driver'], true))->not->toBe([]);
 
     expect(cachePayloadRoleViolations('unknown-role', ['get'], false))->not->toBe([]);
 });

@@ -1,0 +1,11 @@
+--- a/tests/Support/Queue/DeferringJobTemplate.php
++++ b/tests/Support/Queue/DeferringJobTemplate.php
+@@ -68,7 +68,7 @@
+      */
+     public function retryUntil(): DateTimeInterface
+     {
+-        return now()->addMinutes(self::HORIZON_MINUTES);
++        return now();
+     }
+ 
+     public function handle(): void

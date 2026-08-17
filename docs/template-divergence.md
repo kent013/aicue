@@ -8,7 +8,7 @@
 `template-divergence-ledger` が 2026-08-15 に確定した形) に従う。形式は
 `tests/Architecture/TemplateDivergenceLedgerFormatTest.php` が機械で強制する。
 
-登録エントリ: 23 件
+登録エントリ: 24 件
 
 ## 記録の原則
 
@@ -1386,3 +1386,72 @@ bug-hunt の走行が実際の外部 ID 基盤へ遷移すると、探索が本�
 - 実装: `app/Services/Auth/SocialiteDriverResolver.php` /
   `app/Services/Auth/Fakes/FakeSocialiteDriverResolver.php`
 - 設計: `devnotes/20260811-1736-bughunt-sso-egress/`
+
+---
+
+## D25 退避終端 gate の母集団と目録を静的 gate のファイル内に置く
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `tests/Architecture/JobDeferralTerminationGateTest.php` |
+| 業務要件起因の説明 | キューに載るクラスの母集団を決める実装を `tests/Support/QueuedJobPopulation.php` ただ 1 本へ集約する既存の判断があり、正典の**母集団を数える実装**まで持ち込むと母集団の実装が 2 本になって片方だけ更新される食い違いが復活する。正典が置き場所を `tests/Pest.php` にした理由 (並列実行で他ファイルの関数を参照すると未定義関数になる) は同一ファイル内定義には掛からないため、静的 gate のファイル内へ集約すれば置き場所の制約と母集団の一本化を両立できる |
+| 揃え続ける不変条件と保証機構 | 母集団と全数申告の完全一致を既定拒否で取り、退避を持たないという申告を毎回の走査で裏取りする。同ファイルの E1 から E4 が固定する |
+| 再判定の条件 | 母集団の正本が `QueuedJobPopulation` から移ったとき / 並列実行で同一ファイル内の関数定義が解決されなくなったとき / 移植元が目録の置き場所を変えたとき |
+| 決めた日 | 2026-08-17 |
+| 決めた人 | 開発者 |
+| 根拠 | T215 |
+| 状態 | 恒久 |
+| 見直し期限 | — |
+
+| 観点 | テンプレート | 本アプリ |
+|---|---|---|
+| 母集団と目録の置き場所 | `tests/Pest.php` の 2 関数 | 静的 gate のファイル内の 2 関数 |
+| 母集団の供給元 | `appShouldQueueClasses()` と `appDispatchableVendorJobs()` (後者は移植元でも空) | `Tests\Support\QueuedJobPopulation::shouldQueueClasses()` (既存の唯一の正本) |
+| 守る不変条件 | 母集団と申告の完全一致 と 走査による裏取り | 同じ |
+| 保証機構 | E1 から E4 | 同じ |
+
+### なぜ正当な差分か (logic-driven)
+
+本アプリは「キューに載るクラスの母集団」を決める実装を `Tests\Support\QueuedJobPopulation`
+ただ 1 本へ集約済みである。同クラスの説明が書いているとおり、これは
+`QueuedJobLeaseInventoryTest` と `JobExecutionDedupInventoryTest` が同じ母集団を見ることを
+構造で保証するための集約であり、2 実装に分かれていると片方だけ更新される食い違いが起きる。
+正典の**母集団を数える実装**まで `tests/Pest.php` 版のとおりそのまま持ち込むと、
+母集団を数える実装が本アプリの中に 2 本できる。既に潰した食い違いをわざわざ復活させる
+変更なので採らない。
+
+正典が `tests/Pest.php` を選んだ理由は「並列実行では Architecture テストが別プロセスへ
+振り分けられうるため、他のテストファイルで定義した関数を参照すると未定義関数で落ちる」ことである。
+**この理由は同一ファイル内の定義には掛からない**。本アプリには先例があり、
+`tests/Architecture/JobExecutionDedupInventoryTest.php` は目録関数を自ファイル内で定義して
+並列実行の下で緑になっている。
+
+ここでの「ジョブ」は**キューの payload に載るもの全般**を指す (メールと通知を含む)。
+どれも同じキューに載り同じ試行回数の勘定を受けるので、退避の有無を問う対象としては同格である。
+帰結として、メールや通知に退避する job middleware を付けると本 gate が赤くなる。
+それは誤検出ではなく設計どおりの動作である。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「母集団と全数申告の完全一致を既定拒否で取り、退避を持たないという申告を毎回の走査で裏取りする」
+
+- E1 が母集団と目録の集合一致を両方向で固定する (登録漏れも stale も落ちる)
+- E2 が母集団 0 件 (検出器の故障) を落とす
+- E3 が申告の値域と理由の非空を固定する
+- E4 が申告を信じず、走査根 (クラス自身と祖先と trait の推移閉包) に退避マーカーが
+  0 件であることを毎回裏取りする
+
+### 保証しないもの
+
+- **`app/` の外 (vendor が登録するキュークラス) は母集団に入らない**。移植元の拡張点
+  `appDispatchableVendorJobs()` も空配列を返すので実効は同じだが、
+  「vendor のキュークラスまで見ている」とは読めない
+- 検出器そのものの限界 (委譲・動的呼び出し・自作 job middleware・factory 経由・
+  投入サイトでの後付け) は移植元と同じで、限界ごと移植している。
+  正本は `docs/architecture.md` §退避を正常系に持つジョブの終端方式
+
+### 関連
+
+- 実装: `tests/Architecture/JobDeferralTerminationGateTest.php` /
+  `tests/Support/Queue/JobDeferralScanner.php` / `tests/Support/Queue/JobDeferralContract.php`
+- 設計: `devnotes/20260817-1309-todo-t215-job-deferral-gate-port/`
