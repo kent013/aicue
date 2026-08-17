@@ -341,8 +341,8 @@ test('検査 5: 正のコントロール (4 入口それぞれが点灯する)',
 test('検査 7: フロント側に台帳 kind の対応型が無い (増やすなら TS 同期テストが要る)', function (): void {
     // C2b で `TicketLedgerKind` に `carry_forward` を足した。**現時点で `resources/js` 側に
     // 台帳 kind の対応型も表示分岐も存在しない**ため TS 同期テストは不要である
-    // (ManualEnumTsSyncInvariantTest / NotificationTypeTsSyncInvariantTest のような
-    //  literal union が 1 つも無い)。この「不在」を deny-by-default で固定する —
+    // (enum-ts-sync.test.ts の目録が見るような literal union が 1 つも無い)。
+    // この「不在」を deny-by-default で固定する —
     // フロントに台帳 kind を持ち込むなら、同時に enum ⇔ TS union の同期テストを足させる。
     $hits = [];
     $base = resource_path('js');
@@ -367,7 +367,8 @@ test('検査 7: フロント側に台帳 kind の対応型が無い (増やす�
 
     expect($hits)->toBe([],
         'フロントに台帳 kind の対応型 / 表示分岐が現れました。PHP enum ⇔ TS union の '
-        .'同期テスト (Tests\Support\TsUnionValues) を同時に追加してください。'
+        .'同期 gate (tests/js/architecture/enum-ts-sync.test.ts の目録) へ '
+        .'1 行足してください。'
         .PHP_EOL.implode(PHP_EOL, $hits));
 
     // 空振り検知: 走査が実際にファイルへ届いている

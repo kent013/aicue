@@ -9,7 +9,7 @@ namespace App\Enums;
  *
  * **表示時点のヒントであり権威ではない** (削除時にサーバがロック下で再評価する)。
  * 値集合は resources/js/types/account.ts の TS union と同期する
- * (AccountDeletionBlockerActionTsSyncInvariantTest が固定)。
+ * (tests/js/architecture/enum-ts-sync.test.ts の目録が固定)。
  */
 enum AccountDeletionBlockerAction: string
 {

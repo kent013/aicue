@@ -10,7 +10,7 @@ namespace App\Enums\Notification;
  * - DB (notifications.type) には本 enum の value を格納する (クラス名を DB に置かない。
  *   AppNotification::databaseType() 経由。InAppNotificationTypeInvariantTest が強制)
  * - TS 側 resources/js/types/notification.ts の literal union と値集合を一致させる
- *   (NotificationTypeTsSyncInvariantTest が固定)
+ *   (tests/js/architecture/enum-ts-sync.test.ts の目録が固定)
  */
 enum NotificationType: string
 {

@@ -2,7 +2,7 @@
  * アプリ内通知 (通知センター) の Inertia props 型。
  * PHP 側 App\Enums\Notification\NotificationType /
  * App\DataTransferObjects\Notification\NotificationListItemData::toArray() と対で保守する
- * (値集合の一致は tests/Architecture/NotificationTypeTsSyncInvariantTest が固定する)。
+ * (値集合の一致は tests/js/architecture/enum-ts-sync.test.ts の目録が固定する)。
  */
 
 /** PHP: App\Enums\Notification\NotificationType と対 (値集合を一致させる) */

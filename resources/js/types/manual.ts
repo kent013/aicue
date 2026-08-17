@@ -3,8 +3,8 @@
  * PHP 側の typed array PHPDoc (ProjectController::manualRows 等) と対で保守する。
  * status は PHP enum App\Enums\Manual\VideoManualStatus と値集合を一致させる
  * (literal union で UI 分岐漏れを検出する)。**乖離検知の正本は
- * tests/Architecture/ManualEnumTsSyncInvariantTest.php** (VideoManualStatus /
- * ManualProgress を含む値集合同期テスト) であり、手動確認ではない。
+ * tests/js/architecture/enum-ts-sync.test.ts の目録** (VideoManualStatus /
+ * ManualProgress を含む値集合同期 gate) であり、手動確認ではない。
  */
 
 import type { BadgeTone } from "@/components/atoms/Badge.types";
@@ -297,7 +297,7 @@ export interface InsufficientTicketsBody {
     message: string;
 }
 
-/** PHP: App\Enums\Manual\RenderKind と対 (値集合同期テストあり = ManualEnumTsSyncInvariantTest) */
+/** PHP: App\Enums\Manual\RenderKind と対 (値集合同期は enum-ts-sync.test.ts の目録) */
 export type RenderKind = "render" | "preview";
 
 /** PHP: App\Enums\Manual\RenderStep と対 (値集合同期テストあり) */

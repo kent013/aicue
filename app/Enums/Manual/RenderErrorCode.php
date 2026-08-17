@@ -7,7 +7,8 @@ namespace App\Enums\Manual;
 /**
  * レンダ失敗種別の型付き判別子 (v1 は 3 値で閉じる。概念設計 Round 2/3)。
  * フロントの CTA 分岐は自由文 error でなくこの code で行う (文言変更で壊れない)。
- * TS 側 types/manual.ts の RenderErrorCode union と対で保守する (ManualEnumTsSyncInvariantTest)。
+ * TS 側 types/manual.ts の RenderErrorCode union と対で保守する
+ * (tests/js/architecture/enum-ts-sync.test.ts の目録が固定)。
  */
 enum RenderErrorCode: string
 {

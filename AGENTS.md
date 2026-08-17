@@ -936,3 +936,16 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
       キュークラス) は母集団に入らない。**保証しないものの正本は
       `docs/architecture.md` §退避を正常系に持つジョブの終端方式**
       (ここは要約であり、増減はそちらで管理する)。
+19. **PHP 列挙 ⇔ TypeScript 値域の同期の登録 (T218 / 家系の裁定 AG-099 前半)**:
+    PHP の文字列付き列挙の値を TS の型別名で受ける箇所を作ったら、
+    `tests/js/architecture/enum-ts-sync.test.ts` の目録へ 1 行足し、件数の pin も 1 増やす。
+    **個別の同期テストのファイルを増やさない** (増殖を止めるのが本 gate の目的)。
+    - 受理する形は**型別名の宣言**で、解決した型が**文字列リテラル型だけ**であること
+      (別名参照・`keyof typeof`・有限のテンプレートリテラル型は解決されるので受理する)。
+      PHP 側は深さ 0 の `enum X: string` がちょうど 1 つで、本体直下の case が
+      `case Name = '値';` の 1 行に一致すること
+    - **正本のレーンは `pnpm test`** (CI の frontend job) である。
+      `composer test` だけでは値集合の同期は検証されない
+    - **保証しないものの正本は `docs/architecture.md` §PHP 列挙と TypeScript 値域の同期**
+      であり、本書には写さない (2 か所に書くと必ず食い違う)。
+      全数走査と逆走査を持たないことは `docs/template-divergence.md` **D29**

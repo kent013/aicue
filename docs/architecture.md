@@ -958,8 +958,8 @@ catch を足す必要が出たら、観測目録へ移すか免除の分類を�
     `billing.index`、`manageBilling` なしなら `onboarding.billing-required` へ
     **サーバ (`OnboardingController::show` の離脱ガード) が捌く**。認可をフロントで
     二重実装しないし、押せないボタンも作らない (禁止事項 8)。
-  - 値集合の同期は `OnboardingBillingStateTsSyncInvariantTest` (PHP enum ⇔
-    `resources/js/types/billing.ts` の `BillingStateValue`)、分岐の網羅は
+  - 値集合の同期は `tests/js/architecture/enum-ts-sync.test.ts` の目録 (PHP enum ⇔
+    `resources/js/types/billing.ts` の `BillingStateValue`。§PHP 列挙と TypeScript 値域の同期)、分岐の網羅は
     **`resources/js/types/dashboard.ts` の `BILLING_CALLOUTS`** が持つ
     `satisfies Record<BillingStateValue, …>` (= `pnpm typecheck`)、描画は vitest と
     Browser lane が担う。**3 層は別物でどれか 1 つでは足りない**。
@@ -1298,7 +1298,8 @@ webhook は落ちうる (Stripe 自身が遅延・欠落を明記している)�
 - **type 規約**: `notifications.type` には `NotificationType` enum の value を格納する
   (クラス名を DB に置かない。`InAppNotificationTypeInvariantTest` が
   `app/Notifications/InApp/*` の全派生に deny-by-default で強制。
-  TS 側 `types/notification.ts` との値集合同期は `NotificationTypeTsSyncInvariantTest`)
+  TS 側 `types/notification.ts` との値集合同期は
+  `tests/js/architecture/enum-ts-sync.test.ts` の目録。§PHP 列挙と TypeScript 値域の同期)
 - **発火**: すべて `NotificationCenterService` 経由・既存 exactly-once 遷移の **commit 後**
   (解析/レンダ terminal 遷移の bool ゲート / 招待作成後 / reserve の残高閾値クロス検知)。
   terminal tx 内に通知 insert を入れない。通知例外は catch + report でジョブ本流を壊さない
@@ -2791,3 +2792,58 @@ env も置かない** (切れる防御は防御ではない / 環境ごとに緩
   沈黙する。
 - **認可コードの交換時に所属を確認してはいない**。閉じているのは「失効の時点で未交換だった
   コードを撃つ」ところまでである (後続の候補)。
+
+## PHP 列挙と TypeScript 値域の同期 (T218 / 家系の裁定 AG-099 前半)
+
+サーバの語彙 (PHP の文字列付き列挙) を画面が受けるとき、TS 側は型別名の値域として
+同じ集合を持つ。片方だけ増えると画面の分岐に「どこにも当たらない値」が生まれ、
+**無言の描画漏れ**になる。これを 1 本の汎用 gate
+(`tests/js/architecture/enum-ts-sync.test.ts`) で固定する。
+
+- **登録の仕方**: 目録 `ENUM_TS_MIRRORS` へ 1 行 (PHP のパス / TS のパス / 型別名 / 理由) を足し、
+  件数の pin `EXPECTED_MIRROR_COUNT` を 1 増やす。**個別の検査ファイルは増やさない**
+  (裁定 AG-099 が止めたかったのは検査の増殖である)。
+  `note` に最小文字数は課さない — 本目録は**免除の申告ではなく登録**であり、
+  「検査から外す」判断ではないため。
+- **受理する形 (TS 側)**: 対象ファイルのトップレベルに、その名前の型別名の宣言が
+  ちょうど 1 つあり、**解決・正規化された後の型**が文字列リテラル型だけの union
+  (または単独の文字列リテラル型) であること。別名参照・import 越しの参照・
+  `keyof typeof`・`Lowercase<…>`・具体化された条件型・有限のテンプレートリテラル型は
+  すべて受理する (型検査器が畳んだ後を見るため)。TypeScript の `enum` の値は受理しない
+  (本リポジトリに 1 件も無く、文字列リテラル型と同じ契約ではない。必要になってから広げる)。
+- **受理する形 (PHP 側)**: 深さ 0 の `enum <名前>: string` がちょうど 1 つあり、
+  その名前がファイル名の語幹と一致し、本体の直下の `case` が
+  `case Name = '値';` / `case Name = "値";` の 1 行に一致すること。
+  定数式・逆斜線・変数の埋め込み・複数行の case は例外にする。
+- **program は tsconfig が含む TS 全体で作る**。目録のファイルだけを起点にすると、
+  `include` だけで参加する宣言 (周囲宣言 / `declare global` / モジュールの拡張) が載らず
+  **本番の型と違う型世界**で判定してしまう (偽陰性)。速さのために起点を縮めない。
+  縮める改変が入ったら `enum-ts-sync-extractor.test.ts` の T25 が赤くなる。
+- **抽出器が静かに間違えないこと**は `tests/js/architecture/enum-ts-sync-extractor.test.ts` の
+  負例行列 (TS 27 件 / PHP 40 件) が固定する。見本の置き方は非対称で、
+  TS は**ファイル** (型検査器に実ファイルが要る。`tsconfig.json` の `exclude` で
+  `pnpm typecheck` の対象から外す)、PHP は**テスト内の文字列** (`.php` として置くと
+  strict_types 宣言 gate / 禁止文の字句走査 / Pint / PHPStan の母集団に入るため)。
+
+### 保証しないもの (誇張しない)
+
+- **登録していない写しは 1 件も検査していない**。全数走査による既定拒否の分類と
+  逆走査 2 規則は裁定 AG-099 の後半の担当で、本 gate には無い
+  (`docs/template-divergence.md` **D29**)。現在意図的に登録していないのは
+  `types/manual.ts::SelectableTakeStatus` (部分集合の意図) /
+  `types/dashboard.ts::DashboardJobStatus` (`JobStatus` の真部分集合) /
+  `types/capture.ts::CaptureProgress` ほか画面側だけの語彙 (対応する PHP 列挙が無い) である。
+- **値の集合だけを見る**。表示ラベル・並び順・意味は見ない。
+- **部分集合の関係は表現できない** (完全一致だけ)。
+- `.svelte` の中の宣言・定数配列 (`as const` の配列)・`switch` の case ラベルは読まない。
+- TS 側は**解決・正規化された後の型**で判断するので、ソース上の重複した union
+  (`"a" | "a"`) や union の中の `never` は区別できない。**「同じ値が 2 回あると落ちる」とは
+  主張しない**。PHP 側の backing の値の重複だけは抽出器が明示的に落とす
+  (旧テストが配列比較で持っていた保証の引き継ぎ)。
+- PHP 側はファイル全体の構文の妥当性・名前空間・オートロード・完全修飾名を検証しない
+  (それらは `composer test` と PHPStan の担当)。PHP が受理する構文をすべて受理する
+  わけでもない (閉じタグ・バッククォート・ヒアドキュメントは拒否する)。
+- **型検査そのものは見ない** (`pnpm typecheck` の担当。意味の診断は読まない)。
+- **レーンの非対称**: 値集合の同期は `pnpm test` (CI の frontend job) でだけ走る。
+  PHP としての妥当性は backend job (`composer test` / PHPStan)。
+  **`composer test` だけでは値集合の同期は検証されない**。
