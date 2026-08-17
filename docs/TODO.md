@@ -36,6 +36,7 @@
 | T221 | デザイントークン検査を正典 t1 へ追従 (tokens.test.ts / design-system-docs.test.ts 新設) | test | 正典t1のトークン検査2本を新設 | Medium | standalone | [設計](devnotes/20260818-0248-design-token-t1-tests/) | 2026-08-18 03:35 |
 | T222 | flash 通知の SoT クラス FlashNotificationRelay と PHP/TS 両側 drift gate を導入し、跳ね返りの reflash() を relayTo() へ置換する (inertia-integration の正典追従 / AG-057) | backend | flash通知中継SoTとdrift gate新設 | Medium | standalone | [設計](devnotes/20260818-0250-flash-notification-relay-sot/) | 2026-08-18 03:38 |
 | T223 | bug-hunt の申し送り文書 spec-ledger.md を生成物化し、経緯を裁定登録の context へ移す (家系の裁定 2026-08-05 の条件解消) | test | 申し送り文書を生成物化しcontextへ移行 | Medium | standalone | [設計](devnotes/20260817-1755-bughunt-handover-to-ledger/) | 2026-08-18 03:39 |
+| T224 | bug-hunt 裁定 A-001 の監視対象に toast.ts を足す (再オープン条件と watch_globs の食い違いを閉じる) | test | A-001を supersede し watch_globs を是正 | Medium | standalone | [設計](devnotes/20260817-1755-bughunt-handover-to-ledger/) | 2026-08-18 03:51 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
