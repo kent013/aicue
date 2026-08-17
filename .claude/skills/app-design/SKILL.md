@@ -55,7 +55,7 @@ argument-hint: "<topic> [conceptual_design_path]  例: /app-design permission-re
 
 - **全ての成果物は `devnotes/{YYYYMMDD-HHMM}-{topic}/` に保存**する
 - **Codexとの合議は「全CriticalとWarningが解消されるまで」繰り返す**（最大5ラウンド）
-- 概念設計レビュー・詳細設計レビューとも **`gpt-5.5`** を使用（reasoning effort で使い分ける）
+- 概念設計レビューは **`gpt-5.6-terra`**（議論・概念設計）、詳細設計レビューは **`gpt-5.6-sol`**（コードの分析・技術設計）を使用する（割当の正本は `app-codex-vscode`）
 
 ---
 
@@ -110,7 +110,7 @@ devnotes/{YYYYMMDD-HHMM}-{topic}/
 
 `app-codex-review` スキルの**セッションモード**に従い、プロンプトファイルを作成してCodexに概念設計のレビューを依頼する。
 
-**model**: `gpt-5.5`
+**model**: `gpt-5.6-terra`
 **reasoning**: `medium`
 **label**: `conceptual-review`
 
@@ -195,7 +195,7 @@ Codexのレビューを精査し:
 
 **詳細設計書には必ず以下のセクションを含める**:
 
-```markdown
+````markdown
 # 詳細設計: {topic}
 
 ## 使命・制約（絶対遵守）
@@ -269,7 +269,7 @@ Codexのレビューを精査し:
 | 推奨モード | incremental / standalone |
 | 判断根拠 | [なぜそのモードか] |
 | 競合リスク | [他施策との干渉可能性] |
-```
+````
 
 保存先:
 ```
@@ -280,7 +280,7 @@ devnotes/{dir}/detailed-design.md
 
 `app-codex-review` スキルの**セッションモード**に従い、プロンプトファイルを作成してCodexにレビューを依頼する。
 
-**model**: `gpt-5.5`
+**model**: `gpt-5.6-sol`
 **reasoning**: `high`
 **label**: `design-review`
 

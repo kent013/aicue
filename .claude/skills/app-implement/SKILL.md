@@ -181,7 +181,7 @@ cd {repo_root}/.claude/worktrees/tasks/{todo_id} && \
 
 `app-codex-review` スキルの**セッションモード**に従い、プロンプトファイルを作成してCodexに依頼する。
 
-**model**: `gpt-5.5`
+**model**: `gpt-5.6-sol`
 **reasoning**: `high`
 **label**: `impl-review`
 
