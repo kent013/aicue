@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "block_count": 1,
+  "provenance": {
+    "source_file": ".claude/skills/app-bug-hunt/spec-ledger.md",
+    "source_commit": "c5a514da1d15e1b95f9c26accab381a0b676358d",
+    "source_lines": "81-112",
+    "source_block_headings": [
+      "#### F-1-02 — 動画マニュアル削除後に「成功 flash が出ない」ように見えた"
+    ],
+    "migrated_at": "2026-08-17",
+    "machine_projection_sha256": {
+      "A-001": "e873bfdd2e4a90400788577ddbf90db51c853b5583be3a0f0ad03b1cd5ca39b6",
+      "A-002": "1116927afad77292d301cb2cca57d0370b23cfd9ac616f94e751af796b9b4ad9",
+      "A-003": "a96092441ecc66054c11c2eecf846cc4949f6ecfc1a634105e3a59e0431b7fae"
+    },
+    "note": "移行元はこの変更で生成物へ置き換わる。以後この台帳と再照合することはできないので、内容の同一性の確認は移行 commit で 1 度だけ人が行った。machine_projection_sha256 は移行時点の機械項目を pin したもので、以後の黙った書き換えを検出する。"
+  },
+  "entries": [
+    {
+      "key": "A-001",
+      "key_kind": "adjudication_id",
+      "target": "adjudications",
+      "field_minimums": {
+        "narrative": 437,
+        "reopen_condition": 230
+      },
+      "required_fragments": [
+        {
+          "field": "narrative",
+          "value": "feedback-probe.js"
+        },
+        {
+          "field": "narrative",
+          "value": "T095"
+        },
+        {
+          "field": "reopen_condition",
+          "value": "AUTO_DISMISS_MS"
+        },
+        {
+          "field": "reopen_condition",
+          "value": "installed_now"
+        }
+      ]
+    }
+  ]
+}

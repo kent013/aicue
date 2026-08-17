@@ -68,3 +68,14 @@ Codex の実装レビュー (Round 1) で受けた Critical / Warning への対�
 - D27 の比較表と「保証しないもの」を上記に合わせて直した
 
 それ以外 (施策 1・2・4・6) は設計のとおりである。
+
+## main 取り込み時の採番のずれ (2026-08-17)
+
+本ブランチの作業中に main 側でも逸脱の登録が 1 件増え、**同じ D27 を両方が名乗った**。
+main へ取り込むとき、先に main へ入っていた側 (コード到達の対象外の宣言) を D27 のまま残し、
+**本タスクの登録を D28 へ採番し直した**。件数の pin は
+`docs/template-divergence.md` の見出し行と
+`tests/Architecture/TemplateDivergenceLedgerFormatTest.php` の
+`TEMPLATE_DIVERGENCE_ENTRY_COUNT` の 2 か所とも **27** になる。
+本書のこれより上の記述と各レビュー記録に残る「D27」は、
+本タスクの登録を指しているときは **D28 と読み替えること**。

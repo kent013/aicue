@@ -9,8 +9,8 @@ findings.jsonl を検証し、success/kill 判定に使う KPI を出力する�
     python3 validate_findings.py findings.jsonl --json
     python3 validate_findings.py findings.jsonl --strict   # 必須欠損が閾値超で exit 1
 
-設計根拠: .claude/skills/app-bug-hunt/SKILL.md / coverage-audit.md
-  (最小スキーマ / success-kill 基準)。app bug-hunt は直列 :8010 (shard 0) /
+設計根拠: .claude/skills/app-bug-hunt/SKILL.md (最小スキーマ / success-kill 基準) と
+  coverage-audit.md (ブラウザ走行では検査できない面の棚卸し)。app bug-hunt は直列 :8010 (shard 0) /
   並列 :8011..8014 (shard 1..4) の専用 bughunt 環境で走る。
 """
 from __future__ import annotations

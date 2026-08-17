@@ -7,6 +7,7 @@ namespace App\Http\Middleware;
 use App\DataTransferObjects\Account\AccountDeletionStateDto;
 use App\Enums\Account\AccountDeletionFreezeAllowance;
 use App\Models\User;
+use App\Support\Http\FlashNotificationRelay;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -64,8 +65,10 @@ final class EnsureAccountNotPendingDeletion
             abort(Response::HTTP_CONFLICT, self::FROZEN_MESSAGE);
         }
 
-        // 直前の flash (他画面の success/error) を着地先まで保つ。理由の flash は積まない。
-        $request->session()->reflash();
+        // 直前の通知 (他画面の success/error) を着地先まで保つ。理由の flash は積まない。
+        // **通知だけ**を延命する (reflash() にしない): API キー平文のような
+        // 1 度きり表示の内部状態まで持ち越さないため。
+        FlashNotificationRelay::relayTo($request->session());
 
         return redirect()->route('settings');
     }

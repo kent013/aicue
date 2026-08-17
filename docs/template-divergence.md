@@ -8,7 +8,7 @@
 `template-divergence-ledger` が 2026-08-15 に確定した形) に従う。形式は
 `tests/Architecture/TemplateDivergenceLedgerFormatTest.php` が機械で強制する。
 
-登録エントリ: 26 件
+登録エントリ: 27 件
 
 ## 記録の原則
 
@@ -1507,7 +1507,78 @@ bug-hunt の走行が実際の外部 ID 基盤へ遷移すると、探索が本�
 - 設計: `devnotes/20260815-1111-passkey-config-hardening/` /
   `devnotes/20260817-1309-todo-t216-passkey-hardening-completion/`
 
-## D27 デザイントークンの生成 CSS 検査を、値の写しを持たず実 app.css も通す形で実装する
+---
+
+## D27 コード到達の対象外の宣言を、route 名の接頭辞を持たないコード軸だけの形にする
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `.claude/skills/app-bug-hunt/coverage/out-of-scope.json` / `.claude/skills/app-bug-hunt/coverage/out_of_scope.py` / `.claude/skills/app-bug-hunt/coverage-audit.md` |
+| 業務要件起因の説明 | 探索の分母は route 単位の注釈が正本であり、コード到達の未到達は `app/` のパス単位でしか説明できないため、対象外の宣言を軸で 2 本に分ける |
+| 揃え続ける不変条件と保証機構 | 対象外は理由と代替検証と実在する参照を伴う。増減は承認済み範囲のスナップショットとの完全一致で必ずレビューに出る。`BughuntCoverageToolSelfTest` から `test_out_of_scope` が実走する |
+| 再判定の条件 | 家系の正典が route 名接頭辞を必須にしたとき / 注釈側へ代替検証の欄が入ったとき / 集計器が宣言を読む形になったとき |
+| 決めた日 | 2026-08-17 |
+| 決めた人 | 開発者 |
+| 根拠 | T220 |
+| 状態 | 恒久 |
+| 見直し期限 | — |
+
+家系の参照実装は対象外の宣言に **route 名の接頭辞**を持たせ、目録のドリフト検査をそこから
+導出している。本アプリは route 単位の判断を `inventory/annotations.toml` (区分 外) が持つため、
+宣言を**コード到達の軸だけ**に絞る。
+
+| 観点 | 家系の参照実装 | 本アプリ |
+|---|---|---|
+| 宣言が持つ軸 | route 名の接頭辞と `app/` のパスの両方 | `app/` のパスだけ |
+| 目録のドリフト検査の対象外 | 宣言から導出する | 注釈 TOML の区分 外 が正本 (D20) |
+| 代替検証の実在 | 散文で書く | `verification_refs` として機械が実在を見る |
+
+### なぜ正当な差分か (logic-driven)
+
+1. **route 単位の対象外は既に別の正本を持っている**。本アプリの目録は注釈 TOML から生成する形
+   (D20) で、区分 外 の行は 30 文字以上の理由付きで目録に見える。宣言にも route 名接頭辞を
+   置くと、同じ判断が 2 か所に載って必ず食い違う。
+2. **導出先が無い**。参照実装が接頭辞を持つのは、検査スクリプトが宣言から選択の正規表現を
+   導出するためである。本アプリの検査は生成器側で判定するので、導出する相手がいない。
+   使われない出力を作らない (思考原則 2)。
+3. **代替検証は実在を機械で見るほうが腐りにくい**。散文で「別のテストが見ている」と書くと、
+   その参照先が消えても気付けない。パスとして宣言すれば、少なくとも参照先が丸ごと消えたことは
+   検出できる。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「対象外は理由と代替検証と実在する参照を伴い、増減は必ずレビューに出る」
+
+| 不変条件 | 担い手 |
+|---|---|
+| 理由と代替検証が中身のある文であること (30 文字以上・無内容な値でない) | `test_out_of_scope` (必須キー / 型 / 文の中身) |
+| 代替検証が実在し、追跡下にあり、自己言及でないこと | 同上 (実在・追跡・循環参照) |
+| 対象パスが実在し、幹や包含や正規形の迂回で無制限に広がらないこと | 同上 (幹の禁止・antichain・層 1 の正規形) |
+| 対象外の静かな増減が起きないこと | 同上 (承認済み範囲のスナップショットとの完全一致) |
+| 宣言不正が fail-closed であること (標準出力を汚さない) | 同上 (CLI の終了コード契約を実プロセスで検査) |
+| これらが `composer test` から実走すること | `tests/Architecture/BughuntCoverageToolSelfTest.php` |
+
+### 保証しないもの
+
+- **集計器との自動照合は持たない**。`merge_pcov.py` は宣言を読まないので、
+  まだ通れていないものの一覧と宣言の突合は人が読んで行う。
+- 機械が見るのは宣言の形式と参照先の実在までで、代替検証がその面を本当に守っているか
+  (テストの意味的十分性) は人のレビューの担当である。
+- 古い断定の再混入を見る走査 (`test_naming_no_stale`) の射程はスキル配下の `.md` / `.py` で、
+  `app/` のコメントは見ない。
+
+### 関連
+
+- 実装: `.claude/skills/app-bug-hunt/coverage/out-of-scope.json` /
+  `.claude/skills/app-bug-hunt/coverage/out_of_scope.py` /
+  `.claude/skills/app-bug-hunt/coverage-audit.md`
+- gate: `tests/Architecture/BughuntCoverageToolSelfTest.php` /
+  `.claude/skills/app-bug-hunt/coverage/test_out_of_scope.py`
+- 設計: `devnotes/20260818-0243-bughunt-coverage-audit-doc/`
+
+---
+
+## D28 デザイントークンの生成 CSS 検査を、値の写しを持たず実 app.css も通す形で実装する
 
 | 行 | 内容 |
 |---|---|

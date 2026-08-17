@@ -19,8 +19,12 @@ export interface FlashPayload {
 /** 最後に消費した visitKey (モジュール変数で保持し、同一 visit の再評価を抑止する) */
 let lastVisitKey: string | null = null;
 
-/** flash の各キーと toast type の対応 (キーが入っていれば対応する type で addToast する) */
-const FLASH_KEYS = ["success", "error", "info", "warning"] as const;
+/**
+ * flash の各キーと toast type の対応 (キーが入っていれば対応する type で addToast する)。
+ * キー集合の SoT は PHP 側 FlashNotificationRelay::NOTIFICATION_KEYS。一致は
+ * tests/js/architecture/flash-keys-sync.test.ts が固定する (export はその参照用で挙動不変)。
+ */
+export const FLASH_KEYS = ["success", "error", "info", "warning"] as const;
 
 /**
  * flash payload を toast に変換して enqueue する。

@@ -3,7 +3,9 @@
 2 群のパターンを検知する。
 
 1. STALE_PATTERNS — 旧 Stage 付番 (Stage1/Stage3) と旧出力ファイル名
-   (coverage-stage1.md / coverage-stage3.md)。対象は skill 配下の本文 (.md / .py) 全部。
+   (coverage-stage1.md / coverage-stage3.md)、および計測基盤についての古い断定
+   (pcov がこの環境に無い / 実測が取れない、と言い切る文面)。
+   対象は skill 配下の本文 (.md / .py) 全部。
 2. IMPLEMENTATION_ONLY_PATTERNS — 旧 fail-open の文言 (「--executed 省略時」「未実行 candidate」)
    と旧語彙 (skipped_blocked_count / status 値としての skipped)。
    **対象から test_*.py を除外する** — 旧値を拒否する負の対照テストは、入力 fixture として
@@ -22,11 +24,17 @@ from pathlib import Path
 
 SKILL_ROOT = Path(__file__).resolve().parent.parent  # .claude/skills/app-bug-hunt/
 
-# 旧用語パターン: 単語境界付き Stage1/Stage3 (Stage 1 / Stage 3 表記も) と旧出力ファイル名。
+# 旧用語パターン: 単語境界付き Stage1/Stage3 (Stage 1 / Stage 3 表記も) と旧出力ファイル名、
+# および計測基盤について事実でなくなった古い断定 3 つ。
+# 古い断定は「新しい正しい文面を完全一致で pin する」のではなく **再混入だけ**を検出する
+# (正しい文面を pin すると言い回しを直すたびに赤くなり、腐りやすい側になる)。
 STALE_PATTERNS = [
     re.compile(r"Stage\s?1\b"),
     re.compile(r"Stage\s?3\b"),
     re.compile(r"coverage-stage[13]\.md"),
+    re.compile(r"pcov は本環境未導入"),
+    re.compile(r"本環境/CI/本番には pcov が入っていない"),
+    re.compile(r"実 coverage は取得できない"),
 ]
 
 # 旧 fail-open の文言と旧語彙。実装ファイル (と全 .md) にだけ禁じる。
@@ -135,6 +143,14 @@ class GateItselfTest(unittest.TestCase):
         self._write("test_something.py", "# Stage1 の名残\n")
         stale, _ = scan(self.root)
         self.assertEqual(len(stale), 1, stale)
+
+    def test_detects_stale_measurement_premise(self) -> None:
+        # 計測基盤についての古い断定 3 つ (再混入だけを検出する側の負の対照)。
+        self._write("doc.md", "pcov は本環境未導入。\n")
+        self._write("impl.py", "# 本環境/CI/本番には pcov が入っていない\n")
+        self._write("other.md", "よって実 coverage は取得できない。\n")
+        stale, _ = scan(self.root)
+        self.assertEqual(len(stale), 3, stale)
 
     def test_excluded_name_is_skipped(self) -> None:
         # 自ファイル除外 (EXCLUDE_NAMES) が効いていること (依存を暗黙にしない)。

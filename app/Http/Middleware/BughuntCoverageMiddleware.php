@@ -13,9 +13,13 @@ use Throwable;
 /**
  * コード到達カバレッジ (bug-hunt): app/ の実行された行/未到達行を bug-hunt 走行中のみ収集する観測器。
  *
- * 設計の honest 前提: 本環境/CI/本番には pcov が入っていない。よって本 middleware は
- * env (BUGHUNT_PCOV) + function_exists('\pcov\start') の **二重 guard** を通らない限り完全 no-op で、
- * pcov 未導入環境に読み込まれても安全 (handle は $next をそのまま返すだけ)。
+ * 設計の honest 前提: 開発コンテナ (docker/Dockerfile) では pcov を使えるが、収集を有効にするのは
+ * bug-hunt が serve を起動するときだけである。CI と本番でコード到達の収集を有効にする構成は
+ * 本リポジトリに存在せず (CI の workflow に pcov の導入記述は無く、デプロイ定義そのものが無い)、
+ * リポジトリの外にある本番構成がどうなっているかは分からない。よって拡張の有無に関わらず、
+ * 設定 config('bughunt.pcov.enabled') (値の出所は env の BUGHUNT_PCOV) と
+ * function_exists('\pcov\start') の **二重 guard** は必要であり、
+ * どちらかが偽なら本 middleware は完全 no-op で安全である (handle は $next をそのまま返すだけ)。
  *
  * 役割分担:
  *  - handle:    per-request で pcov を初期化 (clear → start)。gate 内のみ。
@@ -33,8 +37,8 @@ use Throwable;
 final class BughuntCoverageMiddleware
 {
     /**
-     * env + function_exists の二重 guard。どちらか偽なら handle/terminate は完全 no-op。
-     * pcov 未導入 (= 本環境/CI/本番) では常に false を返す。
+     * 設定 + function_exists の二重 guard。どちらか偽なら handle/terminate は完全 no-op。
+     * 拡張が読み込まれていない実行環境では function_exists 側が常に false を返す。
      */
     public static function enabled(): bool
     {
