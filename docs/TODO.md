@@ -35,6 +35,7 @@
 | T220 | bug-hunt 網羅監査文書と「コード到達の対象外」宣言の新設 (家系の裁定 2026-08-05 の条件解消) | test | 対象外宣言(JSON)と監査文書を新設 | Medium | standalone | [設計](devnotes/20260818-0243-bughunt-coverage-audit-doc/) | 2026-08-18 03:32 |
 | T221 | デザイントークン検査を正典 t1 へ追従 (tokens.test.ts / design-system-docs.test.ts 新設) | test | 正典t1のトークン検査2本を新設 | Medium | standalone | [設計](devnotes/20260818-0248-design-token-t1-tests/) | 2026-08-18 03:35 |
 | T222 | flash 通知の SoT クラス FlashNotificationRelay と PHP/TS 両側 drift gate を導入し、跳ね返りの reflash() を relayTo() へ置換する (inertia-integration の正典追従 / AG-057) | backend | flash通知中継SoTとdrift gate新設 | Medium | standalone | [設計](devnotes/20260818-0250-flash-notification-relay-sot/) | 2026-08-18 03:38 |
+| T223 | bug-hunt の申し送り文書 spec-ledger.md を生成物化し、経緯を裁定登録の context へ移す (家系の裁定 2026-08-05 の条件解消) | test | 申し送り文書を生成物化しcontextへ移行 | Medium | standalone | [設計](devnotes/20260817-1755-bughunt-handover-to-ledger/) | 2026-08-18 03:39 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
