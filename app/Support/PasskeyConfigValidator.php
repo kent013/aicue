@@ -19,6 +19,17 @@ use RuntimeException;
  * あるいは APP_KEY ローテートで登録済みパスキーが全件無効になる)。
  * production では起動時に落として、デプロイ前に気づけるようにする。
  *
+ * ⚠ **受理と検証の役割分担**: 「正規形へ寄せる」のは宣言側 (config/fortify.php) の責務であり、
+ * 正規形の定義は `PasskeyOriginCanonicalizer` ただ 1 か所にある。本 validator は
+ * **正規形からの逸脱を落とす**側に徹する (判定基準を 2 か所に持たない)。
+ * したがって運用者が env に書いた末尾スラッシュや既定 port は**宣言側で吸収され**、
+ * ここへ非正規形が届くのは「宣言側を通らない経路が設定した」場合だけである。
+ * その値は webauthn-lib の厳密比較に一致せず**全手続きを無言で失敗させる**ので、
+ * 黙って受理せず起動時に落とす (裁定 2026-08-04 / aicue:T216)。
+ *
+ * ⚠ **例外文に設定の生値を載せない**。載せると配備ログへ設定値が焼き付くため、
+ * **何番目の値か**と**環境変数名**だけを示す (運用者は自分の .env を見れば特定できる)。
+ *
  * ⚠ 本 validator は **意図的にデプロイ時の破壊的変更**である
  * (TRUSTED_PROXIES と同性質)。`PASSKEYS_USER_HANDLE_SECRET` を宣言せずに
  * production を起動すると fail-fast する。既にパスキーが登録済みの環境では
@@ -37,6 +48,8 @@ use RuntimeException;
  * PasskeyConfigValidatorTest に**既知の限界として明示的なテストで記録する**。
  * production の身元の識別子・接続元は **DNS 名のみ**を対象とする
  * (IPv4 / IPv6 リテラルと単一ラベルは reject する = WebAuthn の relying party id にできない)。
+ * **非 ASCII ホストは受理しない** — 国際化ドメインの punycode 変換は行わず運用者に
+ * punycode で書かせる (変換を実装すると、変換結果が正しいことを誰も検査できない層が増える)。
  */
 final class PasskeyConfigValidator
 {
@@ -52,7 +65,7 @@ final class PasskeyConfigValidator
     /**
      * @param  string  $relyingPartyId  config 通過後の身元の識別子 (host のみ)
      * @param  list<string>  $allowedOrigins  config 通過後の許可する接続元 (空要素除去済み)
-     * @param  list<string>  $rawAllowedOrigins  フィルタ前の接続元列 (trim・小文字化済み、空要素を保持)
+     * @param  list<string>  $rawAllowedOrigins  フィルタ前の接続元列 (正規化済み、空要素を保持)
      * @param  bool  $userHandleSecretDeclared  導出鍵が専用 env で宣言されたか
      * @param  string  $userHandleSecret  解決後の導出鍵
      *
@@ -75,27 +88,27 @@ final class PasskeyConfigValidator
         }
 
         // 2. 身元の識別子は production で受け付ける dotted DNS 名でなければならない。
-        //    IP リテラル / localhost / 単一ラベルは WebAuthn の relying party id にできない。
+        //    IP リテラル / localhost / 単一ラベル / 非 ASCII は WebAuthn の relying party id にできない。
         //    (public suffix かどうかはここでは見ない = PSL を持たない。docblock の限界を参照)
         if (! $this->isDnsName($relyingPartyId) || ! str_contains($relyingPartyId, '.')) {
-            throw new RuntimeException(sprintf(
-                'Passkey relying party id "%s" is not an accepted production DNS name. '
-                .'It must be a dotted DNS name (e.g. app.example.com), not an IP address, '
-                .'"localhost" or a single label. '
-                .'(Public suffixes such as "co.uk" are not rejected here: this check has no Public Suffix List.)',
-                $relyingPartyId,
-            ));
+            throw new RuntimeException(
+                'Passkey relying party id is not an accepted production DNS name. '
+                .'Set PASSKEYS_RELYING_PARTY_ID to a dotted DNS name (the host part of APP_URL); '
+                .'IP addresses, "localhost", single labels and non-ASCII names (use punycode) are rejected. '
+                .'(Public suffixes are not rejected here: this check has no Public Suffix List.) '
+                .'The offending value is not printed here on purpose.'
+            );
         }
 
         // 3. 接続元の宣言に空要素がある = 設定の書き損じ (末尾カンマ / 連続カンマ)。
         //    config 段で落ちた事実を黙って正規化せず、起動時に表面化させる。
-        foreach ($rawAllowedOrigins as $raw) {
+        foreach ($rawAllowedOrigins as $index => $raw) {
             if (trim($raw) === '') {
-                throw new RuntimeException(
-                    'PASSKEYS_ALLOWED_ORIGINS contains an empty entry '
-                    .'(a stray or trailing comma). List each origin exactly once as '
-                    .'"https://host[:port]".'
-                );
+                throw new RuntimeException(sprintf(
+                    'PASSKEYS_ALLOWED_ORIGINS entry #%d is empty (a stray or trailing comma). '
+                    .'List each origin exactly once as "https://host[:port]".',
+                    $index + 1,
+                ));
             }
         }
 
@@ -107,19 +120,23 @@ final class PasskeyConfigValidator
             );
         }
 
-        foreach ($allowedOrigins as $origin) {
+        foreach ($allowedOrigins as $index => $origin) {
+            // 例外文には**位置だけ**を出す (生の設定値は出さない)。
+            $position = $index + 1;
+
             // 5. 書式。scheme は**小文字 https のみ** (production の WebAuthn は TLS 必須)。
-            //    path / query / fragment / userinfo / 末尾スラッシュを弾く。
-            //    ★大文字を通さないのは意図的である: 宣言側 (config/fortify.php) が小文字へ
-            //      正規化するので、ここに大文字が届くのは「別経路が正規化せずに設定した」場合だけ。
-            //      webauthn-lib は strict 比較なので、その値は**全手続きを無言で失敗させる**。
-            //      黙って受理せず起動時に落とす (運用者が env へ書く大文字は config が吸収する)。
-            if (preg_match('#^https://([a-z0-9.-]+)(?::(\d{1,5}))?$#', $origin, $m) !== 1) {
+            //    path / query / fragment / userinfo / 末尾スラッシュ / 非 ASCII ホストを弾く。
+            //    ★ここに非正規形が届くのは「宣言側 (config/fortify.php) を通らない経路が
+            //      設定した」場合だけである (docblock の役割分担を参照)。
+            if (preg_match('#^https://([a-z0-9.\-]+)(?::(\d{1,5}))?$#', $origin, $m) !== 1) {
                 throw new RuntimeException(sprintf(
-                    'Passkey allowed origin "%s" is invalid. '
-                    .'Each origin must be "https://dns-name[:port]" with no path, query or trailing slash. '
-                    .'Plain http, IPv4/IPv6 literals and bracketed hosts are not accepted in production.',
-                    $origin,
+                    'Passkey allowed origin #%d (PASSKEYS_ALLOWED_ORIGINS) is invalid. '
+                    .'Each origin must be "https://dns-name[:port]" with no path, query, userinfo '
+                    .'or trailing slash. Plain http, IPv4/IPv6 literals, bracketed hosts and '
+                    .'non-ASCII hosts (use punycode) are not accepted in production. '
+                    .'The offending value is not printed here on purpose '
+                    .'(it would be baked into deploy logs).',
+                    $position,
                 ));
             }
 
@@ -128,16 +145,30 @@ final class PasskeyConfigValidator
 
             if (! $this->isDnsName($host)) {
                 throw new RuntimeException(sprintf(
-                    'Passkey allowed origin "%s" has an invalid host. '
-                    .'Each label must be 1-63 alphanumeric/hyphen characters and must not start or end with a hyphen.',
-                    $origin,
+                    'Passkey allowed origin #%d (PASSKEYS_ALLOWED_ORIGINS) has an invalid host. '
+                    .'Each label must be 1-63 alphanumeric/hyphen characters and must not start '
+                    .'or end with a hyphen.',
+                    $position,
                 ));
             }
 
             if ($port !== '' && ((int) $port < 1 || (int) $port > 65535)) {
                 throw new RuntimeException(sprintf(
-                    'Passkey allowed origin "%s" has an out-of-range port.',
-                    $origin,
+                    'Passkey allowed origin #%d (PASSKEYS_ALLOWED_ORIGINS) has an out-of-range port.',
+                    $position,
+                ));
+            }
+
+            // 5b. 正規形からの逸脱 (既定 port の明示など)。ブラウザは既定 port を申告しないため、
+            //     `:443` と書かれた設定は厳密比較に一致せず**全手続きが無言で失敗する**。
+            //     正規形の定義は PasskeyOriginCanonicalizer ただ 1 か所に置き、ここでは
+            //     「宣言側と同じ器に掛けて変化しないこと」だけを見る (判定基準を割らない)。
+            if (PasskeyOriginCanonicalizer::canonicalize($origin) !== $origin) {
+                throw new RuntimeException(sprintf(
+                    'Passkey allowed origin #%d (PASSKEYS_ALLOWED_ORIGINS) is not in canonical form. '
+                    .'Do not declare the default port (":443"); browsers never send it, so the '
+                    .'strict comparison in webauthn-lib fails for every ceremony.',
+                    $position,
                 ));
             }
 
@@ -145,11 +176,11 @@ final class PasskeyConfigValidator
             //    ことを要求する。ここが食い違うと**全ての手続きが失敗する** (登録も検証も)。
             if ($host !== $relyingPartyId && ! str_ends_with($host, '.'.$relyingPartyId)) {
                 throw new RuntimeException(sprintf(
-                    'Passkey allowed origin "%s" does not belong to the relying party id "%s". '
-                    .'The origin host must equal the relying party id or be a subdomain of it, '
-                    .'otherwise every passkey ceremony fails.',
-                    $origin,
-                    $relyingPartyId,
+                    'Passkey allowed origin #%d (PASSKEYS_ALLOWED_ORIGINS) does not belong to the '
+                    .'configured relying party id. The origin host must equal the relying party id '
+                    .'or be a subdomain of it, otherwise every passkey ceremony fails. '
+                    .'Neither value is printed here on purpose.',
+                    $position,
                 ));
             }
         }
@@ -188,6 +219,9 @@ final class PasskeyConfigValidator
      * ここに大文字が届くのは別経路が未正規化のまま設定した場合で、その値は
      * webauthn-lib の strict 比較に一致せず**全手続きを無言で失敗させる**。
      *
+     * **非 ASCII を受理しない**のは punycode 変換を実装しない方針の帰結である
+     * (ラベルの字形を `[a-z0-9-]` に限るので、非 ASCII のバイト列はここで落ちる)。
+     *
      * **末尾ラベルに英字を 1 文字以上要求する**のは、`192.168.001.001` のような
      * 「filter_var では IP と認められないが実質 IP アドレスの書き損じ」を弾くため
      * (全数字の TLD は存在しない)。punycode (`xn--p1ai`) は英字を含むので通る。
@@ -210,7 +244,7 @@ final class PasskeyConfigValidator
                 return false;   // 空ラベル = 連続ドット / 先頭ドット / 末尾ドット
             }
             if (preg_match('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/', $label) !== 1) {
-                return false;   // ハイフン開始 / ハイフン終了 / 大文字 / 不正文字
+                return false;   // ハイフン開始 / ハイフン終了 / 大文字 / 非 ASCII / 不正文字
             }
         }
 

@@ -8,7 +8,7 @@
 `template-divergence-ledger` が 2026-08-15 に確定した形) に従う。形式は
 `tests/Architecture/TemplateDivergenceLedgerFormatTest.php` が機械で強制する。
 
-登録エントリ: 24 件
+登録エントリ: 25 件
 
 ## 記録の原則
 
@@ -1455,3 +1455,54 @@ bug-hunt の走行が実際の外部 ID 基盤へ遷移すると、探索が本�
 - 実装: `tests/Architecture/JobDeferralTerminationGateTest.php` /
   `tests/Support/Queue/JobDeferralScanner.php` / `tests/Support/Queue/JobDeferralContract.php`
 - 設計: `devnotes/20260817-1309-todo-t215-job-deferral-gate-port/`
+
+---
+
+## D26 パスキー設定の検査を「設定の評価時」ではなく「本番起動時の関門」で行う
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `app/Support/PasskeyConfigValidator.php` / `app/Support/PasskeyOriginCanonicalizer.php` |
+| 業務要件起因の説明 | 撮影 PWA の主要ログイン導線がパスキーであり、設定の評価時に例外を投げる正典の形では開発環境とテストレーンまで起動不能にできる。本アプリは受け入れホストと接続元の信頼設定で「本番起動時に落とす」関門を先に確立しており、パスキーもそこへ相乗りする |
+| 揃え続ける不変条件と保証機構 | 正規形の定義は 1 か所 (`PasskeyOriginCanonicalizer`) で、宣言側は正規形へ寄せ、検証側は正規形からの逸脱を落とす。本番で書式・相互整合・導出鍵の宣言が不正なら起動しない (`ProductionEnvGuardTest` / `PasskeyConfigValidatorTest` / `PasskeyOriginCanonicalizerTest` / `PasskeyOriginDeclarationTest`) |
+| 再判定の条件 | 正典が検査の置き場所を変えたとき、または本番以外でも設定事故を早期に検出したい要求が出たとき |
+| 決めた日 | 2026-08-15 |
+| 決めた人 | 開発者 |
+| 根拠 | devnotes/20260815-1111-passkey-config-hardening/ |
+| 状態 | 恒久 |
+| 見直し期限 | — |
+
+| 観点 | テンプレート | 本アプリ |
+|---|---|---|
+| 設定が正規形でなかったときの落とし方 | 設定の評価時にその場で例外を投げる | 本番起動時の関門 (`ProductionEnvGuard`) で落とす |
+| 正規形へ寄せる場所 | 設定の宣言時 | 設定の宣言時 (ここは正典と同じ) |
+
+### なぜ正当な差分か (logic-driven)
+
+設定ファイルは**すべての環境で評価される**。評価時に例外を投げる形にすると、
+開発環境とテストレーンまで起動不能にできる。撮影 PWA の主要ログイン導線がパスキーである以上、
+設定事故を本番前に止める必要はあるが、その代償として開発が止まる形は取れない。
+本アプリは接続元の信頼設定 (TRUSTED_PROXIES) と受け入れホストで
+「本番起動時に落とす」関門を先に確立しており、パスキーもそこへ相乗りするほうが
+落とし方の置き場所が 1 つで済む。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「正規形の定義は 1 か所にあり、宣言側は正規形へ寄せ、検証側は正規形からの逸脱を落とす」
+
+- 正規形の定義は `PasskeyOriginCanonicalizer` ただ 1 つで、宣言側と検証側の両方が参照する
+- 本番で書式・相互整合・導出鍵の宣言が不正なら起動しない (`ProductionEnvGuardTest`)
+- 宣言経路が正規形へ寄せることは宣言経路そのものの再評価で固定する
+  (`PasskeyOriginDeclarationTest`)
+
+### 保証しないもの
+
+- 検査が走るのは `Features::passkeys()` が有効な**本番起動時だけ**である
+  (キルスイッチを切った環境には設定を要求しない)
+- 開発環境・テストレーンでは設定事故が起動時には表面化しない (これがこの逸脱の代償である)
+
+### 関連
+
+- 実装: `app/Support/PasskeyConfigValidator.php` / `app/Support/PasskeyOriginCanonicalizer.php`
+- 設計: `devnotes/20260815-1111-passkey-config-hardening/` /
+  `devnotes/20260817-1309-todo-t216-passkey-hardening-completion/`

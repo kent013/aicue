@@ -302,7 +302,8 @@ test('接続元の宣言に空要素があれば violation (末尾カンマの�
     config(['fortify.passkeys.raw_allowed_origins' => ['https://app.example.com', '']]);
     $errors = (new ProductionEnvGuard)->violations();
     expect($errors)->toHaveCount(1);
-    expect($errors[0])->toContain('empty entry');
+    // 例外文は位置 (1 始まり) で指す。設定の生値は載せない (T216 施策 B)。
+    expect($errors[0])->toContain('entry #2 is empty');
 });
 
 test('passkeys を無効化すると不正設定でも violation は出ない (キルスイッチ)', function (): void {

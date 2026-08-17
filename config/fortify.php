@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Support\PasskeyOriginCanonicalizer;
 use Laravel\Fortify\Features;
 
 /*
@@ -31,29 +32,38 @@ $appUrlScheme = is_array($appUrl) && is_string($appUrl['scheme'] ?? null) ? strt
 $appUrlHost = is_array($appUrl) && is_string($appUrl['host'] ?? null) ? strtolower($appUrl['host']) : '';
 $appUrlPort = is_array($appUrl) && is_int($appUrl['port'] ?? null) ? ':'.$appUrl['port'] : '';
 
-// APP_URL の origin (scheme://host[:port])。path / query は落とす。
-$derivedOrigin = ($appUrlScheme !== '' && $appUrlHost !== '')
-    ? $appUrlScheme.'://'.$appUrlHost.$appUrlPort
-    : '';
+// APP_URL の origin (scheme://host[:port])。path / query は落とし、正規形へ寄せる。
+$derivedOrigin = PasskeyOriginCanonicalizer::canonicalize(
+    ($appUrlScheme !== '' && $appUrlHost !== '')
+        ? $appUrlScheme.'://'.$appUrlHost.$appUrlPort
+        : ''
+);
 
+// ⚠ 身元の識別子 (relying party id) は**正規化器へ通さない**。
+//    これは scheme も port も持たない host 単独の識別子であり、パスキーはこの値に
+//    束縛されるため、書き換える処理を増やすと**登録済みパスキーが全件使えなくなる**
+//    方向の事故を作る。前後空白の除去と小文字化だけに留める。
 $declaredRelyingPartyIdValue = env('PASSKEYS_RELYING_PARTY_ID');
 $declaredRelyingPartyId = is_string($declaredRelyingPartyIdValue) ? strtolower(trim($declaredRelyingPartyIdValue)) : '';
 
 $declaredOriginsValue = env('PASSKEYS_ALLOWED_ORIGINS');
-$declaredOrigins = is_string($declaredOriginsValue) ? trim($declaredOriginsValue) : '';
 
-// 宣言があれば CSV を trim + **小文字化**して保持する (空要素は落とさない)。
-// ★小文字化は load-bearing である。webauthn-lib の照合は
+// 宣言があれば CSV を**正規形へ寄せて**保持する (空要素は落とさない)。
+// ★正規化は load-bearing である。webauthn-lib の照合は
 //   `in_array($normalizedOrigin, $this->fullOrigins, true)` = **strict な文字列比較**で
 //   (vendor/web-auth/webauthn-lib/src/CeremonyStep/CheckAllowedOrigins.php 実測)、
-//   ブラウザは常に小文字の origin を申告する。`HTTPS://App.Example.com` と書かれた設定は
-//   一致せず**全ての手続きが無言で失敗する**ため、宣言の時点で小文字へ正規化する
-//   (scheme と host は RFC 3986 上 case-insensitive なので、正規化は意味を変えない)。
+//   ブラウザは常に小文字かつ既定 port なしの origin を申告する。
+//   `HTTPS://App.Example.com` / `https://app.example.com:443` / 末尾スラッシュ付きの
+//   設定は一致せず**全ての手続きが無言で失敗する**ため、宣言の時点で正規形へ寄せる。
+// 正規形の定義は App\Support\PasskeyOriginCanonicalizer ただ 1 か所であり、
+// 本番起動時の検査 (App\Support\PasskeyConfigValidator) も同じ器で「正規形か」を見る
+// (判定基準を 2 か所に持たない)。
 // 宣言が無い / 空文字なら APP_URL からの導出 1 件に倒す
 // (env ファイルにキーだけ残す運用を壊さないため、空文字は「未宣言」と同じ扱い)。
-$rawAllowedOrigins = $declaredOrigins !== ''
-    ? array_map(static fn (string $v): string => strtolower(trim($v)), explode(',', $declaredOrigins))
-    : [$derivedOrigin];
+$rawAllowedOrigins = PasskeyOriginCanonicalizer::declaredList(
+    is_string($declaredOriginsValue) ? $declaredOriginsValue : null,
+    $derivedOrigin,
+);
 
 // ⚠ **値そのものは trim しない**。「既にパスキーがある環境は現行 APP_KEY の値を
 //    そのまま宣言すれば維持できる」という運用契約を守るため
@@ -279,7 +289,7 @@ return [
         )),
 
         /*
-        | フィルタ前の接続元列 (trim・小文字化済み。**空要素を保持する**)。
+        | フィルタ前の接続元列 (正規形へ寄せ済み。**空要素を保持する**)。
         | ここでの「生」は「env の原文」ではなく「空要素を除去する前」の意味である。config 段で落ちた空要素を
         | 起動時 fail-fast で表面化させるために PasskeyConfigValidator が読む
         | (trustedproxy.raw_proxies と同じ役割)。**Fortify は本キーを読まない**
