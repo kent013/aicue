@@ -53,3 +53,38 @@ export function designRamp(name: string): Record<string, string> {
     }
     return props;
 }
+
+/**
+ * frontmatter の**最上位の節名**を宣言順で返す。
+ *
+ * 「どの節がどの検査の担当か」を既定拒否で宣言するための入力
+ * (tests/js/styles/inventory.ts の FRONTMATTER_SECTION_OWNERS)。
+ * 入れ子の子キー (typography.display 等) は含めない — 担当の宣言は節の粒度で行う。
+ *
+ * 保証範囲: 行頭から始まるキーだけを最上位として拾う。frontmatter の書式が変わったときは
+ * 抽出結果が変わり、担当宣言との集合一致で気付ける**ことが多い**が、
+ * 別の最上位らしい文字列を拾う形の誤解析まで防げるわけではない。
+ */
+export function designFrontmatterSections(): readonly string[] {
+    const sections: string[] = [];
+    for (const m of frontmatter.matchAll(/^([a-zA-Z][a-zA-Z0-9-]*):/gm)) {
+        sections.push(m[1]);
+    }
+    return sections;
+}
+
+/**
+ * frontmatter `typography:` の**子キー** (ramp 名) を宣言順で返す。
+ *
+ * TYPOGRAPHY_RAMPS (検査側の母集団) と集合一致させるための入力。
+ * これが無いと、DESIGN.md に ramp を足しても検査側の固定配列に入らず見逃す。
+ */
+export function designTypographyNames(): readonly string[] {
+    const section = frontmatter.match(/^typography:\n((?: {4}\S[^\n]*\n| {8}\S[^\n]*\n)+)/m);
+    if (!section) throw new Error("DESIGN.md typography section not found");
+    const names: string[] = [];
+    for (const m of section[1].matchAll(/^ {4}([a-zA-Z][a-zA-Z0-9-]*):$/gm)) {
+        names.push(m[1]);
+    }
+    return names;
+}
