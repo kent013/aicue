@@ -8,6 +8,7 @@ use App\Enums\SecurityEventType;
 use App\Models\User;
 use App\Notifications\EmailChangedSecurityNotification;
 use App\Services\Security\SecurityEventRecorder;
+use App\Support\EmailHash;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
@@ -57,6 +58,15 @@ class UpdateUserProfileInformation implements UpdatesUserProfileInformation
 
         $oldEmail = $user->email;
 
+        // 監査 metadata 用の鍵つきハッシュは**保存の前**に算出する。EmailHash は
+        // config('app.key') が文字列であることを要求するため、前提が崩れているなら
+        // 不可逆な状態変更 (アドレスの書き換え・確認済みの解除・旧アドレスへの通知) が
+        // 起きる前に落ちるほうが安全である。
+        $auditMetadata = [
+            'old_email_hash' => EmailHash::compute($oldEmail),
+            'new_email_hash' => EmailHash::compute($email),
+        ];
+
         $user->forceFill([
             'name' => $name,
             'email' => $email,
@@ -66,8 +76,14 @@ class UpdateUserProfileInformation implements UpdatesUserProfileInformation
         // 監査証跡。SecurityEventType::EmailChanged は enum に存在しながら記録経路が
         // 無かった (T108 S7 の SecurityEventCoverageTest が deny-by-default で検出)。
         // 通知 (検知導線) と監査ログ (事後追跡) は同じ事象の両輪なので同じ場所で記録する。
-        // 平文 email は metadata に載せない (PII は CipherSweet 管理の users 側に閉じる)。
-        $this->recorder->record(SecurityEventType::EmailChanged, $user);
+        //
+        // metadata には**生アドレスと鍵なしの変換値は載せない** (家系の裁定 AG-195)。
+        // 載せる 2 値は HMAC-SHA256 (鍵は app.key) で、鍵を持たない者には乱数、
+        // 鍵保持者でも復元はできず、手元の候補アドレスとの一致確認にだけ使える。
+        // 乗っ取り調査で「どのアドレスからどのアドレスへ変わったか」を追うための値である
+        // (users.email は上書きされるため、旧アドレスは他のどこにも残らない)。
+        // **観測専用**である。この 2 値で分岐する処理は 1 つも作らない。
+        $this->recorder->record(SecurityEventType::EmailChanged, $user, $auditMetadata);
 
         // 旧アドレスへの on-demand セキュリティ通知 (アカウントを持たない宛先にも送れる経路)
         Notification::route('mail', $oldEmail)
