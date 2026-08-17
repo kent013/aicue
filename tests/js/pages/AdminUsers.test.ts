@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
 import Users from "@/pages/Admin/Users.svelte";
+import { formatDateTime } from "@/lib/date-format";
 import type { InvitationRow, MemberRow } from "@/types/admin";
 
 // router.patch をモックして visit options (第3引数) を捕捉し、page は errors を
@@ -55,6 +56,7 @@ const membersFixture: MemberRow[] = [
         roleLabel: "管理者（オーナー）",
         twoFactorStatus: "enabled",
         isSelf: true,
+        lastLoginAt: "2026-05-04T10:08:00+09:00",
     },
     {
         id: 2,
@@ -64,6 +66,7 @@ const membersFixture: MemberRow[] = [
         roleLabel: "編集者",
         twoFactorStatus: "enabled",
         isSelf: false,
+        lastLoginAt: "2026-05-01T09:30:00+09:00",
     },
     {
         // F-14 (モバイル横スクロール) の bug-hunt 実測の最悪幅構成を再現する行:
@@ -76,6 +79,8 @@ const membersFixture: MemberRow[] = [
         roleLabel: "未割当",
         twoFactorStatus: "enabled",
         isSelf: false,
+        // 記録が無い行 (「記録なし」表示の対象)
+        lastLoginAt: null,
     },
     {
         id: 4,
@@ -85,6 +90,7 @@ const membersFixture: MemberRow[] = [
         roleLabel: "撮影者",
         twoFactorStatus: "disabled",
         isSelf: false,
+        lastLoginAt: "2026-04-20T18:00:00+09:00",
     },
 ];
 
@@ -118,6 +124,27 @@ describe("Admin/Users", () => {
         expect(screen.getByText("invited@example.com")).toBeInTheDocument();
         expect(screen.getByLabelText("メールアドレス")).toBeInTheDocument();
         expect(screen.getByTestId("invite-submit")).toBeInTheDocument();
+    });
+
+    it("最終ログインの記録がある行は日時を表示する", () => {
+        render(Users, { props: baseProps });
+
+        // 期待値は fixture を同じ formatter に通して作る (Vitest の実行環境 TZ に依存させない)
+        const expected = formatDateTime(membersFixture[0].lastLoginAt, "記録なし");
+        expect(screen.getByTestId("member-last-login-1")).toHaveTextContent(
+            `最終ログイン ${expected}`,
+        );
+        expect(expected).not.toBe("記録なし");
+    });
+
+    it("最終ログインの記録が無い行は「記録なし」を表示し「未ログイン」とは書かない", () => {
+        render(Users, { props: baseProps });
+
+        // id=3 は lastLoginAt null の行
+        expect(screen.getByTestId("member-last-login-3")).toHaveTextContent("最終ログイン 記録なし");
+        // 「一度も入っていない」と断定する語彙への退行を検出する
+        // (導出元 security_audit_events は保持期間が未確定で、将来 purge されうるため)
+        expect(screen.queryByText(/未ログイン/)).toBeNull();
     });
 
     it("owner 行と自分の行にはロール select を出さずラベル表示する", () => {
@@ -184,6 +211,7 @@ describe("Admin/Users", () => {
                         roleLabel: "管理者（オーナー）",
                         twoFactorStatus: "enabled",
                         isSelf: true,
+                        lastLoginAt: "2026-05-04T10:08:00+09:00",
                     },
                     {
                         id: 2,
@@ -193,6 +221,7 @@ describe("Admin/Users", () => {
                         roleLabel: "編集者",
                         twoFactorStatus: "enabled",
                         isSelf: false,
+                        lastLoginAt: "2026-05-01T09:30:00+09:00",
                     },
                     {
                         id: 5,
@@ -202,6 +231,7 @@ describe("Admin/Users", () => {
                         roleLabel: "編集者",
                         twoFactorStatus: "pending",
                         isSelf: false,
+                        lastLoginAt: null,
                     },
                 ] satisfies MemberRow[],
             },
@@ -235,6 +265,7 @@ describe("Admin/Users", () => {
                         roleLabel: "管理者",
                         twoFactorStatus: "enabled",
                         isSelf: true,
+                        lastLoginAt: "2026-05-04T10:08:00+09:00",
                     },
                     {
                         id: 2,
@@ -244,6 +275,7 @@ describe("Admin/Users", () => {
                         roleLabel: "管理者",
                         twoFactorStatus: "enabled",
                         isSelf: false,
+                        lastLoginAt: "2026-05-01T09:30:00+09:00",
                     },
                     {
                         id: 3,
@@ -253,6 +285,7 @@ describe("Admin/Users", () => {
                         roleLabel: "撮影者",
                         twoFactorStatus: "enabled",
                         isSelf: false,
+                        lastLoginAt: null,
                     },
                 ] satisfies MemberRow[],
             },

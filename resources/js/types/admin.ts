@@ -17,6 +17,12 @@ export interface MemberRow {
     roleLabel: string;
     twoFactorStatus: "disabled" | "pending" | "enabled";
     isSelf: boolean;
+    /**
+     * 最終ログイン日時 (ISO8601、オフセット付き)。記録が無ければ null。
+     * 出所は security_audit_events の login 行 (users の列ではない)。
+     * null は「一度も入っていない」と「記録が残っていない」を区別しない。
+     */
+    lastLoginAt: string | null;
 }
 
 /**

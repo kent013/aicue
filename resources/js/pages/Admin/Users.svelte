@@ -17,6 +17,7 @@
     import AppLayout from "@/components/templates/AppLayout.svelte";
     import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
+    import { formatDateTime } from "@/lib/date-format";
     import { withRecentAuth, type RecentAuthStatus } from "@/lib/recent-auth";
     import type { SharedProps } from "@/lib/shared-props";
     import type { ConsoleRole, InvitationRow, MemberRow } from "@/types/admin";
@@ -307,6 +308,15 @@
                                     </div>
                                     <p class="truncate text-caption text-text-secondary">
                                         {member.email}
+                                    </p>
+                                    <!-- 最終ログイン。値の無い行は「記録なし」(「未ログイン」と断定しない —
+                                         導出元の security_audit_events は保持期間が未確定で、将来 purge されうるため)。
+                                         表示は閲覧者の端末タイムゾーンで行う (date-format.ts の Intl 経由) -->
+                                    <p
+                                        class="truncate text-caption text-text-secondary"
+                                        data-testid={`member-last-login-${member.id}`}
+                                    >
+                                        最終ログイン {formatDateTime(member.lastLoginAt, "記録なし")}
                                     </p>
                                 </div>
                                 <div class="flex flex-wrap items-center gap-2 sm:ml-auto sm:shrink-0 sm:justify-end">

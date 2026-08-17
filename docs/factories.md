@@ -39,6 +39,7 @@
 | `EmailSuppressionFactory` | EmailSuppression | `bounce()`, `complaint()`, `forEmail(string $email)` (normalize + hash 込み) |
 | `LlmCallLogFactory` | LlmCallLog | `withFxSnapshot(float $rate = 154.32)`, `failed(string $reason = ...)`, `metadataMissing()` |
 | `ModelAuditFactory` | ModelAudit | — (auditable は Item 既定。派生アプリは state で上書き) |
+| `SecurityAuditEventFactory` | SecurityAuditEvent | `forUser($user)`, `ofType(SecurityEventType)`, `occurredAt(CarbonImmutable)`。既定は `login` / `now()` / guard=web。**本番の記録経路ではない** (記録の窓口は SecurityEventRecorder) |
 | `Billing\BillingNotificationFactory` | Billing/BillingNotification | `forOrganization($org)`, `reminder(?string $dedupKey = null)` (dedup_key 経路), `sent()`, `failed()` |
 | `Billing\TicketCheckoutSessionFactory` | Billing/TicketCheckoutSession | `forOrganization($org)`, `initiatedBy($user)`, `completed()`, `expired()`, `stale()` (pending のまま expires_at 過去) |
 | `Billing\TicketReservationFactory` | Billing/TicketReservation | `forOrganization($org)`, `legacy()` (P5 前の in-flight 予約 = `consume_*` null), `monthlyHold(?CarbonImmutable $consumeExpiresAt = null)`, `purchasedHold()`, `stale()` (reserved のまま TTL 超過) |
