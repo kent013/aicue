@@ -47,11 +47,21 @@ final class PhpReferenceScanner
      *   emit される。すなわち **1 つの静的呼び出しは NameReference と StaticCall の 2 site を生む**。
      *   利用側はどちらか一方だけを canonical にすること (両方を見ると二重検出になる)。
      *
-     * ★**名前解決の限界** (現行 `ExternalClientBoundaryScanner` の挙動をそのまま保存する):
+     * ★**名前解決の限界 = 共通規約 (a)・(b) を満たしていない既知の穴**
+     *   (`AGENTS.md` の「静的検査 (gate) と走査器の共通規約」):
      *   `T_NAME_QUALIFIED` (`Foo\Bar` のような部分修飾名) は `ltrim($text, '\\')` するだけで、
      *   「現在の namespace への相対解決」も「先頭 segment の alias 解決」も**行わない**。
-     *   したがって `use Illuminate\Support\Facades; … Facades\Http::get()` は解決できない。
-     *   これは既存 gate と同じ非対称であり、抽出は**振る舞い保存**が目的なのでここを直さない。
+     *   したがって `use Illuminate\Support\Facades; … Facades\Http::get()` は解決できず、
+     *   **未解決であることを区別できない名前文字列として参照 site が emit される**。
+     *   **現在の**利用側 (対象クラスを完全修飾名で照合するもの) では、この文字列が対象一覧に
+     *   一致しないため、参照 site は存在しているのに違反候補として認識されず**無言で見逃される**
+     *   (= 見逃す側へ倒れている)。
+     *   抽出したときは**振る舞い保存**が目的でここを触らなかったが、
+     *   これは**規約に照らして是認された限界ではなく、是正待ちの穴**である
+     *   (是正すると本走査器を使う gate と派生検出器の判定結果が変わり、従来見逃していた参照の
+     *   顕在化、または未解決エラーによる新しい失敗が起こり得るため別 TODO で扱う。
+     *   棚卸しは `devnotes/20260818-0303-scanner-common-conventions/divergence-survey.md` の D1)。
+     *   **したがって部分修飾名で書かれた参照について本走査器は検出力を主張しない。**
      */
     public static function references(string $relativePath, string $phpSource): ReferenceScanResult
     {
