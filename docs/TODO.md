@@ -30,7 +30,6 @@
 | T204 | 一覧検索欄 placeholder の狭幅実機表示確認 | test | 撮影 PWA の狭幅で検索欄の文言が読めるか実機で確認+記録。T202 が検索欄の placeholder を `タイトルで検索` → `タイトル・本文で検索` (3 文字長い) へ変えたが、**狭幅で途中省略されないか**は自動レーンの守備範囲の外にある — jsdom の JS テストは `placeholder` 属性の**文字列**を共有定数と比較するだけで実描画幅を見ず、Browser lane も表示の切れ方を判定する契約を持たない。**T202 は本確認を待たずにマージ済み**であり、本 TODO がその未達分を引き継ぐ。記録先は `devnotes/20260817-1027-todo-T202/manual-verification.md` の 2 項目 (撮影 PWA `/app/projects/{id}/manuals` を iOS Safari 狭幅 = iPhone SE 幅 375px 相当で / PC 一覧 `/projects/{id}` のキーワード欄で) と状態表 (状態: 未実施)。切れていた場合の是正は `resources/js/lib/manual/search.ts` の**定数 1 か所**の変更で済む (両画面が同じ定数を読むため片側だけ直る事故は起きない) | High | standalone | [設計](devnotes/20260817-0909-manual-search-scope/) | 2026-08-17 11:07 |
 
 | T218 | PHP 列挙 ⇔ TypeScript 値域の汎用同期 gate (型情報による抽出への置き換え / AG-099 前半) | test | 列挙値の同期検査を型情報抽出のvitest gateへ移行 | Medium | standalone | [設計](devnotes/20260817-1748-enum-ts-generic-sync-gate/) | 2026-08-18 03:25 |
-| T221 | デザイントークン検査を正典 t1 へ追従 (tokens.test.ts / design-system-docs.test.ts 新設) | test | 正典t1のトークン検査2本を新設 | Medium | standalone | [設計](devnotes/20260818-0248-design-token-t1-tests/) | 2026-08-18 03:35 |
 | T224 | bug-hunt 裁定 A-001 の監視対象に toast.ts を足す (再オープン条件と watch_globs の食い違いを閉じる) | test | A-001を supersede し watch_globs を是正 | Medium | standalone | [設計](devnotes/20260817-1755-bughunt-handover-to-ledger/) | 2026-08-18 03:51 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
