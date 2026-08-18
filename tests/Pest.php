@@ -26,6 +26,7 @@ use Illuminate\Support\Facades\Vite;
 use Illuminate\Support\Str;
 use Kent013\PrismPrompt\Prompt;
 use Laravel\Cashier\Subscription;
+use Tests\Support\Cache\PlainDataCacheGuard;
 use Tests\Support\StrayHttpRequestGuard;
 use Tests\Support\StrayLlmCallGuard;
 use Tests\TestCase;
@@ -60,18 +61,24 @@ pest()->extend(TestCase::class)
         // テスト本体で Http::fake([...]) を呼ぶと該当 URL は透過する
         // (Factory::fake() は prevent フラグを reset しないため共存する)。
         StrayHttpRequestGuard::install($this->app);
+
+        // キャッシュ guard は Tests\TestCase::createApplication() の bootstrap 前に結線済み。
+        // ここでは**結線が効いていること**だけを確認する (accumulator には触らない。
+        // 触ると起動中に記録された違反が消える)。
+        PlainDataCacheGuard::assertInstalled($this->app);
     })
     ->afterEach(function (): void {
         try {
             // stray call が記録されていれば test を fail させる (Service 層の
             // try/catch fallback で guard 例外が握り潰されてもここで必ず赤くなる)
             //
-            // ★2 つの guard は順に flush する。**同時発生時は先に throw した guard の
-            //   詳細だけが表示される** (もう一方の accumulator は finally の reset で
+            // ★3 つの guard は順に flush する。**同時発生時は先に throw した guard の
+            //   詳細だけが表示される** (他方の accumulator は finally の reset で
             //   捨てられる)。test は既に赤いので「静かに緑」にはならず、検出目的は達成される。
-            //   両方を集約する仕組みは入れない (今必要なものだけ作る)。
+            //   すべてを集約する仕組みは入れない (今必要なものだけ作る)。
             StrayLlmCallGuard::flushAndFailIfStray();
             StrayHttpRequestGuard::flushAndFailIfStray();
+            PlainDataCacheGuard::flushAndFailIfStray();
         } finally {
             // flush が throw しても次テストへ accumulator / Prompt::$fake を漏らさない
             if (Prompt::isFaking()) {
@@ -79,6 +86,7 @@ pest()->extend(TestCase::class)
             }
             StrayLlmCallGuard::reset();
             StrayHttpRequestGuard::reset();
+            PlainDataCacheGuard::reset();
         }
     })
     ->in('Feature', 'Unit');
@@ -93,12 +101,15 @@ pest()->extend(TestCase::class)
     ->beforeEach(function (): void {
         $this->withoutVite();
         StrayHttpRequestGuard::install($this->app);
+        PlainDataCacheGuard::assertInstalled($this->app);
     })
     ->afterEach(function (): void {
         try {
             StrayHttpRequestGuard::flushAndFailIfStray();
+            PlainDataCacheGuard::flushAndFailIfStray();
         } finally {
             StrayHttpRequestGuard::reset();
+            PlainDataCacheGuard::reset();
         }
     })
     ->in('Architecture');
@@ -137,17 +148,21 @@ pest()->extend(TestCase::class)
         // Browser lane と bughunt 実行時の両方で共有 (registrar 参照)。install() 内の
         // stopFaking の後に上書きインストールするのが load-bearing。
         app(CannedPromptFakeRegistrar::class)->install();
+
+        PlainDataCacheGuard::assertInstalled($this->app);
     })
     ->afterEach(function (): void {
         try {
             StrayLlmCallGuard::flushAndFailIfStray();
             StrayHttpRequestGuard::flushAndFailIfStray();
+            PlainDataCacheGuard::flushAndFailIfStray();
         } finally {
             if (Prompt::isFaking()) {
                 Prompt::stopFaking();
             }
             StrayLlmCallGuard::reset();
             StrayHttpRequestGuard::reset();
+            PlainDataCacheGuard::reset();
         }
     })
     ->in('Browser');

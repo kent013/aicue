@@ -86,15 +86,32 @@
     `bootstrap/app.php` の **priority list**(route の宣言順ではない)
     (`ProjectRouteCurrentOrgGuardTest` / `NestedRouteIdorDefenseTest` /
     `TenantBoundaryOrderingTest`)
-11. **キャッシュに入れるのは素のデータだけ**: cache へ渡す値は配列 / 文字列 / 数値 / 真偽値に限る
+11. **キャッシュに入れるのは素のデータだけ**: cache へ渡す値は
+    配列 / 文字列 / 数値 / 真偽値 / `null` に限る
     (オブジェクトを直接入れない)。読み戻しは `fromArray()` 等で**明示的に組み立て直して検査**し、
     失敗したら `forget` する(準拠実装 `FxRateService` + `FxSnapshotDto`)。
     `config/cache.php` の `serializable_classes` は **`false` 固定**でクラス許可一覧を作らず、
     **キーごと消さない**(宣言が無いと制限なしの `unserialize()` に戻る = fail-open)。
-    **テストは array store で緑になり本番 database store でだけ壊れる**ため、
-    書き込み経路とキャッシュに触れるファイルは deny-by-default の目録で強制する
-    (`CachePayloadPlainDataGateTest` / 宣言 pin は `ConfigHardeningTest`。
-    guide §7 不変条件 6 と対応)
+    強制は **2 層**である(家系の裁定 AG-151 = 正典 v2)。
+    **静的層** (`CachePayloadPlainDataGateTest`) は書き込み経路とキャッシュに触れるファイルを
+    deny-by-default の目録で強制し、受け皿の境界を迂回する書き方(`Cache::extend` /
+    `getStore` / `setStore` / `tags` / 受け手型・保管先型の直接生成 / macro 登録)を
+    **通常経路は 0 件、実行時層の自己テストだけを名指しの目録へ exact-fit** で pin する。
+    受け手型・保管先型の**継承・実装の宣言**は別の名指し目録で扱い、
+    実行時層の実装 2 本 (guard 付き受け皿と guard 付き manager) だけを許す。
+    **実行時層** (`Tests\Support\Cache\PlainDataCacheGuard`) はテスト中のキャッシュ書き込みを
+    受け皿の側で捕まえ、保管先へ渡す前の値を再帰検査する。結線はアプリ起動の前
+    (`Tests\TestCase::createApplication()`)で、後始末は `tests/Pest.php` の全レーンが行う
+    (`CacheGuardWiringGateTest` が deny-by-default で固定)。
+    **「テストは array store なので実行時には捕まらない」は誤り** — 実行時層は直列化ではなく
+    **値**を見るので、直列化しない保管方式でも同じように発火する。
+    ただし **`getStore()` は実行時には落とせない**(vendor 自身が流量制限・排他の正常系で呼ぶ)
+    ため、そこは静的層だけが塞ぐ。したがって
+    **vendor が `getStore()` 経由で書く値は 2 層とも見えない**。
+    設定の宣言 pin は `ConfigHardeningTest`、実効値は静的 gate の検査 6。
+    **主要な境界の例外として `getStore()` だけをここにも記す**。
+    網羅的な保証外一覧の正本は**実行時層の docblock**であり、本書と guide には写さない
+    (2 か所に書くと必ず食い違う)。guide §7 不変条件 6 と対応
 
 > **採番の注意**: 本節の番号と `docs/app-integration-guide.md` §7 の番号は **1:1 対応しない**
 > (本節 6 = PII CipherSweet / guide 6 = 逆シリアライズ、本節 8 = SSRF / guide 8 = 認可 gate)。

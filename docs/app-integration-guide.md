@@ -229,14 +229,32 @@ LLM を使う機能が要件に来たら、まず利用形態を分類する:
 6. **任意 class の逆シリアライズを許さない / キャッシュに入れるのは素のデータだけ**:
    `config/cache.php` の `serializable_classes` は **`false` 固定**でクラス許可一覧は作らない
    (例外を作らない)。**キーごと消すのも不可** — Laravel は宣言が無いと制限なしの
-   `unserialize()` に戻る(fail-open)。cache へ渡してよいのは配列 / 文字列 / 数値 / 真偽値だけで、
+   `unserialize()` に戻る(fail-open)。cache へ渡してよいのは
+   配列 / 文字列 / 数値 / 真偽値 / `null` だけで、
    オブジェクトは `toArray()` で素の配列にしてから入れ、読み戻しは `fromArray()` 等で
    **明示的に組み立て直して検査し、失敗したら `forget`** する
    (準拠実装: `App\Services\FxRateService` + `App\DataTransferObjects\FxSnapshotDto`)。
-   **テストレーンは array store(`serialize => false`)なのでオブジェクトを入れても緑になる** —
-   本番の database store でだけ壊れるため、静的検査で塞ぐ:
-   キャッシュ書き込み経路とキャッシュに触れるファイルは
-   `tests/Architecture/CachePayloadPlainDataGateTest.php` の目録へ登録必須(deny-by-default)。
+   強制は **2 層**である(家系の裁定 AG-151 = 正典 v2):
+   - **静的層** (`tests/Architecture/CachePayloadPlainDataGateTest.php`) —
+     キャッシュ書き込み経路とキャッシュに触れるファイルは目録へ登録必須(deny-by-default)。
+     受け皿の境界を迂回する書き方は**3 つの目録**で pin する:
+     (a) `Cache::extend` / `getStore` / `setStore` / `tags` / macro 登録 /
+     受け手型・保管先型の直接生成 は**通常経路 0 件 + 実行時層の自己テストだけ**を
+     名指しの目録へ exact-fit、
+     (b) 受け手型・保管先型・実行時層の実装クラスの**継承・実装の宣言**は
+     別の名指し目録で**実行時層の実装 2 本だけ**、
+     (c) `new $class` のように生成対象が静的に決まらない形は deny-by-default で、
+     キャッシュの保管先ではない既知の用途を理由付きの目録へ登録する
+   - **実行時層** (`Tests\Support\Cache\PlainDataCacheGuard`) —
+     テスト中のキャッシュ書き込みを受け皿の側で捕まえ、保管先へ渡す**前の値**を再帰検査する。
+     結線はアプリ起動の前(`Tests\TestCase::createApplication()`)、後始末は
+     `tests/Pest.php` の全レーン(`tests/Architecture/CacheGuardWiringGateTest.php` が固定)
+   **「テストは array store なので実行時には捕まらない」は誤り** — 実行時層は直列化ではなく
+   **値**を見るので、直列化しない保管方式でも同じように発火する。
+   ただし **`getStore()` は実行時には落とせない**(vendor 自身が流量制限・排他の正常系で呼ぶ)
+   ため、そこは静的層だけが塞ぐ。したがって
+   **vendor が `getStore()` 経由で書く値は 2 層とも見えない**。
+   網羅的な保証外一覧の正本は**実行時層の docblock**であり、本書と AGENTS.md には写さない。
    配列往復は `tests/Unit/DataTransferObjects/FxSnapshotDtoTest.php` が固定する
 7. **課金系の冪等性**: webhook は冪等マシン経由、消費は 2 フェーズ、通知は dedup_key。
    課金による利用可否の判定は `BillingAccess` 経由のみ(subscription 直参照の gate 分岐禁止。
