@@ -144,6 +144,25 @@ test('config/cache.php は serializable_classes を false で宣言している'
         'クラス許可一覧は作らない (lctl 標準形 v1 / AGENTS.md セキュリティ不変条件 11)');
 });
 
+// ========== prism-prompt: テンプレートのオブジェクトキャッシュを持たない (T228) ==========
+
+test('config/prism-prompt.php は cache.enabled を false で宣言している (env で開かない)', function (): void {
+    // ★同梱パッケージの PromptTemplate::fromYaml() は PromptTemplate オブジェクトそのものを
+    //   キャッシュへ入れる (AGENTS.md セキュリティ不変条件 11 に反する)。有効・無効を決める
+    //   設定は本リポジトリが所有しているので、env で開け直せる形を残さない。
+    $config = evaluateConfigFileWithEnv('prism-prompt.php', ['PRISM_PROMPT_CACHE' => 'true']);
+
+    expect($config['cache'])->toBeArray();
+    /** @var array<string, mixed> $cache */
+    $cache = $config['cache'];
+    expect($cache['enabled'])->toBeFalse(
+        'PromptTemplate::fromYaml() がオブジェクトをキャッシュへ入れるため、env で開けられてはならない');
+});
+
+test('prism-prompt.cache.enabled は実行時にも false', function (): void {
+    expect(config('prism-prompt.cache.enabled'))->toBeFalse();
+});
+
 // ========== fortify: passkeys ブロックの env 派生 (T166) ==========
 
 /*

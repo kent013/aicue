@@ -83,12 +83,20 @@ return [
     |--------------------------------------------------------------------------
     |
     | Configuration for caching parsed YAML templates.
-    | Enabled by default in production for performance.
-    | Set PRISM_PROMPT_CACHE=false in .env for development.
+    |
+    | ★enabled は false 固定 (env を介さない)。
+    |   同梱パッケージの Kent013\PrismPrompt\PromptTemplate::fromYaml() は
+    |   Cache::store(...)->put($cacheKey, $instance, $ttl) で **PromptTemplate オブジェクトそのもの**を
+    |   キャッシュへ入れる。これは AGENTS.md セキュリティ不変条件 11 (キャッシュに入れるのは
+    |   素のデータだけ) に反する。有効・無効を決める設定は本リポジトリが所有しているので、
+    |   既定で閉じる。env で開け直せる形は残さない (開いた瞬間に規約違反になるため)。
+    |   ※現行コードを確認した範囲では fromYaml() の呼び出し元が無く、観測できる挙動の変化は
+    |     見込まれない。効果はパッケージ更新等で呼び出し元が生まれたときの fail-safe である。
+    |   宣言と実効値の二段 pin は tests/Feature/Config/ConfigHardeningTest.php。
     |
     */
     'cache' => [
-        'enabled' => env('PRISM_PROMPT_CACHE', true),
+        'enabled' => false,
         'ttl' => 3600,
         'store' => null, // null = default cache driver
     ],

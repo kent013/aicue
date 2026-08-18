@@ -2853,3 +2853,71 @@ env も置かない** (切れる防御は防御ではない / 環境ごとに緩
 - **レーンの非対称**: 値集合の同期は `pnpm test` (CI の frontend job) でだけ走る。
   PHP としての妥当性は backend job (`composer test` / PHPStan)。
   **`composer test` だけでは値集合の同期は検証されない**。
+
+## キャッシュ素データ規約の 2 層 (T228 / 家系の裁定 AG-151 = 正典 v2)
+
+「キャッシュに入れるのは素のデータだけ」(AGENTS.md セキュリティ不変条件 11) は
+**静的層と実行時層の 2 層**で強制する。どちらも他方を包含しない。
+
+| 層 | 実体 | 保証すること |
+|---|---|---|
+| 静的層 | `tests/Architecture/CachePayloadPlainDataGateTest.php` | **申告なしに書き込み経路を増やせない**。境界を迂回する書き方が通常経路で 0 件である |
+| 実行時層 | `tests/Support/Cache/PlainDataCacheGuard.php` ほか 4 本 | **テストが実行した書き込みの値が実際に素データである** |
+
+- **静的層だけが見えるもの**: `tests/` `app/` にありながらテストが 1 度も踏まない書き込み。
+  実行時層は実行されないものを永久に見ない
+- **実行時層だけが見えるもの**: `vendor/` 配下からの書き込み。静的走査の母集団
+  (`app` / `routes` / `database` / `tests`) に入らないので、テストがその経路を踏んだときに
+  値を見られるのは実行時層だけである
+
+### 実行時層の仕組み
+
+受け皿 (`Illuminate\Cache\Repository`) を継承した `PlainDataGuardedRepository` が
+値の末端 4 メソッド (`put` / `add` / `forever` / `putMany`) を override し、
+保管先へ渡す**前の値**を `PlainDataInspector` で再帰検査する。
+糖衣 API (`set` / `setMultiple` / `remember` / `rememberForever` / `sear` / `flexible` /
+`rememberWithWarmth` / `$cache[$k] = $v`) は vendor 実装がこの 4 つへ合流するので、
+合流が将来変わったら `tests/Feature/Cache/CachePayloadPlainDataGuardTest.php` が落ちる。
+
+**イベント購読 (`KeyWritten`) にはしない** — `Event::fake()` や store 設定の
+`'events' => false` で無効化できる差し替え可能な境界だからである。
+
+**結線はアプリ起動の前**である。`Tests\TestCase::createApplication()` が
+`bootstrap/app.php` を require した直後・`bootstrap()` の直前に
+`PlainDataCacheGuard::registerBeforeBootstrap()` を呼ぶ。Pest の beforeEach では遅く、
+起動中の書き込み (vendor 由来だと静的層の走査根にも入らない) が
+**2 層とも沈黙する穴**になる。
+
+**違反は「その場で例外」と「accumulator への記録」の両方**にする。アプリ側の
+`catch (Throwable)` で例外が消えても、afterEach の `flushAndFailIfStray()` で必ず赤くなる
+(既存の `StrayHttpRequestGuard` / `StrayLlmCallGuard` と同じ設計)。
+
+### 露出したときの直し方
+
+**免除目録は作らない**。出所ごとに次のとおり処理する。
+
+1. `app/` → 必ず直す。素の配列にして入れ、読み戻しで組み立て直す
+   (準拠実装 `FxRateService` + `FxSnapshotDto`)。あわせて静的層の L2 目録へ登録する
+2. `tests/` → 必ず直す (本番で壊れる書き方をテストが先取りしている状態である)
+3. vendor 由来 → (a) 本リポジトリが所有する設定でその機能を閉じる /
+   (b) その機能を使わない形へアプリを直す / (c) どちらもできなければ実装を完了にせず
+   家系の台帳の議題として起こす。**guard 側に許可一覧を足す選択肢は取らない**
+
+### 保管先への素通しの分類 (`__call`)
+
+`Illuminate\Cache\Repository` は `lock()` / `restoreLock()` を宣言しておらず、
+`Cache::lock(...)` は `Repository::__call()` の素通しで保管先へ届く。排他は payload を
+運ばないので、実行時層はこの 2 語彙**だけ**を名指しで通し、それ以外の素通しと
+macro 経由の呼び出しは境界迂回として落とす。許可を 2 か所で別々に育てないよう、
+この 2 語彙が静的層の TERMINAL 語彙 (payload を運ばないと分類した語彙) の**部分集合**である
+ことを同じ gate (検査 L4g) が固定する。
+
+### 設定で閉じたもの
+
+`config/prism-prompt.php` の `cache.enabled` は **`false` 固定** (env を介さない)。
+同梱パッケージの `PromptTemplate::fromYaml()` が `PromptTemplate` オブジェクトそのものを
+キャッシュへ入れるためで、有効・無効を決める設定を本リポジトリが所有している以上、
+既定で閉じるのが規約の帰結である。宣言と実効値の二段 pin は `ConfigHardeningTest`。
+
+> **保証しないものは本節に書かない**。正本は実行時層 (`PlainDataCacheGuard`) の docblock である
+> (2 か所に書くと必ず食い違う)。

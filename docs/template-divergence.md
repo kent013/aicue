@@ -8,7 +8,7 @@
 `template-divergence-ledger` が 2026-08-15 に確定した形) に従う。形式は
 `tests/Architecture/TemplateDivergenceLedgerFormatTest.php` が機械で強制する。
 
-登録エントリ: 30 件
+登録エントリ: 31 件
 
 ## 記録の原則
 
@@ -1883,3 +1883,63 @@ B を採らない理由は 3 つある。
 - 設計: `devnotes/20260816-0457-todo-T181/` /
   `devnotes/20260818-1755-template-divergence-ledger-ci-db-and-launcher/`
 - 家系の機能台帳: `vscode-cli-wrappers` (本アプリのセルは追従の判断待ちのまま)
+
+---
+
+## D32 キャッシュ素データ規約の実行時層を、アプリ起動の前に結線し境界迂回を正典より広く塞ぐ
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `tests/Support/Cache/PlainDataCacheGuard.php` / `tests/Support/Cache/GuardedBoundaryProbe.php` / `tests/Architecture/CacheGuardWiringGateTest.php` |
+| 業務要件起因の説明 | 本アプリは起動時に名前付き流量制限を多数登録し、その時点で受け皿を握るため、Pest の beforeEach で結線すると起動中の書き込みが 2 層とも見えない穴になる。また同梱パッケージがオブジェクトをキャッシュへ入れる実装を持つため、受け皿を跨ぐ書き方を正典の 3 形より広く塞ぐ必要がある |
+| 揃え続ける不変条件と保証機構 | 結線がアプリ起動の前にあり全レーンが後始末すること (`CacheGuardWiringGateTest`)。受け皿を跨ぐ書き方と静的に解決できない生成が目録と exact-fit であること (`CachePayloadPlainDataGateTest` の検査 L4a-L4h) |
+| 再判定の条件 | 家系の正典が結線点と境界迂回の語彙を改めたとき / Laravel が `createApplication()` の本体を変えて写しが維持できなくなったとき |
+| 決めた日 | 2026-08-18 |
+| 決めた人 | 開発者 |
+| 根拠 | devnotes/20260818-1757-cache-runtime-plain-data-guard/ |
+| 状態 | 監視中 |
+| 見直し期限 | 2027-02-14 |
+
+| 観点 | テンプレート | 本アプリ |
+|---|---|---|
+| 結線点 | Pest の beforeEach 相当 | アプリ起動の前 (`Tests\TestCase::createApplication()` の bootstrap 直前) |
+| 境界迂回の語彙 | 保管先の直接取得・受け皿の直接生成・拡張登録の 3 形 | 上記に加えて `setStore` / `tags` / macro 系 / 具体 store の生成 / 静的に解決できない生成 |
+| 迂回の判定 | 0 件 | 通常経路 0 件 + 実行時層の自己テストだけを名指しの目録へ exact-fit |
+| 継承・実装の宣言 | 対象外 | 受け手型・保管先型・実行時層の実装クラスの継承を**別の名指し目録**で扱い、実行時層の実装 2 本だけを許す |
+| 静的に解決できない生成 (`new $class`) | 対象外 | 走査根の全体で deny-by-default にし、キャッシュの保管先ではない既知の用途を**理由付きの目録**へ exact-fit で登録する |
+| 目録の構造 | 書き込みサイトの全数申告目録 | 既存の L1-L3 に L4 (迂回) を足す形 |
+| ArrayAccess 書き込み | 検出しない | `$cache[$k] = $v` を静的にも検出する |
+
+### なぜ正当な差分か (logic-driven)
+
+`AppServiceProvider::boot()` が名前付き流量制限を多数登録するため、`Illuminate\Cache\RateLimiter` は
+**起動中に** cache を解決して受け皿を握る。beforeEach で結線すると RateLimiter が握るのは
+guard の付いていない受け皿になり、起動中の書き込みは実行時層に見えない。
+vendor 由来の書き込みは静的層の走査根 (`app` / `routes` / `database` / `tests`) にも入らないので、
+**2 層とも沈黙する**。`Illuminate\Foundation\Testing\TestCase::createApplication()` は
+`bootstrap/app.php` を require したあと `bootstrap()` を呼ぶ間に**まだ起動していない `$app`** に
+触れる唯一の点なので、そこを override して結線する。
+
+境界迂回を広げたのは、`Repository::tags()` が `new TaggedCache($this->store, ...)` を素で生成して
+継承を素通りすること、`Repository` が `Macroable` を use しており macro の closure から
+`$this->store` へ直接到達できることを vendor 実読で確認したためである。
+どちらも実行時層の被覆から抜ける口であり、正典の 3 形には含まれていない。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「テストが実行したキャッシュ書き込みの値は、保管先へ渡る前に素データであることを検査されている」
+
+- 結線がアプリ起動の前にあることと、全レーンが後始末することは `CacheGuardWiringGateTest` が固定する
+- vendor の `createApplication()` の写しは token 列の完全一致で pin するので、静かに古くならない
+- 受け皿を跨ぐ書き方は自己テスト目録と exact-fit で、1 件増えたら必ず赤くなる
+
+### 保証しないもの
+
+- 保証しないものの正本は `tests/Support/Cache/PlainDataCacheGuard.php` の docblock である
+  (本書と `docs/architecture.md` には写さない)
+
+### 関連
+
+- 実装: `tests/Support/Cache/` / `tests/TestCase.php` / `tests/Pest.php` /
+  `tests/Architecture/CachePayloadPlainDataGateTest.php`
+- 設計: `devnotes/20260818-1757-cache-runtime-plain-data-guard/`
