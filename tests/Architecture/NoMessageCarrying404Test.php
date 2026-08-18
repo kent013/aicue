@@ -18,6 +18,14 @@ use Tests\Support\PhpReferenceScanner;
  * ★実装は token ベース (正規表現へフォールバックしない)。named argument の引数順不同・
  *   複数行にまたがる呼び出し・ネストした引数式を構文的に扱い、
  *   コメントや文字列リテラル中の疑似コードは拾わない (normalize が comment を落とす)。
+ *
+ * 空振り検査 (AGENTS.md §静的検査 (gate) と走査器の共通規約 (b) の
+ * 「違反が 0 件」と「母集団が 0 件」の区別): 本 gate は**走査根の非空が不変条件**である。
+ * 3 本の走査根 (app / routes / bootstrap) はどれか 1 本が改名・移動しても、
+ * 「文言つきの 404 は 1 件も無い」は違反ゼロのまま緑になる。
+ * 「空振り検査」ケースが 3 本すべての生存 (実在かつ PHP ファイルを持つ) を固定し、
+ * その直後の負のコントロールが「根を差し替えると母集団が空になる」ことを示す。
+ * 検出器そのものの裏取りは末尾の記法ごとの正例 / 負例が担当する。
  */
 
 /**
@@ -128,6 +136,16 @@ function messageCarrying404Detected(array $arguments, int $statusPosition, int $
 }
 
 /**
+ * 走査根 (リポジトリ相対パス)。
+ *
+ * @return list<string>
+ */
+function messageCarrying404Roots(): array
+{
+    return ['app', 'routes', 'bootstrap'];
+}
+
+/**
  * 走査対象ディレクトリの PHP ファイルから、文言つき 404 の site を集める。
  *
  * @return list<string>
@@ -148,7 +166,7 @@ function messageCarrying404Sites(): array
 
     $sites = [];
 
-    foreach (['app', 'routes', 'bootstrap'] as $root) {
+    foreach (messageCarrying404Roots() as $root) {
         foreach (PhpReferenceScanner::phpFiles(base_path($root), $root) as $relativePath => $source) {
             $tokens = PhpReferenceScanner::tokens($source);
 
@@ -199,6 +217,22 @@ function messageCarrying404Sites(): array
 
 test('文言つきの 404 は 1 件も無い (JSON 経路では collapse され失われるため)', function (): void {
     expect(messageCarrying404Sites())->toBe([]);
+});
+
+test('空振り検査: 3 本の走査根がいずれも生きている (実在し PHP ファイルを持つ)', function (): void {
+    foreach (messageCarrying404Roots() as $root) {
+        $absolute = base_path($root);
+        expect(is_dir($absolute))->toBeTrue("走査根 {$root} が存在しません");
+        expect(PhpReferenceScanner::phpFiles($absolute, $root))
+            ->not->toBe([], "走査根 {$root} に PHP ファイルがありません");
+    }
+});
+
+test('負のコントロール: 走査根を差し替えると母集団が空になる', function (): void {
+    // 上の生存検査が空振りしていないことの裏取り。走査根の改名・移動を模して
+    // 実在しないパスを渡すと母集団が 0 件になる = 生存検査が赤くなる。
+    expect(PhpReferenceScanner::phpFiles(base_path('app-renamed'), 'app'))->toBe([]);
+    expect(PhpReferenceScanner::phpFiles(base_path('bootstrap-renamed'), 'bootstrap'))->toBe([]);
 });
 
 /**

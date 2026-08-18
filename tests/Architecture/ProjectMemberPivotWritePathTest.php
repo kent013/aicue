@@ -14,6 +14,13 @@ declare(strict_types=1);
  * 検出 A: 文字列リテラル 'project_members' の出現 (DB::table 直書き経路の deny)
  * 検出 B: `members()->attach|detach|sync|syncWithoutDetaching|toggle` の呼び出し形
  * いずれも allowlist 外の app/ コードに現れたら fail。
+ *
+ * 空振り検査 (AGENTS.md §静的検査 (gate) と走査器の共通規約 (b) の
+ * 「違反が 0 件」と「母集団が 0 件」の区別): 本 gate は**母集団の非空が不変条件**である。
+ * 走査根 app/ の移動や token 判定の綻びで検出が 0 件になると、経路が増えても違反ゼロで緑になる。
+ * 「空振り検査」ケースが (1) 走査した PHP ファイルの非空 (2) allowlist の各ファイルが
+ * 実際に検出されていること を固定し、その直後の負のコントロールが
+ * 「走査根を差し替えると検出が空になる」ことを示す。
  */
 
 final class ProjectMemberPivotWriteScanner
@@ -35,32 +42,78 @@ final class ProjectMemberPivotWriteScanner
     ];
 
     /**
-     * @return array<string, list<string>> 検出種別 => 違反ファイル (app/ 相対パス)
+     * @return array{project_members_literal: list<string>, members_relation_write: list<string>}
      */
-    public static function findViolations(): array
+    public static function allowlists(): array
     {
-        $appDir = self::appDir();
-        $violations = [
+        return [
+            'project_members_literal' => self::PROJECT_MEMBERS_LITERAL_ALLOWED,
+            'members_relation_write' => self::MEMBERS_WRITE_ALLOWED,
+        ];
+    }
+
+    /**
+     * 走査根配下で検出したファイルを allowlist で絞らずに返す (空振り検査用)。
+     *
+     * @param  string|null  $rootDirectory  走査根の絶対パス (null = app/)
+     * @return array{project_members_literal: list<string>, members_relation_write: list<string>}
+     */
+    public static function findDetections(?string $rootDirectory = null): array
+    {
+        $root = $rootDirectory ?? self::appDir();
+        $detections = [
             'project_members_literal' => [],
             'members_relation_write' => [],
         ];
 
-        foreach (self::phpFiles($appDir) as $path) {
-            $relative = substr($path, strlen($appDir) + 1);
+        foreach (self::phpFiles($root) as $path) {
+            $relative = substr($path, strlen($root) + 1);
             $source = file_get_contents($path);
             if ($source === false) {
                 throw new RuntimeException("Failed to read PHP source: {$path}");
             }
 
-            if (self::containsProjectMembersLiteral($source)
-                && ! in_array($relative, self::PROJECT_MEMBERS_LITERAL_ALLOWED, true)) {
-                $violations['project_members_literal'][] = $relative;
+            if (self::containsProjectMembersLiteral($source)) {
+                $detections['project_members_literal'][] = $relative;
             }
-            if (self::containsMembersRelationWrite($source)
-                && ! in_array($relative, self::MEMBERS_WRITE_ALLOWED, true)) {
-                $violations['members_relation_write'][] = $relative;
+            if (self::containsMembersRelationWrite($source)) {
+                $detections['members_relation_write'][] = $relative;
             }
         }
+
+        return $detections;
+    }
+
+    /**
+     * 走査した PHP ファイル (絶対パス)。走査根が実在しなければ空を返す。
+     *
+     * @return list<string>
+     */
+    public static function scannedFiles(?string $rootDirectory = null): array
+    {
+        return self::phpFiles($rootDirectory ?? self::appDir());
+    }
+
+    /**
+     * 検出種別 => 違反ファイル (app/ 相対パス)。2 種別を必ず返す。
+     *
+     * @return array{project_members_literal: list<string>, members_relation_write: list<string>}
+     */
+    public static function findViolations(): array
+    {
+        $allowlists = self::allowlists();
+        $detections = self::findDetections();
+
+        $violations = [
+            'project_members_literal' => array_values(array_diff(
+                $detections['project_members_literal'],
+                $allowlists['project_members_literal'],
+            )),
+            'members_relation_write' => array_values(array_diff(
+                $detections['members_relation_write'],
+                $allowlists['members_relation_write'],
+            )),
+        ];
 
         return $violations;
     }
@@ -134,7 +187,7 @@ final class ProjectMemberPivotWriteScanner
         return null;
     }
 
-    private static function appDir(): string
+    public static function appDir(): string
     {
         $dir = realpath(__DIR__.'/../../app');
         if ($dir === false) {
@@ -149,6 +202,10 @@ final class ProjectMemberPivotWriteScanner
      */
     private static function phpFiles(string $dir): array
     {
+        if (! is_dir($dir)) {
+            return [];
+        }
+
         $files = [];
         $iterator = new RecursiveIteratorIterator(
             new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
@@ -170,4 +227,33 @@ test('project_members への書き込みは inventory (OrganizationMembershipSer
 
     expect($violations['project_members_literal'])->toBe([]);
     expect($violations['members_relation_write'])->toBe([]);
+});
+
+test('空振り検査: 走査の母集団が空でなく、allowlist の各ファイルが実際に検出されている', function (): void {
+    // (1) 走査根が生きていること
+    $scanned = ProjectMemberPivotWriteScanner::scannedFiles();
+    expect($scanned)->not->toBe([], '走査根 app/ に PHP ファイルがありません');
+    expect(count($scanned))->toBeGreaterThanOrEqual(400); // 床値 (実測 827 件)
+
+    // (2) 検出そのものが生きていること。allowlist は「検出されるが許す」ファイルなので、
+    //     検出結果に現れないなら token 判定が壊れている (違反ゼロは検出停止でも成立する)。
+    $detections = ProjectMemberPivotWriteScanner::findDetections();
+    foreach (ProjectMemberPivotWriteScanner::allowlists() as $kind => $allowed) {
+        foreach ($allowed as $relative) {
+            // `toContain()` は可変長引数なので理由は第 2 引数に渡せない (渡すと検索語が増える)
+            expect(in_array($relative, $detections[$kind], true))->toBeTrue(
+                "検出 {$kind} が allowlist の {$relative} を拾えていません (走査が空振りしています)",
+            );
+        }
+    }
+});
+
+test('負のコントロール: 走査根を差し替えると検出が空になる', function (): void {
+    // 上の検査が空振りしていないことの裏取り。走査根の改名・移動を模して
+    // 一致するもののないディレクトリ / 実在しないパスを渡すと検出が 0 件になる。
+    expect(ProjectMemberPivotWriteScanner::findDetections(base_path('config')))->toBe([
+        'project_members_literal' => [],
+        'members_relation_write' => [],
+    ]);
+    expect(ProjectMemberPivotWriteScanner::scannedFiles(base_path('app-renamed')))->toBe([]);
 });

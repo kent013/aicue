@@ -21,6 +21,17 @@ use Symfony\Component\Process\Process;
  * exit code 規約は「静的に読める宣言」ではなく **実走で** 検証する。ただし実 artisan
  * (boot + APP_KEY + DB) には依存させない: 一時 sandbox へ道具一式を複製し、`php` を
  * 固定の scan JSON を吐く shim に差し替えて走らせる (決定論・DB 不使用)。
+ *
+ * ★空振り検査 (母集団非空) の付与対象外である。理由:
+ *   本 gate は**ディレクトリを列挙して母集団を作らない**。見るのは名指しの 2 ファイル
+ *   (`scripts/bug-hunt-inventory-check.sh` / `scripts/bug-hunt-inventory.py`) と、
+ *   テスト自身が組み立てた sandbox の fixture だけである。走査根の改名・移動は
+ *   「母集団が 0 件になって緑」ではなく `Assert::fileExists` / `expect(file_exists(...))` の
+ *   即時 fail になる (= 無言の空振りが起きる形になっていない)。
+ *   シェルの実装行を読む `bhicShellCodeLines()` だけは列挙に近いが、その非空は
+ *   同じケース内の必須語句検査 (`expect($code)->toContain('scripts/bug-hunt-inventory.py')`) が
+ *   先に落ちることで担保されている。
+ *   なお目録の生成器が母集合 0 件を検出する責務は生成器側 (段 1) が持つ。
  */
 
 function bhicScriptPath(): string

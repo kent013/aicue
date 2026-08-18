@@ -10,8 +10,9 @@ use Webmozart\Assert\Assert;
  * 常設 hook 配線の台帳 (deny-by-default) と、hook スクリプトの実挙動ゲート。
  *
  * 本テストは 2 層で構成する:
- *  - 静的層 (S01〜S12b): `.claude/settings.json` が下の台帳と**完全一致**することを見る。
+ *  - 静的層 (S01〜S12c): `.claude/settings.json` が下の台帳と**完全一致**することを見る。
  *    台帳に無い hook・イベント・トップレベルキーはすべて違反 = 配線の正本が 1 か所になる。
+ *    末尾の S12c は S12b の走査域が空振りしていないことの検査である。
  *  - 実起動層 (B01〜B51): hook スクリプトと起動子を**別プロセスで本当に起動**して、
  *    終了コード・標準出力の空・告知の回数・排他・敵対的な検索パス・symlink の置き場での
  *    振る舞いを実証する。静的検査だけでは「書いてあるが効いていない」を検出できない。
@@ -67,16 +68,28 @@ const CLAUDE_HOOKS_PROLOGUE_END = '# ---8< /SHARED_PATH_PROLOGUE >8---';
  * S12b の走査対象 (実行面のファイルのみ)。文書は走査しない —
  * 禁止を説明する文章にコマンド名が出るのは正常であり、走査すると必ず落ちるためである。
  *
- * @var list<string>
+ * **glob ごとに「非空が契約か」を申告する** (S12c が使う)。S12b は「禁止語句が 1 件も無いこと」を
+ * 見るので、glob が当たらなくなっても緑になる。union 全体の非空だけを見ると、
+ * 代表を持たない glob の改名・綴り間違い・対象移動を取りこぼす。
+ * 値は次の 2 通りで、**3 通り目を作らない**:
+ *  - 代表ファイルのリポジトリ相対パス = その glob は非空が契約であり、この 1 本が母集団に居ること
+ *  - `null` = **0 件でも正常**な glob (理由を下のコメントに書く)
+ *
+ * `scripts/{下位ディレクトリ}/*.sh` が `null` なのは、恒久スクリプトを下位ディレクトリへ
+ * 置く運用が現在なく、置いたときに走査域へ入るための先回りの glob だからである
+ * (0 件は違反ではない。ファイルが増えれば S12b はそのまま走査する)。
+ * **件数そのものは pin しない** (スクリプトの増減は日常の変更である)。
+ *
+ * @var array<string, string|null>
  */
 const CLAUDE_HOOKS_TOOL_SELFWIRING_SCAN_GLOBS = [
-    'scripts/*.sh',
-    'scripts/*/*.sh',
-    '.claude/settings*.json',
-    'docker/Dockerfile',
-    'composer.json',
-    'package.json',
-    '.github/workflows/*',
+    'scripts/*.sh' => 'scripts/bug-hunt-shard.sh',
+    'scripts/*/*.sh' => null,
+    '.claude/settings*.json' => '.claude/settings.json',
+    'docker/Dockerfile' => 'docker/Dockerfile',
+    'composer.json' => 'composer.json',
+    'package.json' => 'package.json',
+    '.github/workflows/*' => '.github/workflows/ci.yml',
 ];
 
 // =============================================================================
@@ -368,6 +381,47 @@ function claudeHooksExpectNotContains(string $haystack, string $needle, string $
     expect(str_contains($haystack, $needle))->toBeFalse("{$reason} (現れてはならない文字列: {$needle})");
 }
 
+/**
+ * S12b の走査域 (リポジトリ相対パスの昇順)。
+ *
+ * @param  string|null  $root  走査根の絶対パス (null = リポジトリルート)。
+ *                             負のコントロールで別の根を渡すために引数化してある
+ * @return list<string>
+ */
+function claudeHooksSelfWiringScanFiles(?string $root = null): array
+{
+    $files = [];
+    foreach (array_keys(CLAUDE_HOOKS_TOOL_SELFWIRING_SCAN_GLOBS) as $glob) {
+        $files = [...$files, ...claudeHooksSelfWiringGlobFiles($glob, $root)];
+    }
+
+    $files = array_values(array_unique($files));
+    sort($files);
+
+    return $files;
+}
+
+/**
+ * glob 1 本が当てるファイル (リポジトリ相対パス)。
+ *
+ * @param  string|null  $root  走査根の絶対パス (null = リポジトリルート)
+ * @return list<string>
+ */
+function claudeHooksSelfWiringGlobFiles(string $glob, ?string $root = null): array
+{
+    $root = rtrim($root ?? base_path(), '/');
+
+    $files = [];
+    foreach (glob($root.'/'.$glob) ?: [] as $path) {
+        if (is_file($path)) {
+            $files[] = ltrim(str_replace($root, '', $path), '/');
+        }
+    }
+    sort($files);
+
+    return $files;
+}
+
 /** 台帳から起動子の実文字列を取り出す (台帳の写しではなく本物を走らせるため)。 */
 function claudeHooksLauncherCommand(string $event): string
 {
@@ -595,18 +649,42 @@ test('S12a: 索引ツール自身に配線を書かせない明文が AGENTS.md 
 test('S12b: 実行面のファイルが索引ツールに配線を書かせる呼び出しを持たないこと', function (): void {
     $violations = [];
 
-    foreach (CLAUDE_HOOKS_TOOL_SELFWIRING_SCAN_GLOBS as $glob) {
-        foreach (glob(base_path($glob)) ?: [] as $path) {
-            if (! is_file($path)) {
-                continue;
-            }
-            if (preg_match('/code-review-graph\s+(install|init|uninstall)\b/', claudeHooksReadFile($path)) === 1) {
-                $violations[] = str_replace(base_path().'/', '', $path);
-            }
+    foreach (claudeHooksSelfWiringScanFiles() as $relative) {
+        if (preg_match('/code-review-graph\s+(install|init|uninstall)\b/', claudeHooksReadFile(base_path($relative))) === 1) {
+            $violations[] = $relative;
         }
     }
 
     expect($violations)->toBe([], "配線の正本が二重化する呼び出しがある:\n".implode("\n", $violations));
+});
+
+test('S12c (空振り検査): S12b の走査域が glob ごとの申告どおりであること', function (): void {
+    $files = claudeHooksSelfWiringScanFiles();
+
+    // 非空: glob がすべて外れても S12b は違反ゼロで緑になる
+    expect($files)->not->toBe([], 'S12b の走査域が空です (glob が 1 つも当たっていません)');
+
+    // glob ごと: 非空が契約の glob は代表ファイルを当てていること。
+    // union 全体だけを見ると、代表を持たない glob が 1 本壊れても他が非空なら緑のままになる。
+    foreach (CLAUDE_HOOKS_TOOL_SELFWIRING_SCAN_GLOBS as $glob => $representative) {
+        $matched = claudeHooksSelfWiringGlobFiles($glob);
+
+        if ($representative === null) {
+            continue; // 当たらないことが正常な glob (理由は台帳の docblock)
+        }
+
+        // `toContain()` は可変長引数なので理由は第 2 引数に渡せない (冒頭のヘルパと同じ理由)
+        expect(in_array($representative, $matched, true))
+            ->toBeTrue("glob [{$glob}] が代表ファイル {$representative} を当てていません");
+    }
+});
+
+test('S12c の負のコントロール: 走査根を差し替えると走査域が空になる', function (): void {
+    // 上の検査が空振りしていないことの裏取り。実在しない根を渡すと 0 件になる。
+    expect(claudeHooksSelfWiringScanFiles(base_path('nonexistent-scan-root')))->toBe([]);
+    foreach (array_keys(CLAUDE_HOOKS_TOOL_SELFWIRING_SCAN_GLOBS) as $glob) {
+        expect(claudeHooksSelfWiringGlobFiles($glob, base_path('nonexistent-scan-root')))->toBe([]);
+    }
 });
 
 // =============================================================================
