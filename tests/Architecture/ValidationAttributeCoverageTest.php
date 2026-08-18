@@ -19,6 +19,13 @@ use Illuminate\Support\Facades\Validator;
  *
  * 規約: validation の呼び出し経路を追加する場合 (`validator()` helper 等) は、本テストの
  *       検出対象パターンにも必ず追加すること。
+ *
+ * 空振り検査 (AGENTS.md §静的検査 (gate) と走査器の共通規約 (b) の
+ * 「違反が 0 件」と「母集団が 0 件」の区別): 本 gate は**母集団の非空が不変条件**である。
+ * 検査 1 は app/Http/Requests、検査 2 は app/ (Requests を除く) を走査根に持ち、
+ * どちらかが改名・移動すると未登録キーゼロのまま緑になる。末尾の「空振り検査」ケースが
+ * 2 つの母集団の非空・床値・代表要素を固定し、その直後の負のコントロールが
+ * 「走査根を差し替えると母集団が空になる」ことを示す。
  */
 
 /**
@@ -57,13 +64,17 @@ const UNPARSEABLE_CALL_INVENTORY = [
  * (FormRequestProhibitedKeyTest と同一パターン。関数名は Pest のグローバル関数衝突を避け
  * validationCoverage* プレフィックスにする)。
  *
+ * @param  string|null  $base  走査根の絶対パス (null = app/Http/Requests)。
+ *                             負のコントロールで別の根を渡すために引数化してある
  * @return list<class-string<FormRequest>>
  */
-function validationCoverageFormRequestClasses(): array
+function validationCoverageFormRequestClasses(?string $base = null): array
 {
     $classes = [];
-    $base = app_path('Http/Requests');
-    expect(is_dir($base))->toBeTrue();
+    $base ??= app_path('Http/Requests');
+    if (! is_dir($base)) {
+        return [];
+    }
 
     $iterator = new RecursiveIteratorIterator(
         new RecursiveDirectoryIterator($base, FilesystemIterator::SKIP_DOTS),
@@ -281,27 +292,32 @@ function validationCoverageExtractArrayKeys(array $tokens, int $start, int $end)
 /**
  * app/ 配下 (app/Http/Requests を除く) の inline validation 呼び出しを走査する。
  *
- * @return array{keys: array<string, list<string>>, unparseable: list<string>}
+ * @param  string|null  $root  走査根の絶対パス (null = app/)。
+ *                             負のコントロールで別の根を渡すために引数化してある
+ * @return array{keys: array<string, list<string>>, unparseable: list<string>, scannedFiles: list<string>}
  */
-function validationCoverageScanInlineCalls(): array
+function validationCoverageScanInlineCalls(?string $root = null): array
 {
     $keysByCall = [];
     $unparseable = [];
+    $root ??= app_path();
 
-    $iterator = new RecursiveIteratorIterator(
-        new RecursiveDirectoryIterator(app_path(), FilesystemIterator::SKIP_DOTS),
-    );
     $files = [];
-    /** @var SplFileInfo $file */
-    foreach ($iterator as $file) {
-        if (! $file->isFile() || $file->getExtension() !== 'php') {
-            continue;
+    if (is_dir($root)) {
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS),
+        );
+        /** @var SplFileInfo $file */
+        foreach ($iterator as $file) {
+            if (! $file->isFile() || $file->getExtension() !== 'php') {
+                continue;
+            }
+            $path = $file->getPathname();
+            if (str_starts_with($path, app_path('Http/Requests').'/')) {
+                continue;
+            }
+            $files[] = $path;
         }
-        $path = $file->getPathname();
-        if (str_starts_with($path, app_path('Http/Requests').'/')) {
-            continue;
-        }
-        $files[] = $path;
     }
     sort($files);
 
@@ -384,7 +400,7 @@ function validationCoverageScanInlineCalls(): array
         }
     }
 
-    return ['keys' => $keysByCall, 'unparseable' => $unparseable];
+    return ['keys' => $keysByCall, 'unparseable' => $unparseable, 'scannedFiles' => $files];
 }
 
 // ──────────────────────────── 検査 1 (FormRequest) ────────────────────────────
@@ -425,6 +441,30 @@ test('全 FormRequest の rules() キーが validation attributes に登録さ�
 
     $violations = array_values(array_unique($violations));
     expect($violations)->toBe([], 'attributes 未登録キー: '.implode(', ', $violations));
+});
+
+// ──────────────────────────── 空振り検査 (母集団が 0 件で緑にならないこと) ────────────────────────────
+
+test('空振り検査: 2 つの母集団が空でない (走査根が生きている)', function (): void {
+    // 検査 1 の母集団: app/Http/Requests の FormRequest
+    expect(is_dir(app_path('Http/Requests')))->toBeTrue('走査根 app/Http/Requests が存在しません');
+    $formRequests = validationCoverageFormRequestClasses();
+    expect($formRequests)->not->toBe([], '走査根 app/Http/Requests から FormRequest が 1 件も見つかりません');
+    expect(count($formRequests))->toBeGreaterThanOrEqual(25); // 床値 (実測 34 件)
+
+    // 検査 2 の母集団: app/ (Requests を除く) の PHP ファイル
+    $scanned = validationCoverageScanInlineCalls()['scannedFiles'];
+    expect($scanned)->not->toBe([], '走査根 app/ に inline validation の走査対象がありません');
+    expect(count($scanned))->toBeGreaterThanOrEqual(400); // 床値 (実測 793 件)
+});
+
+test('負のコントロール: 走査根を差し替えると 2 つの母集団が空になる', function (): void {
+    // 上の非空検査が空振りしていないことの裏取り。走査根の改名・移動を模して
+    // 別ディレクトリ / 実在しないパスを渡すと母集団が 0 件になる。
+    expect(validationCoverageFormRequestClasses(app_path('Models')))->toBe([]);
+    expect(validationCoverageFormRequestClasses(app_path('Http/Requests-renamed')))->toBe([]);
+    expect(validationCoverageScanInlineCalls(app_path('Http/Requests'))['scannedFiles'])->toBe([]);
+    expect(validationCoverageScanInlineCalls(base_path('app-renamed'))['scannedFiles'])->toBe([]);
 });
 
 // ──────────────────────────── 検査 2 (inline validation, fail-closed) ────────────────────────────

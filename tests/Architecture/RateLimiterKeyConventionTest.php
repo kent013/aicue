@@ -26,6 +26,15 @@ use Webmozart\Assert\Assert;
  *       `RateLimiter::for()` の名前集合が inventory と完全一致すること。
  *       解析できない登録 (unresolved) は 1 件でも fail (沈黙する登録を作らせない)。
  *   (2) キーの実挙動 — 各 limiter を実際に評価し、produce されたキーが規約に合うこと。
+ *
+ * ★空振り検査 (母集団非空) の**新規付与は不要**である。理由:
+ *   走査 (`RateLimiterRegistrationScanner::scanDirectory(app_path(), 'app')`) の結果が
+ *   0 件になると、「scan で検出した limiter 名の集合が inventory と完全一致する」が
+ *   非空の inventory (`rateLimiterKeyInventory()`) と食い違って**必ず赤くなる**。
+ *   つまり母集団の非空は完全一致の pin が構造的に担保している。
+ *   加えて各 limiter は実評価されるため、登録が消えれば `rateLimiterProduceLimits()` の
+ *   `Assert::notNull` が落ちる (静的走査と実挙動の両側から空振りが塞がっている)。
+ *   走査器自身の正例 / 負例は `tests/Unit/Architecture/RateLimiterRegistrationScannerTest.php`。
  */
 
 /** キー規約の正規表現 (`{レーン}:{種別}:` の接頭辞)。 */
