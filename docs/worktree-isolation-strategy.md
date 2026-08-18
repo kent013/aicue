@@ -228,6 +228,13 @@ bughunt 環境の DB (`bug_hunt(_1..4)`) は本書のテスト DB 分離とは**
 - `.env` は親から**実供給**するため、親の `.env` を後から変えても worktree には反映されない
   (worktree ごとに直す)。供給時に mode を 0600 に確定するのは**新規 worktree だけ**で、
   既存 worktree の秘密ファイルと親側の権限はそのまま残る。
+- **正典の `scripts/ci/ensure-test-db.php` はスキーマ更新まで担う形になったが追従していない**。
+  正典 (家系の裁定 AG-135) は基点 DB を「存在させる」だけでなく `migrate` まで走らせ、
+  未適用が残っていないことと更新がその DB に当たったことまで確かめる。本アプリの
+  `ensure-test-db.php` は CREATE と出自の記録までで、基点 DB のスキーマが古いまま残りうる
+  (DB 系の trait を使わない Architecture のレーンは基点 DB をそのまま読むため、
+  新しい worktree でだけ落ちる形の失敗になりうる)。これは意図的な逸脱ではないので
+  `docs/template-divergence.md` では正当化していない (aicue:D30 の「この登録が扱わない範囲」)。
 
 ## 参考
 
