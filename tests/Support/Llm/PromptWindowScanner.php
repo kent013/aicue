@@ -13,6 +13,7 @@ use Kent013\PrismPrompt\Prompt;
 use Kent013\PrismPrompt\TextPrompt;
 use Kent013\PrismPrompt\Values\UserInput;
 use Tests\Support\PhpReferenceScanner;
+use Tests\Support\ReceiverName;
 use Tests\Support\ReferenceKind;
 use Tests\Support\ReferenceSite;
 use Tests\Support\ScanScopeKind;
@@ -74,14 +75,18 @@ final class PromptWindowScanner
     /**
      * **同じ名前空間の短縮名**を補って参照 site にする。
      *
-     * `PhpReferenceScanner` は import (`use`) が無い短縮名を解決しない (同クラスの
-     * 「名前解決の限界」。既存 gate との振る舞い保存のため中立走査器側は直さない)。
+     * `PhpReferenceScanner` は import (`use`) が無い短縮名を名前参照 site にしない
+     * (同クラスの「保証しないもの」。`true` や定数まで同じ `T_STRING` で現れるため、
+     * 短縮名を一律に site 化すると母集団が意味を失う)。
      * しかし窓口一式は `App\Support\Llm` に同居しているため、そのままでは
-     * `PromptDefense.php` 内の `new GuardedPrompt(...)` や `UntrustedTextSanitizer::sanitize(...)` が
-     * 1 件も見えず、**所有権の検査が空振りしたまま緑になる**。ここを補って穴を塞ぐ。
+     * `PromptDefense.php` 内の `UntrustedTextSanitizer::sanitize(...)` の**受け手**や
+     * `PromptCanary` の型宣言が 1 件も見えず、**所有権の検査が空振りしたまま緑になる**。
+     * ここを補って穴を塞ぐ。
      *
      * ★ tokenizer は増やさない (`PhpReferenceScanner::tokens()` の正規化列を使う)。
      * ★ 補うのは**窓口一式の短縮名だけ**で、無関係な名前は 1 つも site にしない。
+     * ★ 補うのは `NameReference` だけである。`new Foo(` と静的呼び出しそのものは
+     *   中立走査器が解決するようになったので、ここで出すと**二重計上**になる。
      *
      * @param  array<string, string>  $imports  小文字 short name => FQCN
      * @return list<ReferenceSite>
@@ -135,45 +140,28 @@ final class PromptWindowScanner
                 continue; // メソッド名 / 宣言名であってクラス参照ではない
             }
 
+            if ($previousId === T_NEW) {
+                continue; // `new Foo(` は中立走査器が Construction として解決済み
+            }
+
             $next = $tokens[$i + 1] ?? null;
-            $isStaticCall = $next !== null && $next['id'] === T_DOUBLE_COLON;
-            if ($isStaticCall) {
+            if ($next !== null && $next['id'] === T_DOUBLE_COLON) {
                 $method = $tokens[$i + 2] ?? null;
                 $paren = $tokens[$i + 3] ?? null;
                 if ($method === null || $method['id'] !== T_STRING
                     || $paren === null || $paren['id'] !== null || $paren['text'] !== '(') {
                     continue; // `Foo::CONST` や `Foo::class`
                 }
-                // ★ 中立走査器の emission 契約に合わせ、**1 つの静的呼び出しから
-                //   StaticCall と receiver の NameReference の 2 site**を出す
-                //   (所有権の検査は NameReference 側を canonical にしているため)。
-                $references[] = self::reference(
-                    $relativePath,
-                    $method['line'],
-                    $i + 2,
-                    ReferenceKind::StaticCall,
-                    $method['text'],
-                    $candidates[$token['text']],
-                );
-                $references[] = self::reference(
-                    $relativePath,
-                    $token['line'],
-                    $i,
-                    ReferenceKind::NameReference,
-                    $candidates[$token['text']],
-                    null,
-                );
-
-                continue;
+                // ★ 静的呼び出しで補うのは**受け手の NameReference だけ**である。呼び出しそのものは
+                //   中立走査器が受け手を解決した StaticCall として出す (二重計上しない)。
+                //   所有権の検査は NameReference 側を canonical にしているためここが要る。
             }
 
             $references[] = self::reference(
                 $relativePath,
                 $token['line'],
                 $i,
-                $previousId === T_NEW ? ReferenceKind::Construction : ReferenceKind::NameReference,
                 $candidates[$token['text']],
-                null,
             );
         }
 
@@ -184,17 +172,15 @@ final class PromptWindowScanner
         string $path,
         int $line,
         int $tokenIndex,
-        ReferenceKind $kind,
         string $name,
-        ?string $receiver,
     ): ReferenceSite {
         return new ReferenceSite(
             path: $path,
             line: $line,
             tokenIndex: $tokenIndex,
-            kind: $kind,
+            kind: ReferenceKind::NameReference,
             name: $name,
-            receiver: $receiver,
+            receiver: ReceiverName::absent(),
             qualified: false,
             scopeKind: ScanScopeKind::NamedClass,
             class: null,
@@ -418,16 +404,36 @@ final class PromptWindowScanner
 
     private static function classify(ReferenceSite $reference): ?PromptWindowSite
     {
+        // 受け手を静的に決められない静的呼び出し。**読み込み系のメソッド名なら拾う** = fail-closed。
+        // ★`load` は「vendor 直読み」と「窓口呼び出し」のどちらか判別できないので、
+        //   **窓口 1 ファイルにしか許されない側** (VendorPromptLoad) として扱う。
+        //   窓口を迂回する経路を変数経由の書き方で隠せてはならない (共通規約 (b))。
+        if ($reference->kind === ReferenceKind::StaticCall && $reference->receiver->isUnresolved()) {
+            $rule = match ($reference->name) {
+                self::VENDOR_LOAD_METHOD => PromptWindowRule::VendorPromptLoad,
+                'loadUnattributed' => PromptWindowRule::WindowLoadUnattributed,
+                default => null,
+            };
+            if ($rule !== null) {
+                return new PromptWindowSite(
+                    $reference->path,
+                    $reference->line,
+                    $rule,
+                    '(受け手が未解決)::'.$reference->name,
+                );
+            }
+        }
+
         // `Prompt::load(` / `TextPrompt::load(` / `EmbeddingPrompt::load(`
         if ($reference->kind === ReferenceKind::StaticCall
             && $reference->name === self::VENDOR_LOAD_METHOD
-            && $reference->receiver !== null
-            && in_array($reference->receiver, self::VENDOR_PROMPT_CLASSES, true)) {
+            && $reference->receiver->isResolved()
+            && in_array($reference->receiver->fqcn(), self::VENDOR_PROMPT_CLASSES, true)) {
             return new PromptWindowSite(
                 $reference->path,
                 $reference->line,
                 PromptWindowRule::VendorPromptLoad,
-                $reference->receiver.'::load',
+                $reference->receiver->fqcn().'::load',
             );
         }
 
@@ -442,7 +448,7 @@ final class PromptWindowScanner
         }
 
         // `PromptDefense::load(` / `PromptDefense::loadUnattributed(`
-        if ($reference->kind === ReferenceKind::StaticCall && $reference->receiver === PromptDefense::class) {
+        if ($reference->kind === ReferenceKind::StaticCall && $reference->receiver->is(PromptDefense::class)) {
             $rule = match ($reference->name) {
                 'load' => PromptWindowRule::WindowLoad,
                 'loadUnattributed' => PromptWindowRule::WindowLoadUnattributed,

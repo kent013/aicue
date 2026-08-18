@@ -106,22 +106,34 @@ test('走査器: 決済名前空間をまったく知らないファイルの ->
 });
 
 test('走査器: new Stripe\StripeClient を payment_client_construction として検出する', function (): void {
+    // ★見本は完全修飾と import の 2 形で書く。`namespace App\Services\Billing;` の中で
+    //   `new Stripe\StripeClient(...)` と書くと PHP は
+    //   `App\Services\Billing\Stripe\StripeClient` を指すので、決済 client の見本にならない
+    //   (部分修飾名を解決するようになって初めてこの取り違えが見える)。
     $source = <<<'PHP'
     <?php
     namespace App\Services\Billing;
+    use Stripe\StripeClient;
     final class Probe
     {
         public function go(): mixed
         {
-            return new Stripe\StripeClient(['api_key' => 'sk_test']);
+            return new StripeClient(['api_key' => 'sk_test']);
+        }
+
+        public function goQualified(): mixed
+        {
+            return new \Stripe\StripeClient(['api_key' => 'sk_test']);
         }
     }
     PHP;
 
     $result = ExternalSeamScanner::scan('probe.php', $source);
 
-    expect(externalSeamRuleValues(...$result->adopted))
-        ->toBe([ExternalSeamRule::PaymentClientConstruction->value]);
+    expect(externalSeamRuleValues(...$result->adopted))->toBe([
+        ExternalSeamRule::PaymentClientConstruction->value,
+        ExternalSeamRule::PaymentClientConstruction->value,
+    ]);
 });
 
 test('走査器: Stripe\HttpClient\CurlClient の new は検出しない', function (): void {
@@ -430,10 +442,9 @@ test('走査器: 文字列補間を含むメソッド本体でも scope 追跡�
         ->and($result->adopted[0]->callable)->toBe('go');
 });
 
-test('走査器: 部分修飾名は解決しない (既存 gate と同じ限界を固定する)', function (): void {
-    // T_NAME_QUALIFIED は現在の namespace への相対解決も先頭 segment の alias 解決も
-    // 行わない。既存 ExternalClientBoundaryScanner と同じ限界であり、抽出は
-    // 振る舞い保存が目的なので直さない (直すと T126 の母集団が変わる)。
+test('走査器: 先頭要素を import した部分修飾名 (Facades\Http) を検出する', function (): void {
+    // T_NAME_QUALIFIED は先頭要素を import 表で置き換えて解決する。
+    // 解決しなかった頃はこの形が目録に出ず、外部到達点が無言で見逃されていた (T226 で是正)。
     $source = <<<'PHP'
     <?php
     namespace App\Services;
@@ -449,7 +460,72 @@ test('走査器: 部分修飾名は解決しない (既存 gate と同じ限界�
 
     $result = ExternalSeamScanner::scan('probe.php', $source);
 
-    expect($result->adopted)->toBe([]);
+    expect(externalSeamRuleValues(...$result->adopted))->toBe([ExternalSeamRule::HttpFacadeReference->value])
+        ->and($result->adopted[0]->class)->toBe('App\Services\Probe')
+        ->and($result->adopted[0]->callable)->toBe('go');
+});
+
+test('走査器: 先頭要素を import した部分修飾名の Cashier\Cashier::stripe() を検出する', function (): void {
+    $source = <<<'PHP'
+    <?php
+    namespace App\Services\Billing;
+    use Laravel\Cashier;
+    final class Probe
+    {
+        public function go(): mixed
+        {
+            return Cashier\Cashier::stripe();
+        }
+    }
+    PHP;
+
+    $result = ExternalSeamScanner::scan('probe.php', $source);
+
+    expect(externalSeamRuleValues(...$result->adopted))->toBe([ExternalSeamRule::PaymentClientCall->value])
+        ->and($result->suppressed)->toBe([]);
+});
+
+test('走査器: 受け手を静的に決められない ::stripe() は fail-closed で採用する', function (): void {
+    // 受け手が変数の静的呼び出しは FQCN を確定できない。**未解決を黙って候補から外さない**
+    // (規約 (b))。決済 client の取り出しを変数経由に書き換えるだけで目録を抜けられては困る。
+    $source = <<<'PHP'
+    <?php
+    namespace App\Services\Billing;
+    final class Probe
+    {
+        public function go(string $gateway): mixed
+        {
+            return $gateway::stripe();
+        }
+    }
+    PHP;
+
+    $result = ExternalSeamScanner::scan('probe.php', $source);
+
+    expect(externalSeamRuleValues(...$result->adopted))->toBe([ExternalSeamRule::PaymentClientCall->value])
+        ->and($result->suppressed)->toBe([]);
+});
+
+test('走査器: 名前空間相対の部分修飾名を外部到達点と取り違えない', function (): void {
+    // 先頭要素の import が無い部分修飾名は**現在の名前空間の下**に解決される。
+    // `App\Services\Billing\Cashier\Cashier` は決済 facade ではないので採用しない。
+    $source = <<<'PHP'
+    <?php
+    namespace App\Services\Billing;
+    final class Probe
+    {
+        public function go(): mixed
+        {
+            return Cashier\Cashier::stripe();
+        }
+    }
+    PHP;
+
+    $result = ExternalSeamScanner::scan('probe.php', $source);
+
+    // `stripe` はメソッド名一致でも拾う規則を持たない (静的呼び出しは receiver 一致が要る)。
+    expect($result->adopted)->toBe([])
+        ->and($result->suppressed)->toBe([]);
 });
 
 test('走査器: 同名 alias (use ... as Http) を解決する', function (): void {

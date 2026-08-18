@@ -285,3 +285,77 @@ test('グループ use を接頭辞ごと解決する', function (): void {
         ['rule' => 'new_external_object', 'name' => 'Aws\S3\S3Client', 'class' => 'App\Gate\Sample', 'scope' => 'NamedClass'],
     ]);
 });
+
+test('先頭要素を import した部分修飾名 (S3\S3Client) を解決して検出する', function (): void {
+    // T226: 部分修飾名を解決しなかった頃は `S3\S3Client` のまま照合され、
+    // 到達境界の接頭辞 `Aws\` に一致せず**無言で見逃されていた**。
+    $source = <<<'PHP'
+    <?php
+    namespace App\Gate;
+    use Aws\S3;
+    class Sample { public function f(): void { $client = new S3\S3Client([]); } }
+    PHP;
+
+    expect(scannerSummary(ExternalClientBoundaryScanner::scan('app/Gate/Sample.php', $source)))->toBe([
+        ['rule' => 'new_external_object', 'name' => 'Aws\S3\S3Client', 'class' => 'App\Gate\Sample', 'scope' => 'NamedClass'],
+    ]);
+});
+
+test('名前空間相対の部分修飾名を到達境界と取り違えない', function (): void {
+    // 先頭要素の import が無い部分修飾名は**現在の名前空間の下**に解決される。
+    // 解決しなかった頃は字面 `Aws\Bridge` が接頭辞 `Aws\` に一致し、
+    // 自前クラスを到達境界として**誤検出**していた。
+    $source = <<<'PHP'
+    <?php
+    namespace App\Gate;
+    class Sample { public function f(): void { $bridge = new Aws\Bridge(); } }
+    PHP;
+
+    expect(scannerSummary(ExternalClientBoundaryScanner::scan('app/Gate/Sample.php', $source)))->toBe([]);
+});
+
+test('受け手を静的に決められない大域 setter は fail-closed で検出する', function (): void {
+    // 受け手が変数 / 遅延静的束縛の静的呼び出しは FQCN を確定できない。
+    // **未解決を黙って候補から外さない** (規約 (b))。変数経由に書き換えるだけで
+    // プロセス大域状態への到達が目録から消えては困る。
+    $source = <<<'PHP'
+    <?php
+    namespace App\Gate;
+    class Sample {
+        public function f(string $requestor): void {
+            $requestor::setHttpClient($this->client);
+            static::setMaxNetworkRetries(0);
+        }
+    }
+    PHP;
+
+    expect(array_column(ExternalClientBoundaryScanner::stripeGlobalSites('app/Gate/Sample.php', $source), 'name'))
+        ->toBe(['setHttpClient', 'setMaxNetworkRetries']);
+});
+
+test('trait 本体の self:: 経由の大域 setter も fail-closed で検出する', function (): void {
+    // trait のコードは利用クラスへ展開されるため `self` は静的に決まらない。
+    // trait 自身へ解決してしまうと、この書き方で目録を抜けられる。
+    $source = <<<'PHP'
+    <?php
+    namespace App\Gate;
+    trait UsesGateway {
+        public function f(): void { self::setHttpClient($this->client); }
+    }
+    PHP;
+
+    expect(array_column(ExternalClientBoundaryScanner::stripeGlobalSites('app/Gate/UsesGateway.php', $source), 'name'))
+        ->toBe(['setHttpClient']);
+});
+
+test('同じ名前空間の裸の受け手は解決され、大域 setter と取り違えない', function (): void {
+    // import の無い短縮名の受け手は現在の名前空間の下に解決される
+    // (`App\Gate\Registry`)。Stripe 名前空間ではないので検出しない。
+    $source = <<<'PHP'
+    <?php
+    namespace App\Gate;
+    class Sample { public function f(): void { Registry::instance(); } }
+    PHP;
+
+    expect(ExternalClientBoundaryScanner::stripeGlobalSites('app/Gate/Sample.php', $source))->toBe([]);
+});

@@ -47,21 +47,44 @@ final class PhpReferenceScanner
      *   emit される。すなわち **1 つの静的呼び出しは NameReference と StaticCall の 2 site を生む**。
      *   利用側はどちらか一方だけを canonical にすること (両方を見ると二重検出になる)。
      *
-     * ★**名前解決の限界 = 共通規約 (a)・(b) を満たしていない既知の穴**
-     *   (`AGENTS.md` の「静的検査 (gate) と走査器の共通規約」):
-     *   `T_NAME_QUALIFIED` (`Foo\Bar` のような部分修飾名) は `ltrim($text, '\\')` するだけで、
-     *   「現在の namespace への相対解決」も「先頭 segment の alias 解決」も**行わない**。
-     *   したがって `use Illuminate\Support\Facades; … Facades\Http::get()` は解決できず、
-     *   **未解決であることを区別できない名前文字列として参照 site が emit される**。
-     *   **現在の**利用側 (対象クラスを完全修飾名で照合するもの) では、この文字列が対象一覧に
-     *   一致しないため、参照 site は存在しているのに違反候補として認識されず**無言で見逃される**
-     *   (= 見逃す側へ倒れている)。
-     *   抽出したときは**振る舞い保存**が目的でここを触らなかったが、
-     *   これは**規約に照らして是認された限界ではなく、是正待ちの穴**である
-     *   (是正すると本走査器を使う gate と派生検出器の判定結果が変わり、従来見逃していた参照の
-     *   顕在化、または未解決エラーによる新しい失敗が起こり得るため別 TODO で扱う。
-     *   棚卸しは `devnotes/20260818-0303-scanner-common-conventions/divergence-survey.md` の D1)。
-     *   **したがって部分修飾名で書かれた参照について本走査器は検出力を主張しない。**
+     * ★**名前解決の規則** (`AGENTS.md` の「静的検査 (gate) と走査器の共通規約」(a)):
+     *   emit する `name` は**必ず完全修飾名まで解決済み**である。PHP の名前解決規則をそのまま写す。
+     *   - `T_NAME_FULLY_QUALIFIED` (`\Foo\Bar`): 先頭の `\` を落とす
+     *   - `T_NAME_QUALIFIED` (`Foo\Bar` のような部分修飾名): **先頭要素を import 表で置き換える**。
+     *     一致する import が無ければ**現在の名前空間の下**に置く
+     *     (`use Illuminate\Support\Facades;` + `Facades\Http` => `Illuminate\Support\Facades\Http`、
+     *      `namespace App\Services;` + `Support\Thing` => `App\Services\Support\Thing`)
+     *   - `T_NAME_RELATIVE` (`namespace\Foo`): 現在の名前空間の下に置く
+     *   - import 済みの短縮名 / 別名: import 表で置き換える
+     *   - import の無い短縮名でも `new X(` の位置は**構文上クラス名が確定する**ので、
+     *     現在の名前空間の下に解決する (`namespace Stripe; new StripeClient();`)
+     *   import 表は**namespace 宣言ごとに作り直し**、**ファイルスコープの `use` だけ**を、
+     *   さらに**クラスの import だけ**を登録する
+     *   (クラス本体の `use SomeTrait;` は取り込みであって import ではない。
+     *    `use function` / `use const` はクラス名を作らない。
+     *    どちらも混ぜると同名の短縮キーでクラスの import を上書きし FQCN を失う)。
+     *   `use` は宣言より前の参照には効かない (PHP 実測) ため、走査順のまま解決してよい。
+     *
+     * ★**解決できない形の扱い ((b) fail-closed)**: 静的呼び出しの受け手が変数 (`$gateway::`) /
+     *   遅延静的束縛 (`static::`) / 親クラス (`parent::`) / 式 / **trait 本体の `self::`**
+     *   (取り込んだクラスへ展開されるので trait 自身を指さない) のときは FQCN を確定できない。
+     *   これを「受け手なし」と同じ値へ潰さず、`ReceiverName` が
+     *   `ReceiverResolution::Unresolved` として返す。利用側 gate は**拾いすぎる方向**へ倒して
+     *   扱うこと (完全修飾名だけを見て黙って落とすと、変数経由に書き換えるだけで検査を抜けられる)。
+     *   なお `new` の直後の `self` / `static` / `parent` も同じ理由で名前解決の対象にしない。
+     *
+     * ★**保証しないもの (誇張しない)**: import の無い短縮名のうち、
+     *   **`new` の直後でも静的呼び出しの受け手でもない位置** (型宣言 / `::class` / `instanceof` /
+     *   `implements` / `extends`) は名前参照 site として emit しない。
+     *   PHP の規則では現在の名前空間の下に解決されるので、**これは PHP の構文上の限界ではなく、
+     *   本走査器がこれらの文脈の判定を実装していないという限界である**
+     *   (`T_STRING` は定数名・関数名・`true` などにも使われるため、文脈を見ずに一律 emit すると
+     *    母集団が意味を失う。文脈ごとの判定を足せば解決はできる)。
+     *   したがって**ファイル自身の名前空間の下に居るクラス**を、import 無しの短縮名で
+     *   この位置に書いた参照は見えない。**この形について本走査器は検出力を主張しない**。
+     *   同じ名前空間の対象を照合したい利用側は自分で補うこと
+     *   (準拠実装: `Tests\Support\Llm\PromptWindowScanner::sameNamespaceReferences()`)。
+     *   `new` の直後と静的呼び出しの受け手は上記のとおり解決するので、この穴には入らない。
      */
     public static function references(string $relativePath, string $phpSource): ReferenceScanResult
     {
@@ -69,13 +92,15 @@ final class PhpReferenceScanner
         $count = count($tokens);
 
         $namespace = '';
-        /** @var array<string, string> $aliases short name (小文字) => FQCN */
+        /** @var array<string, string> $aliases 現在の namespace ブロックの import 表 (小文字 short name => FQCN) */
         $aliases = [];
+        /** @var array<string, string> $imports ファイル全体の import (返却用。namespace ブロックをまたいで積む) */
+        $imports = [];
 
         $braceDepth = 0;
-        /** @var list<array{kind: ScanScopeKind, class: string|null, bodyDepth: int}> $scopes */
+        /** @var list<array{kind: ScanScopeKind, class: string|null, trait: bool, bodyDepth: int}> $scopes */
         $scopes = [];
-        /** @var array{kind: ScanScopeKind, class: string|null}|null $pendingScope */
+        /** @var array{kind: ScanScopeKind, class: string|null, trait: bool}|null $pendingScope */
         $pendingScope = null;
         /** @var list<array{name: string, bodyDepth: int}> $callables */
         $callables = [];
@@ -90,7 +115,12 @@ final class PhpReferenceScanner
             $text = $token['text'];
 
             // --- namespace 宣言 ---
+            // ★import 表は namespace ブロックごとに作り直される (PHP 実測: 前のブロックの
+            //   `use A as Sub;` は次のブロックの `Sub\Y` を解決しない)。捨てないと
+            //   別ブロックの別名で解決してしまう。
             if ($id === T_NAMESPACE) {
+                $namespace = '';
+                $aliases = [];
                 $next = $tokens[$i + 1] ?? null;
                 if ($next !== null && ($next['id'] === T_NAME_QUALIFIED || $next['id'] === T_STRING)) {
                     $namespace = $next['text'];
@@ -107,7 +137,17 @@ final class PhpReferenceScanner
                 if ($next !== null && $next['text'] === '(') {
                     continue;
                 }
-                $i = self::collectUseStatement($tokens, $i, $aliases);
+                /** @var array<string, string> $collected */
+                $collected = [];
+                $i = self::collectUseStatement($tokens, $i, $collected);
+                // ★クラス本体の `use SomeTrait;` は**取り込みであって import ではない**。
+                //   import 表へ混ぜると同名の短縮キーでファイル先頭の import を上書きし、
+                //   FQCN を失う (`use App\Concerns\Foo;` + クラス本体の `use Foo;` で
+                //   `foo => 'Foo'` になる)。名前解決の土台なのでファイルスコープに限る。
+                if ($scopes === []) {
+                    $aliases = array_merge($aliases, $collected);
+                    $imports = array_merge($imports, $collected);
+                }
 
                 continue;
             }
@@ -126,6 +166,9 @@ final class PhpReferenceScanner
                     'class' => $isNamed && $next !== null
                         ? ($namespace === '' ? $next['text'] : $namespace.'\\'.$next['text'])
                         : null,
+                    // ★trait は「どのクラスへ展開されるか」が走査時点で決まらない。
+                    //   `self::` の解決可否がクラスと違うので、宣言の種別を覚えておく。
+                    'trait' => $id === T_TRAIT,
                 ];
 
                 continue;
@@ -153,7 +196,12 @@ final class PhpReferenceScanner
             if ($id === null && $text === '{') {
                 $braceDepth++;
                 if ($pendingScope !== null) {
-                    $scopes[] = ['kind' => $pendingScope['kind'], 'class' => $pendingScope['class'], 'bodyDepth' => $braceDepth];
+                    $scopes[] = [
+                        'kind' => $pendingScope['kind'],
+                        'class' => $pendingScope['class'],
+                        'trait' => $pendingScope['trait'],
+                        'bodyDepth' => $braceDepth,
+                    ];
                     $pendingScope = null;
                 } elseif ($pendingCallable !== null) {
                     $callables[] = ['name' => $pendingCallable, 'bodyDepth' => $braceDepth];
@@ -187,10 +235,11 @@ final class PhpReferenceScanner
 
             $scopeKind = $scopes === [] ? ScanScopeKind::FileScope : $scopes[count($scopes) - 1]['kind'];
             $scopeClass = $scopes === [] ? null : $scopes[count($scopes) - 1]['class'];
+            $scopeIsTrait = $scopes !== [] && $scopes[count($scopes) - 1]['trait'];
             $callableName = $callables === [] ? null : $callables[count($callables) - 1]['name'];
 
-            // --- 完全修飾 / 修飾名による参照 ---
-            if ($id === T_NAME_FULLY_QUALIFIED || $id === T_NAME_QUALIFIED) {
+            // --- 完全修飾 / 部分修飾 / 名前空間相対の名前による参照 ---
+            if ($id === T_NAME_FULLY_QUALIFIED || $id === T_NAME_QUALIFIED || $id === T_NAME_RELATIVE) {
                 $kind = ($tokens[$i - 1]['id'] ?? null) === T_NEW
                     ? ReferenceKind::Construction
                     : ReferenceKind::NameReference;
@@ -199,8 +248,8 @@ final class PhpReferenceScanner
                     line: $token['line'],
                     tokenIndex: $i,
                     kind: $kind,
-                    name: ltrim($text, '\\'),
-                    receiver: null,
+                    name: self::resolveWrittenName($id, $text, $namespace, $aliases),
+                    receiver: ReceiverName::absent(),
                     qualified: true,
                     scopeKind: $scopeKind,
                     class: $scopeClass,
@@ -230,7 +279,9 @@ final class PhpReferenceScanner
                     tokenIndex: $i,
                     kind: ReferenceKind::StaticCall,
                     name: $text,
-                    receiver: $receiverToken === null ? null : self::resolveName($receiverToken, $aliases),
+                    receiver: $receiverToken === null
+                        ? ReceiverName::unresolved()
+                        : self::resolveReceiver($receiverToken, $namespace, $scopeIsTrait ? null : $scopeClass, $aliases),
                     qualified: false,
                     scopeKind: $scopeKind,
                     class: $scopeClass,
@@ -248,7 +299,7 @@ final class PhpReferenceScanner
                     tokenIndex: $i,
                     kind: ReferenceKind::MethodCall,
                     name: $text,
-                    receiver: null,
+                    receiver: ReceiverName::absent(),
                     qualified: false,
                     scopeKind: $scopeKind,
                     class: $scopeClass,
@@ -267,9 +318,19 @@ final class PhpReferenceScanner
                 || $previousId === T_AS || $previousId === T_GOTO) {
                 continue; // 宣言名であって参照ではない
             }
-            $resolved = $aliases[mb_strtolower($text)] ?? null;
+            $lower = mb_strtolower($text);
+            $resolved = $aliases[$lower] ?? null;
             if ($resolved === null) {
-                continue;
+                // ★`new X(` の `X` は直前のトークンだけでクラス名だと分かるので、
+                //   import が無くても現在の名前空間の下に解決する。ここを落とすと
+                //   `namespace Stripe; new StripeClient();` のように**ファイル自身の名前空間が
+                //   対象と同じ**ときに構築点を見逃す (fail-open)。
+                //   それ以外の位置 (型宣言 / `::class` 等) の短縮名は文脈判定を実装していないので
+                //   解決しない (docblock の「保証しないもの」)。
+                if ($previousId !== T_NEW || in_array($lower, ['self', 'static', 'parent'], true)) {
+                    continue;
+                }
+                $resolved = $namespace === '' ? $text : $namespace.'\\'.$text;
             }
 
             $sites[] = new ReferenceSite(
@@ -278,7 +339,7 @@ final class PhpReferenceScanner
                 tokenIndex: $i,
                 kind: $previousId === T_NEW ? ReferenceKind::Construction : ReferenceKind::NameReference,
                 name: $resolved,
-                receiver: null,
+                receiver: ReceiverName::absent(),
                 qualified: false,
                 scopeKind: $scopeKind,
                 class: $scopeClass,
@@ -286,13 +347,16 @@ final class PhpReferenceScanner
             );
         }
 
-        return new ReferenceScanResult($sites, $aliases);
+        return new ReferenceScanResult($sites, $imports);
     }
 
     /**
      * `use` 文を読み進めて alias マップへ登録し、`;` の添字を返す。
      *
      * `use function` / `use const` は名前解決の対象外 (クラス参照ではない)。
+     * **グループの内側に書く形 (`use App\{Foo, function bar, const BAZ};`) も同じ扱い**で、
+     * 関数 / 定数の要素だけを飛ばす。ここを取り違えるとクラスの別名表へ関数名が入り、
+     * 同名のクラス import を上書きして部分修飾名を誤った FQCN へ解決する。
      * グループ use (`use Aws\{S3\S3Client, Sns\SnsClient};`) にも対応する。
      *
      * @param  list<array{id: int|null, text: string, line: int}>  $tokens
@@ -316,6 +380,7 @@ final class PhpReferenceScanner
         $current = '';
         $alias = null;
         $expectAlias = false;
+        $isClassImport = true;
 
         for (; $i < $count; $i++) {
             $token = $tokens[$i];
@@ -326,7 +391,7 @@ final class PhpReferenceScanner
                 // ★`{` の直前に溜まっている名前は**グループ use の接頭辞**であって import ではない。
                 //   ここで alias 登録すると `use Illuminate\Support\Facades\{Http, Mail};` が
                 //   `Facades` という実在しない import を作る。
-                if ($current !== '' && $text !== '{') {
+                if ($current !== '' && $text !== '{' && $isClassImport) {
                     $fqcn = ltrim($prefix.$current, '\\');
                     $short = $alias ?? self::shortName($fqcn);
                     $aliases[mb_strtolower($short)] = $fqcn;
@@ -334,6 +399,7 @@ final class PhpReferenceScanner
                 $current = '';
                 $alias = null;
                 $expectAlias = false;
+                $isClassImport = true;
 
                 if ($text === '{') {
                     // グループ use: 直前までの名前が接頭辞になる
@@ -345,6 +411,13 @@ final class PhpReferenceScanner
                 if ($text === ';') {
                     return $i;
                 }
+
+                continue;
+            }
+
+            if ($id === T_FUNCTION || $id === T_CONST) {
+                // グループの内側の `function` / `const`。この要素はクラスの別名にしない
+                $isClassImport = false;
 
                 continue;
             }
@@ -395,22 +468,81 @@ final class PhpReferenceScanner
     }
 
     /**
-     * トークンをクラス名 (FQCN) として解決する。解決できなければ null。
+     * ソースに書かれた名前を PHP の名前解決規則どおり FQCN へ解決する。
      *
-     * @param  array{id: int|null, text: string, line: int}  $token
+     * 部分修飾名 (`Foo\Bar`) は**先頭要素**だけが import 表の対象である
+     * (`use A\B\Foo;` + `Foo\Bar` => `A\B\Foo\Bar`)。一致する import が無ければ
+     * 現在の名前空間の下に置く (`namespace App;` + `Foo\Bar` => `App\Foo\Bar`)。
+     *
      * @param  array<string, string>  $aliases
      */
-    private static function resolveName(array $token, array $aliases): ?string
+    private static function resolveWrittenName(?int $id, string $text, string $namespace, array $aliases): string
     {
-        $id = $token['id'];
-        if ($id === T_NAME_FULLY_QUALIFIED || $id === T_NAME_QUALIFIED) {
-            return ltrim($token['text'], '\\');
-        }
-        if ($id === T_STRING) {
-            return $aliases[mb_strtolower($token['text'])] ?? null;
+        if ($id === T_NAME_FULLY_QUALIFIED) {
+            return ltrim($text, '\\');
         }
 
-        return null;
+        $separator = strpos($text, '\\');
+
+        if ($id === T_NAME_RELATIVE) {
+            // `namespace\Foo\Bar` は現在の名前空間の下を指す
+            $rest = $separator === false ? '' : substr($text, $separator + 1);
+
+            return $namespace === '' ? $rest : $namespace.'\\'.$rest;
+        }
+
+        $head = $separator === false ? $text : substr($text, 0, $separator);
+        $resolvedHead = $aliases[mb_strtolower($head)] ?? null;
+        if ($resolvedHead !== null) {
+            return $separator === false ? $resolvedHead : $resolvedHead.substr($text, $separator);
+        }
+
+        return $namespace === '' ? $text : $namespace.'\\'.$text;
+    }
+
+    /**
+     * 静的呼び出しの受け手を解決する。**確定できない形は `Unresolved` として返す** ((b) fail-closed)。
+     *
+     * `self::` は囲みのクラスが分かるので解決する。`static::` は遅延静的束縛、
+     * `parent::` は継承関係を追わないと決まらないため未解決にする。
+     * **trait 本体の `self::` も未解決**である — trait のコードは取り込んだクラスへ展開されるので
+     * `self` は trait 自身ではなく利用クラスを指し、複数のクラスが取り込める以上ここでは決まらない
+     * (呼び出し側が `$scopeClass` に null を渡す)。
+     *
+     * @param  array{id: int|null, text: string, line: int}  $token
+     * @param  string|null  $scopeClass  囲みのクラス FQCN (`self` が決まらない scope では null)
+     * @param  array<string, string>  $aliases
+     */
+    private static function resolveReceiver(array $token, string $namespace, ?string $scopeClass, array $aliases): ReceiverName
+    {
+        $id = $token['id'];
+
+        if ($id === T_NAME_FULLY_QUALIFIED || $id === T_NAME_QUALIFIED || $id === T_NAME_RELATIVE) {
+            return ReceiverName::resolved(self::resolveWrittenName($id, $token['text'], $namespace, $aliases));
+        }
+
+        if ($id === T_STRING) {
+            $lower = mb_strtolower($token['text']);
+            if ($lower === 'self') {
+                return $scopeClass === null ? ReceiverName::unresolved() : ReceiverName::resolved($scopeClass);
+            }
+            if ($lower === 'parent') {
+                return ReceiverName::unresolved();
+            }
+            $imported = $aliases[$lower] ?? null;
+            if ($imported !== null) {
+                return ReceiverName::resolved($imported);
+            }
+
+            // ★受け手の位置に来る短縮名は**必ずクラス名**なので、import が無ければ
+            //   現在の名前空間の下に解決してよい (定数や関数名と混ざる余地が無い)。
+            return ReceiverName::resolved(
+                $namespace === '' ? $token['text'] : $namespace.'\\'.$token['text'],
+            );
+        }
+
+        // 変数 / `static` / 式の結果など。**null へ潰さず未解決として返す**。
+        return ReceiverName::unresolved();
     }
 
     private static function shortName(string $fqcn): string

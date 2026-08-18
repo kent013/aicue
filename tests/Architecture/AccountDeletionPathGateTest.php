@@ -55,8 +55,14 @@ use Webmozart\Assert\Assert;
  *     `AccountController extends Controller` から app/ の全 Controller が入り信号が死ぬため、
  *     意図的に `implements` だけに限定している)
  *   - **`use Billable;` のような trait 取り込み**そのもの。PhpReferenceScanner はクラス本体の
- *     `use` を import として扱い site を出さないため、trait 名は記号照合に載らない
+ *     `use` を site にしないため、trait 名は記号照合に載らない
  *     (帰結として Cashier の**構造的な取り込み**は検出せず、**呼び出し**だけを見る)
+ *   - **受け手を静的に決められない静的呼び出しからの到達辺** (`$class::run()` / `static::run()` /
+ *     `parent::run()`)。名前が無いので辿る先を作れず、**閉包はここで途切れる**。
+ *     ただし**決済記号の照合は落ちない** — 受け手を見ずにメソッド名だけで判定する規則が
+ *     別にあるため、`$gateway::stripe()` のような書き方は記号として拾う (負のコントロール 11 形目)。
+ *     受け手を決められない呼び出しを閉包内で 0 件に pin しないのは、`parent::` を含めると
+ *     app/ に 31 件あり、退会経路と無関係な継承呼び出しまで免除語彙を要求することになるためである
  *   - **`Laravel\Cashier\` 名前空間の型参照そのもの** (`Subscription extends CashierSubscription` /
  *     `use Billable;`) は記号にしない。接頭辞走査は値オブジェクト・例外・モデル継承を巻き込んで
  *     信号を殺すため (ExternalSeamScanner が同じ理由で接頭辞走査を禁じている)
@@ -416,8 +422,8 @@ function deletionPathEdges(ReferenceScanResult $result, array $tokens): array
         if ($site->kind === ReferenceKind::NameReference || $site->kind === ReferenceKind::Construction) {
             $names[] = $site->name;
         }
-        if ($site->kind === ReferenceKind::StaticCall && $site->receiver !== null) {
-            $names[] = $site->receiver;
+        if ($site->kind === ReferenceKind::StaticCall && $site->receiver->isResolved()) {
+            $names[] = $site->receiver->fqcn();
         }
     }
     foreach ($tokens as $token) {
@@ -516,10 +522,10 @@ function deletionPathClassifySite(ReferenceSite $site, array $apiMethods): ?stri
         return $site->name;
     }
 
-    if ($site->kind === ReferenceKind::StaticCall && $site->receiver !== null
-        && deletionPathIsPaymentNamespace($site->receiver)
+    if ($site->kind === ReferenceKind::StaticCall && $site->receiver->isResolved()
+        && deletionPathIsPaymentNamespace($site->receiver->fqcn())
     ) {
-        return $site->receiver.'::'.$site->name.'()';
+        return $site->receiver->fqcn().'::'.$site->name.'()';
     }
 
     if ($site->kind !== ReferenceKind::MethodCall && $site->kind !== ReferenceKind::StaticCall) {
@@ -1195,10 +1201,13 @@ test('負のコントロール 5 形目: trait / import 経由の到達を辺と
     expect($scan['edges'])->toContain('App\Support\Billing\SomeBillingTrait');
 });
 
-test('負のコントロール 5 形目 (b): クラス本体の use が先頭 import を上書きしても辺を失わない', function (): void {
-    // ★`PhpReferenceScanner` の alias マップは `use App\...\Foo;` と クラス本体の `use Foo;` を
-    //   同じ短縮キーで扱うため、後者が前者を上書きして FQCN を失う。alias マップを辺に使うと
-    //   **trait 経由の到達が丸ごと消える** (fail-open)。トークン直読みでこれを防いでいることを固定する。
+test('負のコントロール 5 形目 (b): クラス本体の use があっても trait 経由の辺を失わない', function (): void {
+    // ★かつては `PhpReferenceScanner` の alias マップが `use App\...\Foo;` と
+    //   クラス本体の `use Foo;` を同じ短縮キーで扱い、後者が前者を上書きして FQCN を失っていた
+    //   (alias マップを辺に使うと trait 経由の到達が丸ごと消える fail-open)。
+    //   T226 で走査器側が**ファイルスコープの import だけ**を表に載せるようになったので
+    //   上書きは起きない。本 gate はもともとトークン直読みで辺を取るため、
+    //   **どちらの前提でも辺を失わない**ことを両側から固定する。
     $fixture = <<<'PHP'
     <?php
     namespace App\Models;
@@ -1209,8 +1218,7 @@ test('負のコントロール 5 形目 (b): クラス本体の use が先頭 im
     PHP;
 
     $result = PhpReferenceScanner::references('app/Models/Fixture.php', $fixture);
-    // 前提の実測: alias マップ側は上書きで短縮名に潰れている (この前提が崩れたら本テストは不要になる)。
-    expect($result->imports['shadowedtrait'] ?? null)->toBe('ShadowedTrait');
+    expect($result->imports['shadowedtrait'] ?? null)->toBe('App\Models\Concerns\ShadowedTrait');
 
     $scan = deletionPathScanSource('app/Models/Fixture.php', $fixture);
     expect($scan['edges'])->toContain('App\Models\Concerns\ShadowedTrait');
@@ -1361,6 +1369,30 @@ test('負のコントロール 10 形目: 1 ファイル 2 型 / ファイル名
 
     $scan = deletionPathScanSource('app/Services/Billing/StripeRedactor.php', $mismatched);
     expect($scan['declared'])->not->toBe([$scan['class']]);
+});
+
+test('負のコントロール 11 形目: 受け手を静的に決められない決済呼び出しも記号に載せる', function (): void {
+    // ★受け手を変数 / 遅延静的束縛にすると FQCN は解決できない (`ReceiverName` が未解決を返す)。
+    //   受け手だけを見て落とすと、この書き方 1 つで記号照合を素通りできる (fail-open)。
+    //   記号照合は**受け手を見ずメソッド名で**判定する規則を別に持つのでここは落ちない。
+    //   一方で到達辺は名前が無いため作れず、閉包はここで途切れる (docblock の「保証しないもの」)。
+    $fixture = <<<'PHP'
+    <?php
+    namespace App\Services\Organization;
+    class Fixture {
+        public function run(string $gateway): void {
+            $gateway::stripe();
+            static::createAsStripeCustomer();
+        }
+    }
+    PHP;
+
+    $scan = deletionPathScanSource('app/Services/Organization/Fixture.php', $fixture);
+
+    // 辺として残るのは `namespace` 宣言のトークン (ファイル自身) だけで、
+    // 受け手からの到達辺は 1 本も作れない。
+    expect(array_column($scan['payment'], 'symbol'))->toBe(['->stripe()', '->createAsStripeCustomer()'])
+        ->and($scan['edges'])->toBe(['App\Services\Organization']);
 });
 
 test('正のコントロール: 匿名クラスと ::class は宣言型に数えない', function (): void {
