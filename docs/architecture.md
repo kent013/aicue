@@ -2921,3 +2921,69 @@ macro 経由の呼び出しは境界迂回として落とす。許可を 2 か�
 
 > **保証しないものは本節に書かない**。正本は実行時層 (`PlainDataCacheGuard`) の docblock である
 > (2 か所に書くと必ず食い違う)。
+
+## SNS 署名検証の証明書取得 (T229 / 家系の正典 t1・裁定 AG-199)
+
+SES のバウンス / 苦情通知は SNS 経由で `POST /ses/notification` に届く。
+**無認証のリクエストが外向き通信を誘発する経路**なので、証明書 (PEM) の取得は
+`app/Services/Mail/Sns/SnsCertificateFetcher.php` 1 本へ集約し、
+署名検証器 (`AwsSnsSignatureVerifier`) は HTTP client を持たない。
+
+| 段 | 何をするか | 失敗したときの扱い |
+|---|---|---|
+| 1 | 両キー (`SigningCertURL` / `SigningCertUrl`) の同時送信を拒否 | 403 (恒久) |
+| 2 | `SnsCertificateUrl` で厳格な書式検証 (**型**で担保する) | 403 |
+| 3 | `UrlSafetyInspector::inspect()` (SSRF 判定。**ロックの外**) | DNS 解決失敗のみ 503、他は 403 |
+| 4 | 単一ロックキーで同時取得を 1 本に直列化 (待たない) | 競合 / ロック基盤障害は 503 |
+| 5 | 時間予算つき HTTP 取得 (redirect 禁止 / 2xx 以外は拒否) | 通信系は 503 |
+| 6 | 応答サイズ上限 → PEM 確認 | 403 |
+| 7 | `MessageValidator::validate()` が通ってからキャッシュへ昇格 | 昇格の失敗はログのみ |
+
+「SDK が検証済み URL 以外を要求したら取りに行かない」最後の砦が certClient の中にある。
+
+### 保証しないもの (誇張しない)
+
+1. **permit 1 はロック寿命による条件付きの性質である**。SSRF 検査はロックの外で行い
+   (DNS 解決に時間の上限が無く予算へ入れられないため)、ロック内の後処理
+   (キャッシュ再確認・PEM 解析) にも強制上限は無い。1 要求の保持が寿命を超えれば取得は重なりうる。
+   併せて **DNS 解決は permit 1 の対象外で並列に走りうる** — 無認証の入力から
+   別々の SNS 風 host (`sns.a1.amazonaws.com`, `sns.a2.amazonaws.com`, …) を作れるためである。
+   それでも受容したのは (a) t0 は同じ入力に対して**外向き HTTP 取得を無制限に並列で
+   行っていた**ので後退ではないこと、(b) 受け口の `throttle:webhook-ses` (300/分・IP 単位) が
+   単一 IP の物量を頭打ちにすること、の 2 点による。
+   **再検討条件と判断に使う観測値**は、受け口 `webhooks.ses` の応答時間 p95 / p99 (アクセスログ) /
+   `mail.sns.verification_unavailable` の件数 (アプリログ) / 受け口の 429 応答 (アクセスログ) の
+   3 つで、そのとき採る緩和策は「証明書 host の region を TopicArn の allowlist へ束縛する」
+   「名前解決用の独立した同時実行制限を設ける」「解決器へ実効 timeout を入れる」である。
+2. **「検証済みのみ昇格」は 2 段で守られている** — 昇格メソッドの名前
+   (`rememberVerified`) と、`app/` 全体で呼び出し site を 1 件に固定する契約テスト
+   (`SnsCertificateFetchContractTest` の C11) である。**言語の可視性で閉じてはいない**。
+3. **取得口の唯一性は「指定した走査根の中の、解決可能な HTTP client 参照の範囲」**である。
+   走査根の外・部分修飾名・変数経由・列挙していない通信の原語には効かない。
+   3 つの目録の役割分担は次のとおりで、**注入された `HttpFactory` は
+   `ExternalSeamInventory` の母集団に入らない**という非対称がある
+   (同目録の `http_facade_reference` 規則は `Http::` facade の参照だけを見るため)。
+
+   | 目録 | 見るもの |
+   |---|---|
+   | `SnsCertificateFetchContractTest` | SNS 署名検証まわりの走査根での HTTP client 参照・取得の配線 |
+   | `ExternalSeamInventory` | `app/` 全体の `Http::` facade / Socialite / Mail / Notification / 決済 client |
+   | `ExternalClientTimeoutInventoryTest` | `Aws\` / Flysystem / `Storage` の到達境界と待ち上限 |
+
+4. **キャッシュ読みの障害で止まらないのは「読みだけが失敗した場合」**である。
+   同じ store がロックも担うので、**store ごと落ちればロック取得も失敗して 503 になる**。
+5. **DNS rebinding は解消しない**。検査時と接続時で名前解決が変わる TOCTOU は残り、
+   private IP への TCP 接続と TLS ClientHello そのものは発生する。HTTP 層での取得を
+   制限するのは「通常の CA 検証が有効であること」を前提とした TLS であり、
+   取得先の host が型で `sns.<region>.amazonaws.com` に固定されていることに依存する。
+   テストで固定できるのは「private IP に解決される host は 403」「DNS 解決失敗は 503」
+   「通信系の失敗は 503」「取得口が TLS 検証を無効化していない」までである。
+6. **応答サイズ上限も時間予算もメモリ使用量の上界ではない**。Laravel の HTTP client は
+   既定で非 stream なので本文は先に全部メモリへ載る。上限の役割は
+   「期待と違う応答を検証・キャッシュに固定しない」ことだけである。
+7. **「SDK が検証済み URL 以外を要求する」分岐は現行 vendor
+   (aws/aws-php-sns-message-validator 1.10.0) では到達しない**ため behavioral テストを持たない
+   (lambda キー単独の封筒は `convertLambdaMessage()` で同じ値が `SigningCertURL` に入る)。
+   到達可能な半分 (一致するときは取得へ進む) はテストで固定してある。
+8. **署名検証が成功した証明書しかキャッシュに載らない**ことは実装の不変条件だが、
+   「キャッシュにある証明書が今も有効」ことは意味しない (寿命で失効させるだけである)。

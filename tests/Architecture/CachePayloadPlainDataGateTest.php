@@ -389,6 +389,13 @@ const CACHE_PAYLOAD_WRITE_INVENTORY = [
         'proof' => 'tests/Unit/DataTransferObjects/FxSnapshotDtoTest.php',
         'rationale' => '当日の USD/JPY レートを 1 日 cache する。読み戻しは is_array 検査 + FxSnapshotDto::fromArray() + 失敗時 Cache::forget() で標準形どおり',
     ],
+    'app/Services/Mail/Sns/SnsCertificateFetcher.php::put' => [
+        'kind' => 'plain',
+        'count' => 1,
+        'payload' => 'SNS 署名検証用の証明書 (PEM) の素の文字列。オブジェクトは渡さない',
+        'proof' => 'tests/Feature/Mail/SnsCertificateFetcherTest.php',
+        'rationale' => '署名検証が通った証明書だけを URL の sha256 をキーにして寿命つきで保存する。読み戻しは is_string + 非空 + PEM として読めることを検査し、失敗したら Cache::forget して miss 扱いにする',
+    ],
     'tests/Feature/Cache/CachePayloadPlainDataGuardTest.php::add' => [
         'kind' => 'guard-selftest',
         'count' => 1,
@@ -473,6 +480,13 @@ const CACHE_PAYLOAD_WRITE_INVENTORY = [
         'proof' => 'tests/Feature/Cache/CachePayloadPlainDataGuardTest.php',
         'rationale' => '糖衣 API の合流が将来変わったら guard の被覆が静かに減るため、実 API 経由で合流を固定する 1 件',
     ],
+    'tests/Feature/Mail/SnsCertificateFetcherTest.php::put' => [
+        'kind' => 'plain',
+        'count' => 7,
+        'payload' => '証明書 PEM の素の文字列と、読み戻せない値 (PEM でない素の文字列) を仕込む 7 件。どちらも文字列でオブジェクトは渡さない',
+        'proof' => 'tests/Feature/Mail/SnsCertificateFetcherTest.php',
+        'rationale' => 'キャッシュ命中・読み戻し不能・寿命・キー分離の振る舞いを実 API 経由で固定するため、テスト自身が素の文字列を仕込む。取得口の読み戻し検査と forget の往復もここで固定する',
+    ],
     'tests/Support/Cache/BootTimeCacheWriteProbeProvider.php::put' => [
         'kind' => 'guard-selftest',
         'count' => 1,
@@ -526,6 +540,10 @@ const CACHE_PAYLOAD_SURFACE_INVENTORY = [
         'role' => 'write',
         'rationale' => 'FX レートの当日 cache。素の配列を put し、読み戻しで DTO へ組み立て直す唯一の経路',
     ],
+    'app/Services/Mail/Sns/SnsCertificateFetcher.php' => [
+        'role' => 'write',
+        'rationale' => 'SNS 証明書の取得口。get / put / forget と Cache::lock を持つ唯一のファイルで、payload は PEM の素の文字列だけである',
+    ],
     'tests/Feature/Billing/ReconcileSubscriptionStatusTest.php' => [
         'role' => 'lock-only',
         'rationale' => '突き合わせコマンドの多重起動を再現するため Cache::lock を先取するのみ。payload は書かない',
@@ -534,9 +552,17 @@ const CACHE_PAYLOAD_SURFACE_INVENTORY = [
         'role' => 'write',
         'rationale' => '実行時層の振る舞い検査。意図的に違反する値を書いて guard が落とすことを固定する唯一のファイル',
     ],
+    'tests/Feature/Mail/SnsCertificateFetcherTest.php' => [
+        'role' => 'write',
+        'rationale' => 'キャッシュ命中・読み戻し不能・ロック競合・保管方式の障害を再現するため、素の文字列の put と Cache::lock を直接使う取得口の振る舞い検査',
+    ],
     'tests/Feature/Queue/DeferredRetryHorizonTest.php' => [
         'role' => 'driver-handoff',
         'rationale' => 'Worker::setCache() へ渡すため app(\'cache\')->driver() で driver を解決するだけで、読み出し・書き込み・削除のいずれも行わない。未処理例外の計数は framework 側が整数で行う',
+    ],
+    'tests/Pest.php' => [
+        'role' => 'no-payload-write',
+        'rationale' => 'SNS 証明書テスト用にキャッシュの既定をテスト専用 array store へ向け直す共用ヘルパで forgetDriver を呼ぶだけ。payload は書かない',
     ],
     'tests/Support/Cache/BootTimeCacheWriteProbeProvider.php' => [
         'role' => 'write',

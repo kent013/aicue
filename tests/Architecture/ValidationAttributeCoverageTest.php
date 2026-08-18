@@ -56,7 +56,7 @@ const RULES_UNINSTANTIABLE_INVENTORY = [
  * @var array<string, string>
  */
 const UNPARSEABLE_CALL_INVENTORY = [
-    'app/Services/Mail/Sns/AwsSnsSignatureVerifier.php@43#validate' => 'AWS SNS MessageValidator::validate (Laravel validation ではなくルール配列を持たない)',
+    'app/Services/Mail/Sns/AwsSnsSignatureVerifier.php@79#validate' => 'AWS SNS MessageValidator::validate (Laravel validation ではなくルール配列を持たない)',
 ];
 
 /**
