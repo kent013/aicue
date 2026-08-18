@@ -32,7 +32,6 @@
 | T225 | PHP 列挙 ⇔ TS 値域の発見の段と逆走査 (AG-099 後半) | test | 全数走査の既定拒否分類と逆走査2規則 | Medium | standalone | [設計](devnotes/20260817-1748-enum-ts-generic-sync-gate/) | 2026-08-18 06:30 |
 | T228 | キャッシュ素データ規約の実行時層 (正典 v2 追従) | test | キャッシュ実行時層の導入 (v2追従) | High | standalone | [設計](devnotes/20260818-1757-cache-runtime-plain-data-guard/) | 2026-08-18 19:59 |
 | T229 | SES/SNS 証明書取得経路の強化 (正典 t1 追従) | backend | SNS証明書取得の集約と8要件の実装 | High | standalone | [設計](devnotes/20260818-1756-sns-certificate-fetch-hardening/) | 2026-08-18 19:59 |
-| T230 | テンプレート乖離台帳へ D30 と D31 を登録 | docs | 乖離台帳へ D30/D31 を登録 | Medium | incremental | [設計](devnotes/20260818-1755-template-divergence-ledger-ci-db-and-launcher/) | 2026-08-18 19:59 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
