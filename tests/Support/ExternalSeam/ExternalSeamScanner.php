@@ -29,6 +29,10 @@ use Tests\Support\ReferenceSite;
  * ★**保証範囲を誇張しない**: 検出できるのは下記 5 規則の**静的な出現**だけである。
  *   文字列キーの container 解決だけで型名も呼び出しも出さない経路は検出できない。
  *   走査根は `app/` のみで、`routes/` / `config/` は見ない。
+ *
+ * ★**受け手が未解決の静的呼び出しは採用する側へ倒す** (共通規約 (b))。`$gateway::stripe()` の
+ *   ように FQCN を静的に決められない書き方でも決済 client の取得として採用する。
+ *   採用しすぎたら目録へ登録して理由を残す形にし、**無言で候補から外さない**。
  */
 final class ExternalSeamScanner
 {
@@ -126,8 +130,12 @@ final class ExternalSeamScanner
     private static function classify(ReferenceSite $reference): ?ExternalSeamSite
     {
         // 決済: client の取得 (static / method の両方)
+        // ★受け手を静的に決められない静的呼び出し (`$gateway::stripe()`) も採用する
+        //   = fail-closed。完全修飾名だけを見て落とすと、変数経由に書き換えるだけで
+        //   目録登録の要求を抜けられる (共通規約 (b))。
         if ($reference->name === self::CLIENT_ACCESSOR
-            && (($reference->kind === ReferenceKind::StaticCall && $reference->receiver === self::CASHIER_FACADE)
+            && (($reference->kind === ReferenceKind::StaticCall
+                && ($reference->receiver->is(self::CASHIER_FACADE) || $reference->receiver->isUnresolved()))
                 || $reference->kind === ReferenceKind::MethodCall)
         ) {
             return self::site($reference, ExternalSeamRule::PaymentClientCall, self::CLIENT_ACCESSOR);

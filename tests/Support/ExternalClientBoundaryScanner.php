@@ -22,6 +22,10 @@ namespace Tests\Support;
  *   これらの token をまったく出さない経路 (`app('filesystem')` の戻りを別メソッドへ渡す等) は
  *   **検出できない**。この非対称は docs/architecture.md §外部 SDK の待ち上限の規約に明記する。
  *
+ * ★**受け手が未解決の静的呼び出しは拾う側へ倒す** (共通規約 (b))。`$requestor::setHttpClient()` の
+ *   ように FQCN を静的に決められない書き方でも大域 setter として検出する。
+ *   偽陽性が出たら目録へ登録して理由を残す形にし、**無言で候補から外さない**。
+ *
  * ★検出理由コード: `fqn_reference` / `imported_name_reference` (クラス名の参照) /
  *   `new_external_object` (**構築点**。DI で受け取るだけの消費点と区別するために種別を分ける) /
  *   `disk_call` / `get_client_call` / `stripe_global_setter`。
@@ -136,10 +140,13 @@ final class ExternalClientBoundaryScanner
                 ),
 
                 // R6: Stripe のプロセス大域 setter
+                // ★受け手を静的に決められない形 (`$requestor::setHttpClient()` /
+                //   `static::setMaxNetworkRetries()`) も検出する = fail-closed。
+                //   完全修飾名だけを見て落とすと、変数経由に書き換えるだけで
+                //   プロセス大域状態への到達が目録から消える (共通規約 (b))。
                 $reference->kind === ReferenceKind::StaticCall
                     && in_array($reference->name, self::STRIPE_GLOBAL_SYMBOLS, true)
-                    && $reference->receiver !== null
-                    && str_starts_with($reference->receiver, 'Stripe\\') => self::fromReference($reference, 'stripe_global_setter', $reference->name, null),
+                    && ($reference->receiver->startsWith('Stripe\\') || $reference->receiver->isUnresolved()) => self::fromReference($reference, 'stripe_global_setter', $reference->name, null),
 
                 // R7: `new Aws\…` は「構築点」であり、DI で受け取るだけの消費点と区別する
                 $reference->kind === ReferenceKind::Construction && self::isTargetName($reference->name) => self::fromReference($reference, 'new_external_object', $reference->name, null),

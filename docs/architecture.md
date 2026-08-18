@@ -2116,11 +2116,17 @@ T126 の `ExternalClientBoundaryScanner` も本目録の `ExternalSeamScanner` �
 8. **`.env.bughunt.local` (git 管理外) の内容**。pin できるのは `.env.bughunt.local.example` まで
 9. **決済の別 API 表面**。検出は「client の取得・構築」に限り、新しい静的 helper が増えたときは
    規則の追加が要る
-10. **部分修飾名の解決**。`T_NAME_QUALIFIED` (`Facades\Http::get()` のような書き方) は
-    現在の namespace への相対解決も先頭 segment の alias 解決も行わない
-    (`ExternalClientBoundaryScanner` と同じ限界)。この限界は
-    `tests/Unit/Architecture/ExternalSeamScannerTest.php` が**テストとして明示的に固定**しており、
-    将来直すときは必ず差分が出る
+10. **import の無い短縮名を型宣言 / `::class` / `instanceof` の位置に書いた参照**。
+    これらの文脈の判定を走査器が実装していないため走査しない (PHP の構文上の限界ではなく
+    実装上の限界。`T_STRING` は定数名や関数名にも使われるので、文脈を見ずに一律走査すると
+    母集団が意味を失う)。**ファイル自身の名前空間の下に対象クラスが居る場合はここで見逃す**。
+    `new` の直後と静的呼び出しの受け手は解決する。ただし `self` / `static` / `parent` は
+    短縮クラス名として解決せず、`static` / `parent` と **trait 本体の `self`** は
+    未解決として返す (`PhpReferenceScanner` の docblock が正本)。
+    なお**部分修飾名** (`Facades\Http::get()`) と**受け手が未解決の静的呼び出し**
+    (`$gateway::stripe()`) は T226 で解決 / fail-closed 化済みで、
+    `tests/Unit/Architecture/PhpReferenceScannerTest.php` と
+    `tests/Unit/Architecture/ExternalSeamScannerTest.php` が両方向を固定している
 ## 冪等キーの claim と保持期間 (REST API v1 / MCP)
 
 REST API v1 の `Idempotency-Key` は **本処理の前に claim する**方式で、契約の正本は

@@ -429,6 +429,46 @@ PHP;
     expect($dynamicCalls[0]->template)->toBeNull();
     expect($dynamicCalls[0]->untrustedKeys)->toBeNull();
 
+    // (f) 先頭要素を import した部分修飾名で vendor prompt を読む形
+    //     (部分修飾名を解決しなかった頃は `PrismPrompt\Prompt` のまま照合され見逃していた)
+    $partiallyQualified = <<<'PHP'
+<?php
+namespace App\Services;
+use Kent013\PrismPrompt;
+class Sneaky { public function go(): mixed { return PrismPrompt\Prompt::load('sop-extract', []); } }
+PHP;
+    expect(PromptWindowScanner::pathsOf(
+        PromptWindowScanner::scan('app/Services/Sneaky.php', $partiallyQualified),
+        PromptWindowRule::VendorPromptLoad,
+    ))->toBe(['app/Services/Sneaky.php']);
+
+    // (g) 受け手を変数にして読み込み元を隠す形 = 未解決。**fail-closed で拾う** (規約 (b))。
+    //     `load` は vendor 直読みか窓口呼び出しか判別できないので、
+    //     窓口 1 ファイルにしか許されない側 (vendor 読み込み) として数える。
+    $unresolvedReceiver = <<<'PHP'
+<?php
+namespace App\Services;
+class Sneaky
+{
+    public function go(string $prompt): mixed { return $prompt::load('sop-extract', []); }
+
+    public function goUnattributed(string $prompt): mixed { return $prompt::loadUnattributed('sop-extract', []); }
+}
+PHP;
+    $unresolvedSites = PromptWindowScanner::scan('app/Services/Sneaky.php', $unresolvedReceiver);
+    expect(PromptWindowScanner::pathsOf($unresolvedSites, PromptWindowRule::VendorPromptLoad))
+        ->toBe(['app/Services/Sneaky.php']);
+    expect(PromptWindowScanner::pathsOf($unresolvedSites, PromptWindowRule::WindowLoadUnattributed))
+        ->toBe(['app/Services/Sneaky.php']);
+
+    // 正例: 名前空間相対の同名クラス (`App\Services\PrismPrompt\Prompt`) は vendor ではない
+    $sameNamespace = <<<'PHP'
+<?php
+namespace App\Services;
+class Innocent { public function go(): mixed { return PrismPrompt\Prompt::load('note', []); } }
+PHP;
+    expect(PromptWindowScanner::scan('app/Services/Innocent.php', $sameNamespace))->toBe([]);
+
     // 正例: コメント / 文字列リテラル中の記述には反応しない (gate 自身の説明文を数えない)
     $benign = <<<'PHP'
 <?php

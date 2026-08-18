@@ -16,7 +16,14 @@ final readonly class ReferenceScanResult
 {
     /**
      * @param  list<ReferenceSite>  $sites
-     * @param  array<string, string>  $imports  小文字 short name => FQCN (`use` 宣言の全件)
+     * @param  array<string, string>  $imports  小文字 short name => FQCN。
+     *                                          **ファイルスコープの `use` のうちクラス / 名前空間の
+     *                                          import だけ**が載る (クラス本体の trait 取り込みと
+     *                                          `use function` / `use const` は載らない)。
+     *                                          **ファイル全体を 1 つの表へ畳んだ結果**なので、
+     *                                          namespace ブロックが複数あって同じ短縮名を使う場合は
+     *                                          後のブロックが勝つ。名前解決そのものは
+     *                                          ブロックごとの表で行っており、この表は使っていない
      */
     public function __construct(
         public array $sites,
