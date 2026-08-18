@@ -7,107 +7,117 @@ namespace App\Services\Mail\Sns;
 use Aws\Sns\Exception\InvalidSnsMessageException;
 use Aws\Sns\Message;
 use Aws\Sns\MessageValidator;
-use Illuminate\Http\Client\Factory as HttpFactory;
 
 /**
  * AWS SDK ベースの SNS 署名検証実装。
  *
  * 署名の暗号検証 (canonical string / SignatureVersion / 証明書検証) は AWS SDK の
- * `MessageValidator` に委譲し、自前再実装しない。wrapper の責務は 2 点:
- *  1. 証明書 URL を SNS 証明書 URL の厳格パターンに限定 (不正 = 恒久 → Invalid、SSRF 遮断)
- *  2. 証明書取得を自前 HTTP client に差し込み (`certClient`)、取得失敗を
- *     `SnsVerificationUnavailableException` (一時障害 → 503) に正規化する
+ * `MessageValidator` に委譲し、自前で再実装しない。wrapper の責務は 4 点:
+ *  1. **SDK が実際に取りに行く URL** を特定し、値オブジェクトで書式検証する
+ *     (両キー同時送信は拒否する。下の `effectiveCertUrl()` の docblock 参照)
+ *  2. 証明書取得を `SnsCertificateFetcher` へ委譲する (SSRF 検査 / 直列化 / キャッシュ / PEM 確認)
+ *  3. SDK が閉じ込めた URL 以外を要求してきたら取りに行かない (fail-closed)
+ *  4. **署名検証が通った証明書だけ**をキャッシュへ昇格させる
  *
- * `MessageValidator` は cert 取得を `certClient` callable に委譲できる。これを使い
- * **取得失敗 (一時障害) と署名不一致 (恒久) を確実に分離**する: certClient が投げた
- * Unavailable は validate() を素通りして伝播し、validate() が投げる
- * `InvalidSnsMessageException` は cert 取得後の検証失敗 = 署名不一致のみとなる。
- * これにより SDK 既定の `file_get_contents` 再取得や例外メッセージ判定に依存しない。
+ * `MessageValidator` は証明書取得を `certClient` へ委譲できる。これを使い
+ * **取得失敗 (一時障害) と署名不一致 (恒久) を確実に分ける**: certClient が投げた
+ * `SnsVerificationUnavailableException` は `validate()` を素通りして伝播し、
+ * `validate()` が投げる `InvalidSnsMessageException` は取得済みの証明書での検証失敗
+ * = 署名不一致だけになる。SDK 既定の `file_get_contents` 再取得にも
+ * 例外メッセージの判定にも依存しない。
+ *
+ * ★**certClient は決して false を返さない**。vendor は false を
+ *   `InvalidSnsMessageException` に吸収するため、返すと一時障害が 403 に化ける。
+ *
+ * ★**解放から昇格までの窓**: ロックが包むのは外向き通信ちょうどで、署名検証はその後に走る。
+ *   この間に届いた別の要求は同じ証明書をもう一度取りに行きうる。窓の長さは署名検証 1 回ぶん
+ *   (取得に比べて無視できる) で、起きても取得が 1 回余分に走るだけである。
+ *   ロックを署名検証まで伸ばしても同時外向き通信数の上界は改善せず、
+ *   ロック寿命を伸ばす必要が出る (= 障害時に後続が 503 になる時間が延びる) ので伸ばさない。
+ *
+ * ★**保証しないもの**: 「SDK が検証済み URL 以外を要求する」分岐は現行 vendor
+ *   (aws/aws-php-sns-message-validator 1.10.0) では到達しない
+ *   (lambda キー単独の封筒は `convertLambdaMessage()` で同じ値が `SigningCertURL` に入るため)。
+ *   将来の vendor 変更に対する砦であり、behavioral テストを持てない。
  */
 final class AwsSnsSignatureVerifier implements SnsSignatureVerifier
 {
-    public function __construct(private readonly HttpFactory $http) {}
+    public function __construct(private readonly SnsCertificateFetcher $certificates) {}
 
     public function verify(Message $message): void
     {
-        // 1) 証明書 URL を SNS 証明書 URL に限定。不正 = 恒久 → 403。
-        if (! $this->isValidSnsCertUrl($this->certUrl($message))) {
-            throw new SnsSignatureInvalidException('untrusted SigningCertURL');
-        }
+        // 1) SDK が実際に取りに行く URL を特定し、型で書式検証する
+        //    (不正は SnsCertificateUrl::fromString が SnsSignatureInvalidException を投げる = 403)。
+        $url = SnsCertificateUrl::fromString($this->effectiveCertUrl($message));
 
-        // 2) cert 取得は certClient に差し込む。取得失敗は certClient 内で Unavailable に
-        //    正規化され validate() を伝播 → 503。validate() の InvalidSnsMessageException は
-        //    cert 取得済の検証失敗 = 署名不一致 = 恒久 → 403。
-        $validator = new MessageValidator($this->certClient());
+        // **新しく取得した** PEM だけをここに載せる (キャッシュから返ったものは載せない)。
+        /** @var string|null $fetched */
+        $fetched = null;
+
+        $validator = new MessageValidator(
+            function (string $requested) use ($url, &$fetched): string {
+                // SDK が検証済みの URL 以外を要求したら取りに行かない (最後の砦)。
+                if ($requested !== $url->value) {
+                    throw new SnsSignatureInvalidException('unexpected SigningCertURL requested');
+                }
+
+                $cached = $this->certificates->cached($url);
+                if ($cached !== null) {
+                    return $cached; // 正常時はここ。ロックも外向き通信も無い。
+                }
+
+                $certificate = $this->certificates->fetchSerialized($url);
+                if (! $certificate->fromCache) {
+                    $fetched = $certificate->pem;
+                }
+
+                return $certificate->pem;
+            }
+        );
+
         try {
             $validator->validate($message);
         } catch (InvalidSnsMessageException $e) {
             throw new SnsSignatureInvalidException('signature mismatch', 0, $e);
         }
+
+        // ★昇格はここだけ。`validate()` を通ったあとであることが唯一の条件である。
+        if (is_string($fetched)) {
+            $this->certificates->rememberVerified($url, $fetched);
+        }
     }
 
     /**
-     * MessageValidator に渡す証明書取得 callable。
-     * 取得失敗 (ネットワーク / HTTP エラー) は一時障害として SnsVerificationUnavailableException に。
+     * SDK (`MessageValidator`) が**実際に取得する** 証明書 URL。
      *
-     * @return callable(string): string
+     * vendor の `MessageValidator::isLambdaStyle()` は `isset($message['SigningCertUrl'])` を
+     * 先に判定し、真なら `convertLambdaMessage()` が `SigningCertUrl` の値で
+     * `SigningCertURL` を**上書き**する。したがって `SigningCertURL` を先に読む実装だと、
+     * **両キーを同時に送られたときに「検査した URL」と「取得する URL」が食い違い、
+     * アプリ側の追加検証 (port 443 固定 / query 禁止 / path 形式 / 中国パーティション排除) を
+     * 回避できる** (vendor 自身の検査は host 形式と `.pem` 終端しか見ない)。
+     * この上書き順序は aws/aws-php-sns-message-validator 1.10.0 を実読して確認し、
+     * `tests/Unit/Mail/AwsSnsSignatureVerifierTest.php` の vendor 契約テストが固定する。
+     *
+     * 対策は 2 段:
+     *  1. **両キー同時存在は拒否する** (正当な SNS 通知はどちらか一方しか持たない。
+     *     両方あるのは検査を食い違わせる意図しか無い)
+     *  2. 単独のときは SDK と同じ実効キー (Lambda キー優先) を返す
+     *
+     * @throws SnsSignatureInvalidException
      */
-    private function certClient(): callable
+    private function effectiveCertUrl(Message $message): string
     {
-        return function (string $url): string {
-            try {
-                return $this->http
-                    ->connectTimeout(5)
-                    ->timeout(10)
-                    ->withoutRedirecting()
-                    ->get($url)
-                    ->throw()
-                    ->body();
-            } catch (\Throwable $e) {
-                throw new SnsVerificationUnavailableException('certificate fetch failed', 0, $e);
-            }
-        };
-    }
+        $canonical = $message['SigningCertURL'] ?? null;
+        $lambda = $message['SigningCertUrl'] ?? null;
 
-    private function certUrl(Message $message): string
-    {
-        // SDK バージョン差で大文字小文字が揺れるため両対応。
-        $url = $message['SigningCertURL'] ?? $message['SigningCertUrl'] ?? '';
+        if ($canonical !== null && $lambda !== null) {
+            throw new SnsSignatureInvalidException('conflicting SigningCertURL / SigningCertUrl');
+        }
+
+        // SDK は Lambda キーがあればそれで上書きするため、同じ優先順を採る。
+        $url = $lambda ?? $canonical ?? '';
 
         return is_string($url) ? $url : '';
-    }
-
-    /**
-     * SNS 証明書 URL の厳格検証:
-     *  - scheme は https 固定
-     *  - port 未指定 or 443
-     *  - query / fragment を持たない
-     *  - host は `sns.{region}.amazonaws.com` (`sns.` prefix 必須、region セグメントあり)
-     *  - path は `/SimpleNotificationService-*.pem`
-     *
-     * China partition (amazonaws.com.cn) は対象外。利用予定が出たら allowlist を明示拡張する。
-     */
-    private function isValidSnsCertUrl(string $url): bool
-    {
-        $parts = parse_url($url);
-        if (! is_array($parts)) {
-            return false;
-        }
-        if (($parts['scheme'] ?? '') !== 'https') {
-            return false;
-        }
-        if (($parts['port'] ?? 443) !== 443) {
-            return false;
-        }
-        if (isset($parts['query']) || isset($parts['fragment'])) {
-            return false;
-        }
-        $host = $parts['host'] ?? '';
-        if (preg_match('/^sns\.[a-z0-9-]+\.amazonaws\.com$/', $host) !== 1) {
-            return false;
-        }
-        $path = $parts['path'] ?? '';
-
-        return preg_match('#^/SimpleNotificationService-[A-Za-z0-9]+\.pem$#', $path) === 1;
     }
 }

@@ -21,10 +21,14 @@ use App\Services\Storage\Fakes\FakeObjectStore;
 use App\Support\ExternalFakes\ExternalFakeDeclaration;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Vite;
 use Illuminate\Support\Str;
 use Kent013\PrismPrompt\Prompt;
+use Kent013\SsrfPin\Contracts\DnsResolverInterface;
+use Kent013\SsrfPin\Testing\FakeDnsResolver;
+use Kent013\SsrfPin\UrlSafetyInspector;
 use Laravel\Cashier\Subscription;
 use Tests\Support\Cache\PlainDataCacheGuard;
 use Tests\Support\StrayHttpRequestGuard;
@@ -382,4 +386,38 @@ function enableFakeExternals(): void
     config()->set(ExternalFakeDeclaration::EXTERNALS_FLAG, true);
 
     (new BughuntFakesServiceProvider(app()))->register();
+}
+
+/**
+ * SNS 証明書取得テスト用に DNS 解決を固定する。
+ *
+ * `UrlSafetyInspector` そのものは ExternalFakeDeclaration::neverSwapped() により偽物に
+ * できないので、差し替えるのは**その依存**である DnsResolverInterface である。
+ * inspector は singleton なので、bind 後に作り直させる。
+ *
+ * @param  list<string>  $ips  空配列なら「DNS 解決失敗」を模す
+ */
+function bindSnsDnsResolver(array $ips): void
+{
+    app()->bind(
+        DnsResolverInterface::class,
+        fn (): DnsResolverInterface => new FakeDnsResolver(['sns.us-east-1.amazonaws.com' => $ips]),
+    );
+    app()->forgetInstance(UrlSafetyInspector::class);
+}
+
+/**
+ * SNS 証明書のキャッシュをテストごとに作り直す。
+ *
+ * ★`Cache::flush()` は**使わない** — store 全体を消すので rate limiter・lock・
+ *   他テストの値まで巻き添えにする。既定を**テスト専用の array store** へ向け直し、
+ *   `forgetDriver()` で前のテストの実体を捨てるだけにする (既存の store には一切触れない)。
+ * ★呼ぶキャッシュ API は `forgetDriver` だけである
+ *   (CachePayloadPlainDataGateTest の面目録で role: no-payload-write に収まる)。
+ */
+function useFreshSnsCertificateCacheStore(): void
+{
+    config(['cache.stores.sns_cert_test' => ['driver' => 'array', 'serialize' => false]]);
+    config(['cache.default' => 'sns_cert_test']);
+    Cache::forgetDriver('sns_cert_test');
 }

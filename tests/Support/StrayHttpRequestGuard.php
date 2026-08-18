@@ -29,10 +29,12 @@ use RuntimeException;
  *     (フレームワークの既定挙動を変えない)。
  *  4. tests/Pest.php の afterEach が flushAndFailIfStray() を呼び、記録があれば test を fail させる。
  *
- * ★4 が本 guard の存在意義。FxRateService::fetchFromFrankfurter は catch (Throwable) で、
- *   AwsSnsSignatureVerifier::certClient は catch (\Throwable) で例外を握り潰すため、
- *   preventStrayRequests **だけ**では「fx_snapshot が null になる」等の挙動変化に化けて
- *   テストが静かに緑のまま通る。accumulator があれば必ず赤くなる
+ * ★4 が本 guard の存在意義。FxRateService::fetchFromFrankfurter は catch (Throwable) で
+ *   例外を握り潰し、SnsCertificateFetcher は証明書取得の失敗を
+ *   SnsVerificationUnavailableException へ写像するため、
+ *   preventStrayRequests **だけ**では「fx_snapshot が null になる」「取りに行った事実が
+ *   503 に化ける」等の挙動変化に紛れて、テストが静かに緑のまま通る。
+ *   accumulator があれば必ず赤くなる
  *   (StrayLlmCallGuard で既に学習済みの失敗を繰り返さない)。
  *
  * **保証範囲**: Laravel HTTP client (`Illuminate\Http\Client`) 経由の出口**のみ**。

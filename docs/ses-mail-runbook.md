@@ -11,6 +11,10 @@ SES 実送信への切替と、バウンス (届かなかった) / 苦情 (迷�
                   ▼ (bounce/complaint)
               SNS topic ──HTTPS──▶ POST /ses/notification
                                      ├ VerifySnsSignature (署名検証)
+                                     │    └ AwsSnsSignatureVerifier
+                                     │         └ SnsCertificateFetcher (証明書取得の唯一の口)
+                                     │              SSRF 検査 → 単一ロックで直列化 → HTTP 取得
+                                     │              → PEM 確認 → 署名検証後にキャッシュ昇格
                                      └ SesNotificationController
                                           └ email_suppressions に upsert
 アプリ 次回送信 ──MessageSending──▶ FilterSuppressedRecipients (抑止宛先を除去)
@@ -18,6 +22,10 @@ SES 実送信への切替と、バウンス (届かなかった) / 苦情 (迷�
 
 - 自前 DB (`email_suppressions`) が送信前チェックの正本。SES account-level suppression は最終防壁。
 - Permanent バウンスと苦情のみ抑止 (Transient バウンスは再送余地を残す)。
+- 証明書取得の予算 (接続 / リクエスト全体 / ロック寿命 / キャッシュ寿命 / 応答サイズ上限) は
+  `config/services.php` の `services.sns_certificate` にある。**env にしない** —
+  環境ごとに変えてよい運用値ではなく、値の大小関係そのものが契約である
+  (`tests/Architecture/SnsCertificateFetchContractTest.php` が固定する)。
 
 ## インフラ前提 (コード外)
 
@@ -63,15 +71,28 @@ php artisan mail:unsuppress user@example.com
 - **平文 email は PII**: ログには出さない (ログは `email_hash` のみ)。DB dump / 運用閲覧の取扱いに注意。将来の管理 UI 追加時は閲覧に認可を必須とする。
 - **抑止時刻の意味**: `suppressed_at` / `provider_message_id` は最後の通知で上書きされ、**初回抑止時刻は保持しない**。初回記録時刻の近似は `created_at`。厳密な時系列は SES / CloudWatch ログを参照。
 - **二重管理の乖離**: 自前 DB と SES account-level suppression は二重防御。乖離 (ローカルに無いが SES 側で抑止) は SES が drop するため安全側。自動 reconcile は将来 TODO。
+- **証明書取得が競合すると 503 を返す**: 同時取得は 1 本に直列化してあり、取れなかった要求は
+  待たずに 503 になる (SNS が再送する)。**403 と混ぜない** — 403 は恒久 (再送しても直らない)、
+  503 は一時障害で再送に意味がある、という分離が抑止漏れを防いでいる。
 
 ## 障害一次切り分け
 
 | 症状 | 確認 |
 |------|------|
-| 403 多発 | ① 受信 TopicArn が `SES_SNS_TOPIC_ARNS` allowlist に含まれるか ② region 不一致 ③ `SigningCertURL` が `sns.{region}.amazonaws.com/SimpleNotificationService-*.pem` 形式か ④ 証明書取得経路 (プローブ成功後に SDK 内部 fetch が落ちると 403 になり得る) |
-| 503 継続 | 証明書取得のネットワーク到達性 (一時障害として SNS が再試行する) |
+| 403 多発 | ① 受信 TopicArn が `SES_SNS_TOPIC_ARNS` allowlist に含まれるか ② region 不一致 ③ `SigningCertURL` が `sns.{region}.amazonaws.com/SimpleNotificationService-*.pem` 形式か ④ 両キー (`SigningCertURL` と `SigningCertUrl`) が同時に来ていないか ⑤ 証明書 host が private IP へ解決されていないか (SSRF 判定の恒久拒否) ⑥ 応答が PEM でない / 大きすぎる |
+| 503 継続 | ① 証明書取得のネットワーク到達性 ② 証明書 host の名前解決 ③ 取得の競合 (同時 1 本に直列化しており、取れなければ待たずに 503) ④ キャッシュ / ロック基盤 (既定 `database` store) の障害。いずれも一時障害として SNS が再試行する |
 | 400 多発 | SNS 以外からの不正 POST か疎通確認ミス |
 | メールが届かない | `email_suppressions` に該当アドレスがないか確認 → あれば `mail:unsuppress` + SES 側削除 |
+
+証明書取得まわりのログキー (いずれも `Log::warning`。平文は出さない):
+
+| ログキー | 意味 |
+|---------|------|
+| `mail.sns.cert_cache_read_failed` | キャッシュ読みが例外。miss 扱いで続行する (取りに行く) |
+| `mail.sns.cert_cache_write_failed` | 昇格 (キャッシュ書き) が例外。署名検証は済んでいるので落とさない |
+| `mail.sns.cert_cache_forget_failed` | 読み戻せない値の削除が例外。miss 扱いで続行する |
+| `mail.sns.cert_lock_release_failed` | ロック解放が例外。寿命の失効まで後続が 503 になる |
+| `mail.sns.verification_unavailable` | middleware が 503 を返した (証明書取得の一時障害。件数の増加は再検討条件) |
 
 ## メールテーマの運用
 

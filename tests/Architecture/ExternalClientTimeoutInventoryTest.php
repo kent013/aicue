@@ -99,7 +99,7 @@ const EXTERNAL_CLIENT_BOUNDARY_INVENTORY = [
     AwsSnsSignatureVerifier::class => [
         'surface' => 'exempt',
         'reason' => ExternalClientBoundaryExemption::AwsValueObjectOnly,
-        'rationale' => 'MessageValidator は署名検証のみで送信しない。証明書取得は自前 HTTP client で timeout 済み',
+        'rationale' => 'MessageValidator 自身は transport を構築せず送信もしない。証明書取得は SnsCertificateFetcher へ委譲する',
     ],
     SnsSignatureVerifier::class => [
         'surface' => 'exempt',
