@@ -8,6 +8,7 @@ use App\Enums\Manual\VideoManualStatus;
 use App\Models\Project;
 use App\Models\SourceDocument;
 use App\Models\VideoManual;
+use App\Support\Manual\AcceptedSourceDocumentTypes;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -61,6 +62,19 @@ class SourceDocumentService
             ]);
         }
 
+        // 画像は 1 手順書につき 1 枚だけを受理する (画像・スキャン SOP の OCR 対応。
+        // 概念設計 §入り口 1)。複数画像を束ねて 1 つの SOP として扱う機能はスコープ外なので、
+        // 2 枚目以降は明示的に拒否する (暗黙に無視・別 SOP として黙って作成しない)。
+        // 判定は storeForManual() が既に取っている VideoManual 行ロックの内側で行うため
+        // (appendDocument は create() の tx 内、または storeForManual() の tx 内からのみ呼ばれる)、
+        // 追加の競合対策は不要。
+        if (str_starts_with($sniffedMime, 'image/')
+            && $manual->sourceDocuments()->where('mime', 'like', 'image/%')->exists()) {
+            throw ValidationException::withMessages([
+                'document' => ['画像の手順書は 1 枚までです。複数ページの手順書は PDF でアップロードしてください。'],
+            ]);
+        }
+
         $size = $file->getSize();
         Assert::integer($size, 'アップロードファイルのサイズを取得できません');
 
@@ -91,17 +105,13 @@ class SourceDocumentService
     }
 
     /**
-     * 許可 MIME (内容 sniff 値)。config manual.source_document_mimes の拡張子リストと対で保守。
+     * 許可 MIME (内容 sniff 値)。単一の情報源は `AcceptedSourceDocumentTypes`
+     * (画像・スキャン SOP の OCR 対応。フラグに連動して画像 MIME を合成する)。
      *
      * @return list<string>
      */
     private static function allowedMimeTypes(): array
     {
-        return [
-            'application/pdf',
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // xlsx
-            'application/vnd.ms-excel',                                          // xls
-            'text/plain',
-        ];
+        return AcceptedSourceDocumentTypes::mimes();
     }
 }

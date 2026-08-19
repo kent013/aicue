@@ -7,6 +7,7 @@ namespace App\Services\Manual;
 use App\DataTransferObjects\Manual\Analysis\ExtractedText;
 use App\Exceptions\Manual\AnalysisFailedException;
 use App\Models\SourceDocument;
+use App\Support\Manual\JapaneseTextRatio;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use PhpOffice\PhpSpreadsheet\Cell\Cell;
@@ -16,7 +17,12 @@ use Throwable;
 use Webmozart\Assert\Assert;
 
 /**
- * SOP (SourceDocument) からのテキスト抽出。doc/10 §10.7 (v1: テキスト抽出可能な手順書のみ)。
+ * SOP (SourceDocument) からのテキスト抽出。doc/10 §10.7。
+ *
+ * テキスト抽出できない・日本語比率が不足する PDF は `AnalysisPipeline` が
+ * `AnalysisMediaValidator` 経由の OCR 経路 (画像・スキャン SOP の OCR 対応) へ回す
+ * (`manual.ocr_analysis_enabled` フラグが有効な場合のみ)。本クラスの責務は
+ * あくまで「テキストを抽出できるか」の判定であり、OCR 経路の判断はここでは行わない。
  *
  * - 分岐はアップロード時に内容 sniff 済みの mime を使う (クライアント拡張子は信頼しない)
  * - 抽出不能/実質空/バイト上限超過は AnalysisFailedException (ユーザー向け文言)
@@ -44,10 +50,6 @@ class SopTextExtractor
         .'\x{2030}\x{0160}\x{2039}\x{0152}\x{017D}\x{2018}\x{2019}\x{201C}\x{201D}\x{2022}'
         .'\x{2013}\x{2014}\x{02DC}\x{2122}\x{0161}\x{203A}\x{0153}\x{017E}\x{0178}]+/u';
 
-    /** 日本語文字 (かな / 漢字 / 全角句読点 / 全角英数記号 / 半角カナ) */
-    private const JAPANESE_PATTERN = '/[\x{3001}-\x{303F}\x{3040}-\x{30FF}\x{3400}-\x{4DBF}'
-        .'\x{4E00}-\x{9FFF}\x{F900}-\x{FAFF}\x{FF01}-\x{FF60}\x{FF66}-\x{FF9D}]/u';
-
     /**
      * CP932 の **2 バイト列からしか出ない**日本語文字 (JAPANESE_PATTERN から半角カナを除いたもの)。
      *
@@ -59,9 +61,6 @@ class SopTextExtractor
      */
     private const MULTIBYTE_JAPANESE_PATTERN = '/[\x{3001}-\x{303F}\x{3040}-\x{30FF}\x{3400}-\x{4DBF}'
         .'\x{4E00}-\x{9FFF}\x{F900}-\x{FAFF}\x{FF01}-\x{FF60}]/u';
-
-    /** 比率の分母 = 空白を除いた文字数 (レイアウト由来の空白量に判定を引きずられない) */
-    private const NON_SPACE_PATTERN = '/[^\s\x{3000}]/u';
 
     /**
      * 区間を復元済みへ差し替える下限比率 = **過半数が日本語文字であること**。
@@ -108,7 +107,7 @@ class SopTextExtractor
 
         $extracted = $this->ensureUtf8($extracted); // JSON 化・UserInput 生成を不正バイトで壊さない
         $minJapaneseRatio = config()->float('manual.analysis_min_japanese_ratio');
-        $ratioBefore = $this->japaneseRatio($extracted);
+        $ratioBefore = JapaneseTextRatio::of($extracted);
 
         // 復元は「そのままでは日本語本文ゲートで拒否される文書」だけを救う機構である。
         // 既に日本語として読める文書には一切触れない = 正当なテキストの不変性を
@@ -128,7 +127,7 @@ class SopTextExtractor
                 'source_document_id' => $document->id,
                 'source_kind' => $kind,
                 'japanese_ratio_before' => round($ratioBefore, 4),
-                'japanese_ratio_after' => round($this->japaneseRatio($text), 4),
+                'japanese_ratio_after' => round(JapaneseTextRatio::of($text), 4),
             ]);
         }
 
@@ -145,7 +144,7 @@ class SopTextExtractor
             throw AnalysisFailedException::tooLarge();
         }
 
-        $ratio = $this->japaneseRatio($text);
+        $ratio = JapaneseTextRatio::of($text);
         if ($ratio < $minJapaneseRatio) {
             Log::info('SOP テキストの日本語本文が不足しています', [
                 'reason' => 'insufficient_japanese_text',
@@ -214,10 +213,10 @@ class SopTextExtractor
         }
 
         // 偶然 CP932 として成立しただけの短い区間を弾く (過半数が日本語文字であることを要求)
-        return $this->japaneseRatio($decoded) >= self::RUN_MIN_JAPANESE_RATIO ? $decoded : $run;
+        return JapaneseTextRatio::of($decoded) >= self::RUN_MIN_JAPANESE_RATIO ? $decoded : $run;
     }
 
-    /** パターンに一致する文字数 */
+    /** パターンに一致する文字数 (SJIS 復元判定専用。文書ゲート側は JapaneseTextRatio が持つ) */
     private function countBy(string $pattern, string $text): int
     {
         $count = preg_match_all($pattern, $text);
@@ -225,17 +224,14 @@ class SopTextExtractor
         return is_int($count) ? $count : 0;
     }
 
-    /** 空白を除いた文字数に占める日本語文字の比率 (0.0〜1.0) */
-    private function japaneseRatio(string $text): float
-    {
-        $assessable = $this->countBy(self::NON_SPACE_PATTERN, $text);
-
-        return $assessable === 0 ? 0.0 : $this->countBy(self::JAPANESE_PATTERN, $text) / $assessable;
-    }
-
     /**
      * mime → 抽出方式。未知 mime はアップロード時 sniff で弾かれている前提だが、
      * 防御的に unextractable で落とす (LLM に渡さない)。
+     *
+     * ★ 画像 mime (image/jpeg・image/png) もここでは default 分岐 (unextractable) に落ちる。
+     *   これは呼び出し元 (`AnalysisPipeline::resolveExtractInput()`) が OCR 有効時に
+     *   画像をそもそもここへ渡さず `AnalysisMediaValidator::validateImage()` へ直接回すためで、
+     *   この default 分岐は「フラグ無効時」「OCR 未対応の呼び出し元」に対する防御である。
      *
      * @return 'pdf'|'spreadsheet'|'plain'
      */
