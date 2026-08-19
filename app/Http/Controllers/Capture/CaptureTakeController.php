@@ -109,6 +109,7 @@ class CaptureTakeController extends Controller
         Gate::authorize('adopt', $take);
 
         $adoptedCut = $takes->adopt($project, $manual, $cut, $take);
+        $adoptedCut->load('takes'); // fromCut() の relationLoaded() 検査を満たすため必須
 
         return CaptureCutResource::make(CaptureCutData::fromCut($adoptedCut));
     }

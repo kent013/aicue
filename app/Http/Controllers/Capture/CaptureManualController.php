@@ -132,6 +132,10 @@ class CaptureManualController extends Controller
         $user = $request->user();
         Assert::isInstanceOf($user, User::class);
 
+        // メタ情報 (カテゴリ名 / 作成者名) の解決を DTO 側の lazy load に任せない。
+        // 対象は 1 行なので追加は最大 2 クエリ (既にロード済みなら 0)。
+        $manual->loadMissing(['category', 'creator']);
+
         return Inertia::render('Capture/Show', [
             'project' => ['id' => $project->id, 'name' => $project->name],
             'manual' => CaptureManualDetailData::fromManual($manual, $user, $storage, $codec)->toArray(),

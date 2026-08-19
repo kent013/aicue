@@ -11,6 +11,7 @@
     import CaptureFileFallback from "@/components/features/capture/CaptureFileFallback.svelte";
     import CutNavigator from "@/components/features/capture/CutNavigator.svelte";
     import CutSwipeBar from "@/components/features/capture/CutSwipeBar.svelte";
+    import ManualMetaSummary from "@/components/features/capture/ManualMetaSummary.svelte";
     import ScenarioPreviewDialog from "@/components/features/capture/ScenarioPreviewDialog.svelte";
     import TakeStrip from "@/components/features/capture/TakeStrip.svelte";
     import UploadQueueBar from "@/components/features/capture/UploadQueueBar.svelte";
@@ -493,6 +494,16 @@
                     マニュアル詳細へ
                 </TextLink>
             </PageHeaderSection>
+            <!-- doc/05 §5.2 のシナリオメタ情報。タイトルは上の h1 が持つ -->
+            <div class="mt-3">
+                <ManualMetaSummary
+                    categoryName={manual.category_name}
+                    creatorName={manual.creator_name}
+                    updatedAt={manual.updated_at}
+                    totalDurationMs={manual.total_duration_ms}
+                    undeterminedCutCount={manual.undetermined_cut_count}
+                />
+            </div>
         </div>
 
         <!-- UploadQueueBar は全画面かどうかで **どちらか一方にだけ** 置く

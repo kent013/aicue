@@ -55,7 +55,9 @@ final class AdoptedTakeReferenceInventory
                 'kind' => AdoptedTakeReferenceKind::DelegatedToCoverage,
                 'rationale' => '採用テイクの署名 URL / ACK を出すかどうかを'
                     .'AdoptedReadyTakeCoverage::readyTakeId() へ委譲し、自前の ready 判定は持たない。'
-                    .'残る参照は非欠落側で素材パスと take id を読む 1 箇所と、N+1 を防ぐ eager load である。',
+                    .'残る参照は非欠落側で素材パスと take id を読む 1 箇所と、N+1 を防ぐ eager load である。'
+                    .'同じ 1 回の解決結果 (readyTakeId が非 null なら取得する採用テイク) を、'
+                    .'署名 URL/ACK の発行条件だけでなく DeterminedCutDuration へ渡す尺の式へも共有する。',
             ],
             'DataTransferObjects/Manual/CutTakeSummaryData.php' => [
                 'kind' => AdoptedTakeReferenceKind::DifferentCriterion,

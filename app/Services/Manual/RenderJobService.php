@@ -8,7 +8,6 @@ use App\DataTransferObjects\Manual\Render\OrderedCut;
 use App\DataTransferObjects\Manual\Render\RenderResult;
 use App\Enums\Billing\TicketReservationStatus;
 use App\Enums\Manual\JobStatus;
-use App\Enums\Manual\MaterialType;
 use App\Enums\Manual\RenderConflictType;
 use App\Enums\Manual\RenderErrorCode;
 use App\Enums\Manual\RenderKind;
@@ -438,7 +437,11 @@ class RenderJobService
 
     /**
      * 尺上限ソフトゲート (§10.8-1: TTL 内 commit)。クライアント申告値ベースで、
-     * ハード保証はジョブ timeout が担う。duration_ms NULL は保守的な既定尺で代用する。
+     * ハード保証はジョブ timeout が担う。
+     *
+     * **尺の式は持たない** (`DeterminedCutDuration` が唯一の所在)。
+     * ここに残るのは「確定していないカットを上界として何 ms とみなすか」という
+     * **このゲートだけの政策**である (撮影 PWA の表示側は埋めずに未確定として数える)。
      *
      * @param  list<OrderedCut>  $ordered
      */
@@ -452,12 +455,7 @@ class RenderJobService
             // ここへ来る時点で採用テイクは確定している (充足判定 = AdoptedReadyTakeCoverage が先に 422 を出す)
             Assert::notNull($take, '充足判定を通った cut には採用テイクが必ず存在する');
 
-            // レンダ (RenderPipeline::clipSpecFor) と**同じ 2 クラス**を通す。
-            // 片方だけ実効判定を持つと、cut=video/take=still の組み合わせで
-            // ゲート 60 秒 / レンダ 5 秒という新しい二重管理が生まれる
-            $totalMs += EffectiveMaterialType::of($cut, $take) === MaterialType::Still
-                ? StillDisplayDuration::secondsFor($cut) * 1000
-                : ($take->duration_ms ?? $defaultMs);
+            $totalMs += DeterminedCutDuration::milliseconds($cut, $take) ?? $defaultMs;
         }
 
         if ($totalMs > config()->integer('manual.render_max_total_source_ms')) {

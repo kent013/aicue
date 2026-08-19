@@ -112,6 +112,11 @@ function makeManual(): CaptureManualDetail {
         id: 5,
         title: "ネジ締め作業",
         status: "ready",
+        category_name: "組立作業",
+        creator_name: "山田太郎",
+        updated_at: "2026-07-01T00:00:00Z",
+        total_duration_ms: 5000,
+        undetermined_cut_count: 0,
         cuts: [makeCut()],
     };
 }
@@ -137,6 +142,11 @@ function makeAdoptedManual(): CaptureManualDetail {
         id: 5,
         title: "ネジ締め作業",
         status: "ready",
+        category_name: "組立作業",
+        creator_name: "山田太郎",
+        updated_at: "2026-07-01T00:00:00Z",
+        total_duration_ms: 3000,
+        undetermined_cut_count: 0,
         cuts: [makeCut({ adopted_take_id: take.id, adopted_ready_take_id: take.id, takes: [take] })],
     };
 }
@@ -204,7 +214,7 @@ describe("Capture/Show 撮影モードの出し分け", () => {
         const cut = makeCut({ material_type: "still" });
         return {
             ...baseProps,
-            manual: { id: 5, title: "ネジ締め作業", status: "ready", cuts: [cut] },
+            manual: { ...makeManual(), cuts: [cut] },
         };
     }
 
@@ -573,6 +583,24 @@ describe("Capture/Show マニュアル詳細への復路 (T155)", () => {
 });
 
 /*
+ * シナリオメタ情報の配線 (T232 / doc/05 §5.2)。
+ * 表示規則そのものは ManualMetaSummary.test.ts が固定する。ここで固定するのは
+ * props → component への配線 (キー名の対応) だけである。
+ */
+describe("Capture/Show シナリオメタ情報の配線 (T232)", () => {
+    it("manual の 5 キーがメタ情報ブロックへ渡り描画される", () => {
+        stubCameraSupported(false);
+        render(CaptureShow, { props: baseProps });
+
+        expect(screen.getByTestId("capture-manual-meta")).toBeInTheDocument();
+        const line = screen.getByTestId("capture-manual-meta-line").textContent ?? "";
+        expect(line).toContain("組立作業");
+        expect(line).toContain("山田太郎");
+        expect(screen.getByTestId("capture-manual-duration").textContent).toContain("合計時間 0:05");
+    });
+});
+
+/*
  * サムネイル反映の**ページ配線** (T183 / S10)。
  *
  * 有界性・停止条件そのものは thumbnail-refresh.test.ts が固定する。
@@ -668,9 +696,7 @@ function installLandscapeMatchMedia(initial: boolean): LandscapeMatchMedia {
 
 function makeLandscapeManual(count: number): CaptureManualDetail {
     return {
-        id: 5,
-        title: "ネジ締め作業",
-        status: "ready",
+        ...makeManual(),
         cuts: Array.from({ length: count }, (_, index) =>
             makeCut({ id: 101 + index, scene: `工程 ${index + 1}` }),
         ),
@@ -942,6 +968,8 @@ describe("Capture/Show 横持ち全画面 (T186)", () => {
 
         expect(hasInertAncestor(screen.getByTestId("cut-row-101"))).toBe(true);
         expect(hasInertAncestor(screen.getByTestId("manual-detail-link"))).toBe(true);
+        // メタ情報ブロックも既存の見出し・リンクと同じく背後に隠れる (意図した設計)
+        expect(hasInertAncestor(screen.getByTestId("capture-manual-meta"))).toBe(true);
         // 全画面そのものは inert の外にある (操作できないと詰む)
         expect(hasInertAncestor(screen.getByTestId("exit-fullscreen-capture"))).toBe(false);
     });

@@ -215,6 +215,41 @@ test('尺上限: Still カットの static_display_seconds 合計が上限超過
     expect(RenderJob::query()->count())->toBe(0);
 });
 
+test('尺上限: 合計がちょうど上限なら 201 (境界値。DeterminedCutDuration への切り出しで挙動が動かないことの固定)', function (): void {
+    Queue::fake();
+    config()->set('manual.render_max_total_source_ms', 5_000);
+    [, $owner, $project, $manual] = renderTriggerContext(); // 採用テイクは 5,000ms ちょうど
+
+    $this->actingAs($owner)->postJson(
+        "/projects/{$project->id}/manuals/{$manual->id}/render",
+    )->assertCreated();
+});
+
+test('尺上限: 合計が上限 +1ms なら 422 (境界値)', function (): void {
+    Queue::fake();
+    config()->set('manual.render_max_total_source_ms', 4_999);
+    [, $owner, $project, $manual] = renderTriggerContext(); // 採用テイクは 5,000ms
+
+    $this->actingAs($owner)->postJson(
+        "/projects/{$project->id}/manuals/{$manual->id}/render",
+    )->assertUnprocessable()->assertJsonValidationErrors(['takes']);
+    expect(RenderJob::query()->count())->toBe(0);
+});
+
+test('尺上限: duration_ms NULL の採用テイクは render_default_take_duration_ms で数えられる', function (): void {
+    Queue::fake();
+    config()->set('manual.render_default_take_duration_ms', 60_000);
+    config()->set('manual.render_max_total_source_ms', 59_999);
+    [, $owner, $project, $manual, $cut] = renderTriggerContext();
+    $cut->adoptedTake?->forceFill(['duration_ms' => null])->save();
+
+    // 60,000ms (既定値) で数えられ、59,999ms の上限を超えるので 422
+    $this->actingAs($owner)->postJson(
+        "/projects/{$project->id}/manuals/{$manual->id}/render",
+    )->assertUnprocessable()->assertJsonValidationErrors(['takes']);
+    expect(RenderJob::query()->count())->toBe(0);
+});
+
 test('残高不足は 402 (code=insufficient_tickets。job も予約も作らない・status 不変)', function (): void {
     Queue::fake();
     [, $owner, $project, $manual] = renderTriggerContext(tickets: 2); // cost=3 に不足
