@@ -32,7 +32,6 @@
 | T225 | PHP 列挙 ⇔ TS 値域の発見の段と逆走査 (AG-099 後半) | test | 全数走査の既定拒否分類と逆走査2規則 | Medium | standalone | [設計](devnotes/20260817-1748-enum-ts-generic-sync-gate/) | 2026-08-18 06:30 |
 | T232 | 撮影 PWA シナリオ詳細画面のメタ情報表示 | frontend | 詳細画面へ合計時間/カテゴリ/作成者/日付を追加 | High | incremental | [設計](devnotes/20260819-1055-capture-detail-meta-info/) | 2026-08-19 12:15 |
 | T233 | テスト DB 準備スクリプトのスキーマ更新への追従 (家系の裁定 AG-135) | test | ensure-test-db.php にスキーマ更新を追加 | High | standalone | [設計](devnotes/20260819-1056-ensure-test-db-schema-followup/) | 2026-08-19 12:15 |
-| T234 | 画像・スキャン SOP の OCR 対応 | backend | 画像/スキャンPDFのOCR解析対応(LLM読取) | High | incremental | [設計](devnotes/20260819-1053-sop-image-ocr-support/) | 2026-08-19 12:30 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
