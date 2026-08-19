@@ -1535,7 +1535,7 @@ index 00000000..abe21c9e
 +
 +- production が `config:cache` を使う場合、`.env` の変更だけでは反映されない。
 +  `MANUAL_OCR_ANALYSIS_ENABLED=true` の設定後、`config:cache` の再生成とプロセス再起動が
-+  別途必要 (既存運用の一般論。`route:cache` の運用要件そのものを変更するものではない)。
++  別途必要 (既存運用の一般論であり、AGENTS.md が定める経路キャッシュ関連の運用要件
 +- フラグ有効化直後の確認は「制御された synthetic 確認」(実際にアップロード・DB 書き込み・
 +  外部 LLM 呼び出し・チケット消費を伴う) と呼ぶ (read-only ではない)。専用の検証用組織・
 +  使い捨てのテスト SOP (PII を含まない fixture) を用いる。消費したチケットは通常の grant
