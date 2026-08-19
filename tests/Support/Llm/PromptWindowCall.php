@@ -13,7 +13,7 @@ namespace Tests\Support\Llm;
 final readonly class PromptWindowCall
 {
     /**
-     * @param  'load'|'loadUnattributed'  $method
+     * @param  'load'|'loadUnattributed'|'loadWithMedia'  $method
      * @param  list<string>|null  $untrustedKeys  キーがすべて文字列リテラルの配列リテラルなら鍵一覧、そうでなければ null
      */
     public function __construct(

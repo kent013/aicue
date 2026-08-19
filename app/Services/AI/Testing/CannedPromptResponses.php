@@ -94,6 +94,7 @@ final class CannedPromptResponses
     {
         return [
             '作業手順書 (SOP) を構造化するエキスパート' => self::sopExtractCanned(),
+            '手順書を画像や PDF から読み取り構造化するエキスパート' => self::sopExtractMediaCanned(),
             '作業標準化エキスパート' => self::workDecompositionCanned(),
             'マニュアル動画の演出家' => self::scenarioGenerationCanned(),
             'テキストを 1 文に要約するアシスタント' => self::exampleSummaryCanned(),
@@ -107,6 +108,25 @@ final class CannedPromptResponses
     {
         return json_encode([
             'header' => ['title' => 'bughunt サンプル手順書', 'department' => null, 'revision' => null],
+            'sections' => [[
+                'title' => null,
+                'steps' => [[
+                    'no' => 1,
+                    'work_process' => 'バルブを閉じる',
+                    'work_points' => ['ハンドルを時計回りに回す'],
+                    'safety_points' => ['保護手袋を着用する'],
+                    'quality_points' => [],
+                    'pm_points' => [],
+                ]],
+            ]],
+        ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+    }
+
+    /** sop-extract-media (OCR 経路): ExtractedSopData::fromLlmText を通過する最小妥当 JSON */
+    private static function sopExtractMediaCanned(): string
+    {
+        return json_encode([
+            'header' => ['title' => 'bughunt サンプル手順書 (画像)', 'department' => null, 'revision' => null],
             'sections' => [[
                 'title' => null,
                 'steps' => [[

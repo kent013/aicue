@@ -120,6 +120,26 @@ final readonly class ExtractedSopData
         ];
     }
 
+    /**
+     * 日本語比率判定の対象文字列 (画像・スキャン SOP の OCR 対応。OCR 経路の成功条件判定用)。
+     * JSON 全体やキー名ではなく、手順と急所類の本文を決まった順序で連結する。
+     * 連結順序を変えると同じ入力でも比率が変わりうるため、一度固定した順序を変えない。
+     */
+    public function textForJapaneseRatioCheck(): string
+    {
+        $parts = [];
+        foreach ($this->sections as $section) {
+            foreach ($section['steps'] as $step) {
+                $parts[] = $step['work_process'];
+                foreach (['work_points', 'safety_points', 'quality_points', 'pm_points'] as $key) {
+                    array_push($parts, ...$step[$key]);
+                }
+            }
+        }
+
+        return implode("\n", $parts);
+    }
+
     /** 次段プロンプトへ渡す正規化 JSON */
     public function toJsonString(): string
     {

@@ -5,10 +5,12 @@ declare(strict_types=1);
 use App\DataTransferObjects\LlmCallContextData;
 use App\DataTransferObjects\Manual\Analysis\ExtractedSopData;
 use App\DataTransferObjects\Manual\Analysis\GeneratedScenarioData;
+use App\DataTransferObjects\Manual\Analysis\ImageAnalysisMediaData;
 use App\DataTransferObjects\Manual\Analysis\WorkDecompositionResponseData;
 use App\Enums\Manual\ScenarioVerdict;
 use App\Prompts\ExampleSummaryPrompt;
 use App\Prompts\ScenarioGenerationPrompt;
+use App\Prompts\SopExtractFromMediaPrompt;
 use App\Prompts\SopExtractPrompt;
 use App\Prompts\WorkDecompositionPrompt;
 use App\Services\AI\Testing\CannedPromptFakeRegistrar;
@@ -85,6 +87,10 @@ function makeRegisteredPrompt(string $key): GuardedPrompt
 {
     return match ($key) {
         'sop-extract' => SopExtractPrompt::make('サンプル SOP', LlmCallContextData::none()),
+        'sop-extract-media' => SopExtractFromMediaPrompt::make(
+            ImageAnalysisMediaData::fromValidated('image/jpeg', 'stub-jpeg-bytes', 17, 10, 10),
+            LlmCallContextData::none(),
+        ),
         'work-decomposition' => WorkDecompositionPrompt::make('{"header":{},"sections":[]}', LlmCallContextData::none()),
         'scenario-generation' => ScenarioGenerationPrompt::make('{"steps":[]}', LlmCallContextData::none()),
         'example-summary' => ExampleSummaryPrompt::make('本文'),
@@ -96,6 +102,16 @@ function makeRegisteredPrompt(string $key): GuardedPrompt
 
 test('sop-extract の canned が ExtractedSopData::fromLlmText を通過する', function (): void {
     $text = SopExtractPrompt::make('サンプル SOP', LlmCallContextData::none())->executeSync();
+    Assert::string($text);
+
+    $dto = ExtractedSopData::fromLlmText($text);
+    expect($dto->sections)->not->toBeEmpty();
+    expect($dto->sections[0]['steps'])->toHaveCount(1);
+});
+
+test('sop-extract-media の canned が ExtractedSopData::fromLlmText を通過する', function (): void {
+    $media = ImageAnalysisMediaData::fromValidated('image/jpeg', 'stub-jpeg-bytes', 17, 10, 10);
+    $text = SopExtractFromMediaPrompt::make($media, LlmCallContextData::none())->executeSync();
     Assert::string($text);
 
     $dto = ExtractedSopData::fromLlmText($text);
@@ -145,6 +161,7 @@ test('登録 prompt はちょうど 1 signature に一致し、それが期待�
     expect($matched)->toBe([$expected]);
 })->with([
     'sop-extract' => ['sop-extract', '作業手順書 (SOP) を構造化するエキスパート'],
+    'sop-extract-media' => ['sop-extract-media', '手順書を画像や PDF から読み取り構造化するエキスパート'],
     'work-decomposition' => ['work-decomposition', '作業標準化エキスパート'],
     'scenario-generation' => ['scenario-generation', 'マニュアル動画の演出家'],
     'example-summary' => ['example-summary', 'テキストを 1 文に要約するアシスタント'],

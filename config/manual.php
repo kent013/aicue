@@ -53,6 +53,39 @@ return [
     'source_document_max_bytes' => 20 * 1024 * 1024,
     'source_document_mimes' => ['pdf', 'xlsx', 'xls', 'txt'],
 
+    // ── 画像・スキャン SOP の OCR 対応 ──────────────────────────────
+    // 画像受理 + PDF の OCR フォールバックの単一 gate。既定 false = 施策 1〜9 のコードは
+    // デプロイされていても無害 (画像は 422 のまま、PDF 品質ゲート失敗は即時失敗のまま)。
+    // true にするのは法務確認・画像内 prompt injection の手動評価・責任者承認が
+    // 完了した後の独立した運用操作とする (docs/rollout-checklists.md)。
+    'ocr_analysis_enabled' => env('MANUAL_OCR_ANALYSIS_ENABLED', false),
+
+    // 画像専用の容量上限 (既存の source_document_max_bytes とは別枠、より小さい値)。
+    // 一次情報: Anthropic Vision ドキュメント (platform.claude.com/docs/en/build-with-claude/vision
+    // 「Image limits and costs」、2026-08-19 参照)。API 直接利用時の 1 画像あたり上限は
+    // base64 エンコード後 10MB。base64 は生バイトの約 4/3 なので生バイトの実上限は
+    // 10MB * 3/4 ≈ 7.5MiB。マージンを取り 7MiB (7 * 1024 * 1024) を上限にする。
+    'source_document_image_max_bytes' => 7 * 1024 * 1024,
+
+    // 画像 1 辺の最大 px。一次情報: 同上ドキュメント「maximum dimensions per image are
+    // 8000x8000 px」(request 全体の hard limit)。この値をそのまま送信前の上限に反映する
+    // (provider の拒否を待たない)。
+    'analysis_ocr_max_dimension' => 8000,
+
+    // 画像の最大画素数。provider のドキュメントに画素数そのものの hard limit の記載は無い
+    // (辺長の hard limit はあるが画素数は無い) ため、これは一次情報由来の hard limit ではなく
+    // 自前の工学的な上限 (スマートフォン写真相当の解像度を上限にし、処理コストの見積りを
+    // 現実的な範囲に保つ)。8,000,000 px (約 8MP)。
+    'analysis_ocr_max_pixels' => 8_000_000,
+
+    // PDF (OCR フォールバック) の最大ページ数。一次情報: Anthropic PDF support ドキュメント
+    // (platform.claude.com/docs/en/build-with-claude/pdf-support、2026-08-19 参照)。
+    // 1 request あたりの hard limit は 600 ページ (ただし context window が 1M token 未満の
+    // モデルでは 100 ページ)。sop-extract-media.yaml が pin する claude-sonnet-4-5-20250929 は
+    // 200k context (< 1M) のため hard limit は 100 ページ。token budget
+    // (AnalysisTokenBudgetInvariantTest) にも収まる十分小さい値として 20 を既定にする。
+    'analysis_ocr_max_pages' => 20,
+
     // ── レンダ (doc/10 §10.5 / §10.8-1 / 概念設計 §9) ──────────────────
     'render_ticket_cost' => 3,                    // COST_RENDER (v1 固定。係数化は後続)
     'render_stale_after_minutes' => 30,           // running の stale 閾値
