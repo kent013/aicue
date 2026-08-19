@@ -6,8 +6,10 @@ declare(strict_types=1);
  * scripts/ci/pgsql_test_conn.php
  *
  * ensure-test-db.php / drop-test-db.php 共有の接続 resolver。
- * 両スクリプトが本ファイルを require し、同一の接続値・同一の maintenance PDO を使うことで
- * 「ensure は作るが drop は別 PostgreSQL を見て回収しない」ズレ (stale DB) を構造的に排除する。
+ * ensure-test-db.php は base DB を「存在させ、スキーマを最新にする」ところまで担う
+ * (家系の裁定 AG-135)。本ファイルはその接続値解決・環境組み立て・到達確認の判定を
+ * ensure/drop の双方へ共有し、「ensure は作るが drop は別 PostgreSQL を見て回収しない」
+ * (stale DB) や「スクリプトと検査で判定がずれる」ことを構造的に排除する。
  *
  * 接続値の解決はテスト lane (APP_ENV=testing) と同一の優先順位:
  *   shell env (docker-compose の export が最優先) → .env.testing → 固定 default
@@ -105,22 +107,33 @@ enum TestDatabaseEnsureAction
 {
     case Create;
     case StampProvenance;
+    case UpdateSchema;
 }
 
 /**
  * ensure が実行すべき action 列を返す (純関数。PDO にも SQL にも触れない)。
  *
- * **両分岐とも StampProvenance を含む**のが契約: 既存 DB のときに省くと
- * 「ラベルの無い現役 DB」が生まれ、将来の孤児 sweep の分類材料が欠ける (= 冪等にする)。
+ * 実行順は **CREATE → 出自の記録 → スキーマ更新** で固定する。出自の記録をスキーマ更新より
+ * 先に置くのは、スキーマ更新が失敗したときに「ラベルの無い現役 DB」を残さないためである
+ * (aicue:D30 が揃え続けると宣言した不変条件の 1 つ)。
+ *
+ * **両分岐とも StampProvenance と UpdateSchema を含む**のが契約: 既存 DB のときに省くと、
+ * 前者は「ラベルの無い現役 DB」、後者は「基点 DB のスキーマが古いまま放置される」につながる
+ * (= どちらも冪等にする)。
  *
  * @return list<TestDatabaseEnsureAction>
- *                                        $exists=false → [Create, StampProvenance] / $exists=true → [StampProvenance]
+ *                                        $exists=false → [Create, StampProvenance, UpdateSchema] /
+ *                                        $exists=true  → [StampProvenance, UpdateSchema]
  */
 function testDatabaseEnsurePlan(bool $exists): array
 {
     return $exists
-        ? [TestDatabaseEnsureAction::StampProvenance]
-        : [TestDatabaseEnsureAction::Create, TestDatabaseEnsureAction::StampProvenance];
+        ? [TestDatabaseEnsureAction::StampProvenance, TestDatabaseEnsureAction::UpdateSchema]
+        : [
+            TestDatabaseEnsureAction::Create,
+            TestDatabaseEnsureAction::StampProvenance,
+            TestDatabaseEnsureAction::UpdateSchema,
+        ];
 }
 
 /**
@@ -152,4 +165,123 @@ function pgsqlStampProvenance(callable $exec, string $sql): bool
 
         return false;
     }
+}
+
+/**
+ * 指定した DB への PDO (スキーマ更新後の到達確認用。maintenance DB ではない)。
+ */
+function pgsqlTestDatabasePdo(string $projectRoot, string $database): PDO
+{
+    $c = pgsqlTestConnValues($projectRoot);
+    $dsn = "pgsql:host={$c['host']};port={$c['port']};dbname={$database}";
+
+    return new PDO($dsn, $c['username'], $c['password'], [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_TIMEOUT => 10,
+    ]);
+}
+
+/**
+ * スキーマ更新の子プロセス**専用**の設定キャッシュパス。
+ *
+ * Laravel の既定パス (`bootstrap/cache/config.php`) を返す形は採らず、通常の
+ * `php artisan config:cache` が**絶対に書かない**専用パスを返す。`pgsqlTestArtisanEnv()` は
+ * この値をそのまま `APP_CONFIG_CACHE` として子プロセスへ渡すため、子プロセスは既定パスの
+ * 残存状態に一切左右されない (既定パスが別プロセスの `config:cache` で再生成されても、
+ * 子プロセスはこの専用パスしか見ない)。
+ *
+ * この専用パスの存在チェック (`ensureTestDatabaseSchemaUpdated()` が各 artisan 起動の直前に行う)
+ * は、したがって「よくある race の検出」ではなく「通常経路では誰も生成しないはずの専用パスが、
+ * なぜか既に存在している」という**通常は起こらない異常**の検出になる (通常の `migrate` 子プロセスも
+ * 設定キャッシュファイル自体は書き出さない。書くとすれば `config:cache` コマンドだけであり、
+ * それはこの専用パスへ向けて実行されることがない)。
+ * **多重起動の排除までは主張しない**: `scripts/setup-worktree.sh` はグローバルテストロックの
+ * **外**でこのスクリプトを呼ぶため (worktree 作成そのものを壊さないための意図的な設計)、
+ * 同一 worktree 内で本スクリプトが多重に起動される余地は理論上ゼロではない。
+ * この専用パスの存在チェックが fail-closed で拾うのは、その多重起動を含む「原因を問わず
+ * 専用パスが既に存在する」という異常そのものである。
+ */
+function pgsqlTestConfigCachePath(string $projectRoot): string
+{
+    return $projectRoot.'/bootstrap/cache/ensure-test-db-schema-update.config-cache.php';
+}
+
+/**
+ * スキーマ更新の子プロセスへ渡す環境変数を **継承せず** 組み立てる。
+ *
+ * 継承しないのが要点である: この devcontainer では shell に dev DB 名が export されており、
+ * 素直に継承すると更新が dev DB へ当たる (AGENTS.md 禁止事項 3)。
+ * DB 接続先は pgsqlTestConnValues() で解決した値をそのまま渡し、phpunit 本体と
+ * 同じ PostgreSQL を見ることを保つ。
+ *
+ * URL 形の接続指定は DB_URL 1 つだけを空で固定する — config/database.php が読む URL 形の
+ * キーは env('DB_URL') だけであり、読み手のいないキーを足すと「効いているつもりの設定」が
+ * 増えるだけだからである。
+ *
+ * **この関数単独は安全な実行境界にならない**。渡された `$database` をそのまま
+ * `DB_DATABASE` に固定するだけであり、`$database` が dev DB かどうかの判定は行わない。
+ * 呼び出し側 (`ensureTestDatabaseSchemaUpdated()`) が、この関数を呼ぶ**直前**に
+ * `TestDatabaseEnv::isDevDatabase()` / `isAllowedTestDatabase()` を再検証する契約になっている。
+ *
+ * @return array<string, string>
+ */
+function pgsqlTestArtisanEnv(string $projectRoot, string $database): array
+{
+    $conn = pgsqlTestConnValues($projectRoot);
+
+    $inherited = [];
+    foreach (['PATH', 'HOME', 'TMPDIR'] as $key) {
+        $value = $_SERVER[$key] ?? $_ENV[$key] ?? getenv($key);
+        if (is_string($value) && $value !== '') {
+            $inherited[$key] = $value;
+        }
+    }
+
+    // 固定値が常に勝つ順で合成する。
+    return array_merge($inherited, [
+        'APP_ENV' => 'testing',
+        'APP_CONFIG_CACHE' => pgsqlTestConfigCachePath($projectRoot),
+        'DB_CONNECTION' => 'pgsql',
+        'DB_URL' => '',
+        'DB_HOST' => $conn['host'],
+        'DB_PORT' => $conn['port'],
+        'DB_USERNAME' => $conn['username'],
+        'DB_PASSWORD' => $conn['password'],
+        'DB_DATABASE' => $database,
+        'CACHE_STORE' => 'array',
+    ]);
+}
+
+/**
+ * database/migrations のファイル名一覧 (拡張子・ディレクトリ抜き) を返す。
+ *
+ * ensure-test-db.php の到達確認と tests/Architecture/BaseTestDatabaseSchemaTest.php の
+ * B-2 が **同じ関数** を呼ぶことで、判定基準がスクリプトと検査でずれないようにする。
+ *
+ * @param  list<string>  $migrationPaths  glob() が返すファイルパスの列
+ * @return list<string>
+ */
+function pgsqlTestMigrationFileNames(array $migrationPaths): array
+{
+    return array_values(array_map(
+        static fn (string $path): string => basename($path, '.php'),
+        $migrationPaths,
+    ));
+}
+
+/**
+ * 到達確認の判定 (正典より強い基準)。
+ *
+ * 正典の到達確認は「migrations 表があり行が 1 件以上ある」で止まる。これでは
+ * **古い基点 DB に古い migrations 表が残っている**状態を通してしまう。
+ * 本関数は比較の向きをファイル→表の包含にする (集合の一致は求めない。vendor パッケージ由来の
+ * migration が表に増えうるため)。
+ *
+ * @param  list<string>  $appliedMigrations  migrations 表の migration 列
+ * @param  list<string>  $migrationFileNames  database/migrations の全ファイル名 (拡張子抜き)
+ * @return list<string> 未適用のファイル名 (空 = 到達確認 OK)
+ */
+function pgsqlTestSchemaUnappliedMigrations(array $appliedMigrations, array $migrationFileNames): array
+{
+    return array_values(array_diff($migrationFileNames, $appliedMigrations));
 }

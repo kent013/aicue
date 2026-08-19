@@ -19,7 +19,7 @@
 |---|---|---|
 | **vendor (composer)** | worktree-local に独立 install | `setup-worktree.sh [4/7]` の `composer install --no-progress --no-interaction --no-scripts` (最大 3 回リトライ) |
 | **node_modules (pnpm)** | worktree-local install + GVS で実体共有 | `setup-worktree.sh [5/7]` の `pnpm install --frozen-lockfile --config.*` 強制 (同 3 回リトライ)。詳細は [`docs/pnpm-global-virtual-store-runbook.md`](pnpm-global-virtual-store-runbook.md) |
-| **テスト DB (pgsql)** | worktree ごとに別 DB (`<slug>_test_<worktree-hash>`) | `tests/Support/Ci/TestDatabaseEnv::workrootHash()` = worktree root realpath の sha1 先頭 8 桁。`scripts/ci/ensure-test-db.php` が冪等 CREATE |
+| **テスト DB (pgsql)** | worktree ごとに別 DB (`<slug>_test_<worktree-hash>`) | `tests/Support/Ci/TestDatabaseEnv::workrootHash()` = worktree root realpath の sha1 先頭 8 桁。`scripts/ci/ensure-test-db.php` が冪等 CREATE し、スキーマも最新にする (家系の裁定 AG-135) |
 | **実行時ファイル** | 親から実供給 (共有しない) | `setup-worktree.sh [2/7]` が `.env` (必須) / `storage/oauth-*.key` / `.env.bughunt.local` を **0600 で作成**して供給し、`public/build` をコピー |
 
 ### なぜ vendor を hardlink 共有しないのか
@@ -33,6 +33,32 @@
 複数 worktree で `composer test` が同時に走ると、`RefreshDatabase` の `migrate:fresh` と
 paratest の per-worker DB が衝突して**不可解な failure**になる。DB 名を worktree path の hash で
 分けることで、**DB 名の取り合いは構造的に起きない**。
+
+### 基点テスト DB のスキーマ更新 (家系の裁定 AG-135)
+
+`ensure-test-db.php` は base DB を「存在させる」だけでなく「スキーマを最新にする」ところまで
+担う。DB 系 trait を使わないテストは並列実行の切替が起きず**base DB をそのまま読む**ため、
+base DB のスキーマが古いままだと「新しい worktree でだけ落ちる」「実行順で結果が変わる」
+失敗になる。実装を必ず worktree で行う進め方 (AGENTS.md §worktree 運用ルール) と組み合わさると
+この欠陥を踏む頻度は高くなるため、`scripts/ci/ensure-test-db.php` は毎回無条件で
+`migrate --force` を実行し、未適用が無いことと migration ファイルの適用状況を確認するまで
+成功にしない (fail-closed)。`tests/Architecture/BaseTestDatabaseSchemaTest.php` が
+「その場所で」観測する。
+
+**保証範囲**: この確認は「基点 DB の最終状態がスキーマ最新である」ことの観測であって、
+`ensure-test-db.php` の子プロセスがその更新を実際に行ったことの監査ではない。到達確認は
+基点 DB へ直接つないだ最終状態しか見ないため、dev DB を誤って更新しないことの保証は
+到達確認ではなく、名前の出所の一本化・起動直前の再検証・環境変数の非継承 (aicue:D30) で
+成立させている。
+
+対象は base DB のみで worker DB (`_test_<token>`) には触らない (Laravel の並列実行と
+`RefreshDatabase` が担う層)。使うのは `migrate` だけで、`migrate:fresh` 等の破壊的コマンドは
+使わない (AGENTS.md 禁止事項 3。`tests/Unit/Ci/TestDatabaseSchemaUpdateTest.php` の
+引数列検証と負例が固定する)。
+
+`setup-worktree.sh` の工程 [7/7] は今までどおり警告扱いで続行する (pgsql 非接続の環境でも
+worktree 作成そのものを壊さないため)。テスト実行時に `run-test.sh` / `run-browser-test.sh` が
+同じ ensure をやり直すので fail-closed の実効性は失われない。
 
 ただし分離できるのは名前空間だけで、**PostgreSQL サーバ・実ブラウザ・CPU/メモリは
 マシン全体で 1 つ**である。そこで 2 層構造にしている:
@@ -228,13 +254,6 @@ bughunt 環境の DB (`bug_hunt(_1..4)`) は本書のテスト DB 分離とは**
 - `.env` は親から**実供給**するため、親の `.env` を後から変えても worktree には反映されない
   (worktree ごとに直す)。供給時に mode を 0600 に確定するのは**新規 worktree だけ**で、
   既存 worktree の秘密ファイルと親側の権限はそのまま残る。
-- **正典の `scripts/ci/ensure-test-db.php` はスキーマ更新まで担う形になったが追従していない**。
-  正典 (家系の裁定 AG-135) は基点 DB を「存在させる」だけでなく `migrate` まで走らせ、
-  未適用が残っていないことと更新がその DB に当たったことまで確かめる。本アプリの
-  `ensure-test-db.php` は CREATE と出自の記録までで、基点 DB のスキーマが古いまま残りうる
-  (DB 系の trait を使わない Architecture のレーンは基点 DB をそのまま読むため、
-  新しい worktree でだけ落ちる形の失敗になりうる)。これは意図的な逸脱ではないので
-  `docs/template-divergence.md` では正当化していない (aicue:D30 の「この登録が扱わない範囲」)。
 
 ## 参考
 

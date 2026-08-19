@@ -1706,9 +1706,9 @@ bug-hunt の走行が実際の外部 ID 基盤へ遷移すると、探索が本�
 | 行 | 内容 |
 |---|---|
 | 対象パス | `scripts/ci/drop-test-db.php` / `scripts/ci/ensure-test-db.php` / `scripts/ci/pgsql_test_conn.php` / `tests/Support/Ci/TestDatabaseEnv.php` / `tests/Support/Ci/TestDatabaseCandidate.php` / `tests/Support/Ci/TestDatabaseClassification.php` / `tests/Support/Ci/TestDatabaseDecision.php` |
-| 業務要件起因の説明 | 実装を必ず worktree で行う進め方のため、テスト DB 名を worktree の realpath の hash から作っている。worktree が検証なしで強制撤去されると hash を再現できず、引数なしの回収では二度と落とせない孤児 DB が積み上がる (2026-08-05 の監査時点で 17 個 / 221.9 MB) |
-| 揃え続ける不変条件と保証機構 | 孤児の回収も `drop-test-db.php` の中の同じ DROP の境界へ合流すること、dev DB の拒否と allowlist の再検査が `TestDatabaseEnv` の既存実装を共有すること、テスト DB 名が worktree の realpath から決まること。`tests/Unit/Ci/DropTestDbScriptTest.php` (`--orphans --apply` の削除も通常の回収と同じ guard ループ `dropTestDbDropAll()` を通り、そこへ dev DB と allowlist 外の名前が到達しない) と `tests/Unit/Ci/TestDatabaseClassificationTest.php` (分類の優先順位と確認用の値の照合) と `tests/Unit/Ci/TestDatabaseProvenanceTest.php` (出自の記録が冪等で best-effort) と `tests/Unit/Ci/TestDatabaseEnvTest.php` (名前が worktree ごとに変わり同じ worktree では変わらない) が固定する |
-| 再判定の条件 | 正典が同じ回収経路を取り込んだとき。または実装を worktree で行う進め方をやめてテスト DB 名が worktree に依存しなくなったとき |
+| 業務要件起因の説明 | 実装を必ず worktree で行う進め方のため、テスト DB 名を worktree の realpath の hash から作っている。worktree が検証なしで強制撤去されると hash を再現できず、引数なしの回収では二度と落とせない孤児 DB が積み上がる (2026-08-05 の監査時点で 17 個 / 221.9 MB)。加えて、worktree ごとに基点 DB を新規作成するため、正典の到達確認 (「migrations 表があり行が 1 件以上ある」) では古い基点 DB に古い migrations 表が残っている状態を見逃す頻度が正典の想定より高い (2026-08-19 追記) |
+| 揃え続ける不変条件と保証機構 | 孤児の回収も `drop-test-db.php` の中の同じ DROP の境界へ合流すること、dev DB の拒否と allowlist の再検査が `TestDatabaseEnv` の既存実装を共有すること、テスト DB 名が worktree の realpath から決まること。`tests/Unit/Ci/DropTestDbScriptTest.php` (`--orphans --apply` の削除も通常の回収と同じ guard ループ `dropTestDbDropAll()` を通り、そこへ dev DB と allowlist 外の名前が到達しない) と `tests/Unit/Ci/TestDatabaseClassificationTest.php` (分類の優先順位と確認用の値の照合) と `tests/Unit/Ci/TestDatabaseProvenanceTest.php` (出自の記録が冪等で best-effort) と `tests/Unit/Ci/TestDatabaseEnvTest.php` (名前が worktree ごとに変わり同じ worktree では変わらない) が固定する。加えて (2026-08-19 追記)、基点 DB のスキーマ更新 (家系の裁定 AG-135 への追従) は「`database/migrations` の全ファイル名が migrations 表に含まれる」という正典より強い包含判定 (`pgsqlTestSchemaUnappliedMigrations()`) で成功を判定すること、スキーマ更新の子プロセスへは ensure 専用の非既定設定キャッシュパス (`pgsqlTestConfigCachePath()`) を渡し各 artisan 起動の直前にその残存を確認すること、出自の記録 (StampProvenance) はスキーマ更新 (UpdateSchema) より先に実行することを `tests/Unit/Ci/TestDatabaseSchemaUpdateTest.php` と `tests/Architecture/BaseTestDatabaseSchemaTest.php` (B-2) が固定する |
+| 再判定の条件 | 正典が同じ回収経路を取り込んだとき。または実装を worktree で行う進め方をやめてテスト DB 名が worktree に依存しなくなったとき。または (2026-08-19 追記) 正典が同水準以上の到達確認 (ファイル→表の包含判定) を採用したとき、または専用非キャッシュパスと同等の TOCTOU 対策を採用したとき (この場合は該当する上積みだけを撤去し正典実装へ揃え直す) |
 | 決めた日 | 2026-08-05 |
 | 決めた人 | 開発者 |
 | 根拠 | T114 |
@@ -1723,7 +1723,7 @@ bug-hunt の走行が実際の外部 ID 基盤へ遷移すると、探索が本�
 | 孤児の扱い | 経路が無い (hash を再現できないので落とせない) | SELECT だけで `Protected` `Live` `Foreign` `Orphan` `Unlabeled` の順に分類し dry-run で列挙する |
 | 削除の決め方 | 名前の一致で自動 | 分類だけでは決めない。`--include-hash` で人が 1 つずつ名指しし、`--confirm` の値を lock 取得後に再計算して照合する |
 | DROP DDL の実行点 | `drop-test-db.php` の 1 本 | 同じ (`--orphans` は入口を足すだけ) |
-| 基点 DB のスキーマ更新 | 正典 HEAD は `migrate` まで担う (家系の裁定 AG-135) | 持たない。本登録の対象外 (下の「この登録が扱わない範囲」) |
+| 基点 DB のスキーマ更新 | 正典 HEAD は `migrate` まで担う (家系の裁定 AG-135) | 追従済み (`devnotes/20260819-1056-ensure-test-db-schema-followup/`)。到達確認は正典より強い基準を採用し、専用の非キャッシュ設定パスを使う (下記「到達確認を正典より強めた基準」参照) |
 
 ### なぜ正当な差分か (logic-driven)
 
@@ -1758,12 +1758,41 @@ bug-hunt の走行が実際の外部 ID 基盤へ遷移すると、探索が本�
   実行境界へ何が渡るかを見るケース群 (`never passes the dev database to the SQL executor` ほか 2 件) は
   この 1 本の guard ループを対象にしている
 
-### この登録が扱わない範囲 (遅れであって逸脱ではない)
+併せて、家系の裁定 AG-135 への追従で「出自の記録 (StampProvenance) はスキーマ更新
+(UpdateSchema) より先に実行する」を不変条件へ加える (スキーマ更新の失敗時に
+「ラベルの無い現役 DB」を残さないため)。`tests/Unit/Ci/TestDatabaseProvenanceTest.php` の
+`always plans the schema update last, after the provenance stamp` が固定する。
+到達確認の基準そのもの・専用非キャッシュ設定パスの採用理由は次の節を参照。
 
-正典 HEAD の `ensure-test-db.php` は基点 DB を「存在させる」だけでなく「スキーマを最新にする」
-ところまで担う (家系の裁定 AG-135)。本アプリの `ensure-test-db.php` は CREATE と出自の記録までで、
-これを持たない。**これは意図的な逸脱ではなく追従の遅れ**なので、本登録では正当化しない。
-追跡先は `docs/worktree-isolation-strategy.md` の「既知のギャップ」である。
+### 追従の記録
+
+正典 HEAD の `ensure-test-db.php` が担う基点 DB のスキーマ更新 (家系の裁定 AG-135) に、
+`devnotes/20260819-1056-ensure-test-db-schema-followup/` の設計で追従した
+(オーナー決定 2026-08-19)。追従の実装は `tests/Architecture/BaseTestDatabaseSchemaTest.php` と
+`tests/Unit/Ci/TestDatabaseSchemaUpdateTest.php` が固定する。
+`docs/worktree-isolation-strategy.md` の「既知のギャップ」から該当項を削除した。
+
+### 到達確認を正典より強めた基準と専用の非キャッシュ設定パス (還流候補)
+
+正典の到達確認 (「migrations 表があり行が 1 件以上ある」) は、古い基点 DB に古い
+migrations 表が残っている状態を通してしまう。実装を必ず worktree で行う進め方
+(AGENTS.md §worktree 運用ルール) は worktree ごとに基点 DB を新規作成するため、
+この見逃しを踏む頻度が正典の想定より高い。本アプリはこの追従にあたり、次の 2 点を
+正典より強くした。
+
+1. 到達確認は `database/migrations` の全ファイル名が migrations 表に含まれることを要求する
+   (`pgsqlTestSchemaUnappliedMigrations()`)。集合の一致は求めない (vendor パッケージ由来の
+   migration が表に増えても許容する)。
+2. スキーマ更新の子プロセスへ渡す設定キャッシュパスは Laravel の既定パスではなく ensure
+   専用の非既定パス (`pgsqlTestConfigCachePath()`) を使い、各 artisan 起動の直前にこのパスの
+   残存を確認する。
+
+`tests/Unit/Ci/TestDatabaseSchemaUpdateTest.php` (到達確認の判定関数・専用パスの値・
+各失敗経路) と `tests/Architecture/BaseTestDatabaseSchemaTest.php` (B-2。同じ判定関数を
+共有する到達確認の実地観測) が固定する。**正典より強い基準であるため、家系の機能台帳への
+還流候補として扱う**。正典が同水準以上の到達確認 (ファイル→表の包含判定) を採用したとき、
+または正典が専用非キャッシュパスと同等の TOCTOU 対策を採用したときに、この上積みを
+撤去して正典実装へ揃え直す (再判定の条件)。
 
 ### 保証しないもの
 
@@ -1776,6 +1805,17 @@ bug-hunt の走行が実際の外部 ID 基盤へ遷移すると、探索が本�
 - **リポジトリ全体で DROP の実行点が 1 本であることを走査する検査は持たない**。
   上の不変条件が言っているのは「孤児の回収経路が既存の境界へ合流している」ことだけで、
   別のファイルに新しい DROP の実行点が増えたことは検出できない
+- スキーマ更新の到達確認は「基点 DB の最終状態がスキーマ最新である」ことの確認であって、
+  直前の migrate/migrate:status 子プロセスがその更新を行ったことの監査ではない
+  (基点 DB が既に最新なら、子プロセスの環境変数解決が壊れていて別の DB を
+  更新していても、この確認だけでは検出できない。dev DB 保護は名前の出所の一本化・
+  起動直前の再検証・非継承の環境固定で成立させている)
+- 専用非キャッシュパスの残存チェックは「多重起動が絶対に起きない」ことを前提にしない。
+  `scripts/setup-worktree.sh` はグローバルテストロックの**外**で本スクリプトを呼ぶため
+  (worktree 作成そのものを壊さないための意図的な設計)、多重起動は理論上ゼロではない。
+  このチェックが担うのは「専用パスが原因を問わず既に存在していたら、通常の
+  `config:cache` はこの専用パスを絶対に書かないという前提が崩れているとみなして
+  fail-closed で停止する」ことだけである
 
 ### 関連
 
@@ -1787,10 +1827,13 @@ bug-hunt の走行が実際の外部 ID 基盤へ遷移すると、探索が本�
 - 検査: `tests/Unit/Ci/DropTestDbScriptTest.php` /
   `tests/Unit/Ci/TestDatabaseClassificationTest.php` /
   `tests/Unit/Ci/TestDatabaseProvenanceTest.php` /
-  `tests/Unit/Ci/TestDatabaseEnvTest.php`
+  `tests/Unit/Ci/TestDatabaseEnvTest.php` /
+  `tests/Architecture/BaseTestDatabaseSchemaTest.php` /
+  `tests/Unit/Ci/TestDatabaseSchemaUpdateTest.php`
 - 背景: `docs/worktree-isolation-strategy.md` の「孤児テスト DB の回収」と「既知のギャップ」
 - 設計: `devnotes/20260805-2017-todo-T114/` /
-  `devnotes/20260818-1755-template-divergence-ledger-ci-db-and-launcher/`
+  `devnotes/20260818-1755-template-divergence-ledger-ci-db-and-launcher/` /
+  `devnotes/20260819-1056-ensure-test-db-schema-followup/`
 
 ---
 

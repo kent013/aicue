@@ -265,6 +265,198 @@ function globalTestLockLaneScriptViolations(string $path, string $source): array
     return $violations;
 }
 
+/**
+ * ensure-test-db.php を呼ぶスクリプト。この 2 レーンだけが対象で、
+ * setup-worktree.sh はロックの外で呼ぶのが仕様のため対象外にする
+ * (docs/worktree-isolation-strategy.md の [7/7] 参照)。
+ * CI の workflow から scripts/ci/ensure-test-db.php を直に叩く形は運用していないため見ない
+ * (CI は本 2 レーン経由でのみ呼ぶ)。
+ */
+const GLOBAL_TEST_LOCK_ENSURE_TEST_DB_SCRIPTS = [
+    'scripts/run-test.sh',
+    'scripts/run-browser-test.sh',
+];
+
+/** 唯一許可する呼び出し形 (トークン完全一致で比較する)。 */
+const GLOBAL_TEST_LOCK_ENSURE_TEST_DB_EXACT_TOKENS = ['global_test_lock_run', 'php', 'scripts/ci/ensure-test-db.php'];
+
+/** 検出対象の完全一致トークン (呼び出し対象を指す語彙)。 */
+const GLOBAL_TEST_LOCK_ENSURE_TEST_DB_TARGET_TOKEN = 'scripts/ci/ensure-test-db.php';
+
+/**
+ * シェルの行を空白 1 文字以上で区切ったトークン列にする (純関数)。
+ *
+ * クオート結合・変数展開の解決はしない。トークンの**完全一致**だけで判定することで、
+ * `not-ensure-test-db.php` (接頭辞) / `ensure-test-db.php.bak` `ensure-test-db.php.disabled`
+ * (接尾辞) のような別ファイル名の部分文字列一致による誤検出/誤通過を構造的に防ぐ
+ * (共通規約(e))。
+ *
+ * @return list<string>
+ */
+function globalTestLockShellTokens(string $line): array
+{
+    return array_values(array_filter(
+        preg_split('/\s+/u', trim($line)) ?: [],
+        static fn (string $token): bool => $token !== '',
+    ));
+}
+
+/**
+ * ensure-test-db.php の呼び出し行だけを対象に、global_test_lock_run 経由の
+ * 厳密な呼び出し形であることを検査する (純関数)。
+ *
+ * `ensure-test-db.php` 自体は CREATE / 出自記録の時点で既に実 DB へ触れているが、
+ * 家系の裁定 AG-135 で新たに追加される「スキーマ更新の子プロセス起動点」
+ * (`migrate` / `migrate:status` の artisan 起動) は、この呼び出し行の外側からは
+ * ガードできない新しい競合対象である。グローバルテストロックの外で呼ばれると、
+ * 同一マシン上の別レーンの基点 DB 更新と競合しうる (Postgres の DDL 自体は個々に安全でも、
+ * artisan の子プロセスが同時に走ることは想定していない)。
+ *
+ * 許可する呼び出し形は `global_test_lock_run php scripts/ci/ensure-test-db.php` の
+ * **3 トークン完全一致だけ**である。前後に別トークンが挟まる形 (`echo` 経由・
+ * `true # ...` のような偽装) は全て違反にする。
+ *
+ * **保証範囲**: 見るのは空白区切りのトークン列だけであり、シェルのクオート結合・
+ * 変数展開・コマンド置換までは解決しない。変数展開 (`$`) または行末の改行継続 (`\`) を
+ * 含む行に対象トークンが現れた場合は、解決できない形として fail-closed で違反にする
+ * (共通規約(b): 解決できない形を見逃す方向へは倒さない)。
+ *
+ * @return list<string> 違反一覧 (空 = 合格。母集団が空 = 走査の空振りも違反として返す)
+ */
+function globalTestLockEnsureTestDbViolations(string $path, string $source): array
+{
+    $violations = [];
+    $mentioned = false;
+    $targetToken = GLOBAL_TEST_LOCK_ENSURE_TEST_DB_TARGET_TOKEN;
+
+    foreach (preg_split('/\R/u', globalTestLockCodeLines($source)) ?: [] as $rawLine) {
+        $line = trim($rawLine);
+        if ($line === '') {
+            continue;
+        }
+
+        $tokens = globalTestLockShellTokens($line);
+        if (! in_array(GLOBAL_TEST_LOCK_ENSURE_TEST_DB_TARGET_TOKEN, $tokens, true)) {
+            continue; // このトークン集合には呼び出し対象が完全一致で現れていない (無関係行)
+        }
+
+        // 解決できない形 (変数展開・改行継続) が対象トークンと同じ行に現れたら、
+        // 判定を確定させず fail-closed で違反にする。
+        if (str_contains($line, '$') || str_ends_with($line, '\\')) {
+            $mentioned = true;
+            $violations[] = "{$path} の行が解決不能 (変数展開/改行継続) な形で {$targetToken} に触れている: {$line}";
+
+            continue;
+        }
+
+        $mentioned = true;
+        if ($tokens !== GLOBAL_TEST_LOCK_ENSURE_TEST_DB_EXACT_TOKENS) {
+            $violations[] = "{$path} の ensure-test-db.php 呼び出しが厳密な呼び出し形ではない: {$line}";
+        }
+    }
+
+    if (! $mentioned) {
+        $violations[] = "{$path} に {$targetToken} への言及が無い (走査が空振りしている可能性)";
+    }
+
+    return $violations;
+}
+
+test('run-test.sh / run-browser-test.sh の ensure-test-db.php 呼び出しがグローバルテストロック配下であること', function (): void {
+    foreach (GLOBAL_TEST_LOCK_ENSURE_TEST_DB_SCRIPTS as $rel) {
+        $source = file_get_contents(base_path($rel));
+        expect($source)->toBeString();
+        /** @var string $source */
+        expect(globalTestLockEnsureTestDbViolations($rel, $source))->toBe([]);
+    }
+});
+
+// ── 負のコントロール: Round 1 レビューが指摘した擬陽性の合格例 ──
+
+test('負のコントロール: echo 経由で名前だけを混ぜた呼び出しを検出する', function (): void {
+    $violations = globalTestLockEnsureTestDbViolations('fixture.sh', "#!/usr/bin/env bash\nglobal_test_lock_run echo scripts/ci/ensure-test-db.php\n");
+    expect($violations)->not->toBe([]);
+    expect(implode("\n", $violations))->toContain('厳密な呼び出し形ではない');
+});
+
+test('負のコントロール: 行末コメントに名前があるだけの偽装を検出する', function (): void {
+    $violations = globalTestLockEnsureTestDbViolations('fixture.sh', "#!/usr/bin/env bash\nglobal_test_lock_run true # scripts/ci/ensure-test-db.php\n");
+    expect($violations)->not->toBe([]);
+    expect(implode("\n", $violations))->toContain('厳密な呼び出し形ではない');
+});
+
+test('負のコントロール: ロックを通さない ensure-test-db.php 呼び出しを検出する', function (): void {
+    $broken = <<<'SH'
+    #!/usr/bin/env bash
+    . "$(dirname "$0")/global-test-lock.sh"
+    global_test_lock_acquire "lane"
+    php scripts/ci/ensure-test-db.php
+    global_test_lock_run vendor/bin/pest
+    SH;
+    $violations = globalTestLockEnsureTestDbViolations('fixture.sh', $broken);
+    expect($violations)->not->toBe([]);
+    expect(implode("\n", $violations))->toContain('厳密な呼び出し形ではない');
+});
+
+// ── 負のコントロール: 共通規約(e) — 接頭辞/打ち消し/接尾辞つきの別ファイル名は無関係行として扱う ──
+
+test('負のコントロール: 打ち消しつきの別ファイル名 (not-ensure-test-db.php) を対象として誤検出しない', function (): void {
+    $source = "#!/usr/bin/env bash\nglobal_test_lock_run php scripts/ci/not-ensure-test-db.php\n";
+    // 対象トークンが完全一致で現れないため「無関係行」になり、走査は空振り (=言及ゼロ) として報告する。
+    $violations = globalTestLockEnsureTestDbViolations('fixture.sh', $source);
+    expect(implode("\n", $violations))->toContain('空振りしている可能性');
+    expect(implode("\n", $violations))->not->toContain('厳密な呼び出し形ではない');
+});
+
+test('負のコントロール: 打ち消しを伴わない接頭辞つきの別ファイル名 (prefix-ensure-test-db.php) を対象として誤検出しない', function (): void {
+    // 上の not-ensure-test-db.php は「打ち消し」の意味も持つため、
+    // 共通規約(e)が要求する「接頭辞・打ち消し・接尾辞」の 3 形のうち、打ち消しの意味を
+    // 持たない独立した接頭辞形も別途固定する。
+    $source = "#!/usr/bin/env bash\nglobal_test_lock_run php scripts/ci/prefix-ensure-test-db.php\n";
+    $violations = globalTestLockEnsureTestDbViolations('fixture.sh', $source);
+    expect(implode("\n", $violations))->toContain('空振りしている可能性');
+    expect(implode("\n", $violations))->not->toContain('厳密な呼び出し形ではない');
+});
+
+test('負のコントロール: 接尾辞つきの別ファイル名 (.bak / .disabled) を対象として誤検出しない', function (string $suffix): void {
+    $source = "#!/usr/bin/env bash\nglobal_test_lock_run php scripts/ci/ensure-test-db.php{$suffix}\n";
+    $violations = globalTestLockEnsureTestDbViolations('fixture.sh', $source);
+    expect(implode("\n", $violations))->toContain('空振りしている可能性');
+    expect(implode("\n", $violations))->not->toContain('厳密な呼び出し形ではない');
+})->with(['.bak', '.disabled']);
+
+test('負のコントロール: ensure-test-db.php への言及が無いスクリプトを走査の空振りとして検出する', function (): void {
+    $violations = globalTestLockEnsureTestDbViolations('fixture.sh', "#!/usr/bin/env bash\necho no-op\n");
+    expect($violations)->not->toBe([]);
+    expect(implode("\n", $violations))->toContain('空振り');
+});
+
+// ── 負のコントロール: 解決不能な形 (共通規約(b)) ──
+
+test('負のコントロール: 対象トークンと同じ行に変数展開が同居する解決不能な呼び出しを fail-closed で違反にする', function (): void {
+    $mixedSource = "#!/usr/bin/env bash\nglobal_test_lock_run php scripts/ci/ensure-test-db.php \$EXTRA_ARG\n";
+    $violations = globalTestLockEnsureTestDbViolations('fixture.sh', $mixedSource);
+    expect($violations)->not->toBe([]);
+    expect(implode("\n", $violations))->toContain('解決不能');
+});
+
+test('保証範囲の限界: 変数に間接的に格納された呼び出し名は解決できない (別行の代入までは追わない)', function (): void {
+    // $SCRIPT の中身を解決しないという保証範囲の限界そのものを固定する。
+    // 対象トークンが完全一致で現れる行が無いため、走査は「言及なし (空振り)」を返す
+    // (=このスクリプトを誤って安全と判定するわけではなく、判定を保留する形で fail-closed に倒れる)。
+    $indirectSource = "#!/usr/bin/env bash\nSCRIPT=\"scripts/ci/ensure-test-db.php\"\nglobal_test_lock_run php \$SCRIPT\n";
+    $violations = globalTestLockEnsureTestDbViolations('fixture.sh', $indirectSource);
+    expect($violations)->not->toBe([]);
+    expect(implode("\n", $violations))->toContain('空振りしている可能性');
+});
+
+test('負のコントロール: 行末の改行継続を含む解決不能な呼び出しを fail-closed で違反にする', function (): void {
+    $source = "#!/usr/bin/env bash\nglobal_test_lock_run php scripts/ci/ensure-test-db.php \\\n";
+    $violations = globalTestLockEnsureTestDbViolations('fixture.sh', $source);
+    expect($violations)->not->toBe([]);
+    expect(implode("\n", $violations))->toContain('解決不能');
+});
+
 test('scripts/global-test-lock.sh と with-global-test-lock.sh が存在し実行可能であること', function (): void {
     foreach (['scripts/global-test-lock.sh', 'scripts/with-global-test-lock.sh'] as $rel) {
         $path = base_path($rel);

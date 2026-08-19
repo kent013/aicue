@@ -371,16 +371,20 @@ fi
 echo "    health check: OK"
 emit_timing "6-health-check"
 
-# === [7/7] pgsql test base DB を冪等 ensure ===
-# worktree の base テスト DB を先に用意する。pgsql 非接続環境でも setup 全体を
-# 壊さないよう warning 扱い (test 実行時に run-test.sh が再 ensure する)。
-echo ">>> [7/7] ensure pgsql test base DB"
+# === [7/7] pgsql test base DB を冪等 ensure (スキーマ更新まで含む) ===
+# worktree の base テスト DB を存在させ、スキーマを最新にするところまで用意する
+# (家系の裁定 AG-135)。pgsql 非接続環境やスキーマ更新の失敗でも setup 全体を壊さないよう
+# warning 扱いで続行する。テスト実行時に run-test.sh / run-browser-test.sh が同じ ensure を
+# やり直すので fail-closed の実効性は失われない (テストは composer test / composer test:browser
+# のいずれかから実行すること)。
+echo ">>> [7/7] ensure pgsql test base DB (schema up to date)"
 if [[ ! -f "${WORKTREE_DIR}/scripts/ci/ensure-test-db.php" ]]; then
     echo "    warning: scripts/ci/ensure-test-db.php が worktree に無いため skip (test 実行時に再 ensure されます)" >&2
 elif php "${WORKTREE_DIR}/scripts/ci/ensure-test-db.php"; then
-    echo "    ensure: OK"
+    echo "    ensure: OK (schema up to date)"
 else
-    echo "    warning: ensure-test-db に失敗 (pgsql 非接続?)。test 実行時に再 ensure されます" >&2
+    echo "    warning: ensure-test-db に失敗しました (pgsql 非接続、またはスキーマ更新の失敗)。" >&2
+    echo "    'composer test' または 'composer test:browser' から実行すれば同じ準備がやり直されます" >&2
 fi
 emit_timing "7-ensure-test-db"
 
