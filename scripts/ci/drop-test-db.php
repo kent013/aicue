@@ -33,7 +33,10 @@ use Tests\Support\Ci\TestDatabaseEnv;
 use Webmozart\Assert\Assert;
 
 require __DIR__.'/../../vendor/autoload.php';
-require __DIR__.'/pgsql_test_conn.php';
+// scripts/ci 配下の共有ファイルは全て require_once で読み込む規約にする (ensure-test-db.php も同じ)。
+// 同一プロセスで pgsql_test_conn.php が既に require_once 済みのとき、通常の require は
+// 関数/enum の再宣言で fatal error になるため。
+require_once __DIR__.'/pgsql_test_conn.php';
 
 // ───────────────────── DROP 実装 (両経路が共有する唯一の DDL 実行点) ─────────────────────
 

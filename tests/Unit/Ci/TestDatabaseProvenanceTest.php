@@ -8,8 +8,10 @@ require_once __DIR__.'/../../../scripts/ci/pgsql_test_conn.php';
  * ensure-test-db.php が付ける provenance ラベル (COMMENT ON DATABASE) の Unit テスト。
  *
  * 固定する不変条件:
- *   1. ensure の plan は **作成時・既存時の両方**で StampProvenance を含む (= 冪等。
- *      ここを片方だけにすると「ラベルの無い現役 DB」が生まれ、孤児 sweep の分類材料が欠ける)
+ *   1. ensure の plan は **作成時・既存時の両方**で StampProvenance と UpdateSchema を含む
+ *      (= 冪等。ここを片方だけにすると「ラベルの無い現役 DB」または「スキーマが古いまま放置
+ *      される DB」が生まれる)。実行順は StampProvenance → UpdateSchema で固定する
+ *      (スキーマ更新の失敗時に「ラベルの無い現役 DB」を残さないため)。
  *   2. COMMENT 文のリテラルは **PDO::quote() 経由**で組み立てる (独自連結しない。
  *      provenance の realpath に `'` が含まれうる)
  *   3. ラベル付与は **best-effort**。失敗しても例外を伝播させずテスト実行を止めない
@@ -19,21 +21,37 @@ require_once __DIR__.'/../../../scripts/ci/pgsql_test_conn.php';
  * 本テストは実 DB を作らない (SQL 文字列の生成と callable の注入のみ)。
  */
 
-// ── T-C2-17: plan は両分岐とも StampProvenance を含む ──
+// ── T-C2-17: plan は両分岐とも StampProvenance + UpdateSchema を含む ──
 
-it('plans create + stamp when the base database does not exist yet', function (): void {
+it('plans create + stamp + schema update when the base database does not exist yet', function (): void {
     expect(testDatabaseEnsurePlan(false))->toBe([
         TestDatabaseEnsureAction::Create,
         TestDatabaseEnsureAction::StampProvenance,
+        TestDatabaseEnsureAction::UpdateSchema,
     ]);
 });
 
-it('still plans a stamp when the base database already exists (idempotent labelling)', function (): void {
-    expect(testDatabaseEnsurePlan(true))->toBe([TestDatabaseEnsureAction::StampProvenance]);
+it('still plans a stamp + schema update when the base database already exists (idempotent)', function (): void {
+    expect(testDatabaseEnsurePlan(true))->toBe([
+        TestDatabaseEnsureAction::StampProvenance,
+        TestDatabaseEnsureAction::UpdateSchema,
+    ]);
 });
 
 it('never plans a create for an existing database', function (): void {
     expect(testDatabaseEnsurePlan(true))->not->toContain(TestDatabaseEnsureAction::Create);
+});
+
+it('always plans the schema update last, after the provenance stamp', function (): void {
+    foreach ([false, true] as $exists) {
+        $plan = testDatabaseEnsurePlan($exists);
+        expect(array_search(TestDatabaseEnsureAction::UpdateSchema, $plan, true))
+            ->toBe(count($plan) - 1, 'UpdateSchema is not last in the plan');
+        if (in_array(TestDatabaseEnsureAction::StampProvenance, $plan, true)) {
+            expect(array_search(TestDatabaseEnsureAction::StampProvenance, $plan, true))
+                ->toBeLessThan(array_search(TestDatabaseEnsureAction::UpdateSchema, $plan, true));
+        }
+    }
 });
 
 // ── T-C2-17b: 識別子 / リテラルのクォート ──
