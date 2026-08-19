@@ -7,6 +7,8 @@ namespace Tests\Support\Llm;
 use App\Support\Llm\GuardedPrompt;
 use App\Support\Llm\PromptCanary;
 use Kent013\PrismPrompt\Prompt;
+use Prism\Prism\Contracts\Message;
+use ReflectionMethod;
 use ReflectionProperty;
 use Webmozart\Assert\Assert;
 
@@ -84,5 +86,23 @@ final class GuardedPromptInspector
     public static function renderedSystemPrompt(GuardedPrompt $guarded): string
     {
         return self::prompt($guarded)->getRenderedSystemPrompt();
+    }
+
+    /**
+     * vendor へ実際に渡るメッセージ配列 (`Prompt::buildMessages()`。protected)。
+     * 媒体添付 (画像・スキャン SOP の OCR 対応) の vendor 組合せ契約テストが、
+     * Anthropic の `MessageMap` へ実際に通すメッセージを取り出すために使う。
+     *
+     * @return array<int, Message>
+     */
+    public static function messages(GuardedPrompt $guarded): array
+    {
+        $method = new ReflectionMethod(Prompt::class, 'buildMessages');
+        $messages = $method->invoke(self::prompt($guarded));
+        Assert::isArray($messages);
+        Assert::allIsInstanceOf($messages, Message::class);
+
+        /** @var array<int, Message> $messages */
+        return $messages;
     }
 }

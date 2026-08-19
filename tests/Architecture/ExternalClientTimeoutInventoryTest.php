@@ -12,6 +12,7 @@ use App\Services\Capture\Fakes\FakeTakeObjectStorage;
 use App\Services\Capture\TakeObjectStorage;
 use App\Services\Mail\Sns\AwsSnsSignatureVerifier;
 use App\Services\Mail\Sns\SnsSignatureVerifier;
+use App\Services\Manual\AnalysisMediaValidator;
 use App\Services\Manual\SopTextExtractor;
 use App\Services\Manual\SourceDocumentService;
 use App\Services\Render\Fakes\FakeRenderObjectStorage;
@@ -121,6 +122,11 @@ const EXTERNAL_CLIENT_BOUNDARY_INVENTORY = [
         'surface' => 'exempt',
         'reason' => ExternalClientBoundaryExemption::DefaultDiskWithoutAwsClient,
         'rationale' => 'アップロード原本を既定 disk へ置くだけで disk 選択も AWS client 構築も行わない (前提は gate が検査)',
+    ],
+    AnalysisMediaValidator::class => [
+        'surface' => 'exempt',
+        'reason' => ExternalClientBoundaryExemption::DefaultDiskWithoutAwsClient,
+        'rationale' => 'OCR 経路の媒体 (画像/PDF) を既定 disk から読むだけで disk 選択も AWS client 構築も行わない (前提は gate が検査)',
     ],
 ];
 

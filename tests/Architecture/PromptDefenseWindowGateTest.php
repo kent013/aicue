@@ -41,6 +41,12 @@ const GUARDED_PROMPT_FILE = 'app/Support/Llm/GuardedPrompt.php';
 /** 帰属なし窓口を呼んでよい唯一の factory (テンプレート同梱の見本)。 */
 const UNATTRIBUTED_FACTORY_FILE = 'app/Prompts/ExampleSummaryPrompt.php';
 
+/** OCR 経路 (画像・スキャン SOP の OCR 対応) の媒体検証を許す唯一のファイル。 */
+const MEDIA_VALIDATOR_FILE = 'app/Services/Manual/AnalysisMediaValidator.php';
+
+/** OCR 経路の媒体添付 prompt factory (loadWithMedia を呼んでよい唯一の factory)。 */
+const MEDIA_FACTORY_FILE = 'app/Prompts/SopExtractFromMediaPrompt.php';
+
 /**
  * 呼び出し site 検査の走査根 (相対 => 絶対)。
  *
@@ -231,6 +237,68 @@ test('帰属なしの窓口 (loadUnattributed) を呼べるのは見本 factory 
     expect($paths)->toBe([UNATTRIBUTED_FACTORY_FILE],
         '帰属なしの窓口は帰属の対象を構造的に持たない見本 1 本のためだけにあります。'
         .'新しい factory は PromptDefense::load (LlmCallContextData 必須) を使ってください。');
+});
+
+// ── 5b. 媒体添付つき窓口 (loadWithMedia) の呼び出し site (画像・スキャン SOP の OCR 対応) ──
+test('媒体添付つき窓口 (loadWithMedia) を呼べるのは OCR 用 factory 1 件だけ', function (): void {
+    $paths = PromptWindowScanner::pathsOf(promptWindowCallSites(), PromptWindowRule::WindowLoadWithMedia);
+
+    expect($paths)->toBe([MEDIA_FACTORY_FILE],
+        '媒体添付つきの窓口は OCR 用 factory 1 本だけが呼んでよいものです。'
+        .'app/Prompts/ の factory を通してください。');
+});
+
+// ── 11. vendor 媒体型の生成箇所 (画像・スキャン SOP の OCR 対応) ─────
+test('vendor 媒体型 (Image/Document) の構築は窓口 1 ファイルに限り、呼び出しはちょうど 2 件', function (): void {
+    $sites = promptWindowCallSites();
+    $paths = PromptWindowScanner::pathsOf($sites, PromptWindowRule::VendorMediaTypeConstruction);
+
+    expect($paths)->toBe([WINDOW_FILE],
+        'vendor 媒体型 (Image/Document) の構築は窓口 (PromptDefense) の中でのみ行ってください。'
+        .'窓口を迂回すると容量・画素数・ページ数の検証を経ないバイト列が prompt に載せられます。');
+
+    $count = 0;
+    foreach ($sites as $site) {
+        if ($site->rule === PromptWindowRule::VendorMediaTypeConstruction && $site->path === WINDOW_FILE) {
+            $count++;
+        }
+    }
+    expect($count)->toBe(2, '窓口内の vendor 媒体型構築は Image 用 1 回・Document 用 1 回の'
+        .'ちょうど 2 件であるはずです (件数が増減したら実装を確認してください)。');
+});
+
+// ── 12. vendor prompt 継承宣言 (画像・スキャン SOP の OCR 対応) ──────
+test('vendor prompt (Prompt/TextPrompt) の継承宣言は窓口 1 ファイルに限る', function (): void {
+    $paths = PromptWindowScanner::pathsOf(promptWindowCallSites(), PromptWindowRule::MediaPromptExtendsDeclaration);
+
+    expect($paths)->toBe([WINDOW_FILE],
+        'vendor prompt の継承は窓口 (PromptDefense) の中の無名クラスでのみ行ってください。'
+        .'記名クラスとして別ファイルに置くと、生成箇所の目録が必要になります。');
+});
+
+// ── 13. vendor 媒体型の subclass 化は 0 件 (画像・スキャン SOP の OCR 対応) ─
+test('vendor 媒体型 (Image/Document/Media) の subclass 化は 0 件', function (): void {
+    $paths = PromptWindowScanner::pathsOf(
+        promptWindowCallSites(),
+        PromptWindowRule::VendorMediaTypeSubclassDeclaration,
+    );
+
+    expect($paths)->toBe([],
+        'Image/Document/Media を継承すると vendor の final でない性質を突いた '
+        .'未検証構築点が生まれます。現在の設計はどの媒体型も subclass 化する必要がありません。');
+});
+
+// ── 14. 媒体 DTO の named constructor 呼び出し (画像・スキャン SOP の OCR 対応) ─
+test('媒体 DTO の fromValidated() を呼べるのは AnalysisMediaValidator だけ', function (): void {
+    $paths = PromptWindowScanner::pathsOf(
+        promptWindowCallSites(),
+        PromptWindowRule::MediaDataNamedConstructorCall,
+    );
+
+    expect($paths)->toBe([MEDIA_VALIDATOR_FILE],
+        'ImageAnalysisMediaData::fromValidated() / PdfAnalysisMediaData::fromValidated() を'
+        .' 呼べるのは AnalysisMediaValidator だけです。検証を経ないバイト列から'
+        .' 媒体 DTO を作れる経路を増やさないでください。');
 });
 
 // ── 6. factory の戻り値型 ────────────────────────────────────────────
@@ -490,4 +558,286 @@ PHP;
         expect($call->template)->not->toBeNull();
         expect($call->untrustedKeys)->not->toBeNull();
     }
+});
+
+// ── 15. 新ルールの自己検証 (合成負例 / 正例。画像・スキャン SOP の OCR 対応) ─────
+test('VendorMediaTypeConstruction: 窓口外の複数構文を検出する (合成負例)', function (): void {
+    $direct = <<<'PHP'
+<?php
+namespace App\Services;
+use Prism\Prism\ValueObjects\Media\Image;
+class Sneaky { public function go(): mixed { return Image::fromRawContent('x', 'image/jpeg'); } }
+PHP;
+    $newDocument = <<<'PHP'
+<?php
+namespace App\Services;
+use Prism\Prism\ValueObjects\Media\Document;
+class Sneaky { public function go(): mixed { return new Document('u', null, 'application/pdf'); } }
+PHP;
+    $storagePath = <<<'PHP'
+<?php
+namespace App\Services;
+use Prism\Prism\ValueObjects\Media\Image;
+class Sneaky { public function go(): mixed { return Image::fromStoragePath('x'); } }
+PHP;
+
+    expect(PromptWindowScanner::pathsOf(
+        PromptWindowScanner::scan('app/Services/Sneaky.php', $direct),
+        PromptWindowRule::VendorMediaTypeConstruction,
+    ))->toBe(['app/Services/Sneaky.php']);
+    expect(PromptWindowScanner::pathsOf(
+        PromptWindowScanner::scan('app/Services/Sneaky.php', $newDocument),
+        PromptWindowRule::VendorMediaTypeConstruction,
+    ))->toBe(['app/Services/Sneaky.php']);
+    expect(PromptWindowScanner::pathsOf(
+        PromptWindowScanner::scan('app/Services/Sneaky.php', $storagePath),
+        PromptWindowRule::VendorMediaTypeConstruction,
+    ))->toBe(['app/Services/Sneaky.php']);
+});
+
+test('VendorMediaTypeConstruction: 受け手を変数にした間接呼び出しは未解決として fail-closed に拾う', function (): void {
+    $indirect = <<<'PHP'
+<?php
+namespace App\Services;
+use Prism\Prism\ValueObjects\Media\Image;
+class Sneaky
+{
+    public function go(): mixed
+    {
+        $class = Image::class;
+
+        return $class::fromRawContent('x', 'image/jpeg');
+    }
+}
+PHP;
+
+    expect(PromptWindowScanner::pathsOf(
+        PromptWindowScanner::scan('app/Services/Sneaky.php', $indirect),
+        PromptWindowRule::VendorMediaTypeConstruction,
+    ))->toBe(['app/Services/Sneaky.php']);
+});
+
+test('VendorMediaTypeConstruction / MediaDataNamedConstructorCall: 配列 callable の構築を検出する (impl-review Round 3 Critical 対応)', function (): void {
+    // `[Image::class, 'fromRawContent']` という配列 callable の**構築**は、後で実際に
+    // 呼び出されるかどうかに関わらず、構築された時点で違反として検出する
+    // (構築点を塞ぐ考え方は VendorMediaTypeConstruction 自体と同じ)。
+    $arrayCallableImage = <<<'PHP'
+<?php
+namespace App\Services;
+use Prism\Prism\ValueObjects\Media\Image;
+class Sneaky
+{
+    public function go(): mixed
+    {
+        $factory = [Image::class, 'fromRawContent'];
+
+        return $factory('x', 'image/jpeg');
+    }
+}
+PHP;
+    expect(PromptWindowScanner::pathsOf(
+        PromptWindowScanner::scan('app/Services/Sneaky.php', $arrayCallableImage),
+        PromptWindowRule::VendorMediaTypeConstruction,
+    ))->toBe(['app/Services/Sneaky.php']);
+
+    $arrayCallableDto = <<<'PHP'
+<?php
+namespace App\Services;
+use App\DataTransferObjects\Manual\Analysis\PdfAnalysisMediaData;
+class Sneaky
+{
+    public function go(): mixed
+    {
+        $factory = [PdfAnalysisMediaData::class, 'fromValidated'];
+
+        return $factory('application/pdf', 'x', 1, 1);
+    }
+}
+PHP;
+    expect(PromptWindowScanner::pathsOf(
+        PromptWindowScanner::scan('app/Services/Sneaky.php', $arrayCallableDto),
+        PromptWindowRule::MediaDataNamedConstructorCall,
+    ))->toBe(['app/Services/Sneaky.php']);
+
+    // 正例: 窓口内の実際のコードはこの構文を使っていない
+    $realArrayCallables = PromptWindowScanner::arrayCallableConstructions(
+        WINDOW_FILE,
+        (string) file_get_contents(dirname(__DIR__, 2).'/'.WINDOW_FILE),
+    );
+    expect($realArrayCallables)->toBe([]);
+});
+
+test('dynamicMethodNameCalls: 完全修飾名・部分修飾名の受け手でも動的メソッド名を検出する (impl-review Round 3 Critical 対応)', function (): void {
+    $fullyQualified = <<<'PHP'
+<?php
+namespace App\Services;
+class Sneaky
+{
+    public function go(): mixed
+    {
+        $method = 'fromRawContent';
+
+        return \Prism\Prism\ValueObjects\Media\Image::{$method}('x', 'image/jpeg');
+    }
+}
+PHP;
+    expect(PromptWindowScanner::pathsOf(
+        PromptWindowScanner::scan('app/Services/Sneaky.php', $fullyQualified),
+        PromptWindowRule::VendorMediaTypeConstruction,
+    ))->toBe(['app/Services/Sneaky.php']);
+});
+
+test('MediaPromptExtendsDeclaration: 無名クラス・記名クラス・別名 import のいずれでも検出する', function (): void {
+    $anonymous = <<<'PHP'
+<?php
+namespace App\Services;
+use Kent013\PrismPrompt\TextPrompt;
+class Sneaky { public function go(): mixed { return new class extends TextPrompt {}; } }
+PHP;
+    $named = <<<'PHP'
+<?php
+namespace App\Services;
+use Kent013\PrismPrompt\Prompt;
+class Sneaky extends Prompt {}
+PHP;
+    $aliased = <<<'PHP'
+<?php
+namespace App\Services;
+use Kent013\PrismPrompt\TextPrompt as TP;
+class Sneaky extends TP {}
+PHP;
+
+    expect(PromptWindowScanner::pathsOf(
+        PromptWindowScanner::scan('app/Services/Sneaky.php', $anonymous),
+        PromptWindowRule::MediaPromptExtendsDeclaration,
+    ))->toBe(['app/Services/Sneaky.php']);
+    expect(PromptWindowScanner::pathsOf(
+        PromptWindowScanner::scan('app/Services/Sneaky.php', $named),
+        PromptWindowRule::MediaPromptExtendsDeclaration,
+    ))->toBe(['app/Services/Sneaky.php']);
+    expect(PromptWindowScanner::pathsOf(
+        PromptWindowScanner::scan('app/Services/Sneaky.php', $aliased),
+        PromptWindowRule::MediaPromptExtendsDeclaration,
+    ))->toBe(['app/Services/Sneaky.php']);
+});
+
+test('VendorMediaTypeSubclassDeclaration: 別名 import・group use・無名クラスのいずれでも検出する', function (): void {
+    $aliased = <<<'PHP'
+<?php
+namespace App\Services;
+use Prism\Prism\ValueObjects\Media\Image as Img;
+class Sneaky extends Img {}
+PHP;
+    $groupUse = <<<'PHP'
+<?php
+namespace App\Services;
+use Prism\Prism\ValueObjects\Media\{Document, Image};
+class Sneaky extends Document {}
+PHP;
+    $anonymous = <<<'PHP'
+<?php
+namespace App\Services;
+use Prism\Prism\ValueObjects\Media\Media;
+class Sneaky { public function go(): mixed { return new class extends Media {}; } }
+PHP;
+
+    expect(PromptWindowScanner::pathsOf(
+        PromptWindowScanner::scan('app/Services/Sneaky.php', $aliased),
+        PromptWindowRule::VendorMediaTypeSubclassDeclaration,
+    ))->toBe(['app/Services/Sneaky.php']);
+    expect(PromptWindowScanner::pathsOf(
+        PromptWindowScanner::scan('app/Services/Sneaky.php', $groupUse),
+        PromptWindowRule::VendorMediaTypeSubclassDeclaration,
+    ))->toBe(['app/Services/Sneaky.php']);
+    expect(PromptWindowScanner::pathsOf(
+        PromptWindowScanner::scan('app/Services/Sneaky.php', $anonymous),
+        PromptWindowRule::VendorMediaTypeSubclassDeclaration,
+    ))->toBe(['app/Services/Sneaky.php']);
+
+    // 正例: 同じ短名だが別 namespace のクラスは誤検出しない
+    $innocent = <<<'PHP'
+<?php
+namespace App\Foo;
+class Image {}
+namespace App\Services;
+class Sneaky extends \App\Foo\Image {}
+PHP;
+    expect(PromptWindowScanner::pathsOf(
+        PromptWindowScanner::scan('app/Services/Sneaky.php', $innocent),
+        PromptWindowRule::VendorMediaTypeSubclassDeclaration,
+    ))->toBe([]);
+});
+
+test('VendorMediaTypeConstruction / MediaDataNamedConstructorCall: 中括弧による動的メソッド名を検出する (impl-review Round 2 Critical 対応)', function (): void {
+    // `Image::{$method}(...)` は `::` の直後が T_STRING (メソッド名) ではないため、
+    // 通常の静的呼び出し検出には現れない迂回路だった。受け手が対象クラスへ解決できれば
+    // メソッド名が動的でも fail-closed で拾う。
+    $dynamicImage = <<<'PHP'
+<?php
+namespace App\Services;
+use Prism\Prism\ValueObjects\Media\Image;
+class Sneaky
+{
+    public function go(): mixed
+    {
+        $method = 'fromRawContent';
+
+        return Image::{$method}('x', 'image/jpeg');
+    }
+}
+PHP;
+    expect(PromptWindowScanner::pathsOf(
+        PromptWindowScanner::scan('app/Services/Sneaky.php', $dynamicImage),
+        PromptWindowRule::VendorMediaTypeConstruction,
+    ))->toBe(['app/Services/Sneaky.php']);
+
+    $dynamicFromValidated = <<<'PHP'
+<?php
+namespace App\Services;
+use App\DataTransferObjects\Manual\Analysis\ImageAnalysisMediaData;
+class Sneaky
+{
+    public function go(): mixed
+    {
+        $m = 'fromValidated';
+
+        return ImageAnalysisMediaData::{$m}('image/jpeg', 'x', 1, 1, 1);
+    }
+}
+PHP;
+    expect(PromptWindowScanner::pathsOf(
+        PromptWindowScanner::scan('app/Services/Sneaky.php', $dynamicFromValidated),
+        PromptWindowRule::MediaDataNamedConstructorCall,
+    ))->toBe(['app/Services/Sneaky.php']);
+
+    // 正例: 窓口内の実際のコードはこの構文を使っていない (誤検出が実コードに無いことの確認)
+    $realCalls = PromptWindowScanner::dynamicMethodNameCalls(
+        WINDOW_FILE,
+        (string) file_get_contents(dirname(__DIR__, 2).'/'.WINDOW_FILE),
+    );
+    expect($realCalls)->toBe([]);
+});
+
+test('WindowLoadWithMedia / MediaDataNamedConstructorCall: factory/validator 以外からの呼び出しを検出する', function (): void {
+    $loadWithMedia = <<<'PHP'
+<?php
+namespace App\Services;
+use App\Support\Llm\PromptDefense;
+class Sneaky { public function go(): mixed { return PromptDefense::loadWithMedia(template: 't', untrusted: [], media: $m, context: $c); } }
+PHP;
+    $fromValidated = <<<'PHP'
+<?php
+namespace App\Services;
+use App\DataTransferObjects\Manual\Analysis\ImageAnalysisMediaData;
+class Sneaky { public function go(): mixed { return ImageAnalysisMediaData::fromValidated('image/jpeg', 'x', 1, 1, 1); } }
+PHP;
+
+    expect(PromptWindowScanner::pathsOf(
+        PromptWindowScanner::scan('app/Services/Sneaky.php', $loadWithMedia),
+        PromptWindowRule::WindowLoadWithMedia,
+    ))->toBe(['app/Services/Sneaky.php']);
+    expect(PromptWindowScanner::pathsOf(
+        PromptWindowScanner::scan('app/Services/Sneaky.php', $fromValidated),
+        PromptWindowRule::MediaDataNamedConstructorCall,
+    ))->toBe(['app/Services/Sneaky.php']);
 });

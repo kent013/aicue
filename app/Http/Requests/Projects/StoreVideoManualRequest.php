@@ -6,9 +6,10 @@ namespace App\Http\Requests\Projects;
 
 use App\Http\Requests\Concerns\ProhibitsProtectedKeys;
 use App\Models\Project;
+use App\Rules\SourceDocumentSizeLimit;
+use App\Support\Manual\AcceptedSourceDocumentTypes;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
-use Webmozart\Assert\Assert;
 
 /**
  * VideoManual 作成。
@@ -46,22 +47,26 @@ class StoreVideoManualRequest extends FormRequest
             'document' => [
                 'nullable',
                 'file',
-                'mimes:'.implode(',', $this->allowedExtensions()),
-                'max:'.intdiv(config()->integer('manual.source_document_max_bytes'), 1024), // KB 単位
+                'mimes:'.implode(',', AcceptedSourceDocumentTypes::extensions()),
+                new SourceDocumentSizeLimit,
             ],
         ], $this->protectedKeyMissingRules());
     }
 
     /**
-     * 許可拡張子 (config manual.source_document_mimes) を list<string> へ narrow する。
+     * mimes ルールの汎用文言を、現在受理している形式の案内へ差し替える
+     * (画像・スキャン SOP の OCR 対応。`StoreSourceDocumentRequest` と同じ方針)。
      *
-     * @return list<string>
+     * @return array<string, string>
      */
-    private function allowedExtensions(): array
+    public function messages(): array
     {
-        $mimes = config()->array('manual.source_document_mimes');
-        Assert::allString($mimes);
+        $formats = AcceptedSourceDocumentTypes::imagesEnabled()
+            ? 'PDF・Excel・テキスト形式、または JPEG・PNG の画像'
+            : 'PDF・Excel・テキスト形式';
 
-        return array_values($mimes);
+        return [
+            'document.mimes' => "対応していないファイル形式です。{$formats}でアップロードし直してください。",
+        ];
     }
 }

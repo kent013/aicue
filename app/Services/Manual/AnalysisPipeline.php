@@ -8,6 +8,8 @@ use App\DataTransferObjects\LlmCallContextData;
 use App\DataTransferObjects\Manual\Analysis\ExtractedSopData;
 use App\DataTransferObjects\Manual\Analysis\ExtractedText;
 use App\DataTransferObjects\Manual\Analysis\GeneratedScenarioData;
+use App\DataTransferObjects\Manual\Analysis\ImageAnalysisMediaData;
+use App\DataTransferObjects\Manual\Analysis\PdfAnalysisMediaData;
 use App\DataTransferObjects\Manual\Analysis\WorkDecompositionData;
 use App\DataTransferObjects\Manual\Analysis\WorkDecompositionResponseData;
 use App\Enums\Billing\TicketReservationStatus;
@@ -27,10 +29,12 @@ use App\Models\Project;
 use App\Models\SourceDocument;
 use App\Models\VideoManual;
 use App\Prompts\ScenarioGenerationPrompt;
+use App\Prompts\SopExtractFromMediaPrompt;
 use App\Prompts\SopExtractPrompt;
 use App\Prompts\WorkDecompositionPrompt;
 use App\Services\Billing\TicketLedgerService;
 use App\Services\Notification\NotificationCenterService;
+use App\Support\Manual\AnalysisAcceptanceGate;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
@@ -84,6 +88,7 @@ class AnalysisPipeline
         private readonly TicketLedgerService $tickets,
         private readonly NotificationCenterService $notifications,
         private readonly ScenarioBookendBuilder $bookend,
+        private readonly AnalysisMediaValidator $mediaValidator,
     ) {}
 
     public function run(int $analysisJobId): void
@@ -111,8 +116,7 @@ class AnalysisPipeline
             // リトライでも同じ context が使われるため、再試行で出た失敗行にも同じ帰属が付く。
             $context = $this->resolveCallContext($job);
 
-            $text = $this->extractor->extract($document);
-            $extracted = $this->runExtractStep($job, $document, $text, $deadline, $context);
+            $extracted = $this->runExtractStage($job, $document, $deadline, $context);
             $decomposition = $this->runDecomposeStep($job, $extracted, $deadline, $context);
             $generated = $this->runGenerateStep($job, $decomposition, $deadline, $context);
             if ($this->finalize($job, $generated)) {
@@ -193,6 +197,152 @@ class AnalysisPipeline
     }
 
     /**
+     * extract 段の入口 (画像・スキャン SOP の OCR 対応)。`resolveExtractInput()`
+     * (経路決定・媒体検証) と `runExtractStep()` (LLM 呼び出し) の両方を包み、
+     * 成功・失敗を問わず extract 段の終端をちょうど 1 回だけログする
+     * (「媒体検証成功」と「LLM 呼び出し失敗」の 2 つの outcome 付きログが同じジョブに
+     * 残ってしまう問題を、単一の終端ログに統合して解消する)。
+     */
+    private function runExtractStage(
+        AnalysisJob $job,
+        SourceDocument $document,
+        CarbonImmutable $deadline,
+        LlmCallContextData $context,
+    ): ExtractedSopData {
+        $isImage = in_array($document->mime, ['image/jpeg', 'image/png'], true);
+        $ocrEnabled = config()->boolean('manual.ocr_analysis_enabled');
+        // 初期値: 画像 + フラグ有効なら最初から 'ocr'、それ以外は 'text'。
+        // PDF が品質ゲート失敗から OCR フォールバックへ入る場合は、resolveExtractInput()
+        // が参照渡しでこの値を 'ocr' へ更新する (media 検証を試みる直前に更新するため、
+        // 検証が失敗して例外が飛んでも route は正しく 'ocr' のまま catch へ渡る)。
+        $route = ($isImage && $ocrEnabled) ? 'ocr' : 'text';
+        // 媒体検証が成功した後に LLM 呼び出しが失敗した場合でも、検証済みの媒体メタデータ
+        // (容量・ページ数・画素数) をログへ残すため、$input をこのスコープで保持し続ける。
+        $input = null;
+
+        try {
+            $input = $this->resolveExtractInput($document, $isImage, $ocrEnabled, $route);
+            $extracted = $this->runExtractStep($job, $document, $input, $deadline, $context);
+
+            $this->logExtractStageTerminal($job, $document, $route, $input, null);
+
+            return $extracted;
+        } catch (Throwable $exception) {
+            $this->logExtractStageTerminal($job, $document, $route, $input, $exception);
+
+            throw $exception;
+        }
+    }
+
+    /**
+     * text 抽出を試み、失敗理由が OCR 経路の対象なら media 検証へフォールバックする。
+     * 対象外の理由 (tooLarge 等) や、画像/PDF 以外の mime での失敗はそのまま再送出する
+     * (既存の catch → failJob 経路がそのまま処理する)。ログは出さない (呼び出し元
+     * `runExtractStage()` が終端をまとめて 1 回ログする)。
+     *
+     * @param  string  $route  呼び出し元の route (参照渡し)。PDF が OCR フォールバックへ
+     *                         入ると判断した瞬間 (media 検証を試みる前) に 'ocr' へ更新する
+     *                         (戻り値の型だけで route を判定すると、media 検証自体が失敗したケースで
+     *                         route を復元できないため)。
+     */
+    private function resolveExtractInput(
+        SourceDocument $document,
+        bool $isImage,
+        bool $ocrEnabled,
+        string &$route,
+    ): ExtractedText|ImageAnalysisMediaData|PdfAnalysisMediaData {
+        if ($isImage && $ocrEnabled) {
+            // 画像は SopTextExtractor::kindFor() の default 分岐が unextractable を投げる
+            // (テキスト抽出は元々試みない対象)。ここで直接 media 検証へ回す
+            // ($route は呼び出し元で既に 'ocr' に初期化済み)。
+            return $this->mediaValidator->validateImage($document);
+        }
+
+        try {
+            return $this->extractor->extract($document);
+        } catch (AnalysisFailedException $exception) {
+            $isPdf = $document->mime === 'application/pdf';
+            if ($ocrEnabled && $isPdf && $exception->reason->isOcrEligibleForPdf()) {
+                $route = 'ocr'; // media 検証を試みる直前に更新 (この後の呼び出しが失敗しても正しい)
+
+                return $this->mediaValidator->validatePdfForOcr($document);
+            }
+
+            throw $exception; // OCR 対象外、またはフラグ無効時はそのまま失敗 (既存の catch → failJob)
+        }
+    }
+
+    /**
+     * extract 段の終端ログ。**`run()` の 1 回の実行 (= `runExtractStage()` の 1 回の呼び出し)
+     * につきちょうど 1 回**だけ呼ばれる (`runExtractStage()` の成功パス・catch の両方から、
+     * この 1 メソッドだけを経由する)。
+     *
+     * ★ **保証しないもの (誇張しない)**: 「ジョブ 1 件につき生涯で 1 回」ではない。
+     *   永続化された冪等キーは持たないため、同じ `analysis_job_id` に対して `run()` が
+     *   複数回実行されれば (stale 回復による再キューイング等)、その都度 1 行ずつ増える。
+     *   `docs/rollout-checklists.md` の評価指標は「ジョブ単位」で集計するが、これは
+     *   「解析ジョブ 1 件を単位に丸める」という集計方針であって、本ログの出力回数の
+     *   保証ではない。厳密な一意性が必要な集計は `analysis_jobs` の終端状態と
+     *   突き合わせて行うこと。
+     *
+     * ★ **例外 1 件**: `JobOwnershipLostException` のときだけ、本メソッドは早期 return して
+     *   ログを出さない (所有権喪失は「失敗」ではなく「別の担当が既に処理した」という
+     *   正常系のノイズなので、失敗率の集計対象に含めない)。
+     */
+    private function logExtractStageTerminal(
+        AnalysisJob $job,
+        SourceDocument $document,
+        string $route,
+        ExtractedText|ImageAnalysisMediaData|PdfAnalysisMediaData|null $input,
+        ?Throwable $exception,
+    ): void {
+        if ($exception instanceof JobOwnershipLostException) {
+            return;
+        }
+
+        $media = $input instanceof ExtractedText ? null : $input;
+
+        Log::info('AI 解析の抽出段 (終端)', [
+            'analysis_job_id' => $job->id,
+            'route' => $route,
+            'source_mime' => $document->mime,
+            'outcome' => $exception === null ? 'ok' : 'failed',
+            // 失敗理由は固定語彙のカテゴリに正規化する (実装クラス名を集計キーにしない)
+            'failure_category' => $exception === null ? null : $this->observabilityCategoryFor($exception),
+            'media_size_bytes' => $media?->sizeBytes,
+            'media_pages' => $media instanceof PdfAnalysisMediaData ? $media->pageCount : null,
+            'media_pixels' => $media instanceof ImageAnalysisMediaData ? $media->pixelCount : null,
+        ]);
+    }
+
+    /**
+     * 失敗理由を固定語彙のカテゴリへ正規化する。`userMessageFor()` と判定材料
+     * (reason enum / HTTP status) を共有し、集計キーの語彙を二重管理しない。
+     */
+    private function observabilityCategoryFor(Throwable $exception): string
+    {
+        $status = $this->extractHttpStatus($exception); // userMessageFor() と同じ既存メソッドを再利用
+
+        return match (true) {
+            $exception instanceof AnalysisFailedException => $exception->reason->value,
+            $exception instanceof LlmOutputInvalidException => 'llm_output_invalid_'.$exception->reason->value,
+            $exception instanceof UntrustedInputRejectedException => match ($exception->reason) {
+                UntrustedInputRejectionReason::TooLarge => 'too_large',
+                UntrustedInputRejectionReason::InvalidEncoding => 'unreadable_encoding',
+            },
+            $exception instanceof PromptResponseRejectedException => 'unsafe_response',
+            $exception instanceof ConnectionException => 'timed_out',
+            $exception instanceof PrismRateLimitedException,
+            $exception instanceof PrismProviderOverloadedException => 'provider_busy',
+            $exception instanceof PrismRequestTooLargeException => 'too_large',
+            // generic PrismException: userMessageFor() と同じ status 定数で分類する
+            $status === self::TIMED_OUT_HTTP_STATUS => 'timed_out',
+            $status !== null && in_array($status, self::PROVIDER_BUSY_HTTP_STATUSES, true) => 'provider_busy',
+            default => 'unknown', // 上記いずれにも当たらない残余 (実装クラス名は出さない)
+        };
+    }
+
+    /**
      * extract 段: 統一 JSON 化 + extracted_json 保存 (write-only 監査スナップショット)。
      *
      * ★ `SourceDocument::extracted_json` は**条件付き UPDATE にしない** (T131):
@@ -204,7 +354,7 @@ class AnalysisPipeline
     private function runExtractStep(
         AnalysisJob $job,
         SourceDocument $document,
-        ExtractedText $text,
+        ExtractedText|ImageAnalysisMediaData|PdfAnalysisMediaData $input,
         CarbonImmutable $deadline,
         LlmCallContextData $context,
     ): ExtractedSopData {
@@ -212,9 +362,21 @@ class AnalysisPipeline
             $job,
             $deadline,
             AnalysisStep::Extract,
-            fn (): ExtractedSopData => ExtractedSopData::fromLlmText(
-                SopExtractPrompt::make($text->text, $context)->executeSync(),
-            ),
+            function () use ($input, $context): ExtractedSopData {
+                // PHPStan level 10 で型が確実に絞り込まれるよう、match(true) ではなく
+                // 素直な if/early-return にする (3 型を 2 群に束ねる match + default は避ける)
+                if ($input instanceof ExtractedText) {
+                    return ExtractedSopData::fromLlmText(
+                        SopExtractPrompt::make($input->text, $context)->executeSync(),
+                    );
+                }
+
+                return AnalysisAcceptanceGate::validateOcrResult(
+                    ExtractedSopData::fromLlmText(
+                        SopExtractFromMediaPrompt::make($input, $context)->executeSync(),
+                    ),
+                );
+            },
         );
 
         $document->extracted_json = $extracted->toArray();

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Support\Llm;
 
+use App\DataTransferObjects\Manual\Analysis\ImageAnalysisMediaData;
+use App\DataTransferObjects\Manual\Analysis\PdfAnalysisMediaData;
 use App\Support\Llm\GuardedPrompt;
 use App\Support\Llm\PromptCanary;
 use App\Support\Llm\PromptDefense;
@@ -12,6 +14,9 @@ use Kent013\PrismPrompt\EmbeddingPrompt;
 use Kent013\PrismPrompt\Prompt;
 use Kent013\PrismPrompt\TextPrompt;
 use Kent013\PrismPrompt\Values\UserInput;
+use Prism\Prism\ValueObjects\Media\Document;
+use Prism\Prism\ValueObjects\Media\Image;
+use Prism\Prism\ValueObjects\Media\Media;
 use Tests\Support\PhpReferenceScanner;
 use Tests\Support\ReceiverName;
 use Tests\Support\ReferenceKind;
@@ -50,6 +55,41 @@ final class PromptWindowScanner
     ];
 
     /**
+     * vendor 媒体型 (画像・スキャン SOP の OCR 対応)。`Media` に構築以外の static メソッドは
+     * 存在しないため、`Image::`/`Document::` への任意の static 呼び出しを構築とみなせる。
+     */
+    private const array VENDOR_MEDIA_TYPES = [Image::class, Document::class];
+
+    /** vendor 媒体型の基底 (subclass 検出の対象。Image/Document 自身も含む)。 */
+    private const array VENDOR_MEDIA_BASE_TYPES = [Image::class, Document::class, Media::class];
+
+    /** vendor prompt 継承検出の対象。 */
+    private const array VENDOR_PROMPT_EXTENDS_TARGETS = [Prompt::class, TextPrompt::class];
+
+    /**
+     * 媒体 DTO の named constructor (`ImageAnalysisMediaData`/`PdfAnalysisMediaData` の
+     * `fromValidated`)。受け手が不明でも、この特徴的なメソッド名なら fail-closed で拾う。
+     */
+    private const array MEDIA_DATA_CLASSES = [ImageAnalysisMediaData::class, PdfAnalysisMediaData::class];
+
+    private const string MEDIA_DATA_METHOD = 'fromValidated';
+
+    private const string WINDOW_LOAD_WITH_MEDIA_METHOD = 'loadWithMedia';
+
+    /**
+     * `Media` の named constructor 群 (受け手が不明な静的呼び出しを fail-closed で
+     * 拾うための、既知のメソッド名の集合)。**受け手が解決できている場合はこの列挙を使わない**
+     * (`Image::`/`Document::` への任意の static 呼び出しをそのまま構築とみなす)。
+     * 列挙が要るのは「受け手が変数などで隠されている」場合だけである。
+     *
+     * @var list<string>
+     */
+    private const array MEDIA_CONSTRUCTOR_METHOD_NAMES = [
+        'fromFileId', 'fromPath', 'fromLocalPath', 'fromStoragePath',
+        'fromUrl', 'fromRawContent', 'fromBase64', 'fromText', 'fromChunks',
+    ];
+
+    /**
      * 1 ファイルを走査して site を列挙する。
      *
      * @return list<PromptWindowSite>
@@ -68,8 +108,193 @@ final class PromptWindowScanner
                 $sites[] = $site;
             }
         }
+        array_push($sites, ...self::extendsDeclarations($relativePath, $phpSource));
+        array_push($sites, ...self::dynamicMethodNameCalls($relativePath, $phpSource));
+        array_push($sites, ...self::arrayCallableConstructions($relativePath, $phpSource));
 
         return $sites;
+    }
+
+    /**
+     * `Image::{$method}(...)` のような中括弧による動的メソッド名の静的呼び出しを検出する
+     * (画像・スキャン SOP の OCR 対応。impl-review Round 2 Critical 対応)。
+     *
+     * `PhpReferenceScanner` の静的呼び出し検出は「`::` の直後が `T_STRING` (メソッド名)」
+     * という形だけを対象にしており、`::` の直後が `{` (中括弧開始) になるこの構文は
+     * 元々 site として emit されない (=`VendorMediaTypeConstruction`/`MediaDataNamedConstructorCall`
+     * のどちらの分類にも到達しない迂回路になっていた)。受け手が対象クラスへ解決できる場合、
+     * メソッド名が静的に決まらなくても**受け手が対象クラスである事実だけ**で違反候補として拾う
+     * (fail-closed。メソッド名を問わないので `VendorMediaTypeConstruction` と同じ理由で
+     * 列挙が要らない)。
+     *
+     * ★ **保証しないもの**: 受け手も動的な形 (`$class::{$method}(...)`) は対象外
+     * (受け手の名前解決すらできないため、対象クラスかどうか判定できない)。
+     *
+     * @return list<PromptWindowSite>
+     */
+    public static function dynamicMethodNameCalls(string $relativePath, string $phpSource): array
+    {
+        $tokens = PhpReferenceScanner::tokens($phpSource);
+        $imports = PhpReferenceScanner::references($relativePath, $phpSource)->imports;
+        $namespace = self::firstNamespace($tokens);
+        $count = count($tokens);
+
+        /** @var array<string, PromptWindowRule> $watched */
+        $watched = array_merge(
+            array_fill_keys(self::VENDOR_MEDIA_TYPES, PromptWindowRule::VendorMediaTypeConstruction),
+            array_fill_keys(self::MEDIA_DATA_CLASSES, PromptWindowRule::MediaDataNamedConstructorCall),
+        );
+
+        $sites = [];
+        for ($i = 0; $i < $count; $i++) {
+            if ($tokens[$i]['id'] !== T_DOUBLE_COLON) {
+                continue;
+            }
+            $next = $tokens[$i + 1] ?? null;
+            if ($next === null || $next['id'] !== null || $next['text'] !== '{') {
+                continue; // 通常の `::method(` / `::CONST` / `::class` はここでは扱わない
+            }
+            $receiverToken = $tokens[$i - 1] ?? null;
+            if ($receiverToken === null) {
+                continue;
+            }
+            $resolved = self::resolveNameToken($receiverToken, $namespace, $imports);
+            if ($resolved === null) {
+                continue;
+            }
+            $rule = $watched[$resolved] ?? null;
+            if ($rule === null) {
+                continue;
+            }
+
+            $sites[] = new PromptWindowSite(
+                $relativePath,
+                $receiverToken['line'],
+                $rule,
+                $resolved.'::{$dynamic}(...)',
+            );
+        }
+
+        return $sites;
+    }
+
+    /**
+     * 1 トークンを名前として解決する (完全修飾 / 部分修飾 / import 済み短縮名の
+     * いずれか)。解決できなければ null (呼び出し側は fail-closed へ倒すこと)。
+     *
+     * @param  array{id: int|null, text: string, line: int}  $token
+     * @param  array<string, string>  $imports
+     */
+    private static function resolveNameToken(array $token, string $namespace, array $imports): ?string
+    {
+        if ($token['id'] === T_NAME_FULLY_QUALIFIED) {
+            return ltrim($token['text'], '\\');
+        }
+        if ($token['id'] === T_NAME_QUALIFIED || $token['id'] === T_NAME_RELATIVE) {
+            return self::resolveExtendsQualifiedName($token['id'], $token['text'], $namespace, $imports);
+        }
+        if ($token['id'] === T_STRING) {
+            return $imports[mb_strtolower($token['text'])]
+                ?? ($namespace === '' ? $token['text'] : $namespace.'\\'.$token['text']);
+        }
+
+        return null;
+    }
+
+    /**
+     * `[X::class, 'method']` という配列 callable の**構築** (画像・スキャン SOP の OCR 対応。
+     * impl-review Round 3 Critical 対応)。呼び出し側がこの配列を実際に呼び出すかどうかは
+     * データフロー解析が要るため追わない — **構築されている事実だけ**を deny-by-default で
+     * 拒否する (窓口 1 ファイルの外で対象クラスの callable 配列を組む理由が無い)。
+     * `VendorMediaTypeConstruction`/`MediaDataNamedConstructorCall` が「構築」を pin する
+     * 既存の考え方 (呼び出しの証明ではなく構築点を塞ぐ) をそのまま踏襲する。
+     *
+     * 検出する構文: `[` `X::class` `,` 文字列リテラル `]` (要素順序固定。逆順・3 要素以上・
+     * 変数を含む形は対象外 = 未解決として拾わない。これは「配列 callable なら何でも検出する」
+     * という主張はしておらず、`X::class` を先頭に持つ最小限の形だけを塞ぐものである)。
+     *
+     * @return list<PromptWindowSite>
+     */
+    public static function arrayCallableConstructions(string $relativePath, string $phpSource): array
+    {
+        $tokens = PhpReferenceScanner::tokens($phpSource);
+        $imports = PhpReferenceScanner::references($relativePath, $phpSource)->imports;
+        $namespace = self::firstNamespace($tokens);
+        $count = count($tokens);
+
+        /** @var array<string, PromptWindowRule> $watched */
+        $watched = array_merge(
+            array_fill_keys(self::VENDOR_MEDIA_TYPES, PromptWindowRule::VendorMediaTypeConstruction),
+            array_fill_keys(self::MEDIA_DATA_CLASSES, PromptWindowRule::MediaDataNamedConstructorCall),
+        );
+
+        $sites = [];
+        for ($i = 0; $i < $count; $i++) {
+            $open = $tokens[$i];
+            if ($open['id'] !== null || $open['text'] !== '[') {
+                continue;
+            }
+
+            $classToken = $tokens[$i + 1] ?? null;
+            $doubleColon = $tokens[$i + 2] ?? null;
+            $classKeyword = $tokens[$i + 3] ?? null;
+            $comma = $tokens[$i + 4] ?? null;
+            $methodToken = $tokens[$i + 5] ?? null;
+            $close = $tokens[$i + 6] ?? null;
+
+            if ($classToken === null || $doubleColon === null || $classKeyword === null
+                || $comma === null || $methodToken === null || $close === null) {
+                continue;
+            }
+            if ($doubleColon['id'] !== T_DOUBLE_COLON || $classKeyword['id'] !== T_CLASS) {
+                continue;
+            }
+            if ($comma['id'] !== null || $comma['text'] !== ',') {
+                continue;
+            }
+            if ($methodToken['id'] !== T_CONSTANT_ENCAPSED_STRING) {
+                continue;
+            }
+            if ($close['id'] !== null || $close['text'] !== ']') {
+                continue; // 3 要素以上・末尾カンマ等は対象外 (fail-closed で「未解決」とはせず、
+                // 「この最小形ではない」として単に検出対象から外れる。保証範囲は上記 docblock 参照)
+            }
+
+            $resolved = self::resolveNameToken($classToken, $namespace, $imports);
+            if ($resolved === null) {
+                continue;
+            }
+            $rule = $watched[$resolved] ?? null;
+            if ($rule === null) {
+                continue;
+            }
+
+            $sites[] = new PromptWindowSite(
+                $relativePath,
+                $classToken['line'],
+                $rule,
+                '['.$resolved.'::class, '.trim($methodToken['text'], "'\"").']',
+            );
+        }
+
+        return $sites;
+    }
+
+    /** @return array<string, string> 現在の namespace 宣言 (最初の 1 つ。ファイル先頭が前提) */
+    private static function firstNamespace(array $tokens): string
+    {
+        $count = count($tokens);
+        for ($i = 0; $i < $count; $i++) {
+            if ($tokens[$i]['id'] === T_NAMESPACE) {
+                $next = $tokens[$i + 1] ?? null;
+                if ($next !== null && ($next['id'] === T_NAME_QUALIFIED || $next['id'] === T_STRING)) {
+                    return $next['text'];
+                }
+                break;
+            }
+        }
+
+        return '';
     }
 
     /**
@@ -243,13 +468,18 @@ final class PromptWindowScanner
         /** @var list<PromptWindowCall> $calls */
         $calls = [];
         foreach (self::scan($relativePath, $phpSource) as $site) {
-            if ($site->rule !== PromptWindowRule::WindowLoad && $site->rule !== PromptWindowRule::WindowLoadUnattributed) {
+            $method = match ($site->rule) {
+                PromptWindowRule::WindowLoad => 'load',
+                PromptWindowRule::WindowLoadUnattributed => 'loadUnattributed',
+                PromptWindowRule::WindowLoadWithMedia => self::WINDOW_LOAD_WITH_MEDIA_METHOD,
+                default => null,
+            };
+            if ($method === null) {
                 continue;
             }
 
             // site の行から `PromptDefense::` に続くメソッド名トークンを探し直す
             // (ReferenceSite は tokenIndex を持つが、行と種別で十分に一意である)。
-            $method = $site->rule === PromptWindowRule::WindowLoad ? 'load' : 'loadUnattributed';
             for ($i = 0; $i < $count; $i++) {
                 $token = $tokens[$i];
                 if ($token['id'] !== T_STRING || $token['text'] !== $method || $token['line'] !== $site->line) {
@@ -402,6 +632,22 @@ final class PromptWindowScanner
         return trim($literal, "'\"");
     }
 
+    /**
+     * ★★ **保証しないもの (誇張しない。画像・スキャン SOP の OCR 対応で追加した 5 ルール共通)**:
+     *   本メソッド (と `PhpReferenceScanner` 自体) は**字句 (トークン) レベルの静的解析**であり、
+     *   受信者・メソッド名の両方が式 (関数呼び出しの戻り値・複雑な式等) になる形は
+     *   token 列だけでは確定できない (データフロー解析が要る) ため検出できない
+     *   (docs/architecture.md の「LLM プロンプト防御の窓口方式」節が既存の
+     *   `VendorPromptLoad`/`WindowLoad` ルールについて既に宣言している限界と同種)。
+     *
+     *   ただし次の 2 形は、この走査器のアーキテクチャの中で追加検出している
+     *   (impl-review Round 2/3 Critical 対応)。
+     *   - **中括弧による動的メソッド名** (`Image::{$method}(...)`): 受け手が対象クラスへ
+     *     解決できる場合に限り `dynamicMethodNameCalls()` が検出する (メソッド名は問わない)
+     *   - **配列 callable の構築** (`[Image::class, 'method']`): `arrayCallableConstructions()` が
+     *     構築時点の構文 (`X::class` を先頭要素に持つ 2 要素配列リテラル) を検出する
+     *     (実際に呼び出されるかどうかは追わない。構築そのものを塞ぐ)
+     */
     private static function classify(ReferenceSite $reference): ?PromptWindowSite
     {
         // 受け手を静的に決められない静的呼び出し。**読み込み系のメソッド名なら拾う** = fail-closed。
@@ -412,7 +658,11 @@ final class PromptWindowScanner
             $rule = match ($reference->name) {
                 self::VENDOR_LOAD_METHOD => PromptWindowRule::VendorPromptLoad,
                 'loadUnattributed' => PromptWindowRule::WindowLoadUnattributed,
-                default => null,
+                self::WINDOW_LOAD_WITH_MEDIA_METHOD => PromptWindowRule::WindowLoadWithMedia,
+                self::MEDIA_DATA_METHOD => PromptWindowRule::MediaDataNamedConstructorCall,
+                default => in_array($reference->name, self::MEDIA_CONSTRUCTOR_METHOD_NAMES, true)
+                    ? PromptWindowRule::VendorMediaTypeConstruction
+                    : null,
             };
             if ($rule !== null) {
                 return new PromptWindowSite(
@@ -437,6 +687,32 @@ final class PromptWindowScanner
             );
         }
 
+        // `Image::<任意の static メソッド>(` / `Document::<任意の static メソッド>(`
+        // (Media に構築以外の static メソッドは存在しないため、メソッド名を列挙しない)
+        if ($reference->kind === ReferenceKind::StaticCall
+            && $reference->receiver->isResolved()
+            && in_array($reference->receiver->fqcn(), self::VENDOR_MEDIA_TYPES, true)) {
+            return new PromptWindowSite(
+                $reference->path,
+                $reference->line,
+                PromptWindowRule::VendorMediaTypeConstruction,
+                $reference->receiver->fqcn().'::'.$reference->name,
+            );
+        }
+
+        // `ImageAnalysisMediaData::fromValidated(` / `PdfAnalysisMediaData::fromValidated(`
+        if ($reference->kind === ReferenceKind::StaticCall
+            && $reference->name === self::MEDIA_DATA_METHOD
+            && $reference->receiver->isResolved()
+            && in_array($reference->receiver->fqcn(), self::MEDIA_DATA_CLASSES, true)) {
+            return new PromptWindowSite(
+                $reference->path,
+                $reference->line,
+                PromptWindowRule::MediaDataNamedConstructorCall,
+                $reference->receiver->fqcn().'::fromValidated',
+            );
+        }
+
         // `new GuardedPrompt(`
         if ($reference->kind === ReferenceKind::Construction && $reference->name === GuardedPrompt::class) {
             return new PromptWindowSite(
@@ -447,11 +723,23 @@ final class PromptWindowScanner
             );
         }
 
-        // `PromptDefense::load(` / `PromptDefense::loadUnattributed(`
+        // `new Image(` / `new Document(`
+        if ($reference->kind === ReferenceKind::Construction
+            && in_array($reference->name, self::VENDOR_MEDIA_TYPES, true)) {
+            return new PromptWindowSite(
+                $reference->path,
+                $reference->line,
+                PromptWindowRule::VendorMediaTypeConstruction,
+                'new '.$reference->name,
+            );
+        }
+
+        // `PromptDefense::load(` / `PromptDefense::loadUnattributed(` / `PromptDefense::loadWithMedia(`
         if ($reference->kind === ReferenceKind::StaticCall && $reference->receiver->is(PromptDefense::class)) {
             $rule = match ($reference->name) {
                 'load' => PromptWindowRule::WindowLoad,
                 'loadUnattributed' => PromptWindowRule::WindowLoadUnattributed,
+                self::WINDOW_LOAD_WITH_MEDIA_METHOD => PromptWindowRule::WindowLoadWithMedia,
                 default => null,
             };
             if ($rule !== null) {
@@ -478,5 +766,89 @@ final class PromptWindowScanner
         }
 
         return null;
+    }
+
+    /**
+     * `extends` 宣言の対象クラス名を検出する (画像・スキャン SOP の OCR 対応。
+     * `MediaPromptExtendsDeclaration` / `VendorMediaTypeSubclassDeclaration` が使う)。
+     *
+     * `PhpReferenceScanner::references()` は import 済み短縮名・完全修飾名・部分修飾名を
+     * `extends` の位置でも NameReference として解決するが、「その参照が `extends` の直後に
+     * 書かれたものか」までは持ち帰らない (`ReferenceSite` は前後の文脈を持たない)。
+     * そのため本メソッドは `T_EXTENDS` トークンの直後だけを対象にした専用の走査を行う。
+     *
+     * 名前解決は `PhpReferenceScanner::references()` が返す import 表 (`imports`) を再利用し、
+     * 解決できない場合のみ現在の namespace の下に解決する (import 表側の解決規則と同じ)。
+     * 対象 (`Prompt`/`TextPrompt`/`Image`/`Document`/`Media`) に一致しない `extends` は
+     * 単に無視する (母集団は app/ 全体の class 宣言だが、興味があるのはこの 5 クラスだけ)。
+     *
+     * @return list<PromptWindowSite>
+     */
+    public static function extendsDeclarations(string $relativePath, string $phpSource): array
+    {
+        $tokens = PhpReferenceScanner::tokens($phpSource);
+        $imports = PhpReferenceScanner::references($relativePath, $phpSource)->imports;
+        $count = count($tokens);
+        $namespace = self::firstNamespace($tokens);
+
+        $sites = [];
+        for ($i = 0; $i < $count; $i++) {
+            if ($tokens[$i]['id'] !== T_EXTENDS) {
+                continue;
+            }
+            $target = $tokens[$i + 1] ?? null;
+            if ($target === null) {
+                continue;
+            }
+
+            $name = match ($target['id']) {
+                T_NAME_FULLY_QUALIFIED => ltrim($target['text'], '\\'),
+                T_NAME_QUALIFIED, T_NAME_RELATIVE => self::resolveExtendsQualifiedName(
+                    $target['id'],
+                    $target['text'],
+                    $namespace,
+                    $imports,
+                ),
+                T_STRING => $imports[mb_strtolower($target['text'])]
+                    ?? ($namespace === '' ? $target['text'] : $namespace.'\\'.$target['text']),
+                default => null,
+            };
+            if ($name === null) {
+                continue;
+            }
+
+            if (in_array($name, self::VENDOR_PROMPT_EXTENDS_TARGETS, true)) {
+                $sites[] = new PromptWindowSite(
+                    $relativePath, $target['line'], PromptWindowRule::MediaPromptExtendsDeclaration, 'extends '.$name,
+                );
+            } elseif (in_array($name, self::VENDOR_MEDIA_BASE_TYPES, true)) {
+                $sites[] = new PromptWindowSite(
+                    $relativePath, $target['line'], PromptWindowRule::VendorMediaTypeSubclassDeclaration, 'extends '.$name,
+                );
+            }
+        }
+
+        return $sites;
+    }
+
+    /**
+     * @param  array<string, string>  $imports
+     */
+    private static function resolveExtendsQualifiedName(?int $id, string $text, string $namespace, array $imports): string
+    {
+        $separator = strpos($text, '\\');
+        if ($id === T_NAME_RELATIVE) {
+            $rest = $separator === false ? '' : substr($text, $separator + 1);
+
+            return $namespace === '' ? $rest : $namespace.'\\'.$rest;
+        }
+
+        $head = $separator === false ? $text : substr($text, 0, $separator);
+        $resolvedHead = $imports[mb_strtolower($head)] ?? null;
+        if ($resolvedHead !== null) {
+            return $separator === false ? $resolvedHead : $resolvedHead.substr($text, $separator);
+        }
+
+        return $namespace === '' ? $text : $namespace.'\\'.$text;
     }
 }

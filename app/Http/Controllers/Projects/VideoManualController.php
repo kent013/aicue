@@ -25,6 +25,7 @@ use App\Services\Manual\AdoptedReadyTakeCoverage;
 use App\Services\Manual\CurrentRenderArtifact;
 use App\Services\Manual\ScenarioReportBuilder;
 use App\Services\Manual\VideoManualService;
+use App\Support\Manual\AcceptedSourceDocumentTypes;
 use App\Support\Seo\SeoManager;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -180,6 +181,10 @@ class VideoManualController extends Controller
             ],
             'canManage' => $user->can('update', $manual),
             'categories' => $this->categoryOptions($project), // 複製ダイアログのカテゴリ選択肢 (既存 helper 再利用)
+            // SOP アップロードの受理形式 (画像・スキャン SOP の OCR 対応)。
+            // AcceptedSourceDocumentTypes が単一の情報源 (フラグに連動)
+            'sourceDocumentAccept' => AcceptedSourceDocumentTypes::acceptAttribute(),
+            'imageSourceDocumentsEnabled' => AcceptedSourceDocumentTypes::imagesEnabled(),
         ]);
     }
 

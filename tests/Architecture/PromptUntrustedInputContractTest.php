@@ -3,9 +3,11 @@
 declare(strict_types=1);
 
 use App\DataTransferObjects\LlmCallContextData;
+use App\DataTransferObjects\Manual\Analysis\ImageAnalysisMediaData;
 use App\Models\VideoManual;
 use App\Prompts\ExampleSummaryPrompt;
 use App\Prompts\ScenarioGenerationPrompt;
+use App\Prompts\SopExtractFromMediaPrompt;
 use App\Prompts\SopExtractPrompt;
 use App\Prompts\WorkDecompositionPrompt;
 use App\Support\Llm\GuardedPrompt;
@@ -79,6 +81,18 @@ function promptUntrustedInputInventory(): array
             ['text'],
             ['organization_id', 'subject_type', 'subject_id'],
             fn (): GuardedPrompt => SopExtractPrompt::make('untrusted sop text', $context),
+        ],
+        // OCR 経路 (画像・スキャン SOP の OCR 対応)。媒体そのものが入力であるため
+        // untrusted な自由記述テキスト変数は 1 つも無い (空配列で明示)。
+        // 帰属は他の解析段と同じく必須のまま (untrusted キーが空であることと
+        // 帰属が exempt であることは別物)
+        SopExtractFromMediaPrompt::class => [
+            [],
+            ['organization_id', 'subject_type', 'subject_id'],
+            fn (): GuardedPrompt => SopExtractFromMediaPrompt::make(
+                ImageAnalysisMediaData::fromValidated('image/jpeg', 'stub-jpeg-bytes', 17, 10, 10),
+                $context,
+            ),
         ],
         WorkDecompositionPrompt::class => [
             ['extracted'],
