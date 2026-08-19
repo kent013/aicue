@@ -199,6 +199,105 @@ test('show の take shape は TS CaptureTake と対のキー集合 (PHP↔TS 契
     ]);
 });
 
+/*
+ * メタ情報 (施策3): カテゴリ名 / 作成者名 / 更新日時 / 合計時間 (doc/05 §5.2)。
+ * 合計時間は「いま尺が確定している分」の合計であって完成動画の見込み尺ではない。
+ */
+
+test('show の manual 直下キー集合は TS CaptureManualDetail と対 (PHP↔TS 契約)', function (): void {
+    [, $owner, $project] = browsingContext();
+    $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
+
+    $response = $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals/{$manual->id}");
+
+    $props = $response->inertiaPage()['props']['manual'];
+    expect(array_keys($props))->toBe([
+        'id', 'title', 'status', 'category_name', 'creator_name', 'updated_at',
+        'total_duration_ms', 'undetermined_cut_count', 'cuts',
+    ]);
+});
+
+test('show はカテゴリ名・作成者名・更新日時 (ISO 8601) を返す', function (): void {
+    [, $owner, $project] = browsingContext();
+    $category = Category::factory()->forProject($project)->create(['name' => '組立作業']);
+    $manual = VideoManual::factory()->forProject($project)->forCategory($category)
+        ->createdBy($owner)->create(['status' => 'ready']);
+
+    $response = $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals/{$manual->id}");
+
+    $response->assertInertia(fn (Assert $page) => $page
+        ->where('manual.category_name', '組立作業')
+        ->where('manual.creator_name', $owner->name)
+        ->where('manual.updated_at', $manual->fresh()?->updated_at?->toIso8601String()));
+});
+
+test('show は未分類なら category_name が null', function (): void {
+    [, $owner, $project] = browsingContext();
+    $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
+
+    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals/{$manual->id}")
+        ->assertInertia(fn (Assert $page) => $page->where('manual.category_name', null));
+});
+
+test('show の合計時間は静止画カット (未撮影) + 動画カット (採用 ready) の合算で未確定 0 件', function (): void {
+    [, $owner, $project] = browsingContext();
+    $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
+    Cut::factory()->forManual($manual)->withSortOrder(0)->create([
+        'material_type' => 'still',
+        'static_display_seconds' => 4, // → 4,000ms (撮影前でも確定)
+    ]);
+    $videoCut = Cut::factory()->forManual($manual)->withSortOrder(1)->create(['material_type' => 'video']);
+    $take = Take::factory()->forCut($videoCut)->create(['duration_ms' => 6_000]);
+    $videoCut->forceFill(['adopted_take_id' => $take->id])->save();
+
+    $storage = Mockery::mock(TakeObjectStorage::class);
+    $storage->shouldReceive('temporaryPlaybackUrl')->andReturn('https://s3.fake.test/signed-get-url');
+    app()->instance(TakeObjectStorage::class, $storage);
+
+    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals/{$manual->id}")
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('manual.total_duration_ms', 10_000)
+            ->where('manual.undetermined_cut_count', 0));
+});
+
+test('show は未撮影の動画カットを未確定として数え、合計からは除く', function (): void {
+    [, $owner, $project] = browsingContext();
+    $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
+    Cut::factory()->forManual($manual)->withSortOrder(0)->create(['material_type' => 'still', 'static_display_seconds' => 3]);
+    Cut::factory()->forManual($manual)->withSortOrder(1)->create(['material_type' => 'video']); // 未撮影
+
+    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals/{$manual->id}")
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('manual.total_duration_ms', 3_000)
+            ->where('manual.undetermined_cut_count', 1));
+});
+
+test('採用済みだが ready でないテイクは URL も尺も未確定として扱う', function (): void {
+    [, $owner, $project] = browsingContext();
+    $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
+    $cut = Cut::factory()->forManual($manual)->withSortOrder(0)->create(['material_type' => 'video']);
+    $notReadyTake = Take::factory()->forCut($cut)->create(['status' => 'processing', 'duration_ms' => 9_000]);
+    $cut->forceFill(['adopted_take_id' => $notReadyTake->id])->save();
+
+    $response = $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals/{$manual->id}");
+
+    $response->assertInertia(fn (Assert $page) => $page
+        ->where('manual.cuts.0.takes.0.playback_url', null)
+        ->where('manual.cuts.0.takes.0.download_ack_token', null)
+        ->where('manual.total_duration_ms', null)
+        ->where('manual.undetermined_cut_count', 1));
+});
+
+test('同一 org 内の別 project の manual を URL に差し込むと 404 (認可より前)', function (): void {
+    [$organization, $owner, $projectA] = browsingContext();
+    $projectB = Project::factory()->forOrganization($organization)->create();
+    $manualOfB = VideoManual::factory()->forProject($projectB)->create(['status' => 'ready']);
+
+    $this->actingAs($owner)
+        ->get("/app/projects/{$projectA->id}/manuals/{$manualOfB->id}")
+        ->assertNotFound();
+});
+
 test('cross-org の project は index / show とも 404', function (): void {
     [, $owner] = createOrganizationWithOwner();
     [, , $otherProject] = browsingContext();

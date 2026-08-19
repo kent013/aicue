@@ -53,7 +53,17 @@ function makeCut(overrides: Partial<CaptureCut> = {}): CaptureCut {
 }
 
 function makeManual(cuts: CaptureCut[] = [makeCut()]): CaptureManualDetail {
-    return { id: 5, title: "ネジ締め作業", status: "ready", cuts };
+    return {
+        id: 5,
+        title: "ネジ締め作業",
+        status: "ready",
+        category_name: null,
+        creator_name: null,
+        updated_at: null,
+        total_duration_ms: null,
+        undetermined_cut_count: 0,
+        cuts,
+    };
 }
 
 function okResponse(): Response {

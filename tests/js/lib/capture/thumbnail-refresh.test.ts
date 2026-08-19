@@ -34,6 +34,11 @@ function makeManual(takes: CaptureTake[]): CaptureManualDetail {
         id: 1,
         title: "手順書",
         status: "ready",
+        category_name: null,
+        creator_name: null,
+        updated_at: null,
+        total_duration_ms: null,
+        undetermined_cut_count: 0,
         cuts: [
             {
                 id: 3,

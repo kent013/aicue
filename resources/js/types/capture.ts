@@ -56,6 +56,21 @@ export interface CaptureManualDetail {
     id: number;
     title: string;
     status: string;
+    /** カテゴリ名。未分類は null (UI は「未分類」) */
+    category_name: string | null;
+    /** 作成者名。退会/削除で解決不可のときは null (UI は「不明」) */
+    creator_name: string | null;
+    /** 更新日時 (ISO 8601)。UI は lib/date-format.ts の formatDate で描く */
+    updated_at: string | null;
+    /**
+     * **いま尺が確定しているカットだけ**の合計 (ms)。1 本も確定していなければ null。
+     * **完成動画の見込み尺ではない** — 未撮影の動画カットの尺は v1 では出せない
+     * (PHP 側 Services/Manual/DeterminedScenarioDuration が正本)。
+     * PC 一覧の `duration_ms` (公開済み完成動画の実尺) とは**別の量**なので統合しない。
+     */
+    total_duration_ms: number | null;
+    /** 尺が確定していないカット数。**常に併記する** (— だけでは「カット無し」と区別できない) */
+    undetermined_cut_count: number;
     cuts: CaptureCut[];
 }
 
