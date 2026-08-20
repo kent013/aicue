@@ -5,6 +5,7 @@
     import Input from "@/components/atoms/Input.svelte";
     import Select from "@/components/atoms/Select.svelte";
     import FormField from "@/components/molecules/FormField.svelte";
+    import SourceDocumentUploadNotice from "@/components/features/manual/SourceDocumentUploadNotice.svelte";
     import AppLayout from "@/components/templates/AppLayout.svelte";
     import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
@@ -17,13 +18,29 @@
      * 動画マニュアル作成 (タイトル + カテゴリ + 任意の手順書アップロード)。
      * カテゴリの入力名は保護キー category_id と別名の `category` (id 値)。
      * 空選択 = 未分類 (null で送信)。document は multipart で任意送信。
+     *
+     * 受理形式・画像対応の出し分けは `AcceptedSourceDocumentTypes` をサーバ側の
+     * 単一の情報源として渡された Props に従う (フロント側で accept 文字列を解析して
+     * 画像対応可否を判定しない)。
      */
     interface Props {
         project: { id: number; name: string };
         categories: CategoryOption[];
+        /** SOP アップロードの `<input accept>` 属性値 (画像・スキャン SOP の OCR 対応) */
+        sourceDocumentAccept: string;
+        /** 画像・スキャン PDF の OCR 対応が有効か (フラグ連動の案内出し分け専用) */
+        imageSourceDocumentsEnabled: boolean;
+        /** 受理形式の人間向けラベル (422 文言と同一の情報源) */
+        sourceDocumentFormatsLabel: string;
     }
 
-    let { project, categories }: Props = $props();
+    let {
+        project,
+        categories,
+        sourceDocumentAccept,
+        imageSourceDocumentsEnabled,
+        sourceDocumentFormatsLabel,
+    }: Props = $props();
 
     const shared = $derived(page.props as unknown as SharedProps);
     const appName = $derived(shared.appName ?? "");
@@ -91,17 +108,19 @@
                             </Select>
                         {/snippet}
                     </FormField>
+                    <!-- ファイルを選ぶ前に外部送信の事実が見えている必要があるため file input の直前に置く -->
+                    <SourceDocumentUploadNotice {imageSourceDocumentsEnabled} />
                     <FormField
                         label="手順書 (SOP・任意)"
                         id="manual-document"
                         error={form.errors.document}
-                        help="PDF / Excel / テキスト。アップロードすると AI 解析でシナリオを生成できます。"
+                        help={`${sourceDocumentFormatsLabel}。アップロードすると AI 解析でシナリオを生成できます。`}
                     >
                         {#snippet children({ id, describedBy, invalid })}
                             <input
                                 {id}
                                 type="file"
-                                accept=".pdf,.xlsx,.xls,.txt"
+                                accept={sourceDocumentAccept}
                                 onchange={onFileChange}
                                 aria-describedby={describedBy}
                                 aria-invalid={invalid}

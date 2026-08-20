@@ -66,6 +66,13 @@ class VideoManualController extends Controller
                 'name' => $project->name,
             ],
             'categories' => $this->categoryOptions($project),
+            // 作成と同時の SOP アップロードの受理形式 (画像・スキャン SOP の OCR 対応)。
+            // StoreVideoManualRequest と同じ AcceptedSourceDocumentTypes を情報源にする
+            // = ダイアログに出る形式とサーバが受理する形式が構造的に一致する。
+            'sourceDocumentAccept' => AcceptedSourceDocumentTypes::acceptAttribute(),
+            'imageSourceDocumentsEnabled' => AcceptedSourceDocumentTypes::imagesEnabled(),
+            // help 文言用の受理形式ラベル (422 文言と同一の情報源)
+            'sourceDocumentFormatsLabel' => AcceptedSourceDocumentTypes::formatsLabel(),
         ]);
     }
 

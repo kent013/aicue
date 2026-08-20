@@ -2,6 +2,7 @@
     import { useForm } from "@inertiajs/svelte";
     import Button from "@/components/atoms/Button.svelte";
     import FormField from "@/components/molecules/FormField.svelte";
+    import SourceDocumentUploadNotice from "@/components/features/manual/SourceDocumentUploadNotice.svelte";
 
     /**
      * SOP (手順書) の後付けアップロード (POST .../source-documents。Inertia multipart form)。
@@ -37,16 +38,7 @@
 </script>
 
 <form novalidate onsubmit={submit} class="flex flex-col gap-3" data-testid="source-document-upload">
-    <p class="text-caption text-text-secondary" data-testid="source-document-send-notice">
-        アップロードした手順書は AI 解析のためファイル内容が外部の LLM provider に送信されます。
-    </p>
-    {#if imageSourceDocumentsEnabled}
-        <p class="text-caption text-text-secondary" data-testid="source-document-image-notice">
-            画像や、文字を読み取れないスキャン PDF では、紙面の見た目がそのまま送信されます。
-            不要な個人情報や機密情報が写っていないか特に確認してください。
-            画像は 1 手順書につき 1 枚までです (複数ページの手順書は PDF でアップロードしてください)。
-        </p>
-    {/if}
+    <SourceDocumentUploadNotice {imageSourceDocumentsEnabled} />
     <FormField
         label={hasDocument ? "手順書を差し替える" : "手順書 (SOP) をアップロード"}
         id="source-document"

@@ -56,4 +56,20 @@ final class AcceptedSourceDocumentTypes
     {
         return config()->boolean('manual.ocr_analysis_enabled');
     }
+
+    /**
+     * 受理形式の人間向けラベル (法務確認を経た文面。FormRequest の 422 文言と
+     * 作成画面の help 文言が共有する)。
+     *
+     * **機械導出しない**: 拡張子リストから日本語の文を組み立てる形にすると
+     * config を触った副作用で文面が変わりうるため、承認済みの 2 文をそのまま持つ。
+     * 乖離は AcceptedSourceDocumentTypesTest の前提 pin (基底拡張子集合・
+     * 画像拡張子集合が現在値ちょうど) が検出する。
+     */
+    public static function formatsLabel(): string
+    {
+        return self::imagesEnabled()
+            ? 'PDF・Excel・テキスト形式、または JPEG・PNG の画像'
+            : 'PDF・Excel・テキスト形式';
+    }
 }

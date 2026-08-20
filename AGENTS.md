@@ -988,3 +988,37 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
       `composer test` だけでは値集合の同期は検証されない
     - **保証しないものの正本は `docs/architecture.md` §PHP 列挙と TypeScript 値域の同期**
       であり、本書には写さない (2 か所に書くと必ず食い違う)
+20. **file input の accept 供給元の宣言 (T235)**: `resources/js` 配下の `.svelte` に
+    file input を足したら、`tests/js/support/file-input-accept-inventory.ts` の
+    `FILE_INPUT_ACCEPT_INVENTORY` へ 1 行足し、件数の pin も 1 増やす
+    (`tests/js/architecture/file-input-accept-source-inventory.test.ts` が
+    deny-by-default + 両方向で強制する)。
+    - 宣言は **2 軸**である。実測構文 (`syntax`) は**走査器が AST から実測する**ので
+      合わせるしかない。供給元 (`supply`) は**人がレビューで宣言する設計意図**で、
+      `server-prop` (サーバの受理形式が単一の情報源) か `client-owned`
+      (その面の固有の値域) かを 30 文字以上の理由付きで書く。
+      **`server-prop` の宣言は由来の証明ではない** — 値が本当に
+      `AcceptedSourceDocumentTypes` 由来であることは Controller の Feature テストと
+      component テストが担う
+    - SOP (手順書) の受理形式を扱う面は `server-prop` にする。
+      サーバ側の単一の情報源は `App\Support\Manual\AcceptedSourceDocumentTypes` で、
+      `accept` 属性値・画像対応の真偽・人間向けの形式ラベルの 3 つを供給する
+      (フロントで accept 文字列を解析して画像対応可否を判定しない)。
+      外部送信の案内文言は
+      `resources/js/components/features/manual/SourceDocumentUploadNotice.svelte`
+      **1 つだけが持つ** (複写すると法務確認済みの文が片方だけ更新される)
+    - **生 HTML の描画** (`{@html …}`) は `file` + 序数を鍵にした名指しの免除目録へ
+      理由付きで登録する。**免除は「そこに file input を作らない」という人の宣言**であって
+      走査器が中身を確かめた結果ではない
+    - 走査器が **file input かどうか / accept の値を静的に確定できない形** は
+      原則として**実装を直して解消する**。免除目録へ登録できる理由は
+      **必要最小限の狭い集合に限る** (現在は汎用入力 atom の属性転送だけ)。
+      解析そのものの失敗や、file input と確定した上での `accept` 欠落は**免除できない**。
+      理由の集合を広げるときは、その形が本当に直せないことを示してから広げる
+      (広げる操作そのものがレビューに見える)。
+      この免除の鍵は `file` + 理由 + **件数の完全一致**であり、
+      **同一ファイル・同一理由・同数の置き換えは検出しない** (限界は走査器側の docblock が正本)
+    - **正本のレーンは `pnpm test`** である (`composer test` では JS の gate は走らない)
+    - **走査対象と保証しないものの正本は `tests/js/support/file-input-scan.ts` の
+      docblock** であり、本書には写さない (2 か所に書くと必ず食い違う)。
+      件数も写さない (正本は目録側の pin)

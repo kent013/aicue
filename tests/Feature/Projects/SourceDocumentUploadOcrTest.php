@@ -8,6 +8,7 @@ use App\Models\SourceDocument;
 use App\Models\User;
 use App\Models\VideoManual;
 use App\Services\Manual\SourceDocumentService;
+use App\Support\Manual\AcceptedSourceDocumentTypes;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
@@ -221,13 +222,84 @@ test('公開面の一貫性: FormRequest / Service / Inertia Props がフラグ�
             ))->toThrow(ValidationException::class);
         }
 
-        // Inertia Props: sourceDocumentAccept / imageSourceDocumentsEnabled
-        $this->actingAs($owner)->get(route('projects.manuals.show', [$project, $httpManual]))
-            ->assertInertia(fn (Assert $page) => $page
-                ->where('imageSourceDocumentsEnabled', $flag)
-                ->where('sourceDocumentAccept', $flag
-                    ? '.pdf,.xlsx,.xls,.txt,.jpg,.jpeg,.png'
-                    : '.pdf,.xlsx,.xls,.txt'));
+        // Inertia Props (詳細画面): sourceDocumentAccept / imageSourceDocumentsEnabled
+        $showResponse = $this->actingAs($owner)->get(route('projects.manuals.show', [$project, $httpManual]));
+        $showResponse->assertInertia(fn (Assert $page) => $page
+            ->where('imageSourceDocumentsEnabled', $flag)
+            ->where('sourceDocumentAccept', $flag
+                ? '.pdf,.xlsx,.xls,.txt,.jpg,.jpeg,.png'
+                : '.pdf,.xlsx,.xls,.txt'));
+
+        // Inertia Props (作成画面): 同じ単一の情報源を経由する 3 件
+        $createResponse = $this->actingAs($owner)->get(route('projects.manuals.create', [$project]));
+        $createResponse->assertInertia(fn (Assert $page) => $page
+            ->where('imageSourceDocumentsEnabled', $flag)
+            ->where('sourceDocumentAccept', $flag
+                ? '.pdf,.xlsx,.xls,.txt,.jpg,.jpeg,.png'
+                : '.pdf,.xlsx,.xls,.txt')
+            ->where('sourceDocumentFormatsLabel', $flag
+                ? 'PDF・Excel・テキスト形式、または JPEG・PNG の画像'
+                : 'PDF・Excel・テキスト形式'));
+
+        // 面をまたいだ同値性。リテラル pin は「両面とも同じ間違い」を検出できるが、
+        // 「面ごとに違う」ケースはこの比較が担う。
+        // **比較対象は両面に存在する 2 件だけ**である: sourceDocumentFormatsLabel は
+        // 詳細画面に形式ラベルを表示する UI が無く props を配っていないため含めない。
+        $sharedKeys = ['sourceDocumentAccept', 'imageSourceDocumentsEnabled'];
+        $showProps = Assert::fromTestResponse($showResponse)->toArray();
+        $createProps = Assert::fromTestResponse($createResponse)->toArray();
+        foreach ($sharedKeys as $key) {
+            expect($createProps[$key] ?? null)->toBe(
+                $showProps[$key] ?? null,
+                "作成画面と詳細画面で props {$key} が食い違っている (単一の情報源を経由していない)",
+            );
+        }
+    }
+});
+
+/*
+ * StoreVideoManualRequest (作成と同時のアップロード経路) の 422 出力契約。
+ *
+ * **このテストが保証する範囲 (誇張しない)**: 固定できるのは両エンドポイントの 422 出力契約
+ * である。「formatsLabel() を実際に呼んでいること」は保証しない — 置換前の三項演算子を
+ * 残しても両フラグで同じ文言を返すため本テストは緑になる。中央メソッドへの構造的な結線は
+ * コードレビューで確認する。逆に **文面が経路ごとにずれたら** 本テストが検出する。
+ */
+test('作成と同時のアップロード経路も後付け経路と同じ 422 文言を返す (両フラグ)', function (): void {
+    Storage::fake();
+    [, $owner, $project, $manual] = ocrUploadContext();
+
+    $cases = [
+        // フラグ false: jpeg は受理外
+        [false, fn (): UploadedFile => fakeJpegFile('rejected.jpg')],
+        // フラグ true: heic は受理外 (画像を受理してもなお外)
+        [true, fn (): UploadedFile => UploadedFile::fake()->create('rejected.heic', 10, 'image/heic')],
+    ];
+
+    foreach ($cases as [$flag, $makeFile]) {
+        config()->set('manual.ocr_analysis_enabled', $flag);
+
+        // 期待文はリテラルを書かず中央ラベルから組み立てる (文面そのものの pin は Unit テスト側)
+        $expected = '対応していないファイル形式です。'
+            .AcceptedSourceDocumentTypes::formatsLabel()
+            .'でアップロードし直してください。';
+
+        // 作成と同時 (StoreVideoManualRequest): title は有効値を渡し document.mimes だけを発火させる
+        $this->actingAs($owner)->postJson("/projects/{$project->id}/manuals", [
+            'title' => '422 文言の経路差テスト',
+            'category' => null,
+            'document' => $makeFile(),
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors(['document'])
+            ->assertJsonFragment(['document' => [$expected]]);
+
+        // 後付け (StoreSourceDocumentRequest): 同じ文面であること
+        $this->actingAs($owner)->postJson(
+            "/projects/{$project->id}/manuals/{$manual->id}/source-documents",
+            ['document' => $makeFile()],
+        )->assertUnprocessable()
+            ->assertJsonValidationErrors(['document'])
+            ->assertJsonFragment(['document' => [$expected]]);
     }
 });
 
