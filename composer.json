@@ -1,6 +1,6 @@
 {
     "$schema": "https://getcomposer.org/schema.json",
-    "name": "rio-development/laravel-claude-template",
+    "name": "rio-development/aicue",
     "type": "project",
     "description": "Laravel + Svelte SaaS template for LLM-driven development",
     "keywords": [
