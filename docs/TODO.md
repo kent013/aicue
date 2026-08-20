@@ -23,7 +23,6 @@
 |---|---|---|---|---|---|---|---|
 | T110 | 認証手段変更のメール通知ポリシーの統一設計 | backend | passkey/2FA/SSO の増減通知を一貫したポリシーとして設計する(T108 S7 は監査ログのみで通知は見送り) | Low | standalone | [設計](devnotes/20260805-1550-security-audit-remediation/) | 2026-08-05 17:45 |
 | T224 | bug-hunt 裁定 A-001 の監視対象に toast.ts を足す (再オープン条件と watch_globs の食い違いを閉じる) | test | A-001を supersede し watch_globs を是正 | Medium | standalone | [設計](devnotes/20260817-1755-bughunt-handover-to-ledger/) | 2026-08-18 03:51 |
-| T225 | PHP 列挙 ⇔ TS 値域の発見の段と逆走査 (AG-099 後半) | test | 全数走査の既定拒否分類と逆走査2規則 | Medium | standalone | [設計](devnotes/20260817-1748-enum-ts-generic-sync-gate/) | 2026-08-18 06:30 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
