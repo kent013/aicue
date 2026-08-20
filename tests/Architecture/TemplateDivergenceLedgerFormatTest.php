@@ -6,6 +6,7 @@ use Carbon\CarbonImmutable;
 use Tests\Support\TemplateDivergence\DivergenceLedgerParser;
 use Tests\Support\TemplateDivergence\DivergenceLedgerRules;
 use Tests\Support\TemplateDivergence\LedgerContext;
+use Tests\Support\TemplateDivergence\LedgerPins;
 use Tests\Support\TemplateDivergence\TodoLedgerReference;
 use Webmozart\Assert\Assert;
 
@@ -19,22 +20,16 @@ use Webmozart\Assert\Assert;
  *
  * **この検査が保証しないもの** (誇張しない):
  *  - 実ファイルがテンプレートから逸脱したのに登録が無いこと (登録漏れそのもの)。
- *    実体との突合は台帳リポジトリの巡回が行う (家系の裁定 AG-159)
- *  - 内容をテンプレート準拠へ戻したのに残っている登録 (対象パスは実在し続けるため)
+ *    **実体との突合は `tests/Architecture/TemplateDivergenceFingerprintTest.php` が持つ**
+ *    (家系の正典 t1)。本検査は形式だけを見る
+ *  - 内容をテンプレート準拠へ戻したのに残っている登録 (対象パスは実在し続けるため。
+ *    こちらも突合検査の担当である)
  *  - 登録の中身が正しいこと (空でないこと・値域に収まっていることだけを見る)
  *  - 削除した番号の再利用 (使用済み番号の履歴を持たないため)
  *
  * 実行不能 (台帳が読めない / 囲みが閉じない / 登録エントリ領域が無い) は
  * skip でも緑でもなく**不合格**にする。
  */
-
-/**
- * 登録件数の固定値。
- *
- * **明示件数との同期検査であって、例外を許す一覧ではない**。個別の D 番号を名指しして
- * 規則を免除する仕組みは持たない。登録を足した / 消したら同じ変更でこの値も直す。
- */
-const TEMPLATE_DIVERGENCE_ENTRY_COUNT = 30;
 
 /** 逸脱の登録簿の本文 (読めないことは不合格)。 */
 function templateDivergenceMarkdown(): string
@@ -68,7 +63,7 @@ test('TD1〜TD12: 逸脱の登録簿が統一形式を満たすこと', function
         DivergenceLedgerParser::parse(templateDivergenceMarkdown()),
         new LedgerContext(
             baseDate: CarbonImmutable::today(),
-            pinnedEntryCount: TEMPLATE_DIVERGENCE_ENTRY_COUNT,
+            pinnedEntryCount: LedgerPins::DIVERGENCE_ENTRY_COUNT,
             pathExists: fn (string $path): bool => is_file(base_path($path)),
             directoryExists: fn (string $path): bool => is_dir(base_path($path)),
             // T 番号は TODO 台帳の表のセルとして境界付きで照合する (T1 が T10 に一致しないように)

@@ -8,7 +8,7 @@
 `template-divergence-ledger` が 2026-08-15 に確定した形) に従う。形式は
 `tests/Architecture/TemplateDivergenceLedgerFormatTest.php` が機械で強制する。
 
-登録エントリ: 30 件
+登録エントリ: 32 件
 
 ## 記録の原則
 
@@ -58,12 +58,17 @@
 
 ## この登録簿が保証しないもの
 
-- 実ファイルがテンプレートから逸脱したのに登録が無いこと (登録漏れそのもの) は検出できない。
-  実体との突合は台帳リポジトリの巡回が行う (家系の裁定 AG-159)
-- 内容としてテンプレート準拠へ戻したのにファイルが残っている登録も検出できない
 - 登録の中身が正しいことは機械では見ない (空でないこと・値域に収まっていることだけを見る)
 - **削除した番号の再利用**は検出できない (使用済み番号の履歴を持たないため。
   再利用しないことは人が守る規約である)
+- **実体との突合は別の検査が持つ** —
+  `tests/Architecture/TemplateDivergenceFingerprintTest.php` が指紋台帳
+  (`docs/template-fingerprints.json`) と実ファイルを突き合わせ、食い違いに登録が無い場合と、
+  内容が一致へ戻ったのに登録が残っている場合を落とす。
+  **形式検査 (`TemplateDivergenceLedgerFormatTest`) 自身は突合を持たない**
+- **突合が保証しない範囲の正本は突合検査の docblock である** (ここには写さない。
+  2 か所に書くと必ず食い違う)。突合が見ない範囲 (母集合の外・ファイル内部の逸脱・
+  追従遅れ・採用時債務の分類) は台帳リポジトリの巡回が引き続き担う (家系の裁定 AG-159)
 
 ## エントリ形式
 
@@ -1932,3 +1937,121 @@ vendor 由来の書き込みは静的層の走査根 (`app` / `routes` / `databa
 - 実装: `tests/Support/Cache/` / `tests/TestCase.php` / `tests/Pest.php` /
   `tests/Architecture/CachePayloadPlainDataGateTest.php`
 - 設計: `devnotes/20260818-1757-cache-runtime-plain-data-guard/`
+
+---
+
+## D33 テンプレート乖離の突合を、正典の分類規則ではなく公開された指紋台帳のキーで行う
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `docs/template-fingerprints.json` / `tests/Architecture/TemplateDivergenceFingerprintTest.php` / `tests/Architecture/TemplateDivergenceLedgerFormatTest.php` / `tests/Support/TemplateDivergence/DivergenceLedgerParser.php` / `tests/Support/TemplateDivergence/FingerprintLedger.php` / `tests/Support/TemplateDivergence/AtomicLedgerWriter.php` / `scripts/update-template-fingerprints.php` |
+| 業務要件起因の説明 | テンプレートの現物を CI に持てないため、母集合を正典の分類規則ではなく正典が公開する指紋台帳のキーで決める。突合は本アプリの登録簿が許す複数の対象パスに合わせて実装する |
+| 揃え続ける不変条件と保証機構 | 3a / 3b の集合等式と fail-closed の 4 規約を保つ (`TemplateDivergenceFingerprintTest` / `TemplateDivergenceFingerprintRulesTest` / `TemplateFingerprintGeneratorTest`) |
+| 再判定の条件 | 正典が母集合の決め方・schema・パス検証の判定を変えたとき / テンプレートの現物を CI で引ける手段ができたとき |
+| 決めた日 | 2026-08-20 |
+| 決めた人 | 開発者 |
+| 根拠 | devnotes/20260821-0000-template-divergence-fingerprint-t1/ |
+| 状態 | 恒久 |
+| 見直し期限 | — |
+
+| 観点 | テンプレート | 本アプリ |
+|---|---|---|
+| 母集合の出典 | 自リポジトリの `git ls-files` を `SharedPathRules` (22KB の規則表) で分類する | 正典が公開する指紋台帳のキー ∩ 自リポジトリの追跡ファイル (規則表は持ち込まない) |
+| パスの書式判定 | `SharedPathRules::isValidRepoRelativePath()` | `RepoRelativePath::isValid()` (書式判定だけを切り出した 1 クラス) |
+| 指紋台帳の解釈 | 連想配列で解釈する | object 形で解釈し、空配列と空 object を型で区別する |
+| 正本の正準形 | 検査しない | 正本のバイト列が解釈して直列化し直した結果と完全一致することを要求する (重複キー・整形の崩れを落とす) |
+| 突合の DTO | 対象パスを 1 件だけ持つ `DivergenceEntry` | 対象パスの複数指定を許す本アプリの解析結果をそのまま使う |
+| 生成器の起動 | 提供元で走らせ、子アプリでは role ガードが拒否する | 受け手側で走らせ、入力の正典台帳を `--template-ledger` で渡す (既存台帳が `role: template` なら拒否) |
+| 生成物 | 指紋台帳 1 本 | 指紋台帳 + 採用時債務一覧の 2 本 (平文は `AtomicTextWriter` が書く) |
+| 生成器の先頭行 | `#!/usr/bin/env php` を持つ | 持たない (`StrictTypesDeclarationGateTest` が開始タグより前のトークンを未宣言として落とすため) |
+
+### なぜ正当な差分か (logic-driven)
+
+本リポジトリは**テンプレートの受け手**であり、テンプレートの現物 (working tree) を CI に持てない。
+正典の突合はテンプレート側の分類規則を自分で走らせて母集合を決めるが、受け手側で同じ規則表を
+持つと「使われない 22KB の資産」が増えるだけで不変条件は 1 つも増えない (思考原則 2)。
+そこで**母集合の出典を正典が公開する指紋台帳のキーに置き換えた**。
+正典自身が「検査の本数・クラス名・ファイル配置は不変条件に含めない」と定めているため、
+同じ等式を本リポジトリのモデル (対象パスの複数指定を許す解析器) で実装している。
+
+解釈を object 形にしたのと正準形バイト一致を要求したのは、どちらも**過剰検出寄りへの上積み**である。
+連想配列で解釈すると `{"entries": []}` のような空配列が空 object と区別できず、
+`json_decode` は重複キーを後勝ちで潰すため、どちらも「母集合が黙って空になる」経路になる。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「テンプレートと共有するファイルが食い違ったなら、登録簿の登録か採用時債務の記載が必ずある」
+
+- 集合等式 1 本で両方向 (3a = 未登録の食い違い / 3b = 一致へ戻ったのに残る登録) を落とす
+- 読み取り失敗・解釈不能・git の失敗・母集合 0 件・検査不能はすべて不合格にする (fail-closed)
+- 本機構自身のファイルが母集合に残り regular file であることを必須メンバ pin が固定する
+
+### 保証しないもの
+
+- 保証しないものの正本は `tests/Architecture/TemplateDivergenceFingerprintTest.php` の
+  docblock である (本書と `AGENTS.md` には写さない)
+
+### 関連
+
+- 実装: `tests/Support/TemplateDivergence/` / `tests/Architecture/TemplateDivergenceFingerprintTest.php` /
+  `scripts/update-template-fingerprints.php`
+- 設計: `devnotes/20260821-0000-template-divergence-fingerprint-t1/`
+
+---
+
+## D34 採用時点で説明の無い食い違いを、採用時ハッシュ付きで凍結する層を持つ
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `tests/Support/TemplateDivergence/adoption-debt.tsv` / `tests/Support/TemplateDivergence/AdoptionDebtInventory.php` |
+| 業務要件起因の説明 | テンプレートの現物が CI に無いため、採用時点で食い違っていたファイル (176 件) が意図的逸脱なのか追従遅れなのかを機械では区別できない。区別が付くまで採用時の姿を凍結して扱う層を持つ |
+| 揃え続ける不変条件と保証機構 | 債務パスは採用時のアプリ側ハッシュのまま留まること。変えたら `mutatedDebtPaths`、テンプレート一致へ戻ったら `resolvedDebtPaths` が落とす (`TemplateDivergenceFingerprintTest` の F10 / F11) |
+| 再判定の条件 | 一覧が 0 件になったとき (一覧ファイルと本登録を同じ変更で消す) / テンプレート更新の一括取り込みを行うとき / 債務パスの分類が付いたとき |
+| 決めた日 | 2026-08-20 |
+| 決めた人 | 開発者 |
+| 根拠 | devnotes/20260821-0000-template-divergence-fingerprint-t1/ |
+| 状態 | 監視中 |
+| 見直し期限 | 2027-02-28 |
+
+| 観点 | テンプレート | 本アプリ |
+|---|---|---|
+| 未分類の食い違い | 存在しない (提供元なので食い違いの概念が無い) | 採用時債務一覧に採用時のアプリ側 sha256 付きで凍結する |
+| 凍結の粒度 | — | パス 1 件 + そのときのアプリ側ハッシュ (パスだけを持つ形は恒久的な許可一覧になってしまう) |
+| 一覧が縮む契機 | — | 内容をテンプレートへ戻す / 意図的逸脱として登録簿へ書く の 2 つだけ |
+| 期限の管理 | — | 本登録の状態を `監視中` にし、見直し期限切れを CI の赤で強制する |
+
+### なぜ正当な差分か (logic-driven)
+
+**本登録は「未分類の債務をまとめて正当化する登録」ではない。**
+本書の冒頭は「互換・UX・**作業量**を理由にした逸脱は記録せず是正する」と定めており、
+「件数が多くて書くのが大変だから」は逸脱の理由になり得ない。
+本登録が登録するのは**未分類の債務を期限付きで管理する安全機構を持つこと**そのものであり、
+その業務要件起因は「テンプレートの現物が CI に無く、意図的逸脱と追従遅れを機械で区別できない」
+ことである。**分類を先送りする言い訳ではなく、先送りを期限付きで可視化する装置**として登録する
+(期限切れは CI の赤 = 是正の強制)。
+
+一覧が**採用時のアプリ側ハッシュを持つ**ことが要点である。パスだけを持つと
+「そのパスは食い違っていればいつでも合格」になり、凍結された観測ではなく
+**そのパスに対する恒久的な許可一覧**になってしまう。ハッシュを持てば
+「採用時の姿のまま」と「採用後に手を入れた」を区別でき、後者は違反として落とせる。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「採用時債務に載っているパスは、採用時の姿のまま留まっている」
+
+- 採用時の姿から変わったら `mutatedDebtPaths` が落とす (登録を書くか、戻すか、同期する)
+- テンプレート一致へ戻ったら `resolvedDebtPaths` が落とす (一覧から削れという指示になる)
+- 件数は `LedgerPins::ADOPTION_DEBT_COUNT` と完全一致で pin する (増減のどちらでも赤になる)
+- 2 生成物の世代が食い違ったら F14 が落とす (片方だけ更新された状態を緑にしない)
+
+### 保証しないもの
+
+- 保証しないものの正本は `tests/Support/TemplateDivergence/AdoptionDebtInventory.php` と
+  `tests/Architecture/TemplateDivergenceFingerprintTest.php` の docblock である
+  (本書には写さない)
+
+### 関連
+
+- 実装: `tests/Support/TemplateDivergence/AdoptionDebtInventory.php` /
+  `tests/Support/TemplateDivergence/adoption-debt.tsv`
+- 設計: `devnotes/20260821-0000-template-divergence-fingerprint-t1/`
