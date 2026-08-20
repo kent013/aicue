@@ -22,7 +22,6 @@
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
 | T110 | 認証手段変更のメール通知ポリシーの統一設計 | backend | passkey/2FA/SSO の増減通知を一貫したポリシーとして設計する(T108 S7 は監査ログのみで通知は見送り) | Low | standalone | [設計](devnotes/20260805-1550-security-audit-remediation/) | 2026-08-05 17:45 |
-| T235 | 新規動画作成画面の SOP ファイル入力を受理形式の単一情報源 (AcceptedSourceDocumentTypes) へ揃える | frontend | 作成画面のaccept/案内文言を単一情報源へ統一 | Medium | incremental | [設計](devnotes/20260820-2348-manuals-create-accepted-source-types/) | 2026-08-21 00:25 |
 | T236 | テンプレート乖離台帳を家系の正典 t1 へ追従する (指紋台帳・突合検査・掃除漏れ検出・fail-closed) | test | 指紋台帳導入し突合検査で掃除漏れをfail-closed検出 | High | standalone | [設計](devnotes/20260821-0000-template-divergence-fingerprint-t1/) | 2026-08-21 00:48 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。

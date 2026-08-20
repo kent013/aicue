@@ -61,12 +61,10 @@ class StoreVideoManualRequest extends FormRequest
      */
     public function messages(): array
     {
-        $formats = AcceptedSourceDocumentTypes::imagesEnabled()
-            ? 'PDF・Excel・テキスト形式、または JPEG・PNG の画像'
-            : 'PDF・Excel・テキスト形式';
-
         return [
-            'document.mimes' => "対応していないファイル形式です。{$formats}でアップロードし直してください。",
+            'document.mimes' => '対応していないファイル形式です。'
+                .AcceptedSourceDocumentTypes::formatsLabel()
+                .'でアップロードし直してください。',
         ];
     }
 }
