@@ -114,14 +114,32 @@ def config_dir_service(config_dir: Path) -> str:
     return f"{KEYCHAIN_SERVICE}-{suffix}"
 
 
+def keychain_fail(op: str, proc: subprocess.CompletedProcess) -> "NoReturn":
+    """Explain a failed `security` call. Never re-raises: a CalledProcessError
+    traceback would dump the command line, which contains the tokens."""
+    detail = (proc.stderr or "").strip() or f"exit status {proc.returncode}"
+    hint = ""
+    if proc.returncode == 36:  # errSecInteractionNotAllowed
+        hint = ("\n  the keychain needs an unlock dialog this session cannot"
+                " show (typical over SSH) — run\n"
+                "  `security unlock-keychain ~/Library/Keychains/login.keychain-db`"
+                " and retry")
+    die(f"keychain {op} failed: {detail}{hint}")
+
+
 def keychain_read(service: str = KEYCHAIN_SERVICE):
-    """Return (payload dict, account attr) or (None, None) if absent."""
+    """Return (payload dict, account attr), or (None, None) if the item does
+    not exist. Any other failure (e.g. locked keychain) aborts: proceeding
+    would crash later in keychain_write anyway, and treating it as "absent"
+    could make store_live overwrite the item without the merged mcpOAuth."""
     proc = subprocess.run(
         ["security", "find-generic-password", "-s", service, "-w"],
         capture_output=True, text=True,
     )
     if proc.returncode != 0:
-        return None, None
+        if proc.returncode == 44:  # errSecItemNotFound
+            return None, None
+        keychain_fail("read", proc)
     attr = subprocess.run(
         ["security", "find-generic-password", "-s", service],
         capture_output=True, text=True,
@@ -136,11 +154,13 @@ def keychain_read(service: str = KEYCHAIN_SERVICE):
 
 def keychain_write(payload: dict, account: str, service: str = KEYCHAIN_SERVICE) -> None:
     blob = json.dumps(payload, separators=(",", ":"))
-    subprocess.run(
+    proc = subprocess.run(
         ["security", "add-generic-password", "-U",
          "-s", service, "-a", account, "-w", blob],
-        check=True, capture_output=True, text=True,
+        capture_output=True, text=True,
     )
+    if proc.returncode != 0:
+        keychain_fail("write", proc)
 
 
 def keychain_delete(service: str) -> None:
