@@ -33,7 +33,7 @@
 <!-- entry: A-001 -->
 ### A-001 — 動画マニュアル削除後に「成功 flash が出ない」ように見えた
 
-- 有効性: **active**
+- 有効性: **superseded** (A-004 に差し替えられた。判断の正本は後継)
 - 由来 finding: F-1-02
 - 判定: false_positive / 対象面: route_name=projects.manuals.destroy
 - 確定: run 20260803-203721 (commit 22d6d30) / 見直し期限: 180 日
@@ -67,6 +67,25 @@
 **当時の判断 (run 20260812-100645 / commit 6d0cf1d)**: 同一組織内で権限が足りなければ 403 が設計どおりであり、404 へ潰すと文書化済みの 3 層モデル (層 2 のテナント境界 = 404 は層 3 の認可 = 403 より前) に反する。cross-tenant の存在秘匿とは層が違うため、bug-hunt は「バグと断定しない」として needs_spec で挙げ、事後に intentional として登録した。
 
 **この経緯は 2026-08-17 の移行時に、当時の rationale_ref と run 成果物から起こしたものである** (2026-08-12 の時点では人間向けの申し送りが書かれていなかった)。当時確認されていない事実は足していない。
+
+<!-- entry: A-004 -->
+### A-004 — 動画マニュアル削除後に「成功 flash が出ない」ように見えた (A-001 の watch_globs 是正)
+
+- 有効性: **active**
+- 差し替え: A-001 を差し替えた
+- 由来 finding: F-1-02
+- 判定: false_positive / 対象面: route_name=projects.manuals.destroy
+- 確定: run 20260803-203721 (commit 22d6d30) / 見直し期限: 180 日
+- 仕様根拠: app/Http/Controllers/Projects/VideoManualController.php:230-232 削除後 projects.show へ redirect し ->with('success', '動画マニュアルを削除しました') ; resources/js/lib/stores/toast.ts:23-29 success/info/warning は 4000ms で auto-dismiss、error のみ null = 自動消去しない ; resources/js/components/organisms/ToastContainer.svelte role="status" + data-testid="toast-{type}" で描画 ; tests/Browser/FlashToastTest.php 着地マーカーと同一時間窓で toast-success が可視になることを Chromium / WebKit の 2 レーンで pin
+- 再オープン条件: 次のいずれか。(a) VideoManualController::destroy が ->with('success', ...) を落とした、(b) toast.ts の success 用 AUTO_DISMISS_MS が大幅に短縮された、(c) feedback probe が installed_now:false かつ seen(visible:true) / present_new ともに空を返した。**probe を使わない事後 snapshot 単独の観察は再オープン根拠にならない。**
+
+**判定内容は A-001 から変えていない**: verdict / species_key / scope / conditions / symptom / rationale_ref / adjudicated_at_run / adjudicated_at_commit / source_finding_ids はすべて A-001 と同じである。判定そのものが変わったわけではなく、A-001 の登録に技術的な不備があったための是正である。
+
+**是正した理由 (T224)**: A-001 の再オープン条件 (b) は `resources/js/lib/stores/toast.ts` の `AUTO_DISMISS_MS` が大幅に短縮された場合を再オープン根拠として挙げていたが、A-001 の `watch_globs` にこのファイルが含まれておらず、照合器の invalidation (watch_globs の変更検知) が発火しない食い違いがあった。A-001 は append-only 規約により機械項目を書き換えないため、本登録が `watch_globs` へ `resources/js/lib/stores/toast.ts` を足した上で A-001 を supersede する。
+
+**なぜ誤検知に見えたか (A-001 からの引き継ぎ)**: bug-hunt driver の観測は「操作 → 事後 snapshot」の 1 点サンプリングで、Bash 1 往復ぶん (数百 ms〜数秒、並列 shard ではさらに遅延) 後ろにずれる。可視窓 4000ms の後に snapshot が来れば「flash 無し」に見える。T095 の実装フェーズで **現行コードのまま** Browser テストを両レーンで走らせて PASS したため、アプリ側は正しいと確定した。**アプリコードは変更していない。**
+
+**driver 側の再発防止 (A-001 からの引き継ぎ)**: `SKILL.md` §一過性フィードバックの観測 — 書き込み操作の**直前**に feedback probe (`.claude/skills/app-bug-hunt/probes/feedback-probe.js`) を仕込み、直後に読む。「事後 snapshot に無い」を根拠に H7 を起票することを禁止した。回帰は `tests/js/bughunt/feedback-probe.test.ts` が固定する。
 
 ---
 

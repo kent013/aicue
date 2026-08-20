@@ -142,6 +142,15 @@ def _entry_blocks(text: str) -> dict[str, str]:
     return blocks
 
 
+def _unused_adjudication_id(records: list[dict]) -> str:
+    """現物の登録に無い `A-NNN` を 1 つ作る (実登録の増減で合成テストが衝突しないため)。"""
+    used = {r.get("adjudication_id") for r in records}
+    n = 1
+    while f"A-{n:03d}" in used:
+        n += 1
+    return f"A-{n:03d}"
+
+
 class _Stage:
     """入力 2 点の写しを持つ一時作業場。**現物は絶対に書き換えない**。"""
 
@@ -544,14 +553,15 @@ class ListingCompletenessTest(unittest.TestCase):
         """契約 15: 同じ id を差し替える登録が 2 件あれば、両方の id が昇順で出る。"""
         with staged() as stage:
             records = stage.records()
+            new_id = _unused_adjudication_id(records)
             extra = json.loads(json.dumps(stage.record("A-003")))
-            extra["adjudication_id"] = "A-004"
+            extra["adjudication_id"] = new_id
             extra["supersedes"] = "A-002"
             extra.pop("context", None)
             records.append(extra)
             stage.write_records(records)
             blocks = _entry_blocks(stage.build())
-            self.assertIn("A-003 / A-004 に差し替えられた", blocks["A-002"])
+            self.assertIn(f"A-003 / {new_id} に差し替えられた", blocks["A-002"])
 
     def test_broken_supersede_relations_are_rejected(self) -> None:
         """契約 16: 書式不正 / 実在しない id / 自己参照 / 循環はいずれも RenderError。"""
