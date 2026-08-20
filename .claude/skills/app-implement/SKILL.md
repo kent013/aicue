@@ -230,6 +230,16 @@ cd {repo_root}/.claude/worktrees/tasks/{todo_id} && \
 
 ### B-1. コミット（worktree内）
 
+コミット前に**乖離台帳の確認段**を通す: 共有ファイル
+(`docs/template-fingerprints.json` のキー) を変えたなら、`docs/template-divergence.md` の
+登録と `tests/Support/TemplateDivergence/LedgerPins.php` の件数を**同じコミットに含める**。
+stage は**変更したファイルを個別に指定する** (`git add docs/template-divergence.md
+tests/Support/TemplateDivergence/LedgerPins.php` のように。ディレクトリ単位の
+`git add docs/` は無関係な変更まで巻き込むので書かない)。
+突合 gate が赤いときに**指紋台帳や債務一覧を書き換えて黙らせない** (登録を書くか内容を戻す)。
+採用時債務一覧に在るファイルを変えた場合は、3 択 (採用時の姿へ戻す / テンプレートへ同期して
+債務から削る / 登録を書いて債務から削る) のどれを採ったかをコミットメッセージに書く。
+
 Phase Aの実装・テスト変更をまとめてコミットする。
 
 ```bash
