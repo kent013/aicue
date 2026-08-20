@@ -19,7 +19,7 @@ final class LedgerPins
     private function __construct() {}
 
     /** 逸脱の登録件数 (宣言行 / 見出しの実数 / 本定数の 3 点一致)。 */
-    public const int DIVERGENCE_ENTRY_COUNT = 32;
+    public const int DIVERGENCE_ENTRY_COUNT = 33;
 
     /** 指紋台帳の登録パス件数 (「以下」ではない完全一致)。 */
     public const int FINGERPRINT_POPULATION_COUNT = 281;
@@ -31,7 +31,19 @@ final class LedgerPins
      *   増やせば通る)。増加を許さないのは生成器のガードとレビュー規約であり、
      *   検査は「一覧と定数と実測が食い違ったら赤」を担う。
      */
-    public const int ADOPTION_DEBT_COUNT = 176;
+    public const int ADOPTION_DEBT_COUNT = 174;
+
+    /**
+     * 採用時債務一覧を説明する逸脱の登録番号 (D34)。
+     *
+     * ★掃除の判定は**登録の存在**で行う (対象パスだけを見ると、一覧ファイルを消して
+     *   対象パス欄から一覧パスだけを削り登録を残す、という中途半端な掃除が緑になる)。
+     *   同定に使うので番号を pin する。
+     *   ★**引退時に外すのは対象パスの 1 行だけで、登録そのものは残る** —
+     *   一覧が 0 件になっても判定機構 (`AdoptionDebtInventory`) は残り続けるので、
+     *   本アプリ固有の追加としての説明は要る (詳しくは同クラスの docblock)。
+     */
+    public const int ADOPTION_DEBT_DIVERGENCE_ID = 34;
 
     /** 取り込んだ正典台帳の generated_at_commit (指紋台帳の出自 pin)。 */
     public const string TEMPLATE_LEDGER_SOURCE_COMMIT = 'a078806b0574518ddc64966f60f7d536b1338b2f';

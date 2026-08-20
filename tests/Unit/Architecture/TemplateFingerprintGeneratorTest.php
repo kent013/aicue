@@ -11,6 +11,7 @@ use Tests\Support\TemplateDivergence\FingerprintGenerationContext;
 use Tests\Support\TemplateDivergence\FingerprintGenerationService;
 use Tests\Support\TemplateDivergence\FingerprintLedger;
 use Tests\Support\TemplateDivergence\GenerationRefused;
+use Tests\Support\TemplateDivergence\InventoryPresence;
 use Tests\Support\TemplateDivergence\LedgerPins;
 use Tests\Support\TemplateDivergence\LedgerRole;
 use Tests\Support\TemplateDivergence\TrackedRepositoryFiles;
@@ -102,6 +103,7 @@ function generatorRun(
     bool $adopt = false,
     ?string $templateCommit = null,
     ?callable $writer = null,
+    ?callable $remover = null,
 ): array {
     foreach ($files as $relative => $contents) {
         $absolute = $root.'/'.$relative;
@@ -134,7 +136,7 @@ function generatorRun(
         writer: $writer ?? $io['writer'],
         reader: $io['reader'],
         renamer: $io['renamer'],
-        remover: $io['remover'],
+        remover: $remover ?? $io['remover'],
     );
 }
 
@@ -668,7 +670,7 @@ test('正例: service が両生成物を書き、3 つの pin 値を報告する
         ->and($debt['templateLedgerCommit'])->toBe($ledger->generatedAtCommit);
 });
 
-test('負例: service の拒否 4 経路では生成物のバイト列が 1 ビットも変わらない', function (string $case): void {
+test('負例: service の拒否 4 経路は GenerationRefused で、生成物のバイト列が 1 ビットも変わらない', function (string $case): void {
     $root = generatorTempRoot();
 
     // まず正常な生成物を作る (以後これが 1 バイトも変わらないことを見る)
@@ -686,12 +688,7 @@ test('負例: service の拒否 4 経路では生成物のバイト列が 1 ビ�
     $io = generatorIo();
 
     $call = match ($case) {
-        // 1: 既存台帳が role: template (CLI は先に exit 3 するが、型の側でも閉じる)
-        'role' => fn (): mixed => FingerprintGenerationContext::forRoot(
-            $root, str_repeat('a', 64), str_repeat('1', 40), false,
-            new FingerprintLedger(1, LedgerRole::Template, str_repeat('1', 40), ['a.php' => str_repeat('0', 64)]),
-        ),
-        // 2: 入力の sha256 が pin と違うのに載せ替えフラグが無い
+        // 1: 入力の sha256 が pin と違うのに載せ替えフラグが無い
         'sha' => function () use ($root, $previous, $io): mixed {
             $raw = generatorTemplateRaw(['a.php' => hash('sha256', 'A')]);
 
@@ -712,7 +709,7 @@ test('負例: service の拒否 4 経路では生成物のバイト列が 1 ビ�
                 remover: $io['remover'],
             );
         },
-        // 3: 債務へ新規パスを追加しようとした
+        // 2: 債務へ新規パスを追加しようとした
         'debt' => fn (): mixed => generatorRun(
             root: $root,
             templateEntries: ['a.php' => hash('sha256', 'A'), 'b.php' => hash('sha256', 'B')],
@@ -721,7 +718,7 @@ test('負例: service の拒否 4 経路では生成物のバイト列が 1 ビ�
             previousLedger: $previous,
             templateCommit: $previous->generatedAtCommit,
         ),
-        // 4: 同じ正典入力のまま母集合を縮小しようとした
+        // 3: 同じ正典入力のまま母集合を縮小しようとした
         'shrink' => fn (): mixed => generatorRun(
             root: $root,
             templateEntries: ['a.php' => hash('sha256', 'A')],
@@ -729,13 +726,272 @@ test('負例: service の拒否 4 経路では生成物のバイト列が 1 ビ�
             previousLedger: $previous,
             templateCommit: $previous->generatedAtCommit,
         ),
+        // 4: 出力先が既に追跡下にあるのに初回生成 (採用) をやり直そうとした
+        //    = 指紋台帳を消すだけで債務を再基準化する経路を塞ぐ
+        'reseed' => fn (): mixed => generatorRun(
+            root: $root,
+            templateEntries: ['a.php' => hash('sha256', 'A'), 'b.php' => hash('sha256', 'B')],
+            files: [
+                'a.php' => 'A',
+                'b.php' => 'CHANGED',
+                LedgerPins::FINGERPRINT_LEDGER_PATH => $ledgerBefore,
+            ],
+            previousLedger: null,
+        ),
     };
 
-    expect($call)->toThrow(RuntimeException::class);
+    // **型を名指しで検査する** (素の RuntimeException を通すと「拒否として分類されること」が固定できない)
+    expect($call)->toThrow(GenerationRefused::class);
 
     expect(file_get_contents($ledgerPath))->toBe($ledgerBefore)
         ->and(file_get_contents($debtPath))->toBe($debtBefore);
-})->with(['role', 'sha', 'debt', 'shrink']);
+})->with(['sha', 'debt', 'shrink', 'reseed']);
+
+test('正例: 出力先がまだ追跡下に無いときだけ初回生成 (採用) が通る', function (): void {
+    $root = generatorTempRoot();
+
+    $report = generatorRun(
+        root: $root,
+        templateEntries: ['a.php' => hash('sha256', 'A'), 'b.php' => hash('sha256', 'B')],
+        files: ['a.php' => 'A', 'b.php' => 'CHANGED'],
+        previousLedger: null,
+    );
+
+    expect($report['seeded'])->toBeTrue()
+        ->and($report['adoptionDebtCount'])->toBe(1);
+});
+
+test('負例: 初回生成 (採用) のガードの 3 つの blocker が 1 件ずつ拒否になる', function (array $extraFiles, array $existingDebt): void {
+    $root = generatorTempRoot();
+
+    expect(fn (): array => generatorRun(
+        root: $root,
+        templateEntries: ['a.php' => hash('sha256', 'A'), 'b.php' => hash('sha256', 'B')],
+        files: ['a.php' => 'A', 'b.php' => 'CHANGED', ...$extraFiles],
+        existingDebt: $existingDebt,
+        previousLedger: null,
+    ))->toThrow(GenerationRefused::class);
+})->with([
+    '1: 指紋台帳だけが追跡済み' => [
+        [LedgerPins::FINGERPRINT_LEDGER_PATH => '{}'],
+        [],
+    ],
+    // ★Codex Round 2 の指摘: ヘッダだけの旧一覧が残っている形は引退遷移の近くで現実に起こり得る
+    '2: 債務一覧だけが追跡済み (指紋台帳は未追跡)' => [
+        [AdoptionDebtInventory::INVENTORY_PATH => '# template_ledger_commit='.str_repeat('1', 40)."\n"],
+        [],
+    ],
+    '3: 既存債務が非空' => [
+        [],
+        ['b.php' => '0000000000000000000000000000000000000000000000000000000000000009'],
+    ],
+]);
+
+// ---------------------------------------------------------------------------
+// 引退 (債務 0 件) が安定状態であること
+// ---------------------------------------------------------------------------
+
+test('引退は安定状態である — 0 件になったら一覧を書かず、台帳更新でも再作成しない', function (): void {
+    $root = generatorTempRoot();
+    $ledgerPath = $root.'/'.LedgerPins::FINGERPRINT_LEDGER_PATH;
+    $debtPath = $root.'/'.AdoptionDebtInventory::INVENTORY_PATH;
+
+    // --- 第 1 世代: 未登録の相違が 1 件あるので一覧が作られる ---
+    $first = generatorRun(
+        root: $root,
+        templateEntries: ['a.php' => hash('sha256', 'A'), 'b.php' => hash('sha256', 'B')],
+        files: ['a.php' => 'A', 'b.php' => 'CHANGED'],
+        templateCommit: generatorCommit('a'),
+    );
+
+    expect($first['adoptionDebtCount'])->toBe(1)
+        ->and($first['retired'])->toBeFalse()
+        ->and(is_file($debtPath))->toBeTrue();
+
+    // --- 第 2 世代: 内容をテンプレートへ戻したので債務が 0 件になる ---
+    $second = generatorRun(
+        root: $root,
+        templateEntries: ['a.php' => hash('sha256', 'A'), 'b.php' => hash('sha256', 'B')],
+        files: ['a.php' => 'A', 'b.php' => 'B'],
+        existingDebt: ['b.php' => hash('sha256', 'CHANGED')],
+        previousLedger: FingerprintLedger::fromJson((string) file_get_contents($ledgerPath)),
+        templateCommit: generatorCommit('a'),
+    );
+
+    expect($second['adoptionDebtCount'])->toBe(0)
+        ->and($second['retired'])->toBeTrue()
+        ->and($second['debtInventoryRemoved'])->toBeTrue()
+        // **「0 件の一覧」ではなく「一覧が無い」が正しい生成物の状態である**
+        ->and(is_file($debtPath))->toBeFalse();
+
+    // --- 第 3 世代: 新しい正典台帳を取り込む (新規債務は発生しない) ---
+    $third = generatorRun(
+        root: $root,
+        templateEntries: ['a.php' => hash('sha256', 'A'), 'b.php' => hash('sha256', 'B')],
+        files: ['a.php' => 'A', 'b.php' => 'B'],
+        existingDebt: [],
+        previousLedger: FingerprintLedger::fromJson((string) file_get_contents($ledgerPath)),
+        adopt: true,
+        templateCommit: generatorCommit('b'),
+    );
+
+    // --- 引退状態が維持され、一覧は再作成されない ---
+    expect($third['adoptionDebtCount'])->toBe(0)
+        ->and($third['retired'])->toBeTrue()
+        ->and(is_file($debtPath))->toBeFalse()
+        ->and(FingerprintLedger::fromJson((string) file_get_contents($ledgerPath))->generatedAtCommit)
+        ->toBe(generatorCommit('b'));
+
+    // 引退状態は掃除の判定でも合格する (pin を 0 へ、対象パスから 1 行外した状態)
+    expect(AdoptionDebtInventory::retirementViolations(
+        pinnedCount: 0,
+        presence: InventoryPresence::fromPath($debtPath),
+        isRegisteredAsTargetPath: false,
+        divergenceEntryExists: true,
+    ))->toBe([]);
+});
+
+test('引退の削除経路は残置を成功扱いにしない (6 形)', function (string $kind, bool $expectThrow, bool $expectRemoved): void {
+    $root = generatorTempRoot();
+    $debtPath = $root.'/'.AdoptionDebtInventory::INVENTORY_PATH;
+    $io = generatorIo();
+
+    // 一覧のパスを「その形」で用意する (実ファイルシステム上に本物を作る)
+    match ($kind) {
+        'regular' => file_put_contents($debtPath, '# template_ledger_commit='.str_repeat('1', 40)."\n"),
+        'symlink' => (function () use ($root, $debtPath): void {
+            $real = $root.'/real.tsv';
+            file_put_contents($real, "x\n");
+            symlink($real, $debtPath);
+        })(),
+        'broken-symlink' => symlink($root.'/absent.tsv', $debtPath),
+        'directory' => mkdir($debtPath, 0o777, true),
+        'remover-fails' => file_put_contents($debtPath, "x\n"),
+        'absent' => null,
+    };
+
+    $call = fn (): array => generatorRun(
+        root: $root,
+        templateEntries: ['a.php' => hash('sha256', 'A')],
+        files: ['a.php' => 'A'], // 一致だけなので債務 0 件 = 引退の経路へ入る
+        remover: $kind === 'remover-fails' ? static fn (string $path): bool => false : null,
+    );
+
+    if ($expectThrow) {
+        expect($call)->toThrow(RuntimeException::class);
+
+        // 残置は残ったままである (成功扱いにしていない)
+        expect(InventoryPresence::fromPath($debtPath))->not->toBe(InventoryPresence::Absent);
+
+        return;
+    }
+
+    $report = $call();
+
+    expect($report['retired'])->toBeTrue()
+        ->and($report['debtInventoryRemoved'])->toBe($expectRemoved)
+        ->and(InventoryPresence::fromPath($debtPath))->toBe(InventoryPresence::Absent);
+})->with([
+    '1: 通常ファイルは削除される' => ['regular', false, true],
+    '2: symlink はリンクが消えて不在になる' => ['symlink', false, true],
+    '3: 壊れた symlink は残るので例外' => ['broken-symlink', true, false],
+    '4: ディレクトリは残るので例外' => ['directory', true, false],
+    '5: 削除器が false を返したら例外' => ['remover-fails', true, false],
+    '6: 元から不在なら削除しない' => ['absent', false, false],
+]);
+
+test('引退の報告は 3 つの事実を混ぜない (retired / newlyRetired / debtInventoryRemoved)', function (): void {
+    $root = generatorTempRoot();
+    $ledgerPath = $root.'/'.LedgerPins::FINGERPRINT_LEDGER_PATH;
+    $debtPath = $root.'/'.AdoptionDebtInventory::INVENTORY_PATH;
+
+    // 第 1 世代: 未登録の相違が 1 件あるので一覧が作られる (引退していない)
+    $first = generatorRun(
+        root: $root,
+        templateEntries: ['a.php' => hash('sha256', 'A')],
+        files: ['a.php' => 'CHANGED'],
+    );
+
+    expect($first['retired'])->toBeFalse()
+        ->and($first['newlyRetired'])->toBeFalse()
+        ->and($first['debtInventoryRemoved'])->toBeFalse()
+        ->and(is_file($debtPath))->toBeTrue();
+
+    // 第 2 世代: 内容を戻して 0 件へ**遷移**した回 (3 つとも真)
+    $transition = generatorRun(
+        root: $root,
+        templateEntries: ['a.php' => hash('sha256', 'A')],
+        files: ['a.php' => 'A'],
+        existingDebt: ['a.php' => hash('sha256', 'CHANGED')],
+        previousLedger: FingerprintLedger::fromJson((string) file_get_contents($ledgerPath)),
+    );
+
+    expect($transition['retired'])->toBeTrue()
+        ->and($transition['newlyRetired'])->toBeTrue()
+        ->and($transition['debtInventoryRemoved'])->toBeTrue();
+
+    // 第 3 世代: 既に引退している状態での再実行 (retired だけが真)
+    $stable = generatorRun(
+        root: $root,
+        templateEntries: ['a.php' => hash('sha256', 'A')],
+        files: ['a.php' => 'A'],
+        existingDebt: [],
+        previousLedger: FingerprintLedger::fromJson((string) file_get_contents($ledgerPath)),
+    );
+
+    expect($stable['retired'])->toBeTrue()
+        ->and($stable['newlyRetired'])->toBeFalse()
+        ->and($stable['debtInventoryRemoved'])->toBeFalse();
+});
+
+test('引退後に新しい債務が生じたら一覧は再作成される (機構が再開する)', function (): void {
+    $root = generatorTempRoot();
+    $ledgerPath = $root.'/'.LedgerPins::FINGERPRINT_LEDGER_PATH;
+    $debtPath = $root.'/'.AdoptionDebtInventory::INVENTORY_PATH;
+
+    // 引退済みの状態を作る (一致しか無いので債務 0 件)
+    generatorRun(
+        root: $root,
+        templateEntries: ['a.php' => hash('sha256', 'A')],
+        files: ['a.php' => 'A'],
+        templateCommit: generatorCommit('a'),
+    );
+    expect(is_file($debtPath))->toBeFalse();
+
+    // 台帳を載せ替えてテンプレート側が前進した = 前世代の正典ハッシュと一致する新規債務
+    $report = generatorRun(
+        root: $root,
+        templateEntries: ['a.php' => hash('sha256', 'A2')],
+        files: ['a.php' => 'A'],
+        previousLedger: FingerprintLedger::fromJson((string) file_get_contents($ledgerPath)),
+        adopt: true,
+        templateCommit: generatorCommit('b'),
+    );
+
+    expect($report['adoptionDebtCount'])->toBe(1)
+        ->and($report['retired'])->toBeFalse()
+        ->and(is_file($debtPath))->toBeTrue()
+        ->and($report['addedDebt'])->toBe(['a.php']);
+});
+
+// ---------------------------------------------------------------------------
+// role ガード (CLI が呼ぶ判定本体) — 両方向
+// ---------------------------------------------------------------------------
+
+test('正例: 既存台帳の role が app なら role ガードは通す', function (): void {
+    $ledger = new FingerprintLedger(1, LedgerRole::App, generatorCommit('a'), ['a.php' => generatorHash('1')]);
+
+    FingerprintGenerationService::assertAppLedgerRole($ledger);
+
+    expect(true)->toBeTrue(); // 例外が出ないことが検査である
+});
+
+test('負例: 既存台帳の role が template なら role ガードが拒否する', function (): void {
+    $ledger = new FingerprintLedger(1, LedgerRole::Template, generatorCommit('a'), ['a.php' => generatorHash('1')]);
+
+    expect(fn (): mixed => FingerprintGenerationService::assertAppLedgerRole($ledger))
+        ->toThrow(GenerationRefused::class);
+});
 
 test('負例: 書き込み開始前の失敗では生成物が作られない', function (callable $call): void {
     expect($call)->toThrow(RuntimeException::class);
@@ -926,3 +1182,37 @@ test('負例: 生成器は引数が不正なら書き込み前に exit 1 して�
     '入力ファイルが存在しない' => [['--template-ledger=/tmp/t236-does-not-exist.json']],
     '--template-ledger の値が空' => [['--template-ledger=']],
 ]);
+
+test('負例: 生成器は pin と違う正典台帳を渡されると書き込み前に exit 3 で拒否する', function (): void {
+    // GenerationRefused → 終了コード 3 の写像を**実プロセスで**裏取りする。
+    // sha256 のガードは書き込みに一切到達しないので、本物の生成物には触れない。
+    $ledgerPath = base_path(LedgerPins::FINGERPRINT_LEDGER_PATH);
+    $debtPath = base_path(AdoptionDebtInventory::INVENTORY_PATH);
+    $ledgerBefore = (string) file_get_contents($ledgerPath);
+    $debtBefore = (string) file_get_contents($debtPath);
+
+    // pin とは違う「正当な (正準形の) 正典台帳」を一時ファイルへ置く
+    $input = sys_get_temp_dir().'/t236-other-template-ledger-'.bin2hex(random_bytes(6)).'.json';
+    file_put_contents($input, generatorTemplateRaw(['tests/Pest.php' => hash('sha256', 'not-the-pinned-ledger')]));
+
+    $process = new Process(
+        ['php', 'scripts/update-template-fingerprints.php', '--template-ledger='.$input],
+        base_path(),
+    );
+    $process->run();
+
+    expect($process->getExitCode())->toBe(3, '標準エラー: '.$process->getErrorOutput())
+        ->and($process->getErrorOutput())->toContain('refused:')
+        ->and(file_get_contents($ledgerPath))->toBe($ledgerBefore)
+        ->and(file_get_contents($debtPath))->toBe($debtBefore);
+
+    unlink($input);
+});
+
+/*
+ * **裏取りできない範囲 (誇張しない)**: CLI の role ガード自身の exit 3 は、
+ * 本物の `docs/template-fingerprints.json` を `role: template` へ書き換えないと到達できないため
+ * 実プロセスでは検査していない。型 (`GenerationRefused`) は上のテストが写像ごと固定し、
+ * 「前世代の台帳が app でない」入力条件は
+ * `FingerprintGenerationContext` の負例 (形 5) が固定する。
+ */

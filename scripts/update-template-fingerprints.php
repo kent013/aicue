@@ -40,7 +40,7 @@ use Tests\Support\TemplateDivergence\FingerprintGenerationService;
 use Tests\Support\TemplateDivergence\FingerprintLedger;
 use Tests\Support\TemplateDivergence\GenerationRefused;
 use Tests\Support\TemplateDivergence\LedgerPins;
-use Tests\Support\TemplateDivergence\LedgerRole;
+use Tests\Support\TemplateDivergence\RegularFileReader;
 use Tests\Support\TemplateDivergence\TrackedRepositoryFiles;
 
 $root = dirname(__DIR__);
@@ -105,26 +105,10 @@ if ($templateLedgerRaw === false) {
 // --- role ガード (最も現実的な無効化経路を正規経路の側で塞ぐ) ---
 // 既存のアプリ側台帳が role: template なら、子アプリで正典側の生成を走らせている。
 // これは逸脱検出そのものを消すので**拒否 (3)** で止める。
+// 拒否は GenerationRefused で表し、終了コードへの写像は下の catch 1 か所に集約する
+// (拒否 = 3 / 実行不能 = 1。型を使わずに直接 exit すると型の説明が実装と食い違う)。
 $previousLedger = null;
 $fingerprintPath = $root.'/'.LedgerPins::FINGERPRINT_LEDGER_PATH;
-if (is_file($fingerprintPath)) {
-    $existingRaw = file_get_contents($fingerprintPath);
-    if ($existingRaw === false) {
-        $fail("既存の指紋台帳を読めない: {$fingerprintPath}");
-    }
-
-    try {
-        $previousLedger = FingerprintLedger::fromJson($existingRaw);
-    } catch (RuntimeException $e) {
-        $fail('既存の指紋台帳を解釈できない: '.$e->getMessage());
-    }
-
-    if ($previousLedger->role !== LedgerRole::App) {
-        fwrite(STDERR, 'refused: 既存の指紋台帳の role が app でない。'
-            ."本リポジトリはテンプレートの受け手なので、正典側の生成器を走らせてはならない。\n");
-        exit(3);
-    }
-}
 
 // --- 登録簿と既存の債務一覧 ---
 $ledgerMarkdown = file_get_contents($root.'/docs/template-divergence.md');
@@ -165,6 +149,17 @@ try {
 
 // --- 生成 ---
 try {
+    if (file_exists($fingerprintPath) || is_link($fingerprintPath)) {
+        // 指紋台帳の読み取り口は 1 つに寄せる (gate / 一覧 / 生成器が同じ判定を通る)。
+        // symlink を追跡すると母集合ごと差し替えられるため受理しない。
+        $previousLedger = FingerprintLedger::fromJson(
+            RegularFileReader::read($fingerprintPath, '既存の指紋台帳'),
+        );
+
+        // 判定本体は service 側に置く (CLI とテストが同じ処理を呼ぶ = 両方向を裏取りできる)
+        FingerprintGenerationService::assertAppLedgerRole($previousLedger);
+    }
+
     $context = FingerprintGenerationContext::forRoot(
         root: $root,
         expectedTemplateLedgerSha256: LedgerPins::TEMPLATE_LEDGER_SOURCE_SHA256,
@@ -229,5 +224,21 @@ fwrite(STDOUT, sprintf(
     $report['seeded'] ? ' (初回生成 = 採用)' : '',
     $report['templateLedgerCommit'],
 ));
+
+// 案内は**遷移したときだけ**出す (安定した引退状態で再実行するたびに出すと嘘になる)
+if ($report['newlyRetired']) {
+    fwrite(STDOUT,
+        "採用時債務が 0 件になった。同じ変更で次の 2 つを行うこと:\n"
+        ."  1. LedgerPins::ADOPTION_DEBT_COUNT を 0 にする\n"
+        .'  2. docs/template-divergence.md の対象パスから '
+            .AdoptionDebtInventory::INVENTORY_PATH." の 1 行を外す\n"
+        ."     (登録そのものは一覧クラスの説明として残す)\n",
+    );
+}
+
+// 「取り除いた」は実際に削除したときだけ言う
+if ($report['debtInventoryRemoved']) {
+    fwrite(STDOUT, '一覧ファイルを取り除いた: '.AdoptionDebtInventory::INVENTORY_PATH."\n");
+}
 
 exit(0);

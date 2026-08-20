@@ -7,11 +7,13 @@ use Tests\Support\TemplateDivergence\ComparisonState;
 use Tests\Support\TemplateDivergence\DivergenceLedgerParser;
 use Tests\Support\TemplateDivergence\FingerprintLedger;
 use Tests\Support\TemplateDivergence\FingerprintReconciler;
+use Tests\Support\TemplateDivergence\InventoryPresence;
 use Tests\Support\TemplateDivergence\LedgerPins;
 use Tests\Support\TemplateDivergence\LedgerRole;
 use Tests\Support\TemplateDivergence\ParsedLedger;
 use Tests\Support\TemplateDivergence\PathObservation;
 use Tests\Support\TemplateDivergence\ReconciliationResult;
+use Tests\Support\TemplateDivergence\RegularFileReader;
 use Tests\Support\TemplateDivergence\TrackedRepositoryFiles;
 
 /*
@@ -84,15 +86,15 @@ function fingerprintRequiredMembers(): array
     ];
 }
 
-/** 指紋台帳の生バイト列 (読めないことは不合格)。 */
+/**
+ * 指紋台帳の生バイト列 (読めないことは不合格)。
+ *
+ * ★**symlink を受理しない**。`file_get_contents()` はリンク先を読むので、リンクを差し替えると
+ *   母集合ごと入れ替えられる。母集合を決める正本なので債務一覧と同じ強さで守る。
+ */
 function fingerprintLedgerRaw(): string
 {
-    $raw = file_get_contents(base_path(LedgerPins::FINGERPRINT_LEDGER_PATH));
-    if ($raw === false) {
-        throw new RuntimeException('指紋台帳 '.LedgerPins::FINGERPRINT_LEDGER_PATH.' を読めない');
-    }
-
-    return $raw;
+    return RegularFileReader::read(base_path(LedgerPins::FINGERPRINT_LEDGER_PATH), '指紋台帳');
 }
 
 /** 指紋台帳の DTO。 */
@@ -102,16 +104,58 @@ function fingerprintLedger(): FingerprintLedger
 }
 
 /**
+ * 採用時債務が引退済みか (件数の pin が 0)。
+ *
+ * 引退後は**一覧ファイルが無く、対象パスからも一覧パスの 1 行が外れている**のが正しい状態で、
+ * **登録そのものは一覧クラスの説明として残る**。gate は pin を状態の軸にして、
+ * 一覧を読まずに空の債務集合を突合へ渡す。判定の両方向は
+ * `AdoptionDebtInventory::retirementViolations()` が持つ。
+ */
+function fingerprintDebtRetired(): bool
+{
+    return LedgerPins::ADOPTION_DEBT_COUNT === 0;
+}
+
+/**
+ * 一覧のパスの在り方 (3 値)。
+ *
+ * 「残っているか」と「regular file か」を 2 つの真偽値で持つと
+ * 「存在しないが regular file」という矛盾した組み合わせを作れてしまうので、
+ * 写像を `InventoryPresence` の 1 か所へ閉じる。
+ */
+function fingerprintDebtInventoryPresence(): InventoryPresence
+{
+    return InventoryPresence::fromPath(base_path(AdoptionDebtInventory::INVENTORY_PATH));
+}
+
+/** 採用時債務一覧を説明する登録 (D34) が登録簿に存在するか (番号で同定する)。 */
+function fingerprintDebtDivergenceEntryExists(): bool
+{
+    foreach (fingerprintParsedDivergenceLedger()->entries as $entry) {
+        if ($entry->id === LedgerPins::ADOPTION_DEBT_DIVERGENCE_ID) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
  * 採用時債務一覧。
  *
- * @return array{templateLedgerCommit: string, entries: array<string, string>}
+ * 引退後 (pin が 0) は一覧ファイルを読まず、空の債務集合を返す。
+ * 「0 件だから一覧ファイルが無い」ことは F11 / F12 が両方向で固定する。
+ *
+ * @return array{templateLedgerCommit: ?string, entries: array<string, string>}
  */
 function fingerprintDebt(): array
 {
     static $cache = null;
 
     if ($cache === null) {
-        $cache = AdoptionDebtInventory::read(base_path());
+        $cache = fingerprintDebtRetired()
+            ? ['templateLedgerCommit' => null, 'entries' => []]
+            : AdoptionDebtInventory::read(base_path());
     }
 
     return $cache;
@@ -254,8 +298,15 @@ function fingerprintReconciliation(): ReconciliationResult
 
 test('F0: 指紋台帳・登録簿・債務一覧が実在して読めること (読み取り失敗は不合格)', function (): void {
     expect(trim(fingerprintLedgerRaw()))->not->toBe('')
-        ->and(fingerprintDebt())->toHaveKey('templateLedgerCommit')
-        ->and(is_file(base_path('docs/template-divergence.md')))->toBeTrue();
+        ->and(fingerprintDebt())->toHaveKey('entries')
+        ->and(is_file(base_path('docs/template-divergence.md')))->toBeTrue()
+        // 母集合の正本は regular file であること (symlink 差し替えで母集合ごと入れ替えられない)
+        ->and(is_link(base_path(LedgerPins::FINGERPRINT_LEDGER_PATH)))->toBeFalse();
+
+    // 引退前は一覧ファイルも regular file として実在すること
+    if (! fingerprintDebtRetired()) {
+        expect(fingerprintDebtInventoryPresence())->toBe(InventoryPresence::RegularFile);
+    }
 
     // 負のコントロール: 読めない入力が黙って空へ潰れず例外になること
     expect(fn (): array => AdoptionDebtInventory::read(base_path('storage/framework/t236-absent')))
@@ -357,20 +408,22 @@ test('F11: 採用時債務の件数が pin と完全一致すること', functio
     expect(fingerprintDebt()['entries'])->toHaveCount(LedgerPins::ADOPTION_DEBT_COUNT);
 });
 
-test('F12: 債務が非空の間は債務一覧のファイルが登録簿に登録されていること', function (): void {
-    $debt = fingerprintDebt()['entries'];
-    if ($debt === []) {
-        // 0 件になったら一覧ファイルと登録を同じ変更で消す (D34 の再判定の条件)
-        expect(true)->toBeTrue();
-
-        return;
-    }
-
+test('F12: 債務の引退の掃除が両方向で済んでいること', function (): void {
+    // pin が 1 件以上 → 一覧ファイルが regular file で実在し対象パスに含まれる /
+    // pin が 0 件 → 一覧のパスも対象パスの 1 行も残っていてはならない
+    // (**登録そのものは pin の値に関わらず残る** — 一覧クラスは 0 件でも残るため)。
+    // **0 件を無条件で合格にしない** (ヘッダだけの一覧や残った対象パスを緑にしないため)。
     $registeredPaths = array_column(fingerprintRegisteredPaths(), 'path');
 
-    expect(in_array(AdoptionDebtInventory::INVENTORY_PATH, $registeredPaths, true))->toBeTrue(
-        '債務が残っている間は '.AdoptionDebtInventory::INVENTORY_PATH.' を登録簿へ登録しておくこと',
+    $violations = AdoptionDebtInventory::retirementViolations(
+        pinnedCount: LedgerPins::ADOPTION_DEBT_COUNT,
+        presence: fingerprintDebtInventoryPresence(),
+        isRegisteredAsTargetPath: in_array(AdoptionDebtInventory::INVENTORY_PATH, $registeredPaths, true),
+        // **登録の存在は番号で同定する** (対象パスだけを見ると中途半端な掃除が緑になる)
+        divergenceEntryExists: fingerprintDebtDivergenceEntryExists(),
     );
+
+    expect($violations)->toBe([], '採用時債務の掃除漏れ:'.PHP_EOL.implode(PHP_EOL, $violations));
 });
 
 test('F13: 逸脱の登録簿の解析が成功していること (解析違反から登録を組み立てない)', function (): void {
@@ -388,6 +441,13 @@ test('F13: 逸脱の登録簿の解析が成功していること (解析違反�
 test('F14: 2 生成物の世代が揃っていて、債務が定義どおり食い違っていること', function (): void {
     $ledger = fingerprintLedger();
     $debt = fingerprintDebt();
+
+    if (fingerprintDebtRetired()) {
+        // 引退後はヘッダが存在しないので世代の突き合わせへ進めない (掃除は F12 が見る)
+        expect($debt['entries'])->toBe([]);
+
+        return;
+    }
 
     // 片方だけが更新された状態を落とす (件数 pin だけでは増減が相殺されて緑になり得る)
     expect($debt['templateLedgerCommit'])->toBe(

@@ -19,7 +19,11 @@ use InvalidArgumentException;
  *    - `MissingCurrent`  + null      + null   (git index / working tree から消えた)
  *    - null              + null      + 空でない理由 (symlink / 非 regular / 読めない / hash 失敗)
  *
- * 落とす 7 形と、許す 4 形が構築できることは
+ * ★件数の言い方を混ぜない — 上の 4 形は**状態・ハッシュ・理由の組み合わせ**の話で、
+ *   落とす組み合わせは **7 形**である。**それとは別の軸として値の書式**も見る
+ *   (ハッシュは 64 桁小文字 hex でなければ例外)。書式は組み合わせの数には数えない。
+ *
+ * 組み合わせの 7 形・書式違反・許す 4 形が構築できることは
  * `tests/Unit/Architecture/TemplateDivergenceFingerprintRulesTest.php` が両方向で固定する。
  */
 final readonly class PathObservation

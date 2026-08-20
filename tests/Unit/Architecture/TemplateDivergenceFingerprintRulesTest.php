@@ -6,9 +6,11 @@ use Tests\Support\TemplateDivergence\AdoptionDebtInventory;
 use Tests\Support\TemplateDivergence\ComparisonState;
 use Tests\Support\TemplateDivergence\FingerprintLedger;
 use Tests\Support\TemplateDivergence\FingerprintReconciler;
+use Tests\Support\TemplateDivergence\InventoryPresence;
 use Tests\Support\TemplateDivergence\LedgerPins;
 use Tests\Support\TemplateDivergence\LedgerRole;
 use Tests\Support\TemplateDivergence\PathObservation;
+use Tests\Support\TemplateDivergence\RegularFileReader;
 use Tests\Support\TemplateDivergence\RepoRelativePath;
 
 /*
@@ -25,7 +27,8 @@ use Tests\Support\TemplateDivergence\RepoRelativePath;
  *
  * ★件数の正本は各 dataset の名前である。詳細設計の「N 形」と一致していること:
  *   `FingerprintLedger::fromJson()` = 11 形 / `RepoRelativePath::isValid()` = 8 形 /
- *   `PathObservation` = 7 形 / `AdoptionDebtInventory` = 11 形 (読み取り失敗 1 + 内容 10) /
+ *   `PathObservation` = 組み合わせ 7 形 (値の書式は別軸なので数に入れない) /
+ *   `AdoptionDebtInventory` = 11 形 (読み取り失敗 1 + 内容 10) /
  *   `FingerprintReconciler` = 8 種別。
  *
  * 生成器側 (`AppFingerprintBuilder` / `AtomicLedgerWriter` / `AtomicTextWriter` /
@@ -124,17 +127,6 @@ test('正例: entries が空 object の指紋台帳は解釈できる (母集合
     expect(FingerprintLedger::fromJson(fingerprintLedgerJson([]))->entries)->toBe([]);
 });
 
-test('FingerprintLedger の鮮度比較は generated_at_commit を無視する', function (): void {
-    $entries = ['a.php' => fingerprintHash()];
-    $left = new FingerprintLedger(1, LedgerRole::App, fingerprintCommit('a'), $entries);
-    $right = new FingerprintLedger(1, LedgerRole::App, fingerprintCommit('b'), $entries);
-
-    expect($left->matchesIgnoringGeneratedCommit($right))->toBeTrue()
-        ->and($left->matchesIgnoringGeneratedCommit(
-            new FingerprintLedger(1, LedgerRole::Template, fingerprintCommit('a'), $entries),
-        ))->toBeFalse();
-});
-
 // ---------------------------------------------------------------------------
 // 正準形バイト一致 (F1 の上積み) — 重複キー・整形の崩れを落とす
 // ---------------------------------------------------------------------------
@@ -215,7 +207,7 @@ test('正例: PathObservation が許容する 4 形はすべて構築できる',
         ->and($failed->state)->toBeNull();
 });
 
-test('負例: PathObservation が矛盾した組み合わせを例外にする', function (?ComparisonState $state, ?string $hash, ?string $failure): void {
+test('負例: PathObservation が矛盾した組み合わせ 7 形を例外にする', function (?ComparisonState $state, ?string $hash, ?string $failure): void {
     expect(fn (): PathObservation => new PathObservation($state, $hash, $failure))
         ->toThrow(InvalidArgumentException::class);
 })->with([
@@ -228,7 +220,7 @@ test('負例: PathObservation が矛盾した組み合わせを例外にする',
     '7: 検査不能の理由が空文字' => [null, null, ''],
 ]);
 
-test('負例: PathObservation がハッシュの書式違反を例外にする', function (): void {
+test('負例: PathObservation がハッシュの書式違反を例外にする (組み合わせとは別の軸)', function (): void {
     expect(fn (): PathObservation => new PathObservation(ComparisonState::Matched, 'DEADBEEF', null))
         ->toThrow(InvalidArgumentException::class);
 });
@@ -525,8 +517,234 @@ test('正例: ヘッダだけの一覧 (債務 0 件) は受理する (0 件は�
 });
 
 test('正例: 現物の採用時債務一覧が読めて件数の pin と一致する', function (): void {
+    if (LedgerPins::ADOPTION_DEBT_COUNT === 0) {
+        // 引退後は一覧ファイルが無いのが正しい (掃除の両方向は下の検査が固定する)
+        expect(is_file(base_path(AdoptionDebtInventory::INVENTORY_PATH)))->toBeFalse();
+
+        return;
+    }
+
     $parsed = AdoptionDebtInventory::read(base_path());
 
     expect($parsed['entries'])->toHaveCount(LedgerPins::ADOPTION_DEBT_COUNT)
         ->and($parsed['templateLedgerCommit'])->toBe(LedgerPins::TEMPLATE_LEDGER_SOURCE_COMMIT);
+});
+
+// ---------------------------------------------------------------------------
+// 債務の引退の掃除 (両方向) — 「0 件なら無条件で合格」を作らない
+// ---------------------------------------------------------------------------
+
+test('債務の引退の掃除を両方向で判定する (0 件を無条件で合格にしない)', function (
+    int $pinnedCount,
+    InventoryPresence $presence,
+    bool $isRegisteredAsTargetPath,
+    bool $entryExists,
+    bool $expectedClean,
+): void {
+    $violations = AdoptionDebtInventory::retirementViolations(
+        pinnedCount: $pinnedCount,
+        presence: $presence,
+        isRegisteredAsTargetPath: $isRegisteredAsTargetPath,
+        divergenceEntryExists: $entryExists,
+    );
+
+    expect($violations === [])->toBe($expectedClean, '違反: '.implode(' / ', $violations));
+})->with([
+    // pin が 1 件以上: 一覧が regular file として実在し、登録が存在し、対象パスに含む
+    '1 件以上・すべて揃っている → 合格' => [176, InventoryPresence::RegularFile, true, true, true],
+    '1 件以上・一覧のパスが無い → 違反' => [176, InventoryPresence::Absent, true, true, false],
+    '1 件以上・一覧が symlink → 違反' => [176, InventoryPresence::NonRegularFile, true, true, false],
+    '1 件以上・対象パスに含んでいない → 違反' => [176, InventoryPresence::RegularFile, false, true, false],
+    '1 件以上・登録と対象パスを一緒に消した → 違反' => [176, InventoryPresence::RegularFile, false, false, false],
+    // ★各項が単独で発火すること (対象パス側だけで通ってしまわないこと)
+    '1 件以上・対象パスはあるが登録が無い → 違反' => [176, InventoryPresence::RegularFile, true, false, false],
+    // pin が 0 件: 一覧のパスも対象パスも残っていてはならない (登録そのものは残る)
+    '0 件・掃除済み (一覧なし・対象パスなし・登録あり) → 合格' => [0, InventoryPresence::Absent, false, true, true],
+    '0 件・一覧ファイルが残っている → 違反' => [0, InventoryPresence::RegularFile, false, true, false],
+    '0 件・一覧が symlink として残っている → 違反' => [0, InventoryPresence::NonRegularFile, false, true, false],
+    '0 件・対象パスが残っている → 違反' => [0, InventoryPresence::Absent, true, true, false],
+    // ★登録ごと消すのは誤りである (機構が残るので説明は要る)
+    '0 件・登録ごと消してしまった → 違反' => [0, InventoryPresence::Absent, false, false, false],
+    '0 件・対象パスはあるが登録が無い → 違反' => [0, InventoryPresence::Absent, true, false, false],
+]);
+
+test('引退の掃除の違反は条件ごとに 1 件ずつ独立して出る', function (): void {
+    // 「登録が無い」だけ (対象パスは正しく外れている / 一覧も無い)
+    expect(AdoptionDebtInventory::retirementViolations(
+        pinnedCount: 0,
+        presence: InventoryPresence::Absent,
+        isRegisteredAsTargetPath: false,
+        divergenceEntryExists: false,
+    ))->toHaveCount(1);
+
+    // 「対象パスが残っている」だけ
+    expect(AdoptionDebtInventory::retirementViolations(
+        pinnedCount: 0,
+        presence: InventoryPresence::Absent,
+        isRegisteredAsTargetPath: true,
+        divergenceEntryExists: true,
+    ))->toHaveCount(1);
+
+    // 「一覧が残っている」だけ
+    expect(AdoptionDebtInventory::retirementViolations(
+        pinnedCount: 0,
+        presence: InventoryPresence::RegularFile,
+        isRegisteredAsTargetPath: false,
+        divergenceEntryExists: true,
+    ))->toHaveCount(1);
+
+    // 3 つ同時 (集約されて 3 件出る)
+    expect(AdoptionDebtInventory::retirementViolations(
+        pinnedCount: 0,
+        presence: InventoryPresence::RegularFile,
+        isRegisteredAsTargetPath: true,
+        divergenceEntryExists: false,
+    ))->toHaveCount(3);
+});
+
+test('負例: 債務の件数 pin が負なら例外にする', function (): void {
+    expect(fn (): array => AdoptionDebtInventory::retirementViolations(
+        pinnedCount: -1,
+        presence: InventoryPresence::RegularFile,
+        isRegisteredAsTargetPath: true,
+        divergenceEntryExists: true,
+    ))->toThrow(RuntimeException::class);
+});
+
+test('引退の掃除の違反は直し方まで告げる', function (): void {
+    $violations = AdoptionDebtInventory::retirementViolations(
+        pinnedCount: 0,
+        presence: InventoryPresence::RegularFile,
+        isRegisteredAsTargetPath: true,
+        divergenceEntryExists: true,
+    );
+
+    expect(implode("\n", $violations))->toContain(AdoptionDebtInventory::INVENTORY_PATH)
+        ->and(implode("\n", $violations))->toContain('登録そのものは一覧クラスの説明として残す');
+});
+
+// ---------------------------------------------------------------------------
+// InventoryPresence — ファイルシステムから 3 値への写像 (矛盾を型で消す)
+// ---------------------------------------------------------------------------
+
+test('InventoryPresence はパスの在り方を 3 値へ写す', function (string $kind, InventoryPresence $expected): void {
+    $dir = sys_get_temp_dir().'/t236-presence-'.bin2hex(random_bytes(6));
+    mkdir($dir, 0o777, true);
+
+    $path = match ($kind) {
+        'regular' => (function () use ($dir): string {
+            $p = $dir.'/plain.tsv';
+            file_put_contents($p, "x\n");
+
+            return $p;
+        })(),
+        'symlink' => (function () use ($dir): string {
+            $real = $dir.'/real.tsv';
+            file_put_contents($real, "x\n");
+            $link = $dir.'/link.tsv';
+            symlink($real, $link);
+
+            return $link;
+        })(),
+        'broken-symlink' => (function () use ($dir): string {
+            $link = $dir.'/broken.tsv';
+            symlink($dir.'/absent.tsv', $link);
+
+            return $link;
+        })(),
+        'directory' => $dir,
+        'absent' => $dir.'/absent.tsv',
+    };
+
+    expect(InventoryPresence::fromPath($path))->toBe($expected);
+})->with([
+    '通常ファイル' => ['regular', InventoryPresence::RegularFile],
+    'symlink は残置扱い' => ['symlink', InventoryPresence::NonRegularFile],
+    '壊れた symlink も残置扱い' => ['broken-symlink', InventoryPresence::NonRegularFile],
+    'ディレクトリも残置扱い' => ['directory', InventoryPresence::NonRegularFile],
+    '不在' => ['absent', InventoryPresence::Absent],
+]);
+
+test('InventoryPresence::exists() は不在だけを false にする', function (): void {
+    expect(InventoryPresence::Absent->exists())->toBeFalse()
+        ->and(InventoryPresence::RegularFile->exists())->toBeTrue()
+        ->and(InventoryPresence::NonRegularFile->exists())->toBeTrue();
+});
+
+// ---------------------------------------------------------------------------
+// RegularFileReader — symlink 拒否の負例と正例 (走査条件を変えたので (c) の対象)
+// ---------------------------------------------------------------------------
+
+test('正例: RegularFileReader は通常ファイルの中身をそのまま返す', function (): void {
+    $dir = sys_get_temp_dir().'/t236-reader-'.bin2hex(random_bytes(6));
+    mkdir($dir, 0o777, true);
+    $path = $dir.'/plain.txt';
+    file_put_contents($path, "abc\n");
+
+    expect(RegularFileReader::read($path, '検体'))->toBe("abc\n");
+});
+
+test('負例: RegularFileReader が symlink・ディレクトリ・不在を例外にする', function (string $kind): void {
+    $dir = sys_get_temp_dir().'/t236-reader-'.bin2hex(random_bytes(6));
+    mkdir($dir, 0o777, true);
+
+    $path = match ($kind) {
+        'symlink' => (function () use ($dir): string {
+            $real = $dir.'/real.txt';
+            file_put_contents($real, "abc\n");
+            $link = $dir.'/link.txt';
+            symlink($real, $link);
+
+            return $link;
+        })(),
+        'broken-symlink' => (function () use ($dir): string {
+            $link = $dir.'/broken.txt';
+            symlink($dir.'/does-not-exist.txt', $link);
+
+            return $link;
+        })(),
+        'directory' => $dir,
+        'missing' => $dir.'/absent.txt',
+    };
+
+    expect(fn (): string => RegularFileReader::read($path, '検体'))->toThrow(RuntimeException::class);
+})->with(['symlink', 'broken-symlink', 'directory', 'missing']);
+
+test('負例: RegularFileReader は regular file の判定を通った後の読み取り失敗も例外にする', function (): void {
+    // symlink / 不在 は手前の分岐で落ちるので、この最後の分岐は読み取り器を注入しないと通れない
+    $dir = sys_get_temp_dir().'/t236-reader-'.bin2hex(random_bytes(6));
+    mkdir($dir, 0o777, true);
+    $path = $dir.'/plain.txt';
+    file_put_contents($path, "abc\n");
+
+    expect(fn (): string => RegularFileReader::read(
+        $path,
+        '検体',
+        static fn (string $p): string|false => false,
+    ))->toThrow(RuntimeException::class);
+});
+
+test('正例: RegularFileReader は注入された読み取り器の結果をそのまま返す', function (): void {
+    $dir = sys_get_temp_dir().'/t236-reader-'.bin2hex(random_bytes(6));
+    mkdir($dir, 0o777, true);
+    $path = $dir.'/plain.txt';
+    file_put_contents($path, "on-disk\n");
+
+    expect(RegularFileReader::read($path, '検体', static fn (string $p): string|false => "injected\n"))
+        ->toBe("injected\n");
+});
+
+test('負例: 指紋台帳が symlink なら読み取り口が拒否する (母集合の差し替えを塞ぐ)', function (): void {
+    // 現物を差し替えずに検出力を裏取りする: 実ファイルへのリンクを一時ディレクトリへ作り、
+    // 「中身は読めるがリンクである」入力が拒否されることを見る。
+    $dir = sys_get_temp_dir().'/t236-ledger-link-'.bin2hex(random_bytes(6));
+    mkdir($dir, 0o777, true);
+    $link = $dir.'/template-fingerprints.json';
+    symlink(base_path(LedgerPins::FINGERPRINT_LEDGER_PATH), $link);
+
+    // リンク先は正当な指紋台帳なので、素の file_get_contents なら通ってしまう
+    expect(FingerprintLedger::fromJson((string) file_get_contents($link))->role)->toBe(LedgerRole::App);
+
+    // 読み取り口は拒否する
+    expect(fn (): string => RegularFileReader::read($link, '指紋台帳'))->toThrow(RuntimeException::class);
 });

@@ -12,10 +12,10 @@ use stdClass;
  * 指紋台帳 `docs/template-fingerprints.json` の DTO と直列化。
  *
  * 解釈不能はすべて例外 (正典の boundary (5c)「検査自体が実行不能なら fail」)。
- * `generated_at_commit` は情報フィールドであり **鮮度比較では比較しない** —
- * 生成コミット自身を比較に含めると「生成時点で未存在の commit」を要求する循環になる。
+ * `generated_at_commit` は出自を示す情報フィールドであり、利用側 (突合 gate の F5) は
+ * pin との一致だけを見る。
  *
- * 正典 (laravel-claude-template) からの移植で、差は 2 点だけである
+ * 正典 (laravel-claude-template) からの移植で、差は 3 点だけである
  * (`docs/template-divergence.md` D33 に登録済み):
  *  1. キーの書式判定を `SharedPathRules::isValidRepoRelativePath()` から
  *     `RepoRelativePath::isValid()` へ差し替えた (規則表を持ち込まないため)
@@ -23,6 +23,9 @@ use stdClass;
  *     `{"entries": []}` のような**空配列と空 object の混同を受理してしまう**。
  *     本リポジトリは突合 gate が「entries が object であること」を負例で固定するので、
  *     両者を型で区別できる object 形にした (過剰検出寄りへの上積み)
+ *  3. 鮮度比較 (`matchesIgnoringGeneratedCommit()`) を持たない。あれは提供元側が
+ *     「指紋台帳が古くなっていないか」を見るためのもので、受け手側には呼び出し元が無い
+ *     (思考原則 2 = 今必要なものだけ作る)
  *
  * **重複キーは本クラスでは検出できない** (`json_decode` が後勝ちで潰すため)。
  * 検出は利用側が**正準形バイト一致** (`$raw === self::fromJson($raw)->toJson()`) を
@@ -137,15 +140,5 @@ final readonly class FingerprintLedger
             'generated_at_commit' => $this->generatedAtCommit,
             'entries' => (object) $entries,
         ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)."\n";
-    }
-
-    /**
-     * 鮮度比較。`generated_at_commit` は比較しない (循環回避)。
-     */
-    public function matchesIgnoringGeneratedCommit(self $other): bool
-    {
-        return $this->schemaVersion === $other->schemaVersion
-            && $this->role === $other->role
-            && $this->entries === $other->entries;
     }
 }

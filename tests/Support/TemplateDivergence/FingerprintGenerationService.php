@@ -24,12 +24,41 @@ use RuntimeException;
  * ★**`AtomicLedgerWriter::replace()` の戻り値を無視しない**。非 null は即座に例外にする
  *   (戻り値を無視すると fail-open になる)。この配線は単体テストが固定する。
  *
+ * ★**引退 (債務 0 件) は安定状態である**。債務が 0 件になったら一覧を書かず、
+ *   既存の一覧ファイルを取り除く。「ヘッダだけの一覧」を書き続けると、台帳を更新するたびに
+ *   一覧が再作成されて突合 gate が赤くなり、引退が安定しない。
+ *   逆に新しい債務が生じれば一覧は再作成される (そのときは件数 pin と登録の対象パスを戻す)。
+ *
  * 終了コードの写像は例外の型で決まる: `GenerationRefused` = 3 / `RuntimeException` = 1。
  */
 final class FingerprintGenerationService
 {
     /** インスタンス化しない (純関数のみ)。 */
     private function __construct() {}
+
+    /**
+     * 既存のアプリ側指紋台帳の role を検査する (CLI の role ガードの判定本体)。
+     *
+     * ★これが**最も現実的な無効化経路**である。赤い CI を消すために受け手側で
+     *   正典側の生成器を善意で走らせると、逸脱検出そのものが消える。
+     *   `role: template` の台帳を持っているのは「提供元の生成器を回している」証拠なので拒否する。
+     * ★判定を CLI の本文へ直書きせず本メソッドへ置くのは、**両方向を負例で裏取りできる形**に
+     *   するためである (CLI とテストが同じ処理を呼ぶ)。
+     *
+     * @throws GenerationRefused role が app でないとき (終了コード 3 へ写る)
+     */
+    public static function assertAppLedgerRole(FingerprintLedger $ledger): void
+    {
+        if ($ledger->role === LedgerRole::App) {
+            return;
+        }
+
+        throw new GenerationRefused(
+            '既存の指紋台帳の role が app でない ('.$ledger->role->value.')。'
+                .'本リポジトリはテンプレートの受け手なので、正典側の生成器を走らせてはならない。'
+                .'共有ファイルを変えたのなら docs/template-divergence.md へ逸脱を登録すること。',
+        );
+    }
 
     /**
      * @param  string  $templateLedgerRaw  入力の正典台帳の**生バイト列**
@@ -43,6 +72,8 @@ final class FingerprintGenerationService
      * @param  callable(string): (string|false)  $reader
      * @param  callable(string, string): bool  $renamer
      * @param  callable(string): bool  $remover
+     * @param  (callable(string): InventoryPresence)|null  $presenceResolver  一覧のパスの在り方の解決
+     *                                                                        (既定は `InventoryPresence::fromPath()`。注入できるのは削除経路の負例を書くためである)
      * @return array{
      *     populationCount: int,
      *     adoptionDebtCount: int,
@@ -53,6 +84,9 @@ final class FingerprintGenerationService
      *     addedDebt: list<string>,
      *     templateLedgerCommit: string,
      *     seeded: bool,
+     *     retired: bool,
+     *     newlyRetired: bool,
+     *     debtInventoryRemoved: bool,
      * }
      *
      * @throws GenerationRefused ガードによる拒否 (終了コード 3)
@@ -71,7 +105,10 @@ final class FingerprintGenerationService
         callable $reader,
         callable $renamer,
         callable $remover,
+        ?callable $presenceResolver = null,
     ): array {
+        $presenceResolver ??= static fn (string $path): InventoryPresence => InventoryPresence::fromPath($path);
+
         // --- 入力の出自 (pin との一致) ---
         $actualSha256 = hash('sha256', $templateLedgerRaw);
         if ($actualSha256 !== $context->expectedTemplateLedgerSha256 && ! $context->adoptNewTemplateLedger) {
@@ -96,6 +133,32 @@ final class FingerprintGenerationService
         }
         if ($trackedPaths === []) {
             throw new RuntimeException('git 追跡ファイルが 0 件と算出された (実行不能として落とす)');
+        }
+
+        // --- 初回生成 (採用) のガード ---
+        // 「前世代の台帳が無い」を初回とみなすと、**指紋台帳を working tree から消すだけで
+        // 採用をやり直せる** (未登録の相違を債務へ再基準化できる) 経路が開く。
+        // 本当の導入時は出力先がまだ git 追跡下に無いので、その 3 条件で初回を識別する。
+        if ($context->previousLedger === null) {
+            $tracked = array_fill_keys($trackedPaths, true);
+            $blockers = [];
+            if (array_key_exists(LedgerPins::FINGERPRINT_LEDGER_PATH, $tracked)) {
+                $blockers[] = LedgerPins::FINGERPRINT_LEDGER_PATH.' は既に git 追跡下にある';
+            }
+            if (array_key_exists(AdoptionDebtInventory::INVENTORY_PATH, $tracked)) {
+                $blockers[] = AdoptionDebtInventory::INVENTORY_PATH.' は既に git 追跡下にある';
+            }
+            if ($existingDebt !== []) {
+                $blockers[] = '既存の採用時債務が '.count($existingDebt).' 件ある';
+            }
+
+            if ($blockers !== []) {
+                throw new GenerationRefused(
+                    '初回生成 (採用) をやり直せない: '.implode(' / ', $blockers).'。'
+                        .'出力先が追跡済みなのに読めないのは「初回」ではなく削除・検査不能である。'
+                        .'指紋台帳を復元してから再実行すること。',
+                );
+            }
         }
 
         // --- 母集合の縮小の拒否 (同じ正典入力のまま狭めさせない) ---
@@ -147,18 +210,51 @@ final class FingerprintGenerationService
             throw new RuntimeException('指紋台帳を置換できない: '.$reason);
         }
 
-        AtomicTextWriter::replace(
-            $context->debtOutputPath,
-            $debtContents,
-            static fn (): string|false => $tempPathFactory($context->debtOutputPath),
-            $writer,
-            $reader,
-            $renamer,
-            $remover,
-            static function (string $contents): void {
-                AdoptionDebtInventory::parse($contents);
-            },
-        );
+        // 引退は**安定状態**でなければならない。債務が 0 件のとき「ヘッダだけの一覧」を書くと、
+        // 台帳を更新するたびに一覧が再作成されて突合 gate が赤くなる。
+        // 正しい生成物の状態は「0 件の一覧」ではなく**一覧が無い**ことなので、
+        // 既存の一覧ファイルがあれば取り除く。
+        //
+        // ★**読み取り結果を存在判定に使わない**。production の読み取り器は
+        //   `is_file()` が false なら false を返すので、壊れた symlink・ディレクトリ・
+        //   読み取り不能な通常ファイルをすべて「不在」と誤認する (= 残置を成功扱いにする)。
+        //   在り方は `InventoryPresence` で見て、削除後に**もう一度取り直して確かめる**。
+        $debtInventoryRemoved = false;
+        if ($built['debt'] === []) {
+            $presence = $presenceResolver($context->debtOutputPath);
+
+            if ($presence->exists()) {
+                if (! $remover($context->debtOutputPath)) {
+                    throw new RuntimeException(
+                        '債務が 0 件になったが採用時債務一覧を取り除けない: '.$context->debtOutputPath,
+                    );
+                }
+                $debtInventoryRemoved = true;
+            }
+
+            // 削除後の再検査 (削除器が真を返しても実際には残っている形がある)
+            $after = $presenceResolver($context->debtOutputPath);
+            if ($after !== InventoryPresence::Absent) {
+                throw new RuntimeException(sprintf(
+                    '債務が 0 件になったが採用時債務一覧のパスが残っている (%s): %s',
+                    $after->name,
+                    $context->debtOutputPath,
+                ));
+            }
+        } else {
+            AtomicTextWriter::replace(
+                $context->debtOutputPath,
+                $debtContents,
+                static fn (): string|false => $tempPathFactory($context->debtOutputPath),
+                $writer,
+                $reader,
+                $renamer,
+                $remover,
+                static function (string $contents): void {
+                    AdoptionDebtInventory::parse($contents);
+                },
+            );
+        }
 
         return [
             'populationCount' => count($built['ledger']->entries),
@@ -170,6 +266,11 @@ final class FingerprintGenerationService
             'addedDebt' => $built['addedDebt'],
             'templateLedgerCommit' => $templateLedger->generatedAtCommit,
             'seeded' => $built['seeded'],
+            // retired = 生成結果が 0 件 / newlyRetired = 非空から 0 件へ遷移した /
+            // debtInventoryRemoved = 今回実際にパスを削除した (3 つは別の事実である)
+            'retired' => $built['debt'] === [],
+            'newlyRetired' => $built['debt'] === [] && $existingDebt !== [],
+            'debtInventoryRemoved' => $debtInventoryRemoved,
         ];
     }
 }
