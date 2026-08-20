@@ -2884,14 +2884,63 @@ App\Support\Llm\GuardedPrompt                 ← 実行単位は既存と同じ
   `pnpm typecheck` の対象から外す)、PHP は**テスト内の文字列** (`.php` として置くと
   strict_types 宣言 gate / 禁止文の字句走査 / Pint / PHPStan の母集団に入るため)。
 
-### 保証しないもの (誇張しない)
+## 発見の段と逆走査 (T225 / 家系の裁定 AG-099 後半)
 
-- **登録していない写しは 1 件も検査していない**。全数走査による既定拒否の分類と
-  逆走査 2 規則は裁定 AG-099 の後半の担当で、本 gate には無い
-  (`docs/template-divergence.md` **D29**)。現在意図的に登録していないのは
-  `types/manual.ts::SelectableTakeStatus` (部分集合の意図) /
-  `types/dashboard.ts::DashboardJobStatus` (`JobStatus` の真部分集合) /
-  `types/capture.ts::CaptureProgress` ほか画面側だけの語彙 (対応する PHP 列挙が無い) である。
+`enum-ts-sync.test.ts` は目録に登録した写しだけを見る (未登録は沈黙する)。この欠落を
+`tests/js/architecture/enum-ts-sync-discovery.test.ts` が向きを変えて埋める
+(`docs/template-divergence.md` の D29 はこの実装で再判定条件を満たし、登録を削除した)。
+
+- **発見の段 (全数走査 → 既定拒否の分類)**: `buildPhpEnumCatalog()`
+  (`tests/js/support/enum-ts-sync/php-enum-catalog.ts`) が `app/` 配下の git 追跡下の
+  `*.php` を全数走査する。抽出器は既存の `readPhpEnumValuesFromText` が使う字句走査器を
+  `detectEnumHeaders` として共有し (**2 本目の抽出器を作らない**)、値集合を読めたもの
+  (`resolved`) と読めなかったもの (`unresolvable`) に分ける。`resolved` の**すべて**が
+  「登録済み (`ENUM_TS_MIRRORS`)」か「対象外の理由つき (`PHP_ENUM_EXEMPTIONS`。理由は
+  30 文字以上)」のどちらか一方に分類されていることを固定する。`unresolvable` の
+  **すべて**が `KNOWN_UNRESOLVABLE_PHP_ENUMS` に登録されていることを固定する。
+  どの分類にも入らない PHP 列挙が 1 件でもあれば赤くする (既定拒否)。登録先が実態と
+  食い違った (stale) ときも赤くする。
+  - `scan()` が拒否する字句 (バッククォート・ヒアドキュメント等) を含むファイルは、
+    生のソースに **`enum` の語が無ければ**母集団から外し、**あれば**
+    (直後の並びを問わず。コメントを挟む書き方・非 ASCII 識別子も見逃さない)
+    安全側に倒して `unresolvable` へ回す (取りこぼしを作らない側に倒す。実測では
+    ヒアドキュメントを持ちつつ docblock で「enum」に言及するだけの
+    `app/Mcp/Servers/AppMcpServer.php` がここで意図した過剰検出になる)。
+  - **波括弧付き namespace 宣言** (`namespace Foo { … }`。無名・大文字小文字・
+    コメントの割り込みを問わない) の中は `enum` 宣言の波括弧の深さが 1 になり、
+    「深さ 0」の前提が崩れる。**個別の namespace 構文を正規表現で当てるのではなく**、
+    `detectEnumHeaders` が返す**深さ付きの enum 候補**を見て、**深さ 0 でない候補が
+    1 件でも混ざっていれば**安全側で `unresolvable` へ回す (深さ 0 の候補だけを拾って
+    残りを黙って捨てると、同じファイルの別の深さ 0 enum の影に隠れて消えてしまう。
+    どんな書き方で深さがずれても同じ 1 つの判定で拾える。本リポジトリは波括弧無しの
+    namespace 宣言 (`namespace Foo;`) だけを使っており、現時点で該当ファイルは 0 件)。
+- **逆走査 (未登録候補の検出。2 規則)**: `collectTsUnionCandidates()`
+  (`tests/js/support/enum-ts-sync/ts-candidates.ts`) が `resources/js/` 配下の
+  文字列リテラル型だけの union に解決するトップレベルの型別名を全数走査する。
+  母集団は `tsconfig.json` の `include` (`resources/js/**` 配下の `*.ts`) が実際に
+  決めるが、**それだけを出典とは言わない** — `resources/js/` をプログラムを介さず
+  直接再帰的に歩いた `*.ts` (`.d.ts` を除く) の集合と、program に載った集合が
+  **完全一致すること**を独立実装の回帰テストで固定しており、この一致こそが
+  「登録済みファイルの import グラフに閉じない・tsconfig の `exclude` が
+  意図せず広がっていない」という不変条件の実体である
+  (`createMirrorProgram` の rootNames が tsconfig の全ファイルを含むことにも依存しない)。
+  走査対象ファイルの構文が壊れているときは無言で読み飛ばさず例外にする (fail-closed)。
+  `findUnregisteredMirrorCandidates()` (`tests/js/support/enum-ts-sync/reverse-sweep.ts`)
+  が未登録の宣言を PHP の母集団 (`resolved`。分類にかかわらず全件) と突き合わせる。
+  - **規則 1 (完全一致)**: 値集合が PHP 列挙と完全一致する未登録の宣言 = 登録漏れの疑い。
+  - **規則 2 (名前対応 + 値の交差)**: 名前が厳密に対応し (大文字小文字の違いを除く
+    一致 / `+s` / `+es` / `+values`。**英数字以外を除去する正規化はしない**。
+    `Foo_Bar` と `FooBar` を同一視すると要件より緩くなるため) 値が交差するが
+    完全一致ではない未登録の宣言 = 片方だけ値を足してズレた写しの疑い。
+    緩い名前対応 (部分集合・ファイル名を名前に混ぜる形) は採らない
+    (家系の実測で偽陽性が支配的になったため)。判定は `ResolvedPhpEnum.name`
+    (抽出器が読んだ enum 宣言の名前) を使い、ファイル名の語幹からの再計算はしない。
+  - 見つかった候補は `REVERSE_SWEEP_EXEMPTIONS`
+    (`php` + `file` + `declaration` + `rule` の組で固定) に登録された分だけ許す。
+    未登録の候補が 1 件でもあれば赤くする。登録先が実態と食い違ったときも赤くする。
+
+### 保証しないもの (誇張しない。発見の段・逆走査を含む)
+
 - **値の集合だけを見る**。表示ラベル・並び順・意味は見ない。
 - **部分集合の関係は表現できない** (完全一致だけ)。
 - `.svelte` の中の宣言・定数配列 (`as const` の配列)・`switch` の case ラベルは読まない。
@@ -2906,6 +2955,15 @@ App\Support\Llm\GuardedPrompt                 ← 実行単位は既存と同じ
 - **レーンの非対称**: 値集合の同期は `pnpm test` (CI の frontend job) でだけ走る。
   PHP としての妥当性は backend job (`composer test` / PHPStan)。
   **`composer test` だけでは値集合の同期は検証されない**。
+- **逆走査は「登録漏れが無いことの証明」ではない**。名前も対応せず値も完全一致しない
+  drift 済みの写しは検出できない (2 規則それぞれの意図した限界)。
+- `collectTsUnionCandidates` は `resources/js/` 配下の `type X = …` という
+  トップレベル宣言だけを見る。`.svelte` の中の宣言・定数配列・switch の case ラベルは
+  逆走査の対象にもならない。**`.d.ts` (宣言ファイル) も対象外**である。
+  母集団は `tsconfig.json` の `include`/`exclude` が実際に決めるが、それだけを出典とは
+  言わない — `resources/js/` を直接歩いた `*.ts` (`.d.ts` を除く) の集合と program に
+  載った集合が完全一致することを独立実装の回帰テストで固定しており、目録に登録済みの
+  ファイルから import されるかどうかにも `tsconfig` の設定だけにも依存しない。
 
 ## キャッシュ素データ規約の 2 層 (T228 / 家系の裁定 AG-151 = 正典 v2)
 

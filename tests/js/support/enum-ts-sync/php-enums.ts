@@ -202,6 +202,58 @@ const CASE_SINGLE = /^case[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*'([^'\\\r\n
 /** 受理する case の書き方 (二重引用符。変数の埋め込みを拒むため `$` も除く)。 */
 const CASE_DOUBLE = /^case[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*"([^"\\$\r\n]*)"[ \t]*;$/i;
 
+/** コード状態にある enum 宣言の頭 1 件分。 */
+export interface EnumHeader {
+    /** `enum` の直後に書かれた名前。 */
+    readonly name: string;
+    /** `:` の後ろの backing 型 (無ければ `undefined`)。 */
+    readonly backing: string | undefined;
+    /** 宣言の頭の開始位置 (無害化した写し上のオフセット)。 */
+    readonly offset: number;
+    /** 宣言の頭 (`enum Name: backing` の部分) の文字数。 */
+    readonly headerLength: number;
+    /** 波括弧の深さ。**0 でない値も返す** (深さ 0 だけに絞るのは呼び出し側の責務)。 */
+    readonly depth: number;
+}
+
+/**
+ * `scan()` の結果から、コード状態にある enum 宣言の頭を**深さ・件数を問わず**列挙する。
+ * `readPhpEnumValuesFromText` (深さ 0 でちょうど 1 件・string backing を要求) と
+ * `php-enum-catalog.ts` (全数走査。深さも件数も問わず候補として拾う) の両方から使う
+ * 共通の入口であり、2 本目の字句走査器を作らないための分割である。
+ *
+ * **深さでフィルタしない理由**: 波括弧付き namespace 宣言 (`namespace Foo { … }`) の中は
+ * enum 宣言が深さ 1 になる。ここでフィルタしてしまうと、そのような enum が
+ * 「見つからなかった」のか「対象外の深さにあった」のか呼び出し側から区別できず、
+ * 発見の段が静かに見逃す (fail-open になる)。呼び出し側が深さを見て判断する。
+ */
+const scanEnumHeaders = ({ sanitized, isCode, depth }: ScanResult, where: string): readonly EnumHeader[] => {
+    const headers: EnumHeader[] = [];
+    const enumToken = enumTokenRe();
+    for (let m = enumToken.exec(sanitized); m !== null; m = enumToken.exec(sanitized)) {
+        if (isCode[m.index] !== 1) continue;
+        const header = ENUM_HEADER.exec(sanitized.slice(m.index));
+        if (header === null) throw new EnumTsSyncError(where, "enum 宣言の頭を読めません");
+        headers.push({
+            name: header[1],
+            backing: header[2],
+            offset: m.index,
+            headerLength: header[0].length,
+            depth: depth[m.index],
+        });
+    }
+    return headers;
+};
+
+/**
+ * enum 宣言の頭を深さ・件数を問わず読む (母集団の全数走査専用)。
+ * `readPhpEnumValuesFromText` と同じ `scan()` を使うので、抽出器が 2 本に分岐しない。
+ */
+export const detectEnumHeaders = (source: string, fileName: string): readonly EnumHeader[] => {
+    const { sanitized, isCode, depth } = scan(source, fileName);
+    return scanEnumHeaders({ sanitized, isCode, depth }, fileName);
+};
+
 /**
  * PHP の文字列付き列挙の値集合を読む (本体)。
  *
@@ -216,24 +268,17 @@ export const readPhpEnumValuesFromText = (source: string, fileName: string): Rea
     }
     const stem = base.slice(0, -".php".length);
 
-    const { sanitized, isCode, depth } = scan(source, where);
+    const scanResult = scan(source, where);
+    const { sanitized, isCode, depth } = scanResult;
 
     // 1. 深さ 0 の enum 宣言がちょうど 1 つ
-    const enumOffsets: number[] = [];
-    const enumToken = enumTokenRe();
-    for (let m = enumToken.exec(sanitized); m !== null; m = enumToken.exec(sanitized)) {
-        if (isCode[m.index] === 1 && depth[m.index] === 0) enumOffsets.push(m.index);
-    }
-    if (enumOffsets.length === 0) throw new EnumTsSyncError(where, "enum 宣言が見つかりません");
-    if (enumOffsets.length > 1) {
-        throw new EnumTsSyncError(where, `enum 宣言が ${enumOffsets.length} 件あります`);
+    const headers = scanEnumHeaders(scanResult, where).filter((header) => header.depth === 0);
+    if (headers.length === 0) throw new EnumTsSyncError(where, "enum 宣言が見つかりません");
+    if (headers.length > 1) {
+        throw new EnumTsSyncError(where, `enum 宣言が ${headers.length} 件あります`);
     }
 
-    const headerOffset = enumOffsets[0];
-    const header = ENUM_HEADER.exec(sanitized.slice(headerOffset));
-    if (header === null) throw new EnumTsSyncError(where, "enum 宣言の頭を読めません");
-    const enumName = header[1];
-    const backing = header[2];
+    const { name: enumName, backing, offset: headerOffset, headerLength } = headers[0];
     if (backing === undefined) {
         throw new EnumTsSyncError(where, "backing 型がありません (string 付きの列挙だけを受理します)");
     }
@@ -248,7 +293,7 @@ export const readPhpEnumValuesFromText = (source: string, fileName: string): Rea
 
     // 3. 本体の範囲を取る
     let bodyStart = -1;
-    for (let i = headerOffset + header[0].length; i < sanitized.length; i += 1) {
+    for (let i = headerOffset + headerLength; i < sanitized.length; i += 1) {
         if (isCode[i] === 1 && sanitized[i] === "{") {
             bodyStart = i;
             break;
