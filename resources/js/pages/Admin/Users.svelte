@@ -55,12 +55,17 @@
         { value: "organization_member", label: "メンバー" },
     ];
 
-    /** ロール select の選択肢 (遷移コマンド 3 値。owner は enum 外 = 構造的に指定不可) */
-    const ROLE_OPTIONS: { value: ConsoleRole; label: string }[] = [
+    /**
+     * ロール select の選択肢 (遷移コマンド 3 値。owner は enum 外 = 構造的に指定不可)。
+     * hasDefaultProject が false のとき、編集者・撮影者は選べても割り当てはできない
+     * (サーバが validation で拒否)。禁止事項 8 に従い disabled にはせず、選択地点で
+     * 制約を可視化する注記サフィックスを付ける。管理者は無条件に選べるため付けない。
+     */
+    const roleOptions = $derived<{ value: ConsoleRole; label: string }[]>([
         { value: "admin", label: "管理者" },
-        { value: "editor", label: "編集者" },
-        { value: "shooter", label: "撮影者" },
-    ];
+        { value: "editor", label: hasDefaultProject ? "編集者" : "編集者（要プロジェクト）" },
+        { value: "shooter", label: hasDefaultProject ? "撮影者" : "撮影者（要プロジェクト）" },
+    ]);
 
     /** ロール select を出す行か (owner 行・自分の行はテキスト表示 = 現行 Settings と同じ流儀) */
     function canChangeRole(member: MemberRow): boolean {
@@ -353,7 +358,7 @@
                                                 {#if member.roleState === "unassigned"}
                                                     <option value="">未割当（選択してください）</option>
                                                 {/if}
-                                                {#each ROLE_OPTIONS as option (option.value)}
+                                                {#each roleOptions as option (option.value)}
                                                     <option value={option.value}>{option.label}</option>
                                                 {/each}
                                             </Select>

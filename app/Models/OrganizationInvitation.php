@@ -15,6 +15,7 @@ use ParagonIE\CipherSweet\BlindIndex;
 use ParagonIE\CipherSweet\EncryptedRow;
 use Spatie\LaravelCipherSweet\Concerns\UsesCipherSweet;
 use Spatie\LaravelCipherSweet\Contracts\CipherSweetEncrypted;
+use Webmozart\Assert\Assert;
 
 /**
  * 組織招待。token は平文を保存せず sha256 ハッシュ (token_hash) のみ。
@@ -118,6 +119,34 @@ class OrganizationInvitation extends Model implements CipherSweetEncrypted
     public function isRevoked(): bool
     {
         return $this->revoked_at !== null;
+    }
+
+    /**
+     * この招待が指定 email 宛かを判定する (**復号後インメモリ宛先比較の単一出典**)。
+     *
+     * email 同一性規則は scopeActivePendingForEmail (上の docblock) と同じ
+     * 「CipherSweet 復号後平文の大文字小文字を区別する厳密一致」である。正規化 (lowercase / trim) は
+     * 意図的に行わない (大小差は fail-secure に不一致へ倒す)。
+     *
+     * 保証範囲は「復号後インメモリ宛先比較の単一出典」であって「email 同一性規則すべての単一実装」では
+     * ない。受信者スコープ (scopeActivePendingForEmail) は blind index による DB 検索であり別レイヤ。
+     * 両者は同じ意図 (大小区別の厳密一致) で書かれているが、本 predicate を直接は使わない。
+     */
+    public function isAddressedToEmail(string $email): bool
+    {
+        $invited = $this->email; // CipherSweet 復号後。model に @property 注釈が無く PHPStan L10 は mixed と見る
+        Assert::string($invited);
+
+        return $invited === $email;
+    }
+
+    /** User 宛判定の薄いラッパ (呼び出し側の可読性。規則は isAddressedToEmail に集約)。 */
+    public function isAddressedTo(User $user): bool
+    {
+        $email = $user->email;
+        Assert::string($email);
+
+        return $this->isAddressedToEmail($email);
     }
 
     /**

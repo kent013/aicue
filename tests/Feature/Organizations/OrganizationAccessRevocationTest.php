@@ -256,7 +256,8 @@ test('プロジェクト側の割当だけが変わり組織ロールが同値�
 
 test('招待受諾 (組織に入れる操作) では失効しない', function (): void {
     [$organization, $owner] = createOrganizationWithOwner('招待組織');
-    $invitee = User::factory()->create();
+    // 受諾には宛先 email との一致が要る (F-2-02) ため受諾者 email を招待宛先に揃える
+    $invitee = User::factory()->create(['email' => 'invitee@example.test']);
 
     $invitation = app(OrganizationMembershipService::class)
         ->inviteMember($organization, $owner, 'invitee@example.test', OrganizationRole::Member);

@@ -109,9 +109,13 @@ class OrganizationMembershipService
     }
 
     /**
-     * 招待受諾。ログイン中ユーザーが受諾する (招待 email と user の email の一致は要求しない)。
+     * 招待受諾。ログイン中ユーザーが受諾する。
+     * **受諾者の email は招待の宛先 email と一致しなければならない**。register 経路
+     * (acceptInvitationIfValid) / アプリ内受諾 (acceptPendingInvitation) と同じ email 境界を
+     * token POST 経路にも適用する。email 同一性規則は acceptInvitationIfValid と同一
+     * (CipherSweet 復号後平文の厳密比較)。最終権威は joinOrganization のロック下再照合。
      *
-     * @throws ValidationException token 不正 / 取り消し済み / 失効 / 受諾済み / 既メンバー
+     * @throws ValidationException token 不正 / 取り消し済み / 失効 / 受諾済み / 宛先 email 不一致 / 既メンバー
      */
     public function acceptInvitation(string $plainToken, User $user): Organization
     {
@@ -128,6 +132,15 @@ class OrganizationMembershipService
         }
         if ($invitation->isExpired()) {
             throw ValidationException::withMessages(['token' => ['この招待は有効期限が切れています。']]);
+        }
+
+        // 宛先 email の早期照合 (UX 用の明示メッセージ + 高速拒否)。生存判定 (取消/受諾済/失効) の後・
+        // 既メンバー判定の前に置き、どの分岐も join より前 = 状態を一切変えずに拒否する。
+        // 権威はロック下再照合 (joinOrganization) 側で、規則は OrganizationInvitation::isAddressedTo に集約。
+        if (! $invitation->isAddressedTo($user)) {
+            throw ValidationException::withMessages([
+                'token' => ['この招待は別のメールアドレス宛に送信されています。招待先のメールアドレスでログインし直してください。'],
+            ]);
         }
 
         $organization = $invitation->organization;
@@ -176,7 +189,8 @@ class OrganizationMembershipService
         }
 
         // 招待 email と登録 email が一致しない場合は join しない
-        if ($invitation->email !== $user->email) {
+        // (email 同一性規則は OrganizationInvitation::isAddressedTo に集約)
+        if (! $invitation->isAddressedTo($user)) {
             return null;
         }
 
@@ -415,6 +429,19 @@ class OrganizationMembershipService
             $locked = OrganizationInvitation::query()->whereKey($invitation->id)->lockForUpdate()->firstOrFail();
             if ($locked->isAccepted() || $locked->isRevoked() || $locked->isExpired()) {
                 return false; // 期限境界の TOCTOU も含めロック下で完全再検証 (敗者は受諾不能)
+            }
+
+            // 1b. 宛先 email のロック下再照合 (最終権威。受諾中の email 変更 TOCTOU / stale user を封じる)。
+            //     ロック**読み**した User インスタンスで照合する ($user->fresh() は非ロック SELECT で
+            //     MVCC スナップショット版を返しうるため使わない)。users 行は lockForMembershipWrite が
+            //     canonical 順序で既にロック済みのため、同一行の lockForUpdate 再取得は no-op re-acquire
+            //     (新しいロック順序を作らない = デッドロックを導入しない。上の $locked 招待行 reload と同じ流儀)。
+            //     3 経路 (token / register / in-app) 共通コアに入るため全経路がロック下 email 境界を得る
+            //     (register / in-app は元から pre-lock で email 一致を保証済みのため挙動は不変)。
+            /** @var User $lockedUser */
+            $lockedUser = User::query()->whereKey($user->getKey())->lockForUpdate()->firstOrFail();
+            if (! $locked->isAddressedTo($lockedUser)) {
+                return false; // 宛先不一致は受諾不能へ畳む (既存の false 契約と同じ neutral 扱い)
             }
 
             // 2. org 参加の原子的 INSERT。0 行 = 別経路で join 済み (role は変更しない。

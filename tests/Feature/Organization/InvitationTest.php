@@ -12,7 +12,9 @@ use App\Services\Billing\TicketLedgerService;
 use App\Services\Organization\OrganizationMembershipService;
 use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Validation\ValidationException;
 use Inertia\Testing\AssertableInertia;
+use Webmozart\Assert\Assert;
 
 /*
  * 組織招待 (送信 / 受諾 / 拒否系)。
@@ -75,8 +77,11 @@ test('token 受諾でメンバーシップ + 招待ロールが付与される',
     [$organization, $owner] = createOrganizationWithOwner();
     $token = inviteAndCaptureToken($organization, $owner, 'invitee@example.com', OrganizationRole::Admin);
 
-    // 受諾するユーザーは別組織を現在組織に持つ (POST 受諾が現在組織を切り替えないことを固定するため)
-    [$otherOrg, $invitee] = createOrganizationWithOwner('受諾者の既存組織');
+    // 受諾するユーザーは別組織を現在組織に持つ (POST 受諾が現在組織を切り替えないことを固定するため)。
+    // email 照合の追加により受諾者 email を招待宛先に揃える。
+    $invitee = User::factory()->create(['email' => 'invitee@example.com']);
+    [$otherOrg] = createOrganizationWithOwner('受諾者の既存組織');
+    $otherOrg->users()->attach($invitee);
     $invitee->forceFill(['current_organization_id' => $otherOrg->id])->save();
     $before = $invitee->current_organization_id;
 
@@ -97,14 +102,15 @@ test('受諾画面 (GET) は組織名と token を表示する', function (): vo
     [$organization, $owner] = createOrganizationWithOwner('受諾テスト組織');
     $token = inviteAndCaptureToken($organization, $owner, 'invitee@example.com', OrganizationRole::Admin);
 
-    $invitee = User::factory()->create();
+    $invitee = User::factory()->create(['email' => 'invitee@example.com']);
     $response = $this->actingAs($invitee)->get('/invitations/accept?token='.$token);
 
     $response->assertOk();
     $response->assertInertia(
         fn ($page) => $page->component('Invitations/Accept')
             ->where('organizationName', '受諾テスト組織')
-            ->where('token', $token),
+            ->where('token', $token)
+            ->where('recipientEmailMatches', true),
     );
 });
 
@@ -347,7 +353,7 @@ test('無効な招待リンクは専用タイトルを返す (組織名は漏ら
 test('有効な招待リンクの受諾確認画面は route 既定タイトルのまま', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $token = inviteAndCaptureToken($organization, $owner, 'valid-title@example.com', OrganizationRole::Admin);
-    $invitee = User::factory()->create();
+    $invitee = User::factory()->create(['email' => 'valid-title@example.com']);
 
     $this->actingAs($invitee)
         ->get('/invitations/accept?token='.$token)
@@ -515,7 +521,7 @@ test('招待の受諾は org 参加のみで Default Project の pivot を作ら
     $project = Project::factory()->forOrganization($organization)->create();
     $token = inviteAndCaptureToken($organization, $owner, 'member@example.com', OrganizationRole::Member);
 
-    $invitee = User::factory()->create();
+    $invitee = User::factory()->create(['email' => 'member@example.com']);
     $this->actingAs($invitee)->post('/invitations/accept', ['token' => $token])
         ->assertRedirect('/dashboard');
 
@@ -547,10 +553,12 @@ test('受諾済み招待で joinOrganization 相当に到達しても no-op (ロ
     [$organization, $owner] = createOrganizationWithOwner();
     $token = inviteAndCaptureToken($organization, $owner, 'idempotent@example.com', OrganizationRole::Admin);
 
-    $first = User::factory()->create();
+    // 1 人目は招待宛先 email に揃えて受諾成立させる
+    $first = User::factory()->create(['email' => 'idempotent@example.com']);
     $this->actingAs($first)->post('/invitations/accept', ['token' => $token]);
 
-    // 2 人目は事前検証 (isAccepted) で拒否される。受諾状態・membership が変化しないこと
+    // 2 人目は事前検証 (isAccepted) で拒否される (email 照合より前で弾かれる)。
+    // 受諾状態・membership が変化しないこと
     $second = User::factory()->create();
     $response = $this->actingAs($second)->post('/invitations/accept', ['token' => $token]);
 
@@ -564,8 +572,10 @@ test('既 attach 状態での受諾は unique 違反にならず role を変更�
     $project = Project::factory()->forOrganization($organization)->create();
     $token = inviteAndCaptureToken($organization, $owner, 'already@example.com', OrganizationRole::Member);
 
-    // 招待送信後に別経路で org へ参加済み (organization_user 行あり + Admin ロール)
-    $invitee = User::factory()->create();
+    // 招待送信後に別経路で org へ参加済み (organization_user 行あり + Admin ロール)。
+    // joinOrganization は共通コアで宛先 email をロック下再照合するため、受諾者 email を招待宛先に揃える
+    // (email 一致下で「既 attach は unique 違反にならず role を変えない」冪等契約を検証する)。
+    $invitee = User::factory()->create(['email' => 'already@example.com']);
     $organization->users()->attach($invitee);
     $invitee->addRole(OrganizationRole::Admin->value, $organization->laratrust_team_id);
 
@@ -588,3 +598,150 @@ test('既 attach 状態での受諾は unique 違反にならず role を変更�
     // 招待は受諾済みになる (再利用不能)
     expect($invitation->refresh()->isAccepted())->toBeTrue();
 });
+
+/*
+ * 宛先 email 照合 (F-2-02)。register 経路 / アプリ内受諾と同じ email 境界を token POST 経路へ適用する。
+ * 権威は Service (acceptInvitation の早期照合 + joinOrganization のロック下再照合)。
+ */
+
+test('T3: 別 email のログイン者の受諾確認画面は recipientEmailMatches=false (組織名を出さない)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner('照合確認組織');
+    $token = inviteAndCaptureToken($organization, $owner, 'invited@example.com', OrganizationRole::Admin);
+
+    $intruder = User::factory()->create(['email' => 'intruder@example.com']);
+    $response = $this->actingAs($intruder)->get('/invitations/accept?token='.$token);
+
+    $response->assertOk();
+    $response->assertInertia(
+        fn ($page) => $page->component('Invitations/Accept')
+            ->where('recipientEmailMatches', false)
+            // payload 層でも組織名を出さない (DOM 非表示だけでは devtools/初期 payload から読めてしまう)
+            ->where('organizationName', null),
+    );
+});
+
+test('T4: 別 email の直 POST 受諾は拒否され副作用が一切残らない (権威境界)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner('照合 POST 組織');
+    $project = Project::factory()->forOrganization($organization)->create();
+    $token = inviteAndCaptureToken($organization, $owner, 'invited@example.com', OrganizationRole::Admin);
+
+    $intruder = User::factory()->create(['email' => 'intruder@example.com']);
+    $before = $intruder->current_organization_id;
+
+    $response = $this->actingAs($intruder)->post('/invitations/accept', ['token' => $token]);
+
+    $response->assertRedirect('/dashboard');
+    $response->assertSessionHas('error');
+
+    // pivot 不在を DB assertion で直接確認する (organizationRole の null だけに依存しない)
+    $this->assertDatabaseMissing('organization_user', [
+        'organization_id' => $organization->id,
+        'user_id' => $intruder->id,
+    ]);
+    // 対象組織 laratrust_team_id の role_user に行が増えない (キャッシュ/relation リセット後に確認)
+    expect($intruder->fresh()?->organizationRole($organization))->toBeNull();
+    $this->assertDatabaseMissing('role_user', [
+        'user_id' => $intruder->id,
+        'team_id' => $organization->laratrust_team_id,
+    ]);
+    // 招待は未受諾のまま / project pivot / current_organization_id も不変
+    expect(OrganizationInvitation::query()->sole()->isAccepted())->toBeFalse();
+    expect($project->memberRole($intruder))->toBeNull();
+    expect($intruder->fresh()?->current_organization_id)->toBe($before);
+});
+
+test('T4b: 早期照合を stale 値で通過し、ロック読みの最新値で最終拒否する (TOCTOU)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner('TOCTOU 組織');
+    $project = Project::factory()->forOrganization($organization)->create();
+    $token = inviteAndCaptureToken($organization, $owner, 'invitee@example.com', OrganizationRole::Admin);
+    $staleUser = User::factory()->create(['email' => 'invitee@example.com']);
+
+    // 別インスタンスを通常保存経路 (CipherSweet 経由) で更新。$staleUser は古い email のまま。
+    // 一括 update は暗号化・モデルイベントを迂回するため使わない。
+    $persisted = $staleUser->fresh();
+    Assert::isInstanceOf($persisted, User::class);
+    $persisted->email = 'changed@example.com';
+    $persisted->save();
+
+    // 早期照合は stale 値で通過し、最新の保存値では不一致になることを明示 assert (失敗理由の分離)
+    $invitation = OrganizationInvitation::query()->sole();
+    expect($invitation->isAddressedTo($staleUser))->toBeTrue();  // 古い email = 招待宛先
+    expect($invitation->isAddressedTo($persisted))->toBeFalse(); // 最新の保存値 = 不一致
+
+    // Service を直接呼ぶ (HTTP 経由だと認証ユーザーが DB から再解決され stale モデルを渡せない)
+    $thrown = null;
+    try {
+        app(OrganizationMembershipService::class)->acceptInvitation($token, $staleUser);
+    } catch (ValidationException $exception) {
+        $thrown = $exception;
+    }
+    expect($thrown)->not->toBeNull();
+    expect($thrown?->errors())->toHaveKey('token');
+
+    // 「早期照合が働いただけ」ではなく「最終照合がロック読みの最新値を使った」ことを DB 状態不変で分離証明する
+    $this->assertDatabaseMissing('organization_user', [
+        'organization_id' => $organization->id,
+        'user_id' => $staleUser->id,
+    ]);
+    $this->assertDatabaseMissing('role_user', [
+        'user_id' => $staleUser->id,
+        'team_id' => $organization->laratrust_team_id,
+    ]);
+    expect($invitation->refresh()->isAccepted())->toBeFalse();
+    expect($project->memberRole($staleUser))->toBeNull();
+    expect($staleUser->fresh()?->current_organization_id)->toBeNull();
+});
+
+test('T5: email 同一性規則は register 経路と token POST 経路で同一 (厳密比較・大小区別)', function (
+    string $relation,
+    bool $shouldJoin,
+): void {
+    $service = app(OrganizationMembershipService::class);
+
+    // 招待宛先 email から受諾者 email を導出する (email は全体で一意なので経路ごとに別の宛先を使う)。
+    //  - exact:    完全一致
+    //  - mismatch: 完全不一致
+    //  - case:     大文字小文字のみ相違 (先頭 1 文字を大文字化。case-sensitive fail-secure 規則の固定)
+    $userEmailFor = fn (string $invited): string => match ($relation) {
+        'exact' => $invited,
+        'mismatch' => 'different-'.$invited,
+        'case' => ucfirst($invited),
+    };
+
+    // register 経路 (acceptInvitationIfValid): 独立 fixture
+    [$orgRegister, $ownerRegister] = createOrganizationWithOwner('register 経路組織');
+    $invitedRegister = 'register-invited@example.com';
+    $tokenRegister = inviteAndCaptureToken($orgRegister, $ownerRegister, $invitedRegister, OrganizationRole::Member);
+    $userRegister = User::factory()->create(['email' => $userEmailFor($invitedRegister)]);
+    $resultRegister = $service->acceptInvitationIfValid($tokenRegister, $userRegister);
+
+    // token POST 経路 (acceptInvitation): 独立 fixture・別宛先 (同一招待を使い回さない)
+    [$orgToken, $ownerToken] = createOrganizationWithOwner('token 経路組織');
+    $invitedToken = 'token-invited@example.com';
+    $tokenToken = inviteAndCaptureToken($orgToken, $ownerToken, $invitedToken, OrganizationRole::Member);
+    $userToken = User::factory()->create(['email' => $userEmailFor($invitedToken)]);
+    $thrown = null;
+    $resultToken = null;
+    try {
+        $resultToken = $service->acceptInvitation($tokenToken, $userToken);
+    } catch (ValidationException $exception) {
+        $thrown = $exception;
+    }
+
+    if ($shouldJoin) {
+        expect($resultRegister)->not->toBeNull();
+        expect($orgRegister->users()->whereKey($userRegister->id)->exists())->toBeTrue();
+        expect($thrown)->toBeNull();
+        expect($resultToken)->not->toBeNull();
+        expect($orgToken->users()->whereKey($userToken->id)->exists())->toBeTrue();
+    } else {
+        expect($resultRegister)->toBeNull();
+        expect($orgRegister->users()->whereKey($userRegister->id)->exists())->toBeFalse();
+        expect($thrown)->not->toBeNull();
+        expect($orgToken->users()->whereKey($userToken->id)->exists())->toBeFalse();
+    }
+})->with([
+    '完全一致' => ['exact', true],
+    '完全不一致' => ['mismatch', false],
+    '大文字小文字のみ相違' => ['case', false],
+]);

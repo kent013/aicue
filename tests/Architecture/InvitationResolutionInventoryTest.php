@@ -68,7 +68,8 @@ function invitationResolutionInventory(): array
             .' DB を引かない。一覧・件数・受諾解決がすべてここを通る。'],
         'Services/Organization/OrganizationMembershipService.php#acceptInvitation' => [$token,
             'POST token 受諾。token_hash 照合で解決し、失効/期限/受諾済みを個別メッセージに'
-            .'出し分ける (token 保持者向けの既存契約)。'],
+            .'出し分ける。宛先 email の早期照合に加え、参加成立と同じ排他区間 (joinOrganization の'
+            .'ロック下) で再照合し、不一致は join しない (register 経路と同一の email 境界)。'],
         'Services/Organization/OrganizationMembershipService.php#acceptInvitationIfValid' => [$token,
             'register 経路の受諾。findActiveByPlainToken で解決し、招待 email と登録 email の'
             .'一致を要求する (MatchesInvitationEmail と対で二重防御)。'],

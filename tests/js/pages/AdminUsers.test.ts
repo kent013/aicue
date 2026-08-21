@@ -535,3 +535,41 @@ describe("Admin/Users ロール変更フィードバック", () => {
         await waitFor(() => expect(screen.getByTestId("member-role-2")).toHaveFocus());
     });
 });
+
+describe("Admin/Users ロール制約の可視化 (F-2-01)", () => {
+    it("T9a: hasDefaultProject=false では編集者/撮影者に注記が付き、管理者は素のまま", () => {
+        render(Users, { props: { ...baseProps, hasDefaultProject: false } });
+
+        // id=2 (editor) 行の select 選択肢を検査する
+        const select = screen.getByTestId("member-role-2");
+        const options = Array.from(select.querySelectorAll("option")).map(
+            (option) => option.textContent,
+        );
+        expect(options).toEqual(["管理者", "編集者（要プロジェクト）", "撮影者（要プロジェクト）"]);
+    });
+
+    it("T9b: hasDefaultProject=false でも制約付き option を選択して change を開始でき、disabled にしない (禁止事項 8)", async () => {
+        pageState.props = { appName: "AI-CUE", errors: {} };
+        render(Users, { props: { ...baseProps, hasDefaultProject: false } });
+
+        const select = screen.getByTestId("member-role-2") as HTMLSelectElement;
+        // ロール select も削除ボタンも disabled 属性を持たない (押下時にサーバがエラー表示する方針)
+        expect(select).not.toBeDisabled();
+        expect(screen.getByTestId("remove-member-2")).not.toBeDisabled();
+
+        // 制約付き option (shooter) を選択して change を開始できる (option が非 disabled の実挙動)
+        await fireEvent.change(select, { target: { value: "shooter" } });
+        expect(routerPatchMock).toHaveBeenCalledTimes(1);
+        expect(routerPatchMock.mock.calls[0][1]).toEqual({ role: "shooter" });
+    });
+
+    it("T9d: hasDefaultProject=true では注記なしの素のラベル (対の正例)", () => {
+        render(Users, { props: { ...baseProps, hasDefaultProject: true } });
+
+        const select = screen.getByTestId("member-role-2");
+        const options = Array.from(select.querySelectorAll("option")).map(
+            (option) => option.textContent,
+        );
+        expect(options).toEqual(["管理者", "編集者", "撮影者"]);
+    });
+});

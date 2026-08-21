@@ -20,7 +20,8 @@ use Webmozart\Assert\Assert;
 /**
  * 招待受諾。GET (確認画面) は guest 可 (未ログインは register へ誘導)。POST (受諾) は auth 必須。
  * verified は要求しない (招待された直後の未検証ユーザーも受諾できる)。
- * 招待 email とログインユーザーの email の一致はログイン後経路では要求しない仕様。
+ * 受諾には受諾者 email と招待の宛先 email の一致を要求する (権威は
+ * OrganizationMembershipService。GET は補助 UX として不一致を事前表示する)。
  */
 class InvitationAcceptanceController extends Controller
 {
@@ -70,9 +71,21 @@ class InvitationAcceptanceController extends Controller
         $organization = $invitation->organization;
         Assert::isInstanceOf($organization, Organization::class);
 
+        // 宛先 email 照合 (補助 UX)。権威は Service (acceptInvitation + joinOrganization)。
+        // prop 名は「email が一致するか」だけを表す (受諾可否の全条件ではない)。
+        // 規則は OrganizationInvitation::isAddressedTo に集約 (Controller は独自比較式を持たない)。
+        // $request->user() は上の guest 分岐で早期 return 済みだが PHPStan L10 のため narrow する。
+        $user = $request->user();
+        Assert::isInstanceOf($user, User::class);
+        $recipientEmailMatches = $invitation->isAddressedTo($user);
+
+        // 不一致時は organizationName を渡さない (null)。DOM で隠すだけでは初期 Inertia payload /
+        // devtools から非受信者が組織名を読めてしまうため、payload そのものから組織名を落とす
+        // (非受信者への組織の実在・名称の開示面を増やさない)。
         return Inertia::render('Invitations/Accept', [
-            'organizationName' => $organization->name,
+            'organizationName' => $recipientEmailMatches ? $organization->name : null,
             'token' => $token,
+            'recipientEmailMatches' => $recipientEmailMatches,
         ]);
     }
 

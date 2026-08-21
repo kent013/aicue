@@ -43,7 +43,7 @@ class MatchesInvitationEmail implements ValidationRule
             return;
         }
 
-        if ($invitation->email !== $value) {
+        if (! $invitation->isAddressedToEmail($value)) {
             $fail('招待されたメールアドレスと一致しません。招待メール記載のアドレスをご確認ください。');
         }
     }

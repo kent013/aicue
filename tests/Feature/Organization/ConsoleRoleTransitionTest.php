@@ -101,6 +101,31 @@ test('endpoint 経由: Default Project 不在の editor コマンドは error ba
     expect($member->fresh()->organizationRole($organization))->toBe(OrganizationRole::Member);
 });
 
+test('T10: プロジェクト 0 件組織での editor/shooter 割当は back redirect + role error で拒否し状態を変えない', function (AdminConsoleRole $role): void {
+    // enforcement の権威はサーバ (applyConsoleRole)。Inertia フォームの検証エラーは 302 redirect back
+    // + session errors で返る (422 JSON ではない)。
+    [$organization, $owner] = createOrganizationWithOwner();
+    $member = attachOrganizationMember($organization);
+
+    $response = $this->actingAs($owner)
+        ->from("/organizations/{$organization->slug}/settings")
+        ->patch("/organizations/{$organization->slug}/members/{$member->id}", [
+            'role' => $role->value,
+        ]);
+
+    $response->assertRedirect("/organizations/{$organization->slug}/settings");
+    $response->assertSessionHasErrors([
+        'role' => '編集者・撮影者を割り当てるには、先にプロジェクトを作成してください。',
+    ]);
+    $response->assertSessionMissing('success');
+    // org role / project pivot を変更しない (DB assertion)
+    expect($member->fresh()->organizationRole($organization))->toBe(OrganizationRole::Member);
+    $this->assertDatabaseMissing('project_members', ['user_id' => $member->id]);
+})->with([
+    'editor' => [AdminConsoleRole::Editor],
+    'shooter' => [AdminConsoleRole::Shooter],
+]);
+
 test('endpoint 経由: editor コマンドで org ロールと pivot が 1 操作で揃う', function (): void {
     [$organization, $owner, $project] = createOrgWithDefaultProject();
     $member = attachOrganizationMember($organization);
