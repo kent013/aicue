@@ -16,6 +16,7 @@ use App\Jobs\Manual\RunManualRender;
 use App\Mail\InquiryAcknowledgementMail;
 use App\Mail\InquiryReceivedMail;
 use App\Notifications\Account\AccountDeletionRequestedNotification;
+use App\Notifications\Auth\AuthMethodChangedNotification;
 use App\Notifications\Billing\AutoRechargeActionRequiredNotification;
 use App\Notifications\Billing\AutoRechargeDisabledNotification;
 use App\Notifications\Billing\AutoRechargeEnabledNotification;
@@ -275,6 +276,12 @@ function jobDeferralTerminationInventory(): array
             'class' => RenewalReminderNotification::class,
             'mode' => 'NO_DEFERRAL',
             'reason' => $common.'契約更新が近いことを知らせるだけで、業務の状態を書かない。',
+            'coveredBy' => [],
+        ],
+        [
+            'class' => AuthMethodChangedNotification::class,
+            'mode' => 'NO_DEFERRAL',
+            'reason' => '認証手段変更のお知らせを 1 通送るだけで、他の仕事と順番を争わない。',
             'coveredBy' => [],
         ],
     ];

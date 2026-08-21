@@ -3098,3 +3098,62 @@ SES のバウンス / 苦情通知は SNS 経由で `POST /ses/notification` に
    到達可能な半分 (一致するときは取得へ進む) はテストで固定してある。
 8. **署名検証が成功した証明書しかキャッシュに載らない**ことは実装の不変条件だが、
    「キャッシュにある証明書が今も有効」ことは意味しない (寿命で失効させるだけである)。
+
+## 認証手段変更のメール通知ポリシー (T110)
+
+パスワード設定・変更・リセット / 2FA 有効化・無効化・回復コード再発行 / パスキー追加・削除 /
+SSO 連携 (合計 9 種。`App\Enums\Auth\AuthMethodChangeEvent`) が起きたとき、本人の登録メール
+アドレスへ「何が変わったか・いつ変わったか・心当たりが無い場合の対処」を通知する。
+オーナー裁定 (2026-08-21「方針は任せる。一般的なものに倣う」) に基づく。
+
+- **対象外 (スコープ外)**: ログインのたびの通知 / アプリ内通知センターへの複製 /
+  管理者向け通知。既存の監査ログ (T108 S7) は変えない。組織管理者によるメンバー 2FA 解除
+  (`TwoFactorResetSecurityNotification`) はこのポリシーが統一する対象ではない (加害者側ではなく
+  組織管理者が正規に行う操作で読者・文脈が異なる別ポリシー)。メールアドレス変更の通知
+  (`EmailChangedSecurityNotification`。T031/T211 系) も実装は変更しない。
+- **窓口**: 発火は `App\Services\Security\AuthMethodChangeNotifier` (`notify()` = 受けた
+  文脈のままその場で `$user->notify()` を呼ぶ。queue 投入自体の失敗は `report()` して
+  認証操作を巻き込まない) の 1 経路に統一する。呼び出し元は `App\Listeners\Auth\NotifyAuthMethodChange`
+  (vendor イベント購読) と、イベント化されていない `App\Services\Auth\PasswordCredentialService` /
+  `App\Services\Auth\SocialAccountService` の直接呼び出しの 2 種類。
+
+### 発火点対応表
+
+| イベント (`AuthMethodChangeEvent`) | 発火元 | transaction 内か | 発火方法 |
+|---|---|---|---|
+| `PasswordSet` / `PasswordChanged` | `PasswordCredentialService::afterPersist()` | 否 | `notify()` |
+| `PasswordReset` | `Illuminate\Auth\Events\PasswordReset` | 否 | `notify()` |
+| `TwoFactorEnabled` | Fortify `TwoFactorAuthenticationConfirmed` | 否 | `notify()` |
+| `TwoFactorDisabled` | Fortify `TwoFactorAuthenticationDisabled` | 否 | `notify()` |
+| `RecoveryCodesRegenerated` | Fortify `RecoveryCodesGenerated` | 否 | `notify()` |
+| `PasskeyRegistered` | Laravel Passkeys `PasskeyRegistered` | 否 | `notify()` |
+| `PasskeyDeleted` | Laravel Passkeys `PasskeyDeleted` | **是** (`EnsureLoginMethodRemains` が課す) | `notify()` |
+| `SocialAccountLinked` | `SocialAccountService::linkToUser()` (`register()` 内部の初回連携では発火しない) | 否 | `notify()` |
+
+`notify()` はどの経路でも同じ 1 メソッドであり、受けた文脈のままその場で `$user->notify()`
+を呼ぶだけである (呼び出し元の transaction 文脈は関心事にしない)。実際のメール配送は
+worker が非同期に行う。`PasskeyDeleted` だけが「transaction 内か」で「是」なのは、
+本 listener 自身が何か特別な機構を持つからではなく、`EnsureLoginMethodRemains` が課す
+transaction (ロック取得〜controller〜同期 listener〜レスポンス生成まで丸ごと) の**内側で
+`PasskeyDeleted` が同期発火する**ため、`notify()` の呼び出しが自然にその transaction の
+内側で起きるからである。queue 投入 (`jobs` 行の INSERT) は既定接続 (`after_commit=false`)
+なのでその場で業務トランザクションへ参加し、rollback すれば jobs 行ごと消え、commit と
+同時に耐久化される (AGENTS.md ドメイン規約 11「キュー投入の原子性」に字義どおり従う)。
+2026-08-21 の実装レビューで指摘された Critical (transaction 呼び出しの正常終了後にだけ
+実行する専用の post-commit callback collector を自作していた) は、この collector を撤去し
+listener がイベントの文脈のままその場で dispatch する形へ変更して解消した。詳細は
+`devnotes/20260821-2015-auth-method-change-notification/detailed-design.md`
+「実装レビューの裁定」節。
+
+### 保証しないもの (誇張しない)
+
+- **配信先は送信時点の現在の登録メールアドレス** であり、操作時点のアドレスのスナップショット
+  ではない (queued notification が worker 実行時に User を再取得するため)
+- SSO の「解除」機能は本設計時点でアプリに実装されていない。実装されたときは
+  `AuthMethodChangeEvent` へ case を追加し本ポリシーへ含めること (先回りして作らない)
+- **queue 投入の成功、およびメールの実配送成功は保証しない**。本ポリシーの責務は
+  「queue へジョブの投入を best-effort で試行するところまで」であり、
+  `AuthMethodChangeNotifier::notify()` は投入時の例外を `report()` して吸収するため、
+  投入成功そのものも保証範囲ではない。配送成功は既存の mailer driver
+  設定・SES バウンス処理等の一般的な配送信頼性の枠内に委ねる
+- 詳細設計は `devnotes/20260821-2015-auth-method-change-notification/`

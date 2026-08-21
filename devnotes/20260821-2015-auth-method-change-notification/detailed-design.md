@@ -1276,3 +1276,76 @@ Feature テスト) に加え、次の Unit テストファイルも新設する
 | 競合リスク | `AppServiceProvider.php` への Event::subscribe 追記は他の認証系施策と
   競合しやすい。`docs/template-divergence.md` の件数 pin は他の乖離登録と同時進行だと
   番号衝突しうる (登録直前に最新の D 番号を再確認すること) |
+
+---
+
+## 実装レビューの裁定 (監督セッション 2026-08-21)
+
+### Critical (Codex 実装レビュー Round 1〜3、解消せず CHANGES_REQUESTED)
+
+`App\Http\Middleware\EnsureLoginMethodRemains` のパスキー削除経路が採っていた設計
+(施策 2: `App\Support\Auth\LoginMethodRemovalPostCommitCallbacks` という
+transaction 呼び出し専用の post-commit callback collector を自作し、
+`start()` で有効化 → transaction 呼び出しの正常終了後に `flush()` して
+`AuthMethodChangeNotifier::notifyAfterCommit()` 経由で通知を queue へ投入する。
+rollback (例外) 時は `discard()` して投入しない) は、
+AGENTS.md ドメイン規約 11「キュー投入の原子性」(業務状態の保存とキュー投入は
+**同一トランザクション内**で行い `afterCommit` に依存しない。`->afterCommit()` /
+`ShouldQueueAfterCommit` 等の**列挙 API は 0 件 pin**・**免除機構を持たない**) と
+字義上衝突する、として 3 ラウンドとも CHANGES_REQUESTED になった。
+
+Codex の指摘の要旨 (Round 2 で確定):
+
+1. 詳細設計レビュー Round 1 の既往 [Warning] は「commit と通知が 1:1 という過大な
+   保証表現を best-effort へ絞る」表現の適正化であり、「規約 11 の対象からこの通知を
+   除外してよいか」という規約適用の裁定そのものではなかった
+2. 静的検査 (`QueueDispatchAtomicityInventoryTest`) が collector を検出しないのは
+   検査の検出範囲 (列挙された特定 API の 0 件 pin) の外にあるだけであり、
+   規約 11 の意味上の適用除外を意味しない。collector は名前も動作も
+   post-transaction callback であり、既知 API を使わず同じ順序を自作したことは
+   規約適合の根拠ではなく静的検査の盲点を示すにすぎない
+3. `EnsureLoginMethodRemains` 既存契約 (transaction 内での外部 I/O・非 afterCommit
+   queue dispatch 禁止) と規約 11 が衝突するなら、必要なのは規約 11 準拠パターンへの
+   再設計・通知意図の同一トランザクションでの耐久化・規約 11 への正式な適用除外・
+   設計不採用のいずれかであり、「transaction 内に置けないので transaction 後に自作
+   callback で投入する」は衝突の片側だけを選んだ状態である
+
+### 裁定: 選択肢 (a) — collector を撤去し、パスキー削除の通知も業務トランザクションの
+内側で dispatch する
+
+**出所**: 監督セッション (2026-08-21)。
+
+**内容**: `LoginMethodRemovalPostCommitCallbacks` を撤去し、`EnsureLoginMethodRemains`
+を collector 配線 (try/catch + start/flush/discard) が無い元の姿へ戻す。
+`App\Listeners\Auth\NotifyAuthMethodChange::handlePasskeyDeleted()` は他の 7 イベントと
+同じ `notify()` (その場で `$user->notify()` を呼ぶだけ) を呼ぶ。
+
+**根拠**: AGENTS.md ドメイン規約 11 は原子性の前提として driver=database /
+キュー DB 接続 = 業務 DB / after_commit=false を `QueueDispatchAtomicityGuard` が
+**全環境の起動時**に fail-closed で強制している。この前提の下では、
+業務トランザクションの内側から dispatch すれば queue の `jobs` 行がそのトランザクションに
+**構造的に参加する**。したがって:
+
+1. rollback すれば jobs 行ごと消える。「取り消された変更について誤って通知が届く」
+   ケースが構造的に発生しない — これはまさに collector が実現したかった性質である
+2. commit と同時に jobs 行が耐久化される。「業務状態の保存とキュー投入は同一
+   トランザクション内で行う」という規約 11 を**字義どおり**満たす
+
+`PasskeyDeleted` は `EnsureLoginMethodRemains` が課す transaction (ロック取得〜
+controller〜同期購読〜レスポンス生成まで丸ごと) の内側で既に同期発火しているため
+(`tests/Architecture/PasskeyPackageContractTest.php` が同期購読者の顔ぶれと順序を pin する)、
+listener がその場で `notify()` を呼ぶだけで dispatch は自然に業務トランザクションの
+内側に位置する。collector は「transaction 呼び出しの正常終了後にだけ実行する」という
+`afterCommit` の意味論を**手作りで再現するもの**であり、規約 11 が禁止している構造
+(状態の保存とキュー投入を分離し、後者を「呼び出しの正常終了後」という条件で遅延する)
+そのものを自作 API で再現していた。これは規約の趣旨と衝突するのであって、
+静的検査の検出範囲がたまたま及んでいなかっただけである。撤去は思考原則 2
+(今必要なものだけ作る。オーバーエンジニアリング禁止) にも沿う。
+
+**規約 11 の免除追加 (AGENTS.md 変更) は不要になる** — 免除ではなく、規約 11 が
+要求する形そのもの (`Manual/AnalysisJobService::trigger()` 等、本リポジトリの
+既存準拠パターンと同型) へ実装を合わせたことで解消したため。
+
+**スコープ**: 本裁定が対象とするのはパスキー削除経路 (collector) のみである。
+`PasswordCredentialService::afterPersist()` / `SocialAccountService::linkToUser()` の
+「保存 (commit) の後で `notify()` を呼ぶ」構造は変更しない (本裁定のスコープ外)。
