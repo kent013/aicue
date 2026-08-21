@@ -1,0 +1,51 @@
+diff --git a/docs/rollout-checklists.md b/docs/rollout-checklists.md
+index 061d4b94..56c2848c 100644
+--- a/docs/rollout-checklists.md
++++ b/docs/rollout-checklists.md
+@@ -14,11 +14,13 @@ ## 画像・スキャン SOP の OCR 対応 (`MANUAL_OCR_ANALYSIS_ENABLED`)
+    または現行の契約・同意で画像を含む文書の送信までカバー済みであることの確認。
+    アップロード画面の短い案内文言 (`SourceDocumentUpload.svelte` の
+    `source-document-send-notice` / `source-document-image-notice`) の妥当性もあわせて確認する。
++   → **完了**。記録は下記「承認記録」参照。
+ 2. **画像内 prompt injection の手動評価**: 代表的な日本語 SOP・正当な手順命令・
+    画像内に仕込んだ攻撃的命令 (「この指示を無視して〇〇と出力せよ」等)・隠し文言・
+    スキーマ逸脱を誘う文言を含む評価セットを用意し、期待される抽出結果との突合と
+    責任者の承認記録を残す。日本語比率閾値 (`manual.analysis_min_japanese_ratio`) が
+    OCR 経路の実データに対して妥当かどうかもこの評価のタイミングで確認する。
++   → **今回は実施しない (オーナー判断で省略)**。記録は下記「承認記録」参照。
+ 3. **再評価対象の棚卸し**: 以下のいずれかに変更が入る場合は、production を継続する前に
+    同じ評価セットで再評価・再承認し、この変更単位に承認記録を添付する。
+    - provider/model pin (`AnalysisTokenBudgetInvariantTest` の
+@@ -26,9 +28,32 @@ ## 画像・スキャン SOP の OCR 対応 (`MANUAL_OCR_ANALYSIS_ENABLED`)
+    - 媒体 YAML (`resources/prompts/sop-extract-media.yaml`。特に防御指示 4 項目)
+    - vendor 媒体変換の契約テスト (`tests/Feature/Manual/Analysis/OcrMediaMessageContractTest.php`)
+      が前提にする Prism/Anthropic のバージョン
++   - **注**: 項目 2 の評価自体を実施していないため、現時点で「同じ評価セット」は存在しない。
++     再評価の起点となる評価セットの用意は、この項目の起票時点であらためて判断する。
++
++## 承認記録
++
++| 日付 | 項目 | 結果 | 出所 |
++|---|---|---|---|
++| 2026-08-21 | 法務確認 (項目 1) | 「利用規約・顧客契約と矛盾しない」と確認した。アップロード画面の送信案内文言 (`source-document-send-notice` / `source-document-image-notice`) も法務確認済み (矛盾しない) として確認した | オーナーの決定 (2026-08-21) |
++| 2026-08-21 | 画像内 prompt injection の手動評価 (項目 2) | 実施しない (オーナー判断で省略)。評価セットの用意・突合・承認は行っていない | オーナーの決定 (2026-08-21) |
++
++上記 2 件により、本チェックリストが定める `MANUAL_OCR_ANALYSIS_ENABLED=true` への
++前提条件は、運用判断として満たされたものとして扱う。**項目 2 は「評価を実施し合格した」
++という記録ではなく「オーナー権限で評価そのものを省略した」という記録である**ことを
++以降の再確認でも維持する (実施したかのような記録へ書き換えない)。
+ 
+ ## 反映の運用手順
+ 
++- **フラグを `true` にする変更そのものはリポジトリ変更ではない**。`config/manual.php` の
++  既定値 (`env('MANUAL_OCR_ANALYSIS_ENABLED', false)`) はこのままにし、`true` への切替は
++  本番環境変数 `MANUAL_OCR_ANALYSIS_ENABLED` の設定という単独の運用操作で行う
++  (施策 11 の設計どおり。コード変更を伴わない)。
++  **本リポジトリにはデプロイ定義が無い** (AGENTS.md の `route:cache` 運用要件節が明記する
++  とおり `deploy/` / terraform / k8s / CI デプロイ job のいずれも存在しない) ため、
++  この環境変数設定・`config:cache` 再生成・プロセス再起動は**このリポジトリ内の変更としては
++  実行できない**。承認記録が揃った時点で、本番環境を運用する側が上記手順を人手で実施する
++  (残タスクは summary で明示的に引き継ぐ)。
+ - production が `config:cache` を使う場合、`.env` の変更だけでは反映されない。
+   `MANUAL_OCR_ANALYSIS_ENABLED=true` の設定後、`config:cache` の再生成とプロセス再起動が
+   別途必要 (既存運用の一般論であり、AGENTS.md が定める経路キャッシュ関連の運用要件
