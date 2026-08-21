@@ -5,8 +5,7 @@ import { normalizedTextOf } from "../../../support/normalizeText";
 
 /*
  * SOP アップロードの外部送信案内 (文言の唯一の出現箇所。作成画面と詳細画面が共有する):
- * - 一般案内はフラグの真偽に関わらず常時表示 (テキスト・Excel・通常 PDF にも等しく当てはまる事実)
- * - OCR 固有警告だけを imageSourceDocumentsEnabled で出し分ける
+ * - 一般案内・OCR 固有警告ともに常時表示 (旧 imageSourceDocumentsEnabled フラグは撤去済み)
  * - 文言は **全文一致** で固定する (部分一致では文面の劣化を見逃す)
  */
 
@@ -23,17 +22,8 @@ afterEach(() => {
 });
 
 describe("SourceDocumentUploadNotice", () => {
-    it("imageSourceDocumentsEnabled=false では一般案内だけを全文どおり描画する", () => {
-        render(SourceDocumentUploadNotice, { props: { imageSourceDocumentsEnabled: false } });
-
-        expect(normalizedTextOf(screen.getByTestId("source-document-send-notice"))).toBe(
-            SEND_NOTICE,
-        );
-        expect(screen.queryByTestId("source-document-image-notice")).toBeNull();
-    });
-
-    it("imageSourceDocumentsEnabled=true では OCR 固有警告も全文どおり描画する", () => {
-        render(SourceDocumentUploadNotice, { props: { imageSourceDocumentsEnabled: true } });
+    it("一般案内と OCR 固有警告を全文どおり描画する", () => {
+        render(SourceDocumentUploadNotice, {});
 
         expect(normalizedTextOf(screen.getByTestId("source-document-send-notice"))).toBe(
             SEND_NOTICE,

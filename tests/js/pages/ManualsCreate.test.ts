@@ -19,11 +19,10 @@ const baseProps = {
         { id: 1, name: "準備作業" },
         { id: 2, name: "仕上げ" },
     ],
-    // 受理形式・画像対応の出し分けはサーバの AcceptedSourceDocumentTypes 由来の props に従う
+    // 受理形式はサーバの AcceptedSourceDocumentTypes 由来の props に従う
     // (フロント側で accept 文字列を解析して画像対応可否を判定しない)
-    sourceDocumentAccept: ".pdf,.xlsx,.xls,.txt",
-    imageSourceDocumentsEnabled: false,
-    sourceDocumentFormatsLabel: "PDF・Excel・テキスト形式",
+    sourceDocumentAccept: ".pdf,.xlsx,.xls,.txt,.jpg,.jpeg,.png",
+    sourceDocumentFormatsLabel: "PDF・Excel・テキスト形式、または JPEG・PNG の画像",
 };
 
 /** FormField が描画する help 段落を入力要素から引く (FormField の id 規約 `{id}-help`)。 */
@@ -72,30 +71,8 @@ describe("Manuals/Create", () => {
         expect(screen.queryByRole("option", { name: "準備作業" })).toBeNull();
     });
 
-    it("手順書 (SOP) のファイル入力は accept をサーバ props からそのまま受ける (フラグ false 相当)", () => {
+    it("手順書 (SOP) のファイル入力は accept をサーバ props からそのまま受ける (画像拡張子を含む)", () => {
         render(Create, { props: baseProps });
-
-        const input = screen.getByTestId("manual-document-input");
-        expect(input).toBeInTheDocument();
-        expect(input.getAttribute("type")).toBe("file");
-        expect(input.getAttribute("accept")).toBe(".pdf,.xlsx,.xls,.txt");
-
-        // 一般的な外部送信案内はフラグの真偽に関わらず常時表示
-        expect(screen.getByTestId("source-document-send-notice")).toHaveTextContent(
-            "外部の LLM provider",
-        );
-        expect(screen.queryByTestId("source-document-image-notice")).toBeNull();
-    });
-
-    it("フラグ true 相当の props では accept に画像拡張子を含み OCR 固有警告が出る", () => {
-        render(Create, {
-            props: {
-                ...baseProps,
-                sourceDocumentAccept: ".pdf,.xlsx,.xls,.txt,.jpg,.jpeg,.png",
-                imageSourceDocumentsEnabled: true,
-                sourceDocumentFormatsLabel: "PDF・Excel・テキスト形式、または JPEG・PNG の画像",
-            },
-        });
 
         expect(screen.getByTestId("manual-document-input").getAttribute("accept")).toBe(
             ".pdf,.xlsx,.xls,.txt,.jpg,.jpeg,.png",
@@ -120,7 +97,7 @@ describe("Manuals/Create", () => {
         render(Create, { props: baseProps });
 
         expect(normalizedTextOf(helpTextOf(screen.getByTestId("manual-document-input")))).toBe(
-            "PDF・Excel・テキスト形式。アップロードすると AI 解析でシナリオを生成できます。",
+            "PDF・Excel・テキスト形式、または JPEG・PNG の画像。アップロードすると AI 解析でシナリオを生成できます。",
         );
     });
 
@@ -129,9 +106,7 @@ describe("Manuals/Create", () => {
      * 案内へ直接効く親子構造を固定する (詳細画面側と同じ判定方法)。
      */
     it("案内は file input より前にあり、作成 form の直下に置かれる", () => {
-        const { container } = render(Create, {
-            props: { ...baseProps, imageSourceDocumentsEnabled: true },
-        });
+        const { container } = render(Create, { props: baseProps });
 
         const form = container.querySelector("form");
         const sendNotice = screen.getByTestId("source-document-send-notice");

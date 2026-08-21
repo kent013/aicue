@@ -20,11 +20,10 @@ use Illuminate\Translation\PotentiallyTranslatedString;
  * 偽装できるため、上限選択の材料にしない (JPEG バイトを `.pdf` にリネームして
  * 20MB 上限側へ迂回する攻撃を防ぐ)。
  *
- * 「画像かどうか」はファイルの実バイトの性質であり、`ocr_analysis_enabled` フラグで
- * 変わる「現在の許可集合」(`AcceptedSourceDocumentTypes`) とは別概念。
- * ここではフラグに依存しない固定の判定を使う (許可判定と容量分類の責務を混同しない。
- * MIME の受理可否そのものは `mimes:` ルールが担当し、本 Rule は「受理された後の
- * 容量分類」だけを担当する)。
+ * 「画像かどうか」はファイルの実バイトの性質であり、受理可否そのもの
+ * (`AcceptedSourceDocumentTypes`) とは別概念。ここでは受理可否の判定に依存しない
+ * 固定の判定を使う (許可判定と容量分類の責務を混同しない。MIME の受理可否そのものは
+ * `mimes:` ルールが担当し、本 Rule は「受理された後の容量分類」だけを担当する)。
  */
 final class SourceDocumentSizeLimit implements ValidationRule
 {

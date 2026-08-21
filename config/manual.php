@@ -54,11 +54,9 @@ return [
     'source_document_mimes' => ['pdf', 'xlsx', 'xls', 'txt'],
 
     // ── 画像・スキャン SOP の OCR 対応 ──────────────────────────────
-    // 画像受理 + PDF の OCR フォールバックの単一 gate。既定 false = 施策 1〜9 のコードは
-    // デプロイされていても無害 (画像は 422 のまま、PDF 品質ゲート失敗は即時失敗のまま)。
-    // true にするのは法務確認・画像内 prompt injection の手動評価・責任者承認が
-    // 完了した後の独立した運用操作とする (docs/rollout-checklists.md)。
-    'ocr_analysis_enabled' => env('MANUAL_OCR_ANALYSIS_ENABLED', false),
+    // 画像受理 + PDF の OCR フォールバックは無条件で有効 (旧 rollout gate
+    // `manual.ocr_analysis_enabled` はオーナー決定により撤去済み。
+    // 経緯は docs/rollout-checklists.md 「画像・スキャン SOP の OCR 対応」節)。
 
     // 画像専用の容量上限 (既存の source_document_max_bytes とは別枠、より小さい値)。
     // 一次情報: Anthropic Vision ドキュメント (platform.claude.com/docs/en/build-with-claude/vision

@@ -3,10 +3,10 @@ import { cleanup, render, screen } from "@testing-library/svelte";
 import SourceDocumentUpload from "@/components/features/manual/SourceDocumentUpload.svelte";
 
 /*
- * SOP アップロード (画像・スキャン SOP の OCR 対応。施策 1/10):
+ * SOP アップロード (画像・スキャン SOP の OCR 対応。常時有効):
  * - accept 属性はサーバ Props (sourceDocumentAccept) をそのまま使う (フロントで解析しない)
- * - 送信案内 (外部 LLM provider への送信) は imageSourceDocumentsEnabled の真偽に関わらず常時表示
- * - OCR 固有の警告・1 枚制約の明示は imageSourceDocumentsEnabled=true のときだけ表示
+ * - 送信案内 (外部 LLM provider への送信) は常時表示
+ * - OCR 固有の警告・1 枚制約の明示も常時表示 (旧 imageSourceDocumentsEnabled フラグは撤去済み)
  */
 
 vi.mock("@inertiajs/svelte", () => ({
@@ -24,28 +24,11 @@ const baseProps = {
 };
 
 describe("SourceDocumentUpload", () => {
-    it("imageSourceDocumentsEnabled=false では accept が画像を含まず OCR 固有文言が出ない", () => {
-        render(SourceDocumentUpload, {
-            props: {
-                ...baseProps,
-                sourceDocumentAccept: ".pdf,.xlsx,.xls,.txt",
-                imageSourceDocumentsEnabled: false,
-            },
-        });
-
-        const input = screen.getByTestId("source-document-input") as HTMLInputElement;
-        expect(input.accept).toBe(".pdf,.xlsx,.xls,.txt");
-        expect(screen.queryByTestId("source-document-image-notice")).toBeNull();
-        // 一般的な外部送信案内は false のときも表示され続ける
-        expect(screen.getByTestId("source-document-send-notice")).toHaveTextContent("外部の LLM provider");
-    });
-
-    it("imageSourceDocumentsEnabled=true では accept に画像拡張子を含み OCR 固有文言が出る", () => {
+    it("accept に画像拡張子を含み OCR 固有文言が出る", () => {
         render(SourceDocumentUpload, {
             props: {
                 ...baseProps,
                 sourceDocumentAccept: ".pdf,.xlsx,.xls,.txt,.jpg,.jpeg,.png",
-                imageSourceDocumentsEnabled: true,
             },
         });
 
@@ -67,7 +50,6 @@ describe("SourceDocumentUpload", () => {
             props: {
                 ...baseProps,
                 sourceDocumentAccept: ".pdf,.xlsx,.xls,.txt,.jpg,.jpeg,.png",
-                imageSourceDocumentsEnabled: true,
             },
         });
 

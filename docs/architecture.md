@@ -2774,10 +2774,11 @@ App\Support\Llm\GuardedPrompt                 ← 実行単位は既存と同じ
   出力は所定スキーマのみ) を明記する (`DefensiveInstructionsPresenceTest` が固定)。
   判読不能箇所は ASCII マーカー `[UNREADABLE]` で明示させ (日本語文字を含まないため
   `AnalysisAcceptanceGate` の日本語比率ゲートが正しく機能する)。
-- **rollout gate**: `config('manual.ocr_analysis_enabled')` (既定 `false`) が
-  画像受理 (アップロード層) と OCR フォールバック (`AnalysisPipeline::resolveExtractInput()`) の
-  両方を一貫してゲートする (`AcceptedSourceDocumentTypes` が単一の情報源)。
-  フラグを `true` にする前提条件はチェックリスト (`docs/rollout-checklists.md`) を参照。
+- **rollout gate は撤去済み**: 画像受理 (アップロード層) と OCR フォールバック
+  (`AnalysisPipeline::resolveExtractInput()`) は無条件で有効である (`AcceptedSourceDocumentTypes`
+  が単一の情報源)。旧 rollout gate `config('manual.ocr_analysis_enabled')` はオーナー決定
+  (2026-08-21〜22、JST) により撤去した。有効化に至った経緯・既存の承認記録・
+  再評価義務は `docs/rollout-checklists.md` を参照。
 - **観測ログ**: `AnalysisPipeline::logExtractStageTerminal()` が extract 段の終端
   (成功・失敗を問わず、`run()` の 1 回の実行につきちょうど 1 回。永続化された冪等キーは
   持たないため、同じジョブが stale 回復等で再実行されれば行が増える) を

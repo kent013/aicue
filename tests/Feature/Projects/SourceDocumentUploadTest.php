@@ -110,28 +110,28 @@ test('analyzing 中の専用 route は 422 (行・ファイル不変)', function
     expect(SourceDocument::query()->count())->toBe(0);
 });
 
-test('許可外拡張子 (png) は 422', function (): void {
+test('許可外拡張子 (gif) は 422', function (): void {
+    // png/jpg/jpeg は画像・スキャン SOP の OCR 対応 (常時有効) により受理対象になったため、
+    // ここでは許可集合に残らない gif を「許可外拡張子」の代表として使う
+    // (AcceptedSourceDocumentTypesTest の「webp/gif は含まれない」pin と対応する)。
     Storage::fake();
     [, $owner, $project, $manual] = sourceDocumentTestContext();
 
-    $png = UploadedFile::fake()->createWithContent(
-        'image.png',
-        base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', true) ?: '',
-    );
+    $gif = UploadedFile::fake()->create('image.gif', 10, 'image/gif');
 
     $this->actingAs($owner)->postJson(
         "/projects/{$project->id}/manuals/{$manual->id}/source-documents",
-        ['document' => $png],
+        ['document' => $gif],
     )->assertUnprocessable()->assertJsonValidationErrors(['document']);
 });
 
-test('拡張子偽装 (.pdf だが内容が PNG) は 422 (polyglot 対策)', function (): void {
+test('拡張子偽装 (.pdf だが内容が GIF) は 422 (polyglot 対策)', function (): void {
     Storage::fake();
     [, $owner, $project, $manual] = sourceDocumentTestContext();
 
     // fake UploadedFile は getMimeType() が宣言 mime を返すため、「内容 sniff が
-    // image/png を検出した」状況を mime 指定で再現する (.pdf 拡張子 + PNG 内容)
-    $polyglot = UploadedFile::fake()->create('fake.pdf', 10, 'image/png');
+    // image/gif を検出した」状況を mime 指定で再現する (.pdf 拡張子 + GIF 内容)
+    $polyglot = UploadedFile::fake()->create('fake.pdf', 10, 'image/gif');
 
     $this->actingAs($owner)->postJson(
         "/projects/{$project->id}/manuals/{$manual->id}/source-documents",
@@ -144,7 +144,7 @@ test('拡張子偽装 (.pdf だが内容が PNG) は 422 (polyglot 対策)', fun
 test('Service の内容 sniff 二層目: 許可外 mime は appendDocument が拒否する (行・ファイルなし)', function (): void {
     Storage::fake();
     [, , , $manual] = sourceDocumentTestContext();
-    $polyglot = UploadedFile::fake()->create('fake.pdf', 10, 'image/png');
+    $polyglot = UploadedFile::fake()->create('fake.pdf', 10, 'image/gif');
 
     expect(fn () => app(SourceDocumentService::class)->appendDocument($manual, $polyglot))
         ->toThrow(ValidationException::class);

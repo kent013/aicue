@@ -210,18 +210,17 @@ class AnalysisPipeline
         LlmCallContextData $context,
     ): ExtractedSopData {
         $isImage = in_array($document->mime, ['image/jpeg', 'image/png'], true);
-        $ocrEnabled = config()->boolean('manual.ocr_analysis_enabled');
-        // 初期値: 画像 + フラグ有効なら最初から 'ocr'、それ以外は 'text'。
+        // 初期値: 画像なら最初から 'ocr'、それ以外は 'text'。
         // PDF が品質ゲート失敗から OCR フォールバックへ入る場合は、resolveExtractInput()
         // が参照渡しでこの値を 'ocr' へ更新する (media 検証を試みる直前に更新するため、
         // 検証が失敗して例外が飛んでも route は正しく 'ocr' のまま catch へ渡る)。
-        $route = ($isImage && $ocrEnabled) ? 'ocr' : 'text';
+        $route = $isImage ? 'ocr' : 'text';
         // 媒体検証が成功した後に LLM 呼び出しが失敗した場合でも、検証済みの媒体メタデータ
         // (容量・ページ数・画素数) をログへ残すため、$input をこのスコープで保持し続ける。
         $input = null;
 
         try {
-            $input = $this->resolveExtractInput($document, $isImage, $ocrEnabled, $route);
+            $input = $this->resolveExtractInput($document, $isImage, $route);
             $extracted = $this->runExtractStep($job, $document, $input, $deadline, $context);
 
             $this->logExtractStageTerminal($job, $document, $route, $input, null);
@@ -248,10 +247,9 @@ class AnalysisPipeline
     private function resolveExtractInput(
         SourceDocument $document,
         bool $isImage,
-        bool $ocrEnabled,
         string &$route,
     ): ExtractedText|ImageAnalysisMediaData|PdfAnalysisMediaData {
-        if ($isImage && $ocrEnabled) {
+        if ($isImage) {
             // 画像は SopTextExtractor::kindFor() の default 分岐が unextractable を投げる
             // (テキスト抽出は元々試みない対象)。ここで直接 media 検証へ回す
             // ($route は呼び出し元で既に 'ocr' に初期化済み)。
@@ -262,13 +260,13 @@ class AnalysisPipeline
             return $this->extractor->extract($document);
         } catch (AnalysisFailedException $exception) {
             $isPdf = $document->mime === 'application/pdf';
-            if ($ocrEnabled && $isPdf && $exception->reason->isOcrEligibleForPdf()) {
+            if ($isPdf && $exception->reason->isOcrEligibleForPdf()) {
                 $route = 'ocr'; // media 検証を試みる直前に更新 (この後の呼び出しが失敗しても正しい)
 
                 return $this->mediaValidator->validatePdfForOcr($document);
             }
 
-            throw $exception; // OCR 対象外、またはフラグ無効時はそのまま失敗 (既存の catch → failJob)
+            throw $exception; // OCR 対象外はそのまま失敗 (既存の catch → failJob)
         }
     }
 
