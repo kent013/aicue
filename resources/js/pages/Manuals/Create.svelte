@@ -51,9 +51,14 @@
         document: null,
     });
 
+    // 選択済みファイル名の表示用 state (まだ未送信であることが分かる文言で示す)
+    let selectedFileName = $state<string | null>(null);
+
     function onFileChange(event: Event): void {
         const input = event.currentTarget as HTMLInputElement;
-        form.document = input.files?.[0] ?? null;
+        const file = input.files?.[0] ?? null;
+        form.document = file;
+        selectedFileName = file?.name ?? null;
     }
 
     function submit(event: SubmitEvent): void {
@@ -127,6 +132,15 @@
                                 class="block w-full text-body text-text file:mr-3 file:rounded-md file:border file:border-border file:bg-surface file:px-3 file:py-1.5 file:text-caption file:text-text"
                                 data-testid="manual-document-input"
                             />
+                            {#if selectedFileName !== null}
+                                <p
+                                    class="mt-1 text-caption text-text-secondary"
+                                    aria-live="polite"
+                                    data-testid="manual-document-selected-name"
+                                >
+                                    選択したファイル: {selectedFileName}
+                                </p>
+                            {/if}
                         {/snippet}
                     </FormField>
                     <div class="flex items-center gap-2">

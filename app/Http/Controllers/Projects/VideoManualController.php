@@ -9,6 +9,7 @@ use App\DataTransferObjects\Manual\CutTakeSummaryData;
 use App\DataTransferObjects\Manual\ManualListQuery;
 use App\DataTransferObjects\Manual\RenderJobData;
 use App\DataTransferObjects\Manual\ScenarioDocumentData;
+use App\DataTransferObjects\Manual\SourceDocumentSummaryData;
 use App\Enums\Manual\RenderKind;
 use App\Enums\Manual\VideoManualStatus;
 use App\Http\Concerns\ResolvesCurrentOrganization;
@@ -126,6 +127,10 @@ class VideoManualController extends Controller
         $category = $manual->category;
 
         // stale な失敗 (失敗確定後に scenario 保存が成立) は job=null で抑制する (T032 / F-1-1)
+        // 現在登録されている手順書 (最新 1 件)。hasDocument / document を同一行から導出する。
+        // 単一 manual の表示なので N+1 は無い (行ロード 1 クエリ)。
+        $sourceDocument = $manual->latestSourceDocument;
+
         $analysisJob = $manuals->displayAnalysisJob($manual);
         $renderJob = $manuals->displayRenderJob($manual);
         $previewJob = $manuals->displayPreviewJob($manual);
@@ -156,12 +161,19 @@ class VideoManualController extends Controller
                     : ['id' => $category->id, 'name' => $category->name],
                 'created_at' => $manual->created_at?->format('Y-m-d H:i') ?? '',
             ],
-            // AI 解析パネル (最新 job + 手順書有無)。AnalysisJobData::toArray() と対
+            // AI 解析パネル (最新 job + 手順書現況)。AnalysisJobData::toArray() と対
+            // hasDocument と document は同一スナップショット ($sourceDocument) から作る
+            // (同時アップロードでの食い違いを構造的に消す)。
             'analysis' => [
                 'job' => $analysisJob === null
                     ? null
                     : AnalysisJobData::fromJob($analysisJob, $manual)->toArray(),
-                'hasDocument' => $manual->sourceDocuments()->exists(),
+                'hasDocument' => $sourceDocument !== null,
+                // 現在登録されている手順書 (最新 1 件)。null = 未添付。
+                // relation 経由なので他組織・他 manual の行は構造的に混ざらない。
+                'document' => $sourceDocument === null
+                    ? null
+                    : SourceDocumentSummaryData::fromDocument($sourceDocument)->toArray(),
                 // 生成結果の確認 (LLM の所見 + 現在の cuts への決定的検査)。null = 出す材料が無い。
                 // 描画時点のスナップショットであり常に最新ではない (render.coverage と同じ性質)。
                 'report' => $reports->build($manual)?->toArray(),

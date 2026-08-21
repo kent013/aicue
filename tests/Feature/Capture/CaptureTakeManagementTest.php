@@ -14,6 +14,7 @@ use App\Models\TakeUploadReservation;
 use App\Models\User;
 use App\Models\VideoManual;
 use App\Services\Capture\UploadTicketCodec;
+use App\Support\Security\MassAssignmentProtectedKeys;
 use Illuminate\Support\Facades\Queue;
 
 /*
@@ -95,6 +96,69 @@ test('adopt: cross-org は 404', function (): void {
     [, $otherOwner] = createOrganizationWithOwner();
 
     $this->actingAs($otherOwner)->postJson(takePath($project, $manual, $cut, $take, '/adopt'))->assertNotFound();
+});
+
+// ---------- adopt: 保護キー入口防御 (F-1-03) ----------
+
+test('adopt: 保護キー adopted_take_id 混入は 422 (副作用なし)', function (): void {
+    [, $owner, $project, $manual, $cut, $take] = takeManagementContext();
+
+    $this->actingAs($owner)
+        ->postJson(takePath($project, $manual, $cut, $take, '/adopt'), ['adopted_take_id' => 999])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('adopted_take_id');
+
+    // 保護キー混入は入口で拒否され、採用の副作用が一切起きないこと
+    expect($cut->fresh()?->adopted_take_id)->toBeNull();
+});
+
+// 保護キー集合の増加に自動追従する。現状の保護キーは全てトップレベルキーである前提
+// (将来ドット記法キーが増えたら Laravel の入力構造に合わせて payload を組む)。
+test('adopt: 全保護キー単体混入は 422', function (string $protectedKey): void {
+    [, $owner, $project, $manual, $cut, $take] = takeManagementContext();
+
+    $this->actingAs($owner)
+        ->postJson(takePath($project, $manual, $cut, $take, '/adopt'), [$protectedKey => 1])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors($protectedKey);
+
+    expect($cut->fresh()?->adopted_take_id)->toBeNull();
+})->with(MassAssignmentProtectedKeys::all());
+
+test('adopt: 保護キー混入 + cross-cut は (422 でなく) 404', function (): void {
+    [, $owner, $project, $manual, $cut] = takeManagementContext();
+    $cutB = Cut::factory()->forManual($manual)->create();
+    $takeB = Take::factory()->forCut($cutB)->create();
+
+    // binding (scopeBindings) が FormRequest より前に閉じるため 404 が先に返る
+    $this->actingAs($owner)
+        ->postJson(takePath($project, $manual, $cut, $takeB, '/adopt'), ['adopted_take_id' => 1])
+        ->assertNotFound();
+    expect($cut->fresh()?->adopted_take_id)->toBeNull();
+});
+
+test('adopt: 保護キー混入 + cross-org は (422 でなく) 404', function (): void {
+    [, , $project, $manual, $cut, $take] = takeManagementContext();
+    [, $otherOwner] = createOrganizationWithOwner();
+
+    // EnsureProjectBelongsToCurrentOrganization がテナント境界 404 を FormRequest より前に返す
+    $this->actingAs($otherOwner)
+        ->postJson(takePath($project, $manual, $cut, $take, '/adopt'), ['adopted_take_id' => 1])
+        ->assertNotFound();
+});
+
+test('adopt: 保護キー混入 + 非 project member は 422 (FormRequest が Gate より先)', function (): void {
+    [$organization, , $project, $manual, $cut, $take] = takeManagementContext();
+    $outsider = attachOrganizationMember($organization);
+    $outsider->forceFill(['current_organization_id' => $organization->id])->save();
+
+    // 本アプリの正規順序 (404 → 422 FormRequest → 403 Gate)。保護キーは Gate より前の
+    // FormRequest で 422 になる (存在オラクルにならない範囲=同一組織内)。
+    $this->actingAs($outsider)
+        ->postJson(takePath($project, $manual, $cut, $take, '/adopt'), ['adopted_take_id' => 1])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('adopted_take_id');
+    expect($cut->fresh()?->adopted_take_id)->toBeNull();
 });
 
 // ---------- PATCH (comment / position) ----------

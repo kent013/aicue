@@ -273,10 +273,20 @@ export interface ScenarioReportProps {
     }[];
 }
 
+/** PHP: App\DataTransferObjects\Manual\SourceDocumentSummaryData と対 */
+export interface SourceDocumentSummaryProps {
+    name: string;
+    sizeBytes: number;
+    /** ISO 8601 (TZ 付き)。表示整形はフロント */
+    uploadedAt: string;
+}
+
 /** PHP: VideoManualController::show の analysis props と対 */
 export interface AnalysisProps {
     job: AnalysisJobProps | null;
     hasDocument: boolean;
+    /** 現在登録されている手順書 (最新 1 件)。null = 未添付 */
+    document: SourceDocumentSummaryProps | null;
     /** null = 出す材料が無い (cuts も所見も無い) */
     report: ScenarioReportProps | null;
 }

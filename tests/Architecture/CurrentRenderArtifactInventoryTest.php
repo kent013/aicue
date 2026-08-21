@@ -452,25 +452,33 @@ test('ケース 8: EagerLoadCandidate の前提 (受け取れるかを判断し�
         'succeeded 条件が 2 つ以上あります。候補行 relation が増えた可能性があるため区分を再審査してください');
 
     // ofMany( / hasOne( の件数は**ファイル単位の粗い代理検査**である。T198 で
-    // 一覧カードの代表サムネイル候補 (coverCut。cuts が対象で render_jobs とは無関係) が
-    // 同じ形の relation として増えたため、現在値は 2 本ちょうどである。
-    // 完全一致で pin してあるので、3 本目が増えても 1 本に減っても赤くなる。
-    // **どちらが成果物側かは (c) の名前 pin が固定する**ので、代理検査が 2 になっても
-    // 「2 本目の成果物選択式を足せない」という不変条件の検出力は落ちていない。
-    expect(RenderArtifactSelectionScanner::countCalls($tokens, 'ofMany'))->toBe(2,
-        'ofMany( が 2 回ではありません (one-of-many relation の本数が増減しています。'
+    // 一覧カードの代表サムネイル候補 (coverCut。cuts が対象で render_jobs とは無関係) が、
+    // T238 で手順書パネルの現況候補 (latestSourceDocument。source_documents が対象で
+    // render_jobs とは無関係) が、いずれも同じ形の relation として増えたため、
+    // 現在値は 3 本ちょうどである。完全一致で pin してあるので、4 本目が増えても減っても赤くなる。
+    // **どちらが成果物側かは (c) の名前 pin が固定する**ので、代理検査が 3 になっても
+    // 「2 本目の成果物選択式を足せない」という不変条件の検出力は落ちていない
+    // (成果物側の増加は (b) の succeeded 条件件数 === 1 が捉える。latestSourceDocument は
+    // render_jobs を 1 バイトも見ず succeeded 条件を持たないため成果物側ではない)。
+    expect(RenderArtifactSelectionScanner::countCalls($tokens, 'ofMany'))->toBe(3,
+        'ofMany( が 3 回ではありません (one-of-many relation の本数が増減しています。'
         .'成果物側が増えたのか別概念が増えたのかを名前で確かめて区分を再審査してください)');
-    expect(RenderArtifactSelectionScanner::countCalls($tokens, 'hasOne'))->toBe(2,
-        'hasOne( が 2 回ではありません (one-of-many relation の本数が増減しています)');
+    expect(RenderArtifactSelectionScanner::countCalls($tokens, 'hasOne'))->toBe(3,
+        'hasOne( が 3 回ではありません (one-of-many relation の本数が増減しています)');
 
     // (c) 候補行の名前と対象種別を pin する (rename / kind 変更は再審査の合図)
     expect(RenderArtifactSelectionScanner::declaresFunction($tokens, 'latestSucceededRender'))->toBeTrue(
         '候補行 relation latestSucceededRender() が見つかりません (rename したら目録と parity テストを見直すこと)');
-    // 成果物と無関係な 2 本目 (T198 の代表サムネイル候補) も名前で pin する =
-    // (b) の件数 2 の内訳が「成果物 1 本 + coverCut 1 本」であることを機械で固定する。
+    // 成果物と無関係な 2・3 本目 (T198 の代表サムネイル候補 / T238 の手順書現況候補) も
+    // 名前で pin する = ofMany/hasOne の件数 3 の内訳が
+    // 「成果物 1 本 (latestSucceededRender) + coverCut 1 本 + latestSourceDocument 1 本」で
+    // あることを機械で固定する。
     expect(RenderArtifactSelectionScanner::declaresFunction($tokens, 'coverCut'))->toBeTrue(
         '代表サムネイル候補 relation coverCut() が見つかりません。'
-        .'(b) の件数 2 の内訳が変わっているため、成果物側が増えていないかを再審査してください');
+        .'ofMany/hasOne の件数 3 の内訳が変わっているため、成果物側が増えていないかを再審査してください');
+    expect(RenderArtifactSelectionScanner::declaresFunction($tokens, 'latestSourceDocument'))->toBeTrue(
+        '手順書現況候補 relation latestSourceDocument() が見つかりません (source_documents 対象・'
+        .'render_jobs 非参照)。ofMany/hasOne の件数 3 の内訳が変わっているため再審査してください');
     expect(RenderArtifactSelectionScanner::countEnumCaseReferences($tokens, 'RenderKind', 'Render'))->toBe(1,
         '候補行が見る種別 (RenderKind::Render) の参照数が変わりました (preview を混ぜていないか再審査)');
 

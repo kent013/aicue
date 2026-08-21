@@ -1,6 +1,8 @@
 <script lang="ts">
     import { page, router } from "@inertiajs/svelte";
-    import { BookOpen, Camera } from "@lucide/svelte";
+    import { BookOpen, Camera, FileText } from "@lucide/svelte";
+    import { formatBytes } from "@/lib/format-bytes";
+    import { formatDateTime } from "@/lib/date-format";
     import Badge from "@/components/atoms/Badge.svelte";
     import Button from "@/components/atoms/Button.svelte";
     import Card from "@/components/atoms/Card.svelte";
@@ -168,6 +170,31 @@
                     <p class="mt-2 text-caption text-text-secondary">
                         PDF / Excel / テキストの手順書をアップロードできます。差し替えた場合は最新のファイルが解析対象になります。
                     </p>
+                    <!-- 現在登録されている手順書の現況 (差し替え文言との矛盾を解消) -->
+                    <div class="mt-4" data-testid="source-document-current">
+                        {#if analysis.document !== null}
+                            <div class="flex items-start gap-2 rounded-md border border-border bg-surface p-3">
+                                <FileText class="mt-0.5 size-4 shrink-0 text-text-secondary" />
+                                <div class="min-w-0">
+                                    <p
+                                        class="truncate text-body text-text"
+                                        data-testid="source-document-name"
+                                    >
+                                        {analysis.document.name}
+                                    </p>
+                                    <p class="text-caption text-text-secondary">
+                                        {formatBytes(analysis.document.sizeBytes)} ・ {formatDateTime(
+                                            analysis.document.uploadedAt,
+                                        )}
+                                    </p>
+                                </div>
+                            </div>
+                        {:else}
+                            <p class="text-caption text-text-secondary" data-testid="source-document-empty">
+                                まだ手順書は登録されていません。
+                            </p>
+                        {/if}
+                    </div>
                     <div class="mt-4">
                         <SourceDocumentUpload
                             projectId={project.id}

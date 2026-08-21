@@ -21,6 +21,9 @@ import {
 
 const {
     routerReloadMock,
+    routerVisitMock,
+    routerGetMock,
+    routerPostMock,
     enqueueMock,
     resumeMock,
     autoDownloadRunMock,
@@ -28,6 +31,11 @@ const {
     pendingSeed,
 } = vi.hoisted(() => ({
     routerReloadMock: vi.fn(),
+    // F-1-02: 撮影 PWA の /app 離脱防止。programmatic な明示遷移入口 (visit/get/post) を
+    // 記録し、通常フローでこれらが /app 外へ向けて呼ばれないことを固定する。
+    routerVisitMock: vi.fn(),
+    routerGetMock: vi.fn(),
+    routerPostMock: vi.fn(),
     enqueueMock: vi.fn(),
     resumeMock: vi.fn(),
     autoDownloadRunMock: vi.fn(),
@@ -48,7 +56,12 @@ vi.mock("@/lib/capture/panel-navigation", async (importOriginal) => ({
 
 vi.mock("@inertiajs/svelte", async (importOriginal) => ({
     ...(await importOriginal<typeof import("@inertiajs/svelte")>()),
-    router: { reload: routerReloadMock },
+    router: {
+        reload: routerReloadMock,
+        visit: routerVisitMock,
+        get: routerGetMock,
+        post: routerPostMock,
+    },
 }));
 
 // jsdom に indexedDB が無いため in-memory PendingStore に差し替える
@@ -180,6 +193,9 @@ beforeEach(() => {
     routerReloadMock.mockImplementation((options: { onFinish?: () => void }) => {
         options.onFinish?.();
     });
+    routerVisitMock.mockReset();
+    routerGetMock.mockReset();
+    routerPostMock.mockReset();
     enqueueMock.mockReset();
     resumeMock.mockReset();
     resumeMock.mockResolvedValue([]);
@@ -647,6 +663,129 @@ describe("Capture/Show サムネイル反映の配線 (T183)", () => {
             expect(resumeMock).toHaveBeenCalled();
         });
         expect(routerReloadMock).not.toHaveBeenCalled();
+    });
+});
+
+/*
+ * 撮影 PWA の /app 離脱防止 (bug-hunt F-1-02 Phase A の回帰固定)。
+ *
+ * Phase A 調査 (devnotes/20260821-1517-bughunt-capture-manual/phase-a-investigation.md に記録)
+ * の結論: Capture/Show の**アプリ自コード**が起こす programmatic navigation は
+ * `router.reload({only:['manual']})` (現 URL の部分リロード) のみで、/app 外への
+ * programmatic Inertia visit (router.visit/get/post) は存在しない。/app 外への遷移は
+ * 利用者がクリックする明示リンク (Inertia <Link href="/projects/...">。PC 詳細への復路 = T155。
+ * docs/architecture.md §撮影 PWA の運用契約) だけである。
+ *
+ * よって恒久ガード (施策5 Phase B) は実装せず (再現できないものへ包括ガードを足さない。
+ * AGENTS.md 思考原則 2)、本ブロックが「通常フローで /app 外への programmatic visit が
+ * 発生しない」ことを回帰として固定する。
+ *
+ * **観測点と保証範囲 (誇張しない。AGENTS.md 走査規約 (b))**:
+ * 本ブロックの観測点は router の programmatic 入口 (reload/visit/get/post) を 1 本の
+ * collector (`collectProgrammaticVisits`) に集約したものである。アプリ自コードの
+ * programmatic navigation はこの 4 入口に限られる (Phase A の静的走査で確認)。
+ * - **含む**: `router.reload/visit/get/post` (= アプリが自分で起こす遷移)。
+ * - **含まない**: 実 Inertia `<Link>` クリック / form helper。これらは本テストの mock を
+ *   通らない実 component であり、その唯一の /app 外 destination は意図的な PC 詳細リンク
+ *   (T155。href は capture-manual-title 近傍のリンクとして別途構造で固定) である。
+ *   ここではその利用者主導リンクの「非発生」を主張しない (妨げもしない)。
+ */
+describe("Capture/Show の /app 離脱防止 (F-1-02)", () => {
+    /**
+     * visit の destination が現在オリジンの /app 配下でなければ
+     * 「/app 外 programmatic visit」とみなす判定器 (許可リスト方式)。
+     */
+    function isExternalProgrammaticDestination(url: unknown): boolean {
+        if (typeof url !== "string") return true; // 解析不能は外部側に倒す
+        let parsed: URL;
+        try {
+            parsed = new URL(url, window.location.href);
+        } catch {
+            return true;
+        }
+        if (parsed.origin !== window.location.origin) return true;
+        return !(parsed.pathname === "/app" || parsed.pathname.startsWith("/app/"));
+    }
+
+    /**
+     * router の全 programmatic 入口を 1 本に集約する共通 collector。
+     * reload は url を持たない = 現 URL 固定。visit/get/post は第 1 引数が destination。
+     * この 1 本を「通常フローの検査」も「負のコントロール」も共通に通す
+     * (mock → collect → 判定の配線ごと検証する)。
+     */
+    function collectProgrammaticVisits(): { method: string; url: unknown }[] {
+        return [
+            ...routerReloadMock.mock.calls.map((call) => {
+                const options = (call[0] ?? {}) as { url?: unknown };
+                // reload に url が付いたら現 URL 固定が崩れたとみなし外部側の判定に載せる
+                return { method: "reload", url: options.url };
+            }),
+            ...routerVisitMock.mock.calls.map((call) => ({ method: "visit", url: call[0] })),
+            ...routerGetMock.mock.calls.map((call) => ({ method: "get", url: call[0] })),
+            ...routerPostMock.mock.calls.map((call) => ({ method: "post", url: call[0] })),
+        ];
+    }
+
+    /** collector が集めた記録から /app 外 destination だけを抽出する。 */
+    function externalOf(records: { method: string; url: unknown }[]): {
+        method: string;
+        url: unknown;
+    }[] {
+        // reload は url=undefined が正常 (現 URL)。undefined は外部扱いしない。
+        return records.filter(
+            (r) => r.url !== undefined && isExternalProgrammaticDestination(r.url),
+        );
+    }
+
+    it("通常フロー (キュー再開 → reload) で /app 外への programmatic visit が発生しない", async () => {
+        stubCameraSupported(false);
+        // 母集団非空を保証する: uploaded を返して現 URL への reload を確実に 1 回起こす
+        resumeMock.mockResolvedValue([{ status: "uploaded", clientTakeId: "q1" }]);
+
+        render(CaptureShow, { props: baseProps });
+        await fireEvent(window, new Event("online"));
+
+        // 母集団非空: collector が programmatic 入口を最低 1 件 (現 URL reload) 捕まえている
+        await vi.waitFor(() => {
+            expect(collectProgrammaticVisits().length).toBeGreaterThan(0);
+        });
+
+        const records = collectProgrammaticVisits();
+        // reload は現 URL 固定 (url なし)。visit/get/post 入口は 1 件も呼ばれていない。
+        expect(records.every((r) => r.method === "reload" && r.url === undefined)).toBe(true);
+        // 同じ collector → 判定パイプラインで /app 外は 0 件
+        expect(externalOf(records)).toEqual([]);
+    });
+
+    it("負のコントロール: 禁止 destination を実 mock 入口へ流すと配線が検出する", async () => {
+        stubCameraSupported(false);
+        resumeMock.mockResolvedValue([{ status: "uploaded", clientTakeId: "q1" }]);
+
+        render(CaptureShow, { props: baseProps });
+        await fireEvent(window, new Event("online"));
+        await vi.waitFor(() => {
+            expect(collectProgrammaticVisits().length).toBeGreaterThan(0);
+        });
+
+        // 通常フロー時点では /app 外は 0 件 (母集団は非空)
+        expect(externalOf(collectProgrammaticVisits())).toEqual([]);
+
+        // 実 mock 入口 (router.visit) に禁止 destination を注入し、mock→collect→判定を通す
+        routerVisitMock("/projects/1/manuals/5");
+        routerGetMock("https://evil.example/app/x");
+        routerPostMock("/app.evil/x");
+
+        const external = externalOf(collectProgrammaticVisits());
+        expect(external.map((r) => r.url)).toEqual([
+            "/projects/1/manuals/5",
+            "https://evil.example/app/x",
+            "/app.evil/x",
+        ]);
+        // 現 URL 配下 (/app/...) は許可され外部に載らない (空振り防止の正例)
+        routerGetMock("/app/projects/1/manuals/5");
+        expect(externalOf(collectProgrammaticVisits()).map((r) => r.url)).not.toContain(
+            "/app/projects/1/manuals/5",
+        );
     });
 });
 

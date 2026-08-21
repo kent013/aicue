@@ -9,6 +9,7 @@ use App\DataTransferObjects\Capture\CaptureTakeData;
 use App\Enums\Manual\TakeStatus;
 use App\Http\Concerns\ResolvesCurrentOrganization;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Capture\AdoptCaptureTakeRequest;
 use App\Http\Requests\Capture\MarkTakeDownloadedRequest;
 use App\Http\Requests\Capture\StoreCaptureTakeRequest;
 use App\Http\Requests\Capture\UpdateCaptureTakeRequest;
@@ -97,7 +98,7 @@ class CaptureTakeController extends Controller
 
     /** 採用 (adopted_take_id は VideoManual 行ロック tx 内でのみ書く) */
     public function adopt(
-        Request $request,
+        AdoptCaptureTakeRequest $request,
         Project $project,
         VideoManual $manual,
         Cut $cut,

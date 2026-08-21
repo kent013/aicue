@@ -166,6 +166,57 @@ describe("Manuals/Create", () => {
         expect(screen.queryByText("タイトルを入力してください")).toBeNull();
     });
 
+    it("ファイル選択後に選択したファイル名が表示される", async () => {
+        render(Create, { props: baseProps });
+
+        expect(screen.queryByTestId("manual-document-selected-name")).toBeNull();
+
+        const input = screen.getByTestId("manual-document-input");
+        const file = new File(["x"], "手順書.pdf", { type: "application/pdf" });
+        await fireEvent.change(input, { target: { files: [file] } });
+
+        const name = screen.getByTestId("manual-document-selected-name");
+        expect(name).toHaveTextContent("選択したファイル: 手順書.pdf");
+    });
+
+    it("未選択時はファイル名表示が出ない", () => {
+        render(Create, { props: baseProps });
+
+        expect(screen.queryByTestId("manual-document-selected-name")).toBeNull();
+    });
+
+    it("別ファイルを再選択すると表示名が置き換わる", async () => {
+        render(Create, { props: baseProps });
+
+        const input = screen.getByTestId("manual-document-input");
+        await fireEvent.change(input, {
+            target: { files: [new File(["a"], "first.pdf", { type: "application/pdf" })] },
+        });
+        expect(screen.getByTestId("manual-document-selected-name")).toHaveTextContent(
+            "選択したファイル: first.pdf",
+        );
+
+        await fireEvent.change(input, {
+            target: { files: [new File(["b"], "second.pdf", { type: "application/pdf" })] },
+        });
+        expect(screen.getByTestId("manual-document-selected-name")).toHaveTextContent(
+            "選択したファイル: second.pdf",
+        );
+    });
+
+    it("選択を解除 (files 空) すると表示が消える", async () => {
+        render(Create, { props: baseProps });
+
+        const input = screen.getByTestId("manual-document-input");
+        await fireEvent.change(input, {
+            target: { files: [new File(["a"], "first.pdf", { type: "application/pdf" })] },
+        });
+        expect(screen.getByTestId("manual-document-selected-name")).toBeInTheDocument();
+
+        await fireEvent.change(input, { target: { files: [] } });
+        expect(screen.queryByTestId("manual-document-selected-name")).toBeNull();
+    });
+
     it("タイトルエラーが無いとき oninput は clearErrors を呼ばない", async () => {
         setupForm();
         render(Create, { props: baseProps });

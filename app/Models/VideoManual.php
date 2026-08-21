@@ -87,6 +87,21 @@ class VideoManual extends Model
     }
 
     /**
+     * 手順書パネルに出す「現在登録されている手順書」。追記型 immutable のため
+     * 最新 (created_at max、同時刻は id max で安定) の 1 件を指す one-of-many relation。
+     * (`->latest()->latest()` は eager 時に全件取得→照合になり弱いため ofMany を使う)
+     *
+     * @return HasOne<SourceDocument, $this>
+     */
+    public function latestSourceDocument(): HasOne
+    {
+        return $this->hasOne(SourceDocument::class)->ofMany([
+            'created_at' => 'max',
+            'id' => 'max',
+        ]);
+    }
+
+    /**
      * @return HasMany<Cut, $this>
      */
     public function cuts(): HasMany

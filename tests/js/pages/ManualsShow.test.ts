@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import Show from "@/pages/Manuals/Show.svelte";
+import { formatDateTime } from "@/lib/date-format";
 import type { VideoManualStatus } from "@/types/manual";
 
 const baseProps = {
@@ -12,7 +13,7 @@ const baseProps = {
         category: { id: 2, name: "仕上げ" },
         created_at: "2026-07-10 12:00",
     },
-    analysis: { job: null, hasDocument: false, report: null },
+    analysis: { job: null, hasDocument: false, document: null, report: null },
     render: {
         job: null,
         previewJob: null,
@@ -146,6 +147,7 @@ describe("Manuals/Show", () => {
                         manual_status: "analyzing" as VideoManualStatus,
                     },
                     hasDocument: true,
+                    document: null,
                     report: null,
                 },
             },
@@ -180,6 +182,64 @@ describe("Manuals/Show", () => {
 
         expect(screen.getByTestId("scenario-report")).toBeInTheDocument();
         expect(screen.getByTestId("scenario-counts")).toHaveTextContent("手順 2");
+    });
+
+    // --- F-1-01b: 現在登録されている手順書 (SOP) の現況表示 ---
+
+    it("document 有り: 手順書パネルにファイル名・サイズ・日時が出る", () => {
+        render(Show, {
+            props: {
+                ...baseProps,
+                analysis: {
+                    ...baseProps.analysis,
+                    hasDocument: true,
+                    document: {
+                        name: "作業手順.pdf",
+                        sizeBytes: 1024 * 1024 * 2,
+                        uploadedAt: "2026-07-10T12:00:00+09:00",
+                    },
+                },
+            },
+        });
+
+        expect(screen.getByTestId("source-document-name")).toHaveTextContent("作業手順.pdf");
+        const current = screen.getByTestId("source-document-current");
+        expect(current).toHaveTextContent("2.0 MB");
+        // 日時も formatDateTime の既知出力で固定する (サイズだけの assert にしない)
+        expect(current).toHaveTextContent(formatDateTime("2026-07-10T12:00:00+09:00"));
+        expect(screen.queryByTestId("source-document-empty")).toBeNull();
+    });
+
+    it("document null: 「まだ手順書は登録されていません」を表示し差し替え UI と矛盾しない", () => {
+        render(Show, { props: baseProps });
+
+        expect(screen.getByTestId("source-document-empty")).toHaveTextContent(
+            "まだ手順書は登録されていません",
+        );
+        expect(screen.queryByTestId("source-document-name")).toBeNull();
+    });
+
+    it("filename に <script> を含む document でも HTML として解釈されずテキスト表示される", () => {
+        const evil = "<script>alert(1)</script>.pdf";
+        render(Show, {
+            props: {
+                ...baseProps,
+                analysis: {
+                    ...baseProps.analysis,
+                    hasDocument: true,
+                    document: {
+                        name: evil,
+                        sizeBytes: 100,
+                        uploadedAt: "2026-07-10T12:00:00+09:00",
+                    },
+                },
+            },
+        });
+
+        const nameEl = screen.getByTestId("source-document-name");
+        // Svelte の既定エスケープでテキストとして描画され、実 script 要素は生成されない
+        expect(nameEl.textContent).toBe(evil);
+        expect(nameEl.querySelector("script")).toBeNull();
     });
 
     // --- T148 (bug-hunt F-1-01): render props の配線 ---
