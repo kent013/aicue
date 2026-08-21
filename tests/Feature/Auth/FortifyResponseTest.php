@@ -6,6 +6,7 @@ use App\Models\User;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password;
+use Inertia\Testing\AssertableInertia;
 
 /*
  * Fortify Response contract bind (app/Http/Responses/Fortify/) の応答契約の正本。
@@ -100,6 +101,105 @@ test('プロフィール更新は JSON リクエストに 200 を返す', functi
         ]);
 
     $response->assertStatus(200);
+});
+
+/*
+ * F-4-01: メール変更成功時に認証画面 (verification.notice) で成功フィードバックを出す。
+ *
+ * バグ: メール変更で email_verified_at が null 化された状態で back() (= /settings) へ
+ * 戻すと、/settings の素の verified ゲートが verification.notice へもう一段 302 し、
+ * success flash が中間ホップで期限切れ廃棄される。着地画面 (/email/verify、auth のみ) へ
+ * 直接寄せ、そこで成功を明示する。
+ */
+
+// EMAIL_CHANGED_MESSAGE (ProfileUpdatedResponse::EMAIL_CHANGED_MESSAGE と同値であることを固定する)
+$emailChangedMessage = 'メールアドレスを変更しました。新しいアドレスに認証メールを送信しましたので、認証を完了してください。';
+
+test('メール変更 (fresh + web) は verification.notice へ redirect し success flash を載せる', function () use ($emailChangedMessage): void {
+    Notification::fake();
+    // 変更前は verified 済み。fresh を明示設定 (Factory 暗黙 default に依存させない)。
+    $user = User::factory()->create();
+
+    $response = $this->actingAs($user)
+        ->withSession(['recent_auth_at' => time()])
+        ->from('/settings')
+        ->put('/user/profile-information', [
+            'name' => $user->name,
+            'email' => 'new@example.com',
+        ]);
+
+    $response->assertRedirect(route('verification.notice'));
+    $response->assertSessionHas('success', $emailChangedMessage);
+});
+
+test('メール変更の着地画面が flash.success を Inertia prop として受け取る', function () use ($emailChangedMessage): void {
+    Notification::fake();
+    $user = User::factory()->create();
+
+    $this->actingAs($user)
+        ->withSession(['recent_auth_at' => time()])
+        ->from('/settings')
+        ->put('/user/profile-information', [
+            'name' => $user->name,
+            'email' => 'new@example.com',
+        ]);
+
+    // 302 の着地先を GET し、consumeFlash が読む共有 prop 値と着地 component 名まで固定する
+    // (session だけでなく props 配線の回帰、「正しい props だが誤った画面」の後退も検出)。
+    $this->actingAs($user)
+        ->get('/email/verify')
+        ->assertInertia(fn (AssertableInertia $page) => $page
+            ->component('Auth/VerifyEmail')
+            ->where('flash.success', $emailChangedMessage));
+});
+
+test('メール変更で新アドレスへ認証メールが送信される', function (): void {
+    Notification::fake();
+    $user = User::factory()->create();
+
+    $this->actingAs($user)
+        ->withSession(['recent_auth_at' => time()])
+        ->from('/settings')
+        ->put('/user/profile-information', [
+            'name' => $user->name,
+            'email' => 'new@example.com',
+        ]);
+
+    Notification::assertSentTo($user, VerifyEmail::class);
+});
+
+test('氏名のみ更新 (web) は従来どおり back() + プロフィール更新メッセージ', function (): void {
+    Notification::fake();
+    $user = User::factory()->create();
+
+    // email は現行と同一 → wasChanged('email')=false → verification.notice へは飛ばない
+    $response = $this->actingAs($user)
+        ->withSession(['recent_auth_at' => time()])
+        ->from('/settings')
+        ->put('/user/profile-information', [
+            'name' => '更新後の名前',
+            'email' => $user->email,
+        ]);
+
+    $response->assertRedirect('/settings');
+    $response->assertSessionHas('success', 'プロフィールを更新しました。');
+    expect($response->headers->get('Location'))->not->toBe(route('verification.notice'));
+});
+
+test('メール変更でも expectsJson は 200 の空 JSON 本文を維持する', function (): void {
+    Notification::fake();
+    $user = User::factory()->create();
+
+    $response = $this->actingAs($user)
+        ->withSession(['recent_auth_at' => time()])
+        ->putJson('/user/profile-information', [
+            'name' => $user->name,
+            'email' => 'new@example.com',
+        ]);
+
+    $response->assertOk();
+    expect($response->headers->get('Content-Type'))->toContain('application/json');
+    expect($response->getContent())->toBe('""');
 });
 
 test('パスワード変更は success flash を返す (web)', function (): void {

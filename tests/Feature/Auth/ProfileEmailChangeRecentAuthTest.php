@@ -99,6 +99,47 @@ test('3: fresh + email 変更は成功し旧アドレス通知 + 再検証要求
     );
 });
 
+test('F-4-01: stale → 再認証完了 → 元操作再送で verification.notice + success flash', function (): void {
+    Notification::fake();
+    $user = User::factory()->create(['email' => 'old@example.com']);
+
+    // (1) stale セッションで email 変更 PUT (Inertia mutation) → 409 で反映されない (1a と同契約)
+    $this->actingAs($user)
+        ->withHeaders(['X-Inertia' => 'true'])
+        ->put('/user/profile-information', [
+            'name' => $user->name,
+            'email' => 'new@example.com',
+        ])
+        ->assertStatus(409)
+        ->assertJsonPath('code', 'recent_auth_required');
+
+    // (2) 同一セッションで再認証 (正しいパスワード) → 鮮度が stamp される。
+    // 直前の 409 (Inertia mutation) が dropped_mutation を stash するため、confirmPassword は
+    // 204 ではなく intended への redirect を返す (詳細は RecentAuthTest が担保)。ここでは
+    // 「再認証で鮮度が stamp される」ことだけ固定し、次段で元操作の再送を通す。
+    $this->actingAs($user)
+        ->postJson('/recent-auth/password', ['password' => 'password']);
+    expect(session('recent_auth_at'))->toBeInt();
+
+    // (3) 元の email 変更 PUT を再送 → gate 通過し verification.notice + success へ着地
+    $response = $this->actingAs($user)
+        ->from('/settings')
+        ->put('/user/profile-information', [
+            'name' => $user->name,
+            'email' => 'new@example.com',
+        ]);
+
+    $response->assertRedirect(route('verification.notice'));
+    $response->assertSessionHas(
+        'success',
+        'メールアドレスを変更しました。新しいアドレスに認証メールを送信しましたので、認証を完了してください。',
+    );
+
+    $user->refresh();
+    expect($user->email)->toBe('new@example.com');
+    expect($user->email_verified_at)->toBeNull();
+});
+
 test('5: stale + email 欠落/非string は recent-auth で gate されず email 不変', function (array $payload): void {
     Notification::fake();
     $user = User::factory()->create(['email' => 'me@example.com']);

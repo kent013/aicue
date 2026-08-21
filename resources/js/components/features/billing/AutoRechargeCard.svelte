@@ -86,10 +86,13 @@
         return n;
     });
 
-    const rangeError = $derived.by<string | null>(() => {
-        if (parsedThreshold === null) {
-            return "リチャージ開始残高は 0 以上の整数で入力してください";
-        }
+    // 原因フィールドを 1 つに特定する raw 派生 (inputErrorShown 非依存 = 妥当性ゲート用)。
+    // threshold-first 短絡により thresholdErrorText と maxErrorText が同時に非 null にはならない。
+    const thresholdErrorText = $derived.by<string | null>(() =>
+        parsedThreshold === null ? "リチャージ開始残高は 0 以上の整数で入力してください" : null,
+    );
+    const maxErrorText = $derived.by<string | null>(() => {
+        if (parsedThreshold === null) return null; // 原因は threshold 側。max は巻き込まない
         if (parsedMax === null) {
             return `リチャージ後の残高は ${autoRecharge.minCount} 〜 ${autoRecharge.maxCountLimit} の整数で入力してください`;
         }
@@ -99,8 +102,12 @@
         return null;
     });
 
-    /** 表示中の入力エラー。提示開始後は rangeError に完全追随する (有効化で消え、理由が変われば文言も変わる) */
-    const inputError = $derived(inputErrorShown ? rangeError : null);
+    // 妥当性ゲート (ensureValidRange が参照)。単一 SoT: per-field の合流で従来の threshold-first と同値。
+    const rangeError = $derived(thresholdErrorText ?? maxErrorText);
+
+    // 表示は押下後に初めて提示する現行契約を維持 (禁止事項 #8)。提示開始後は現在入力に追随。
+    const thresholdError = $derived(inputErrorShown ? thresholdErrorText : null);
+    const maxError = $derived(inputErrorShown ? maxErrorText : null);
 
     // 適用単価: Max 枚をまとめ買いした場合の tier 単価 (同意文言の上限額と同じ計算)。
     const appliedUnit = $derived.by<number>(() => {
@@ -332,7 +339,11 @@
     {/if}
 
     <div class="mt-4 grid gap-4 md:grid-cols-2">
-        <FormField label="リチャージ開始残高 (残りがこの枚数を下回ったら購入)" id="auto-recharge-threshold">
+        <FormField
+            label="リチャージ開始残高 (残りがこの枚数を下回ったら購入)"
+            id="auto-recharge-threshold"
+            error={thresholdError}
+        >
             {#snippet children({ id, describedBy, invalid })}
                 <Input
                     {id}
@@ -351,7 +362,7 @@
                 />
             {/snippet}
         </FormField>
-        <FormField label="リチャージ後の残高 (この枚数まで補充)" id="auto-recharge-max">
+        <FormField label="リチャージ後の残高 (この枚数まで補充)" id="auto-recharge-max" error={maxError}>
             {#snippet children({ id, describedBy, invalid })}
                 <Input
                     {id}
@@ -381,15 +392,15 @@
         </p>
     {/if}
 
-    {#if inputError !== null}
-        <p
-            class="mt-2 text-caption text-danger"
-            aria-live="polite"
-            data-testid="auto-recharge-range-error"
-        >
-            {inputError}
-        </p>
-    {/if}
+    <!-- 可視の統合エラー <p> は撤去 (文言は各 FormField 内の FormError が per-field で描画する)。
+         読み上げ専用として、常時 DOM 常在の visually-hidden な polite live region を 1 つ置く。
+         要素は常在し本文だけが更新されるため、押下後のエラー出現が確実に通知される
+         (要素と本文の同時挿入だと SR が読み落とすことがあるため空要素を先に置く)。
+         テキストは提示中の単一アクティブエラー (threshold-first 短絡で常に高々 1 つ)。 -->
+    <p class="sr-only" aria-live="polite" data-testid="auto-recharge-range-error">
+        {#if inputErrorShown && (thresholdError ?? maxError)}{thresholdError ??
+                maxError}{/if}
+    </p>
 
     {#if showConsent}
         <div class="mt-4">
