@@ -22,7 +22,6 @@
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
 | T110 | 認証手段変更のメール通知ポリシーの統一設計 | backend | passkey/2FA/SSO の増減通知を一貫したポリシーとして設計する(T108 S7 は監査ログのみで通知は見送り) | Low | standalone | [設計](devnotes/20260805-1550-security-audit-remediation/) | 2026-08-05 17:45 |
-| T240 | bug-hunt 要確認グループ対応: 非管理メンバーの onboarding 初回着地を dashboard へ寄せる (Q-2-01) + F-3-02/S6-1/S6-2 の既存カバレッジ確認 | backend | 非管理者の初回着地をdashboardへ、他3件は確認 | Medium | incremental | [設計](devnotes/20260821-1520-bughunt-needs-review/) | 2026-08-21 16:00 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
