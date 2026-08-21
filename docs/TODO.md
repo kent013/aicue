@@ -22,7 +22,6 @@
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
 | T110 | 認証手段変更のメール通知ポリシーの統一設計 | backend | passkey/2FA/SSO の増減通知を一貫したポリシーとして設計する(T108 S7 は監査ログのみで通知は見送り) | Low | standalone | [設計](devnotes/20260805-1550-security-audit-remediation/) | 2026-08-05 17:45 |
-| T237 | 招待受諾の宛先メール照合と組織メンバーシップ認可の是正 (F-2-02/F-2-03/F-2-01) | backend | 招待受諾の宛先メール照合と認可テスト整備 | Critical | standalone | [設計](devnotes/20260821-1522-bughunt-org-membership-authz/) | 2026-08-21 16:00 |
 | T238 | 撮影PWA離脱防止とSOP可視化・adopt保護キー防御 (F-1-02/F-1-01/F-1-03) | general | 撮影PWA離脱防止・SOP表示・採用の保護キー拒否 | High | incremental | [設計](devnotes/20260821-1517-bughunt-capture-manual/) | 2026-08-21 16:00 |
 | T239 | bughunt profile-feedback-a11y: メール変更成功フィードバックと課金オートリチャージ a11y | general | メール変更成功通知と課金a11yの是正 | Medium | incremental | [設計](devnotes/20260821-1517-bughunt-profile-feedback-a11y/) | 2026-08-21 16:00 |
 | T240 | bug-hunt 要確認グループ対応: 非管理メンバーの onboarding 初回着地を dashboard へ寄せる (Q-2-01) + F-3-02/S6-1/S6-2 の既存カバレッジ確認 | backend | 非管理者の初回着地をdashboardへ、他3件は確認 | Medium | incremental | [設計](devnotes/20260821-1520-bughunt-needs-review/) | 2026-08-21 16:00 |
