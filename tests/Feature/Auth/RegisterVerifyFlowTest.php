@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\OrganizationRole;
 use App\Models\Organization;
 use App\Models\User;
 use Illuminate\Support\Facades\Http;
@@ -113,6 +114,39 @@ test('verify 完了で onboarding.checkout へ redirect し continuation が消�
     $response->assertRedirect(route('onboarding.checkout'));
     $response->assertSessionMissing('verify_continue_organization_id');
     expect($user->fresh()?->hasVerifiedEmail())->toBeTrue();
+});
+
+test('continuation: ActiveFreePlan の非管理メンバーは verify 完了後 onboarding.checkout 経由で dashboard に着地する (Q-2-01)', function (): void {
+    // ActiveFreePlan (free_plan_code=personal) の既契約 org を用意する
+    // (hasActiveAccess=true かつ課金は非管理メンバーの管掌外)。
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    $organization->forceFill(['plan_code' => 'standard'])->save();
+    contractPaidPlan($organization, status: 'canceled');
+    $organization->forceFill([
+        'free_plan_code' => 'personal',
+        'free_plan_activated_at' => now(),
+        'personal_declared_at' => now(),
+        'personal_declared_by_user_id' => $owner->getKey(),
+    ])->save();
+
+    // 非管理メンバー (unverified) を当該 org に所属させ、current org / continuation を張る。
+    $member = User::factory()->unverified()->create();
+    $organization->users()->attach($member);
+    $member->addRole(OrganizationRole::Member->value, $organization->laratrust_team_id);
+    $member->forceFill(['current_organization_id' => $organization->id])->save();
+
+    $response = $this->actingAs($member)
+        ->withSession(['verify_continue_organization_id' => $organization->id])
+        ->get(($this->verificationUrlFor)($member));
+
+    // 第一段: verify 完了は onboarding.checkout へ redirect し continuation が消える。
+    $response->assertRedirect(route('onboarding.checkout'));
+    $response->assertSessionMissing('verify_continue_organization_id');
+    expect($member->fresh()?->hasVerifiedEmail())->toBeTrue();
+
+    // 第二段: onboarding.checkout は非管理メンバーを dashboard へ寄せる (中間ホップを保証)。
+    $this->actingAs($member->fresh())->get(route('onboarding.checkout'))
+        ->assertRedirect(route('dashboard'));
 });
 
 test('continuation なしの verify 完了は Fortify 既定と同値 (/dashboard?verified=1)', function (): void {

@@ -60,8 +60,16 @@ final class OnboardingController extends Controller
 
         // 判定順序は hasActiveAccess → manageBilling。契約済み non-manager が誤って
         // billing-required に飛ばないよう、先に契約状態を判定する。
+        // 契約済み (Subscribed / ActiveFreePlan) の入口着地は manageBilling 能力で分岐する:
+        // - 保持者: 請求管理が正当な着地なので billing.index (現状維持)。
+        // - 非保持メンバー (現場作業者): 自分で操作できない請求画面ではなく業務入口 dashboard へ
+        //   (Q-2-01。North Star: 現場作業者を最小摩擦で仕事へ着地させる。soft dead-end にしない)。
         if ($this->access->hasActiveAccess($organization)) {
-            return new RedirectResponse(route('billing.index'));
+            return new RedirectResponse(
+                Gate::allows('manageBilling', $organization)
+                    ? route('billing.index')
+                    : route('dashboard'),
+            );
         }
 
         // 未契約 + manageBilling 権限なし → billing-required へ

@@ -87,29 +87,90 @@ test('Subscribed は manageBilling でも billing.index へ redirect', function 
         ->assertRedirect(route('billing.index'));
 });
 
-test('Subscribed の non-manager member は billing-required ではなく billing.index へ (判定順序の固定)', function (): void {
+// #2 [期待更新 Q-2-01]: 契約済み (paid) の非管理メンバーは、自分で操作できない
+// billing.index ではなく業務入口 dashboard へ寄せる。判定順序 (hasActiveAccess →
+// manageBilling) は不変で、分岐先だけを manageBilling 能力で切り替える。
+test('Subscribed の non-manager member は billing.index ではなく dashboard へ (Q-2-01)', function (): void {
     [$organization] = createOrganizationWithOwner(grandfatherFreePlan: false);
     contractPaidPlan($organization, status: 'active');
     $member = attachOrganizationMember($organization);
     $member->forceFill(['current_organization_id' => $organization->id])->save();
 
     $this->actingAs($member)->get('/onboarding/checkout')
+        ->assertRedirect(route('dashboard'));
+});
+
+test('Subscribed の manageBilling 保持 owner は billing.index へ (Q-2-01 で不変)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    contractPaidPlan($organization, status: 'active');
+
+    $this->actingAs($owner)->get('/onboarding/checkout')
         ->assertRedirect(route('billing.index'));
 });
 
-test('ActiveFreePlan (free_plan_code=personal) は billing.index へ redirect', function (): void {
-    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+/** ActiveFreePlan (free_plan_code=personal) の組織にする。 */
+function activateFreePersonalPlan(Organization $organization, User $declaredBy): void
+{
     $organization->forceFill(['plan_code' => 'standard'])->save(); // 移行 OR を経由しないことの明示
     contractPaidPlan($organization, status: 'canceled');
     $organization->forceFill([
         'free_plan_code' => 'personal',
         'free_plan_activated_at' => now(),
         'personal_declared_at' => now(),
-        'personal_declared_by_user_id' => $owner->getKey(),
+        'personal_declared_by_user_id' => $declaredBy->getKey(),
     ])->save();
+}
+
+test('ActiveFreePlan (free_plan_code=personal) の manageBilling 保持 owner は billing.index へ (Q-2-01 で不変)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    activateFreePersonalPlan($organization, $owner);
 
     $this->actingAs($owner)->get('/onboarding/checkout')
         ->assertRedirect(route('billing.index'));
+});
+
+// #4 [新規 Q-2-01]: bug-hunt が観測した実シナリオ。ActiveFreePlan (Personal free) の
+// 組織に属する非管理メンバーは、請求画面ではなく dashboard へ着地する。
+test('ActiveFreePlan + manageBilling 非保持 member は dashboard へ (Q-2-01 の既契約=Personal free ケース)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    activateFreePersonalPlan($organization, $owner);
+    $member = attachOrganizationMember($organization);
+    $member->forceFill(['current_organization_id' => $organization->id])->save();
+
+    $this->actingAs($member)->get('/onboarding/checkout')
+        ->assertRedirect(route('dashboard'));
+});
+
+// #6 [characterization / 境界回帰]: 未契約 (hasActiveAccess=false) の非管理メンバーは
+// dashboard には行かず billing-required へ。#4 と最も取り違えやすい境界 (active access の
+// 有無で dashboard か billing-required かが分かれる) を固定する。現行コードでも緑であり
+// (仕様変更テストではない)、変更後も緑を維持することで変更範囲が「active access を持つ
+// 非管理者だけ」であることを保証する。
+test('未契約 + manageBilling 非保持 member は billing-required へ (dashboard には行かない)', function (): void {
+    [$organization] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    $member = attachOrganizationMember($organization);
+    $member->forceFill(['current_organization_id' => $organization->id])->save();
+
+    $this->actingAs($member)->get('/onboarding/checkout')
+        ->assertRedirect(route('onboarding.billing-required'));
+});
+
+// [着地の実効性]: dashboard への 302 の先で、非管理メンバーでも Dashboard 画面が
+// 課金ゲートに阻まれず 200 で開くこと (soft dead-end でないこと) を段階で固定する。
+test('dashboard 着地は 302 の先で実際に Dashboard 画面が 200 描画される', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    activateFreePersonalPlan($organization, $owner);
+    $member = attachOrganizationMember($organization);
+    $member->forceFill(['current_organization_id' => $organization->id])->save();
+
+    // (1) onboarding.checkout が dashboard へ 302。
+    $this->actingAs($member)->get('/onboarding/checkout')
+        ->assertRedirect(route('dashboard'));
+
+    // (2)(3) 同一認証ユーザーで dashboard を GET すると 200 で Dashboard 画面が描画される。
+    $this->actingAs($member)->get(route('dashboard'))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page): Assert => $page->component('Dashboard'));
 });
 
 test('未契約 org (plan_code IS NULL) は checkout を 200 で render する (P4 ゲート反転後)', function (): void {

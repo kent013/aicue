@@ -141,7 +141,9 @@ bug-hunt はこれらを**単独で開くのではなく**、S1/S6 のパスキ�
 > §サブスク契約 Checkout とオンボーディング着地)。
 
 - `onboarding.checkout` は**離脱ガード付き**: 契約済み (有効 sub / free personal) は
-  `billing.index` へ、`manageBilling` 非保持者は `onboarding.billing-required` へ逃がす。
+  `manageBilling` 保持者 → `billing.index` / 非保持メンバー → `dashboard` へ寄せる
+  (非保持メンバーに操作できない請求画面を見せず業務入口へ着地させる。Q-2-01)。
+  未契約で `manageBilling` 非保持者は `onboarding.billing-required` へ逃がす。
 - `onboarding.billing-required` も同様に、利用可なら `dashboard`、`manageBilling` 保持者なら
   `onboarding.checkout` へ逃がす。**どちらの画面も「行き先のない詰み」を作らないこと**が契約で、
   ここでループ・403・空画面が出たら finding (H4/H10)。
