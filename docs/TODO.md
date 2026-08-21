@@ -21,7 +21,6 @@
 
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
-| T242 | OCR 機能フラグの完全撤去 (常時有効化) | backend | OCRフラグ撤去・常時有効化の設計完了 | Medium | standalone | [設計](devnotes/20260822-0146-ocr-flag-removal/) | 2026-08-22 02:11 |
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
 ## Conditional (条件付き待機)
