@@ -1,0 +1,1661 @@
+{
+  "run_id": "20260821-095643",
+  "shards": [
+    "1",
+    "2",
+    "3",
+    "4"
+  ],
+  "executed_routes": [
+    {
+      "route_name": "billing.auto-recharge.setup",
+      "shard": "3",
+      "status": "blocked",
+      "http_statuses": [
+        403,
+        409,
+        422
+      ]
+    },
+    {
+      "route_name": "billing.auto-recharge.update",
+      "shard": "3",
+      "status": "blocked",
+      "http_statuses": [
+        403,
+        422
+      ]
+    },
+    {
+      "route_name": "billing.auto-recharge.update",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "billing.checkout",
+      "shard": "3",
+      "status": "blocked",
+      "http_statuses": [
+        302,
+        403,
+        409
+      ]
+    },
+    {
+      "route_name": "billing.checkout",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "billing.contact.update",
+      "shard": "3",
+      "status": "blocked",
+      "http_statuses": [
+        303,
+        403
+      ]
+    },
+    {
+      "route_name": "billing.contact.update",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        303
+      ]
+    },
+    {
+      "route_name": "billing.index",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "billing.index",
+      "shard": "3",
+      "status": "blocked",
+      "http_statuses": [
+        409
+      ]
+    },
+    {
+      "route_name": "billing.index",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        200,
+        303
+      ]
+    },
+    {
+      "route_name": "billing.plan.change",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "billing.plans",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "billing.portal",
+      "shard": "3",
+      "status": "blocked",
+      "http_statuses": [
+        409
+      ]
+    },
+    {
+      "route_name": "billing.tickets.checkout",
+      "shard": "3",
+      "status": "blocked",
+      "http_statuses": [
+        409
+      ]
+    },
+    {
+      "route_name": "billing.tickets.show",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "capture.home",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "capture.manuals.index",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "capture.manuals.show",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "capture.takes.adopt",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "capture.takes.downloaded",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "capture.takes.playback",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "capture.takes.store",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        201
+      ]
+    },
+    {
+      "route_name": "capture.takes.thumbnail",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "capture.takes.upload-url",
+      "shard": "1",
+      "status": "blocked",
+      "http_statuses": [
+        422
+      ]
+    },
+    {
+      "route_name": "capture.takes.upload-url",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "contact",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "contact.store",
+      "shard": "2",
+      "status": "blocked",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "contact.store",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "contact.thanks",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "dashboard",
+      "shard": "1",
+      "status": "blocked",
+      "http_statuses": [
+        409
+      ]
+    },
+    {
+      "route_name": "dashboard",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "dashboard",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "dashboard",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "dashboard",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "home",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "home",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "home",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "home",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "invitations.accept",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        200,
+        302
+      ]
+    },
+    {
+      "route_name": "invitations.accept.store",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "legal.commerce-disclosure",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "legal.privacy",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "legal.terms",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "login",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "login",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "login",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "login",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "login.store",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "login.store",
+      "shard": "2",
+      "status": "blocked",
+      "http_statuses": [
+        302,
+        422
+      ]
+    },
+    {
+      "route_name": "login.store",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "login.store",
+      "shard": "3",
+      "status": "blocked",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "login.store",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "login.store",
+      "shard": "4",
+      "status": "blocked",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "login.store",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "logout",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "logout",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "logout",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "manage.users.index",
+      "shard": "1",
+      "status": "blocked",
+      "http_statuses": [
+        403
+      ]
+    },
+    {
+      "route_name": "manage.users.index",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "manage.users.index",
+      "shard": "2",
+      "status": "blocked",
+      "http_statuses": [
+        403
+      ]
+    },
+    {
+      "route_name": "manage.users.index",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "manage.users.index",
+      "shard": "3",
+      "status": "blocked",
+      "http_statuses": [
+        403
+      ]
+    },
+    {
+      "route_name": "manage.users.index",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "notifications.index",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "notifications.open",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        303
+      ]
+    },
+    {
+      "route_name": "notifications.read",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "notifications.read-all",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "onboarding.activate-personal",
+      "shard": "2",
+      "status": "blocked",
+      "http_statuses": [
+        422
+      ]
+    },
+    {
+      "route_name": "onboarding.activate-personal",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "onboarding.billing-required",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        200,
+        302
+      ]
+    },
+    {
+      "route_name": "onboarding.checkout",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        200,
+        302,
+        303
+      ]
+    },
+    {
+      "route_name": "organizations.api-keys.index",
+      "shard": "3",
+      "status": "blocked",
+      "http_statuses": [
+        403
+      ]
+    },
+    {
+      "route_name": "organizations.api-keys.index",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "organizations.api-keys.revoke",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        303
+      ]
+    },
+    {
+      "route_name": "organizations.api-keys.sessions.index",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "organizations.api-keys.store",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "organizations.create",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "organizations.invitations.revoke",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        303
+      ]
+    },
+    {
+      "route_name": "organizations.invitations.revoke",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        303
+      ]
+    },
+    {
+      "route_name": "organizations.invitations.store",
+      "shard": "2",
+      "status": "blocked",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "organizations.invitations.store",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "organizations.invitations.store",
+      "shard": "3",
+      "status": "blocked",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "organizations.invitations.store",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "organizations.members.destroy",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        303
+      ]
+    },
+    {
+      "route_name": "organizations.members.destroy",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        303
+      ]
+    },
+    {
+      "route_name": "organizations.members.two-factor.reset",
+      "shard": "2",
+      "status": "blocked",
+      "http_statuses": [
+        303
+      ]
+    },
+    {
+      "route_name": "organizations.members.two-factor.reset",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        303
+      ]
+    },
+    {
+      "route_name": "organizations.members.update",
+      "shard": "2",
+      "status": "blocked",
+      "http_statuses": [
+        303
+      ]
+    },
+    {
+      "route_name": "organizations.members.update",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        303
+      ]
+    },
+    {
+      "route_name": "organizations.members.update",
+      "shard": "3",
+      "status": "blocked",
+      "http_statuses": [
+        303
+      ]
+    },
+    {
+      "route_name": "organizations.members.update",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        303
+      ]
+    },
+    {
+      "route_name": "organizations.onboarding.cli",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "organizations.onboarding.mcp",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "organizations.settings",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "organizations.store",
+      "shard": "3",
+      "status": "blocked",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "organizations.store",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "organizations.switch",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "organizations.switch",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "organizations.two-factor-requirement.update",
+      "shard": "3",
+      "status": "blocked",
+      "http_statuses": [
+        303
+      ]
+    },
+    {
+      "route_name": "organizations.update",
+      "shard": "3",
+      "status": "blocked",
+      "http_statuses": [
+        303
+      ]
+    },
+    {
+      "route_name": "organizations.update",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        303
+      ]
+    },
+    {
+      "route_name": "passkey.login-options",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "passkey.registration-options",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "password.confirm",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "password.email",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "password.request",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "password.reset",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "password.update",
+      "shard": "2",
+      "status": "blocked",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "password.update",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "pricing",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "pricing",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "projects.categories.destroy",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        303
+      ]
+    },
+    {
+      "route_name": "projects.categories.index",
+      "shard": "1",
+      "status": "blocked",
+      "http_statuses": [
+        403
+      ]
+    },
+    {
+      "route_name": "projects.categories.index",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "projects.categories.reorder",
+      "shard": "1",
+      "status": "blocked",
+      "http_statuses": [
+        422
+      ]
+    },
+    {
+      "route_name": "projects.categories.reorder",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        303
+      ]
+    },
+    {
+      "route_name": "projects.categories.store",
+      "shard": "3",
+      "status": "blocked",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "projects.categories.store",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "projects.categories.update",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        303
+      ]
+    },
+    {
+      "route_name": "projects.create",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "projects.create",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "projects.create",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "projects.destroy",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        303
+      ]
+    },
+    {
+      "route_name": "projects.edit",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "projects.index",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "projects.index",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "projects.index",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "projects.items.destroy",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        303
+      ]
+    },
+    {
+      "route_name": "projects.items.store",
+      "shard": "3",
+      "status": "blocked",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "projects.items.store",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "projects.items.update",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        303
+      ]
+    },
+    {
+      "route_name": "projects.manuals.analyze",
+      "shard": "1",
+      "status": "blocked",
+      "http_statuses": [
+        403,
+        409
+      ]
+    },
+    {
+      "route_name": "projects.manuals.analyze",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        201
+      ]
+    },
+    {
+      "route_name": "projects.manuals.create",
+      "shard": "1",
+      "status": "blocked",
+      "http_statuses": [
+        403
+      ]
+    },
+    {
+      "route_name": "projects.manuals.create",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "projects.manuals.destroy",
+      "shard": "1",
+      "status": "blocked",
+      "http_statuses": [
+        403
+      ]
+    },
+    {
+      "route_name": "projects.manuals.download",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "projects.manuals.duplicate",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "projects.manuals.edit",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "projects.manuals.jobs.show",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "projects.manuals.preview",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        201
+      ]
+    },
+    {
+      "route_name": "projects.manuals.render",
+      "shard": "1",
+      "status": "blocked",
+      "http_statuses": [
+        403,
+        422
+      ]
+    },
+    {
+      "route_name": "projects.manuals.render",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        201
+      ]
+    },
+    {
+      "route_name": "projects.manuals.render-jobs.playback",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "projects.manuals.render-jobs.show",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "projects.manuals.scenario.update",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "projects.manuals.show",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "projects.manuals.store",
+      "shard": "1",
+      "status": "blocked",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "projects.manuals.store",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "projects.manuals.update",
+      "shard": "1",
+      "status": "blocked",
+      "http_statuses": [
+        403,
+        422
+      ]
+    },
+    {
+      "route_name": "projects.members.destroy",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        303
+      ]
+    },
+    {
+      "route_name": "projects.members.store",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "projects.members.store",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "projects.show",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "projects.show",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "projects.show",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "projects.store",
+      "shard": "1",
+      "status": "blocked",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "projects.store",
+      "shard": "1",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "projects.store",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "projects.store",
+      "shard": "3",
+      "status": "blocked",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "projects.store",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "projects.update",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        303
+      ]
+    },
+    {
+      "route_name": "recent-auth.confirm",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "recent-auth.password",
+      "shard": "4",
+      "status": "blocked",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "recent-auth.password",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        204,
+        302
+      ]
+    },
+    {
+      "route_name": "recent-auth.status",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "recent-auth.status",
+      "shard": "3",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "recent-auth.status",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "register",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "register.store",
+      "shard": "2",
+      "status": "blocked",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "register.store",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "session.status",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "settings",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "settings.account.deletion-request.destroy",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        303
+      ]
+    },
+    {
+      "route_name": "settings.account.deletion-request.store",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "settings.account.destroy",
+      "shard": "4",
+      "status": "blocked",
+      "http_statuses": [
+        303
+      ]
+    },
+    {
+      "route_name": "settings.account.destroy",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        303
+      ]
+    },
+    {
+      "route_name": "settings.password.store",
+      "shard": "4",
+      "status": "blocked",
+      "http_statuses": [
+        422
+      ]
+    },
+    {
+      "route_name": "settings.security",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "settings.security",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "social.callback",
+      "shard": "4",
+      "status": "blocked",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "social.redirect",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "two-factor.confirm",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "two-factor.confirm",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "two-factor.disable",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        303
+      ]
+    },
+    {
+      "route_name": "two-factor.enable",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "two-factor.enable",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "two-factor.login",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "two-factor.login.store",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "two-factor.qr-code",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "two-factor.qr-code",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "two-factor.recovery-codes",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "two-factor.recovery-codes",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "two-factor.regenerate-recovery-codes",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "two-factor.secret-key",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "two-factor.secret-key",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "user-password.update",
+      "shard": "4",
+      "status": "blocked",
+      "http_statuses": [
+        303
+      ]
+    },
+    {
+      "route_name": "user-password.update",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        200,
+        303
+      ]
+    },
+    {
+      "route_name": "user-profile-information.update",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        303
+      ]
+    },
+    {
+      "route_name": "verification.notice",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "verification.notice",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        200
+      ]
+    },
+    {
+      "route_name": "verification.send",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "verification.verify",
+      "shard": "2",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    },
+    {
+      "route_name": "verification.verify",
+      "shard": "4",
+      "status": "ok",
+      "http_statuses": [
+        302
+      ]
+    }
+  ],
+  "unresolved": {}
+}
