@@ -28,8 +28,6 @@
         categories: CategoryOption[];
         /** SOP アップロードの `<input accept>` 属性値 (画像・スキャン SOP の OCR 対応) */
         sourceDocumentAccept: string;
-        /** 画像・スキャン PDF の OCR 対応が有効か (フラグ連動の案内出し分け専用) */
-        imageSourceDocumentsEnabled: boolean;
         /** 受理形式の人間向けラベル (422 文言と同一の情報源) */
         sourceDocumentFormatsLabel: string;
     }
@@ -38,7 +36,6 @@
         project,
         categories,
         sourceDocumentAccept,
-        imageSourceDocumentsEnabled,
         sourceDocumentFormatsLabel,
     }: Props = $props();
 
@@ -114,7 +111,7 @@
                         {/snippet}
                     </FormField>
                     <!-- ファイルを選ぶ前に外部送信の事実が見えている必要があるため file input の直前に置く -->
-                    <SourceDocumentUploadNotice {imageSourceDocumentsEnabled} />
+                    <SourceDocumentUploadNotice />
                     <FormField
                         label="手順書 (SOP・任意)"
                         id="manual-document"

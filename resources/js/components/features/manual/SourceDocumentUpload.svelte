@@ -17,10 +17,9 @@
         manualId: number;
         hasDocument: boolean;
         sourceDocumentAccept: string;
-        imageSourceDocumentsEnabled: boolean;
     }
 
-    let { projectId, manualId, hasDocument, sourceDocumentAccept, imageSourceDocumentsEnabled }: Props = $props();
+    let { projectId, manualId, hasDocument, sourceDocumentAccept }: Props = $props();
 
     const form = useForm<{ document: File | null }>({ document: null });
 
@@ -38,7 +37,7 @@
 </script>
 
 <form novalidate onsubmit={submit} class="flex flex-col gap-3" data-testid="source-document-upload">
-    <SourceDocumentUploadNotice {imageSourceDocumentsEnabled} />
+    <SourceDocumentUploadNotice />
     <FormField
         label={hasDocument ? "手順書を差し替える" : "手順書 (SOP) をアップロード"}
         id="source-document"

@@ -40,8 +40,6 @@
         categories: CategoryOption[];
         /** SOP アップロードの `<input accept>` 属性値 (画像・スキャン SOP の OCR 対応) */
         sourceDocumentAccept: string;
-        /** 画像・スキャン PDF の OCR 対応が有効か (フラグ連動の案内出し分け専用) */
-        imageSourceDocumentsEnabled: boolean;
     }
 
     let {
@@ -52,7 +50,6 @@
         canManage,
         categories,
         sourceDocumentAccept,
-        imageSourceDocumentsEnabled,
     }: Props = $props();
 
     const shared = $derived(page.props as unknown as SharedProps);
@@ -201,7 +198,6 @@
                             manualId={manual.id}
                             hasDocument={analysis.hasDocument}
                             {sourceDocumentAccept}
-                            {imageSourceDocumentsEnabled}
                         />
                     </div>
                 </Card>

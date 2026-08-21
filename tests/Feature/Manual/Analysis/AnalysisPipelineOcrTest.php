@@ -20,18 +20,17 @@ use Tests\Support\Manual\MinimalImageFixture;
 use Tests\Support\Manual\MinimalPdfFixture;
 
 /*
- * AI 解析パイプラインの OCR 経路 (画像・スキャン SOP の OCR 対応。施策 6):
+ * AI 解析パイプラインの OCR 経路 (画像・スキャン SOP の OCR 対応。常時有効。
+ * 旧 `manual.ocr_analysis_enabled` フラグはオーナー決定により撤去済み):
  * - 画像アップロード → OCR 経路 → 成功
  * - テキスト層の無い PDF → OCR フォールバック → 成功
  * - OCR 対象外の失敗 (tooLarge) はそのまま失敗する (回帰)
- * - フラグ無効時は画像・PDF 品質ゲート失敗のどちらも OCR フォールバックが一切発火しない (回帰)
  * - extract 段の終端ログがジョブにつきちょうど 1 回だけ出ること・route/failure_category/
  *   media メタデータが正しいこと
  */
 
 beforeEach(function (): void {
     Http::fake(['*' => Http::response(['base' => 'USD', 'rates' => ['JPY' => 150.0]])]);
-    config()->set('manual.ocr_analysis_enabled', true);
 });
 
 /** @return array{Organization, Project, VideoManual} */
@@ -110,7 +109,7 @@ function fakeSuccessfulOcrScript(): void
     ]);
 }
 
-test('画像アップロード (フラグ有効) は OCR 経路で成功する', function (): void {
+test('画像アップロードは OCR 経路で成功する', function (): void {
     Storage::fake();
     [$organization, , $manual] = ocrPipelineOrg();
     $document = imageSourceDocument($manual, MinimalImageFixture::jpeg(10, 10));
@@ -126,7 +125,7 @@ test('画像アップロード (フラグ有効) は OCR 経路で成功する',
     expect($manual->status)->toBe(VideoManualStatus::Ready);
 });
 
-test('テキスト層の無い PDF (フラグ有効) は OCR フォールバックで成功する', function (): void {
+test('テキスト層の無い PDF は OCR フォールバックで成功する', function (): void {
     Storage::fake();
     [$organization, , $manual] = ocrPipelineOrg();
     $document = unreadablePdfSourceDocument($manual);
@@ -140,7 +139,7 @@ test('テキスト層の無い PDF (フラグ有効) は OCR フォールバッ�
     expect($job->status)->toBe(JobStatus::Succeeded);
 });
 
-test('OCR 対象外の失敗 (tooLarge) はそのまま失敗する (フラグ有効でも回帰)', function (): void {
+test('OCR 対象外の失敗 (tooLarge) はそのまま失敗する (回帰)', function (): void {
     Storage::fake();
     config()->set('manual.analysis_max_text_bytes', 10);
     [$organization, , $manual] = ocrPipelineOrg();
@@ -163,40 +162,6 @@ test('OCR 対象外の失敗 (tooLarge) はそのまま失敗する (フラグ�
             && $context['outcome'] === 'failed'
             && $context['failure_category'] === 'too_large';
     })->once();
-});
-
-test('フラグ無効時は画像アップロードが OCR フォールバックなしで即時失敗する (回帰)', function (): void {
-    Storage::fake();
-    config()->set('manual.ocr_analysis_enabled', false);
-    [$organization, , $manual] = ocrPipelineOrg();
-    $document = imageSourceDocument($manual, MinimalImageFixture::jpeg(10, 10));
-    $job = AnalysisJob::factory()->forManual($manual)->forDocument($document)->create();
-    app(TicketLedgerService::class)->grant($organization, 1, 'テスト残高');
-
-    Log::spy();
-    app(AnalysisPipeline::class)->run($job->id);
-
-    $job->refresh();
-    expect($job->status)->toBe(JobStatus::Failed);
-    expect($job->error)->toContain('テキストを抽出できません');
-
-    Log::shouldHaveReceived('info')->withArgs(function (string $message, array $context): bool {
-        return $message === 'AI 解析の抽出段 (終端)' && $context['route'] === 'text';
-    })->once();
-});
-
-test('フラグ無効時はテキスト品質ゲート失敗 PDF も OCR フォールバックなしで即時失敗する (回帰)', function (): void {
-    Storage::fake();
-    config()->set('manual.ocr_analysis_enabled', false);
-    [$organization, , $manual] = ocrPipelineOrg();
-    $document = unreadablePdfSourceDocument($manual);
-    $job = AnalysisJob::factory()->forManual($manual)->forDocument($document)->create();
-    app(TicketLedgerService::class)->grant($organization, 1, 'テスト残高');
-
-    app(AnalysisPipeline::class)->run($job->id);
-
-    $job->refresh();
-    expect($job->status)->toBe(JobStatus::Failed);
 });
 
 test('画像の media 検証失敗 (画素数上限超過) は route=ocr で 1 回だけログされ LLM は呼ばれない', function (): void {

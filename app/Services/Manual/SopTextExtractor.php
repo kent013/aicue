@@ -20,9 +20,9 @@ use Webmozart\Assert\Assert;
  * SOP (SourceDocument) からのテキスト抽出。doc/10 §10.7。
  *
  * テキスト抽出できない・日本語比率が不足する PDF は `AnalysisPipeline` が
- * `AnalysisMediaValidator` 経由の OCR 経路 (画像・スキャン SOP の OCR 対応) へ回す
- * (`manual.ocr_analysis_enabled` フラグが有効な場合のみ)。本クラスの責務は
- * あくまで「テキストを抽出できるか」の判定であり、OCR 経路の判断はここでは行わない。
+ * `AnalysisMediaValidator` 経由の OCR 経路 (画像・スキャン SOP の OCR 対応) へ回す。
+ * 本クラスの責務はあくまで「テキストを抽出できるか」の判定であり、OCR 経路の判断は
+ * ここでは行わない。
  *
  * - 分岐はアップロード時に内容 sniff 済みの mime を使う (クライアント拡張子は信頼しない)
  * - 抽出不能/実質空/バイト上限超過は AnalysisFailedException (ユーザー向け文言)

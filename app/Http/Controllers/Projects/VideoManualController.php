@@ -71,7 +71,6 @@ class VideoManualController extends Controller
             // StoreVideoManualRequest と同じ AcceptedSourceDocumentTypes を情報源にする
             // = ダイアログに出る形式とサーバが受理する形式が構造的に一致する。
             'sourceDocumentAccept' => AcceptedSourceDocumentTypes::acceptAttribute(),
-            'imageSourceDocumentsEnabled' => AcceptedSourceDocumentTypes::imagesEnabled(),
             // help 文言用の受理形式ラベル (422 文言と同一の情報源)
             'sourceDocumentFormatsLabel' => AcceptedSourceDocumentTypes::formatsLabel(),
         ]);
@@ -201,9 +200,8 @@ class VideoManualController extends Controller
             'canManage' => $user->can('update', $manual),
             'categories' => $this->categoryOptions($project), // 複製ダイアログのカテゴリ選択肢 (既存 helper 再利用)
             // SOP アップロードの受理形式 (画像・スキャン SOP の OCR 対応)。
-            // AcceptedSourceDocumentTypes が単一の情報源 (フラグに連動)
+            // AcceptedSourceDocumentTypes が単一の情報源
             'sourceDocumentAccept' => AcceptedSourceDocumentTypes::acceptAttribute(),
-            'imageSourceDocumentsEnabled' => AcceptedSourceDocumentTypes::imagesEnabled(),
         ]);
     }
 
