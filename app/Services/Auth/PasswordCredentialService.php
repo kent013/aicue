@@ -4,13 +4,16 @@ declare(strict_types=1);
 
 namespace App\Services\Auth;
 
+use App\Enums\Auth\AuthMethodChangeEvent;
 use App\Enums\SecurityEventType;
 use App\Models\User;
+use App\Services\Security\AuthMethodChangeNotifier;
 use App\Services\Security\SecurityEventRecorder;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
+use LogicException;
 use Throwable;
 use Webmozart\Assert\Assert;
 
@@ -33,6 +36,7 @@ final class PasswordCredentialService
 {
     public function __construct(
         private readonly SecurityEventRecorder $recorder,
+        private readonly AuthMethodChangeNotifier $notifier,
     ) {}
 
     /**
@@ -86,17 +90,29 @@ final class PasswordCredentialService
     }
 
     /**
-     * 保存 **commit 後**の副作用: 監査記録 → 他デバイス失効 → DB session 行削除。
+     * 保存 **commit 後**の副作用: 監査記録 → 通知 → 他デバイス失効 → DB session 行削除。
      * transaction 内では実行しない (上記の PostgreSQL 事情)。
-     * best-effort なのは **監査記録と DB session 行削除**の 2 つ (どちらも内部で例外を握る)。
+     * best-effort なのは **監査記録・通知・DB session 行削除**の 3 つ (いずれも内部で例外を握る)。
      * `Auth::logoutOtherDevices()` は例外を捕捉しない (失敗は 500 として表面化させる。
      * 他デバイス失効は correctness 側の要求であり、既存 UpdateUserPassword の挙動を維持する)。
+     * 通知は「本人が自分の認証手段を変更したことに気づく」導線であり (T110)、
+     * 対象は `setInitial()` (SSO のみのアカウントへ password を追加する = パスキー追加と
+     * 同じ脅威モデル) と `change()` の両方。
      */
     private function afterPersist(User $user, string $plain, SecurityEventType $event): void
     {
         // 「そのユーザーが自分でパスワードを設定/変更したか」の監査証跡。
         // 記録失敗は report のみ (SecurityEventRecorder が内包する)。
         $this->recorder->record($event, $user);
+
+        $this->notifier->notify($user, match ($event) {
+            SecurityEventType::PasswordSet => AuthMethodChangeEvent::PasswordSet,
+            SecurityEventType::PasswordChanged => AuthMethodChangeEvent::PasswordChanged,
+            default => throw new LogicException(
+                'PasswordCredentialService::afterPersist() は PasswordSet / PasswordChanged 以外の'
+                .'SecurityEventType で呼ばれない想定です。',
+            ),
+        });
 
         // 現在デバイスを維持しつつ他デバイスを失効させる。logoutOtherDevices は password を
         // 再ハッシュし、現在デバイスの recaller (remember-me) を新ハッシュで再発行 (現在リクエストが

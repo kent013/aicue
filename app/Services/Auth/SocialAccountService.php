@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace App\Services\Auth;
 
+use App\Enums\Auth\AuthMethodChangeEvent;
 use App\Enums\SecurityEventType;
 use App\Models\SocialAccount;
 use App\Models\User;
 use App\Services\Auth\EmailTrust\EmailTrustPolicyResolver;
 use App\Services\Organization\OrganizationProvisioningService;
+use App\Services\Security\AuthMethodChangeNotifier;
 use App\Services\Security\SecurityEventRecorder;
 use App\Support\Legal\LegalConsent;
 use Illuminate\Support\Facades\DB;
@@ -29,6 +31,7 @@ class SocialAccountService
         private readonly SecurityEventRecorder $recorder,
         private readonly OrganizationProvisioningService $provisioning,
         private readonly EmailTrustPolicyResolver $emailTrust,
+        private readonly AuthMethodChangeNotifier $notifier,
     ) {}
 
     public function findLinkedUser(string $provider, SocialiteUser $socialiteUser): ?User
@@ -88,6 +91,11 @@ class SocialAccountService
 
     /**
      * 連携追加。既に他ユーザーに連携済みの場合は false を返す。
+     *
+     * **通知は本メソッドだけが行う** (`register()` 内部の初回連携では呼ばない)。
+     * 新規 SSO 登録は「既存アカウントが新しい認証手段を獲得した」わけではなく、
+     * 本人がその場で作ったばかりのアカウントに「連携しました」と知らせるのは
+     * 一般的な慣行にも無い冗長な通知になるため (T110 概念設計「制約・前提」)。
      */
     public function linkToUser(string $provider, SocialiteUser $socialiteUser, User $user): bool
     {
@@ -101,6 +109,8 @@ class SocialAccountService
         }
 
         $this->link($provider, $socialiteUser, $user);
+
+        $this->notifier->notify($user, AuthMethodChangeEvent::SocialAccountLinked, $this->providerLabel($provider));
 
         return true;
     }
@@ -117,5 +127,13 @@ class SocialAccountService
         $this->recorder->record(SecurityEventType::SocialAccountLinked, $user, [
             'provider' => $provider,
         ]);
+    }
+
+    /** config の label を使う。未宣言なら provider 識別子そのものを使う (fail-closed ではなく表示のみのため許容)。 */
+    private function providerLabel(string $provider): string
+    {
+        $label = config("template.social_providers.{$provider}.label");
+
+        return is_string($label) && $label !== '' ? $label : $provider;
     }
 }

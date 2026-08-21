@@ -19,6 +19,7 @@ use App\Jobs\Manual\RunManualRender;
 use App\Mail\InquiryAcknowledgementMail;
 use App\Mail\InquiryReceivedMail;
 use App\Notifications\Account\AccountDeletionRequestedNotification;
+use App\Notifications\Auth\AuthMethodChangedNotification;
 use App\Notifications\Billing\AutoRechargeActionRequiredNotification;
 use App\Notifications\Billing\AutoRechargeDisabledNotification;
 use App\Notifications\Billing\AutoRechargeEnabledNotification;
@@ -264,6 +265,11 @@ function jobDedupExemptions(): array
             '契約更新のリマインダ。ドメイン状態を書かず、重複受信しても案内内容が同一で'
             .'受信者に新たな支払い操作を発生させない (更新は Stripe の自動請求が行う)。',
         ),
+        AuthMethodChangedNotification::class => new ExemptionEntry(
+            JobDedupExemption::DuplicateDeliveryAccepted,
+            '認証手段変更のお知らせ。ドメイン状態を一切書かず、重複受信しても同じ内容の'
+            .'メールが 2 通届くだけで、受信者に新たな操作 (支払い・承認等) を要求しない。',
+        ),
     ];
 }
 
@@ -275,7 +281,7 @@ function jobDedupExemptions(): array
  */
 function jobDedupExemptionCap(): int
 {
-    return 15;
+    return 16;
 }
 
 /**
@@ -287,7 +293,7 @@ function jobDedupExemptionCap(): int
 function jobDedupExemptionCapByCase(): array
 {
     return [
-        JobDedupExemption::DuplicateDeliveryAccepted->value => 9,
+        JobDedupExemption::DuplicateDeliveryAccepted->value => 10,
         JobDedupExemption::IdempotentDeletion->value => 2,
         JobDedupExemption::ConvergentStateSync->value => 3,
         JobDedupExemption::GuardedByDownstreamConstraint->value => 1,

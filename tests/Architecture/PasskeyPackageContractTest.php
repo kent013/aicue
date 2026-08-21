@@ -7,6 +7,7 @@ use App\Http\Responses\Passkey\PasskeyDeletedResponse;
 use App\Http\Responses\Passkey\PasskeyLoginResponse;
 use App\Http\Responses\Passkey\PasskeyRegistrationResponse;
 use App\Listeners\Auth\ClearRecentAuthOnPasskeyChange;
+use App\Listeners\Auth\NotifyAuthMethodChange;
 use App\Listeners\RecordSecurityEvent;
 use App\Models\Passkey;
 use App\Models\User;
@@ -476,7 +477,7 @@ function passkeyListenerClass(mixed $listener): string
     return $class;
 }
 
-test('パスキー削除イベントの直接購読は同期で走る 2 つだけである (巻き戻りの前提)', function (): void {
+test('パスキー削除イベントの直接購読は同期で走る 3 つだけである (巻き戻りの前提)', function (): void {
     // ★`app('events')` は文字列キー解決なので level 10 では型が確定しない。
     //   具体クラスであることを**検査してから**絞る (docblock だけで断定しない)。
     $dispatcherValue = app('events');
@@ -502,8 +503,14 @@ test('パスキー削除イベントの直接購読は同期で走る 2 つだ�
         );
     }
 
-    // 顔ぶれを完全一致で固定する (増減のどちらでも赤くなる)。
-    expect($classes)->toBe([RecordSecurityEvent::class, ClearRecentAuthOnPasskeyChange::class]);
+    // 顔ぶれと購読順を完全一致で固定する (増減のどちらでも赤くなる)。
+    // 実際の購読順: RecordSecurityEvent → NotifyAuthMethodChange (T110 のメール通知) →
+    // ClearRecentAuthOnPasskeyChange。
+    expect($classes)->toBe([
+        RecordSecurityEvent::class,
+        NotifyAuthMethodChange::class,
+        ClearRecentAuthOnPasskeyChange::class,
+    ]);
 
     // ★**直接購読だけを見ても閉じない**。Dispatcher は
     //   ワイルドカード購読 (`Laravel\Passkeys\Events\*`) を別の集合で持ち、

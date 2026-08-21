@@ -10,6 +10,7 @@ use App\Http\Routing\MembershipScopedOrganizationBinder;
 use App\Http\Routing\RouteBindingTypes;
 use App\Listeners\Audit\RejectNonCriticalAudit;
 use App\Listeners\Auth\ClearRecentAuthOnPasskeyChange;
+use App\Listeners\Auth\NotifyAuthMethodChange;
 use App\Listeners\Auth\StampRecentAuthOnLogin;
 use App\Listeners\Auth\StampRecentAuthOnPasskeyVerified;
 use App\Listeners\Billing\MarkBillingNotificationDelivered;
@@ -212,6 +213,9 @@ class AppServiceProvider extends ServiceProvider
 
         // 認証系イベント → security_audit_events 記録 (監査 3 層の Layer 2)
         Event::subscribe(RecordSecurityEvent::class);
+
+        // 認証手段変更 → 本人へのメール通知 (T110)
+        Event::subscribe(NotifyAuthMethodChange::class);
 
         // ログイン成功 → recent-auth スタンプ (機微操作 step-up の起点)
         Event::listen(Login::class, StampRecentAuthOnLogin::class);
