@@ -1,0 +1,34 @@
+{
+  "run_id": "20260823-001445",
+  "shards": {
+    "1": {
+      "serve_pid": 3082533,
+      "port": 8011,
+      "executed_capture": "storage/bughunt-executed/20260823-001445-1.jsonl",
+      "db": "bug_hunt_1",
+      "app_url": "http://127.0.0.1:8011",
+      "log_offset": 0,
+      "worker_pid_database_analysis": 3082579,
+      "worker_pid_database_render": 3082584,
+      "worker_pid_database_media": 3082591,
+      "started_at": "2026-08-23 00:15:02",
+      "stories": "S3 S7 S6"
+    },
+    "2": {
+      "serve_pid": 3083192,
+      "port": 8012,
+      "executed_capture": "storage/bughunt-executed/20260823-001445-2.jsonl",
+      "db": "bug_hunt_2",
+      "app_url": "http://127.0.0.1:8012",
+      "log_offset": 0,
+      "worker_pid_database_analysis": 3083315,
+      "worker_pid_database_render": 3083320,
+      "worker_pid_database_media": 3083331,
+      "started_at": "2026-08-23 00:15:13",
+      "stories": "S1 S2 S4 S5"
+    }
+  },
+  "parallel": 2,
+  "mode": "fan-out",
+  "started_at": "2026-08-23 00:14:45"
+}
