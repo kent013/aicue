@@ -16,7 +16,9 @@ screens.md (画面 = GET×inertia) と operations.md (全書き込み操作 = �
 
 > **テンプレート注記**: 本スキルは spirux/aigenba の bug-hunt 基盤を汎用化したもの。アプリ名・ポート・DB 名は
 > プレースホルダ化してある。`screens.md` / `operations.md` は**生成物**で、注釈 (`inventory/annotations.toml`)
-> と散文 (`inventory/notes-*.md`) から作る (下記 Phase 1)。`stories/` はスケルトンのままである。
+> と散文 (`inventory/notes-*.md`) と**シナリオカードの前付け** (`stories/S*.md` の `covers_*`) から作る
+> (下記 Phase 1)。**割当 (どのカードが route を消化するか) の正本はカードの前付けである**
+> (書式の正本は `stories/README.md`。逸脱の登録は `docs/template-divergence.md` D20 / D40)。
 > オプトインで、使わなければアプリ実行には一切影響しない
 > (config/bughunt.php + BughuntCoverageMiddleware は env + function_exists の二重 guard で完全 no-op)。
 
@@ -123,8 +125,10 @@ npx --yes playwright install chromium
      **shard agent は consult しない** (子は素の `proposed` finding のみ)。
 6. **teardown**: `BUGHUNT_ORCHESTRATOR=1 scripts/bug-hunt-shard.sh teardown --run-id {ts} [--drop-db]`。
    その後、手順2 の `--hold-lock` 常駐プロセスを終了して lock 解放。
-7. **目録修正の反映**: 統合 report に記録した採用分のみを `inventory/annotations.toml` (割当・区分・理由) /
-   `inventory/notes-*.md` (散文) / stories に反映し、`python3 scripts/bug-hunt-inventory.py generate` を走らせる。
+7. **目録修正の反映**: 統合 report に記録した採用分のみを `stories/S*.md` の前付け (割当 = `covers_*`) /
+   `inventory/annotations.toml` (区分・理由・種別) / `inventory/notes-*.md` (散文) に反映し、
+   `python3 scripts/bug-hunt-inventory.py generate` を走らせる。
+   **割当を `annotations.toml` へ書かない** (`story` は未知の項目として exit 3 になる)。
 8. **adjudication 追記の規律 (人手判断時のみ)**: finding を誤検知 / 意図的仕様 / won't-fix と確定したら、
    cross-session の再 triage を避けるため `ledger/adjudications.jsonl` に 1 行 append (既存行は編集しない)。
    詳細スキーマは `ledger/README.md`。
@@ -213,8 +217,9 @@ scripts/bug-hunt-inventory-check.sh   # exit 0=一致 / 2=致命 / 3=ドリフ�
 - **exit 3 (ドリフト)** の出力は 3 種類に分かれる。
   - `[注釈] 未注釈の route: …` — 実装に route が増えた。
     `.claude/skills/app-bug-hunt/inventory/annotations.toml` に 1 行足す
-    (画面なら `kind` = 画面 / JSON、割当なら `story` = S1..S7 と `kubun` = 通常 / 逸、
+    (画面なら `kind` = 画面 / JSON、`kubun` = 通常 / 逸 / 終、
     探索の分母に載せないなら `kubun` = 外 と 30 文字以上の `reason`)。
+    **割当はここに書かない** — 消化するカードの `covers_screens` / `covers_operations` へ足す。
   - `[注釈] 実装に無い route の注釈が残っている: …` — route が消えた。注釈も消す。
   - `[生成物] 生成物が再生成の結果と一致しない: …` — 再生成し忘れか手編集。下記を走らせる。
 - 注釈を直したら再生成する (**表の行は手で書かない**):
@@ -459,9 +464,11 @@ scripts/teardown-worktree.sh bughunt-<date>
 
 ## メンテナンス規約
 
-- 新画面・新フローを実装したら `inventory/annotations.toml` に注釈を 1 行足して再生成し
-  (`python3 scripts/bug-hunt-inventory.py generate`)、該当ストーリーを更新する。
-  新しい書き込みルートは必ずいずれかのストーリーに割り当てる (未注釈は inventory-check.sh が exit 3)。
+- 新画面・新フローを実装したら `inventory/annotations.toml` に注釈を 1 行足し、**消化するカードの
+  前付け (`covers_screens` / `covers_operations`) にも route 名を足して**再生成する
+  (`python3 scripts/bug-hunt-inventory.py generate`)。
+  対象内 (区分が `外` でない) の route は必ず 1 枚以上のカードに載せる
+  (未注釈も未割当も inventory-check.sh が exit 3)。
   **screens.md / operations.md を直接編集しない** (生成物であり、byte 比較で赤くなる)。
 - ストーリーカードの「期待」は設計の正 (devnotes/docs) への参照を持つこと。カード自体が仕様の正本になってはならない。
 - 同じ finding が 2 回連続で「要確認」のまま放置されたら、仕様を確定させる TODO を提案する。

@@ -22,9 +22,14 @@ use Symfony\Component\Process\Process;
  * (boot + APP_KEY + DB) には依存させない: 一時 sandbox へ道具一式を複製し、`php` を
  * 固定の scan JSON を吐く shim に差し替えて走らせる (決定論・DB 不使用)。
  *
+ * 道具一式には**シナリオカードと前付けの読み取り器**が含まれる。割当 (どのカードが route を
+ * 消化するか) の正本はカードの前付けであり (`docs/template-divergence.md` D20 / D40)、
+ * 生成器はそれを読めないと段 2 を成立させられないためである。
+ *
  * ★空振り検査 (母集団非空) の付与対象外である。理由:
- *   本 gate は**ディレクトリを列挙して母集団を作らない**。見るのは名指しの 2 ファイル
- *   (`scripts/bug-hunt-inventory-check.sh` / `scripts/bug-hunt-inventory.py`) と、
+ *   本 gate は**ディレクトリを列挙して母集団を作らない**。見るのは名指しの 3 ファイル
+ *   (`scripts/bug-hunt-inventory-check.sh` / `scripts/bug-hunt-inventory.py` /
+ *   `.claude/skills/app-bug-hunt/stories/story_front_matter.py`) と、
  *   テスト自身が組み立てた sandbox の fixture だけである。走査根の改名・移動は
  *   「母集団が 0 件になって緑」ではなく `Assert::fileExists` / `expect(file_exists(...))` の
  *   即時 fail になる (= 無言の空振りが起きる形になっていない)。
@@ -44,8 +49,43 @@ function bhicGeneratorPath(): string
     return base_path('scripts/bug-hunt-inventory.py');
 }
 
+/** 前付けの読み取り器 (生成器が割当を読むのに使う。カードの隣に置く)。 */
+function bhicStoryReaderPath(): string
+{
+    return base_path('.claude/skills/app-bug-hunt/stories/story_front_matter.py');
+}
+
 /** sandbox 内の相対パス (生成器が持つ正本パスと同じ場所へ置く)。 */
 const BHIC_SKILL_DIR = '.claude/skills/app-bug-hunt';
+
+/**
+ * sandbox 用のシナリオカード 1 枚 (割当の正本は前付けである)。
+ *
+ * @param  list<string>  $screens
+ * @param  list<string>  $operations
+ */
+function bhicCard(string $id, string $surface, array $screens, array $operations): string
+{
+    return "---\n"
+        ."id: {$id}\n"
+        ."title: 見本カード {$id}\n"
+        ."surface: {$surface}\n"
+        ."lane: parallel_browser\n"
+        ."priority: P1\n"
+        ."applicability: applicable\n"
+        ."depends_on: []\n"
+        ."reseed_before: true\n"
+        ."accounts: [guest]\n"
+        ."setup: []\n"
+        .'covers_screens: ['.implode(', ', $screens)."]\n"
+        .'covers_operations: ['.implode(', ', $operations)."]\n"
+        ."covers_capabilities: []\n"
+        ."---\n\n"
+        ."# {$id}: 見本カード {$id}\n\n"
+        ."## 目的\n見本である。\n\n"
+        ."## 手順\n1. 開く → 見える\n\n"
+        ."## 逸脱アイデア (--deviate 時)\n- 二重送信してみる\n";
+}
 
 /**
  * sandbox を組み立てる。scripts/ に検査シェルと生成器、skill ディレクトリに注釈・散文ノート・
@@ -60,10 +100,12 @@ function bhicMakeSandbox(bool $phpFails = false): string
     $sandbox = sys_get_temp_dir().'/bhic-'.bin2hex(random_bytes(6));
     mkdir($sandbox.'/scripts', 0o755, true);
     mkdir($sandbox.'/'.BHIC_SKILL_DIR.'/inventory', 0o755, true);
+    mkdir($sandbox.'/'.BHIC_SKILL_DIR.'/stories', 0o755, true);
     mkdir($sandbox.'/bin', 0o755, true);
 
     copy(bhicScriptPath(), $sandbox.'/scripts/bug-hunt-inventory-check.sh');
     copy(bhicGeneratorPath(), $sandbox.'/scripts/bug-hunt-inventory.py');
+    copy(bhicStoryReaderPath(), $sandbox.'/'.BHIC_SKILL_DIR.'/stories/story_front_matter.py');
 
     $scan = [
         'schema_version' => 1,
@@ -84,8 +126,17 @@ function bhicMakeSandbox(bool $phpFails = false): string
 
     file_put_contents(
         $sandbox.'/'.BHIC_SKILL_DIR.'/inventory/annotations.toml',
-        "schema_version = 1\n\n[routes.\"dashboard\"]\nkind = \"画面\"\nstory = \"S1\"\nkubun = \"通常\"\n\n"
-        ."[routes.\"projects.store\"]\nstory = \"S4\"\nkubun = \"通常\"\n"
+        "schema_version = 1\n\n[routes.\"dashboard\"]\nkind = \"画面\"\nkubun = \"通常\"\n\n"
+        ."[routes.\"projects.store\"]\nkubun = \"通常\"\n"
+    );
+    // 割当の正本はカードの前付けである (注釈には書かない)。対象内 2 route をちょうど覆う。
+    file_put_contents(
+        $sandbox.'/'.BHIC_SKILL_DIR.'/stories/S1-signup.md',
+        bhicCard('S1', 'signup_funnel', ['dashboard'], []),
+    );
+    file_put_contents(
+        $sandbox.'/'.BHIC_SKILL_DIR.'/stories/S2-admin.md',
+        bhicCard('S2', 'org_project_admin', [], ['projects.store']),
     );
     file_put_contents($sandbox.'/'.BHIC_SKILL_DIR.'/inventory/notes-screens.md', "## 画面の散文\n\n人が書く。\n");
     file_put_contents($sandbox.'/'.BHIC_SKILL_DIR.'/inventory/notes-operations.md', "## 操作の散文\n\n人が書く。\n");

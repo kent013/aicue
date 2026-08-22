@@ -1,7 +1,23 @@
+---
+id: S5
+title: 課金・チケット(残高/チャージ/消費)
+surface: billing
+lane: parallel_browser
+priority: P1
+applicability: applicable
+depends_on: []
+reseed_before: false
+accounts: [owner]
+setup: [Stripe は fake 実装で走らせる]
+covers_screens: [billing.index, billing.plans, billing.tickets.show, pricing]
+covers_operations: [billing.auto-recharge.setup, billing.auto-recharge.update, billing.checkout, billing.contact.update, billing.plan.change, billing.portal, billing.tickets.checkout]
+covers_capabilities: [BILL-01, BILL-02, BILL-03, BILL-04, BILL-05, PUB-01]
+---
+
 # S5: 課金・チケット(残高/チャージ/消費)
 
-- 前提状態: 代表ユーザー(組織オーナー/管理者)でログイン済み。Stripe fake。
-- 目的: プラン選択 → checkout → サブスク状態確認、およびチケット残高の確認・チャージ・消費が二重課金/無反応/残高不整合なく進むか。料金表(pricing)の表示が実際の課金と矛盾しないか。
+## 目的
+組織オーナー/管理者によるプラン選択 → checkout → サブスク状態確認、およびチケット残高の確認・チャージ・消費が二重課金/無反応/残高不整合なく進むか。料金表(pricing)の表示が実際の課金と矛盾しないか。
 
 ## 手順
 1. `pricing`(料金表)を開く → 三層(個人バナー / 法人グリッド / 大規模利用バナー)とチケット価格表が表示され、CTA(申込/チャージ)導線が見える。未ログインでも閲覧でき、申込はログインへ誘導。**月次付与は廃止済み(D28)なので「月 N 枚のチケット付与」表記が復活していないか**も見る。
@@ -33,10 +49,6 @@
    - 価格改定・同意 version 改定後は**再同意を要求**して自動購入が止まる(fail-closed)。
      `auto-recharge-status` / `auto-recharge-max-amount` の表示が設定値と矛盾しないか。
 10. チケット消費との整合(S3 と連動): analyze で 1、render で N 消費され、残高が減る。preview は非消費。ジョブ失敗時は予約が解放され残高が戻る(reserve→commit/release の 2 フェーズ)。
-
-## このストーリーで消化する screens / operations
-- screens: pricing, billing.index, billing.plans, billing.tickets.show
-- operations: billing.checkout, billing.portal, billing.tickets.checkout, billing.contact.update, billing.auto-recharge.update, billing.auto-recharge.setup
 
 ## 逸脱アイデア (--deviate 時)
 - checkout を二重送信/戻る→再送 → 二重課金・二重チャージにならないか(冪等マシン/webhook)。

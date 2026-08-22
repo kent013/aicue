@@ -4,133 +4,113 @@
 # メソッド / 画面題名) は生成器が入れるので、ここには**実装から導けない意味だけ**を書く。
 #
 #   kind   画面表の route で必須 (画面 / JSON)。操作表の route には書けない
-#   story  区分が 通常 / 逸 のとき必須 (S1..S7)。区分が 外 / 終 には書けない
 #   kubun  常に必須 (通常 / 逸 / 終 / 外)
 #   reason 区分が 外 / 終 のとき必須・30 文字以上。それ以外には書けない
 #
-# 許すのはこの 4 項目だけで、未知の項目・未知の語彙・定義域のずれは
+# 許すのはこの 3 項目だけで、未知の項目・未知の語彙・定義域のずれは
 # `scripts/bug-hunt-inventory-check.sh` が exit 3 (ドリフト) で落とす。
+#
+# ★ **割当 (どのカードが消化するか) はここには書かない**。正本はシナリオカードの前付け
+#   (`../stories/S*.md` の covers_screens / covers_operations) である。目録の割当列は
+#   そこから逆引き生成される。ここに書くと二重の正本になるので、`story` は未知の項目として
+#   exit 3 (ドリフト) で落ちる。
+#
+# ★ 区分 **終** は**対象内**である (対象外は **外** だけ)。`終` の route も
+#   1 枚以上のカードの covers_* に載せること (載せる先が無いなら区分を `外` にする)。
 schema_version = 1
 
 [routes."billing.auto-recharge.setup"]
-story = "S5"
 kubun = "通常"
 
 [routes."billing.auto-recharge.update"]
-story = "S5"
 kubun = "通常"
 
 [routes."billing.checkout"]
-story = "S5"
 kubun = "通常"
 
 [routes."billing.contact.update"]
-story = "S5"
 kubun = "通常"
 
 [routes."billing.index"]
 kind = "画面"
-story = "S5"
 kubun = "通常"
 
 [routes."billing.plan.change"]
-story = "S5"
 kubun = "通常"
 
 [routes."billing.plans"]
 kind = "画面"
-story = "S5"
 kubun = "通常"
 
 [routes."billing.portal"]
-story = "S5"
 kubun = "通常"
 
 [routes."billing.tickets.checkout"]
-story = "S5"
 kubun = "通常"
 
 [routes."billing.tickets.show"]
 kind = "画面"
-story = "S5"
 kubun = "通常"
 
 [routes."capture.account"]
 kind = "画面"
-story = "S3"
 kubun = "通常"
 
 [routes."capture.csrf-cookie"]
 kind = "JSON"
-story = "S3"
 kubun = "通常"
 
 [routes."capture.home"]
 kind = "画面"
-story = "S3"
 kubun = "通常"
 
 [routes."capture.manuals.index"]
 kind = "画面"
-story = "S3"
 kubun = "通常"
 
 [routes."capture.manuals.show"]
 kind = "画面"
-story = "S3"
 kubun = "通常"
 
 [routes."capture.takes.adopt"]
-story = "S3"
 kubun = "通常"
 
 [routes."capture.takes.destroy"]
-story = "S3"
 kubun = "通常"
 
 [routes."capture.takes.downloaded"]
-story = "S3"
 kubun = "通常"
 
 [routes."capture.takes.playback"]
 kind = "画面"
-story = "S3"
 kubun = "通常"
 
 [routes."capture.takes.store"]
-story = "S3"
 kubun = "通常"
 
 [routes."capture.takes.thumbnail"]
 kind = "画面"
-story = "S3"
 kubun = "通常"
 
 [routes."capture.takes.update"]
-story = "S3"
 kubun = "通常"
 
 [routes."capture.takes.upload-url"]
-story = "S3"
 kubun = "通常"
 
 [routes."contact"]
 kind = "画面"
-story = "S1"
 kubun = "通常"
 
 [routes."contact.store"]
-story = "S1"
 kubun = "通常"
 
 [routes."contact.thanks"]
 kind = "画面"
-story = "S1"
 kubun = "通常"
 
 [routes."dashboard"]
 kind = "画面"
-story = "S1"
 kubun = "通常"
 
 [routes."debug.bfcache-trial"]
@@ -149,211 +129,164 @@ kubun = "外"
 reason = "開発環境専用のログイン補助画面であり探索は POST の debug.login-as で前提を組むため分母に載せない"
 
 [routes."debug.login-as"]
-story = "S1"
 kubun = "通常"
 
 [routes."home"]
 kind = "画面"
-story = "S1"
 kubun = "通常"
 
 [routes."invitations.accept"]
 kind = "画面"
-story = "S2"
 kubun = "通常"
 
 [routes."invitations.accept-in-app"]
-story = "S2"
 kubun = "通常"
 
 [routes."invitations.accept.store"]
-story = "S2"
 kubun = "通常"
 
 [routes."legal.commerce-disclosure"]
 kind = "画面"
-story = "S1"
 kubun = "通常"
 
 [routes."legal.privacy"]
 kind = "画面"
-story = "S1"
 kubun = "通常"
 
 [routes."legal.terms"]
 kind = "画面"
-story = "S1"
 kubun = "通常"
 
 [routes."login"]
 kind = "画面"
-story = "S1"
 kubun = "通常"
 
 [routes."login.store"]
-story = "S1"
 kubun = "通常"
 
 [routes."logout"]
-story = "S1"
 kubun = "通常"
 
 [routes."manage.users.index"]
 kind = "画面"
-story = "S4"
 kubun = "通常"
 
 [routes."notifications.index"]
 kind = "画面"
-story = "S6"
 kubun = "通常"
 
 [routes."notifications.open"]
-story = "S6"
 kubun = "通常"
 
 [routes."notifications.read"]
-story = "S6"
 kubun = "通常"
 
 [routes."notifications.read-all"]
-story = "S6"
 kubun = "通常"
 
 [routes."onboarding.activate-personal"]
-story = "S1"
 kubun = "通常"
 
 [routes."onboarding.billing-required"]
 kind = "画面"
-story = "S2"
 kubun = "通常"
 
 [routes."onboarding.checkout"]
 kind = "画面"
-story = "S1"
 kubun = "通常"
 
 [routes."organizations.api-keys.index"]
 kind = "画面"
-story = "S4"
 kubun = "通常"
 
 [routes."organizations.api-keys.revoke"]
-story = "S4"
 kubun = "通常"
 
 [routes."organizations.api-keys.sessions.index"]
 kind = "画面"
-story = "S4"
 kubun = "通常"
 
 [routes."organizations.api-keys.sessions.revoke"]
-story = "S4"
 kubun = "通常"
 
 [routes."organizations.api-keys.store"]
-story = "S4"
 kubun = "通常"
 
 [routes."organizations.create"]
 kind = "画面"
-story = "S4"
 kubun = "通常"
 
 [routes."organizations.invitations.revoke"]
-story = "S2"
 kubun = "通常"
 
 [routes."organizations.invitations.store"]
-story = "S2"
 kubun = "通常"
 
 [routes."organizations.members.destroy"]
-story = "S2"
 kubun = "通常"
 
 [routes."organizations.members.two-factor.reset"]
-story = "S2"
 kubun = "通常"
 
 [routes."organizations.members.update"]
-story = "S2"
 kubun = "通常"
 
 [routes."organizations.onboarding.cli"]
 kind = "画面"
-story = "S4"
 kubun = "通常"
 
 [routes."organizations.onboarding.mcp"]
 kind = "画面"
-story = "S4"
 kubun = "通常"
 
 [routes."organizations.settings"]
 kind = "画面"
-story = "S4"
 kubun = "通常"
 
 [routes."organizations.store"]
-story = "S4"
 kubun = "通常"
 
 [routes."organizations.switch"]
-story = "S4"
 kubun = "通常"
 
 [routes."organizations.transfer-ownership"]
-story = "S4"
 kubun = "通常"
 
 [routes."organizations.two-factor-requirement.update"]
-story = "S4"
 kubun = "通常"
 
 [routes."organizations.update"]
-story = "S4"
 kubun = "通常"
 
 [routes."passkey.confirm"]
-story = "S6"
 kubun = "通常"
 
 [routes."passkey.confirm-options"]
 kind = "JSON"
-story = "S6"
 kubun = "通常"
 
 [routes."passkey.destroy"]
-story = "S6"
 kubun = "通常"
 
 [routes."passkey.login"]
-story = "S1"
 kubun = "通常"
 
 [routes."passkey.login-options"]
 kind = "JSON"
-story = "S1"
 kubun = "通常"
 
 [routes."passkey.registration-options"]
 kind = "JSON"
-story = "S6"
 kubun = "通常"
 
 [routes."passkey.store"]
-story = "S6"
 kubun = "通常"
 
 [routes."password.confirm"]
 kind = "画面"
-story = "S6"
 kubun = "通常"
 
 [routes."password.confirm.store"]
-story = "S6"
 kubun = "通常"
 
 [routes."password.confirmation"]
@@ -362,198 +295,154 @@ kubun = "外"
 reason = "再認証が有効かどうかだけを返す状態問い合わせであり画面として開く経路ではないため分母に載せない"
 
 [routes."password.email"]
-story = "S1"
 kubun = "通常"
 
 [routes."password.request"]
 kind = "画面"
-story = "S1"
 kubun = "通常"
 
 [routes."password.reset"]
 kind = "画面"
-story = "S1"
 kubun = "通常"
 
 [routes."password.update"]
-story = "S1"
 kubun = "通常"
 
 [routes."pricing"]
 kind = "画面"
-story = "S5"
 kubun = "通常"
 
 [routes."projects.categories.destroy"]
-story = "S4"
 kubun = "通常"
 
 [routes."projects.categories.index"]
 kind = "画面"
-story = "S4"
 kubun = "通常"
 
 [routes."projects.categories.reorder"]
-story = "S4"
 kubun = "通常"
 
 [routes."projects.categories.store"]
-story = "S4"
 kubun = "通常"
 
 [routes."projects.categories.update"]
-story = "S4"
 kubun = "通常"
 
 [routes."projects.create"]
 kind = "画面"
-story = "S4"
 kubun = "通常"
 
 [routes."projects.destroy"]
-story = "S4"
 kubun = "通常"
 
 [routes."projects.edit"]
 kind = "画面"
-story = "S4"
 kubun = "通常"
 
 [routes."projects.index"]
 kind = "画面"
-story = "S4"
 kubun = "通常"
 
 [routes."projects.items.destroy"]
-story = "S4"
 kubun = "通常"
 
 [routes."projects.items.store"]
-story = "S4"
 kubun = "通常"
 
 [routes."projects.items.update"]
-story = "S4"
 kubun = "通常"
 
 [routes."projects.manuals.analyze"]
-story = "S3"
 kubun = "通常"
 
 [routes."projects.manuals.create"]
 kind = "画面"
-story = "S3"
 kubun = "通常"
 
 [routes."projects.manuals.cuts.takes.index"]
 kind = "画面"
-story = "S3"
 kubun = "通常"
 
 [routes."projects.manuals.destroy"]
-story = "S3"
 kubun = "通常"
 
 [routes."projects.manuals.download"]
 kind = "画面"
-story = "S3"
 kubun = "通常"
 
 [routes."projects.manuals.duplicate"]
-story = "S3"
 kubun = "通常"
 
 [routes."projects.manuals.edit"]
 kind = "画面"
-story = "S3"
 kubun = "通常"
 
 [routes."projects.manuals.jobs.show"]
 kind = "画面"
-story = "S3"
 kubun = "通常"
 
 [routes."projects.manuals.preview"]
-story = "S3"
 kubun = "通常"
 
 [routes."projects.manuals.render"]
-story = "S3"
 kubun = "通常"
 
 [routes."projects.manuals.render-jobs.playback"]
 kind = "画面"
-story = "S3"
 kubun = "通常"
 
 [routes."projects.manuals.render-jobs.show"]
 kind = "画面"
-story = "S3"
 kubun = "通常"
 
 [routes."projects.manuals.scenario.update"]
-story = "S3"
 kubun = "通常"
 
 [routes."projects.manuals.show"]
 kind = "画面"
-story = "S3"
 kubun = "通常"
 
 [routes."projects.manuals.source-documents.store"]
-story = "S3"
 kubun = "通常"
 
 [routes."projects.manuals.store"]
-story = "S3"
 kubun = "通常"
 
 [routes."projects.manuals.update"]
-story = "S3"
 kubun = "通常"
 
 [routes."projects.members.destroy"]
-story = "S4"
 kubun = "通常"
 
 [routes."projects.members.store"]
-story = "S4"
 kubun = "通常"
 
 [routes."projects.show"]
 kind = "画面"
-story = "S3"
 kubun = "通常"
 
 [routes."projects.store"]
-story = "S4"
 kubun = "通常"
 
 [routes."projects.update"]
-story = "S4"
 kubun = "通常"
 
 [routes."recent-auth.confirm"]
 kind = "画面"
-story = "S6"
 kubun = "通常"
 
 [routes."recent-auth.password"]
-story = "S6"
 kubun = "通常"
 
 [routes."recent-auth.status"]
 kind = "画面"
-story = "S6"
 kubun = "通常"
 
 [routes."register"]
 kind = "画面"
-story = "S1"
 kubun = "通常"
 
 [routes."register.store"]
-story = "S1"
 kubun = "通常"
 
 [routes."seo.ai"]
@@ -578,33 +467,26 @@ reason = "クローラ向けの機械可読 route であり人が操作する画
 
 [routes."session.status"]
 kind = "JSON"
-story = "S6"
 kubun = "通常"
 
 [routes."settings"]
 kind = "画面"
-story = "S6"
 kubun = "通常"
 
 [routes."settings.account.deletion-request.destroy"]
-story = "S6"
 kubun = "通常"
 
 [routes."settings.account.deletion-request.store"]
-story = "S6"
 kubun = "通常"
 
 [routes."settings.account.destroy"]
-story = "S6"
 kubun = "通常"
 
 [routes."settings.password.store"]
-story = "S6"
 kubun = "通常"
 
 [routes."settings.security"]
 kind = "画面"
-story = "S6"
 kubun = "通常"
 
 [routes."social.callback"]
@@ -618,24 +500,19 @@ kubun = "外"
 reason = "外部の識別提供者へ出ていく遷移であり隔離した探索環境の外へ出てしまうため分母に載せない"
 
 [routes."two-factor.confirm"]
-story = "S6"
 kubun = "通常"
 
 [routes."two-factor.disable"]
-story = "S6"
 kubun = "通常"
 
 [routes."two-factor.enable"]
-story = "S6"
 kubun = "通常"
 
 [routes."two-factor.login"]
 kind = "画面"
-story = "S1"
 kubun = "通常"
 
 [routes."two-factor.login.store"]
-story = "S1"
 kubun = "通常"
 
 [routes."two-factor.qr-code"]
@@ -649,7 +526,6 @@ kubun = "外"
 reason = "復旧コードを返す開示 endpoint であり単独で開くと秘密が走行記録に残るため分母に載せない"
 
 [routes."two-factor.regenerate-recovery-codes"]
-story = "S6"
 kubun = "通常"
 
 [routes."two-factor.secret-key"]
@@ -658,25 +534,20 @@ kubun = "外"
 reason = "第二要素の秘密そのものを返す開示 endpoint であり単独で開くと秘密が走行記録に残るため分母に載せない"
 
 [routes."user-password.update"]
-story = "S6"
 kubun = "通常"
 
 [routes."user-profile-information.update"]
-story = "S6"
 kubun = "通常"
 
 [routes."verification.notice"]
 kind = "画面"
-story = "S1"
 kubun = "通常"
 
 [routes."verification.send"]
-story = "S1"
 kubun = "通常"
 
 [routes."verification.verify"]
 kind = "画面"
-story = "S1"
 kubun = "通常"
 
 [routes."webhooks.ses"]
