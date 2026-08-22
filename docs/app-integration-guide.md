@@ -92,6 +92,62 @@
 - 子リソースの作成は親 FK を **relation 経由で代入**する
   (`$project->items()->create([...])`)。FK の mass assignment を書かない。
 
+### 新規リソースで踏む Architecture ゲートの索引
+
+下の 2 表は「新しいドメインリソースを足すとき、どの Architecture ゲートが発火し、
+何をどこへ登録しなければならないか」の索引である。上の対応表(見本 Item のどのファイルか)とは
+軸が違うので併存させる。**§7 の不変条件を参照するときは番号ではなく項目名で指す**
+(本書 §7 と AGENTS.md のセキュリティ不変条件は番号が 1:1 対応しないため。
+禁じているのは不変条件の番号での参照であって、節の名前を使うことではない)。
+
+> **この索引の性質**: 家系の裁定 AG-116 が定めた合成版の一部として復帰させた表である。
+> テンプレート現物を参照できないため**逐語復元ではなく、本アプリの実在ゲートへ写した
+> 判定規準**である(テンプレート側の還流も同じ作法を採っている)。
+> 網羅性は主張しない — ここに無いゲートが発火しないという意味ではない。
+> **保証しないものの詳細の正本は `tests/Architecture/IntegrationGuideGateTableSyncTest.php` の
+> docblock** である(ここには写さない)。
+
+#### 新規リソースで必ず踏む Architecture ゲート
+
+**対象は「§2 の手順で Project 配下に *書き込み可能な* ドメインリソースを 1 つ足すこと」**
+= 見本 Item と同型の実装単位である。この単位は定義上、マイグレーション(親 FK `constrained()` +
+NOT NULL)/ Model / Factory / FormRequest(store・update)/ nested route(変更系を含む)/
+親 Policy 経由の認可 / Feature テスト を必ず持つので、下の 8 本は条件なしに発火する。
+
+この単位から外れる形(読み取り専用リソース / 画面だけの追加 / 組織直下に置くマスタデータ)を
+足すときは、**該当しない行を設計書で名指しして外す理由を書く**。黙って外さない。
+
+| ゲート | 何を落とすか | 何をどこへ登録するか |
+|---|---|---|
+| `MassAssignmentSafetyTest` | ownership / actor / tenant / secret キーが Model の `$fillable` に載ること | 登録簿は無い。新 Model の親 FK を `$fillable` に入れず、relation 経由か明示代入で書く |
+| `FormRequestProhibitedKeyTest` | FormRequest が `ProhibitsProtectedKeys` を欠くこと / 保護キーの missing rule が無いこと | 新 FormRequest に trait を適用し `rules()` に missing を書く。アプリ固有の新 FK 名は `app/Support/Security/MassAssignmentProtectedKeys.php` へ追記 |
+| `ValidationAttributeCoverageTest` | `rules()` のキーが利用者向け文言の attributes に無いこと(生のキー名が画面に出る) | `lang/ja/validation.php` の attributes に新しいキーを追記 |
+| `ProjectRouteCurrentOrgGuardTest` | `{project}` を受ける route が middleware 層の URL 整合 guard を欠くこと(FormRequest の DB ルールが先に走り 422 と 404 の差が存在オラクルになる) | web は `project.in-current-org`、API は `api.project-in-org` を route group に付ける |
+| `NestedRouteIdorDefenseTest` | param 付き route の防御方式が未分類・stale・無記名であること | `tests/Architecture/NestedRouteIdorDefenseTest.php` が読む inventory へ **parameter 単位**で `NestedRouteDefenseMode` を登録。テナント親子でない param は理由を `nonTenantReasons()` に書く |
+| `TenantBoundaryOrderingTest` | テナント境界の 404 が binding の直後で閉じていないこと(1 bit の存在オラクル) | 新しい middleware を足したら `middlewareShortCircuitInventory()` に「短絡しうるか」を分類する(疑わしきは `true` 側)。`SubstituteBindings` より前に置くなら `preBindingShortCircuitInventory()` にも登録 |
+| `RouteBindingTypeConstraintInventoryTest` | binding param が型分類の目録に無く、型不一致が 404 ではなく生 500 になること | `RouteBindingTypes` の 5 分類のいずれかへ登録し、分類に応じた制約を route に付ける |
+| `ControllerAuthorizationGateTest` | 変更系(POST/PUT/PATCH/DELETE)ハンドラが認可判断を 1 度も通らないこと | ハンドラ冒頭(URL 整合 guard の**後**)に `Gate::authorize`。認可が不要なら exemption inventory へ enum + 「何が代わりに守っているか」を 30 文字以上で登録 |
+
+#### 条件付きで発火するゲート
+
+リソースの性質や付随機能が加わって初めて母集団に入るもの。
+
+| ゲート | 発火条件 | 何をどこへ登録するか |
+|---|---|---|
+| `ModelDirectFetchInvariantTest` | route parameter **以外**の id 受け口(POST payload / query string / MCP tool 引数 / token claim / queue payload)を足すとき | まず relation 起点(`$organization->users()->whereKey($id)`)で書けないか検討する。書けないときだけ `DirectFetchInventory` へ `DirectFetchJustification` + 30 文字以上の具体的根拠 + case ごとの構造化 field を登録 |
+| `ThrottleCoverageInventoryTest` | 保護対象群(未認証で到達しうる変更系 / 機械向け経路 `api/`・`oauth/`・`.well-known/oauth-` / 認証面の変更系)に route が入るとき | throttle をちょうど 1 本持たせるか、`ThrottleCoverageExemption` + 30 文字以上の根拠で登録(下の「流量制限の付与規約」の節) |
+| `ThrottleLaneAssignmentTest` | named レーンへ route を割り当てるとき | レーンごとの route 目録へ登録する(どの route がどのレーンに属するかを固定する) |
+| `IdempotentRouteCoverageTest` | `api/v1/*` に変更系 route を足すとき | `idempotent` middleware をちょうど 1 本持たせるか、型付き分類 + 30 文字以上の根拠で免除登録 |
+| `ApiGuardAllowlistInvariantTest` | REST API v1 の endpoint を足すとき | guard 分類(dual / oauth / public)を宣言表へ登録 |
+| `McpAuthorizationChokePointTest` | MCP tool を足すとき | 認可の関門を業務処理より前に通し、結果を捨てない。書き込み tool を足すときは冪等キーの必須化も同時に要る(別ゲートが trip-wire として発火する) |
+| `QuotaKeyConfigInvariantTest` | 上限(Quota 項目)を足すとき | `config/quota.php` の limits キーと `App\Enums\QuotaKey` の case を**対で**足す |
+| `PromptGuardrailTest` | LLM 呼び出しを足すとき | `app/Prompts/` の factory → 窓口 → 実行単位の 1 本道で書く(vendor 直呼びを作らない)。prompt 文字列は `resources/prompts/*.yaml` に置く |
+| `PromptUntrustedInputContractTest` | untrusted 文字列を prompt に入れるとき | 窓口 `App\Support\Llm\PromptDefense` 経由にし、inventory へ帰属キーを登録(帰属の対象を持たない見本だけが空配列で exempt 登録できる) |
+| `CachePayloadPlainDataGateTest` | キャッシュ書き込み経路を足すとき | 素のデータ(配列 / 文字列 / 数値 / 真偽値 / `null`)だけを入れ、書き込み経路を目録へ登録する。読み戻しは `fromArray()` 等で組み立て直して検査し、失敗したら `forget` する |
+| `SsrfPinBoundaryTest` | 外部 URL(特にユーザ入力由来)を取得するとき | `Kent013\SsrfPin\UrlSafetyInspector` / `PinnedHttpClient` を通す。安全境界は `config/ssrf-pin.php` に pin する |
+| `DocumentTitleCoverageTest` | Inertia を render する GET named route を足すとき | ページ固有のタイトルを controller 供給メタか `config/seo.php` に持たせる(無いとサイト名だけになる) |
+| `InertiaRenderPageExistsInvariantTest` | 新しいページコンポーネントを足すとき | `resources/js/pages/` に実体を置く(literal 参照と 1:1。参照先が無いページは本番で白画面になる) |
+
 ## 3. ロール・権限のマッピング
 
 1. テンプレ既定ロール: `organization_owner / organization_admin / organization_member`、
