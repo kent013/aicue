@@ -1,0 +1,11 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Fixture;
+
+final class Kernel
+{
+    /** @var list<string> */
+    protected array $middleware = ['password.confirm'];
+}

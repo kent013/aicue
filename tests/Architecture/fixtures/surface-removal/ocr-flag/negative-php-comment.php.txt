@@ -1,0 +1,11 @@
+<?php
+
+declare(strict_types=1);
+
+// 旧 rollout gate `ocr_analysis_enabled` は撤去済み。
+
+/**
+ * 撤去した設定キー: ocr_analysis_enabled / OCR_ANALYSIS_ENABLED
+ * 撤去した props 名: imageSourceDocumentsEnabled
+ */
+return [];

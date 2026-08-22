@@ -8,7 +8,7 @@
 `template-divergence-ledger` が 2026-08-15 に確定した形) に従う。形式は
 `tests/Architecture/TemplateDivergenceLedgerFormatTest.php` が機械で強制する。
 
-登録エントリ: 36 件
+登録エントリ: 37 件
 
 ## 記録の原則
 
@@ -2259,3 +2259,62 @@ deny-by-default 機構そのものであり、業務ドメイン (認証手段�
 
 - 実装: `tests/Architecture/PasskeyPackageContractTest.php`
 - 設計: `devnotes/20260821-2015-auth-method-change-notification/`
+
+---
+
+## D40 撤去表面の不在 gate を、走査根と走査器を共通基盤へ切り出した形で持つ
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `tests/Support/SurfaceRemoval/ContentClassification.php` / `tests/Support/SurfaceRemoval/MethodReference.php` / `tests/Support/SurfaceRemoval/MethodReferenceKind.php` / `tests/Support/SurfaceRemoval/MiddlewareReference.php` / `tests/Support/SurfaceRemoval/MiddlewareReferenceKind.php` / `tests/Support/SurfaceRemoval/Occurrence.php` / `tests/Support/SurfaceRemoval/PhpNameResolver.php` / `tests/Support/SurfaceRemoval/RemovedSurfaceScanTargets.php` / `tests/Support/SurfaceRemoval/RemovedSurfaceScanner.php` / `tests/Support/SurfaceRemoval/RemovedTerm.php` / `tests/Support/SurfaceRemoval/ScanOutcome.php` / `tests/Support/SurfaceRemoval/ScanPopulation.php` / `tests/Support/SurfaceRemoval/ScannedFile.php` / `tests/Support/SurfaceRemoval/TermMatchMode.php` / `tests/Architecture/PasswordConfirmSurfaceAbsenceGateTest.php` / `tests/Architecture/OcrFeatureFlagAbsenceGateTest.php` |
+| 業務要件起因の説明 | aicue が撤去した表面 (Fortify 標準のパスワード確認 step-up 機構 / OCR 機能フラグ) はテンプレートには存在しない。撤去物が 2 件あり、走査根 (`.github` と `scripts` を含む 8 本) の列挙と PHP の名前解決を 2 本持たないために共通基盤へ切り出す必要がある |
+| 揃え続ける不変条件と保証機構 | 走査根に `.github/` と `scripts/` を含み `database/migrations/` を含まないこと、実走査母集団が根・種別ごとに非空で未解決もバイナリ除外も 0 件であること、静的層が許可形を 0 個で保つこと、検出器の自己検証を正例・負例・未解決の三軸で持つこと。`PasswordConfirmSurfaceAbsenceGateTest` と `OcrFeatureFlagAbsenceGateTest` が固定する |
+| 再判定の条件 | 3 件目の撤去物が来て、撤去項目の台帳から層を機械駆動する形へ移すとき。またはテンプレートが同じ共通基盤を取り込んだとき (そのときは上積みを撤去して正典実装へ揃え直す) |
+| 決めた日 | 2026-08-22 |
+| 決めた人 | 開発者 |
+| 根拠 | T250 |
+| 状態 | 恒久 |
+| 見直し期限 | — |
+
+| 観点 | テンプレート | 本アプリ |
+|---|---|---|
+| 走査根の持ち方 | 撤去 1 件ごとに gate 自身のファイル内へ走査を書く (`RetiredRecoveryReferenceGateTest`) | 走査根と走査器を `tests/Support/SurfaceRemoval/` へ切り出し、許可ポリシーは撤去物ごとの gate が指定する |
+| 名前の突合 | 語彙一致中心 | クラス参照は完全修飾名へ解決してから突合する (`PhpNameResolver`)。解決できない形は未解決として gate を落とす |
+| 母集団 | 拡張子で絞った列挙 | `git ls-files` から生成し拡張子で絞らない (`scripts/` の拡張子なし実行ファイルを落とさない) |
+
+### なぜ正当な差分か (logic-driven)
+
+同じ家系正典 (`surface-removal-absence-gate` v1) を満たす形は 1 つではない。テンプレートは
+撤去物が 1 件のため gate のファイル内に走査を閉じているが、aicue は撤去物が **2 件**あり、
+両者が同じ走査根 (8 本) と同じ PHP 名前解決を要る。ここで各 gate に走査を複写すると
+「走査根の列挙を 2 本持つ」ことになり、AGENTS.md「静的検査 (gate) と走査器の共通規約」の
+**走査根の単一出典**に反する。したがって共通基盤へ切り出す側を選んだ。
+
+3 件目が来たら台帳駆動へ移す判断が要るが、2 件のために台帳機構を先回りして作るのは
+思考原則 2 (今必要なものだけ作る) に反するため v1 では作らない。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「**各 gate が列挙した静的構文**への参照は、走査根 8 本の git 追跡下の全ファイルで 0 件である。
+> 許可一覧は持たない (母集団の定義そのもので絞る)。解決できない形は未解決として gate を落とす」
+
+保証するのは**列挙した構文**についてであり、「あらゆる書き方で 0 件」ではない
+(変数・式・分割連結・定数経由・動的組み立ては母集団に入らない。下の「保証しないもの」を参照)。
+
+- 母集団の空振り (走査根の改名・ディレクトリ移動) は代表パス pin と種別検査が検出する
+- 検出力は見本 (`tests/Architecture/fixtures/surface-removal/`) の正例・負例・未解決で裏取りする
+- NUL を 1 つ入れて静的層を迂回する経路は `binaryExcluded === []` の要求が塞ぐ
+
+### 保証しないもの
+
+- 静的層が見るのは列挙した構文だけである。middleware 位置の変数・式、分割連結、定数経由、
+  動的組み立て、PHP のコメント内には沈黙する。網羅的な一覧の正本は
+  `RemovedSurfaceScanner` と各 gate の docblock であり、ここには写さない
+- 実行時層が補完するのは**テスト起動時に実体化した route** までで、環境依存で実体化しない
+  経路 (production 限定の条件分岐・未実行コード) は両層とも見えない
+
+### 関連
+
+- 実装: `tests/Support/SurfaceRemoval/` / `tests/Architecture/PasswordConfirmSurfaceAbsenceGateTest.php` / `tests/Architecture/OcrFeatureFlagAbsenceGateTest.php`
+- 実行時層: `tests/Architecture/PasswordConfirmMiddlewareAbsenceTest.php`
+- 設計: `devnotes/20260823-0016-password-confirm-surface-removal-gate-v1/`

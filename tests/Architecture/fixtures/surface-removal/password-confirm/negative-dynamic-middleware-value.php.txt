@@ -1,0 +1,13 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Fixture;
+
+/*
+ * middleware 位置の**変数・式**はクラス参照でも文字列リテラルでもないため母集団に入らない
+ * (静的層は沈黙する)。実在する後付け経路 (RouteMiddlewareBinder / RouteThrottleBinder) を
+ * 免除で黙らせないための規則段階の定義であり、許可一覧ではない。
+ */
+$route->middleware($alias);
+$route->middleware('throttle:'.$limiter);

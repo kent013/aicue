@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+OCR_ANALYSIS_ENABLED=1
+export OCR_ANALYSIS_ENABLED
