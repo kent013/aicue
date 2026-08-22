@@ -24,6 +24,7 @@
 | T243 | kent013/laravel-ssrf-pin を完全区間分類の版 (^0.4) へ改版し回帰テストで受ける | backend | SSRF判定を^0.4へ改版し回帰固定 | High | standalone | [設計](devnotes/20260822-2311-ssrf-pin-v04-upgrade/) | 2026-08-23 01:26 |
 | T244 | アプリ組み込みガイド §2 ゲート表 2 本の復帰 | docs | 契約文書§2のゲート表2本を復帰 | Medium | standalone | [設計](devnotes/20260822-2305-integration-guide-gate-table-restore/) | 2026-08-23 01:27 |
 | T245 | bug-hunt シナリオカードへの前付け導入と割当正本の一元化 (正典 t1 追従) | test | シナリオ前付け導入と割当正本一元化 | Medium | standalone | [設計](devnotes/20260823-0022-bughunt-story-front-matter-adoption/) | 2026-08-23 01:27 |
+| T246 | lctl help-system 追従: ヘルプ取り込み基盤 + MCP ツール一覧の自動生成 (鮮度検査つき) | backend | MCPツール一覧の自動生成とヘルプ基盤 | Medium | standalone | [設計](devnotes/20260823-0019-help-system-aicue-propagation/) | 2026-08-23 01:28 |
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
 ## Conditional (条件付き待機)
