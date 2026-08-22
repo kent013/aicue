@@ -26,7 +26,6 @@
 | T247 | 組織テナンシー正典追従 (AG-037/038/039系/046/047) | backend | 組織文脈をURL単一方式へ揃え識別名を堅くする | High | standalone | [設計](devnotes/20260823-0016-organization-tenancy-ag-catchup/) | 2026-08-23 01:28 |
 | T248 | 冪等 claim の実プロセス並行テストハーネス導入 (正典 v1 追従) | test | 実プロセス2本の並行claim検証ハーネス導入 | Medium | standalone | [設計](devnotes/20260823-0017-process-concurrency-harness-adoption/) | 2026-08-23 01:29 |
 | T249 | 起動 probe の共通 runner への一元化 (正典 v1 追従) | test | 起動probeを共通runnerへ一元化・退行gate新設 | Medium | standalone | [設計](devnotes/20260823-0022-boot-probe-runner-unification/) | 2026-08-23 01:30 |
-| T250 | 撤去表面の不在 gate を家系正典 v1 の標準形へ揃える | test | 撤去表面の不在gateを正典v1形へ揃える | Medium | incremental | [設計](devnotes/20260823-0016-password-confirm-surface-removal-gate-v1/) | 2026-08-23 01:30 |
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
 ## Conditional (条件付き待機)
