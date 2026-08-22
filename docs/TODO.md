@@ -29,6 +29,7 @@
 | T248 | 冪等 claim の実プロセス並行テストハーネス導入 (正典 v1 追従) | test | 実プロセス2本の並行claim検証ハーネス導入 | Medium | standalone | [設計](devnotes/20260823-0017-process-concurrency-harness-adoption/) | 2026-08-23 01:29 |
 | T249 | 起動 probe の共通 runner への一元化 (正典 v1 追従) | test | 起動probeを共通runnerへ一元化・退行gate新設 | Medium | standalone | [設計](devnotes/20260823-0022-boot-probe-runner-unification/) | 2026-08-23 01:30 |
 | T250 | 撤去表面の不在 gate を家系正典 v1 の標準形へ揃える | test | 撤去表面の不在gateを正典v1形へ揃える | Medium | incremental | [設計](devnotes/20260823-0016-password-confirm-surface-removal-gate-v1/) | 2026-08-23 01:30 |
+| T251 | Svelte raw HTML sink の deny-by-default 禁止 (正典 t1 追従) | frontend | {@html}禁止gate新設とQR部品置換 | Medium | standalone | [設計](devnotes/20260823-0017-svelte-raw-html-sink-ban/) | 2026-08-23 01:31 |
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
 ## Conditional (条件付き待機)
