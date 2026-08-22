@@ -20,11 +20,17 @@ use Tests\Support\OAuthTestHelpers;
  *   (b) 同一スコープの 2 本目の INSERT を unique が落とすこと (テスト 3)
  * を固定する。
  *
- * ★**保証しないこと**: PHP のテストは単一プロセスであり、真の並行 2 本は走らせていない。
- *   `RefreshDatabase` 下では全操作が同一接続・同一トランザクション内で見えるため、
- *   claim の commit も別接続からの可視性も検証していない。本番で後着から claim が
- *   見えるのは「middleware を包む外側 transaction が無い + pgsql の autocommit /
- *   read committed」という前提の帰結であって、テストによる保証ではない。
+ * ★**このテストが保証しないこと**: 単一プロセスであり、真の並行 2 本は走らせていない。
+ *   細かい分岐 (再生 / conflict / indeterminate / 期限切れ再 claim / 順序) を
+ *   決定的に固定するのが本テストの役割である。
+ *
+ * ★**実プロセス 2 本での裏取りは別にある**:
+ *   tests/Feature/Concurrency/IdempotencyClaimProcessConcurrencyTest.php が
+ *   barrier で同期させた実プロセス 2 本で、
+ *   (a) claim の commit が別接続 (別プロセス) から見えること
+ *   (b) 本処理を通したのはちょうど 1 本で、もう 1 本は idempotency_in_progress で弾かれること
+ *   を測っている。**埋まったのはこの 2 点だけ**である —
+ *   任意の production route や実ジョブの副作用まで保証したわけではない。
  */
 
 /** report() 経路 (運用アラート) を観測する spy を差し込む */

@@ -333,7 +333,7 @@ checksum query の存在を固定し、`TakeRegistrationTest` が三点照合の
 | 対象パス | `app/Services/Manual/RenderJobService.php` / `tests/Feature/Manual/RenderPreviewConcurrencyTest.php` |
 | 業務要件起因の説明 | `RefreshDatabase` が検体を未コミットのトランザクション内に置くため、別プロセスからは検体が見えず、直列化の実証には非トランザクションの専用レーンが要る |
 | 揃え続ける不変条件と保証機構 | 組織ごとの同時 preview 上限の検査とジョブ作成は Organization 行ロック下で行う。逐次境界は `RenderPreviewConcurrencyTest` が固定する |
-| 再判定の条件 | 非トランザクションのテストレーンを導入したとき (別プロセスでの実証へ移す) |
+| 再判定の条件 | 実プロセス並行テストの本数制約を見直すとき、または preview 上限の直列化に退行が疑われたとき |
 | 決めた日 | 2026-07-11 |
 | 決めた人 | 開発者 |
 | 根拠 | T005 |
@@ -365,10 +365,24 @@ checksum query の存在を固定し、`TakeRegistrationTest` が三点照合の
   §レンダジョブの運用契約が正本)
 - subprocess 実証は同テストの skip プレースホルダとして残置 (専用 lane 導入時に実装する)
 
+### 再判定の記録 (2026-08-23)
+
+lctl feature `process-concurrency-test-harness` (rev `14-3117f6369f21` / 正典 v1) への追従作業
+(T248) 時に再判定した。**本登録は据え置く (完了扱いにしない)**。
+
+- 非トランザクションの検体置き場 (`tests/Support/Concurrency/OutOfTransactionFixtures.php`) は
+  導入したので、本登録が挙げていた前提 (「別プロセスからは検体が見えない」) の一部は解消した
+- ただし正典 v1 の要素 (6) が **実プロセス版は 1 本に絞る**ことを求めており、その 1 本は
+  冪等 claim (`tests/Feature/Concurrency/IdempotencyClaimProcessConcurrencyTest.php`) へ
+  割り当てた。preview 上限の実証は**逐次境界のまま据え置く**
+- したがって「subprocess 実証が入った」と読まないこと。道具はできたので、
+  次に実プロセス版の本数制約を見直すときに選択肢へ載る
+
 ### 関連
 
 - 実装: `app/Services/Manual/RenderJobService.php` (triggerPreview)
 - 設計: `devnotes/20260711-0549-render/detailed-design.md` 施策 4 テスト計画
+- 再判定: `devnotes/20260823-0017-process-concurrency-harness-adoption/detailed-design.md` 施策 9
 
 ---
 
