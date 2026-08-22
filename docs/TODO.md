@@ -24,6 +24,7 @@
 | T247 | 組織テナンシー正典追従 (AG-037/038/039系/046/047) | backend | 組織文脈をURL単一方式へ揃え識別名を堅くする | High | standalone | [設計](devnotes/20260823-0016-organization-tenancy-ag-catchup/) | 2026-08-23 01:28 |
 | T249 | 起動 probe の共通 runner への一元化 (正典 v1 追従) | test | 起動probeを共通runnerへ一元化・退行gate新設 | Medium | standalone | [設計](devnotes/20260823-0022-boot-probe-runner-unification/) | 2026-08-23 01:30 |
 | T252 | Pest arch ベースラインの規則別分解導入 | test | Pest arch 規則別ベースラインを新設 | Medium | standalone | [設計](devnotes/20260823-0020-pest-arch-baseline-per-rule-adoption/) | 2026-08-23 08:46 |
+| T253 | 企業 IdP との OIDC SSO 採用 | backend | 企業IdPのOIDCでSSOログインを追加 | High | standalone | [設計](devnotes/20260823-0015-enterprise-oidc-sso-adoption/) | 2026-08-23 08:46 |
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
 ## Conditional (条件付き待機)
