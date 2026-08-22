@@ -32,6 +32,8 @@ use App\Services\Billing\StripeWebhookProcessor;
 use App\Services\Billing\TicketCheckoutGateway;
 use App\Services\Capture\FfmpegTakeThumbnailExtractor;
 use App\Services\Capture\TakeThumbnailExtractor;
+use App\Services\Help\HelpRepository;
+use App\Services\Help\McpToolScanner;
 use App\Services\Mail\Sns\AwsSnsSignatureVerifier;
 use App\Services\Mail\Sns\SnsSignatureVerifier;
 use App\Services\Render\FfmpegVideoComposer;
@@ -140,6 +142,40 @@ class AppServiceProvider extends ServiceProvider
         // (ChannelManager::createDatabaseDriver は container 解決のため binding が効く。
         // AppNotification 以外の通知は素通し = 後方互換)
         $this->app->bind(DatabaseChannel::class, OrganizationScopedDatabaseChannel::class);
+
+        // ヘルプ機構 (T246) の 2 つの根。運用者が触る値ではないので CLI の knob には出さない
+        // (出すと「別の場所を検査させて緑にする」経路ができる)。テストは container の
+        // rebind で差し替える。
+        // ★**信頼する起点はリポジトリルートの canonical path** である。ここで realpath を
+        //   通しておくことで「作業ツリー全体が symlink の先にある」形は許しつつ、
+        //   起点から根までの経路に symlink が挟まった形は受け取り側の検査が弾ける
+        //   (根を canonical path として渡すことが両クラスの契約である)。
+        $this->app->singleton(HelpRepository::class, static function (): HelpRepository {
+            return new HelpRepository(self::canonicalPathUnder('docs/help'));
+        });
+
+        $this->app->singleton(McpToolScanner::class, static function (): McpToolScanner {
+            return new McpToolScanner(self::canonicalPathUnder('app/Mcp/Tools'));
+        });
+    }
+
+    /**
+     * 信頼する起点 (リポジトリルートの canonical path) の配下の絶対パスを組み立てる。
+     *
+     * ★起点だけを `realpath()` で正規化し、**配下の相対部分は正規化しない**。
+     *   正規化してしまうと経路に挟まった symlink が畳まれ、受け取り側の
+     *   「canonical path か」の検査が意味を失う。
+     *
+     * @param  non-empty-string  $relative
+     * @return non-empty-string
+     */
+    private static function canonicalPathUnder(string $relative): string
+    {
+        $base = realpath(base_path());
+        Assert::string($base, 'リポジトリルートを解決できません。');
+        Assert::stringNotEmpty($base);
+
+        return $base.'/'.$relative;
     }
 
     public function boot(): void
