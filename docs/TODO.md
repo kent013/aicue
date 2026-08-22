@@ -25,6 +25,7 @@
 | T244 | アプリ組み込みガイド §2 ゲート表 2 本の復帰 | docs | 契約文書§2のゲート表2本を復帰 | Medium | standalone | [設計](devnotes/20260822-2305-integration-guide-gate-table-restore/) | 2026-08-23 01:27 |
 | T245 | bug-hunt シナリオカードへの前付け導入と割当正本の一元化 (正典 t1 追従) | test | シナリオ前付け導入と割当正本一元化 | Medium | standalone | [設計](devnotes/20260823-0022-bughunt-story-front-matter-adoption/) | 2026-08-23 01:27 |
 | T246 | lctl help-system 追従: ヘルプ取り込み基盤 + MCP ツール一覧の自動生成 (鮮度検査つき) | backend | MCPツール一覧の自動生成とヘルプ基盤 | Medium | standalone | [設計](devnotes/20260823-0019-help-system-aicue-propagation/) | 2026-08-23 01:28 |
+| T247 | 組織テナンシー正典追従 (AG-037/038/039系/046/047) | backend | 組織文脈をURL単一方式へ揃え識別名を堅くする | High | standalone | [設計](devnotes/20260823-0016-organization-tenancy-ag-catchup/) | 2026-08-23 01:28 |
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
 ## Conditional (条件付き待機)
