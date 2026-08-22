@@ -21,6 +21,7 @@
 
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
+| T243 | kent013/laravel-ssrf-pin を完全区間分類の版 (^0.4) へ改版し回帰テストで受ける | backend | SSRF判定を^0.4へ改版し回帰固定 | High | standalone | [設計](devnotes/20260822-2311-ssrf-pin-v04-upgrade/) | 2026-08-23 01:26 |
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
 ## Conditional (条件付き待機)
