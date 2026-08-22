@@ -22,7 +22,6 @@
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
 | T244 | アプリ組み込みガイド §2 ゲート表 2 本の復帰 | docs | 契約文書§2のゲート表2本を復帰 | Medium | standalone | [設計](devnotes/20260822-2305-integration-guide-gate-table-restore/) | 2026-08-23 01:27 |
-| T245 | bug-hunt シナリオカードへの前付け導入と割当正本の一元化 (正典 t1 追従) | test | シナリオ前付け導入と割当正本一元化 | Medium | standalone | [設計](devnotes/20260823-0022-bughunt-story-front-matter-adoption/) | 2026-08-23 01:27 |
 | T247 | 組織テナンシー正典追従 (AG-037/038/039系/046/047) | backend | 組織文脈をURL単一方式へ揃え識別名を堅くする | High | standalone | [設計](devnotes/20260823-0016-organization-tenancy-ag-catchup/) | 2026-08-23 01:28 |
 | T248 | 冪等 claim の実プロセス並行テストハーネス導入 (正典 v1 追従) | test | 実プロセス2本の並行claim検証ハーネス導入 | Medium | standalone | [設計](devnotes/20260823-0017-process-concurrency-harness-adoption/) | 2026-08-23 01:29 |
 | T249 | 起動 probe の共通 runner への一元化 (正典 v1 追従) | test | 起動probeを共通runnerへ一元化・退行gate新設 | Medium | standalone | [設計](devnotes/20260823-0022-boot-probe-runner-unification/) | 2026-08-23 01:30 |
