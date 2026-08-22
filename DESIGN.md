@@ -253,6 +253,20 @@ composition される前提の最小 atom。単体で使う場合、`aria-descri
 表現する — §Elevation & Depth)。padding: `none`(table/list 等を内包し内側で個別に
 padding を制御する箱用)/ `sm` / `md`(既定)/ `lg`。
 
+### QrCodeImage
+
+実装: `components/atoms/QrCodeImage.svelte`。**サーバが生成した SVG 文字列を
+data URI の `<img>` として描く**。生の HTML を DOM へ差し込む構文 (`{@html}`) を
+使わずに QR を表示するための**唯一の手段**であり、lint 規則
+`svelte/no-at-html-tags` (`eslint.config.js`) と対で 1 組である。
+props は `svg: string`(必須)/ `alt: string`(必須)/ `testId`。
+**`class` は受けない** — 寸法・装飾は呼び出し側の wrapper が持つ。
+`svg` は **null 許容にしない** — 取得中・取得失敗の分岐は呼び出し側が持つ。
+アクセシブルネームの正本は `alt` なので、wrapper 側に `role="img"` を重ねない。
+data URI は percent encoding で作る(`btoa()` は非 ASCII の SVG で例外を投げる)。
+CSP の `img-src` が `data:` を含むことに依存しており、
+`tests/Feature/Security/SecurityHeadersTest.php` が 2 構成で pin している。
+
 ### Spinner
 
 実装: `components/atoms/Spinner.svelte`。LoaderCircle(@lucide/svelte)+ `animate-spin`。
@@ -520,6 +534,15 @@ active)はページ側が組み立てる(どのタブを出すか・URL は呼�
   (認証・権限・ゲートで確実に弾かれる先を指すもの)は**出さずに、なぜ今は進めないかを
   文章で説明する**。disabled 化でも代替しない(上の Don't と同根。例: メール未認証画面から
   `verified` ゲート内の checkout へ進む CTA)
+- **生の HTML を DOM へ差し込む構文 (`{@html}`) を書かない**。値の出どころが 1 か所でも
+  汚れていれば script がそのまま実行される。`eslint.config.js` の
+  `svelte/no-at-html-tags` が error で落とし、inline コメントでの無効化も効かない
+  (`noInlineConfig`)。**許可一覧の口は無い** — 例外を設けるなら、その口を排除できない
+  理由・安全境界・専用テストを含む別のセキュリティ設計としてレビューを通すこと。
+  サーバ生成の SVG (2 要素認証の QR) には `QrCodeImage` atom を使う。
+  実効性の裏取りは `tests/js/architecture/svelte-raw-html-gate.test.ts`。
+  なお同 gate は**字面**で数えるため、`resources/js` 配下の `.svelte` では
+  コメントであってもこの構文の字面を書けない(「raw HTML 挿入構文」と呼び名で書く)
 - ページ内で素の `<input>` / `<table>` / リンク風 `<a>` 手書きをしない(対応する atom/molecule を使う)
 - **native の constraint validation に検証を任せない**。`<form>` には `novalidate` を付け、
   検証文言はサーバ(日本語)と押下時の client エラーに一本化する。
