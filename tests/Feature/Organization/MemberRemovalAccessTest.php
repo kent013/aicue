@@ -29,7 +29,6 @@ test('T7: 自然除名で membership/role/pivot/current が掃除され、被除
     $project = Project::factory()->forOrganization($organization)->create();
     $member = attachOrganizationMember($organization, OrganizationRole::Member);
     attachProjectMember($project, $member, ProjectRole::Member);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
     $this->actingAs($owner)
         ->delete("/organizations/{$organization->slug}/members/{$member->id}")
@@ -51,12 +50,10 @@ test('T7: 自然除名で membership/role/pivot/current が掃除され、被除
         'project_id' => $project->id,
         'user_id' => $member->id,
     ]);
-    // (5) current_organization_id が null 化 (当該 org を current にしていたため)
-    expect($member->fresh()?->current_organization_id)->toBeNull();
 
     // (2) /manage/users (owner 閲覧) の members prop に被除名者が含まれない
     $this->actingAs($owner)
-        ->get('/manage/users')
+        ->get("/organizations/{$organization->slug}/manage/users")
         ->assertInertia(function (AssertableInertia $page) use ($member): void {
             $page->component('Admin/Users');
             /** @var list<array{id: int}> $members */
@@ -68,10 +65,10 @@ test('T7: 自然除名で membership/role/pivot/current が掃除され、被除
     //     dashboard は current 未解決時に no-org 設定画面 (200) を出すため、除名の証明は projects/
     //     billing/manage の 404 で行う (dashboard 200 は「除名済み org のデータではない」ことの確認に留める)。
     $removed = $member->fresh();
-    $this->actingAs($removed)->get('/dashboard')->assertOk();
-    $this->actingAs($removed)->get('/projects')->assertNotFound();
-    $this->actingAs($removed)->get('/billing')->assertNotFound();
-    $this->actingAs($removed)->get('/manage/users')->assertNotFound();
+    $this->actingAs($removed)->get("/organizations/{$organization->slug}/dashboard")->assertOk();
+    $this->actingAs($removed)->get("/organizations/{$organization->slug}/projects")->assertNotFound();
+    $this->actingAs($removed)->get("/organizations/{$organization->slug}/billing")->assertNotFound();
+    $this->actingAs($removed)->get("/organizations/{$organization->slug}/manage/users")->assertNotFound();
 });
 
 test('T7b: 除名後に current-org を除名済み org へ戻しても membership 境界で拒否される (層3=403)', function (): void {
@@ -83,18 +80,17 @@ test('T7b: 除名後に current-org を除名済み org へ戻しても membersh
         ->assertSessionHas('success');
 
     // current-org を除名済み組織へ明示的に戻す (binding は通るが membership/role は不在)
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
     $stale = $member->fresh();
 
     // 拒否が current-org 不在ではなく membership 境界で成立することを分離して固定する (層 3 = 403)。
     // dashboard は stale current でも no-org 設定画面 (200) を出す (除名済み org のデータではない)。
-    $this->actingAs($stale)->get('/dashboard')->assertOk();
-    $this->actingAs($stale)->get('/projects')->assertForbidden();
-    $this->actingAs($stale)->get('/billing')->assertForbidden();
-    $this->actingAs($stale)->get('/manage/users')->assertForbidden();
+    $this->actingAs($stale)->get("/organizations/{$organization->slug}/dashboard")->assertOk();
+    $this->actingAs($stale)->get("/organizations/{$organization->slug}/projects")->assertForbidden();
+    $this->actingAs($stale)->get("/organizations/{$organization->slug}/billing")->assertForbidden();
+    $this->actingAs($stale)->get("/organizations/{$organization->slug}/manage/users")->assertForbidden();
 });
 
-test('T8: 未割当 (attach 済み・current=org・laratrust role 無し) は主要 route が fail-closed (層3=403)', function (): void {
+test('T8: 未割当 (attach 済み・laratrust role 無し) は主要 route が fail-closed (層3=403)', function (): void {
     // 検証した主要 route (dashboard/projects/billing/manage-users)。全 route 保証ではない。
     [$organization] = createOrganizationWithOwner('未割当 fail-closed 組織');
 
@@ -102,12 +98,11 @@ test('T8: 未割当 (attach 済み・current=org・laratrust role 無し) は主
     // current_organization_id は対象組織に設定する (拒否が current-org 不在ではなく role 不在で成立する)。
     $unassigned = User::factory()->create();
     $organization->users()->attach($unassigned);
-    $unassigned->forceFill(['current_organization_id' => $organization->id])->save();
 
     expect($unassigned->fresh()?->organizationRole($organization))->toBeNull();
 
-    $this->actingAs($unassigned)->get('/dashboard')->assertForbidden();
-    $this->actingAs($unassigned)->get('/projects')->assertForbidden();
-    $this->actingAs($unassigned)->get('/billing')->assertForbidden();
-    $this->actingAs($unassigned)->get('/manage/users')->assertForbidden();
+    $this->actingAs($unassigned)->get("/organizations/{$organization->slug}/dashboard")->assertForbidden();
+    $this->actingAs($unassigned)->get("/organizations/{$organization->slug}/projects")->assertForbidden();
+    $this->actingAs($unassigned)->get("/organizations/{$organization->slug}/billing")->assertForbidden();
+    $this->actingAs($unassigned)->get("/organizations/{$organization->slug}/manage/users")->assertForbidden();
 });

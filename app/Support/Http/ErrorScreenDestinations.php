@@ -35,7 +35,7 @@ final class ErrorScreenDestinations
 
         if ($authenticated) {
             return [
-                new ErrorScreenDestination('ダッシュボードへ', route('dashboard', absolute: false)),
+                new ErrorScreenDestination('ダッシュボードへ', route('app.entry', absolute: false)),
                 self::home(),
             ];
         }

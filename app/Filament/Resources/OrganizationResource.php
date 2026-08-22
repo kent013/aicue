@@ -12,20 +12,18 @@ use App\Models\Organization;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
 use Filament\Forms\Components\TextInput;
-use Filament\Infolists\Components\IconEntry;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Resources\Pages\PageRegistration;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
-use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 
 /**
  * 組織 (テナント) の閲覧 + name のみ編集。
  *
- * slug / plan_code / is_personal はサーバ側 (provisioning / Stripe webhook) が
+ * slug / plan_code はサーバ側 (provisioning / Stripe webhook) が
  * 管理する状態キーのため管理画面からは編集させない。削除も提供しない
  * (退会フローはアプリ側の正規経路で行う)。
  */
@@ -65,8 +63,6 @@ class OrganizationResource extends Resource
                 TextColumn::make('plan_code')->label('プラン')
                     ->placeholder('未契約')
                     ->sortable(),
-                IconColumn::make('is_personal')->label('個人組織')
-                    ->boolean(),
                 TextColumn::make('created_at')->label('作成日時')
                     ->dateTime()
                     ->sortable(),
@@ -85,8 +81,6 @@ class OrganizationResource extends Resource
             TextEntry::make('slug')->label('スラッグ'),
             TextEntry::make('plan_code')->label('プラン')
                 ->placeholder('未契約'),
-            IconEntry::make('is_personal')->label('個人組織')
-                ->boolean(),
             TextEntry::make('members_count')->label('メンバー数')
                 ->state(static fn (Organization $record): int => $record->users()->count()),
             TextEntry::make('projects_count')->label('プロジェクト数')

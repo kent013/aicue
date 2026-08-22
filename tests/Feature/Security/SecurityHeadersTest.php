@@ -134,14 +134,14 @@ function captureShowContext(): array
     $project = Project::factory()->forOrganization($organization)->create();
     $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
 
-    return [$owner, $project, $manual];
+    return [$organization, $owner, $project, $manual];
 }
 
 test('撮影 document route は camera/microphone を (self) に緩める', function (): void {
-    [$owner, $project, $manual] = captureShowContext();
+    [$organization, $owner, $project, $manual] = captureShowContext();
 
     // 完全一致で検証: camera/microphone のみ (self)、geolocation / payment は baseline のまま (drift 検出)
-    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals/{$manual->id}")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}")
         ->assertOk()
         ->assertHeader(
             'Permissions-Policy',
@@ -150,9 +150,9 @@ test('撮影 document route は camera/microphone を (self) に緩める', func
 });
 
 test('capture 内の非 recorder ルート (index) は厳格な baseline を維持する', function (): void {
-    [$owner, $project] = captureShowContext();
+    [$organization, $owner, $project] = captureShowContext();
 
-    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals")
         ->assertOk()
         ->assertHeader(
             'Permissions-Policy',
@@ -161,32 +161,32 @@ test('capture 内の非 recorder ルート (index) は厳格な baseline を維�
 });
 
 test('binding 失敗 404 には Permissions-Policy が一切付かない (緩和の漏れなし)', function (): void {
-    [$owner, $project] = captureShowContext();
+    [$organization, $owner, $project] = captureShowContext();
 
     // 存在しない manual id → scopeBindings 失敗で 404。SecurityHeaders は SubstituteBindings より
     // 内側 (append) のため到達せず、ヘッダは付かない (fail-safe)。
-    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals/999999999")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/999999999")
         ->assertNotFound()
         ->assertHeaderMissing('Permissions-Policy');
 });
 
 test('capture 用 config が空文字 (opt-out) なら撮影 route でも非送出になる', function (): void {
-    [$owner, $project, $manual] = captureShowContext();
+    [$organization, $owner, $project, $manual] = captureShowContext();
 
     config()->set('security.capture_permissions_policy', '');
 
-    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals/{$manual->id}")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}")
         ->assertOk()
         ->assertHeaderMissing('Permissions-Policy');
 });
 
 test('allowlist の非文字列要素は無視される (型安全 fail-safe)', function (): void {
-    [$owner, $project, $manual] = captureShowContext();
+    [$organization, $owner, $project, $manual] = captureShowContext();
 
     config()->set('security.capture_permissions_policy_routes', ['capture.manuals.show', 123, null]);
 
     // 撮影 route は capture 値 (非文字列要素を落としても route は生き残る)
-    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals/{$manual->id}")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}")
         ->assertOk()
         ->assertHeader(
             'Permissions-Policy',
@@ -194,7 +194,7 @@ test('allowlist の非文字列要素は無視される (型安全 fail-safe)', 
         );
 
     // 非 recorder は baseline のまま
-    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals")
         ->assertOk()
         ->assertHeader(
             'Permissions-Policy',

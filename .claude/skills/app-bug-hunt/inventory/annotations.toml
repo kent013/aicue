@@ -12,6 +12,11 @@
 # `scripts/bug-hunt-inventory-check.sh` が exit 3 (ドリフト) で落とす。
 schema_version = 1
 
+[routes."app.entry"]
+kind = "画面"
+story = "S1"
+kubun = "通常"
+
 [routes."billing.auto-recharge.setup"]
 story = "S5"
 kubun = "通常"
@@ -63,6 +68,11 @@ kubun = "通常"
 [routes."capture.csrf-cookie"]
 kind = "JSON"
 story = "S3"
+kubun = "通常"
+
+[routes."capture.entry"]
+kind = "画面"
+story = "S5"
 kubun = "通常"
 
 [routes."capture.home"]
@@ -300,7 +310,7 @@ kubun = "通常"
 story = "S4"
 kubun = "通常"
 
-[routes."organizations.switch"]
+[routes."organizations.slug.update"]
 story = "S4"
 kubun = "通常"
 

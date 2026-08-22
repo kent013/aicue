@@ -656,7 +656,7 @@ index 0000000..cd2cc75
 +
 +use App\Http\Middleware\BughuntExecutedRouteMiddleware;
 +use App\Http\Middleware\EnsureAccountNotPendingDeletion;
-+use App\Http\Middleware\EnsureProjectBelongsToCurrentOrganization;
++use App\Http\Middleware\EnsureProjectBelongsToRouteOrganization;
 +use App\Http\Middleware\RequireActiveSubscription;
 +use Illuminate\Auth\Middleware\Authenticate;
 +use Illuminate\Routing\Route as RoutingRoute;
@@ -757,7 +757,7 @@ index 0000000..cd2cc75
 +
 +    foreach ([
 +        Authenticate::class,
-+        EnsureProjectBelongsToCurrentOrganization::class,
++        EnsureProjectBelongsToRouteOrganization::class,
 +        RequireActiveSubscription::class,
 +        EnsureAccountNotPendingDeletion::class,
 +    ] as $upstream) {

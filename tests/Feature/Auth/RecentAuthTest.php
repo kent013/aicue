@@ -110,7 +110,7 @@ test('409 の intended も same-origin referer のみ採用する (open redirect
         ->delete('/settings/account')
         ->assertStatus(409);
 
-    expect(session('url.intended'))->toBe(route('dashboard'));
+    expect(session('url.intended'))->toBe(route('app.entry'));
 });
 
 /*
@@ -172,7 +172,7 @@ test('外部 origin の referer は intended に採用されない (open redirec
         ->delete('/settings/account')
         ->assertRedirect(route('recent-auth.confirm'));
 
-    expect(session('url.intended'))->toBe(route('dashboard'));
+    expect(session('url.intended'))->toBe(route('app.entry'));
 });
 
 /* ------------------------------------------- fortify password.confirm 救済 redirect */
@@ -479,7 +479,7 @@ test('T106: SSO 登録直後のユーザーは passwordSet=false / canSatisfy=tr
     $this->withSession(['social_auth_intent' => 'register']);
     fakeStepUpSocialiteCallback('g-t106-status');
 
-    $this->get('/auth/google/callback')->assertRedirect(route('dashboard'));
+    $this->get('/auth/google/callback')->assertRedirect(route('app.entry'));
 
     $user = User::whereBlind('email', 'email_index', 'step-up@example.com')->firstOrFail();
 

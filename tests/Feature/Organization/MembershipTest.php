@@ -68,7 +68,6 @@ test('Owner への昇格はロール変更経路では指定できない (enum �
 test('Owner は削除できない (移譲が先)', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $admin = attachOrganizationMember($organization, OrganizationRole::Admin);
-    $admin->forceFill(['current_organization_id' => $organization->id])->save();
 
     $response = $this->actingAs($admin)->delete("/organizations/{$organization->slug}/members/{$owner->id}");
 
@@ -77,10 +76,9 @@ test('Owner は削除できない (移譲が先)', function (): void {
     expect($owner->fresh()->organizationRole($organization))->toBe(OrganizationRole::Owner);
 });
 
-test('メンバー削除で membership / ロール / current_organization_id が掃除される', function (): void {
+test('メンバー削除で membership / ロールが掃除される', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
     $response = $this->actingAs($owner)->delete("/organizations/{$organization->slug}/members/{$member->id}");
 
@@ -88,13 +86,11 @@ test('メンバー削除で membership / ロール / current_organization_id が
     $member = $member->fresh();
     expect($organization->users()->whereKey($member->id)->exists())->toBeFalse();
     expect($member->organizationRole($organization))->toBeNull();
-    expect($member->current_organization_id)->toBeNull();
 });
 
 test('manageMembers 権限がない member はロール変更できない (403)', function (): void {
     [$organization] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
     $other = attachOrganizationMember($organization);
 
     $response = $this->actingAs($member)->patch("/organizations/{$organization->slug}/members/{$other->id}", [

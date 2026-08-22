@@ -89,14 +89,14 @@ test('local + 正しい credential → ユーザー一覧 (Debug/Login) が表�
 });
 
 test('loginAs で対象ユーザーとしてログインし dashboard へ redirect', function (): void {
-    [, $user] = createOrganizationWithOwner();
+    [$organization, $user] = createOrganizationWithOwner();
 
     $response = $this->withHeaders([
         'PHP_AUTH_USER' => 'testuser',
         'PHP_AUTH_PW' => 'testpass123',
     ])->post("/debug/login/{$user->id}");
 
-    $response->assertRedirect('/dashboard');
+    $response->assertRedirect("/organizations/{$organization->slug}/dashboard");
     $this->assertAuthenticatedAs($user);
 });
 

@@ -172,7 +172,7 @@ Route::middleware(['auth', 'verified', 'not-pending-deletion'])->group(function 
 ```
 
 撮影 PWA の group (`->prefix('app')->as('capture.')`) はこの内側にあり、
-さらに `require-active-subscription` / `project.in-current-org` が重なる。
+さらに `require-active-subscription` / `project.in-route-org` が重なる。
 `User implements MustVerifyEmail` かつ `config/fortify.php` に `Features::emailVerification()`。
 
 #### (d) 招待の受け渡し手段はメールだけ (平文 token は DB に無い)

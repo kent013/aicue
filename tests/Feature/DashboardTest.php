@@ -50,7 +50,7 @@ test('進行中ジョブ: analyzing/rendering manual と進行中 job が progre
     ]);
     RenderJob::factory()->forManual($rendering)->running()->create(['progress' => 60]);
 
-    $this->actingAs($owner)->get('/dashboard')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->component('Dashboard')
@@ -73,7 +73,7 @@ test('進行中ジョブ: job_updated_at が Y-m-d H:i で出る', function (): 
     ]);
     $job = AnalysisJob::factory()->forManual($manual)->running()->create();
 
-    $this->actingAs($owner)->get('/dashboard')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard")
         ->assertInertia(fn (Assert $page) => $page
             ->where('dashboard.in_progress.0.job_updated_at', $job->fresh()?->updated_at?->format('Y-m-d H:i')));
 });
@@ -86,7 +86,7 @@ test('進行中ジョブ: preview の RenderJob は引き当てない (job_statu
     ]);
     RenderJob::factory()->forManual($rendering)->preview()->running()->create();
 
-    $this->actingAs($owner)->get('/dashboard')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard")
         ->assertInertia(fn (Assert $page) => $page
             ->has('dashboard.in_progress', 1)
             ->where('dashboard.in_progress.0.job_status', null)
@@ -102,7 +102,7 @@ test('進行中ジョブ: failed の job は引き当てない (queued/running �
     AnalysisJob::factory()->forManual($analyzing)->failed()->create();
 
     // manual 行は残る (状態カード) が、failed job は進行中扱いにしない
-    $this->actingAs($owner)->get('/dashboard')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard")
         ->assertInertia(fn (Assert $page) => $page
             ->has('dashboard.in_progress', 1)
             ->where('dashboard.in_progress.0.manual_id', $analyzing->id)
@@ -126,7 +126,7 @@ test('進行中ジョブ: progress は 0-100 に clamp される', function (): 
     ]);
     AnalysisJob::factory()->forManual($under)->running()->create(['progress' => -10]);
 
-    $this->actingAs($owner)->get('/dashboard')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard")
         ->assertInertia(fn (Assert $page) => $page
             ->where('dashboard.in_progress.0.manual_id', $under->id)
             ->where('dashboard.in_progress.0.progress', 0)
@@ -150,7 +150,7 @@ test('最近のマニュアル: updated_at 降順 5 件・category_name / status
         'updated_at' => now(),
     ]);
 
-    $this->actingAs($owner)->get('/dashboard')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard")
         ->assertInertia(fn (Assert $page) => $page
             ->has('dashboard.recent_manuals', 5)
             ->where('dashboard.recent_manuals.0.title', '最新の分類済み')
@@ -188,7 +188,7 @@ test('撮影対象: 未採用 cut を持つ ready/published manual だけが未�
     ]);
     Cut::factory()->forManual($draft)->create();
 
-    $this->actingAs($owner)->get('/dashboard')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard")
         ->assertInertia(fn (Assert $page) => $page
             ->has('dashboard.shooting_targets', 1)
             ->where('dashboard.shooting_targets.0.manual_id', $target->id)
@@ -201,7 +201,7 @@ test('残高/容量: grant 済み残高・低残高フラグ・使用率が正�
     Project::factory()->forOrganization($organization)->create();
     app(TicketLedgerService::class)->grant($organization, 10, 'テスト付与');
 
-    $this->actingAs($owner)->get('/dashboard')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard")
         ->assertInertia(fn (Assert $page) => $page
             ->where('dashboard.billing.ticket_balance', 10)
             ->where('dashboard.billing.is_low_balance', false)
@@ -213,7 +213,7 @@ test('残高/容量: threshold 未満で is_low_balance=true', function (): void
     [$organization, $owner] = createOrganizationWithOwner();
     app(TicketLedgerService::class)->grant($organization, 3, 'テスト付与'); // threshold 既定 5
 
-    $this->actingAs($owner)->get('/dashboard')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard")
         ->assertInertia(fn (Assert $page) => $page
             ->where('dashboard.billing.ticket_balance', 3)
             ->where('dashboard.billing.is_low_balance', true));
@@ -227,7 +227,7 @@ test('容量: takes.size_bytes 合計と limit から storage_usage_percent が�
     $cut = Cut::factory()->forManual($manual)->create();
     Take::factory()->forCut($cut)->create(['size_bytes' => 250]);
 
-    $this->actingAs($owner)->get('/dashboard')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard")
         ->assertInertia(fn (Assert $page) => $page
             ->where('dashboard.billing.storage_used_bytes', 250)
             ->where('dashboard.billing.storage_limit_bytes', 1_000)
@@ -243,7 +243,7 @@ test('容量: storage_usage_percent は 0-100 に clamp される (不正デー�
     // データ不整合 (負の size_bytes) が起きても percent は 0 に丸める防御的契約
     Take::factory()->forCut($cut)->create(['size_bytes' => -500]);
 
-    $this->actingAs($owner)->get('/dashboard')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard")
         ->assertInertia(fn (Assert $page) => $page
             ->where('dashboard.billing.storage_usage_percent', 0));
 });
@@ -257,7 +257,7 @@ test('容量: pending 予約 (未失効) の bytes_pending が加算される', 
     Take::factory()->forCut($cut)->create(['size_bytes' => 250]);
     TakeUploadReservation::factory()->forCut($cut)->create(['size_bytes' => 250]);
 
-    $this->actingAs($owner)->get('/dashboard')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard")
         ->assertInertia(fn (Assert $page) => $page
             // occupiedBytes = bytes_used (250) + bytes_pending (250) の契約固定
             ->where('dashboard.billing.storage_used_bytes', 500)
@@ -284,7 +284,7 @@ test('cross-org 分離: 別 org の manual / job / take が一切混入しない
     $foreignCut = Cut::factory()->forManual($foreignReady)->create();
     Take::factory()->forCut($foreignCut)->create(['size_bytes' => 999]);
 
-    $response = $this->actingAs($owner)->get('/dashboard');
+    $response = $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard");
 
     $response->assertInertia(fn (Assert $page) => $page
         ->where('dashboard.state', 'ready')
@@ -301,7 +301,7 @@ test('ロール: org owner は editor', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     Project::factory()->forOrganization($organization)->create();
 
-    $this->actingAs($owner)->get('/dashboard')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard")
         ->assertInertia(fn (Assert $page) => $page
             ->where('dashboard.role', 'editor'));
 });
@@ -312,7 +312,7 @@ test('ロール: project member (撮影のみ) は shooter', function (): void {
     $shooter = attachOrganizationMember($organization, OrganizationRole::Member);
     attachProjectMember($project, $shooter, ProjectRole::Member);
 
-    $this->actingAs($shooter)->get('/dashboard')
+    $this->actingAs($shooter)->get("/organizations/{$organization->slug}/dashboard")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('dashboard.role', 'shooter'));
@@ -323,27 +323,26 @@ test('ロール: project 非所属の org member は viewer', function (): void 
     Project::factory()->forOrganization($organization)->create();
     $viewer = attachOrganizationMember($organization, OrganizationRole::Member);
 
-    $this->actingAs($viewer)->get('/dashboard')
+    $this->actingAs($viewer)->get("/organizations/{$organization->slug}/dashboard")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('dashboard.role', 'viewer'));
 });
 
-test('空状態: 所属 org なしは state=no_organization で 200', function (): void {
+test('所属していない組織の dashboard は 404 (組織の有無を露出しない)', function (): void {
+    // 組織文脈は URL だけで決まる (家系裁定 AG-037)。所属 0 件の利用者は
+    // そもそも組織 URL を持たず、分岐入口 (/go) が組織作成へ倒す。
+    [$organization] = createOrganizationWithOwner('他人の組織');
     $user = User::factory()->create();
 
-    $this->actingAs($user)->get('/dashboard')
-        ->assertOk()
-        ->assertInertia(fn (Assert $page) => $page
-            ->where('dashboard.state', 'no_organization')
-            ->where('dashboard.billing', null)
-            ->where('dashboard.project', null));
+    $this->actingAs($user)->get("/organizations/{$organization->slug}/dashboard")->assertNotFound();
+    $this->actingAs($user)->get('/go')->assertRedirect('/organizations/create');
 });
 
 test('空状態: org あり project なしは state=no_project (owner は can_create_project=true)', function (): void {
     [$organization, $owner] = createOrganizationWithOwner('プロジェクト待ち組織');
 
-    $this->actingAs($owner)->get('/dashboard')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('dashboard.state', 'no_project')
@@ -356,7 +355,7 @@ test('空状態: member は can_create_project=false', function (): void {
     [$organization] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization, OrganizationRole::Member);
 
-    $this->actingAs($member)->get('/dashboard')
+    $this->actingAs($member)->get("/organizations/{$organization->slug}/dashboard")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('dashboard.state', 'no_project')
@@ -367,7 +366,7 @@ test('空状態: project あり manual 0 件は ready + 空 list', function (): 
     [$organization, $owner] = createOrganizationWithOwner();
     Project::factory()->forOrganization($organization)->create();
 
-    $this->actingAs($owner)->get('/dashboard')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('dashboard.state', 'ready')
@@ -380,46 +379,41 @@ test('current org 自己修復: org はあるが current null でも 200 + 当�
     [$organization, $owner] = createOrganizationWithOwner();
     $project = Project::factory()->forOrganization($organization)->create();
     VideoManual::factory()->forProject($project)->create(['title' => '自組織マニュアル']);
-    $owner->forceFill(['current_organization_id' => null])->save();
 
-    $this->actingAs($owner)->get('/dashboard')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('dashboard.state', 'ready')
             ->where('dashboard.recent_manuals.0.title', '自組織マニュアル'));
-
-    expect($owner->fresh()->current_organization_id)->toBe($organization->id);
 });
 
-test('dangling current の cross-org 防御: 他 org のデータは一切出ず所属 org へ自己修復', function (): void {
+test('cross-org 防御: URL 上の組織のデータだけが出る (他 org は一切出ない)', function (): void {
     [$foreignOrg] = createOrganizationWithOwner('他人の組織');
     $foreignProject = Project::factory()->forOrganization($foreignOrg)->create();
     VideoManual::factory()->forProject($foreignProject)->create(['title' => '他組織の機密マニュアル']);
 
     [$organization] = createOrganizationWithOwner('自分の組織');
     $member = attachOrganizationMember($organization, OrganizationRole::Member);
-    $member->forceFill(['current_organization_id' => $foreignOrg->id])->save();
 
-    $response = $this->actingAs($member)->get('/dashboard');
+    $response = $this->actingAs($member)->get("/organizations/{$organization->slug}/dashboard");
 
     $response->assertOk();
     $response->assertDontSee('他組織の機密マニュアル');
     $response->assertDontSee('他人の組織');
     $response->assertInertia(fn (Assert $page) => $page
         ->where('dashboard.organization_name', '自分の組織'));
-    expect($member->fresh()->current_organization_id)->toBe($organization->id);
 });
 
 test('Free (grandfathered) org: dashboard 200 + billing_state=active_free_plan + 業務 route 開通', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     Project::factory()->forOrganization($organization)->create();
 
-    $this->actingAs($owner)->get('/dashboard')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('dashboard.billing.billing_state', 'active_free_plan'));
 
-    $this->actingAs($owner)->get('/projects')->assertOk();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects")->assertOk();
 });
 
 test('有償契約 + 支払い不健全 org: billing_state=expired_checkout + CTA 遷移先 200 (redirect loop なし)', function (): void {
@@ -432,14 +426,14 @@ test('有償契約 + 支払い不健全 org: billing_state=expired_checkout + CT
     contractPaidPlan($organization, status: 'canceled');
     Project::factory()->forOrganization($organization)->create();
 
-    $this->actingAs($owner)->get('/dashboard')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('dashboard.billing.billing_state', 'expired_checkout'));
 
     // CTA 遷移先は課金ゲート外 (redirect loop なし不変条件)
-    $this->actingAs($owner)->get('/purchase-tickets')->assertOk();
-    $this->actingAs($owner)->get('/billing')->assertOk();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/billing/purchase-tickets")->assertOk();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/billing")->assertOk();
 });
 
 test('有償契約 + past_due org: billing_state=subscribed (cohort D。dunning 中も利用継続)', function (): void {
@@ -447,7 +441,7 @@ test('有償契約 + past_due org: billing_state=subscribed (cohort D。dunning 
     contractPaidPlan($organization, status: 'past_due');
     Project::factory()->forOrganization($organization)->create();
 
-    $this->actingAs($owner)->get('/dashboard')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('dashboard.billing.billing_state', 'subscribed'));
@@ -466,7 +460,7 @@ test('新規登録相当 (未契約) org: billing_state=no_subscription (F-2-01 
     [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     Project::factory()->forOrganization($organization)->create();
 
-    $this->actingAs($owner)->get('/dashboard')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('dashboard.billing.billing_state', 'no_subscription')
@@ -475,29 +469,28 @@ test('新規登録相当 (未契約) org: billing_state=no_subscription (F-2-01 
 });
 
 test('未契約 org の CTA 着地 /onboarding/checkout が 200 (行き先のない詰みを作らない)', function (): void {
-    [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
 
-    $this->actingAs($owner)->get('/onboarding/checkout')->assertOk();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/onboarding/checkout")->assertOk();
 });
 
 test('未契約 org の非 manageBilling メンバーは CTA 着地で /billing-required へ捌かれる', function (): void {
     [$organization] = createOrganizationWithOwner(grandfatherFreePlan: false);
     $member = attachOrganizationMember($organization, OrganizationRole::Member);
     // current org は保護キーのため forceFill (attachOrganizationMember は設定しない)
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
     // CTA の行き先はサーバが決める (フロントで認可を二重実装しない) ことの behavioral な裏付け
-    $this->actingAs($member)->get('/onboarding/checkout')
-        ->assertRedirect(route('onboarding.billing-required'));
+    $this->actingAs($member)->get("/organizations/{$organization->slug}/onboarding/checkout")
+        ->assertRedirect(route('onboarding.billing-required', ['organization' => $organization->slug]));
 
-    $this->actingAs($member)->get('/billing-required')->assertOk();
+    $this->actingAs($member)->get("/organizations/{$organization->slug}/onboarding/billing-required")->assertOk();
 });
 
 test('live pending checkout org: billing_state=pending_checkout', function (): void {
     [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     BillingCheckoutSession::factory()->for($organization)->create(); // 既定 = live pending
 
-    $this->actingAs($owner)->get('/dashboard')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('dashboard.billing.billing_state', 'pending_checkout'));
@@ -507,12 +500,12 @@ test('expired checkout org: billing_state=expired_checkout', function (): void {
     [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     BillingCheckoutSession::factory()->for($organization)->expired()->create();
 
-    $this->actingAs($owner)->get('/dashboard')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('dashboard.billing.billing_state', 'expired_checkout'));
 });
 
 test('ゲストは /login へ redirect (既存挙動維持)', function (): void {
-    $this->get('/dashboard')->assertRedirect('/login');
+    $this->get('/organizations/guest-org/dashboard')->assertRedirect('/login');
 });

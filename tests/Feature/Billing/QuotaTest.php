@@ -43,7 +43,7 @@ test('organization_quotas の override がプラン既定値より優先され�
 test('max_projects 上限内ならプロジェクトを作成できる', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
 
-    $response = $this->actingAs($owner)->post('/projects', ['name' => '1 つ目']);
+    $response = $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects", ['name' => '1 つ目']);
 
     $response->assertSessionHasNoErrors();
     $response->assertSessionHas('success');
@@ -56,10 +56,10 @@ test('max_projects 超過でプロジェクト作成が拒否され error flash 
     Project::factory()->forOrganization($organization)->create();
 
     $response = $this->actingAs($owner)
-        ->from('/projects/create')
-        ->post('/projects', ['name' => '2 つ目']);
+        ->from("/organizations/{$organization->slug}/projects/create")
+        ->post("/organizations/{$organization->slug}/projects", ['name' => '2 つ目']);
 
-    $response->assertRedirect('/projects/create');
+    $response->assertRedirect("/organizations/{$organization->slug}/projects/create");
     $response->assertSessionHas('error');
     expect($organization->projects()->count())->toBe(1);
 });
@@ -71,8 +71,8 @@ test('quota 超過の error flash に回復先の画面名が含まれる', func
     Project::factory()->forOrganization($organization)->create();
 
     $this->actingAs($owner)
-        ->from('/projects/create')
-        ->post('/projects', ['name' => '2 つ目']);
+        ->from("/organizations/{$organization->slug}/projects/create")
+        ->post("/organizations/{$organization->slug}/projects", ['name' => '2 つ目']);
 
     expect(session('error'))->toBeString()->toContain('「お支払い」画面');
 });
@@ -82,7 +82,7 @@ test('override で上限を上げると超過していた作成が可能にな�
     Project::factory()->forOrganization($organization)->create();
     $organization->quota()->create(['limits' => ['max_projects' => 2]]);
 
-    $response = $this->actingAs($owner)->post('/projects', ['name' => '2 つ目']);
+    $response = $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects", ['name' => '2 つ目']);
 
     $response->assertSessionHas('success');
     expect($organization->projects()->count())->toBe(2);

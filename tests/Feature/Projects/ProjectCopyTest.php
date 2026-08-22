@@ -15,11 +15,11 @@ test('プロジェクト作成で名前が空だと UI ラベル準拠のエラ�
     // .env.testing は APP_LOCALE=en のため、日本語文言の検証対象ロケールを明示する
     $this->app->setLocale('ja');
 
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
     $response = $this->actingAs($owner)
-        ->from(route('projects.create'))
-        ->post(route('projects.store'), ['name' => '']);
+        ->from(route('projects.create', ['organization' => $organization->slug]))
+        ->post(route('projects.store', ['organization' => $organization->slug]), ['name' => '']);
 
     $response->assertSessionHasErrors(['name' => 'プロジェクト名は必須項目です。']);
 });

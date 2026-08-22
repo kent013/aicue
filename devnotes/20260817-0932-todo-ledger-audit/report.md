@@ -335,7 +335,7 @@ T053 (「動画一覧の並べ替え・自作フィルタ・作成者/更新日�
 指摘に挙げなかった = 現行コードで裏付けが取れたもののうち、利用者から見える主なものを記録する。
 **この一覧は網羅ではない** (§3-1)。
 
-- **T001** `EnsureProjectBelongsToCurrentOrganization` / `project.in-current-org`
+- **T001** `EnsureProjectBelongsToRouteOrganization` / `project.in-route-org`
 - **T002** `ScenarioService` + `ScenarioEditor.svelte` の 409/419 復帰
 - **T003** `SourceDocumentController` / `AnalysisPipeline` / `resources/prompts` の 3 YAML / `AnalysisPanel.svelte`
 - **T004** `TakeUploadService` の 2 フェーズ予約 / `QuotaService` / `capture:purge-upload-reservations`

@@ -32,7 +32,7 @@ test('reorder は送信順に sort_order を再採番する', function (): void 
     [$organization, $owner] = createOrganizationWithOwner();
     [$project, [$c1, $c2, $c3]] = createProjectWithCategories($organization, 3);
 
-    $response = $this->actingAs($owner)->patch("/projects/{$project->id}/categories/reorder", [
+    $response = $this->actingAs($owner)->patch("/organizations/{$organization->slug}/projects/{$project->id}/categories/reorder", [
         'order' => [$c3->id, $c1->id, $c2->id],
     ]);
 
@@ -49,17 +49,17 @@ test('集合不一致 (欠落・重複・余剰) は 422 で並びは変わら�
     $foreign = Category::factory()->forProject($otherProject)->create();
 
     // 欠落
-    $this->actingAs($owner)->patch("/projects/{$project->id}/categories/reorder", [
+    $this->actingAs($owner)->patch("/organizations/{$organization->slug}/projects/{$project->id}/categories/reorder", [
         'order' => [$c1->id, $c2->id],
     ])->assertSessionHasErrors('order');
 
     // 重複
-    $this->actingAs($owner)->patch("/projects/{$project->id}/categories/reorder", [
+    $this->actingAs($owner)->patch("/organizations/{$organization->slug}/projects/{$project->id}/categories/reorder", [
         'order' => [$c1->id, $c1->id, $c2->id],
     ])->assertSessionHasErrors('order');
 
     // 余剰 (他 project の category id 混入)
-    $this->actingAs($owner)->patch("/projects/{$project->id}/categories/reorder", [
+    $this->actingAs($owner)->patch("/organizations/{$organization->slug}/projects/{$project->id}/categories/reorder", [
         'order' => [$c1->id, $c2->id, $c3->id, $foreign->id],
     ])->assertSessionHasErrors('order');
 
@@ -72,9 +72,9 @@ test('order は必須の配列 (形式バリデーション)', function (): void
     [$organization, $owner] = createOrganizationWithOwner();
     $project = Project::factory()->forOrganization($organization)->create();
 
-    $this->actingAs($owner)->patch("/projects/{$project->id}/categories/reorder", [])
+    $this->actingAs($owner)->patch("/organizations/{$organization->slug}/projects/{$project->id}/categories/reorder", [])
         ->assertSessionHasErrors('order');
-    $this->actingAs($owner)->patch("/projects/{$project->id}/categories/reorder", [
+    $this->actingAs($owner)->patch("/organizations/{$organization->slug}/projects/{$project->id}/categories/reorder", [
         'order' => ['abc'],
     ])->assertSessionHasErrors('order.0');
 });
@@ -92,12 +92,12 @@ test('reorder 後の create は末尾 (max+1) に採番される (Project 行ロ
     [$organization, $owner] = createOrganizationWithOwner();
     [$project, [$c1, $c2, $c3]] = createProjectWithCategories($organization, 3);
 
-    $this->actingAs($owner)->patch("/projects/{$project->id}/categories/reorder", [
+    $this->actingAs($owner)->patch("/organizations/{$organization->slug}/projects/{$project->id}/categories/reorder", [
         'order' => [$c3->id, $c2->id, $c1->id],
     ])->assertSessionHas('success');
 
     // reorder 後の最大 sort_order は 2 → 新規 create は 3 (単調増加)
-    $this->actingAs($owner)->post("/projects/{$project->id}/categories", ['name' => '追加分'])
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects/{$project->id}/categories", ['name' => '追加分'])
         ->assertSessionHas('success');
     /** @var Category $created */
     $created = $project->categories()->where('name', '追加分')->firstOrFail();

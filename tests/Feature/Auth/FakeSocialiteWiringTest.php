@@ -90,7 +90,7 @@ test('fake 有効: register intent の round-trip で User と SocialAccount と
             ->assertRedirect(route('social.callback', ['provider' => 'google']));
 
         $this->get(route('social.callback', ['provider' => 'google']))
-            ->assertRedirect(route('dashboard'));
+            ->assertRedirect(route('app.entry'));
 
         $this->assertAuthenticated();
 
@@ -114,7 +114,7 @@ test('fake 有効: login intent の round-trip で連携済みユーザーとし
             ->assertRedirect(route('social.callback', ['provider' => 'google']));
 
         $this->get(route('social.callback', ['provider' => 'google']))
-            ->assertRedirect(route('dashboard'));
+            ->assertRedirect(route('app.entry'));
 
         $this->assertAuthenticatedAs($user);
     });

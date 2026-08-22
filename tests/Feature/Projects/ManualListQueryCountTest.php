@@ -34,7 +34,7 @@ test('一覧のクエリ数は行数に比例しない (1 行のページと 10 
     $measure = function (Project $project) use ($owner): array {
         DB::enableQueryLog();
         DB::flushQueryLog();
-        $this->actingAs($owner)->get("/projects/{$project->id}")->assertOk();
+        $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}")->assertOk();
         $log = DB::getQueryLog();
         DB::disableQueryLog();
 
@@ -83,7 +83,7 @@ test('検索ありでも一覧のクエリ数は行数に比例しない', funct
         DB::enableQueryLog();
         DB::flushQueryLog();
         $this->actingAs($owner)
-            ->get("/projects/{$project->id}?q=".urlencode('ケンサクゴ'))
+            ->get("/organizations/{$organization->slug}/projects/{$project->id}?q=".urlencode('ケンサクゴ'))
             ->assertOk();
         $log = DB::getQueryLog();
         DB::disableQueryLog();

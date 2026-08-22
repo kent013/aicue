@@ -9,6 +9,9 @@ use App\Models\Organization;
 use App\Models\Team;
 use App\Models\User;
 use App\Services\Billing\PersonalPlanService;
+use App\Support\Organization\AssignableOrganizationSlug;
+use App\Support\Organization\OrganizationSlug;
+use App\Support\Organization\OrganizationSlugReservedWords;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Str;
@@ -31,7 +34,12 @@ class OrganizationFactory extends Factory
 
         return [
             'name' => $name,
-            'slug' => Str::slug($name).'-'.Str::lower(Str::random(6)),
+            // slug は保存可能型を経由してのみ書く (家系裁定 AG-039。
+            // OrganizationSlugWritePathTest が「この型を受ける経路以外は 0 件」を固定する)
+            'slug' => AssignableOrganizationSlug::promote(
+                OrganizationSlug::fromString('org-'.Str::lower(Str::random(12))),
+                OrganizationSlugReservedWords::load(),
+            )->value,
             'laratrust_team_id' => $team->id,
         ];
     }
@@ -50,11 +58,6 @@ class OrganizationFactory extends Factory
                 $defaultTeam->save();
             }
         });
-    }
-
-    public function personal(): static
-    {
-        return $this->state(fn () => ['is_personal' => true]);
     }
 
     /**

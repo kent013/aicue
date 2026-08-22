@@ -75,5 +75,5 @@ test('passkey 保有は 2FA 必須組織のゲートを免除しない', functio
     expect(app(PasskeyLoginPolicy::class)->allowsPasskeyLogin($owner))->toBeTrue();
 
     // しかし 2FA 準拠にはならないため業務画面は 2FA 設定へ誘導される
-    $this->actingAs($owner)->get('/dashboard')->assertRedirect(route('settings.security'));
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard")->assertRedirect(route('settings.security'));
 });

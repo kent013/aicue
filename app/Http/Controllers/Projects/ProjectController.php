@@ -7,7 +7,7 @@ namespace App\Http\Controllers\Projects;
 use App\DataTransferObjects\Manual\ManualListItemData;
 use App\DataTransferObjects\Manual\ManualListQuery;
 use App\Enums\Manual\ManualSortOption;
-use App\Http\Concerns\ResolvesCurrentOrganization;
+use App\Http\Concerns\ResolvesRouteOrganization;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Projects\StoreProjectRequest;
 use App\Http\Requests\Projects\UpdateProjectRequest;
@@ -31,7 +31,7 @@ use Webmozart\Assert\Assert;
 /**
  * プロジェクト CRUD (Project 配下リソース追加の見本となる Controller 流儀)。
  *
- * - current org スコープ: ResolvesCurrentOrganization で解決 (URL に org セグメントを持たない)
+ * - current org スコープ: ResolvesRouteOrganization で解決 (URL に org セグメントを持たない)
  * - URL 整合 guard: {project} が current org に属さなければ**認可より前に 404**
  * - teams_visible=false の既定では Team 概念を UI に出さない (Default Team は Service が自動割当)
  *
@@ -39,12 +39,11 @@ use Webmozart\Assert\Assert;
  */
 class ProjectController extends Controller
 {
-    use ResolvesCurrentOrganization;
+    use ResolvesRouteOrganization;
 
     /** プロジェクト一覧 (current org の全プロジェクト) */
-    public function index(Request $request): Response
+    public function index(Request $request, Organization $organization): Response
     {
-        $organization = $this->resolveCurrentOrganization($request);
         Gate::authorize('viewAny', [Project::class, $organization]);
 
         $user = $request->user();
@@ -66,18 +65,16 @@ class ProjectController extends Controller
     }
 
     /** 新規プロジェクト作成フォーム (Team 選択は出さない = Default Team パターン) */
-    public function create(Request $request): Response
+    public function create(Request $request, Organization $organization): Response
     {
-        $organization = $this->resolveCurrentOrganization($request);
         Gate::authorize('create', [Project::class, $organization]);
 
         return Inertia::render('Projects/Create');
     }
 
     /** 新規プロジェクト作成。custom_team_id は受け取らず Service が Default Team を割当する */
-    public function store(StoreProjectRequest $request, ProjectService $projects): RedirectResponse
+    public function store(StoreProjectRequest $request, Organization $organization, ProjectService $projects): RedirectResponse
     {
-        $organization = $this->resolveCurrentOrganization($request);
         Gate::authorize('create', [Project::class, $organization]);
 
         $name = $request->validated('name');
@@ -87,13 +84,13 @@ class ProjectController extends Controller
 
         $project = $projects->createProject($organization, $name, $description);
 
-        return redirect()->route('projects.show', $project)->with('success', 'プロジェクトを作成しました');
+        return redirect()->route('projects.show', ['organization' => $organization->slug, 'project' => $project])
+            ->with('success', 'プロジェクトを作成しました');
     }
 
     /** プロジェクト詳細 (Item 一覧・メンバー一覧を内包する) */
-    public function show(Request $request, Project $project, SeoManager $seo): Response
+    public function show(Request $request, Organization $organization, Project $project, SeoManager $seo): Response
     {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404 (cross-org の存在を漏らさない)
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('view', $project);
@@ -327,9 +324,8 @@ class ProjectController extends Controller
     }
 
     /** プロジェクト編集フォーム */
-    public function edit(Request $request, Project $project): Response
+    public function edit(Request $request, Organization $organization, Project $project): Response
     {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('update', $project);
@@ -344,9 +340,8 @@ class ProjectController extends Controller
     }
 
     /** プロジェクト更新 (name / description) */
-    public function update(UpdateProjectRequest $request, Project $project): RedirectResponse
+    public function update(UpdateProjectRequest $request, Organization $organization, Project $project): RedirectResponse
     {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('update', $project);
@@ -358,19 +353,20 @@ class ProjectController extends Controller
 
         $project->fill(['name' => $name, 'description' => $description])->save();
 
-        return redirect()->route('projects.show', $project)->with('success', 'プロジェクトを更新しました');
+        return redirect()->route('projects.show', ['organization' => $organization->slug, 'project' => $project])
+            ->with('success', 'プロジェクトを更新しました');
     }
 
     /** プロジェクト削除 (items は FK cascade で削除される) */
-    public function destroy(Request $request, Project $project): RedirectResponse
+    public function destroy(Request $request, Organization $organization, Project $project): RedirectResponse
     {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('delete', $project);
 
         $project->delete();
 
-        return redirect()->route('projects.index')->with('success', 'プロジェクトを削除しました');
+        return redirect()->route('projects.index', ['organization' => $organization->slug])
+            ->with('success', 'プロジェクトを削除しました');
     }
 }

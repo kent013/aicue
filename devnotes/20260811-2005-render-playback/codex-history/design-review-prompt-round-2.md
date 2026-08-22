@@ -299,7 +299,7 @@ final class CurrentRenderArtifact
      * 成果物再生 (302 → S3 署名 URL)。preview と完成動画の**両方**を扱う。
      *
      * 層は 3 段で、**すべて認可より前に 404**(AGENTS.md セキュリティ不変条件 2/10):
-     *   1. {project} ∈ current org … project.in-current-org middleware + inline guard
+     *   1. {project} ∈ current org … project.in-route-org middleware + inline guard
      *   2. {manual}  ∈ {project}   … routes 側 Route::scopeBindings()
      *   3. {renderJob} ∈ {manual}  … scopeBindings + 下の inline 再検査(二重防御)
      * その後に **成果物の性質に合う ability** を評価する:

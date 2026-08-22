@@ -319,12 +319,12 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
     | を持たない組織は billing へ redirect される (JSON は 402)。
     | 新しい業務ドメインの route はこの group 内に追加すること。
     */
-    Route::middleware(['require-active-subscription', 'project.in-current-org'])->group(function (): void {
+    Route::middleware(['require-active-subscription', 'project.in-route-org'])->group(function (): void {
         /*
         | プロジェクト (current org スコープ。URL に org / team セグメントを含めない =
         | Default Team パターンのルーティング仕様)。
         | {project} の URL 整合 guard ({project} ∈ current org) は 2 層:
-        | (1) project.in-current-org middleware — FormRequest の DB ルール (unique/exists) より
+        | (1) project.in-route-org middleware — FormRequest の DB ルール (unique/exists) より
         |     前に cross-org を 404 に落とす (存在オラクル防止。{project} を持たない route では
         |     no-op のため group 一括付与。網羅性は ProjectRouteCurrentOrgGuardTest が固定)
         | (2) controller の inline guard (resolveOrganizationProject) — 二重防御
@@ -390,7 +390,7 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
                 ->name('projects.manuals.update');
             // シナリオ document 一括保存 (doc/09 §9.4 / doc/10 §10.3)。同一オリジン XHR (JSON 応答)。
             // {manual} ∈ {project} は scopeBindings、{project} ∈ current org は
-            // project.in-current-org middleware + controller inline guard の 2 層 (既存 group が担保)
+            // project.in-route-org middleware + controller inline guard の 2 層 (既存 group が担保)
             Route::put('/projects/{project}/manuals/{manual}/scenario', [ManualScenarioController::class, 'update'])
                 ->name('projects.manuals.scenario.update');
             // SOP アップロード (追記型 immutable。差し替え = 新規行。doc/10 §10.3)
@@ -443,7 +443,7 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
     | 推論が外れても cross-parent は 404 に落ちる。挙動担保は各エンドポイントの
     | cross-org/project/manual/cut 404 Feature テスト。
     */
-    Route::middleware(['require-active-subscription', 'project.in-current-org'])
+    Route::middleware(['require-active-subscription', 'project.in-route-org'])
         ->prefix('app')->as('capture.')->group(function (): void {
             // PWA エントリ (manifest start_url)。current org の先頭 project へ redirect
             Route::get('/', [CaptureManualController::class, 'home'])->name('home');

@@ -91,7 +91,7 @@ function rateLimiterProbeUser(?int $organizationId = null): User
 {
     $user = User::factory()->make();
     Assert::isInstanceOf($user, User::class);
-    $user->forceFill(['id' => 4242, 'current_organization_id' => $organizationId]);
+    $user->forceFill(['id' => 4242]);
 
     return $user;
 }

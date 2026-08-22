@@ -7,10 +7,7 @@
  */
 
 /** PHP: App\Enums\AccountDeletionBlockerAction と対 (値集合を一致させる) */
-export type AccountDeletionBlockerAction =
-    | "transfer_ownership"
-    | "open_billing"
-    | "switch_organization_then_open_billing";
+export type AccountDeletionBlockerAction = "transfer_ownership" | "open_billing";
 
 /** 退会をブロックしている組織 1 件分 (表示時点のスナップショット) */
 export interface AccountDeletionBlocker {

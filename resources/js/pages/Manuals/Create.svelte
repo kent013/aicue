@@ -13,6 +13,7 @@
     import { BookOpen } from "@lucide/svelte";
     import type { SharedProps } from "@/lib/shared-props";
     import type { CategoryOption } from "@/types/manual";
+    import { currentOrgUrl } from "@/lib/org-url";
 
     /**
      * 動画マニュアル作成 (タイトル + カテゴリ + 任意の手順書アップロード)。
@@ -64,7 +65,7 @@
             title: data.title,
             category: data.category === "" ? null : Number(data.category),
             document: data.document,
-        })).post(`/projects/${project.id}/manuals`);
+        })).post(currentOrgUrl(`/projects/${project.id}/manuals`));
     }
 </script>
 
@@ -144,7 +145,7 @@
                         <Button type="submit" loading={form.processing} testId="manual-submit">
                             作成
                         </Button>
-                        <Button variant="ghost" href={`/projects/${project.id}`} inertia>
+                        <Button variant="ghost" href={currentOrgUrl(`/projects/${project.id}`)} inertia>
                             キャンセル
                         </Button>
                     </div>

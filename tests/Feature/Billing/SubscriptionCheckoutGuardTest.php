@@ -129,12 +129,12 @@ test('有効サブスク保持組織の /billing/checkout は 500 にせず erro
     createFakeSubscription($organization, status: 'active');
 
     $this->actingAs($owner)
-        ->from('/billing')
-        ->post('/billing/checkout', [
+        ->from("/organizations/{$organization->slug}/billing")
+        ->post("/organizations/{$organization->slug}/billing/checkout", [
             'plan_code' => 'standard',
             'subscription_attempt_token' => (string) Str::ulid(),
         ])
-        ->assertRedirect('/billing')
+        ->assertRedirect("/organizations/{$organization->slug}/billing")
         ->assertSessionHas('error', '既に有効なサブスクリプションがあります。プラン変更をご利用ください。');
 });
 
@@ -166,12 +166,12 @@ test('支払い未解決の /billing/checkout は error flash で差し戻す (�
     createFakeSubscription($organization, status: 'past_due');
 
     $this->actingAs($owner)
-        ->from('/billing')
-        ->post('/billing/checkout', [
+        ->from("/organizations/{$organization->slug}/billing")
+        ->post("/organizations/{$organization->slug}/billing/checkout", [
             'plan_code' => 'standard',
             'subscription_attempt_token' => (string) Str::ulid(),
         ])
-        ->assertRedirect('/billing')
+        ->assertRedirect("/organizations/{$organization->slug}/billing")
         ->assertSessionHas('error', 'お支払いが確認できていないご契約があります。お支払い方法の更新をお願いします。');
 });
 

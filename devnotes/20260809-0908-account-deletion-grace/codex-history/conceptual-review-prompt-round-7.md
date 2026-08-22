@@ -400,7 +400,7 @@ group 内/外の既存構造は凍結範囲の定義としては**粗い**と結
   **行き先のない詰みを作らない**。「予約中はブロッカーを解消できない」状態を作ると、
   執行もできず取消もしなければ永久凍結になる。上表の「可」はすべて**詰み回避のために必要**である。
 - **middleware の実行位置**: `EnsureAccountNotPendingDeletion` は **302 で短絡する** middleware なので、
-  テナント境界 404 (`project.in-current-org`) **より後**でなければ 1 bit の存在オラクルになる
+  テナント境界 404 (`project.in-route-org`) **より後**でなければ 1 bit の存在オラクルになる
   (AGENTS.md 不変条件 10)。`bootstrap/app.php` の priority list の web 鎖の末尾
   (`RequireActiveSubscription` の直後) に append し、`TenantBoundaryOrderingTest` に登録する。
 - **route:cache 前提**: group への直付けで配線する。`RouteMiddlewareBinder` の後付けは使わない

@@ -37,10 +37,10 @@ test('登録経路でも個人組織 + Default Team + Owner ロールが揃う',
     /** @var Organization $organization */
     $organization = $user->organizations()->firstOrFail();
 
-    expect($organization->is_personal)->toBeTrue();
     expect($organization->customTeams()->where('is_default', true)->count())->toBe(1);
     expect($user->organizationRole($organization)?->value)->toBe('organization_owner');
-    expect($user->refresh()->current_organization_id)->toBe($organization->id);
+    // 種別フラグは撤去済み (AG-038)。初期組織であることは「所属が 1 件」で表す
+    expect($user->organizations()->count())->toBe(1);
 });
 
 test('個人組織の provisioning は冪等 (二重生成しない)', function (): void {

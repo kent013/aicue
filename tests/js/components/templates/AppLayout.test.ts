@@ -252,23 +252,23 @@ describe("templates/AppLayout", () => {
 
     // --- 組織切替 / drawer / Escape ---
 
-    it("組織切替: org-switch-{id} 押下で正しい id の POST /organizations/{id}/switch が 1 回", async () => {
+    it("別組織はリンク (切替 POST ではない。組織文脈は URL だけで決まる)", async () => {
         setPageProps({
             auth: { user: authUser() },
             notifications: { unreadCount: 0 },
             currentOrganization: org({ id: 1 }),
             organizations: [
-                { id: 1, name: "アクメ社", isPersonal: false },
-                { id: 2, name: "別組織", isPersonal: false },
+                { id: 1, name: "アクメ社", slug: "acme" },
+                { id: 2, name: "別組織", slug: "another" },
             ],
         });
         renderApp();
 
         await fireEvent.click(desktop().getByTestId("app-user-menu-toggle"));
-        await fireEvent.click(desktop().getByTestId("org-switch-2"));
+        const link = desktop().getByTestId("org-switch-2");
 
-        expect(routerMock.post).toHaveBeenCalledTimes(1);
-        expect(routerMock.post.mock.calls[0][0]).toBe("/organizations/2/switch");
+        expect(link.getAttribute("href")).toBe("/organizations/another/dashboard");
+        expect(routerMock.post).not.toHaveBeenCalled();
     });
 
     it("mobile drawer: メニューボタンで開き、閉じるボタンで閉じる", async () => {

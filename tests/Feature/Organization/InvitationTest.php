@@ -77,25 +77,22 @@ test('token 受諾でメンバーシップ + 招待ロールが付与される',
     [$organization, $owner] = createOrganizationWithOwner();
     $token = inviteAndCaptureToken($organization, $owner, 'invitee@example.com', OrganizationRole::Admin);
 
-    // 受諾するユーザーは別組織を現在組織に持つ (POST 受諾が現在組織を切り替えないことを固定するため)。
+    // 受諾するユーザーは別組織にも所属している (受諾が既存の所属を壊さないことを固定するため)。
     // email 照合の追加により受諾者 email を招待宛先に揃える。
     $invitee = User::factory()->create(['email' => 'invitee@example.com']);
     [$otherOrg] = createOrganizationWithOwner('受諾者の既存組織');
     $otherOrg->users()->attach($invitee);
-    $invitee->forceFill(['current_organization_id' => $otherOrg->id])->save();
-    $before = $invitee->current_organization_id;
 
     $response = $this->actingAs($invitee)->post('/invitations/accept', ['token' => $token]);
 
-    $response->assertRedirect('/dashboard');
+    $response->assertRedirect("/organizations/{$organization->slug}/dashboard");
     $response->assertSessionHas('success');
     expect($organization->users()->whereKey($invitee->id)->exists())->toBeTrue();
     expect($invitee->organizationRole($organization))->toBe(OrganizationRole::Admin);
     expect(OrganizationInvitation::query()->sole()->isAccepted())->toBeTrue();
 
-    // [register 専用前提の保護] POST 受諾 (ログイン後経路) は現在組織を切り替えない。
-    // 将来 joinOrganization へ現在組織確定を誤って昇格させる回帰を検知する。
-    expect($invitee->refresh()->current_organization_id)->toBe($before);
+    // 組織文脈は URL だけで決まる (AG-037) ので、受諾は既存の所属を壊さない。
+    expect($invitee->organizations()->whereKey($otherOrg->id)->exists())->toBeTrue();
 });
 
 test('受諾画面 (GET) は組織名と token を表示する', function (): void {
@@ -128,7 +125,7 @@ test('失効した招待は受諾できない', function (): void {
     $invitee = User::factory()->create();
     $response = $this->actingAs($invitee)->post('/invitations/accept', ['token' => 'expired-token']);
 
-    $response->assertRedirect('/dashboard');
+    $response->assertRedirect("/organizations/{$organization->slug}/dashboard");
     $response->assertSessionHas('error');
     expect($organization->users()->whereKey($invitee->id)->exists())->toBeFalse();
 });
@@ -148,7 +145,7 @@ test('受諾済みの招待は再受諾できない', function (): void {
     $invitee = User::factory()->create();
     $response = $this->actingAs($invitee)->post('/invitations/accept', ['token' => 'used-token']);
 
-    $response->assertRedirect('/dashboard');
+    $response->assertRedirect("/organizations/{$organization->slug}/dashboard");
     $response->assertSessionHas('error');
     expect($organization->users()->whereKey($invitee->id)->exists())->toBeFalse();
 });
@@ -187,7 +184,6 @@ test('manageMembers 権限がない member は招待できない (403)', functio
     Notification::fake();
     [$organization] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
     $response = $this->actingAs($member)->post("/organizations/{$organization->slug}/invitations", [
         'email' => 'someone@example.com',
@@ -244,7 +240,7 @@ test('取り消した招待は受諾できない (無効扱い、取り消しは
     $invitee = User::factory()->create();
     $response = $this->actingAs($invitee)->post('/invitations/accept', ['token' => $token]);
 
-    $response->assertRedirect('/dashboard');
+    $response->assertRedirect("/organizations/{$organization->slug}/dashboard");
     $response->assertSessionHas('error', 'この招待は無効です。');
     expect($organization->users()->whereKey($invitee->id)->exists())->toBeFalse();
 });
@@ -254,7 +250,6 @@ test('manageMembers 権限がない member は招待を取り消せない (403)'
     $invitation = OrganizationInvitation::factory()->forOrganization($organization)->create();
 
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
     $response = $this->actingAs($member)
         ->delete("/organizations/{$organization->slug}/invitations/{$invitation->id}");
@@ -395,8 +390,8 @@ test('招待 email で register すると個人組織を作らず招待組織へ
     expect(OrganizationInvitation::query()->sole()->isAccepted())->toBeTrue();
     $response->assertSessionMissing('invitation_token');
 
-    // [回帰固定] 招待成立で現在組織が招待先組織に確定する (登録直後・自己修復非依存)
-    expect($user->current_organization_id)->toBe($organization->id);
+    // [回帰固定] 招待成立で招待先組織に所属する (保持列は無い = URL だけが組織文脈)
+    expect($user->organizations()->pluck('organizations.id')->all())->toBe([$organization->id]);
 });
 
 test('招待経由登録の直後、dashboard 自己修復を経ずに共有プロップ currentOrganization が招待先を指す', function (): void {
@@ -490,9 +485,8 @@ test('取り消し済みの招待 token で register すると通常登録 (個�
     expect($organization->users()->whereKey($user->id)->exists())->toBeFalse();
     expect($user->organizations()->where('is_personal', true)->exists())->toBeTrue();
 
-    // [分岐 B(fallback) 固定] 無効 token の fallback でも現在組織は個人組織 (招待先ではない)
-    $personalOrg = $user->organizations()->where('is_personal', true)->firstOrFail();
-    expect($user->current_organization_id)->toBe($personalOrg->id);
+    // [分岐 B(fallback) 固定] 無効 token の fallback では初期組織だけに所属する (招待先ではない)
+    expect($user->organizations()->count())->toBe(1);
 });
 
 /*
@@ -523,7 +517,7 @@ test('招待の受諾は org 参加のみで Default Project の pivot を作ら
 
     $invitee = User::factory()->create(['email' => 'member@example.com']);
     $this->actingAs($invitee)->post('/invitations/accept', ['token' => $token])
-        ->assertRedirect('/dashboard');
+        ->assertRedirect("/organizations/{$organization->slug}/dashboard");
 
     expect($invitee->organizationRole($organization))->toBe(OrganizationRole::Member);
     // 編集者 / 撮影者は参加後にロール割当コマンドで付与する (招待では付かない)
@@ -626,11 +620,10 @@ test('T4: 別 email の直 POST 受諾は拒否され副作用が一切残らな
     $token = inviteAndCaptureToken($organization, $owner, 'invited@example.com', OrganizationRole::Admin);
 
     $intruder = User::factory()->create(['email' => 'intruder@example.com']);
-    $before = $intruder->current_organization_id;
 
     $response = $this->actingAs($intruder)->post('/invitations/accept', ['token' => $token]);
 
-    $response->assertRedirect('/dashboard');
+    $response->assertRedirect("/organizations/{$organization->slug}/dashboard");
     $response->assertSessionHas('error');
 
     // pivot 不在を DB assertion で直接確認する (organizationRole の null だけに依存しない)
@@ -644,10 +637,10 @@ test('T4: 別 email の直 POST 受諾は拒否され副作用が一切残らな
         'user_id' => $intruder->id,
         'team_id' => $organization->laratrust_team_id,
     ]);
-    // 招待は未受諾のまま / project pivot / current_organization_id も不変
+    // 招待は未受諾のまま / project pivot も不変 / 所属も増えない
     expect(OrganizationInvitation::query()->sole()->isAccepted())->toBeFalse();
     expect($project->memberRole($intruder))->toBeNull();
-    expect($intruder->fresh()?->current_organization_id)->toBe($before);
+    expect($intruder->fresh()?->organizations()->count())->toBe(0);
 });
 
 test('T4b: 早期照合を stale 値で通過し、ロック読みの最新値で最終拒否する (TOCTOU)', function (): void {
@@ -689,7 +682,7 @@ test('T4b: 早期照合を stale 値で通過し、ロック読みの最新値�
     ]);
     expect($invitation->refresh()->isAccepted())->toBeFalse();
     expect($project->memberRole($staleUser))->toBeNull();
-    expect($staleUser->fresh()?->current_organization_id)->toBeNull();
+    expect($staleUser->fresh()?->organizations()->count())->toBe(0);
 });
 
 test('T5: email 同一性規則は register 経路と token POST 経路で同一 (厳密比較・大小区別)', function (

@@ -1823,7 +1823,7 @@ export function buildCutLabels(cuts: CaptureCut[]): Record<number, string> {
      * doc/04 テイクプレビュー / doc/05 個別再生。採用前テイクも再生できる (adopted 限定でない)。
      *
      * nested route 整合 (認可より前に 404):
-     * 1. {project} ∈ current org (project.in-current-org middleware + resolveOrganizationProject)
+     * 1. {project} ∈ current org (project.in-route-org middleware + resolveOrganizationProject)
      * 2. {manual}∈{project}, {cut}∈{manual}, {take}∈{cut} は Route::scopeBindings()
      *
      * 302 応答は Cache-Control: no-store, private (期限付き署名 URL の再利用防止)。

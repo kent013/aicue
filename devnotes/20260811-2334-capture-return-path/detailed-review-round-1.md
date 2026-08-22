@@ -77,7 +77,7 @@ $this->actingAs($member)
 
 修正案: `VideoManualStatus::cases()` を dataset 化し、各 status で `capture.manuals.show` と `projects.manuals.show` の両方を assert する。
 
-[Warning] 「同じ middleware 2 本」という説明は不正確です。実際には外側の `auth` / `verified` / `not-pending-deletion`、内側の `require-active-subscription` / `project.in-current-org`、`scopeBindings()`、controller 内の `resolveOrganizationProject()`、`Gate::authorize('view', $manual)` が組み合わさっています。  
+[Warning] 「同じ middleware 2 本」という説明は不正確です。実際には外側の `auth` / `verified` / `not-pending-deletion`、内側の `require-active-subscription` / `project.in-route-org`、`scopeBindings()`、controller 内の `resolveOrganizationProject()`、`Gate::authorize('view', $manual)` が組み合わさっています。  
 修正案: 文書・テストコメントでは「同じ middleware 2本」ではなく、この構成を具体名で書いてください。
 
 **施策 4: REQUEST_CHANGES**
@@ -90,7 +90,7 @@ $this->actingAs($member)
 ```markdown
 復路を無条件にできる根拠は、両 route が共通の auth / verified /
 not-pending-deletion 親グループ、require-active-subscription、
-project.in-current-org、scopeBindings、controller 内の
+project.in-route-org、scopeBindings、controller 内の
 resolveOrganizationProject、Gate::authorize('view', $manual) を通ることである。
 ```
 

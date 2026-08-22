@@ -25,10 +25,9 @@ beforeEach(function (): void {
 test('manageBilling を持たない member は設定更新できない (403)', function (): void {
     [$organization] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization, OrganizationRole::Member);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
     $this->actingAs($member)
-        ->post('/billing/auto-recharge', [
+        ->post("/organizations/{$organization->slug}/billing/auto-recharge", [
             'enabled' => false,
             'threshold_count' => 5,
             'max_count' => 50,
@@ -41,21 +40,20 @@ test('manageBilling を持たない member は設定更新できない (403)', f
 test('manageBilling を持たない member はカード登録を開始できない (403)', function (): void {
     [$organization] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization, OrganizationRole::Member);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
     $this->actingAs($member)
-        ->post('/billing/auto-recharge/setup', ['attempt_token' => strtolower((string) Str::ulid())])
+        ->post("/organizations/{$organization->slug}/billing/auto-recharge/setup", ['attempt_token' => strtolower((string) Str::ulid())])
         ->assertForbidden();
 
     expect(BillingCheckoutSession::query()->count())->toBe(0);
 });
 
-test('他組織の設定は触れない — current org スコープで解決されるため cross-org 書き込みが起きない', function (): void {
+test('他組織の設定は触れない — URL 上の組織で解決されるため cross-org 書き込みが起きない', function (): void {
     [$organizationA, $ownerA] = createOrganizationWithOwner('組織A');
     [$organizationB] = createOrganizationWithOwner('組織B');
 
     $this->actingAs($ownerA)
-        ->post('/billing/auto-recharge', [
+        ->post("/organizations/{$organizationA->slug}/billing/auto-recharge", [
             'enabled' => false,
             'threshold_count' => 3,
             'max_count' => 30,
@@ -70,7 +68,7 @@ test('enabled=true で consent_version 欠落は 422', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
 
     $this->actingAs($owner)
-        ->post('/billing/auto-recharge', [
+        ->post("/organizations/{$organization->slug}/billing/auto-recharge", [
             'enabled' => true,
             'threshold_count' => 5,
             'max_count' => 50,
@@ -82,7 +80,7 @@ test('max_count <= threshold_count は 422', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
 
     $this->actingAs($owner)
-        ->post('/billing/auto-recharge', [
+        ->post("/organizations/{$organization->slug}/billing/auto-recharge", [
             'enabled' => false,
             'threshold_count' => 50,
             'max_count' => 50,
@@ -94,7 +92,7 @@ test('max_count が config 上限を超えると 422', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
 
     $this->actingAs($owner)
-        ->post('/billing/auto-recharge', [
+        ->post("/organizations/{$organization->slug}/billing/auto-recharge", [
             'enabled' => false,
             'threshold_count' => 5,
             'max_count' => config()->integer('billing.auto_recharge.max_count') + 1,
@@ -106,7 +104,7 @@ test('保護キー (organization_id) を payload に載せると 422 (mass assig
     [$organization, $owner] = createOrganizationWithOwner();
 
     $this->actingAs($owner)
-        ->post('/billing/auto-recharge', [
+        ->post("/organizations/{$organization->slug}/billing/auto-recharge", [
             'enabled' => false,
             'threshold_count' => 5,
             'max_count' => 50,
@@ -121,7 +119,7 @@ test('カード登録開始で SetupPaymentMethod 台帳行が 1 行だけ作ら
 
     foreach ([1, 2] as $ignored) {
         $this->actingAs($owner)
-            ->post('/billing/auto-recharge/setup', ['attempt_token' => $token]);
+            ->post("/organizations/{$organization->slug}/billing/auto-recharge/setup", ['attempt_token' => $token]);
     }
 
     $sessions = BillingCheckoutSession::query()
@@ -144,9 +142,9 @@ test('カード登録着地は 303 + flash で canonical URL に倒れる (GET �
         ->create(['stripe_session_id' => 'cs_setup_landing']);
 
     $this->actingAs($owner)
-        ->get('/billing?setup_session_id='.$session->stripe_session_id)
+        ->get("/organizations/{$organization->slug}/billing?setup_session_id=".$session->stripe_session_id)
         ->assertStatus(303)
-        ->assertRedirect(route('billing.index'))
+        ->assertRedirect(route('billing.index', ['organization' => $organization->slug]))
         ->assertSessionHas('success');
 });
 
@@ -161,7 +159,7 @@ test('他組織の setup session id を投げ込んでも成功文言は出な�
         ->create(['stripe_session_id' => 'cs_setup_other_org']);
 
     $this->actingAs($ownerA)
-        ->get('/billing?setup_session_id=cs_setup_other_org')
+        ->get("/organizations/{$organizationA->slug}/billing?setup_session_id=cs_setup_other_org")
         ->assertStatus(303)
         ->assertSessionMissing('success');
 });
@@ -170,7 +168,7 @@ test('課金ページ props に autoRecharge が常に含まれる (既定 off)'
     [$organization, $owner] = createOrganizationWithOwner();
 
     $response = $this->actingAs($owner)
-        ->get('/billing')
+        ->get("/organizations/{$organization->slug}/billing")
         ->assertOk();
 
     $props = $response->viewData('page')['props'];
@@ -184,10 +182,9 @@ test('課金ページ props に autoRecharge が常に含まれる (既定 off)'
 test('member でも autoRecharge props は届くが canManage=false (閲覧は全員)', function (): void {
     [$organization] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization, OrganizationRole::Member);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
     $response = $this->actingAs($member)
-        ->get('/billing')
+        ->get("/organizations/{$organization->slug}/billing")
         ->assertOk();
 
     expect($response->viewData('page')['props']['page']['autoRecharge']['canManage'])->toBeFalse();
@@ -211,6 +208,6 @@ test('setup 台帳行があっても BillingAccess::state() は PendingCheckout 
 
     // ついでに課金ページが到達可能なままであること
     $this->actingAs($owner)
-        ->get('/billing')
+        ->get("/organizations/{$organization->slug}/billing")
         ->assertOk();
 });

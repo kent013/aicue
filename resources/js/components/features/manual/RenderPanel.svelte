@@ -10,6 +10,7 @@
     import { csrfToken } from "@/lib/csrf";
     import type { RenderJobProps, TakeCoverageProps, VideoManualStatus } from "@/types/manual";
     import { RENDER_STEP_LABELS } from "@/types/manual";
+    import { currentOrgUrl } from "@/lib/org-url";
 
     /**
      * レンダパネル (完成動画生成・プレビュー生成・進捗ポーリング・DL 導線)。概念設計 §8。
@@ -145,7 +146,7 @@
 
         const pollOne = async (target: { kind: "render" | "preview"; id: number }) => {
             const res = await fetch(
-                `/projects/${projectId}/manuals/${manualId}/render-jobs/${target.id}`,
+                currentOrgUrl(`/projects/${projectId}/manuals/${manualId}/render-jobs/${target.id}`),
                 {
                     headers: {
                         Accept: "application/json",
@@ -218,7 +219,7 @@
         else previewStartError = null;
         sessionExpiredMessage = null;
         try {
-            const res = await fetch(`/projects/${projectId}/manuals/${manualId}/${kind}`, {
+            const res = await fetch(currentOrgUrl(`/projects/${projectId}/manuals/${manualId}/${kind}`), {
                 method: "POST",
                 headers: {
                     Accept: "application/json",
@@ -351,14 +352,14 @@
                     controls
                     preload="none"
                     class="w-full rounded-md bg-neutral"
-                    src={`/projects/${projectId}/manuals/${manualId}/render-jobs/${finishedJob.id}/playback`}
+                    src={currentOrgUrl(`/projects/${projectId}/manuals/${manualId}/render-jobs/${finishedJob.id}/playback`)}
                     aria-label="完成動画"
                     data-testid="final-video"
                 ></video>
                 <div>
                     <Button
                         variant="secondary"
-                        href={`/projects/${projectId}/manuals/${manualId}/download`}
+                        href={currentOrgUrl(`/projects/${projectId}/manuals/${manualId}/download`)}
                         testId="download-button"
                     >
                         <Download class="size-4" />
@@ -380,7 +381,7 @@
                 {renderStartError.message}
                 {#if renderStartError.showPurchaseLink}
                     <span class="ml-1">
-                        <TextLink href="/purchase-tickets" testId="render-purchase-link">
+                        <TextLink href={currentOrgUrl("/billing/purchase-tickets")} testId="render-purchase-link">
                             チケットを購入する
                         </TextLink>
                     </span>
@@ -439,7 +440,7 @@
                         {previewStartError.message}
                         {#if previewStartError.showPurchaseLink}
                             <span class="ml-1">
-                                <TextLink href="/purchase-tickets" testId="preview-purchase-link">
+                                <TextLink href={currentOrgUrl("/billing/purchase-tickets")} testId="preview-purchase-link">
                                     チケットを購入する
                                 </TextLink>
                             </span>
@@ -470,7 +471,7 @@
                     controls
                     preload="metadata"
                     class="w-full rounded-md bg-neutral"
-                    src={`/projects/${projectId}/manuals/${manualId}/render-jobs/${playbackJob.id}/playback`}
+                    src={currentOrgUrl(`/projects/${projectId}/manuals/${manualId}/render-jobs/${playbackJob.id}/playback`)}
                     aria-label="プレビュー動画"
                     data-testid="preview-video"
                 ></video>

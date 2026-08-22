@@ -149,7 +149,7 @@ LLM / prompt / 課金 / DB 破壊のいずれにも触れない。
 ### 現行コード
 
 ```php
-    Route::middleware(['require-active-subscription', 'project.in-current-org'])
+    Route::middleware(['require-active-subscription', 'project.in-route-org'])
         ->prefix('app')->as('capture.')->group(function (): void {
             // PWA エントリ (manifest start_url)。current org の先頭 project へ redirect
             Route::get('/', [CaptureManualController::class, 'home'])->name('home');
@@ -164,7 +164,7 @@ LLM / prompt / 課金 / DB 破壊のいずれにも触れない。
 ### 変更後コード
 
 ```php
-    Route::middleware(['require-active-subscription', 'project.in-current-org'])
+    Route::middleware(['require-active-subscription', 'project.in-route-org'])
         ->prefix('app')->as('capture.')->group(function (): void {
             // PWA エントリ (manifest start_url)。current org の先頭 project へ redirect
             Route::get('/', [CaptureManualController::class, 'home'])->name('home');
@@ -196,7 +196,7 @@ LLM / prompt / 課金 / DB 破壊のいずれにも触れない。
   アカウント確認はそれに当たらない。遮断中は `/app` 全体に入れないので導線の矛盾も無い。
   遮断時の着地 `pages/Onboarding/BillingRequired.svelte` / `Checkout.svelte` はどちらも
   `AppLayout` を使うため、**遮断中もログアウトはできる**(実読確認済み)。
-- **`project.in-current-org`**: `{project}` を持たない route では実質 no-op。
+- **`project.in-route-org`**: `{project}` を持たない route では実質 no-op。
   同 group の既存 `capture.home` / `capture.csrf-cookie` も `{project}` を持たない前例がある。
 - **`/app` へ PWA 固有の middleware を足さない**(`docs/architecture.md`: `/app/*` は PC 面と共用)。
   本施策は route を 1 本足すだけで middleware を触らない。

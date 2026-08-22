@@ -130,11 +130,11 @@ test('未認証の変更系要求は 1 行も記録されない (auth が上流�
 test('課金ゲートに遮断された変更系要求は 1 行も記録されない', function (): void {
     bughuntEnableCapture();
     // 未契約組織 (free_plan_code NULL) = require-active-subscription が遮断する
-    [, $owner] = createOrganizationWithOwner('未契約組織', grandfatherFreePlan: false);
+    [$organization, $owner] = createOrganizationWithOwner('未契約組織', grandfatherFreePlan: false);
 
     // owner は manageBilling を持つので checkout へ倒れる (遮断したのが課金ゲートである証拠)
-    $this->actingAs($owner)->post('/projects', ['name' => 'テスト'])
-        ->assertRedirect(route('onboarding.checkout'));
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects", ['name' => 'テスト'])
+        ->assertRedirect(route('onboarding.checkout', ['organization' => $organization->slug]));
 
     expect(bughuntCapturedRows())->toBe([]);
 });

@@ -1,3 +1,4 @@
+import { orgUrl } from "@/lib/org-url";
 import { captureJson } from "@/lib/capture/http";
 import type { CaptureManualDetail } from "@/types/capture";
 
@@ -119,6 +120,7 @@ function toFailureReason(error: unknown): FetchOutcome {
 }
 
 export class AdoptedTakeAutoDownloader {
+    private readonly organizationSlug: string;
     private readonly projectId: number;
     private readonly manualId: number;
     private readonly videoFetcher: (url: string) => Promise<FetchOutcome>;
@@ -135,7 +137,13 @@ export class AdoptedTakeAutoDownloader {
     /** run() の多重起動防止 (onMount と online 復帰の二重発火を単一化) */
     private running = false;
 
-    constructor(projectId: number, manualId: number, options: AutoDownloadOptions = {}) {
+    constructor(
+        organizationSlug: string,
+        projectId: number,
+        manualId: number,
+        options: AutoDownloadOptions = {},
+    ) {
+        this.organizationSlug = organizationSlug;
         this.projectId = projectId;
         this.manualId = manualId;
         this.videoFetcher = options.videoFetcher ?? fetchAndDrain;
@@ -259,7 +267,10 @@ export class AdoptedTakeAutoDownloader {
 
     /** ACK を有界リトライ (総 1 + maxRetries 回)。response.ok で true */
     private async ackWithRetry(target: DownloadTarget): Promise<boolean> {
-        const url = `/app/projects/${this.projectId}/manuals/${this.manualId}/cuts/${target.cutId}/takes/${target.takeId}/downloaded`;
+        const url = orgUrl(
+            this.organizationSlug,
+            `/app/projects/${this.projectId}/manuals/${this.manualId}/cuts/${target.cutId}/takes/${target.takeId}/downloaded`,
+        );
         for (let attempt = 0; ; attempt++) {
             let ok = false;
             try {

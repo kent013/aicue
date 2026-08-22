@@ -8,6 +8,7 @@ use App\DataTransferObjects\Capture\UploadTicketClaims;
 use App\Enums\Manual\TakeStatus;
 use App\Enums\ProjectRole;
 use App\Models\Cut;
+use App\Models\Organization;
 use App\Models\Project;
 use App\Models\Take;
 use App\Models\TakeUploadReservation;
@@ -31,9 +32,9 @@ use Illuminate\Support\Str;
  *      (撮影者の採用は doc/10 §10.5 の確定仕様)。
  */
 
-function pcTakePath(Project $project, VideoManual $manual, Cut $cut, ?Take $take = null, string $suffix = ''): string
+function pcTakePath(Organization $organization, Project $project, VideoManual $manual, Cut $cut, ?Take $take = null, string $suffix = ''): string
 {
-    $base = "/app/projects/{$project->id}/manuals/{$manual->id}/cuts/{$cut->id}/takes";
+    $base = "/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}/cuts/{$cut->id}/takes";
 
     return $take === null ? $base.$suffix : "{$base}/{$take->id}{$suffix}";
 }
@@ -46,7 +47,7 @@ test('編集者 (org owner) は adopt を実行でき、採用が反映される
     $take = Take::factory()->forCut($cut)->create();
 
     $this->actingAs($owner)
-        ->postJson(pcTakePath($project, $manual, $cut, $take, '/adopt'))
+        ->postJson(pcTakePath($organization, $project, $manual, $cut, $take, '/adopt'))
         ->assertOk();
 
     expect($cut->fresh()?->adopted_take_id)->toBe($take->id);
@@ -57,17 +58,16 @@ test('編集者 (project_admin) も adopt / destroy を実行できる', functio
     $project = Project::factory()->forOrganization($organization)->create();
     $editor = attachOrganizationMember($organization);
     attachProjectMember($project, $editor, ProjectRole::Admin);
-    $editor->forceFill(['current_organization_id' => $organization->id])->save();
 
     $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
     $cut = Cut::factory()->forManual($manual)->create();
     $take = Take::factory()->forCut($cut)->create();
 
     $this->actingAs($editor)
-        ->postJson(pcTakePath($project, $manual, $cut, $take, '/adopt'))
+        ->postJson(pcTakePath($organization, $project, $manual, $cut, $take, '/adopt'))
         ->assertOk();
     $this->actingAs($editor)
-        ->deleteJson(pcTakePath($project, $manual, $cut, $take))
+        ->deleteJson(pcTakePath($organization, $project, $manual, $cut, $take))
         ->assertNoContent();
 
     expect(Take::query()->whereKey($take->id)->exists())->toBeFalse();
@@ -89,7 +89,7 @@ test('編集者は presigned upload-url を発行できる (PC からのファ�
     app()->instance(TakeObjectStorage::class, $storage);
 
     $this->actingAs($owner)
-        ->postJson(pcTakePath($project, $manual, $cut, null, '/upload-url'), [
+        ->postJson(pcTakePath($organization, $project, $manual, $cut, null, '/upload-url'), [
             'client_take_id' => (string) Str::ulid(),
             'size_bytes' => 1_000_000,
             'content_type' => 'video/mp4',
@@ -104,7 +104,6 @@ test('**撮影者 (project_member) も adopt を実行できる** (画面は 403
     $project = Project::factory()->forOrganization($organization)->create();
     $shooter = attachOrganizationMember($organization);
     attachProjectMember($project, $shooter, ProjectRole::Member);
-    $shooter->forceFill(['current_organization_id' => $organization->id])->save();
 
     $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
     $cut = Cut::factory()->forManual($manual)->create();
@@ -112,12 +111,12 @@ test('**撮影者 (project_member) も adopt を実行できる** (画面は 403
 
     // 画面は編集者限定 (403)
     $this->actingAs($shooter)
-        ->get("/projects/{$project->id}/manuals/{$manual->id}/cuts/{$cut->id}/takes")
+        ->get("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/cuts/{$cut->id}/takes")
         ->assertForbidden();
 
     // API は撮影者にも開いている (PWA の採用導線。doc/10 §10.5)
     $this->actingAs($shooter)
-        ->postJson(pcTakePath($project, $manual, $cut, $take, '/adopt'))
+        ->postJson(pcTakePath($organization, $project, $manual, $cut, $take, '/adopt'))
         ->assertOk();
 
     expect($cut->fresh()?->adopted_take_id)->toBe($take->id);
@@ -131,7 +130,7 @@ test('rendering 中の adopt は 409 (画面の事前告知と同じ理由)', fu
     $take = Take::factory()->forCut($cut)->create();
 
     $this->actingAs($owner)
-        ->postJson(pcTakePath($project, $manual, $cut, $take, '/adopt'))
+        ->postJson(pcTakePath($organization, $project, $manual, $cut, $take, '/adopt'))
         ->assertStatus(409);
 });
 
@@ -143,7 +142,7 @@ test('ready でないテイクの adopt は 422', function (): void {
     $take = Take::factory()->forCut($cut)->create(['status' => TakeStatus::Processing->value]);
 
     $this->actingAs($owner)
-        ->postJson(pcTakePath($project, $manual, $cut, $take, '/adopt'))
+        ->postJson(pcTakePath($organization, $project, $manual, $cut, $take, '/adopt'))
         ->assertStatus(422);
 });
 
@@ -155,7 +154,7 @@ test('DL 済みテイクの削除は 422 (画面はサーバ文言をそのま�
     $take = Take::factory()->forCut($cut)->downloaded()->create();
 
     $this->actingAs($owner)
-        ->deleteJson(pcTakePath($project, $manual, $cut, $take))
+        ->deleteJson(pcTakePath($organization, $project, $manual, $cut, $take))
         ->assertStatus(422);
 
     expect(Take::query()->whereKey($take->id)->exists())->toBeTrue();
@@ -182,7 +181,7 @@ test('編集者は presigned 発行の続き (POST takes = 登録) まで通せ�
     app()->instance(TakeObjectStorage::class, $storage);
 
     $this->actingAs($owner)
-        ->postJson(pcTakePath($project, $manual, $cut), [
+        ->postJson(pcTakePath($organization, $project, $manual, $cut), [
             'ticket' => $ticket,
             'client_take_id' => $reservation->client_take_id,
             'duration_ms' => 5_000,
@@ -204,11 +203,11 @@ test('編集者は playback / thumbnail の 302 を受け取れる (画面の vi
     $cut = Cut::factory()->forManual($manual)->create();
     $take = Take::factory()->forCut($cut)->withThumbnail()->create();
 
-    $playback = $this->actingAs($owner)->get(pcTakePath($project, $manual, $cut, $take, '/playback'));
+    $playback = $this->actingAs($owner)->get(pcTakePath($organization, $project, $manual, $cut, $take, '/playback'));
     $playback->assertStatus(302);
     expect($playback->headers->get('Cache-Control'))->toContain('no-store');
 
-    $thumbnail = $this->actingAs($owner)->get(pcTakePath($project, $manual, $cut, $take, '/thumbnail'));
+    $thumbnail = $this->actingAs($owner)->get(pcTakePath($organization, $project, $manual, $cut, $take, '/thumbnail'));
     $thumbnail->assertStatus(302);
     expect($thumbnail->headers->get('Location'))->toContain(urlencode((string) $take->thumbnail_path));
 });
@@ -221,6 +220,6 @@ test('analyzing 中の adopt も 409 (rendering と同じ扱い)', function (): 
     $take = Take::factory()->forCut($cut)->create();
 
     $this->actingAs($owner)
-        ->postJson(pcTakePath($project, $manual, $cut, $take, '/adopt'))
+        ->postJson(pcTakePath($organization, $project, $manual, $cut, $take, '/adopt'))
         ->assertStatus(409);
 });

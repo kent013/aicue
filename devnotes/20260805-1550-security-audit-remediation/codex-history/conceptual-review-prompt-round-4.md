@@ -250,7 +250,7 @@ ability を先に置く積極的な理由は存在しない。
 $middleware->prependToPriorityList(SubstituteBindings::class, ResolveApiActor::class);
 // テナント guard は binding の直後へ
 $middleware->appendToPriorityList(SubstituteBindings::class, EnsureProjectBelongsToApiOrganization::class);
-$middleware->appendToPriorityList(EnsureProjectBelongsToApiOrganization::class, EnsureProjectBelongsToCurrentOrganization::class);
+$middleware->appendToPriorityList(EnsureProjectBelongsToApiOrganization::class, EnsureProjectBelongsToRouteOrganization::class);
 ```
 
 **`ResolveApiActor` を `SubstituteBindings` の前に置けること**は実装で確認済み:

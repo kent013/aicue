@@ -68,9 +68,9 @@ function mockPresign(): MockInterface
     return $mock;
 }
 
-function uploadUrlPath(Project $project, VideoManual $manual, Cut $cut): string
+function uploadUrlPath(Organization $organization, Project $project, VideoManual $manual, Cut $cut): string
 {
-    return "/app/projects/{$project->id}/manuals/{$manual->id}/cuts/{$cut->id}/takes/upload-url";
+    return "/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}/cuts/{$cut->id}/takes/upload-url";
 }
 
 test('発行成功: pending 予約が作成され bytes_pending に計上、presign には予約行の値が渡る', function (): void {
@@ -92,7 +92,7 @@ test('発行成功: pending 予約が作成され bytes_pending に計上、pres
             expiresAt: CarbonImmutable::now()->addMinutes(30),
         ));
 
-    $response = $this->actingAs($owner)->postJson(uploadUrlPath($project, $manual, $cut), $payload);
+    $response = $this->actingAs($owner)->postJson(uploadUrlPath($organization, $project, $manual, $cut), $payload);
 
     $response->assertOk();
     $response->assertJsonStructure(['upload_url', 'headers', 'ticket', 'client_take_id', 'expires_at']);
@@ -116,7 +116,7 @@ test('bytes_used + pending + size が上限を超えると 422 quota_exceeded (�
     mockPresign();
 
     $response = $this->actingAs($owner)->postJson(
-        uploadUrlPath($project, $manual, $cut),
+        uploadUrlPath($organization, $project, $manual, $cut),
         uploadUrlPayload(['size_bytes' => 501]),
     );
 
@@ -132,7 +132,7 @@ test('境界: 加算後合計 == limit は成功する', function (): void {
     mockPresign();
 
     $response = $this->actingAs($owner)->postJson(
-        uploadUrlPath($project, $manual, $cut),
+        uploadUrlPath($organization, $project, $manual, $cut),
         uploadUrlPayload(['size_bytes' => 1_000]),
     );
 
@@ -143,7 +143,7 @@ test('manual が draft / analyzing / rendering だと 422 (撮影不可)', funct
     [, $owner, $project, $manual, $cut] = uploadUrlContext($status);
     mockPresign();
 
-    $response = $this->actingAs($owner)->postJson(uploadUrlPath($project, $manual, $cut), uploadUrlPayload());
+    $response = $this->actingAs($owner)->postJson(uploadUrlPath($organization, $project, $manual, $cut), uploadUrlPayload());
 
     $response->assertStatus(422);
     expect($cut->uploadReservations()->count())->toBe(0);
@@ -153,7 +153,7 @@ test('published の manual は撮影できる', function (): void {
     [, $owner, $project, $manual, $cut] = uploadUrlContext(VideoManualStatus::Published->value);
     mockPresign();
 
-    $this->actingAs($owner)->postJson(uploadUrlPath($project, $manual, $cut), uploadUrlPayload())->assertOk();
+    $this->actingAs($owner)->postJson(uploadUrlPath($organization, $project, $manual, $cut), uploadUrlPayload())->assertOk();
 });
 
 test('保護キー (cut_id / organization_id / video_path) の payload 直送は 422', function (string $key): void {
@@ -161,7 +161,7 @@ test('保護キー (cut_id / organization_id / video_path) の payload 直送は
     mockPresign();
 
     $response = $this->actingAs($owner)->postJson(
-        uploadUrlPath($project, $manual, $cut),
+        uploadUrlPath($organization, $project, $manual, $cut),
         uploadUrlPayload([$key => 'anything']),
     );
 
@@ -175,7 +175,7 @@ test('cross-org の {project} は 404', function (): void {
     mockPresign();
 
     $this->actingAs($owner)
-        ->postJson(uploadUrlPath($otherProject, $otherManual, $otherCut), uploadUrlPayload())
+        ->postJson(uploadUrlPath($organization, $otherProject, $otherManual, $otherCut), uploadUrlPayload())
         ->assertNotFound();
 });
 
@@ -189,7 +189,7 @@ test('cross-project の {manual} / cross-manual の {cut} は 404', function ():
     $otherCut = Cut::factory()->forManual($otherManual)->create();
 
     $this->actingAs($owner)
-        ->postJson(uploadUrlPath($project, $otherManual, $otherCut), uploadUrlPayload())
+        ->postJson(uploadUrlPath($organization, $project, $otherManual, $otherCut), uploadUrlPayload())
         ->assertNotFound();
 
     // 同 project の別 manual の cut
@@ -197,7 +197,7 @@ test('cross-project の {manual} / cross-manual の {cut} は 404', function ():
     $siblingCut = Cut::factory()->forManual($siblingManual)->create();
 
     $this->actingAs($owner)
-        ->postJson(uploadUrlPath($project, $manual, $siblingCut), uploadUrlPayload())
+        ->postJson(uploadUrlPath($organization, $project, $manual, $siblingCut), uploadUrlPayload())
         ->assertNotFound();
 });
 
@@ -206,16 +206,14 @@ test('project_member は発行可・非 project member の org member は 403・
     mockPresign();
 
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
     attachProjectMember($project, $member, ProjectRole::Member);
-    $this->actingAs($member)->postJson(uploadUrlPath($project, $manual, $cut), uploadUrlPayload())->assertOk();
+    $this->actingAs($member)->postJson(uploadUrlPath($organization, $project, $manual, $cut), uploadUrlPayload())->assertOk();
 
     $outsider = attachOrganizationMember($organization);
-    $outsider->forceFill(['current_organization_id' => $organization->id])->save();
-    $this->actingAs($outsider)->postJson(uploadUrlPath($project, $manual, $cut), uploadUrlPayload())->assertForbidden();
+    $this->actingAs($outsider)->postJson(uploadUrlPath($organization, $project, $manual, $cut), uploadUrlPayload())->assertForbidden();
 
     [, $otherOwner] = createOrganizationWithOwner();
-    $this->actingAs($otherOwner)->postJson(uploadUrlPath($project, $manual, $cut), uploadUrlPayload())->assertNotFound();
+    $this->actingAs($otherOwner)->postJson(uploadUrlPath($organization, $project, $manual, $cut), uploadUrlPayload())->assertNotFound();
 });
 
 test('content_type 非許可 / size 超過 / checksum 形式不正は 422', function (array $overrides, string $errorKey): void {
@@ -223,7 +221,7 @@ test('content_type 非許可 / size 超過 / checksum 形式不正は 422', func
     mockPresign();
 
     $response = $this->actingAs($owner)->postJson(
-        uploadUrlPath($project, $manual, $cut),
+        uploadUrlPath($organization, $project, $manual, $cut),
         uploadUrlPayload($overrides),
     );
 
@@ -253,7 +251,7 @@ test('checksum が base64 44 文字でもデコード後 32 bytes でなけれ�
     // 改竄 (base64 だが 33 bytes) は 44 文字にならず regex で 422
     $tooLong = base64_encode(random_bytes(33));
     $this->actingAs($owner)->postJson(
-        uploadUrlPath($project, $manual, $cut),
+        uploadUrlPath($organization, $project, $manual, $cut),
         uploadUrlPayload(['checksum_sha256' => $tooLong]),
     )->assertStatus(422);
 });
@@ -269,7 +267,7 @@ test('issue() が保持する予約インスタンスは refresh なしで statu
     });
 
     $this->actingAs($owner)
-        ->postJson(uploadUrlPath($project, $manual, $cut), uploadUrlPayload())
+        ->postJson(uploadUrlPath($organization, $project, $manual, $cut), uploadUrlPayload())
         ->assertOk();
 
     // in-memory: 明示代入していないと属性ごと存在せず null になる (DB default では埋まらない)。
@@ -293,7 +291,7 @@ test('still カット + image/jpeg は 200 で、S3 キーが .jpg になる', f
     mockPresign();
 
     $this->actingAs($owner)
-        ->postJson(uploadUrlPath($project, $manual, $cut), uploadUrlPayload(['content_type' => 'image/jpeg']))
+        ->postJson(uploadUrlPath($organization, $project, $manual, $cut), uploadUrlPayload(['content_type' => 'image/jpeg']))
         ->assertOk();
 
     $reservation = $cut->uploadReservations()->sole();
@@ -307,7 +305,7 @@ test('video カットへ画像を上げようとすると 422 で、予約行が
     mockPresign();
 
     $this->actingAs($owner)
-        ->postJson(uploadUrlPath($project, $manual, $cut), uploadUrlPayload(['content_type' => 'image/jpeg']))
+        ->postJson(uploadUrlPath($organization, $project, $manual, $cut), uploadUrlPayload(['content_type' => 'image/jpeg']))
         ->assertStatus(422)
         ->assertJsonValidationErrors('content_type');
 
@@ -320,7 +318,7 @@ test('material_type 未指定カットも画像は 422 (計画が無いカット
     mockPresign();
 
     $this->actingAs($owner)
-        ->postJson(uploadUrlPath($project, $manual, $cut), uploadUrlPayload(['content_type' => 'image/jpeg']))
+        ->postJson(uploadUrlPath($organization, $project, $manual, $cut), uploadUrlPayload(['content_type' => 'image/jpeg']))
         ->assertStatus(422)
         ->assertJsonValidationErrors('content_type');
 });
@@ -330,7 +328,7 @@ test('material_type を payload に入れると 422 (サーバ確定値なので
     mockPresign();
 
     $this->actingAs($owner)
-        ->postJson(uploadUrlPath($project, $manual, $cut), uploadUrlPayload(['material_type' => 'still']))
+        ->postJson(uploadUrlPath($organization, $project, $manual, $cut), uploadUrlPayload(['material_type' => 'still']))
         ->assertStatus(422)
         ->assertJsonValidationErrors('material_type');
 });
@@ -343,7 +341,7 @@ test('バイト上限は種別で非対称: 同じサイズでも image は 422 
     expect($overStill)->toBeLessThanOrEqual(config()->integer('capture.max_take_bytes'));
 
     $this->actingAs($owner)
-        ->postJson(uploadUrlPath($project, $manual, $cut), uploadUrlPayload([
+        ->postJson(uploadUrlPath($organization, $project, $manual, $cut), uploadUrlPayload([
             'content_type' => 'image/jpeg',
             'size_bytes' => $overStill,
         ]))
@@ -352,7 +350,7 @@ test('バイト上限は種別で非対称: 同じサイズでも image は 422 
 
     // 同じサイズを動画として送ると通る (静止画にだけ厳しい上限が効いている)
     $this->actingAs($owner)
-        ->postJson(uploadUrlPath($project, $manual, $cut), uploadUrlPayload([
+        ->postJson(uploadUrlPath($organization, $project, $manual, $cut), uploadUrlPayload([
             'content_type' => 'video/mp4',
             'size_bytes' => $overStill,
         ]))
@@ -365,7 +363,7 @@ test('allowlist 外の画像形式 (image/webp) は 422', function (): void {
     mockPresign();
 
     $this->actingAs($owner)
-        ->postJson(uploadUrlPath($project, $manual, $cut), uploadUrlPayload(['content_type' => 'image/webp']))
+        ->postJson(uploadUrlPath($organization, $project, $manual, $cut), uploadUrlPayload(['content_type' => 'image/webp']))
         ->assertStatus(422)
         ->assertJsonValidationErrors('content_type');
 });

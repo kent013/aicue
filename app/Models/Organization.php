@@ -35,8 +35,12 @@ use Webmozart\Assert\Assert;
  * Cashier::useCustomerModel 参照)。Laratrust Team と 1:1 で、権限判定は常に
  * laratrust_team_id を明示して行う (strict_check=true)。
  *
- * laratrust_team_id / is_personal は所有権・状態キーのため $fillable 外
+ * laratrust_team_id は所有権キーのため $fillable 外
  * (OrganizationProvisioningService が明示代入する)。
+ * slug も $fillable 外である — 保存できるのは保存可能型
+ * (App\Support\Organization\AssignableOrganizationSlug) を受ける 1 本道だけで、
+ * 構文型や生文字列を保存へ渡す道は型で消えている (家系裁定 AG-039。
+ * OrganizationSlugWritePathTest が deny-by-default で固定する)。
  * plan_code は現在プランの状態キーのため $fillable 外 (StripeWebhookProcessor が
  * webhook から同期する。クライアント入力では変更できない)。
  * plan_code は Stripe Price を持つ有償プランの契約 (active/trialing) 時のみ set され、
@@ -76,7 +80,6 @@ class Organization extends Model implements CipherSweetEncrypted
      */
     protected $fillable = [
         'name',
-        'slug',
     ];
 
     /**
@@ -138,6 +141,16 @@ class Organization extends Model implements CipherSweetEncrypted
     public function invitations(): HasMany
     {
         return $this->hasMany(OrganizationInvitation::class);
+    }
+
+    /**
+     * 識別名の改名履歴 (30 日 5 回の回数判定に使う。家系裁定 AG-046)。
+     *
+     * @return HasMany<OrganizationSlugRename, $this>
+     */
+    public function slugRenames(): HasMany
+    {
+        return $this->hasMany(OrganizationSlugRename::class);
     }
 
     /**
@@ -270,7 +283,6 @@ class Organization extends Model implements CipherSweetEncrypted
     protected function casts(): array
     {
         return [
-            'is_personal' => 'boolean',
             // 2FA 必須方針。セキュリティ方針キーのため $fillable 外
             // (OrganizationController::updateTwoFactorRequirement が forceFill で明示代入する)
             'two_factor_required' => 'boolean',

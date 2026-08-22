@@ -235,7 +235,7 @@ NOT NULL)/ Model / Factory / FormRequest(store・update)/ nested route(変更系
 | `MassAssignmentSafetyTest` | ownership / actor / tenant / secret キーが Model の `$fillable` に載ること | 登録簿は無い。新 Model の親 FK を `$fillable` に入れず、relation 経由か明示代入で書く |
 | `FormRequestProhibitedKeyTest` | FormRequest が `ProhibitsProtectedKeys` を欠くこと / 保護キーの missing rule が無いこと | 新 FormRequest に trait を適用し `rules()` に missing を書く。アプリ固有の新 FK 名は `app/Support/Security/MassAssignmentProtectedKeys.php` へ追記 |
 | `ValidationAttributeCoverageTest` | `rules()` のキーが利用者向け文言の attributes に無いこと(生のキー名が画面に出る) | `lang/ja/validation.php` の attributes に新しいキーを追記 |
-| `ProjectRouteCurrentOrgGuardTest` | `{project}` を受ける route が middleware 層の URL 整合 guard を欠くこと(FormRequest の DB ルールが先に走り 422 と 404 の差が存在オラクルになる) | web は `project.in-current-org`、API は `api.project-in-org` を route group に付ける |
+| `ProjectRouteCurrentOrgGuardTest` | `{project}` を受ける route が middleware 層の URL 整合 guard を欠くこと(FormRequest の DB ルールが先に走り 422 と 404 の差が存在オラクルになる) | web は `project.in-route-org`、API は `api.project-in-org` を route group に付ける |
 | `NestedRouteIdorDefenseTest` | param 付き route の防御方式が未分類・stale・無記名であること | `tests/Architecture/NestedRouteIdorDefenseTest.php` が読む inventory へ **parameter 単位**で `NestedRouteDefenseMode` を登録。テナント親子でない param は理由を `nonTenantReasons()` に書く |
 | `TenantBoundaryOrderingTest` | テナント境界の 404 が binding の直後で閉じていないこと(1 bit の存在オラクル) | 新しい middleware を足したら `middlewareShortCircuitInventory()` に「短絡しうるか」を分類する(疑わしきは `true` 側)。`SubstituteBindings` より前に置くなら `preBindingShortCircuitInventory()` にも登録 |
 | `RouteBindingTypeConstraintInventoryTest` | binding param が型分類の目録に無く、型不一致が 404 ではなく生 500 になること | `RouteBindingTypes` の 5 分類のいずれかへ登録し、分類に応じた制約を route に付ける |

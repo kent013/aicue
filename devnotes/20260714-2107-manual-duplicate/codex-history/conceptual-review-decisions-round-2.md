@@ -12,7 +12,7 @@
 
 ## [Warning] FormRequest 検証が resolveOrganizationProject より先に走り category 存在オラクル（観点2 / 観点5）
 - 判断: 一部対応（既存機構で担保 + 明文化）+ 対応（契約固定）
-- 根拠: route は `project.in-current-org` middleware 配下。middleware は FormRequest 検証より前に走り、cross-org `{project}` を 404 に落とす（`{manual}∈{project}` も route model binding = scopeBindings で検証前に 404）。よって `{project}` は検証時点で in-org 保証済み。StoreVideoManualRequest と同型に category exists を **route project の id にスコープ**すれば cross-project category は 422。
+- 根拠: route は `project.in-route-org` middleware 配下。middleware は FormRequest 検証より前に走り、cross-org `{project}` を 404 に落とす（`{manual}∈{project}` も route model binding = scopeBindings で検証前に 404）。よって `{project}` は検証時点で in-org 保証済み。StoreVideoManualRequest と同型に category exists を **route project の id にスコープ**すれば cross-project category は 422。
 - 対応内容: `DuplicateVideoManualRequest` は StoreVideoManualRequest を厳密に踏襲（`Rule::exists('categories','id')->where('project_id', $routeProjectId)`、`ProhibitsProtectedKeys`）。設計に「middleware ordering が存在オラクルを閉じる」ことを明記。category 選択肢取得（Show props）も解決済み project relation 経由（既存 `categoryOptions()`）。
 
 ## [Warning] category エラーの 422/404 契約が曖昧（観点5）

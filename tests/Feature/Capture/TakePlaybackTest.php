@@ -35,15 +35,15 @@ function takePlaybackContext(string $takeStatus = 'ready'): array
     return [$organization, $owner, $project, $manual, $cut, $take];
 }
 
-function playbackPath(Project $project, VideoManual $manual, Cut $cut, Take $take): string
+function playbackPath(Organization $organization, Project $project, VideoManual $manual, Cut $cut, Take $take): string
 {
-    return "/app/projects/{$project->id}/manuals/{$manual->id}/cuts/{$cut->id}/takes/{$take->id}/playback";
+    return "/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}/cuts/{$cut->id}/takes/{$take->id}/playback";
 }
 
 test('撮影者が ready テイクを GET playback すると 302 で署名 URL へリダイレクトし no-store かつ private を返す', function (): void {
     [, $owner, $project, $manual, $cut, $take] = takePlaybackContext();
 
-    $response = $this->actingAs($owner)->get(playbackPath($project, $manual, $cut, $take));
+    $response = $this->actingAs($owner)->get(playbackPath($organization, $project, $manual, $cut, $take));
 
     $response->assertStatus(302);
     // 署名 URL は対象 take の video_path から生成される (別 take の path を使わない)
@@ -62,7 +62,7 @@ test('署名 URL は別 take の path を使わない (対象 take の video_pat
     $otherTake = Take::factory()->forCut($cut)->create(['status' => 'ready']);
 
     $location = $this->actingAs($owner)
-        ->get(playbackPath($project, $manual, $cut, $take))
+        ->get(playbackPath($organization, $project, $manual, $cut, $take))
         ->headers->get('Location');
 
     expect($location)->toContain(urlencode($take->video_path));
@@ -73,17 +73,16 @@ test('非 ready テイク (uploading/processing/failed) は 404 (状態秘匿)',
     [, $owner, $project, $manual, $cut, $take] = takePlaybackContext($status);
 
     $this->actingAs($owner)
-        ->get(playbackPath($project, $manual, $cut, $take))
+        ->get(playbackPath($organization, $project, $manual, $cut, $take))
         ->assertNotFound();
 })->with(['uploading', 'processing', 'failed']);
 
 test('非 capture ユーザー (非 project member の org member) は 403', function (): void {
     [$organization, , $project, $manual, $cut, $take] = takePlaybackContext();
     $orgMember = attachOrganizationMember($organization);
-    $orgMember->forceFill(['current_organization_id' => $organization->id])->save();
 
     $this->actingAs($orgMember)
-        ->get(playbackPath($project, $manual, $cut, $take))
+        ->get(playbackPath($organization, $project, $manual, $cut, $take))
         ->assertForbidden();
 });
 
@@ -95,18 +94,17 @@ test('team 文脈: role が別 team で付与されている間は 403 / 正し�
     $user = User::factory()->create();
     $organization->users()->attach($user);
     attachProjectMember($project, $user, ProjectRole::Member);
-    $user->forceFill(['current_organization_id' => $organization->id])->save();
 
     // 誤った team 文脈 (otherOrg の team_id) でロールを付与 → 対象 org では role null = 403
     $user->addRole(OrganizationRole::Member->value, $otherOrg->laratrust_team_id);
     $this->actingAs($user)
-        ->get(playbackPath($project, $manual, $cut, $take))
+        ->get(playbackPath($organization, $project, $manual, $cut, $take))
         ->assertForbidden();
 
     // 正しい team 文脈で付与 → 302 (権限判定が team scope で効く)
     $user->addRole(OrganizationRole::Member->value, $organization->laratrust_team_id);
     $this->actingAs($user->fresh())
-        ->get(playbackPath($project, $manual, $cut, $take))
+        ->get(playbackPath($organization, $project, $manual, $cut, $take))
         ->assertStatus(302);
 });
 
@@ -115,7 +113,7 @@ test('IDOR: project mismatch は 404 (認可より前)', function (): void {
     $otherProject = Project::factory()->forOrganization($organization)->create();
 
     $this->actingAs($owner)
-        ->get(playbackPath($otherProject, $manual, $cut, $take))
+        ->get(playbackPath($organization, $otherProject, $manual, $cut, $take))
         ->assertNotFound();
 });
 
@@ -124,7 +122,7 @@ test('IDOR: manual mismatch は 404', function (): void {
     $otherManual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
 
     $this->actingAs($owner)
-        ->get(playbackPath($project, $otherManual, $cut, $take))
+        ->get(playbackPath($organization, $project, $otherManual, $cut, $take))
         ->assertNotFound();
 });
 
@@ -133,7 +131,7 @@ test('IDOR: cut mismatch は 404', function (): void {
     $otherCut = Cut::factory()->forManual($manual)->create();
 
     $this->actingAs($owner)
-        ->get(playbackPath($project, $manual, $otherCut, $take))
+        ->get(playbackPath($organization, $project, $manual, $otherCut, $take))
         ->assertNotFound();
 });
 
@@ -143,16 +141,15 @@ test('IDOR: take mismatch (別 cut 所属の take を別 cut の URL で) は 40
     $takeB = Take::factory()->forCut($cutB)->create(['status' => 'ready']);
 
     $this->actingAs($owner)
-        ->get(playbackPath($project, $manual, $cut, $takeB))
+        ->get(playbackPath($organization, $project, $manual, $cut, $takeB))
         ->assertNotFound();
 });
 
 test('IDOR: cross-org は 404', function (): void {
     [, , $project, $manual, $cut, $take] = takePlaybackContext();
     [$otherOrg, $otherOwner] = createOrganizationWithOwner('別組織');
-    $otherOwner->forceFill(['current_organization_id' => $otherOrg->id])->save();
 
     $this->actingAs($otherOwner)
-        ->get(playbackPath($project, $manual, $cut, $take))
+        ->get(playbackPath($organization, $project, $manual, $cut, $take))
         ->assertNotFound();
 });

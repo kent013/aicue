@@ -471,7 +471,7 @@ index c640e61..b5f0f56 100644
 +    | (JSON は 402)。free (未契約 = plan_code null) 組織は遮断されない。
      | 新しい業務ドメインの route はこの group 内に追加すること。
      */
-     Route::middleware(['require-active-subscription', 'project.in-current-org'])->group(function (): void {
+     Route::middleware(['require-active-subscription', 'project.in-route-org'])->group(function (): void {
 diff --git a/tests/Feature/Billing/ReconcileSubscriptionSchedulesTest.php b/tests/Feature/Billing/ReconcileSubscriptionSchedulesTest.php
 index 9909c85..40ca911 100644
 --- a/tests/Feature/Billing/ReconcileSubscriptionSchedulesTest.php

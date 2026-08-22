@@ -336,9 +336,8 @@ test('予約でアプリ内通知が 1 件作られる (current org を表示文
     expect($data['grace_days'] ?? null)->toBe(AccountDeletionGrace::days());
 });
 
-test('current org を持たないユーザーにはアプリ内通知を作らない (org 文脈を捏造しない)', function (): void {
+test('退会予約ではアプリ内通知を作らない (org 文脈を捏造しない。メールは従来どおり届く)', function (): void {
     $user = User::factory()->create();
-    expect($user->current_organization_id)->toBeNull();
 
     app(OrganizationMembershipService::class)->requestAccountDeletion($user);
 

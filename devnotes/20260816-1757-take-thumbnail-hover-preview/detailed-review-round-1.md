@@ -73,6 +73,6 @@ function startPreview(): void {
 
 **セキュリティ確認**
 
-署名 URL を Inertia props に載せず、`/thumbnail` / `/playback` の認可付き endpoint を `<img>` / `<video>` の `src` にする設計は妥当です。各リクエストで session 認証、nested binding、`project.in-current-org`、`Gate::authorize('preview', $take)` を通るため、props 経由で期限付き URL が漏れる設計より安全です。
+署名 URL を Inertia props に載せず、`/thumbnail` / `/playback` の認可付き endpoint を `<img>` / `<video>` の `src` にする設計は妥当です。各リクエストで session 認証、nested binding、`project.in-route-org`、`Gate::authorize('preview', $take)` を通るため、props 経由で期限付き URL が漏れる設計より安全です。
 
 ただし、`no-store, private` と「署名 URL を JS 側でキャッシュしない」は維持してください。ここを緩めると、この施策の安全性の前提が崩れます。

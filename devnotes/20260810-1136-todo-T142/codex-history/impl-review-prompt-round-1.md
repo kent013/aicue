@@ -539,7 +539,7 @@ final class AccountDeletionRequestController extends Controller
 
 ```php
 foreach ([
-    [EnsureProjectBelongsToCurrentOrganization::class, HandleInertiaRequests::class],
+    [EnsureProjectBelongsToRouteOrganization::class, HandleInertiaRequests::class],
     // …
     [EnsureEmailIsVerified::class, RequireActiveSubscription::class],
 ] as [$after, $append]) {
@@ -552,7 +552,7 @@ foreach ([
 ```php
     [EnsureEmailIsVerified::class, RequireActiveSubscription::class],
     // 退会予約中の凍結。**302 で短絡する**ため、テナント境界 404
-    // (EnsureProjectBelongsToCurrentOrganization) より必ず後に置く。
+    // (EnsureProjectBelongsToRouteOrganization) より必ず後に置く。
     // 前に置くと「他組織に実在 = 302 / 不在 = 404」の 1 bit 存在オラクルになる
     // (AGENTS.md 不変条件 10)。課金ゲートの直後に置き、未契約組織のユーザーは
     // 課金ゲート → onboarding → 凍結 → /settings の 2 hop で取消 UI に着く。
@@ -1104,7 +1104,7 @@ export interface AccountDeletionState {
 | M3 | 同じ注入を `app('cashier.stripe')` の literal 呼び出しで書く | 同上 (fixture 4 形目) |
 | M4 | `AccountDeletionFreezeAllowance` から `settings` を削る | 到達性テスト (取消に到達できない) |
 | M5 | 同 enum に `dashboard` を足す | exact-fit 検査 3 |
-| M6 | 凍結 middleware を priority list で `EnsureProjectBelongsToCurrentOrganization` より**前**へ動かす | `TenantBoundaryOrderingTest` + 他組織 `{project}` が 302 になる behavioral |
+| M6 | 凍結 middleware を priority list で `EnsureProjectBelongsToRouteOrganization` より**前**へ動かす | `TenantBoundaryOrderingTest` + 他組織 `{project}` が 302 になる behavioral |
 | M7 | `PurgeDeletionRequestsCommand` の終了コードを常に `SUCCESS` にする | 「想定外例外で FAILURE」テスト |
 | M8 | `deleteAccount` の precondition 差し込み位置をブロッカー判定の**後**へ動かす | 「抽出後に取消 → 削除しない」テスト |
 | M9 | 通知の `via()` から予約生存の再確認を外す | 「予約 → 即取消 → メール 0 通」テスト |
@@ -1711,7 +1711,7 @@ index 0000000..e02d575
 + *   (課金ゲート `RequireActiveSubscription` と同じ契約)。
 + *
 + * ★**実行位置は `bootstrap/app.php` の priority list が正本**で、テナント境界 404
-+ *   (`EnsureProjectBelongsToCurrentOrganization`) より**必ず後**に置く。前に置くと
++ *   (`EnsureProjectBelongsToRouteOrganization`) より**必ず後**に置く。前に置くと
 + *   「他組織に実在 = 302 / 不在 = 404」の 1 bit 存在オラクルになる
 + *   (AGENTS.md セキュリティ不変条件 10)。
 + *
@@ -2288,7 +2288,7 @@ index 14955c5..f82bdf6 100644
              [EncryptHistory::class, EnsureEmailIsVerified::class],
              [EnsureEmailIsVerified::class, RequireActiveSubscription::class],
 +            // 退会予約中の凍結。**302 で短絡する**ため、テナント境界 404
-+            // (EnsureProjectBelongsToCurrentOrganization) より必ず後に置く。前に置くと
++            // (EnsureProjectBelongsToRouteOrganization) より必ず後に置く。前に置くと
 +            // 「他組織に実在 = 302 / 不在 = 404」の 1 bit 存在オラクルになる
 +            // (AGENTS.md セキュリティ不変条件 10)。課金ゲートの直後に置き、未契約組織の
 +            // ユーザーは 課金ゲート → onboarding → 凍結 → /settings の 2 hop で取消 UI に着く。
@@ -3723,7 +3723,7 @@ index fab0189..49129d3 100644
          RequireRecentAuth::class => true,
 @@ -449,6 +452,8 @@ function tenantBoundaryHasMode(string $routeName, NestedRouteDefenseMode $mode):
      ];
-     $guard = EnsureProjectBelongsToCurrentOrganization::class;
+     $guard = EnsureProjectBelongsToRouteOrganization::class;
      $billing = RequireActiveSubscription::class;
 +    // 退会予約中の凍結は**課金ゲートの直後**。テナント境界 404 より必ず後 (302 短絡のため)。
 +    $freeze = EnsureAccountNotPendingDeletion::class;

@@ -9,6 +9,7 @@
     import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
     import type { SharedProps } from "@/lib/shared-props";
+    import { currentOrgUrl } from "@/lib/org-url";
 
     /**
      * 撮影 PWA のアカウント確認画面 (doc/05 §5.1 / §5.2)。
@@ -66,7 +67,7 @@
         <PageHeader title="アカウント" icon={UserRound} testId="capture-account-heading" />
         <PageContent>
             <div class="mb-4">
-                <TextLink href="/app" testId="capture-account-back">
+                <TextLink href={currentOrgUrl("/app")} testId="capture-account-back">
                     <ArrowLeft class="inline size-3" aria-hidden="true" />
                     撮影に戻る
                 </TextLink>

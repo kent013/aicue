@@ -22,31 +22,30 @@ function activatePersonalPayload(): array
     return ['declaration' => true];
 }
 
-test('current org 不在なら 404', function (): void {
+test('非所属の組織 URL は 404 (組織の有無を露出しない)', function (): void {
+    [$organization] = createOrganizationWithOwner();
     $user = User::factory()->create();
 
     $this->actingAs($user)
-        ->post('/onboarding/activate-personal', activatePersonalPayload())
+        ->post("/organizations/{$organization->slug}/onboarding/activate-personal", activatePersonalPayload())
         ->assertNotFound();
 });
 
 test('current org に非所属なら 404 (認可より前 = 403 で存在を漏らさない)', function (): void {
     [$organization] = createOrganizationWithOwner(grandfatherFreePlan: false);
     $outsider = User::factory()->create();
-    $outsider->forceFill(['current_organization_id' => $organization->id])->save();
 
     $this->actingAs($outsider)
-        ->post('/onboarding/activate-personal', activatePersonalPayload())
+        ->post("/organizations/{$organization->slug}/onboarding/activate-personal", activatePersonalPayload())
         ->assertNotFound();
 });
 
 test('manageBilling なし member は 403', function (): void {
     [$organization] = createOrganizationWithOwner(grandfatherFreePlan: false);
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
     $this->actingAs($member)
-        ->post('/onboarding/activate-personal', activatePersonalPayload())
+        ->post("/organizations/{$organization->slug}/onboarding/activate-personal", activatePersonalPayload())
         ->assertForbidden();
 });
 
@@ -54,26 +53,26 @@ test('declaration 未チェックは redirect-back + errors.declaration (有効�
     [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
 
     $this->actingAs($owner)
-        ->post('/onboarding/activate-personal', ['declaration' => false])
+        ->post("/organizations/{$organization->slug}/onboarding/activate-personal", ['declaration' => false])
         ->assertSessionHasErrors(['declaration' => '個人利用であることの確認が必要です。']);
 
     expect($organization->fresh()?->free_plan_code)->toBeNull();
 });
 
 test('declaration 欠落の XHR は 422', function (): void {
-    [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
 
     $this->actingAs($owner)
-        ->postJson('/onboarding/activate-personal', [])
+        ->postJson("/organizations/{$organization->slug}/onboarding/activate-personal", [])
         ->assertStatus(422)
         ->assertJsonValidationErrors(['declaration' => '個人利用であることの確認が必要です。']);
 });
 
 test('保護キーを payload に混ぜると 422 (mass-assignment 入口防御)', function (): void {
-    [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
 
     $this->actingAs($owner)
-        ->postJson('/onboarding/activate-personal', [
+        ->postJson("/organizations/{$organization->slug}/onboarding/activate-personal", [
             'declaration' => true,
             'personal_declared_by_user_id' => 999,
         ])
@@ -86,8 +85,8 @@ test('成功すると free entitlement が確定し dashboard へ redirect + 枚
     $tickets = app(TicketPricingService::class)->signupGrantTickets();
 
     $this->actingAs($owner)
-        ->post('/onboarding/activate-personal', activatePersonalPayload())
-        ->assertRedirect(route('dashboard'))
+        ->post("/organizations/{$organization->slug}/onboarding/activate-personal", activatePersonalPayload())
+        ->assertRedirect(route('app.entry'))
         ->assertSessionHas('success', sprintf(
             'パーソナルプラン（無料）を開始しました。無料チケット %d 枚をお付けしました。',
             $tickets,
@@ -112,10 +111,10 @@ test('成功すると free entitlement が確定し dashboard へ redirect + 枚
 test('二重 POST は冪等 (2 回目は付与なしの文言 + signup_grant は 1 行のまま)', function (): void {
     [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
 
-    $this->actingAs($owner)->post('/onboarding/activate-personal', activatePersonalPayload());
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/onboarding/activate-personal", activatePersonalPayload());
     $this->actingAs($owner)
-        ->post('/onboarding/activate-personal', activatePersonalPayload())
-        ->assertRedirect(route('dashboard'))
+        ->post("/organizations/{$organization->slug}/onboarding/activate-personal", activatePersonalPayload())
+        ->assertRedirect(route('app.entry'))
         ->assertSessionHas('success', 'パーソナルプラン（無料）を開始しました。');
 
     expect(DB::table('ticket_ledger_entries')
@@ -129,8 +128,8 @@ test('付与マーカー済みの org は granted=false の文言で有効化さ
     $organization->forceFill(['signup_tickets_granted_at' => now()])->save();
 
     $this->actingAs($owner)
-        ->post('/onboarding/activate-personal', activatePersonalPayload())
-        ->assertRedirect(route('dashboard'))
+        ->post("/organizations/{$organization->slug}/onboarding/activate-personal", activatePersonalPayload())
+        ->assertRedirect(route('app.entry'))
         ->assertSessionHas('success', 'パーソナルプラン（無料）を開始しました。');
 
     expect(DB::table('ticket_ledger_entries')
@@ -144,7 +143,7 @@ test('既に free personal org を持つ user は errors.plan_code (500 にし�
     Organization::factory()->freePersonal($owner)->create();
 
     $this->actingAs($owner)
-        ->post('/onboarding/activate-personal', activatePersonalPayload())
+        ->post("/organizations/{$organization->slug}/onboarding/activate-personal", activatePersonalPayload())
         ->assertSessionHasErrors([
             'plan_code' => '既にパーソナルプラン（無料）の組織をお持ちのため、この組織では選択できません。',
         ]);
@@ -160,7 +159,7 @@ test('メンバー超過の org は errors.plan_code (XHR は 422)', function ()
     }
 
     $this->actingAs($owner)
-        ->postJson('/onboarding/activate-personal', activatePersonalPayload())
+        ->postJson("/organizations/{$organization->slug}/onboarding/activate-personal", activatePersonalPayload())
         ->assertStatus(422)
         ->assertJsonValidationErrors([
             'plan_code' => sprintf(
@@ -177,7 +176,7 @@ test('有効な有償契約がある org は errors.plan_code', function (): voi
     contractPaidPlan($organization, status: 'active');
 
     $this->actingAs($owner)
-        ->post('/onboarding/activate-personal', activatePersonalPayload())
+        ->post("/organizations/{$organization->slug}/onboarding/activate-personal", activatePersonalPayload())
         ->assertSessionHasErrors([
             'plan_code' => '有効な有償契約があるためパーソナルプランは選択できません。',
         ]);
@@ -186,16 +185,16 @@ test('有効な有償契約がある org は errors.plan_code', function (): voi
 });
 
 test('plan-activate レーンが効く (11 回目は 429)', function (): void {
-    [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
 
     for ($i = 0; $i < 10; $i++) {
         $this->actingAs($owner)
-            ->post('/onboarding/activate-personal', activatePersonalPayload())
+            ->post("/organizations/{$organization->slug}/onboarding/activate-personal", activatePersonalPayload())
             ->assertStatus(302);
     }
 
     $this->actingAs($owner)
-        ->post('/onboarding/activate-personal', activatePersonalPayload())
+        ->post("/organizations/{$organization->slug}/onboarding/activate-personal", activatePersonalPayload())
         ->assertStatus(429);
 });
 
@@ -207,14 +206,14 @@ test('plan-activate レーンが効く (11 回目は 429)', function (): void {
  *   利用箇所が 1 か所なので assertion を直接書く。
  */
 test('plan-activate レーンを使い切っても再認証は 429 にならない', function (): void {
-    [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     $this->actingAs($owner);
 
     for ($i = 1; $i <= 10; $i++) {
-        expect($this->post('/onboarding/activate-personal', activatePersonalPayload())->getStatusCode())
+        expect($this->post("/organizations/{$organization->slug}/onboarding/activate-personal", activatePersonalPayload())->getStatusCode())
             ->not->toBe(429, "{$i} 回目で既に 429 になりました");
     }
-    expect($this->post('/onboarding/activate-personal', activatePersonalPayload())->getStatusCode())->toBe(429);
+    expect($this->post("/organizations/{$organization->slug}/onboarding/activate-personal", activatePersonalPayload())->getStatusCode())->toBe(429);
 
     // throttle が実際に走ったうえで通ったことを示す (残数ヘッダの存在 + 429 でないこと)
     $recentAuth = $this->post('/recent-auth/password', ['password' => 'wrong-password']);
@@ -225,6 +224,6 @@ test('plan-activate レーンを使い切っても再認証は 429 にならな�
 });
 
 test('未認証は login へ', function (): void {
-    $this->post('/onboarding/activate-personal', activatePersonalPayload())
+    $this->post('/organizations/guest-org/onboarding/activate-personal', activatePersonalPayload())
         ->assertRedirect('/login');
 });

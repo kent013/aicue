@@ -24,7 +24,7 @@ import {
 import { takeUrl } from "@/lib/capture/take-endpoints";
 import type { CaptureCut } from "@/types/capture";
 
-const TARGET = { projectId: 1, manualId: 5 };
+const TARGET = { organizationSlug: "test-org", projectId: 1, manualId: 5 };
 
 function cut(id: number, readyTakeId: number | null, type: "step" | "point" = "step"): CaptureCut {
     return {
@@ -92,9 +92,9 @@ describe("buildPreviewEntries", () => {
 
         expect(entries[0]).toHaveProperty(
             "src",
-            takeUrl({ projectId: 1, manualId: 5, cutId: 101 }, 900, "/playback"),
+            takeUrl({ organizationSlug: "test-org", projectId: 1, manualId: 5, cutId: 101 }, 900, "/playback"),
         );
-        expect(entries[0]).toHaveProperty("src", "/app/projects/1/manuals/5/cuts/101/takes/900/playback");
+        expect(entries[0]).toHaveProperty("src", "/organizations/test-org/app/projects/1/manuals/5/cuts/101/takes/900/playback");
     });
 
     it("cuts の順序をそのまま保つ (手順 → 急所の並びを崩さない)", () => {

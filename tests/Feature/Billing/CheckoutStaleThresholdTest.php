@@ -34,7 +34,7 @@ test('2 日前の stale pending があっても新 token の POST は新規 Chec
         ->stale()
         ->create();
 
-    $this->actingAs($owner)->post('/billing/checkout', [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/checkout", [
         'plan_code' => 'standard',
         'subscription_attempt_token' => (string) Str::ulid(),
     ])->assertRedirectContains('https://checkout.stripe.test/');
@@ -59,11 +59,11 @@ test('同 token + stale pending の再送は checkout_retry_required、境界内
         ->withAttempt($staleToken, 'standard')
         ->create(['created_at' => CarbonImmutable::now()->subHours(25)]);
 
-    $this->actingAs($owner)->post('/billing/checkout', [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/checkout", [
         'plan_code' => 'standard',
         'subscription_attempt_token' => $staleToken,
     ])
-        ->assertRedirect('/billing')
+        ->assertRedirect("/organizations/{$organization->slug}/billing")
         ->assertSessionHas(BillingFeedbackKind::FLASH_KEY, BillingFeedbackKind::CheckoutRetryRequired->value);
 
     // (b) 境界内 (23h59m 前) → replay (既存 checkout_url)
@@ -75,7 +75,7 @@ test('同 token + stale pending の再送は checkout_retry_required、境界内
         ->withAttempt($liveToken, 'standard')
         ->create(['created_at' => CarbonImmutable::now()->subMinutes(23 * 60 + 59)]);
 
-    $this->actingAs($owner2)->post('/billing/checkout', [
+    $this->actingAs($owner2)->post("/organizations/{$organization->slug}/billing/checkout", [
         'plan_code' => 'standard',
         'subscription_attempt_token' => $liveToken,
     ])->assertRedirect('https://checkout.stripe.com/dummy');
@@ -95,8 +95,8 @@ test('state() と startCheckout() は同一閾値を共有する (23h = PendingC
     expect($access->state($org23))->toBe(OnboardingBillingState::PendingCheckout);
 
     $this->actingAs($owner23)
-        ->from('/billing/plans')
-        ->post('/billing/checkout', [
+        ->from("/organizations/{$org23->slug}/billing/plans")
+        ->post("/organizations/{$org23->slug}/billing/checkout", [
             'plan_code' => 'standard',
             'subscription_attempt_token' => (string) Str::ulid(),
         ])
@@ -113,7 +113,7 @@ test('state() と startCheckout() は同一閾値を共有する (23h = PendingC
 
     expect($access->state($org25))->toBe(OnboardingBillingState::ExpiredCheckout);
 
-    $this->actingAs($owner25)->post('/billing/checkout', [
+    $this->actingAs($owner25)->post("/organizations/{$org25->slug}/billing/checkout", [
         'plan_code' => 'standard',
         'subscription_attempt_token' => (string) Str::ulid(),
     ])->assertRedirectContains('https://checkout.stripe.test/');

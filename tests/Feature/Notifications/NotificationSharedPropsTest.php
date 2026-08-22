@@ -19,7 +19,7 @@ test('ログイン時: unreadCount が共有される (既読分は数えない)
     $owner->notify(new ManualAnalyzedNotification($organization->id, $payload));
     $owner->notifications()->firstOrFail()->markAsRead();
 
-    $this->actingAs($owner)->get('/dashboard')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('notifications.unreadCount', 1));

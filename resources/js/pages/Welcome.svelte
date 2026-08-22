@@ -131,7 +131,7 @@
     {#snippet nav()}
         <a href="/pricing" class="text-text-secondary hover:text-primary">料金プラン</a>
         {#if page.isAuthenticated}
-            <a href="/dashboard" class="text-text-secondary hover:text-primary">ダッシュボード</a>
+            <a href="/go" class="text-text-secondary hover:text-primary">ダッシュボード</a>
         {:else}
             <a href="/login" class="text-text-secondary hover:text-primary">ログイン</a>
             <a href="/pricing" class="text-primary hover:text-primary-hover">無料で始める</a>
@@ -153,7 +153,7 @@
             </p>
             <div class="mt-8 flex flex-col gap-3 sm:flex-row">
                 {#if page.isAuthenticated}
-                    <Button href="/dashboard" size="lg" inertia>
+                    <Button href="/go" size="lg" inertia>
                         <LayoutDashboard class="size-5" aria-hidden="true" /> ダッシュボードへ
                     </Button>
                 {:else}
@@ -351,7 +351,7 @@
         </p>
         <div class="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
             {#if page.isAuthenticated}
-                <Button href="/dashboard" size="lg" inertia>
+                <Button href="/go" size="lg" inertia>
                     <LayoutDashboard class="size-5" aria-hidden="true" /> ダッシュボードへ
                 </Button>
             {:else}

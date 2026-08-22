@@ -164,23 +164,6 @@ describe("Dashboard", () => {
         expect(screen.queryByTestId("recent-edit-link")).toBeNull();
     });
 
-    it("空状態: no_organization は組織作成 CTA", () => {
-        render(Dashboard, {
-            props: {
-                dashboard: dashboardData({
-                    state: "no_organization",
-                    role: null,
-                    organization_name: null,
-                    project: null,
-                    billing: null,
-                }),
-            },
-        });
-
-        expect(screen.getByTestId("dashboard-setup-org")).toBeInTheDocument();
-        expect(screen.getByText("組織を作成")).toBeInTheDocument();
-    });
-
     it("空状態: no_project (can_create_project=true) はプロジェクト作成 CTA", () => {
         render(Dashboard, {
             props: {

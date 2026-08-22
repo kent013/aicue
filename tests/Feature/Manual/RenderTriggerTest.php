@@ -60,10 +60,10 @@ function adoptReadyTake(Cut $cut, int $durationMs = 5_000): Take
 
 test('ready + 採用テイク + 残高あり → 201 (job=queued / manual=rendering / version スナップショット / dispatch)', function (): void {
     Queue::fake();
-    [, $owner, $project, $manual] = renderTriggerContext();
+    [$organization, $owner, $project, $manual] = renderTriggerContext();
 
     $response = $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/render",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render",
     );
 
     $response->assertCreated()->assertJson([
@@ -88,11 +88,11 @@ test('ready + 採用テイク + 残高あり → 201 (job=queued / manual=render
 
 test('ready 以外は 409 (type=status_not_renderable。published 直接再レンダも不可)', function (VideoManualStatus $status): void {
     Queue::fake();
-    [, $owner, $project, $manual] = renderTriggerContext();
+    [$organization, $owner, $project, $manual] = renderTriggerContext();
     $manual->forceFill(['status' => $status])->save();
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/render",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render",
     )->assertConflict()->assertJson([
         'code' => 'render_conflict',
         'conflict_type' => 'status_not_renderable',
@@ -108,11 +108,11 @@ test('ready 以外は 409 (type=status_not_renderable。published 直接再レ�
 
 test('in-flight render があると 409 (type=in_flight・DB 不変)', function (): void {
     Queue::fake();
-    [, $owner, $project, $manual] = renderTriggerContext();
+    [$organization, $owner, $project, $manual] = renderTriggerContext();
     RenderJob::factory()->forManual($manual)->create();
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/render",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render",
     )->assertConflict()->assertJson([
         'code' => 'render_conflict',
         'conflict_type' => 'in_flight',
@@ -123,11 +123,11 @@ test('in-flight render があると 409 (type=in_flight・DB 不変)', function 
 
 test('preview の in-flight は render を妨げない (別操作種別 = §10.8-8)', function (): void {
     Queue::fake();
-    [, $owner, $project, $manual] = renderTriggerContext();
+    [$organization, $owner, $project, $manual] = renderTriggerContext();
     RenderJob::factory()->forManual($manual)->preview()->create();
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/render",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render",
     )->assertCreated();
 
     expect(RenderJob::query()->where('kind', RenderKind::Render->value)->count())->toBe(1);
@@ -135,11 +135,11 @@ test('preview の in-flight は render を妨げない (別操作種別 = §10.8
 
 test('直前 render job が failed なら再トリガー 201 (in-flight 不在)', function (): void {
     Queue::fake();
-    [, $owner, $project, $manual] = renderTriggerContext();
+    [$organization, $owner, $project, $manual] = renderTriggerContext();
     RenderJob::factory()->forManual($manual)->failed()->create();
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/render",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render",
     )->assertCreated();
 
     expect(RenderJob::query()->count())->toBe(2);
@@ -147,12 +147,12 @@ test('直前 render job が failed なら再トリガー 201 (in-flight 不在)'
 
 test('採用テイク欠落は 422 (欠落カットの表示ラベルが message に含まれる・status 不変)', function (): void {
     Queue::fake();
-    [, $owner, $project, $manual] = renderTriggerContext();
+    [$organization, $owner, $project, $manual] = renderTriggerContext();
     // 2 本目の step は未採用
     Cut::factory()->forManual($manual)->withSortOrder(1)->create();
 
     $response = $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/render",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render",
     );
 
     $response->assertUnprocessable()->assertJsonValidationErrors(['takes']);
@@ -164,23 +164,23 @@ test('採用テイク欠落は 422 (欠落カットの表示ラベルが message
 
 test('採用テイクが ready でない (processing) 場合も 422', function (): void {
     Queue::fake();
-    [, $owner, $project, $manual, $cut] = renderTriggerContext();
+    [$organization, $owner, $project, $manual, $cut] = renderTriggerContext();
     $take = $cut->adoptedTake;
     expect($take)->not->toBeNull();
     $take?->forceFill(['status' => TakeStatus::Processing->value])->save();
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/render",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render",
     )->assertUnprocessable()->assertJsonValidationErrors(['takes']);
 });
 
 test('尺上限超過は 422 (duration_ms 合計がソフトゲート超過)', function (): void {
     Queue::fake();
     config()->set('manual.render_max_total_source_ms', 4_000);
-    [, $owner, $project, $manual] = renderTriggerContext(); // 採用テイクは 5,000ms
+    [$organization, $owner, $project, $manual] = renderTriggerContext(); // 採用テイクは 5,000ms
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/render",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render",
     )->assertUnprocessable()->assertJsonValidationErrors(['takes']);
     expect(RenderJob::query()->count())->toBe(0);
 });
@@ -188,21 +188,21 @@ test('尺上限超過は 422 (duration_ms 合計がソフトゲート超過)', f
 test('尺上限: Still カットは static_display_seconds×1000 で数える (テイク実尺 5,000ms は無視 → 201)', function (): void {
     Queue::fake();
     config()->set('manual.render_max_total_source_ms', 4_000);
-    [, $owner, $project, $manual, $cut] = renderTriggerContext(); // 採用テイクは 5,000ms
+    [$organization, $owner, $project, $manual, $cut] = renderTriggerContext(); // 採用テイクは 5,000ms
     $cut->forceFill([
         'material_type' => MaterialType::Still->value,
         'static_display_seconds' => 3, // → 3,000ms として加算 (上限 4,000ms 内)
     ])->save();
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/render",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render",
     )->assertCreated();
 });
 
 test('尺上限: Still カットの static_display_seconds 合計が上限超過なら 422 (テイク実尺が小さくても)', function (): void {
     Queue::fake();
     config()->set('manual.render_max_total_source_ms', 4_000);
-    [, $owner, $project, $manual, $cut] = renderTriggerContext();
+    [$organization, $owner, $project, $manual, $cut] = renderTriggerContext();
     $cut->adoptedTake?->forceFill(['duration_ms' => 1_000])->save(); // 実尺は上限内
     $cut->forceFill([
         'material_type' => MaterialType::Still->value,
@@ -210,7 +210,7 @@ test('尺上限: Still カットの static_display_seconds 合計が上限超過
     ])->save();
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/render",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render",
     )->assertUnprocessable()->assertJsonValidationErrors(['takes']);
     expect(RenderJob::query()->count())->toBe(0);
 });
@@ -218,20 +218,20 @@ test('尺上限: Still カットの static_display_seconds 合計が上限超過
 test('尺上限: 合計がちょうど上限なら 201 (境界値。DeterminedCutDuration への切り出しで挙動が動かないことの固定)', function (): void {
     Queue::fake();
     config()->set('manual.render_max_total_source_ms', 5_000);
-    [, $owner, $project, $manual] = renderTriggerContext(); // 採用テイクは 5,000ms ちょうど
+    [$organization, $owner, $project, $manual] = renderTriggerContext(); // 採用テイクは 5,000ms ちょうど
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/render",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render",
     )->assertCreated();
 });
 
 test('尺上限: 合計が上限 +1ms なら 422 (境界値)', function (): void {
     Queue::fake();
     config()->set('manual.render_max_total_source_ms', 4_999);
-    [, $owner, $project, $manual] = renderTriggerContext(); // 採用テイクは 5,000ms
+    [$organization, $owner, $project, $manual] = renderTriggerContext(); // 採用テイクは 5,000ms
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/render",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render",
     )->assertUnprocessable()->assertJsonValidationErrors(['takes']);
     expect(RenderJob::query()->count())->toBe(0);
 });
@@ -240,22 +240,22 @@ test('尺上限: duration_ms NULL の採用テイクは render_default_take_dura
     Queue::fake();
     config()->set('manual.render_default_take_duration_ms', 60_000);
     config()->set('manual.render_max_total_source_ms', 59_999);
-    [, $owner, $project, $manual, $cut] = renderTriggerContext();
+    [$organization, $owner, $project, $manual, $cut] = renderTriggerContext();
     $cut->adoptedTake?->forceFill(['duration_ms' => null])->save();
 
     // 60,000ms (既定値) で数えられ、59,999ms の上限を超えるので 422
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/render",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render",
     )->assertUnprocessable()->assertJsonValidationErrors(['takes']);
     expect(RenderJob::query()->count())->toBe(0);
 });
 
 test('残高不足は 402 (code=insufficient_tickets。job も予約も作らない・status 不変)', function (): void {
     Queue::fake();
-    [, $owner, $project, $manual] = renderTriggerContext(tickets: 2); // cost=3 に不足
+    [$organization, $owner, $project, $manual] = renderTriggerContext(tickets: 2); // cost=3 に不足
 
     $response = $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/render",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render",
     );
 
     $response->assertPaymentRequired()->assertJson(['code' => 'insufficient_tickets']);
@@ -270,7 +270,7 @@ test('preview: ready で 201 (manual status 不変・チケット非消費・ver
     [$organization, $owner, $project, $manual] = renderTriggerContext(tickets: 0);
 
     $response = $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/preview",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/preview",
     );
 
     $response->assertCreated()->assertJson([
@@ -292,21 +292,21 @@ test('preview: ready で 201 (manual status 不変・チケット非消費・ver
 
 test('preview: 採用テイク欠落は許容される (プレースホルダ合成 = 201)', function (): void {
     Queue::fake();
-    [, $owner, $project, $manual] = renderTriggerContext();
+    [$organization, $owner, $project, $manual] = renderTriggerContext();
     Cut::factory()->forManual($manual)->withSortOrder(1)->create(); // 未採用 cut
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/preview",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/preview",
     )->assertCreated();
 });
 
 test('preview: analyzing / rendering は 409 (type=status_not_previewable)', function (VideoManualStatus $status): void {
     Queue::fake();
-    [, $owner, $project, $manual] = renderTriggerContext();
+    [$organization, $owner, $project, $manual] = renderTriggerContext();
     $manual->forceFill(['status' => $status])->save();
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/preview",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/preview",
     )->assertConflict()->assertJson([
         'code' => 'render_conflict',
         'conflict_type' => 'status_not_previewable',
@@ -324,25 +324,25 @@ test('preview: cuts なし (draft) は 422「シナリオがありません」',
     $manual = VideoManual::factory()->forProject($project)->create(); // draft・cuts なし
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/preview",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/preview",
     )->assertUnprocessable()->assertJsonValidationErrors(['scenario']);
     Queue::assertNothingPushed();
 });
 
 test('preview: 同一 manual の in-flight preview は 409 (in_flight)', function (): void {
     Queue::fake();
-    [, $owner, $project, $manual] = renderTriggerContext();
+    [$organization, $owner, $project, $manual] = renderTriggerContext();
     RenderJob::factory()->forManual($manual)->preview()->running()->create();
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/preview",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/preview",
     )->assertConflict()->assertJson(['conflict_type' => 'in_flight']);
 });
 
 test('preview: org 同時 preview 上限で 409 (org_preview_limit。逐次境界)', function (): void {
     Queue::fake();
     config()->set('manual.render_max_inflight_previews_per_org', 2);
-    [, $owner, $project, $manual] = renderTriggerContext();
+    [$organization, $owner, $project, $manual] = renderTriggerContext();
 
     // 同一 org の別 manual に in-flight preview を上限まで積む
     foreach (range(1, 2) as $i) {
@@ -354,7 +354,7 @@ test('preview: org 同時 preview 上限で 409 (org_preview_limit。逐次境�
     }
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/preview",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/preview",
     )->assertConflict()->assertJson(['conflict_type' => 'org_preview_limit']);
     expect(RenderJob::query()->where('video_manual_id', $manual->id)->count())->toBe(0);
 });
@@ -369,10 +369,10 @@ test('preview: 別 org の in-flight preview は上限に数えない (cross-org
     $otherManual = VideoManual::factory()->forProject($otherProject)->create();
     RenderJob::factory()->forManual($otherManual)->preview()->running()->create();
 
-    [, $owner, $project, $manual] = renderTriggerContext();
+    [$organization, $owner, $project, $manual] = renderTriggerContext();
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/preview",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/preview",
     )->assertCreated();
 });
 
@@ -380,27 +380,26 @@ test('撮影者 (project_member) は render/preview とも 403', function (): vo
     Queue::fake();
     [$organization, , $project, $manual] = renderTriggerContext();
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
     attachProjectMember($project, $member, ProjectRole::Member);
 
     $this->actingAs($member)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/render",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render",
     )->assertForbidden();
     $this->actingAs($member)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/preview",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/preview",
     )->assertForbidden();
     Queue::assertNothingPushed();
 });
 
 test('cross-org の manual への POST は 404 (存在オラクル封じ)', function (): void {
-    [, $stranger] = createOrganizationWithOwner('別組織');
+    [$organization, $stranger] = createOrganizationWithOwner('別組織');
     [, , $project, $manual] = renderTriggerContext();
 
     $this->actingAs($stranger)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/render",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render",
     )->assertNotFound();
     $this->actingAs($stranger)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/preview",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/preview",
     )->assertNotFound();
 });
 
@@ -409,16 +408,16 @@ test('cross-project の manual への POST は 404 (scopeBindings)', function ()
     $otherProject = Project::factory()->forOrganization($organization)->create();
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$otherProject->id}/manuals/{$manual->id}/render",
+        "/organizations/{$organization->slug}/projects/{$otherProject->id}/manuals/{$manual->id}/render",
     )->assertNotFound();
 });
 
 test('保護キー (ticket_reservation_id 等) の直送は 422', function (): void {
     Queue::fake();
-    [, $owner, $project, $manual] = renderTriggerContext();
+    [$organization, $owner, $project, $manual] = renderTriggerContext();
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/render",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render",
         ['ticket_reservation_id' => 999, 'video_manual_id' => 999],
     )->assertUnprocessable()->assertJsonValidationErrors(['ticket_reservation_id', 'video_manual_id']);
 
@@ -428,22 +427,22 @@ test('保護キー (ticket_reservation_id 等) の直送は 422', function (): v
 
 test('throttle: render-trigger は 6 回/分 (7 回目は 429)', function (): void {
     Queue::fake();
-    [, $owner, $project, $manual] = renderTriggerContext();
+    [$organization, $owner, $project, $manual] = renderTriggerContext();
 
     foreach (range(1, 6) as $i) {
         $this->actingAs($owner)->postJson(
-            "/projects/{$project->id}/manuals/{$manual->id}/preview",
+            "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/preview",
         ); // 1 回目 201・以降 409 (throttle は応答種別に関係なく数える)
     }
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/preview",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/preview",
     )->assertTooManyRequests();
 });
 
 test('未ログインは 401 (JSON)', function (): void {
-    [, , $project, $manual] = renderTriggerContext();
+    [$organization, , $project, $manual] = renderTriggerContext();
 
-    $this->postJson("/projects/{$project->id}/manuals/{$manual->id}/render")->assertUnauthorized();
-    $this->postJson("/projects/{$project->id}/manuals/{$manual->id}/preview")->assertUnauthorized();
+    $this->postJson("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render")->assertUnauthorized();
+    $this->postJson("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/preview")->assertUnauthorized();
 });

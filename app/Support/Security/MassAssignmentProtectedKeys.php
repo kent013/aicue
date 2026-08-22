@@ -34,7 +34,6 @@ final class MassAssignmentProtectedKeys
             'organization_id',
             'custom_team_id',
             'laratrust_team_id',
-            'current_organization_id',
             'project_id',
             'api_key_id',
             // AI-CUE ドメイン (Project ─< Category / VideoManual ─< SourceDocument / Cut ─< Take)

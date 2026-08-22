@@ -5,7 +5,7 @@
 import type { BillingStateValue } from "@/types/billing";
 import type { VideoManualStatus } from "@/types/manual";
 
-export type DashboardState = "no_organization" | "no_project" | "ready";
+export type DashboardState = "no_project" | "ready";
 export type DashboardRole = "editor" | "shooter" | "viewer";
 export type DashboardJobStatus = "queued" | "running"; // 進行中のみ (terminal は出ない)
 
@@ -73,26 +73,30 @@ export interface DashboardProps {
  * 「コンパイル時に守っているつもり」の空振りになる (T150 の mutation 3 で実測)。
  * `types/manual.ts` の VIDEO_MANUAL_STATUS_LABELS / CAPTURE_NAVIGABLE_BY_STATUS と同じ所在。
  *
- * **CTA の行き先を権限で分岐させない**: /onboarding/checkout は契約済みなら /billing、
- * manageBilling なしなら /billing-required へサーバが捌く (OnboardingController::show)。
- * フロントで認可を再判定しないし、押せないボタンも作らない (禁止事項 8)。
+ * **CTA の行き先を権限で分岐させない**: onboarding.checkout は契約済みなら billing.index、
+ * manageBilling なしなら onboarding.billing-required へサーバが捌く
+ * (OnboardingController::show)。フロントで認可を再判定しないし、押せないボタンも作らない
+ * (禁止事項 8)。
+ *
+ * ★値は**組織相対パス** (`path`) である。組織 URL への写像は利用側が `currentOrgUrl()` で行う
+ *   (家系裁定 AG-037: 業務 route は組織 URL 配下にある)。
  */
 export const BILLING_CALLOUTS = {
     subscribed: null,
     active_free_plan: null,
     no_subscription: {
         body: "ご利用にはプランの選択が必要です。プランを選ぶと機能をご利用いただけます。",
-        cta: { label: "プランを選ぶ", href: "/onboarding/checkout" },
+        cta: { label: "プランを選ぶ", path: "/onboarding/checkout" },
     },
     pending_checkout: {
         body: "お支払いのお手続きが完了していません。ご利用を開始するには、プラン選択からお手続きください。",
-        cta: { label: "プラン選択へ", href: "/onboarding/checkout" },
+        cta: { label: "プラン選択へ", path: "/onboarding/checkout" },
     },
     expired_checkout: {
         body: "サブスクリプションのお支払いが確認できないため、一部機能を一時停止しています。お支払い方法をご確認ください。",
-        cta: { label: "お支払い方法を確認", href: "/billing" },
+        cta: { label: "お支払い方法を確認", path: "/billing" },
     },
 } as const satisfies Record<
     BillingStateValue,
-    { body: string; cta: { label: string; href: string } } | null
+    { body: string; cta: { label: string; path: string } } | null
 >;

@@ -3,6 +3,7 @@
     import Button from "@/components/atoms/Button.svelte";
     import FormField from "@/components/molecules/FormField.svelte";
     import SourceDocumentUploadNotice from "@/components/features/manual/SourceDocumentUploadNotice.svelte";
+    import { currentOrgUrl } from "@/lib/org-url";
 
     /**
      * SOP (手順書) の後付けアップロード (POST .../source-documents。Inertia multipart form)。
@@ -30,7 +31,7 @@
 
     function submit(event: SubmitEvent): void {
         event.preventDefault();
-        form.post(`/projects/${projectId}/manuals/${manualId}/source-documents`, {
+        form.post(currentOrgUrl(`/projects/${projectId}/manuals/${manualId}/source-documents`), {
             onSuccess: () => form.reset(),
         });
     }

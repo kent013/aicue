@@ -6,9 +6,10 @@ namespace App\Http\Controllers\Projects;
 
 use App\Enums\Manual\RenderKind;
 use App\Enums\Manual\VideoManualStatus;
-use App\Http\Concerns\ResolvesCurrentOrganization;
+use App\Http\Concerns\ResolvesRouteOrganization;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Projects\DownloadManualRequest;
+use App\Models\Organization;
 use App\Models\Project;
 use App\Models\VideoManual;
 use App\Services\Manual\CurrentRenderArtifact;
@@ -24,11 +25,10 @@ use Illuminate\Support\Facades\Gate;
  */
 class ManualDownloadController extends Controller
 {
-    use ResolvesCurrentOrganization;
+    use ResolvesRouteOrganization;
 
-    public function show(DownloadManualRequest $request, Project $project, VideoManual $manual, RenderObjectStorage $storage): RedirectResponse
+    public function show(DownloadManualRequest $request, Organization $organization, Project $project, VideoManual $manual, RenderObjectStorage $storage): RedirectResponse
     {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404 ({manual} ∈ {project} は scopeBindings が担保済み)
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('download', $manual);

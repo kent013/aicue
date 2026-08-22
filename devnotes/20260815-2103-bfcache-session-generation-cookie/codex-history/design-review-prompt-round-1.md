@@ -1500,12 +1500,12 @@ final class NoStoreCacheHeadersForAuthenticatedPages
         );
         $middleware->appendToPriorityList(
             EnsureProjectBelongsToApiOrganization::class,
-            EnsureProjectBelongsToCurrentOrganization::class,
+            EnsureProjectBelongsToRouteOrganization::class,
         );
         // テナント guard より後に走ることを確定させる web グループの鎖
         // (guard を binding 直後まで引き上げるための「後続」宣言)。
         foreach ([
-            [EnsureProjectBelongsToCurrentOrganization::class, HandleInertiaRequests::class],
+            [EnsureProjectBelongsToRouteOrganization::class, HandleInertiaRequests::class],
             [HandleInertiaRequests::class, SecurityHeaders::class],
             [SecurityHeaders::class, RequireTwoFactorForEnforcedOrganizations::class],
             [RequireTwoFactorForEnforcedOrganizations::class, BlockTwoFactorDisableForEnforcedOrganizations::class],
@@ -1514,7 +1514,7 @@ final class NoStoreCacheHeadersForAuthenticatedPages
             [EncryptHistory::class, EnsureEmailIsVerified::class],
             [EnsureEmailIsVerified::class, RequireActiveSubscription::class],
             // 退会予約中の凍結。**302 で短絡する**ため、テナント境界 404
-            // (EnsureProjectBelongsToCurrentOrganization) より必ず後に置く。前に置くと
+            // (EnsureProjectBelongsToRouteOrganization) より必ず後に置く。前に置くと
             // 「他組織に実在 = 302 / 不在 = 404」の 1 bit 存在オラクルになる
             // (AGENTS.md セキュリティ不変条件 10)。課金ゲートの直後に置き、未契約組織の
             // ユーザーは 課金ゲート → onboarding → 凍結 → /settings の 2 hop で取消 UI に着く。
@@ -1626,7 +1626,7 @@ test('検査5: 代表 route の解決後 middleware 列を完全一致で固定�
     ];
     // bug-hunt の実行済み route 記録器は web 鎖の**最後** (遮断 middleware より内側)。
     $recorder = BughuntExecutedRouteMiddleware::class;
-    $guard = EnsureProjectBelongsToCurrentOrganization::class;
+    $guard = EnsureProjectBelongsToRouteOrganization::class;
     $billing = RequireActiveSubscription::class;
     // 退会予約中の凍結は**課金ゲートの直後**。テナント境界 404 より必ず後 (302 短絡のため)。
     $freeze = EnsureAccountNotPendingDeletion::class;

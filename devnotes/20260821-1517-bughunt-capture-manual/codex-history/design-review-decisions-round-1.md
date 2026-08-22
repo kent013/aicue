@@ -5,7 +5,7 @@
 ### [Warning] 実行順序の根拠を route group 記述順でなく bootstrap/app.php の実効 priority に
 - 判断: 対応する
 - 根拠: 正しい。SortedMiddleware は priority list で相対順序を強制する。宣言順は証拠にならない。
-- 対応: 施策1 に priority list の実効順 (SubstituteBindings → EnsureProjectBelongsToCurrentOrganization →
+- 対応: 施策1 に priority list の実効順 (SubstituteBindings → EnsureProjectBelongsToRouteOrganization →
   HandleInertiaRequests → … → RequireActiveSubscription → EnsureAccountNotPendingDeletion) を明記。
   テナント境界 404 が subscription/凍結の 302 短絡より前であることを `TenantBoundaryOrderingTest` /
   `ProjectRouteCurrentOrgGuardTest` が固定している旨を引用。adopt route が母集団に含まれることを実装時に確認。

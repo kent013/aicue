@@ -756,7 +756,7 @@ index 608b92f..984687f 100644
 +++ b/tests/Architecture/NestedRouteIdorDefenseTest.php
 @@ -75,7 +75,6 @@ function nestedRouteIdorInventory(): array
          // scopeBindings + 各書き込み Service の tx 内連鎖再解決 (二重防御)。
-         // {project} ∈ current org は project.in-current-org middleware + inline guard の 2 層
+         // {project} ∈ current org は project.in-route-org middleware + inline guard の 2 層
          'capture.manuals.show' => $s,
 -        'capture.manuals.sync' => $s,
          'capture.takes.upload-url' => $s,

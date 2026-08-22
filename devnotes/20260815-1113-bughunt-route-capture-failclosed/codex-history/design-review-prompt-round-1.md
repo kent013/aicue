@@ -633,7 +633,7 @@ priority 鎖 (既存の foreach 配列) の末尾へ 1 行足す:
 
 - [ ] 代表 route (課金ゲート配下の変更系 route を 1 本、`routes/web.php` から選ぶ) の
       **解決後 (priority 適用後) の middleware 列**で、記録器が
-      `Authenticate` / `EnsureProjectBelongsToCurrentOrganization` / `RequireActiveSubscription` /
+      `Authenticate` / `EnsureProjectBelongsToRouteOrganization` / `RequireActiveSubscription` /
       `EnsureAccountNotPendingDeletion` の**すべてより後**にあること。
       列の取得は既存の `Tests\Support\Routing\NestedRouteDefenseInventory::resolvedMiddleware()` を使う
       (同じ正規化を二度書かない)。
@@ -1224,7 +1224,7 @@ final class BughuntCoverageMiddleware
         // テナント guard より後に走ることを確定させる web グループの鎖
         // (guard を binding 直後まで引き上げるための「後続」宣言)。
         foreach ([
-            [EnsureProjectBelongsToCurrentOrganization::class, HandleInertiaRequests::class],
+            [EnsureProjectBelongsToRouteOrganization::class, HandleInertiaRequests::class],
             [HandleInertiaRequests::class, SecurityHeaders::class],
             [SecurityHeaders::class, RequireTwoFactorForEnforcedOrganizations::class],
             [RequireTwoFactorForEnforcedOrganizations::class, BlockTwoFactorDisableForEnforcedOrganizations::class],
@@ -1233,7 +1233,7 @@ final class BughuntCoverageMiddleware
             [EncryptHistory::class, EnsureEmailIsVerified::class],
             [EnsureEmailIsVerified::class, RequireActiveSubscription::class],
             // 退会予約中の凍結。**302 で短絡する**ため、テナント境界 404
-            // (EnsureProjectBelongsToCurrentOrganization) より必ず後に置く。前に置くと
+            // (EnsureProjectBelongsToRouteOrganization) より必ず後に置く。前に置くと
             // 「他組織に実在 = 302 / 不在 = 404」の 1 bit 存在オラクルになる
             // (AGENTS.md セキュリティ不変条件 10)。課金ゲートの直後に置き、未契約組織の
             // ユーザーは 課金ゲート → onboarding → 凍結 → /settings の 2 hop で取消 UI に着く。

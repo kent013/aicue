@@ -83,7 +83,8 @@ test('acceptInvitationIfValid はロック下再検証の敗北で null を返�
     $result = app(OrganizationMembershipService::class)->acceptInvitationIfValid($plainToken, $invitee);
 
     expect($result)->toBeNull();
-    expect($invitee->fresh()?->current_organization_id)->toBe($ownOrganization->id);
+    // 受諾できていないので所属も増えない (組織文脈は URL だけで決まるため保持列は無い)
+    expect($invitee->organizations()->pluck('organizations.id')->all())->toBe([$ownOrganization->id]);
     expect($organization->users()->whereKey($invitee->id)->exists())->toBeFalse();
 });
 

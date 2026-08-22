@@ -5,11 +5,12 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Projects;
 
 use App\DataTransferObjects\Manual\AnalysisJobData;
-use App\Http\Concerns\ResolvesCurrentOrganization;
+use App\Http\Concerns\ResolvesRouteOrganization;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Projects\AnalyzeManualRequest;
 use App\Http\Resources\Manual\AnalysisJobResource;
 use App\Models\AnalysisJob;
+use App\Models\Organization;
 use App\Models\Project;
 use App\Models\User;
 use App\Models\VideoManual;
@@ -28,12 +29,11 @@ use Illuminate\Support\Facades\Gate;
  */
 class ManualAnalysisController extends Controller
 {
-    use ResolvesCurrentOrganization;
+    use ResolvesRouteOrganization;
 
     /** AI 解析トリガー (201 + AnalysisJobResource)。編集者のみ。保護キー直送は 422 */
-    public function store(AnalyzeManualRequest $request, Project $project, VideoManual $manual, AnalysisJobService $analysis): JsonResponse
+    public function store(AnalyzeManualRequest $request, Organization $organization, Project $project, VideoManual $manual, AnalysisJobService $analysis): JsonResponse
     {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404 ({manual} ∈ {project} は scopeBindings が担保済み)
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('analyze', $manual);
@@ -49,9 +49,8 @@ class ManualAnalysisController extends Controller
     }
 
     /** job 状態ポーリング (撮影者も read 可) */
-    public function show(Request $request, Project $project, VideoManual $manual, AnalysisJob $analysisJob): AnalysisJobResource
+    public function show(Request $request, Organization $organization, Project $project, VideoManual $manual, AnalysisJob $analysisJob): AnalysisJobResource
     {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404
         $this->resolveOrganizationProject($organization, $project);
         // {analysisJob} ∈ {manual} は scopeBindings が担保済み。inline 再検査は二重防御

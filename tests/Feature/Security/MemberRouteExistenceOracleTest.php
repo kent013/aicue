@@ -147,7 +147,7 @@ test('未契約組織でも projects.members.destroy の非メンバーと不在
 
     mreoAssertNoOracle(
         fn (string $id) => $this->actingAs($owner)
-            ->delete("/projects/{$project->id}/members/{$id}"),
+            ->delete("/organizations/{$organization->slug}/projects/{$project->id}/members/{$id}"),
         $outsider,
         302,
     );
@@ -160,7 +160,7 @@ test('契約済み組織では projects.members.destroy の非メンバーと不
 
     mreoAssertNoOracle(
         fn (string $id) => $this->actingAs($owner)
-            ->delete("/projects/{$project->id}/members/{$id}"),
+            ->delete("/organizations/{$organization->slug}/projects/{$project->id}/members/{$id}"),
         $outsider,
         404,
     );
@@ -173,7 +173,7 @@ test('projects.members.destroy の正常系 (明示メンバーの削除) は従
     attachProjectMember($project, $member, ProjectRole::Member);
 
     $this->actingAs($owner)
-        ->delete("/projects/{$project->id}/members/{$member->id}")
+        ->delete("/organizations/{$organization->slug}/projects/{$project->id}/members/{$member->id}")
         ->assertRedirect();
 
     expect($project->members()->whereKey($member->id)->exists())->toBeFalse();
@@ -186,6 +186,6 @@ test('projects.members.destroy に暗黙メンバー (pivot 無しの org admin)
 
     // pivot が無い = detach は no-op。挙動非退行 (404 に変わっていない) の確認
     $this->actingAs($owner)
-        ->delete("/projects/{$project->id}/members/{$admin->id}")
+        ->delete("/organizations/{$organization->slug}/projects/{$project->id}/members/{$admin->id}")
         ->assertRedirect();
 });

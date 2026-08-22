@@ -79,10 +79,10 @@ AI-CUE は、現場に既にある**作業手順書(SOP)を起点に**、AI が�
 ### 実行順序の確認 (最重要 — Codex Round1 [Warning] 反映)
 **根拠は route group の記述順ではなく `bootstrap/app.php` の実効 priority list** (`SortedMiddleware` は
 priority に載る middleware 間の相対順序のみ強制する)。実効順:
-`SubstituteBindings` → `EnsureProjectBelongsToCurrentOrganization` (= `project.in-current-org`) →
+`SubstituteBindings` → `EnsureProjectBelongsToRouteOrganization` (= `project.in-route-org`) →
 `HandleInertiaRequests` → … → `RequireActiveSubscription` → `EnsureAccountNotPendingDeletion`。
 - **テナント境界 404** は `SubstituteBindings` (不在 id / scopeBindings の親子不整合 → 404) と
-  `EnsureProjectBelongsToCurrentOrganization` (cross-org → 404) で、**FormRequest 検証より前**に閉じる
+  `EnsureProjectBelongsToRouteOrganization` (cross-org → 404) で、**FormRequest 検証より前**に閉じる
   (AGENTS.md 不変条件 10「層 2 は binding の直後・FormRequest より前で閉じる」)。subscription の
   302 短絡や凍結 302 は**テナント境界 404 より後**に置かれている (存在オラクル防止)。
 - 実測の正本は **`TenantBoundaryOrderingTest`** / `ProjectRouteCurrentOrgGuardTest` / `NestedRouteIdorDefenseTest`

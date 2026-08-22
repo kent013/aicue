@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Middleware;
 
+use App\DataTransferObjects\Organizations\CurrentOrganizationData;
 use App\Models\Organization;
 use App\Models\User;
 use App\Services\Marketing\ContactUrl;
@@ -63,7 +64,7 @@ class HandleInertiaRequests extends Middleware
                 ],
             ],
             'organizations' => $this->organizationsProp($user),
-            'currentOrganization' => $this->currentOrganizationProp($user),
+            'currentOrganization' => $this->currentOrganizationProp($request, $user),
             // 通知センターの未読数 (全 org 横断・自分宛のみ)。closure = Inertia partial reload で
             // 省略可能 (将来の router.reload({ only: ['notifications'] }) ポーリング拡張にも使える)
             'notifications' => [
@@ -130,9 +131,13 @@ class HandleInertiaRequests extends Middleware
     }
 
     /**
-     * ユーザー所属組織の一覧 (組織切替 UI 用。Phase 2c で sidebar に配線する)。
+     * ユーザー所属組織の一覧。
      *
-     * @return list<array{id: int, name: string, isPersonal: bool}>
+     * ★**切替の入力ではない** (家系裁定 AG-037 は切替 endpoint を禁じる)。
+     *   組織文脈は URL だけで決まるので、この一覧は「別の組織の URL への**リンク**」を
+     *   描くためだけに使う。slug を含めるのはそのためである。
+     *
+     * @return list<array{id: int, name: string, slug: string}>
      */
     private function organizationsProp(?User $user): array
     {
@@ -140,25 +145,24 @@ class HandleInertiaRequests extends Middleware
             return [];
         }
 
-        return array_values($user->organizations()->get()
+        return array_values($user->organizations()->orderBy('organizations.name')->get()
             ->map(fn (Organization $organization): array => [
                 'id' => $organization->id,
                 'name' => $organization->name,
-                'isPersonal' => $organization->is_personal,
+                'slug' => $organization->slug,
             ])
             ->all());
     }
 
     /**
      * 現在の組織 + 自分のロール + ナビ表示に必要な最小権限フラグ。
-     * 権限は currentOrganization ($organization) を対象に評価し、OrganizationPolicy を
-     * 唯一の真実源とする (role 直見しない)。Policy は organizationRole($organization)
-     * = laratrust_team_id を明示した strict_check 判定を経由するため、別組織で付与された
-     * 権限は現在組織へ漏れない (cross-org 分離。テストで固定)。
-     * slug は organizations.settings / organizations.api-keys.index ({organization:slug}
-     * バインド) への恒常リンク生成に必須。
-     * defense-in-depth: current_organization_id が万一 (データドリフト等で) 非所属 org を
-     * 指した場合に slug/name を露出しないよう、isMemberOf で membership を再検証して null に倒す。
+     *
+     * ★**URL の binding からのみ導出する** (家系裁定 AG-037)。組織 route 以外では必ず null で、
+     *   「所属している組織のどれか」を裏口から選ばない。保持列は撤去済みである。
+     * ★binder (`MembershipScopedOrganizationBinder`) が「認証済みユーザーが所属する組織」へ
+     *   スコープして解決するので、ここに届く時点で membership は成立している。
+     *   それでも `isMemberOf` を再確認するのは二重防御である (binder の配線が外れたときに
+     *   slug/name を露出しない)。
      *
      * @return array{
      *     id: int,
@@ -169,27 +173,18 @@ class HandleInertiaRequests extends Middleware
      *     canManageApiKeys: bool
      * }|null
      */
-    private function currentOrganizationProp(?User $user): ?array
+    private function currentOrganizationProp(Request $request, ?User $user): ?array
     {
-        $organization = $user?->currentOrganization;
-        if ($user === null || $organization === null) {
+        $organization = $request->route('organization');
+        if ($user === null || ! $organization instanceof Organization) {
             return null;
         }
 
-        // cross-org 防御: current が非所属 org を指していたら共有しない (存在秘匿)。
+        // 二重防御: binding が非所属 org を返したら共有しない (存在秘匿)。
         if (! $user->isMemberOf($organization)) {
             return null;
         }
 
-        return [
-            'id' => $organization->id,
-            'name' => $organization->name,
-            'slug' => $organization->slug,
-            'role' => $user->organizationRole($organization)?->value,
-            // ナビ表示用の最小権限 (settings/billing は view=メンバー全員のためフラグ不要)。
-            // billing 画面内の操作出し分けは既存 canManageBilling prop が担うため shared には載せない。
-            'canManageMembers' => $user->can('manageMembers', $organization),
-            'canManageApiKeys' => $user->can('manageApiKeys', $organization),
-        ];
+        return CurrentOrganizationData::forMember($user, $organization)->toArray();
     }
 }

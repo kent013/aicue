@@ -1280,8 +1280,8 @@ final class AutoRechargeService
             new AutoRechargeFailedNotification(
                 $dedupKey,
                 $organization->name,
-                route('billing.index'),
-                route('billing.tickets.show'),
+                route('billing.index', ['organization' => $organization->slug]),
+                route('billing.tickets.show', ['organization' => $organization->slug]),
             ),
         );
     }
@@ -1297,7 +1297,7 @@ final class AutoRechargeService
             new AutoRechargeDisabledNotification(
                 $dedupKey,
                 $organization->name,
-                route('billing.index'),
+                route('billing.index', ['organization' => $organization->slug]),
             ),
         );
     }
@@ -1330,7 +1330,7 @@ final class AutoRechargeService
                 $config->max_count,
                 $config->consented_max_amount,
                 $organization->pm_last_four,
-                route('billing.index'),
+                route('billing.index', ['organization' => $organization->slug]),
             ),
         );
     }
@@ -1356,7 +1356,7 @@ final class AutoRechargeService
             new AutoRechargeActionRequiredNotification(
                 $dedupKey,
                 $organization->name,
-                $hostedUrl ?? route('billing.index'),
+                $hostedUrl ?? route('billing.index', ['organization' => $organization->slug]),
             ),
         );
     }

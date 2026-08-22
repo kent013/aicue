@@ -43,11 +43,11 @@ function scenarioReportContext(): array
         'subtitle_secondary' => '締め切り確認',
     ]);
 
-    return [$owner, $project, $manual];
+    return [$organization, $owner, $project, $manual];
 }
 
 test('succeeded ジョブの validation_json が verdict props に出る', function (): void {
-    [$owner, $project, $manual] = scenarioReportContext();
+    [$organization, $owner, $project, $manual] = scenarioReportContext();
     $document = SourceDocument::factory()->forManual($manual)->create();
     AnalysisJob::factory()->forManual($manual)->forDocument($document)
         ->succeeded()->withValidation(ScenarioVerdict::NeedsReview, splitRecommended: true)->create();
@@ -66,7 +66,7 @@ test('succeeded ジョブの validation_json が verdict props に出る', funct
 });
 
 test('最新ジョブが failed でも前回 succeeded の所見を出す', function (): void {
-    [$owner, $project, $manual] = scenarioReportContext();
+    [$organization, $owner, $project, $manual] = scenarioReportContext();
     $document = SourceDocument::factory()->forManual($manual)->create();
     AnalysisJob::factory()->forManual($manual)->forDocument($document)
         ->succeeded()->withValidation()->create();
@@ -78,7 +78,7 @@ test('最新ジョブが failed でも前回 succeeded の所見を出す', func
 });
 
 test('validation_json が NULL の旧ジョブでは verdict=null だが counts/findings は出る', function (): void {
-    [$owner, $project, $manual] = scenarioReportContext();
+    [$organization, $owner, $project, $manual] = scenarioReportContext();
     AnalysisJob::factory()->forManual($manual)->succeeded()->create();
 
     $this->actingAs($owner)->get(route('projects.manuals.show', [$project, $manual]))
@@ -88,7 +88,7 @@ test('validation_json が NULL の旧ジョブでは verdict=null だが counts/
 });
 
 test('壊れた validation_json でも 200 で verdict=null になり警告が 1 回残る', function (): void {
-    [$owner, $project, $manual] = scenarioReportContext();
+    [$organization, $owner, $project, $manual] = scenarioReportContext();
     $job = AnalysisJob::factory()->forManual($manual)->succeeded()->create();
     // 保存済みの値が壊れた状況 (cast を通さず生 JSON を書き込む)
     DB::table('analysis_jobs')->where('id', $job->id)
@@ -107,7 +107,7 @@ test('壊れた validation_json でも 200 で verdict=null になり警告が 1
 });
 
 test('手順書を差し替えて未再解析なら is_current_document=false', function (): void {
-    [$owner, $project, $manual] = scenarioReportContext();
+    [$organization, $owner, $project, $manual] = scenarioReportContext();
     $analyzed = SourceDocument::factory()->forManual($manual)->create();
     AnalysisJob::factory()->forManual($manual)->forDocument($analyzed)
         ->succeeded()->withValidation()->create();
@@ -119,7 +119,7 @@ test('手順書を差し替えて未再解析なら is_current_document=false', 
 });
 
 test('解析対象の手順書が消えている (source_document_id=null) なら is_current_document=false', function (): void {
-    [$owner, $project, $manual] = scenarioReportContext();
+    [$organization, $owner, $project, $manual] = scenarioReportContext();
     SourceDocument::factory()->forManual($manual)->create();
     AnalysisJob::factory()->forManual($manual)->succeeded()->withValidation()->create();
 
@@ -129,7 +129,7 @@ test('解析対象の手順書が消えている (source_document_id=null) な�
 });
 
 test('複製直後 (解析ジョブなし・cuts あり) は verdict=null で counts は出る', function (): void {
-    [$owner, $project, $manual] = scenarioReportContext();
+    [$organization, $owner, $project, $manual] = scenarioReportContext();
 
     $this->actingAs($owner)->get(route('projects.manuals.show', [$project, $manual]))
         ->assertInertia(fn (Assert $page) => $page
@@ -147,7 +147,7 @@ test('cuts も所見も無ければ report は null (出す材料が無い)', fu
 });
 
 test('規約違反のある cuts では findings に件数と位置が載る', function (): void {
-    [$owner, $project, $manual] = scenarioReportContext();
+    [$organization, $owner, $project, $manual] = scenarioReportContext();
     Cut::factory()->forManual($manual)->withSortOrder(2)->create([
         'narration' => 'バルブを閉じてください',
         'subtitle_primary' => null,
@@ -167,7 +167,6 @@ test('規約違反のある cuts では findings に件数と位置が載る', f
 test('撮影者 (canManage=false) でも report は props に載る (表示は情報提供であり操作ではない)', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
     $project = Project::factory()->forOrganization($organization)->create();
     attachProjectMember($project, $member, ProjectRole::Member);
     $manual = VideoManual::factory()->forProject($project)->create();
@@ -187,7 +186,7 @@ test('撮影者 (canManage=false) でも report は props に載る (表示は�
 });
 
 test('ScenarioReportBuilder のクエリ本数は cut 件数に依存しない (N+1 なし)', function (): void {
-    [, $project, $manual] = scenarioReportContext();
+    [$organization, , $project, $manual] = scenarioReportContext();
     $document = SourceDocument::factory()->forManual($manual)->create();
     AnalysisJob::factory()->forManual($manual)->forDocument($document)
         ->succeeded()->withValidation()->create();
@@ -222,11 +221,12 @@ test('ScenarioReportBuilder のクエリ本数は cut 件数に依存しない (
 });
 
 test('他組織の manual へは従来どおり 404 (props 追加で経路は変わらない)', function (): void {
-    [, , $manual] = scenarioReportContext();
+    [, , , $manual] = scenarioReportContext();
     [$otherOrganization, $intruder] = createOrganizationWithOwner();
     $otherProject = Project::factory()->forOrganization($otherOrganization)->create();
 
+    // 自分の組織の URL から他組織の manual は開けない (scopeBindings が認可より前に 404)
     $this->actingAs($intruder)
-        ->get("/projects/{$otherProject->id}/manuals/{$manual->id}")
+        ->get("/organizations/{$otherOrganization->slug}/projects/{$otherProject->id}/manuals/{$manual->id}")
         ->assertNotFound();
 });

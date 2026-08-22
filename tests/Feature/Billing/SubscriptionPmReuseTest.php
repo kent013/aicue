@@ -367,9 +367,9 @@ test('着地 flash: 自 org の auto_recharge 完了 session は ?highlight=auto
         ->create();
 
     $this->actingAs($owner)
-        ->get('/billing?session_id='.$session->stripe_session_id)
+        ->get("/organizations/{$organization->slug}/billing?session_id=".$session->stripe_session_id)
         ->assertStatus(303)
-        ->assertRedirect('/billing?highlight=auto-recharge')
+        ->assertRedirect("/organizations/{$organization->slug}/billing?highlight=auto-recharge")
         ->assertSessionHas('info', fn (string $m): bool => str_contains($m, '自動的に有効になります'));
 });
 
@@ -382,7 +382,7 @@ test('着地 flash: marker なし / 同意失効では確定表現を避けた�
         ->create();
 
     $this->actingAs($owner)
-        ->get('/billing?session_id='.$session->stripe_session_id)
+        ->get("/organizations/{$organization->slug}/billing?session_id=".$session->stripe_session_id)
         ->assertStatus(303)
         ->assertSessionHas('info', 'お支払いを受け付けました。オートリチャージの設定はこの画面から確認できます。');
 });
@@ -400,8 +400,8 @@ test('着地 flash: 他 org / setup_payment_method の session_id は T1004 着�
     // F-3-04 以降、?session_id は P9 の feedback 着地として canonical へ畳まれる (303)。
     // 守る不変条件は「T1004 の highlight 着地にならない / 成功文言を出さない」こと。
     $this->actingAs($owner)
-        ->get('/billing?session_id='.$session->stripe_session_id)
-        ->assertRedirect('/billing')
+        ->get("/organizations/{$organization->slug}/billing?session_id=".$session->stripe_session_id)
+        ->assertRedirect("/organizations/{$organization->slug}/billing")
         ->assertSessionMissing('info')
         ->assertSessionMissing(BillingFeedbackKind::FLASH_KEY);
 })->with(['他 org' => [true], 'setup_payment_method' => [false]]);
@@ -420,8 +420,8 @@ test('同意 fail-closed (Request 層): consent_version 欠落 / 旧版は 422 �
     }
 
     $this->actingAs($owner)
-        ->from('/onboarding/checkout')
-        ->post('/billing/checkout', $payload)
+        ->from("/organizations/{$organization->slug}/onboarding/checkout")
+        ->post("/organizations/{$organization->slug}/billing/checkout", $payload)
         ->assertInvalid(['consent_version' => $expectedMessage]);
 
     expect(TicketAutoRecharge::query()->where('organization_id', $organization->id)->exists())->toBeFalse();
@@ -445,7 +445,7 @@ test('同意記録の順序: recordPreConsent → startCheckout の順で走り�
     [$organization, $owner] = createOrganizationWithOwner();
 
     try {
-        $this->withoutExceptionHandling()->actingAs($owner)->post('/billing/checkout', [
+        $this->withoutExceptionHandling()->actingAs($owner)->post("/organizations/{$organization->slug}/billing/checkout", [
             'plan_code' => 'standard',
             'subscription_attempt_token' => (string) Str::ulid(),
             'funding_choice' => SignupFundingChoice::AutoRecharge->value,

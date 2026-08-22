@@ -8,7 +8,7 @@
 
 実行順序の結論自体は正しいです。
 
-Laravel では route middleware を通過した後に controller が呼び出され、FormRequest は controller 引数の解決時に validation されます。したがって、`SubstituteBindings` と `project.in-current-org` が FormRequest より前に配置されていれば、期待順序は次になります。
+Laravel では route middleware を通過した後に controller が呼び出され、FormRequest は controller 引数の解決時に validation されます。したがって、`SubstituteBindings` と `project.in-route-org` が FormRequest より前に配置されていれば、期待順序は次になります。
 
 `404 tenant/binding → 422 FormRequest → 403 controller Gate`
 
@@ -18,7 +18,7 @@ FormRequest は controller 実行前に検証されるため、Gate より先に
 
 - [Warning] 設計書の根拠を route group の記述順から、`bootstrap/app.php` の実効 priority に置き換えてください。
 
-  修正案: `SubstituteBindings → project.in-current-org → require-active-subscription等` の実効順と、その間に 404 以外で短絡する middleware がないことを明記してください。既存 `TenantBoundaryOrderingTest` がこれを固定しているなら、対象 route に adopt が含まれることも確認対象にします。
+  修正案: `SubstituteBindings → project.in-route-org → require-active-subscription等` の実効順と、その間に 404 以外で短絡する middleware がないことを明記してください。既存 `TenantBoundaryOrderingTest` がこれを固定しているなら、対象 route に adopt が含まれることも確認対象にします。
 
 - [Warning] `cross-org + 保護キー` テストは active subscription を持つ fixture だけでは、subscription middleware の短絡順を固定できません。
 

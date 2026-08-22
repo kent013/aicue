@@ -398,11 +398,14 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('render-trigger', function (Request $request): Limit {
             $user = $request->user();
             $userId = $user instanceof User ? (string) $user->id : 'guest';
-            $orgId = $user instanceof User && $user->current_organization_id !== null
-                ? (string) $user->current_organization_id
-                : 'none';
+            // ★組織は **URL の binding からのみ**取る (家系裁定 AG-037)。'none' へ倒さない —
+            //   配線不良を黙って許すと、識別名の改名時にキーの一貫性まで失う。
+            //   「render-trigger 対象 route は必ず organization binding を持つ」は
+            //   RenderTriggerRouteOrganizationParamTest が固定する。
+            $organization = $request->route('organization');
+            Assert::isInstanceOf($organization, Organization::class);
 
-            return Limit::perMinute(6)->by("render-trigger:actor-org:{$userId}:{$orgId}");
+            return Limit::perMinute(6)->by("render-trigger:actor-org:{$userId}:{$organization->id}");
         });
     }
 

@@ -86,7 +86,6 @@ test('直接付与された一般メンバーは /billing/portal が 403 にな�
     billingPermissionService()->grant($member, $organization);
 
     $fresh = $member->fresh();
-    $fresh->forceFill(['current_organization_id' => $organization->id])->save();
 
     // Gate 境界の検証 (Stripe は叩かない)。付与前は 403 になる route。
     expect(Gate::forUser($fresh)->allows('manageBilling', $organization))->toBeTrue();

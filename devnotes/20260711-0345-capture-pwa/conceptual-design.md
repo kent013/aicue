@@ -46,7 +46,7 @@ AI-CUE の使命は「SOP → AI シナリオ → **スマホ（PWA）でナビ�
 
 ### 設計判断（Decision 一覧）
 
-**D1. ルート分離（§10.8-3）** — 撮影 PWA のデータ API は `/api/v1`（dual guard・機械用）とは別の **web ガード route group `/app/projects/{project}/...`** に分離する。既存 middleware をそのまま再利用: `auth` + `verified` + `require-active-subscription` + `project.in-current-org`（= EnsureProjectBelongsToCurrentOrganization。cross-org {project} を FormRequest より前に 404）+ `Route::scopeBindings()`。書き込みは CSRF 必須（Inertia の XSRF-TOKEN cookie）。画面シェルは Inertia ページ、データ endpoint は JSON（DTO + JsonResource。`response()->json()` 直書き禁止に従う）。全 nested route を `NestedRouteIdorDefenseTest` inventory に登録する。
+**D1. ルート分離（§10.8-3）** — 撮影 PWA のデータ API は `/api/v1`（dual guard・機械用）とは別の **web ガード route group `/app/projects/{project}/...`** に分離する。既存 middleware をそのまま再利用: `auth` + `verified` + `require-active-subscription` + `project.in-route-org`（= EnsureProjectBelongsToRouteOrganization。cross-org {project} を FormRequest より前に 404）+ `Route::scopeBindings()`。書き込みは CSRF 必須（Inertia の XSRF-TOKEN cookie）。画面シェルは Inertia ページ、データ endpoint は JSON（DTO + JsonResource。`response()->json()` 直書き禁止に従う）。全 nested route を `NestedRouteIdorDefenseTest` inventory に登録する。
 
 **D2. アップロード予約行 + 署名チケット（§10.8-7 検証専用）** — 新テーブル `take_upload_reservations`（cut_id / organization_id はサーバ導出・protected、client_take_id / size_bytes / content_type / **checksum_sha256（クライアント申告・署名対象）** / video_path（サーバ生成 S3 キー）/ status(**pending|verifying|completed|released**) / expires_at）を**真実源**とし、レスポンスの「署名チケット」は `Crypt::encryptString`（AEAD = 改竄不能）で reservation_id + cut_id + client_take_id + size + content_type + checksum + video_path + 有効期限を封入した**検証専用トークン**とする。`POST .../takes` では:
 - cut は **URL の nested route（`$project->manuals()` → `$manual->cuts()` の scopeBindings）からのみ解決**。

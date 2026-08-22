@@ -179,9 +179,6 @@ test('GET で active prefill 後 POST 前に revoke されても登録は成立�
     expect(app(TicketLedgerService::class)->balance($personalOrg)->totalAvailable())->toBe(0);
     expect($personalOrg->signup_tickets_granted_at)->toBeNull();
 
-    // current_organization_id は個人組織側 (招待組織側でない)
-    expect($user->current_organization_id)->toBe($personalOrg->id);
-
     // session の invitation_token は登録確定で forget されている
     $response->assertSessionMissing('invitation_token');
 

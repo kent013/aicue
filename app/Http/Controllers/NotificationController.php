@@ -7,6 +7,7 @@ namespace App\Http\Controllers;
 use App\DataTransferObjects\Invitations\PendingInvitationForUserDto;
 use App\DataTransferObjects\Notification\NotificationListItemData;
 use App\Enums\Notification\NotificationType;
+use App\Models\Organization;
 use App\Models\User;
 use App\Services\Notification\NotificationCenterService;
 use App\Services\Organization\OrganizationMembershipService;
@@ -25,8 +26,10 @@ use Webmozart\Assert\Assert;
  *   解決する (cross-user は構造的に 404 = 存在オラクル封じ。403 で存在を漏らさない。
  *   1 param ルートのため NestedRouteIdorDefenseTest の inventory 対象外)
  * - open は POST + 303 (GET にしない = prefetch/リンクプレビューによる意図しない既読化防止)
+ * - 通知一覧は**組織 URL 配下**にある (家系裁定 AG-037)。一覧そのものは全 org 横断 (自分宛)
+ *   だが、遷移先の組み立てには URL 上の組織を使う (「いまどの組織か」を保持列から取らない)
  * - open は認可判断 (Gate) を一切複製しない。行うのは (a) 自通知の organization_id と
- *   current org の突合 (自分のデータ同士のルーティング判断) と (b) org→project→manual の
+ *   **URL 上の組織**の突合 (自分のデータ同士のルーティング判断) と (b) org→project→manual の
  *   relation 連鎖による存在解決のみ (「認可より前の 404」層の再利用。Gate::authorize は
  *   遷移先 projects.manuals.show が唯一の判断点)。(b) と遷移の間の TOCTOU
  *   (redirect 直後の削除) は遷移先の標準 404 が受ける (残余は許容)
@@ -39,7 +42,7 @@ class NotificationController extends Controller
     ) {}
 
     /** 通知一覧 (全 org 横断 = 自分宛のみで構造的に閉じる) */
-    public function index(Request $request): Response
+    public function index(Request $request, Organization $organization): Response
     {
         $user = $this->authedUser($request);
         $paginator = $this->notifications->paginateFor($user);
@@ -73,7 +76,7 @@ class NotificationController extends Controller
     }
 
     /** 既読化 + 遷移先のサーバ解決 (POST + 303。開けない場合は一覧へ明示 redirect) */
-    public function open(Request $request, string $notification): RedirectResponse
+    public function open(Request $request, Organization $organization, string $notification): RedirectResponse
     {
         $user = $this->authedUser($request);
         $found = $this->notifications->findOwnOrFail($user, $notification); // cross-user 404
@@ -84,28 +87,32 @@ class NotificationController extends Controller
         // 遷移はすべて 303 (POST → GET の意味論を明示。Inertia の POST visit とも整合)
         return match (true) {
             // manual 系: 通知 org ≠ current org → 案内して一覧へ (自動 org 切替はしない = 驚き最小)
-            $item->isManualJob() && ! $this->belongsToCurrentOrg($user, $item) => redirect()
-                ->route('notifications.index', [], 303)
-                ->with('info', 'この通知は別の組織のものです。組織を切り替えてから開いてください。'),
-            // manual 系: current org → project → manual の relation 連鎖で現存する → manual 画面へ
-            $item->isManualJob() && $this->manualStillExists($user, $item) => redirect()
-                ->route('projects.manuals.show', [$item->projectId(), $item->manualId()], 303),
+            $item->isManualJob() && ! $this->belongsToCurrentOrg($organization, $item) => redirect()
+                ->route('notifications.index', ['organization' => $organization->slug], 303)
+                ->with('info', 'この通知は別の組織のものです。その組織の画面から開いてください。'),
+            // manual 系: URL 上の組織 → project → manual の relation 連鎖で現存する → manual 画面へ
+            $item->isManualJob() && $this->manualStillExists($organization, $item) => redirect()
+                ->route('projects.manuals.show', [
+                    'organization' => $organization->slug,
+                    'project' => $item->projectId(),
+                    'manual' => $item->manualId(),
+                ], 303),
             $item->isManualJob() => redirect()
-                ->route('notifications.index', [], 303)
+                ->route('notifications.index', ['organization' => $organization->slug], 303)
                 ->with('info', '対象の動画マニュアルは削除されています。'),
             $item->type === NotificationType::TicketBalanceLow => redirect()
-                ->route('billing.tickets.show', [], 303),
+                ->route('billing.tickets.show', ['organization' => $organization->slug], 303),
             // 招待通知: 受諾可能な一覧が出る通知センターへ戻す。
             // ★通知 payload は招待 id を持たないため「この招待」を特定できない。
             //   したがって flash は**集合表現**にする (件数 0 のときだけ説明を出す)。
             //   件数は受諾の解決と同一 scope から算出する。
             $item->type === NotificationType::InvitationReceived => $this->membership->pendingInvitationCountFor($user) > 0
-                ? redirect()->route('notifications.index', [], 303)
-                : redirect()->route('notifications.index', [], 303)
+                ? redirect()->route('notifications.index', ['organization' => $organization->slug], 303)
+                : redirect()->route('notifications.index', ['organization' => $organization->slug], 303)
                     ->with('info', '現在有効な招待はありません (取り消し・期限切れ・参加済みの可能性があります)。'),
             // 未知 type (enum⇔DB ドリフト時の防御): 既読化のみ・汎用文言
             default => redirect()
-                ->route('notifications.index', [], 303)
+                ->route('notifications.index', ['organization' => $organization->slug], 303)
                 ->with('info', 'この通知には開ける対象がありません。'),
         };
     }
@@ -136,24 +143,19 @@ class NotificationController extends Controller
         return $user;
     }
 
-    /** 通知の org 文脈 (organization_id 列) が current org と一致するか (認可判断ではない) */
-    private function belongsToCurrentOrg(User $user, NotificationListItemData $item): bool
+    /** 通知の org 文脈 (organization_id 列) が **URL 上の組織**と一致するか (認可判断ではない) */
+    private function belongsToCurrentOrg(Organization $organization, NotificationListItemData $item): bool
     {
         return $item->organizationId !== null
-            && $item->organizationId === $user->current_organization_id;
+            && $item->organizationId === $organization->getKey();
     }
 
     /**
-     * current org → projects() → manuals の relation 連鎖による存在解決 (exists() 1 クエリ。
+     * URL 上の組織 → projects() → manuals の relation 連鎖による存在解決 (exists() 1 クエリ。
      * 認可判断なし = 「認可より前の 404」層の再利用)。
      */
-    private function manualStillExists(User $user, NotificationListItemData $item): bool
+    private function manualStillExists(Organization $organization, NotificationListItemData $item): bool
     {
-        $organization = $user->currentOrganization;
-        if ($organization === null) {
-            return false;
-        }
-
         return $organization->projects()
             ->whereKey($item->projectId())
             ->whereHas('manuals', fn (Builder $query): Builder => $query->whereKey($item->manualId()))

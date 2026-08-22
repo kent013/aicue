@@ -49,7 +49,6 @@ test('recent-auth なしでは移譲できない (確認画面へ redirect)', fu
 test('非 Owner は移譲できない (403)', function (): void {
     [$organization] = createOrganizationWithOwner();
     $admin = attachOrganizationMember($organization, OrganizationRole::Admin);
-    $admin->forceFill(['current_organization_id' => $organization->id])->save();
     $member = attachOrganizationMember($organization);
 
     $response = $this->actingAs($admin)

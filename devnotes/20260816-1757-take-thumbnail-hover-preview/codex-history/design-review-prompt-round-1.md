@@ -830,7 +830,7 @@ import { takeUrl } from "@/lib/capture/take-endpoints";
 route (routes/web.php。認可は意図的に非対称 = 画面は編集者限定 / takes.* は撮影者にも開く):
 
 ```php
-Route::middleware(['require-active-subscription', 'project.in-current-org'])
+Route::middleware(['require-active-subscription', 'project.in-route-org'])
     ->prefix('app')->as('capture.')->group(function (): void {
         Route::scopeBindings()->group(function (): void {
             Route::get('/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take}/playback', [CaptureTakeController::class, 'playback'])->name('takes.playback');

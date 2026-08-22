@@ -23,13 +23,13 @@ use Illuminate\Support\Facades\Route;
  * 機械検証し、将来の route 追加での guard 漏れを構造的に落とす。
  *
  * 組織の解決元が違うため middleware は web / API で 2 本立てになる:
- *  - web (`project.in-current-org` = EnsureProjectBelongsToCurrentOrganization):
+ *  - web (`project.in-route-org` = EnsureProjectBelongsToRouteOrganization):
  *    セッションの current org。API に付けてはならない (API はセッションを持たない)
  *  - API v1 (`api.project-in-org` = EnsureProjectBelongsToApiOrganization):
  *    API キー / OAuth token から確定した request attribute 'organization'
  */
 
-test('web の {project} route は project.in-current-org / API は api.project-in-org を必ず持つ', function (): void {
+test('web の {project} route は project.in-route-org / API は api.project-in-org を必ず持つ', function (): void {
     $checked = 0;
     $violations = [];
 
@@ -44,8 +44,8 @@ test('web の {project} route は project.in-current-org / API は api.project-i
         if (str_starts_with($route->uri(), 'api/')) {
             // API は web セッション (current org) を持たない。誤配線は全 API project route を
             // 404 に落とすため、付いていたら fail させる
-            if (in_array('project.in-current-org', $middleware, true)) {
-                $violations[] = "API route {$name} に web セッション前提の project.in-current-org が付いている";
+            if (in_array('project.in-route-org', $middleware, true)) {
+                $violations[] = "API route {$name} に web セッション前提の project.in-route-org が付いている";
             }
             // API 版の URL 整合 guard は必須 (FormRequest より前に cross-org を 404 に落とす)
             if (! in_array('api.project-in-org', $middleware, true)) {
@@ -57,8 +57,8 @@ test('web の {project} route は project.in-current-org / API は api.project-i
             continue;
         }
 
-        if (! in_array('project.in-current-org', $middleware, true)) {
-            $violations[] = "web route {$name} に project.in-current-org middleware が無い"
+        if (! in_array('project.in-route-org', $middleware, true)) {
+            $violations[] = "web route {$name} に project.in-route-org middleware が無い"
                 .' (cross-org {project} が FormRequest の DB ルールより前に 404 になりません)';
         }
         $checked++;

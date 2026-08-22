@@ -15,6 +15,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
+use Webmozart\Assert\Assert;
 
 /**
  * 課金ゲート: BillingAccess の entitlement 判定で不許可 (= 未契約、または有償プラン契約中の
@@ -33,13 +34,13 @@ use Symfony\Component\HttpFoundation\Response;
  *   到達できることを保証する = 「契約するための画面が契約してないと見られない」詰みの防止)
  *
  * 対象 organization の解決:
- *   1. route に `{organization}` binding があればそれを使う。その際、非メンバー /
- *      不在 org は **認可より前に 404** (テナント存在秘匿)。通常は
- *      MembershipScopedOrganizationBinder が 404 済みのため到達しない
- *      defense-in-depth (binder 回帰時の最終防波堤。403 を返すと存在が漏れる)
- *   2. binding が無い current org スコープ route (/projects 等) は
- *      user の currentOrganization を使う。未設定は controller 側の
- *      ResolvesCurrentOrganization が 404 に倒すため素通しする
+ *   route の `{organization}` binding **だけ**を使う (家系裁定 AG-037: 組織文脈は URL だけで
+ *   決まる。保持列は撤去済み)。非メンバー / 不在 org は **認可より前に 404**
+ *   (テナント存在秘匿)。通常は MembershipScopedOrganizationBinder が 404 済みのため到達しない
+ *   defense-in-depth (binder 回帰時の最終防波堤。403 を返すと存在が漏れる)。
+ *   **binding が無ければ fail-closed (500)** — 課金ゲート配下に組織を持たない route が
+ *   紛れ込んだら黙って通さない。「課金ゲート配下の全 route は組織引数を持つ」は
+ *   BillingGateRouteOrganizationParamTest が固定する。
  */
 final class RequireActiveSubscription
 {
@@ -71,9 +72,6 @@ final class RequireActiveSubscription
         }
 
         $organization = $this->resolveOrganization($request, $user);
-        if ($organization === null) {
-            return $next($request);
-        }
 
         $state = $this->access->state($organization);
         if ($state->grantsAccess()) {
@@ -114,26 +112,25 @@ final class RequireActiveSubscription
     }
 
     /**
-     * gate 対象の Organization を解決する。route binding 優先、無ければ current org。
+     * gate 対象の Organization を解決する。**URL の binding だけ**が出所である。
+     * binding が無い = 配線ミスなので fail-closed (500)。
      */
-    private function resolveOrganization(Request $request, User $user): ?Organization
+    private function resolveOrganization(Request $request, User $user): Organization
     {
         $organization = $request->route('organization');
-        if ($organization instanceof Organization) {
-            // defense-in-depth: 非メンバーがここに到達する = binder の回帰。
-            // 存在秘匿方針に合わせ 404 で abort し、観測可能化して即検知する
-            if (! Gate::forUser($user)->allows('view', $organization)) {
-                Log::warning('non-member passed organization binder (binder regression?)', [
-                    'organization_id' => $organization->id,
-                    'user_id' => $user->id,
-                    'route' => $request->route()?->getName(),
-                ]);
-                abort(404);
-            }
+        Assert::isInstanceOf($organization, Organization::class);
 
-            return $organization;
+        // defense-in-depth: 非メンバーがここに到達する = binder の回帰。
+        // 存在秘匿方針に合わせ 404 で abort し、観測可能化して即検知する
+        if (! Gate::forUser($user)->allows('view', $organization)) {
+            Log::warning('non-member passed organization binder (binder regression?)', [
+                'organization_id' => $organization->id,
+                'user_id' => $user->id,
+                'route' => $request->route()?->getName(),
+            ]);
+            abort(404);
         }
 
-        return $user->currentOrganization;
+        return $organization;
     }
 }

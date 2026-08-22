@@ -55,7 +55,7 @@ function bookendPipelineContext(string $title = 'ネジ締め作業'): array
     $job = AnalysisJob::factory()->forManual($manual)->forDocument($document)->create();
     app(TicketLedgerService::class)->grant($organization, 5, 'テスト残高');
 
-    return [$project, $manual, $job, $document, $owner];
+    return [$organization, $project, $manual, $job, $document, $owner];
 }
 
 function bookendExtractJson(): string
@@ -172,7 +172,7 @@ test('初回生成: 先頭 top-level=導入 / 末尾 top-level=総括 / 間に�
 });
 
 test('再解析は全置換: 導入/総括が重複せず先頭1件・末尾1件のみ', function (): void {
-    [, $manual, $job, $document] = bookendPipelineContext();
+    [, , $manual, $job, $document] = bookendPipelineContext();
     // 事前に無関係な cut がある状態でも全置換される
     Cut::factory()->forManual($manual)->create();
 
@@ -196,7 +196,7 @@ test('再解析は全置換: 導入/総括が重複せず先頭1件・末尾1件
 });
 
 test('再生成の総括再掲は今回生成のみを参照する (旧 cut 不参照)', function (): void {
-    [, $manual, $job, $document] = bookendPipelineContext();
+    [, , $manual, $job, $document] = bookendPipelineContext();
 
     bookendFakeLlm(bookendScenarioJson([['primary' => '旧要点', 'points' => ['旧急所']]]));
     app(AnalysisPipeline::class)->run($job->id);
@@ -227,7 +227,7 @@ test('生成 point / step subtitle が全欠なら総括は定型フォールバ
 });
 
 test('MAX_STEPS(100) 生成 → top-level 102 が切り捨てなく materialize される', function (): void {
-    [, $manual, $job] = bookendPipelineContext();
+    [, , $manual, $job] = bookendPipelineContext();
     $steps = [];
     for ($i = 1; $i <= ScenarioLimits::MAX_STEPS; $i++) {
         $steps[] = ['primary' => "要点{$i}", 'points' => []];
@@ -245,7 +245,7 @@ test('MAX_STEPS(100) 生成 → top-level 102 が切り捨てなく materialize 
 });
 
 test('materialize された 102 件 top-level を編集画面から再保存できる (MAX_TOP_LEVEL_CUTS 整合)', function (): void {
-    [$project, $manual, $job, , $owner] = bookendPipelineContext();
+    [$organization, $project, $manual, $job, , $owner] = bookendPipelineContext();
     $steps = [];
     for ($i = 1; $i <= ScenarioLimits::MAX_STEPS; $i++) {
         $steps[] = ['primary' => "要点{$i}", 'points' => []];
@@ -288,7 +288,7 @@ test('materialize された 102 件 top-level を編集画面から再保存で�
 
     $version = $manual->scenario_version;
     $this->actingAs($owner)->putJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/scenario",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/scenario",
         ['expected_version' => $version, 'steps' => $payloadSteps],
     )->assertOk()->assertJsonPath('scenario_version', $version + 1);
 

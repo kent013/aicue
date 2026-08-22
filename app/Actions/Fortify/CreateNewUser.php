@@ -111,7 +111,7 @@ class CreateNewUser implements CreatesNewUsers
                     // であり、marker (organizations.signup_tickets_granted_at) の先取と付与は
                     // その経路の同一 tx に閉じている。**marker 設定だけをここに残してはならない**
                     // (付与されない marker 済み org = 永久に付与を受けられない org になる)。
-                    $this->provisioning->provisionPersonalOrganization($user);
+                    $this->provisioning->provisionInitialOrganization($user);
                 }
 
                 return $user;

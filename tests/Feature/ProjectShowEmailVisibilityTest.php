@@ -26,18 +26,14 @@ function createEmailVisibilityContext(): array
     [$organization, $owner] = createOrganizationWithOwner();
 
     $admin = attachOrganizationMember($organization, OrganizationRole::Admin);
-    $admin->forceFill(['current_organization_id' => $organization->id])->save();
 
     $member = attachOrganizationMember($organization, OrganizationRole::Member);
-    $member->forceFill([
-        'current_organization_id' => $organization->id,
-        'email' => 'member@example.com',
-    ])->save();
+    $member->forceFill(['email' => 'member@example.com'])->save();
 
     $project = Project::factory()->forOrganization($organization)->create();
     attachProjectMember($project, $member, ProjectRole::Member);
 
-    return [$owner, $member, $admin, $project];
+    return [$organization, $owner, $member, $admin, $project];
 }
 
 /**
@@ -51,9 +47,9 @@ function emailVisibilityRows(mixed $members): array
 }
 
 it('管理権限のない project member には email を出さない (キーは常在・値 null)', function (): void {
-    [, $member, , $project] = createEmailVisibilityContext();
+    [$organization, , $member, , $project] = createEmailVisibilityContext();
 
-    $response = $this->actingAs($member)->get("/projects/{$project->id}");
+    $response = $this->actingAs($member)->get("/organizations/{$organization->slug}/projects/{$project->id}");
 
     $response->assertOk();
     // members には暗黙メンバー (org Owner/Admin = implicit) と明示メンバー (self) の両方が
@@ -80,10 +76,10 @@ it('管理権限のない project member には email を出さない (キーは
 });
 
 it('project_admin には email を出す', function (): void {
-    [, $member, , $project] = createEmailVisibilityContext();
+    [$organization, , $member, , $project] = createEmailVisibilityContext();
     $project->members()->updateExistingPivot($member->id, ['role' => ProjectRole::Admin->value]);
 
-    $response = $this->actingAs($member)->get("/projects/{$project->id}");
+    $response = $this->actingAs($member)->get("/organizations/{$organization->slug}/projects/{$project->id}");
 
     $response->assertOk();
     $response->assertInertia(fn (AssertableInertia $page): AssertableInertia => $page
@@ -96,9 +92,9 @@ it('project_admin には email を出す', function (): void {
 });
 
 it('org Owner には email を出す', function (): void {
-    [$owner, , , $project] = createEmailVisibilityContext();
+    [$organization, $owner, , , $project] = createEmailVisibilityContext();
 
-    $response = $this->actingAs($owner)->get("/projects/{$project->id}");
+    $response = $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}");
 
     $response->assertOk();
     $response->assertInertia(fn (AssertableInertia $page): AssertableInertia => $page
@@ -111,11 +107,11 @@ it('org Owner には email を出す', function (): void {
 });
 
 it('org Admin には email を出す (project 明示メンバーでなくとも can(update) 継承)', function (): void {
-    [, , $admin, $project] = createEmailVisibilityContext();
+    [$organization, , , $admin, $project] = createEmailVisibilityContext();
 
     // org Admin は project の明示メンバーでなくとも can('update', $project) のため
     // email 可視 = gate が can('update') 単一根拠であることの回帰検知。
-    $response = $this->actingAs($admin)->get("/projects/{$project->id}");
+    $response = $this->actingAs($admin)->get("/organizations/{$organization->slug}/projects/{$project->id}");
 
     $response->assertOk();
     $response->assertInertia(fn (AssertableInertia $page): AssertableInertia => $page

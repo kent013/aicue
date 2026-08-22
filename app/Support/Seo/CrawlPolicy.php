@@ -15,11 +15,13 @@ final class CrawlPolicy
     public function disallowedPaths(): array
     {
         return [
-            '/dashboard',
-            '/projects',
+            // 業務 route はすべて組織 URL 配下にある (家系裁定 AG-037)。個別の業務 prefix を
+            // 並べる必要はなく、`/organizations` 1 本で配下ごと閉じる。
             '/organizations',
+            // 組織文脈を持たない入口 (所属数で分岐するだけだが認証必須)
+            '/app',
+            '/go',
             '/settings',
-            '/billing',
             '/invitations',
             '/recent-auth',
             '/api/',

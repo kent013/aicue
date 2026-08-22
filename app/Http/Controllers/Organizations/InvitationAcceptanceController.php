@@ -105,9 +105,10 @@ class InvitationAcceptanceController extends Controller
             $organization = $membership->acceptInvitation($token, $user);
         } catch (ValidationException $e) {
             // back 先が GET /invitations/accept (404 になり得る) のため dashboard へ逃がす
-            return redirect()->route('dashboard')->with('error', $e->getMessage());
+            return redirect()->route('app.entry')->with('error', $e->getMessage());
         }
 
-        return redirect()->route('dashboard')->with('success', "「{$organization->name}」に参加しました");
+        return redirect()->route('dashboard', ['organization' => $organization->slug])
+            ->with('success', "「{$organization->name}」に参加しました");
     }
 }

@@ -44,15 +44,16 @@ final class RegisterResponse implements RegisterResponseContract
         $user = $request->user();
         Assert::isInstanceOf($user, User::class);
 
-        // 招待受諾は CreateNewUser の tx 内で完了しており、成立時は個人組織を作らない。
-        // 「個人組織の有無」が招待経由かどうかの唯一の判定軸 (?-> で握り潰さず分岐を明示する)。
-        $personalOrganization = $user->organizations()->where('is_personal', true)->first();
+        // 招待受諾は CreateNewUser の tx 内で完了しており、成立時は初期組織を作らない。
+        // 種別フラグは撤去済み (家系裁定 AG-038) なので、判定軸は「所属組織の有無」である
+        // (?-> で握り潰さず分岐を明示する)。
+        $initialOrganization = $user->organizations()->orderBy('organizations.id')->first();
 
-        if ($personalOrganization instanceof Organization) {
+        if ($initialOrganization instanceof Organization) {
             // pending → org-scoped へ移送 (pending は必ず forget で消費される)。
-            $this->intendedPlanResolver->promotePendingToOrganization($personalOrganization);
+            $this->intendedPlanResolver->promotePendingToOrganization($initialOrganization);
             // 生 URL ではなく組織 id のみ保持する (参照時に membership 確認 + route 再構築)。
-            EmailVerificationContinuation::remember($request->session(), $personalOrganization->id);
+            EmailVerificationContinuation::remember($request->session(), $initialOrganization->id);
         } else {
             // 招待経由: 料金表由来の pending が残っていても消費しない (stale 防止)。
             $this->intendedPlanResolver->forgetPending();

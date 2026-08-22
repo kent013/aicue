@@ -15,6 +15,7 @@
     import type { PaginationMeta } from "@/types/manual";
     import type { PendingInvitation } from "@/types/invitation";
     import type { NotificationItem } from "@/types/notification";
+    import { currentOrgUrl } from "@/lib/org-url";
 
     /**
      * 通知一覧 (全 org 横断 = 自分宛のみ)。行クリックはサーバ解決の open (POST + 303)。
@@ -45,7 +46,7 @@
     function markAllRead(): void {
         if (markingAll) return; // 連打ガード (disabled 属性ではなく送信ガード)
         router.post(
-            "/notifications/read-all",
+            currentOrgUrl("/notifications/read-all"),
             {},
             {
                 onStart: () => {
@@ -59,7 +60,7 @@
     }
 
     function goToPage(pageNumber: number): void {
-        router.get("/notifications", { page: pageNumber });
+        router.get(currentOrgUrl("/notifications"), { page: pageNumber });
     }
 </script>
 

@@ -7,8 +7,9 @@ namespace App\Http\Controllers\Admin;
 use App\DataTransferObjects\Admin\InvitationRowData;
 use App\DataTransferObjects\Admin\MemberRowData;
 use App\Enums\ProjectRole;
-use App\Http\Concerns\ResolvesCurrentOrganization;
+use App\Http\Concerns\ResolvesRouteOrganization;
 use App\Http\Controllers\Controller;
+use App\Models\Organization;
 use App\Models\OrganizationInvitation;
 use App\Models\User;
 use App\Services\Project\DefaultProjectResolver;
@@ -28,14 +29,13 @@ use Webmozart\Assert\Assert;
  */
 class UserManagementController extends Controller
 {
-    use ResolvesCurrentOrganization;
+    use ResolvesRouteOrganization;
 
     public function index(
-        Request $request,
+        Request $request, Organization $organization,
         DefaultProjectResolver $defaultProjects,
         LastLoginLookup $lastLogins,
     ): Response {
-        $organization = $this->resolveCurrentOrganization($request);
         Gate::authorize('manageMembers', $organization); // 撮影者・一般メンバーは 403
 
         $user = $request->user();

@@ -51,7 +51,7 @@
 
 **確認結果**
 
-- S2 の priority pin 方針自体は妥当です。`ResolveApiActor → SubstituteBindings → api.project-in-org → project.in-current-org` の鎖は、解決済み middleware 列で固定すれば検証可能です。
+- S2 の priority pin 方針自体は妥当です。`ResolveApiActor → SubstituteBindings → api.project-in-org → project.in-route-org` の鎖は、解決済み middleware 列で固定すれば検証可能です。
 - S3-a の `scopeBindings()` + `Organization::users()` は、Laravel の `BelongsToMany` 子 binding が related table の column を修飾するため、pivot の `id` 曖昧参照リスクは低いです。Feature テストで固定すれば十分です。
 - S5 の `config('trustedproxy.proxies')` fallback は、`at:` を渡さず static `TrustProxies::at()` も使わない前提なら Laravel 12 の提供抜粋上は成立します。問題は fallback ではなく config/validator の値検証です。
 - Frontend 変更は実質なしのため、DESIGN.md / Atomic Design は該当なしです。DTO/JsonResource パターンも本件の本線では破っていません。

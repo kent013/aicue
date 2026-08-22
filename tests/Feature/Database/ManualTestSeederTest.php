@@ -44,7 +44,7 @@ test('ロール × プラン総当たりのユーザーと組織を作成する'
 
             expect($user)->not->toBeNull();
             expect($user?->organizationRole($organization))->toBe($role);
-            expect($user?->current_organization_id)->toBe($organization?->id);
+            expect($user?->organizations()->whereKey($organization?->id)->exists())->toBeTrue();
             expect(Hash::check('password123', $user?->getAttribute('password') ?? ''))->toBeTrue();
         }
     }

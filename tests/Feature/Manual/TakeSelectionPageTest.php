@@ -35,15 +35,15 @@ function takeSelectionContext(string $manualStatus = 'ready'): array
     return [$organization, $owner, $project, $manual, $cut];
 }
 
-function takeSelectionPath(Project $project, VideoManual $manual, Cut $cut): string
+function takeSelectionPath(Organization $organization, Project $project, VideoManual $manual, Cut $cut): string
 {
-    return "/projects/{$project->id}/manuals/{$manual->id}/cuts/{$cut->id}/takes";
+    return "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/cuts/{$cut->id}/takes";
 }
 
 test('org owner (編集者) は 200 で Manuals/Takes を受け取り cut.label が 手順1 になる', function (): void {
     [, $owner, $project, $manual, $cut] = takeSelectionContext();
 
-    $response = $this->actingAs($owner)->get(takeSelectionPath($project, $manual, $cut));
+    $response = $this->actingAs($owner)->get(takeSelectionPath($organization, $project, $manual, $cut));
 
     $response->assertOk();
     $response->assertInertia(fn ($page) => $page
@@ -63,7 +63,7 @@ test('point の cut は 急所1-1 のラベルになる (CutSequencer と同じ�
     $point = Cut::factory()->asPointOf($step)->withSortOrder(0)->create();
 
     $this->actingAs($owner)
-        ->get(takeSelectionPath($project, $manual, $point))
+        ->get(takeSelectionPath($organization, $project, $manual, $point))
         ->assertInertia(fn ($page) => $page->where('cut.label', '急所1-1'));
 });
 
@@ -73,7 +73,7 @@ test('親を持たない急所 (データ異常) でも画面は開き中立ラ�
     $orphan = Cut::factory()->forManual($manual)->create(['type' => 'point']);
 
     $this->actingAs($owner)
-        ->get(takeSelectionPath($project, $manual, $orphan))
+        ->get(takeSelectionPath($organization, $project, $manual, $orphan))
         ->assertOk()
         ->assertInertia(fn ($page) => $page->where('cut.label', 'カット'));
 });
@@ -82,18 +82,16 @@ test('project_admin (編集者) も 200 で閲覧できる', function (): void {
     [$organization, , $project, $manual, $cut] = takeSelectionContext();
     $editor = attachOrganizationMember($organization);
     attachProjectMember($project, $editor, ProjectRole::Admin);
-    $editor->forceFill(['current_organization_id' => $organization->id])->save();
 
-    $this->actingAs($editor)->get(takeSelectionPath($project, $manual, $cut))->assertOk();
+    $this->actingAs($editor)->get(takeSelectionPath($organization, $project, $manual, $cut))->assertOk();
 });
 
 test('project_member (撮影者) は 403 (PWA 側に採用導線があるため詰みではない)', function (): void {
     [$organization, , $project, $manual, $cut] = takeSelectionContext();
     $shooter = attachOrganizationMember($organization);
     attachProjectMember($project, $shooter, ProjectRole::Member);
-    $shooter->forceFill(['current_organization_id' => $organization->id])->save();
 
-    $this->actingAs($shooter)->get(takeSelectionPath($project, $manual, $cut))->assertForbidden();
+    $this->actingAs($shooter)->get(takeSelectionPath($organization, $project, $manual, $cut))->assertForbidden();
 });
 
 test('cross-org の {project} は認可より前に 404', function (): void {
@@ -104,21 +102,21 @@ test('cross-org の {project} は認可より前に 404', function (): void {
     $cutB = Cut::factory()->forManual($manualB)->create();
     expect($ownerB)->not->toBeNull();
 
-    $this->actingAs($ownerA)->get(takeSelectionPath($projectB, $manualB, $cutB))->assertNotFound();
+    $this->actingAs($ownerA)->get(takeSelectionPath($organization, $projectB, $manualB, $cutB))->assertNotFound();
 });
 
 test('cross-project の {manual} は 404', function (): void {
     [$organization, $owner, , $manual, $cut] = takeSelectionContext();
     $otherProject = Project::factory()->forOrganization($organization)->create();
 
-    $this->actingAs($owner)->get(takeSelectionPath($otherProject, $manual, $cut))->assertNotFound();
+    $this->actingAs($owner)->get(takeSelectionPath($organization, $otherProject, $manual, $cut))->assertNotFound();
 });
 
 test('cross-manual の {cut} は 404', function (): void {
     [, $owner, $project, , $cut] = takeSelectionContext();
     $otherManual = VideoManual::factory()->forProject($project)->create();
 
-    $this->actingAs($owner)->get(takeSelectionPath($project, $otherManual, $cut))->assertNotFound();
+    $this->actingAs($owner)->get(takeSelectionPath($organization, $project, $otherManual, $cut))->assertNotFound();
 });
 
 test('takes は sort_order 昇順で並び downloaded / has_thumbnail が反映される', function (): void {
@@ -127,7 +125,7 @@ test('takes は sort_order 昇順で並び downloaded / has_thumbnail が反映�
     $first = Take::factory()->forCut($cut)->withThumbnail()->create(['sort_order' => 0]);
 
     $this->actingAs($owner)
-        ->get(takeSelectionPath($project, $manual, $cut))
+        ->get(takeSelectionPath($organization, $project, $manual, $cut))
         ->assertInertia(fn ($page) => $page
             ->where('takes.0.id', $first->id)
             ->where('takes.0.downloaded', false)
@@ -143,7 +141,7 @@ test('採用テイクは cut.adopted に id と status で載る', function (): 
     $cut->forceFill(['adopted_take_id' => $take->id])->save();
 
     $this->actingAs($owner)
-        ->get(takeSelectionPath($project, $manual, $cut))
+        ->get(takeSelectionPath($organization, $project, $manual, $cut))
         ->assertInertia(fn ($page) => $page
             ->where('cut.adopted.id', $take->id)
             ->where('cut.adopted.status', 'ready'));
@@ -153,7 +151,7 @@ test('props に署名 URL / 保存パス / ACK トークンのスロットが一
     [, $owner, $project, $manual, $cut] = takeSelectionContext();
     Take::factory()->forCut($cut)->withThumbnail()->create();
 
-    $response = $this->actingAs($owner)->get(takeSelectionPath($project, $manual, $cut));
+    $response = $this->actingAs($owner)->get(takeSelectionPath($organization, $project, $manual, $cut));
 
     $response->assertOk();
     $props = $response->viewData('page')['props'];
@@ -171,8 +169,8 @@ test('未契約組織は onboarding へ遮断される (課金ゲートの中に
     $cut = Cut::factory()->forManual($manual)->create();
 
     $this->actingAs($owner)
-        ->get(takeSelectionPath($project, $manual, $cut))
-        ->assertRedirect(route('onboarding.checkout'));
+        ->get(takeSelectionPath($organization, $project, $manual, $cut))
+        ->assertRedirect(route('onboarding.checkout', ['organization' => $organization->slug]));
 });
 
 test('cut の計画 (material_type) と採用テイクの実体が props に載る', function (): void {
@@ -184,7 +182,7 @@ test('cut の計画 (material_type) と採用テイクの実体が props に載�
     $cut->forceFill(['adopted_take_id' => $take->id])->save();
 
     $this->actingAs($owner)
-        ->get(takeSelectionPath($project, $manual, $cut))
+        ->get(takeSelectionPath($organization, $project, $manual, $cut))
         ->assertInertia(fn ($page) => $page
             ->where('cut.material_type', 'still')
             ->where('cut.adopted.material_type', 'still')
@@ -196,7 +194,7 @@ test('計画未指定 + 動画テイクでは cut.material_type が null / take 
     Take::factory()->forCut($cut)->create();
 
     $this->actingAs($owner)
-        ->get(takeSelectionPath($project, $manual, $cut))
+        ->get(takeSelectionPath($organization, $project, $manual, $cut))
         ->assertInertia(fn ($page) => $page
             ->where('cut.material_type', null)
             ->where('takes.0.material_type', 'video'));

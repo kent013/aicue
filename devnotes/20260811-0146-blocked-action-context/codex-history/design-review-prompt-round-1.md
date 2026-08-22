@@ -802,7 +802,7 @@ use Symfony\Component\HttpFoundation\Response;
  *   (課金ゲート `RequireActiveSubscription` と同じ契約)。
  *
  * ★**実行位置は `bootstrap/app.php` の priority list が正本**で、テナント境界 404
- *   (`EnsureProjectBelongsToCurrentOrganization`) より**必ず後**に置く。前に置くと
+ *   (`EnsureProjectBelongsToRouteOrganization`) より**必ず後**に置く。前に置くと
  *   「他組織に実在 = 302 / 不在 = 404」の 1 bit 存在オラクルになる
  *   (AGENTS.md セキュリティ不変条件 10)。
  *

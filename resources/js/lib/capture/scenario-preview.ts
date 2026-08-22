@@ -97,7 +97,7 @@ export const PREVIEW_STALL_TIMEOUT_MS = 20_000;
 export function buildPreviewEntries(
     cuts: CaptureCut[],
     labels: Record<number, string>,
-    target: { projectId: number; manualId: number },
+    target: { organizationSlug: string; projectId: number; manualId: number },
 ): PreviewEntry[] {
     return cuts.map((cut): PreviewEntry => {
         const label = labels[cut.id] ?? "カット";
@@ -120,7 +120,12 @@ export function buildPreviewEntries(
             subtitlePrimary: cut.subtitle_primary,
             subtitleSecondary: cut.subtitle_secondary,
             src: takeUrl(
-                { projectId: target.projectId, manualId: target.manualId, cutId: cut.id },
+                {
+                    organizationSlug: target.organizationSlug,
+                    projectId: target.projectId,
+                    manualId: target.manualId,
+                    cutId: cut.id,
+                },
                 takeId,
                 "/playback",
             ),

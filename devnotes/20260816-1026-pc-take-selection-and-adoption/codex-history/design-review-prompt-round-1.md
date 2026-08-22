@@ -253,7 +253,7 @@ use Inertia\Response;
  * テイク選択・採用画面 (doc/04)。編集者がカットごとのテイクを見て採用を確定する面。
  *
  * nested route の URL 整合は 2 層 (認可より前に 404):
- * 1. {project} ∈ current org (project.in-current-org middleware + resolveOrganizationProject)
+ * 1. {project} ∈ current org (project.in-route-org middleware + resolveOrganizationProject)
  * 2. {manual} ∈ {project}, {cut} ∈ {manual} (Route::scopeBindings())
  *
  * 本 controller は**読み取りのみ**である。採用・削除・アップロード・再生は
@@ -1319,7 +1319,7 @@ export function createMemoryPendingStore(): PendingStore {
 ### routes/web.php (業務 route group と 撮影 PWA group)
 
 ```php
-Route::middleware(['require-active-subscription', 'project.in-current-org'])->group(function (): void {
+Route::middleware(['require-active-subscription', 'project.in-route-org'])->group(function (): void {
     // …projects.* …
     Route::scopeBindings()->group(function (): void {
         Route::get('/projects/{project}/manuals/{manual}', [VideoManualController::class, 'show'])->name('projects.manuals.show');
@@ -1330,7 +1330,7 @@ Route::middleware(['require-active-subscription', 'project.in-current-org'])->gr
     });
 });
 
-Route::middleware(['require-active-subscription', 'project.in-current-org'])
+Route::middleware(['require-active-subscription', 'project.in-route-org'])
     ->prefix('app')->as('capture.')->group(function (): void {
         Route::scopeBindings()->group(function (): void {
             Route::post('/projects/{project}/manuals/{manual}/cuts/{cut}/takes/upload-url', [TakeUploadUrlController::class, 'store'])->name('takes.upload-url');

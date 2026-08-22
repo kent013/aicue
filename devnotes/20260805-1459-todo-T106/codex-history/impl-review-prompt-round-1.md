@@ -4016,7 +4016,7 @@ index b226506..2a42510 100644
  use App\Http\Middleware\EnforceMcpTransport;
  use App\Http\Middleware\EnsureEmailIsVerifiedOrBack;
 +use App\Http\Middleware\EnsureLoginMethodRemains;
- use App\Http\Middleware\EnsureProjectBelongsToCurrentOrganization;
+ use App\Http\Middleware\EnsureProjectBelongsToRouteOrganization;
  use App\Http\Middleware\HandleInertiaRequests;
  use App\Http\Middleware\IdempotentRequest;
  use App\Http\Middleware\McpConsentOrganizationBinder;

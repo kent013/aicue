@@ -127,6 +127,16 @@ $item = Item::factory()->forProject($project)->create();
 明示 State + 親 Factory 連鎖のパターンに揃えること
 ([docs/app-integration-guide.md](app-integration-guide.md) §2)。
 
+### OrganizationSlugRename
+
+識別名の改名履歴 (家系裁定 AG-046)。`renamedAt(CarbonImmutable)` state で窓の判定を
+組み立てられる。**旧識別名は予約せず解放する**ため `from_slug` / `to_slug` に
+一意制約は無い (Factory も重複を作れる)。
+
+```php
+OrganizationSlugRename::factory()->for($organization)->renamedAt($at)->create();
+```
+
 ## Seeder
 
 参照データの Seeder は依存順に分割されている (DatabaseSeeder の call 順):

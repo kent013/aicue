@@ -40,7 +40,7 @@ it('assignableUsers は id/name のみで既存メンバー(明示・暗黙)と�
     $project = Project::factory()->forOrganization($organization)->create();
     attachProjectMember($project, $assigned, ProjectRole::Member);
 
-    $response = $this->actingAs($owner)->get("/projects/{$project->id}");
+    $response = $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}");
 
     $response->assertOk();
     $response->assertInertia(fn (AssertableInertia $page): AssertableInertia => $page
@@ -67,14 +67,13 @@ it('assignableUsers は id/name のみで既存メンバー(明示・暗黙)と�
 it('canManage=false の閲覧者には assignableUsers=[] かつ member email も null', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $viewer = attachOrganizationMember($organization);
-    $viewer->forceFill(['current_organization_id' => $organization->id])->save();
     // 未所属の org member。canManage=true なら候補に出るため、[] が空虚な真でないことを担保する。
     attachOrganizationMember($organization);
     $project = Project::factory()->forOrganization($organization)->create();
     // viewer は project_member (閲覧のみ = can('update') 不可)。owner は暗黙メンバー。
     attachProjectMember($project, $viewer, ProjectRole::Member);
 
-    $response = $this->actingAs($viewer)->get("/projects/{$project->id}");
+    $response = $this->actingAs($viewer)->get("/organizations/{$organization->slug}/projects/{$project->id}");
 
     $response->assertOk();
     $response->assertInertia(fn (AssertableInertia $page): AssertableInertia => $page

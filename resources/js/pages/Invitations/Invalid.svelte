@@ -25,7 +25,7 @@
             招待を送った担当者に、新しい招待リンクの再送を依頼してください。
         </p>
         {#if isAuthenticated}
-            <TextLink href="/dashboard">ダッシュボードへ戻る</TextLink>
+            <TextLink href="/go">ダッシュボードへ戻る</TextLink>
         {:else}
             <div class="flex justify-center gap-4">
                 <TextLink href="/login">ログイン</TextLink>

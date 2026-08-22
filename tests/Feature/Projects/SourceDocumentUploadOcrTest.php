@@ -49,21 +49,21 @@ function fakePngFile(string $name = 'sop.png'): UploadedFile
 
 test('jpg/png アップロードが成功する', function (): void {
     Storage::fake();
-    [, $owner, $project] = ocrUploadContext();
+    [$organization, $owner, $project] = ocrUploadContext();
 
     // jpg/png それぞれ別マニュアルで検証する (1 手順書 1 枚制約の干渉を避ける)
     $jpgManual = VideoManual::factory()->forProject($project)->create();
     $pngManual = VideoManual::factory()->forProject($project)->create();
 
     $this->actingAs($owner)->post(
-        "/projects/{$project->id}/manuals/{$jpgManual->id}/source-documents",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$jpgManual->id}/source-documents",
         ['document' => fakeJpegFile()],
     )->assertRedirect();
     $jpgDocument = $jpgManual->sourceDocuments()->firstOrFail();
     expect($jpgDocument->mime)->toBe('image/jpeg');
 
     $this->actingAs($owner)->post(
-        "/projects/{$project->id}/manuals/{$pngManual->id}/source-documents",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$pngManual->id}/source-documents",
         ['document' => fakePngFile()],
     )->assertRedirect();
     $pngDocument = $pngManual->sourceDocuments()->firstOrFail();
@@ -72,14 +72,14 @@ test('jpg/png アップロードが成功する', function (): void {
 
 test('HEIC は引き続き 422 で拒否される', function (): void {
     Storage::fake();
-    [, $owner, $project, $manual] = ocrUploadContext();
+    [$organization, $owner, $project, $manual] = ocrUploadContext();
 
     // finfo は HEIC を image/heic (または application/octet-stream) と判定する。
     // ここでは許可集合に無いことを固定する目的で明示的に mime 指定する。
     $heic = UploadedFile::fake()->create('sop.heic', 10, 'image/heic');
 
     $response = $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/source-documents",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/source-documents",
         ['document' => $heic],
     )->assertUnprocessable()->assertJsonValidationErrors(['document']);
 
@@ -90,9 +90,9 @@ test('HEIC は引き続き 422 で拒否される', function (): void {
 
 test('新規マニュアル作成時 (StoreVideoManualRequest) でも jpg アップロードが成功する', function (): void {
     Storage::fake();
-    [, $owner, $project] = ocrUploadContext();
+    [$organization, $owner, $project] = ocrUploadContext();
 
-    $this->actingAs($owner)->post("/projects/{$project->id}/manuals", [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects/{$project->id}/manuals", [
         'title' => '画像アップロードテスト',
         'category' => null,
         'document' => fakeJpegFile('create-true.jpg'),
@@ -103,12 +103,12 @@ test('新規マニュアル作成時 (StoreVideoManualRequest) でも jpg アッ
 
 test('webp/gif は引き続き拒否される (回帰)', function (): void {
     Storage::fake();
-    [, $owner, $project, $manual] = ocrUploadContext();
+    [$organization, $owner, $project, $manual] = ocrUploadContext();
 
     foreach (['image/webp' => 'sop.webp', 'image/gif' => 'sop.gif'] as $mime => $name) {
         $file = UploadedFile::fake()->create($name, 10, $mime);
         $this->actingAs($owner)->postJson(
-            "/projects/{$project->id}/manuals/{$manual->id}/source-documents",
+            "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/source-documents",
             ['document' => $file],
         )->assertUnprocessable()->assertJsonValidationErrors(['document']);
     }
@@ -118,12 +118,12 @@ test('webp/gif は引き続き拒否される (回帰)', function (): void {
 test('画像の容量上限超過 (source_document_image_max_bytes 基準) は 422', function (): void {
     Storage::fake();
     config()->set('manual.source_document_image_max_bytes', 1024); // 1KB に絞る
-    [, $owner, $project, $manual] = ocrUploadContext();
+    [$organization, $owner, $project, $manual] = ocrUploadContext();
 
     $big = UploadedFile::fake()->create('big.jpg', 2, 'image/jpeg'); // 2KB (指定 mime を sniff 相当として扱う fake)
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/source-documents",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/source-documents",
         ['document' => $big],
     )->assertUnprocessable()->assertJsonValidationErrors(['document']);
 });
@@ -132,13 +132,13 @@ test('容量上限の判定材料は sniff MIME である (偽装で迂回でき
     Storage::fake();
     config()->set('manual.source_document_image_max_bytes', 1024); // 画像上限 1KB
     config()->set('manual.source_document_max_bytes', 5 * 1024 * 1024); // 既定上限 5MB
-    [, $owner, $project, $manual] = ocrUploadContext();
+    [$organization, $owner, $project, $manual] = ocrUploadContext();
 
     // JPEG バイト (2KB) にファイル名だけ .pdf を付けても、画像専用の (より厳しい) 上限が適用される
     $fakeJpegAsPdf = UploadedFile::fake()->create('fake.pdf', 2, 'image/jpeg');
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/source-documents",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/source-documents",
         ['document' => $fakeJpegAsPdf],
     )->assertUnprocessable()->assertJsonValidationErrors(['document']);
 });
@@ -152,7 +152,7 @@ test('容量上限の判定材料は sniff MIME である (実バイトと clien
     Storage::fake();
     config()->set('manual.source_document_image_max_bytes', 1024); // 画像上限 1KB
     config()->set('manual.source_document_max_bytes', 5 * 1024 * 1024); // 既定上限 5MB
-    [, $owner, $project, $manual] = ocrUploadContext();
+    [$organization, $owner, $project, $manual] = ocrUploadContext();
 
     $realBytes = MinimalImageFixture::jpeg(10, 10).str_repeat("\x00", 2048); // 実サイズ 2KB 超
     $tmpPath = tempnam(sys_get_temp_dir(), 'sniff-bypass-');
@@ -163,7 +163,7 @@ test('容量上限の判定材料は sniff MIME である (実バイトと clien
     expect($disguised->getClientMimeType())->toBe('application/pdf'); // client 申告 (偽装)
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/source-documents",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/source-documents",
         ['document' => $disguised],
     )->assertUnprocessable()->assertJsonValidationErrors(['document']);
 
@@ -172,7 +172,7 @@ test('容量上限の判定材料は sniff MIME である (実バイトと clien
 
 test('公開面の一貫性: FormRequest / Service / Inertia Props (create/show) が同じ受理形式 (画像込み) を表す', function (): void {
     Storage::fake();
-    [, $owner, $project] = ocrUploadContext();
+    [$organization, $owner, $project] = ocrUploadContext();
 
     // 各分岐を独立したマニュアルで検証する (1 手順書 1 枚制約の干渉を避ける)
     $httpManual = VideoManual::factory()->forProject($project)->create();
@@ -180,7 +180,7 @@ test('公開面の一貫性: FormRequest / Service / Inertia Props (create/show)
 
     // FormRequest 境界: jpg が StoreSourceDocumentRequest の mimes: ルールを通過する
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$httpManual->id}/source-documents",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$httpManual->id}/source-documents",
         ['document' => fakeJpegFile('sop.jpg')],
     )->assertRedirect();
 
@@ -223,13 +223,13 @@ test('公開面の一貫性: FormRequest / Service / Inertia Props (create/show)
  */
 test('作成と同時のアップロード経路も後付け経路と同じ 422 文言を返す', function (): void {
     Storage::fake();
-    [, $owner, $project, $manual] = ocrUploadContext();
+    [$organization, $owner, $project, $manual] = ocrUploadContext();
     $makeFile = fn (): UploadedFile => UploadedFile::fake()->create('rejected.heic', 10, 'image/heic');
     $expected = '対応していないファイル形式です。'
         .AcceptedSourceDocumentTypes::formatsLabel()
         .'でアップロードし直してください。';
 
-    $this->actingAs($owner)->postJson("/projects/{$project->id}/manuals", [
+    $this->actingAs($owner)->postJson("/organizations/{$organization->slug}/projects/{$project->id}/manuals", [
         'title' => '422 文言の経路差テスト',
         'category' => null,
         'document' => $makeFile(),
@@ -238,7 +238,7 @@ test('作成と同時のアップロード経路も後付け経路と同じ 422 
         ->assertJsonFragment(['document' => [$expected]]);
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/source-documents",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/source-documents",
         ['document' => $makeFile()],
     )->assertUnprocessable()
         ->assertJsonValidationErrors(['document'])
@@ -247,16 +247,16 @@ test('作成と同時のアップロード経路も後付け経路と同じ 422 
 
 test('画像の手順書は 1 枚まで (2 枚目は明示的に拒否される)', function (): void {
     Storage::fake();
-    [, $owner, $project, $manual] = ocrUploadContext();
+    [$organization, $owner, $project, $manual] = ocrUploadContext();
 
     $this->actingAs($owner)->post(
-        "/projects/{$project->id}/manuals/{$manual->id}/source-documents",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/source-documents",
         ['document' => fakeJpegFile('first.jpg')],
     )->assertRedirect();
     expect(SourceDocument::query()->count())->toBe(1);
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/source-documents",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/source-documents",
         ['document' => fakePngFile('second.png')],
     )->assertUnprocessable()->assertJsonValidationErrors(['document']);
     expect(SourceDocument::query()->count())->toBe(1);
@@ -264,10 +264,10 @@ test('画像の手順書は 1 枚まで (2 枚目は明示的に拒否される)
 
 test('非画像 (PDF) の 2 枚目は画像制約の対象外で受理される', function (): void {
     Storage::fake();
-    [, $owner, $project, $manual] = ocrUploadContext();
+    [$organization, $owner, $project, $manual] = ocrUploadContext();
 
     $this->actingAs($owner)->post(
-        "/projects/{$project->id}/manuals/{$manual->id}/source-documents",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/source-documents",
         ['document' => fakeJpegFile('first.jpg')],
     )->assertRedirect();
 
@@ -276,7 +276,7 @@ test('非画像 (PDF) の 2 枚目は画像制約の対象外で受理される'
         "%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n",
     );
     $this->actingAs($owner)->post(
-        "/projects/{$project->id}/manuals/{$manual->id}/source-documents",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/source-documents",
         ['document' => $pdf],
     )->assertRedirect();
 

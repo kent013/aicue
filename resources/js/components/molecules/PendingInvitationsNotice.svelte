@@ -13,15 +13,17 @@
      */
     interface Props {
         pendingCount: number;
+        /** 遷移先 (組織 URL 配下の通知一覧)。**親が渡す** = molecule は組織文脈を解決しない */
+        href: string;
         testId?: string;
     }
 
-    let { pendingCount, testId = "pending-invitations-notice" }: Props = $props();
+    let { pendingCount, href, testId = "pending-invitations-notice" }: Props = $props();
 </script>
 
 {#if pendingCount > 0}
     <Link
-        href="/notifications"
+        {href}
         class="flex items-center gap-2 rounded-md border border-border bg-primary-soft/40 px-4 py-2 text-body text-text hover:bg-primary-soft"
         data-testid={testId}
     >

@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\Log;
 |--------------------------------------------------------------------------
 |
 | AppServiceProvider の Route::bind('organization', ...) 登録を実 route
-| (slug binding = organizations.settings / id binding = organizations.switch) で検証し、
+| (slug binding = organizations.settings) と binder 直接呼び (id binding) で検証し、
 | binder 単体の fail-closed 分岐 (guest / 未知 field / 非数値 id / 非 scalar) を直接呼びで
 | 固定する。membership は organization_user pivot (Organization::users) で判定する。
 */
@@ -45,65 +45,78 @@ it('slug binding: 不在 slug は非メンバーと同一の 404', function (): 
         ->assertNotFound();
 });
 
-it('id binding: メンバーは所属組織へ切り替えられる (organizations.switch)', function (): void {
-    [$organizationA, $user] = createOrganizationWithOwner('組織A');
-    [$organizationB] = createOrganizationWithOwner('組織B');
-    $organizationB->users()->attach($user);
+/*
+| id binding の検証は **binder 直接呼び**で行う。
+|
+| 家系裁定 AG-037 に従い切替 endpoint (organizations.switch) を撤去したため、
+| `{organization}` を **field 無指定 (= id)** で受ける web route は 1 本も無い
+| (MachinePlaneOrganizationReferenceTest が 0 件であることを固定する)。
+| binder 自身は allowlist として id を引き続き受け付けるので、その fail-closed 分岐は
+| ここで直接固定する (経路が消えたからといって分岐の検証まで消さない)。
+*/
 
-    expect($user->current_organization_id)->toBe($organizationA->id);
+it('id binding: メンバーは id でも解決できる', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
+    $this->actingAs($owner);
 
-    $this->actingAs($user)
-        ->post("/organizations/{$organizationB->id}/switch")
-        ->assertRedirect('/dashboard');
+    $binder = new MembershipScopedOrganizationBinder;
 
-    expect($user->fresh()->current_organization_id)->toBe($organizationB->id);
+    expect($binder->bind((string) $organization->id)->is($organization))->toBeTrue();
 });
 
-it('id binding: 非メンバーは 404 (旧 403 でなく存在秘匿)', function (): void {
-    [$organizationA, $user] = createOrganizationWithOwner('組織A');
+it('id binding: 非メンバーは ModelNotFoundException (旧 403 でなく存在秘匿)', function (): void {
+    [, $user] = createOrganizationWithOwner('組織A');
     [$other] = createOrganizationWithOwner('組織B');
+    $this->actingAs($user);
 
-    $this->actingAs($user)
-        ->post("/organizations/{$other->id}/switch")
-        ->assertNotFound();
+    $binder = new MembershipScopedOrganizationBinder;
 
-    expect($user->fresh()->current_organization_id)->toBe($organizationA->id);
+    expect(fn (): Organization => $binder->bind((string) $other->id))
+        ->toThrow(ModelNotFoundException::class);
 });
 
-it('id binding: 不在 id は非メンバーと同一の 404', function (): void {
+it('id binding: 不在 id は非メンバーと同一の ModelNotFoundException', function (): void {
     [, $user] = createOrganizationWithOwner();
+    $this->actingAs($user);
 
-    $this->actingAs($user)
-        ->post('/organizations/987654321/switch')
-        ->assertNotFound();
+    $binder = new MembershipScopedOrganizationBinder;
+
+    expect(fn (): Organization => $binder->bind('987654321'))
+        ->toThrow(ModelNotFoundException::class);
 });
 
-it('id binding に非数値文字列は 404 に倒す (500 化しない)', function (): void {
+it('id binding に非数値文字列は fail-closed (500 化しない)', function (): void {
     [, $user] = createOrganizationWithOwner();
+    $this->actingAs($user);
 
-    $this->actingAs($user)
-        ->post('/organizations/not-a-number/switch')
-        ->assertNotFound();
+    $binder = new MembershipScopedOrganizationBinder;
+
+    expect(fn (): Organization => $binder->bind('not-a-number'))
+        ->toThrow(ModelNotFoundException::class);
 });
 
-it('id binding に bigint 範囲外の巨大数値文字列は 404 に倒す (500 化しない)', function (): void {
+it('id binding に bigint 範囲外の巨大数値文字列は fail-closed (500 化しない)', function (): void {
     [, $user] = createOrganizationWithOwner();
+    $this->actingAs($user);
 
     // 64bit signed (bigint) を超える数値文字列。where('id', ...) で範囲外キャストによる
-    // 500 を避け、存在し得ない id として 404 に倒すことを固定する。
-    $this->actingAs($user)
-        ->post('/organizations/99999999999999999999999999/switch')
-        ->assertNotFound();
+    // 500 を避け、存在し得ない id として fail-closed にすることを固定する。
+    $binder = new MembershipScopedOrganizationBinder;
+
+    expect(fn (): Organization => $binder->bind('99999999999999999999999999'))
+        ->toThrow(ModelNotFoundException::class);
 });
 
-it('id binding に先頭ゼロ付き (非 canonical) 値は 404 に倒す', function (): void {
+it('id binding に先頭ゼロ付き (非 canonical) 値は fail-closed', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
+    $this->actingAs($owner);
 
-    // '0'+id は非 canonical な数値表現。round-trip 不一致で fail-closed 404 になることを固定する
+    // '0'+id は非 canonical な数値表現。round-trip 不一致で fail-closed になることを固定する
     // (メンバーであっても解決対象外 = 存在秘匿と同列に倒す)。
-    $this->actingAs($owner)
-        ->post("/organizations/0{$organization->id}/switch")
-        ->assertNotFound();
+    $binder = new MembershipScopedOrganizationBinder;
+
+    expect(fn (): Organization => $binder->bind('0'.$organization->id))
+        ->toThrow(ModelNotFoundException::class);
 });
 
 it('guest fail-closed: 未認証コンテキストの bind() 直接呼び出しは ModelNotFoundException', function (): void {

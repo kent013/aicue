@@ -31,6 +31,7 @@
         PaginationMeta,
     } from "@/types/manual";
     import { MANUAL_PROGRESS_LABELS } from "@/types/manual";
+    import { currentOrgUrl } from "@/lib/org-url";
 
     /**
      * プロジェクト詳細。動画マニュアル一覧 (フィルタ + paginate)・カテゴリ管理・
@@ -120,7 +121,7 @@
 
     function applyManualFilters(event?: SubmitEvent): void {
         event?.preventDefault();
-        router.get(`/projects/${project.id}`, manualQuery(), {
+        router.get(currentOrgUrl(`/projects/${project.id}`), manualQuery(), {
             preserveState: true,
             preserveScroll: true,
             only: ["manuals", "manualFilters"],
@@ -128,7 +129,7 @@
     }
 
     function changeManualPage(pageNumber: number): void {
-        router.get(`/projects/${project.id}`, manualQuery(pageNumber), {
+        router.get(currentOrgUrl(`/projects/${project.id}`), manualQuery(pageNumber), {
             preserveState: true,
             preserveScroll: true,
             only: ["manuals", "manualFilters"],
@@ -177,7 +178,7 @@
         if (target === null || removingManual) return;
         // 絞り込み・ページを付けて送る。サーバは同じ allowlist を通して着地先に載せ直すため、
         // 削除後も同じ絞り込み・同じページに戻る (そのページが消えたらサーバが最終ページへ丸める)
-        router.delete(`/projects/${project.id}/manuals/${target.id}${manualQueryString()}`, {
+        router.delete(currentOrgUrl(`/projects/${project.id}/manuals/${target.id}${manualQueryString()}`), {
             preserveScroll: true,
             onStart: () => {
                 removingManual = true;
@@ -219,7 +220,7 @@
             addMemberClientError = "追加するメンバーを選択してください。";
             return;
         }
-        memberForm.post(`/projects/${project.id}/members`, {
+        memberForm.post(currentOrgUrl(`/projects/${project.id}/members`), {
             preserveScroll: true,
             onSuccess: () => {
                 memberForm.reset();
@@ -237,7 +238,7 @@
         if (role === "" || changingRoleId !== null) return; // 二重送信ガード (disabled に頼らない)
         changingRoleId = member.id;
         router.post(
-            `/projects/${project.id}/members`,
+            currentOrgUrl(`/projects/${project.id}/members`),
             { user_id: member.id, role },
             {
                 preserveScroll: true,
@@ -265,7 +266,7 @@
 
     function removeMember(): void {
         if (removeMemberTarget === null || removingMember) return;
-        router.delete(`/projects/${project.id}/members/${removeMemberTarget.id}`, {
+        router.delete(currentOrgUrl(`/projects/${project.id}/members/${removeMemberTarget.id}`), {
             preserveScroll: true,
             onStart: () => {
                 removingMember = true;
@@ -282,7 +283,7 @@
 
     function submitAdd(event: SubmitEvent): void {
         event.preventDefault();
-        addForm.post(`/projects/${project.id}/items`, {
+        addForm.post(currentOrgUrl(`/projects/${project.id}/items`), {
             preserveScroll: true,
             onSuccess: () => {
                 addForm.reset();
@@ -306,7 +307,7 @@
     function submitEdit(event: SubmitEvent): void {
         event.preventDefault();
         if (editTarget === null) return;
-        editForm.patch(`/projects/${project.id}/items/${editTarget.id}`, {
+        editForm.patch(currentOrgUrl(`/projects/${project.id}/items/${editTarget.id}`), {
             preserveScroll: true,
             onSuccess: () => {
                 editModalOpen = false;
@@ -326,7 +327,7 @@
 
     function removeItem(): void {
         if (removeTarget === null) return;
-        router.delete(`/projects/${project.id}/items/${removeTarget.id}`, {
+        router.delete(currentOrgUrl(`/projects/${project.id}/items/${removeTarget.id}`), {
             preserveScroll: true,
             onStart: () => {
                 removing = true;
@@ -343,7 +344,7 @@
     let deletingProject = $state(false);
 
     function deleteProject(): void {
-        router.delete(`/projects/${project.id}`, {
+        router.delete(currentOrgUrl(`/projects/${project.id}`), {
             onStart: () => {
                 deletingProject = true;
             },
@@ -366,7 +367,7 @@
             {#if canManage}
                 <Button
                     variant="ghost"
-                    href={`/projects/${project.id}/edit`}
+                    href={currentOrgUrl(`/projects/${project.id}/edit`)}
                     inertia
                     testId="edit-project-button"
                 >
@@ -375,7 +376,7 @@
                 <!-- カテゴリ管理 (project-scoped)。CategoryPolicy::viewAny ≡ project update = canManage -->
                 <Button
                     variant="ghost"
-                    href={`/projects/${project.id}/categories`}
+                    href={currentOrgUrl(`/projects/${project.id}/categories`)}
                     inertia
                     testId="manage-categories-link"
                 >
@@ -390,7 +391,7 @@
                     <h2 class="text-h3">動画マニュアル</h2>
                     {#if canManage}
                         <Button
-                            href={`/projects/${project.id}/manuals/create`}
+                            href={currentOrgUrl(`/projects/${project.id}/manuals/create`)}
                             inertia
                             testId="create-manual-button"
                         >
@@ -514,7 +515,7 @@
                         {#if canManage}
                             <li>
                                 <TextLink
-                                    href={`/projects/${project.id}/categories`}
+                                    href={currentOrgUrl(`/projects/${project.id}/categories`)}
                                     testId="link-manage-categories"
                                 >
                                     カテゴリ管理
@@ -523,7 +524,7 @@
                         {/if}
                         {#if canManageMembers}
                             <li>
-                                <TextLink href="/manage/users" testId="link-manage-users">
+                                <TextLink href={currentOrgUrl("/manage/users")} testId="link-manage-users">
                                     ユーザー管理
                                 </TextLink>
                             </li>
@@ -615,7 +616,7 @@
                             >
                                 アサインできる組織メンバーがいません。
                                 {#if canManageMembers}
-                                    <TextLink href="/manage/users">ユーザー管理</TextLink>から招待・確認できます。
+                                    <TextLink href={currentOrgUrl("/manage/users")}>ユーザー管理</TextLink>から招待・確認できます。
                                 {/if}
                             </p>
                         {/if}

@@ -103,7 +103,7 @@ class SendBillingReminders extends Command
                 $org,
                 BillingNotificationType::RenewalReminder,
                 $dedupKey,
-                new RenewalReminderNotification($dedupKey, $org->name, route('billing.index'), $effective),
+                new RenewalReminderNotification($dedupKey, $org->name, route('billing.index', ['organization' => $org->slug]), $effective),
             );
             $counts[$result->value]++;
         } catch (Throwable $e) {

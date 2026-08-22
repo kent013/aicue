@@ -38,7 +38,7 @@ final class PasskeyConfirmationResponse implements PasskeyConfirmationResponseCo
         $droppedMutation = $request->session()->pull('recent_auth.dropped_mutation') === true;
 
         if ($request->hasHeader('X-Inertia')) {
-            $redirect = redirect()->intended(route('dashboard'));
+            $redirect = redirect()->intended(route('app.entry'));
             if ($droppedMutation) {
                 $redirect->with('info', '再認証が完了しました。先ほどの操作はまだ実行されていません。お手数ですがもう一度操作してください。');
             }

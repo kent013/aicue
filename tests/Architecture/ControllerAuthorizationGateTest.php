@@ -74,12 +74,6 @@ function controllerAuthorizationExemptions(): array
     $localOnly = ControllerAuthorizationExemption::LocalOnlyDebugRoute;
 
     return [
-        'organizations.switch' => [$membership,
-            '{organization} は MembershipScopedOrganizationBinder が membership スコープで解決し、'
-            .'非所属は認可より前に 404 (存在秘匿)。「所属組織なら誰でも current org を切り替えられる」が'
-            .'ロール非依存の仕様であり、Policy を足すと membership の二重判定になるうえ、'
-            .'404 の存在秘匿を 403 に劣化させる危険がある。守っているのは不変条件 2/3。'],
-
         'organizations.store' => [$noSubject,
             '新規組織の作成。判定対象となる既存リソースも親テナントも存在しない'
             .'(誰でも自分の組織を作れる)。制約は verified.or-back middleware と'

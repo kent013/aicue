@@ -26,7 +26,7 @@ test('CTA 導線: manageMembers を持たない Member は projects.create で 4
     $this->actingAs($member)->get('/projects/create')->assertForbidden();
 });
 ```
-/projects/create は require-active-subscription + project.in-current-org 配下。無償プラン (plan_code null = createOrganizationWithOwner の既定) は課金ゲート通過、project.in-current-org は {project} 無し route で no-op。member は ProjectController::create の Gate::authorize('create') で 403。
+/projects/create は require-active-subscription + project.in-route-org 配下。無償プラン (plan_code null = createOrganizationWithOwner の既定) は課金ゲート通過、project.in-route-org は {project} 無し route で no-op。member は ProjectController::create の Gate::authorize('create') で 403。
 ## [施策3 Warning] 診断性 → 対応 (owner/admin と member の 2 テストに分割)
 
 スコープ外として明記: 有償プラン支払い不健全 + Default Project 不在の稀な組合せでは注記(課金ゲート外)は CTA を出すが projects.create は課金ゲートで遮断される。これは注記の既存アドバイスに元々内在する edge で本件の新規導入ではない。common path (無償/健全) を本テストで固定。

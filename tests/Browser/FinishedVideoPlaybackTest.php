@@ -51,14 +51,14 @@ function finishedVideoPlaybackFixture(): array
 
     test()->actingAs($owner);
 
-    return [$project, $manual, $job];
+    return [$organization, $project, $manual, $job];
 }
 
 test('E-1: published マニュアルの詳細画面に完成動画プレイヤーが見える', function (): void {
-    [$project, $manual, $job] = finishedVideoPlaybackFixture();
+    [$organization, $project, $manual, $job] = finishedVideoPlaybackFixture();
 
-    $page = visit("/projects/{$project->id}/manuals/{$manual->id}")
-        ->assertPathIs("/projects/{$project->id}/manuals/{$manual->id}")
+    $page = visit("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}")
+        ->assertPathIs("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}")
         ->assertNoJavaScriptErrors();
 
     $page->assertPresent('[data-testid="final-video"]');
@@ -70,16 +70,16 @@ test('E-1: published マニュアルの詳細画面に完成動画プレイヤ�
             return el === null ? null : { src: el.getAttribute('src'), preload: el.getAttribute('preload') };
         })()
     JS))->toMatchArray([
-        'src' => "/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$job->id}/playback",
+        'src' => "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$job->id}/playback",
         'preload' => 'none',
     ]);
 });
 
 test('E-2: 再生を足しても DL 導線は残っている (同じブロックに両方見える)', function (): void {
-    [$project, $manual] = finishedVideoPlaybackFixture();
+    [$organization, $project, $manual] = finishedVideoPlaybackFixture();
 
-    $page = visit("/projects/{$project->id}/manuals/{$manual->id}")
-        ->assertPathIs("/projects/{$project->id}/manuals/{$manual->id}");
+    $page = visit("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}")
+        ->assertPathIs("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}");
 
     $page->assertVisible('[data-testid="final-video-block"]');
     $page->assertVisible('[data-testid="download-button"]');
@@ -98,12 +98,12 @@ test('E-2: 再生を足しても DL 導線は残っている (同じブロック
 });
 
 test('E-3: ready へ戻った manual では完成動画プレイヤーも DL ボタンも出ない', function (): void {
-    [$project, $manual] = finishedVideoPlaybackFixture();
+    [$organization, $project, $manual] = finishedVideoPlaybackFixture();
     // シナリオ編集で ready へ戻ると完成動画は受け取れない (押すと 404 になる導線を出さない)
     $manual->forceFill(['status' => VideoManualStatus::Ready])->save();
 
-    $page = visit("/projects/{$project->id}/manuals/{$manual->id}")
-        ->assertPathIs("/projects/{$project->id}/manuals/{$manual->id}");
+    $page = visit("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}")
+        ->assertPathIs("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}");
 
     $page->assertMissing('[data-testid="final-video-block"]');
     $page->assertMissing('[data-testid="download-button"]');

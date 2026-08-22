@@ -10,7 +10,6 @@ use Carbon\CarbonImmutable;
 use Database\Factories\UserFactory;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -141,14 +140,6 @@ class User extends Authenticatable implements CipherSweetEncrypted, LaratrustUse
     public function isMemberOf(Organization $organization): bool
     {
         return $this->organizations()->whereKey($organization->getKey())->exists();
-    }
-
-    /**
-     * @return BelongsTo<Organization, $this>
-     */
-    public function currentOrganization(): BelongsTo
-    {
-        return $this->belongsTo(Organization::class, 'current_organization_id');
     }
 
     /**

@@ -19,6 +19,7 @@
         VideoManualStatus,
     } from "@/types/manual";
     import { isCaptureNavigable } from "@/types/manual";
+    import { currentOrgUrl } from "@/lib/org-url";
 
     /**
      * 動画マニュアルの編集 (基本情報 + シナリオ)。
@@ -59,7 +60,7 @@
         form.transform((data) => ({
             title: data.title,
             category: data.category === "" ? null : Number(data.category),
-        })).patch(`/projects/${project.id}/manuals/${manual.id}`);
+        })).patch(currentOrgUrl(`/projects/${project.id}/manuals/${manual.id}`));
     }
 </script>
 
@@ -74,7 +75,7 @@
             {#if captureNavigable}
                 <Button
                     variant="primary"
-                    href={`/app/projects/${project.id}/manuals/${manual.id}`}
+                    href={currentOrgUrl(`/app/projects/${project.id}/manuals/${manual.id}`)}
                     inertia
                     testId="capture-manual-link"
                 >
@@ -121,7 +122,7 @@
                         </Button>
                         <Button
                             variant="ghost"
-                            href={`/projects/${project.id}/manuals/${manual.id}`}
+                            href={currentOrgUrl(`/projects/${project.id}/manuals/${manual.id}`)}
                             inertia
                         >
                             キャンセル

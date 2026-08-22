@@ -28,7 +28,7 @@ it('remember → resolveUrl が引数なしの onboarding.checkout URL を返す
     EmailVerificationContinuation::remember($session, $organization->id);
 
     expect(EmailVerificationContinuation::resolveUrl($owner, $session))
-        ->toBe(route('onboarding.checkout'));
+        ->toBe(route('onboarding.checkout', ['organization' => $organization->slug]));
 });
 
 it('他組織の id を session に注入しても null (membership 確認)', function (): void {

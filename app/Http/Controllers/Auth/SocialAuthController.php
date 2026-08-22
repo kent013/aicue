@@ -111,7 +111,7 @@ class SocialAuthController extends Controller
             Auth::login($linkedUser, remember: true);
             $request->session()->regenerate();
 
-            return redirect()->intended(route('dashboard'));
+            return redirect()->intended(route('app.entry'));
         }
 
         if ($intent === 'login') {
@@ -139,16 +139,17 @@ class SocialAuthController extends Controller
         Auth::login($user, remember: true);
         $request->session()->regenerate();
 
-        // pending → 個人組織へ移送 (pending は必ず forget で消費される)。
-        // 個人組織が無い (= 招待経由等) 場合は promote 対象が存在しないため pending だけ落とす。
-        $personalOrganization = $user->organizations()->where('is_personal', true)->first();
-        if ($personalOrganization instanceof Organization) {
-            $this->intendedPlanResolver->promotePendingToOrganization($personalOrganization);
+        // pending → 初期組織へ移送 (pending は必ず forget で消費される)。
+        // 所属組織が無い (= 招待経由等) 場合は promote 対象が存在しないため pending だけ落とす
+        // (種別フラグは撤去済み。家系裁定 AG-038)。
+        $initialOrganization = $user->organizations()->orderBy('organizations.id')->first();
+        if ($initialOrganization instanceof Organization) {
+            $this->intendedPlanResolver->promotePendingToOrganization($initialOrganization);
         } else {
             $this->intendedPlanResolver->forgetPending();
         }
 
-        return redirect()->route('dashboard');
+        return redirect()->route('app.entry');
     }
 
     /**
@@ -183,7 +184,7 @@ class SocialAuthController extends Controller
         // (RequireRecentAuth の one-shot flag。password satisfier と同じ契約)。
         $droppedMutation = $request->session()->pull('recent_auth.dropped_mutation') === true;
 
-        $redirect = redirect()->intended(route('dashboard'));
+        $redirect = redirect()->intended(route('app.entry'));
         if ($droppedMutation) {
             $redirect->with('info', '再認証が完了しました。先ほどの操作はまだ実行されていません。お手数ですがもう一度操作してください。');
         }
