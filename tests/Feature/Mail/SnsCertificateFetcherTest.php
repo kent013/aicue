@@ -35,7 +35,7 @@ beforeEach(function (): void {
     //   `Cache::flush()` は使わない — store 全体を消すので rate limiter・lock・
     //   他テストの値まで巻き添えにする。
     useFreshSnsCertificateCacheStore();
-    bindSnsDnsResolver(['203.0.113.10']);
+    bindSnsDnsResolver(snsPublicCertHostIps());
 });
 
 function snsCertUrl(string $url = SnsTestData::CERT_URL): SnsCertificateUrl

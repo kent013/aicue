@@ -13,7 +13,7 @@ use Tests\Support\SnsTestData;
 
 beforeEach(function (): void {
     useFreshSnsCertificateCacheStore();
-    bindSnsDnsResolver(['203.0.113.10']);
+    bindSnsDnsResolver(snsPublicCertHostIps());
 });
 
 function makeSnsVerifier(): AwsSnsSignatureVerifier

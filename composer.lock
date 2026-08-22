@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "85e724b7256bd8c371986eced49a0623",
+    "content-hash": "a6678b9c00e9c0479308d74c1106480e",
     "packages": [
         {
             "name": "aws/aws-crt-php",
@@ -2742,23 +2742,25 @@
         },
         {
             "name": "kent013/laravel-ssrf-pin",
-            "version": "v0.2.0",
+            "version": "v0.4.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/kent013/laravel-ssrf-pin.git",
-                "reference": "eeff61894a2040023e1ac1d6f4d0ef498ebc2df5"
+                "reference": "93ba837c661bf2c31b6801c4c9ad866bdff4445e"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/kent013/laravel-ssrf-pin/zipball/eeff61894a2040023e1ac1d6f4d0ef498ebc2df5",
-                "reference": "eeff61894a2040023e1ac1d6f4d0ef498ebc2df5",
+                "url": "https://api.github.com/repos/kent013/laravel-ssrf-pin/zipball/93ba837c661bf2c31b6801c4c9ad866bdff4445e",
+                "reference": "93ba837c661bf2c31b6801c4c9ad866bdff4445e",
                 "shasum": ""
             },
             "require": {
                 "ext-curl": "*",
                 "guzzlehttp/guzzle": "^7.5",
+                "guzzlehttp/psr7": "^2.4",
                 "illuminate/support": "^11.0|^12.0|^13.0",
                 "php": "^8.2",
+                "psr/http-message": "^1.1 || ^2.0",
                 "webmozart/assert": "^1.11 || ^2.0"
             },
             "require-dev": {
@@ -2820,10 +2822,10 @@
                 "ssrf-protection"
             ],
             "support": {
-                "source": "https://github.com/kent013/laravel-ssrf-pin/tree/v0.2.0",
+                "source": "https://github.com/kent013/laravel-ssrf-pin/tree/v0.4.1",
                 "issues": "https://github.com/kent013/laravel-ssrf-pin/issues"
             },
-            "time": "2026-06-07T11:25:13+00:00"
+            "time": "2026-08-17T18:11:02+00:00"
         },
         {
             "name": "kirschbaum-development/eloquent-power-joins",

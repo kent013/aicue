@@ -22,7 +22,7 @@ beforeEach(function (): void {
     config(['services.ses.sns_topic_arns' => [SnsTestData::TOPIC_ARN]]);
     // `Cache::flush()` は使わない (middleware の throttle も cache を使うため)。
     useFreshSnsCertificateCacheStore();
-    bindSnsDnsResolver(['203.0.113.10']);
+    bindSnsDnsResolver(snsPublicCertHostIps());
 });
 
 /** @return array<string, mixed> */
