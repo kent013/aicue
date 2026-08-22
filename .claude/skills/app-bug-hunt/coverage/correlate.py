@@ -62,6 +62,14 @@ EXIT_OK = 0
 EXIT_INPUT_ERROR = 1        # 読み込み・parse の失敗 (従来どおり)
 EXIT_INPUT_UNAVAILABLE = 3  # 主入力の可用性違反 = 検査を成立させられない
 
+
+class FatalError(Exception):
+    """主入力が契約に反していて検査を成立させられない状態 (終了コード 3)。
+
+    目録は生成物なので、契約外の割当セルが出る状況は「目録を手編集した」か
+    「生成器が壊れた」のどちらかである。どちらも黙って進んではいけない。
+    """
+
 # 記録器が書く status の語彙。ok|blocked の 2 値だけを受け付ける。
 VALID_STATUSES = {"ok", "blocked"}
 
@@ -79,6 +87,42 @@ ALL_KUBUN = {"◎", "○", "逸", "終", "外"}
 _NAME_HEADERS = ("name", "api route name", "route name", "route_name")
 _STORY_HEADERS = ("story",)
 _KUBUN_HEADERS = ("区分",)
+
+# 割当セルの値域 (書き出し側の正本は scripts/bug-hunt-inventory.py。規則の散文は
+# .claude/skills/app-bug-hunt/stories/README.md)。**寛容に正規化しない** —
+# str.split() は前後空白も連続空白も黙って吸収するので、それだけで済ませると書式違反を見逃す。
+#
+# ★ 照合は fullmatch() で行う (Python の `$` は末尾改行の直前にも一致するため、
+#   match() + `$` は「厳密一致」と同義ではない)。
+STORY_CELL_RE = re.compile(r"(S[1-9][0-9]*( S[1-9][0-9]*)*|-)")
+STORY_CELL_SEPARATOR = " "
+STORY_CELL_EMPTY = "-"
+
+
+def parse_story_cell(cell: str, route_name: str) -> list[str]:
+    """割当セルを分解する。文法・昇順・重複を検証し、反したら FatalError。
+
+    実在 (そのカードが在るか) は**見ない**。目録は生成物であり、割当列は実在するカードの
+    前付けからしか作られない。手編集で紛れ込んだ id は目録の byte 一致検査が落とす。
+    ここに実在検査を足すと照合器が stories/README.md を新たな入力に取ることになり、
+    同じ規則が 2 か所に増える。
+    """
+    if STORY_CELL_RE.fullmatch(cell) is None:
+        raise FatalError(
+            f"割当セルが契約外: route={route_name} cell={cell!r} "
+            "(S{n} を番号の昇順で半角空白 1 つ区切りに並べるか '-')"
+        )
+    if cell == STORY_CELL_EMPTY:
+        return []
+
+    ids = cell.split(STORY_CELL_SEPARATOR)
+    numbers = [int(i[1:]) for i in ids]
+    if numbers != sorted(set(numbers)):
+        raise FatalError(
+            f"割当セルが昇順でないか重複している: route={route_name} cell={cell!r}"
+        )
+
+    return ids
 
 
 # --------------------------------------------------------------------------- #
@@ -502,9 +546,12 @@ def correlate(routes, operations, executed, findings, tb_index, *,
     # capability_tag -> 機構群 (operations.md には capability 列が無いので、
     # finding の route 直結を優先しつつ、route 不明 finding は story 一致の機構へ
     # capability 経由でブロードキャストする)。
+    # 割当セルは複数値を取りうる (1 route を複数カードが消化する)。セルをそのまま
+    # キーにすると `S3 S7` の行が `S3` の finding と一致しなくなるので、検証してから分解する。
     rows_by_story: dict[str, list[MechanismRow]] = defaultdict(list)
     for row in rows:
-        rows_by_story[row.story].append(row)
+        for story in parse_story_cell(row.story, row.route_name):
+            rows_by_story[story].append(row)
 
     # finding 紐付け。species_key 単位で二重計上を防ぐ。
     counted: dict[str, set[str]] = defaultdict(set)  # route_name -> {species_key}
@@ -726,11 +773,16 @@ def main(argv=None) -> int:
               file=sys.stderr)
         return EXIT_INPUT_UNAVAILABLE
 
-    corr = correlate(
-        routes, operations, executed, findings, tb_index,
-        run_id=args.run_id, hotspot_threshold=args.hotspot_threshold,
-        dropped_other_run=dropped,
-    )
+    try:
+        corr = correlate(
+            routes, operations, executed, findings, tb_index,
+            run_id=args.run_id, hotspot_threshold=args.hotspot_threshold,
+            dropped_other_run=dropped,
+        )
+    except FatalError as e:
+        # 目録は生成物である。契約外の割当セルは手編集か生成器の故障なので成功にしない。
+        print(f"ERROR: 主入力が契約に反している: {e}", file=sys.stderr)
+        return EXIT_INPUT_UNAVAILABLE
 
     if args.json:
         print(json.dumps(to_summary(corr), ensure_ascii=False, indent=2))
