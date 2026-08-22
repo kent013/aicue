@@ -1164,3 +1164,71 @@ Tier 2 で「行頭がコメント記号なら許可」という分類を置く�
 - **走査器の索引**（家系先行実装が持つ「走査器の書き方を検査する仕組み」）の新設。AGENTS.md がその新設を再検討する条件を別に定めており、本設計はその条件に当たらない
 - **分割連結・定数経由・動的組み立ての検出**。字句走査の原理的な限界であり、保証範囲外として docblock に明記する
 - **`docs/TODO.md` の更新**。本設計は設計ファイルの生成のみで、TODO 登録は `/app-todo-add` の責務
+
+---
+
+## 実装時に確定した事項 (T250 実装 PR / Codex 実装レビュー Round 1 反映)
+
+本節は**実装が設計へ差し戻した確定事項**である。上の本文と食い違う場合は本節が優先する。
+
+### 1. middleware 位置の「クラス参照」は `X::class` 構文に限る (S3 / S5 の修正)
+
+S3 の見本 `unresolved-dynamic-middleware-class.php.txt` は `->middleware($cls)` も
+「未解決 = gate を落とす」としていたが、**production に実在する後付け経路**が
+変数を middleware 位置へ渡している:
+
+- `app/Support/Http/RouteMiddlewareBinder.php` の `$route->middleware($alias);`
+- `app/Support/Http/RouteThrottleBinder.php` の `$route->middleware('throttle:'.$limiter);`
+- `app/DataTransferObjects/Bughunt/InventoryRouteData.php` の `'middleware' => $this->middleware,`
+
+これらを未解決にすると gate は初日から赤くなり、免除で黙らせるほか無くなる
+(正典 I3「許可一覧を持たない」と衝突する)。したがって**規則の段階で**クラス参照を
+`X::class` 構文と定義し、受け手が名前でないもの (`$cls::class`) だけを未解決にする。
+変数・式は母集団に入らない (沈黙する) ことを走査器と gate の docblock に明記し、
+見本 `negative-dynamic-middleware-value.php.txt` が「沈黙すること」を固定する。
+実体化した route は実行時層が補完する。
+
+### 2. クラス名は**文字列**でも生テキストでも 0 件固定する (S3 / S5 の追加)
+
+Laravel は middleware を**クラス名の文字列**でも受ける (`->middleware('Illuminate\…\RequirePassword')`)。
+また拡張子なしの PHP スクリプト・シェル・YAML は `isPhp = false` なので Tier 1 の対象外である。
+そこで:
+
+- 一致様式に **`TermMatchMode::FqcnReference`** (クラス名だけの完全一致。専用トークン文字集合
+  `[A-Za-z0-9_\]`・先頭の逆斜線を落とす・連続する逆斜線を 1 つへ畳む・ASCII 大小無視) を足す
+- S5 に **D2b** (middleware 位置の文字列がクラス名へ一致する) と **D4** (非 PHP の生テキストに
+  クラス名が現れる) を足す
+
+### 3. `MiddlewareReference::$resolvedFqcn` が null の `ClassReference` は**未解決**にする (S5)
+
+型では非 null を守れないため、gate 側で null を「非該当」ではなく未解決として落とす
+(将来の退行が黙って通り抜ける fail-open を作らない)。
+
+### 4. メソッド宣言は**型の本体の直下**だけを数える (S3)
+
+`typeAt()` だけでは、メソッドの中で宣言した名前付き関数や、型の中に置いた無名クラスの
+メソッドを対象クラスのメソッドと誤認する。`PhpNameResolver` が位置ごとの波括弧の深さを
+索引し、`TypeSegment['bodyDepth']` と一致する位置の宣言だけを数える。
+
+### 5. group use の要素ごとの種別を保持する (S3)
+
+PHP は関数・定数とクラスの取り込み空間が別である。混合形 `use A\B\{function X};` の印だけを
+読み飛ばすと、その後の名前をクラスの取り込みとして誤登録し、同名の対象クラス参照を
+別 namespace へ誤解決して**見逃す**。要素ごとに種別を持ち、`function` / `const` の要素は
+要素ごと取り込み表へ入れない。
+
+### 6. symlink 判定を純関数 `symlinkUnresolvedReason()` へ切り出す (S2)
+
+`population()` の中に閉じ込めると、`git ls-files` の母集団の外から確かめる手立てが無い。
+自己検証は一時ディレクトリに配下向き / 外向き / 壊れた symlink を作り、同じ関数を通す。
+
+### 7. 乖離台帳 D40 の対象パスはファイル列挙にする (S8)
+
+台帳の形式検査 (`DivergenceLedgerRules` TD3) が「ファイルとして実在すること
+(ディレクトリは対象パスに書けない)」を強制するため、`tests/Support/SurfaceRemoval/` の
+全ファイルと gate 2 本を列挙する。
+
+### 8. 実走査母集団は `RemovedSurfaceScanTargets` 側で memo 化する (S2)
+
+2 つの gate が同じ母集団を共有するので、ファイルスコープの静的キャッシュ関数を 2 本持つより
+出典を 1 つにするほうが本設計の趣旨 (走査根の単一出典) に合う。

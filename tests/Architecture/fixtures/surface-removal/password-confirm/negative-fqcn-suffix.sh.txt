@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+php -r "Illuminate\Auth\Middleware\RequirePasswordAt::class;"

@@ -1,0 +1,5 @@
+name: ci
+jobs:
+  smoke:
+    steps:
+      - run: php artisan route:list --name=password.confirm

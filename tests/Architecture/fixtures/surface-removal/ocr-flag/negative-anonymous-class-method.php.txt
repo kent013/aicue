@@ -1,0 +1,19 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Support\Manual;
+
+class AcceptedSourceDocumentTypes
+{
+    public static function make(): object
+    {
+        return new class
+        {
+            public static function imagesEnabled(): bool
+            {
+                return true;
+            }
+        };
+    }
+}

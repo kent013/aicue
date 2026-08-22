@@ -1,0 +1,7 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Illuminate\Auth\Middleware;
+
+Route::get('/x', [Controller::class, 'show'])->middleware(namespace\RequirePassword::class);

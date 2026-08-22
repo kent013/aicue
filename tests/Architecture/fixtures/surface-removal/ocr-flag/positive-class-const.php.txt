@@ -1,0 +1,10 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Fixture;
+
+final class Flags
+{
+    public const bool OCR_ANALYSIS_ENABLED = true;
+}

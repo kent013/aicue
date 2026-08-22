@@ -4,7 +4,7 @@
      * 作成画面と詳細画面が共有する。複写すると片方だけ更新される事故が起きるため
      * component 1 つへ集約している)。
      *
-     * 画像・スキャン PDF の OCR 対応は常時有効 (旧 `manual.ocr_analysis_enabled` フラグは
+     * 画像・スキャン PDF の OCR 対応は常時有効 (旧 OCR 有効化フラグ (config/manual.php) は
      * オーナー決定により撤去済み) なので、OCR 固有警告も常時表示する。props は持たない。
      *
      * **wrapper 要素を作らない**: 呼び出し側の flex 列 (gap) が案内の各段落へ直接効く

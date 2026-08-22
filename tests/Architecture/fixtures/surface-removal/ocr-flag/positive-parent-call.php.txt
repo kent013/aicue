@@ -1,0 +1,15 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Fixture;
+
+use App\Support\Manual\AcceptedSourceDocumentTypes;
+
+final class Sub extends AcceptedSourceDocumentTypes
+{
+    public static function probe(): bool
+    {
+        return parent::imagesEnabled();
+    }
+}

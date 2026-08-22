@@ -1,0 +1,13 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Other;
+
+final class Thing
+{
+    public static function probe(): bool
+    {
+        return self::imagesEnabled();
+    }
+}

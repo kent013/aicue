@@ -1,0 +1,11 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Fixture;
+
+final class Kernel
+{
+    /** @var array<string, list<string>> */
+    protected array $middlewareGroups = ['web' => ['password.confirm']];
+}

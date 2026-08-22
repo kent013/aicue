@@ -1,0 +1,5 @@
+<?php
+
+declare(strict_types=1);
+
+Route::get('/x', [Controller::class, 'show'])->middleware(['auth', 'password.confirm']);

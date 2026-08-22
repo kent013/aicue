@@ -61,7 +61,7 @@
      * 2FA 管理
      * 未有効 → 有効化開始 (POST) → QR + コード確認 (confirming)
      * → リカバリコード表示 → 有効。無効化は ConfirmDialog 経由。
-     * 注: Fortify の password.confirm は撤去済み (generic recent-auth へ統一)。
+     * 注: Fortify 標準のパスワード確認 step-up は撤去済み (generic recent-auth へ統一)。
      * リカバリコード表示/再生成の endpoint は recent-auth 配線済み
      * (FortifyServiceProvider::attachRecentAuthToSensitiveRoutes())。フロントは
      * guardWithRecentAuth で precheck し、stale なら再認証モーダルを挟んで再開する。

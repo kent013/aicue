@@ -1,0 +1,7 @@
+<?php
+
+declare(strict_types=1);
+
+return [
+    'disable_ocr_analysis_enabled' => false,
+];
