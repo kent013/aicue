@@ -6,14 +6,22 @@ use App\Services\Auth\SocialiteDriverResolver;
 use App\Support\ExternalFakes\ExternalFakeDeclaration;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Foundation\Application;
+use Tests\Support\ExternalFakes\FakeWiringProbeRunner;
 use Webmozart\Assert\Assert;
 
 /*
  * 別プロセスで「宣言した差し替えが実際に効いているか」を観測して JSON を書き出す。
  *
- * ★責務は 4 つだけ: DB へ接続しない / container から解決する /
- *   転送先 URL を組み立てて読む / 終了コードを返す。
- *   HTTP サーバもブラウザも起動しない。
+ * ★責務は 6 つだけ:
+ *   1. DB へ接続しない
+ *   2. container から解決する
+ *   3. 転送先 URL を組み立てて読む (**偽物が有効なときだけ**)
+ *   4. **実働証明の印を storage_path() 経由で 1 本書く** (正典 v1 (5))
+ *   5. **起動しきったアプリが解決した書き出し先 8 種と、効いた鍵 2 種の digest を報告する**
+ *   6. 終了コードを返す
+ * ★**観測しないもの**: HTTP サーバもブラウザも起動しない /
+ *   設定キャッシュ**有り**の起動は観測しない / 外部へ 1 度も通信しない
+ *   (転送先は組み立てて URL を読むだけ)。
  * ★禁止する文 (echo) を使わないため fwrite(STDOUT, …) で書く (AGENTS.md §禁止する文)。
  * ★読み込む環境ファイルを**専用の一時ファイルだけ**に固定する (親のチェックアウトの
  *   .env / .env.bughunt.local を読ませない = 実資格情報が子の設定へ入らない)。
@@ -45,6 +53,19 @@ try {
 
     $app->make(Kernel::class)->bootstrap();
 
+    /*
+     * ★正典 v1 (5) の**実働証明**の観測点 (lctl feature: subprocess-boot-probe-harness)。
+     *   「書き出し先を環境変数で退避した」ことは、退避が**効いていなければ**既定の場所
+     *   (リポジトリの storage/) へ書かれ、観測は緑のまま嘘になる。そこで
+     *   Laravel の storage_path() 経由で印を 1 本置き、それが起動器の一時ディレクトリ配下に
+     *   現れたことを呼び出し側 (P-13) が確かめる。
+     *   置き場所 (storage/app/private) は起動器が事前に掘っている。
+     */
+    $markerPath = $app->storagePath(FakeWiringProbeRunner::MARKER_RELATIVE_PATH);
+    if (file_put_contents($markerPath, 'fake-wiring-probe') === false) {
+        throw new RuntimeException("観測の印を書けない: {$markerPath}");
+    }
+
     $resolved = [];
     foreach (ExternalFakeDeclaration::swaps() as $swap) {
         $resolved[$swap->abstract] = $app->make($swap->abstract)::class;
@@ -71,6 +92,23 @@ try {
         'resolved' => $resolved,
         'redirect_host' => $redirectHost,
         'process_environment_keys' => $processEnvironmentKeys,
+        // ★P-14 (向き): 起動しきったアプリが解決した書き出し先。呼び出し側が
+        //   「1 件残らず一時ディレクトリ配下で、リポジトリの外」であることを確かめる。
+        'write_targets' => [
+            'storage' => $app->storagePath(),
+            'config_cache' => $app->getCachedConfigPath(),
+            'routes_cache' => $app->getCachedRoutesPath(),
+            'services_cache' => $app->getCachedServicesPath(),
+            'packages_cache' => $app->getCachedPackagesPath(),
+            'events_cache' => $app->getCachedEventsPath(),
+            'view_compiled' => (string) config('view.compiled'),
+            'log_path' => (string) config('logging.channels.single.path'),
+        ],
+        // ★P-8 (使い捨て鍵が子で効いたこと)。鍵そのものは出力しない (テスト出力へ鍵を流さない)。
+        'key_digests' => [
+            'app' => hash('sha256', (string) config('app.key')),
+            'ciphersweet' => hash('sha256', (string) config('ciphersweet.providers.string.key')),
+        ],
     ], JSON_THROW_ON_ERROR));
 
     exit(0);
