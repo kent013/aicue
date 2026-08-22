@@ -1,7 +1,23 @@
+---
+id: S1
+title: 登録/ログインファネル
+surface: signup_funnel
+lane: parallel_browser
+priority: P1
+applicability: applicable
+depends_on: []
+reseed_before: true
+accounts: [guest]
+setup: []
+covers_screens: [app.entry, contact, contact.thanks, dashboard, home, legal.commerce-disclosure, legal.privacy, legal.terms, login, onboarding.checkout, passkey.login-options, password.request, password.reset, register, two-factor.login, verification.notice, verification.verify]
+covers_operations: [contact.store, debug.login-as, login.store, logout, onboarding.activate-personal, passkey.login, password.email, password.update, register.store, two-factor.login.store, verification.send]
+covers_capabilities: [AUTH-01, AUTH-02, AUTH-03, AUTH-04, PLAT-02, PUB-01, PUB-02, QUO-01]
+---
+
 # S1: 登録/ログインファネル
 
-- 前提状態: 未ログイン(ゲスト)。reseed 済み。
-- 目的: ゲストがトップ/公開ページから新規登録 → メール認証 → 初回ログインまで詰まらず到達できるか。公開導線(料金・問い合わせ・法務)が破綻しないか。
+## 目的
+未ログインのゲストがトップ/公開ページから新規登録 → メール認証 → 初回ログインまで詰まらず到達できるか。公開導線(料金・問い合わせ・法務)が破綻しないか。
 
 ## 手順
 1. `home`(トップページ)を開く → プロダクト価値と CTA(登録/ログイン/料金)が見える。`pricing`/`contact`/`legal.privacy`/`legal.terms`/`legal.commerce-disclosure` へ遷移できる。
@@ -43,10 +59,6 @@
    - 通知ベルが単一導線として出ており、通知が左 nav 項目に重複していないこと。
 7. パスワード忘れ: `password.request` → `password.email` → `password.reset` → `password.update` → 再ログイン。
 8. `logout` でログアウト。
-
-## このストーリーで消化する screens / operations
-- screens: home, register, login, dashboard, onboarding.checkout, verification.notice, verification.verify, password.request, password.reset, two-factor.login, contact, contact.thanks, legal.commerce-disclosure, legal.privacy, legal.terms, passkey.login-options
-- operations: register.store, login.store, logout, password.email, password.update, verification.send, two-factor.login.store, contact.store, debug.login-as, onboarding.activate-personal, passkey.login
 
 ## 逸脱アイデア (--deviate 時)
 - 認証前ページ(dashboard 等)へ直アクセス → login へ誘導されるか。認証後に login/register を開くと dashboard へ戻るか。

@@ -76,7 +76,30 @@
 7. **課金の冪等性**: webhook は冪等マシン経由、チケットは reserve→commit/release の 2 フェーズ
 8. **外部 URL 取得は SSRF 検査経由**: 外部 URL(特にユーザ入力由来)を取得する機能は
    必ず `Kent013\SsrfPin\UrlSafetyInspector` / `PinnedHttpClient` を通す。
-   安全境界は `config/ssrf-pin.php` に pin する(`SsrfPinBoundaryTest` が pin 値を固定)
+   境界は**2 つに分かれる**:
+   - **アプリ設定の 5 値**(スキーム / ポート / redirect hop 上限 / 追加 deny CIDR /
+     IP literal 一律拒否)は `config/ssrf-pin.php` に pin する
+     (`SsrfPinBoundaryTest` が pin 値を固定)
+   - **判定の実装と同梱の分類登録簿**は `composer.lock` の package revision で固定し、
+     その版が実際に何を拒否するかを
+     `SsrfPinSpecialPurposeRangeRegressionTest` が実挙動で受ける
+
+   現在採用している 0.4 系の判定は
+   **「公開到達可能と分類できた IP だけを許可」する既定拒否**である
+   (IANA Special-Purpose Address Registry を写した完全区間分類でアドレス空間を分割し、
+   未分類と表の破損は拒否 / load 時例外)。回帰 gate は
+   塞がっている区間・従来の拒否が緩んでいないこと・公開到達可能なら通ること・
+   A と AAAA を跨いだ全件検査・判定に使われた登録簿の版を固定する
+   (aicue の pin 値は `deny_ip_literals: true` なので、この gate は
+   **IP literal ではなく DNS 応答経由**で判定層を観測する。IP literal で書くと
+   分類より前に切られて 1 件も検査しない偽グリーンになる)。
+   判定の deny 規則を**アプリ側で再実装しない** — 正本は共有パッケージ
+   `kent013/laravel-ssrf-pin` にある。
+   **監視条件**: 版を上げてこの gate が赤くなったら、登録簿の差分と回帰ケースを
+   見直してから追従する。**将来の版 (0.5 系以降) の方式は本項では保証しない** —
+   gate が赤くなった時点で再評価する。
+   ★**登録簿の陳腐化は機械では見ていない** — 見るのは同梱の登録簿が変わったかだけで、
+   IANA 側の更新は参照しない。定期の見直しは上流と家系の巡回の責務である
 9. **変更系 route は認可を通る**: POST/PUT/PATCH/DELETE は `Gate::authorize` を通すか、
    exemption inventory へ理由付きで登録する(deny-by-default)。
    **層 2(テナント境界 = 404)は層 3(認可 = 403)より前**(逆にすると存在が漏れる)

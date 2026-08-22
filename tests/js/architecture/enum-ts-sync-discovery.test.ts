@@ -158,11 +158,12 @@ const PHP_ENUM_EXEMPTIONS = [
     { path: "app/Enums/Storage/S3OperationSurface.php", reason: "S3 操作面の内部分類語彙。SSRF 検査など Architecture テストの目録だけが参照する" },
     { path: "app/Enums/Support/QueueAtomicityRule.php", reason: "キュー投入原子性判定の内部語彙 (ドメイン固有規約 11)。Architecture テストの目録だけが参照する" },
     { path: "app/Enums/TwoFactorStatus.php", reason: "2FA 状態の内部判定。画面は有効/無効の真偽値と個別の案内文だけを見る" },
+    { path: "app/Services/Help/HelpArtifactState.php", reason: "ヘルプ生成物の鮮度の内部語彙 (up_to_date/stale/missing/orphan)。artisan コマンドの報告にのみ使い画面へは出ない" },
     { path: "app/Services/Marketing/ContactDestinationKind.php", reason: "マーケティング問い合わせの送信先を表す内部種別。バッチ処理の内部でのみ使う" },
 ] as const satisfies readonly PhpEnumExemption[];
 
 /** `PHP_ENUM_EXEMPTIONS` の件数の pin。増えても減っても赤くする。 */
-const EXPECTED_EXEMPTION_COUNT = 87;
+const EXPECTED_EXEMPTION_COUNT = 88;
 
 interface UnresolvablePhpEnumEntry {
     readonly path: string;

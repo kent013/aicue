@@ -1,0 +1,10 @@
+<?php
+
+declare(strict_types=1);
+
+return [
+    'app_titles' => [
+        'password.confirm' => 'パスワードの確認',
+        'recent-auth.confirm' => '本人確認',
+    ],
+];

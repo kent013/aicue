@@ -1,0 +1,5 @@
+<style>
+    .step-up::after {
+        content: 'password.confirm';
+    }
+</style>

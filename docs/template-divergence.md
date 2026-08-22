@@ -8,7 +8,7 @@
 `template-divergence-ledger` が 2026-08-15 に確定した形) に従う。形式は
 `tests/Architecture/TemplateDivergenceLedgerFormatTest.php` が機械で強制する。
 
-登録エントリ: 38 件
+登録エントリ: 41 件
 
 ## 記録の原則
 
@@ -333,7 +333,7 @@ checksum query の存在を固定し、`TakeRegistrationTest` が三点照合の
 | 対象パス | `app/Services/Manual/RenderJobService.php` / `tests/Feature/Manual/RenderPreviewConcurrencyTest.php` |
 | 業務要件起因の説明 | `RefreshDatabase` が検体を未コミットのトランザクション内に置くため、別プロセスからは検体が見えず、直列化の実証には非トランザクションの専用レーンが要る |
 | 揃え続ける不変条件と保証機構 | 組織ごとの同時 preview 上限の検査とジョブ作成は Organization 行ロック下で行う。逐次境界は `RenderPreviewConcurrencyTest` が固定する |
-| 再判定の条件 | 非トランザクションのテストレーンを導入したとき (別プロセスでの実証へ移す) |
+| 再判定の条件 | 実プロセス並行テストの本数制約を見直すとき、または preview 上限の直列化に退行が疑われたとき |
 | 決めた日 | 2026-07-11 |
 | 決めた人 | 開発者 |
 | 根拠 | T005 |
@@ -365,10 +365,24 @@ checksum query の存在を固定し、`TakeRegistrationTest` が三点照合の
   §レンダジョブの運用契約が正本)
 - subprocess 実証は同テストの skip プレースホルダとして残置 (専用 lane 導入時に実装する)
 
+### 再判定の記録 (2026-08-23)
+
+lctl feature `process-concurrency-test-harness` (rev `14-3117f6369f21` / 正典 v1) への追従作業
+(T248) 時に再判定した。**本登録は据え置く (完了扱いにしない)**。
+
+- 非トランザクションの検体置き場 (`tests/Support/Concurrency/OutOfTransactionFixtures.php`) は
+  導入したので、本登録が挙げていた前提 (「別プロセスからは検体が見えない」) の一部は解消した
+- ただし正典 v1 の要素 (6) が **実プロセス版は 1 本に絞る**ことを求めており、その 1 本は
+  冪等 claim (`tests/Feature/Concurrency/IdempotencyClaimProcessConcurrencyTest.php`) へ
+  割り当てた。preview 上限の実証は**逐次境界のまま据え置く**
+- したがって「subprocess 実証が入った」と読まないこと。道具はできたので、
+  次に実プロセス版の本数制約を見直すときに選択肢へ載る
+
 ### 関連
 
 - 実装: `app/Services/Manual/RenderJobService.php` (triggerPreview)
 - 設計: `devnotes/20260711-0549-render/detailed-design.md` 施策 4 テスト計画
+- 再判定: `devnotes/20260823-0017-process-concurrency-harness-adoption/detailed-design.md` 施策 9
 
 ---
 
@@ -717,10 +731,10 @@ phantom password (ランダム値) が入っていると:
 
 | 行 | 内容 |
 |---|---|
-| 対象パス | `app/Http/Middleware/BughuntExecutedRouteMiddleware.php` / `bootstrap/app.php` / `config/bughunt.php` / `.claude/skills/app-bug-hunt/coverage/build_executed.py` / `.claude/skills/app-bug-hunt/coverage/correlate.py` |
-| 業務要件起因の説明 | 記録が採れていないことと本当に叩けていないことを取り違えると操作到達の一覧そのものが嘘になるため、遮断 middleware の内側で 1 要求 1 行を機械記録する |
-| 揃え続ける不変条件と保証機構 | 主入力が揃わない走行は成功にしない。`BughuntExecutedRouteOrderingTest` が記録器の位置を、集約と照合の 2 つの Python ツールが終了コード 3 を担う |
-| 再判定の条件 | 家系の正典が退避 → 正規化 → route 名解決の 3 段へ揃える裁定を出したとき / web グループ外の面を分母に載せるとき |
+| 対象パス | `app/Http/Middleware/BughuntExecutedRouteMiddleware.php` / `bootstrap/app.php` / `config/bughunt.php` / `.claude/skills/app-bug-hunt/coverage/build_executed.py` / `.claude/skills/app-bug-hunt/coverage/correlate.py` / `.claude/skills/app-bug-hunt/coverage/test_correlate.py` |
+| 業務要件起因の説明 | 記録が採れていないことと本当に叩けていないことを取り違えると操作到達の一覧そのものが嘘になるため、遮断 middleware の内側で 1 要求 1 行を機械記録する。併せて、割当列が複数値になった目録を照合器が取り違えずに読む |
+| 揃え続ける不変条件と保証機構 | 主入力が揃わない走行は成功にしない。`BughuntExecutedRouteOrderingTest` が記録器の位置を、集約と照合の 2 つの Python ツールが終了コード 3 を担う。割当セルの分解は `test_correlate.py` が値域の両方向で固定する |
+| 再判定の条件 | 家系の正典が退避 → 正規化 → route 名解決の 3 段へ揃える裁定を出したとき / web グループ外の面を分母に載せるとき / 家系の正典が割当列の分解を実装したとき |
 | 決めた日 | 2026-08-15 |
 | 決めた人 | 開発者 |
 | 根拠 | T164 |
@@ -733,6 +747,7 @@ phantom password (ランダム値) が入っていると:
 | 採取の起動 | 走行中の LLM (探索エージェント) が退避コマンドを呼ぶ | 起動時に `provision` が env で仕込み、以後は無条件 |
 | 遮断された要求の扱い | 通信履歴なので 302/403 も「叩いた」側に残り、後段で除外しきれない | 遮断 middleware より**内側**に置いてあるため、そもそも記録に現れない |
 | 主入力が欠けたとき | 照合器が「全 in_scope を未実行 candidate」として出力し 0 で終わる | **終了コード 3 で落ちる** (worklist を出さない) |
+| 目録の割当列の読み方 (理由 2) | セルをそのままキーにするので `S3 S7` の行は `S3` の finding と一致しない | **セルを検証してから分解**し、各 story へ索引する (単一値の挙動は不変。正典に無い上乗せ = 家系への還流候補) |
 
 ### なぜ正当な差分か(logic-driven)
 
@@ -770,6 +785,18 @@ route 名は `$request->route()->getName()` でその場で確定するので逆
 - 記録器が既定 no-op であること (env 既定 false + production 除外) と ok/blocked の写像は
   `tests/Feature/Bughunt/ExecutedRouteCaptureTest.php` が実 HTTP 要求で固定する
 
+理由 2 (割当列の分解) が揃え続けるのは次である。
+
+> 「**目録の割当列に載ったカードは、すべてその finding の索引先になる**」
+
+- 割当セルの値域 (`S{n}` を番号の昇順で半角空白 1 つ区切り、または `-`) は
+  書き出し側 (`scripts/bug-hunt-inventory.py`) が自分の出力を突き合わせ、
+  読み手 (`correlate.py`) が `fullmatch` で強制する。**寛容に正規化しない**
+- 契約外のセル (前後空白 / 連続空白 / 降順 / 重複 / 未知の綴り) は照合器が
+  **終了コード 3** で落ちる (目録の手編集と生成器の故障を黙って進めない)
+- 両側の定数が一致することと、生成側が書くセルを読み手が同じ値へ分解することは
+  `scripts/tests/test_bug_hunt_inventory.py` が同一ケースの列挙で固定する
+
 ### 保証しないもの (誇張しない)
 
 - **web グループ外は観測しない** (`api/*` / Filament `/admin` / MCP)。分母に載っていれば
@@ -777,6 +804,9 @@ route 名は `$request->route()->getName()` でその場で確定するので逆
 - **部分欠測は検出しない**。分かるのは「名前付き route の行が 1 件も無い」「別 run が混ざった」
   「失敗マーカーが残せた」まで
 - **偽造耐性は無い**。記録ファイルは worktree 内にあり、書き換えを検出する仕組みは持たない
+- 割当セルに書かれたカードが**実在するか**は照合器では見ない (目録は生成物であり、
+  割当列は実在するカードの前付けからしか作られない。手編集で紛れ込んだ id は
+  目録の byte 一致検査が落とす)
 
 ### 関連
 
@@ -1134,7 +1164,7 @@ deny-by-default の目録 / 撤去済み参照の gate) はそのまま採って
 
 | 行 | 内容 |
 |---|---|
-| 対象パス | `scripts/bug-hunt-inventory.py` / `app/Console/Commands/Bughunt/InventoryScanCommand.php` / `.claude/skills/app-bug-hunt/inventory/annotations.toml` |
+| 対象パス | `scripts/bug-hunt-inventory.py` / `app/Console/Commands/Bughunt/InventoryScanCommand.php` / `.claude/skills/app-bug-hunt/inventory/annotations.toml` / `scripts/tests/test_bug_hunt_inventory.py` / `tests/Architecture/BugHuntInventoryCheckInvariantTest.php` / `.claude/skills/app-bug-hunt/SKILL.md` / `scripts/README.md` |
 | 業務要件起因の説明 | 機能カタログの id 列が所見記録の語彙の正本であり、Python ツールを標準ライブラリだけで書く規約から注釈は TOML になる |
 | 揃え続ける不変条件と保証機構 | 目録は実装と注釈から再生成でき、ずれていたら CI が落ちる。`BugHuntInventoryCheckInvariantTest` と生成器の自己テストが 4 段の判定を固定する |
 | 再判定の条件 | 家系の正典が id 列を持つ形へ変わったとき / Python に依存を足す裁定が出たとき / 中間 JSON を読む道具が家系に現れたとき |
@@ -1153,6 +1183,9 @@ deny-by-default の目録 / 撤去済み参照の gate) はそのまま採って
 | 機能カタログ (`capability-catalog.md`) | 生成物。3 列は 機能 / 対応する画面 / 対応する操作 | **生成しない**。3 列は `id` / `機能 (actor→outcome)` / `代表機構 (route name)` を維持し、参照整合だけを検査する |
 | 注釈ファイル | `inventory/annotations.yaml` | **`inventory/annotations.toml`** |
 | 中間成果物 | `inventory/inventory.json` をコミットする | **持たない** (生成・検査の実行中にだけ存在する) |
+| 割当の正本 | カードの前付け (`covers_screens` / `covers_operations`) | **同じ** (2026-08-23 に注釈の `story` を撤去して一本化した。以前は注釈側が正本だった) |
+| `covers_screens` の母集合 | `kind` が `screen` / `read` / `redirect` の web route | **safe method (GET / HEAD / OPTIONS) の web route** (`kind` の語彙が `画面` / `JSON` で違うため `kind` に依存させない) |
+| `covers_capabilities` の検査 | 実在 / 欄の意味 / 分母 / 被覆の 4 段 | **実在・形・一意まで** (機能カタログが継承宣言の欄 `no_route` / `coverage_surface` / `covered_via` を持たないため、分母・被覆は見ない) |
 
 ### なぜ正当な差分か (logic-driven)
 
@@ -1178,9 +1211,11 @@ deny-by-default の目録 / 撤去済み参照の gate) はそのまま採って
 | 不変条件 | 担い手 |
 |---|---|
 | 抽出が成功し、宣言した抽出条件で走り、母集合が 0 件でないこと (段 1) | `scripts/bug-hunt-inventory.py` (exit 2) / `scripts/tests/test_bug_hunt_inventory.py` |
-| 注釈の集合が面の集合と一致し、語彙・必須・理由の長さを満たすこと (段 2) | 同上 (exit 3)。未注釈も残置注釈も許さない |
+| 注釈の集合が面の集合と一致し、語彙・必須・理由の長さを満たすこと (段 2) | 同上 (exit 3)。未注釈も残置注釈も許さない。割当を注釈へ書き戻す道は未知の項目として塞ぐ |
+| 対象内 (区分が `外` でない) の route が 1 枚以上のカードの `covers_*` に載っていること (段 2) | 同上 (exit 3)。載せた route の実在・欄の意味・対象外でないことも見る |
 | 生成物が再生成の結果と byte 一致すること (段 3) | 同上 (exit 3)。手編集と再生成の忘れをまとめて捕まえる |
 | 機能カタログの代表機構が実在し、id が重複しないこと (段 4) | 同上 (exit 3) |
+| カードが挙げる capability が実在すること (段 4) | 同上 (exit 3)。**被覆漏れは見ない** |
 | 検査シェルが判定を持たず、終了コード 0 / 2 / 3 を実際に返すこと | `tests/Architecture/BugHuntInventoryCheckInvariantTest.php` (sandbox 実走) |
 | 生成器の自己テストが `composer test` の下で実走すること | `tests/Architecture/BughuntInventoryToolSelfTest.php` |
 | 抽出コマンドが事実だけを書き出すこと (面の判定を持たない) | `tests/Feature/Bughunt/InventoryScanCommandTest.php` |
@@ -1194,13 +1229,23 @@ Filament の管理画面 (`/admin`) / MCP / Stripe の webhook がこれに当�
 必ず目録に入り注釈を要求される。
 注釈の**内容**の妥当性 (割当が適切か) は見ない。画面題名の欠落も検出しない。
 機能カタログの網羅性も見ない (代表機構の実在と id の一意性まで)。
+**割当が痩せたこと**も検出できない — 見るのは「1 枚以上のカードに載っていること」だけなので、
+ある route が `S3 S7` から `S3` へ減っても緑のままである (PR レビューの義務)。
 目録の母集合は T164 の記録器が観測しうる route の**部分集合**であり、両者は一致しない。
+
+**対象パスに運用文書 2 本を含める理由 (範囲を誇張しない)**: `.claude/skills/app-bug-hunt/SKILL.md` と
+`scripts/README.md` は本エントリで**目録の生成方式に関わる記述だけ**を説明する
+(どこを直して再生成するか / 割当の正本はどこか)。両ファイルには本エントリと無関係な
+テンプレート差分も含まれうるが、それらは本エントリが説明したことにはならない。
+2026-08-23 に採用時債務一覧から本エントリへ移した (割当の正本を一本化したのに、
+運用手順が廃止済みの入力先へ誘導したままになるのを避けるため)。
 
 ### 再検討の条件 (解消条件)
 
 - 家系の正典が id 列を持つ形へ変わったとき (機能カタログの生成を採り直す)
 - 本リポジトリの Python に依存を足す裁定が出たとき (注釈を YAML へ寄せる)
 - 中間 JSON を読む道具が家系に現れたとき
+- 機能カタログが継承宣言の欄を持つ形になったとき (`covers_capabilities` の被覆判定を採り直す)
 
 ### 関連
 
@@ -2260,7 +2305,225 @@ deny-by-default 機構そのものであり、業務ドメイン (認証手段�
 - 実装: `tests/Architecture/PasskeyPackageContractTest.php`
 - 設計: `devnotes/20260821-2015-auth-method-change-notification/`
 
-## D40 組織文脈の共有プロパティを URL の binding だけから導出する
+---
+
+## D40 撤去表面の不在 gate を、走査根と走査器を共通基盤へ切り出した形で持つ
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `tests/Support/SurfaceRemoval/ContentClassification.php` / `tests/Support/SurfaceRemoval/MethodReference.php` / `tests/Support/SurfaceRemoval/MethodReferenceKind.php` / `tests/Support/SurfaceRemoval/MiddlewareReference.php` / `tests/Support/SurfaceRemoval/MiddlewareReferenceKind.php` / `tests/Support/SurfaceRemoval/Occurrence.php` / `tests/Support/SurfaceRemoval/PhpNameResolver.php` / `tests/Support/SurfaceRemoval/RemovedSurfaceScanTargets.php` / `tests/Support/SurfaceRemoval/RemovedSurfaceScanner.php` / `tests/Support/SurfaceRemoval/RemovedTerm.php` / `tests/Support/SurfaceRemoval/ScanOutcome.php` / `tests/Support/SurfaceRemoval/ScanPopulation.php` / `tests/Support/SurfaceRemoval/ScannedFile.php` / `tests/Support/SurfaceRemoval/TermMatchMode.php` / `tests/Architecture/PasswordConfirmSurfaceAbsenceGateTest.php` / `tests/Architecture/OcrFeatureFlagAbsenceGateTest.php` |
+| 業務要件起因の説明 | aicue が撤去した表面 (Fortify 標準のパスワード確認 step-up 機構 / OCR 機能フラグ) はテンプレートには存在しない。撤去物が 2 件あり、走査根 (`.github` と `scripts` を含む 8 本) の列挙と PHP の名前解決を 2 本持たないために共通基盤へ切り出す必要がある |
+| 揃え続ける不変条件と保証機構 | 走査根に `.github/` と `scripts/` を含み `database/migrations/` を含まないこと、実走査母集団が根・種別ごとに非空で未解決もバイナリ除外も 0 件であること、静的層が許可形を 0 個で保つこと、検出器の自己検証を正例・負例・未解決の三軸で持つこと。`PasswordConfirmSurfaceAbsenceGateTest` と `OcrFeatureFlagAbsenceGateTest` が固定する |
+| 再判定の条件 | 3 件目の撤去物が来て、撤去項目の台帳から層を機械駆動する形へ移すとき。またはテンプレートが同じ共通基盤を取り込んだとき (そのときは上積みを撤去して正典実装へ揃え直す) |
+| 決めた日 | 2026-08-22 |
+| 決めた人 | 開発者 |
+| 根拠 | T250 |
+| 状態 | 恒久 |
+| 見直し期限 | — |
+
+| 観点 | テンプレート | 本アプリ |
+|---|---|---|
+| 走査根の持ち方 | 撤去 1 件ごとに gate 自身のファイル内へ走査を書く (`RetiredRecoveryReferenceGateTest`) | 走査根と走査器を `tests/Support/SurfaceRemoval/` へ切り出し、許可ポリシーは撤去物ごとの gate が指定する |
+| 名前の突合 | 語彙一致中心 | クラス参照は完全修飾名へ解決してから突合する (`PhpNameResolver`)。解決できない形は未解決として gate を落とす |
+| 母集団 | 拡張子で絞った列挙 | `git ls-files` から生成し拡張子で絞らない (`scripts/` の拡張子なし実行ファイルを落とさない) |
+
+### なぜ正当な差分か (logic-driven)
+
+同じ家系正典 (`surface-removal-absence-gate` v1) を満たす形は 1 つではない。テンプレートは
+撤去物が 1 件のため gate のファイル内に走査を閉じているが、aicue は撤去物が **2 件**あり、
+両者が同じ走査根 (8 本) と同じ PHP 名前解決を要る。ここで各 gate に走査を複写すると
+「走査根の列挙を 2 本持つ」ことになり、AGENTS.md「静的検査 (gate) と走査器の共通規約」の
+**走査根の単一出典**に反する。したがって共通基盤へ切り出す側を選んだ。
+
+3 件目が来たら台帳駆動へ移す判断が要るが、2 件のために台帳機構を先回りして作るのは
+思考原則 2 (今必要なものだけ作る) に反するため v1 では作らない。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「**各 gate が列挙した静的構文**への参照は、走査根 8 本の git 追跡下の全ファイルで 0 件である。
+> 許可一覧は持たない (母集団の定義そのもので絞る)。解決できない形は未解決として gate を落とす」
+
+保証するのは**列挙した構文**についてであり、「あらゆる書き方で 0 件」ではない
+(変数・式・分割連結・定数経由・動的組み立ては母集団に入らない。下の「保証しないもの」を参照)。
+
+- 母集団の空振り (走査根の改名・ディレクトリ移動) は代表パス pin と種別検査が検出する
+- 検出力は見本 (`tests/Architecture/fixtures/surface-removal/`) の正例・負例・未解決で裏取りする
+- NUL を 1 つ入れて静的層を迂回する経路は `binaryExcluded === []` の要求が塞ぐ
+
+### 保証しないもの
+
+- 静的層が見るのは列挙した構文だけである。middleware 位置の変数・式、分割連結、定数経由、
+  動的組み立て、PHP のコメント内には沈黙する。網羅的な一覧の正本は
+  `RemovedSurfaceScanner` と各 gate の docblock であり、ここには写さない
+- 実行時層が補完するのは**テスト起動時に実体化した route** までで、環境依存で実体化しない
+  経路 (production 限定の条件分岐・未実行コード) は両層とも見えない
+
+### 関連
+
+- 実装: `tests/Support/SurfaceRemoval/` / `tests/Architecture/PasswordConfirmSurfaceAbsenceGateTest.php` / `tests/Architecture/OcrFeatureFlagAbsenceGateTest.php`
+- 実行時層: `tests/Architecture/PasswordConfirmMiddlewareAbsenceTest.php`
+- 設計: `devnotes/20260823-0016-password-confirm-surface-removal-gate-v1/`
+
+---
+
+## D41 シナリオカードの前付けは採るが、ステップ表の書式は採らない
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `.claude/skills/app-bug-hunt/stories/README.md` / `.claude/skills/app-bug-hunt/stories/test_story_front_matter.py` |
+| 業務要件起因の説明 | 所見台帳の finding は story までしか指さず step を指す欄を持たないため、ステップ識別子を入れても読む機械が 1 つも無い |
+| 揃え続ける不変条件と保証機構 | 前付けの制限文法・番号規約・表 A / 表 B との突合は `stories/test_story_front_matter.py` が強制し、`BughuntStoryToolSelfTest` が composer test の配線に載せる |
+| 再判定の条件 | `ledger/findings.schema.json` に step を指す欄が入ったとき / 家系の正典が t2 以降でステップ表を版の名前に含めたとき / `applicability` に `not_applicable` を取るカードを 1 枚でも置くことになったとき |
+| 決めた日 | 2026-08-22 |
+| 決めた人 | 開発者 |
+| 根拠 | devnotes/20260823-0022-bughunt-story-front-matter-adoption/ |
+| 状態 | 恒久 |
+| 見直し期限 | — |
+
+家系の正典 (機能台帳 `bughunt-story-front-matter` の t1) は、シナリオカードに制限文法の前付けを
+置いて割当の正本にし、併せて**手順をステップ表の書式で書く**ことまでを 1 つの契約にしている。
+本アプリは**前付けは全面的に採る**が、次の 2 点は採らないので登録する。
+
+| 外している契約 | 本アプリの形 |
+|---|---|
+| ステップ表の書式 (正準 4 列ヘッダ `step / 操作 / 期待 / 注目` / 疎な step 識別子 `{id}-{3 桁}` / 副ブロック / 期待欄・注目欄の書き分け) | **散文の番号付きリストのまま**置く |
+| `not_applicable` のカードを実走対象から外す契約 (`SKILL.md` 側が持つ) | **持たない** (該当カードが 0 枚) |
+
+### なぜ正当な差分か (logic-driven)
+
+1. **step 識別子を読む機械が 1 つも無い**。所見台帳の schema
+   (`.claude/skills/app-bug-hunt/ledger/findings.schema.json`) は finding の位置を
+   `story_id` / `route_name` / `capability_tag` で指し、**step を指す欄を持たない**。
+   識別子を振っても照合器・抑制機構・目録のどれもそれで join しないので、
+   増えるのは「振り直してはいけない番号」という保守債務だけである。
+   正典が step を切ったのは finding が step を指す形を前提にしているためで、
+   その前提が本アプリには無い。
+2. **`not_applicable` の実走除外は該当カードが 0 枚である**。本アプリは家系必須 7 面の
+   すべてに実カードがあり、`not_applicable` を取るカードは 1 枚も無い。
+   **読む対象が 1 枚も無い契約を先回りして置かない** (思考原則 2「今必要なものだけ作る」)。
+   置くべき時期は本エントリの再判定の条件が名指ししている — `applicability` に
+   `not_applicable` を取るカードを 1 枚でも置くことになったときである。
+   そのときの置き場は `SKILL.md` (実走の手順の正本) になる。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「**割当の正本はカードの前付けだけであり、前付けは制限文法と番号規約を機械で満たす**」
+
+| 不変条件 | 担い手 |
+|---|---|
+| 前付けの制限文法 (区切り / 1 行 1 項目 / key の書式と重複 / 値の 3 形) | `.claude/skills/app-bug-hunt/stories/story_front_matter.py` |
+| 必須 13 key の全数と正準順序・閉じた語彙・値の書式 | `stories/test_story_front_matter.py` (AC-01 / AC-02) |
+| 番号規約 (命名 / 一意 / 欠番なし / 家系固定の `(id, surface)`) | 同上 (AC-03 / AC-06) |
+| 表 A の構造と家系必須 11 語・表 B とカードの 1 対 1 | 同上 (AC-04 / AC-05) |
+| 依存と実行方式の整合 (実在 / 自己参照 / 循環 / 初期化 / 直列待ち) | 同上 (AC-07 / AC-08 / AC-09) |
+| 本文の確定形と旧メタ節の不在 (二重の正本を残さない) | 同上 (AC-10 / AC-11 / AC-12 / AC-15) |
+| 採用した不変条件の全数点呼 (未割当 0 件・担い手の実在) | 同上 (AC-14) |
+| 上記が `composer test` の下で実走し、検査を削って緑にできないこと | `tests/Architecture/BughuntStoryToolSelfTest.php` (件数の下限 + 中核負例の成功表示) |
+
+### 保証しないもの (誇張しない)
+
+- **ステップ表を採らない帰結**: step 識別子の再採番の禁止・副ブロックの個数・期待欄と注目欄の
+  書き分けは 1 つも検査しない (概念ごと持たない)
+- 兆候番号 (`H{n}`) の意味をカードに書かないことは**文書規約であり機械検査しない**
+  (正典もこれ単独の検査は持たない)
+- `lane` / `depends_on` と `scripts/bug-hunt-shard.sh` の固定 fan-out マップの一致は見ない
+  (固定マップは前付けからの派生キャッシュ。**正典も未達**)
+- `accounts` と `database/seeders/ManualTestSeeder.php` の一致は見ない (正典も同じ)
+- `covers_*` の値の**実在**は前付け側では見ない (形だけ)。実在・欄の意味・分母の被覆は
+  目録側 (D20) の責務である
+
+### 関連
+
+- 実装: `.claude/skills/app-bug-hunt/stories/` (README.md / story_front_matter.py /
+  test_story_front_matter.py / S1〜S7 のカード)
+- gate: `tests/Architecture/BughuntStoryToolSelfTest.php` /
+  `tests/Support/Bughunt/StoryFrontMatterPins.php`
+- 設計: `devnotes/20260823-0022-bughunt-story-front-matter-adoption/`
+
+---
+
+## D42 契約文書のゲート索引を、本アプリの実在ゲートへ写した判定規準として持つ
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `docs/app-integration-guide.md` / `tests/Architecture/IntegrationGuideGateTableSyncTest.php` |
+| 業務要件起因の説明 | 本文書の §2 は「新しいドメインリソースを足すときにどの検査へ登録するか」の索引であり、指す先が本アプリのゲート実体である以上、本アプリ固有のセキュリティ境界と実在ゲート名で構成するほかない。家系の裁定 AG-116 が定めた合成版の一部だが、テンプレート現物を参照できないため逐語復元ではなく判定規準としての写像である |
+| 揃え続ける不変条件と保証機構 | 索引が指すゲート名の実在・件数 (必ず踏む 8 件 / 条件付き 13 件)・表をまたいだ一意性は `tests/Architecture/IntegrationGuideGateTableSyncTest.php` が固定し続ける。§7 の不変条件を参照するときは番号ではなく項目名で指す (本文書 §7 と AGENTS.md の採番は 1:1 対応しないため、どちらの側も renumber しない) |
+| 再判定の条件 | テンプレート更新の一括取り込みを行うとき / 家系の巡回で裁定 AG-116 の合成版の現物が配られたとき / §2 のゲート表の行を増減させるとき。再照合の正本は家系の機能台帳 lctl の feature `app-integration-guide` とテンプレートの `docs/app-integration-guide.md` である。本登録を消せるのはファイル単位の不一致そのものが解消したときだけで、意味の一致だけでは消せない (下の「削除の判断基準」) |
+| 決めた日 | 2026-08-22 |
+| 決めた人 | 開発者 |
+| 根拠 | devnotes/20260822-2305-integration-guide-gate-table-restore/ |
+| 状態 | 監視中 |
+| 見直し期限 | 2027-02-28 |
+
+| 観点 | テンプレート | 本アプリ |
+|---|---|---|
+| §2 のゲート索引 | 必ず踏む 8 本 / 条件付き 13 本 (台帳が記録する規模。行の中身は現物を参照できていない) | 同じ 8 件 / 13 件で、行は本アプリの実在ゲート名で構成する |
+| 本アプリ由来の節 | 裁定 AG-116 に基づき還流済みの 3 節を持つ (エラー応答の優先順位 / テナント境界を経路解決の直後で閉じる / 新規ルート追加チェックリスト。実装は `T121` と `T132`) | 還流済みの 3 節に加えて「流量制限の付与規約」と「vendor route への後付け機構と経路キャッシュの契約」の 2 節を持つ (台帳が AG-116 の名指しした 3 節の外と明記) |
+| §7 の採番 | 1〜11 | 1〜10 (renumber しない。相互参照は項目名で行う) |
+| §9 (正本から生成し写しを同期検査する) | 持つ | 持たない (裁定 AG-116 が名指しした 3 節の外) |
+| 索引と実装の同期検査 | 文書と実装ゲートの整合を見る gate を持つ | §2 の 2 表に限った実在・件数・一意性の検査を持つ |
+
+### なぜ正当な差分か (logic-driven)
+
+**本登録は「テンプレート現物が届くまでの監視中の登録」である。** 恒久の差分を主張するものではない。
+
+逸脱が logic-driven なのは 2 点による。
+
+1. **索引が指す先が本アプリのゲート実体である**。§2 の 2 表は「新しいドメインリソースを
+   足すときにどの検査へ何を登録するか」を指すものなので、実在しないゲート名を指す索引は
+   無価値になる。本アプリのゲート構成 (SOP・シナリオ・撮影テイクというテナントデータを
+   守る境界の集合) はテンプレートの汎用形と同一ではないため、名前をそのまま写すことはできない。
+2. **本アプリ由来の節は実測された監査所見への対処である**。「エラーを返す順番を間違えると
+   他組織のデータの存在が 1 bit 漏れる」という所見と、その順番を機械で固定する規約であり、
+   家系の裁定 AG-116 自身が「テンプレートに無いのは取りこぼしに近い」と評価して還流の対象にした。
+   逸脱の理由は互換・UX・作業量ではない。
+
+### 削除の判断基準 (この登録をいつ消すか)
+
+**意味的な一致とファイル指紋の一致は別物である。** 突合 gate はファイル単位のハッシュを見るので、
+同じ不変条件を同じ抽象度で要求していても、ゲート名や文章が違えば指紋は一致しない。
+その状態で本登録だけを消すと、**未登録の不一致として再び赤くなる**。したがって本登録を消せるのは、
+次のどれかによって**ファイル単位の不一致そのものが解消したとき**である:
+
+1. 配布されたテンプレート現物を正規の取り込み手順で採用し、実ファイルが指紋台帳と一致した
+2. 正規のテンプレート台帳更新 (`LedgerPins::TEMPLATE_LEDGER_SOURCE_*` の更新を伴う取り込み) により、
+   本パスの新しい指紋が入って一致した
+3. 別の承認済みの同期機構がファイル単位の不一致を解消した
+
+**意味的な一致だけが確認できてファイル内容が異なる場合、登録簿の記録の原則の上では
+「同じ不変条件」であっても、現行の指紋検査の上では D42 を削除できない。**
+そのときに行うのは削除ではなく、本登録の説明を「意味は一致しており、残っているのは
+表記の差である」旨へ更新して見直し期限を引き直すことである。
+テンプレート現物を参照できない間は、**台帳で確認できる範囲を超えた現状断定をしない**。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「§2 のゲート索引が指すゲートは実在する。必ず踏む表は 8 件、条件付きの表は 13 件で、
+> 同じゲートが 2 度現れない」
+
+- 実在・件数・一意性は同期検査が deny-by-default ではなく**抽出した各行の未解決・不存在・
+  件数不一致・重複を拒否する**形で固定する
+- §7 を参照するときに番号を使わない規約は人のレビューが担う
+
+### 保証しないもの
+
+- **採用時ハッシュによる追跡を失う**。突合 gate は「登録済みのパスの追加の drift は検出しない
+  (検出するのは一致から不一致へ移る瞬間である)。**債務パスは例外**で、採用時ハッシュとの
+  一致まで見る」と定めており、債務から登録へ移した本パスは以後の内容変更を検出されない。
+  再照合の契機は本登録の見直し期限とテンプレート更新の一括取り込みである
+- 表に書かれた発火条件・登録先の**意味的な正確さ**は機械では見ない (同期検査の docblock が正本)
+- 設計者が実際に §2 の判定を踏んだかは見ない (家系の正典が「それを確かめる機械は家系のどこにも
+  無い」と記録しており、本登録はその状況を変えない)
+
+### 関連
+
+- 実装: `tests/Architecture/IntegrationGuideGateTableSyncTest.php`
+- 設計: `devnotes/20260822-2305-integration-guide-gate-table-restore/`
+
+---
+
+## D43 組織文脈の共有プロパティを URL の binding だけから導出する
 
 | 行 | 内容 |
 |---|---|
@@ -2298,7 +2561,9 @@ deny-by-default 機構そのものであり、業務ドメイン (認証手段�
 - 実装: `app/Http/Middleware/HandleInertiaRequests.php`, `app/DataTransferObjects/Organizations/CurrentOrganizationData.php`
 - 設計: `devnotes/20260823-0016-organization-tenancy-ag-catchup/`
 
-## D41 テンプレート共有部の「組織文脈」前提を URL 単一方式へ書き換える
+---
+
+## D44 テンプレート共有部の「組織文脈」前提を URL 単一方式へ書き換える
 
 | 行 | 内容 |
 |---|---|

@@ -1,8 +1,23 @@
+---
+id: S3
+title: アプリ中核ジャーニー — SOP から完成マニュアル動画まで
+surface: core_journey
+lane: parallel_browser
+priority: P1
+applicability: applicable
+depends_on: []
+reseed_before: true
+accounts: [admin]
+setup: [Default Project とチケット残高を用意する (不足なら S5 の手順でチャージする), real-llm 既定 (実 Anthropic 接続) + fake storage + ffmpeg 導入済みの環境で走らせる]
+covers_screens: [capture.account, capture.csrf-cookie, capture.entry, capture.home, capture.manuals.index, capture.manuals.show, capture.takes.playback, capture.takes.thumbnail, projects.manuals.create, projects.manuals.cuts.takes.index, projects.manuals.download, projects.manuals.edit, projects.manuals.jobs.show, projects.manuals.render-jobs.playback, projects.manuals.render-jobs.show, projects.manuals.show, projects.show]
+covers_operations: [capture.takes.adopt, capture.takes.destroy, capture.takes.downloaded, capture.takes.store, capture.takes.update, capture.takes.upload-url, projects.manuals.analyze, projects.manuals.destroy, projects.manuals.duplicate, projects.manuals.preview, projects.manuals.render, projects.manuals.scenario.update, projects.manuals.source-documents.store, projects.manuals.store, projects.manuals.update]
+covers_capabilities: [CAP-01, CAP-02, CAP-03, CAP-04, CAP-05, CAP-06, REN-01, REN-02, REN-03, REN-04, SCEN-01, SCEN-02, SCEN-03, SCEN-05, SOP-01, SOP-02, SOP-03, SOP-04, SOP-05]
+---
+
 # S3: アプリ中核ジャーニー — SOP から完成マニュアル動画まで
 
-- 前提状態: 編集者(project_admin)でログイン済み、Default Project あり、チケット残高あり(なければ S5 でチャージ)。reseed 推奨。
-- 目的: AI-CUE の North Star フロー全体が破綻なく通るか。手順書(SOP)を起点に AI がカット設計 → 撮影 → 完成動画まで、ユーザーが「次に何をすべきか」を見失わないか。
-- 環境: real-llm 既定(実 Anthropic 接続)+ fake storage(take upload はローカル emulate)+ ffmpeg 導入済み。中核チェーンはエンドツーエンドで通る前提。
+## 目的
+AI-CUE の North Star フロー全体が破綻なく通るか。手順書(SOP)を起点に AI がカット設計 → 撮影 → 完成動画まで、編集者(project_admin)が「次に何をすべきか」を見失わないか。中核チェーンはエンドツーエンドで通る前提とする。
 
 ## 手順
 1. `projects.show`(動画一覧)を開く → カテゴリ/状態/検索の絞り込みが効き、空状態でも「動画を追加」導線が見える。**並べ替え(更新日/タイトル × 昇順/降順)**・**「自分の作成分のみ」フィルタ**・行の**作成者/更新日メタ表示**が機能する(T053)。並べ替え/フィルタ切替が一覧に正しく反映されるか(H10)。
@@ -19,10 +34,6 @@
    - テイクの並べ替え/コメント(`capture.takes.update`)、**インラインプレビュー再生 + 字幕トグル(T050、`capture.takes.playback`)**で採用前に確認、採用(`capture.takes.adopt`)、削除(`capture.takes.destroy`、**確認ダイアログ**があるか T043)。
 8. `projects.manuals.preview`(チケット非消費)で確認 → `projects.manuals.render`(video_render チケット消費) → status=rendering → `projects.manuals.render-jobs.show` ポーリング → 完了で published。ffmpeg で実際に合成されるか。複数の失敗 alert(プレビュー失敗/採用テイク未設定/レンダ失敗)が**帰属明示**されるか(T040)。
 9. `projects.manuals.render-jobs.playback` / `projects.manuals.download` で完成 mp4 を再生・DL(byte 一致)。
-
-## このストーリーで消化する screens / operations
-- screens: projects.show, projects.manuals.create, projects.manuals.show, projects.manuals.edit, projects.manuals.jobs.show, projects.manuals.render-jobs.show, projects.manuals.render-jobs.playback, projects.manuals.download, capture.home, capture.csrf-cookie, capture.manuals.index, capture.manuals.show, capture.takes.playback
-- operations: projects.manuals.store, projects.manuals.update, projects.manuals.destroy, projects.manuals.duplicate, projects.manuals.source-documents.store, projects.manuals.analyze, projects.manuals.scenario.update, projects.manuals.preview, projects.manuals.render, capture.takes.upload-url, capture.takes.store, capture.takes.update, capture.takes.destroy, capture.takes.adopt, capture.takes.downloaded
 
 ## 逸脱アイデア (--deviate 時)
 - 解析失敗(実 AI/レート制限由来)を UX バグと環境ハザードで区別して記録する(Anthropic 429/5xx)。環境ハザードは比較可能性のため `HTTP status / 再試行回数 / 待機秒 / 発生 route` の 1 行フォーマットで残す。

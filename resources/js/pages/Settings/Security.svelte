@@ -6,6 +6,7 @@
     import Button from "@/components/atoms/Button.svelte";
     import Card from "@/components/atoms/Card.svelte";
     import Input from "@/components/atoms/Input.svelte";
+    import QrCodeImage from "@/components/atoms/QrCodeImage.svelte";
     import TextLink from "@/components/atoms/TextLink.svelte";
     import CodeSnippet from "@/components/molecules/CodeSnippet.svelte";
     import FormField from "@/components/molecules/FormField.svelte";
@@ -61,7 +62,7 @@
      * 2FA 管理
      * 未有効 → 有効化開始 (POST) → QR + コード確認 (confirming)
      * → リカバリコード表示 → 有効。無効化は ConfirmDialog 経由。
-     * 注: Fortify の password.confirm は撤去済み (generic recent-auth へ統一)。
+     * 注: Fortify 標準のパスワード確認 step-up は撤去済み (generic recent-auth へ統一)。
      * リカバリコード表示/再生成の endpoint は recent-auth 配線済み
      * (FortifyServiceProvider::attachRecentAuthToSensitiveRoutes())。フロントは
      * guardWithRecentAuth で precheck し、stale なら再認証モーダルを挟んで再開する。
@@ -629,15 +630,17 @@
                             </Alert>
                         {:else}
                             {#if qrSvg}
-                                <!-- QR はサーバ提供の SVG をそのまま描画する。svg 文字列に属性を注入せず、
-                                     wrapper を role="img" にしてアクセシブルネームを与える (H14) -->
-                                <div
-                                    role="img"
-                                    aria-label="2 要素認証の設定用 QR コード"
-                                    class="self-start rounded-md border border-border bg-surface p-4"
-                                    data-testid="two-factor-qr"
-                                >
-                                    {@html qrSvg}
+                                <!-- QR はサーバ生成の SVG を **data URI の <img>** として描く。
+                                     生の HTML を DOM へ差し込む構文は使わない
+                                     (禁止の正本は eslint.config.js の svelte/no-at-html-tags)。
+                                     アクセシブルネームは img の alt が正本なので、
+                                     wrapper の role="img" / aria-label は持たせない (二重命名を避ける)。 -->
+                                <div class="self-start rounded-md border border-border bg-surface p-4">
+                                    <QrCodeImage
+                                        svg={qrSvg}
+                                        alt="2 要素認証の設定用 QR コード"
+                                        testId="two-factor-qr"
+                                    />
                                 </div>
                             {:else}
                                 <Alert type="warning" testId="qr-unavailable">

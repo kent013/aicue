@@ -9,12 +9,20 @@
     check    … 段 1 → 2 → 3 → 4 を通す。**1 バイトも書かない**
 
     段 1 (抽出)         抽出コマンドが成功し、宣言した抽出条件で走り、母集合が 0 件でない
-    段 2 (注釈)         注釈の集合 = 面の集合。語彙・必須・形式・複合 method を検査する
+    段 2 (注釈・割当)   注釈の集合 = 面の集合。語彙・必須・形式・複合 method を検査し、
+                        シナリオカードの前付け (`stories/S*.md` の covers_*) と突き合わせる
     段 3 (生成物)       メモリ上で再生成した内容と現物を byte 比較する
-    段 4 (機能カタログ) capability-catalog.md の代表機構が実在し、id が重複しない
+    段 4 (機能カタログ) capability-catalog.md の代表機構が実在し、id が重複しない。
+                        カードが挙げる capability が実在する
+
+**割当 (どのカードが route を消化するか) の正本はシナリオカードの前付け**である
+(規則の散文は `.claude/skills/app-bug-hunt/stories/README.md`)。注釈は route ごとの意味
+(`kind` / `kubun` / `reason`) だけを持ち、`story` は未知の項目として落ちる。
 
 終了コード: 0=一致 / 2=致命 (抽出不能・抽出条件不一致・母集合 0 件・空名・重複名・
-入力ファイル不在・壊れた TOML・想定外例外) / 3=ドリフト (段 2 / 3 / 4 の違反)。
+入力ファイル不在・壊れた TOML・**カードの置き場が無い / 候補 0 件 / 読み取り不能**・
+想定外例外) / 3=ドリフト (段 2 / 3 / 4 の違反。**前付けの形式違反・語彙違反・
+配列内重複・割当のドリフトはこちら**)。
 **1 と 4 以上は使わない** (argparse が引数エラーで返す 2 は「致命」の側に落ちる)。
 
 保証しないもの: 見るのは web group を宣言した面だけである。web group を宣言していない面
@@ -22,6 +30,10 @@
 逆に web group を宣言した route は面の除外表の 2 つを除き必ず目録に入り、注釈を要求される
 (実例: `webhooks.ses` は web 面なので操作表に載り、区分 `外` として理由付きで宣言されている)。
 注釈の**内容**の妥当性・画面題名の欠落・機能カタログの網羅性も見ない。
+**割当が痩せたこと**も検出できない (見るのは「1 枚以上のカードに載っていること」だけなので、
+ある route が 2 枚から 1 枚へ減っても緑のままである)。カードの前付けの契約のうち
+目録に関係しないもの (正準順序 / 表 A・表 B との突合 / lane / priority / depends_on /
+H1 見出し / 旧メタ節) は `stories/test_story_front_matter.py` の責務で、ここでは見ない。
 
 依存は標準ライブラリのみ (AGENTS.md §bug-hunt)。
 """
@@ -56,13 +68,23 @@ SURFACE_EXCLUDED_PREFIXES = ("livewire",)       # 先頭セグメントの前方
 KUBUN_VOCABULARY = ("通常", "逸", "終", "外")
 # coverage/correlate.py の定数と一致させる (自己テストが import して照合する)。
 KUBUN_OUT_OF_SCOPE, KUBUN_DEVIATE = "外", "逸"
-KUBUN_NEEDS_STORY = ("通常", "逸")
+# **reason の要否だけ**に使う。スコープ判定は `kubun == KUBUN_OUT_OF_SCOPE` に統一する
+# (`終` は「実行すると後続が成立しない終端」であって**対象内**である)。
 KUBUN_NEEDS_REASON = ("外", "終")
 
-STORY_IDS = tuple(f"S{i}" for i in range(1, 8))
 SCREEN_KINDS = ("画面", "JSON")
-ANNOTATION_KEYS = ("kind", "story", "kubun", "reason")
+# 注釈が持つのは「route ごとの意味」だけである。割当 (どのカードが消化するか) は
+# シナリオカードの前付けが正本なので、ここには持たない。
+ANNOTATION_KEYS = ("kind", "kubun", "reason")
 REASON_MIN_LENGTH = 30
+
+# 割当セルの値域。**書き出し側の正本はここ**であり、規則の散文は
+# `.claude/skills/app-bug-hunt/stories/README.md` にある。
+# `-` は「載せるカードが 0 枚 (= 対象外)」を表す。
+STORY_CELL_EMPTY = "-"
+STORY_CELL_SEPARATOR = " "
+# 照合は fullmatch() で行う (Python の `$` は末尾改行の直前にも一致するため)。
+STORY_CELL_RE = re.compile(r"(S[1-9][0-9]*( S[1-9][0-9]*)*|-)")
 
 GET_LIKE_METHODS = ("GET", "HEAD", "OPTIONS")
 
@@ -79,6 +101,8 @@ BACKTICK_TOKEN_RE = re.compile(r"`([^`]+)`")
 PATH_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.\-]+(?:/[A-Za-z0-9_.\-]+)+\.[A-Za-z0-9]+$")
 
 SKILL_DIR = Path(".claude/skills/app-bug-hunt")
+# 前付けの読み取り器の置き場 (stories/ に居る。文法の正本はその隣の README.md)。
+STORIES_DIR = SKILL_DIR / "stories"
 ANNOTATIONS_PATH = SKILL_DIR / "inventory" / "annotations.toml"
 NOTES_SCREENS_PATH = SKILL_DIR / "inventory" / "notes-screens.md"
 NOTES_OPERATIONS_PATH = SKILL_DIR / "inventory" / "notes-operations.md"
@@ -88,14 +112,23 @@ CATALOG_PATH = SKILL_DIR / "capability-catalog.md"
 
 GENERATED_NOTICE = (
     "> **このファイルは生成物である。手で編集しない。**\n"
-    "> 直し方: `.claude/skills/app-bug-hunt/inventory/annotations.toml` (割当・区分・理由) か\n"
-    "> `inventory/notes-*.md` (散文) を直してから "
-    "`python3 scripts/bug-hunt-inventory.py generate` を走らせる。\n"
+    "> 直し方: 割当ストーリー列は `.claude/skills/app-bug-hunt/stories/S*.md` の前付け\n"
+    "> (`covers_screens` / `covers_operations`) を、区分・理由・種別は\n"
+    "> `inventory/annotations.toml` を、散文は `inventory/notes-*.md` を直してから\n"
+    "> `python3 scripts/bug-hunt-inventory.py generate` を走らせる。\n"
     "> 抽出条件: 開発環境 (local) またはテスト実行中に登録される route 集合。\n"
     "> ドリフト検査: `scripts/bug-hunt-inventory-check.sh` (exit 3 = ドリフト)。\n"
 )
 
 Scanner = Callable[[Path], object]
+
+# 前付けの読み取り器を取り込む (ファイル名にハイフンを含む生成器からは通常の import ができない
+# ため、読み取り器の置き場を sys.path へ一時的に足す)。読み取り器は stdlib だけに依存する。
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / STORIES_DIR))
+try:
+    import story_front_matter  # noqa: E402 — 置き場を sys.path へ足した直後にしか読めない
+finally:
+    sys.path.pop(0)
 
 
 class FatalError(Exception):
@@ -284,6 +317,162 @@ def _annotation_value(entry: dict[str, object], key: str) -> str | None:
     return value if isinstance(value, str) else None
 
 
+@dataclass(frozen=True)
+class Assignment:
+    """カードの前付けから逆引きした route → 割当カード集合 (欄ごと)。
+
+    ★ 持つのは**判定と生成に使う 3 つだけ**である (集めるが誰も参照しない出力を作らない)。
+      カードの一覧そのものは目録の生成にも突合にも要らないので持たない。
+    """
+
+    screens: dict[str, frozenset[str]]
+    operations: dict[str, frozenset[str]]
+    capabilities: frozenset[str]
+
+
+def load_assignment(stories_dir: Path) -> tuple[Assignment | None, list[str]]:
+    """カードの前付けを読み、欄ごとの割当と違反を返す。
+
+    ★ **生成器単体で fail-closed にする**。書式の全契約は
+      stories/test_story_front_matter.py の責務だが、それは**別プロセス**である。
+      生成器を直接叩いた走行が緑になってはいけないので、ここでも次を見る:
+
+        - parse_front_matter() が返した違反を**必ず伝播する**
+        - `id` / `applicability` / `covers_*` が期待型でなければ**割当を構築しない**
+        - 不正なカードを**飛ばして目録を生成しない** (段 2 の違反として exit 3 にする)
+
+      逆に、語彙・正準順序・表 A / 表 B との突合といった「目録に関係しない契約」は
+      ここでは見ない (二重に持つと必ず食い違う)。
+
+    ★ **失敗を型で表す**。違反が 1 件でもあれば `None` を返す。空の Assignment を返すと、
+      呼び出し側が違反の並びを見落としたときに**そのまま目録を生成できてしまう**。
+
+    ★ 読むこと自体が成立しない状態 (置き場が無い / 候補 0 件 / 読み取り不能) は
+      `FatalError` (終了コード 2) にする。**違反 0 件と母集団 0 件を混ぜない**。
+    """
+    try:
+        cards, violations = story_front_matter.read_cards(stories_dir)
+    except story_front_matter.StoryReadError as exc:
+        raise FatalError(f"[{STAGE2}] シナリオカードを読めない: {exc}") from exc
+
+    violations = [f"[{STAGE2}] {v}" for v in violations]
+    screens: dict[str, set[str]] = {}
+    operations: dict[str, set[str]] = {}
+    capabilities: set[str] = set()
+    card_ids: list[str] = []
+
+    for card in cards:
+        prefix = f"[{STAGE2}] {card.filename}:"
+        card_id = card.front_matter.get("id")
+        if not isinstance(card_id, str) or story_front_matter.CARD_ID_RE.fullmatch(card_id) is None:
+            violations.append(f"{prefix} id の書式が契約外: {card_id!r}")
+            continue
+        if card_id in card_ids:
+            violations.append(f"{prefix} id が重複している: {card_id}")
+            continue
+        card_ids.append(card_id)
+
+        applicability = card.front_matter.get("applicability")
+        if applicability not in story_front_matter.APPLICABILITY_VOCABULARY:
+            violations.append(f"{prefix} 未知の applicability: {applicability!r}")
+            continue
+
+        for key, pattern in (
+            ("covers_screens", story_front_matter.ROUTE_TOKEN_RE),
+            ("covers_operations", story_front_matter.ROUTE_TOKEN_RE),
+            ("covers_capabilities", story_front_matter.CAPABILITY_TOKEN_RE),
+        ):
+            elements = card.front_matter.get(key)
+            if not isinstance(elements, list):
+                violations.append(f"{prefix} {key} が配列でない")
+                continue
+            names: list[str] = []
+            for element in elements:
+                if not isinstance(element, str) or pattern.fullmatch(element) is None:
+                    violations.append(f"{prefix} {key} の要素の書式が契約外: {element!r}")
+                    continue
+                if element in names:
+                    # frozenset 化すると消えるので、集合にする**前**に見る。
+                    violations.append(f"{prefix} {key} に重複した要素がある: {element}")
+                    continue
+                names.append(element)
+            # not_applicable のカードは `## 手順` を持たない (F2) ため、消化カードとして
+            # 数えるべきではない。よって割当の母集団から外す。
+            if applicability != "applicable":
+                continue
+            if key == "covers_screens":
+                for name in names:
+                    screens.setdefault(name, set()).add(card_id)
+            elif key == "covers_operations":
+                for name in names:
+                    operations.setdefault(name, set()).add(card_id)
+            else:
+                capabilities.update(names)
+
+    if violations:
+        return None, violations
+
+    return Assignment(
+        screens={k: frozenset(v) for k, v in screens.items()},
+        operations={k: frozenset(v) for k, v in operations.items()},
+        capabilities=frozenset(capabilities),
+    ), []
+
+
+def validate_assignment(
+    facts: Facts, annotations: Annotations, assignment: Assignment
+) -> list[str]:
+    """前付けの割当と目録の母集合を突き合わせる (段 2 の一部)。
+
+    見るのは 4 つ:
+      I2 実在   … 載せた route 名が web 面の母集合に在る
+      I3 欄     … covers_screens は safe method / covers_operations は 非 safe method
+      I4 対象外 … 区分 **外** の route を載せていない (`終` は対象内である)
+      I1 未割当 … 対象内の route が 1 枚以上のカードに載っている
+
+    ★ **欄ごとに明示的にループする**。`fact in facts.screens` のような所属判定に頼ると、
+      将来 GET と非 GET を併せ持つ route (compound) を両方の表へ入れる形にした瞬間に、
+      操作側の未割当を静かに見逃す。
+    ★ **判定の順序は expected → other → 不明**である。other を先に見ると、
+      両方の母集合に在る route を「欄違い」と誤って報告する。
+    """
+    violations: list[str] = []
+    screen_names = {f.name for f in facts.screens}
+    operation_names = {f.name for f in facts.operations}
+
+    for label, cell, expected, other in (
+        ("covers_screens", assignment.screens, screen_names, operation_names),
+        ("covers_operations", assignment.operations, operation_names, screen_names),
+    ):
+        for name in sorted(cell):
+            if name in expected:
+                entry = annotations.routes.get(name)
+                # 未注釈 route は既存の「未注釈の route」違反の担当。ここでは黙って飛ばす
+                # (KeyError で全体を落とすと、他の違反を集め終える前に走行が止まる)。
+                if entry is not None and _annotation_value(entry, "kubun") == KUBUN_OUT_OF_SCOPE:
+                    violations.append(f"[{STAGE2}] {label} に対象外の route: {name}")
+            elif name in other:
+                violations.append(f"[{STAGE2}] {label} に欄違いの route: {name}")
+            else:
+                violations.append(f"[{STAGE2}] {label} に実在しない route: {name}")
+
+    for label, route_facts, pool in (
+        ("画面", facts.screens, assignment.screens),
+        ("操作", facts.operations, assignment.operations),
+    ):
+        for fact in route_facts:
+            entry = annotations.routes.get(fact.name)
+            if entry is None or _annotation_value(entry, "kubun") == KUBUN_OUT_OF_SCOPE:
+                continue
+            if not pool.get(fact.name):
+                violations.append(
+                    f"[{STAGE2}] 対象内なのにどのカードにも載っていない{label}: {fact.name} "
+                    "(消化するカードの covers_* へ足すこと)"
+                )
+
+    return violations
+
+
 def validate_annotations(facts: Facts, annotations: Annotations) -> list[str]:
     """注釈の定義域一致・語彙・形式・複合 method を検査し、違反行を全件返す。"""
     violations: list[str] = []
@@ -328,16 +517,6 @@ def validate_annotations(facts: Facts, annotations: Annotations) -> list[str]:
         elif kind is not None:
             violations.append(f"{prefix} 操作表の route に kind は書けない")
 
-        story = _annotation_value(entry, "story")
-        if kubun in KUBUN_NEEDS_STORY:
-            if story is None:
-                violations.append(f"{prefix} 区分 {kubun} には story が要る")
-            elif story not in STORY_IDS:
-                violations.append(f"{prefix} 未知のストーリー: {story}")
-        elif kubun in KUBUN_NEEDS_REASON and story is not None:
-            # 表では `-` に潰れて見えなくなる古い割当を残さない。
-            violations.append(f"{prefix} 区分 {kubun} に story は書けない")
-
         reason = _annotation_value(entry, "reason")
         if kubun in KUBUN_NEEDS_REASON:
             if reason is None:
@@ -351,7 +530,7 @@ def validate_annotations(facts: Facts, annotations: Annotations) -> list[str]:
         elif reason is not None:
             violations.append(f"{prefix} 区分 {kubun} に理由は書けない")
 
-        for key in ("kind", "story", "kubun"):
+        for key in ("kind", "kubun"):
             value = _annotation_value(entry, key)
             if value is not None and any(c in value for c in FORBIDDEN_CELL_CHARS):
                 violations.append(f"{prefix} {key} に表を壊す文字 (| / 改行) が入っている")
@@ -391,9 +570,21 @@ def check_notes(notes: dict[str, str]) -> list[str]:
 # --------------------------------------------------------------------------- #
 # 段 3 の素材: 生成物のレンダリング
 # --------------------------------------------------------------------------- #
-def _story_cell(entry: dict[str, object]) -> str:
-    story = _annotation_value(entry, "story")
-    return story if story is not None else "-"
+def _story_cell(assignment: frozenset[str]) -> str:
+    """割当カードの集合をセルの表記へ落とす (番号の昇順・半角空白 1 つ区切り)。
+
+    ★ 書き出す直前に**自分の出力を値域へ突き合わせる**。読み手 (`coverage/correlate.py`) は
+      同じ値域を fullmatch で強制するので、生成側が契約外のセルを書いたら
+      そこで走行を止める (黙って読めない目録を作らない)。
+    """
+    if not assignment:
+        cell = STORY_CELL_EMPTY
+    else:
+        cell = STORY_CELL_SEPARATOR.join(sorted(assignment, key=lambda s: int(s[1:])))
+    if STORY_CELL_RE.fullmatch(cell) is None:
+        raise FatalError(f"[{STAGE3}] 割当セルが契約外の表記になった: {cell!r}")
+
+    return cell
 
 
 def _out_of_scope_section(
@@ -403,7 +594,7 @@ def _out_of_scope_section(
     rows = [
         f"- `{fact.name}` — {_annotation_value(annotations.routes[fact.name], 'reason')}"
         for fact in routes
-        if _annotation_value(annotations.routes[fact.name], "kubun") in KUBUN_NEEDS_REASON
+        if _annotation_value(annotations.routes[fact.name], "kubun") == KUBUN_OUT_OF_SCOPE
     ]
     lines.extend(rows if rows else ["対象外に分類した route は無い。"])
 
@@ -411,12 +602,12 @@ def _out_of_scope_section(
 
 
 def render_screens(
-    facts: Facts, annotations: Annotations, notes: str
+    facts: Facts, annotations: Annotations, notes: str, assignment: Assignment
 ) -> str:
     out_of_scope = sum(
         1
         for fact in facts.screens
-        if _annotation_value(annotations.routes[fact.name], "kubun") in KUBUN_NEEDS_REASON
+        if _annotation_value(annotations.routes[fact.name], "kubun") == KUBUN_OUT_OF_SCOPE
     )
     lines = [
         "# 画面インベントリ (screens.md) — AI-CUE",
@@ -435,7 +626,8 @@ def render_screens(
         entry = annotations.routes[fact.name]
         lines.append(
             f"| {fact.uri} | {fact.name} | {_annotation_value(entry, 'kind')} | "
-            f"{fact.title or '-'} | {_story_cell(entry)} | {_annotation_value(entry, 'kubun')} |"
+            f"{fact.title or '-'} | {_story_cell(assignment.screens.get(fact.name, frozenset()))} | "
+            f"{_annotation_value(entry, 'kubun')} |"
         )
     body = "\n".join(lines) + "\n"
 
@@ -443,12 +635,12 @@ def render_screens(
 
 
 def render_operations(
-    facts: Facts, annotations: Annotations, notes: str
+    facts: Facts, annotations: Annotations, notes: str, assignment: Assignment
 ) -> str:
     out_of_scope = sum(
         1
         for fact in facts.operations
-        if _annotation_value(annotations.routes[fact.name], "kubun") in KUBUN_NEEDS_REASON
+        if _annotation_value(annotations.routes[fact.name], "kubun") == KUBUN_OUT_OF_SCOPE
     )
     lines = [
         "# 操作インベントリ (operations.md) — AI-CUE",
@@ -469,7 +661,8 @@ def render_operations(
         entry = annotations.routes[fact.name]
         lines.append(
             f"| {','.join(fact.write_methods)} | {fact.uri} | {fact.name} | "
-            f"{_story_cell(entry)} | {_annotation_value(entry, 'kubun')} |"
+            f"{_story_cell(assignment.operations.get(fact.name, frozenset()))} | "
+            f"{_annotation_value(entry, 'kubun')} |"
         )
     body = "\n".join(lines) + "\n"
 
@@ -479,11 +672,16 @@ def render_operations(
 # --------------------------------------------------------------------------- #
 # 段 4: 機能カタログの参照整合
 # --------------------------------------------------------------------------- #
-def check_catalog(catalog_text: str, facts: Facts) -> list[str]:
+def check_catalog(catalog_text: str, facts: Facts, assignment: Assignment) -> list[str]:
     """capability-catalog.md の代表機構が実在し、id が重複しないことを検査する。
 
     対象はヘッダが CAPABILITY_TABLE_HEADER の表**だけ** (責務境界・割当規則の表は見ない)。
     網羅性 (すべての route が id を持つか) は見ない (overlay なので網羅を主張しない)。
+
+    併せて、カードの `covers_capabilities` が**実在する id だけ**を挙げていることを見る。
+    **被覆漏れは見ない** (機能カタログが継承宣言の欄を持たないため。既存乖離 D20。
+    保証境界は stories/README.md に書いてある)。配列内の重複は `load_assignment()` が
+    集合化の**前**に見る。
     """
     violations: list[str] = []
     seen: list[str] = []
@@ -526,6 +724,9 @@ def check_catalog(catalog_text: str, facts: Facts) -> list[str]:
 
     if not seen:
         raise FatalError(f"[{STAGE4}] 機能カタログの表が見つからない (ヘッダが変わっていないか)")
+
+    for capability in sorted(assignment.capabilities - set(seen)):
+        violations.append(f"[{STAGE4}] カードが実在しない capability を挙げている: {capability}")
 
     return violations
 
@@ -630,14 +831,21 @@ def _replace_atomically(pairs: list[tuple[Path, str]]) -> None:
 # --------------------------------------------------------------------------- #
 # 公開 entry
 # --------------------------------------------------------------------------- #
-def _prepare(repo_root: Path, scanner: Scanner | None) -> tuple[Facts, Annotations, str, str]:
-    """段 1 と入力の読み込みまでを行う。"""
+def _prepare(
+    repo_root: Path, scanner: Scanner | None
+) -> tuple[Facts, Annotations, str, str, Assignment | None, list[str]]:
+    """段 1 と入力の読み込みまでを行う。
+
+    割当は読めなければ `None` になる (違反の並びを第 6 要素で返す)。**空の Assignment を
+    返さない** — 呼び出し側が違反を見落としたときにそのまま目録を生成できてしまうため。
+    """
     facts = split_surface((scanner or scan)(repo_root))
     annotations = load_annotations(repo_root / ANNOTATIONS_PATH)
     notes_screens = _read_text(repo_root / NOTES_SCREENS_PATH, STAGE2)
     notes_operations = _read_text(repo_root / NOTES_OPERATIONS_PATH, STAGE2)
+    assignment, assignment_violations = load_assignment(repo_root / STORIES_DIR)
 
-    return facts, annotations, notes_screens, notes_operations
+    return facts, annotations, notes_screens, notes_operations, assignment, assignment_violations
 
 
 def _report(violations: list[str]) -> int:
@@ -650,18 +858,24 @@ def _report(violations: list[str]) -> int:
 
 def run_check(repo_root: Path, *, scanner: Scanner | None = None) -> int:
     """段 1 → 2 → 3 → 4 を通す。**1 バイトも書かない**。"""
-    facts, annotations, notes_screens, notes_operations = _prepare(repo_root, scanner)
+    facts, annotations, notes_screens, notes_operations, assignment, assignment_violations = (
+        _prepare(repo_root, scanner)
+    )
 
     violations = validate_annotations(facts, annotations) + check_notes({
         NOTES_SCREENS_PATH.name: notes_screens,
         NOTES_OPERATIONS_PATH.name: notes_operations,
-    })
+    }) + assignment_violations
+    if assignment is None:
+        # 割当が読めない状態で段 3 / 4 へ進まない (レンダリングの入力が無い)。
+        return _report(violations)
+    violations += validate_assignment(facts, annotations, assignment)
     if violations:
         return _report(violations)
 
     for path, rendered in (
-        (repo_root / SCREENS_PATH, render_screens(facts, annotations, notes_screens)),
-        (repo_root / OPERATIONS_PATH, render_operations(facts, annotations, notes_operations)),
+        (repo_root / SCREENS_PATH, render_screens(facts, annotations, notes_screens, assignment)),
+        (repo_root / OPERATIONS_PATH, render_operations(facts, annotations, notes_operations, assignment)),
     ):
         if _read_text(path, STAGE3) != rendered:
             violations.append(
@@ -669,7 +883,7 @@ def run_check(repo_root: Path, *, scanner: Scanner | None = None) -> int:
                 "(python3 scripts/bug-hunt-inventory.py generate を走らせること)"
             )
 
-    violations += check_catalog(_read_text(repo_root / CATALOG_PATH, STAGE4), facts)
+    violations += check_catalog(_read_text(repo_root / CATALOG_PATH, STAGE4), facts, assignment)
     if violations:
         return _report(violations)
 
@@ -683,19 +897,25 @@ def run_check(repo_root: Path, *, scanner: Scanner | None = None) -> int:
 
 def run_generate(repo_root: Path, *, scanner: Scanner | None = None) -> int:
     """段 1 → 2 → 4 を通してから 2 ファイルを書き替える。"""
-    facts, annotations, notes_screens, notes_operations = _prepare(repo_root, scanner)
+    facts, annotations, notes_screens, notes_operations, assignment, assignment_violations = (
+        _prepare(repo_root, scanner)
+    )
 
     violations = validate_annotations(facts, annotations) + check_notes({
         NOTES_SCREENS_PATH.name: notes_screens,
         NOTES_OPERATIONS_PATH.name: notes_operations,
-    })
-    violations += check_catalog(_read_text(repo_root / CATALOG_PATH, STAGE4), facts)
+    }) + assignment_violations
+    if assignment is None:
+        # 目録を 1 バイトも書かずに落とす。
+        return _report(violations)
+    violations += validate_assignment(facts, annotations, assignment)
+    violations += check_catalog(_read_text(repo_root / CATALOG_PATH, STAGE4), facts, assignment)
     if violations:
         return _report(violations)
 
     _replace_atomically([
-        (repo_root / SCREENS_PATH, render_screens(facts, annotations, notes_screens)),
-        (repo_root / OPERATIONS_PATH, render_operations(facts, annotations, notes_operations)),
+        (repo_root / SCREENS_PATH, render_screens(facts, annotations, notes_screens, assignment)),
+        (repo_root / OPERATIONS_PATH, render_operations(facts, annotations, notes_operations, assignment)),
     ])
     print(
         f"生成完了: 画面 {len(facts.screens)} 件 / 操作 {len(facts.operations)} 件 "

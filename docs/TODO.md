@@ -21,15 +21,10 @@
 
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
-| T243 | kent013/laravel-ssrf-pin を完全区間分類の版 (^0.4) へ改版し回帰テストで受ける | backend | SSRF判定を^0.4へ改版し回帰固定 | High | standalone | [設計](devnotes/20260822-2311-ssrf-pin-v04-upgrade/) | 2026-08-23 01:26 |
-| T244 | アプリ組み込みガイド §2 ゲート表 2 本の復帰 | docs | 契約文書§2のゲート表2本を復帰 | Medium | standalone | [設計](devnotes/20260822-2305-integration-guide-gate-table-restore/) | 2026-08-23 01:27 |
-| T245 | bug-hunt シナリオカードへの前付け導入と割当正本の一元化 (正典 t1 追従) | test | シナリオ前付け導入と割当正本一元化 | Medium | standalone | [設計](devnotes/20260823-0022-bughunt-story-front-matter-adoption/) | 2026-08-23 01:27 |
-| T246 | lctl help-system 追従: ヘルプ取り込み基盤 + MCP ツール一覧の自動生成 (鮮度検査つき) | backend | MCPツール一覧の自動生成とヘルプ基盤 | Medium | standalone | [設計](devnotes/20260823-0019-help-system-aicue-propagation/) | 2026-08-23 01:28 |
 | T247 | 組織テナンシー正典追従 (AG-037/038/039系/046/047) | backend | 組織文脈をURL単一方式へ揃え識別名を堅くする | High | standalone | [設計](devnotes/20260823-0016-organization-tenancy-ag-catchup/) | 2026-08-23 01:28 |
-| T248 | 冪等 claim の実プロセス並行テストハーネス導入 (正典 v1 追従) | test | 実プロセス2本の並行claim検証ハーネス導入 | Medium | standalone | [設計](devnotes/20260823-0017-process-concurrency-harness-adoption/) | 2026-08-23 01:29 |
 | T249 | 起動 probe の共通 runner への一元化 (正典 v1 追従) | test | 起動probeを共通runnerへ一元化・退行gate新設 | Medium | standalone | [設計](devnotes/20260823-0022-boot-probe-runner-unification/) | 2026-08-23 01:30 |
-| T250 | 撤去表面の不在 gate を家系正典 v1 の標準形へ揃える | test | 撤去表面の不在gateを正典v1形へ揃える | Medium | incremental | [設計](devnotes/20260823-0016-password-confirm-surface-removal-gate-v1/) | 2026-08-23 01:30 |
-| T251 | Svelte raw HTML sink の deny-by-default 禁止 (正典 t1 追従) | frontend | {@html}禁止gate新設とQR部品置換 | Medium | standalone | [設計](devnotes/20260823-0017-svelte-raw-html-sink-ban/) | 2026-08-23 01:31 |
+| T252 | Pest arch ベースラインの規則別分解導入 | test | Pest arch 規則別ベースラインを新設 | Medium | standalone | [設計](devnotes/20260823-0020-pest-arch-baseline-per-rule-adoption/) | 2026-08-23 08:46 |
+| T253 | 企業 IdP との OIDC SSO 採用 | backend | 企業IdPのOIDCでSSOログインを追加 | High | standalone | [設計](devnotes/20260823-0015-enterprise-oidc-sso-adoption/) | 2026-08-23 08:46 |
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
 ## Conditional (条件付き待機)

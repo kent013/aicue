@@ -1,8 +1,10 @@
 # 画面インベントリ (screens.md) — AI-CUE
 
 > **このファイルは生成物である。手で編集しない。**
-> 直し方: `.claude/skills/app-bug-hunt/inventory/annotations.toml` (割当・区分・理由) か
-> `inventory/notes-*.md` (散文) を直してから `python3 scripts/bug-hunt-inventory.py generate` を走らせる。
+> 直し方: 割当ストーリー列は `.claude/skills/app-bug-hunt/stories/S*.md` の前付け
+> (`covers_screens` / `covers_operations`) を、区分・理由・種別は
+> `inventory/annotations.toml` を、散文は `inventory/notes-*.md` を直してから
+> `python3 scripts/bug-hunt-inventory.py generate` を走らせる。
 > 抽出条件: 開発環境 (local) またはテスト実行中に登録される route 集合。
 > ドリフト検査: `scripts/bug-hunt-inventory-check.sh` (exit 3 = ドリフト)。
 
@@ -18,11 +20,11 @@ bug-hunt カバレッジの分母となる「画面」(GET × web セッショ�
 | organizations/{organization}/billing/purchase-tickets | billing.tickets.show | 画面 | チケットを購入 | S5 | 通常 |
 | organizations/{organization}/app/account | capture.account | 画面 | アカウント | S3 | 通常 |
 | organizations/{organization}/app/csrf-cookie | capture.csrf-cookie | JSON | - | S3 | 通常 |
-| app | capture.entry | 画面 | - | S5 | 通常 |
+| app | capture.entry | 画面 | - | S3 | 通常 |
 | organizations/{organization}/app | capture.home | 画面 | - | S3 | 通常 |
 | organizations/{organization}/app/projects/{project}/manuals | capture.manuals.index | 画面 | 撮影するマニュアルを選ぶ | S3 | 通常 |
-| organizations/{organization}/app/projects/{project}/manuals/{manual} | capture.manuals.show | 画面 | - | S3 | 通常 |
-| organizations/{organization}/app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take}/playback | capture.takes.playback | 画面 | - | S3 | 通常 |
+| organizations/{organization}/app/projects/{project}/manuals/{manual} | capture.manuals.show | 画面 | - | S3 S7 | 通常 |
+| organizations/{organization}/app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take}/playback | capture.takes.playback | 画面 | - | S3 S7 | 通常 |
 | organizations/{organization}/app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take}/thumbnail | capture.takes.thumbnail | 画面 | - | S3 | 通常 |
 | contact | contact | 画面 | お問い合わせ | S1 | 通常 |
 | contact/thanks | contact.thanks | 画面 | お問い合わせ完了 | S1 | 通常 |
@@ -54,19 +56,19 @@ bug-hunt カバレッジの分母となる「画面」(GET × web セッショ�
 | forgot-password | password.request | 画面 | パスワードリセット | S1 | 通常 |
 | reset-password/{token} | password.reset | 画面 | パスワードリセット | S1 | 通常 |
 | pricing | pricing | 画面 | - | S5 | 通常 |
-| organizations/{organization}/projects/{project}/categories | projects.categories.index | 画面 | カテゴリ管理 | S4 | 通常 |
+| organizations/{organization}/projects/{project}/categories | projects.categories.index | 画面 | カテゴリ管理 | S4 S7 | 通常 |
 | organizations/{organization}/projects/create | projects.create | 画面 | プロジェクトの作成 | S4 | 通常 |
-| organizations/{organization}/projects/{project}/edit | projects.edit | 画面 | プロジェクトの編集 | S4 | 通常 |
+| organizations/{organization}/projects/{project}/edit | projects.edit | 画面 | プロジェクトの編集 | S4 S7 | 通常 |
 | organizations/{organization}/projects | projects.index | 画面 | プロジェクト | S4 | 通常 |
 | organizations/{organization}/projects/{project}/manuals/create | projects.manuals.create | 画面 | 動画マニュアルの作成 | S3 | 通常 |
 | organizations/{organization}/projects/{project}/manuals/{manual}/cuts/{cut}/takes | projects.manuals.cuts.takes.index | 画面 | - | S3 | 通常 |
-| organizations/{organization}/projects/{project}/manuals/{manual}/download | projects.manuals.download | 画面 | - | S3 | 通常 |
-| organizations/{organization}/projects/{project}/manuals/{manual}/edit | projects.manuals.edit | 画面 | - | S3 | 通常 |
-| organizations/{organization}/projects/{project}/manuals/{manual}/jobs/{analysisJob} | projects.manuals.jobs.show | 画面 | - | S3 | 通常 |
-| organizations/{organization}/projects/{project}/manuals/{manual}/render-jobs/{renderJob}/playback | projects.manuals.render-jobs.playback | 画面 | - | S3 | 通常 |
-| organizations/{organization}/projects/{project}/manuals/{manual}/render-jobs/{renderJob} | projects.manuals.render-jobs.show | 画面 | - | S3 | 通常 |
-| organizations/{organization}/projects/{project}/manuals/{manual} | projects.manuals.show | 画面 | - | S3 | 通常 |
-| organizations/{organization}/projects/{project} | projects.show | 画面 | - | S3 | 通常 |
+| organizations/{organization}/projects/{project}/manuals/{manual}/download | projects.manuals.download | 画面 | - | S3 S7 | 通常 |
+| organizations/{organization}/projects/{project}/manuals/{manual}/edit | projects.manuals.edit | 画面 | - | S3 S7 | 通常 |
+| organizations/{organization}/projects/{project}/manuals/{manual}/jobs/{analysisJob} | projects.manuals.jobs.show | 画面 | - | S3 S7 | 通常 |
+| organizations/{organization}/projects/{project}/manuals/{manual}/render-jobs/{renderJob}/playback | projects.manuals.render-jobs.playback | 画面 | - | S3 S7 | 通常 |
+| organizations/{organization}/projects/{project}/manuals/{manual}/render-jobs/{renderJob} | projects.manuals.render-jobs.show | 画面 | - | S3 S7 | 通常 |
+| organizations/{organization}/projects/{project}/manuals/{manual} | projects.manuals.show | 画面 | - | S3 S7 | 通常 |
+| organizations/{organization}/projects/{project} | projects.show | 画面 | - | S3 S7 | 通常 |
 | recent-auth/confirm | recent-auth.confirm | 画面 | 本人確認 | S6 | 通常 |
 | recent-auth/status | recent-auth.status | 画面 | - | S6 | 通常 |
 | register | register | 画面 | アカウント登録 | S1 | 通常 |
@@ -143,7 +145,9 @@ bug-hunt はこれらを**単独で開くのではなく**、S1/S6 のパスキ�
 > §サブスク契約 Checkout とオンボーディング着地)。
 
 - `onboarding.checkout` は**離脱ガード付き**: 契約済み (有効 sub / free personal) は
-  `billing.index` へ、`manageBilling` 非保持者は `onboarding.billing-required` へ逃がす。
+  `manageBilling` 保持者 → `billing.index` / 非保持メンバー → `dashboard` へ寄せる
+  (非保持メンバーに操作できない請求画面を見せず業務入口へ着地させる。Q-2-01)。
+  未契約で `manageBilling` 非保持者は `onboarding.billing-required` へ逃がす。
 - `onboarding.billing-required` も同様に、利用可なら `dashboard`、`manageBilling` 保持者なら
   `onboarding.checkout` へ逃がす。**どちらの画面も「行き先のない詰み」を作らないこと**が契約で、
   ここでループ・403・空画面が出たら finding (H4/H10)。

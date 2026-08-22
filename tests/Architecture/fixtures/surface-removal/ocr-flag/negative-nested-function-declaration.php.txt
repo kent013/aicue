@@ -1,0 +1,16 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Support\Manual;
+
+class AcceptedSourceDocumentTypes
+{
+    public function register(): void
+    {
+        function imagesEnabled(): bool
+        {
+            return true;
+        }
+    }
+}

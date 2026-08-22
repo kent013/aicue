@@ -1,0 +1,5 @@
+name: ci
+jobs:
+  probe:
+    steps:
+      - run: php -r "app\support\manual\acceptedsourcedocumenttypes::IMAGESENABLED();"

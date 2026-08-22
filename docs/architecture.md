@@ -2195,6 +2195,14 @@ REST API v1 の `Idempotency-Key` は **本処理の前に claim する**方式�
   使われていることが前提 (既存の `billing:send-billing-reminders` /
   `render:reconcile-outputs` と同じ。本節で新しく持ち込む前提ではない)。
   満たさないと多重実行しうるが DELETE は冪等で、害は `report()` の重複に留まる。
+- **実プロセス並行テスト (T248)**: `tests/Support/Concurrency` のハーネスが barrier で同期した
+  実プロセス 2 本を走らせ、`tests/Feature/Concurrency/IdempotencyClaimProcessConcurrencyTest.php`
+  が「冪等 claim の本処理はちょうど 1 回・敗者は `idempotency_in_progress`」を実経路で固定する
+  (**実プロセス版はこの 1 本だけ**。細かい分岐は同一プロセスの
+  `tests/Feature/Api/IdempotencyConcurrentClaimTest.php` が持つ)。子の DB 座標は親の実接続設定から
+  作られ、`TestDatabaseEnv::assertPgsqlTestDatabaseSafe()` を親子で 2 回通る。
+  検体は `OutOfTransactionFixtures` がテストの transaction の外へ commit し、末尾で 8 表の
+  残留ゼロを検査して片付ける。
 
 ## 退会の猶予期間つき削除 (凍結方式・30 日)
 

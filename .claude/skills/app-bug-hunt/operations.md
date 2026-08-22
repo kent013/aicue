@@ -1,8 +1,10 @@
 # 操作インベントリ (operations.md) — AI-CUE
 
 > **このファイルは生成物である。手で編集しない。**
-> 直し方: `.claude/skills/app-bug-hunt/inventory/annotations.toml` (割当・区分・理由) か
-> `inventory/notes-*.md` (散文) を直してから `python3 scripts/bug-hunt-inventory.py generate` を走らせる。
+> 直し方: 割当ストーリー列は `.claude/skills/app-bug-hunt/stories/S*.md` の前付け
+> (`covers_screens` / `covers_operations`) を、区分・理由・種別は
+> `inventory/annotations.toml` を、散文は `inventory/notes-*.md` を直してから
+> `python3 scripts/bug-hunt-inventory.py generate` を走らせる。
 > 抽出条件: 開発環境 (local) またはテスト実行中に登録される route 集合。
 > ドリフト検査: `scripts/bug-hunt-inventory-check.sh` (exit 3 = ドリフト)。
 
@@ -19,8 +21,8 @@ bug-hunt カバレッジの分母となる「書き込み操作」(非 GET × we
 | POST | organizations/{organization}/billing/plan | billing.plan.change | S5 | 通常 |
 | POST | organizations/{organization}/billing/portal | billing.portal | S5 | 通常 |
 | POST | organizations/{organization}/billing/purchase-tickets/checkout | billing.tickets.checkout | S5 | 通常 |
-| POST | organizations/{organization}/app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take}/adopt | capture.takes.adopt | S3 | 通常 |
-| DELETE | organizations/{organization}/app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take} | capture.takes.destroy | S3 | 通常 |
+| POST | organizations/{organization}/app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take}/adopt | capture.takes.adopt | S3 S7 | 通常 |
+| DELETE | organizations/{organization}/app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take} | capture.takes.destroy | S3 S7 | 通常 |
 | POST | organizations/{organization}/app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take}/downloaded | capture.takes.downloaded | S3 | 通常 |
 | POST | organizations/{organization}/app/projects/{project}/manuals/{manual}/cuts/{cut}/takes | capture.takes.store | S3 | 通常 |
 | PATCH | organizations/{organization}/app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take} | capture.takes.update | S3 | 通常 |
@@ -55,23 +57,23 @@ bug-hunt カバレッジの分母となる「書き込み操作」(非 GET × we
 | POST | user/confirm-password | password.confirm.store | S6 | 通常 |
 | POST | forgot-password | password.email | S1 | 通常 |
 | POST | reset-password | password.update | S1 | 通常 |
-| DELETE | organizations/{organization}/projects/{project}/categories/{category} | projects.categories.destroy | S4 | 通常 |
-| PATCH | organizations/{organization}/projects/{project}/categories/reorder | projects.categories.reorder | S4 | 通常 |
+| DELETE | organizations/{organization}/projects/{project}/categories/{category} | projects.categories.destroy | S4 S7 | 通常 |
+| PATCH | organizations/{organization}/projects/{project}/categories/reorder | projects.categories.reorder | S4 S7 | 通常 |
 | POST | organizations/{organization}/projects/{project}/categories | projects.categories.store | S4 | 通常 |
-| PATCH | organizations/{organization}/projects/{project}/categories/{category} | projects.categories.update | S4 | 通常 |
+| PATCH | organizations/{organization}/projects/{project}/categories/{category} | projects.categories.update | S4 S7 | 通常 |
 | DELETE | organizations/{organization}/projects/{project} | projects.destroy | S4 | 通常 |
 | DELETE | organizations/{organization}/projects/{project}/items/{item} | projects.items.destroy | S4 | 通常 |
 | POST | organizations/{organization}/projects/{project}/items | projects.items.store | S4 | 通常 |
 | PATCH | organizations/{organization}/projects/{project}/items/{item} | projects.items.update | S4 | 通常 |
 | POST | organizations/{organization}/projects/{project}/manuals/{manual}/analyze | projects.manuals.analyze | S3 | 通常 |
-| DELETE | organizations/{organization}/projects/{project}/manuals/{manual} | projects.manuals.destroy | S3 | 通常 |
-| POST | organizations/{organization}/projects/{project}/manuals/{manual}/duplicate | projects.manuals.duplicate | S3 | 通常 |
+| DELETE | organizations/{organization}/projects/{project}/manuals/{manual} | projects.manuals.destroy | S3 S7 | 通常 |
+| POST | organizations/{organization}/projects/{project}/manuals/{manual}/duplicate | projects.manuals.duplicate | S3 S7 | 通常 |
 | POST | organizations/{organization}/projects/{project}/manuals/{manual}/preview | projects.manuals.preview | S3 | 通常 |
 | POST | organizations/{organization}/projects/{project}/manuals/{manual}/render | projects.manuals.render | S3 | 通常 |
-| PUT | organizations/{organization}/projects/{project}/manuals/{manual}/scenario | projects.manuals.scenario.update | S3 | 通常 |
+| PUT | organizations/{organization}/projects/{project}/manuals/{manual}/scenario | projects.manuals.scenario.update | S3 S7 | 通常 |
 | POST | organizations/{organization}/projects/{project}/manuals/{manual}/source-documents | projects.manuals.source-documents.store | S3 | 通常 |
 | POST | organizations/{organization}/projects/{project}/manuals | projects.manuals.store | S3 | 通常 |
-| PATCH | organizations/{organization}/projects/{project}/manuals/{manual} | projects.manuals.update | S3 | 通常 |
+| PATCH | organizations/{organization}/projects/{project}/manuals/{manual} | projects.manuals.update | S3 S7 | 通常 |
 | DELETE | organizations/{organization}/projects/{project}/members/{user} | projects.members.destroy | S4 | 通常 |
 | POST | organizations/{organization}/projects/{project}/members | projects.members.store | S4 | 通常 |
 | POST | organizations/{organization}/projects | projects.store | S4 | 通常 |
