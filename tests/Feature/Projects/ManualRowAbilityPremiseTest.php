@@ -64,11 +64,9 @@ test('撮影者は全行で両方 false、編集者は全行で両方 true (行�
     $project = Project::factory()->forOrganization($organization)->create();
 
     $shooter = attachOrganizationMember($organization);
-    $shooter->forceFill(['current_organization_id' => $organization->id])->save();
     attachProjectMember($project, $shooter, ProjectRole::Member);
 
     $editor = attachOrganizationMember($organization);
-    $editor->forceFill(['current_organization_id' => $organization->id])->save();
     attachProjectMember($project, $editor, ProjectRole::Admin);
 
     $manuals = manualRowsWithDifferingAttributes($project, $owner);

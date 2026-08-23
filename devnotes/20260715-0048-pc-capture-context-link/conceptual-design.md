@@ -62,7 +62,7 @@ PC 管理 UI のマニュアル詳細 (`Manuals/Show.svelte`) / 編集 (`Manuals
 - PC の Show は `view`、Edit は `update` 認可で到達する。**いずれも撮影ナビの view 認可を包含**するため、
   リンクを出した相手が遷移先で 403 になることはない (フロントの表示条件は UX 上の話であり、
   認可はサーバ側の `capture.manuals.show` が最終担保)。
-- `capture.manuals.show` は `project.in-current-org` middleware 配下。PC のマニュアルも current org の
+- `capture.manuals.show` は `project.in-route-org` middleware 配下。PC のマニュアルも current org の
   プロジェクト配下なので組織スコープは一致 (cross-org 遷移は発生しない)。
 
 ## テスト方針 (テストファースト)

@@ -46,7 +46,7 @@
 [web]     EncryptCookies → StartSession → ShareErrors → PreventRequestForgery
             → Authenticate → AuthenticateSession
             → SubstituteBindings
-            → EnsureProjectBelongsToCurrentOrganization      ← テナント境界 404
+            → EnsureProjectBelongsToRouteOrganization      ← テナント境界 404
             → HandleInertiaRequests → SecurityHeaders
             → RequireTwoFactorForEnforcedOrganizations → BlockTwoFactorDisable
             → NoStoreCacheHeaders → EncryptHistory
@@ -73,7 +73,7 @@ S2 の 3 行を足すと最終的に
   → ResolveApiActor
   → SubstituteBindings
   → EnsureProjectBelongsToApiOrganization
-  → EnsureProjectBelongsToCurrentOrganization
+  → EnsureProjectBelongsToRouteOrganization
   → Authorize
 ```
 
@@ -254,7 +254,7 @@ $middleware->appendToPriorityList(
 );
 $middleware->appendToPriorityList(
     EnsureProjectBelongsToApiOrganization::class,
-    EnsureProjectBelongsToCurrentOrganization::class,
+    EnsureProjectBelongsToRouteOrganization::class,
 );
 ```
 
@@ -276,7 +276,7 @@ S4 の `TenantBoundaryOrderingTest` で以下を固定する (解決後 = `Route
 - [ ] `api.v1.projects.items.index` (read group)
 - [ ] `api.v1.me` / `api.v1.projects.index` — `{project}` を持たない同一 group の route で
       guard が列に載っていても no-op であること (Feature テストで 200 を確認)
-- [ ] `projects.update` — `EnsureProjectBelongsToCurrentOrganization` が
+- [ ] `projects.update` — `EnsureProjectBelongsToRouteOrganization` が
       `EnsureEmailIsVerified` / `RequireActiveSubscription` /
       `RequireTwoFactorForEnforcedOrganizations` / `HandleInertiaRequests` より前
 - [ ] `capture.manuals.show`
@@ -293,7 +293,7 @@ S4 の `TenantBoundaryOrderingTest` で以下を固定する (解決後 = `Route
 - priority list への追加は全 route に影響しうる。ただし priority list は
   「その route に実在する middleware の相対順序」しか変えないため、
   guard を持たない route には無影響 (テストで固定)。
-- `EnsureProjectBelongsToCurrentOrganization` が `verified` より前に走るため、
+- `EnsureProjectBelongsToRouteOrganization` が `verified` より前に走るため、
   `current_organization_id` が null のユーザーは `{project}` route で 404 になる。
   変更前も `RequireActiveSubscription` が素通しして同じ 404 に落ちていたため挙動不変
   (`RequireActiveSubscription.php:73-75` + `ResolvesCurrentOrganization::resolveCurrentOrganization`)。
@@ -495,7 +495,7 @@ enum NestedRouteDefenseMode: string
     /** Route::bind() の explicit binder が actor スコープで解決 (不整合は binding 段で 404)。 */
     case ScopedBinder = 'scoped_binder';
 
-    /** テナント guard middleware (project.in-current-org / api.project-in-org) が担う。 */
+    /** テナント guard middleware (project.in-route-org / api.project-in-org) が担う。 */
     case TenantGuardMiddleware = 'tenant_guard_middleware';
 
     /** implicit binding を使わず controller が owner-scoped relation から手動解決する。 */
@@ -533,7 +533,7 @@ vendor prefix 除外に `cashier.` を追加する (`cashier.payment` は Cashie
 
 | param | モード | 根拠 |
 |---|---|---|
-| `project` | `TenantGuardMiddleware` | `project.in-current-org` / `api.project-in-org` が binding 直後に走る (S2) |
+| `project` | `TenantGuardMiddleware` | `project.in-route-org` / `api.project-in-org` が binding 直後に走る (S2) |
 | `organization` | `ScopedBinder` | `MembershipScopedOrganizationBinder` |
 | `passkey` | `ScopedBinder` | `SelfScopedPasskeyBinder` |
 | `notification` | `ManualOwnerScopedResolution` | controller が `$user->notifications()` から解決 (implicit binding なし) |
@@ -604,7 +604,7 @@ function middlewareShortCircuitInventory(): array
         App\Http\Middleware\RequireApiKeyAbility::class => true,
         App\Http\Middleware\ResolveApiActor::class => true,
         App\Http\Middleware\IdempotentRequest::class => true,
-        App\Http\Middleware\EnsureProjectBelongsToCurrentOrganization::class => true,
+        App\Http\Middleware\EnsureProjectBelongsToRouteOrganization::class => true,
         App\Http\Middleware\EnsureProjectBelongsToApiOrganization::class => true,
         // ... (実装時に解決済み列を走査して全件を埋める)
         // --- 透過 ---

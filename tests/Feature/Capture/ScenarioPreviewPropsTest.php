@@ -64,11 +64,11 @@ function scenarioPreviewFakeStorage(?string $url = 'https://s3.fake.test/signed-
  *
  * @return array<string, mixed>
  */
-function scenarioPreviewProps(Project $project, VideoManual $manual, User $actor): array
+function scenarioPreviewProps(Organization $organization, Project $project, VideoManual $manual, User $actor): array
 {
     /** @var array<string, mixed> $props */
     $props = test()->actingAs($actor)
-        ->get("/app/projects/{$project->id}/manuals/{$manual->id}")
+        ->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}")
         ->assertOk()
         ->inertiaPage()['props'];
 
@@ -76,21 +76,21 @@ function scenarioPreviewProps(Project $project, VideoManual $manual, User $actor
 }
 
 test('採用済み + ready の cut は adopted_ready_take_id にそのテイク id を持つ', function (): void {
-    [, $owner, $project, $manual, $cut] = scenarioPreviewContext();
+    [$organization, $owner, $project, $manual, $cut] = scenarioPreviewContext();
     $take = scenarioPreviewAdopt($cut);
     scenarioPreviewFakeStorage();
 
-    $props = scenarioPreviewProps($project, $manual, $owner);
+    $props = scenarioPreviewProps($organization, $project, $manual, $owner);
 
     expect($props['manual']['cuts'][0]['adopted_ready_take_id'])->toBe($take->id);
 });
 
 test('採用済みでも ready でない cut の adopted_ready_take_id は null (uploading/processing/failed)', function (TakeStatus $status): void {
-    [, $owner, $project, $manual, $cut] = scenarioPreviewContext();
+    [$organization, $owner, $project, $manual, $cut] = scenarioPreviewContext();
     scenarioPreviewAdopt($cut, $status);
     scenarioPreviewFakeStorage(null); // 署名 URL を 1 度も作らないことを併せて固定する
 
-    $props = scenarioPreviewProps($project, $manual, $owner);
+    $props = scenarioPreviewProps($organization, $project, $manual, $owner);
 
     expect($props['manual']['cuts'][0]['adopted_ready_take_id'])->toBeNull();
 })->with([
@@ -100,44 +100,44 @@ test('採用済みでも ready でない cut の adopted_ready_take_id は null 
 ]);
 
 test('未採用 (テイクはあるが adopted_take_id が null) の adopted_ready_take_id は null', function (): void {
-    [, $owner, $project, $manual, $cut] = scenarioPreviewContext();
+    [$organization, $owner, $project, $manual, $cut] = scenarioPreviewContext();
     Take::factory()->forCut($cut)->create();
     scenarioPreviewFakeStorage(null);
 
-    $props = scenarioPreviewProps($project, $manual, $owner);
+    $props = scenarioPreviewProps($organization, $project, $manual, $owner);
 
     expect($props['manual']['cuts'][0]['adopted_take_id'])->toBeNull();
     expect($props['manual']['cuts'][0]['adopted_ready_take_id'])->toBeNull();
 });
 
 test('テイクが 1 件も無い cut の adopted_ready_take_id は null', function (): void {
-    [, $owner, $project, $manual] = scenarioPreviewContext();
+    [$organization, $owner, $project, $manual] = scenarioPreviewContext();
     scenarioPreviewFakeStorage(null);
 
-    $props = scenarioPreviewProps($project, $manual, $owner);
+    $props = scenarioPreviewProps($organization, $project, $manual, $owner);
 
     expect($props['manual']['cuts'][0]['takes'])->toBe([]);
     expect($props['manual']['cuts'][0]['adopted_ready_take_id'])->toBeNull();
 });
 
 test('adopted_take_id と adopted_ready_take_id は別の意味である (採用済み非 ready で前者だけ非 null)', function (): void {
-    [, $owner, $project, $manual, $cut] = scenarioPreviewContext();
+    [$organization, $owner, $project, $manual, $cut] = scenarioPreviewContext();
     $take = scenarioPreviewAdopt($cut, TakeStatus::Processing);
     scenarioPreviewFakeStorage(null);
 
-    $props = scenarioPreviewProps($project, $manual, $owner);
+    $props = scenarioPreviewProps($organization, $project, $manual, $owner);
 
     expect($props['manual']['cuts'][0]['adopted_take_id'])->toBe($take->id);
     expect($props['manual']['cuts'][0]['adopted_ready_take_id'])->toBeNull();
 });
 
 test('採用済み非 ready のテイクには playback_url も download_ack_token も出さない (S2b)', function (): void {
-    [, $owner, $project, $manual, $cut] = scenarioPreviewContext();
+    [$organization, $owner, $project, $manual, $cut] = scenarioPreviewContext();
     $take = scenarioPreviewAdopt($cut, TakeStatus::Processing);
     // 署名 URL 発行そのものが起きないことを直接固定する (呼ばれたら Mockery が落とす)
     scenarioPreviewFakeStorage(null);
 
-    $props = scenarioPreviewProps($project, $manual, $owner);
+    $props = scenarioPreviewProps($organization, $project, $manual, $owner);
 
     $takeProps = $props['manual']['cuts'][0]['takes'][0];
     expect($takeProps['id'])->toBe($take->id);
@@ -146,11 +146,11 @@ test('採用済み非 ready のテイクには playback_url も download_ack_tok
 });
 
 test('採用済み + ready のテイクには従来どおり playback_url と download_ack_token が出る', function (): void {
-    [, $owner, $project, $manual, $cut] = scenarioPreviewContext();
+    [$organization, $owner, $project, $manual, $cut] = scenarioPreviewContext();
     scenarioPreviewAdopt($cut);
     scenarioPreviewFakeStorage();
 
-    $props = scenarioPreviewProps($project, $manual, $owner);
+    $props = scenarioPreviewProps($organization, $project, $manual, $owner);
 
     $takeProps = $props['manual']['cuts'][0]['takes'][0];
     expect($takeProps['playback_url'])->toBe('https://s3.fake.test/signed-get-url');
@@ -158,10 +158,10 @@ test('採用済み + ready のテイクには従来どおり playback_url と do
 });
 
 test('previewPlaceholderSeconds は config の値と一致する 1 以上の int である', function (): void {
-    [, $owner, $project, $manual] = scenarioPreviewContext();
+    [$organization, $owner, $project, $manual] = scenarioPreviewContext();
     scenarioPreviewFakeStorage(null);
 
-    $props = scenarioPreviewProps($project, $manual, $owner);
+    $props = scenarioPreviewProps($organization, $project, $manual, $owner);
 
     expect($props['previewPlaceholderSeconds'])->toBeInt();
     expect($props['previewPlaceholderSeconds'])->toBe(config()->integer('manual.preview_placeholder_seconds'));
@@ -169,23 +169,23 @@ test('previewPlaceholderSeconds は config の値と一致する 1 以上の int
 });
 
 test('adopt 応答の adopted_ready_take_id は採用したテイク id になる (relation 鮮度)', function (): void {
-    [, $owner, $project, $manual, $cut] = scenarioPreviewContext();
+    [$organization, $owner, $project, $manual, $cut] = scenarioPreviewContext();
     $take = Take::factory()->forCut($cut)->create();
 
     $this->actingAs($owner)->postJson(
-        "/app/projects/{$project->id}/manuals/{$manual->id}/cuts/{$cut->id}/takes/{$take->id}/adopt",
+        "/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}/cuts/{$cut->id}/takes/{$take->id}/adopt",
     )->assertOk()
         ->assertJsonPath('adopted_take_id', $take->id)
         ->assertJsonPath('adopted_ready_take_id', $take->id);
 });
 
 test('採用を付け替えると adopt 応答の adopted_ready_take_id は新しい方になる (relation 鮮度)', function (): void {
-    [, $owner, $project, $manual, $cut] = scenarioPreviewContext();
+    [$organization, $owner, $project, $manual, $cut] = scenarioPreviewContext();
     $first = scenarioPreviewAdopt($cut);
     $second = Take::factory()->forCut($cut)->create(['sort_order' => 1]);
 
     $this->actingAs($owner)->postJson(
-        "/app/projects/{$project->id}/manuals/{$manual->id}/cuts/{$cut->id}/takes/{$second->id}/adopt",
+        "/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}/cuts/{$cut->id}/takes/{$second->id}/adopt",
     )->assertOk()
         ->assertJsonPath('adopted_ready_take_id', $second->id);
 
@@ -193,7 +193,7 @@ test('採用を付け替えると adopt 応答の adopted_ready_take_id は新�
 });
 
 test('cuts を増やしても採用テイクの取得クエリは 1 本のまま (N+1 を作らない)', function (): void {
-    [, $owner, $project, $manual, $cut] = scenarioPreviewContext();
+    [$organization, $owner, $project, $manual, $cut] = scenarioPreviewContext();
     scenarioPreviewAdopt($cut);
     foreach (range(1, 4) as $index) {
         $extra = Cut::factory()->forManual($manual)->withSortOrder($index)->create();
@@ -206,7 +206,7 @@ test('cuts を増やしても採用テイクの取得クエリは 1 本のまま
         $queries[] = $query->sql;
     });
 
-    $props = scenarioPreviewProps($project, $manual, $owner);
+    $props = scenarioPreviewProps($organization, $project, $manual, $owner);
 
     expect($props['manual']['cuts'])->toHaveCount(5);
     $takeQueries = array_values(array_filter(

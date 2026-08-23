@@ -8,6 +8,7 @@ use App\Support\EmailHash;
 use Illuminate\Cache\RateLimiter as CacheRateLimiter;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Route;
 use Illuminate\Session\ArraySessionHandler;
 use Illuminate\Session\Store;
 use Tests\Support\RateLimiterRegistrationScanner;
@@ -87,13 +88,33 @@ function rateLimiterSessionRequest(?string $loginId): Request
 }
 
 /** DB に触れずに id を持つ User を組み立てる (Architecture レーンは RefreshDatabase 非適用)。 */
-function rateLimiterProbeUser(?int $organizationId = null): User
+function rateLimiterProbeUser(): User
 {
     $user = User::factory()->make();
     Assert::isInstanceOf($user, User::class);
-    $user->forceFill(['id' => 4242, 'current_organization_id' => $organizationId]);
+    $user->forceFill(['id' => 4242]);
 
     return $user;
+}
+
+/**
+ * 組織 URL 配下の Request (`{organization}` route parameter つき)。
+ *
+ * ★組織文脈は URL だけで決まる (家系裁定 AG-037)。render-trigger の limiter は
+ *   route parameter の**識別名の文字列**をキーに使うので、probe も同じ形で渡す
+ *   (流量制限は SubstituteBindings より前に走るためモデルは束縛されていない)。
+ */
+function rateLimiterOrganizationRequest(?User $user = null): Request
+{
+    $request = $user instanceof User
+        ? rateLimiterAuthenticatedRequest($user)
+        : rateLimiterGuestRequest();
+
+    $route = new Route(['POST'], 'organizations/{organization}/probe', static fn (): string => 'ok');
+    $route->parameters = ['organization' => 'probe-org'];
+    $request->setRouteResolver(static fn (): Route => $route);
+
+    return $request;
 }
 
 /** DB に触れずに id を持つ ApiKey を組み立てる。 */
@@ -158,8 +179,8 @@ function rateLimiterKeyInventory(): array
         ],
         'render-trigger' => [
             'scenarios' => [
-                'authenticated-with-org' => static fn (): Request => rateLimiterAuthenticatedRequest(rateLimiterProbeUser(7)),
-                'guest' => $noEmail,
+                'authenticated-with-org' => static fn (): Request => rateLimiterOrganizationRequest(rateLimiterProbeUser()),
+                'guest-with-org' => static fn (): Request => rateLimiterOrganizationRequest(),
             ],
             'expectedKeyPrefixes' => ['render-trigger:actor-org'],
             'emailScenarios' => [],

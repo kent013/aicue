@@ -98,9 +98,9 @@ test('recent-auth の鮮度が切れていても 200 + boolean を返す', funct
         ->assertExactJson(['authenticated' => true, 'sessionEpochMatches' => false]);
 });
 
-test('組織未選択 (current_organization_id が null) でも 200 + boolean を返す', function (): void {
+test('所属組織が無くても 200 + boolean を返す', function (): void {
     $user = User::factory()->create();
-    expect($user->current_organization_id)->toBeNull();
+    expect($user->organizations()->count())->toBe(0);
 
     $this->actingAs($user)->get('/session/status')
         ->assertOk()

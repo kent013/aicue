@@ -182,7 +182,7 @@ pest()->extend(TestCase::class)
 
 /**
  * Owner 付きの組織を provisioning 経由で生成する (Default Team 込み)。
- * owner の current_organization_id はこの組織になる。
+ * 組織文脈は URL だけで決まる (家系裁定 AG-037) ので、保持列は設定しない。
  *
  * 既定では grandfathering backfill 相当 (`free_plan_code='personal'` / declarer NULL) を付与し、
  * 課金ゲート (require-active-subscription) を `ActiveFreePlan` で通る既存組織を再現する。

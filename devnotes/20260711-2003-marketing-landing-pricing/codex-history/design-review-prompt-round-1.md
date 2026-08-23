@@ -1527,7 +1527,7 @@ Route::middleware(NoIndex::class)->group(function (): void {
     | を持たない組織は billing へ redirect される (JSON は 402)。
     | 新しい業務ドメインの route はこの group 内に追加すること。
     */
-    Route::middleware(['require-active-subscription', 'project.in-current-org'])->group(function (): void {
+    Route::middleware(['require-active-subscription', 'project.in-route-org'])->group(function (): void {
 ```
 
 ### app/Http/Controllers/HomeController.php（現行全文）

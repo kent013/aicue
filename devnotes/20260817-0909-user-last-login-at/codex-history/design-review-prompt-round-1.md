@@ -1664,8 +1664,8 @@ trait ResolvesCurrentOrganization
      * **認可より前に 404** (403 で存在を漏らさない / cross-org は 404)。
      * 所属確認は relation (Organization::projects = CustomTeam 経由) のみで行う (直 fetch 禁止)。
      *
-     * web の {project} route では EnsureProjectBelongsToCurrentOrganization middleware
-     * (project.in-current-org) が本 guard を FormRequest の DB ルールより**前**にも実行する
+     * web の {project} route では EnsureProjectBelongsToRouteOrganization middleware
+     * (project.in-route-org) が本 guard を FormRequest の DB ルールより**前**にも実行する
      * (422/404 差分の存在オラクル防止)。controller 内の呼び出しは二重防御として維持する。
      */
     private function resolveOrganizationProject(Organization $organization, Project $project): Project

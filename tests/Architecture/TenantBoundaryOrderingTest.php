@@ -7,7 +7,7 @@ use App\Http\Middleware\BlockTwoFactorDisableForEnforcedOrganizations;
 use App\Http\Middleware\BughuntExecutedRouteMiddleware;
 use App\Http\Middleware\EnsureAccountNotPendingDeletion;
 use App\Http\Middleware\EnsureProjectBelongsToApiOrganization;
-use App\Http\Middleware\EnsureProjectBelongsToCurrentOrganization;
+use App\Http\Middleware\EnsureProjectBelongsToRouteOrganization;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\IdempotentRequest;
 use App\Http\Middleware\IssueSessionEpochCookie;
@@ -95,7 +95,7 @@ function preBindingShortCircuitInventory(): array
 function tenantGuardMiddlewareClasses(): array
 {
     return [
-        EnsureProjectBelongsToCurrentOrganization::class,
+        EnsureProjectBelongsToRouteOrganization::class,
         EnsureProjectBelongsToApiOrganization::class,
     ];
 }
@@ -399,7 +399,7 @@ test('検査5: 代表 route の解決後 middleware 列を完全一致で固定�
     ];
     // bug-hunt の実行済み route 記録器は web 鎖の**最後** (遮断 middleware より内側)。
     $recorder = BughuntExecutedRouteMiddleware::class;
-    $guard = EnsureProjectBelongsToCurrentOrganization::class;
+    $guard = EnsureProjectBelongsToRouteOrganization::class;
     $billing = RequireActiveSubscription::class;
     // 退会予約中の凍結は**課金ゲートの直後**。テナント境界 404 より必ず後 (302 短絡のため)。
     $freeze = EnsureAccountNotPendingDeletion::class;

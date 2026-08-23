@@ -65,9 +65,9 @@ test('web フォーム経路の QuotaExceededException は従来どおり back +
     Project::factory()->forOrganization($organization)->create(); // free の max_projects: 1 到達
 
     $response = $this->actingAs($owner)
-        ->from('/projects/create')
-        ->post('/projects', ['name' => '2 つ目']);
+        ->from("/organizations/{$organization->slug}/projects/create")
+        ->post("/organizations/{$organization->slug}/projects", ['name' => '2 つ目']);
 
-    $response->assertRedirect('/projects/create');
+    $response->assertRedirect("/organizations/{$organization->slug}/projects/create");
     $response->assertSessionHas('error');
 });

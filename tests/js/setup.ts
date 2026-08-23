@@ -107,3 +107,11 @@ afterEach(async () => {
         await new Promise((resolve) => setTimeout(resolve, 40));
     }
 });
+
+// 組織文脈は URL だけで決まる (家系裁定 AG-037)。resources/js/lib/org-url.ts は
+// `window.location.pathname` から識別名を読むため、jsdom の既定 URL ("/") のままだと
+// 組織 URL を組み立てる component が落ちる。**組織配下の画面を既定の現在地にする**
+// (組織 URL の外を検証したいテストは自分で history.replaceState して上書きする)。
+if (typeof window !== "undefined") {
+    window.history.replaceState({}, "", "/organizations/test-org/dashboard");
+}

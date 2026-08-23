@@ -101,7 +101,7 @@ final class RequireRecentAuth
     {
         $referer = $request->headers->get('referer');
         if ($referer === null) {
-            return route('dashboard');
+            return route('app.entry');
         }
 
         // 完全一致 or 「origin + '/'」前置一致のみ same-origin と判定する。
@@ -112,6 +112,6 @@ final class RequireRecentAuth
             return $referer;
         }
 
-        return route('dashboard');
+        return route('app.entry');
     }
 }

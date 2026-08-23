@@ -206,7 +206,7 @@ test('cross-org かつ viewer は認可より前に 404 (403 が返るなら順�
 
 // --- 判定は URL 上の {project} の組織で行う (ケース 10) ---
 
-test('actor の current_organization_id が別組織でも URL の {project} の組織で判定される', function (): void {
+test('actor が別組織にも所属していても URL の {project} の組織で判定される', function (): void {
     [$organizationA] = createOrganizationWithOwner('組織A');
     [$organizationB] = createOrganizationWithOwner('組織B');
     $projectA = Project::factory()->forOrganization($organizationA)->create();
@@ -214,7 +214,6 @@ test('actor の current_organization_id が別組織でも URL の {project} の
     $editor = attachOrganizationMember($organizationA, OrganizationRole::Member);
     attachProjectMember($projectA, $editor, ProjectRole::Admin);
     // Laratrust team 文脈が current org に汚染されないことの固定
-    $editor->forceFill(['current_organization_id' => $organizationB->id])->save();
 
     [, $plain] = issueApiKey($organizationA, $editor, ['read', 'write']);
 

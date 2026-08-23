@@ -124,8 +124,8 @@ AI-CUE は、現場に既にある**作業手順書(SOP)を起点に**、AI が�
 - テストファイル: `tests/Feature/Capture/CaptureTakeManagementTest.php` に保護キーテストを追加
 
 ### 実行順序の確認 (最重要)
-capture route group は `['require-active-subscription', 'project.in-current-org']` + `Route::scopeBindings()`。
-- **テナント境界 404** は `project.in-current-org` middleware と scopeBindings による route-model binding で
+capture route group は `['require-active-subscription', 'project.in-route-org']` + `Route::scopeBindings()`。
+- **テナント境界 404** は `project.in-route-org` middleware と scopeBindings による route-model binding で
   **FormRequest 検証より前**に閉じる (AGENTS.md セキュリティ不変条件 10「層 2 は binding の直後・
   FormRequest より前で閉じる」)。よって cross-cut / cross-org に保護キーを混ぜても **404** が先に返り、
   422 にはならない (既存 `StoreCaptureTakeRequest` も同 group で cross-org 404 を維持している = 実証済み)。
@@ -637,7 +637,7 @@ trait ProhibitsProtectedKeys
 ```
 ### capture route group (middleware / scopeBindings)
 ```php
-    Route::middleware(['require-active-subscription', 'project.in-current-org'])
+    Route::middleware(['require-active-subscription', 'project.in-route-org'])
         ->prefix('app')->as('capture.')->group(function (): void {
             // PWA エントリ (manifest start_url)。current org の先頭 project へ redirect
             Route::get('/', [CaptureManualController::class, 'home'])->name('home');

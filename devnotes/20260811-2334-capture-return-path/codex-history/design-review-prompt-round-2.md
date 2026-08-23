@@ -67,7 +67,7 @@ status が増えたときにテストが自動追従しないため採りませ�
 
 - 判断: **対応する**
 - 根拠: そのとおり。外側 group (`auth` / `verified` / `not-pending-deletion`)、内側 group
-  (`require-active-subscription` / `project.in-current-org`)、`scopeBindings()`、
+  (`require-active-subscription` / `project.in-route-org`)、`scopeBindings()`、
   controller の `resolveOrganizationProject()`、`Gate::authorize('view', $manual)` の合成である。
   セキュリティ不変条件に関わる説明を省略形で書くと、次に読む人が省略された層を見落とす。
 - 対応内容: 詳細設計・テストコメント・`docs/architecture.md` 追記のすべてを具体名の列挙に置き換えた。
@@ -175,7 +175,7 @@ TypeScript 型定義 / Inertia Props / JsonResource への波及なし。
 | 層 | `capture.manuals.show` | `projects.manuals.show` |
 |---|---|---|
 | 外側 group | `auth` / `verified` / `not-pending-deletion` (routes/web.php:189) | 同左 (同一 group 内) |
-| 内側 group | `require-active-subscription` / `project.in-current-org` (:593) | 同左 (:453) |
+| 内側 group | `require-active-subscription` / `project.in-route-org` (:593) | 同左 (:453) |
 | 親子整合 | `Route::scopeBindings()` = `$project->manuals()` 経由 | 同左 |
 | テナント境界 | controller の `resolveOrganizationProject()` (**認可より前に 404**) | 同左 |
 | 認可 | `Gate::authorize('view', $manual)` | `Gate::authorize('view', $manual)` |
@@ -405,7 +405,7 @@ use Inertia\Testing\AssertableInertia as Assert;
  *
  * 両 route が同じく通る層 (省略形で書かない):
  *   auth / verified / not-pending-deletion (外側 group)
- *   → require-active-subscription / project.in-current-org (内側 group)
+ *   → require-active-subscription / project.in-route-org (内側 group)
  *   → Route::scopeBindings() ($project->manuals() 経由)
  *   → controller の resolveOrganizationProject() (認可より前に 404)
  *   → Gate::authorize('view', $manual)
@@ -485,7 +485,7 @@ dataset は `VideoManualStatus::cases()` なので、**PHP enum に status が�
   意味が違い、合成中 (`rendering`) こそ進み具合を見に戻る場面である。復路専用の述語も作らない。
   復路を無条件にできる根拠は、行き先 `projects.manuals.show` が `capture.manuals.show` と
   **同じ層を同じ順序で通る**ことである — 外側 group の `auth` / `verified` /
-  `not-pending-deletion`、内側 group の `require-active-subscription` / `project.in-current-org`、
+  `not-pending-deletion`、内側 group の `require-active-subscription` / `project.in-route-org`、
   `Route::scopeBindings()`、controller の `resolveOrganizationProject()` (認可より前に 404)、
   `Gate::authorize('view', $manual)`。詳細 GET はどちらも status で絞り込まない (一覧だけが絞る)。
   よって 403 が構造的に起きない。これは `CaptureReturnPathTest` が撮影者 (project_member) で

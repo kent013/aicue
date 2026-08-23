@@ -25,11 +25,13 @@
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
     import TakeHoverPreview from "@/components/features/manual/TakeHoverPreview.svelte";
     import { takeUrl as buildTakeUrl } from "@/lib/capture/take-endpoints";
+    import { currentOrganizationSlug } from "@/lib/org-url";
     import { csrfToken } from "@/lib/csrf";
     import { moveItem } from "@/lib/dnd/list-reorder";
     import { createPointerDrag, type PointerDragState } from "@/lib/dnd/pointer-drag";
     import { boundHistory, parseHistorySnapshot, pushHistory } from "@/lib/manual/scenario-history";
     import { addToast } from "@/lib/stores/toast";
+    import { currentOrgUrl } from "@/lib/org-url";
     import type {
         CutTakeSummary,
         DraftPoint,
@@ -720,7 +722,7 @@
     }
 
     async function putScenario(): Promise<Response> {
-        return fetch(`/projects/${projectId}/manuals/${manualId}/scenario`, {
+        return fetch(currentOrgUrl(`/projects/${projectId}/manuals/${manualId}/scenario`), {
             method: "PUT",
             headers: {
                 "Content-Type": "application/json",
@@ -1077,7 +1079,7 @@
             </p>
         {:else}
             {@const summary = summaryByCutId.get(cutId)}
-            {@const takesHref = `/projects/${projectId}/manuals/${manualId}/cuts/${cutId}/takes`}
+            {@const takesHref = currentOrgUrl(`/projects/${projectId}/manuals/${manualId}/cuts/${cutId}/takes`)}
             {@const adopted = summary?.adopted ?? null}
             <div class="mt-1 flex items-start gap-2">
                 <!-- サムネイル表示条件 = サーバが 404 を返す状態へ URL を張らないための 3 条件
@@ -1085,12 +1087,12 @@
                 {#if adopted !== null && adopted.status === "ready" && adopted.has_thumbnail}
                     <TakeHoverPreview
                         thumbnailUrl={buildTakeUrl(
-                            { projectId, manualId, cutId },
+                            { organizationSlug: currentOrganizationSlug(), projectId, manualId, cutId },
                             adopted.id,
                             "/thumbnail",
                         )}
                         playbackUrl={buildTakeUrl(
-                            { projectId, manualId, cutId },
+                            { organizationSlug: currentOrganizationSlug(), projectId, manualId, cutId },
                             adopted.id,
                             "/playback",
                         )}

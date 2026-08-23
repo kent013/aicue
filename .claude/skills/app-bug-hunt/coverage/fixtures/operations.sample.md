@@ -31,5 +31,5 @@ join キーは **name 列 (= index 2)** であり route(URL) 列 (index 1) で�
 
 | method | route | api route name | CLI コマンド | story | 区分 |
 |---|---|---|---|---|---|
-| POST | /projects | `api.v1.projects.store` | `project:create` | S8 | ◎ |
+| POST | /api/v1/projects | `api.v1.projects.store` | `project:create` | S8 | ◎ |
 | DELETE | /me/session | `api.v1.me.session.revoke` | `logout` | S8 | ○ |

@@ -222,7 +222,7 @@ group の外 (構造的 allowlist) は**すべて通す**。遮断時は 403 で
   新しい allowlist 定数を作らない。ドメイン規約 4 (新しい業務ドメインの route は group の中) が
   そのまま凍結範囲の定義にもなる。
 - **middleware の実行位置**: `EnsureAccountNotPendingDeletion` は **302 で短絡する** middleware なので、
-  テナント境界 404 (`project.in-current-org`) **より後**でなければ 1 bit の存在オラクルになる
+  テナント境界 404 (`project.in-route-org`) **より後**でなければ 1 bit の存在オラクルになる
   (AGENTS.md 不変条件 10)。`bootstrap/app.php` の priority list の web 鎖の末尾
   (`RequireActiveSubscription` の直後) に append し、`TenantBoundaryOrderingTest` に登録する。
 - **route:cache 前提**: group への直付けで配線する。`RouteMiddlewareBinder` の後付けは使わない

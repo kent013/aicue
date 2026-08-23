@@ -70,7 +70,7 @@
 ## 施策8 カテゴリ管理BE  
 **判定: APPROVE**
 
-- [Suggestion] `viewAny(User, Project)` 追加は適切。`project.in-current-org` + inline guard 二層は堅いです。  
+- [Suggestion] `viewAny(User, Project)` 追加は適切。`project.in-route-org` + inline guard 二層は堅いです。  
   修正案: テスト名で「authorize前404」を明示し、IDOR不変条件との接続を強化。
 
 ---

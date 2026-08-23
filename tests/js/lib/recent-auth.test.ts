@@ -230,7 +230,7 @@ describe("registerRecentAuthRedirectHandler (409 の単一ハンドラ)", () => 
         ],
         [
             "別 route",
-            { ...REQUIRED_409, data: { ...REQUIRED_409.data, redirect: "/dashboard" } },
+            { ...REQUIRED_409, data: { ...REQUIRED_409.data, redirect: "/organizations/test-org/dashboard" } },
         ],
         ["redirect 欠損", { status: 409, data: { code: "recent_auth_required" } }],
         [

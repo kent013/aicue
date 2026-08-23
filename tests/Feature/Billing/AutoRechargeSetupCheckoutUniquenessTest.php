@@ -91,19 +91,18 @@ test('同一 org の別 billing 管理者が同じ attempt_token を送っても
     // 2 人目にも実際に manageBilling を持たせる (= 両者とも認可済みという設計根拠を固定するため
     // Service 直呼びではなく Controller 経由で叩く)
     $secondManager = attachOrganizationMember($organization, OrganizationRole::Admin);
-    $secondManager->forceFill(['current_organization_id' => $organization->id])->save();
 
     $token = strtolower((string) Str::ulid());
 
     // 前段が失敗していると後段の失敗として見えてしまうので、1 回目も着地まで固定する
     $this->actingAs($owner)
-        ->post('/billing/auto-recharge/setup', ['attempt_token' => $token])
+        ->post("/organizations/{$organization->slug}/billing/auto-recharge/setup", ['attempt_token' => $token])
         ->assertRedirect($this->gateway->setupUrl);
 
     // 同一性判定に initiated_by_user_id を**入れない**契約 (詳細設計「保証しないもの」§14)。
     // 入れると benign なこの replay が 500 になる = 契約が load-bearing であることの固定。
     $this->actingAs($secondManager)
-        ->post('/billing/auto-recharge/setup', ['attempt_token' => $token])
+        ->post("/organizations/{$organization->slug}/billing/auto-recharge/setup", ['attempt_token' => $token])
         ->assertRedirect($this->gateway->setupUrl); // 500 にならず checkout へ送られる
 
     $sessions = BillingCheckoutSession::query()

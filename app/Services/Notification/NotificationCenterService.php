@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace App\Services\Notification;
 
-use App\DataTransferObjects\Account\AccountDeletionStateDto;
-use App\DataTransferObjects\Notification\AccountDeletionRequestedPayload;
 use App\DataTransferObjects\Notification\InvitationReceivedPayload;
 use App\DataTransferObjects\Notification\ManualJobPayload;
 use App\DataTransferObjects\Notification\TicketBalanceLowPayload;
@@ -18,7 +16,6 @@ use App\Models\Project;
 use App\Models\RenderJob;
 use App\Models\User;
 use App\Models\VideoManual;
-use App\Notifications\InApp\AccountDeletionRequestedNotification;
 use App\Notifications\InApp\InvitationReceivedNotification;
 use App\Notifications\InApp\ManualAnalyzedNotification;
 use App\Notifications\InApp\ManualRenderedNotification;
@@ -161,29 +158,17 @@ class NotificationCenterService
      * ★呼び出し位置は **予約の書き込みと同一 tx 内** (他の発火とは違う)。予約が rollback したら
      *   通知も残らないのが正しい状態であるため。
      * ★アプリ内通知は org 文脈を必須とする (`AppNotification::organizationId()` が
-     *   non-nullable)。退会は組織に属さない事象なので、**予約時点の current org** を表示文脈として
-     *   写す。current org を持たないユーザーには**作らない** (メールだけが届く。
-     *   org 文脈を捏造しない)。
+     *   non-nullable)。退会予約は**個人設定の面**からの操作であり、URL に組織を持たない
+     *   (家系裁定 AG-037: 組織文脈は URL だけで決まる)。すなわち
+     *   **信頼できる org 文脈をこの経路から導出できない**ため、
+     *   本サービス自身の既存規則「org 文脈を捏造しない」に従って**アプリ内通知は作らない**。
+     *   **メールは従来どおり届く** (利用者が退会予約に気付けなくなるわけではない)。
+     * ★所属組織のどれか 1 つを選ぶ / 全組織へ配る (fan-out) / org 文脈を nullable にする、は
+     *   いずれも本 feature の裁量を超える方針変更なので採らない。
      */
     public function notifyAccountDeletionRequested(User $user, CarbonImmutable $purgeAfter): void
     {
-        $this->safely(function () use ($user, $purgeAfter): void {
-            $organizationId = $user->current_organization_id;
-            if (! is_int($organizationId)) {
-                return;
-            }
-
-            $state = AccountDeletionStateDto::fromUser($user);
-            $graceDays = $state->graceDays();
-            if ($graceDays === null) {
-                return; // 予約が成立していない (呼び出し順の異常) ときは作らない
-            }
-
-            $user->notify(new AccountDeletionRequestedNotification(
-                $organizationId,
-                new AccountDeletionRequestedPayload($purgeAfter->toIso8601String(), $graceDays),
-            ));
-        });
+        // 意図的に何もしない。上の docblock が理由の正本である。
     }
 
     // ── 読み出し・既読化 (NotificationController から委譲) ────────────────────

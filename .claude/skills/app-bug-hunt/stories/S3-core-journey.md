@@ -9,7 +9,7 @@ depends_on: []
 reseed_before: true
 accounts: [admin]
 setup: [Default Project とチケット残高を用意する (不足なら S5 の手順でチャージする), real-llm 既定 (実 Anthropic 接続) + fake storage + ffmpeg 導入済みの環境で走らせる]
-covers_screens: [capture.account, capture.csrf-cookie, capture.home, capture.manuals.index, capture.manuals.show, capture.takes.playback, capture.takes.thumbnail, projects.manuals.create, projects.manuals.cuts.takes.index, projects.manuals.download, projects.manuals.edit, projects.manuals.jobs.show, projects.manuals.render-jobs.playback, projects.manuals.render-jobs.show, projects.manuals.show, projects.show]
+covers_screens: [capture.account, capture.csrf-cookie, capture.entry, capture.home, capture.manuals.index, capture.manuals.show, capture.takes.playback, capture.takes.thumbnail, projects.manuals.create, projects.manuals.cuts.takes.index, projects.manuals.download, projects.manuals.edit, projects.manuals.jobs.show, projects.manuals.render-jobs.playback, projects.manuals.render-jobs.show, projects.manuals.show, projects.show]
 covers_operations: [capture.takes.adopt, capture.takes.destroy, capture.takes.downloaded, capture.takes.store, capture.takes.update, capture.takes.upload-url, projects.manuals.analyze, projects.manuals.destroy, projects.manuals.duplicate, projects.manuals.preview, projects.manuals.render, projects.manuals.scenario.update, projects.manuals.source-documents.store, projects.manuals.store, projects.manuals.update]
 covers_capabilities: [CAP-01, CAP-02, CAP-03, CAP-04, CAP-05, CAP-06, REN-01, REN-02, REN-03, REN-04, SCEN-01, SCEN-02, SCEN-03, SCEN-05, SOP-01, SOP-02, SOP-03, SOP-04, SOP-05]
 ---

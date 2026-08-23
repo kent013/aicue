@@ -50,8 +50,8 @@ mass-assignment 防御の prohibited キー集合には**両方**入れる。
 フラグを切り替えても URL が壊れないよう、**ルート形状は Team の可視性に依存させない**:
 
 - プロジェクト系 Web ルートは Team セグメントを含めない:
-  `/projects/{project}/...`(current organization + org-scoped 解決。URL 整合 guard 方式)。
-  Project 配下の子リソース(`/projects/{project}/items/{item}` 等)は
+  `/organizations/{slug}/projects/{project}/...`(current organization + org-scoped 解決。URL 整合 guard 方式)。
+  Project 配下の子リソース(`/organizations/{slug}/projects/{project}/items/{item}` 等)は
   `Route::scopeBindings()` で親 relation 経由の解決(子→親不整合は認可より前に 404)
 - **組織管理系 Web ルートは org セグメントを持つ**:
   `/organizations/{organization:slug}/...`(設定 / メンバー / 招待 / API キー / オーナー移譲)。

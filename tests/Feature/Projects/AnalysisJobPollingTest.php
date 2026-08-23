@@ -20,7 +20,7 @@ test('200: AnalysisJobResource の shape を返す', function (): void {
     $job = AnalysisJob::factory()->forManual($manual)->running()->create();
 
     $this->actingAs($owner)->getJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/jobs/{$job->id}",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/jobs/{$job->id}",
     )->assertOk()->assertExactJson([
         'id' => $job->id,
         'status' => 'running',
@@ -38,7 +38,7 @@ test('failed job は error を返す', function (): void {
     $job = AnalysisJob::factory()->forManual($manual)->failed('解析に失敗しました')->create();
 
     $this->actingAs($owner)->getJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/jobs/{$job->id}",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/jobs/{$job->id}",
     )->assertOk()->assertJson([
         'status' => 'failed',
         'error' => '解析に失敗しました',
@@ -54,7 +54,7 @@ test('他 manual の job id は 404 (scopeBindings。存在を漏らさない)',
     $otherJob = AnalysisJob::factory()->forManual($otherManual)->create();
 
     $this->actingAs($owner)->getJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/jobs/{$otherJob->id}",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/jobs/{$otherJob->id}",
     )->assertNotFound();
 });
 
@@ -66,7 +66,7 @@ test('cross-org の job への GET は 404', function (): void {
     $job = AnalysisJob::factory()->forManual($manual)->create();
 
     $this->actingAs($stranger)->getJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/jobs/{$job->id}",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/jobs/{$job->id}",
     )->assertNotFound();
 });
 
@@ -77,6 +77,6 @@ test('未ログインは 401 (JSON)', function (): void {
     $job = AnalysisJob::factory()->forManual($manual)->create();
 
     $this->getJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/jobs/{$job->id}",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/jobs/{$job->id}",
     )->assertUnauthorized();
 });

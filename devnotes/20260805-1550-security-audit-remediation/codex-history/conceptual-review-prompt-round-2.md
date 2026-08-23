@@ -249,7 +249,7 @@ ability を先に置く積極的な理由は存在しない。
 ```php
 $middleware->appendToPriorityList(SubstituteBindings::class, ResolveApiActor::class);
 $middleware->appendToPriorityList(ResolveApiActor::class, EnsureProjectBelongsToApiOrganization::class);
-$middleware->appendToPriorityList(EnsureProjectBelongsToApiOrganization::class, EnsureProjectBelongsToCurrentOrganization::class);
+$middleware->appendToPriorityList(EnsureProjectBelongsToApiOrganization::class, EnsureProjectBelongsToRouteOrganization::class);
 ```
 
 (API guard と web guard は同一 route に共存しないため相対順序に意味は無いが、

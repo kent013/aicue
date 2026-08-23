@@ -99,7 +99,6 @@ test('接続セッション画面の境界 (manageForOrganization) も直接付�
     apiKeyPermissionService()->grant($member, $organization);
 
     // OauthSessionPolicy::manageForOrganization は manageApiKeys へ委譲している
-    $member->fresh()->forceFill(['current_organization_id' => $organization->id])->save();
     $this->actingAs($member->fresh())
         ->get("/organizations/{$organization->slug}/api-keys/sessions")
         ->assertOk();

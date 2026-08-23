@@ -2,8 +2,6 @@
 
 declare(strict_types=1);
 
-use App\Models\User;
-
 /*
  * bug-hunt F-2-01 の根本原因を「仕様」として固定する回帰テスト。
  *
@@ -17,32 +15,34 @@ use App\Models\User;
  * 「出してはならない根拠」をサーバ側の事実として固定する。
  */
 
-test('メール未認証ユーザーの GET /onboarding/checkout は verification.notice へ差し戻される', function (): void {
-    [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+test('メール未認証ユーザーの GET /organizations/{slug}/onboarding/checkout は verification.notice へ差し戻される', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     // email_verified_at は $fillable 外の状態キーのため forceFill で明示代入する
     $owner->forceFill(['email_verified_at' => null])->save();
 
     $this->actingAs($owner->fresh())
-        ->get('/onboarding/checkout')
+        ->get("/organizations/{$organization->slug}/onboarding/checkout")
         ->assertRedirect(route('verification.notice'));
 });
 
-test('認証済み owner は GET /onboarding/checkout に到達できる (ゲートを締めすぎていない)', function (): void {
-    [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+test('認証済み owner は GET /organizations/{slug}/onboarding/checkout に到達できる (ゲートを締めすぎていない)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
 
     expect($owner->hasVerifiedEmail())->toBeTrue();
 
     $this->actingAs($owner)
-        ->get('/onboarding/checkout')
+        ->get("/organizations/{$organization->slug}/onboarding/checkout")
         ->assertOk();
 });
 
 test('未認証ユーザーは verify notice 画面へ着地し状況説明を受け取る (行き先のない詰みにしない)', function (): void {
-    $user = User::factory()->unverified()->create();
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    $owner->forceFill(['email_verified_at' => null])->save();
+    $user = $owner->fresh();
 
     $this->actingAs($user)
         ->followingRedirects()
-        ->get('/onboarding/checkout')
+        ->get("/organizations/{$organization->slug}/onboarding/checkout")
         ->assertOk()
         ->assertInertia(fn ($page) => $page->component('Auth/VerifyEmail'));
 });

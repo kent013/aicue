@@ -43,7 +43,8 @@ function createApiKeyForGuardTest(?Carbon $expiresAt = null, ?Carbon $lastUsedAt
     /** @var Organization $org */
     $org = Organization::factory()->create();
     /** @var User $user */
-    $user = User::factory()->create(['current_organization_id' => $org->id]);
+    $user = User::factory()->create();
+    $org->users()->attach($user);
 
     [$factory, $plainToken] = ApiKeyFactory::withPlainToken();
     /** @var ApiKey $apiKey */

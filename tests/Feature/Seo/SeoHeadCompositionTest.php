@@ -48,9 +48,9 @@ it('home の SoftwareApplication は Free プラン開始可能 (lowPrice 0) の
 });
 
 it('認証配下ページは noindex + per-page title のみで canonical / og を漏らさない', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $html = (string) $this->actingAs($owner)->get('/dashboard')->getContent();
+    $html = (string) $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard")->getContent();
 
     expect($html)->toContain('<meta name="robots" content="noindex">')
         ->toContain('<title>ダッシュボード | Acme</title>')
@@ -67,9 +67,9 @@ it('ゲスト向け認証画面 (login) も noindex + per-page title になる',
 
 it('app_titles 未登録の route はサイト名のみの title になる (noindex 維持)', function (): void {
     config(['seo.app_titles' => []]);
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $html = (string) $this->actingAs($owner)->get('/dashboard')->getContent();
+    $html = (string) $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard")->getContent();
 
     expect($html)->toContain('<title>Acme</title>')
         ->toContain('<meta name="robots" content="noindex">');
@@ -79,16 +79,16 @@ it('動的固有名 (projects.show の setPrivateTitle) が app_titles 既定よ
     [$organization, $owner] = createOrganizationWithOwner();
     $project = Project::factory()->forOrganization($organization)->create(['name' => 'My Project']);
 
-    $html = (string) $this->actingAs($owner)->get("/projects/{$project->id}")->getContent();
+    $html = (string) $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}")->getContent();
 
     expect($html)->toContain('<title>My Project | Acme</title>')
         ->toContain('<meta name="robots" content="noindex">');
 });
 
 it('Inertia 共有 prop title はサーバ描画 <title> と同一文字列を供給する', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->get('/dashboard')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard")
         ->assertInertia(fn (Assert $page) => $page
             ->component('Dashboard')
             ->where('title', 'ダッシュボード | Acme'));

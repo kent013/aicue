@@ -28,14 +28,12 @@ class DebugLoginController extends Controller
         // decryptRow() が失敗し復号がスキップされる。User 本体は select() で列を
         // 絞らず丸ごとロードし、将来の暗号化列追加にも追従させる。
         $users = User::query()
-            ->with('currentOrganization:id,name')
             ->orderBy('id')
             ->get()
             ->map(fn (User $user): array => [
                 'id' => $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
-                'organization' => $user->currentOrganization?->name,
             ])
             ->all();
 
@@ -59,6 +57,6 @@ class DebugLoginController extends Controller
         Auth::login($user);
         $request->session()->regenerate();
 
-        return redirect()->route('dashboard');
+        return redirect()->route('app.entry');
     }
 }

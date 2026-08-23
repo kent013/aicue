@@ -16,9 +16,12 @@ enum AccountDeletionBlockerAction: string
     /** 別メンバーへオーナーを移譲する (/organizations/{slug}/settings) */
     case TransferOwnership = 'transfer_ownership';
 
-    /** サブスクリプションを解約する (/billing。blocker が現在組織のとき) */
+    /**
+     * サブスクリプションを解約する (/organizations/{slug}/billing)。
+     *
+     * ★組織文脈は URL だけで決まる (家系裁定 AG-037) ので、blocker がどの組織であっても
+     *   その組織の課金画面へ**直接**行ける。切替を挟む一手 (旧 SwitchOrganizationThenOpenBilling) は
+     *   保持列と切替 endpoint の撤去に伴い**概念ごと消えた**。
+     */
     case OpenBilling = 'open_billing';
-
-    /** 組織を切り替えてから請求設定を開く (blocker が現在組織でないとき) */
-    case SwitchOrganizationThenOpenBilling = 'switch_organization_then_open_billing';
 }

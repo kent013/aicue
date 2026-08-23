@@ -21,6 +21,7 @@
     import { withRecentAuth, type RecentAuthStatus } from "@/lib/recent-auth";
     import type { SharedProps } from "@/lib/shared-props";
     import type { ConsoleRole, InvitationRow, MemberRow } from "@/types/admin";
+    import { currentOrgUrl } from "@/lib/org-url";
 
     /**
      * 管理メニュー > ユーザー管理 (doc/04 §4.2。モック PC_管理メニュー 02〜09)。
@@ -283,7 +284,7 @@
                         </p>
                         <!-- 詰まりの文脈から 1 ホップで作成画面へ (既存 CTA 流儀 = Button href+inertia) -->
                         <Button
-                            href="/projects/create"
+                            href={currentOrgUrl("/projects/create")}
                             inertia
                             variant="ghost"
                             size="sm"

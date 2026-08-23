@@ -46,9 +46,9 @@ function issuedSessionEpochCookie(TestResponse $response): ?string
 }
 
 test('認証済みの Inertia 応答で描画世代と世代 cookie が同値である', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $response = $this->actingAs($owner)->get('/dashboard');
+    $response = $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard");
 
     $epoch = renderedSessionEpoch($response);
 
@@ -106,12 +106,12 @@ test('ログイン応答の世代 cookie は再生成後のセッション ID �
 });
 
 test('部分再読み込みで別 prop だけを要求しても描画世代は載る', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $response = $this->actingAs($owner)->get('/dashboard');
+    $response = $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard");
     $component = $response->viewData('page')['component'];
 
-    $partial = $this->actingAs($owner)->get('/dashboard', [
+    $partial = $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard", [
         'X-Inertia' => 'true',
         'X-Inertia-Version' => (string) $response->viewData('page')['version'],
         'X-Inertia-Partial-Component' => $component,

@@ -58,7 +58,7 @@ use Symfony\Component\HttpFoundation\Response;
 const FREEZE_POPULATION_FLOOR = 60;
 
 /** `A` の件数 (exact-fit。増減させたらこの数値も同じ diff で書き換わる)。 */
-const FREEZE_ALLOWANCE_COUNT = 17;
+const FREEZE_ALLOWANCE_COUNT = 16;
 
 /**
  * 凍結 middleware が付いた route (`U`)。名前をキーにする。

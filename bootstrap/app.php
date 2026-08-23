@@ -14,7 +14,7 @@ use App\Http\Middleware\EnsureAccountNotPendingDeletion;
 use App\Http\Middleware\EnsureEmailIsVerifiedOrBack;
 use App\Http\Middleware\EnsureLoginMethodRemains;
 use App\Http\Middleware\EnsureProjectBelongsToApiOrganization;
-use App\Http\Middleware\EnsureProjectBelongsToCurrentOrganization;
+use App\Http\Middleware\EnsureProjectBelongsToRouteOrganization;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\IdempotentRequest;
 use App\Http\Middleware\IssueSessionEpochCookie;
@@ -199,7 +199,7 @@ return Application::configure(basePath: dirname(__DIR__))
             // FormRequest の DB ルール (unique/exists) より前に 404 へ落とす
             // (存在オラクル防止。網羅性は ProjectRouteCurrentOrgGuardTest が固定)。
             // **実行位置は上の priority list が正本** (SubstituteBindings 直後)。
-            'project.in-current-org' => EnsureProjectBelongsToCurrentOrganization::class,
+            'project.in-route-org' => EnsureProjectBelongsToRouteOrganization::class,
             // REST API v1 用の同等 guard (組織は API キー / OAuth token から確定するため
             // web セッションの current org とは解決元が違う = 別 alias)。
             // resolve.api-actor より後・api-key.ability より前・idempotent より前
@@ -261,12 +261,12 @@ return Application::configure(basePath: dirname(__DIR__))
         );
         $middleware->appendToPriorityList(
             EnsureProjectBelongsToApiOrganization::class,
-            EnsureProjectBelongsToCurrentOrganization::class,
+            EnsureProjectBelongsToRouteOrganization::class,
         );
         // テナント guard より後に走ることを確定させる web グループの鎖
         // (guard を binding 直後まで引き上げるための「後続」宣言)。
         foreach ([
-            [EnsureProjectBelongsToCurrentOrganization::class, HandleInertiaRequests::class],
+            [EnsureProjectBelongsToRouteOrganization::class, HandleInertiaRequests::class],
             [HandleInertiaRequests::class, SecurityHeaders::class],
             [SecurityHeaders::class, RequireTwoFactorForEnforcedOrganizations::class],
             [RequireTwoFactorForEnforcedOrganizations::class, BlockTwoFactorDisableForEnforcedOrganizations::class],
@@ -276,7 +276,7 @@ return Application::configure(basePath: dirname(__DIR__))
             [EncryptHistory::class, EnsureEmailIsVerified::class],
             [EnsureEmailIsVerified::class, RequireActiveSubscription::class],
             // 退会予約中の凍結。**302 で短絡する**ため、テナント境界 404
-            // (EnsureProjectBelongsToCurrentOrganization) より必ず後に置く。前に置くと
+            // (EnsureProjectBelongsToRouteOrganization) より必ず後に置く。前に置くと
             // 「他組織に実在 = 302 / 不在 = 404」の 1 bit 存在オラクルになる
             // (AGENTS.md セキュリティ不変条件 10)。課金ゲートの直後に置き、未契約組織の
             // ユーザーは 課金ゲート → onboarding → 凍結 → /settings の 2 hop で取消 UI に着く。

@@ -14,6 +14,7 @@
         type PreviewOptions,
     } from "@/lib/capture/scenario-preview";
     import type { CaptureCut } from "@/types/capture";
+    import { currentOrganizationSlug } from "@/lib/org-url";
 
     /**
      * 通し再生 (全体連結プレビュー。doc/05 §5.2 [プレビュー] / T191)。
@@ -299,7 +300,11 @@
 
     function startPreview(): void {
         sessionId += 1; // 旧セッションの遅延結果 (play() の reject) をここで無効化する
-        entries = buildPreviewEntries(cuts, labels, { projectId, manualId });
+        entries = buildPreviewEntries(cuts, labels, {
+            organizationSlug: currentOrganizationSlug(),
+            projectId,
+            manualId,
+        });
         previewState = initialPreviewState(currentOptions(), Date.now());
         subtitlesOn = true;
         activeSlot = 0;

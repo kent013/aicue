@@ -19,6 +19,10 @@
 #   1 枚以上のカードの covers_* に載せること (載せる先が無いなら区分を `外` にする)。
 schema_version = 1
 
+[routes."app.entry"]
+kind = "画面"
+kubun = "通常"
+
 [routes."billing.auto-recharge.setup"]
 kubun = "通常"
 
@@ -58,6 +62,10 @@ kubun = "通常"
 
 [routes."capture.csrf-cookie"]
 kind = "JSON"
+kubun = "通常"
+
+[routes."capture.entry"]
+kind = "画面"
 kubun = "通常"
 
 [routes."capture.home"]
@@ -246,7 +254,7 @@ kubun = "通常"
 [routes."organizations.store"]
 kubun = "通常"
 
-[routes."organizations.switch"]
+[routes."organizations.slug.update"]
 kubun = "通常"
 
 [routes."organizations.transfer-ownership"]

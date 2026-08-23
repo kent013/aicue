@@ -73,7 +73,7 @@ test('local + 不正 password → 401', function (): void {
 });
 
 test('local + 正しい credential → ユーザー一覧 (Debug/Login) が表示される', function (): void {
-    [$organization, $user] = createOrganizationWithOwner('デバッグ組織');
+    [, $user] = createOrganizationWithOwner('デバッグ組織');
 
     $response = $this->withHeaders([
         'PHP_AUTH_USER' => 'testuser',
@@ -84,11 +84,11 @@ test('local + 正しい credential → ユーザー一覧 (Debug/Login) が表�
     $response->assertInertia(fn (Assert $page) => $page
         ->component('Debug/Login')
         ->has('users', 1)
-        ->where('users.0.id', $user->id)
-        ->where('users.0.organization', $organization->name));
+        // 組織文脈は URL だけで決まるので、利用者一覧は組織を持たない (家系裁定 AG-037)
+        ->where('users.0.id', $user->id));
 });
 
-test('loginAs で対象ユーザーとしてログインし dashboard へ redirect', function (): void {
+test('loginAs で対象ユーザーとしてログインし分岐入口へ redirect', function (): void {
     [, $user] = createOrganizationWithOwner();
 
     $response = $this->withHeaders([
@@ -96,7 +96,8 @@ test('loginAs で対象ユーザーとしてログインし dashboard へ redire
         'PHP_AUTH_PW' => 'testpass123',
     ])->post("/debug/login/{$user->id}");
 
-    $response->assertRedirect('/dashboard');
+    // debug ログインは組織文脈を持たないので分岐入口へ着地する (家系裁定 AG-037)
+    $response->assertRedirect(route('app.entry'));
     $this->assertAuthenticatedAs($user);
 });
 

@@ -38,7 +38,7 @@ Authenticate
 
 修正提案: 設計文の順序表を Laravel の実実行順に合わせ、Architecture テストも `gatherMiddleware()` の宣言順ではなく priority 適用後の middleware stack を検査すると明記してください。
 
-[Warning] S2 は方向性として妥当ですが、`project.in-current-org` が `{project}` 不在 route で完全 no-op であることを Feature / Architecture テストで固定する必要があります。業務 group 全体に先頭配置するため、将来 `{project}` 以外の route へ副作用が出ると課金ゲートの到達性を壊します。
+[Warning] S2 は方向性として妥当ですが、`project.in-route-org` が `{project}` 不在 route で完全 no-op であることを Feature / Architecture テストで固定する必要があります。業務 group 全体に先頭配置するため、将来 `{project}` 以外の route へ副作用が出ると課金ゲートの到達性を壊します。
 
 [Warning] S5 の Laravel `TrustProxies` fallback 理解は概ね妥当ですが、`config('trustedproxy.proxies')` を本当に参照するには、アプリが使っている TrustProxies 実装と設定キー名の実装確認が必要です。Laravel 本体 / fideloper 系 / 独自 middleware のどれかで設定キーがズレると、意図せず全 proxy 非信頼または設定無視になります。
 

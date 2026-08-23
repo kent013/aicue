@@ -95,6 +95,9 @@ return [
         'settings' => '設定',
         'settings.security' => 'セキュリティ設定',
         // 組織
+        // 組織文脈を持たない分岐入口 (所属が 1 件ならその組織へ転送、複数なら選ぶ画面)
+        'app.entry' => '組織を選ぶ',
+        'capture.entry' => '組織を選ぶ',
         'organizations.create' => '組織の作成',
         'organizations.settings' => '組織設定',
         'invitations.accept' => '組織への招待',

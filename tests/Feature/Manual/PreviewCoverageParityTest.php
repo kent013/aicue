@@ -64,11 +64,11 @@ function previewCoverageAdopt(Cut $cut, TakeStatus $status = TakeStatus::Ready):
 }
 
 /** 詳細画面の render props を取り出す */
-function previewCoverageRenderProps(Project $project, VideoManual $manual, User $actor): array
+function previewCoverageRenderProps(Organization $organization, Project $project, VideoManual $manual, User $actor): array
 {
     $props = [];
     test()->actingAs($actor)
-        ->get("/projects/{$project->id}/manuals/{$manual->id}")
+        ->get("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}")
         ->assertOk()
         ->assertInertia(function (AssertableInertia $page) use (&$props): void {
             /** @var array<string, mixed> $render */
@@ -81,11 +81,11 @@ function previewCoverageRenderProps(Project $project, VideoManual $manual, User 
 
 test('A-1: render は未充足カットがあると 422 で未充足カットを列挙する', function (): void {
     Queue::fake();
-    [, $owner, $project, $manual] = previewCoverageContext();
+    [$organization, $owner, $project, $manual] = previewCoverageContext();
     Cut::factory()->forManual($manual)->withSortOrder(1)->create(); // 未採用
 
     $response = $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/render",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render",
     );
 
     $response->assertUnprocessable()->assertJsonValidationErrors(['takes']);
@@ -94,17 +94,17 @@ test('A-1: render は未充足カットがあると 422 で未充足カットを
 
 test('A-2: preview は未充足カットがあっても 201 で受け付ける (ブロックしない)', function (): void {
     Queue::fake();
-    [, $owner, $project, $manual] = previewCoverageContext();
+    [$organization, $owner, $project, $manual] = previewCoverageContext();
     Cut::factory()->forManual($manual)->withSortOrder(1)->create(); // 未採用
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/preview",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/preview",
     )->assertCreated();
 });
 
 test('A-3: render 422 の列挙件数と詳細画面 coverage の missing_count が一致する', function (): void {
     Queue::fake();
-    [, $owner, $project, $manual] = previewCoverageContext();
+    [$organization, $owner, $project, $manual] = previewCoverageContext();
     // 未充足 3 件 (未採用 2 + 採用済みだが processing 1)
     Cut::factory()->forManual($manual)->withSortOrder(1)->create();
     Cut::factory()->forManual($manual)->withSortOrder(2)->create();
@@ -114,13 +114,13 @@ test('A-3: render 422 の列挙件数と詳細画面 coverage の missing_count 
     );
 
     $response = $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/render",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render",
     );
     $response->assertUnprocessable();
     $message = (string) $response->json('errors.takes.0');
     $enumerated = substr_count($message, '、') + 1;
 
-    $render = previewCoverageRenderProps($project, $manual, $owner);
+    $render = previewCoverageRenderProps($organization, $project, $manual, $owner);
 
     expect($enumerated)->toBe(3);
     expect($render['coverage']['missing_count'])->toBe($enumerated);
@@ -128,10 +128,10 @@ test('A-3: render 422 の列挙件数と詳細画面 coverage の missing_count 
 });
 
 test('A-4: 詳細画面 props に total_cuts / missing_count / missing_labels が載る', function (): void {
-    [, $owner, $project, $manual] = previewCoverageContext();
+    [$organization, $owner, $project, $manual] = previewCoverageContext();
     Cut::factory()->forManual($manual)->withSortOrder(1)->create();
 
-    $render = previewCoverageRenderProps($project, $manual, $owner);
+    $render = previewCoverageRenderProps($organization, $project, $manual, $owner);
 
     expect($render['coverage'])->toBe([
         'total_cuts' => 2,
@@ -141,9 +141,9 @@ test('A-4: 詳細画面 props に total_cuts / missing_count / missing_labels �
 });
 
 test('A-5: すべて充足なら missing_count は 0 でラベルは空になる', function (): void {
-    [, $owner, $project, $manual] = previewCoverageContext();
+    [$organization, $owner, $project, $manual] = previewCoverageContext();
 
-    $render = previewCoverageRenderProps($project, $manual, $owner);
+    $render = previewCoverageRenderProps($organization, $project, $manual, $owner);
 
     expect($render['coverage']['missing_count'])->toBe(0);
     expect($render['coverage']['missing_labels'])->toBe([]);
@@ -151,13 +151,13 @@ test('A-5: すべて充足なら missing_count は 0 でラベルは空になる
 });
 
 test('A-6: 採用済みだが ready でないテイクも missing として数える', function (TakeStatus $status): void {
-    [, $owner, $project, $manual] = previewCoverageContext();
+    [$organization, $owner, $project, $manual] = previewCoverageContext();
     previewCoverageAdopt(
         Cut::factory()->forManual($manual)->withSortOrder(1)->create(),
         $status,
     );
 
-    $render = previewCoverageRenderProps($project, $manual, $owner);
+    $render = previewCoverageRenderProps($organization, $project, $manual, $owner);
 
     expect($render['coverage']['missing_count'])->toBe(1);
     expect($render['coverage']['missing_labels'])->toBe(['手順2']);
@@ -168,12 +168,12 @@ test('A-6: 採用済みだが ready でないテイクも missing として数�
 ]);
 
 test('A-7: missing が 11 件のとき missing_labels は 10 件で missing_count は 11 になる', function (): void {
-    [, $owner, $project, $manual] = previewCoverageContext();
+    [$organization, $owner, $project, $manual] = previewCoverageContext();
     foreach (range(1, 11) as $index) {
         Cut::factory()->forManual($manual)->withSortOrder($index)->create();
     }
 
-    $render = previewCoverageRenderProps($project, $manual, $owner);
+    $render = previewCoverageRenderProps($organization, $project, $manual, $owner);
 
     expect($render['coverage']['missing_count'])->toBe(11);
     expect($render['coverage']['missing_labels'])->toHaveCount(10);
@@ -185,16 +185,15 @@ test('A-8: 撮影者にも coverage は返るが preview / render の起動は 4
     [$organization, , $project, $manual] = previewCoverageContext();
     Cut::factory()->forManual($manual)->withSortOrder(1)->create();
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
     attachProjectMember($project, $member, ProjectRole::Member);
 
-    $render = previewCoverageRenderProps($project, $manual, $member);
+    $render = previewCoverageRenderProps($organization, $project, $manual, $member);
     expect($render['coverage']['missing_count'])->toBe(1);
 
     $this->actingAs($member)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/preview",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/preview",
     )->assertForbidden();
     $this->actingAs($member)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/render",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render",
     )->assertForbidden();
 });

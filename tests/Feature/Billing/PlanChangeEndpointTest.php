@@ -42,47 +42,46 @@ function planChangePayload(string $planCode = 'standard', ?string $currentPlanCo
     ];
 }
 
-test('契約中 owner のプラン変更は /billing へ redirect し受付 flash を出す', function (): void {
-    [, $owner] = planChangeEndpointOrganization();
+test('契約中 owner のプラン変更は /organizations/{slug}/billing へ redirect し受付 flash を出す', function (): void {
+    [$organization, $owner] = planChangeEndpointOrganization();
 
     $gateway = $this->mock(StripeGatewayInterface::class);
     $gateway->shouldReceive('swapSubscriptionPrices')->once()->andReturn(SubscriptionSwapOutcome::Applied);
 
-    $this->actingAs($owner)->post('/billing/plan', planChangePayload())
-        ->assertRedirect('/billing')
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/plan", planChangePayload())
+        ->assertRedirect("/organizations/{$organization->slug}/billing")
         ->assertSessionHas('success', 'プラン変更を受け付けました。反映まで数分かかる場合があります。');
 });
 
 test('AlreadyOnTargetPrice のときは受付済み文言になる', function (): void {
-    [, $owner] = planChangeEndpointOrganization();
+    [$organization, $owner] = planChangeEndpointOrganization();
 
     $gateway = $this->mock(StripeGatewayInterface::class);
     $gateway->shouldReceive('swapSubscriptionPrices')->once()
         ->andReturn(SubscriptionSwapOutcome::AlreadyOnTargetPrice);
 
-    $this->actingAs($owner)->post('/billing/plan', planChangePayload())
-        ->assertRedirect('/billing')
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/plan", planChangePayload())
+        ->assertRedirect("/organizations/{$organization->slug}/billing")
         ->assertSessionHas('success', 'このプランへの変更は受付済みです。反映まで数分かかる場合があります。');
 });
 
 test('manageBilling を持たない member は 403', function (): void {
     [$organization] = planChangeEndpointOrganization();
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
     $gateway = $this->mock(StripeGatewayInterface::class);
     $gateway->shouldNotReceive('swapSubscriptionPrices');
 
-    $this->actingAs($member)->post('/billing/plan', planChangePayload())->assertForbidden();
+    $this->actingAs($member)->post("/organizations/{$organization->slug}/billing/plan", planChangePayload())->assertForbidden();
 });
 
 test('契約の無い組織は 422 で新規契約導線へ倒す', function (): void {
-    [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
 
     $gateway = $this->mock(StripeGatewayInterface::class);
     $gateway->shouldNotReceive('swapSubscriptionPrices');
 
-    $this->actingAs($owner)->post('/billing/plan', planChangePayload(currentPlanCode: null))
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/plan", planChangePayload(currentPlanCode: null))
         ->assertSessionHasErrors(['plan_code']);
 });
 
@@ -95,30 +94,30 @@ test('期間終了済み契約は valid() が false のため 422', function ():
     $gateway = $this->mock(StripeGatewayInterface::class);
     $gateway->shouldNotReceive('swapSubscriptionPrices');
 
-    $this->actingAs($owner)->post('/billing/plan', planChangePayload())
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/plan", planChangePayload())
         ->assertSessionHasErrors(['plan_code']);
 });
 
 test('current_plan_code が実際と食い違うと stale として errors.plan_code を返す', function (): void {
-    [, $owner] = planChangeEndpointOrganization();
+    [$organization, $owner] = planChangeEndpointOrganization();
 
     $gateway = $this->mock(StripeGatewayInterface::class);
     $gateway->shouldNotReceive('swapSubscriptionPrices');
 
-    $this->actingAs($owner)->post('/billing/plan', planChangePayload(currentPlanCode: 'personal'))
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/plan", planChangePayload(currentPlanCode: 'personal'))
         ->assertSessionHasErrors(['plan_code']);
 });
 
 test('plan_change_token の欠落・非 ULID は 422', function (): void {
-    [, $owner] = planChangeEndpointOrganization();
+    [$organization, $owner] = planChangeEndpointOrganization();
     $this->mock(StripeGatewayInterface::class)->shouldNotReceive('swapSubscriptionPrices');
 
-    $this->actingAs($owner)->post('/billing/plan', [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/plan", [
         'plan_code' => 'standard',
         'current_plan_code' => 'starter',
     ])->assertSessionHasErrors(['plan_change_token']);
 
-    $this->actingAs($owner)->post('/billing/plan', [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/plan", [
         'plan_code' => 'standard',
         'current_plan_code' => 'starter',
         'plan_change_token' => 'not-a-ulid',
@@ -126,10 +125,10 @@ test('plan_change_token の欠落・非 ULID は 422', function (): void {
 });
 
 test('未知の plan_code は 422', function (): void {
-    [, $owner] = planChangeEndpointOrganization();
+    [$organization, $owner] = planChangeEndpointOrganization();
     $this->mock(StripeGatewayInterface::class)->shouldNotReceive('swapSubscriptionPrices');
 
-    $this->actingAs($owner)->post('/billing/plan', planChangePayload(planCode: 'unknown-plan'))
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/plan", planChangePayload(planCode: 'unknown-plan'))
         ->assertSessionHasErrors(['plan_code']);
 });
 
@@ -137,7 +136,7 @@ test('current_plan_code はキー欠落なら 422 だが値 null は通る', fun
     [$organization, $owner] = planChangeEndpointOrganization();
 
     $this->mock(StripeGatewayInterface::class)->shouldNotReceive('swapSubscriptionPrices');
-    $this->actingAs($owner)->post('/billing/plan', [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/plan", [
         'plan_code' => 'standard',
         'plan_change_token' => (string) Str::ulid(),
     ])->assertSessionHasErrors(['current_plan_code']);
@@ -147,63 +146,63 @@ test('current_plan_code はキー欠落なら 422 だが値 null は通る', fun
     $gateway = $this->mock(StripeGatewayInterface::class);
     $gateway->shouldReceive('swapSubscriptionPrices')->once()->andReturn(SubscriptionSwapOutcome::Applied);
 
-    $this->actingAs($owner)->post('/billing/plan', [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/plan", [
         'plan_code' => 'standard',
         'current_plan_code' => null,
         'plan_change_token' => (string) Str::ulid(),
-    ])->assertRedirect('/billing');
+    ])->assertRedirect("/organizations/{$organization->slug}/billing");
 });
 
 test('業務拒否 (paused 契約) は back + error flash でその文言を返す', function (): void {
-    [, $owner] = planChangeEndpointOrganization(status: 'paused');
+    [$organization, $owner] = planChangeEndpointOrganization(status: 'paused');
 
     $gateway = $this->mock(StripeGatewayInterface::class);
     $gateway->shouldNotReceive('swapSubscriptionPrices');
 
-    $response = $this->actingAs($owner)->post('/billing/plan', planChangePayload());
+    $response = $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/plan", planChangePayload());
 
     $response->assertRedirect();
     expect(session('error'))->toBeString()->toContain('一時停止');
 });
 
 test('外部障害の flash は固定文言で内部 reason を漏らさない', function (): void {
-    [, $owner] = planChangeEndpointOrganization();
+    [$organization, $owner] = planChangeEndpointOrganization();
 
     $gateway = $this->mock(StripeGatewayInterface::class);
     $gateway->shouldReceive('swapSubscriptionPrices')->once()
         ->andThrow(PlanChangeFailedException::unexpectedShape('sub_secret_1', 2, null));
 
-    $this->actingAs($owner)->post('/billing/plan', planChangePayload())->assertRedirect();
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/plan", planChangePayload())->assertRedirect();
 
     expect(session('error'))->toBe(PlanChangeFailedException::USER_MESSAGE);
     expect(session('error'))->not->toContain('sub_secret_1');
 });
 
 test('前提違反 (InvalidArgumentException) は catch されず 500 になる', function (): void {
-    [, $owner] = planChangeEndpointOrganization();
+    [$organization, $owner] = planChangeEndpointOrganization();
 
     $gateway = $this->mock(StripeGatewayInterface::class);
     $gateway->shouldReceive('swapSubscriptionPrices')->once()
         ->andThrow(new InvalidArgumentException('内部 Assert 文言'));
 
-    $response = $this->actingAs($owner)->post('/billing/plan', planChangePayload());
+    $response = $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/plan", planChangePayload());
 
     $response->assertStatus(500);
     expect(session('error'))->toBeNull();
 });
 
 test('保護キーを payload に混ぜると 422', function (): void {
-    [, $owner] = planChangeEndpointOrganization();
+    [$organization, $owner] = planChangeEndpointOrganization();
     $this->mock(StripeGatewayInterface::class)->shouldNotReceive('swapSubscriptionPrices');
 
-    $this->actingAs($owner)->post('/billing/plan', array_merge(planChangePayload(), [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/plan", array_merge(planChangePayload(), [
         'organization_id' => 999,
     ]))->assertSessionHasErrors(['organization_id']);
 });
 
-test('route parameter を持たないため current org の契約しか変更されない', function (): void {
+test('URL 上の組織の契約だけが変更される (別組織へは波及しない)', function (): void {
     [$current, $owner] = planChangeEndpointOrganization();
-    // owner が別組織にも所属していても、current org 以外は指定する手段が無い
+    // owner が別組織にも所属していても、URL に載せた組織以外は変更されない
     [$other] = planChangeEndpointOrganization();
     $other->users()->attach($owner);
 
@@ -217,7 +216,9 @@ test('route parameter を持たないため current org の契約しか変更さ
             return SubscriptionSwapOutcome::Applied;
         });
 
-    $this->actingAs($owner)->post('/billing/plan', planChangePayload())->assertRedirect('/billing');
+    $this->actingAs($owner)
+        ->post("/organizations/{$current->slug}/billing/plan", planChangePayload())
+        ->assertRedirect("/organizations/{$current->slug}/billing");
 
     expect($seen)->toBe($current->getKey());
 });

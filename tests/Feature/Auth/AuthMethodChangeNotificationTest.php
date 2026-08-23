@@ -315,7 +315,7 @@ test('新規 SSO 登録 (intent=register) は通知を送らないが監査記�
     $this->withSession(['social_auth_intent' => 'register']);
     fakeGoogleSocialiteCallback(fakeGoogleSocialiteUser('g-register-1', 'new-sso-user@example.com'));
 
-    $this->get('/auth/google/callback')->assertRedirect(route('dashboard'));
+    $this->get('/auth/google/callback')->assertRedirect(route('app.entry'));
 
     $user = User::whereBlind('email', 'email_index', 'new-sso-user@example.com')->firstOrFail();
 

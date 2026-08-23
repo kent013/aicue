@@ -33,7 +33,7 @@ DataTransferObjects / Http/Resources (応答形の単一定義)
   ├─ [層1] 認証         auth / auth:api-key,api-oauth
   │                     … ManageRouteAuthGuardTest / ApiGuardAllowlistInvariantTest
   ├─ [層2a] テナント境界 (middleware / routing 層) ★FormRequest より前
-  │                     project.in-current-org (web) / api.project-in-org (API) /
+  │                     project.in-route-org (web) / api.project-in-org (API) /
   │                     MembershipScopedOrganizationBinder / Route::scopeBindings()
   │                     … ProjectRouteCurrentOrgGuardTest / NestedRouteIdorDefenseTest
   │                                                       ← 不整合は 404
@@ -74,7 +74,7 @@ route parameter を経由しない id (POST payload / MCP tool 引数 / token cl
 
 - **なぜ必要か**: pgsql は型不一致の比較で `22P02` (invalid_text_representation)、
   bigint 範囲外で `22003` (numeric_value_out_of_range) を投げる。非適合セグメント
-  (`/projects/abc`) が implicit binding に届くと QueryException → **404 ではなく生 500**。
+  (`/organizations/{slug}/projects/abc`) が implicit binding に届くと QueryException → **404 ではなく生 500**。
   型制約に合致しない URL は route にマッチしない = 404 になり、`SubstituteBindings` へ
   到達しないためクエリ自体が発行されない
 - **ドメイン制約 (重要)**: `BIGINT_PATTERN` は **`[0-9]{1,18}`**。
@@ -204,7 +204,7 @@ route parameter を経由しない id (POST payload / MCP tool 引数 / token cl
 | `Marketing/ContactUrl` | 問い合わせ CTA の宛先解決 (`config('services.marketing.contact_url')` で内部 route / 外部 URL / mailto を切替。未設定なら `/contact`。source attribution は呼び出し側が query で付与) |
 | `Onboarding/IntendedPlanResolver` | 「料金表で選んだプラン意図」を 料金表 → 登録 → Onboarding Checkout で一貫保持する (pending / org-scoped の 2 キー。put は有効値のみ・無効値は forget、peek は再正規化して残す) |
 | `Onboarding/OnboardingReturnResolver` | 課金ゲートで失われた「意図先 destination」を org-scoped session に保持し完了着地で復帰させる。**same-origin の内部相対 path のみ許可** (絶対 URL / protocol-relative は破棄 = open-redirect 防御) |
-| `Organization/CurrentOrganizationResolver` | current organization の「所属再確認つき」解決 + 自己修復 (読み出し時に pivot relation で所属を再確認 = dangling org を描画に出さない。書き込みは条件付き UPDATE の冪等 best-effort) |
+| `Organization/OrganizationSlugRenameLimiter` | 識別名の改名 (家系裁定 AG-046)。30 日あたり 5 回のローリング窓。最終権威は**組織行を行ロックした後の再判定**で、事前判定 (画面の残り回数) は早期拒否にすぎない。旧識別名は予約せず解放する |
 | `Dashboard/DashboardService` | ダッシュボードのサーバ集計 (読み取り専用・固定本数クエリ。集計は organization / project の relation 経由のみ = cross-org は構造的に不可) |
 | `OAuth/OauthSessionListService` | OAuth セッション一覧 (CLI セッション + legacy MCP token の併記) |
 | `VersionInfoService` | `/api/v1/version` の capability negotiation payload (semver fail-fast + CLI client id 解決) |
@@ -816,16 +816,16 @@ catch を足す必要が出たら、観測目録へ移すか免除の分類を�
 **契約の開始**を担うのが本節の経路。デプロイ順序の非交渉事項は
 `docs/billing-gate-inversion-runbook.md` が正本。
 
-- **経路 (すべて current org スコープ = route parameter を持たない)**:
+- **経路 (すべて組織 URL 配下 = `/organizations/{organization:slug}/…`)**:
 
   | route | 画面 / 責務 | guard |
   |---|---|---|
-  | GET `/onboarding/checkout` (`onboarding.checkout`) | `Onboarding/Checkout` — プラン選択 + Personal(無料)の自己申告 + 資金選択 | `view` 認可 + 離脱ガード (契約済み → `billing.index` / `manageBilling` なし → `onboarding.billing-required`) |
-  | GET `/billing-required` (`onboarding.billing-required`) | `Onboarding/BillingRequired` — 未契約 かつ `manageBilling` なし member への説明 (Owner 連絡先 + 問い合わせ導線) | `view` 認可 + 離脱ガード (利用可 → `dashboard` / `manageBilling` 保持 → `onboarding.checkout`) |
-  | POST `/onboarding/activate-personal` (`onboarding.activate-personal`) | Personal(無料)の即時有効化 (Stripe Checkout を通らない) | `manageBilling` + `throttle:10,1` |
-  | POST `/billing/checkout` (`billing.checkout`) | 有償プランの Stripe Checkout 開始 | `manageBilling` |
-  | POST `/billing/plan` (`billing.plan.change`) | 契約中プランの in-app swap (プラン変更) | `manageBilling` |
-  | PATCH `/billing/contact` (`billing.contact.update`) | 請求先連絡先の更新 | `manageBilling` |
+  | GET `/organizations/{slug}/onboarding/checkout` (`onboarding.checkout`) | `Onboarding/Checkout` — プラン選択 + Personal(無料)の自己申告 + 資金選択 | `view` 認可 + 離脱ガード (契約済み → `billing.index` / `manageBilling` なし → `onboarding.billing-required`) |
+  | GET `/organizations/{slug}/billing-required` (`onboarding.billing-required`) | `Onboarding/BillingRequired` — 未契約 かつ `manageBilling` なし member への説明 (Owner 連絡先 + 問い合わせ導線) | `view` 認可 + 離脱ガード (利用可 → `dashboard` / `manageBilling` 保持 → `onboarding.checkout`) |
+  | POST `/organizations/{slug}/onboarding/activate-personal` (`onboarding.activate-personal`) | Personal(無料)の即時有効化 (Stripe Checkout を通らない) | `manageBilling` + `throttle:10,1` |
+  | POST `/organizations/{slug}/billing/checkout` (`billing.checkout`) | 有償プランの Stripe Checkout 開始 | `manageBilling` |
+  | POST `/organizations/{slug}/billing/plan` (`billing.plan.change`) | 契約中プランの in-app swap (プラン変更) | `manageBilling` |
+  | PATCH `/organizations/{slug}/billing/contact` (`billing.contact.update`) | 請求先連絡先の更新 | `manageBilling` |
 
   いずれも `require-active-subscription` group の**外**にある構造的 allowlist
   (`routes/web.php` の gate group コメントが正本)。ゲート内に入れると
@@ -834,7 +834,7 @@ catch を足す必要が出たら、観測目録へ移すか免除の分類を�
   ループになるため、`onboarding.billing-required` を用意する。両画面が相互に離脱ガードを
   持つことで「どちらにも留まれない往復」が構造的に起きない。
 - **テナント境界 404 は課金ゲートより前**: `{project}` を持つ route では
-  `project.in-current-org` が `require-active-subscription` **より先**に走る
+  `project.in-route-org` が `require-active-subscription` **より先**に走る
   (`bootstrap/app.php` の priority list が正本)。逆順だと「他組織に実在する project =
   課金ゲートの 302 / 不在の project = 404」と分岐し、未契約組織のユーザーでも
   project id の実在を列挙できる**存在オラクル**になる (監査サイクル 2 High-1)。
@@ -870,10 +870,10 @@ catch を足す必要が出たら、観測目録へ移すか免除の分類を�
   - live/stale の閾値は `BillingCheckoutSession::staleThresholdAt()` が単一出典で、
     `BillingAccess::state()` / 段 2・3・4 / 日次 sweeper が共有する
     (Architecture テストが literal の再発明を検出)
-- **契約中プランの変更 (in-app swap / F-3-01)**: `POST /billing/plan` (`billing.plan.change`) →
+- **契約中プランの変更 (in-app swap / F-3-01)**: `POST /organizations/{slug}/billing/plan` (`billing.plan.change`) →
   `SubscriptionService::changePlan()`。**有効な subscription を持つ組織専用**の経路で、
   持たない組織の `billing.checkout` と `Subscription::valid()` を境に排他
-  (どちらの CTA も `/billing/plans` から出るが、送信先はサーバが決めた
+  (どちらの CTA も `/organizations/{slug}/billing/plans` から出るが、送信先はサーバが決めた
   `hasChangeableSubscription` で分かれる)。
   - guard 順: 契約再読込 → **変更可能 state (Active のみ)** → schedule 管理下の拒否 →
     stale UI 検知 (`current_plan_code`。UX 専用。**要求先 ≠ local 現在プランのときだけ**評価) →
@@ -919,12 +919,12 @@ catch を足す必要が出たら、観測目録へ移すか免除の分類を�
     (**証拠なく金銭の挙動を反転させない**)。判断の経緯は
     `devnotes/20260804-0900-t089-t090-residual-risk/` を参照
 - **着地 feedback (P9)**: `Inertia::location()` の full page redirect を跨いだ後、
-  `/billing` 着地で one-shot バナーを出す (`BillingFeedbackKind`: purchase_received /
+  `/organizations/{slug}/billing` 着地で one-shot バナーを出す (`BillingFeedbackKind`: purchase_received /
   purchase_processing / purchase_already_received / checkout_retry_required / portal_returned)。
   org スコープ + intent 検証で **fail-closed**、UI は raw query を見ない。
   `PurchaseFormState::Completed` 撤去後、**購入完了を伝える唯一の経路**。
   - **one-shot の定義**: 「サーバが同じ状態を再主張しない」こと。着地 query
-    (`?session_id` / `?portal`) を認識したら **feedback の有無に関わらず canonical `/billing` へ
+    (`?session_id` / `?portal`) を認識したら **feedback の有無に関わらず canonical `/organizations/{slug}/billing` へ
     303** で畳み、kind は `BillingFeedbackKind::FLASH_KEY` の session flash
     (次の 1 リクエストのみ生存) で運ぶ。着地 URL が履歴に残らないため、リロード・戻る・
     ブックマークでバナーが復活しない (bfcache による DOM 復元まで禁じる契約ではない)。
@@ -948,13 +948,13 @@ catch を足す必要が出たら、観測目録へ移すか免除の分類を�
   (`pm_reuse_dispatched_at` が dispatch marker)。**webhook 同期処理から外向き Stripe API を
   撃たない**不変条件のため Job へ退避する。`AutoRechargeService::applyReusedPaymentMethod` は
   適格性先行の fail-closed (同意なし・失効・停止状態では Stripe にも DB にも触らない)。
-- **ダッシュボード callout は state 別 (T150)**: `/dashboard` の課金 callout は
+- **ダッシュボード callout は state 別 (T150)**: `/organizations/{slug}/dashboard` の課金 callout は
   `BillingSummaryData::$billingState` (`OnboardingBillingState` の 5 値) をそのまま props に
   載せて分岐する。**真偽値に潰さない** — 一度も契約していない組織 (`no_subscription`) に
   支払い失敗の文言を出していた回帰 (bug-hunt 20260811-003230 F-2-01) の原因が、
   `hasBillingAccess` が「未契約」と「支払い不健全」を 1 bit に畳んでいたことだった。
   - **CTA の行き先を画面が権限で分岐させない**: 未契約系 (`no_subscription` /
-    `pending_checkout`) の CTA は常に `/onboarding/checkout` を指し、契約済みなら
+    `pending_checkout`) の CTA は常に `/organizations/{slug}/onboarding/checkout` を指し、契約済みなら
     `billing.index`、`manageBilling` なしなら `onboarding.billing-required` へ
     **サーバ (`OnboardingController::show` の離脱ガード) が捌く**。認可をフロントで
     二重実装しないし、押せないボタンも作らない (禁止事項 8)。
@@ -1212,7 +1212,7 @@ webhook は落ちうる (Stripe 自身が遅延・欠落を明記している)�
 
 ## チケットスポット購入 (T007) の運用契約
 
-- **経路**: `GET /purchase-tickets` (閲覧 = 組織メンバー) / `POST /purchase-tickets/checkout`
+- **経路**: `GET /organizations/{slug}/purchase-tickets` (閲覧 = 組織メンバー) / `POST /organizations/{slug}/purchase-tickets/checkout`
   (`manageBilling` のみ)。課金ゲート (`require-active-subscription`) の対象外 = 未契約 /
   free プラン組織でも購入できる。payload は `count` / `attempt_token` のみ
   (金額・Price ID は `TicketVolumePrice::currentTierFor` がサーバ権威で解決)
@@ -1243,8 +1243,8 @@ webhook は落ちうる (Stripe 自身が遅延・欠落を明記している)�
 (`reserve` の低残高通知も含む)。残高が閾値を割ったら off-session の Stripe Invoice で
 自動購入する。
 
-- **経路**: `POST /billing/auto-recharge` (設定更新) / `POST /billing/auto-recharge/setup`
-  (カード登録 = Checkout mode=setup)。いずれも current org スコープ + `manageBilling`。
+- **経路**: `POST /organizations/{slug}/billing/auto-recharge` (設定更新) / `POST /organizations/{slug}/billing/auto-recharge/setup`
+  (カード登録 = Checkout mode=setup)。いずれも組織 URL 配下 + `manageBilling`。
   課金ゲート (`require-active-subscription`) の対象外 = 支払い不健全な組織でも停止・
   カード更新に到達できる
 - **トリガ点は `reserve`** (移植元の `commit` ではない)。AI-CUE の実効残高が減る唯一の
@@ -1332,7 +1332,7 @@ webhook は落ちうる (Stripe 自身が遅延・欠落を明記している)�
 
 ## 撮影 PWA (presigned アップロード + 容量 Quota) の運用契約
 
-doc/10 §10.3 / §10.8-4/-7 の実装 (T004)。routes は `/app/projects/{project}/...`
+doc/10 §10.3 / §10.8-4/-7 の実装 (T004)。routes は `/organizations/{organization:slug}/app/projects/{project}/...`
 (web ガード・セッション + CSRF。GET は Inertia、書き込みは XHR JSON)。
 
 - **presigned 直アップロード**: `Capture/TakeUploadService` が Organization 行ロック tx 内で
@@ -1423,7 +1423,7 @@ doc/10 §10.3 / §10.8-4/-7 の実装 (T004)。routes は `/app/projects/{projec
   意味が違い、合成中 (`rendering`) こそ進み具合を見に戻る場面である。復路専用の述語も作らない。
   復路を無条件にできる根拠は、行き先 `projects.manuals.show` が `capture.manuals.show` と
   **同じ層を同じ順序で通る**ことである — 外側 group の `auth` / `verified` /
-  `not-pending-deletion`、内側 group の `require-active-subscription` / `project.in-current-org`、
+  `not-pending-deletion`、内側 group の `require-active-subscription` / `project.in-route-org`、
   `Route::scopeBindings()`、controller の `resolveOrganizationProject()` (認可より前に 404)、
   `Gate::authorize('view', $manual)`。詳細 GET はどちらも status で絞り込まない (一覧だけが絞る)。
   よって復路が 403 になる経路が見当たらない。**ただしテストが固定するのはこの構造的同一性ではなく**、
@@ -1439,11 +1439,11 @@ doc/10 §10.3 / §10.8-4/-7 の実装 (T004)。routes は `/app/projects/{projec
   (即時アップロード優先・IndexedDB は失敗/オフライン時の一時バッファ・419 は csrf-cookie
   再取得 1 回リトライ)。SW (`public/capture-sw.js`) は同一オリジン GET `/build/*` のみ
   stale-while-revalidate (アプリ応答・S3 は素通し)
-- **`/app/*` のテイク API は PC 編集面と共用である (T184)**: PC のテイク選択・採用画面
+- **`/organizations/{slug}/app/*` のテイク API は PC 編集面と共用である (T184)**: PC のテイク選択・採用画面
   (`projects.manuals.cuts.takes.index` → `pages/Manuals/Takes.svelte`) は**画面 props だけを返す
   GET を 1 本足し**、採用・削除・アップロード・再生・サムネイル取得は `capture.takes.*` を
   そのまま叩く (テイク資源の API 面を 2 本にしない)。URL prefix が `/app` なのは歴史的経緯であり、
-  **`/app/*` は「撮影 PWA 専用」ではない**。URL 導出は `lib/capture/take-endpoints.ts` の 1 箇所に
+  **`/organizations/{slug}/app/*` は「撮影 PWA 専用」ではない**。URL 導出は `lib/capture/take-endpoints.ts` の 1 箇所に
   集約してある (PWA の `TakeStrip` / `UploadQueue` と PC 面が同じ規則を使う)。
   帰結として、**将来 `/app` へ PWA 固有の middleware を足すと PC 面にも掛かる** (足すときは
   この段を読み直すこと)。
@@ -1626,7 +1626,53 @@ doc/10 §10.3 / §10.8-4/-7 の実装 (T004)。routes は `/app/projects/{projec
   ダッシュボード設定に委ねている。**非同期決済 (コンビニ払い等) を有効化する場合、`incomplete` を
   退会ガードで通過させている判断を再確認すること** (滞留時間が伸びるため)
 
-## 管理メニュー (/manage/users・/projects/{project}/categories)
+## 組織テナンシー (組織文脈は URL だけで決まる)
+
+家系裁定 AG-037 / AG-038 / AG-039 / AG-046 / AG-047 への追従 (T247)。
+
+- **「いまどの組織か」は URL だけで決まる**。保持列 (`users.current_organization_id`) と
+  切替 endpoint (`organizations.switch`) は撤去済みで、**2 方式の併存を認めない**。
+  保持列の残骸が 1 つも無いことは `CurrentOrganizationRemovalTest` が 3 つの形
+  (列名リテラル / relation / 撤去した Service の完全修飾名) で固定し、
+  撤去した切替 route 名と組織を持たない旧 URL は
+  `LegacyOrganizationlessUrlAbsenceTest` が git 追跡下ファイル全数で 0 件に固定する
+  (走査する / 走査しない / 自己検査専用 / 未分類 の 4 分類。未分類は 1 件でも赤)
+- **業務 route はすべて `/organizations/{organization:slug}/…` 配下**にある
+  (route 名は不変。変えたのは URI だけ)。除外は
+  `tests/Support/Routing/OrganizationlessWebRouteInventory.php` へ理由付きで登録する
+  (`OrganizationScopedRouteCoverageTest` が deny-by-default で固定)
+- **組織文脈を持たない入口**は `GET /app` (PWA の start_url) と `GET /go` の 2 本で、
+  所属が 1 件ならその組織へ転送、複数なら選ぶ画面、0 件なら組織作成へ分岐する。
+  **状態を一切保存せず、複数所属で自動選択もしない** (自動選択は保持列の再発明である)
+- **識別名 (slug)** は値オブジェクト 2 段で扱う。構文型 `OrganizationSlug`
+  (小文字英数字とハイフン / 先頭末尾と連続ハイフン不可 / 大文字は小文字へ正規化) と、
+  保存可能型 `AssignableOrganizationSlug` (構文妥当 かつ 非予約語)。
+  `organizations.slug` を書ける経路はこの型を受ける 1 本だけで、
+  `OrganizationSlugWritePathTest` が deny-by-default で固定する。
+  DB 側にも CHECK 制約を張ってあり、値オブジェクトを迂回した書き込みは DB が拒否する
+- **予約語**は `config/organization-slug-reserved.php` が正本で、理由 3 分類
+  (ルート衝突 / 権威の詐称 / 構文衝突) の記載が必須。識別名と**同じ位置**
+  (`/organizations/` 直下の第 2 セグメント) の静的語がすべて登録されていることを
+  `OrganizationSlugReservedWordsInvariantTest` が固定する。
+  **予約語を増やすときの運用契約は同 config の冒頭 docblock が正本**である
+- **改名**は 30 日あたり 5 回まで (`OrganizationSlugRenameLimiter`)。**旧識別名は解放**され、
+  他の組織が取れる (履歴表に一意制約を張らない)。改名は他タブの URL を即座に無効化するため、
+  画面は確認ダイアログを挟む (回数上限でもボタンは disabled にしない)
+- **初期組織生成の冪等判定は「所属組織が 0 件か」**である (種別フラグ `is_personal` は撤去)。
+  トランザクション内で利用者行を行ロックしてから数える。呼び出しサイトは
+  `OrganizationProvisioningCallSiteTest` が 2 経路に固定する
+- **機械が使う経路は不変の内部識別子で組織を指す**。api / console / filament / mcp の
+  入口を全数分類した台帳を `MachinePlaneOrganizationReferenceInventory` が持ち、
+  `MachinePlaneOrganizationReferenceTest` が未登録・余剰・親鎖の 5 検証で固定する
+
+### 保証しないもの (誇張しない)
+
+- **旧 URL からの転送は置かない**。利用者のブックマーク・外部サービスに登録済みの URL・
+  送信済みメール本文の URL は切れる (リポジトリ外は保証範囲外である)
+- 保持列の撤去は**ローリングデプロイ非互換**である。切替はメンテナンス前提で、
+  手順は撤去 migration の docblock が正本
+
+## 管理メニュー (組織 URL 配下の manage/users・projects/{project}/categories)
 
 doc/04 §4.2 の管理者専用画面 (T006)。書き込みは既存 endpoint を再利用し、GET 画面のみ新設。
 
@@ -1672,7 +1718,7 @@ doc/04 §4.2 の管理者専用画面 (T006)。書き込みは既存 endpoint �
   `$invitation->role` (org ロール 2 値) であり、**管理者ロールの招待リンクを入手した
   任意のログイン中ユーザーはそのまま組織管理者になれる**。これは経路の性質が
   メンバー招待と同じ (入口の唯一の弱点は招待メールの機密性) であることの帰結で、
-  緩和は 7 日失効・受諾済み/取消済みの除外・`/manage/users` での可視化。
+  緩和は 7 日失効・受諾済み/取消済みの除外・`/organizations/{slug}/manage/users` での可視化。
   **メンバー招待と管理者招待で受諾根拠を変えていない**のは意図であって漏れではない。
 - **email 照合の非対称**: アプリ内経路は blind index の**大文字小文字を区別する完全一致**
   (email の blind index に Lowercase transformer を付けていない)。
@@ -1730,8 +1776,8 @@ joinOrganization / removeMember の掃除) と `ProjectMemberController` に閉�
 
 | route | 画面 | guard |
 |---|---|---|
-| GET `/manage/users` | `Admin/Users` (メンバー + 招待中 + 追加) | current org 解決 (org param なし = 越境不能) + `manageMembers` (403)。`/manage/` 配下の auth+verified は `ManageRouteAuthGuardTest` が強制 |
-| GET `/projects/{project}/categories` | `Admin/Categories` (一覧・追加・編集・削除・▲▼) | 業務 group (課金ゲート + project.in-current-org = cross-org は認可前 404) + `CategoryPolicy::viewAny` (= ProjectPolicy::update 委譲。撮影者 403) |
+| GET `manage/users` (組織 URL 配下) | `Admin/Users` (メンバー + 招待中 + 追加) | 組織は URL の binding が確定 (非所属は認可より前に 404) + `manageMembers` (403)。`manage/` 配下の auth+verified は `ManageRouteAuthGuardTest` が強制 |
+| GET `projects/{project}/categories` (組織 URL 配下) | `Admin/Categories` (一覧・追加・編集・削除・▲▼) | 業務 group (課金ゲート + project.in-route-org = cross-org は認可前 404) + `CategoryPolicy::viewAny` (= ProjectPolicy::update 委譲。撮影者 403) |
 
 **A+B 不可分の理由**: `members.update` / `invitations.store` の 3 値コマンド契約書き換えと
 唯一の caller UI (Admin/Users + Settings スリム化) は同一リリース単位でなければならない
@@ -2191,7 +2237,7 @@ lctl 台帳 feature `account-deletion-billing-guard` の標準形 v1 (裁定 AG-
 - **`settings.account.destroy` (即時削除) は allowlist に入れない**。予約中に即時削除を通すと
   30 日猶予の迂回口になる。「今すぐ消したい」なら **取消 → 即時削除**の 2 手を踏む。
 - **実行位置**は `bootstrap/app.php` の priority list が正本で、テナント境界 404
-  (`EnsureProjectBelongsToCurrentOrganization`) より**後**・課金ゲートの直後に置く。
+  (`EnsureProjectBelongsToRouteOrganization`) より**後**・課金ゲートの直後に置く。
   302 で短絡するため前に置くと存在オラクルになる (セキュリティ不変条件 10)。
   ログイン・ログアウト・パスワード再設定・メール確認・2FA challenge・passkey ログインは
   group の外にあり、**認証回復と離脱の手段は構造的に凍結されない**。
@@ -2556,7 +2602,7 @@ smoke 末尾の「この実行分」と `operations:llm-cost-report` の期間�
 
 評価順は次のとおりで、**すべて認可より前に 404** (セキュリティ不変条件 2/10):
 
-1. `{project}` ∈ current org (`project.in-current-org` middleware + inline guard)
+1. `{project}` ∈ URL 上の組織 (`project.in-route-org` middleware + inline guard)
 2. `{manual}` ∈ `{project}` (`Route::scopeBindings()`)
 3. `{renderJob}` ∈ `{manual}` (scopeBindings + inline 再検査 = 二重防御)
 

@@ -41,16 +41,16 @@ test('one-shot 回帰 (F-3-04): 着地 query は 303 で畳まれ、バナーは
 
     // (1) 着地: canonical URL へ 303。Location に着地 query が残らない。
     $landing = $this->actingAs($owner)
-        ->get('/billing?session_id='.$session->stripe_session_id)
+        ->get("/organizations/{$organization->slug}/billing?session_id=".$session->stripe_session_id)
         ->assertStatus(303)
-        ->assertRedirect('/billing')
+        ->assertRedirect("/organizations/{$organization->slug}/billing")
         ->assertSessionHas(BillingFeedbackKind::FLASH_KEY, BillingFeedbackKind::PurchaseReceived->value);
 
     expect($landing->headers->get('Location'))->not->toContain('session_id');
 
     // (2) 追従先の 1 render だけバナーが出る。
     $this->actingAs($owner)
-        ->get('/billing')
+        ->get("/organizations/{$organization->slug}/billing")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('page.feedback.kind', 'purchase_received')
@@ -59,7 +59,7 @@ test('one-shot 回帰 (F-3-04): 着地 query は 303 で畳まれ、バナーは
 
     // (3) リロード相当の再 GET では復活しない (= one-shot)。
     $this->actingAs($owner)
-        ->get('/billing')
+        ->get("/organizations/{$organization->slug}/billing")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page->where('page.feedback', null)->etc());
 });
@@ -71,9 +71,9 @@ test('自 org の completed / pending は対応する kind を flash する', fu
     $session = ($state === 'completed' ? $factory->completed() : $factory)->create();
 
     $this->actingAs($owner)
-        ->get('/billing?session_id='.$session->stripe_session_id)
+        ->get("/organizations/{$organization->slug}/billing?session_id=".$session->stripe_session_id)
         ->assertStatus(303)
-        ->assertRedirect('/billing')
+        ->assertRedirect("/organizations/{$organization->slug}/billing")
         ->assertSessionHas(BillingFeedbackKind::FLASH_KEY, $kind);
 })->with([
     'completed' => ['completed', 'purchase_received'],
@@ -94,9 +94,9 @@ test('fail-closed: failed / expired / 未知 / 他 org / setup intent は畳む�
     };
 
     $this->actingAs($owner)
-        ->get('/billing?session_id='.$sessionId)
+        ->get("/organizations/{$organization->slug}/billing?session_id=".$sessionId)
         ->assertStatus(303)
-        ->assertRedirect('/billing')
+        ->assertRedirect("/organizations/{$organization->slug}/billing")
         ->assertSessionMissing(BillingFeedbackKind::FLASH_KEY);
 })->with([
     'failed' => ['failed'],
@@ -107,40 +107,40 @@ test('fail-closed: failed / expired / 未知 / 他 org / setup intent は畳む�
 ]);
 
 test('?portal=1 は portal_returned を flash し、追従先でバナーが 1 回だけ出る', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
     $this->actingAs($owner)
-        ->get('/billing?portal=1')
+        ->get("/organizations/{$organization->slug}/billing?portal=1")
         ->assertStatus(303)
-        ->assertRedirect('/billing')
+        ->assertRedirect("/organizations/{$organization->slug}/billing")
         ->assertSessionHas(BillingFeedbackKind::FLASH_KEY, BillingFeedbackKind::PortalReturned->value);
 
     $this->actingAs($owner)
-        ->get('/billing')
+        ->get("/organizations/{$organization->slug}/billing")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page->where('page.feedback.kind', 'portal_returned')->etc());
 
     $this->actingAs($owner)
-        ->get('/billing')
+        ->get("/organizations/{$organization->slug}/billing")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page->where('page.feedback', null)->etc());
 });
 
 test('?portal=1 + error flash では feedback を出さず、error を hop で取りこぼさない', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
     $message = 'お支払い管理画面は有償プラン契約後にご利用いただけます。';
 
     $this->actingAs($owner)
         ->withSession(agedFlashSession('error', $message))
-        ->get('/billing?portal=1')
+        ->get("/organizations/{$organization->slug}/billing?portal=1")
         ->assertStatus(303)
-        ->assertRedirect('/billing')
+        ->assertRedirect("/organizations/{$organization->slug}/billing")
         ->assertSessionMissing(BillingFeedbackKind::FLASH_KEY)
         ->assertSessionHas('error', $message);
 
     // keep() の実効: 追従先の props まで error が届く (= toast が実際に出る)。
     $this->actingAs($owner)
-        ->get('/billing')
+        ->get("/organizations/{$organization->slug}/billing")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('flash.error', $message)
@@ -156,14 +156,14 @@ test('?session_id 着地でも error flash があれば feedback を出さず er
     // error 抑止は portal 専用ではなく着地 hop 共通の分岐であることを固定する。
     $this->actingAs($owner)
         ->withSession(agedFlashSession('error', $message))
-        ->get('/billing?session_id='.$session->stripe_session_id)
+        ->get("/organizations/{$organization->slug}/billing?session_id=".$session->stripe_session_id)
         ->assertStatus(303)
-        ->assertRedirect('/billing')
+        ->assertRedirect("/organizations/{$organization->slug}/billing")
         ->assertSessionMissing(BillingFeedbackKind::FLASH_KEY)
         ->assertSessionHas('error', $message);
 
     $this->actingAs($owner)
-        ->get('/billing')
+        ->get("/organizations/{$organization->slug}/billing")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('flash.error', $message)
@@ -175,12 +175,12 @@ test('着地 query は値が不正でも必ず canonical へ畳まれる', funct
     [$organization, $owner] = createOrganizationWithOwner();
     $session = BillingCheckoutSession::factory()->for($organization)->completed()->create();
 
-    $url = '/billing?'.str_replace('{valid}', (string) $session->stripe_session_id, $query);
+    $url = "/organizations/{$organization->slug}/billing?".str_replace('{valid}', (string) $session->stripe_session_id, $query);
 
     $response = $this->actingAs($owner)
         ->get($url)
         ->assertStatus(303)
-        ->assertRedirect('/billing');
+        ->assertRedirect("/organizations/{$organization->slug}/billing");
 
     $expectsFlash
         ? $response->assertSessionHas(BillingFeedbackKind::FLASH_KEY)
@@ -206,9 +206,9 @@ test('highlight は着地 hop を跨いで保持される (副作用のない an
         : 'setup_session_id='.$setup->stripe_session_id;
 
     $this->actingAs($owner)
-        ->get('/billing?'.$query.'&highlight=auto-recharge')
+        ->get("/organizations/{$organization->slug}/billing?".$query.'&highlight=auto-recharge')
         ->assertStatus(303)
-        ->assertRedirect('/billing?highlight=auto-recharge');
+        ->assertRedirect("/organizations/{$organization->slug}/billing?highlight=auto-recharge");
 })->with(['feedback 着地' => ['session_id'], 'カード登録着地' => ['setup_session_id']]);
 
 test('着地の優先順位: ?setup_session_id が ?session_id より先着で相互排他', function (): void {
@@ -217,9 +217,9 @@ test('着地の優先順位: ?setup_session_id が ?session_id より先着で�
     $checkout = BillingCheckoutSession::factory()->for($organization)->completed()->create();
 
     $this->actingAs($owner)
-        ->get('/billing?setup_session_id='.$setup->stripe_session_id.'&session_id='.$checkout->stripe_session_id)
+        ->get("/organizations/{$organization->slug}/billing?setup_session_id=".$setup->stripe_session_id.'&session_id='.$checkout->stripe_session_id)
         ->assertStatus(303)
-        ->assertRedirect('/billing')
+        ->assertRedirect("/organizations/{$organization->slug}/billing")
         ->assertSessionHas('success')
         ->assertSessionMissing(BillingFeedbackKind::FLASH_KEY);
 });
@@ -238,17 +238,17 @@ test('C-2 との結合: Expired 行が遅延 completed で Completed になっ�
     expect($session->refresh()->status)->toBe(CheckoutSessionStatus::Completed->value);
 
     $this->actingAs($owner)
-        ->get('/billing?session_id=cs_feedback_1')
+        ->get("/organizations/{$organization->slug}/billing?session_id=cs_feedback_1")
         ->assertStatus(303)
         ->assertSessionHas(BillingFeedbackKind::FLASH_KEY, BillingFeedbackKind::PurchaseReceived->value);
 });
 
 test('発行側 flash (checkout の replay / stale) も 1 render だけバナーになる', function (string $kind, string $message): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
     $this->actingAs($owner)
         ->withSession(agedFlashSession(BillingFeedbackKind::FLASH_KEY, $kind))
-        ->get('/billing')
+        ->get("/organizations/{$organization->slug}/billing")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('page.feedback.kind', $kind)
@@ -256,7 +256,7 @@ test('発行側 flash (checkout の replay / stale) も 1 render だけバナー
             ->etc());
 
     $this->actingAs($owner)
-        ->get('/billing')
+        ->get("/organizations/{$organization->slug}/billing")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page->where('page.feedback', null)->etc());
 })->with([
@@ -265,11 +265,11 @@ test('発行側 flash (checkout の replay / stale) も 1 render だけバナー
 ]);
 
 test('未知の flash 値は feedback を出さない (fail-closed)', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
     $this->actingAs($owner)
         ->withSession(agedFlashSession(BillingFeedbackKind::FLASH_KEY, 'not_a_kind'))
-        ->get('/billing')
+        ->get("/organizations/{$organization->slug}/billing")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page->where('page.feedback', null)->etc());
 });

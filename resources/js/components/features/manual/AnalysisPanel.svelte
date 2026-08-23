@@ -10,6 +10,7 @@
     import { csrfToken } from "@/lib/csrf";
     import type { AnalysisJobProps, VideoManualStatus } from "@/types/manual";
     import { ANALYSIS_STEP_LABELS, isAnalyzable, isScenarioEstablished } from "@/types/manual";
+    import { currentOrgUrl } from "@/lib/org-url";
 
     /**
      * AI 解析パネル (起動・進捗ポーリング・エラー表示)。doc/10 §10.3 / 概念設計 §8。
@@ -79,7 +80,7 @@
             if (stopped || document.hidden) return;
             try {
                 const res = await fetch(
-                    `/projects/${projectId}/manuals/${manualId}/jobs/${jobId}`,
+                    currentOrgUrl(`/projects/${projectId}/manuals/${manualId}/jobs/${jobId}`),
                     {
                         headers: {
                             Accept: "application/json",
@@ -170,7 +171,7 @@
         // 分類を要求時点に固定 (応答遅延中に hasDocument が変わっても安定分類)
         const hadDocumentAtStart = hasDocument;
         try {
-            const res = await fetch(`/projects/${projectId}/manuals/${manualId}/analyze`, {
+            const res = await fetch(currentOrgUrl(`/projects/${projectId}/manuals/${manualId}/analyze`), {
                 method: "POST",
                 headers: {
                     Accept: "application/json",
@@ -302,7 +303,7 @@
                     {errorMessage}
                     {#if showPurchaseLink}
                         <span class="ml-1">
-                            <TextLink href="/purchase-tickets" testId="analysis-purchase-link">
+                            <TextLink href={currentOrgUrl("/billing/purchase-tickets")} testId="analysis-purchase-link">
                                 チケットを購入する
                             </TextLink>
                         </span>

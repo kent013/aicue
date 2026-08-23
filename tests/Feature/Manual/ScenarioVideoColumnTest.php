@@ -25,7 +25,7 @@ test('takeSummaries に全カット分の要約が sort_order 順で載る', fun
     Take::factory()->forCut($first)->create(['sort_order' => 1]);
 
     $this->actingAs($owner)
-        ->get("/projects/{$project->id}/manuals/{$manual->id}/edit")
+        ->get("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/edit")
         ->assertInertia(fn ($page) => $page
             ->where('takeSummaries.0.cut_id', $first->id)
             ->where('takeSummaries.0.takes_count', 2)
@@ -43,7 +43,7 @@ test('採用テイクのあるカットは adopted.id / adopted.status が入る
     $cut->forceFill(['adopted_take_id' => $take->id])->save();
 
     $this->actingAs($owner)
-        ->get("/projects/{$project->id}/manuals/{$manual->id}/edit")
+        ->get("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/edit")
         ->assertInertia(fn ($page) => $page
             ->where('takeSummaries.0.adopted.id', $take->id)
             ->where('takeSummaries.0.adopted.status', 'ready'));
@@ -58,7 +58,7 @@ test('サムネイル表示条件: 採用テイクにサムネイルがあれば
     $cut->forceFill(['adopted_take_id' => $take->id])->save();
 
     $this->actingAs($owner)
-        ->get("/projects/{$project->id}/manuals/{$manual->id}/edit")
+        ->get("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/edit")
         ->assertInertia(fn ($page) => $page
             ->where('takeSummaries.0.adopted.id', $take->id)
             ->where('takeSummaries.0.adopted.has_thumbnail', true));
@@ -73,7 +73,7 @@ test('サムネイル表示条件: 採用テイクにサムネイルが無けれ
     $cut->forceFill(['adopted_take_id' => $take->id])->save();
 
     $this->actingAs($owner)
-        ->get("/projects/{$project->id}/manuals/{$manual->id}/edit")
+        ->get("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/edit")
         ->assertInertia(fn ($page) => $page
             ->where('takeSummaries.0.adopted.has_thumbnail', false));
 });
@@ -86,7 +86,7 @@ test('サムネイル表示条件: 採用テイクが無いカットは adopted 
     Take::factory()->forCut($cut)->withThumbnail()->create();
 
     $this->actingAs($owner)
-        ->get("/projects/{$project->id}/manuals/{$manual->id}/edit")
+        ->get("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/edit")
         ->assertInertia(fn ($page) => $page
             ->where('takeSummaries.0.takes_count', 1)
             ->where('takeSummaries.0.adopted', null));
@@ -104,7 +104,7 @@ test('サムネイル表示条件: 非 ready の採用テイクでも status と
 
     // status と has_thumbnail は独立に返す。表示可否の AND は UI 側の責務
     $this->actingAs($owner)
-        ->get("/projects/{$project->id}/manuals/{$manual->id}/edit")
+        ->get("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/edit")
         ->assertInertia(fn ($page) => $page
             ->where('takeSummaries.0.adopted.status', 'processing')
             ->where('takeSummaries.0.adopted.has_thumbnail', true));
@@ -118,7 +118,7 @@ test('takeSummaries のキーに採用テイク外部キーの識別子が現れ
     $take = Take::factory()->forCut($cut)->create();
     $cut->forceFill(['adopted_take_id' => $take->id])->save();
 
-    $response = $this->actingAs($owner)->get("/projects/{$project->id}/manuals/{$manual->id}/edit");
+    $response = $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/edit");
 
     $summaries = json_encode($response->viewData('page')['props']['takeSummaries']);
     expect($summaries)->toBeString()->not->toContain('adopted_take_id');
@@ -128,7 +128,7 @@ test('cut を増やしてもクエリ本数が増えない (N+1 を作らない)
     [$organization, $owner] = createOrganizationWithOwner();
     $project = Project::factory()->forOrganization($organization)->create();
 
-    $count = function (int $cuts) use ($project, $owner): int {
+    $count = function (int $cuts) use ($organization, $project, $owner): int {
         $manual = VideoManual::factory()->forProject($project)->create();
         for ($i = 0; $i < $cuts; $i++) {
             $cut = Cut::factory()->forManual($manual)->withSortOrder($i)->create();
@@ -138,7 +138,7 @@ test('cut を増やしてもクエリ本数が増えない (N+1 を作らない)
 
         DB::flushQueryLog();
         DB::enableQueryLog();
-        $this->actingAs($owner)->get("/projects/{$project->id}/manuals/{$manual->id}/edit")->assertOk();
+        $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/edit")->assertOk();
         $queries = count(DB::getQueryLog());
         DB::disableQueryLog();
 
@@ -166,7 +166,7 @@ test('未採用のカットは adopted が null (未登録)', function (): void 
     Take::factory()->forCut($cut)->create();
 
     $this->actingAs($owner)
-        ->get("/projects/{$project->id}/manuals/{$manual->id}/edit")
+        ->get("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/edit")
         ->assertInertia(fn ($page) => $page->where('takeSummaries.0.adopted', null));
 });
 
@@ -181,7 +181,7 @@ test('採用テイクの material_type が props に載る (動画 / 静止画)'
     $cut->forceFill(['adopted_take_id' => $take->id])->save();
 
     $this->actingAs($owner)
-        ->get("/projects/{$project->id}/manuals/{$manual->id}/edit")
+        ->get("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/edit")
         ->assertInertia(fn ($page) => $page
             ->where('takeSummaries.0.adopted.material_type', $expected));
 })->with([

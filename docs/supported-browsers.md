@@ -74,7 +74,7 @@ AI-CUE が「どのブラウザで、どのレベルまで動作を保証して�
 
 | 面 | URL 空間 | 主要ブラウザ |
 |----|----------|--------------|
-| **撮影 PWA** | `/app/*` (`manifest.webmanifest`, ホーム画面追加) | **iOS Safari** (standalone 含む) / Android Chrome |
+| **撮影 PWA** | `/organizations/{slug}/app/*` (`manifest.webmanifest` の start_url は分岐入口 `/app`, ホーム画面追加) | **iOS Safari** (standalone 含む) / Android Chrome |
 | **管理画面** | 上記以外 | デスクトップ Chrome / Edge / Firefox / Safari |
 
 撮影 PWA が中核 (使命 = 現場作業者がスマホで撮る) であり、**iOS Safari が最重要**。

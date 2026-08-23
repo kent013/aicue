@@ -60,18 +60,18 @@ class BughuntOAuthSeeder extends Seeder
             return;
         }
 
-        // 代表 user: current organization を持つ最初のユーザー (ManualTestSeeder 投入前提)。
+        // 代表 user: 組織に所属する最初のユーザー (ManualTestSeeder 投入前提)。
         // アプリのテストアカウント email 規則に依存しないよう関係で解決する。
         $user = $this->resolveRepresentativeUser();
         if (! $user instanceof User) {
-            $this->command->warn('BughuntOAuthSeeder: current organization を持つ user が無いため skip。先に ManualTestSeeder を流すこと。');
+            $this->command->warn('BughuntOAuthSeeder: 組織に所属する user が無いため skip。先に ManualTestSeeder を流すこと。');
 
             return;
         }
 
-        $org = $user->currentOrganization;
+        $org = $user->organizations()->orderBy('organizations.id')->first();
         if (! $org instanceof Organization) {
-            $this->command->warn('BughuntOAuthSeeder: 代表 user に current organization が無いため skip。');
+            $this->command->warn('BughuntOAuthSeeder: 代表 user が組織に所属していないため skip。');
 
             return;
         }
@@ -89,7 +89,7 @@ class BughuntOAuthSeeder extends Seeder
     private function resolveRepresentativeUser(): ?User
     {
         return User::query()
-            ->whereNotNull('current_organization_id')
+            ->whereHas('organizations')
             ->orderBy('id')
             ->first();
     }

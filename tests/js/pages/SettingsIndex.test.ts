@@ -205,7 +205,7 @@ describe("Settings/Index 退会ガード (blocker と次の一手)", () => {
         expect(screen.getByText("現場B")).toBeInTheDocument();
     });
 
-    it("open_billing は /billing への解約リンクを描画する", () => {
+    it("open_billing は /organizations/test-org/billing への解約リンクを描画する", () => {
         setProps({
             accountDeletionBlockers: [
                 { name: "現場A", slug: "genba-a", actions: ["open_billing"] },
@@ -217,51 +217,23 @@ describe("Settings/Index 退会ガード (blocker と次の一手)", () => {
         expect(link.getAttribute("href")).toMatch(/\/billing$/);
     });
 
-    it("switch_organization_then_open_billing は切替 → 成功時のみ /billing へ進む", async () => {
+    it("open_billing はその組織の課金画面へのリンク (切替は無い)", () => {
         setProps({
             accountDeletionBlockers: [
                 {
                     name: "現場B",
                     slug: "genba-b",
-                    actions: ["switch_organization_then_open_billing"],
+                    actions: ["open_billing"],
                 },
             ],
         });
         render(Index, { props: {} });
 
-        await fireEvent.click(screen.getByTestId("switch-then-billing-button"));
-
-        await waitFor(() => expect(routerPostMock).toHaveBeenCalledTimes(1));
-        const call = routerPostMock.mock.calls.at(-1);
-        expect(call?.[0]).toBe("/organizations/genba-b/switch");
-        const options = call?.[2] as { onSuccess?: () => void; onError?: () => void };
-        // 成功するまで /billing へは進まない
-        expect(routerVisitMock).not.toHaveBeenCalled();
-        options.onSuccess?.();
-        expect(routerVisitMock).toHaveBeenCalledWith("/billing");
-    });
-
-    it("切替失敗 (onError) では /billing へ進まず失敗メッセージを出す", async () => {
-        setProps({
-            accountDeletionBlockers: [
-                {
-                    name: "現場B",
-                    slug: "genba-b",
-                    actions: ["switch_organization_then_open_billing"],
-                },
-            ],
-        });
-        render(Index, { props: {} });
-
-        await fireEvent.click(screen.getByTestId("switch-then-billing-button"));
-        await waitFor(() => expect(routerPostMock).toHaveBeenCalledTimes(1));
-        const options = routerPostMock.mock.calls.at(-1)?.[2] as { onError?: () => void };
-        options.onError?.();
-
-        await waitFor(() =>
-            expect(screen.getByTestId("switch-organization-error")).toBeInTheDocument(),
+        const link = screen.getByText("サブスクリプションを解約する");
+        expect(new URL(link.getAttribute("href") ?? "", window.location.href).pathname).toBe(
+            "/organizations/genba-b/billing",
         );
-        expect(routerVisitMock).not.toHaveBeenCalled();
+        expect(routerPostMock).not.toHaveBeenCalled();
     });
 
     it("accountDeletionBlockers が空なら警告を出さない", () => {

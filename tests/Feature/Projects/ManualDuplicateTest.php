@@ -43,14 +43,14 @@ test('編集者は保存済みシナリオを新タイトル・カテゴリで�
     // 元 cuts の id を保持することを後で明示検証する (複製が元を破壊しないこと)
     $sourceCutIdsBefore = $source->cuts()->orderBy('id')->pluck('id')->all();
 
-    $response = $this->actingAs($owner)->post("/projects/{$project->id}/manuals/{$source->id}/duplicate", [
+    $response = $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$source->id}/duplicate", [
         'title' => '複製後マニュアル',
         'category' => $newCategory->id,
     ]);
 
     /** @var VideoManual $copy */
     $copy = $project->manuals()->where('id', '!=', $source->id)->firstOrFail();
-    $response->assertRedirect("/projects/{$project->id}/manuals/{$copy->id}");
+    $response->assertRedirect("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$copy->id}");
     $response->assertSessionHas('success');
 
     expect($copy->title)->toBe('複製後マニュアル');
@@ -97,7 +97,7 @@ test('複製先は status=draft・scenario_version=0、step/point 両層で adop
     $pointTake = Take::factory()->forCut($point)->create();
     $point->forceFill(['adopted_take_id' => $pointTake->id])->save();
 
-    $this->actingAs($owner)->post("/projects/{$project->id}/manuals/{$source->id}/duplicate", [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$source->id}/duplicate", [
         'title' => 'リセット確認',
     ])->assertSessionHas('success');
 
@@ -122,7 +122,7 @@ test('複製は元 manual の status/version に関わらず必ず Draft/0 を�
         'scenario_version' => 9,
     ]);
 
-    $this->actingAs($owner)->post("/projects/{$project->id}/manuals/{$source->id}/duplicate", [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$source->id}/duplicate", [
         'title' => '不変条件確認',
     ])->assertSessionHas('success');
 
@@ -149,7 +149,7 @@ test('複製は category 未指定なら未分類で作成される', function (
     $category = Category::factory()->forProject($project)->create();
     $source = VideoManual::factory()->forProject($project)->forCategory($category)->create();
 
-    $this->actingAs($owner)->post("/projects/{$project->id}/manuals/{$source->id}/duplicate", [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$source->id}/duplicate", [
         'title' => '未分類で複製',
         'category' => null,
     ])->assertSessionHas('success');
@@ -169,7 +169,7 @@ test('takes / source_documents / render_jobs / analysis_jobs は複製されな�
     RenderJob::factory()->forManual($source)->create();
     AnalysisJob::factory()->forManual($source)->create();
 
-    $this->actingAs($owner)->post("/projects/{$project->id}/manuals/{$source->id}/duplicate", [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$source->id}/duplicate", [
         'title' => '非複製検証',
     ])->assertSessionHas('success');
 
@@ -198,7 +198,7 @@ test('親不明の急所カットは複製されず warning ログが出る (ste
         'scene' => '孤児急所',
     ]);
 
-    $this->actingAs($owner)->post("/projects/{$project->id}/manuals/{$source->id}/duplicate", [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$source->id}/duplicate", [
         'title' => '孤児あり複製',
     ])->assertSessionHas('success');
 
@@ -220,7 +220,7 @@ test('複製直後の CutSequencer が全 cuts をラベル付きで順序どお
     $source = VideoManual::factory()->forProject($project)->create();
     seedScenario($source);
 
-    $this->actingAs($owner)->post("/projects/{$project->id}/manuals/{$source->id}/duplicate", [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$source->id}/duplicate", [
         'title' => '後続接続検証',
     ])->assertSessionHas('success');
 
@@ -238,17 +238,16 @@ test('複製直後の CutSequencer が全 cuts をラベル付きで順序どお
 test('撮影者は複製で 403、編集者 (owner) は成功する', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
     $project = Project::factory()->forOrganization($organization)->create();
     attachProjectMember($project, $member, ProjectRole::Member);
     $source = VideoManual::factory()->forProject($project)->create();
 
-    $this->actingAs($member)->post("/projects/{$project->id}/manuals/{$source->id}/duplicate", [
+    $this->actingAs($member)->post("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$source->id}/duplicate", [
         'title' => '撮影者の複製',
     ])->assertForbidden();
     expect($project->manuals()->count())->toBe(1);
 
-    $this->actingAs($owner)->post("/projects/{$project->id}/manuals/{$source->id}/duplicate", [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$source->id}/duplicate", [
         'title' => '編集者の複製',
     ])->assertSessionHas('success');
     expect($project->manuals()->count())->toBe(2);
@@ -262,8 +261,8 @@ test('cross-org / cross-project の複製は 404 (存在を漏らさない)', fu
     // {manual} が別 project (同一 org B) の場合 = scopeBindings で 404
     $otherProjectB = Project::factory()->forOrganization($orgB)->create();
 
-    // cross-org: 組織A の owner が組織B の manual を複製 → 404
-    $this->actingAs($ownerA)->post("/projects/{$projectB->id}/manuals/{$manualB->id}/duplicate", [
+    // cross-org: 組織A の owner が**組織B の URL**を叩く → binder が membership で 404
+    $this->actingAs($ownerA)->post("/organizations/{$orgB->slug}/projects/{$projectB->id}/manuals/{$manualB->id}/duplicate", [
         'title' => 'x',
     ])->assertNotFound();
 
@@ -272,7 +271,7 @@ test('cross-org / cross-project の複製は 404 (存在を漏らさない)', fu
     $project = Project::factory()->forOrganization($organization)->create();
     $otherProject = Project::factory()->forOrganization($organization)->create();
     $manualInOther = VideoManual::factory()->forProject($otherProject)->create();
-    $this->actingAs($owner)->post("/projects/{$project->id}/manuals/{$manualInOther->id}/duplicate", [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manualInOther->id}/duplicate", [
         'title' => 'x',
     ])->assertNotFound();
 
@@ -287,12 +286,12 @@ test('複製で他 project の category は 422・保護キー category_id 直�
     $ownCategory = Category::factory()->forProject($project)->create();
     $source = VideoManual::factory()->forProject($project)->create();
 
-    $this->actingAs($owner)->post("/projects/{$project->id}/manuals/{$source->id}/duplicate", [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$source->id}/duplicate", [
         'title' => 'x',
         'category' => $foreignCategory->id,
     ])->assertSessionHasErrors('category');
 
-    $this->actingAs($owner)->post("/projects/{$project->id}/manuals/{$source->id}/duplicate", [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$source->id}/duplicate", [
         'title' => 'x',
         'category_id' => $ownCategory->id,
     ])->assertSessionHasErrors('category_id');
@@ -306,11 +305,11 @@ test('複製の title は必須・max:200', function (): void {
     $project = Project::factory()->forOrganization($organization)->create();
     $source = VideoManual::factory()->forProject($project)->create();
 
-    $this->actingAs($owner)->post("/projects/{$project->id}/manuals/{$source->id}/duplicate", [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$source->id}/duplicate", [
         'title' => '',
     ])->assertSessionHasErrors('title');
 
-    $this->actingAs($owner)->post("/projects/{$project->id}/manuals/{$source->id}/duplicate", [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$source->id}/duplicate", [
         'title' => str_repeat('あ', 201),
     ])->assertSessionHasErrors('title');
 

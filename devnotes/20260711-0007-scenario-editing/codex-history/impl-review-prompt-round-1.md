@@ -1201,7 +1201,7 @@ index 436e3d9..22e0173 100644
 +++ b/docs/template-divergence.md
 @@ -123,3 +123,30 @@ ### 揃えている不変条件(これは保証し続ける)
  ### 関連
- - 実装: `app/Http/Middleware/EnsureProjectBelongsToCurrentOrganization.php`, `routes/web.php`, `bootstrap/app.php`
+ - 実装: `app/Http/Middleware/EnsureProjectBelongsToRouteOrganization.php`, `routes/web.php`, `bootstrap/app.php`
  - テンプレート側の根拠: `docs/app-integration-guide.md` §2 (URL 整合 guard 行を 2 層構成に更新済み)
 +
 +## D5 ✅ Cut のシナリオ編集は per-row CRUD でなく document 単位保存 (PUT .../scenario)
@@ -2075,7 +2075,7 @@ index 303f102..33bc922 100644
                  ->name('projects.manuals.update');
 +            // シナリオ document 一括保存 (doc/09 §9.4 / doc/10 §10.3)。同一オリジン XHR (JSON 応答)。
 +            // {manual} ∈ {project} は scopeBindings、{project} ∈ current org は
-+            // project.in-current-org middleware + controller inline guard の 2 層 (既存 group が担保)
++            // project.in-route-org middleware + controller inline guard の 2 層 (既存 group が担保)
 +            Route::put('/projects/{project}/manuals/{manual}/scenario', [ManualScenarioController::class, 'update'])
 +                ->name('projects.manuals.scenario.update');
              Route::delete('/projects/{project}/manuals/{manual}', [VideoManualController::class, 'destroy'])

@@ -833,7 +833,7 @@ index 74347e8..4d255e8 100644
 +    | billing / purchase-tickets / notifications / onboarding は gate group 外の構造的 allowlist。
      | 新しい業務ドメインの route はこの group 内に追加すること。
      */
-     Route::middleware(['require-active-subscription', 'project.in-current-org'])->group(function (): void {
+     Route::middleware(['require-active-subscription', 'project.in-route-org'])->group(function (): void {
 ```
 
 ## テスト差分 (統計)

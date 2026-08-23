@@ -717,7 +717,7 @@ class StripeWebhookProcessor
             $organization,
             BillingNotificationType::PaymentFailed,
             $invoiceId,
-            new PaymentFailedNotification($invoiceId, $organization->name, route('billing.index')),
+            new PaymentFailedNotification($invoiceId, $organization->name, route('billing.index', ['organization' => $organization->slug])),
         ));
     }
 

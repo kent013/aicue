@@ -74,7 +74,7 @@ class UserResource extends Resource
             TextEntry::make('id')->label('ID'),
             TextEntry::make('name')->label('名前'),
             TextEntry::make('email')->label('メールアドレス'),
-            TextEntry::make('currentOrganization.name')->label('現在の組織')
+            TextEntry::make('name')->label('名前')
                 ->placeholder('-'),
             TextEntry::make('email_verified_at')->label('メール確認日時')
                 ->dateTime()

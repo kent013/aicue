@@ -17,6 +17,7 @@
     import { formatDate } from "@/lib/date-format";
     import type { SharedProps } from "@/lib/shared-props";
     import type { BillingDashboardProps, BillingFeedbackKind } from "@/types/billing";
+    import { currentOrgUrl } from "@/lib/org-url";
 
     /**
      * 課金ダッシュボード (/billing)。現在のプラン / per-bucket チケット残高 /
@@ -68,7 +69,7 @@
 
     function openPortal(): void {
         router.post(
-            "/billing/portal",
+            currentOrgUrl("/billing/portal"),
             {},
             {
                 onStart: () => {
@@ -153,7 +154,7 @@
                         </p>
                     {/if}
                     <div class="mt-6 flex flex-wrap items-center gap-4">
-                        <Button href="/billing/plans" inertia variant="ghost" testId="billing-plans-link">
+                        <Button href={currentOrgUrl("/billing/plans")} inertia variant="ghost" testId="billing-plans-link">
                             プラン比較
                         </Button>
                         {#if page.canManageBilling && !isFreePlan}
@@ -210,7 +211,7 @@
                     {/if}
                     <!-- 遷移先が role-aware (非管理者には購入依頼の案内) のため権限に依らず表示 -->
                     <p class="mt-4">
-                        <TextLink href="/purchase-tickets" testId="purchase-tickets-link">
+                        <TextLink href={currentOrgUrl("/billing/purchase-tickets")} testId="purchase-tickets-link">
                             チケットを購入
                         </TextLink>
                     </p>
@@ -223,15 +224,15 @@
                 -->
                 <AutoRechargeCard
                     autoRecharge={page.autoRecharge}
-                    updateUrl="/billing/auto-recharge"
-                    setupUrl="/billing/auto-recharge/setup"
+                    updateUrl={currentOrgUrl("/billing/auto-recharge")}
+                    setupUrl={currentOrgUrl("/billing/auto-recharge/setup")}
                     setupAttemptToken={page.autoRechargeSetupToken}
                 />
 
                 <!-- P9: 請求先情報 (請求通知の宛先。未設定時は owner email へ fallback)。 -->
                 <BillingContactForm
                     billingContact={page.billingContact}
-                    updateUrl="/billing/contact"
+                    updateUrl={currentOrgUrl("/billing/contact")}
                     canManage={page.canManageBilling}
                 />
 

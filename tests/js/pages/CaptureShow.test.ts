@@ -31,8 +31,8 @@ const {
     pendingSeed,
 } = vi.hoisted(() => ({
     routerReloadMock: vi.fn(),
-    // F-1-02: 撮影 PWA の /app 離脱防止。programmatic な明示遷移入口 (visit/get/post) を
-    // 記録し、通常フローでこれらが /app 外へ向けて呼ばれないことを固定する。
+    // F-1-02: 撮影 PWA の /organizations/test-org/app 離脱防止。programmatic な明示遷移入口 (visit/get/post) を
+    // 記録し、通常フローでこれらが /organizations/test-org/app 外へ向けて呼ばれないことを固定する。
     routerVisitMock: vi.fn(),
     routerGetMock: vi.fn(),
     routerPostMock: vi.fn(),
@@ -563,7 +563,7 @@ describe("Capture/Show マニュアル詳細への復路 (T155)", () => {
         // **完全一致**になるため、名前に余計な文字列が混ざった場合もここで落ちる
         // (ByRoleOptions に exact は無い = 既定で完全一致)。
         const link = screen.getByRole("link", { name: "マニュアル詳細へ" });
-        expect(pathOf(link)).toBe("/projects/1/manuals/5");
+        expect(pathOf(link)).toBe("/organizations/test-org/projects/1/manuals/5");
         // アイコンが名前を汚さないことは**別契約**として明示的に見る
         // (Lucide の svg は title を持たないので、aria-hidden を外しても名前は変わらない =
         //  名前の検査だけでは aria-hidden の消失を検出できないため)
@@ -577,7 +577,7 @@ describe("Capture/Show マニュアル詳細への復路 (T155)", () => {
         const back = screen.getByRole("link", { name: "一覧へ戻る" });
         const detail = screen.getByRole("link", { name: "マニュアル詳細へ" });
 
-        expect(pathOf(back)).toBe("/app/projects/1/manuals");
+        expect(pathOf(back)).toBe("/organizations/test-org/app/projects/1/manuals");
         // この実装は tabindex も CSS order も使わないので DOM 順がタブ順になる。
         // 既存要素を動かさないことを固定する
         expect(back.compareDocumentPosition(detail) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
@@ -667,17 +667,17 @@ describe("Capture/Show サムネイル反映の配線 (T183)", () => {
 });
 
 /*
- * 撮影 PWA の /app 離脱防止 (bug-hunt F-1-02 Phase A の回帰固定)。
+ * 撮影 PWA の /organizations/test-org/app 離脱防止 (bug-hunt F-1-02 Phase A の回帰固定)。
  *
  * Phase A 調査 (devnotes/20260821-1517-bughunt-capture-manual/phase-a-investigation.md に記録)
  * の結論: Capture/Show の**アプリ自コード**が起こす programmatic navigation は
- * `router.reload({only:['manual']})` (現 URL の部分リロード) のみで、/app 外への
- * programmatic Inertia visit (router.visit/get/post) は存在しない。/app 外への遷移は
- * 利用者がクリックする明示リンク (Inertia <Link href="/projects/...">。PC 詳細への復路 = T155。
+ * `router.reload({only:['manual']})` (現 URL の部分リロード) のみで、/organizations/test-org/app 外への
+ * programmatic Inertia visit (router.visit/get/post) は存在しない。/organizations/test-org/app 外への遷移は
+ * 利用者がクリックする明示リンク (Inertia <Link href="/organizations/test-org/projects/...">。PC 詳細への復路 = T155。
  * docs/architecture.md §撮影 PWA の運用契約) だけである。
  *
  * よって恒久ガード (施策5 Phase B) は実装せず (再現できないものへ包括ガードを足さない。
- * AGENTS.md 思考原則 2)、本ブロックが「通常フローで /app 外への programmatic visit が
+ * AGENTS.md 思考原則 2)、本ブロックが「通常フローで /organizations/test-org/app 外への programmatic visit が
  * 発生しない」ことを回帰として固定する。
  *
  * **観測点と保証範囲 (誇張しない。AGENTS.md 走査規約 (b))**:
@@ -686,14 +686,14 @@ describe("Capture/Show サムネイル反映の配線 (T183)", () => {
  * programmatic navigation はこの 4 入口に限られる (Phase A の静的走査で確認)。
  * - **含む**: `router.reload/visit/get/post` (= アプリが自分で起こす遷移)。
  * - **含まない**: 実 Inertia `<Link>` クリック / form helper。これらは本テストの mock を
- *   通らない実 component であり、その唯一の /app 外 destination は意図的な PC 詳細リンク
+ *   通らない実 component であり、その唯一の /organizations/test-org/app 外 destination は意図的な PC 詳細リンク
  *   (T155。href は capture-manual-title 近傍のリンクとして別途構造で固定) である。
  *   ここではその利用者主導リンクの「非発生」を主張しない (妨げもしない)。
  */
-describe("Capture/Show の /app 離脱防止 (F-1-02)", () => {
+describe("Capture/Show の /organizations/test-org/app 離脱防止 (F-1-02)", () => {
     /**
-     * visit の destination が現在オリジンの /app 配下でなければ
-     * 「/app 外 programmatic visit」とみなす判定器 (許可リスト方式)。
+     * visit の destination が現在オリジンの /organizations/test-org/app 配下でなければ
+     * 「/organizations/test-org/app 外 programmatic visit」とみなす判定器 (許可リスト方式)。
      */
     function isExternalProgrammaticDestination(url: unknown): boolean {
         if (typeof url !== "string") return true; // 解析不能は外部側に倒す
@@ -704,7 +704,7 @@ describe("Capture/Show の /app 離脱防止 (F-1-02)", () => {
             return true;
         }
         if (parsed.origin !== window.location.origin) return true;
-        return !(parsed.pathname === "/app" || parsed.pathname.startsWith("/app/"));
+        return !(parsed.pathname === "/organizations/test-org/app" || parsed.pathname.startsWith("/organizations/test-org/app/"));
     }
 
     /**
@@ -726,7 +726,7 @@ describe("Capture/Show の /app 離脱防止 (F-1-02)", () => {
         ];
     }
 
-    /** collector が集めた記録から /app 外 destination だけを抽出する。 */
+    /** collector が集めた記録から /organizations/test-org/app 外 destination だけを抽出する。 */
     function externalOf(records: { method: string; url: unknown }[]): {
         method: string;
         url: unknown;
@@ -737,7 +737,7 @@ describe("Capture/Show の /app 離脱防止 (F-1-02)", () => {
         );
     }
 
-    it("通常フロー (キュー再開 → reload) で /app 外への programmatic visit が発生しない", async () => {
+    it("通常フロー (キュー再開 → reload) で /organizations/test-org/app 外への programmatic visit が発生しない", async () => {
         stubCameraSupported(false);
         // 母集団非空を保証する: uploaded を返して現 URL への reload を確実に 1 回起こす
         resumeMock.mockResolvedValue([{ status: "uploaded", clientTakeId: "q1" }]);
@@ -753,7 +753,7 @@ describe("Capture/Show の /app 離脱防止 (F-1-02)", () => {
         const records = collectProgrammaticVisits();
         // reload は現 URL 固定 (url なし)。visit/get/post 入口は 1 件も呼ばれていない。
         expect(records.every((r) => r.method === "reload" && r.url === undefined)).toBe(true);
-        // 同じ collector → 判定パイプラインで /app 外は 0 件
+        // 同じ collector → 判定パイプラインで /organizations/test-org/app 外は 0 件
         expect(externalOf(records)).toEqual([]);
     });
 
@@ -767,24 +767,24 @@ describe("Capture/Show の /app 離脱防止 (F-1-02)", () => {
             expect(collectProgrammaticVisits().length).toBeGreaterThan(0);
         });
 
-        // 通常フロー時点では /app 外は 0 件 (母集団は非空)
+        // 通常フロー時点では /organizations/test-org/app 外は 0 件 (母集団は非空)
         expect(externalOf(collectProgrammaticVisits())).toEqual([]);
 
         // 実 mock 入口 (router.visit) に禁止 destination を注入し、mock→collect→判定を通す
-        routerVisitMock("/projects/1/manuals/5");
+        routerVisitMock("/organizations/test-org/projects/1/manuals/5");
         routerGetMock("https://evil.example/app/x");
         routerPostMock("/app.evil/x");
 
         const external = externalOf(collectProgrammaticVisits());
         expect(external.map((r) => r.url)).toEqual([
-            "/projects/1/manuals/5",
+            "/organizations/test-org/projects/1/manuals/5",
             "https://evil.example/app/x",
             "/app.evil/x",
         ]);
-        // 現 URL 配下 (/app/...) は許可され外部に載らない (空振り防止の正例)
-        routerGetMock("/app/projects/1/manuals/5");
+        // 現 URL 配下 (/organizations/test-org/app/...) は許可され外部に載らない (空振り防止の正例)
+        routerGetMock("/organizations/test-org/app/projects/1/manuals/5");
         expect(externalOf(collectProgrammaticVisits()).map((r) => r.url)).not.toContain(
-            "/app/projects/1/manuals/5",
+            "/organizations/test-org/app/projects/1/manuals/5",
         );
     });
 });

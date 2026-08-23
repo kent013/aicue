@@ -45,40 +45,40 @@ test('テスト環境の DB driver は pgsql である (22P02 / 22003 を再現�
 */
 
 test('ケース 1: bigint param に非数値 → 404 (500 でない)', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->get('/projects/abc')->assertNotFound();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/abc")->assertNotFound();
 });
 
 test("ケース 1': 対比 — 実在 ID は 200 (認可 / 課金ゲートに吸われていない)", function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $project = Project::factory()->forOrganization($organization)->create();
 
-    $this->actingAs($owner)->get("/projects/{$project->id}")->assertOk();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}")->assertOk();
 });
 
 test('ケース 2: bigint param に 19 桁 (PHP_INT_MAX+1) → 404 (22003 由来の 500 でない)', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->get('/projects/'.BIGINT_OVERFLOW)->assertNotFound();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/".BIGINT_OVERFLOW)->assertNotFound();
 });
 
 test('ケース 3: bigint param に 30 桁 → 404', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->get('/projects/'.BIGINT_TOO_LONG)->assertNotFound();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/".BIGINT_TOO_LONG)->assertNotFound();
 });
 
 test('ケース 4: bigint param に 18 桁上限値 → 404 (route にはマッチする = 制約が過剰に狭くない)', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->get('/projects/'.BIGINT_MAX_18)->assertNotFound();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/".BIGINT_MAX_18)->assertNotFound();
 });
 
 test('ケース 5: bigint param に先頭ゼロ → 404 (pgsql は 007 を正常解釈するため 500 にならない)', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->get('/projects/007')->assertNotFound();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/007")->assertNotFound();
 });
 
 /*
@@ -132,16 +132,16 @@ test('ケース 7: 全 bigint param の代表 route が非数値セグメント�
         ->call($method, $url)
         ->assertNotFound();
 })->with([
-    'analysisJob' => ['GET', '/projects/{project}/manuals/{manual}/jobs/abc'],
+    'analysisJob' => ['GET', '/organizations/{organizationSlug}/projects/{project}/manuals/{manual}/jobs/abc'],
     'apiKey' => ['DELETE', '/organizations/{organizationSlug}/api-keys/abc'],
-    'category' => ['PATCH', '/projects/{project}/categories/abc'],
-    'cut' => ['POST', '/app/projects/{project}/manuals/{manual}/cuts/abc/takes'],
+    'category' => ['PATCH', '/organizations/{organizationSlug}/projects/{project}/categories/abc'],
+    'cut' => ['POST', '/organizations/{organizationSlug}/app/projects/{project}/manuals/{manual}/cuts/abc/takes'],
     'invitation' => ['DELETE', '/organizations/{organizationSlug}/invitations/abc'],
-    'item' => ['PATCH', '/projects/{project}/items/abc'],
-    'manual' => ['GET', '/projects/{project}/manuals/abc'],
-    'project' => ['GET', '/projects/abc'],
-    'renderJob' => ['GET', '/projects/{project}/manuals/{manual}/render-jobs/abc'],
-    'take' => ['PATCH', '/app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/abc'],
+    'item' => ['PATCH', '/organizations/{organizationSlug}/projects/{project}/items/abc'],
+    'manual' => ['GET', '/organizations/{organizationSlug}/projects/{project}/manuals/abc'],
+    'project' => ['GET', '/organizations/{organizationSlug}/projects/abc'],
+    'renderJob' => ['GET', '/organizations/{organizationSlug}/projects/{project}/manuals/{manual}/render-jobs/abc'],
+    'take' => ['PATCH', '/organizations/{organizationSlug}/app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/abc'],
     'user' => ['PATCH', '/organizations/{organizationSlug}/members/abc'],
 ]);
 
@@ -160,24 +160,28 @@ test('ケース 8/13: {organization:slug} は実在 slug で 200 (数値制約�
 /*
 | ケース 9〜12: custom binder ({organization}) の入力正規化 = 実効性の正本。
 | marker interface は分類の宣言に過ぎず何も保証しないため、ここで固定する。
+|
+| ★切替 endpoint の撤去 (家系裁定 AG-037) により、web の `{organization}` は
+|   **すべて slug binding** になった。id binding の fail-closed 分岐は
+|   MembershipScopedOrganizationBinderTest が binder 直接呼びで固定する。
 */
 
-test('ケース 9: {organization} の id binding に非数値 → 404', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+test('ケース 9: {organization} の slug binding に不在値 → 404', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->post('/organizations/abc/switch')->assertNotFound();
+    $this->actingAs($owner)->get('/organizations/abc/settings')->assertNotFound();
 });
 
-test('ケース 10: {organization} の id binding に 19 桁 → 404', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+test('ケース 10: {organization} の slug binding に 19 桁の数字列 → 404', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->post('/organizations/'.BIGINT_OVERFLOW.'/switch')->assertNotFound();
+    $this->actingAs($owner)->get('/organizations/'.BIGINT_OVERFLOW.'/settings')->assertNotFound();
 });
 
-test('ケース 11: {organization} の id binding に 30 桁 → 404', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+test('ケース 11: {organization} の slug binding に 30 桁の数字列 → 404', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->post('/organizations/'.BIGINT_TOO_LONG.'/switch')->assertNotFound();
+    $this->actingAs($owner)->get('/organizations/'.BIGINT_TOO_LONG.'/settings')->assertNotFound();
 });
 
 test('ケース 12: {organization:未許可 field} は 404 (500 でない)', function (): void {
@@ -188,7 +192,7 @@ test('ケース 12: {organization:未許可 field} は 404 (500 でない)', fun
         static fn (Organization $organization): string => (string) $organization->id,
     );
 
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
     $this->actingAs($owner)->get('/__test__/organizations/anything')->assertNotFound();
 });

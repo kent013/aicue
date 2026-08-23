@@ -7,7 +7,7 @@ namespace App\Http\Controllers\Onboarding;
 use App\DataTransferObjects\Onboarding\BillingRequiredDto;
 use App\Enums\Inquiry\InquirySource;
 use App\Enums\OrganizationRole;
-use App\Http\Concerns\ResolvesCurrentOrganization;
+use App\Http\Concerns\ResolvesRouteOrganization;
 use App\Http\Controllers\Controller;
 use App\Models\Organization;
 use App\Models\User;
@@ -27,16 +27,15 @@ use Inertia\Response;
  */
 final class BillingRequiredController extends Controller
 {
-    use ResolvesCurrentOrganization;
+    use ResolvesRouteOrganization;
 
     public function __construct(
         private readonly BillingAccess $access,
         private readonly ContactUrl $contactUrl,
     ) {}
 
-    public function show(Request $request): Response|RedirectResponse
+    public function show(Request $request, Organization $organization): Response|RedirectResponse
     {
-        $organization = $this->resolveMemberCurrentOrganization($request);
         // IDOR 二重防御
         Gate::authorize('view', $organization);
 
@@ -45,10 +44,10 @@ final class BillingRequiredController extends Controller
         //   - 既に利用可 (有効 subscription / free personal) → 見せる理由なし → ダッシュボードへ
         //   - manageBilling 保持者 (owner / admin / 個別付与 member) → 自分で手続き可 → checkout へ
         if ($this->access->state($organization)->grantsAccess()) {
-            return redirect()->route('dashboard');
+            return redirect()->route('dashboard', ['organization' => $organization->slug]);
         }
         if (Gate::allows('manageBilling', $organization)) {
-            return redirect()->route('onboarding.checkout');
+            return redirect()->route('onboarding.checkout', ['organization' => $organization->slug]);
         }
 
         // Owner をロール経由で解決 (組織のメンバー数は通常 数〜数十なので filter で十分。

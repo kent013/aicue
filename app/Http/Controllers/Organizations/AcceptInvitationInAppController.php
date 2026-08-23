@@ -45,9 +45,9 @@ class AcceptInvitationInAppController extends Controller
             abort(404);
         }
 
-        // 現在組織は切り替えない契約のため、参加先の画面ではなく dashboard へ着地させる
+        // 組織文脈は URL だけで決まる (家系裁定 AG-037) ので、参加先組織の URL へ着地させる
         // (既存 invitations.accept.store の成功応答と同形。intended は使わない = 禁止事項 7)。
-        return redirect()->route('dashboard')
+        return redirect()->route('dashboard', ['organization' => $organization->slug])
             ->with('success', "「{$organization->name}」に参加しました");
     }
 }

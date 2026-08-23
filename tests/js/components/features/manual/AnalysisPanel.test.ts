@@ -73,7 +73,7 @@ describe("AnalysisPanel", () => {
             expect(fetchMock).toHaveBeenCalled();
         });
         const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-        expect(url).toBe("/projects/1/manuals/5/analyze");
+        expect(url).toBe("/organizations/test-org/projects/1/manuals/5/analyze");
         expect(init.method).toBe("POST");
         expect((init.headers as Record<string, string>)["X-XSRF-TOKEN"]).toBe("test-token");
 
@@ -106,7 +106,7 @@ describe("AnalysisPanel", () => {
             new URL(
                 (screen.getByTestId("analysis-purchase-link") as HTMLAnchorElement).href,
             ).pathname,
-        ).toBe("/purchase-tickets");
+        ).toBe("/organizations/test-org/billing/purchase-tickets");
     });
 
     it("insufficient_tickets 以外の 402/409 では購入導線を出さない (誤表示防止)", async () => {

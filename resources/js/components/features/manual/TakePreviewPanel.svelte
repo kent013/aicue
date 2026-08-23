@@ -7,6 +7,7 @@
     import SubtitleOverlay from "@/components/molecules/SubtitleOverlay.svelte";
     import { captureJson, extractErrorMessage } from "@/lib/capture/http";
     import { takeUrl as buildTakeUrl } from "@/lib/capture/take-endpoints";
+    import { currentOrganizationSlug } from "@/lib/org-url";
     import {
         TAKE_ADOPTABLE_BY_STATUS,
         TAKE_STATUS_LABELS,
@@ -60,7 +61,8 @@
     // (無駄な要素とネットワーク要求を出さない)
     const playbackUrl = $derived(
         take !== null && take.status === "ready"
-            ? buildTakeUrl({ projectId, manualId, cutId: cut.id }, take.id, "/playback")
+            ? buildTakeUrl(
+                { organizationSlug: currentOrganizationSlug(), projectId, manualId, cutId: cut.id }, take.id, "/playback")
             : null,
     );
 
@@ -68,7 +70,8 @@
 
     const thumbnailUrl = $derived(
         take !== null && take.has_thumbnail
-            ? buildTakeUrl({ projectId, manualId, cutId: cut.id }, take.id, "/thumbnail")
+            ? buildTakeUrl(
+                { organizationSlug: currentOrganizationSlug(), projectId, manualId, cutId: cut.id }, take.id, "/thumbnail")
             : null,
     );
 
@@ -94,7 +97,8 @@
         busy = true;
         try {
             const response = await captureJson(
-                buildTakeUrl({ projectId, manualId, cutId: cut.id }, take.id, "/adopt"),
+                buildTakeUrl(
+                { organizationSlug: currentOrganizationSlug(), projectId, manualId, cutId: cut.id }, take.id, "/adopt"),
                 "POST",
             );
             if (!response.ok) {

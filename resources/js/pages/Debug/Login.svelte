@@ -13,7 +13,6 @@
         id: number;
         name: string;
         email: string;
-        organization: string | null;
     }
 
     interface Props {
@@ -32,8 +31,7 @@
             if (query === "") return true;
             return (
                 user.name.toLowerCase().includes(query) ||
-                user.email.toLowerCase().includes(query) ||
-                (user.organization ?? "").toLowerCase().includes(query)
+                user.email.toLowerCase().includes(query)
             );
         }),
     );
@@ -85,9 +83,6 @@
                         <span class="min-w-0 flex-1">
                             <span class="block truncate font-medium text-text">{user.name}</span>
                             <span class="block truncate text-caption text-text-secondary">{user.email}</span>
-                            {#if user.organization}
-                                <span class="block truncate text-caption text-text-secondary">{user.organization}</span>
-                            {/if}
                         </span>
                         <span class="ml-3 flex shrink-0 items-center gap-2 text-caption text-text-secondary">
                             ID: {user.id}

@@ -35,22 +35,19 @@ final readonly class AccountDeletionBlockerDto
     ) {}
 
     /**
-     * 理由集合と「blocker が現在組織か」から action 列を導出して組み立てる。
-     * $isCurrentOrganization は**呼び出し時点の派生値**で、DTO は結果 (action) だけを持つ。
+     * 理由集合から action 列を導出して組み立てる。
      *
      * action 導出規則:
-     *   1. OwnerlessMembers                     → TransferOwnership
-     *   2. ActiveBilling かつ現在組織            → OpenBilling
-     *   3. ActiveBilling かつ現在組織でない      → SwitchOrganizationThenOpenBilling
+     *   1. OwnerlessMembers → TransferOwnership
+     *   2. ActiveBilling    → OpenBilling (その組織の URL 配下の課金画面へ直接行ける)
      *   - 出力順は **TransferOwnership → billing 系** で固定 (画面の並びを安定させる。入力順に依らない)
-     *   - 同じ理由を重複して渡しても action は重複しない (billing 系は排他)
+     *   - 同じ理由を重複して渡しても action は重複しない
      *
      * @param  list<AccountDeletionBlockReason>  $reasons
      */
     public static function build(
         Organization $organization,
         array $reasons,
-        bool $isCurrentOrganization,
     ): self {
         /** @var list<AccountDeletionBlockerAction> $actions */
         $actions = [];
@@ -58,9 +55,7 @@ final readonly class AccountDeletionBlockerDto
             $actions[] = AccountDeletionBlockerAction::TransferOwnership;
         }
         if (in_array(AccountDeletionBlockReason::ActiveBilling, $reasons, true)) {
-            $actions[] = $isCurrentOrganization
-                ? AccountDeletionBlockerAction::OpenBilling
-                : AccountDeletionBlockerAction::SwitchOrganizationThenOpenBilling;
+            $actions[] = AccountDeletionBlockerAction::OpenBilling;
         }
 
         /** @var list<AccountDeletionBlockReason> $uniqueReasons */

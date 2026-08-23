@@ -750,7 +750,7 @@ foreach (Route::getRoutes() as $route) {
 - [ ] 上記の主契約 (違反ゼロ)。未分類クラスの既定は **`true` (短絡しうる)** に倒す
       = 分類漏れが偽陰性にならない (既存 `TenantBoundaryOrderingTest` と同じ規律)
 - [ ] 代表 route (課金ゲート配下の変更系 route を 1 本) で、記録器が
-      `Authenticate` / `EnsureProjectBelongsToCurrentOrganization` / `RequireActiveSubscription` /
+      `Authenticate` / `EnsureProjectBelongsToRouteOrganization` / `RequireActiveSubscription` /
       `EnsureAccountNotPendingDeletion` より後にあることを名指しで確認する
       (主契約が空回りしても気づけるようにする)
 - [ ] 記録器が web グループの route に実際に付いていること (0 件なら fail = 配線消失の検出)

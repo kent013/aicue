@@ -134,7 +134,7 @@ aicue セルは `status: pending` / `assessment: divergence_candidate`。
 
 | # | 正典の不変条件 | 裁定 | aicue の現状 | 本設計 |
 |---|---|---|---|---|
-| I1 | URL に現れた資源が現在の組織に属することを**入力検証より前**の段で確かめ、違えば **404**（403 にしない） | AG-036 | **充足**（aicue 形が標準形として採用された側。`MembershipScopedOrganizationBinder` + `project.in-current-org` + `TenantBoundaryOrderingTest`） | **スコープ外**（層の位置は動かさない。org の取得元だけ変える） |
+| I1 | URL に現れた資源が現在の組織に属することを**入力検証より前**の段で確かめ、違えば **404**（403 にしない） | AG-036 | **充足**（aicue 形が標準形として採用された側。`MembershipScopedOrganizationBinder` + `project.in-route-org` + `TenantBoundaryOrderingTest`） | **スコープ外**（層の位置は動かさない。org の取得元だけ変える） |
 | I2 | 「いまどの組織か」は **URL だけ**で決まる。保持列と切替 endpoint は**存在してはならない**（2 方式の併存不可） | AG-037 | **未充足**（`users.current_organization_id` + `organizations.switch` + `CurrentOrganizationResolver` の自己修復） | **施策 5〜8** |
 | I3 | 個人組織を**種別として区別しない**（種別フラグを撤去） | AG-038 | **未充足**（`organizations.is_personal`） | **施策 4** |
 | I4 | 初期組織生成の冪等判定は「**所属組織が 0 件か**」。トランザクション内で利用者行を**行ロック**してから数える | AG-038 | **未充足**（種別フラグ判定・行ロックなし） | **施策 4** |
@@ -809,7 +809,7 @@ trait ResolvesRouteOrganization
 ### 変更箇所
 
 - 変更: `app/Http/Middleware/HandleInertiaRequests.php`
-- 改称・改修: `app/Http/Middleware/EnsureProjectBelongsToCurrentOrganization.php`
+- 改称・改修: `app/Http/Middleware/EnsureProjectBelongsToRouteOrganization.php`
   → `EnsureProjectBelongsToRouteOrganization.php`（alias `project.in-route-org`）
 - 変更: `bootstrap/app.php`（alias 名と priority list のクラス名）
 - 新設: `app/Data/Organization/CurrentOrganizationData.php`（不変 DTO）
@@ -1228,7 +1228,7 @@ vendor 内部の解決・リポジトリ外の手順には**無言で効かな�
 ### 変更内容
 
 1. **D4 の書き換え**（`docs/template-divergence.md` L214-253）
-   - 対象パスを `EnsureProjectBelongsToCurrentOrganization.php` →
+   - 対象パスを `EnsureProjectBelongsToRouteOrganization.php` →
      `EnsureProjectBelongsToRouteOrganization.php` へ
    - 「テンプレート / 本アプリ」の対比表を「controller の inline guard のみ」vs
      「`project.in-route-org` middleware + inline guard の二重防御」へ更新
@@ -1562,8 +1562,8 @@ trait ResolvesCurrentOrganization
      * **認可より前に 404** (403 で存在を漏らさない / cross-org は 404)。
      * 所属確認は relation (Organization::projects = CustomTeam 経由) のみで行う (直 fetch 禁止)。
      *
-     * web の {project} route では EnsureProjectBelongsToCurrentOrganization middleware
-     * (project.in-current-org) が本 guard を FormRequest の DB ルールより**前**にも実行する
+     * web の {project} route では EnsureProjectBelongsToRouteOrganization middleware
+     * (project.in-route-org) が本 guard を FormRequest の DB ルールより**前**にも実行する
      * (422/404 差分の存在オラクル防止)。controller 内の呼び出しは二重防御として維持する。
      */
     private function resolveOrganizationProject(Organization $organization, Project $project): Project
@@ -1579,7 +1579,7 @@ trait ResolvesCurrentOrganization
 
 ```
 
-### `app/Http/Middleware/EnsureProjectBelongsToCurrentOrganization.php`
+### `app/Http/Middleware/EnsureProjectBelongsToRouteOrganization.php`
 
 ```php
 <?php
@@ -1595,7 +1595,7 @@ use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * web の `{project}` route の URL 整合 guard (middleware 層)。alias: project.in-current-org。
+ * web の `{project}` route の URL 整合 guard (middleware 層)。alias: project.in-route-org。
  *
  * cross-org の {project} を「FormRequest の DB ルールを含むあらゆるアプリコードより前に 404」
  * へ構造的に落とす。controller の inline guard (resolveOrganizationProject) は認可より前の
@@ -1616,7 +1616,7 @@ use Symfony\Component\HttpFoundation\Response;
  *  - controller の inline guard は二重防御として残す (oauthSessions の controller 内再検査と
  *    同じ位置づけ。middleware の付け漏れ・withoutMiddleware への最終防衛線)。
  */
-class EnsureProjectBelongsToCurrentOrganization
+class EnsureProjectBelongsToRouteOrganization
 {
     use ResolvesCurrentOrganization;
 
@@ -1862,12 +1862,12 @@ class OrganizationSwitchController extends Controller
         );
         $middleware->appendToPriorityList(
             EnsureProjectBelongsToApiOrganization::class,
-            EnsureProjectBelongsToCurrentOrganization::class,
+            EnsureProjectBelongsToRouteOrganization::class,
         );
         // テナント guard より後に走ることを確定させる web グループの鎖
         // (guard を binding 直後まで引き上げるための「後続」宣言)。
         foreach ([
-            [EnsureProjectBelongsToCurrentOrganization::class, HandleInertiaRequests::class],
+            [EnsureProjectBelongsToRouteOrganization::class, HandleInertiaRequests::class],
             [HandleInertiaRequests::class, SecurityHeaders::class],
             [SecurityHeaders::class, RequireTwoFactorForEnforcedOrganizations::class],
             [RequireTwoFactorForEnforcedOrganizations::class, BlockTwoFactorDisableForEnforcedOrganizations::class],
@@ -1877,7 +1877,7 @@ class OrganizationSwitchController extends Controller
             [EncryptHistory::class, EnsureEmailIsVerified::class],
             [EnsureEmailIsVerified::class, RequireActiveSubscription::class],
             // 退会予約中の凍結。**302 で短絡する**ため、テナント境界 404
-            // (EnsureProjectBelongsToCurrentOrganization) より必ず後に置く。前に置くと
+            // (EnsureProjectBelongsToRouteOrganization) より必ず後に置く。前に置くと
             // 「他組織に実在 = 302 / 不在 = 404」の 1 bit 存在オラクルになる
             // (AGENTS.md セキュリティ不変条件 10)。課金ゲートの直後に置き、未契約組織の
             // ユーザーは 課金ゲート → onboarding → 凍結 → /settings の 2 hop で取消 UI に着く。
@@ -2026,7 +2026,7 @@ class OrganizationSwitchController extends Controller
 
 ```php
         | {project} の URL 整合 guard ({project} ∈ current org) は 2 層:
-        | (1) project.in-current-org middleware — cross-org を 404 に落とす (存在オラクル防止)。
+        | (1) project.in-route-org middleware — cross-org を 404 に落とす (存在オラクル防止)。
         |     **実行位置は宣言順ではなく bootstrap/app.php の priority list が正本**で、
         |     SubstituteBindings の**直後** = 課金ゲート 302・verified 302・2FA 強制 302・
         |     Inertia version mismatch 409・FormRequest の DB ルールより前に走る。
@@ -2174,13 +2174,13 @@ use Illuminate\Support\Facades\Route;
  * 機械検証し、将来の route 追加での guard 漏れを構造的に落とす。
  *
  * 組織の解決元が違うため middleware は web / API で 2 本立てになる:
- *  - web (`project.in-current-org` = EnsureProjectBelongsToCurrentOrganization):
+ *  - web (`project.in-route-org` = EnsureProjectBelongsToRouteOrganization):
  *    セッションの current org。API に付けてはならない (API はセッションを持たない)
  *  - API v1 (`api.project-in-org` = EnsureProjectBelongsToApiOrganization):
  *    API キー / OAuth token から確定した request attribute 'organization'
  */
 
-test('web の {project} route は project.in-current-org / API は api.project-in-org を必ず持つ', function (): void {
+test('web の {project} route は project.in-route-org / API は api.project-in-org を必ず持つ', function (): void {
     $checked = 0;
     $violations = [];
 
@@ -2195,8 +2195,8 @@ test('web の {project} route は project.in-current-org / API は api.project-i
         if (str_starts_with($route->uri(), 'api/')) {
             // API は web セッション (current org) を持たない。誤配線は全 API project route を
             // 404 に落とすため、付いていたら fail させる
-            if (in_array('project.in-current-org', $middleware, true)) {
-                $violations[] = "API route {$name} に web セッション前提の project.in-current-org が付いている";
+            if (in_array('project.in-route-org', $middleware, true)) {
+                $violations[] = "API route {$name} に web セッション前提の project.in-route-org が付いている";
             }
             // API 版の URL 整合 guard は必須 (FormRequest より前に cross-org を 404 に落とす)
             if (! in_array('api.project-in-org', $middleware, true)) {
@@ -2208,8 +2208,8 @@ test('web の {project} route は project.in-current-org / API は api.project-i
             continue;
         }
 
-        if (! in_array('project.in-current-org', $middleware, true)) {
-            $violations[] = "web route {$name} に project.in-current-org middleware が無い"
+        if (! in_array('project.in-route-org', $middleware, true)) {
+            $violations[] = "web route {$name} に project.in-route-org middleware が無い"
                 .' (cross-org {project} が FormRequest の DB ルールより前に 404 になりません)';
         }
         $checked++;

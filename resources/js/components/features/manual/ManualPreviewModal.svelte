@@ -1,6 +1,7 @@
 <script lang="ts">
     import Modal from "@/components/organisms/Modal.svelte";
     import type { ManualListItem } from "@/types/manual";
+    import { currentOrgUrl } from "@/lib/org-url";
 
     /**
      * 動画一覧からの完成動画プレビュー (doc/04 一覧ページ「プレビュー（オーバーレイ）」)。
@@ -32,7 +33,7 @@
     const playbackSrc = $derived(
         manual === null || manual.current_finished_render_job_id === null
             ? null
-            : `/projects/${projectId}/manuals/${manual.id}/render-jobs/` +
+            : currentOrgUrl(`/projects/${projectId}/manuals/${manual.id}/render-jobs/`) +
               `${manual.current_finished_render_job_id}/playback`,
     );
 </script>

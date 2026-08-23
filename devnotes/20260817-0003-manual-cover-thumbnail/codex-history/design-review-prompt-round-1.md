@@ -1782,7 +1782,7 @@ final class AdoptedTakeReferenceInventory
      * doc/04 動画列 / doc/05 撮影後の下部サムネイル確認。
      *
      * 層の順序は playback と同一 (認可より前に 404):
-     * 1. {project} ∈ current org (project.in-current-org middleware + resolveOrganizationProject)
+     * 1. {project} ∈ current org (project.in-route-org middleware + resolveOrganizationProject)
      * 2. {manual}∈{project}, {cut}∈{manual}, {take}∈{cut} は Route::scopeBindings()
      * 3. 認可 (preview ability。動画の再生と同じ権限で見せる)
      *

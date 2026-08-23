@@ -9,6 +9,7 @@
     import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
     import type { SharedProps } from "@/lib/shared-props";
+    import { orgUrl } from "@/lib/org-url";
 
     interface Props {
         organization: { id: number; name: string; slug: string };
@@ -21,7 +22,6 @@
 
     const shared = $derived(page.props as unknown as SharedProps);
     const appName = $derived(shared.appName ?? "");
-    const base = $derived(`/organizations/${organization.slug}`);
 </script>
 
 <AppLayout {appName}>
@@ -70,7 +70,7 @@
             </Card>
 
             <div>
-                <TextLink href={`${base}/api-keys`} testId="link-back-api-keys">
+                <TextLink href={orgUrl(organization.slug, "/api-keys")} testId="link-back-api-keys">
                     API キー管理へ戻る
                 </TextLink>
             </div>

@@ -118,7 +118,7 @@ TypeScript 型定義 / Inertia Props / JsonResource への波及なし。
 | 層 | `capture.manuals.show` | `projects.manuals.show` |
 |---|---|---|
 | 外側 group | `auth` / `verified` / `not-pending-deletion` (routes/web.php:189) | 同左 (同一 group 内) |
-| 内側 group | `require-active-subscription` / `project.in-current-org` (:593) | 同左 (:453) |
+| 内側 group | `require-active-subscription` / `project.in-route-org` (:593) | 同左 (:453) |
 | 親子整合 | `Route::scopeBindings()` = `$project->manuals()` 経由 | 同左 |
 | テナント境界 | controller の `resolveOrganizationProject()` (**認可より前に 404**) | 同左 |
 | 認可 | `Gate::authorize('view', $manual)` | `Gate::authorize('view', $manual)` |
@@ -367,7 +367,7 @@ use Inertia\Testing\AssertableInertia as Assert;
  *
  * 両 route が同じく通る層 (省略形で書かない):
  *   auth / verified / not-pending-deletion (外側 group)
- *   → require-active-subscription / project.in-current-org (内側 group)
+ *   → require-active-subscription / project.in-route-org (内側 group)
  *   → Route::scopeBindings() ($project->manuals() 経由)
  *   → controller の resolveOrganizationProject() (認可より前に 404)
  *   → Gate::authorize('view', $manual)
@@ -449,7 +449,7 @@ dataset は `VideoManualStatus::cases()` なので、**PHP enum に status が�
   意味が違い、合成中 (`rendering`) こそ進み具合を見に戻る場面である。復路専用の述語も作らない。
   復路を無条件にできる根拠は、行き先 `projects.manuals.show` が `capture.manuals.show` と
   **同じ層を同じ順序で通る**ことである — 外側 group の `auth` / `verified` /
-  `not-pending-deletion`、内側 group の `require-active-subscription` / `project.in-current-org`、
+  `not-pending-deletion`、内側 group の `require-active-subscription` / `project.in-route-org`、
   `Route::scopeBindings()`、controller の `resolveOrganizationProject()` (認可より前に 404)、
   `Gate::authorize('view', $manual)`。詳細 GET はどちらも status で絞り込まない (一覧だけが絞る)。
   よって復路が 403 になる経路が見当たらない。**ただしテストが固定するのはこの構造的同一性ではなく、

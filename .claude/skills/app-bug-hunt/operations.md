@@ -14,29 +14,29 @@ bug-hunt カバレッジの分母となる「書き込み操作」(非 GET × we
 
 | method | route | name | story | 区分 |
 |---|---|---|---|---|
-| POST | billing/auto-recharge/setup | billing.auto-recharge.setup | S5 | 通常 |
-| POST | billing/auto-recharge | billing.auto-recharge.update | S5 | 通常 |
-| POST | billing/checkout | billing.checkout | S5 | 通常 |
-| PATCH | billing/contact | billing.contact.update | S5 | 通常 |
-| POST | billing/plan | billing.plan.change | S5 | 通常 |
-| POST | billing/portal | billing.portal | S5 | 通常 |
-| POST | purchase-tickets/checkout | billing.tickets.checkout | S5 | 通常 |
-| POST | app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take}/adopt | capture.takes.adopt | S3 S7 | 通常 |
-| DELETE | app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take} | capture.takes.destroy | S3 S7 | 通常 |
-| POST | app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take}/downloaded | capture.takes.downloaded | S3 | 通常 |
-| POST | app/projects/{project}/manuals/{manual}/cuts/{cut}/takes | capture.takes.store | S3 | 通常 |
-| PATCH | app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take} | capture.takes.update | S3 | 通常 |
-| POST | app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/upload-url | capture.takes.upload-url | S3 | 通常 |
+| POST | organizations/{organization}/billing/auto-recharge/setup | billing.auto-recharge.setup | S5 | 通常 |
+| POST | organizations/{organization}/billing/auto-recharge | billing.auto-recharge.update | S5 | 通常 |
+| POST | organizations/{organization}/billing/checkout | billing.checkout | S5 | 通常 |
+| PATCH | organizations/{organization}/billing/contact | billing.contact.update | S5 | 通常 |
+| POST | organizations/{organization}/billing/plan | billing.plan.change | S5 | 通常 |
+| POST | organizations/{organization}/billing/portal | billing.portal | S5 | 通常 |
+| POST | organizations/{organization}/billing/purchase-tickets/checkout | billing.tickets.checkout | S5 | 通常 |
+| POST | organizations/{organization}/app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take}/adopt | capture.takes.adopt | S3 S7 | 通常 |
+| DELETE | organizations/{organization}/app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take} | capture.takes.destroy | S3 S7 | 通常 |
+| POST | organizations/{organization}/app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take}/downloaded | capture.takes.downloaded | S3 | 通常 |
+| POST | organizations/{organization}/app/projects/{project}/manuals/{manual}/cuts/{cut}/takes | capture.takes.store | S3 | 通常 |
+| PATCH | organizations/{organization}/app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/{take} | capture.takes.update | S3 | 通常 |
+| POST | organizations/{organization}/app/projects/{project}/manuals/{manual}/cuts/{cut}/takes/upload-url | capture.takes.upload-url | S3 | 通常 |
 | POST | contact | contact.store | S1 | 通常 |
 | POST | debug/login/{userId} | debug.login-as | S1 | 通常 |
 | POST | invitations/{invitation}/accept-in-app | invitations.accept-in-app | S2 | 通常 |
 | POST | invitations/accept | invitations.accept.store | S2 | 通常 |
 | POST | login | login.store | S1 | 通常 |
 | POST | logout | logout | S1 | 通常 |
-| POST | notifications/{notification}/open | notifications.open | S6 | 通常 |
-| POST | notifications/{notification}/read | notifications.read | S6 | 通常 |
-| POST | notifications/read-all | notifications.read-all | S6 | 通常 |
-| POST | onboarding/activate-personal | onboarding.activate-personal | S1 | 通常 |
+| POST | organizations/{organization}/notifications/{notification}/open | notifications.open | S6 | 通常 |
+| POST | organizations/{organization}/notifications/{notification}/read | notifications.read | S6 | 通常 |
+| POST | organizations/{organization}/notifications/read-all | notifications.read-all | S6 | 通常 |
+| POST | organizations/{organization}/onboarding/activate-personal | onboarding.activate-personal | S1 | 通常 |
 | DELETE | organizations/{organization}/api-keys/{apiKey} | organizations.api-keys.revoke | S4 | 通常 |
 | DELETE | organizations/{organization}/api-keys/sessions/{oauthSession} | organizations.api-keys.sessions.revoke | S4 | 通常 |
 | POST | organizations/{organization}/api-keys | organizations.api-keys.store | S4 | 通常 |
@@ -45,8 +45,8 @@ bug-hunt カバレッジの分母となる「書き込み操作」(非 GET × we
 | DELETE | organizations/{organization}/members/{user} | organizations.members.destroy | S2 | 通常 |
 | DELETE | organizations/{organization}/members/{user}/two-factor | organizations.members.two-factor.reset | S2 | 通常 |
 | PATCH | organizations/{organization}/members/{user} | organizations.members.update | S2 | 通常 |
+| PATCH | organizations/{organization}/slug | organizations.slug.update | S4 | 通常 |
 | POST | organizations | organizations.store | S4 | 通常 |
-| POST | organizations/{organization}/switch | organizations.switch | S4 | 通常 |
 | POST | organizations/{organization}/transfer-ownership | organizations.transfer-ownership | S4 | 通常 |
 | PATCH | organizations/{organization}/two-factor-requirement | organizations.two-factor-requirement.update | S4 | 通常 |
 | PATCH | organizations/{organization} | organizations.update | S4 | 通常 |
@@ -57,27 +57,27 @@ bug-hunt カバレッジの分母となる「書き込み操作」(非 GET × we
 | POST | user/confirm-password | password.confirm.store | S6 | 通常 |
 | POST | forgot-password | password.email | S1 | 通常 |
 | POST | reset-password | password.update | S1 | 通常 |
-| DELETE | projects/{project}/categories/{category} | projects.categories.destroy | S4 S7 | 通常 |
-| PATCH | projects/{project}/categories/reorder | projects.categories.reorder | S4 S7 | 通常 |
-| POST | projects/{project}/categories | projects.categories.store | S4 | 通常 |
-| PATCH | projects/{project}/categories/{category} | projects.categories.update | S4 S7 | 通常 |
-| DELETE | projects/{project} | projects.destroy | S4 | 通常 |
-| DELETE | projects/{project}/items/{item} | projects.items.destroy | S4 | 通常 |
-| POST | projects/{project}/items | projects.items.store | S4 | 通常 |
-| PATCH | projects/{project}/items/{item} | projects.items.update | S4 | 通常 |
-| POST | projects/{project}/manuals/{manual}/analyze | projects.manuals.analyze | S3 | 通常 |
-| DELETE | projects/{project}/manuals/{manual} | projects.manuals.destroy | S3 S7 | 通常 |
-| POST | projects/{project}/manuals/{manual}/duplicate | projects.manuals.duplicate | S3 S7 | 通常 |
-| POST | projects/{project}/manuals/{manual}/preview | projects.manuals.preview | S3 | 通常 |
-| POST | projects/{project}/manuals/{manual}/render | projects.manuals.render | S3 | 通常 |
-| PUT | projects/{project}/manuals/{manual}/scenario | projects.manuals.scenario.update | S3 S7 | 通常 |
-| POST | projects/{project}/manuals/{manual}/source-documents | projects.manuals.source-documents.store | S3 | 通常 |
-| POST | projects/{project}/manuals | projects.manuals.store | S3 | 通常 |
-| PATCH | projects/{project}/manuals/{manual} | projects.manuals.update | S3 S7 | 通常 |
-| DELETE | projects/{project}/members/{user} | projects.members.destroy | S4 | 通常 |
-| POST | projects/{project}/members | projects.members.store | S4 | 通常 |
-| POST | projects | projects.store | S4 | 通常 |
-| PATCH | projects/{project} | projects.update | S4 | 通常 |
+| DELETE | organizations/{organization}/projects/{project}/categories/{category} | projects.categories.destroy | S4 S7 | 通常 |
+| PATCH | organizations/{organization}/projects/{project}/categories/reorder | projects.categories.reorder | S4 S7 | 通常 |
+| POST | organizations/{organization}/projects/{project}/categories | projects.categories.store | S4 | 通常 |
+| PATCH | organizations/{organization}/projects/{project}/categories/{category} | projects.categories.update | S4 S7 | 通常 |
+| DELETE | organizations/{organization}/projects/{project} | projects.destroy | S4 | 通常 |
+| DELETE | organizations/{organization}/projects/{project}/items/{item} | projects.items.destroy | S4 | 通常 |
+| POST | organizations/{organization}/projects/{project}/items | projects.items.store | S4 | 通常 |
+| PATCH | organizations/{organization}/projects/{project}/items/{item} | projects.items.update | S4 | 通常 |
+| POST | organizations/{organization}/projects/{project}/manuals/{manual}/analyze | projects.manuals.analyze | S3 | 通常 |
+| DELETE | organizations/{organization}/projects/{project}/manuals/{manual} | projects.manuals.destroy | S3 S7 | 通常 |
+| POST | organizations/{organization}/projects/{project}/manuals/{manual}/duplicate | projects.manuals.duplicate | S3 S7 | 通常 |
+| POST | organizations/{organization}/projects/{project}/manuals/{manual}/preview | projects.manuals.preview | S3 | 通常 |
+| POST | organizations/{organization}/projects/{project}/manuals/{manual}/render | projects.manuals.render | S3 | 通常 |
+| PUT | organizations/{organization}/projects/{project}/manuals/{manual}/scenario | projects.manuals.scenario.update | S3 S7 | 通常 |
+| POST | organizations/{organization}/projects/{project}/manuals/{manual}/source-documents | projects.manuals.source-documents.store | S3 | 通常 |
+| POST | organizations/{organization}/projects/{project}/manuals | projects.manuals.store | S3 | 通常 |
+| PATCH | organizations/{organization}/projects/{project}/manuals/{manual} | projects.manuals.update | S3 S7 | 通常 |
+| DELETE | organizations/{organization}/projects/{project}/members/{user} | projects.members.destroy | S4 | 通常 |
+| POST | organizations/{organization}/projects/{project}/members | projects.members.store | S4 | 通常 |
+| POST | organizations/{organization}/projects | projects.store | S4 | 通常 |
+| PATCH | organizations/{organization}/projects/{project} | projects.update | S4 | 通常 |
 | POST | recent-auth/password | recent-auth.password | S6 | 通常 |
 | POST | register | register.store | S1 | 通常 |
 | DELETE | settings/account/deletion-request | settings.account.deletion-request.destroy | S6 | 通常 |

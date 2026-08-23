@@ -392,12 +392,12 @@ test('世代交代: 再レンダ成功で旧 job id の DeleteRenderOutputsJob �
 });
 
 test('rendering 中の scenario 保存は 409 (既存 guard との整合を再確認)', function (): void {
-    [, $owner, $project, $manual] = renderPipelineContext();
+    [$organization, $owner, $project, $manual] = renderPipelineContext();
     // trigger 済み = manual は rendering
     expect($manual->refresh()->status)->toBe(VideoManualStatus::Rendering);
 
     $this->actingAs($owner)->putJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/scenario",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/scenario",
         ['expected_version' => 2, 'steps' => []],
     )->assertConflict()->assertJson(['conflict_type' => 'rendering']);
 });

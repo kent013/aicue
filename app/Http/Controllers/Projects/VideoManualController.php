@@ -12,13 +12,14 @@ use App\DataTransferObjects\Manual\ScenarioDocumentData;
 use App\DataTransferObjects\Manual\SourceDocumentSummaryData;
 use App\Enums\Manual\RenderKind;
 use App\Enums\Manual\VideoManualStatus;
-use App\Http\Concerns\ResolvesCurrentOrganization;
+use App\Http\Concerns\ResolvesRouteOrganization;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Projects\DuplicateVideoManualRequest;
 use App\Http\Requests\Projects\StoreVideoManualRequest;
 use App\Http\Requests\Projects\UpdateVideoManualRequest;
 use App\Models\Category;
 use App\Models\Cut;
+use App\Models\Organization;
 use App\Models\Project;
 use App\Models\User;
 use App\Models\VideoManual;
@@ -51,12 +52,11 @@ use Webmozart\Assert\Assert;
  */
 class VideoManualController extends Controller
 {
-    use ResolvesCurrentOrganization;
+    use ResolvesRouteOrganization;
 
     /** 作成フォーム (カテゴリ選択肢を props で供給。撮影者は 403) */
-    public function create(Request $request, Project $project): Response
+    public function create(Request $request, Organization $organization, Project $project): Response
     {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('create', [VideoManual::class, $project]);
@@ -77,9 +77,8 @@ class VideoManualController extends Controller
     }
 
     /** VideoManual 作成。project_id / created_by はサーバ導出 (payload では 422) */
-    public function store(StoreVideoManualRequest $request, Project $project, VideoManualService $manuals): RedirectResponse
+    public function store(StoreVideoManualRequest $request, Organization $organization, Project $project, VideoManualService $manuals): RedirectResponse
     {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('create', [VideoManual::class, $project]);
@@ -99,20 +98,19 @@ class VideoManualController extends Controller
         $manual = $manuals->create($project, $title, $category === null ? null : (int) $category, $user->id, $document);
 
         return redirect()
-            ->route('projects.manuals.show', [$project, $manual])
+            ->route('projects.manuals.show', ['organization' => $organization->slug, 'project' => $project, 'manual' => $manual])
             ->with('success', '動画マニュアルを作成しました');
     }
 
     /** 詳細 (撮影者も閲覧可) */
     public function show(
-        Request $request,
+        Request $request, Organization $organization,
         Project $project,
         VideoManual $manual,
         SeoManager $seo,
         VideoManualService $manuals,
         ScenarioReportBuilder $reports,
     ): Response {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404 ({manual} ∈ {project} は scopeBindings が担保済み)
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('view', $manual);
@@ -206,9 +204,8 @@ class VideoManualController extends Controller
     }
 
     /** VideoManual 複製 (別名保存)。保存済み cuts を雛形に新タイトル・カテゴリで新規作成し詳細へ遷移 */
-    public function duplicate(DuplicateVideoManualRequest $request, Project $project, VideoManual $manual, VideoManualService $manuals): RedirectResponse
+    public function duplicate(DuplicateVideoManualRequest $request, Organization $organization, Project $project, VideoManual $manual, VideoManualService $manuals): RedirectResponse
     {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404 ({manual} ∈ {project} は scopeBindings が担保済み)
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('duplicate', $manual);
@@ -219,14 +216,13 @@ class VideoManualController extends Controller
         $copy = $manuals->duplicate($project, $manual, $request->title(), $request->categoryId(), $user->id);
 
         return redirect()
-            ->route('projects.manuals.show', [$project, $copy])
+            ->route('projects.manuals.show', ['organization' => $organization->slug, 'project' => $project, 'manual' => $copy])
             ->with('success', '動画マニュアルを複製しました（手順書は引き継がれません）');
     }
 
     /** 編集フォーム (メタデータ = title / category + シナリオ document) */
-    public function edit(Request $request, Project $project, VideoManual $manual, SeoManager $seo): Response
+    public function edit(Request $request, Organization $organization, Project $project, VideoManual $manual, SeoManager $seo): Response
     {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404 ({manual} ∈ {project} は scopeBindings が担保済み)
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('update', $manual);
@@ -277,9 +273,8 @@ class VideoManualController extends Controller
     }
 
     /** メタデータ更新 (title / category)。category null は未分類化 */
-    public function update(UpdateVideoManualRequest $request, Project $project, VideoManual $manual, VideoManualService $manuals): RedirectResponse
+    public function update(UpdateVideoManualRequest $request, Organization $organization, Project $project, VideoManual $manual, VideoManualService $manuals): RedirectResponse
     {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404 ({manual} ∈ {project} は scopeBindings が担保済み)
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('update', $manual);
@@ -306,9 +301,8 @@ class VideoManualController extends Controller
      *
      * 付いてくるクエリは**対象の決定には一切使わない** (対象は route パラメータのみが決める)。
      */
-    public function destroy(Request $request, Project $project, VideoManual $manual, VideoManualService $manuals): RedirectResponse
+    public function destroy(Request $request, Organization $organization, Project $project, VideoManual $manual, VideoManualService $manuals): RedirectResponse
     {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404 ({manual} ∈ {project} は scopeBindings が担保済み)
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('delete', $manual);
@@ -318,7 +312,7 @@ class VideoManualController extends Controller
         $manuals->delete($project, $manual);
 
         return redirect()
-            ->route('projects.show', ['project' => $project, ...$listQuery->toQueryParams()])
+            ->route('projects.show', ['organization' => $organization->slug, 'project' => $project, ...$listQuery->toQueryParams()])
             ->with('success', '動画マニュアルを削除しました');
     }
 

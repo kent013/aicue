@@ -8,14 +8,14 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
  * - auth.user.id は描画に使わない (内部主キー。props には存在するが画面には出さない)
  * - ログアウトは router.post("/logout") = Inertia visit (経路 C の保証条件)
  * - ログアウト送信中はボタンが押下不可になる (必須条件未充足の disabled ではない)
- * - 復路リンクは /app (capture.home)
+ * - 復路リンクは /organizations/test-org/app (capture.home)
  *
  * mock 方式は既存 tests/js/pages/SettingsIndex.test.ts と同一
  * (vi.hoisted で plain object を作り vi.mock で page / router を差し替える)。
  */
 
 const { pageState, routerPostMock } = vi.hoisted(() => ({
-    pageState: { props: {} as Record<string, unknown>, url: "/app/account" },
+    pageState: { props: {} as Record<string, unknown>, url: "/organizations/test-org/app/account" },
     routerPostMock: vi.fn(),
 }));
 
@@ -97,7 +97,7 @@ describe("Capture/Account", () => {
      * Inertia の Link は jsdom で href を絶対 URL に解決する (http://localhost:3000/app) ため、
      * 完全一致ではなく末尾一致で固定する (既存 SettingsIndex.test.ts と同じ様式)。
      */
-    it("復路リンクは /app (capture.home)", () => {
+    it("復路リンクは /organizations/test-org/app (capture.home)", () => {
         seed();
         render(CaptureAccount);
 

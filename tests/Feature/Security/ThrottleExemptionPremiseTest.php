@@ -568,7 +568,7 @@ test('別セッションで発行した state では callback が外向き HTTP 
     expect($requests)->toBe([], '別セッションの state で外向き HTTP が発生しました');
 
     // ログイン成立経路へ進んでいない
-    expect((string) $response->headers->get('Location'))->not->toContain('/dashboard');
+    expect((string) $response->headers->get('Location'))->not->toContain('/organizations/');
     expect(auth()->check())->toBeFalse();
 });
 

@@ -11,13 +11,13 @@ declare(strict_types=1);
  */
 
 test('未契約 org (サブスク行なし) の owner は portal に到達せず error flash で戻る', function (): void {
-    [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     // Fake gateway を bind しておき「呼ばれない」ことを到達判定に使う
     enableFakeExternals();
 
-    $response = $this->from('/billing')->actingAs($owner)->post('/billing/portal');
+    $response = $this->from("/organizations/{$organization->slug}/billing")->actingAs($owner)->post("/organizations/{$organization->slug}/billing/portal");
 
-    $response->assertRedirect('/billing');
+    $response->assertRedirect("/organizations/{$organization->slug}/billing");
     $response->assertSessionHas('error', 'お支払い管理画面は有償プラン契約後にご利用いただけます。');
     // Stripe (fake) に到達していない = 外部 URL への遷移になっていない
     expect($response->headers->get('Location'))->not->toContain('fake_external=stripe');
@@ -28,9 +28,9 @@ test('ActiveFreePlan (canceled サブスク行が残る) org の owner も porta
     createFakeSubscription($organization, status: 'canceled');
     enableFakeExternals();
 
-    $response = $this->from('/billing')->actingAs($owner)->post('/billing/portal');
+    $response = $this->from("/organizations/{$organization->slug}/billing")->actingAs($owner)->post("/organizations/{$organization->slug}/billing/portal");
 
-    $response->assertRedirect('/billing');
+    $response->assertRedirect("/organizations/{$organization->slug}/billing");
     $response->assertSessionHas('error', 'お支払い管理画面は有償プラン契約後にご利用いただけます。');
 });
 
@@ -39,7 +39,7 @@ test('有償サブスクを持つ owner は従来どおり Portal URL へ遷移�
     contractPaidPlan($organization);
     enableFakeExternals();
 
-    $response = $this->actingAs($owner)->post('/billing/portal');
+    $response = $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/portal");
 
     $response->assertStatus(302);
     expect($response->headers->get('Location'))->toContain('fake_external=stripe');

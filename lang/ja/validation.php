@@ -189,6 +189,8 @@ return [
         'password_confirmation' => 'パスワード（確認）',
         'current_password' => '現在のパスワード',
         'terms_accepted' => '利用規約への同意',
+        // --- 組織 ---
+        'slug' => '組織の識別名',
         // --- お問い合わせ ---
         'company_name' => '会社・組織名',
         'message' => 'お問い合わせ内容',

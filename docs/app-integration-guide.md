@@ -65,8 +65,8 @@
 | Model(FK は `$fillable` 外、親 BelongsTo) | `app/Models/Item.php` + `app/Models/Project.php` の `items()` |
 | 保護キー集合への FK 追記 | `app/Support/Security/MassAssignmentProtectedKeys.php`(Item の FK `project_id` は**既存リストに含まれる**ため追記不要。新規 FK 名のときだけ追記する) |
 | FormRequest(`ProhibitsProtectedKeys` + missing rule) | `app/Http/Requests/Projects/StoreItemRequest.php` / `UpdateItemRequest.php` |
-| nested route(Team セグメントなし = Default Team パターン) | `routes/web.php` の `/projects/{project}/items` 系 |
-| URL 整合 guard(認可より**前**に 404) | {project} ∈ current org は 2 層: `project.in-current-org` middleware(`app/Http/Middleware/EnsureProjectBelongsToCurrentOrganization.php`。FormRequest の DB ルールより**前**に cross-org を 404 に落とす = 存在オラクル防止。web の {project} route group に一括付与、網羅性は `tests/Architecture/ProjectRouteCurrentOrgGuardTest.php`)+ `app/Http/Concerns/ResolvesCurrentOrganization.php` の `resolveOrganizationProject()`(inline guard、二重防御)。{item} ∈ {project} は `routes/web.php` の `Route::scopeBindings()`(`$project->items()` 経由で解決) |
+| nested route(組織 URL 配下 + Team セグメントなし = Default Team パターン) | `routes/web.php` の `organizations/{organization:slug}/projects/{project}/items` 系。業務 route は 1 本残らず組織 URL 配下に置く (家系裁定 AG-037)。除外は `tests/Support/Routing/OrganizationlessWebRouteInventory.php` へ理由付きで登録する |
+| URL 整合 guard(認可より**前**に 404) | {project} ∈ URL 上の組織 は 2 層: `project.in-route-org` middleware(`app/Http/Middleware/EnsureProjectBelongsToRouteOrganization.php`。FormRequest の DB ルールより**前**に cross-org を 404 に落とす = 存在オラクル防止。web の {project} route group に一括付与、網羅性は `tests/Architecture/ProjectRouteCurrentOrgGuardTest.php`)+ `app/Http/Concerns/ResolvesRouteOrganization.php` の `resolveOrganizationProject()`(inline guard、二重防御)。{item} ∈ {project} は `routes/web.php` の `Route::scopeBindings()`(`$project->items()` 経由で解決) |
 | API 側の URL 整合 guard(認可より**前**に 404、**FormRequest より前**) | {project} ∈ actor の組織は 2 層: `api.project-in-org` middleware(`app/Http/Middleware/EnsureProjectBelongsToApiOrganization.php`。組織は API キー / OAuth token から確定。網羅性と middleware 順序契約は `tests/Architecture/ProjectRouteCurrentOrgGuardTest.php`)+ `ResolvesApiOrganization::resolveOrganizationProject()`(inline guard、二重防御)。{item} ∈ {project} は `routes/api.php` の `Route::scopeBindings()` |
 | guard inventory への登録 | `tests/Architecture/NestedRouteIdorDefenseTest.php`(Web の `projects.items.update/destroy`、API の `api.v1.projects.items.update/destroy` = いずれも ScopeBindings) |
 | 変更系 route の認可 gate | `tests/Architecture/ControllerAuthorizationGateTest.php`(POST/PUT/PATCH/DELETE は `Gate` を通るか exemption inventory に理由付き登録。§7 不変条件 8) |
@@ -122,7 +122,7 @@ NOT NULL)/ Model / Factory / FormRequest(store・update)/ nested route(変更系
 | `MassAssignmentSafetyTest` | ownership / actor / tenant / secret キーが Model の `$fillable` に載ること | 登録簿は無い。新 Model の親 FK を `$fillable` に入れず、relation 経由か明示代入で書く |
 | `FormRequestProhibitedKeyTest` | FormRequest が `ProhibitsProtectedKeys` を欠くこと / 保護キーの missing rule が無いこと | 新 FormRequest に trait を適用し `rules()` に missing を書く。アプリ固有の新 FK 名は `app/Support/Security/MassAssignmentProtectedKeys.php` へ追記 |
 | `ValidationAttributeCoverageTest` | `rules()` のキーが利用者向け文言の attributes に無いこと(生のキー名が画面に出る) | `lang/ja/validation.php` の attributes に新しいキーを追記 |
-| `ProjectRouteCurrentOrgGuardTest` | `{project}` を受ける route が middleware 層の URL 整合 guard を欠くこと(FormRequest の DB ルールが先に走り 422 と 404 の差が存在オラクルになる) | web は `project.in-current-org`、API は `api.project-in-org` を route group に付ける |
+| `ProjectRouteCurrentOrgGuardTest` | `{project}` を受ける route が middleware 層の URL 整合 guard を欠くこと(FormRequest の DB ルールが先に走り 422 と 404 の差が存在オラクルになる) | web は `project.in-route-org`、API は `api.project-in-org` を route group に付ける |
 | `NestedRouteIdorDefenseTest` | param 付き route の防御方式が未分類・stale・無記名であること | `tests/Architecture/NestedRouteIdorDefenseTest.php` が読む inventory へ **parameter 単位**で `NestedRouteDefenseMode` を登録。テナント親子でない param は理由を `nonTenantReasons()` に書く |
 | `TenantBoundaryOrderingTest` | テナント境界の 404 が binding の直後で閉じていないこと(1 bit の存在オラクル) | 新しい middleware を足したら `middlewareShortCircuitInventory()` に「短絡しうるか」を分類する(疑わしきは `true` 側)。`SubstituteBindings` より前に置くなら `preBindingShortCircuitInventory()` にも登録 |
 | `RouteBindingTypeConstraintInventoryTest` | binding param が型分類の目録に無く、型不一致が 404 ではなく生 500 になること | `RouteBindingTypes` の 5 分類のいずれかへ登録し、分類に応じた制約を route に付ける |
@@ -147,6 +147,15 @@ NOT NULL)/ Model / Factory / FormRequest(store・update)/ nested route(変更系
 | `SsrfPinBoundaryTest` | 外部 URL(特にユーザ入力由来)を取得するとき | `Kent013\SsrfPin\UrlSafetyInspector` / `PinnedHttpClient` を通す。安全境界は `config/ssrf-pin.php` に pin する |
 | `DocumentTitleCoverageTest` | Inertia を render する GET named route を足すとき | ページ固有のタイトルを controller 供給メタか `config/seo.php` に持たせる(無いとサイト名だけになる) |
 | `InertiaRenderPageExistsInvariantTest` | 新しいページコンポーネントを足すとき | `resources/js/pages/` に実体を置く(literal 参照と 1:1。参照先が無いページは本番で白画面になる) |
+
+### 組織識別名 (slug) を足す・変えるとき
+
+組織識別名の規則は値オブジェクト 1 本 (`app/Support/Organization/AssignableOrganizationSlug.php`)
+に集約してある。`organizations.slug` を書ける経路はこの型を受ける 1 本だけである
+(`tests/Architecture/OrganizationSlugWritePathTest.php` が deny-by-default で固定)。
+
+**予約語を増やすときの義務は `config/organization-slug-reserved.php` の冒頭 docblock を見よ**
+(契約文はここに複写しない。2 か所に書くと必ず食い違う)。
 
 ## 3. ロール・権限のマッピング
 
@@ -337,7 +346,7 @@ LLM を使う機能が要件に来たら、まず利用形態を分類する:
      間に挟まる web グループの middleware も guard より後として priority list に載せる必要がある
    - API の順序契約: `resolve.api-actor` → `SubstituteBindings` → **`api.project-in-org`** →
      `api-key.ability:*` → `idempotent`。**ability の 403 はテナント境界 404 より後**
-   - `{project}` を持つ route は web = `project.in-current-org` /
+   - `{project}` を持つ route は web = `project.in-route-org` /
      **API = `api.project-in-org`** middleware を必ず付ける
    - 子リソースは `Route::scopeBindings()` で routing 層に解決させる。
      scopeBindings に乗らない param は **implicit binding を使わず** controller が
@@ -358,7 +367,7 @@ LLM を使う機能が要件に来たら、まず利用形態を分類する:
 
 1. **層 2(テナント境界)が binding の直後で閉じているか**を確認する。
    controller の inline guard は **FormRequest の後**に走るため、それだけでは不十分。
-   - `{project}` を持つ route → web は `project.in-current-org`、
+   - `{project}` を持つ route → web は `project.in-route-org`、
      **API は `api.project-in-org`** middleware が付いていること
    - 子リソース(`{item}` 等)→ `Route::scopeBindings()` で routing 層に解決させること
    - 確認方法 1: **cross-org の実在リソース + 不正 payload** を送って

@@ -46,7 +46,7 @@ describe("features/manual/DuplicateManualDialog", () => {
         expect(category.value).toBe("2");
     });
 
-    it("『複製する』押下で /projects/{id}/manuals/{id}/duplicate に POST する", async () => {
+    it("『複製する』押下で /organizations/test-org/projects/{id}/manuals/{id}/duplicate に POST する", async () => {
         render(DuplicateManualDialog, { props: baseProps });
 
         await waitFor(() => {
@@ -56,7 +56,7 @@ describe("features/manual/DuplicateManualDialog", () => {
 
         const form = holder.last as { post: ReturnType<typeof vi.fn> };
         expect(form.post).toHaveBeenCalledTimes(1);
-        expect(form.post.mock.calls[0][0]).toBe("/projects/1/manuals/5/duplicate");
+        expect(form.post.mock.calls[0][0]).toBe("/organizations/test-org/projects/1/manuals/5/duplicate");
     });
 
     it("送信ボタンは必須未充足でも disabled にしない (禁止事項8)", async () => {

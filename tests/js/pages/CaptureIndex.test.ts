@@ -86,7 +86,7 @@ describe("Capture/Index 自作フィルタ・作成者表示", () => {
         await fireEvent.click(screen.getByTestId("capture-mine"));
 
         expect(getSpy).toHaveBeenCalledTimes(1);
-        expect(getSpy.mock.calls[0][0]).toBe("/app/projects/1/manuals");
+        expect(getSpy.mock.calls[0][0]).toBe("/organizations/test-org/app/projects/1/manuals");
         expect(getSpy.mock.calls[0][1]).toEqual({ mine: "1" });
     });
 
@@ -113,7 +113,7 @@ describe("Capture/Index 自作フィルタ・作成者表示", () => {
         const element = screen.getByTestId("capture-cover-1");
         expect(element.dataset.state).toBe("image");
         expect(element.getAttribute("src")).toBe(
-            "/app/projects/1/manuals/1/cuts/7/takes/9/thumbnail",
+            "/organizations/test-org/app/projects/1/manuals/1/cuts/7/takes/9/thumbnail",
         );
     });
 

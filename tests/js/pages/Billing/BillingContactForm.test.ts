@@ -35,7 +35,7 @@ afterEach(() => {
 describe("BillingContactForm", () => {
     it("未入力でも submit は enabled のまま押下でき、PATCH が飛ぶ", async () => {
         render(BillingContactForm, {
-            props: { billingContact: baseContact, updateUrl: "/billing/contact", canManage: true },
+            props: { billingContact: baseContact, updateUrl: "/organizations/test-org/billing/contact", canManage: true },
         });
 
         const submit = screen.getByTestId("billing-contact-submit");
@@ -45,7 +45,7 @@ describe("BillingContactForm", () => {
 
         expect(routerPatchMock).toHaveBeenCalledTimes(1);
         const [url, payload] = routerPatchMock.mock.calls[0] as [string, Record<string, unknown>];
-        expect(url).toBe("/billing/contact");
+        expect(url).toBe("/organizations/test-org/billing/contact");
         expect(payload).toEqual({ billing_contact_email: "", billing_contact_name: "" });
     });
 
@@ -59,7 +59,7 @@ describe("BillingContactForm", () => {
      */
     it("form は novalidate を持つ (検証はサーバ日本語文言に一本化する)", () => {
         render(BillingContactForm, {
-            props: { billingContact: baseContact, updateUrl: "/billing/contact", canManage: true },
+            props: { billingContact: baseContact, updateUrl: "/organizations/test-org/billing/contact", canManage: true },
         });
 
         const form = screen.getByTestId("billing-contact-form") as HTMLFormElement;
@@ -68,7 +68,7 @@ describe("BillingContactForm", () => {
 
     it("email 入力は type=email のまま (モバイルキーボード等の入力補助を落とさない)", () => {
         render(BillingContactForm, {
-            props: { billingContact: baseContact, updateUrl: "/billing/contact", canManage: true },
+            props: { billingContact: baseContact, updateUrl: "/organizations/test-org/billing/contact", canManage: true },
         });
 
         expect(screen.getByTestId("billing-contact-email-input")).toHaveAttribute("type", "email");
@@ -76,7 +76,7 @@ describe("BillingContactForm", () => {
 
     it("不正な形式の email でも submit で PATCH が飛ぶ (native にブロックされない)", async () => {
         render(BillingContactForm, {
-            props: { billingContact: baseContact, updateUrl: "/billing/contact", canManage: true },
+            props: { billingContact: baseContact, updateUrl: "/organizations/test-org/billing/contact", canManage: true },
         });
 
         await fireEvent.input(screen.getByTestId("billing-contact-email-input"), {
@@ -97,7 +97,7 @@ describe("BillingContactForm", () => {
             errors: { billing_contact_email: "請求先メールアドレスは、有効なメールアドレス形式で指定してください。" },
         };
         render(BillingContactForm, {
-            props: { billingContact: baseContact, updateUrl: "/billing/contact", canManage: true },
+            props: { billingContact: baseContact, updateUrl: "/organizations/test-org/billing/contact", canManage: true },
         });
 
         expect(
@@ -107,7 +107,7 @@ describe("BillingContactForm", () => {
 
     it("未設定のときは owner email が実際の宛先であることを示す", () => {
         render(BillingContactForm, {
-            props: { billingContact: baseContact, updateUrl: "/billing/contact", canManage: true },
+            props: { billingContact: baseContact, updateUrl: "/organizations/test-org/billing/contact", canManage: true },
         });
 
         expect(screen.getByText(/owner@example\.test/)).toBeInTheDocument();
@@ -117,7 +117,7 @@ describe("BillingContactForm", () => {
         render(BillingContactForm, {
             props: {
                 billingContact: { email: "billing@example.test", name: "経理部", fallbackEmail: null },
-                updateUrl: "/billing/contact",
+                updateUrl: "/organizations/test-org/billing/contact",
                 canManage: false,
             },
         });

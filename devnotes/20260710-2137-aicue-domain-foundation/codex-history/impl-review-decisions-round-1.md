@@ -10,7 +10,7 @@ Codex 出力: `../impl-review-round-1.md` (gpt-5.3-codex / high / one-shot)
 
 | # | 指摘 | 判断 | 根拠 |
 |---|------|------|------|
-| W1 | `project.in-current-org` を業務 route group 全体に付与しているため、`{project}` を持たない route にも middleware が乗る (trait 将来変更での副作用化・過剰適用リスク) | **見送る (現状維持)** | handle() は `$project instanceof Project` の narrowing を **resolveCurrentOrganization() より前**に行うため、{project} 非保持 route では DB/org 解決を一切走らせない完全 no-op。group 一括付与は「将来 project 配下 route を追加した開発者が付け忘れる」リスク (= 本修正が塞いだ順序ハザードの再発経路) を構造的に消すための意図的選択で、ProjectRouteCurrentOrgGuardTest の deny-by-default とセットで機能する。限定付与に変えると『route 追加時に sub-group へ入れ忘れ → Architecture テストで fail → 手で付与』の手戻りが常態化し、一括付与の保守コスト (no-op 1 分岐) より高い。Codex 自身も「現時点のセキュリティ破綻ではない」と認定 |
+| W1 | `project.in-route-org` を業務 route group 全体に付与しているため、`{project}` を持たない route にも middleware が乗る (trait 将来変更での副作用化・過剰適用リスク) | **見送る (現状維持)** | handle() は `$project instanceof Project` の narrowing を **resolveCurrentOrganization() より前**に行うため、{project} 非保持 route では DB/org 解決を一切走らせない完全 no-op。group 一括付与は「将来 project 配下 route を追加した開発者が付け忘れる」リスク (= 本修正が塞いだ順序ハザードの再発経路) を構造的に消すための意図的選択で、ProjectRouteCurrentOrgGuardTest の deny-by-default とセットで機能する。限定付与に変えると『route 追加時に sub-group へ入れ忘れ → Architecture テストで fail → 手で付与』の手戻りが常態化し、一括付与の保守コスト (no-op 1 分岐) より高い。Codex 自身も「現時点のセキュリティ破綻ではない」と認定 |
 
 ## Suggestion
 

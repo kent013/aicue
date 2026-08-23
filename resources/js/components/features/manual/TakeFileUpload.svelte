@@ -9,6 +9,7 @@
         UploadQueue,
     } from "@/lib/capture/upload-queue";
     import type { CutMaterialType } from "@/types/manual";
+    import { currentOrganizationSlug } from "@/lib/org-url";
 
     /**
      * PC ローカル動画の追加アップロード (doc/04)。
@@ -34,7 +35,7 @@
 
     // store を自前で保持するのは、queued (オフライン等) の Blob を PC 側に残さないため
     const store = createMemoryPendingStore();
-    const queue = new UploadQueue({ store });
+    const queue = new UploadQueue({ store, organizationSlug: currentOrganizationSlug() });
     let input: HTMLInputElement | null = $state(null);
     let uploading = $state(false);
     let error = $state<string | null>(null);

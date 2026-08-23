@@ -41,7 +41,7 @@ function seededFreePlan(): Plan
     return $plan;
 }
 
-test('seeded 無料プラン組織の全ロールが /projects に到達できる (F-C3 回帰)', function (OrganizationRole $role): void {
+test('seeded 無料プラン組織の全ロールが /organizations/{slug}/projects に到達できる (F-C3 回帰)', function (OrganizationRole $role): void {
     $this->seed(ManualTestSeeder::class);
 
     $plan = seededFreePlan();
@@ -55,7 +55,7 @@ test('seeded 無料プラン組織の全ロールが /projects に到達でき�
 
     // assertOk() で 302→billing の redirect を検出。加えて Inertia コンポーネント名で
     // 「200 だが別画面」ケースも塞ぐ (ProjectController@index の Inertia::render 先)。
-    $this->actingAs($user)->get('/projects')
+    $this->actingAs($user)->get("/organizations/{$organization->slug}/projects")
         ->assertOk()
         ->assertInertia(fn ($page) => $page->component('Projects/Index'));
 })->with([
@@ -76,5 +76,5 @@ test('seeded 有償組織は plan_code と active subscription を持ち課金�
     expect($organization->subscription('default')?->stripe_status)->toBe('active');
 
     $owner = User::whereBlind('email', 'email_index', "owner-{$paid?->code}@example.com")->firstOrFail();
-    $this->actingAs($owner)->get('/projects')->assertOk();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects")->assertOk();
 });

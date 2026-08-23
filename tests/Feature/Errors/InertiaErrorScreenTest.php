@@ -69,11 +69,10 @@ test('403 が Inertia の Error ページになる', function (): void {
     $project = Project::factory()->forOrganization($organization)->create();
     $shooter = attachOrganizationMember($organization);
     attachProjectMember($project, $shooter, ProjectRole::Member);
-    $shooter->forceFill(['current_organization_id' => $organization->id])->save();
 
     $response = $this->actingAs($shooter)
         ->withHeaders(inertiaErrorScreenHeaders())
-        ->get("/projects/{$project->id}/categories");
+        ->get("/organizations/{$organization->slug}/projects/{$project->id}/categories");
 
     $response->assertForbidden();
     $props = inertiaErrorScreenProps($response);
@@ -279,14 +278,14 @@ test('戻り先が全 status で 1 件以上ある', function (InertiaErrorScree
 })->with(InertiaErrorScreenStatus::cases());
 
 test('cross-org 実在と不在で Error 応答が分岐しない', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
     [$otherOrg] = createOrganizationWithOwner('他組織');
     $foreign = Project::factory()->forOrganization($otherOrg)->create();
 
     $headers = inertiaErrorScreenHeaders();
 
-    $existing = $this->actingAs($owner)->withHeaders($headers)->get("/projects/{$foreign->id}");
-    $missing = $this->actingAs($owner)->withHeaders($headers)->get('/projects/999999999');
+    $existing = $this->actingAs($owner)->withHeaders($headers)->get("/organizations/{$organization->slug}/projects/{$foreign->id}");
+    $missing = $this->actingAs($owner)->withHeaders($headers)->get("/organizations/{$organization->slug}/projects/999999999");
 
     $existing->assertNotFound();
     $missing->assertNotFound();

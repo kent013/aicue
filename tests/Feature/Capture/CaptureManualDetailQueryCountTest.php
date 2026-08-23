@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Models\Cut;
+use App\Models\Organization;
 use App\Models\Project;
 use App\Models\Take;
 use App\Models\User;
@@ -43,11 +44,11 @@ function manualWithCutsAndTakes(Project $project, int $cutCount, int $takesPerCu
  *
  * @return list<string>
  */
-function measureCaptureShowQueries(User $actor, Project $project, VideoManual $manual): array
+function measureCaptureShowQueries(Organization $organization, User $actor, Project $project, VideoManual $manual): array
 {
     DB::enableQueryLog();
     DB::flushQueryLog();
-    test()->actingAs($actor)->get("/app/projects/{$project->id}/manuals/{$manual->id}")->assertOk();
+    test()->actingAs($actor)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}")->assertOk();
     $log = DB::getQueryLog();
     DB::disableQueryLog();
 
@@ -75,11 +76,11 @@ test('撮影詳細のクエリ数はカット数に比例しない', function ()
     $singleCutManual = manualWithCutsAndTakes($project, cutCount: 1, takesPerCut: 2);
     $tenCutsManual = manualWithCutsAndTakes($project, cutCount: 10, takesPerCut: 2);
 
-    measureCaptureShowQueries($owner, $project, $singleCutManual); // 暖機
+    measureCaptureShowQueries($organization, $owner, $project, $singleCutManual); // 暖機
 
     expectSameShowQueryCount(
-        measureCaptureShowQueries($owner, $project, $singleCutManual),
-        measureCaptureShowQueries($owner, $project, $tenCutsManual),
+        measureCaptureShowQueries($organization, $owner, $project, $singleCutManual),
+        measureCaptureShowQueries($organization, $owner, $project, $tenCutsManual),
     );
 });
 
@@ -90,10 +91,10 @@ test('撮影詳細のクエリ数はカット 1 本あたりのテイク数に�
     $fewTakesManual = manualWithCutsAndTakes($project, cutCount: 3, takesPerCut: 1);
     $manyTakesManual = manualWithCutsAndTakes($project, cutCount: 3, takesPerCut: 5);
 
-    measureCaptureShowQueries($owner, $project, $fewTakesManual); // 暖機
+    measureCaptureShowQueries($organization, $owner, $project, $fewTakesManual); // 暖機
 
     expectSameShowQueryCount(
-        measureCaptureShowQueries($owner, $project, $fewTakesManual),
-        measureCaptureShowQueries($owner, $project, $manyTakesManual),
+        measureCaptureShowQueries($organization, $owner, $project, $fewTakesManual),
+        measureCaptureShowQueries($organization, $owner, $project, $manyTakesManual),
     );
 });

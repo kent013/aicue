@@ -94,10 +94,10 @@ function scenarioRowFromCut(Cut $cut): array
 }
 
 test('編集者は steps+points を一括保存できる (type/parent/sort はサーバ採番・version+1)', function (): void {
-    [, $owner, $project, $manual] = scenarioTestContext();
+    [$organization, $owner, $project, $manual] = scenarioTestContext();
 
     $response = $this->actingAs($owner)->putJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/scenario",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/scenario",
         [
             'expected_version' => 0,
             'steps' => [
@@ -139,11 +139,11 @@ test('編集者は steps+points を一括保存できる (type/parent/sort は�
 });
 
 test('既存 cut の本文更新が反映される (fill 対象フィールドのみ変化)', function (): void {
-    [, $owner, $project, $manual] = scenarioTestContext();
+    [$organization, $owner, $project, $manual] = scenarioTestContext();
     $step = Cut::factory()->forManual($manual)->create(['scene' => '元のシーン']);
 
     $this->actingAs($owner)->putJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/scenario",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/scenario",
         [
             'expected_version' => 0,
             'steps' => [
@@ -164,12 +164,12 @@ test('既存 cut の本文更新が反映される (fill 対象フィールド�
 });
 
 test('並べ替えが反映される (sort_order 0..N-1 の gap 除去)', function (): void {
-    [, $owner, $project, $manual] = scenarioTestContext();
+    [$organization, $owner, $project, $manual] = scenarioTestContext();
     $first = Cut::factory()->forManual($manual)->withSortOrder(3)->create(['scene' => 'A']);
     $second = Cut::factory()->forManual($manual)->withSortOrder(7)->create(['scene' => 'B']);
 
     $this->actingAs($owner)->putJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/scenario",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/scenario",
         [
             'expected_version' => 0,
             'steps' => [
@@ -184,13 +184,13 @@ test('並べ替えが反映される (sort_order 0..N-1 の gap 除去)', functi
 });
 
 test('payload から外した cut は削除される (step 削除で配下 point も)', function (): void {
-    [, $owner, $project, $manual] = scenarioTestContext();
+    [$organization, $owner, $project, $manual] = scenarioTestContext();
     $keep = Cut::factory()->forManual($manual)->withSortOrder(0)->create();
     $removedStep = Cut::factory()->forManual($manual)->withSortOrder(1)->create();
     $removedPoint = Cut::factory()->asPointOf($removedStep)->create();
 
     $this->actingAs($owner)->putJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/scenario",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/scenario",
         [
             'expected_version' => 0,
             'steps' => [array_merge(scenarioRowFromCut($keep), ['points' => []])],
@@ -203,11 +203,11 @@ test('payload から外した cut は削除される (step 削除で配下 point
 });
 
 test('expected_version 不一致は 409 (code 厳格一致) で保存されない', function (): void {
-    [, $owner, $project, $manual] = scenarioTestContext();
+    [$organization, $owner, $project, $manual] = scenarioTestContext();
     $manual->forceFill(['scenario_version' => 2])->save();
 
     $response = $this->actingAs($owner)->putJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/scenario",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/scenario",
         [
             'expected_version' => 1,
             'steps' => [scenarioStepPayload()],
@@ -225,11 +225,11 @@ test('expected_version 不一致は 409 (code 厳格一致) で保存されな�
 });
 
 test('rendering 中の保存は 409 (conflict_type=rendering) で DB 不変', function (): void {
-    [, $owner, $project, $manual] = scenarioTestContext();
+    [$organization, $owner, $project, $manual] = scenarioTestContext();
     $manual->forceFill(['status' => VideoManualStatus::Rendering])->save();
 
     $response = $this->actingAs($owner)->putJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/scenario",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/scenario",
         ['expected_version' => 0, 'steps' => [scenarioStepPayload()]],
     );
 
@@ -241,11 +241,11 @@ test('rendering 中の保存は 409 (conflict_type=rendering) で DB 不変', fu
 });
 
 test('analyzing 中の保存は 409 (conflict_type=analyzing)', function (): void {
-    [, $owner, $project, $manual] = scenarioTestContext();
+    [$organization, $owner, $project, $manual] = scenarioTestContext();
     $manual->forceFill(['status' => VideoManualStatus::Analyzing])->save();
 
     $response = $this->actingAs($owner)->putJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/scenario",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/scenario",
         ['expected_version' => 0, 'steps' => [scenarioStepPayload()]],
     );
 
@@ -254,12 +254,12 @@ test('analyzing 中の保存は 409 (conflict_type=analyzing)', function (): voi
 });
 
 test('実変更があると published→ready へ戻る (version も +1)', function (): void {
-    [, $owner, $project, $manual] = scenarioTestContext();
+    [$organization, $owner, $project, $manual] = scenarioTestContext();
     $manual->forceFill(['status' => VideoManualStatus::Published, 'scenario_version' => 5])->save();
     $step = Cut::factory()->forManual($manual)->create(['scene' => '元のシーン']);
 
     $this->actingAs($owner)->putJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/scenario",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/scenario",
         [
             'expected_version' => 5,
             'steps' => [array_merge(scenarioRowFromCut($step), ['scene' => '変更', 'points' => []])],
@@ -272,12 +272,12 @@ test('実変更があると published→ready へ戻る (version も +1)', funct
 });
 
 test('実変更なしの no-op 保存は published を維持し version は +1', function (): void {
-    [, $owner, $project, $manual] = scenarioTestContext();
+    [$organization, $owner, $project, $manual] = scenarioTestContext();
     $manual->forceFill(['status' => VideoManualStatus::Published, 'scenario_version' => 5])->save();
     $step = Cut::factory()->forManual($manual)->withSortOrder(0)->create();
 
     $response = $this->actingAs($owner)->putJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/scenario",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/scenario",
         [
             'expected_version' => 5,
             'steps' => [array_merge(scenarioRowFromCut($step), ['points' => []])],
@@ -292,11 +292,11 @@ test('実変更なしの no-op 保存は published を維持し version は +1',
 });
 
 test('初回保存 (cuts>=1) で draft→ready へ遷移する (自作シナリオ経路)', function (): void {
-    [, $owner, $project, $manual] = scenarioTestContext();
+    [$organization, $owner, $project, $manual] = scenarioTestContext();
     expect($manual->status)->toBe(VideoManualStatus::Draft);
 
     $this->actingAs($owner)->putJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/scenario",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/scenario",
         ['expected_version' => 0, 'steps' => [scenarioStepPayload()]],
     )->assertOk();
 
@@ -304,10 +304,10 @@ test('初回保存 (cuts>=1) で draft→ready へ遷移する (自作シナリ�
 });
 
 test('draft のまま空 steps を保存しても draft を維持する (version は +1)', function (): void {
-    [, $owner, $project, $manual] = scenarioTestContext();
+    [$organization, $owner, $project, $manual] = scenarioTestContext();
 
     $this->actingAs($owner)->putJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/scenario",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/scenario",
         ['expected_version' => 0, 'steps' => []],
     )->assertOk();
 
@@ -317,8 +317,8 @@ test('draft のまま空 steps を保存しても draft を維持する (version
 });
 
 test('保護キー・サーバ導出キーのネスト送出は 422', function (): void {
-    [, $owner, $project, $manual] = scenarioTestContext();
-    $url = "/projects/{$project->id}/manuals/{$manual->id}/scenario";
+    [$organization, $owner, $project, $manual] = scenarioTestContext();
+    $url = "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/scenario";
 
     // steps.0.parent_cut_id
     $this->actingAs($owner)->putJson($url, [
@@ -356,17 +356,17 @@ test('保護キー・サーバ導出キーのネスト送出は 422', function (
 });
 
 test('expected_version 欠落は 422', function (): void {
-    [, $owner, $project, $manual] = scenarioTestContext();
+    [$organization, $owner, $project, $manual] = scenarioTestContext();
 
     $this->actingAs($owner)->putJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/scenario",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/scenario",
         ['steps' => []],
     )->assertStatus(422)->assertJsonValidationErrors('expected_version');
 });
 
 test('本文検証: subtitle_primary 101 文字 / scene 空 / points キー欠落は 422', function (): void {
-    [, $owner, $project, $manual] = scenarioTestContext();
-    $url = "/projects/{$project->id}/manuals/{$manual->id}/scenario";
+    [$organization, $owner, $project, $manual] = scenarioTestContext();
+    $url = "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/scenario";
 
     $this->actingAs($owner)->putJson($url, [
         'expected_version' => 0,
@@ -388,10 +388,10 @@ test('本文検証: subtitle_primary 101 文字 / scene 空 / points キー欠�
 });
 
 test('narration / subtitle_secondary の null は空文字へ正規化され保存できる (下書き許容)', function (): void {
-    [, $owner, $project, $manual] = scenarioTestContext();
+    [$organization, $owner, $project, $manual] = scenarioTestContext();
 
     $this->actingAs($owner)->putJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/scenario",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/scenario",
         [
             'expected_version' => 0,
             'steps' => [scenarioStepPayload(['narration' => null, 'subtitle_secondary' => null])],
@@ -405,12 +405,12 @@ test('narration / subtitle_secondary の null は空文字へ正規化され保�
 });
 
 test('他 manual の cut id 混入は 404 で DB 不変 (tenant キー不信)', function (): void {
-    [, $owner, $project, $manual] = scenarioTestContext();
+    [$organization, $owner, $project, $manual] = scenarioTestContext();
     $otherManual = VideoManual::factory()->forProject($project)->create();
     $foreignCut = Cut::factory()->forManual($otherManual)->create(['scene' => '元のシーン']);
 
     $this->actingAs($owner)->putJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/scenario",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/scenario",
         [
             'expected_version' => 0,
             'steps' => [array_merge(scenarioRowFromCut($foreignCut), ['scene' => '改竄', 'points' => []])],
@@ -423,11 +423,11 @@ test('他 manual の cut id 混入は 404 で DB 不変 (tenant キー不信)', 
 });
 
 test('payload 内の cut id 重複は 422', function (): void {
-    [, $owner, $project, $manual] = scenarioTestContext();
+    [$organization, $owner, $project, $manual] = scenarioTestContext();
     $step = Cut::factory()->forManual($manual)->create();
 
     $this->actingAs($owner)->putJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/scenario",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/scenario",
         [
             'expected_version' => 0,
             'steps' => [
@@ -439,11 +439,11 @@ test('payload 内の cut id 重複は 422', function (): void {
 });
 
 test('既存 cut の階層/型変更は 422 (step→point 降格・point→step 昇格)', function (): void {
-    [, $owner, $project, $manual] = scenarioTestContext();
+    [$organization, $owner, $project, $manual] = scenarioTestContext();
     $step = Cut::factory()->forManual($manual)->withSortOrder(0)->create();
     $point = Cut::factory()->asPointOf($step)->create();
 
-    $url = "/projects/{$project->id}/manuals/{$manual->id}/scenario";
+    $url = "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/scenario";
 
     // step の id を points 配下に置く (降格)
     $this->actingAs($owner)->putJson($url, [
@@ -465,30 +465,29 @@ test('既存 cut の階層/型変更は 422 (step→point 降格・point→step 
 test('撮影者 (project_member) は 403', function (): void {
     [$organization, , $project, $manual] = scenarioTestContext();
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
     attachProjectMember($project, $member, ProjectRole::Member);
 
     $this->actingAs($member)->putJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/scenario",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/scenario",
         ['expected_version' => 0, 'steps' => []],
     )->assertForbidden();
 });
 
 test('未ログインは 401 (JSON)', function (): void {
-    [, , $project, $manual] = scenarioTestContext();
+    [$organization, , $project, $manual] = scenarioTestContext();
 
     $this->putJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/scenario",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/scenario",
         ['expected_version' => 0, 'steps' => []],
     )->assertUnauthorized();
 });
 
 test('cross-org の manual への PUT は 404 (存在オラクル封じ)', function (): void {
-    [, $owner] = createOrganizationWithOwner('自組織');
+    [$organization, $owner] = createOrganizationWithOwner('自組織');
     [, , $otherProject, $otherManual] = scenarioTestContext();
 
     $this->actingAs($owner)->putJson(
-        "/projects/{$otherProject->id}/manuals/{$otherManual->id}/scenario",
+        "/organizations/{$organization->slug}/projects/{$otherProject->id}/manuals/{$otherManual->id}/scenario",
         ['expected_version' => 0, 'steps' => []],
     )->assertNotFound();
 });
@@ -498,14 +497,14 @@ test('cross-project の manual への PUT は 404 (scopeBindings)', function ():
     $otherProject = Project::factory()->forOrganization($organization)->create();
 
     $this->actingAs($owner)->putJson(
-        "/projects/{$otherProject->id}/manuals/{$manual->id}/scenario",
+        "/organizations/{$organization->slug}/projects/{$otherProject->id}/manuals/{$manual->id}/scenario",
         ['expected_version' => 0, 'steps' => []],
     )->assertNotFound();
 });
 
 test('steps / points の上限超過は 422 (有界入力)', function (): void {
-    [, $owner, $project, $manual] = scenarioTestContext();
-    $url = "/projects/{$project->id}/manuals/{$manual->id}/scenario";
+    [$organization, $owner, $project, $manual] = scenarioTestContext();
+    $url = "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/scenario";
 
     // top-level 上限は MAX_TOP_LEVEL_CUTS(=102。生成 100 + 導入/総括 2)。超過 (103) で 422
     $this->actingAs($owner)->putJson($url, [
@@ -522,13 +521,13 @@ test('steps / points の上限超過は 422 (有界入力)', function (): void {
 });
 
 test('edit 画面 props に scenario ツリーと version / manual.status が載る', function (): void {
-    [, $owner, $project, $manual] = scenarioTestContext();
+    [$organization, $owner, $project, $manual] = scenarioTestContext();
     $manual->forceFill(['scenario_version' => 3])->save();
     $step = Cut::factory()->forManual($manual)->withSortOrder(0)->create(['scene' => '手順シーン']);
     $point = Cut::factory()->asPointOf($step)->create(['scene' => '急所シーン']);
 
     $this->actingAs($owner)
-        ->get("/projects/{$project->id}/manuals/{$manual->id}/edit")
+        ->get("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/edit")
         ->assertInertia(fn (Assert $page) => $page
             ->component('Manuals/Edit')
             ->where('manual.status', 'draft')

@@ -6,6 +6,7 @@ use App\Enums\OrganizationRole;
 use App\Enums\ProjectRole;
 use App\Enums\SecurityEventType;
 use App\Models\AdminUser;
+use App\Models\Organization;
 use App\Models\OrganizationInvitation;
 use App\Models\Project;
 use App\Models\SecurityAuditEvent;
@@ -32,9 +33,9 @@ use Webmozart\Assert\Assert;
  *
  * @return array<int, string|null>
  */
-function fetchMemberLastLogins(User $viewer): array
+function fetchMemberLastLogins(Organization $organization, User $viewer): array
 {
-    $response = test()->actingAs($viewer)->get('/manage/users');
+    $response = test()->actingAs($viewer)->get("/organizations/{$organization->slug}/manage/users");
     $response->assertOk();
 
     /** @var list<array{id: int, lastLoginAt: string|null}> $members */
@@ -62,7 +63,7 @@ test('org Owner は 200 + Admin/Users component で members/invitations shape �
     OrganizationInvitation::factory()->forOrganization($organization)
         ->create(['email' => 'pending-member@example.com', 'role' => OrganizationRole::Member->value]);
 
-    $response = $this->actingAs($owner)->get('/manage/users');
+    $response = $this->actingAs($owner)->get("/organizations/{$organization->slug}/manage/users");
 
     $response->assertOk();
     $response->assertInertia(fn ($page) => $page
@@ -81,9 +82,8 @@ test('org Owner は 200 + Admin/Users component で members/invitations shape �
 test('org Admin も閲覧できる (200)', function (): void {
     [$organization] = createOrganizationWithOwner();
     $admin = attachOrganizationMember($organization, OrganizationRole::Admin);
-    $admin->forceFill(['current_organization_id' => $organization->id])->save();
 
-    $this->actingAs($admin)->get('/manage/users')->assertOk();
+    $this->actingAs($admin)->get("/organizations/{$organization->slug}/manage/users")->assertOk();
 });
 
 test('org Member (編集者 = project_admin でも org は Member) は 403', function (): void {
@@ -91,9 +91,8 @@ test('org Member (編集者 = project_admin でも org は Member) は 403', fun
     $project = Project::factory()->forOrganization($organization)->create();
     $editor = attachOrganizationMember($organization);
     attachProjectMember($project, $editor, ProjectRole::Admin);
-    $editor->forceFill(['current_organization_id' => $organization->id])->save();
 
-    $this->actingAs($editor)->get('/manage/users')->assertForbidden();
+    $this->actingAs($editor)->get("/organizations/{$organization->slug}/manage/users")->assertForbidden();
 });
 
 // CTA 導線の到達性 (T067): ユーザー管理注記の「プロジェクトを作成」リンクが指す
@@ -103,22 +102,20 @@ test('CTA 導線: Owner/Admin は projects.create に到達できる (200)', fun
     // createOrganizationWithOwner は無償プラン (plan_code null) = 課金ゲート通過
     [$organization, $owner] = createOrganizationWithOwner();
     $admin = attachOrganizationMember($organization, OrganizationRole::Admin);
-    $admin->forceFill(['current_organization_id' => $organization->id])->save();
 
-    $this->actingAs($owner)->get('/projects/create')->assertOk();
-    $this->actingAs($admin)->get('/projects/create')->assertOk();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/create")->assertOk();
+    $this->actingAs($admin)->get("/organizations/{$organization->slug}/projects/create")->assertOk();
 });
 
 test('CTA 導線: org Member は projects.create で 403 (権限境界が非退化)', function (): void {
     [$organization] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization, OrganizationRole::Member);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
-    $this->actingAs($member)->get('/projects/create')->assertForbidden();
+    $this->actingAs($member)->get("/organizations/{$organization->slug}/projects/create")->assertForbidden();
 });
 
 test('未ログインは login へ redirect される', function (): void {
-    $this->get('/manage/users')->assertRedirect('/login');
+    $this->get('/organizations/guest-org/manage/users')->assertRedirect('/login');
 });
 
 test('roleState 導出: owner/admin/editor/shooter/unassigned の 5 状態が rows に正しく出る', function (): void {
@@ -135,7 +132,7 @@ test('roleState 導出: owner/admin/editor/shooter/unassigned の 5 状態が ro
     $broken = User::factory()->create();
     $organization->users()->attach($broken);
 
-    $response = $this->actingAs($owner)->get('/manage/users');
+    $response = $this->actingAs($owner)->get("/organizations/{$organization->slug}/manage/users");
 
     $response->assertOk();
     $response->assertInertia(function ($page) use ($owner, $admin, $editor, $shooter, $unassigned, $broken): void {
@@ -158,12 +155,12 @@ test('categoriesUrl prop は撤去済み (T071: カテゴリ導線はプロジ�
     [$organization, $owner] = createOrganizationWithOwner();
 
     // AdminMenuNav 撤去に伴い categoriesUrl prop は存在しない (project 有無に関わらず)
-    $this->actingAs($owner)->get('/manage/users')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/manage/users")
         ->assertInertia(fn ($page) => $page->missing('categoriesUrl')->where('hasDefaultProject', false));
 
     Project::factory()->forOrganization($organization)->create();
 
-    $this->actingAs($owner)->get('/manage/users')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/manage/users")
         ->assertInertia(fn ($page) => $page
             ->where('hasDefaultProject', true)
             ->missing('categoriesUrl'));
@@ -176,7 +173,7 @@ test('招待一覧は active のみ (失効・受諾済・取消済は出ない)
     OrganizationInvitation::factory()->forOrganization($organization)->accepted()->create(['email' => 'accepted@example.com']);
     OrganizationInvitation::factory()->forOrganization($organization)->revoked()->create(['email' => 'revoked@example.com']);
 
-    $response = $this->actingAs($owner)->get('/manage/users');
+    $response = $this->actingAs($owner)->get("/organizations/{$organization->slug}/manage/users");
 
     $response->assertInertia(fn ($page) => $page
         ->count('invitations', 1)
@@ -186,10 +183,11 @@ test('招待一覧は active のみ (失効・受諾済・取消済は出ない)
         ->where('invitations.0.roleLabel', 'メンバー'));
 });
 
-test('current org 未設定 (組織未所属状態) は 404', function (): void {
+test('非所属の組織 URL は 404 (組織の有無を露出しない)', function (): void {
+    [$organization] = createOrganizationWithOwner();
     $user = User::factory()->create();
 
-    $this->actingAs($user)->get('/manage/users')->assertNotFound();
+    $this->actingAs($user)->get("/organizations/{$organization->slug}/manage/users")->assertNotFound();
 });
 
 // ─────────────────── T203: 最終ログイン日時 (lastLoginAt) ───────────────────
@@ -203,7 +201,7 @@ test('login 記録のあるメンバーは lastLoginAt に ISO8601 (オフセッ
     $at = CarbonImmutable::parse('2026-05-04 10:08:00');
     SecurityAuditEvent::factory()->forUser($member)->occurredAt($at)->create();
 
-    $lastLogins = fetchMemberLastLogins($owner);
+    $lastLogins = fetchMemberLastLogins($organization, $owner);
 
     // toDateTimeString() への退行 (オフセット欠落 = 端末側で 9 時間ずれる) を検出する
     expect($lastLogins[$member->id])->toBe($at->toIso8601String());
@@ -214,7 +212,7 @@ test('login 記録の無いメンバーは lastLoginAt が null', function (): v
     [$organization, $owner] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization);
 
-    expect(fetchMemberLastLogins($owner)[$member->id])->toBeNull();
+    expect(fetchMemberLastLogins($organization, $owner)[$member->id])->toBeNull();
 });
 
 test('複数の login 行があれば最新が選ばれる', function (): void {
@@ -226,7 +224,7 @@ test('複数の login 行があれば最新が選ばれる', function (): void {
     SecurityAuditEvent::factory()->forUser($member)->occurredAt($latest)->create();
     SecurityAuditEvent::factory()->forUser($member)->occurredAt(CarbonImmutable::now()->subYearNoOverflow())->create();
 
-    expect(fetchMemberLastLogins($owner)[$member->id])->toBe($latest->toIso8601String());
+    expect(fetchMemberLastLogins($organization, $owner)[$member->id])->toBe($latest->toIso8601String());
 });
 
 test('login 以外の種別は数えない (logout / login_failed / password_changed)', function (): void {
@@ -237,7 +235,7 @@ test('login 以外の種別は数えない (logout / login_failed / password_cha
         SecurityAuditEvent::factory()->forUser($member)->ofType($type)->create();
     }
 
-    expect(fetchMemberLastLogins($owner)[$member->id])->toBeNull();
+    expect(fetchMemberLastLogins($organization, $owner)[$member->id])->toBeNull();
 });
 
 test('他組織のメンバーの login 行は混ざらない (cross-org)', function (): void {
@@ -250,7 +248,7 @@ test('他組織のメンバーの login 行は混ざらない (cross-org)', func
     SecurityAuditEvent::factory()->forUser($otherMember)->occurredAt($otherAt)->create();
     SecurityAuditEvent::factory()->forUser($otherOwner)->occurredAt($otherAt)->create();
 
-    $lastLogins = fetchMemberLastLogins($owner);
+    $lastLogins = fetchMemberLastLogins($organization, $owner);
 
     // 当組織の一覧に他組織の利用者は現れず、当組織の行も他組織の値を貰わない
     expect(array_keys($lastLogins))->not->toContain($otherMember->id);
@@ -261,7 +259,6 @@ test('他組織のメンバーの login 行は混ざらない (cross-org)', func
 test('実際のログイン (POST /login) で lastLoginAt に値が入る (記録経路の通し確認)', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
     expect(loginRowCountFor($member))->toBe(0);
 
@@ -273,13 +270,12 @@ test('実際のログイン (POST /login) で lastLoginAt に値が入る (記�
 
     // 閲覧は owner として行う (member は manageMembers を持たず 403 になるため)
     $this->flushSession();
-    expect(fetchMemberLastLogins($owner)[$member->id])->not->toBeNull();
+    expect(fetchMemberLastLogins($organization, $owner)[$member->id])->not->toBeNull();
 });
 
 test('remember me による自動復元も数える (StampRecentAuthOnLogin とは逆の扱い)', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
     // 1 回目: 資格情報を提示したログイン (remember 付き)
     $this->post('/login', [
@@ -305,7 +301,7 @@ test('remember me による自動復元も数える (StampRecentAuthOnLogin と�
     $this->withCookie(
         $recallerName,
         $member->id.'|'.$rememberToken.'|'.$member->getAuthPassword(),
-    )->get('/dashboard');
+    )->get("/organizations/{$organization->slug}/dashboard");
     $this->travelBack();
 
     $this->assertAuthenticatedAs($member);
@@ -328,7 +324,7 @@ test('remember me による自動復元も数える (StampRecentAuthOnLogin と�
     // props は **recaller 行の時刻**になる (1 回目の時刻のままなら除外への退行)
     $this->flushSession();
     Auth::forgetGuards();
-    expect(fetchMemberLastLogins($owner)[$member->id])->toBe($recallerRow->toIso8601String());
+    expect(fetchMemberLastLogins($organization, $owner)[$member->id])->toBe($recallerRow->toIso8601String());
 });
 
 test('2FA 未完了 (challenge 手前) では数えず、完了させると数える', function (): void {
@@ -339,7 +335,6 @@ test('2FA 未完了 (challenge 手前) では数えず、完了させると数�
         $member = User::factory()->withTwoFactor()->create();
         $organization->users()->attach($member);
         $member->addRole(OrganizationRole::Member->value, $organization->laratrust_team_id);
-        $member->forceFill(['current_organization_id' => $organization->id])->save();
 
         return $member;
     };
@@ -364,13 +359,13 @@ test('2FA 未完了 (challenge 手前) では数えず、完了させると数�
 
     $this->flushSession();
     Auth::forgetGuards();
-    $lastLogins = fetchMemberLastLogins($owner);
+    $lastLogins = fetchMemberLastLogins($organization, $owner);
     expect($lastLogins[$pending->id])->toBeNull();
     expect($lastLogins[$completed->id])->not->toBeNull();
 });
 
 test('Filament 管理画面 (admin guard) のログインは混ざらない', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
     $adminUser = AdminUser::factory()->create();
 
     $before = SecurityAuditEvent::query()
@@ -388,7 +383,7 @@ test('Filament 管理画面 (admin guard) のログインは混ざらない', fu
         ->count())->toBe($before);
 
     // owner 自身の行にも影響しない
-    expect(fetchMemberLastLogins($owner)[$owner->id])->toBeNull();
+    expect(fetchMemberLastLogins($organization, $owner)[$owner->id])->toBeNull();
 });
 
 test('招待経由で参加した利用者は参加 (登録の自動ログイン) 時刻が最終ログインになる', function (): void {
@@ -414,5 +409,5 @@ test('招待経由で参加した利用者は参加 (登録の自動ログイン
 
     // 参加直後の本人は org Member = /manage/users は 403 なので owner として確認する
     $this->flushSession();
-    expect(fetchMemberLastLogins($owner)[$invitee->id])->not->toBeNull();
+    expect(fetchMemberLastLogins($organization, $owner)[$invitee->id])->not->toBeNull();
 });

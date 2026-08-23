@@ -162,7 +162,7 @@ Route::scopeBindings()->group(function (): void {
         ->name('projects.manuals.update');
     // シナリオ document 一括保存 (doc/09 §9.4 / doc/10 §10.3)。同一オリジン XHR (JSON 応答)。
     // {manual} ∈ {project} は scopeBindings、{project} ∈ current org は
-    // project.in-current-org middleware + controller inline guard の 2 層 (既存 group が担保)
+    // project.in-route-org middleware + controller inline guard の 2 層 (既存 group が担保)
     Route::put('/projects/{project}/manuals/{manual}/scenario', [ManualScenarioController::class, 'update'])
         ->name('projects.manuals.scenario.update');
     Route::delete('/projects/{project}/manuals/{manual}', [VideoManualController::class, 'destroy'])
@@ -180,7 +180,7 @@ Route::scopeBindings()->group(function (): void {
 'projects.manuals.destroy' => $s,
 ```
 
-補足: この route は既存の業務 route group（`project.in-current-org` + `require-active-subscription` +
+補足: この route は既存の業務 route group（`project.in-route-org` + `require-active-subscription` +
 auth/verified）内にあるため、`ProjectRouteCurrentOrgGuardTest`（deny-by-default）は自動で網羅する。
 cross-org 404 の存在オラクル封じは middleware 層で既に構造化されている。
 

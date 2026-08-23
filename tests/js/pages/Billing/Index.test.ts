@@ -15,7 +15,7 @@ vi.mock("@inertiajs/svelte", async (importOriginal) => ({
 }));
 
 /*
- * 課金ダッシュボード。プラン一覧は /billing/plans へ移設済み (plan-list は持たない)。
+ * 課金ダッシュボード。プラン一覧は /organizations/test-org/billing/plans へ移設済み (plan-list は持たない)。
  * per-bucket 残高 / quota 上限 / portal 出し分けを固定する。
  */
 
@@ -83,7 +83,7 @@ describe("Billing/Index", () => {
 
         expect(screen.queryByTestId("plan-list")).toBeNull();
         expect(screen.getByTestId("billing-plans-link").getAttribute("href")).toContain(
-            "/billing/plans",
+            "/organizations/test-org/billing/plans",
         );
     });
 
@@ -220,15 +220,15 @@ describe("Billing/Index — 着地 feedback (P9)", () => {
     });
 
     it("raw query を参照しない (?session_id があっても feedback=null なら描画しない)", () => {
-        window.history.replaceState({}, "", "/billing?session_id=cs_test&replayed=1");
+        window.history.replaceState({}, "", "/organizations/test-org/billing?session_id=cs_test&replayed=1");
         render(Index, { props: { page: basePage } });
 
         expect(screen.queryByTestId("billing-feedback")).toBeNull();
-        window.history.replaceState({}, "", "/billing");
+        window.history.replaceState({}, "", "/organizations/test-org/billing");
     });
 
     it("?highlight=auto-recharge でオートリチャージカードを強調する", async () => {
-        window.history.replaceState({}, "", "/billing?highlight=auto-recharge");
+        window.history.replaceState({}, "", "/organizations/test-org/billing?highlight=auto-recharge");
         render(Index, { props: { page: basePage } });
 
         await vi.waitFor(() => {
@@ -237,6 +237,6 @@ describe("Billing/Index — 着地 feedback (P9)", () => {
                 "true",
             );
         });
-        window.history.replaceState({}, "", "/billing");
+        window.history.replaceState({}, "", "/organizations/test-org/billing");
     });
 });

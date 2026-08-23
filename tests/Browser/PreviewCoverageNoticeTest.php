@@ -65,14 +65,14 @@ function previewCoverageNoticeFixture(): array
 
     test()->actingAs($owner);
 
-    return [$project, $manual];
+    return [$organization, $project, $manual];
 }
 
 test('E-1: 採用テイクが揃っていないマニュアルの詳細画面で、プレビュー生成前に注記が見える', function (): void {
-    [$project, $manual] = previewCoverageNoticeFixture();
+    [$organization, $project, $manual] = previewCoverageNoticeFixture();
 
-    $page = visit("/projects/{$project->id}/manuals/{$manual->id}")
-        ->assertPathIs("/projects/{$project->id}/manuals/{$manual->id}")
+    $page = visit("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}")
+        ->assertPathIs("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}")
         ->assertNoJavaScriptErrors();
 
     $page->assertVisible('[data-testid="preview-coverage-note"]');
@@ -87,10 +87,10 @@ test('E-1: 採用テイクが揃っていないマニュアルの詳細画面で
 });
 
 test('E-2: 注記が出ていてもプレビュー生成ボタンは押下可能である (禁止事項 8)', function (): void {
-    [$project, $manual] = previewCoverageNoticeFixture();
+    [$organization, $project, $manual] = previewCoverageNoticeFixture();
 
-    $page = visit("/projects/{$project->id}/manuals/{$manual->id}")
-        ->assertPathIs("/projects/{$project->id}/manuals/{$manual->id}");
+    $page = visit("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}")
+        ->assertPathIs("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}");
 
     // クリックはしない (ffmpeg / storage が無いレーンで実行経路へ進めない)。
     // 押下可能性は「可視 + disabled 属性・aria-disabled の不在」で判定する。

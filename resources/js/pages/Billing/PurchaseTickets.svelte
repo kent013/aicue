@@ -14,6 +14,7 @@
     import type { SharedProps } from "@/lib/shared-props";
     import type { PurchaseTicketsPageProps } from "@/types/billing";
     import { parseTicketCount } from "./ticketCount";
+    import { currentOrgUrl } from "@/lib/org-url";
 
     /**
      * チケット購入画面 (current org スコープ)。
@@ -100,7 +101,7 @@
             return;
         }
         router.post(
-            "/purchase-tickets/checkout",
+            currentOrgUrl("/billing/purchase-tickets/checkout"),
             { count: parsedCount, attempt_token: page.ticketAttemptToken },
             {
                 onStart: () => {

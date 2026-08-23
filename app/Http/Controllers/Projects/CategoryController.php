@@ -4,12 +4,13 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Projects;
 
-use App\Http\Concerns\ResolvesCurrentOrganization;
+use App\Http\Concerns\ResolvesRouteOrganization;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Projects\ReorderCategoriesRequest;
 use App\Http\Requests\Projects\StoreCategoryRequest;
 use App\Http\Requests\Projects\UpdateCategoryRequest;
 use App\Models\Category;
+use App\Models\Organization;
 use App\Models\Project;
 use App\Services\Manual\CategoryService;
 use Illuminate\Http\RedirectResponse;
@@ -32,12 +33,11 @@ use Webmozart\Assert\Assert;
  */
 class CategoryController extends Controller
 {
-    use ResolvesCurrentOrganization;
+    use ResolvesRouteOrganization;
 
     /** カテゴリ管理画面 (doc/04 §4.2。追加・編集・削除・▲▼ は既存 write endpoint を使う) */
-    public function index(Request $request, Project $project): Response
+    public function index(Request $request, Organization $organization, Project $project): Response
     {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404 (cross-org の存在を漏らさない)
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('viewAny', [Category::class, $project]);
@@ -55,9 +55,8 @@ class CategoryController extends Controller
     }
 
     /** Category 作成。project_id は URL から導出し relation 経由で代入する (payload では 422) */
-    public function store(StoreCategoryRequest $request, Project $project, CategoryService $categories): RedirectResponse
+    public function store(StoreCategoryRequest $request, Organization $organization, Project $project, CategoryService $categories): RedirectResponse
     {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('create', [Category::class, $project]);
@@ -71,9 +70,8 @@ class CategoryController extends Controller
     }
 
     /** Category 更新 (name のみ) */
-    public function update(UpdateCategoryRequest $request, Project $project, Category $category, CategoryService $categories): RedirectResponse
+    public function update(UpdateCategoryRequest $request, Organization $organization, Project $project, Category $category, CategoryService $categories): RedirectResponse
     {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404 ({category} ∈ {project} は scopeBindings が担保済み)
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('update', $category);
@@ -87,9 +85,8 @@ class CategoryController extends Controller
     }
 
     /** Category 削除 (所属 manual は FK nullOnDelete で未分類化) */
-    public function destroy(Request $request, Project $project, Category $category, CategoryService $categories): RedirectResponse
+    public function destroy(Request $request, Organization $organization, Project $project, Category $category, CategoryService $categories): RedirectResponse
     {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404 ({category} ∈ {project} は scopeBindings が担保済み)
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('delete', $category);
@@ -103,9 +100,8 @@ class CategoryController extends Controller
      * Category 並べ替え (payload = 当該 project の category id 順序配列)。
      * 集合一致検証は Service (Project 行ロック後) が行い、不一致は 422。
      */
-    public function reorder(ReorderCategoriesRequest $request, Project $project, CategoryService $categories): RedirectResponse
+    public function reorder(ReorderCategoriesRequest $request, Organization $organization, Project $project, CategoryService $categories): RedirectResponse
     {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('reorder', [Category::class, $project]);

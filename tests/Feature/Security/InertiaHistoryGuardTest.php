@@ -42,9 +42,9 @@ function inertiaPagePayload(TestResponse $response): array
 }
 
 test('認証済み Inertia 応答の page に encryptHistory が載る', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $response = $this->actingAs($owner)->get('/dashboard');
+    $response = $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard");
 
     $response->assertOk();
     expect(inertiaPagePayload($response))->toHaveKey('encryptHistory', true);
@@ -60,9 +60,9 @@ test('公開ページの Inertia 応答にも encryptHistory が載る (グロ�
 });
 
 test('通常の応答には clearHistory が載らない (負のコントロール)', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $response = $this->actingAs($owner)->get('/dashboard');
+    $response = $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard");
 
     expect(inertiaPagePayload($response))->not->toHaveKey('clearHistory');
 });
@@ -109,7 +109,7 @@ test('実運用経路 (X-Inertia visit) でも着地の page JSON に clearHisto
     // サーバ応答が自己申告した version をそのまま使う。
     // ※ ResponseFactory::render() は Response に getVersion(): string を渡すため
     //    page.version は常に string (空文字はあり得る)。前提を明示 assert する。
-    $version = inertiaPagePayload($this->get('/dashboard'))['version'];
+    $version = inertiaPagePayload($this->get(route('home')))['version'];
     expect($version)->toBeString();
 
     $inertiaHeaders = ['X-Inertia' => 'true'];
@@ -173,7 +173,7 @@ test('JSON ログアウトでもフラグは積まれ、次の Inertia 応答で
 
 test('未認証 guest の認証失敗でも、着地の Inertia 応答に clearHistory が載る', function (): void {
     // セッション期限切れ後のリクエストと同じ形 (guest が auth 保護 route を踏む)。
-    $response = $this->get('/dashboard');
+    $response = $this->get('/settings');
     $response->assertRedirect(route('login'));
 
     // 別リクエストとして着地を叩く (302 を自動追従させない = 境界そのものを固定する)。
@@ -193,7 +193,7 @@ test('他デバイスからの強制ログアウト (AuthenticateSession) で cl
 
     $this->actingAs($user)
         ->withSession(['password_hash_web' => $oldHash])
-        ->get('/dashboard')
+        ->get('/settings')
         ->assertRedirect('/login');
 
     expect(inertiaPagePayload($this->get(route('login'))))->toHaveKey('clearHistory', true);
@@ -208,14 +208,14 @@ test('guest が /login を直接開いてもフラグは積まれない (負の�
 test('expectsJson の 401 ではフラグを積まない (負のコントロール)', function (): void {
     // API / MCP など Inertia 応答が返らない経路で積むと、フラグが宙に浮いて
     // 後続の無関係な Inertia 応答で消費される。
-    $this->getJson('/dashboard')->assertUnauthorized();
+    $this->getJson('/settings')->assertUnauthorized();
 
     expect(inertiaPagePayload($this->get(route('home'))))->not->toHaveKey('clearHistory');
 });
 
 test('認証失敗で積まれたフラグは次の Inertia 応答で 1 度だけ消費される', function (): void {
     // 素の auth 保護 route で発生させる (3rd party の実装差分に契約を依存させない)。
-    $this->get('/dashboard')->assertRedirect(route('login'));
+    $this->get('/settings')->assertRedirect(route('login'));
 
     expect(inertiaPagePayload($this->get(route('home'))))->toHaveKey('clearHistory', true);
     // pull 済みなので 2 度目には載らない (無関係なページで履歴が飛ぶ事故を防ぐ)。

@@ -8,9 +8,10 @@ const baseProps = {
         id: 1,
         name: "テスト組織",
         slug: "test-org",
-        isPersonal: false,
         twoFactorRequired: false,
     },
+    // 識別名の変更 (家系裁定 AG-046)。**表示のための早期情報**であり権威ではない
+    slugRename: { remaining: 5, nextAvailableAt: null },
     // オーナー移譲 select 用の最小 shape (id/name)。email / 2FA は Admin/Users へ移設済み
     members: [
         { id: 1, name: "オーナー 太郎" },
@@ -18,7 +19,7 @@ const baseProps = {
     ],
     currentUserRole: "organization_owner",
     canManageApiKeys: true,
-    usersUrl: "/manage/users",
+    usersUrl: "/organizations/test-org/manage/users",
 };
 
 describe("Organizations/Settings", () => {
@@ -393,5 +394,36 @@ describe("Organizations/Settings オーナー移譲の client error 自動解消
             ).toBeNull();
         });
         expect(screen.getByText(serverMsg)).toBeInTheDocument();
+    });
+});
+
+describe("Organizations/Settings の識別名 (家系裁定 AG-046)", () => {
+    it("識別名フォームを描画し、残り回数を案内する", () => {
+        render(Settings, { props: baseProps });
+
+        expect(screen.getByLabelText("識別名")).toBeInTheDocument();
+        expect(screen.getByText(/30 日あたり 5 回まで変更できます/)).toBeInTheDocument();
+    });
+
+    it("回数上限でもボタンを disabled にしない (押下時にサーバがエラーを返す)", () => {
+        render(Settings, {
+            props: {
+                ...baseProps,
+                slugRename: { remaining: 0, nextAvailableAt: "2026-09-30T00:00:00+09:00" },
+            },
+        });
+
+        const submit = screen.getByTestId("organization-slug-submit");
+        expect(submit).not.toBeDisabled();
+    });
+
+    it("送信は確認ダイアログを挟む (URL が丸ごと変わる破壊的操作のため)", async () => {
+        render(Settings, { props: baseProps });
+
+        await fireEvent.submit(screen.getByTestId("organization-slug-submit").closest("form")!);
+
+        await waitFor(() =>
+            expect(screen.getByTestId("organization-slug-dialog")).toBeInTheDocument(),
+        );
     });
 });

@@ -6,6 +6,7 @@
     import { formatDurationMs } from "@/lib/manual/format-duration";
     import type { ManualListItem } from "@/types/manual";
     import { MANUAL_PROGRESS_LABELS, MANUAL_PROGRESS_TONES } from "@/types/manual";
+    import { currentOrgUrl } from "@/lib/org-url";
 
     /**
      * 動画マニュアル一覧の 1 行 (doc/04: 状態 / タイトル / カテゴリ / 再生時間 / 更新日 /
@@ -42,7 +43,7 @@
         <!-- タイトルは 1 行省略にする (空白の無い長いタイトルでも行の操作領域を押し出さない)。
              TextLink は class prop を受け取れるので、幅制約用の要素で包まずに付与する -->
         <TextLink
-            href={`/projects/${projectId}/manuals/${manual.id}`}
+            href={currentOrgUrl(`/projects/${projectId}/manuals/${manual.id}`)}
             class="block truncate"
             testId={`manual-link-${manual.id}`}
         >
@@ -86,7 +87,7 @@
             <Button
                 variant="ghost"
                 size="sm"
-                href={`/projects/${projectId}/manuals/${manual.id}/download`}
+                href={currentOrgUrl(`/projects/${projectId}/manuals/${manual.id}/download`)}
                 ariaLabel={`${manual.title} の完成動画をダウンロード`}
                 testId={`manual-download-${manual.id}`}
             >

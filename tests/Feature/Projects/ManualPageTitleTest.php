@@ -29,7 +29,7 @@ it('projects.manuals.create は静的 app_titles で固有 title を出す (noin
     $project = Project::factory()->forOrganization($organization)->create();
 
     $html = (string) $this->actingAs($owner)
-        ->get(route('projects.manuals.create', $project))
+        ->get(route('projects.manuals.create', [$organization->slug, $project]))
         ->getContent();
 
     expect($html)->toContain('<title>動画マニュアルの作成 | Acme</title>')
@@ -42,7 +42,7 @@ it('projects.manuals.show はマニュアル名の動的固有 title を出す',
     $manual = VideoManual::factory()->forProject($project)->create(['title' => 'ネジ締め作業']);
 
     $html = (string) $this->actingAs($owner)
-        ->get(route('projects.manuals.show', [$project, $manual]))
+        ->get(route('projects.manuals.show', [$organization->slug, $project, $manual]))
         ->getContent();
 
     expect($html)->toContain('<title>ネジ締め作業 | Acme</title>')
@@ -55,7 +55,7 @@ it('projects.manuals.edit は「<マニュアル名> の編集」を title に�
     $manual = VideoManual::factory()->forProject($project)->create(['title' => 'ネジ締め作業']);
 
     $html = (string) $this->actingAs($owner)
-        ->get(route('projects.manuals.edit', [$project, $manual]))
+        ->get(route('projects.manuals.edit', [$organization->slug, $project, $manual]))
         ->getContent();
 
     expect($html)->toContain('<title>ネジ締め作業 の編集 | Acme</title>');
@@ -70,7 +70,7 @@ it('capture.manuals.show は「<マニュアル名> の撮影」を title に出
     ]);
 
     $html = (string) $this->actingAs($owner)
-        ->get(route('capture.manuals.show', [$project, $manual]))
+        ->get(route('capture.manuals.show', [$organization->slug, $project, $manual]))
         ->getContent();
 
     expect($html)->toContain('<title>ネジ締め作業 の撮影 | Acme</title>');
@@ -84,17 +84,17 @@ it('Inertia 共有 prop title はサーバ描画 <title> と同一文字列 (sho
         'title' => 'ネジ締め作業',
     ]);
 
-    $this->actingAs($owner)->get(route('projects.manuals.show', [$project, $manual]))
+    $this->actingAs($owner)->get(route('projects.manuals.show', [$organization->slug, $project, $manual]))
         ->assertInertia(fn (Assert $page) => $page
             ->component('Manuals/Show')
             ->where('title', 'ネジ締め作業 | Acme'));
 
-    $this->actingAs($owner)->get(route('projects.manuals.edit', [$project, $manual]))
+    $this->actingAs($owner)->get(route('projects.manuals.edit', [$organization->slug, $project, $manual]))
         ->assertInertia(fn (Assert $page) => $page
             ->component('Manuals/Edit')
             ->where('title', 'ネジ締め作業 の編集 | Acme'));
 
-    $this->actingAs($owner)->get(route('capture.manuals.show', [$project, $manual]))
+    $this->actingAs($owner)->get(route('capture.manuals.show', [$organization->slug, $project, $manual]))
         ->assertInertia(fn (Assert $page) => $page
             ->component('Capture/Show')
             ->where('title', 'ネジ締め作業 の撮影 | Acme'));

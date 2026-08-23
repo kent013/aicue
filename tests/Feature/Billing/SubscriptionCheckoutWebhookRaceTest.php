@@ -153,7 +153,7 @@ test('cancel 相当 (webhook が来ない) では行が Pending のまま、2 �
     // state() 実行で行は書き換わらない
     expect($session->refresh()->status)->toBe(CheckoutSessionStatus::Pending->value);
 
-    $this->actingAs($owner)->post('/billing/checkout', [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/checkout", [
         'plan_code' => 'standard',
         'subscription_attempt_token' => (string) Str::ulid(),
     ])->assertRedirectContains('https://checkout.stripe.test/');

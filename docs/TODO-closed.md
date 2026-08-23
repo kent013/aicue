@@ -16,7 +16,7 @@ Open リストは [TODO.md](TODO.md) を参照。
 
 | ID | タイトル | テーマ | 完了日 |
 |---|---|---|---|
-| T001 | AI-CUE ドメイン基盤(Category/VideoManual)。Category/VideoManual CRUD + Tier B スキーマ先取り (Enum/migration/Model/Factory/Service/Policy/route/UI/テスト一式)。cross-org {project} の FormRequest DB ルール存在オラクルを project.in-current-org middleware で封じる修正込み | backend | 2026-07-10 23:46 |
+| T001 | AI-CUE ドメイン基盤(Category/VideoManual)。Category/VideoManual CRUD + Tier B スキーマ先取り (Enum/migration/Model/Factory/Service/Policy/route/UI/テスト一式)。cross-org {project} の FormRequest DB ルール存在オラクルを project.in-route-org middleware で封じる修正込み | backend | 2026-07-10 23:46 |
 | T002 | シナリオ編集(document一括保存・楽観ロック)。scenario document 一括 PUT (expected_version 楽観ロック 409 + 行別 422 + protected キー拒否)、ScenarioService reconcile (id 保全・並べ替え・削除 cascade)、ScenarioEditor (Svelte 5 作業コピー編集・409 復帰は onSuccess で reseed・419 自動リトライ)。Codex impl-review Critical なし | backend | 2026-07-11 01:32 |
 | T003 | AI解析(SOP→作業分解→シナリオ生成→Cut materialize)。SOP アップロード (内容 sniff + 追記型 immutable)・解析トリガー (analyze 冪等 409 / 残高 402)・RunManualAnalysis + AnalysisPipeline (extract→decompose→generate→materialize、チケット reserve→terminal tx で materialize+commit+succeeded 原子化)・LLM 3 プロンプト YAML + 有界リトライ・stale 回復 cron・AnalysisPanel ポーリング UI。Codex impl-review Critical なし (C1 は前提誤認で反論、W1-W3 修正済み) | backend | 2026-07-11 03:37 |
 | T004 | 撮影PWA(presignedアップロード+テイク+容量Quota)。presigned PUT + 署名チケット (reserve→verifying→completed の 2 フェーズ、Organization 行ロックで TOCTOU 防止)・テイク登録 (client_take_id 冪等 + CAS + 重複解決)・容量 Quota (used+pending 集計、pending→used 読み取り順で競合を安全側=拒否側に固定)・stale 予約 sweeper cron・撮影 PWA UI。Codex impl-review Critical なし (occupiedBytes 読み取り順 Warning 修正済み) | backend | 2026-07-11 05:41 |

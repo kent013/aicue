@@ -4230,7 +4230,7 @@ index 33bc922..d83df58 100644
  use App\Http\Controllers\Seo\AiTxtController;
  use App\Http\Controllers\Seo\LlmsTxtController;
 @@ -365,6 +367,15 @@
-             // project.in-current-org middleware + controller inline guard の 2 層 (既存 group が担保)
+             // project.in-route-org middleware + controller inline guard の 2 層 (既存 group が担保)
              Route::put('/projects/{project}/manuals/{manual}/scenario', [ManualScenarioController::class, 'update'])
                  ->name('projects.manuals.scenario.update');
 +            // SOP アップロード (追記型 immutable。差し替え = 新規行。doc/10 §10.3)

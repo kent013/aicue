@@ -582,7 +582,7 @@ Browser テストを足すなら Chromium + WebKit の 2 レーン契約に従�
 Route::middleware(['auth', 'verified', 'not-pending-deletion'])->group(function (): void {
     // ログイン直後の着地点 (課金ゲート外のまま。未契約でも状況把握と復帰導線を提供)
 ...
-    Route::middleware(['require-active-subscription', 'project.in-current-org'])->group(function (): void {
+    Route::middleware(['require-active-subscription', 'project.in-route-org'])->group(function (): void {
         /*
 ...
         Route::post('/projects/{project}/manuals', [VideoManualController::class, 'store'])
@@ -594,7 +594,7 @@ Route::middleware(['auth', 'verified', 'not-pending-deletion'])->group(function 
                 ->name('projects.manuals.edit');
 ...
     */
-    Route::middleware(['require-active-subscription', 'project.in-current-org'])
+    Route::middleware(['require-active-subscription', 'project.in-route-org'])
         ->prefix('app')->as('capture.')->group(function (): void {
             // PWA エントリ (manifest start_url)。current org の先頭 project へ redirect
             Route::get('/', [CaptureManualController::class, 'home'])->name('home');

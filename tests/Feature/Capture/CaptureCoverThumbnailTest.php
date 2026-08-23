@@ -64,10 +64,10 @@ function coverCutWithAdoptedTake(
  *
  * @return array{cut_id: int, take_id: int}|null
  */
-function coverOf(User $actor, Project $project, VideoManual $manual): ?array
+function coverOf(Organization $organization, User $actor, Project $project, VideoManual $manual): ?array
 {
     /** @var array<int, array<string, mixed>> $manuals */
-    $manuals = test()->actingAs($actor)->get("/app/projects/{$project->id}/manuals")
+    $manuals = test()->actingAs($actor)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals")
         ->assertOk()
         ->inertiaPage()['props']['manuals'];
 
@@ -84,7 +84,7 @@ function coverOf(User $actor, Project $project, VideoManual $manual): ?array
 }
 
 test('代表は表示順で最初の「採用テイク + サムネイル生成済み」カットになる', function (): void {
-    [, $owner, $project] = coverContext();
+    [$organization, $owner, $project] = coverContext();
     $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
 
     // sort_order 0 は未採用 (テイクはあるが採用していない) = 候補にならない
@@ -93,14 +93,14 @@ test('代表は表示順で最初の「採用テイク + サムネイル生成�
 
     $cut = coverCutWithAdoptedTake($manual, sortOrder: 1);
 
-    expect(coverOf($owner, $project, $manual))->toBe([
+    expect(coverOf($organization, $owner, $project, $manual))->toBe([
         'cut_id' => $cut->id,
         'take_id' => (int) $cut->adopted_take_id,
     ]);
 });
 
 test('sort_order が同値なら id 昇順で代表が決まる', function (): void {
-    [, $owner, $project] = coverContext();
+    [$organization, $owner, $project] = coverContext();
     $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
 
     // 最小 id のカットを**最小 sort_order ではない**位置に置く。
@@ -110,31 +110,31 @@ test('sort_order が同値なら id 昇順で代表が決まる', function (): v
     $sameOrderLaterId = coverCutWithAdoptedTake($manual, sortOrder: 1);
 
     expect($expected->id)->toBeLessThan($sameOrderLaterId->id);
-    expect(coverOf($owner, $project, $manual))->toBe([
+    expect(coverOf($organization, $owner, $project, $manual))->toBe([
         'cut_id' => $expected->id,
         'take_id' => (int) $expected->adopted_take_id,
     ]);
 });
 
 test('採用テイクが無ければ cover は null', function (): void {
-    [, $owner, $project] = coverContext();
+    [$organization, $owner, $project] = coverContext();
     $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
     $cut = Cut::factory()->forManual($manual)->withSortOrder(0)->create();
     Take::factory()->forCut($cut)->withThumbnail()->create(); // 採用していない
 
-    expect(coverOf($owner, $project, $manual))->toBeNull();
+    expect(coverOf($organization, $owner, $project, $manual))->toBeNull();
 });
 
 test('採用テイクのサムネイルが未生成なら cover は null', function (): void {
-    [, $owner, $project] = coverContext();
+    [$organization, $owner, $project] = coverContext();
     $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
     coverCutWithAdoptedTake($manual, sortOrder: 0, withThumbnail: false);
 
-    expect(coverOf($owner, $project, $manual))->toBeNull();
+    expect(coverOf($organization, $owner, $project, $manual))->toBeNull();
 });
 
 test('生成済みだが ready でない採用テイクは cover にせず、次のカットも探さない', function (): void {
-    [, $owner, $project] = coverContext();
+    [$organization, $owner, $project] = coverContext();
     $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
 
     // 候補条件 (サムネイル生成済み) は満たすが表示条件 (ready) を満たさない先頭カット。
@@ -142,7 +142,7 @@ test('生成済みだが ready でない採用テイクは cover にせず、次
     coverCutWithAdoptedTake($manual, sortOrder: 0, takeAttributes: ['status' => 'processing']);
     coverCutWithAdoptedTake($manual, sortOrder: 1);
 
-    expect(coverOf($owner, $project, $manual))->toBeNull();
+    expect(coverOf($organization, $owner, $project, $manual))->toBeNull();
 });
 
 /*
@@ -152,7 +152,7 @@ test('生成済みだが ready でない採用テイクは cover にせず、次
 */
 
 test('契約 (i): cover の id で組んだ thumbnail URL は 302 と no-store を返す', function (): void {
-    [, $owner, $project] = coverContext();
+    [$organization, $owner, $project] = coverContext();
     $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
     coverCutWithAdoptedTake($manual, sortOrder: 0);
 
@@ -162,24 +162,24 @@ test('契約 (i): cover の id で組んだ thumbnail URL は 302 と no-store �
         ->andReturn('https://s3.fake.test/signed-thumbnail-url');
     app()->instance(TakeObjectStorage::class, $storage);
 
-    $cover = coverOf($owner, $project, $manual);
+    $cover = coverOf($organization, $owner, $project, $manual);
     expect($cover)->not->toBeNull();
 
     $this->actingAs($owner)
-        ->get("/app/projects/{$project->id}/manuals/{$manual->id}"
+        ->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}"
             ."/cuts/{$cover['cut_id']}/takes/{$cover['take_id']}/thumbnail")
         ->assertRedirect('https://s3.fake.test/signed-thumbnail-url')
         ->assertHeader('Cache-Control', 'no-store, private');
 });
 
 test('契約 (ii): 3 条件が揃えば候補が複数あっても cover は非 null', function (): void {
-    [, $owner, $project] = coverContext();
+    [$organization, $owner, $project] = coverContext();
     $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
     $first = coverCutWithAdoptedTake($manual, sortOrder: 0);
     coverCutWithAdoptedTake($manual, sortOrder: 1);
     coverCutWithAdoptedTake($manual, sortOrder: 2);
 
-    expect(coverOf($owner, $project, $manual))->toBe([
+    expect(coverOf($organization, $owner, $project, $manual))->toBe([
         'cut_id' => $first->id,
         'take_id' => (int) $first->adopted_take_id,
     ]);
@@ -191,17 +191,16 @@ test('権限: org member (非 project member) は cover が全行 null で同 UR
     coverCutWithAdoptedTake($manual, sortOrder: 0);
 
     // cover の id は権限を持つ利用者の props から取る
-    $cover = coverOf($owner, $project, $manual);
+    $cover = coverOf($organization, $owner, $project, $manual);
     expect($cover)->not->toBeNull();
 
     $orgMember = attachOrganizationMember($organization);
-    $orgMember->forceFill(['current_organization_id' => $organization->id])->save();
 
     // 一覧そのものは 200 のまま (画面ごと 403 にしない = 行き先のない詰みを作らない)
-    expect(coverOf($orgMember, $project, $manual))->toBeNull();
+    expect(coverOf($organization, $orgMember, $project, $manual))->toBeNull();
 
     $this->actingAs($orgMember)
-        ->get("/app/projects/{$project->id}/manuals/{$manual->id}"
+        ->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}"
             ."/cuts/{$cover['cut_id']}/takes/{$cover['take_id']}/thumbnail")
         ->assertForbidden();
 });
@@ -246,16 +245,16 @@ test('契約 (iii): preview 認可と capture 認可は 4 者すべてで同値 
 */
 
 test('境界: cover の id を別 org の URL に嵌めると 404', function (): void {
-    [, $owner, $project] = coverContext();
+    [$organization, $owner, $project] = coverContext();
     $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
     coverCutWithAdoptedTake($manual, sortOrder: 0);
-    $cover = coverOf($owner, $project, $manual);
+    $cover = coverOf($organization, $owner, $project, $manual);
     expect($cover)->not->toBeNull();
 
     [, $foreignUser] = createOrganizationWithOwner('別組織');
 
     $this->actingAs($foreignUser)
-        ->get("/app/projects/{$project->id}/manuals/{$manual->id}"
+        ->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}"
             ."/cuts/{$cover['cut_id']}/takes/{$cover['take_id']}/thumbnail")
         ->assertNotFound();
 });
@@ -264,7 +263,7 @@ test('境界: cover の id を別 project / 別 manual の URL に嵌めると 4
     [$organization, $owner, $project] = coverContext();
     $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
     coverCutWithAdoptedTake($manual, sortOrder: 0);
-    $cover = coverOf($owner, $project, $manual);
+    $cover = coverOf($organization, $owner, $project, $manual);
     expect($cover)->not->toBeNull();
 
     $otherProject = Project::factory()->forOrganization($organization)->create();
@@ -272,40 +271,40 @@ test('境界: cover の id を別 project / 別 manual の URL に嵌めると 4
 
     // 別 project 配下の URL (manual が project に属さない)
     $this->actingAs($owner)
-        ->get("/app/projects/{$otherProject->id}/manuals/{$manual->id}"
+        ->get("/organizations/{$organization->slug}/app/projects/{$otherProject->id}/manuals/{$manual->id}"
             ."/cuts/{$cover['cut_id']}/takes/{$cover['take_id']}/thumbnail")
         ->assertNotFound();
 
     // 別 manual 配下の URL (cut が manual に属さない)
     $this->actingAs($owner)
-        ->get("/app/projects/{$project->id}/manuals/{$otherManual->id}"
+        ->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$otherManual->id}"
             ."/cuts/{$cover['cut_id']}/takes/{$cover['take_id']}/thumbnail")
         ->assertNotFound();
 });
 
 test('cover の cut / take は必ずその manual 配下のもの (取り違えない)', function (): void {
-    [, $owner, $project] = coverContext();
+    [$organization, $owner, $project] = coverContext();
     $first = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
     $second = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
     $firstCut = coverCutWithAdoptedTake($first, sortOrder: 0);
     $secondCut = coverCutWithAdoptedTake($second, sortOrder: 0);
 
-    expect(coverOf($owner, $project, $first))->toBe([
+    expect(coverOf($organization, $owner, $project, $first))->toBe([
         'cut_id' => $firstCut->id,
         'take_id' => (int) $firstCut->adopted_take_id,
     ]);
-    expect(coverOf($owner, $project, $second))->toBe([
+    expect(coverOf($organization, $owner, $project, $second))->toBe([
         'cut_id' => $secondCut->id,
         'take_id' => (int) $secondCut->adopted_take_id,
     ]);
 });
 
 test('props に URL 文字列を載せない (cover のキーは cut_id / take_id の 2 つで値は int)', function (): void {
-    [, $owner, $project] = coverContext();
+    [$organization, $owner, $project] = coverContext();
     $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
     coverCutWithAdoptedTake($manual, sortOrder: 0);
 
-    $cover = coverOf($owner, $project, $manual);
+    $cover = coverOf($organization, $owner, $project, $manual);
     expect($cover)->not->toBeNull();
     expect(array_keys($cover))->toBe(['cut_id', 'take_id']);
     expect($cover['cut_id'])->toBeInt();

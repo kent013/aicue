@@ -180,8 +180,8 @@ test('activate-personal の funding_choice 省略時は dashboard 着地のま�
     [$organization, $owner] = createOrganizationWithOwner('個人組織', grandfatherFreePlan: false);
 
     $this->actingAs($owner)
-        ->post('/onboarding/activate-personal', ['declaration' => '1'])
-        ->assertRedirect(route('dashboard'));
+        ->post("/organizations/{$organization->slug}/onboarding/activate-personal", ['declaration' => '1'])
+        ->assertRedirect(route('dashboard', ['organization' => $organization->slug]));
 
     expect(TicketAutoRecharge::query()->count())->toBe(0);
 });
@@ -189,7 +189,7 @@ test('activate-personal の funding_choice 省略時は dashboard 着地のま�
 test('activate-personal + funding_choice=auto_recharge で事前同意を記録し setup Checkout へ送る', function (): void {
     [$organization, $owner] = createOrganizationWithOwner('個人組織', grandfatherFreePlan: false);
 
-    $response = $this->actingAs($owner)->post('/onboarding/activate-personal', [
+    $response = $this->actingAs($owner)->post("/organizations/{$organization->slug}/onboarding/activate-personal", [
         'declaration' => '1',
         'funding_choice' => 'auto_recharge',
         'consent_version' => config()->string('billing.auto_recharge.consent_version'),
@@ -209,11 +209,11 @@ test('activate-personal の consent_version 欠落 / 現行版不一致は 422 (
     [$organization, $owner] = createOrganizationWithOwner('個人組織', grandfatherFreePlan: false);
 
     $this->actingAs($owner)
-        ->post('/onboarding/activate-personal', ['declaration' => '1', 'funding_choice' => 'auto_recharge'])
+        ->post("/organizations/{$organization->slug}/onboarding/activate-personal", ['declaration' => '1', 'funding_choice' => 'auto_recharge'])
         ->assertSessionHasErrors('consent_version');
 
     $this->actingAs($owner)
-        ->post('/onboarding/activate-personal', [
+        ->post("/organizations/{$organization->slug}/onboarding/activate-personal", [
             'declaration' => '1',
             'funding_choice' => 'auto_recharge',
             'consent_version' => 'v0-old',
@@ -233,8 +233,8 @@ test('二重 submit でも SetupPaymentMethod 台帳が増殖しない (session 
         'consent_version' => config()->string('billing.auto_recharge.consent_version'),
     ];
 
-    $this->actingAs($owner)->post('/onboarding/activate-personal', $payload);
-    $this->actingAs($owner)->post('/onboarding/activate-personal', $payload);
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/onboarding/activate-personal", $payload);
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/onboarding/activate-personal", $payload);
 
     expect(
         BillingCheckoutSession::query()
@@ -248,14 +248,14 @@ test('funding_choice=tickets は購入ページへ直行する (UI 非提示だ�
     [$organization, $owner] = createOrganizationWithOwner('個人組織', grandfatherFreePlan: false);
 
     $this->actingAs($owner)
-        ->post('/onboarding/activate-personal', ['declaration' => '1', 'funding_choice' => 'tickets'])
-        ->assertRedirect(route('billing.tickets.show'));
+        ->post("/organizations/{$organization->slug}/onboarding/activate-personal", ['declaration' => '1', 'funding_choice' => 'tickets'])
+        ->assertRedirect(route('billing.tickets.show', ['organization' => $organization->slug]));
 });
 
 test('onboarding checkout の props に consentTerms / fundingChoices が届く (tickets は出さない)', function (): void {
     [$organization, $owner] = createOrganizationWithOwner('個人組織', grandfatherFreePlan: false);
 
-    $response = $this->actingAs($owner)->get('/onboarding/checkout')->assertOk();
+    $response = $this->actingAs($owner)->get("/organizations/{$organization->slug}/onboarding/checkout")->assertOk();
     $pageData = $response->viewData('page')['props']['pageData'];
 
     expect($pageData['fundingChoices'])->toBe(['auto_recharge', 'later'])

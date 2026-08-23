@@ -422,7 +422,7 @@ class TestedByIndex:
 
 
 def _normalize_abs_file(abs_file: str) -> str:
-    """/workspace/<...>/app/Foo.php や /workspace/app/Foo.php を app/ 相対へ。"""
+    """絶対パス (末尾が app/Foo.php のような形) を app/ 相対のパスへ畳む。"""
     # 最後に出てくる 'app/' から後ろを相対パスとして採用
     idx = abs_file.rfind("/app/")
     if idx >= 0:

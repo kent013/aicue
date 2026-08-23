@@ -96,7 +96,7 @@ test('RequireTwoFactorForEnforcedOrganizations の 409 の Cache-Control をピ�
     // 2FA 未準拠 (disabled) メンバー = ゲート対象
     $member = attachOrganizationMember($organization);
 
-    $response = $this->actingAs($member)->getJson('/dashboard');
+    $response = $this->actingAs($member)->getJson("/organizations/{$organization->slug}/dashboard");
 
     $response->assertStatus(409);
     pinCacheControl($response, 'no-store, private', 'RequireTwoFactorForEnforcedOrganizations 409');
@@ -115,7 +115,7 @@ test('CaptureTakeController playback の 302 の Cache-Control をピンする',
     $take = Take::factory()->forCut($cut)->create(['status' => 'ready']);
 
     $response = $this->actingAs($owner)->get(
-        "/app/projects/{$project->id}/manuals/{$manual->id}/cuts/{$cut->id}/takes/{$take->id}/playback",
+        "/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}/cuts/{$cut->id}/takes/{$take->id}/playback",
     );
 
     $response->assertStatus(302);

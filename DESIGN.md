@@ -449,7 +449,7 @@ atom 非依存(Lucide アイコンのみ)。単体で置かず、通常は PageH
 
 ### NotificationBell
 
-実装: `components/molecules/NotificationBell.svelte`。`/notifications` への Inertia link に
+実装: `components/molecules/NotificationBell.svelte`。`/organizations/{slug}/notifications` への Inertia link に
 未読数バッジを重ねた通知ベル。未読数は shared props(`notifications.unreadCount`)を親が渡す。
 **100 以上は `99+` に丸める**。v1 はドロップダウンを持たない最小構成(フォーカス管理・
 開閉状態を持たない)。**通知はこのベルが単一導線**で、サイドバー nav 項目に重複掲載しない。

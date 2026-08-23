@@ -68,10 +68,10 @@ class ManualTestSeeder extends Seeder
 
                 if ($organization === null) {
                     // 最初のユーザー (Owner) を creator として組織を provisioning する
-                    // (Default Team + Owner ロール + current_organization_id まで揃う)
+                    // (Default Team + Owner ロールまで揃う)
                     $organization = $this->createOrganization($user, $plan);
                 } else {
-                    $this->addToOrganization($user, $organization, $role, current: true);
+                    $this->addToOrganization($user, $organization, $role);
                 }
 
                 $rows[] = [$email, $organization->name, $role->label(), $plan->code];
@@ -80,16 +80,16 @@ class ManualTestSeeder extends Seeder
             $organizations[] = $organization;
         }
 
-        // 複数組織所属ユーザー (全プラン組織に Member で所属。組織切替の手動テスト用)
+        // 複数組織所属ユーザー (全プラン組織に Member で所属。組織の入口で分岐する手動テスト用)
         $multi = $this->createUser('Multi Org User', 'multi-org@example.com');
-        foreach ($organizations as $index => $organization) {
-            $this->addToOrganization($multi, $organization, OrganizationRole::Member, current: $index === 0);
+        foreach ($organizations as $organization) {
+            $this->addToOrganization($multi, $organization, OrganizationRole::Member);
         }
         $rows[] = ['multi-org@example.com', '全プラン組織', OrganizationRole::Member->label(), '-'];
 
         // メール未認証ユーザー (メール認証フローの手動テスト用)
         $unverified = $this->createUser('Unverified User', 'unverified@example.com', verified: false);
-        $this->addToOrganization($unverified, $organizations[0], OrganizationRole::Member, current: true);
+        $this->addToOrganization($unverified, $organizations[0], OrganizationRole::Member);
         $rows[] = ['unverified@example.com', $organizations[0]->name, OrganizationRole::Member->label().' (未認証)', $plans->first()->code];
 
         $this->command->info('ManualTestSeeder: 投入完了 (パスワードは全員 '.self::PASSWORD.')');
@@ -193,13 +193,10 @@ class ManualTestSeeder extends Seeder
         User $user,
         Organization $organization,
         OrganizationRole $role,
-        bool $current = false,
     ): void {
+        // ★「いまどの組織か」は URL だけで決まる (家系裁定 AG-037)。
+        //   所属と役割を作るだけで、利用者側に現在組織を持たせない。
         $organization->users()->attach($user);
         $user->addRole($role->value, $organization->laratrust_team_id);
-
-        if ($current && $user->current_organization_id === null) {
-            $user->forceFill(['current_organization_id' => $organization->id])->save();
-        }
     }
 }

@@ -97,7 +97,7 @@ describe("UploadQueue", () => {
             .fn()
             .mockResolvedValueOnce(jsonResponse(200, ticketBody)) // upload-url
             .mockResolvedValueOnce(jsonResponse(201, { id: 10 })); // POST takes
-        const queue = new UploadQueue({ store, fetcher, isOnline: () => true });
+        const queue = new UploadQueue({ store, organizationSlug: "test-org", fetcher, isOnline: () => true });
         const item = pendingItem();
 
         const outcome = await queue.enqueue(item);
@@ -126,7 +126,7 @@ describe("UploadQueue", () => {
             .fn()
             .mockResolvedValueOnce(jsonResponse(200, ticketBody))
             .mockResolvedValueOnce(jsonResponse(201, { id: 10 }));
-        const queue = new UploadQueue({ store, fetcher, isOnline: () => online });
+        const queue = new UploadQueue({ store, organizationSlug: "test-org", fetcher, isOnline: () => online });
         const item = pendingItem();
 
         const queued = await queue.enqueue(item);
@@ -143,7 +143,7 @@ describe("UploadQueue", () => {
     it("アップロード失敗時は永続化して queued を返す", async () => {
         const store = memoryStore();
         const fetcher = vi.fn().mockResolvedValue(jsonResponse(500));
-        const queue = new UploadQueue({ store, fetcher, isOnline: () => true });
+        const queue = new UploadQueue({ store, organizationSlug: "test-org", fetcher, isOnline: () => true });
 
         const outcome = await queue.enqueue(pendingItem());
 
@@ -156,7 +156,7 @@ describe("UploadQueue", () => {
         const fetcher = vi
             .fn()
             .mockResolvedValue(jsonResponse(422, { code: "quota_exceeded", message: "保存容量の上限です" }));
-        const queue = new UploadQueue({ store, fetcher, isOnline: () => true });
+        const queue = new UploadQueue({ store, organizationSlug: "test-org", fetcher, isOnline: () => true });
 
         const outcome = await queue.enqueue(pendingItem());
 
@@ -185,6 +185,7 @@ describe("UploadQueue", () => {
             .mockResolvedValueOnce(jsonResponse(200, { id: 10 }));
         const queue = new UploadQueue({
             store,
+            organizationSlug: "test-org",
             fetcher,
             isOnline: () => true,
             delay: async (ms) => {
@@ -210,6 +211,7 @@ describe("UploadQueue", () => {
         );
         const queue = new UploadQueue({
             store,
+            organizationSlug: "test-org",
             fetcher,
             isOnline: () => true,
             delay: async () => {},
@@ -240,7 +242,7 @@ describe("createMemoryPendingStore", () => {
 
     it("オフラインの enqueue は queued になり list() に載る (既存クラスの振る舞い不変)", async () => {
         const store = createMemoryPendingStore();
-        const queue = new UploadQueue({ store, fetcher: vi.fn(), isOnline: () => false });
+        const queue = new UploadQueue({ store, organizationSlug: "test-org", fetcher: vi.fn(), isOnline: () => false });
         const item = pendingItem();
 
         const outcome = await queue.enqueue(item);

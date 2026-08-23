@@ -36,9 +36,9 @@ function takeManagementContext(string $manualStatus = 'ready'): array
     return [$organization, $owner, $project, $manual, $cut, $take];
 }
 
-function takePath(Project $project, VideoManual $manual, Cut $cut, Take $take, string $suffix = ''): string
+function takePath(Organization $organization, Project $project, VideoManual $manual, Cut $cut, Take $take, string $suffix = ''): string
 {
-    return "/app/projects/{$project->id}/manuals/{$manual->id}/cuts/{$cut->id}/takes/{$take->id}{$suffix}";
+    return "/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}/cuts/{$cut->id}/takes/{$take->id}{$suffix}";
 }
 
 /** 署名 ACK トークン (概念設計 D6) を発行する */
@@ -54,9 +54,9 @@ function sealAckToken(Take $take, User $user, ?int $expiresAt = null): string
 // ---------- adopt ----------
 
 test('adopt: ready テイクを採用でき adopted_take_id が反映される', function (): void {
-    [, $owner, $project, $manual, $cut, $take] = takeManagementContext();
+    [$organization, $owner, $project, $manual, $cut, $take] = takeManagementContext();
 
-    $response = $this->actingAs($owner)->postJson(takePath($project, $manual, $cut, $take, '/adopt'));
+    $response = $this->actingAs($owner)->postJson(takePath($organization, $project, $manual, $cut, $take, '/adopt'));
 
     $response->assertOk();
     $response->assertJsonPath('adopted_take_id', $take->id);
@@ -65,46 +65,46 @@ test('adopt: ready テイクを採用でき adopted_take_id が反映される',
 });
 
 test('adopt: cross-cut (cut B の take を cut A の URL で) は 404', function (): void {
-    [, $owner, $project, $manual, $cut] = takeManagementContext();
+    [$organization, $owner, $project, $manual, $cut] = takeManagementContext();
     $cutB = Cut::factory()->forManual($manual)->create();
     $takeB = Take::factory()->forCut($cutB)->create();
 
     $this->actingAs($owner)
-        ->postJson(takePath($project, $manual, $cut, $takeB, '/adopt'))
+        ->postJson(takePath($organization, $project, $manual, $cut, $takeB, '/adopt'))
         ->assertNotFound();
     expect($cut->fresh()?->adopted_take_id)->toBeNull();
 });
 
 test('adopt: ready 前 (uploading/processing/failed) のテイクは 422', function (string $status): void {
-    [, $owner, $project, $manual, $cut] = takeManagementContext();
+    [$organization, $owner, $project, $manual, $cut] = takeManagementContext();
     $take = Take::factory()->forCut($cut)->create(['status' => $status]);
 
-    $this->actingAs($owner)->postJson(takePath($project, $manual, $cut, $take, '/adopt'))->assertStatus(422);
+    $this->actingAs($owner)->postJson(takePath($organization, $project, $manual, $cut, $take, '/adopt'))->assertStatus(422);
 })->with(['uploading', 'processing', 'failed']);
 
 test('adopt: manual が analyzing / rendering 中は 409 scenario_conflict', function (string $status): void {
-    [, $owner, $project, $manual, $cut, $take] = takeManagementContext($status);
+    [$organization, $owner, $project, $manual, $cut, $take] = takeManagementContext($status);
 
-    $response = $this->actingAs($owner)->postJson(takePath($project, $manual, $cut, $take, '/adopt'));
+    $response = $this->actingAs($owner)->postJson(takePath($organization, $project, $manual, $cut, $take, '/adopt'));
 
     $response->assertStatus(409);
     $response->assertJsonPath('code', 'scenario_conflict');
 })->with(['analyzing', 'rendering']);
 
 test('adopt: cross-org は 404', function (): void {
-    [, , $project, $manual, $cut, $take] = takeManagementContext();
+    [$organization, , $project, $manual, $cut, $take] = takeManagementContext();
     [, $otherOwner] = createOrganizationWithOwner();
 
-    $this->actingAs($otherOwner)->postJson(takePath($project, $manual, $cut, $take, '/adopt'))->assertNotFound();
+    $this->actingAs($otherOwner)->postJson(takePath($organization, $project, $manual, $cut, $take, '/adopt'))->assertNotFound();
 });
 
 // ---------- adopt: 保護キー入口防御 (F-1-03) ----------
 
 test('adopt: 保護キー adopted_take_id 混入は 422 (副作用なし)', function (): void {
-    [, $owner, $project, $manual, $cut, $take] = takeManagementContext();
+    [$organization, $owner, $project, $manual, $cut, $take] = takeManagementContext();
 
     $this->actingAs($owner)
-        ->postJson(takePath($project, $manual, $cut, $take, '/adopt'), ['adopted_take_id' => 999])
+        ->postJson(takePath($organization, $project, $manual, $cut, $take, '/adopt'), ['adopted_take_id' => 999])
         ->assertStatus(422)
         ->assertJsonValidationErrors('adopted_take_id');
 
@@ -115,10 +115,10 @@ test('adopt: 保護キー adopted_take_id 混入は 422 (副作用なし)', func
 // 保護キー集合の増加に自動追従する。現状の保護キーは全てトップレベルキーである前提
 // (将来ドット記法キーが増えたら Laravel の入力構造に合わせて payload を組む)。
 test('adopt: 全保護キー単体混入は 422', function (string $protectedKey): void {
-    [, $owner, $project, $manual, $cut, $take] = takeManagementContext();
+    [$organization, $owner, $project, $manual, $cut, $take] = takeManagementContext();
 
     $this->actingAs($owner)
-        ->postJson(takePath($project, $manual, $cut, $take, '/adopt'), [$protectedKey => 1])
+        ->postJson(takePath($organization, $project, $manual, $cut, $take, '/adopt'), [$protectedKey => 1])
         ->assertStatus(422)
         ->assertJsonValidationErrors($protectedKey);
 
@@ -126,36 +126,35 @@ test('adopt: 全保護キー単体混入は 422', function (string $protectedKey
 })->with(MassAssignmentProtectedKeys::all());
 
 test('adopt: 保護キー混入 + cross-cut は (422 でなく) 404', function (): void {
-    [, $owner, $project, $manual, $cut] = takeManagementContext();
+    [$organization, $owner, $project, $manual, $cut] = takeManagementContext();
     $cutB = Cut::factory()->forManual($manual)->create();
     $takeB = Take::factory()->forCut($cutB)->create();
 
     // binding (scopeBindings) が FormRequest より前に閉じるため 404 が先に返る
     $this->actingAs($owner)
-        ->postJson(takePath($project, $manual, $cut, $takeB, '/adopt'), ['adopted_take_id' => 1])
+        ->postJson(takePath($organization, $project, $manual, $cut, $takeB, '/adopt'), ['adopted_take_id' => 1])
         ->assertNotFound();
     expect($cut->fresh()?->adopted_take_id)->toBeNull();
 });
 
 test('adopt: 保護キー混入 + cross-org は (422 でなく) 404', function (): void {
-    [, , $project, $manual, $cut, $take] = takeManagementContext();
+    [$organization, , $project, $manual, $cut, $take] = takeManagementContext();
     [, $otherOwner] = createOrganizationWithOwner();
 
-    // EnsureProjectBelongsToCurrentOrganization がテナント境界 404 を FormRequest より前に返す
+    // EnsureProjectBelongsToRouteOrganization がテナント境界 404 を FormRequest より前に返す
     $this->actingAs($otherOwner)
-        ->postJson(takePath($project, $manual, $cut, $take, '/adopt'), ['adopted_take_id' => 1])
+        ->postJson(takePath($organization, $project, $manual, $cut, $take, '/adopt'), ['adopted_take_id' => 1])
         ->assertNotFound();
 });
 
 test('adopt: 保護キー混入 + 非 project member は 422 (FormRequest が Gate より先)', function (): void {
     [$organization, , $project, $manual, $cut, $take] = takeManagementContext();
     $outsider = attachOrganizationMember($organization);
-    $outsider->forceFill(['current_organization_id' => $organization->id])->save();
 
     // 本アプリの正規順序 (404 → 422 FormRequest → 403 Gate)。保護キーは Gate より前の
     // FormRequest で 422 になる (存在オラクルにならない範囲=同一組織内)。
     $this->actingAs($outsider)
-        ->postJson(takePath($project, $manual, $cut, $take, '/adopt'), ['adopted_take_id' => 1])
+        ->postJson(takePath($organization, $project, $manual, $cut, $take, '/adopt'), ['adopted_take_id' => 1])
         ->assertStatus(422)
         ->assertJsonValidationErrors('adopted_take_id');
     expect($cut->fresh()?->adopted_take_id)->toBeNull();
@@ -164,29 +163,29 @@ test('adopt: 保護キー混入 + 非 project member は 422 (FormRequest が Ga
 // ---------- PATCH (comment / position) ----------
 
 test('PATCH: comment を更新できる (null 送信でクリア)', function (): void {
-    [, $owner, $project, $manual, $cut, $take] = takeManagementContext();
+    [$organization, $owner, $project, $manual, $cut, $take] = takeManagementContext();
 
     $this->actingAs($owner)
-        ->patchJson(takePath($project, $manual, $cut, $take), ['comment' => '手ブレあり'])
+        ->patchJson(takePath($organization, $project, $manual, $cut, $take), ['comment' => '手ブレあり'])
         ->assertOk()
         ->assertJsonPath('comment', '手ブレあり');
     expect($take->fresh()?->comment)->toBe('手ブレあり');
 
     $this->actingAs($owner)
-        ->patchJson(takePath($project, $manual, $cut, $take), ['comment' => null])
+        ->patchJson(takePath($organization, $project, $manual, $cut, $take), ['comment' => null])
         ->assertOk()
         ->assertJsonPath('comment', null);
     expect($take->fresh()?->comment)->toBeNull();
 });
 
 test('PATCH: position でサーバ再採番の並べ替えができる', function (): void {
-    [, $owner, $project, $manual, $cut, $first] = takeManagementContext();
+    [$organization, $owner, $project, $manual, $cut, $first] = takeManagementContext();
     $first->forceFill(['sort_order' => 0])->save();
     $second = Take::factory()->forCut($cut)->create(['sort_order' => 1]);
     $third = Take::factory()->forCut($cut)->create(['sort_order' => 2]);
 
     // 末尾の take を先頭へ
-    $response = $this->actingAs($owner)->patchJson(takePath($project, $manual, $cut, $third), ['position' => 0]);
+    $response = $this->actingAs($owner)->patchJson(takePath($organization, $project, $manual, $cut, $third), ['position' => 0]);
 
     $response->assertOk();
     $response->assertJsonPath('sort_order', 0);
@@ -196,20 +195,20 @@ test('PATCH: position でサーバ再採番の並べ替えができる', functio
 });
 
 test('PATCH: position が末尾超過なら末尾に丸める', function (): void {
-    [, $owner, $project, $manual, $cut, $first] = takeManagementContext();
+    [$organization, $owner, $project, $manual, $cut, $first] = takeManagementContext();
     $first->forceFill(['sort_order' => 0])->save();
     $second = Take::factory()->forCut($cut)->create(['sort_order' => 1]);
 
-    $this->actingAs($owner)->patchJson(takePath($project, $manual, $cut, $first), ['position' => 99])->assertOk();
+    $this->actingAs($owner)->patchJson(takePath($organization, $project, $manual, $cut, $first), ['position' => 99])->assertOk();
 
     expect($second->fresh()?->sort_order)->toBe(0);
     expect($first->fresh()?->sort_order)->toBe(1);
 });
 
 test('PATCH: sort_order の直送は 422 (サーバ採番)', function (): void {
-    [, $owner, $project, $manual, $cut, $take] = takeManagementContext();
+    [$organization, $owner, $project, $manual, $cut, $take] = takeManagementContext();
 
-    $response = $this->actingAs($owner)->patchJson(takePath($project, $manual, $cut, $take), ['sort_order' => 0]);
+    $response = $this->actingAs($owner)->patchJson(takePath($organization, $project, $manual, $cut, $take), ['sort_order' => 0]);
 
     $response->assertStatus(422);
     $response->assertJsonValidationErrors(['sort_order']);
@@ -219,9 +218,9 @@ test('PATCH: sort_order の直送は 422 (サーバ採番)', function (): void {
 
 test('DELETE: 204 + DeleteTakeObjectsJob が media queue へ dispatch される', function (): void {
     Queue::fake();
-    [, $owner, $project, $manual, $cut, $take] = takeManagementContext();
+    [$organization, $owner, $project, $manual, $cut, $take] = takeManagementContext();
 
-    $response = $this->actingAs($owner)->deleteJson(takePath($project, $manual, $cut, $take));
+    $response = $this->actingAs($owner)->deleteJson(takePath($organization, $project, $manual, $cut, $take));
 
     $response->assertNoContent();
     expect($cut->takes()->count())->toBe(0);
@@ -232,10 +231,10 @@ test('DELETE: 204 + DeleteTakeObjectsJob が media queue へ dispatch される'
 
 test('DELETE: DL 済み (downloaded_at 非 null) のテイクは 422 で削除不可', function (): void {
     Queue::fake();
-    [, $owner, $project, $manual, $cut] = takeManagementContext();
+    [$organization, $owner, $project, $manual, $cut] = takeManagementContext();
     $take = Take::factory()->forCut($cut)->downloaded()->create();
 
-    $this->actingAs($owner)->deleteJson(takePath($project, $manual, $cut, $take))->assertStatus(422);
+    $this->actingAs($owner)->deleteJson(takePath($organization, $project, $manual, $cut, $take))->assertStatus(422);
 
     expect($take->fresh())->not->toBeNull();
     Queue::assertNothingPushed();
@@ -243,23 +242,23 @@ test('DELETE: DL 済み (downloaded_at 非 null) のテイクは 422 で削除�
 
 test('DELETE: 採用中テイクの削除で adopted_take_id が null 化される', function (): void {
     Queue::fake();
-    [, $owner, $project, $manual, $cut, $take] = takeManagementContext();
-    $this->actingAs($owner)->postJson(takePath($project, $manual, $cut, $take, '/adopt'))->assertOk();
+    [$organization, $owner, $project, $manual, $cut, $take] = takeManagementContext();
+    $this->actingAs($owner)->postJson(takePath($organization, $project, $manual, $cut, $take, '/adopt'))->assertOk();
     expect($cut->fresh()?->adopted_take_id)->toBe($take->id);
 
-    $this->actingAs($owner)->deleteJson(takePath($project, $manual, $cut, $take))->assertNoContent();
+    $this->actingAs($owner)->deleteJson(takePath($organization, $project, $manual, $cut, $take))->assertNoContent();
 
     expect($cut->fresh()?->adopted_take_id)->toBeNull();
 });
 
 test('DELETE: 削除後に残テイクの sort_order が詰め直される', function (): void {
     Queue::fake();
-    [, $owner, $project, $manual, $cut, $first] = takeManagementContext();
+    [$organization, $owner, $project, $manual, $cut, $first] = takeManagementContext();
     $first->forceFill(['sort_order' => 0])->save();
     $second = Take::factory()->forCut($cut)->create(['sort_order' => 1]);
     $third = Take::factory()->forCut($cut)->create(['sort_order' => 2]);
 
-    $this->actingAs($owner)->deleteJson(takePath($project, $manual, $cut, $first))->assertNoContent();
+    $this->actingAs($owner)->deleteJson(takePath($organization, $project, $manual, $cut, $first))->assertNoContent();
 
     expect($second->fresh()?->sort_order)->toBe(0);
     expect($third->fresh()?->sort_order)->toBe(1);
@@ -268,11 +267,11 @@ test('DELETE: 削除後に残テイクの sort_order が詰め直される', fun
 // ---------- DL 済み ACK ----------
 
 test('downloaded: 有効な ACK トークンで打刻され、再送は冪等 (timestamp 不変)', function (): void {
-    [, $owner, $project, $manual, $cut, $take] = takeManagementContext();
+    [$organization, $owner, $project, $manual, $cut, $take] = takeManagementContext();
     $token = sealAckToken($take, $owner);
 
     $response = $this->actingAs($owner)->postJson(
-        takePath($project, $manual, $cut, $take, '/downloaded'),
+        takePath($organization, $project, $manual, $cut, $take, '/downloaded'),
         ['ack_token' => $token],
     );
 
@@ -283,7 +282,7 @@ test('downloaded: 有効な ACK トークンで打刻され、再送は冪等 (t
 
     $this->travel(5)->minutes();
     $this->actingAs($owner)->postJson(
-        takePath($project, $manual, $cut, $take, '/downloaded'),
+        takePath($organization, $project, $manual, $cut, $take, '/downloaded'),
         ['ack_token' => $token],
     )->assertOk();
 
@@ -291,8 +290,8 @@ test('downloaded: 有効な ACK トークンで打刻され、再送は冪等 (t
 });
 
 test('downloaded: トークン不正 / 期限切れ / take 不一致 / 別ユーザ / チケット流用は 422', function (): void {
-    [, $owner, $project, $manual, $cut, $take] = takeManagementContext();
-    $path = takePath($project, $manual, $cut, $take, '/downloaded');
+    [$organization, $owner, $project, $manual, $cut, $take] = takeManagementContext();
+    $path = takePath($organization, $project, $manual, $cut, $take, '/downloaded');
 
     // 復号不能
     $this->actingAs($owner)->postJson($path, ['ack_token' => 'garbage'])->assertStatus(422);
@@ -320,15 +319,15 @@ test('downloaded: トークン不正 / 期限切れ / take 不一致 / 別ユー
 });
 
 test('downloaded: 採用変更後も DL 時トークンで ACK できる (race 解消)', function (): void {
-    [, $owner, $project, $manual, $cut, $take] = takeManagementContext();
+    [$organization, $owner, $project, $manual, $cut, $take] = takeManagementContext();
     $token = sealAckToken($take, $owner); // DL URL 発行時のトークン
 
     // DL 完了までの間に別テイクが採用される
     $newlyAdopted = Take::factory()->forCut($cut)->create();
-    $this->actingAs($owner)->postJson(takePath($project, $manual, $cut, $newlyAdopted, '/adopt'))->assertOk();
+    $this->actingAs($owner)->postJson(takePath($organization, $project, $manual, $cut, $newlyAdopted, '/adopt'))->assertOk();
 
     $this->actingAs($owner)
-        ->postJson(takePath($project, $manual, $cut, $take, '/downloaded'), ['ack_token' => $token])
+        ->postJson(takePath($organization, $project, $manual, $cut, $take, '/downloaded'), ['ack_token' => $token])
         ->assertOk();
     expect($take->fresh()?->downloaded_at)->not->toBeNull();
 });
@@ -338,21 +337,20 @@ test('downloaded: 採用変更後も DL 時トークンで ACK できる (race �
 test('update/delete/adopt/downloaded: 非 project member の org member は 403', function (): void {
     [$organization, , $project, $manual, $cut, $take] = takeManagementContext();
     $outsider = attachOrganizationMember($organization);
-    $outsider->forceFill(['current_organization_id' => $organization->id])->save();
 
-    $this->actingAs($outsider)->patchJson(takePath($project, $manual, $cut, $take), ['comment' => 'x'])->assertForbidden();
-    $this->actingAs($outsider)->deleteJson(takePath($project, $manual, $cut, $take))->assertForbidden();
-    $this->actingAs($outsider)->postJson(takePath($project, $manual, $cut, $take, '/adopt'))->assertForbidden();
+    $this->actingAs($outsider)->patchJson(takePath($organization, $project, $manual, $cut, $take), ['comment' => 'x'])->assertForbidden();
+    $this->actingAs($outsider)->deleteJson(takePath($organization, $project, $manual, $cut, $take))->assertForbidden();
+    $this->actingAs($outsider)->postJson(takePath($organization, $project, $manual, $cut, $take, '/adopt'))->assertForbidden();
     $this->actingAs($outsider)->postJson(
-        takePath($project, $manual, $cut, $take, '/downloaded'),
+        takePath($organization, $project, $manual, $cut, $take, '/downloaded'),
         ['ack_token' => sealAckToken($take, $outsider)],
     )->assertForbidden();
 });
 
 test('adopt 済み状態は CaptureCutResource の takes にも反映される', function (): void {
-    [, $owner, $project, $manual, $cut, $take] = takeManagementContext();
+    [$organization, $owner, $project, $manual, $cut, $take] = takeManagementContext();
 
-    $response = $this->actingAs($owner)->postJson(takePath($project, $manual, $cut, $take, '/adopt'));
+    $response = $this->actingAs($owner)->postJson(takePath($organization, $project, $manual, $cut, $take, '/adopt'));
 
     $response->assertOk();
     $response->assertJsonPath('takes.0.id', $take->id);

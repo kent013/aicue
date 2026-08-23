@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Auth;
 
+use App\Enums\OrganizationRole;
 use App\Http\Controllers\Controller;
 use App\Models\Organization;
 use App\Models\User;
@@ -111,7 +112,7 @@ class SocialAuthController extends Controller
             Auth::login($linkedUser, remember: true);
             $request->session()->regenerate();
 
-            return redirect()->intended(route('dashboard'));
+            return redirect()->intended(route('app.entry'));
         }
 
         if ($intent === 'login') {
@@ -139,16 +140,20 @@ class SocialAuthController extends Controller
         Auth::login($user, remember: true);
         $request->session()->regenerate();
 
-        // pending → 個人組織へ移送 (pending は必ず forget で消費される)。
-        // 個人組織が無い (= 招待経由等) 場合は promote 対象が存在しないため pending だけ落とす。
-        $personalOrganization = $user->organizations()->where('is_personal', true)->first();
-        if ($personalOrganization instanceof Organization) {
-            $this->intendedPlanResolver->promotePendingToOrganization($personalOrganization);
+        // pending → **自分が Owner の初期組織**へ移送 (pending は必ず forget で消費される)。
+        // ★種別フラグ (旧 `is_personal`) は撤去済み (家系裁定 AG-038) なので、
+        //   「所属組織の有無」では判定できない — 招待経由の利用者も所属組織を持つ。
+        //   Owner の組織が無い (= 招待経由で参加しただけ) なら promote 対象が存在しないため
+        //   pending だけ落とす (他人の組織へプラン意図を移送しない)。
+        $initialOrganization = $user->organizations()->orderBy('organizations.id')->get()
+            ->first(static fn (Organization $organization): bool => $user->organizationRole($organization) === OrganizationRole::Owner);
+        if ($initialOrganization instanceof Organization) {
+            $this->intendedPlanResolver->promotePendingToOrganization($initialOrganization);
         } else {
             $this->intendedPlanResolver->forgetPending();
         }
 
-        return redirect()->route('dashboard');
+        return redirect()->route('app.entry');
     }
 
     /**
@@ -183,7 +188,7 @@ class SocialAuthController extends Controller
         // (RequireRecentAuth の one-shot flag。password satisfier と同じ契約)。
         $droppedMutation = $request->session()->pull('recent_auth.dropped_mutation') === true;
 
-        $redirect = redirect()->intended(route('dashboard'));
+        $redirect = redirect()->intended(route('app.entry'));
         if ($droppedMutation) {
             $redirect->with('info', '再認証が完了しました。先ほどの操作はまだ実行されていません。お手数ですがもう一度操作してください。');
         }

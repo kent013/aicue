@@ -19,7 +19,7 @@ Critical 1 については**前提が事実と異なる**ため、実際の rout
 - 根拠: 本リポジトリに **capture session という概念は存在しない**。`routes/web.php` L604-621 の
   `capture.takes.*` は 7 本すべてが `/app/projects/{project}/manuals/{manual}/cuts/{cut}/takes[/{take}]`
   の形で、**project / manual / cut / take だけ**を parameter に取る。認証はセッション (web guard)、
-  テナント境界は `project.in-current-org` middleware + `scopeBindings` である。
+  テナント境界は `project.in-route-org` middleware + `scopeBindings` である。
   PC 画面は同じ project / manual / cut を持っているので、追加の解決処理は 1 つも要らない。
 - 対応内容: D2 に**既存 route の実シグネチャ表**を貼り、「capture session は存在しない /
   PC が追加で解決するものは無い」ことを明記した。あわせて Codex の懸念どおり
@@ -97,7 +97,7 @@ Critical 1 については**前提が事実と異なる**ため、実際の rout
 `routes/web.php` L594-621 (撮影 PWA group) — capture session の parameter は存在しない:
 
 ```php
-Route::middleware(['require-active-subscription', 'project.in-current-org'])
+Route::middleware(['require-active-subscription', 'project.in-route-org'])
     ->prefix('app')->as('capture.')->group(function (): void {
         Route::get('/', [CaptureManualController::class, 'home'])->name('home');
         Route::get('/csrf-cookie', fn (): Response => response()->noContent())->name('csrf-cookie');
@@ -127,7 +127,7 @@ Route::middleware(['require-active-subscription', 'project.in-current-org'])
 業務 route group (PC 面) の middleware は **完全に同一**である:
 
 ```php
-Route::middleware(['require-active-subscription', 'project.in-current-org'])->group(function (): void {
+Route::middleware(['require-active-subscription', 'project.in-route-org'])->group(function (): void {
 ```
 
 `TakePolicy` は全 ability を `ProjectPolicy::capture()` へ委譲し、`capture()` は
@@ -207,7 +207,7 @@ doc/04 §PC サイト機能仕様が定める **「テイクのプレビュー /
 
 **前提の確認 (重要): 本リポジトリに「capture session」に類する概念は存在しない。**
 `capture.takes.*` は route parameter として **project / manual / cut / take しか取らない**。
-認証はセッション (web guard + CSRF)、テナント境界は `project.in-current-org` middleware と
+認証はセッション (web guard + CSRF)、テナント境界は `project.in-route-org` middleware と
 `Route::scopeBindings()` で閉じている。したがって PC 画面が追加で解決すべき状態は 1 つも無い。
 
 | 既存 route 名 | メソッドと URI | 役割 |
@@ -243,7 +243,7 @@ doc/04 §PC サイト機能仕様が定める **「テイクのプレビュー /
 書き、Feature テストで固定する (下記「必須成果物」)。
 
 - **再利用の根拠**:
-  - 両 group の middleware は**完全に同一** (`['require-active-subscription', 'project.in-current-org']`)。
+  - 両 group の middleware は**完全に同一** (`['require-active-subscription', 'project.in-route-org']`)。
     課金ゲートの内側という要件も自動的に満たす。
   - `TakePolicy` は全 ability を `ProjectPolicy::capture()` に委譲しており、
     編集者 (org owner/admin・project_admin) は既に通る。**認可の変更が 1 行も要らない。**

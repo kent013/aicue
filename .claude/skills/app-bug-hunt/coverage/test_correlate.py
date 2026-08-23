@@ -118,7 +118,7 @@ class LoadOperationsTest(unittest.TestCase):
         path = self._write(
             "| method | route | api route name | CLI コマンド | story | 区分 |\n"
             "|---|---|---|---|---|---|\n"
-            "| POST | /projects | `api.v1.projects.store` | `project:create` | S8 | ◎ |\n"
+            "| POST | /api/v1/projects | `api.v1.projects.store` | `project:create` | S8 | ◎ |\n"
             "| DELETE | /me/session | `api.v1.me.session.revoke` | `logout` | S8 | ○ |\n"
         )
         ops = C.load_operations(path)
@@ -137,7 +137,7 @@ class LoadOperationsTest(unittest.TestCase):
             "\n## API\n\n"
             "| method | route | api route name | CLI コマンド | story | 区分 |\n"
             "|---|---|---|---|---|---|\n"
-            "| POST | /projects | `api.v1.projects.store` | `project:create` | S8 | ◎ |\n"
+            "| POST | /api/v1/projects | `api.v1.projects.store` | `project:create` | S8 | ◎ |\n"
         )
         ops = C.load_operations(path)
         self.assertIn("login.store", ops)

@@ -60,12 +60,12 @@ function tbpForeignProject(): Project
 }
 
 test('メール未確認ユーザーでも cross-org 実在 project と不在 id は同一 404', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
     $owner->forceFill(['email_verified_at' => null])->save();
     $foreign = tbpForeignProject();
 
     tbpAssertNoOracle(
-        fn (string $id) => $this->actingAs($owner)->get("/projects/{$id}"),
+        fn (string $id) => $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$id}"),
         $foreign,
         404,
     );
@@ -73,11 +73,11 @@ test('メール未確認ユーザーでも cross-org 実在 project と不在 id
 
 test('未契約組織のユーザーでも cross-org 実在 project と不在 id は同一 404', function (): void {
     // grandfatherFreePlan: false = 真の未契約組織 (課金ゲートが onboarding へ 302 する)
-    [, $owner] = createOrganizationWithOwner('未契約組織', grandfatherFreePlan: false);
+    [$organization, $owner] = createOrganizationWithOwner('未契約組織', grandfatherFreePlan: false);
     $foreign = tbpForeignProject();
 
     tbpAssertNoOracle(
-        fn (string $id) => $this->actingAs($owner)->get("/projects/{$id}"),
+        fn (string $id) => $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$id}"),
         $foreign,
         404,
     );
@@ -91,20 +91,20 @@ test('2FA 強制の未準拠ユーザーでも cross-org 実在 project と不�
     $foreign = tbpForeignProject();
 
     tbpAssertNoOracle(
-        fn (string $id) => $this->actingAs($owner)->get("/projects/{$id}"),
+        fn (string $id) => $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$id}"),
         $foreign,
         404,
     );
 });
 
 test('Inertia version mismatch (409 契機) でも cross-org 実在 project と不在 id は同一 404', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
     $foreign = tbpForeignProject();
 
     tbpAssertNoOracle(
         fn (string $id) => $this->actingAs($owner)
             ->withHeaders(['X-Inertia' => 'true', 'X-Inertia-Version' => 'stale-version'])
-            ->get("/projects/{$id}"),
+            ->get("/organizations/{$organization->slug}/projects/{$id}"),
         $foreign,
         404,
     );
@@ -115,7 +115,7 @@ test('未契約組織でも自組織 project は従来どおり課金ゲート�
     $ownProject = Project::factory()->forOrganization($organization)->create();
 
     $this->actingAs($owner)
-        ->get("/projects/{$ownProject->id}")
+        ->get("/organizations/{$organization->slug}/projects/{$ownProject->id}")
         ->assertRedirect();
 });
 
@@ -125,7 +125,7 @@ test('メール未確認でも自組織 project は従来どおり verified の 
     $ownProject = Project::factory()->forOrganization($organization)->create();
 
     $this->actingAs($owner)
-        ->get("/projects/{$ownProject->id}")
+        ->get("/organizations/{$organization->slug}/projects/{$ownProject->id}")
         ->assertRedirect(route('verification.notice'));
 });
 
@@ -135,7 +135,7 @@ test('2FA 強制の未準拠ユーザーでも自組織 project は従来どお�
     $ownProject = Project::factory()->forOrganization($organization)->create();
 
     $this->actingAs($owner)
-        ->get("/projects/{$ownProject->id}")
+        ->get("/organizations/{$organization->slug}/projects/{$ownProject->id}")
         ->assertRedirect(route('settings.security'));
 });
 
@@ -153,7 +153,7 @@ test('未認証 (pre-binding 短絡) では実在 project と不在 id が同一
     $existing = Project::factory()->forOrganization($organization)->create();
 
     tbpAssertNoOracle(
-        fn (string $id) => $this->get("/projects/{$id}"),
+        fn (string $id) => $this->get("/organizations/{$organization->slug}/projects/{$id}"),
         $existing,
         302,
     );

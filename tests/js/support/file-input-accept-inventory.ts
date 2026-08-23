@@ -100,17 +100,17 @@ export interface RawHtmlExemption {
     readonly rationale: string;
 }
 
-export const RAW_HTML_EXEMPTIONS: readonly RawHtmlExemption[] = [
-    {
-        file: "pages/Settings/Security.svelte",
-        occurrence: 1,
-        rationale:
-            "2FA の QR コードはサーバが生成した SVG をそのまま描画する箇所で、ファイル入力を作らない",
-    },
-] as const;
+/**
+ * 生 HTML の免除。**現在 0 件**である。
+ *
+ * ★T251 (Svelte raw HTML sink の deny-by-default 禁止) で `{@html}` は 1 つも無くなった。
+ *   免除が 0 件でも目録と件数の pin は残す — 「登録が無い = 検出対象」という既定を保ち、
+ *   `{@html}` が復活したときに未登録として赤くするためである。
+ */
+export const RAW_HTML_EXEMPTIONS: readonly RawHtmlExemption[] = [] as const;
 
 /** 免除の件数の pin (増減のどちらでも赤くする)。 */
-export const RAW_HTML_EXEMPTION_COUNT = 1;
+export const RAW_HTML_EXEMPTION_COUNT = 0;
 
 /**
  * 免除の登録を許す診断の理由。**現在 1 つだけ**である。

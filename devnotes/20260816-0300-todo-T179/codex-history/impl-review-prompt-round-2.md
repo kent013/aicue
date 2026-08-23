@@ -223,12 +223,12 @@ index 99f47a0..2dde794 100644
  - 実装: `app/Services/Manual/CategoryService.php`, `app/Models/Category.php`
  - 設計: `devnotes/20260710-2137-aicue-domain-foundation/detailed-design.md` 施策7
  
--## D4 ✅ web `{project}` route の org スコープ guard を middleware 層に追加 (project.in-current-org)
-+## D4 web `{project}` route の org スコープ guard を middleware 層に追加 (project.in-current-org)
+-## D4 ✅ web `{project}` route の org スコープ guard を middleware 層に追加 (project.in-route-org)
++## D4 web `{project}` route の org スコープ guard を middleware 層に追加 (project.in-route-org)
 +
 +| 行 | 内容 |
 +|---|---|
-+| 対象パス | `app/Http/Middleware/EnsureProjectBelongsToCurrentOrganization.php` / `routes/web.php` |
++| 対象パス | `app/Http/Middleware/EnsureProjectBelongsToRouteOrganization.php` / `routes/web.php` |
 +| 業務要件起因の説明 | FormRequest の DB ルールは controller の inline guard より前に走り、他組織の project に対する 422 と 404 の差がカテゴリ名や所属関係を辞書探索できる存在オラクルになる |
 +| 揃え続ける不変条件と保証機構 | 他組織の project は FormRequest を含むあらゆるアプリコードより前に 404。`ProjectRouteCurrentOrgGuardTest` が deny-by-default で強制する |
 +| 再判定の条件 | web と API v1 で project の解決モデルが 1 つに揃ったとき (binder 化を再検討できる) |
@@ -241,7 +241,7 @@ index 99f47a0..2dde794 100644
  | 観点 | テンプレート | 本アプリ |
  |---|---|---|
 @@ -134,7 +247,19 @@ ### 関連
- - 実装: `app/Http/Middleware/EnsureProjectBelongsToCurrentOrganization.php`, `routes/web.php`, `bootstrap/app.php`
+ - 実装: `app/Http/Middleware/EnsureProjectBelongsToRouteOrganization.php`, `routes/web.php`, `bootstrap/app.php`
  - テンプレート側の根拠: `docs/app-integration-guide.md` §2 (URL 整合 guard 行を 2 層構成に更新済み)
  
 -## D5 ✅ Cut のシナリオ編集は per-row CRUD でなく document 単位保存 (PUT .../scenario)

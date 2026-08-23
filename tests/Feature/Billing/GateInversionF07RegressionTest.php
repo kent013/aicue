@@ -35,7 +35,6 @@ function gateMemberOf(Organization $organization): User
     $member = User::factory()->create();
     $organization->users()->attach($member);
     $member->addRole(OrganizationRole::Member->value, $organization->laratrust_team_id);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
     return $member;
 }
@@ -49,15 +48,15 @@ test('(a) grandfathered な既存 free 組織 (declarer NULL) は業務 route �
         ->and($organization->free_plan_code)->toBe(PersonalPlanService::FREE_PLAN_CODE)
         ->and($organization->personal_declared_by_user_id)->toBeNull();
 
-    $this->actingAs($owner)->get('/projects')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects")
         ->assertOk()
         ->assertInertia(fn ($page) => $page->component('Projects/Index'));
 });
 
 test('(a) grandfathered な既存 free 組織はプロジェクトを作成できる', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->post('/projects', ['name' => 'Grandfathered プロジェクト'])
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects", ['name' => 'Grandfathered プロジェクト'])
         ->assertRedirect();
     expect(Project::query()->where('name', 'Grandfathered プロジェクト')->exists())->toBeTrue();
 });
@@ -66,8 +65,8 @@ test('(a) grandfathered な既存 free 組織は撮影 PWA (/app) に到達で�
     [$organization, $owner] = createOrganizationWithOwner();
     $project = Project::factory()->forOrganization($organization)->create();
 
-    $this->actingAs($owner)->get('/app')
-        ->assertRedirect(route('capture.manuals.index', ['project' => $project]));
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app")
+        ->assertRedirect(route('capture.manuals.index', ['organization' => $organization->slug, 'project' => $project]));
 });
 
 // ── (b) 新規登録者は遮断されても詰まない ──
@@ -76,18 +75,18 @@ test('(b) 新規未契約組織の owner は checkout へ遮断され activate-p
     [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     expect($organization->free_plan_code)->toBeNull();
 
-    $this->actingAs($owner)->get('/projects')
-        ->assertRedirect(route('onboarding.checkout'));
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects")
+        ->assertRedirect(route('onboarding.checkout', ['organization' => $organization->slug]));
 
     // 着地できる (契約するための画面が契約してないと見られない詰みが無い)
-    $this->actingAs($owner)->get(route('onboarding.checkout'))
+    $this->actingAs($owner)->get(route('onboarding.checkout', ['organization' => $organization->slug]))
         ->assertOk()
         ->assertInertia(fn ($page) => $page->component('Onboarding/Checkout'));
 
     // P7: 遮断時に元 path (/projects) が org-scoped session に積まれているため、
     // 有効化の成功着地は dashboard ではなく「やりたかった画面」へ復帰する。
-    $this->actingAs($owner)->post(route('onboarding.activate-personal'), ['declaration' => true])
-        ->assertRedirect('/projects');
+    $this->actingAs($owner)->post(route('onboarding.activate-personal', ['organization' => $organization->slug]), ['declaration' => true])
+        ->assertRedirect("/organizations/{$organization->slug}/projects");
 
     // 閉路が閉じている。
     //
@@ -97,17 +96,17 @@ test('(b) 新規未契約組織の owner は checkout へ遮断され activate-p
     // activate-personal 前にロードされたリレーションが free_plan_code=NULL のままキャッシュされ、
     // そのままだと有効化後も遮断されたように見える。本番は毎リクエストで session から
     // user を解決し直すためこの問題は起きない。
-    $this->actingAs($owner->fresh())->get('/projects')->assertOk();
+    $this->actingAs($owner->fresh())->get("/organizations/{$organization->slug}/projects")->assertOk();
 });
 
 test('(b) manageBilling 非保持 member は billing-required へ遮断され着地できる', function (): void {
     [$organization] = createOrganizationWithOwner(grandfatherFreePlan: false);
     $member = gateMemberOf($organization);
 
-    $this->actingAs($member)->get('/projects')
-        ->assertRedirect(route('onboarding.billing-required'));
+    $this->actingAs($member)->get("/organizations/{$organization->slug}/projects")
+        ->assertRedirect(route('onboarding.billing-required', ['organization' => $organization->slug]));
 
-    $this->actingAs($member)->get(route('onboarding.billing-required'))
+    $this->actingAs($member)->get(route('onboarding.billing-required', ['organization' => $organization->slug]))
         ->assertOk()
         ->assertInertia(fn ($page) => $page->component('Onboarding/BillingRequired'));
 });
@@ -115,15 +114,15 @@ test('(b) manageBilling 非保持 member は billing-required へ遮断され着
 // ── (c) 遮断時に理由が画面に出る (H1 再発検知) ──
 
 test('(c) 遮断 redirect の着地は billing.index ではなく理由を持つ Onboarding/Checkout', function (): void {
-    [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
 
-    $redirect = $this->actingAs($owner)->get('/projects');
-    $redirect->assertRedirect(route('onboarding.checkout'));
-    expect($redirect->headers->get('Location'))->not->toBe(route('billing.index'));
+    $redirect = $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects");
+    $redirect->assertRedirect(route('onboarding.checkout', ['organization' => $organization->slug]));
+    expect($redirect->headers->get('Location'))->not->toBe(route('billing.index', ['organization' => $organization->slug]));
     // 理由は着地ページが持つ = middleware は error flash を積まない (aigenba 方式)
     $redirect->assertSessionMissing('error');
 
-    $this->actingAs($owner)->get(route('onboarding.checkout'))
+    $this->actingAs($owner)->get(route('onboarding.checkout', ['organization' => $organization->slug]))
         ->assertOk()
         ->assertInertia(fn ($page) => $page
             ->component('Onboarding/Checkout')
@@ -135,7 +134,7 @@ test('(c) billing-required の着地は理由提示の素材 (owner 連絡先 / 
     [$organization] = createOrganizationWithOwner(grandfatherFreePlan: false);
     $member = gateMemberOf($organization);
 
-    $this->actingAs($member)->get(route('onboarding.billing-required'))
+    $this->actingAs($member)->get(route('onboarding.billing-required', ['organization' => $organization->slug]))
         ->assertOk()
         ->assertInertia(fn ($page) => $page
             ->component('Onboarding/BillingRequired')
@@ -144,9 +143,9 @@ test('(c) billing-required の着地は理由提示の素材 (owner 連絡先 / 
 });
 
 test('(c) 未契約の JSON は 402 + プラン未選択の文言', function (): void {
-    [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
 
-    $this->actingAs($owner)->getJson('/projects')
+    $this->actingAs($owner)->getJson("/organizations/{$organization->slug}/projects")
         ->assertStatus(402)
         ->assertJsonPath('message', GATE_NO_PLAN_MESSAGE);
 });
@@ -155,7 +154,7 @@ test('(c) 有償契約 + 支払い不健全の JSON は 402 + 支払い文言 (D
     [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     contractPaidPlan($organization, status: 'canceled');
 
-    $this->actingAs($owner)->getJson('/projects')
+    $this->actingAs($owner)->getJson("/organizations/{$organization->slug}/projects")
         ->assertStatus(402)
         ->assertJsonPath('message', GATE_BLOCKED_MESSAGE);
 });
@@ -163,9 +162,9 @@ test('(c) 有償契約 + 支払い不健全の JSON は 402 + 支払い文言 (D
 // ── (d) 無限ループ不在 (gate group 外の構造的 allowlist) ──
 
 test('(d) 遮断先および課金系 route は gate group 外で再遮断されない', function (string $routeName): void {
-    [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
 
-    $this->actingAs($owner)->get(route($routeName))->assertOk();
+    $this->actingAs($owner)->get(route($routeName, ['organization' => $organization->slug]))->assertOk();
 })->with([
     'onboarding.checkout' => 'onboarding.checkout',
     'billing.index' => 'billing.index',
@@ -179,7 +178,7 @@ test('(d) billing-required は manageBilling 非保持 member でも再遮断さ
     [$organization] = createOrganizationWithOwner(grandfatherFreePlan: false);
     $member = gateMemberOf($organization);
 
-    $this->actingAs($member)->get(route('onboarding.billing-required'))->assertOk();
+    $this->actingAs($member)->get(route('onboarding.billing-required', ['organization' => $organization->slug]))->assertOk();
 });
 
 // ── (e) 反転の結論変更は plan_code IS NULL に閉じている ──
@@ -222,5 +221,5 @@ test('(e) entitled な subscription を持つ plan_code null 組織は grandfath
     expect($organization->plan_code)->toBeNull()
         ->and(app(BillingAccess::class)->hasActiveAccess($organization))->toBeTrue();
 
-    $this->actingAs($owner)->get('/projects')->assertOk();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects")->assertOk();
 });

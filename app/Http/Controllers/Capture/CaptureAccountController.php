@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Capture;
 
-use App\Http\Concerns\ResolvesCurrentOrganization;
+use App\Http\Concerns\ResolvesRouteOrganization;
 use App\Http\Controllers\Controller;
+use App\Models\Organization;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -30,12 +31,11 @@ use Inertia\Response;
  */
 class CaptureAccountController extends Controller
 {
-    use ResolvesCurrentOrganization;
+    use ResolvesRouteOrganization;
 
-    public function __invoke(Request $request): Response
+    public function __invoke(Request $request, Organization $organization): Response
     {
         // current org 解決 + 在籍 guard。**戻り値は使わず副作用 (未設定 / 非所属で 404) のために呼ぶ**
-        $this->resolveMemberCurrentOrganization($request);
 
         return Inertia::render('Capture/Account');
     }

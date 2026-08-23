@@ -65,7 +65,7 @@
 - 課金メール通知台帳: app/Services/Billing/BillingNotificationDispatcher.php + billing_notifications テーブル（(type, invoice_id)/(type, dedup_key) UNIQUE の送達台帳。mail channel・Organization notifiable）
 - Inertia 共有 props: app/Http/Middleware/HandleInertiaRequests.php
 - User は Notifiable・CipherSweet（email 検索は whereBlind）。標準 notifications テーブルは未作成。
-- ルーティング: routes/web.php（業務 route は require-active-subscription + project.in-current-org 群。/billing 等は auth+verified 直下）
+- ルーティング: routes/web.php（業務 route は require-active-subscription + project.in-route-org 群。/billing 等は auth+verified 直下）
 
 ---
 ## 概念設計

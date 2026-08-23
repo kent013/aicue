@@ -49,7 +49,7 @@ covers_capabilities: [NOTI-01, SEC-01, SEC-02, SEC-03, SEC-04, SEC-05, SEC-06, S
      (サーバ側 no-store とクライアント guard のセット。正本 `docs/supported-browsers.md`)。
    - セッションが有効な場合は秘匿が**解除されて通常操作に戻れる**こと (白画面のまま
      詰まないこと。H4)。**iOS Safari / WebKit レーンが主戦場**なので WebKit で必ず見る。
-6. 通知センター `notifications.index`(`/notifications`): 通知一覧・空状態の説明、既読化 `notifications.read` / 一括既読 `notifications.read-all` / 開封遷移 `notifications.open`。ブラウザタブ title が固有(「通知 | AI-CUE」)か(T034)。
+6. 通知センター `notifications.index`(`/organizations/{slug}/notifications`): 通知一覧・空状態の説明、既読化 `notifications.read` / 一括既読 `notifications.read-all` / 開封遷移 `notifications.open`。ブラウザタブ title が固有(「通知 | AI-CUE」)か(T034)。
 
 ## 逸脱アイデア (--deviate 時)
 - 再認証(recent-auth/confirm-password)を経ずに機微操作(2FA無効化・アカウント削除・オーナー移譲)を直 POST → ブロックされるか。

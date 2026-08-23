@@ -1159,7 +1159,7 @@ public function index(Request $request, Project $project): Response
 ```
 
 routes/web.php（既存 categories 群の直前。業務 group 内 = `require-active-subscription` +
-`project.in-current-org` を継承）:
+`project.in-route-org` を継承）:
 
 ```php
 // カテゴリ管理画面 (管理メニュー。一覧表示のみ。write は下記既存 route)

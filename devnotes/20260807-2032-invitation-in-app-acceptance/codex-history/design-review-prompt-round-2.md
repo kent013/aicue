@@ -366,7 +366,7 @@ enum NestedRouteDefenseMode: string
     /** Route::bind() の explicit binder が actor スコープで解決する (不整合は binding 段で 404)。 */
     case ScopedBinder = 'scoped_binder';
 
-    /** テナント guard middleware (project.in-current-org / api.project-in-org) が担う。 */
+    /** テナント guard middleware (project.in-route-org / api.project-in-org) が担う。 */
     case TenantGuardMiddleware = 'tenant_guard_middleware';
 
     /** implicit binding を使わず controller が owner-scoped relation から手動解決する。 */

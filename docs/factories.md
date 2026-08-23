@@ -18,7 +18,7 @@
 | `AdminUserFactory` | AdminUser | `withMfa()` |
 | `PasskeyFactory` | Passkey | — (`for($user)` で所有者を指定。WebAuthn ceremony を伴わない経路 = 削除 / 一覧 / 手段カウント / 認可 用の最小 credential。実 ceremony の検証は vendor の WebAuthn helper で credential を生成すること) |
 | `SocialAccountFactory` | SocialAccount | `provider(string)` (`for($user)` で所有者を指定。既定 provider は `google` = recent-auth の step-up satisfier として数えられる provider) |
-| `OrganizationFactory` | Organization | `personal()`, `freePersonal($declarer)`, `grandfathered()`, `signupGranted()`, `withBillingContact(?$email, ?$name)` (請求先連絡先。CipherSweet 暗号化列) |
+| `OrganizationFactory` | Organization | `withSlug($slug)` (識別名を指定。**保存可能型 `AssignableOrganizationSlug` を必ず通す**), `freePersonal($declarer)`, `grandfathered()`, `signupGranted()`, `withStripeCustomer(?$customerId)`, `withBillingContact(?$email, ?$name)` (請求先連絡先。CipherSweet 暗号化列) |
 | `CustomTeamFactory` | CustomTeam | — |
 | `ProjectFactory` | Project | `forOrganization($org)` |
 | `ItemFactory` | Item | `forProject($project)` |
@@ -126,6 +126,16 @@ $item = Item::factory()->forProject($project)->create();
 新規ドメインリソースの Factory も `forProject()` / `forOrganization()` の
 明示 State + 親 Factory 連鎖のパターンに揃えること
 ([docs/app-integration-guide.md](app-integration-guide.md) §2)。
+
+### OrganizationSlugRename
+
+識別名の改名履歴 (家系裁定 AG-046)。`renamedAt(CarbonImmutable)` state で窓の判定を
+組み立てられる。**旧識別名は予約せず解放する**ため `from_slug` / `to_slug` に
+一意制約は無い (Factory も重複を作れる)。
+
+```php
+OrganizationSlugRename::factory()->for($organization)->renamedAt($at)->create();
+```
 
 ## Seeder
 

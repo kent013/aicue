@@ -82,9 +82,9 @@ test('render-trigger bucket は route parameter ごとに分かれない', funct
 
     // 応答が 4xx でも throttle は最外周で消費される (limiter キーの検証が目的)
     $first = $this->actingAs($owner)
-        ->postJson("/projects/{$projectA->id}/manuals/999999999/render");
+        ->postJson("/organizations/{$organization->slug}/projects/{$projectA->id}/manuals/999999999/render");
     $second = $this->actingAs($owner)
-        ->postJson("/projects/{$projectB->id}/manuals/999999999/render");
+        ->postJson("/organizations/{$organization->slug}/projects/{$projectB->id}/manuals/999999999/render");
 
     expect(limiterRemaining($second))->toBe(limiterRemaining($first) - 1);
 });

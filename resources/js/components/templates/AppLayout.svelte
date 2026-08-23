@@ -28,6 +28,7 @@
     import type { SharedProps } from "@/lib/shared-props";
     import { consumeFlash } from "@/lib/stores/flash-to-toast";
     import { clearToasts } from "@/lib/stores/toast";
+    import { orgUrl } from "@/lib/org-url";
 
     /**
      * 認証済み画面用レイアウト (左サイドバー型。参照アプリ aigenba 準拠)。
@@ -85,39 +86,49 @@
         }
     });
 
-    // active 判定: query/hash を除いた pathname で完全一致 + 明示 prefix 許可 (/projects のみ)。
-    const PREFIX_ACTIVE = new Set(["/projects"]);
+    // active 判定: query/hash を除いた pathname で完全一致 + 明示 prefix 許可 (プロジェクト配下のみ)。
+    // ★組織 URL 配下なので prefix も組織ごとに変わる = 派生値にする (定数にすると陳腐化する)。
+    const PREFIX_ACTIVE = $derived(
+        new Set(currentOrganization ? [orgUrl(currentOrganization.slug, "/projects")] : []),
+    );
     const path = $derived(new URL(page.url, "http://localhost").pathname);
     const isActive = (href: string): boolean =>
         path === href || (PREFIX_ACTIVE.has(href) && path.startsWith(href + "/"));
 
     // org-scoped href は currentOrganization.slug からのみ生成 (org なし時 null = 非表示)
     const orgSettingsHref = $derived(
-        currentOrganization ? `/organizations/${currentOrganization.slug}/settings` : null,
+        currentOrganization ? orgUrl(currentOrganization.slug, "/settings") : null,
     );
     const cliHref = $derived(
-        currentOrganization ? `/organizations/${currentOrganization.slug}/onboarding/cli` : null,
+        currentOrganization ? orgUrl(currentOrganization.slug, "/onboarding/cli") : null,
     );
     const mcpHref = $derived(
-        currentOrganization ? `/organizations/${currentOrganization.slug}/onboarding/mcp` : null,
+        currentOrganization ? orgUrl(currentOrganization.slug, "/onboarding/mcp") : null,
+    );
+    /** 通知一覧 (組織 URL 配下)。組織文脈が無ければ導線ごと出さない。 */
+    const notificationsHref = $derived(
+        currentOrganization ? orgUrl(currentOrganization.slug, "/notifications") : null,
     );
 
     // nav 項目 (認可マッピング: 詳細設計参照)。org-scoped は currentOrganization != null + capability でゲート。
     const navItems = $derived.by((): SidebarNavItem[] => {
         const org = currentOrganization;
+        // ★業務 route はすべて組織 URL 配下にある (家系裁定 AG-037)。
+        //   組織文脈が無い面 (個人設定等) では 1 項目も出さない = 壊れた URL を作らない。
+        if (!org) return [];
         const items: SidebarNavItem[] = [
-            { href: "/dashboard", label: "ダッシュボード", icon: House },
+            { href: orgUrl(org.slug, "/dashboard"), label: "ダッシュボード", icon: House },
+            { href: orgUrl(org.slug, "/projects"), label: "プロジェクト", icon: FolderKanban },
         ];
-        if (org) items.push({ href: "/projects", label: "プロジェクト", icon: FolderKanban });
-        if (org?.canManageMembers)
-            items.push({ href: "/manage/users", label: "メンバー", icon: UserPlus });
-        if (org?.canManageApiKeys)
+        if (org.canManageMembers)
+            items.push({ href: orgUrl(org.slug, "/manage/users"), label: "メンバー", icon: UserPlus });
+        if (org.canManageApiKeys)
             items.push({
-                href: `/organizations/${org.slug}/api-keys`,
+                href: orgUrl(org.slug, "/api-keys"),
                 label: "API キー",
                 icon: KeyRound,
             });
-        if (org) items.push({ href: "/billing", label: "請求", icon: CreditCard });
+        items.push({ href: orgUrl(org.slug, "/billing"), label: "請求", icon: CreditCard });
         // 設定は下部 SidebarUserMenu(個人設定)に一本化。左 nav には出さない(aigenba 準拠, T070)。
         return items;
     });
@@ -177,11 +188,12 @@
         );
     }
 
-    // 組織切替は id で POST (既存 AI-CUE 仕様。slug ではない)
-    function selectOrganization(id: number): void {
-        router.post(`/organizations/${id}/switch`);
-        closeUserMenu();
-        closeMobileMenu();
+    /**
+     * 別組織へは**その組織の URL へ移動する**だけである (家系裁定 AG-037)。
+     * 切替 endpoint も保持列も存在しない — 一覧はリンクであって切替 UI ではない。
+     */
+    function organizationHref(slug: string): string {
+        return orgUrl(slug, "/dashboard");
     }
 
     // user menu 展開中のみ Escape で閉じる (outside click は overlay button が担う)
@@ -213,9 +225,15 @@
                 >
                     <Menu class="size-6" aria-hidden="true" />
                 </button>
-                <a href="/dashboard" class="text-h3 text-primary">{appName}</a>
+                <a href="/go" class="text-h3 text-primary">{appName}</a>
             </div>
-            <NotificationBell {unreadCount} testId="notification-bell-mobile" />
+            {#if notificationsHref}
+                <NotificationBell
+                    {unreadCount}
+                    href={notificationsHref}
+                    testId="notification-bell-mobile"
+                />
+            {/if}
         </div>
 
         <!-- Desktop Sidebar -->
@@ -227,13 +245,13 @@
             <!-- Logo / Brand + bell -->
             <div class="flex items-center justify-between gap-2 border-b border-border px-3 py-4">
                 <a
-                    href="/dashboard"
+                    href="/go"
                     class="truncate text-h3 text-primary {sidebarOpen ? '' : 'sr-only'}"
                 >
                     {appName}
                 </a>
-                {#if sidebarOpen}
-                    <NotificationBell {unreadCount} testId="notification-bell" />
+                {#if sidebarOpen && notificationsHref}
+                    <NotificationBell {unreadCount} href={notificationsHref} testId="notification-bell" />
                 {/if}
             </div>
 
@@ -336,15 +354,15 @@
                                                 <span class="flex-1 truncate">{org.name}</span>
                                             </div>
                                         {:else}
-                                            <button
-                                                type="button"
-                                                onclick={() => selectOrganization(org.id)}
+                                            <a
+                                                href={organizationHref(org.slug)}
+                                                onclick={closeUserMenu}
                                                 data-testid="org-switch-{org.id}"
                                                 class="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-caption text-text transition-colors hover:bg-neutral"
                                             >
                                                 <span class="size-4 shrink-0" aria-hidden="true"></span>
                                                 <span class="flex-1 truncate">{org.name}</span>
-                                            </button>
+                                            </a>
                                         {/if}
                                     {/each}
                                 </div>
@@ -386,7 +404,7 @@
             data-testid="app-sidebar-mobile"
         >
             <div class="flex shrink-0 items-center justify-between border-b border-border px-4 py-4">
-                <a href="/dashboard" onclick={closeMobileMenu} class="text-h3 text-primary">
+                <a href="/go" onclick={closeMobileMenu} class="text-h3 text-primary">
                     {appName}
                 </a>
                 <button
@@ -434,15 +452,15 @@
                                     <span class="flex-1 truncate">{org.name}</span>
                                 </div>
                             {:else}
-                                <button
-                                    type="button"
-                                    onclick={() => selectOrganization(org.id)}
+                                <a
+                                    href={organizationHref(org.slug)}
+                                    onclick={closeMobileMenu}
                                     data-testid="org-switch-mobile-{org.id}"
                                     class="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-caption text-text transition-colors hover:bg-neutral"
                                 >
                                     <span class="size-4 shrink-0" aria-hidden="true"></span>
                                     <span class="flex-1 truncate">{org.name}</span>
-                                </button>
+                                </a>
                             {/if}
                         {/each}
                     </div>
@@ -479,7 +497,12 @@
             {/if}
             {#if showAccountNav && pendingInvitationCount > 0}
                 <div class="px-4 pt-4 sm:px-6 lg:px-8">
-                    <PendingInvitationsNotice pendingCount={pendingInvitationCount} />
+                    {#if notificationsHref}
+                        <PendingInvitationsNotice
+                            pendingCount={pendingInvitationCount}
+                            href={notificationsHref}
+                        />
+                    {/if}
                 </div>
             {/if}
             <!-- padding は各ページの PageContainer が担う (aigenba parity, T071)。ここでは付けない。 -->

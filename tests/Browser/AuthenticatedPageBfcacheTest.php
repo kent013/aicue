@@ -99,7 +99,7 @@ function bfcacheCaptureContext(): array
     $project = Project::factory()->forOrganization($organization)->create();
     VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
 
-    return [$owner, $project];
+    return [$organization, $owner, $project];
 }
 
 /**
@@ -208,18 +208,18 @@ function bfcacheLogoutInBrowser(PendingAwaitablePage $page): void
 */
 
 test('撮影画面から通常遷移しても秘匿が誤発火しない', function (): void {
-    [$owner, $project] = bfcacheCaptureContext();
+    [$organization, $owner, $project] = bfcacheCaptureContext();
     $this->actingAs($owner);
 
-    $page = visit("/app/projects/{$project->id}/manuals");
+    $page = visit("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals");
     $page->assertSee('撮影するマニュアルを選ぶ');
     // 未送信のフォーム入力 (撮影 PWA の作業途中状態)
     $page->type('@capture-search', '未送信の入力');
 
     // 通常遷移 (cross-document)
-    $page->navigate('/dashboard');
+    $page->navigate("/organizations/{$organization->slug}/dashboard");
 
-    $page->assertPathIs('/dashboard')
+    $page->assertPathIs("/organizations/{$organization->slug}/dashboard")
         ->assertScript('document.documentElement.hasAttribute("data-bfcache-hidden")', false)
         ->assertMissing('@bfcache-guard-overlay')
         ->assertNoJavaScriptErrors();
@@ -245,10 +245,10 @@ test('撮影画面から通常遷移しても秘匿が誤発火しない', funct
 */
 
 test('pagehide で実描画が止まり pageshow のプローブで復帰する (配線の部分検証)', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
     $this->actingAs($owner);
 
-    $page = visit('/dashboard');
+    $page = visit("/organizations/{$organization->slug}/dashboard");
     $page->assertSee($owner->name);
 
     $hiddenVisibility = $page->script(<<<'JS'
@@ -290,10 +290,10 @@ test('pagehide で実描画が止まり pageshow のプローブで復帰する 
 test('bfcache 復元では秘匿 → 検証 → 復帰の順で状態遷移する', function (): void {
     bfcacheSkipUnlessRestoreIsReproducible();
 
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
     $this->actingAs($owner);
 
-    $page = visit('/dashboard');
+    $page = visit("/organizations/{$organization->slug}/dashboard");
     $page->assertSee($owner->name);
     bfcacheInstallRestoreRecorder($page);
 
@@ -309,7 +309,7 @@ test('bfcache 復元では秘匿 → 検証 → 復帰の順で状態遷移す�
         '!document.documentElement.hasAttribute("data-bfcache-hidden")',
         'セッション有効なのに秘匿が解除されない',
     );
-    $page->assertPathIs('/dashboard')->assertSee($owner->name);
+    $page->assertPathIs("/organizations/{$organization->slug}/dashboard")->assertSee($owner->name);
 });
 
 /*
@@ -321,10 +321,10 @@ test('bfcache 復元では秘匿 → 検証 → 復帰の順で状態遷移す�
 test('未ログアウトでの復元では表示も未送信フォーム状態も壊れない', function (): void {
     bfcacheSkipUnlessRestoreIsReproducible();
 
-    [$owner, $project] = bfcacheCaptureContext();
+    [$organization, $owner, $project] = bfcacheCaptureContext();
     $this->actingAs($owner);
 
-    $page = visit("/app/projects/{$project->id}/manuals");
+    $page = visit("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals");
     $page->assertSee('撮影するマニュアルを選ぶ');
     $page->type('@capture-search', '未送信メモ');
     bfcacheInstallRestoreRecorder($page);
@@ -354,10 +354,10 @@ test('未ログアウトでの復元では表示も未送信フォーム状態�
 test('ログアウト後の復元では PII を再表示せず login へ倒す', function (): void {
     bfcacheSkipUnlessRestoreIsReproducible();
 
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
     $this->actingAs($owner);
 
-    $page = visit('/dashboard');
+    $page = visit("/organizations/{$organization->slug}/dashboard");
     $page->assertSee($owner->name);
     bfcacheInstallRestoreRecorder($page);
 

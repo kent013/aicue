@@ -286,7 +286,7 @@ case は §2-4 の実物から**帰納**する (汎用に見える case ほど�
    fetch 側だけ直しても閉じない = 単独で切り出すべき別課題である。
 3. **`NestedRouteIdorDefenseTest` / `NestedRouteDefenseInventory` への変更**
    — 正典 t1 の total inventory 部は aicue が origin 側であり、既に要件を満たしている。触らない。
-4. **cross-org 存在オラクル封じ middleware (aicue:D4 / `EnsureProjectBelongsToCurrentOrganization`)**
+4. **cross-org 存在オラクル封じ middleware (aicue:D4 / `EnsureProjectBelongsToRouteOrganization`)**
    — t1 の構成要素だが aicue には既に実装済み (`ProjectRouteCurrentOrgGuardTest` が固定)。追従不要。
 5. **c2c 台帳への `status_reported` 書き戻し**
    — 実装が main にマージされ commit が push された後の作業。設計フェーズでは行わない。

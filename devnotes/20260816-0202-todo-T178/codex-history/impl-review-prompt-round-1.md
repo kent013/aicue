@@ -1447,7 +1447,7 @@ index bf7c206..d656900 100644
 --- a/bootstrap/app.php
 +++ b/bootstrap/app.php
 @@ -17,6 +17,7 @@
- use App\Http\Middleware\EnsureProjectBelongsToCurrentOrganization;
+ use App\Http\Middleware\EnsureProjectBelongsToRouteOrganization;
  use App\Http\Middleware\HandleInertiaRequests;
  use App\Http\Middleware\IdempotentRequest;
 +use App\Http\Middleware\IssueSessionEpochCookie;
@@ -2363,7 +2363,7 @@ index 782e8c0..0445246 100644
 --- a/tests/Architecture/TenantBoundaryOrderingTest.php
 +++ b/tests/Architecture/TenantBoundaryOrderingTest.php
 @@ -10,6 +10,7 @@
- use App\Http\Middleware\EnsureProjectBelongsToCurrentOrganization;
+ use App\Http\Middleware\EnsureProjectBelongsToRouteOrganization;
  use App\Http\Middleware\HandleInertiaRequests;
  use App\Http\Middleware\IdempotentRequest;
 +use App\Http\Middleware\IssueSessionEpochCookie;
@@ -2867,7 +2867,7 @@ index 9173834..f857613 100644
 --- a/tests/Support/Routing/MiddlewareShortCircuitInventory.php
 +++ b/tests/Support/Routing/MiddlewareShortCircuitInventory.php
 @@ -15,6 +15,7 @@
- use App\Http\Middleware\EnsureProjectBelongsToCurrentOrganization;
+ use App\Http\Middleware\EnsureProjectBelongsToRouteOrganization;
  use App\Http\Middleware\HandleInertiaRequests;
  use App\Http\Middleware\IdempotentRequest;
 +use App\Http\Middleware\IssueSessionEpochCookie;

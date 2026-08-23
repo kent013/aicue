@@ -11,6 +11,7 @@
     import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
     import type { SharedProps } from "@/lib/shared-props";
+    import { currentOrgUrl } from "@/lib/org-url";
     import type {
         OnboardingCheckoutShape,
         OnboardingOrganizationShape,
@@ -117,7 +118,7 @@
         if (submitting) return; // 多重送信ガード (disabled にはしない)
         lastSubmittedPlanCode = "personal";
         router.post(
-            "/onboarding/activate-personal",
+            currentOrgUrl("/onboarding/activate-personal"),
             {
                 declaration: declarationChecked ? "1" : "0",
                 funding_choice: fundingChoice,
@@ -152,7 +153,7 @@
         if (!isPaidPlanCode(chosenPlanCode)) return;
         lastSubmittedPlanCode = chosenPlanCode;
         router.post(
-            "/billing/checkout",
+            currentOrgUrl("/billing/checkout"),
             {
                 plan_code: chosenPlanCode,
                 subscription_attempt_token: pageData.subscriptionAttemptToken,

@@ -1499,17 +1499,17 @@ function nestedRouteIdorInventory(): array
         // {invitation} は $organization->invitations() 経由 (招待取り消し。cross-org は 404)
         'organizations.invitations.revoke' => $s,
         // {item} は $project->items() 経由 ({project} ∈ current org は
-        // project.in-current-org middleware + controller inline guard の 2 層)
+        // project.in-route-org middleware + controller inline guard の 2 層)
         'projects.items.update' => $s,
         'projects.items.destroy' => $s,
         // {category} は $project->categories() 経由 ({project} ∈ current org は
-        // project.in-current-org middleware + controller inline guard の 2 層。
+        // project.in-route-org middleware + controller inline guard の 2 層。
         // FormRequest の DB ルール (unique) より前の 404 は ProjectRouteCurrentOrgGuardTest 参照)
         'projects.categories.update' => $s,
         'projects.categories.destroy' => $s,
         // {manual} は $project->manuals() 経由 (relation 名は route パラメータ {manual} の
         // scopeBindings 推論と一致させた manuals()。{project} ∈ current org は
-        // project.in-current-org middleware + inline guard の 2 層)
+        // project.in-route-org middleware + inline guard の 2 層)
         'projects.manuals.show' => $s,
         'projects.manuals.edit' => $s,
         'projects.manuals.update' => $s,
@@ -1531,7 +1531,7 @@ function nestedRouteIdorInventory(): array
         'projects.manuals.download' => $s,
         // 撮影 PWA (/app/*。doc/10 §10.8-3)。{manual}∈{project}, {cut}∈{manual}, {take}∈{cut} は
         // scopeBindings + 各書き込み Service の tx 内連鎖再解決 (二重防御)。
-        // {project} ∈ current org は project.in-current-org middleware + inline guard の 2 層
+        // {project} ∈ current org は project.in-route-org middleware + inline guard の 2 層
         'capture.manuals.show' => $s,
         'capture.takes.upload-url' => $s,
         'capture.takes.store' => $s,

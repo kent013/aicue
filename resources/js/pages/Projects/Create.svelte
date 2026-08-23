@@ -11,6 +11,7 @@
     import PageHeader from "@/components/molecules/PageHeader.svelte";
     import { FolderPlus } from "@lucide/svelte";
     import type { SharedProps } from "@/lib/shared-props";
+    import { currentOrgUrl } from "@/lib/org-url";
 
     /**
      * プロジェクト作成。Team 選択は出さない (Default Team パターン:
@@ -23,7 +24,7 @@
 
     function submit(event: SubmitEvent): void {
         event.preventDefault();
-        form.post("/projects");
+        form.post(currentOrgUrl("/projects"));
     }
 </script>
 
@@ -73,7 +74,7 @@
                         <Button type="submit" loading={form.processing} testId="project-submit">
                             作成
                         </Button>
-                        <Button variant="ghost" href="/projects" inertia>キャンセル</Button>
+                        <Button variant="ghost" href={currentOrgUrl("/projects")} inertia>キャンセル</Button>
                     </div>
                 </form>
             </Card>

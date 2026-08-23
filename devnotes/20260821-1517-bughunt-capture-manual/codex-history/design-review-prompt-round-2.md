@@ -3,7 +3,7 @@
 Round 1 の指摘 (施策1 の Warning、施策3/4/5 の REQUEST_CHANGES) への対応マトリクスと改訂後の詳細設計を提示します。全体判定と残る指摘を示してください。
 
 ### 対応の要点
-- 施策1: 実行順序の根拠を bootstrap/app.php の実効 priority list に置換 (SubstituteBindings → EnsureProjectBelongsToCurrentOrganization → HandleInertiaRequests → … → RequireActiveSubscription → EnsureAccountNotPendingDeletion)、TenantBoundaryOrderingTest 等を正本として引用・adopt route の母集団包含を実装時確認。MassAssignmentSafetyTest は Models の $fillable を走査する出口防御で FormRequest を列挙しない=新 Request の inventory 登録不要と事実確認。テストは assertJsonValidationErrors + adopted_take_id null + MassAssignmentProtectedKeys::all() の dataset 化。
+- 施策1: 実行順序の根拠を bootstrap/app.php の実効 priority list に置換 (SubstituteBindings → EnsureProjectBelongsToRouteOrganization → HandleInertiaRequests → … → RequireActiveSubscription → EnsureAccountNotPendingDeletion)、TenantBoundaryOrderingTest 等を正本として引用・adopt route の母集団包含を実装時確認。MassAssignmentSafetyTest は Models の $fillable を走査する出口防御で FormRequest を列挙しない=新 Request の inventory 登録不要と事実確認。テストは assertJsonValidationErrors + adopted_take_id null + MassAssignmentProtectedKeys::all() の dataset 化。
 - 施策3: relation を ofMany(created_at max, id max) に変更。hasDocument と document を同一 $document スナップショットから導出。created_at は Assert::notNull で non-null 確定後に toIso8601String。安定順序テストを 2 ケース (created_at 差 / 同時刻 id 大) に分割。PII テストを境界分割 (別 manual sentinel 非露出 / 別組織非混入 / 別組織 show 404 / <script> filename のテキスト表示)。表示は Show.svelte 側に置き SourceDocumentUpload の props は不変。hasDocument===(document!==null) 不変条件テスト。
 - 施策4: 非再現でハーネス主因を断定しない 3 分岐に変更。判定は before event の url/method (個別メソッド数でない)。409 は X-Inertia-Location 実値を必須証拠。証拠の正本はネットワーク最終 response。
 - 施策5: まず「発火元除去でき別経路の証拠が無ければ包括ガードを実装しない」選択を明記 (過大回避)。トークンは visitExplicitly の同期 wrapper (try/finally で single-use、stale 除去)。visit.url は string|URL の公式型を使い string へ狭めない。/app/ 判定は URL 正規化 + origin 一致 + 正規化 pathname (負例 https://evil/app, //evil/app, /app.evil を弾く) + method 小文字化。before は global listener でセキュリティ境界でないと明記、保証しないもの (ハードビジット/popstate) と認証失効の扱い (判定不能を一般例外にしない) を限定。失う状態表の各行に対応テストを付与。
@@ -17,7 +17,7 @@ Round 1 の指摘 (施策1 の Warning、施策3/4/5 の REQUEST_CHANGES) への
 ### [Warning] 実行順序の根拠を route group 記述順でなく bootstrap/app.php の実効 priority に
 - 判断: 対応する
 - 根拠: 正しい。SortedMiddleware は priority list で相対順序を強制する。宣言順は証拠にならない。
-- 対応: 施策1 に priority list の実効順 (SubstituteBindings → EnsureProjectBelongsToCurrentOrganization →
+- 対応: 施策1 に priority list の実効順 (SubstituteBindings → EnsureProjectBelongsToRouteOrganization →
   HandleInertiaRequests → … → RequireActiveSubscription → EnsureAccountNotPendingDeletion) を明記。
   テナント境界 404 が subscription/凍結の 302 短絡より前であることを `TenantBoundaryOrderingTest` /
   `ProjectRouteCurrentOrgGuardTest` が固定している旨を引用。adopt route が母集団に含まれることを実装時に確認。
@@ -213,10 +213,10 @@ AI-CUE は、現場に既にある**作業手順書(SOP)を起点に**、AI が�
 ### 実行順序の確認 (最重要 — Codex Round1 [Warning] 反映)
 **根拠は route group の記述順ではなく `bootstrap/app.php` の実効 priority list** (`SortedMiddleware` は
 priority に載る middleware 間の相対順序のみ強制する)。実効順:
-`SubstituteBindings` → `EnsureProjectBelongsToCurrentOrganization` (= `project.in-current-org`) →
+`SubstituteBindings` → `EnsureProjectBelongsToRouteOrganization` (= `project.in-route-org`) →
 `HandleInertiaRequests` → … → `RequireActiveSubscription` → `EnsureAccountNotPendingDeletion`。
 - **テナント境界 404** は `SubstituteBindings` (不在 id / scopeBindings の親子不整合 → 404) と
-  `EnsureProjectBelongsToCurrentOrganization` (cross-org → 404) で、**FormRequest 検証より前**に閉じる
+  `EnsureProjectBelongsToRouteOrganization` (cross-org → 404) で、**FormRequest 検証より前**に閉じる
   (AGENTS.md 不変条件 10「層 2 は binding の直後・FormRequest より前で閉じる」)。subscription の
   302 短絡や凍結 302 は**テナント境界 404 より後**に置かれている (存在オラクル防止)。
 - 実測の正本は **`TenantBoundaryOrderingTest`** / `ProjectRouteCurrentOrgGuardTest` / `NestedRouteIdorDefenseTest`

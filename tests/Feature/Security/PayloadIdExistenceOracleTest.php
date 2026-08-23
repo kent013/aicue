@@ -164,7 +164,6 @@ test('transfer-ownership の非メンバーと不在 id は同一応答 (存在�
 test('transfer-ownership は権限が無ければ user_id によらず同一 403', function (): void {
     [$organization] = createOrganizationWithOwner();
     $admin = attachOrganizationMember($organization, OrganizationRole::Admin);
-    $admin->forceFill(['current_organization_id' => $organization->id])->save();
     $member = attachOrganizationMember($organization);
     $outsider = User::factory()->create();
 
@@ -189,8 +188,8 @@ test('projects.members.store の非メンバーと不在 id は同一応答 (存
     $outsider = User::factory()->create();
 
     $send = fn (int $userId): TestResponse => $this->actingAs($owner)
-        ->from("/projects/{$project->id}")
-        ->post("/projects/{$project->id}/members", [
+        ->from("/organizations/{$organization->slug}/projects/{$project->id}")
+        ->post("/organizations/{$organization->slug}/projects/{$project->id}/members", [
             'user_id' => $userId,
             'role' => ProjectRole::Member->value,
         ]);
@@ -198,7 +197,7 @@ test('projects.members.store の非メンバーと不在 id は同一応答 (存
     pieoAssertNoOracle($send, (int) $outsider->id);
 
     $response = $send((int) $outsider->id);
-    $response->assertRedirect("/projects/{$project->id}");
+    $response->assertRedirect("/organizations/{$organization->slug}/projects/{$project->id}");
     $response->assertSessionHasErrors('user_id');
     expect($project->members()->count())->toBe(0);
 });
@@ -206,15 +205,14 @@ test('projects.members.store の非メンバーと不在 id は同一応答 (存
 test('projects.members.store は権限が無ければ user_id によらず同一 403', function (): void {
     [$organization] = createOrganizationWithOwner();
     $actor = attachOrganizationMember($organization);
-    $actor->forceFill(['current_organization_id' => $organization->id])->save();
     $other = attachOrganizationMember($organization);
     $outsider = User::factory()->create();
     $project = Project::factory()->forOrganization($organization)->create();
     attachProjectMember($project, $actor, ProjectRole::Member);
 
     $send = fn (int $userId): TestResponse => $this->actingAs($actor)
-        ->from("/projects/{$project->id}")
-        ->post("/projects/{$project->id}/members", [
+        ->from("/organizations/{$organization->slug}/projects/{$project->id}")
+        ->post("/organizations/{$organization->slug}/projects/{$project->id}/members", [
             'user_id' => $userId,
             'role' => ProjectRole::Member->value,
         ]);

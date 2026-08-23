@@ -28,7 +28,7 @@ it('remember → resolveUrl が引数なしの onboarding.checkout URL を返す
     EmailVerificationContinuation::remember($session, $organization->id);
 
     expect(EmailVerificationContinuation::resolveUrl($owner, $session))
-        ->toBe(route('onboarding.checkout'));
+        ->toBe(route('onboarding.checkout', ['organization' => $organization->slug]));
 });
 
 it('他組織の id を session に注入しても null (membership 確認)', function (): void {
@@ -107,7 +107,7 @@ dataset('継続の有無シナリオ', [
         return [$owner, $session];
     }, true],
     '他組織の id が混入' => [function (): array {
-        [, $owner] = createOrganizationWithOwner();
+        [$organization, $owner] = createOrganizationWithOwner();
         $otherOrg = Organization::factory()->create();
         /** @var Session $session */
         $session = app('session.store');
@@ -116,7 +116,7 @@ dataset('継続の有無シナリオ', [
         return [$owner, $session];
     }, false],
     'session 値が int でない' => [function (): array {
-        [, $owner] = createOrganizationWithOwner();
+        [$organization, $owner] = createOrganizationWithOwner();
         /** @var Session $session */
         $session = app('session.store');
         $session->put('verify_continue_organization_id', 'not-an-int');

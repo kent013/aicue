@@ -7,10 +7,11 @@ namespace App\Http\Controllers\Projects;
 use App\DataTransferObjects\Manual\RenderJobData;
 use App\Enums\Manual\RenderKind;
 use App\Enums\Manual\VideoManualStatus;
-use App\Http\Concerns\ResolvesCurrentOrganization;
+use App\Http\Concerns\ResolvesRouteOrganization;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Projects\TriggerRenderRequest;
 use App\Http\Resources\Manual\RenderJobResource;
+use App\Models\Organization;
 use App\Models\Project;
 use App\Models\RenderJob;
 use App\Models\User;
@@ -38,12 +39,11 @@ use Illuminate\Support\Facades\Gate;
  */
 class ManualRenderController extends Controller
 {
-    use ResolvesCurrentOrganization;
+    use ResolvesRouteOrganization;
 
     /** 完成レンダトリガー (201 + RenderJobResource)。編集者のみ。保護キー直送は 422 */
-    public function store(TriggerRenderRequest $request, Project $project, VideoManual $manual, RenderJobService $render): JsonResponse
+    public function store(TriggerRenderRequest $request, Organization $organization, Project $project, VideoManual $manual, RenderJobService $render): JsonResponse
     {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404 ({manual} ∈ {project} は scopeBindings が担保済み)
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('render', $manual);
@@ -59,9 +59,8 @@ class ManualRenderController extends Controller
     }
 
     /** プレビュートリガー (201 + RenderJobResource)。チケット非消費・status 遷移なし */
-    public function preview(TriggerRenderRequest $request, Project $project, VideoManual $manual, RenderJobService $render): JsonResponse
+    public function preview(TriggerRenderRequest $request, Organization $organization, Project $project, VideoManual $manual, RenderJobService $render): JsonResponse
     {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('render', $manual); // preview も編集者専用 (§10.5)
@@ -76,9 +75,8 @@ class ManualRenderController extends Controller
     }
 
     /** job 状態ポーリング (撮影者も read 可。成果物 URL は含めない = 権限分離) */
-    public function show(Request $request, Project $project, VideoManual $manual, RenderJob $renderJob): RenderJobResource
+    public function show(Request $request, Organization $organization, Project $project, VideoManual $manual, RenderJob $renderJob): RenderJobResource
     {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404
         $this->resolveOrganizationProject($organization, $project);
         // {renderJob} ∈ {manual} は scopeBindings が担保済み。inline 再検査は二重防御
@@ -94,7 +92,7 @@ class ManualRenderController extends Controller
      * 成果物再生 (302 → S3 署名 URL)。preview と完成動画の**両方**を扱う。
      *
      * 層は 3 段で、**すべて認可より前に 404** (AGENTS.md セキュリティ不変条件 2/10):
-     *   1. {project} ∈ current org … project.in-current-org middleware + inline guard
+     *   1. {project} ∈ current org … project.in-route-org middleware + inline guard
      *   2. {manual}  ∈ {project}   … routes 側 Route::scopeBindings()
      *   3. {renderJob} ∈ {manual}  … scopeBindings + 下の inline 再検査 (二重防御)
      * その後に **成果物の性質に合う ability** を評価する:
@@ -105,9 +103,8 @@ class ManualRenderController extends Controller
      * = authorize の後)。最後に「いま受け取れる成果物」と同一行かを照合する
      * (旧世代 job id の直叩き・未完了・実体削除済みはここで 404)。
      */
-    public function playback(Request $request, Project $project, VideoManual $manual, RenderJob $renderJob, RenderObjectStorage $storage): RedirectResponse
+    public function playback(Request $request, Organization $organization, Project $project, VideoManual $manual, RenderJob $renderJob, RenderObjectStorage $storage): RedirectResponse
     {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404
         $this->resolveOrganizationProject($organization, $project);
         if ($renderJob->video_manual_id !== $manual->id) {

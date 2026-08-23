@@ -55,6 +55,13 @@ export type UploadOutcome =
 
 export interface UploadQueueOptions {
     store: PendingStore;
+    /**
+     * 送信先の組織識別名 (家系裁定 AG-037: 組織文脈は URL だけで決まる)。
+     *
+     * ★**キューの項目には持たせない**。項目は IndexedDB に残るので、識別名を焼き込むと
+     *   改名 (AG-046) の後に再送した項目が 404 になる。送信時点の値を使う。
+     */
+    organizationSlug: string;
     fetcher?: typeof captureFetch;
     /** backoff 待機 (テストで即時解決に差し替える) */
     delay?: (ms: number) => Promise<void>;
@@ -109,6 +116,7 @@ export class QuotaExceededError extends Error {}
 
 export class UploadQueue {
     private readonly store: PendingStore;
+    private readonly organizationSlug: string;
     private readonly fetcher: typeof captureFetch;
     private readonly delay: (ms: number) => Promise<void>;
     private readonly isOnline: () => boolean;
@@ -120,6 +128,7 @@ export class UploadQueue {
 
     constructor(options: UploadQueueOptions) {
         this.store = options.store;
+        this.organizationSlug = options.organizationSlug;
         this.fetcher = options.fetcher ?? captureFetch;
         this.delay = options.delay ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
         this.isOnline = options.isOnline ?? (() => navigator.onLine);
@@ -185,7 +194,12 @@ export class UploadQueue {
 
     /** upload-url → S3 PUT → POST takes の 3 段 (D2-D4 経路) */
     private async upload(item: PendingUpload): Promise<void> {
-        const target = { projectId: item.projectId, manualId: item.manualId, cutId: item.cutId };
+        const target = {
+            organizationSlug: this.organizationSlug,
+            projectId: item.projectId,
+            manualId: item.manualId,
+            cutId: item.cutId,
+        };
         const base = cutTakesUrl(target);
         const checksum = await computeChecksumBase64(item.blob);
 

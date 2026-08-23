@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Enums\Manual\VideoManualStatus;
 use App\Models\Cut;
+use App\Models\Organization;
 use App\Models\Project;
 use App\Models\VideoManual;
 
@@ -75,13 +76,13 @@ function landscapeCaptureFixture(): array
 
     test()->actingAs($owner);
 
-    return [$project, $manual];
+    return [$organization, $project, $manual];
 }
 
 /** capture.manuals.show の URL */
-function landscapeCaptureShowUrl(Project $project, VideoManual $manual): string
+function landscapeCaptureShowUrl(Organization $organization, Project $project, VideoManual $manual): string
 {
-    return "/app/projects/{$project->id}/manuals/{$manual->id}";
+    return "/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}";
 }
 
 /**
@@ -152,10 +153,10 @@ function landscapeMediaState(mixed $page): array
 }
 
 test('横持ちスマホ相当の context では撮影パネルが全画面へ切り替わる (ケース 0)', function (): void {
-    [$project, $manual] = landscapeCaptureFixture();
+    [$organization, $project, $manual] = landscapeCaptureFixture();
 
-    $page = visit(landscapeCaptureShowUrl($project, $manual))->on()->mobile()
-        ->assertPathIs(landscapeCaptureShowUrl($project, $manual))
+    $page = visit(landscapeCaptureShowUrl($organization, $project, $manual))->on()->mobile()
+        ->assertPathIs(landscapeCaptureShowUrl($organization, $project, $manual))
         ->resize(844, 390);
 
     expect(waitForTestIdAttribute($page, 'capture-right-pane', 'data-fullscreen', 'true'))
@@ -168,10 +169,10 @@ test('横持ちスマホ相当の context では撮影パネルが全画面へ�
 });
 
 test('全画面の前後ボタンでカットが往復する (ケース 0 の続き)', function (): void {
-    [$project, $manual] = landscapeCaptureFixture();
+    [$organization, $project, $manual] = landscapeCaptureFixture();
 
-    $page = visit(landscapeCaptureShowUrl($project, $manual))->on()->mobile()
-        ->assertPathIs(landscapeCaptureShowUrl($project, $manual))
+    $page = visit(landscapeCaptureShowUrl($organization, $project, $manual))->on()->mobile()
+        ->assertPathIs(landscapeCaptureShowUrl($organization, $project, $manual))
         ->resize(844, 390);
 
     expect(waitForTestIdAttribute($page, 'capture-right-pane', 'data-fullscreen', 'true'))
@@ -191,10 +192,10 @@ test('全画面の前後ボタンでカットが往復する (ケース 0 の続
 });
 
 test('全画面は終了でき、再入路のボタンから戻れる (行き止まりを作らない)', function (): void {
-    [$project, $manual] = landscapeCaptureFixture();
+    [$organization, $project, $manual] = landscapeCaptureFixture();
 
-    $page = visit(landscapeCaptureShowUrl($project, $manual))->on()->mobile()
-        ->assertPathIs(landscapeCaptureShowUrl($project, $manual))
+    $page = visit(landscapeCaptureShowUrl($organization, $project, $manual))->on()->mobile()
+        ->assertPathIs(landscapeCaptureShowUrl($organization, $project, $manual))
         ->resize(844, 390);
 
     expect(waitForTestIdAttribute($page, 'capture-right-pane', 'data-fullscreen', 'true'))
@@ -211,10 +212,10 @@ test('全画面は終了でき、再入路のボタンから戻れる (行き止
 });
 
 test('デスクトップ相当では全画面にならない (負のコントロール 1: 全条件)', function (): void {
-    [$project, $manual] = landscapeCaptureFixture();
+    [$organization, $project, $manual] = landscapeCaptureFixture();
 
-    $page = visit(landscapeCaptureShowUrl($project, $manual))->on()->desktop()
-        ->assertPathIs(landscapeCaptureShowUrl($project, $manual));
+    $page = visit(landscapeCaptureShowUrl($organization, $project, $manual))->on()->desktop()
+        ->assertPathIs(landscapeCaptureShowUrl($organization, $project, $manual));
 
     expect(landscapeMediaState($page))->toBe(['coarse' => false, 'target' => false]);
     expect(waitForTestIdAttribute($page, 'capture-right-pane', 'data-fullscreen', 'false'))
@@ -222,10 +223,10 @@ test('デスクトップ相当では全画面にならない (負のコントロ
 });
 
 test('粗いポインタでも高さが超えると全画面にならない (負のコントロール 2: max-height の欠落)', function (): void {
-    [$project, $manual] = landscapeCaptureFixture();
+    [$organization, $project, $manual] = landscapeCaptureFixture();
 
-    $page = visit(landscapeCaptureShowUrl($project, $manual))->on()->mobile()
-        ->assertPathIs(landscapeCaptureShowUrl($project, $manual))
+    $page = visit(landscapeCaptureShowUrl($organization, $project, $manual))->on()->mobile()
+        ->assertPathIs(landscapeCaptureShowUrl($organization, $project, $manual))
         ->resize(1024, 900);
 
     expect(landscapeMediaState($page))->toBe(['coarse' => true, 'target' => false]);
@@ -234,10 +235,10 @@ test('粗いポインタでも高さが超えると全画面にならない (負
 });
 
 test('横長でも細いポインタなら全画面にならない (負のコントロール 3: pointer: coarse の欠落)', function (): void {
-    [$project, $manual] = landscapeCaptureFixture();
+    [$organization, $project, $manual] = landscapeCaptureFixture();
 
-    $page = visit(landscapeCaptureShowUrl($project, $manual))->on()->desktop()
-        ->assertPathIs(landscapeCaptureShowUrl($project, $manual))
+    $page = visit(landscapeCaptureShowUrl($organization, $project, $manual))->on()->desktop()
+        ->assertPathIs(landscapeCaptureShowUrl($organization, $project, $manual))
         ->resize(844, 390);
 
     expect(landscapeMediaState($page))->toBe(['coarse' => false, 'target' => false]);
@@ -246,10 +247,10 @@ test('横長でも細いポインタなら全画面にならない (負のコン
 });
 
 test('撮影ガイドの矩形が上下の字幕帯のどちらとも交差しない', function (): void {
-    [$project, $manual] = landscapeCaptureFixture();
+    [$organization, $project, $manual] = landscapeCaptureFixture();
 
-    $page = visit(landscapeCaptureShowUrl($project, $manual))->on()->mobile()
-        ->assertPathIs(landscapeCaptureShowUrl($project, $manual))
+    $page = visit(landscapeCaptureShowUrl($organization, $project, $manual))->on()->mobile()
+        ->assertPathIs(landscapeCaptureShowUrl($organization, $project, $manual))
         ->resize(844, 390);
 
     expect(waitForTestIdAttribute($page, 'capture-right-pane', 'data-fullscreen', 'true'))

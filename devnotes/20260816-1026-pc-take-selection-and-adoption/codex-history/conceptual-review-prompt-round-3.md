@@ -140,7 +140,7 @@ doc/04 §PC サイト機能仕様が定める **「テイクのプレビュー /
 
 **前提の確認 (重要): 本リポジトリに「capture session」に類する概念は存在しない。**
 `capture.takes.*` は route parameter として **project / manual / cut / take しか取らない**。
-認証はセッション (web guard + CSRF)、テナント境界は `project.in-current-org` middleware と
+認証はセッション (web guard + CSRF)、テナント境界は `project.in-route-org` middleware と
 `Route::scopeBindings()` で閉じている。したがって PC 画面が追加で解決すべき状態は 1 つも無い。
 
 | 既存 route 名 | メソッドと URI | 役割 |
@@ -176,7 +176,7 @@ doc/04 §PC サイト機能仕様が定める **「テイクのプレビュー /
 書き、Feature テストで固定する (下記「必須成果物」)。
 
 - **再利用の根拠**:
-  - 両 group の middleware は**完全に同一** (`['require-active-subscription', 'project.in-current-org']`)。
+  - 両 group の middleware は**完全に同一** (`['require-active-subscription', 'project.in-route-org']`)。
     課金ゲートの内側という要件も自動的に満たす。
   - `TakePolicy` は全 ability を `ProjectPolicy::capture()` に委譲しており、
     編集者 (org owner/admin・project_admin) は既に通る。**認可の変更が 1 行も要らない。**

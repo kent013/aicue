@@ -41,7 +41,7 @@ function renderForm(errors: Record<string, string> = {}): void {
     render(BillingContactForm, {
         props: {
             billingContact: { email: "old@example.test", name: "旧宛名", fallbackEmail: null },
-            updateUrl: "/billing/contact",
+            updateUrl: "/organizations/test-org/billing/contact",
             canManage: true,
         },
     });

@@ -71,9 +71,9 @@ function mockHeadObjectMatching(TakeUploadReservation $reservation): MockInterfa
     return $mock;
 }
 
-function takesPath(Project $project, VideoManual $manual, Cut $cut): string
+function takesPath(Organization $organization, Project $project, VideoManual $manual, Cut $cut): string
 {
-    return "/app/projects/{$project->id}/manuals/{$manual->id}/cuts/{$cut->id}/takes";
+    return "/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}/cuts/{$cut->id}/takes";
 }
 
 /**
@@ -97,7 +97,7 @@ test('正常登録: 201・status=ready・sort_order 先頭 (既存 +1)・予約 
 
     expect(app(StorageUsageService::class)->bytesPending($organization))->toBe($reservation->size_bytes);
 
-    $response = $this->actingAs($owner)->postJson(takesPath($project, $manual, $cut), takesPayload($reservation, $ticket));
+    $response = $this->actingAs($owner)->postJson(takesPath($organization, $project, $manual, $cut), takesPayload($reservation, $ticket));
 
     $response->assertCreated();
     $response->assertJsonPath('client_take_id', $reservation->client_take_id);
@@ -117,12 +117,12 @@ test('正常登録: 201・status=ready・sort_order 先頭 (既存 +1)・予約 
 });
 
 test('チケット改竄 (復号不能な文字列) は 422', function (): void {
-    [, $owner, $project, $manual, $cut] = registrationContext();
+    [$organization, $owner, $project, $manual, $cut] = registrationContext();
     [$reservation] = reservationWithTicket($cut);
     mockHeadObjectMatching($reservation);
 
     $response = $this->actingAs($owner)->postJson(
-        takesPath($project, $manual, $cut),
+        takesPath($organization, $project, $manual, $cut),
         takesPayload($reservation, 'tampered-ticket-value'),
     );
 
@@ -131,13 +131,13 @@ test('チケット改竄 (復号不能な文字列) は 422', function (): void 
 });
 
 test('別 cut への流用 (cut A で発行 → cut B の URL に POST) は 404', function (): void {
-    [, $owner, $project, $manual, $cutA] = registrationContext();
+    [$organization, $owner, $project, $manual, $cutA] = registrationContext();
     $cutB = Cut::factory()->forManual($manual)->create();
     [$reservation, $ticket] = reservationWithTicket($cutA);
     mockHeadObjectMatching($reservation);
 
     $this->actingAs($owner)
-        ->postJson(takesPath($project, $manual, $cutB), takesPayload($reservation, $ticket))
+        ->postJson(takesPath($organization, $project, $manual, $cutB), takesPayload($reservation, $ticket))
         ->assertNotFound();
 });
 
@@ -148,7 +148,7 @@ test('HeadObject 不存在 (期限内) は 422 + 予約は pending へ戻る (�
     $mock->shouldReceive('headObject')->andReturnNull();
     app()->instance(TakeObjectStorage::class, $mock);
 
-    $response = $this->actingAs($owner)->postJson(takesPath($project, $manual, $cut), takesPayload($reservation, $ticket));
+    $response = $this->actingAs($owner)->postJson(takesPath($organization, $project, $manual, $cut), takesPayload($reservation, $ticket));
 
     $response->assertStatus(422);
     expect($reservation->fresh()?->status)->toBe(TakeUploadReservationStatus::Pending);
@@ -156,7 +156,7 @@ test('HeadObject 不存在 (期限内) は 422 + 予約は pending へ戻る (�
 });
 
 test('HeadObject 不存在 + claim 後に期限超過した予約は released へ倒す', function (): void {
-    [, $owner, $project, $manual, $cut] = registrationContext();
+    [$organization, $owner, $project, $manual, $cut] = registrationContext();
     [$reservation, $ticket] = reservationWithTicket($cut);
     $mock = Mockery::mock(TakeObjectStorage::class);
     // claim 成功後・照合前に期限が切れたケースを clock 前進で再現する
@@ -167,7 +167,7 @@ test('HeadObject 不存在 + claim 後に期限超過した予約は released �
     });
     app()->instance(TakeObjectStorage::class, $mock);
 
-    $response = $this->actingAs($owner)->postJson(takesPath($project, $manual, $cut), takesPayload($reservation, $ticket));
+    $response = $this->actingAs($owner)->postJson(takesPath($organization, $project, $manual, $cut), takesPayload($reservation, $ticket));
 
     $response->assertStatus(422);
     expect($reservation->fresh()?->status)->toBe(TakeUploadReservationStatus::Released);
@@ -175,7 +175,7 @@ test('HeadObject 不存在 + claim 後に期限超過した予約は released �
 });
 
 test('三点照合 (size / content_type / checksum) 不一致は削除 + 予約 released + 422', function (array $meta): void {
-    [, $owner, $project, $manual, $cut] = registrationContext();
+    [$organization, $owner, $project, $manual, $cut] = registrationContext();
     [$reservation, $ticket] = reservationWithTicket($cut);
     $mock = Mockery::mock(TakeObjectStorage::class);
     $mock->shouldReceive('headObject')->andReturn(new ObjectMetadataData(
@@ -186,7 +186,7 @@ test('三点照合 (size / content_type / checksum) 不一致は削除 + 予約 
     $mock->shouldReceive('delete')->once()->with($reservation->video_path);
     app()->instance(TakeObjectStorage::class, $mock);
 
-    $response = $this->actingAs($owner)->postJson(takesPath($project, $manual, $cut), takesPayload($reservation, $ticket));
+    $response = $this->actingAs($owner)->postJson(takesPath($organization, $project, $manual, $cut), takesPayload($reservation, $ticket));
 
     $response->assertStatus(422);
     expect($reservation->fresh()?->status)->toBe(TakeUploadReservationStatus::Released);
@@ -198,7 +198,7 @@ test('三点照合 (size / content_type / checksum) 不一致は削除 + 予約 
 ]);
 
 test('ContentType が HeadObject で欠落 (null) する互換実装では照合をスキップして登録できる', function (): void {
-    [, $owner, $project, $manual, $cut] = registrationContext();
+    [$organization, $owner, $project, $manual, $cut] = registrationContext();
     [$reservation, $ticket] = reservationWithTicket($cut);
     $mock = Mockery::mock(TakeObjectStorage::class);
     $mock->shouldReceive('headObject')->andReturn(new ObjectMetadataData(
@@ -208,11 +208,11 @@ test('ContentType が HeadObject で欠落 (null) する互換実装では照合
     ));
     app()->instance(TakeObjectStorage::class, $mock);
 
-    $this->actingAs($owner)->postJson(takesPath($project, $manual, $cut), takesPayload($reservation, $ticket))->assertCreated();
+    $this->actingAs($owner)->postJson(takesPath($organization, $project, $manual, $cut), takesPayload($reservation, $ticket))->assertCreated();
 });
 
 test('completed チケット再送 (同一 path の既存 Take): 200 既存返却 + delete は呼ばれない', function (): void {
-    [, $owner, $project, $manual, $cut] = registrationContext();
+    [$organization, $owner, $project, $manual, $cut] = registrationContext();
     [$reservation, $ticket] = reservationWithTicket($cut);
     $reservation->forceFill(['status' => TakeUploadReservationStatus::Completed])->save();
     $existing = Take::factory()->forCut($cut)->create([
@@ -223,7 +223,7 @@ test('completed チケット再送 (同一 path の既存 Take): 200 既存返�
     $mock->shouldNotReceive('delete');
     app()->instance(TakeObjectStorage::class, $mock);
 
-    $response = $this->actingAs($owner)->postJson(takesPath($project, $manual, $cut), takesPayload($reservation, $ticket));
+    $response = $this->actingAs($owner)->postJson(takesPath($organization, $project, $manual, $cut), takesPayload($reservation, $ticket));
 
     $response->assertOk();
     $response->assertJsonPath('id', $existing->id);
@@ -231,7 +231,7 @@ test('completed チケット再送 (同一 path の既存 Take): 200 既存返�
 });
 
 test('別 pending 予約による重複 (既存 Take と別 path): 200 既存 + その予約のみ released + そのオブジェクトのみ削除', function (): void {
-    [, $owner, $project, $manual, $cut] = registrationContext();
+    [$organization, $owner, $project, $manual, $cut] = registrationContext();
     $clientTakeId = (string) Str::ulid();
     $existing = Take::factory()->forCut($cut)->create([
         'client_take_id' => $clientTakeId,
@@ -242,7 +242,7 @@ test('別 pending 予約による重複 (既存 Take と別 path): 200 既存 + 
     $mock->shouldReceive('delete')->once()->with($reservation->video_path);
     app()->instance(TakeObjectStorage::class, $mock);
 
-    $response = $this->actingAs($owner)->postJson(takesPath($project, $manual, $cut), takesPayload($reservation, $ticket));
+    $response = $this->actingAs($owner)->postJson(takesPath($organization, $project, $manual, $cut), takesPayload($reservation, $ticket));
 
     $response->assertOk();
     $response->assertJsonPath('id', $existing->id);
@@ -251,14 +251,14 @@ test('別 pending 予約による重複 (既存 Take と別 path): 200 既存 + 
 });
 
 test('completed なのに Take 不在は 409 reservation_inconsistent (削除なし)', function (): void {
-    [, $owner, $project, $manual, $cut] = registrationContext();
+    [$organization, $owner, $project, $manual, $cut] = registrationContext();
     [$reservation, $ticket] = reservationWithTicket($cut);
     $reservation->forceFill(['status' => TakeUploadReservationStatus::Completed])->save();
     $mock = Mockery::mock(TakeObjectStorage::class);
     $mock->shouldNotReceive('delete');
     app()->instance(TakeObjectStorage::class, $mock);
 
-    $response = $this->actingAs($owner)->postJson(takesPath($project, $manual, $cut), takesPayload($reservation, $ticket));
+    $response = $this->actingAs($owner)->postJson(takesPath($organization, $project, $manual, $cut), takesPayload($reservation, $ticket));
 
     $response->assertStatus(409);
     $response->assertJsonPath('code', 'capture_conflict');
@@ -266,7 +266,7 @@ test('completed なのに Take 不在は 409 reservation_inconsistent (削除な
 });
 
 test('completed だが既存 Take と path 矛盾は 409 (削除なし)', function (): void {
-    [, $owner, $project, $manual, $cut] = registrationContext();
+    [$organization, $owner, $project, $manual, $cut] = registrationContext();
     $clientTakeId = (string) Str::ulid();
     Take::factory()->forCut($cut)->create([
         'client_take_id' => $clientTakeId,
@@ -278,51 +278,51 @@ test('completed だが既存 Take と path 矛盾は 409 (削除なし)', functi
     $mock->shouldNotReceive('delete');
     app()->instance(TakeObjectStorage::class, $mock);
 
-    $response = $this->actingAs($owner)->postJson(takesPath($project, $manual, $cut), takesPayload($reservation, $ticket));
+    $response = $this->actingAs($owner)->postJson(takesPath($organization, $project, $manual, $cut), takesPayload($reservation, $ticket));
 
     $response->assertStatus(409);
     $response->assertJsonPath('conflict_type', 'reservation_inconsistent');
 });
 
 test('fresh verifying への再送は 409 registration_in_flight (処理中・リトライ可能)', function (): void {
-    [, $owner, $project, $manual, $cut] = registrationContext();
+    [$organization, $owner, $project, $manual, $cut] = registrationContext();
     [$reservation, $ticket] = reservationWithTicket($cut);
     $reservation->forceFill(['status' => TakeUploadReservationStatus::Verifying])->save();
     mockHeadObjectMatching($reservation);
 
-    $response = $this->actingAs($owner)->postJson(takesPath($project, $manual, $cut), takesPayload($reservation, $ticket));
+    $response = $this->actingAs($owner)->postJson(takesPath($organization, $project, $manual, $cut), takesPayload($reservation, $ticket));
 
     $response->assertStatus(409);
     $response->assertJsonPath('conflict_type', 'registration_in_flight');
 });
 
 test('released 予約 (Take 不在) への再送は 422 (upload-url 再取得を促す)', function (): void {
-    [, $owner, $project, $manual, $cut] = registrationContext();
+    [$organization, $owner, $project, $manual, $cut] = registrationContext();
     [$reservation, $ticket] = reservationWithTicket($cut);
     $reservation->forceFill(['status' => TakeUploadReservationStatus::Released])->save();
     mockHeadObjectMatching($reservation);
 
-    $this->actingAs($owner)->postJson(takesPath($project, $manual, $cut), takesPayload($reservation, $ticket))->assertStatus(422);
+    $this->actingAs($owner)->postJson(takesPath($organization, $project, $manual, $cut), takesPayload($reservation, $ticket))->assertStatus(422);
 });
 
 test('期限切れチケットは 422', function (): void {
-    [, $owner, $project, $manual, $cut] = registrationContext();
+    [$organization, $owner, $project, $manual, $cut] = registrationContext();
     [$reservation, $ticket] = reservationWithTicket($cut);
     Carbon::setTestNow(now()->addHours(2)); // チケット/予約とも期限切れに
 
-    $response = $this->actingAs($owner)->postJson(takesPath($project, $manual, $cut), takesPayload($reservation, $ticket));
+    $response = $this->actingAs($owner)->postJson(takesPath($organization, $project, $manual, $cut), takesPayload($reservation, $ticket));
 
     $response->assertStatus(422);
     Carbon::setTestNow();
 });
 
 test('cut_id の payload 直送は 422 (protected)', function (): void {
-    [, $owner, $project, $manual, $cut] = registrationContext();
+    [$organization, $owner, $project, $manual, $cut] = registrationContext();
     [$reservation, $ticket] = reservationWithTicket($cut);
     mockHeadObjectMatching($reservation);
 
     $response = $this->actingAs($owner)->postJson(
-        takesPath($project, $manual, $cut),
+        takesPath($organization, $project, $manual, $cut),
         takesPayload($reservation, $ticket, ['cut_id' => $cut->id]),
     );
 
@@ -336,20 +336,18 @@ test('cross-org 404 / 非 project member 403 / project_member は登録可', fun
     mockHeadObjectMatching($reservation);
 
     [, $otherOwner] = createOrganizationWithOwner();
-    $this->actingAs($otherOwner)->postJson(takesPath($project, $manual, $cut), takesPayload($reservation, $ticket))->assertNotFound();
+    $this->actingAs($otherOwner)->postJson(takesPath($organization, $project, $manual, $cut), takesPayload($reservation, $ticket))->assertNotFound();
 
     $outsider = attachOrganizationMember($organization);
-    $outsider->forceFill(['current_organization_id' => $organization->id])->save();
-    $this->actingAs($outsider)->postJson(takesPath($project, $manual, $cut), takesPayload($reservation, $ticket))->assertForbidden();
+    $this->actingAs($outsider)->postJson(takesPath($organization, $project, $manual, $cut), takesPayload($reservation, $ticket))->assertForbidden();
 
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
     attachProjectMember($project, $member, ProjectRole::Member);
-    $this->actingAs($member)->postJson(takesPath($project, $manual, $cut), takesPayload($reservation, $ticket))->assertCreated();
+    $this->actingAs($member)->postJson(takesPath($organization, $project, $manual, $cut), takesPayload($reservation, $ticket))->assertCreated();
 });
 
 test('並行二重送信 (insert の unique 衝突) は冪等分岐へフォールバックし 200 既存を返す', function (): void {
-    [, $owner, $project, $manual, $cut] = registrationContext();
+    [$organization, $owner, $project, $manual, $cut] = registrationContext();
     [$reservation, $ticket] = reservationWithTicket($cut);
     $mock = Mockery::mock(TakeObjectStorage::class);
     // HeadObject 中に並行リクエストが同 (cut, client_take_id) の Take を先に登録したケースを再現
@@ -369,7 +367,7 @@ test('並行二重送信 (insert の unique 衝突) は冪等分岐へフォー�
     $mock->shouldReceive('delete')->once()->with($reservation->video_path);
     app()->instance(TakeObjectStorage::class, $mock);
 
-    $response = $this->actingAs($owner)->postJson(takesPath($project, $manual, $cut), takesPayload($reservation, $ticket));
+    $response = $this->actingAs($owner)->postJson(takesPath($organization, $project, $manual, $cut), takesPayload($reservation, $ticket));
 
     $response->assertOk();
     expect($cut->takes()->count())->toBe(1);
@@ -377,7 +375,7 @@ test('並行二重送信 (insert の unique 衝突) は冪等分岐へフォー�
 });
 
 test('確定 CAS と sweeper の競合: 予約が released 済みなら Take は作成されず 422', function (): void {
-    [, $owner, $project, $manual, $cut] = registrationContext();
+    [$organization, $owner, $project, $manual, $cut] = registrationContext();
     [$reservation, $ticket] = reservationWithTicket($cut);
     $mock = Mockery::mock(TakeObjectStorage::class);
     // claim 後・確定 tx 前に sweeper が released 化したケースを再現 (HeadObject 中に横取り)
@@ -393,7 +391,7 @@ test('確定 CAS と sweeper の競合: 予約が released 済みなら Take は
     });
     app()->instance(TakeObjectStorage::class, $mock);
 
-    $response = $this->actingAs($owner)->postJson(takesPath($project, $manual, $cut), takesPayload($reservation, $ticket));
+    $response = $this->actingAs($owner)->postJson(takesPath($organization, $project, $manual, $cut), takesPayload($reservation, $ticket));
 
     $response->assertStatus(422);
     expect($cut->takes()->count())->toBe(0);
@@ -412,7 +410,7 @@ test('claim 中 (verifying) の予約は bytesPending に計上され続け並�
     $presign = Mockery::mock(TakeObjectStorage::class);
     app()->instance(TakeObjectStorage::class, $presign);
     $response = $this->actingAs($owner)->postJson(
-        "/app/projects/{$project->id}/manuals/{$manual->id}/cuts/{$cut->id}/takes/upload-url",
+        "/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}/cuts/{$cut->id}/takes/upload-url",
         [
             'client_take_id' => (string) Str::ulid(),
             'size_bytes' => 300,
@@ -437,12 +435,12 @@ test('claim 中 (verifying) の予約は bytesPending に計上され続け並�
 
 test('新規登録は GenerateTakeThumbnailJob をちょうど 1 件投入する (payload は take id)', function (): void {
     Queue::fake();
-    [, $owner, $project, $manual, $cut] = registrationContext();
+    [$organization, $owner, $project, $manual, $cut] = registrationContext();
     [$reservation, $ticket] = reservationWithTicket($cut);
     mockHeadObjectMatching($reservation);
 
     $this->actingAs($owner)
-        ->postJson(takesPath($project, $manual, $cut), takesPayload($reservation, $ticket))
+        ->postJson(takesPath($organization, $project, $manual, $cut), takesPayload($reservation, $ticket))
         ->assertCreated();
 
     $take = $cut->takes()->where('client_take_id', $reservation->client_take_id)->sole();
@@ -455,7 +453,7 @@ test('新規登録は GenerateTakeThumbnailJob をちょうど 1 件投入する
 
 test('冪等再送 (200 既存返却) では生成ジョブを 1 件も投入しない', function (): void {
     Queue::fake();
-    [, $owner, $project, $manual, $cut] = registrationContext();
+    [$organization, $owner, $project, $manual, $cut] = registrationContext();
     [$reservation, $ticket] = reservationWithTicket($cut);
     $reservation->forceFill(['status' => TakeUploadReservationStatus::Completed])->save();
     Take::factory()->forCut($cut)->create([
@@ -467,7 +465,7 @@ test('冪等再送 (200 既存返却) では生成ジョブを 1 件も投入し
     app()->instance(TakeObjectStorage::class, $mock);
 
     $this->actingAs($owner)
-        ->postJson(takesPath($project, $manual, $cut), takesPayload($reservation, $ticket))
+        ->postJson(takesPath($organization, $project, $manual, $cut), takesPayload($reservation, $ticket))
         ->assertOk();
 
     Queue::assertNotPushed(GenerateTakeThumbnailJob::class);
@@ -475,7 +473,7 @@ test('冪等再送 (200 既存返却) では生成ジョブを 1 件も投入し
 
 test('確定 CAS に負けた登録 (422) では生成ジョブを投入しない', function (): void {
     Queue::fake();
-    [, $owner, $project, $manual, $cut] = registrationContext();
+    [$organization, $owner, $project, $manual, $cut] = registrationContext();
     [$reservation, $ticket] = reservationWithTicket($cut);
     $mock = Mockery::mock(TakeObjectStorage::class);
     $mock->shouldReceive('headObject')->andReturnUsing(function () use ($reservation): ObjectMetadataData {
@@ -491,7 +489,7 @@ test('確定 CAS に負けた登録 (422) では生成ジョブを投入しな�
     app()->instance(TakeObjectStorage::class, $mock);
 
     $this->actingAs($owner)
-        ->postJson(takesPath($project, $manual, $cut), takesPayload($reservation, $ticket))
+        ->postJson(takesPath($organization, $project, $manual, $cut), takesPayload($reservation, $ticket))
         ->assertStatus(422);
 
     Queue::assertNotPushed(GenerateTakeThumbnailJob::class);
@@ -512,7 +510,7 @@ test('画像で登録すると material_type=still になり duration_ms は申�
     mockHeadObjectMatching($reservation);
 
     $this->actingAs($owner)
-        ->postJson(takesPath($project, $manual, $cut), takesPayload($reservation, $ticket, ['duration_ms' => 5_000]))
+        ->postJson(takesPath($organization, $project, $manual, $cut), takesPayload($reservation, $ticket, ['duration_ms' => 5_000]))
         ->assertCreated()
         ->assertJsonPath('duration_ms', null);
 
@@ -526,12 +524,12 @@ test('画像で登録すると material_type=still になり duration_ms は申�
 });
 
 test('動画で登録すると material_type=video のまま (回帰)', function (): void {
-    [, $owner, $project, $manual, $cut] = registrationContext();
+    [$organization, $owner, $project, $manual, $cut] = registrationContext();
     [$reservation, $ticket] = reservationWithTicket($cut);
     mockHeadObjectMatching($reservation);
 
     $this->actingAs($owner)
-        ->postJson(takesPath($project, $manual, $cut), takesPayload($reservation, $ticket))
+        ->postJson(takesPath($organization, $project, $manual, $cut), takesPayload($reservation, $ticket))
         ->assertCreated()
         ->assertJsonPath('duration_ms', 5_000);
 
@@ -539,13 +537,13 @@ test('動画で登録すると material_type=video のまま (回帰)', function
 });
 
 test('material_type を payload に入れると 422 (サーバ確定値なので受け取らない)', function (): void {
-    [, $owner, $project, $manual, $cut] = registrationContext();
+    [$organization, $owner, $project, $manual, $cut] = registrationContext();
     [$reservation, $ticket] = reservationWithTicket($cut);
     mockHeadObjectMatching($reservation);
 
     $this->actingAs($owner)
         ->postJson(
-            takesPath($project, $manual, $cut),
+            takesPath($organization, $project, $manual, $cut),
             takesPayload($reservation, $ticket, ['material_type' => 'video']),
         )
         ->assertStatus(422)
