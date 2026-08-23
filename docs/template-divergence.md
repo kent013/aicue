@@ -8,7 +8,7 @@
 `template-divergence-ledger` が 2026-08-15 に確定した形) に従う。形式は
 `tests/Architecture/TemplateDivergenceLedgerFormatTest.php` が機械で強制する。
 
-登録エントリ: 39 件
+登録エントリ: 40 件
 
 ## 記録の原則
 
@@ -2520,3 +2520,56 @@ deny-by-default 機構そのものであり、業務ドメイン (認証手段�
 
 - 実装: `tests/Architecture/IntegrationGuideGateTableSyncTest.php`
 - 設計: `devnotes/20260822-2305-integration-guide-gate-table-restore/`
+
+## D43 Pest arch のベースラインを、正典の 9 規則ではなく本アプリの実使用に合わせた 7 規則で持つ
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `tests/Architecture/ArchBaselineTest.php` / `tests/Support/Architecture/ArchBaseline.php` / `tests/Support/Architecture/ArchSurfaceScanner.php` / `tests/Support/Architecture/ArchTokenStream.php` / `tests/Support/Architecture/GlobalFunctionCallScanner.php` / `tests/Support/Architecture/VendorArchPresetReader.php` / `tests/Unit/Architecture/ArchBaselineScannerTest.php` |
+| 業務要件起因の説明 | 家系の正典 v1 は禁止シンボルを規則ごとに分解して例外の波及半径を 1 シンボルに閉じることを求めるが、正典の 9 規則 102 シンボルという分解はテンプレート側の例外クラス構成から出た数である。本アプリの走査域 (App と Database\Factories と Database\Seeders) で禁止語彙を実使用しているのは sha1 と tempnam と var_export の 3 語彙 5 クラスだけであり、母集団に対する正しい分解は例外なし 4 束 + 単独シンボル 3 本の 7 規則になる。正典の本数をそのまま写すと実体の無い規則が生まれる |
+| 揃え続ける不変条件と保証機構 | 例外を持つ規則の対象シンボルがちょうど 1 個であること (`ArchBaselineTest` の S3) / 7 規則の語彙の和集合が vendor preset の禁止語彙集合と一致すること (S5。移植漏れと vendor 更新の両方を検出) / 例外の置き場が `ArchBaseline` 1 クラスに限られ禁止表明を作るチェーンが 1 本であること (S4 が tests 配下の追跡 PHP 全数を母集団に完全一致で照合し、7 本が実際に Pest へ**実行可能な状態で**登録されたことまで実行時に確かめ (登録の有無に加えて、新品の factory との差分比較で skip / todo 等の実行修飾が 1 つも付いていないことを見る)、生成文の後置トークンまで exact-fit で閉じ、宿主ファイルの最上位の素の関数呼び出しを test だけに限って (factory の外から実行を止める現行 Pest のファイル単位の入口 — hook・uses 等の素の関数 — を deny-by-default で閉じる。メンバ呼び出し経由の入口は保証範囲外)、宿主ファイルが最上位の短絡 — 実行を打ち切る return 等と、宣言を条件付きにする最上位の制御構造で丸ごと囲む形の 2 つ — を受けていないことは別ファイルの外部自己検査が見張る) |
+| 再判定の条件 | 正典が per-rule 分解の規約そのものを変えたとき / Pest の preset 構成が変わり集合一致が取れなくなったとき / 本アプリで層分離規則 (toOnlyBeUsedIn 等) を導入するとき |
+| 決めた日 | 2026-08-23 |
+| 決めた人 | 開発者 |
+| 根拠 | devnotes/20260823-0020-pest-arch-baseline-per-rule-adoption/ |
+| 状態 | 恒久 |
+| 見直し期限 | — |
+
+| 観点 | テンプレート (家系の正典 v1) | 本アプリ |
+|---|---|---|
+| 規則の本数 | 9 規則 102 シンボル | 7 規則 97 シンボル |
+| 分解の仕方 | 例外を持つ規則は対象シンボル 1 個 | 同じ (S3 が機械で固定) |
+| 例外の置き場 | 定数だけを持つ 1 クラス | 同じ (`ArchBaseline`) |
+| 自己検査 | 期待値の pin / 逆向き証明 / 構造契約 / サーフェスの pin / vendor preset との集合一致 の 5 部 | 同じ 5 部 (S1〜S5) |
+| 語彙集合の出所 | vendor の 3 preset | 同じ (`VendorArchPresetReader` がソース表現から抽出し S5 が集合一致を見る) |
+| 表明の書き方 | `arch()` の糖衣 | `test($description, fn)` の中で `expect(...)->not->toBeUsed()->ignoring(...)` (description がテスト名になる点は同じ。`arch()` は静的に型が付かず PHPStan level 10 が通らないため使わない) |
+
+### なぜ正当な差分か (logic-driven)
+
+差は**規則の本数だけ**であり、規約 (分解の仕方・例外の置き場・自己検査 5 部) は写している。
+
+1. **本数は母集団から決まる従属変数である**。規則を分ける目的は「例外を持つ規則の対象シンボルを
+   1 個にする」ことなので、必要な規則数は**実際に例外を要する語彙の数**で決まる。
+   本アプリで例外を要するのは `sha1` / `tempnam` / `var_export` の 3 語彙だけなので、
+   単独シンボル 3 本 + 例外なし 4 束 = 7 規則になる。正典の 9 という数字を写すと、
+   例外も対象も無い規則が 2 本生まれる (実体の無い規則は「検査がある」という誤った印象だけを作る)。
+2. **語彙の側は取りこぼしゼロを機械証明している**。S5 が 7 規則の和集合と vendor 3 preset の
+   禁止語彙の和集合の**完全一致**を見るので、「本数が違う = 移植漏れ」にはならない。
+   vendor 更新で語彙が増減しても同じ検査が赤くなる。
+
+### 保証しないもの
+
+- **97 語彙のうち一部は本環境で検出力を持たない**。Pest が依存側の層を作れるのは
+  言語構文 (`PhpCoreExpressions`) か `function_exists()` を満たす関数だけで、
+  それ以外は層が空になり規則が落ちようがない。設計時点の実測は「コア構文 5 + 実在関数 27 +
+  不活性 65」だが、**活性判定は実行環境依存**なので件数は pin しない。
+  それでも**不活性な語彙を規則から外さない** — 外すと S5 の集合一致が壊れ、
+  「vendor 更新で語彙が増えたら赤」という唯一の取りこぼし検出が失われるからである
+- 走査域は `App\` / `Database\Factories\` / `Database\Seeders\` の 3 根だけである
+  (`tests/` と `.blade.php` と `resources/js/` は Pest arch の対象外)
+- 保証しないものの完全な一覧は `tests/Architecture/ArchBaselineTest.php` の docblock が正本である
+
+### 関連
+
+- 実装: `tests/Architecture/ArchBaselineTest.php`
+- 設計: `devnotes/20260823-0020-pest-arch-baseline-per-rule-adoption/`

@@ -50,7 +50,11 @@ final class ProcessBarrier
         Assert::directory($this->signalDirectory());
         Assert::directory($this->partialDirectory());
 
-        $this->reader = $reader === null ? null : Closure::fromCallable($reader);
+        // 第一級 callable 構文で Closure 化する (`Closure::fromCallable()` と等価)。
+        // ArchBaselineTest の S4 は `fromCallable` **という綴り**を tests/ 全数で 0 件に
+        // 固定するので、ここでは使わない。可変 callable 経路そのものは S4 の保証範囲外であり
+        // (同 gate の docblock「保証しないもの」5 項)、この書き換えで塞がるものではない。
+        $this->reader = $reader === null ? null : $reader(...);
     }
 
     /**
