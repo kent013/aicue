@@ -61,7 +61,7 @@ function orgRevocationReasonMinLength(): int
 /** 免除の**件数** (完全一致。増えても減っても赤くなる)。 */
 function orgRevocationExemptionCount(): int
 {
-    return 1;
+    return 2;
 }
 
 /**
@@ -77,6 +77,7 @@ function orgRevocationClassification(): array
         'transferOwnership' => 'revokes',
         'normalizeOrganizationRole' => 'revokes',
         'joinOrganization' => 'exempt',
+        'attachJustInTimeMember' => 'exempt',
     ];
 }
 
@@ -103,6 +104,7 @@ function orgRevocationExemptions(): array
 {
     return [
         'joinOrganization' => OrgAccessRevocationExemption::JoinOrganization,
+        'attachJustInTimeMember' => OrgAccessRevocationExemption::AttachJustInTimeMember,
     ];
 }
 

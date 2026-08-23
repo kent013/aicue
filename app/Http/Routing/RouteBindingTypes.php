@@ -11,6 +11,7 @@ use App\Models\Cut;
 use App\Models\Item;
 use App\Models\OauthSession;
 use App\Models\OrganizationInvitation;
+use App\Models\OrganizationOidcConnection;
 use App\Models\Project;
 use App\Models\RenderJob;
 use App\Models\Take;
@@ -59,6 +60,7 @@ final class RouteBindingTypes
         'invitation' => OrganizationInvitation::class,
         'item' => Item::class,
         'manual' => VideoManual::class,
+        'oidcConnection' => OrganizationOidcConnection::class,
         'project' => Project::class,
         'renderJob' => RenderJob::class,
         'take' => Take::class,
@@ -145,6 +147,9 @@ final class RouteBindingTypes
         // Route::pattern を掛けると vendor の route 定義変更に追随できないため、
         // binder が「認証ユーザー所有 + 数値正規化」を担う (他人の passkey は 404)。
         'passkey' => SelfScopedPasskeyBinder::class,
+        // {connection} は公開の企業ログイン導線の識別名 (数値ではないので pattern を掛けられない)。
+        // binder が書式の正規化と「不在 / 使えない接続」の一様化を担う (実在オラクルを作らない)。
+        'connection' => PublicOidcConnectionBinder::class,
     ];
 
     /**

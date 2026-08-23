@@ -357,6 +357,19 @@ return Application::configure(basePath: dirname(__DIR__))
         );
 
         /*
+         | 企業 OIDC 接続の client secret を old input へ残さない (T253 / D2)。
+         |
+         | Laravel は validation の失敗時に入力をセッションへ flash する。登録・更新フォームは
+         | **接続の秘密を扱ってよい唯一の前面**なので、この 1 語だけをグローバルに伏せる。
+         |
+         | ★`code` / `state` / `token` のような**一般名はここへ足さない** —
+         |   他のフォームの入力復元まで黙って変えてしまう。これらは**経路側で閉じる**
+         |   (企業 SSO の callback とメール昇格の確認は、失敗時に withInput() を使わない
+         |   = 入力を一切 flash しない)。
+         */
+        $exceptions->dontFlash(['client_secret']);
+
+        /*
          | セッション終了を検知した契機で Inertia の履歴暗号鍵を捨てさせる (経路 C の拡張)。
          |
          | ログアウト (App\Http\Responses\Fortify\LogoutResponse) は「利用者が明示的に

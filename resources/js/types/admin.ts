@@ -12,7 +12,11 @@ export type MemberRoleState = ConsoleRole | "owner" | "unassigned";
 export interface MemberRow {
     id: number;
     name: string;
-    email: string;
+    /**
+     * CipherSweet 復号後のメールアドレス。
+     * 企業 SSO でしか入れない利用者は使えるメールを持たないため null になりうる (T253 / A3)。
+     */
+    email: string | null;
     roleState: MemberRoleState;
     roleLabel: string;
     twoFactorStatus: "disabled" | "pending" | "enabled";

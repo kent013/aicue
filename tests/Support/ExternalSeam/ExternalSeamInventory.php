@@ -11,6 +11,7 @@ use App\Enums\Security\ExternalSeamClassification;
 use App\Enums\Security\ExternalSeamDimension;
 use App\Enums\Security\ExternalSeamKind;
 use App\Providers\AppServiceProvider;
+use App\Services\Auth\EmailPromotionService;
 use App\Services\Auth\SocialiteDriverResolver;
 use App\Services\Billing\CashierAutoRechargeGateway;
 use App\Services\Billing\CashierStripeGateway;
@@ -131,7 +132,7 @@ final class ExternalSeamInventory
                 rationale: 'Google siteverify の到達点。非本番は RecaptchaVerifierTestFake へ container bind で差し替わる',
             ),
 
-            // --- mail (3 クラス) ---
+            // --- mail (4 クラス) ---
             new ExternalSeamEntry(
                 class: CreateInquiryAction::class,
                 kind: ExternalSeamKind::Mail,
@@ -143,6 +144,12 @@ final class ExternalSeamInventory
                 kind: ExternalSeamKind::Mail,
                 classification: ExternalSeamClassification::Guarded,
                 rationale: '組織招待メールの on-demand 送信点。外部到達の有無は mailer driver 設定が決める',
+            ),
+            new ExternalSeamEntry(
+                class: EmailPromotionService::class,
+                kind: ExternalSeamKind::Mail,
+                classification: ExternalSeamClassification::Guarded,
+                rationale: 'メールアドレス昇格の確認メールの送信点 (T253)。外部到達の有無は mailer driver 設定が決める',
             ),
             new ExternalSeamEntry(
                 class: UpdateUserProfileInformation::class,

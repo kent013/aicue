@@ -84,6 +84,8 @@ return [
         'contact.thanks' => 'お問い合わせ完了',
         // 認証フロー (Fortify)
         'login' => 'ログイン',
+        // 企業アカウントでのログイン (識別名の入力画面。T253)
+        'enterprise-sso.login' => '企業アカウントでログイン',
         'register' => 'アカウント登録',
         'password.request' => 'パスワードリセット',
         'password.reset' => 'パスワードリセット',
@@ -135,6 +137,8 @@ return [
         'manage.users.index' => 'ユーザー管理',
         // API キー (organizations.api-keys.index — ApiKeys/Index.svelte h1「API キー」)
         'organizations.api-keys.index' => 'API キー',
+        // 企業 IdP との OIDC SSO 接続の管理 (T253)
+        'organizations.sso.index' => 'SSO 接続',
         // 接続セッション (organizations.api-keys.sessions.index — ApiKeys/Sessions.svelte h1「接続セッション」)
         'organizations.api-keys.sessions.index' => '接続セッション',
         // CLI 導入ガイド (organizations.onboarding.cli — Onboarding/Cli.svelte h1「CLI 導入ガイド」)

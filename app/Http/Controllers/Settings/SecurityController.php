@@ -20,6 +20,10 @@ use Inertia\Response as InertiaResponse;
  * 2FA / ソーシャル連携 / パスキーの管理面。route closure から抽出したのは
  * passkey 一覧の組み立てで DI (PasskeyLoginPolicy) が必要になり、
  * closure に積み増すと「Controller は薄く」の作法から外れるため。
+ *
+ * ★メールアドレスの昇格 (T253 / E1) の導線もここが供給する。
+ *   **メールを持たない利用者だけ**に出す — 既にある人の変更は
+ *   監査と旧アドレスへの通知を持つプロフィール更新の経路が担う。
  */
 final class SecurityController extends Controller
 {
@@ -40,6 +44,10 @@ final class SecurityController extends Controller
             // TOTP 有効ユーザーには「ログインには使えないが再認証には使える」旨を出すための判別子。
             // 判定は PasskeyLoginPolicy に集約 (login 認可 / inventory と同一条件)。
             'passkeyLoginAvailable' => $isUser && $this->passkeyLoginPolicy->allowsPasskeyLogin($user),
+            // ★メールアドレスの昇格 (T253 / E1) の導線を出すかどうか。
+            //   企業 SSO でしか入れない利用者は使えるメールを 1 件も持たないので、
+            //   **メールが無いときだけ**この面を出す (既にある人は既存の変更経路を使う)。
+            'canPromoteEmail' => $isUser && $user->email === null,
         ]);
     }
 

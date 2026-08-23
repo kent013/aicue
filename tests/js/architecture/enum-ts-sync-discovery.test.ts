@@ -72,6 +72,12 @@ interface PhpEnumExemption {
  * 発見の段が赤くなる (既定拒否)。
  */
 const PHP_ENUM_EXEMPTIONS = [
+    { path: "app/DataTransferObjects/EnterpriseSso/VerifyOutcome.php", reason: "接続の確認の結果 4 値。運営画面へは値ではなく enum が持つ日本語の文言を渡すため、TS 側に値域の写しを要さない" },
+    { path: "app/Enums/EnterpriseSso/ConnectionTransitionRejection.php", reason: "接続の管理操作を拒否した理由。画面へは値ではなく enum が持つ日本語の文言をエラーとして渡すため、TS 側で値による分岐をしない" },
+    { path: "app/Enums/EnterpriseSso/FingerprintPurpose.php", reason: "一時値の指紋の用途ラベル (domain separation の実体)。サーバ内部の鍵導出にだけ使い、画面へは値も名前も渡らない" },
+    { path: "app/Enums/EnterpriseSso/OidcSigningAlgorithm.php", reason: "ID トークン署名方式の許可集合。検証の内部判定にだけ使い、画面は接続の状態だけを見る (顧客が選ぶ項目ではない)" },
+    { path: "app/Enums/EnterpriseSso/RejectionReason.php", reason: "企業 SSO の拒否理由の内部コード。利用者への応答は理由によらず一様であり、区別はログにしか出ない" },
+    { path: "app/Enums/EnterpriseSso/TokenEndpointAuthMethod.php", reason: "token endpoint の client 認証方式。IdP の広告から選ぶ内部判定であり、顧客が入力も選択もしない" },
     { path: "app/Auth/Context/ApiActorKind.php", reason: "認証コンテキストの内部判別 (api_key/user_token)。ログと認可判定にのみ使い、画面へ値として渡さない" },
     { path: "app/DataTransferObjects/Manual/Render/RenderClipSource.php", reason: "レンダーパイプライン内部でクリップの取得元を表す区分。フロントは個別のフラグで結果を受け取り、この値そのものは渡らない" },
     { path: "app/Enums/Account/AccountDeletionFreezeAllowance.php", reason: "退会凍結中に許可する route 名相当の内部許可リスト。ガード判定にのみ使い、画面には表示しない" },
@@ -164,7 +170,7 @@ const PHP_ENUM_EXEMPTIONS = [
 ] as const satisfies readonly PhpEnumExemption[];
 
 /** `PHP_ENUM_EXEMPTIONS` の件数の pin。増えても減っても赤くする。 */
-const EXPECTED_EXEMPTION_COUNT = 89;
+const EXPECTED_EXEMPTION_COUNT = 95;
 
 interface UnresolvablePhpEnumEntry {
     readonly path: string;

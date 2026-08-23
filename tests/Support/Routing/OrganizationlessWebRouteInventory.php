@@ -42,6 +42,14 @@ final class OrganizationlessWebRouteInventory
                 .'利用者に属する情報であり組織に属さない。',
             'settings.password.store' => '個人のパスワード初回設定。利用者の認証手段であり'
                 .'組織には属さない (組織ごとにパスワードが違うことはない)。',
+            'settings.email-promotion.store' => 'メールアドレスの昇格の発行 (T253)。'
+                .'企業 SSO でしか入れない利用者が自分の認証手段を持つための操作で、利用者に属し組織に属さない。',
+            'settings.email-promotion.resend' => 'メールアドレスの昇格の再送 (T253)。'
+                .'発行と対称の利用者単位の操作であり、組織文脈を持たない。',
+            'settings.email-promotion.confirm.show' => 'メールアドレスの昇格の確認画面 (T253)。'
+                .'メールのリンクから開く 1 枚で、利用者の認証手段の確認であり組織に属さない。',
+            'settings.email-promotion.confirm' => 'メールアドレスの昇格の確定 (T253)。'
+                .'利用者の認証手段を増やす操作であり組織に属さない。',
             'settings.account.destroy' => '退会 (即時)。利用者そのものを消す操作であり、'
                 .'特定の組織の文脈では実行しない。',
             'settings.account.deletion-request.store' => '退会予約。利用者そのものに対する操作で'

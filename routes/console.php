@@ -215,3 +215,20 @@ Schedule::command('idempotency:prune')->daily()->onOneServer();
 | 「初回を能動的に完走させて結果を確認する」ためのもので、schedule の抑止ではない)。
 */
 Schedule::command('billing:purge-retention-expired --apply')->daily()->onOneServer();
+
+/*
+|--------------------------------------------------------------------------
+| 企業 SSO の一時状態の掃除 (T253)
+|--------------------------------------------------------------------------
+| どちらも**期限の決着**であって滞留の前進ではない (回収の入口 work:recover-stuck には載せない)。
+|
+| - enterprise-sso:prune-login-attempts: 期限切れのログイン試行。callback の
+|   オンアクセス掃除と二段構えで、こちらが「二度と戻ってこなかった試行」の受け皿である。
+| - auth:prune-email-promotions: 期限切れのメール昇格の確認待ち。利用者ごとに 1 行しか
+|   持てないため、消さないとその利用者は**二度と昇格を始められない**。
+|
+| **監視対象**: 両コマンドの終了コード。削除件数が上限 (prune_chunk) に張り付き続けるなら
+| 発行の側が想定より多い (掃除が追いついていない)。
+*/
+Schedule::command('enterprise-sso:prune-login-attempts')->daily()->onOneServer();
+Schedule::command('auth:prune-email-promotions')->daily()->onOneServer();

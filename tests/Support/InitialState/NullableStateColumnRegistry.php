@@ -409,6 +409,21 @@ final class NullableStateColumnRegistry
                 '撮影端末が申告した撮影時刻を、テイクの登録時にそのまま書き込む。'
                 .'NULL は端末が時刻を申告しなかったことを意味し、進行段階ではない',
             ),
+            // --- 企業 SSO (T253) ---
+            NullableStateColumnEntry::initialStateMarker(
+                'organization_oidc_connections',
+                'verified_at',
+                '接続先情報の取得に成功したときだけロック下の既存行へ打刻し、認証材料を'
+                .'更新したら消す。NULL = まだ一度も確認できていない (既定値が付くと'
+                .'登録した瞬間に確認済みの接続ができる)',
+            ),
+            NullableStateColumnEntry::initialStateMarker(
+                'enterprise_identities',
+                'last_login_at',
+                '企業ログインが確定するたびに既存行へ打刻する。NULL = 身元は作られたが'
+                .'まだ一度もログインが確定していない',
+            ),
+
             NullableStateColumnEntry::setAtCreation(
                 'cuts',
                 'material_type',

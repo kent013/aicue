@@ -31,6 +31,12 @@ export interface EnumTsMirror {
  */
 export const ENUM_TS_MIRRORS = [
     {
+        php: "app/Enums/EnterpriseSso/OidcConnectionStatus.php",
+        ts: "resources/js/components/features/sso/oidc-connection.ts",
+        declaration: "OidcConnectionStatus",
+        note: "企業 SSO の接続管理画面がバッジ・案内文・押せる操作を状態 4 値で分岐する",
+    },
+    {
         php: "app/Enums/Organization/EntryTarget.php",
         ts: "resources/js/types/organization.ts",
         declaration: "OrganizationEntryTarget",
@@ -204,7 +210,7 @@ export const ENUM_TS_MIRRORS = [
  * 目録の件数の pin。増えても減っても赤くする (写しが黙って消えるのを防ぐ)。
  * **これは網羅の証明ではない** — 登録していない写しは 1 件も検査していない。
  */
-export const EXPECTED_MIRROR_COUNT = 28;
+export const EXPECTED_MIRROR_COUNT = 29;
 
 /** `root` の**配下**にあるか (兄弟ディレクトリを通さないよう区切りまで含めて見る)。 */
 export const isUnder = (absolute: string, root: string): boolean => absolute.startsWith(root + path.sep);

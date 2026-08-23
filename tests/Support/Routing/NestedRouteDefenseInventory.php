@@ -41,6 +41,7 @@ final class NestedRouteDefenseInventory
         $tenant = NestedRouteDefenseMode::TenantGuardMiddleware;
         $manual = NestedRouteDefenseMode::ManualOwnerScopedResolution;
         $nonRes = NestedRouteDefenseMode::NonResourceParameter;
+        $publicGlobal = NestedRouteDefenseMode::PublicGlobalResource;
 
         // {project} は web/API とも テナント guard middleware が binding 直後に走る (T108 S2)
         $project = ['project' => $tenant];
@@ -132,6 +133,19 @@ final class NestedRouteDefenseInventory
             'organizations.members.destroy' => ['organization' => $binder, 'user' => $scoped],
             'organizations.members.two-factor.reset' => ['organization' => $binder, 'user' => $scoped],
 
+            // --- 企業 OIDC SSO 接続 (T253) ---
+            // {oidcConnection} は $organization->oidcConnections() 経由 (scopeBindings)
+            'organizations.sso.index' => ['organization' => $binder],
+            'organizations.sso.store' => ['organization' => $binder],
+            'organizations.sso.update' => ['organization' => $binder, 'oidcConnection' => $scoped],
+            'organizations.sso.verify' => ['organization' => $binder, 'oidcConnection' => $scoped],
+            'organizations.sso.activate' => ['organization' => $binder, 'oidcConnection' => $scoped],
+            'organizations.sso.disable' => ['organization' => $binder, 'oidcConnection' => $scoped],
+            'organizations.sso.destroy' => ['organization' => $binder, 'oidcConnection' => $scoped],
+            // 公開のログイン導線。{connection} は**組織に属さない全体一意の識別名**であり、
+            // テナント親子関係の対象にならない (理由は nonTenantReasons)
+            'enterprise-sso.redirect' => ['connection' => $publicGlobal],
+
             // --- 通知センター (組織 URL 配下。一覧は全 org 横断だが URL は組織を持つ) ---
             'notifications.index' => $org,
             'notifications.read-all' => $org,
@@ -207,6 +221,9 @@ final class NestedRouteDefenseInventory
             'mcp.oauth.protected-resource.nested#path' => 'vendor (laravel/mcp) の OAuth discovery。任意の後続セグメントでリソース id ではない',
             'storage.local#path' => 'Laravel の local disk 配信 route。署名付き URL でファイルパスを受ける (リソース id ではない)',
             'storage.local.upload#path' => 'Laravel の local disk アップロード route。署名付き URL でファイルパスを受ける',
+            'enterprise-sso.redirect#connection' => '企業ログインの公開導線の識別名。組織に属さない全体一意の値で、'
+                .'推測されてよい (防御は接続の状態と state / PKCE / ブラウザ結合が担う)。'
+                .'不在の識別名と使えない接続は PublicOidcConnectionBinder が同じ 404 に畳む',
         ];
     }
 

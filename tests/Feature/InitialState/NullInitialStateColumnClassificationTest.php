@@ -76,7 +76,7 @@ use Tests\Support\InitialState\NullInitialStateClass;
 const NULL_INITIAL_STATE_TEMPORAL_TYPES = ['timestamp', 'timestamptz', 'date'];
 
 /** 台帳の総件数 (cap ではなく exact-fit。増減したら必ずこの数字を書き換える)。 */
-const NULL_INITIAL_STATE_COLUMN_COUNT = 59;
+const NULL_INITIAL_STATE_COLUMN_COUNT = 61;
 
 /**
  * 「初期状態の目印」区分の列 (現在値ちょうど。増えるときも減るときもここを書き換える)。
@@ -89,6 +89,7 @@ const NULL_INITIAL_STATE_MARKER_COLUMNS = [
     'billing_checkout_sessions.pm_reuse_dispatched_at',
     'billing_notifications.failed_at',
     'billing_notifications.sent_at',
+    'enterprise_identities.last_login_at',
     'inquiries.closed_at',
     'notifications.read_at',
     'oauth_device_codes.last_polled_at',
@@ -97,6 +98,7 @@ const NULL_INITIAL_STATE_MARKER_COLUMNS = [
     'oauth_sessions.revoked_at',
     'organization_invitations.accepted_at',
     'organization_invitations.revoked_at',
+    'organization_oidc_connections.verified_at',
     'organizations.deleted_at',
     'organizations.free_plan_activated_at',
     'organizations.personal_declared_at',
@@ -146,8 +148,14 @@ const NULL_INITIAL_STATE_EXCLUDED_BY_MODEL = [
     'custom_teams.updated_at',
     'cuts.created_at',
     'cuts.updated_at',
+    'email_promotions.created_at',
+    'email_promotions.updated_at',
     'email_suppressions.created_at',
     'email_suppressions.updated_at',
+    'enterprise_identities.created_at',
+    'enterprise_identities.updated_at',
+    'enterprise_sso_login_attempts.created_at',
+    'enterprise_sso_login_attempts.updated_at',
     'idempotency_keys.created_at',
     'inquiries.created_at',
     'inquiries.updated_at',
@@ -159,6 +167,8 @@ const NULL_INITIAL_STATE_EXCLUDED_BY_MODEL = [
     'oauth_sessions.updated_at',
     'organization_invitations.created_at',
     'organization_invitations.updated_at',
+    'organization_oidc_connections.created_at',
+    'organization_oidc_connections.updated_at',
     'organization_quotas.created_at',
     'organization_quotas.updated_at',
     'organization_slug_renames.created_at',
@@ -253,7 +263,10 @@ const NULL_INITIAL_STATE_MODEL_CLASSES = [
     'App\Models\Category',
     'App\Models\CustomTeam',
     'App\Models\Cut',
+    'App\Models\EmailPromotion',
     'App\Models\EmailSuppression',
+    'App\Models\EnterpriseIdentity',
+    'App\Models\EnterpriseSsoLoginAttempt',
     'App\Models\IdempotencyKey',
     'App\Models\Inquiry',
     'App\Models\Item',
@@ -263,6 +276,7 @@ const NULL_INITIAL_STATE_MODEL_CLASSES = [
     'App\Models\OauthSession',
     'App\Models\Organization',
     'App\Models\OrganizationInvitation',
+    'App\Models\OrganizationOidcConnection',
     'App\Models\OrganizationSlugRename',
     'App\Models\Passkey',
     'App\Models\Permission',
@@ -291,7 +305,10 @@ const NULL_INITIAL_STATE_MODEL_TABLES = [
     'categories',
     'custom_teams',
     'cuts',
+    'email_promotions',
     'email_suppressions',
+    'enterprise_identities',
+    'enterprise_sso_login_attempts',
     'idempotency_keys',
     'inquiries',
     'items',
@@ -300,6 +317,7 @@ const NULL_INITIAL_STATE_MODEL_TABLES = [
     'model_audits',
     'oauth_sessions',
     'organization_invitations',
+    'organization_oidc_connections',
     'organization_quotas',
     'organization_slug_renames',
     'organizations',

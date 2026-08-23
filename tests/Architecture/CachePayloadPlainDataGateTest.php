@@ -317,6 +317,10 @@ const CACHE_PAYLOAD_DYNAMIC_NEW_INVENTORY = [
         'count' => 1,
         'rationale' => 'route binding が宣言した型を生成して Eloquent Model かどうかと主キーの型区分を確かめる。生成するのはモデルであって保管先ではない',
     ],
+    'tests/Feature/EnterpriseSso/EnterpriseSsoModelHidingTest.php' => [
+        'count' => 1,
+        'rationale' => '4 モデルの $fillable が空であることを 1 本のデータ提供で確かめるため、モデルのクラス名から実体を作る。キャッシュの保管先とは無関係である',
+    ],
     'tests/Feature/InitialState/NullInitialStateColumnClassificationTest.php' => [
         'count' => 1,
         'rationale' => '実スキーマと突き合わせるため Eloquent モデルを生成して cast 宣言を読む。生成するのはモデルであって保管先ではない',
@@ -388,6 +392,20 @@ const CACHE_PAYLOAD_WRITE_INVENTORY = [
         'payload' => 'FxSnapshotDto::toArray() の連想配列 (float 1 / string 3)。オブジェクトは渡さない',
         'proof' => 'tests/Unit/DataTransferObjects/FxSnapshotDtoTest.php',
         'rationale' => '当日の USD/JPY レートを 1 日 cache する。読み戻しは is_array 検査 + FxSnapshotDto::fromArray() + 失敗時 Cache::forget() で標準形どおり',
+    ],
+    'tests/Feature/EnterpriseSso/OidcDiscoveryServiceTest.php::put' => [
+        'kind' => 'guard-selftest',
+        'count' => 1,
+        'payload' => '壊れた / 空 / 未知の値のキャッシュ (読み戻しの検査を撃つための入力)',
+        'proof' => 'tests/Feature/EnterpriseSso/OidcDiscoveryServiceTest.php',
+        'rationale' => '読み戻しで DTO を組み立て直せない値を意図的に置き、Cache::forget して取り直すことを固定する。壊れた値を直接置けないとこの分岐を撃てない',
+    ],
+    'app/Services/EnterpriseSso/OidcDiscoveryService.php::put' => [
+        'kind' => 'plain',
+        'count' => 3,
+        'payload' => '接続先情報 (文字列 4 + 文字列の list 2) / 公開鍵集合 (文字列だけの二重配列) / 最終再取得時刻 (int)。オブジェクトは渡さない',
+        'proof' => 'tests/Feature/EnterpriseSso/OidcDiscoveryServiceTest.php',
+        'rationale' => '企業 IdP の接続先情報と公開鍵を issuer の sha256 をキーにして寿命つきで保存する。読み戻しは is_array 検査 + DTO の fromCachePayload() で組み立て直し、破損 / 空配列 / 未知の値のいずれでも Cache::forget して miss 扱いにする',
     ],
     'app/Services/Mail/Sns/SnsCertificateFetcher.php::put' => [
         'kind' => 'plain',
@@ -535,6 +553,14 @@ const CACHE_PAYLOAD_SURFACE_INVENTORY = [
     'app/Services/Billing/TicketCheckoutService.php' => [
         'role' => 'lock-only',
         'rationale' => 'チケット checkout の二重発行を Cache::lock で抑止するのみ。payload は書かない',
+    ],
+    'tests/Feature/EnterpriseSso/OidcDiscoveryServiceTest.php' => [
+        'role' => 'write',
+        'rationale' => '接続先情報と公開鍵の取得口の振る舞い検査。キャッシュ命中と読み戻し不能の分岐を撃つため素の配列の put を直接使う',
+    ],
+    'app/Services/EnterpriseSso/OidcDiscoveryService.php' => [
+        'role' => 'write',
+        'rationale' => '企業 IdP の接続先情報と公開鍵の取得口。get / put / forget を持つ唯一のファイルで、payload は素の配列とスカラーだけである',
     ],
     'app/Services/FxRateService.php' => [
         'role' => 'write',

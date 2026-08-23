@@ -62,11 +62,17 @@ class UpdateUserProfileInformation implements UpdatesUserProfileInformation
         // config('app.key') が文字列であることを要求するため、前提が崩れているなら
         // 不可逆な状態変更 (アドレスの書き換え・確認済みの解除・旧アドレスへの通知) が
         // 起きる前に落ちるほうが安全である。
+        // ★旧アドレスは **null になりうる** — 企業 SSO でしか入れない利用者は使えるメールを
+        //   1 件も持たない (T253 / A3)。宛先が無いので旧アドレスの鍵つきハッシュも通知も無い。
         $auditMetadata = [
-            'old_email_hash' => EmailHash::compute($oldEmail),
+            'old_email_hash' => $oldEmail === null ? null : EmailHash::compute($oldEmail),
             'new_email_hash' => EmailHash::compute($email),
         ];
 
+        // ★`email_verified_at` は**必ず消す** (T253 / A3 の規約)。
+        //   企業 SSO の利用者は `email = null` かつ `email_verified_at != null` という状態を持つので、
+        //   ここで消さないと**別経路で入れたメールが自動的に確認済みになる**。
+        //   メールを確認済みにしてよいのはメール昇格 (E1) の確定だけである。
         $user->forceFill([
             'name' => $name,
             'email' => $email,
@@ -85,9 +91,12 @@ class UpdateUserProfileInformation implements UpdatesUserProfileInformation
         // **観測専用**である。この 2 値で分岐する処理は 1 つも作らない。
         $this->recorder->record(SecurityEventType::EmailChanged, $user, $auditMetadata);
 
-        // 旧アドレスへの on-demand セキュリティ通知 (アカウントを持たない宛先にも送れる経路)
-        Notification::route('mail', $oldEmail)
-            ->notify(new EmailChangedSecurityNotification);
+        // 旧アドレスへの on-demand セキュリティ通知 (アカウントを持たない宛先にも送れる経路)。
+        // ★旧アドレスが無い (企業 SSO のみの利用者) なら送り先が無いので送らない。
+        if ($oldEmail !== null) {
+            Notification::route('mail', $oldEmail)
+                ->notify(new EmailChangedSecurityNotification);
+        }
 
         $user->sendEmailVerificationNotification();
     }

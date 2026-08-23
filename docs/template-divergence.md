@@ -8,7 +8,7 @@
 `template-divergence-ledger` が 2026-08-15 に確定した形) に従う。形式は
 `tests/Architecture/TemplateDivergenceLedgerFormatTest.php` が機械で強制する。
 
-登録エントリ: 41 件
+登録エントリ: 45 件
 
 ## 記録の原則
 
@@ -2611,3 +2611,191 @@ deny-by-default 機構そのものであり、業務ドメイン (認証手段�
 - `docs/app-integration-guide.md` も同じ変更で組織文脈の記述を URL 単一方式へ書き換えたが、
   対象パスには挙げない。同ファイルは **D42** が既に逸脱として登録しており、
   台帳の書式が対象パスの重複を禁じているためである (片方を消しても赤にならなくなる)
+
+## D45 route binding param の型台帳は業務追加ごとに更新され続ける台帳である
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `app/Http/Routing/RouteBindingTypes.php` |
+| 業務要件起因の説明 | 本ファイルは全 route binding param を 5 分類 (BIGINT / UUID / CUSTOM_BINDER / NON_MODEL / EXTERNAL) のいずれかへ登録させる deny-by-default の単一台帳である。新しい業務リソースの route を足すたびに param と対応モデルの登録が要る、**業務ドメインの拡張に追随して恒常的に更新され続ける**設計であり、テンプレートの汎用形 (アプリのモデルを 1 つも知らない骨組み) にも「採用時点の姿」にも収束しない。採用時債務一覧が要求する 3 択のうち「意図的逸脱として登録する」を選ぶ |
+| 揃え続ける不変条件と保証機構 | 未登録 param の出現は `RouteBindingTypeConstraintInventoryTest` (IV-1) が deny-by-default で落とす。分類の重複・pattern の未適用・binder の実在・doc との双方向同期は同テストと `RouteBindingCustomBinderDocSyncTest` が強制し続ける |
+| 再判定の条件 | 本ファイルの構成をテンプレート側の汎用形へ統合する判断をしたとき (現時点でその予定は無い) |
+| 決めた日 | 2026-08-23 |
+| 決めた人 | 開発者 |
+| 根拠 | devnotes/20260823-0015-enterprise-oidc-sso-adoption/ |
+| 状態 | 恒久 |
+| 見直し期限 | — |
+
+| 観点 | テンプレート | 本アプリ |
+|---|---|---|
+| 台帳の内容 | 汎用の骨組み (アプリのモデルを持たない) | 本アプリの全 binding param と対応モデルを蓄積した台帳 |
+| 更新頻度 | テンプレート更新時のみ | 新規 route の追加ごとに更新 (構造上恒常的) |
+
+### なぜ正当な差分か (logic-driven)
+
+D37 / D38 と同じ理由である。本台帳は「新しい route の param を足したら型と解決方式を宣言させる」
+という deny-by-default 機構そのものであり、業務ドメインが拡張し続ける限り内容が増え続けることが
+**設計の目的**である。今回 (T253) は企業 OIDC SSO の `{oidcConnection}` (BIGINT) と
+`{connection}` (CUSTOM_BINDER) の登録がこの恒常的な更新の 1 例である。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「全 binding param が 5 分類のいずれかに登録され、BIGINT / UUID には型 pattern が当たる」
+
+- 分類漏れ・pattern の未適用は `RouteBindingTypeConstraintInventoryTest` が deny-by-default で検出する
+- 本登録は「今後も内容が変わり続けること」を許容するものであり、
+  個々の分類の妥当性は人のレビュー対象のままである
+
+### 保証しないもの
+
+- どの param をどの分類にするかの判断の妥当性は本登録の対象外
+- 将来テンプレート側に同種の台帳が持ち込まれた場合の統合可否は判断していない
+
+### 関連
+
+- 実装: `app/Http/Routing/RouteBindingTypes.php`
+- 設計: `devnotes/20260823-0015-enterprise-oidc-sso-adoption/`
+
+## D46 キャッシュ素データ規約の書き込み経路の目録は業務追加ごとに更新され続ける台帳である
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `tests/Architecture/CachePayloadPlainDataGateTest.php` |
+| 業務要件起因の説明 | 本ファイルはキャッシュへ書く全経路とキャッシュに触れる全ファイルを exact-fit の目録で分類する deny-by-default の静的層である (AGENTS.md セキュリティ不変条件 11)。新しくキャッシュを使う業務経路を足すたびに payload の形・往復の証明・役割の登録が要る、**業務ドメインの拡張に追随して恒常的に更新され続ける**設計であり、テンプレートの汎用形にも「採用時点の姿」にも収束しない。採用時債務一覧が要求する 3 択のうち「意図的逸脱として登録する」を選ぶ |
+| 揃え続ける不変条件と保証機構 | 未登録の書き込み経路・未登録のキャッシュ接触ファイルは同ファイルの検査 2 / 検査 4 が exact-fit で落とす。payload が素のデータだけであることの実挙動は実行時層 (`PlainDataCacheGuard`) が別途受ける |
+| 再判定の条件 | 本ファイルの構成をテンプレート側の汎用形へ統合する判断をしたとき (現時点でその予定は無い) |
+| 決めた日 | 2026-08-23 |
+| 決めた人 | 開発者 |
+| 根拠 | devnotes/20260823-0015-enterprise-oidc-sso-adoption/ |
+| 状態 | 恒久 |
+| 見直し期限 | — |
+
+| 観点 | テンプレート | 本アプリ |
+|---|---|---|
+| 目録の内容 | 汎用の骨組み (業務の書き込み経路を持たない) | 本アプリのキャッシュ書き込み経路と接触ファイルを蓄積した目録 |
+| 更新頻度 | テンプレート更新時のみ | 新規キャッシュ経路の追加ごとに更新 (構造上恒常的) |
+
+### なぜ正当な差分か (logic-driven)
+
+D37 / D38 と同じ理由である。本目録は「キャッシュへ書く経路を足したら payload の形と
+往復の証明を書かせる」という deny-by-default 機構そのものであり、業務ドメインが拡張し続ける限り
+内容が増え続けることが**設計の目的**である。今回 (T253) は企業 IdP の接続先情報と公開鍵の
+キャッシュ経路 (`OidcDiscoveryService`) の登録がこの恒常的な更新の 1 例である。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「キャッシュへ入れるのは素のデータだけであり、書き込み経路と接触ファイルは
+> 目録と exact-fit で一致する」
+
+- 未登録の経路・ファイルは同ファイルの検査が deny-by-default で検出する
+- 実挙動 (実行時層が違反値を落とすこと) は `PlainDataCacheGuard` が担う
+
+### 保証しないもの
+
+- 各 entry の payload 記述と rationale の妥当性は本登録の対象外 (人のレビューが担う)
+- vendor が `getStore()` 経由で書く値は静的層・実行時層のどちらからも見えない (元の gate の限界)
+
+### 関連
+
+- 実装: `tests/Architecture/CachePayloadPlainDataGateTest.php`
+- 設計: `devnotes/20260823-0015-enterprise-oidc-sso-adoption/`
+
+## D47 step-up 必須 route の allowlist は業務追加ごとに更新され続ける台帳である
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `tests/Architecture/RecentAuthRouteTest.php` |
+| 業務要件起因の説明 | 本ファイルは「再認証 (step-up) を必須にする機微操作 route」の allowlist を持ち、宣言と実際の middleware 付与を双方向で突き合わせる。機微操作の route を足すたびに 1 行の追加が要る、**業務ドメインの拡張に追随して恒常的に更新され続ける**設計であり、テンプレートの汎用形 (アプリの route 名を 1 つも知らない骨組み) にも「採用時点の姿」にも収束しない。採用時債務一覧が要求する 3 択のうち「意図的逸脱として登録する」を選ぶ |
+| 揃え続ける不変条件と保証機構 | allowlist に載せた route に `recent-auth` が実際に付いていること、および allowlist の route が実在することを同ファイルが双方向で強制する。判定の実体は `Tests\Support\Security\RecentAuthMiddleware` に単一化され、`TwoFactorStepUpInventoryTest` と同じ述語を共有する |
+| 再判定の条件 | 本ファイルの構成をテンプレート側の汎用形へ統合する判断をしたとき (現時点でその予定は無い) |
+| 決めた日 | 2026-08-23 |
+| 決めた人 | 開発者 |
+| 根拠 | devnotes/20260823-0015-enterprise-oidc-sso-adoption/ |
+| 状態 | 恒久 |
+| 見直し期限 | — |
+
+| 観点 | テンプレート | 本アプリ |
+|---|---|---|
+| allowlist の内容 | 汎用の骨組み (アプリの route 名を持たない) | 本アプリの機微操作 route 全数を蓄積した allowlist |
+| 更新頻度 | テンプレート更新時のみ | 新規の機微操作 route の追加ごとに更新 (構造上恒常的) |
+
+### なぜ正当な差分か (logic-driven)
+
+D37 / D38 と同じ理由である。本 allowlist は「機微操作の route を足したら step-up を宣言させる」
+という機構そのものであり、業務ドメインが拡張し続ける限り内容が増え続けることが**設計の目的**である。
+今回 (T253) は企業 SSO 接続の管理 6 本とメール昇格の発行・再送 2 本の追加が
+この恒常的な更新の 1 例である。**確認 (confirm) を足していない**のも同じ台帳の判断であり、
+救済経路に関門を足すと確定できず詰むためである。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「allowlist に載せた機微操作 route には `recent-auth` 系 middleware がちょうど 1 種類付く」
+
+- 付与漏れ・allowlist の陳腐化 (削除済み route の残置) は同ファイルが双方向で検出する
+- 判定の述語は `TwoFactorStepUpInventoryTest` と共有され、片方だけが真になる drift は起きない
+
+### 保証しないもの
+
+- どの route を allowlist に載せるかの判断の妥当性は本登録の対象外 (人のレビューが担う)
+- 名前ベースのセレクタなので、別名の route で第二要素へ触る経路には沈黙する (元の gate の限界)
+
+### 関連
+
+- 実装: `tests/Architecture/RecentAuthRouteTest.php`
+- 設計: `devnotes/20260823-0015-enterprise-oidc-sso-adoption/`
+
+## D48 企業 SSO のログイン試行を DB の表で保管し、一時トークンを用途別の指紋で扱う
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `app/Models/EnterpriseSsoLoginAttempt.php` / `app/Services/EnterpriseSso/EnterpriseLoginAttemptStore.php` / `app/DataTransferObjects/EnterpriseSso/ConsumedLoginAttempt.php` / `app/DataTransferObjects/EnterpriseSso/AttemptConsumeResult.php` / `app/Support/EnterpriseSso/AttemptFingerprint.php` / `app/Enums/EnterpriseSso/FingerprintPurpose.php` / `app/Console/Commands/EnterpriseSso/PruneLoginAttemptsCommand.php` / `database/migrations/2026_08_23_001300_create_enterprise_sso_login_attempts_table.php` / `database/factories/EnterpriseSsoLoginAttemptFactory.php` / `tests/Feature/EnterpriseSso/EnterpriseLoginAttemptStoreTest.php` / `tests/Feature/EnterpriseSso/PruneLoginAttemptsTest.php` / `tests/Architecture/EnterpriseSsoPruneScheduleTest.php` |
+| 業務要件起因の説明 | 正典はログイン試行の保管先を表として持たない。aicue は `state` の使用権の唯一性を**セッションドライバの種別と `->block()` の書き忘れに依存させない**ため、DB の一意制約と行ロックへ寄せた。あわせて**一時トークンの指紋方式** (用途ラベルで domain separation する導出) を機構横断の部品として持つ — 企業 SSO のログイン試行とメールアドレスの昇格が同じ導出を使う |
+| 揃え続ける不変条件と保証機構 | 「同じ試行の使用権をちょうど 1 つの要求だけが得る」「その試行を開始したブラウザだけが使える」を `EnterpriseLoginAttemptStoreTest` の並行検査と別ブラウザ検査が固定する。用途別の指紋が相互に使い回せないことは `AttemptFingerprintTest` が実挙動で固定する |
+| 再判定の条件 | 本形が正典へ還流されて正典側の版が上がったら、独自差分ではなく新しい正典追従になるので登録を消す。また正典が同等の原子性とブラウザ結合を別方式で持ったときも見直す。★**メールアドレスの昇格の側が正典で指紋方式を採ったときも見直す** (本登録は機構横断の一時トークンの指紋方式を含むため、昇格側だけが正典化したら対象パスの線引きを引き直す) |
+| 決めた日 | 2026-08-23 |
+| 決めた人 | 開発者 |
+| 根拠 | devnotes/20260823-0015-enterprise-oidc-sso-adoption/ |
+| 状態 | 監視中 |
+| 見直し期限 | 2027-08-23 |
+
+| 観点 | テンプレート | 本アプリ |
+|---|---|---|
+| `state` の保管先 | セッション | DB の表 (一意制約 + 行ロック) |
+| 一時トークンの保存 | 原文 | 用途別ラベルつきの指紋のみ (PKCE の検証子だけは暗号化して原文) |
+| 使用権の唯一性の根拠 | セッションの読み書き | `state_fingerprint` の一意制約と `SELECT … FOR UPDATE` |
+
+### なぜ正当な差分か (logic-driven)
+
+同一セッションへの並行要求は route 側で `->block()` を書かない限り直列化が保証されない。
+つまりセッション方式は「普通の `get()` + `forget()` を書いても契約を満たしたと誤認できる」形であり、
+**書き忘れが無音で不変条件を壊す**。DB の一意制約と行ロックへ寄せれば、
+使用権の唯一性の根拠がドライバ設定と呼び出し側の作法から独立する。
+
+`routes/console.php` を対象パスに**入れない**のは、既存の共有ファイルであり、掃除の登録 1 行の
+ために全体を本登録の対象にすると、この 1 ファイルを触る将来の逸脱と必ず衝突するためである
+(値域の要件「全登録の和集合で重複しない」)。**追跡は切れない** — 掃除の本体は
+`PruneLoginAttemptsCommand` (本登録の対象) に在り、`routes/console.php` の 1 行はその
+呼び出しの登録にすぎない。
+
+`EnterpriseSsoLoginController` / `EnterpriseCallbackAuthenticator` を入れないのは、
+**正典にも在る資産**だからである (保管先の実装が違うだけ)。逸脱は「保管先を表にしたこと」であって
+controller の存在ではない。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「同じ試行の使用権を、ちょうど 1 つの要求だけが得る。
+> かつ、その試行を開始したブラウザだけが使える」
+
+- 使用権の唯一性は実プロセスの並行検査が、ブラウザ結合は別セッションからの検査が固定する
+- 期限切れ行はオンアクセスと日次の掃除の二段で回収する (**即時削除ではない**)
+
+### 保証しないもの
+
+- セッション cookie ごと奪われた場合のブラウザ結合は破れる (結合はセッションの秘密に依存する)
+- `APP_KEY` のローテートで進行中の試行 (10 分) と未確認の昇格 (60 分) は失効する。
+  **永続する値 (`subject`) は指紋を使わない**ので、ローテートで失われるのはこれだけである
+
+### 関連
+
+- 実装: `app/Services/EnterpriseSso/EnterpriseLoginAttemptStore.php`
+- 設計: `devnotes/20260823-0015-enterprise-oidc-sso-adoption/`

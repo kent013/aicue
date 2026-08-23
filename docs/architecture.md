@@ -97,6 +97,10 @@ route parameter を経由しない id (POST payload / MCP tool 引数 / token cl
     app 側から `Route::pattern` を掛けると vendor の route 定義変更に追随できないため、
     binder が「認証ユーザー所有 + 数値正規化」を担う (**他人の passkey は 404** =
     セキュリティ不変条件 2 の実装点。403 だと存在が漏れる)
+  - `{connection}` — `PublicOidcConnectionBinder`。企業ログインの公開導線 (T253) の識別名で、
+    数値ではないため pattern を掛けられない。binder が書式の正規化を担い、
+    **不在の識別名と「使えない接続」を同じ 404 に畳む** (実在オラクルを作らない。
+    route 側の `missing()` がそれを利用者向けの一様な案内へ変える)
   <!-- CUSTOM_BINDER:END -->
   未登録 param の出現は `RouteBindingTypeConstraintInventoryTest` が fail させる
   (未知 param を数値と推測しない)。実挙動 (非適合 → 404) は
@@ -157,6 +161,10 @@ route parameter を経由しない id (POST payload / MCP tool 引数 / token cl
 | `Billing/TicketAutoRecharge` | オートリチャージ設定 (1 org 1 行。**既定 off の opt-in**。同意 snapshot 4 列 + 連続失敗状態。`max_count > threshold_count` は DB CHECK) | Organization 従属 |
 | `Billing/TicketAutoRechargeAttempt` | オートリチャージ試行の状態機械 (pending → paid / failed / canceled。quantity・unit_amount は起票時 pin = webhook 金額照合の出典。partial unique `tar_attempts_org_pending_unique` で org あたり pending は 1 件) | Organization 従属 |
 | `Billing/BillingNotification` | 請求通知の delivery record (通知台帳。(type, invoice_id) / (type, dedup_key) 複合 UNIQUE で send-once を構造保証) | Organization 従属 |
+| `OrganizationOidcConnection` | AI-CUE: 企業 IdP との OIDC 接続 (T253)。状態 4 値 (draft/verified/active/disabled)。**識別名の列は `login_slug`** (`organizations.slug` の書き込み gate がキー名で表を特定しているため同名の列を作らない)。client secret は暗号化して保存し、読み出しは `ConnectionSecret` 値型を経由する。`credentials_revision` は `verify` の**内部の比較子**で画面へは出さない | Organization 従属 |
+| `EnterpriseIdentity` | AI-CUE: IdP の身元 (T253)。**引き当ての鍵は (接続, 生の subject) だけ**で、`subject` 列は `COLLATE "C"` のバイト一致。申告メールは暗号化するが **blind index を付けない** (メールで利用者を引く経路を作らない) | OrganizationOidcConnection / User 従属 |
+| `EnterpriseSsoLoginAttempt` | AI-CUE: 企業 SSO のログイン試行 (T253)。state / nonce / ブラウザ結合は**指紋だけ**を保存し、PKCE の検証子だけ暗号化して原文を持つ。使用権の唯一性は `state_fingerprint` の一意制約と行ロックが担う (`docs/template-divergence.md` D48) | OrganizationOidcConnection 従属 |
+| `EmailPromotion` | AI-CUE: メールアドレス昇格の確認待ち (T253)。トークンは指紋だけを保存し、利用者ごとに**未消費は 1 件だけ**。確定するまでは users のメールではないので blind index を付けない | User 従属 |
 
 ## 主要 Service (テンプレート同梱)
 
@@ -164,6 +172,14 @@ route parameter を経由しない id (POST payload / MCP tool 引数 / token cl
 |---|---|
 | `Organization/OrganizationProvisioningService` | 組織作成 (Team + Default Team + Owner ロールまで一括) |
 | `Organization/OrganizationMembershipService` | メンバー追加・削除・ロール変更 |
+| `EnterpriseSso/OidcDiscoveryService` | AI-CUE: 接続先情報と公開鍵の取得 (T253)。**外向きは `PinnedHttpClient` だけ**を通り、リダイレクトを追従せず 2xx 以外を一様に拒否する。キャッシュは素の配列とスカラーだけで、読み戻しは DTO へ組み立て直し失敗したら `forget` する |
+| `EnterpriseSso/OidcTokenExchanger` | AI-CUE: 認可コードとトークンの交換 (T253)。`client_secret_basic` を優先し (body 漏洩面が小さい)、vendor の例外を外へ連結しない (理由の enum だけを持つ例外へ変換する) |
+| `EnterpriseSso/EnterpriseIdTokenVerifier` | AI-CUE: ID トークンの検証 (T253)。`alg` は**アプリの許可集合と IdP の広告集合の両方**に入ることを要求し、`none` と HMAC は enum に持たない。未知の `kid` では鍵を 1 回だけ取り直す |
+| `EnterpriseSso/EnterpriseLoginAttemptStore` | AI-CUE: ログイン試行の保管 (T253)。**業務上の拒否は分類として返し、DB の障害は例外として伝播する** (混ぜると「排他が壊れた」事実が一様な拒否に隠れる) |
+| `EnterpriseSso/EnterpriseUserProvisioner` | AI-CUE: 初回ログインでの利用者の自動作成 (T253 / always-JIT)。**メールで利用者を引かない**。作る利用者は `email = null` / `email_verified_at = now()` / `password = null` で、所属は接続の組織だけ・役割は最小の Member |
+| `EnterpriseSso/EnterpriseCallbackAuthenticator` | AI-CUE: 企業 SSO の戻り口の調停 (T253)。consume → (ロックなしで) 外向き取得 → **接続の行ロックの中で Active の確認と JIT** の順で、無効化との線形化点を接続の行に定める |
+| `EnterpriseSso/OidcConnectionTransitionService` | AI-CUE: 接続の状態遷移 (T253)。`update` / `activate` / `disable` / `destroy` は行ロック下で完結し、**`verify` だけは三段構成** (ロックなしでスナップショット → ロックなしで外向き取得 → ロック下で `credentials_revision` と実値と暗号文 digest の 3 層を再確認) |
+| `Auth/EmailPromotionService` | AI-CUE: メールアドレスの昇格 (T253 / E1)。**`App\Services\Auth` に置く**のは、メール文字列を正当に扱う唯一の場所を企業 SSO の禁止語の走査へ巻き込まないためである (引き当ての鍵は常に自分自身であることは `EmailPromotionIdentityGateTest` が別に固定する) |
 | `Project/ProjectService` | プロジェクト CRUD |
 | `Manual/CategoryService` | AI-CUE: カテゴリ create/update/reorder/delete (Project 行ロックで直列化・sort_order 専有) |
 | `Manual/VideoManualService` | AI-CUE: 動画マニュアル create/updateMeta/delete/duplicate (created_by サーバ導出・category 保存時再解決。duplicate = 別名保存: 保存済み cuts を新 manual へ複製し takes/成果物/SOP は引き継がない) |
@@ -1962,6 +1978,37 @@ Vitest (`OrganizationsSettings.test.ts`) と Feature 両面で回帰固定する
 `ExecuteAutoRechargeAttemptJob` は `$tries = 1` でリコンサイルが再試行を担うため、恒久喪失にはならない
 (Stripe idempotency key により二重課金にもならない)。手順 0 の実施条件はこの受容の**発生確率を下げる**
 ためのものであり、「起きない」ことの保証ではない。
+## `users.email` が null でありうること (T253 / A3)
+
+企業 SSO でしか入れない利用者は**使えるメールアドレスを 1 件も持たない**。
+仮のメール文字列 (`sub@example.invalid` 等) は作らない — 偽のメールは衝突と誤送の温床である。
+したがって `users.email` は **nullable** で、その利用者は
+`email = null` かつ `email_verified_at != null` という状態を持つ。
+
+これは「**IdP が本人確認した。確認すべきメールが無い**」の意味であり、
+`hasVerifiedEmail()` は既存の実装のまま真になる (`verified` middleware の意味論を変えない)。
+
+### 守る規約
+
+- **`email` を null → 非 null にする経路では `email_verified_at` を必ず消す**。
+  消さないと「後から別経路で入れたメールが自動的に確認済みになる」穴になる。
+  棚卸し済みの経路: Fortify のプロフィール更新 (`UpdateUserProfileInformation`)
+- **例外はメール昇格 (`Auth/EmailPromotionService`) の確定だけ**である。
+  そこでは「以前の値のまま」にせず、**新しいメールを実際に確認した時刻へ更新する**
+  (timestamp の監査上の意味を保つ)
+- **メールを持たない利用者は `email_index` の blind index 行を持たない**。
+  同梱 trait の既定は null もハッシュして 1 行書く形なので、そのままだと
+  企業 SSO の利用者が全員同じ blind index 値を持ち、`blind_indexes_type_name_value_unique`
+  (partial unique) に衝突して**2 人目から作成できなくなる**。
+  `User::updateBlindIndexes()` の override がこれを閉じている
+
+### 保証しないもの (誇張しない)
+
+「`email` を書く経路」の**網羅的な静的判定は持っていない** (deny-by-default の gate にしていない)。
+主要経路の挙動を `tests/Feature/Auth/EnterpriseOnlyUserEmailTest.php` が実挙動で固定し、
+規約は本節が持つ。新しく `email` を書く経路を足すときは、本節に従って
+`email_verified_at` の扱いを決めること。
+
 ## 2FA 面の step-up (recent-auth) 契約 (T124)
 
 第二要素そのものを扱う面は、**セッション認証だけでは到達させない**。
