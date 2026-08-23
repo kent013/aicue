@@ -309,6 +309,27 @@ final class EnterpriseSsoSourceScanner
      * ★**外側の引数リストの深さ 1 にある名前付き引数だけ**を見る。
      *   深さを見ないと、入れ子の別の呼び出し・配列・クロージャの中にある同名の引数を
      *   外側のものと取り違える (`fetch($this->build(followRedirects: false), …)` が通ってしまう)。
+     * ★深さは**整数のカウンタではなく区切りの stack** で持つ。PHP の開き区切りは
+     *   素の `(` `[` `{` だけではないためである (実測した token の形):
+     *
+     *   | 構文 | 開き token | 閉じ |
+     *   |---|---|---|
+     *   | attribute `#[Probe]` | `T_ATTRIBUTE` (text は `#[`) | `]` |
+     *   | 文字列内挿 `"{$x}"` | `T_CURLY_OPEN` (text は `{`) | `}` |
+     *   | 文字列内挿 `"${x}"` | `T_DOLLAR_OPEN_CURLY_BRACES` (text は `${`) | `}` |
+     *
+     *   text だけで判定すると `#[` と `${` が**開きとして数えられないのに閉じだけ数えられ**、
+     *   その場から深さが 1 つずれる (以降の入れ子が深さ 1 に見えて取り違える)。
+     *   `T_CURLY_OPEN` は text が `{` なので偶然合っていたが、**偶然に依存しない**。
+     * ★**対応の取れない区切り**が出たら「読み切れない」として落とす ((b) fail-closed)。
+     *   単なる整数カウンタでは `([)]` のような壊れた対応を検出できない。
+     *
+     * ## 保証しないもの (誇張しない)
+     *
+     * - **first-class callable** (`fetch(...)`) は引数が無い形として**違反側**へ落ちる。
+     *   呼び出しの引数を静的に確定できないためであり、G2 の狭い走査根では fail-closed が正しい。
+     * - 可変メソッド名 (`$obj->{$name}(...)`) の呼び出しは走査対象に入らない
+     *   (メソッド名が T_STRING で現れない)。
      *
      * @param  array<string, string>  $sources
      * @param  string  $literal  許すリテラル (例: `false`)
@@ -350,22 +371,35 @@ final class EnterpriseSsoSourceScanner
                 // ★**外側の引数リストの深さ 1 にあるものだけ**を対象にする。
                 //   深さを見ないと、入れ子の別の呼び出しの同名引数を外側のものと取り違える
                 //   (`fetch($this->build(followRedirects: false), $deadline)` が緑になってしまう)。
+                // ★開きは text だけで決まらない (`#[` / `${`)。stack で持ち、
+                //   対応が取れなければ「読み切れない」として落とす。
                 $valuePosition = null;
-                $depth = 1;
+                $unresolved = false;
+                /** @var list<string> $expectedClosers 外側の `(` に対応する `)` を底に積む */
+                $expectedClosers = [')'];
+
                 for ($k = $i + 2; $k < $end; $k++) {
                     $text = $tokens[$k]['text'];
+                    $closer = self::closerForOpener($tokens[$k]);
 
-                    if ($text === '(' || $text === '[' || $text === '{') {
-                        $depth++;
+                    if ($closer !== null) {
+                        $expectedClosers[] = $closer;
 
                         continue;
                     }
+
                     if ($text === ')' || $text === ']' || $text === '}') {
-                        $depth--;
+                        if (array_pop($expectedClosers) !== $text) {
+                            $unresolved = true;
+
+                            break;
+                        }
 
                         continue;
                     }
-                    if ($depth !== 1) {
+
+                    // 深さ 1 = 外側の引数リストそのもの (底の 1 件だけが残っている状態)
+                    if (count($expectedClosers) !== 1) {
                         continue;
                     }
 
@@ -379,6 +413,18 @@ final class EnterpriseSsoSourceScanner
 
                         break;
                     }
+                }
+
+                // ★引数を最後まで読んだのに開きが閉じ切っていない形も「読み切れない」である
+                //   (`fetch($a[0), $d)` のように閉じの種類が食い違う形をここで捕まえる)。
+                if ($valuePosition === null && $expectedClosers !== [')']) {
+                    $unresolved = true;
+                }
+
+                if ($unresolved) {
+                    $violations[] = "{$path}:{$tokens[$i]['line']}: {$method}() の引数を読み切れない";
+
+                    continue;
                 }
 
                 if ($valuePosition === null) {
@@ -399,6 +445,34 @@ final class EnterpriseSsoSourceScanner
         }
 
         return array_values(array_unique($violations));
+    }
+
+    /**
+     * トークンが**開き区切り**なら、対応する閉じ文字を返す (開きでなければ null)。
+     *
+     * ★`#[` (`T_ATTRIBUTE`) と `${` (`T_DOLLAR_OPEN_CURLY_BRACES`) は
+     *   **text が素の `[` / `{` ではない**ので、text だけを見ると開きとして数えられない。
+     *   閉じ (`]` / `}`) だけが数えられて深さが 1 つずれる。
+     * ★`T_CURLY_OPEN` (`"{$x}"` の `{`) は text が `{` なので下の text 判定でも拾えるが、
+     *   **偶然に依存しない**ように id でも明示する。
+     *
+     * @param  array{id: int|null, text: string, line: int}  $token
+     */
+    private static function closerForOpener(array $token): ?string
+    {
+        if ($token['id'] === T_ATTRIBUTE) {
+            return ']';
+        }
+        if ($token['id'] === T_DOLLAR_OPEN_CURLY_BRACES || $token['id'] === T_CURLY_OPEN) {
+            return '}';
+        }
+
+        return match ($token['text']) {
+            '(' => ')',
+            '[' => ']',
+            '{' => '}',
+            default => null,
+        };
     }
 
     /**

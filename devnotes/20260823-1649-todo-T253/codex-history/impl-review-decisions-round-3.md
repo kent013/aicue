@@ -97,3 +97,10 @@ Round 3 の指摘 (Warning 4 / Suggestion 1) は**すべて対応した**が、
 
 **本マトリクスの修正内容は Codex のレビューを受けていない** (合議は 3 ラウンドで上限)。
 検証コマンドは全 green だが、「Codex 実装レビュー APPROVED」という受入条件は**満たしていない**。
+
+> **追記 (Round 5 到達後)**: その後、**監督者の裁量でラウンド上限を +2 (Round 5 まで) 延長**した。
+> 本マトリクスの修正は Round 4 でレビューされ、承認阻害 2 件
+> (2 段の公開による token 検証の迂回 / 走査器の `T_ATTRIBUTE`・`${` の深さ誤認) が出た。
+> どちらも対応し、**Round 5 で `APPROVED` に到達した**。
+> 経緯は `impl-review-round-4.md` / `impl-review-round-5.md` と
+> `impl-review-decisions-round-4.md` / `impl-review-decisions-round-5.md` を参照。

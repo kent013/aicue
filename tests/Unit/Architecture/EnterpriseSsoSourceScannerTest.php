@@ -107,7 +107,7 @@ test('走査根から 1 件以上のファイルを列挙できる (母集団が
     expect(EnterpriseSsoSourceScanner::sources(['app/Services/EnterpriseSso']))->not->toBe([]);
 });
 
-test('危険な fetch() の 5 形をすべて落とし、リテラルの false だけを通す (負例)', function (): void {
+test('危険な fetch() の 7 形をすべて落とし、リテラルの false だけを通す (負例)', function (): void {
     $violations = EnterpriseSsoSourceScanner::callsWithoutNamedLiteral(
         scannerFixture('RedirectFollowingSample'),
         'fetch',
@@ -115,13 +115,14 @@ test('危険な fetch() の 5 形をすべて落とし、リテラルの false �
         'false',
     );
 
-    // ★見本の 7 呼び出しのうち、安全な 2 件 (リテラル false / 内側にも同名があるが外側は false) を通す。
+    // ★見本の 11 呼び出しのうち、安全な 4 件を通す
+    //   (リテラル false / 入れ子にも同名 / attribute つき / 文字列内挿つき。いずれも外側は false)。
     //   `makeRequest()` は fetch ではないので走査対象そのものに入らない。
-    expect($violations)->toHaveCount(5);
+    expect($violations)->toHaveCount(7);
 
     $combined = implode("\n", $violations);
-    // 引数が無い形 (引数省略 + **入れ子にしか無い**形の 2 件)
-    expect(substr_count($combined, 'followRedirects: が無い'))->toBe(2);
+    // 引数が無い形 (引数省略 + 入れ子にしか無い + attribute の後 + 文字列内挿の後 の 4 件)
+    expect(substr_count($combined, 'followRedirects: が無い'))->toBe(4);
     // 値が false でない形 (明示 true / 動的 / 式)
     expect(substr_count($combined, 'followRedirects: が false でない'))->toBe(3);
 });
@@ -167,6 +168,127 @@ test('外側が false なら、入れ子に同名の引数があっても通す 
 
     expect(EnterpriseSsoSourceScanner::callsWithoutNamedLiteral($sources, 'fetch', 'followRedirects', 'false'))
         ->toBe([]);
+});
+
+test('attribute の #[ を開きとして数える (深さ判定の負例)', function (): void {
+    // ★`#[` は `T_ATTRIBUTE` (text は `#[`) であり素の `[` ではない。開きとして数えないと
+    //   閉じの `]` だけが数えられ、以降の入れ子が外側に見える。
+    $sources = ['sample.php' => <<<'PHP'
+        <?php
+        final class Sample
+        {
+            public function run(): void
+            {
+                $this->pinned->fetch(
+                    #[Probe]
+                    fn () => $this->build(followRedirects: false),
+                    $deadline,
+                );
+            }
+        }
+        PHP];
+
+    $violations = EnterpriseSsoSourceScanner::callsWithoutNamedLiteral($sources, 'fetch', 'followRedirects', 'false');
+
+    expect($violations)->toHaveCount(1);
+    expect($violations[0])->toContain('followRedirects: が無い');
+});
+
+test('文字列内挿の ${ と { を開きとして数える (深さ判定の負例)', function (): void {
+    // ★`"${x}"` は `T_DOLLAR_OPEN_CURLY_BRACES` (text は `${`)、`"{$x}"` は `T_CURLY_OPEN`。
+    //   前者を開きとして数えないと閉じの `}` だけが数えられて深さがずれる。
+    $sources = ['sample.php' => <<<'PHP'
+        <?php
+        final class Sample
+        {
+            public function run(): void
+            {
+                $this->pinned->fetch("${label}", $this->build(followRedirects: false), $deadline);
+            }
+        }
+        PHP];
+
+    $violations = EnterpriseSsoSourceScanner::callsWithoutNamedLiteral($sources, 'fetch', 'followRedirects', 'false');
+
+    expect($violations)->toHaveCount(1);
+    expect($violations[0])->toContain('followRedirects: が無い');
+});
+
+test('attribute と文字列内挿があっても外側が false なら通す (深さ判定の正例)', function (): void {
+    $sources = ['sample.php' => <<<'PHP'
+        <?php
+        final class Sample
+        {
+            public function run(): void
+            {
+                $this->pinned->fetch(
+                    #[Probe]
+                    fn () => $this->build(followRedirects: true),
+                    "{$label}${suffix}",
+                    $deadline,
+                    followRedirects: false,
+                );
+            }
+        }
+        PHP];
+
+    expect(EnterpriseSsoSourceScanner::callsWithoutNamedLiteral($sources, 'fetch', 'followRedirects', 'false'))
+        ->toBe([]);
+});
+
+test('区切りの対応が取れない形は「読み切れない」として落とす (fail-closed の負例)', function (): void {
+    // ★閉じの種類が食い違う形。整数のカウンタだけだと `([)]` のような壊れた対応を検出できない。
+    $sources = ['sample.php' => <<<'PHP'
+        <?php
+        final class Sample
+        {
+            public function run(): void
+            {
+                $this->pinned->fetch($a}, $deadline, followRedirects: false);
+            }
+        }
+        PHP];
+
+    $violations = EnterpriseSsoSourceScanner::callsWithoutNamedLiteral($sources, 'fetch', 'followRedirects', 'false');
+
+    expect($violations)->toHaveCount(1);
+    expect($violations[0])->toContain('引数を読み切れない');
+});
+
+test('閉じ切らない開きが残る形も「読み切れない」として落とす (fail-closed の負例)', function (): void {
+    $sources = ['sample.php' => <<<'PHP'
+        <?php
+        final class Sample
+        {
+            public function run(): void
+            {
+                $this->pinned->fetch($a[0), $deadline);
+            }
+        }
+        PHP];
+
+    $violations = EnterpriseSsoSourceScanner::callsWithoutNamedLiteral($sources, 'fetch', 'followRedirects', 'false');
+
+    expect($violations)->toHaveCount(1);
+    expect($violations[0])->toContain('引数を読み切れない');
+});
+
+test('first-class callable は引数を確定できないので落とす (fail-closed の負例)', function (): void {
+    $sources = ['sample.php' => <<<'PHP'
+        <?php
+        final class Sample
+        {
+            public function run(): void
+            {
+                $callable = $this->pinned->fetch(...);
+            }
+        }
+        PHP];
+
+    $violations = EnterpriseSsoSourceScanner::callsWithoutNamedLiteral($sources, 'fetch', 'followRedirects', 'false');
+
+    expect($violations)->toHaveCount(1);
+    expect($violations[0])->toContain('followRedirects: が無い');
 });
 
 test('リテラルの false ちょうどの呼び出しは通す (正例)', function (): void {

@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Contracts\Auth\EmailPromotionStageBoundary;
 use App\Enums\SecurityEventType;
 use App\Http\Requests\Auth\ConfirmEmailPromotionRequest;
 use App\Mail\EmailPromotionMail;
@@ -9,14 +10,17 @@ use App\Models\EmailPromotion;
 use App\Models\SecurityAuditEvent;
 use App\Models\User;
 use App\Services\Auth\EmailPromotionService;
+use App\Services\Auth\InertEmailPromotionStageBoundary;
 use App\Support\EnterpriseSso\AttemptFingerprint;
 use Illuminate\Contracts\Queue\ShouldBeEncrypted;
 use Illuminate\Database\QueryException;
 use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Validator;
+use Tests\Support\Auth\InterferingEmailPromotionStageBoundary;
 
 /*
  * メールアドレスの昇格 (E1)。
@@ -463,24 +467,40 @@ test('メールを持つ利用者には導線が出ない (既存の変更経路
         ->assertInertia(fn ($page) => $page->where('canPromoteEmail', false));
 });
 
+test('本番の継ぎ目は何もしない (公開入口は confirm() 1 本のまま)', function (): void {
+    // ★2 段を公開メソッドにしていないことの担保。継ぎ目の本番実装が不活性であること
+    //   (= 操作面が広がっていないこと) を container の解決で直接固定する。
+    expect(app(EmailPromotionStageBoundary::class))->toBeInstanceOf(InertEmailPromotionStageBoundary::class);
+
+    $reflection = new ReflectionClass(EmailPromotionService::class);
+    foreach (['consumeToken', 'applyConfirmedEmail'] as $stage) {
+        expect($reflection->getMethod($stage)->isPrivate())->toBeTrue(
+            "{$stage}() は private であること: 公開するとトークンの照合・期限・本人結合を迂回する"
+            .'第 2 の入口ができます。'
+        );
+    }
+});
+
 test('消費の確定と適用の間に別経路がメールを入れたら、その更新を上書きしない', function (): void {
     $user = promotionUser();
     $token = issuePromotion($user);
-    $service = app(EmailPromotionService::class);
 
-    // ★**実際の継ぎ目で**割り込む。第 1 段 (消費) が戻った時点で commit は済んでいる。
+    // ★**実際の継ぎ目で**割り込む。第 1 段 (消費) のトランザクションは既に閉じている。
     //   モデルイベントの listener に頼ると割り込みが**第 1 段の内側**で走ってしまい、
-    //   「commit の後」という筋書きにならない (かつ listener の全削除は後続テストを汚す)。
-    $email = $service->consumeToken($user, $token);
-    expect($email)->not->toBeNull();
+    //   「閉じた後」という筋書きにならない (かつ listener の全削除は後続テストを汚す)。
+    //   段そのものを公開する代わりに、継ぎ目だけを差し替える。
+    $boundary = new InterferingEmailPromotionStageBoundary(encryptedEmailFor('other@corp.example'));
+    $this->app->instance(EmailPromotionStageBoundary::class, $boundary);
 
-    // 別経路がメールを入れる (プロフィール更新など)
-    $user->newQuery()->whereKey($user->getKey())->update([
-        'email' => encryptedEmailFor('other@corp.example'),
-    ]);
+    $levelBefore = DB::transactionLevel();
 
-    // ★第 2 段はロックの下で読み直し、**上書きしない**
-    expect($service->applyConfirmedEmail($user, $email))->toBeFalse();
+    // ★第 2 段はロックの下で読み直し、**上書きしない** (入口は confirm() のまま)
+    expect(app(EmailPromotionService::class)->confirm($user, $token))->toBeFalse();
+
+    // ★継ぎ目では第 1 段が開いた層がすべて閉じている (= 段を抜けている)。
+    //   `RefreshDatabase` の外側の層があるので「commit 済み」ではなく
+    //   **呼び出し前の level へ戻っている**ことを固定する。
+    expect($boundary->transactionLevelAtSeam)->toBe($levelBefore);
 
     // ★別経路の更新が残る
     expect($user->fresh()?->email)->toBe('other@corp.example');
@@ -498,14 +518,12 @@ test('消費の確定と適用の間に別経路がメールを入れたら、�
 });
 
 test('割り込みが無ければ第 2 段は適用する (正のコントロール)', function (): void {
+    // ★弾く側だけを固定して「常に false」でも緑になる形にしない。
+    //   継ぎ目は本番のまま (何もしない) である。
     $user = promotionUser();
     $token = issuePromotion($user);
-    $service = app(EmailPromotionService::class);
 
-    $email = $service->consumeToken($user, $token);
-    expect($email)->not->toBeNull();
-
-    expect($service->applyConfirmedEmail($user, $email))->toBeTrue();
+    expect(app(EmailPromotionService::class)->confirm($user, $token))->toBeTrue();
     expect($user->fresh()?->email)->toBe('new@corp.example');
 });
 
@@ -513,15 +531,28 @@ test('監査を記録できなければメールの変更も巻き戻る (記録
     $user = promotionUser();
     $token = issuePromotion($user);
 
-    // ★監査テーブルへの書き込みを壊す。`recordOrFail` は握り潰さないので、
-    //   同じトランザクションのメール変更ごと巻き戻るはずである。
-    SecurityAuditEvent::creating(static fn (): never => throw new RuntimeException('監査の書き込みに失敗した'));
+    // ★監査の書き込みを**挿入の後**で壊す。`creating` で止めると行がそもそも生まれないので
+    //   「監査行が無い」は巻き戻しの証拠にならない (壊し方が弱いと主張が空振りする)。
+    //   `created` なら**一度は挿入されている**ので、外側の「監査行も無い」が
+    //   巻き戻しそのものを固定する。
+    // ★後始末は `flushEventListeners()` (そのモデルの**全 event** を静的に削除する) ではなく、
+    //   **張った 1 つの event 名だけ**を忘れさせる。モデルに trait / observer が足された日に
+    //   後続テストを汚す形にしない (`EmailPromotion` は `UsesCipherSweet` が
+    //   `retrieved` / `saving` / `saved` を張るので、全削除は暗号化を殺す)。
+    $listened = 'eloquent.created: '.SecurityAuditEvent::class;
+
+    SecurityAuditEvent::created(static function (SecurityAuditEvent $event): never {
+        // ★この時点では挿入済みで見える (巻き戻しが効いていることを外側と対で示す)
+        expect(SecurityAuditEvent::query()->whereKey($event->getKey())->exists())->toBeTrue();
+
+        throw new RuntimeException('監査の書き込みに失敗した');
+    });
 
     try {
         expect(fn () => app(EmailPromotionService::class)->confirm($user, $token))
             ->toThrow(RuntimeException::class);
     } finally {
-        SecurityAuditEvent::flushEventListeners();
+        Event::forget($listened);
     }
 
     $fresh = $user->fresh();

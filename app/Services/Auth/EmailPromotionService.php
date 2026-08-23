@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Auth;
 
 use App\Actions\Fortify\UpdateUserProfileInformation;
+use App\Contracts\Auth\EmailPromotionStageBoundary;
 use App\DataTransferObjects\Auth\VerifiedEmail;
 use App\Enums\EnterpriseSso\FingerprintPurpose;
 use App\Enums\SecurityEventType;
@@ -81,7 +82,10 @@ final readonly class EmailPromotionService
     /** PostgreSQL の unique_violation。 */
     private const string SQLSTATE_UNIQUE_VIOLATION = '23505';
 
-    public function __construct(private SecurityEventRecorder $recorder) {}
+    public function __construct(
+        private SecurityEventRecorder $recorder,
+        private EmailPromotionStageBoundary $stageBoundary,
+    ) {}
 
     /**
      * 昇格を始める (確認メールを送る)。
@@ -145,20 +149,24 @@ final readonly class EmailPromotionService
             return false;
         }
 
+        // ★第 1 段のトランザクションは閉じている。**ここが 2 段の継ぎ目**であり、
+        //   本番実装は何もしない (継ぎ目の存在理由は EmailPromotionStageBoundary の docblock)。
+        $this->stageBoundary->afterConsume($user);
+
         return $this->applyConfirmedEmail($user, $email);
     }
 
     /**
      * **第 1 段**: トークンを検査して消費を確定させる (ここで commit される)。
      *
-     * ★`confirm()` の入口から呼ぶのが通常の使い方である。**段を公開しているのは、
-     *   2 段構成そのものが本サービスの契約だから**であり、
-     *   「第 1 段の commit と第 2 段の間に別経路が割り込む」順序を
-     *   テストが**実際の継ぎ目で**再現できるようにするためでもある。
+     * ★**private である**。公開すると `confirm()` が担っているトークンの照合・期限・
+     *   本人結合を迂回する第 2 の入口ができる (適用せずに他人の確認トークンを
+     *   不可逆に消費する呼び方も書けてしまう)。2 段の継ぎ目を検査から捕まえる手段は
+     *   {@see EmailPromotionStageBoundary} であって、段の公開ではない。
      *
      * @return VerifiedEmail|null null = トークンが無効・期限切れ・他人のもの・対象外
      */
-    public function consumeToken(User $user, #[SensitiveParameter] string $token): ?VerifiedEmail
+    private function consumeToken(User $user, #[SensitiveParameter] string $token): ?VerifiedEmail
     {
         $fingerprint = AttemptFingerprint::of(FingerprintPurpose::EmailPromotionToken, $token);
 
@@ -223,11 +231,15 @@ final readonly class EmailPromotionService
      *   「メールは変わったのに記録が無い」状態が残る (設計 E1 が要求する記録が成立しない)。
      *   記録できなければメールの変更ごと巻き戻す。
      *
+     * ★**private である**。公開すると、トークンを 1 つも消費せずに任意の
+     *   `VerifiedEmail` を適用できる入口になる (`VerifiedEmail` は
+     *   「正当に消費した結果」であることを表せない値である)。
+     *
      * @return bool true = 適用した / false = 第 1 段の後にメールが入ったので適用しない
      *
      * @throws EmailPromotionConflictException
      */
-    public function applyConfirmedEmail(User $user, VerifiedEmail $email): bool
+    private function applyConfirmedEmail(User $user, VerifiedEmail $email): bool
     {
         try {
             // ★**自分のトランザクション (savepoint) の中で**書く。

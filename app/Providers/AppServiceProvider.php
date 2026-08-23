@@ -6,6 +6,7 @@ namespace App\Providers;
 
 use App\Auth\EncryptedUserProvider;
 use App\Auth\Guards\ApiKeyGuard;
+use App\Contracts\Auth\EmailPromotionStageBoundary;
 use App\Http\Routing\MembershipScopedOrganizationBinder;
 use App\Http\Routing\PublicOidcConnectionBinder;
 use App\Http\Routing\RouteBindingTypes;
@@ -24,6 +25,7 @@ use App\Models\Billing\Subscription;
 use App\Models\Organization;
 use App\Models\User;
 use App\Notifications\Channels\OrganizationScopedDatabaseChannel;
+use App\Services\Auth\InertEmailPromotionStageBoundary;
 use App\Services\Billing\CashierAutoRechargeGateway;
 use App\Services\Billing\CashierStripeGateway;
 use App\Services\Billing\CashierTicketCheckoutGateway;
@@ -117,6 +119,12 @@ class AppServiceProvider extends ServiceProvider
             return new SnsClient($config);
         });
         $this->app->bind(SnsSignatureVerifier::class, AwsSnsSignatureVerifier::class);
+
+        // メールアドレスの昇格 (T253) の 2 段の継ぎ目。**本番は何もしない実装**であり、
+        // 継ぎ目に名前を与えるためだけに存在する (段そのものを公開メソッドにすると
+        // トークンの照合を迂回する第 2 の入口ができるため。理由は
+        // App\Contracts\Auth\EmailPromotionStageBoundary の docblock が正本)。
+        $this->app->bind(EmailPromotionStageBoundary::class, InertEmailPromotionStageBoundary::class);
 
         // Critical Action 実行中フラグ。scoped() で HTTP request scope に閉じる
         // (queue worker / artisan は別 container のため context は継承されない)
