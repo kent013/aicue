@@ -1,0 +1,18 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services\EnterpriseSso;
+
+use Illuminate\Support\Facades\Http;
+
+/**
+ * ★負例の見本。pin されていない外向き経路 (Http ファサード) を検出することを固定する。
+ */
+final class ForbiddenHttpSample
+{
+    public function run(): void
+    {
+        Http::get('https://idp.example.test/.well-known/openid-configuration');
+    }
+}

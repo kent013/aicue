@@ -34,6 +34,19 @@ function recentAuthRequiredRouteNames(): array
         'settings.account.deletion-request.store',
         // パスワード初回設定 (認証手段を増やす操作。セッション奪取からの永続化を防ぐため step-up 必須)
         'settings.password.store',
+        // メールアドレスの昇格の発行・再送 (T253)。認証手段を増やす操作なので同水準。
+        // ★**確認 (settings.email-promotion.confirm) は追加しない** — 救済の性格であり、
+        //   関門を足すと確定できず詰む (退会予約の取消と同じ判断)。
+        'settings.email-promotion.store',
+        'settings.email-promotion.resend',
+        // 企業 SSO 接続の管理 (T253)。接続の秘密と組織のログイン経路を変える操作であり、
+        // API キーの発行・失効と同水準。
+        'organizations.sso.store',
+        'organizations.sso.update',
+        'organizations.sso.verify',
+        'organizations.sso.activate',
+        'organizations.sso.disable',
+        'organizations.sso.destroy',
         // オーナー移譲
         'organizations.transfer-ownership',
         // 組織の 2FA 必須方針トグル (Owner 専権のセキュリティ方針変更)

@@ -36,6 +36,8 @@
         passkeys?: PasskeyListItem[];
         /** passkey での「ログイン」が許されるか (TOTP 有効時は false。再認証には使える) */
         passkeyLoginAvailable?: boolean;
+        /** メールアドレスの昇格の導線を出すか (メールを持たない利用者だけ true。T253) */
+        canPromoteEmail?: boolean;
     }
 
     let {
@@ -43,6 +45,7 @@
         linkedProviders = [],
         passkeys = [],
         passkeyLoginAvailable = false,
+        canPromoteEmail = false,
     }: Props = $props();
 
     const shared = $derived(page.props as unknown as SharedProps);
@@ -100,6 +103,21 @@
                 recentAuthOpen = true;
             },
             onDelegated,
+        });
+    }
+
+    /* ---- メールアドレスの昇格 (T253 / E1) ---- */
+    // ★企業 SSO でしか入れない利用者が、自分で使えるメールを持つための救済導線。
+    //   ★未入力でもボタンを押せる (押下時にサーバがエラーを返す = 禁止事項 8)。
+    const emailPromotionForm = useForm({ email: "" });
+
+    function submitEmailPromotion(event: SubmitEvent): void {
+        event.preventDefault();
+        void guardWithRecentAuth(() => {
+            emailPromotionForm.post("/settings/email-promotion", {
+                preserveScroll: true,
+                onSuccess: () => emailPromotionForm.reset(),
+            });
         });
     }
 
@@ -506,6 +524,54 @@
         </nav>
 
         <div class="mt-6 flex flex-col gap-10">
+            {#if canPromoteEmail}
+                <!-- ★メールを持たない利用者 (企業 SSO でしか入れない利用者) だけに出す救済導線。
+                     既にメールがある人の変更は、監査と旧アドレスへの通知を持つ
+                     プロフィール更新の経路が担う (T253 / E1) -->
+                <Card padding="lg">
+                    <h2 class="text-h3">メールアドレスの登録</h2>
+                    <p class="mt-1 text-caption text-text-secondary">
+                        いまは勤務先の ID プロバイダ経由でのみログインできます。
+                        メールアドレスを登録すると、パスワード再設定などの連絡を受け取れるようになります。
+                    </p>
+
+                    <form
+                        novalidate
+                        onsubmit={submitEmailPromotion}
+                        class="mt-4 flex flex-col gap-4"
+                    >
+                        <FormField
+                            label="メールアドレス"
+                            id="email-promotion-email"
+                            error={emailPromotionForm.errors.email ??
+                                emailPromotionForm.errors.email_promotion}
+                            help="入力したアドレスに確認メールを送ります。リンクを開いて確定するまで登録されません。"
+                        >
+                            {#snippet children({ id, describedBy, invalid })}
+                                <Input
+                                    {id}
+                                    type="email"
+                                    bind:value={emailPromotionForm.email}
+                                    error={invalid}
+                                    aria-describedby={describedBy}
+                                    autocomplete="email"
+                                    testId="email-promotion-email"
+                                />
+                            {/snippet}
+                        </FormField>
+                        <div class="flex justify-end">
+                            <Button
+                                type="submit"
+                                loading={emailPromotionForm.processing}
+                                testId="email-promotion-submit"
+                            >
+                                確認メールを送る
+                            </Button>
+                        </div>
+                    </form>
+                </Card>
+            {/if}
+
             <Card padding="lg">
                 <div class="flex items-center justify-between gap-4">
                     <h2 class="text-h3">2要素認証</h2>

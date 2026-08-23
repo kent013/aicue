@@ -157,6 +157,12 @@ final class MachinePlaneOrganizationReferenceInventory
             'console:cli:client' => new NotOrganizationScoped(
                 'CLI 用の OAuth クライアントを作る。クライアントは組織ではなくアプリ全体に属する。'
             ),
+            'console:auth:prune-email-promotions' => new NotOrganizationScoped(
+                '期限切れのメール昇格の確認待ちを期限だけで削除する定期実行。組織を選ぶ外部入力を持たない。'
+            ),
+            'console:enterprise-sso:prune-login-attempts' => new NotOrganizationScoped(
+                '期限切れの企業 SSO ログイン試行を期限だけで削除する定期実行。組織を選ぶ外部入力を持たない。'
+            ),
             'console:idempotency:prune' => new NotOrganizationScoped(
                 '期限切れの冪等キーを全件走査で削除する定期実行。組織を選ぶ外部入力を持たない。'
             ),

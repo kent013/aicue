@@ -26,6 +26,8 @@ const RECENT_AUTH_MODAL_CALL_SITES: readonly string[] = [
   "pages/Organizations/Settings.svelte",
   "pages/Organizations/ApiKeys/Index.svelte",
   "pages/Organizations/ApiKeys/Sessions.svelte",
+  // 企業 SSO 接続の管理 (T253)。更新系 6 route が recent-auth 必須のため step-up の受け皿が要る
+  "pages/Organizations/Sso/Index.svelte",
   "pages/Admin/Users.svelte",
 ] as const;
 

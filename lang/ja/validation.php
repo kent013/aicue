@@ -209,6 +209,16 @@ return [
         'user_id' => '対象ユーザー',
         'abilities' => '権限',
         'abilities.*' => '権限',
+        // --- 企業 SSO 接続 (T253) ---
+        // 'slug' は組織の識別名と同名キーのため StoreSsoConnectionRequest::attributes() で個別に上書きする
+        'login_slug' => 'ログイン用の識別名',
+        'display_name' => '表示名',
+        'issuer' => '発行者 URL',
+        'client_id' => 'クライアント ID',
+        'client_secret' => 'クライアントシークレット',
+        'state' => '状態値',
+        'code' => '認可コード',
+        'error' => 'エラー',
         // --- 課金 ---
         'plan_code' => 'プラン',
         'declaration' => '個人利用の確認',

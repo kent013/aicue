@@ -27,6 +27,10 @@ test('OrganizationMembershipService の書き込みメソッドは共通ロッ�
         // deleteAccount と同じ canonical 順序 (users 昇順 → organizations 昇順) の起点に乗せ、
         // 新しいロック順序を作らない (順序の SoT を 2 クラスに分けない)
         'requestAccountDeletion', 'cancelAccountDeletion',
+        // 企業 SSO の初回ログインで作られた利用者の所属付与 (T253 / C1)。
+        // 呼び出し元は接続の行をロックした tx の中にいるが、users → organizations の
+        // canonical 順序はここでも自分で取る (順序の SoT を 2 クラスに分けない)。
+        'attachJustInTimeMember',
     ];
     // ロック済み内部メソッド経由で間接的にロックされる経路 (メソッド名 => 必須の委譲先呼び出し)。
     // ★ハードコードの 'joinOrganization(' を map へ一般化した (既存 3 本の判定は等価のまま)。

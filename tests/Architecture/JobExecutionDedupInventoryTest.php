@@ -16,6 +16,7 @@ use App\Jobs\Capture\GenerateTakeThumbnailJob;
 use App\Jobs\Manual\DeleteRenderOutputsJob;
 use App\Jobs\Manual\RunManualAnalysis;
 use App\Jobs\Manual\RunManualRender;
+use App\Mail\EmailPromotionMail;
 use App\Mail\InquiryAcknowledgementMail;
 use App\Mail\InquiryReceivedMail;
 use App\Notifications\Account\AccountDeletionRequestedNotification;
@@ -215,6 +216,12 @@ function jobDedupExemptions(): array
             .'S3 削除は存在しないキーに対して冪等。NULL 化は検証時の値と一致する行のみを'
             .'更新する CAS なので、再実行で最新世代を誤って壊さない。',
         ),
+        EmailPromotionMail::class => new ExemptionEntry(
+            JobDedupExemption::DuplicateDeliveryAccepted,
+            'メールアドレス昇格の確認メール。ドメイン状態を一切書かず、重複受信しても'
+            .'同じ確認リンクが 2 通届くだけである (確定は POST 1 回きりで、トークンの'
+            .'consume は行ロック下の削除なので二重確定は構造的に起きない)。',
+        ),
         InquiryAcknowledgementMail::class => new ExemptionEntry(
             JobDedupExemption::DuplicateDeliveryAccepted,
             'お問い合わせ受付の自動返信メール。ドメイン状態を一切書かず、重複受信しても'
@@ -281,7 +288,7 @@ function jobDedupExemptions(): array
  */
 function jobDedupExemptionCap(): int
 {
-    return 16;
+    return 17;
 }
 
 /**
@@ -293,7 +300,7 @@ function jobDedupExemptionCap(): int
 function jobDedupExemptionCapByCase(): array
 {
     return [
-        JobDedupExemption::DuplicateDeliveryAccepted->value => 10,
+        JobDedupExemption::DuplicateDeliveryAccepted->value => 11,
         JobDedupExemption::IdempotentDeletion->value => 2,
         JobDedupExemption::ConvergentStateSync->value => 3,
         JobDedupExemption::GuardedByDownstreamConstraint->value => 1,

@@ -112,6 +112,23 @@ function controllerAuthorizationExemptions(): array
             .'別軸の防御として recent-auth (step-up) middleware を必須にし、password 設定済みの'
             .'迂回は PasswordCredentialService が lock 下で fail-closed 拒否する。総当り防御は throttle:password-set。'],
 
+        'settings.email-promotion.store' => [$selfScoped,
+            '対象は $request->user() 自身のメールアドレスの昇格の発行のみ (T253)。route に他者を'
+            .'指せる parameter が無く、Service は relation 起点 ($user->emailPromotions()) しか'
+            .'引かないため他人の行へ到達する経路がコード上存在しない。'
+            .'別軸の防御として recent-auth (step-up) を必須にし、総当り防御は throttle:email-promotion。'],
+
+        'settings.email-promotion.resend' => [$selfScoped,
+            '発行と対称の再送 (T253)。対象は $request->user() 自身だけで、route に他者を指せる'
+            .'parameter が無い。旧トークンは発行のたびに自分の行を消すことで失効する。'
+            .'別軸の防御として recent-auth (step-up) を必須にし、総当り防御は throttle:email-promotion。'],
+
+        'settings.email-promotion.confirm' => [$selfScoped,
+            'メールアドレスの昇格の確定 (T253)。トークンは relation 起点 ($user->emailPromotions())'
+            .'で引くため、他人のトークンでは 1 件も当たらない (user_id の結合が認可そのものである)。'
+            .'★救済の性格なので recent-auth を課さない (関門を足すと確定できず詰む)。'
+            .'総当り防御は throttle:email-promotion-confirm。'],
+
         'recent-auth.password' => [$selfScoped,
             '自分の再認証鮮度 (RecentAuthState) の更新。route に他者を指せる parameter が無く、'
             .'認証そのものが主体判定であるため Policy による再判定に意味がない。'

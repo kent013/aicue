@@ -156,6 +156,18 @@ final class StuckWorkRecoveryInventory
                 '保持期限 (7 年) を過ぎた課金記録の削除と畳み込み。期限の決着であって滞留の前進ではない',
             ),
             new NonRecoveryScheduleEntry(
+                'enterprise-sso:prune-login-attempts',
+                NonRecoveryScheduleReasonKind::RetentionSettlement,
+                '期限切れの企業 SSO ログイン試行の物理削除。期限の決着であって滞留の前進ではない'
+                .'(戻ってこなかった試行を消すだけで、止まった処理を進めるわけではない)',
+            ),
+            new NonRecoveryScheduleEntry(
+                'auth:prune-email-promotions',
+                NonRecoveryScheduleReasonKind::RetentionSettlement,
+                '期限切れのメール昇格の確認待ちの物理削除。期限の決着であって滞留の前進ではない'
+                .'(消さないと利用者ごとの 1 件の枠が空かない)',
+            ),
+            new NonRecoveryScheduleEntry(
                 'capture:purge-upload-reservations',
                 NonRecoveryScheduleReasonKind::RetentionSettlement,
                 '保持期間を過ぎた解放済み / 登録済みのアップロード予約の物理削除。肥大の防止であり、'

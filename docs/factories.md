@@ -137,6 +137,32 @@ $item = Item::factory()->forProject($project)->create();
 OrganizationSlugRename::factory()->for($organization)->renamedAt($at)->create();
 ```
 
+### 企業 OIDC SSO (T253)
+
+企業 IdP との接続とその身元・試行を扱う Factory 4 本。**どれも `$fillable` が空のモデル**なので、
+Factory は `create([...])` の上書きで属性を渡す (保護キーの明示代入は Service 側の責務である)。
+
+| Factory | 補足 |
+|---|---|
+| `OrganizationOidcConnectionFactory` | 既定は `Draft`。`verified()` / `active()` / `disabled()` の 3 state を持つ。**識別名の列は `login_slug`** (`organizations.slug` の書き込み gate がキー名で表を特定しているため、同名の列を作らない) |
+| `EnterpriseIdentityFactory` | 引き当ての鍵は **(接続, subject)**。`subject` 列は `COLLATE "C"` なので大小文字が違えば別の身元になる |
+| `EnterpriseSsoLoginAttemptFactory` | state / nonce / ブラウザ結合は**指紋だけ**を保存する。`expired()` state で期限切れを作れる |
+| `EmailPromotionFactory` | 利用者ごとに**未消費は 1 件だけ** (`email_promotions_user_unique`)。`expired()` state を持つ |
+
+```php
+// ログインに使える接続と、その身元を 1 件
+$connection = OrganizationOidcConnection::factory()->active()->create();
+EnterpriseIdentity::factory()->for($connection, 'connection')->create(['subject' => 'sub-1']);
+```
+
+★接続の秘密は**値型でしか渡せない**:
+
+```php
+OrganizationOidcConnection::factory()->create([
+    'client_secret_encrypted' => ConnectionSecret::fromPlaintext('secret'),
+]);
+```
+
 ## Seeder
 
 参照データの Seeder は依存順に分割されている (DatabaseSeeder の call 順):

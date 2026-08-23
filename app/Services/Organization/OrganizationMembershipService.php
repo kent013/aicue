@@ -19,6 +19,7 @@ use App\Models\User;
 use App\Notifications\Account\AccountDeletionRequestedNotification;
 use App\Notifications\OrganizationInvitationNotification;
 use App\Services\Billing\AccountDeletionBillingGuard;
+use App\Services\EnterpriseSso\EnterpriseUserProvisioner;
 use App\Services\Notification\NotificationCenterService;
 use App\Services\OAuth\OrganizationAccessRevoker;
 use App\Services\Project\DefaultProjectResolver;
@@ -279,7 +280,9 @@ class OrganizationMembershipService
         }
 
         $email = $user->email; // CipherSweet 復号後
-        if ($email === '') {
+        // ★企業 SSO でしか入れない利用者は使えるメールを持たない (T253 / A3)。
+        //   宛先が無いので招待の引き当ても行わない。
+        if ($email === null || $email === '') {
             return null;
         }
 
@@ -899,6 +902,39 @@ class OrganizationMembershipService
                 });
             })
             ->get();
+    }
+
+    /**
+     * 企業 SSO の初回ログインで作られた利用者を、接続が属する組織へ最小権限で所属させる (T253 / C1)。
+     *
+     * ★**ロール書き込みの単一窓口**である本サービスに置く。
+     *   {@see EnterpriseUserProvisioner} から呼ばれ、
+     *   `MembershipWriteLockInventoryTest` の「Laratrust の書き込みはロック済みサービス経由のみ」
+     *   という直列化の前提を崩さない (ロール書き込みを企業 SSO の側へ持ち出さない)。
+     *
+     * ★呼び出し元は既に**接続の行**を `lockForUpdate()` した同一トランザクションの中にいる。
+     *   ここで取るロックの順序は「接続 → users → organizations」であり、
+     *   接続の行より先に他の行をロックする経路は存在しない (D1 は接続の行しかロックしない) ので
+     *   既存のロック順序と循環しない。
+     *
+     * ★利用者は直前に作られた新規行なので、この付与が**既存組織の owner 集合を変えることはない**
+     *   (付与するのは常に最小権限の Member である)。
+     */
+    public function attachJustInTimeMember(Organization $organization, User $user, OrganizationRole $role): void
+    {
+        $this->lockForMembershipWrite([$this->keyOf($user)], [$this->keyOf($organization)]);
+
+        $joined = DB::table('organization_user')->insertOrIgnore([
+            'organization_id' => $organization->id,
+            'user_id' => $user->getKey(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        if ($joined === 1) {
+            // ★権限判定は常に laratrust_team_id を明示する (AGENTS.md セキュリティ不変条件 5)。
+            $user->addRole($role->value, $organization->laratrust_team_id);
+        }
     }
 
     /**

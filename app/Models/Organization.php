@@ -144,6 +144,19 @@ class Organization extends Model implements CipherSweetEncrypted
     }
 
     /**
+     * 企業 IdP との OIDC 接続 (D2 の scoped binding と D1 のロック付き再取得が引く relation)。
+     *
+     * ★接続の解決は**必ずこの relation 起点**で行う。クラス起点の主キー同一性クエリで
+     *   書くと、再取得の経路そのものが組織スコープを失う (AGENTS.md セキュリティ不変条件 3)。
+     *
+     * @return HasMany<OrganizationOidcConnection, $this>
+     */
+    public function oidcConnections(): HasMany
+    {
+        return $this->hasMany(OrganizationOidcConnection::class);
+    }
+
+    /**
      * 識別名の改名履歴 (30 日 5 回の回数判定に使う。家系裁定 AG-046)。
      *
      * @return HasMany<OrganizationSlugRename, $this>

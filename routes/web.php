@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Admin\UserManagementController;
 use App\Http\Controllers\Auth\ConfirmRecentAuthController;
+use App\Http\Controllers\Auth\EmailPromotionController;
+use App\Http\Controllers\Auth\EnterpriseSsoLoginController;
 use App\Http\Controllers\Auth\SessionStatusController;
 use App\Http\Controllers\Auth\SocialAuthController;
 use App\Http\Controllers\Billing\BillingController;
@@ -33,6 +35,7 @@ use App\Http\Controllers\Organizations\OrganizationOauthSessionController;
 use App\Http\Controllers\Organizations\OrganizationOnboardingController;
 use App\Http\Controllers\Organizations\OrganizationOwnershipController;
 use App\Http\Controllers\Organizations\OrganizationSlugController;
+use App\Http\Controllers\Organizations\OrganizationSsoConnectionController;
 use App\Http\Controllers\Projects\CategoryController;
 use App\Http\Controllers\Projects\CutTakeController;
 use App\Http\Controllers\Projects\ItemController;
@@ -179,6 +182,38 @@ Route::get('/auth/{provider}/callback', [SocialAuthController::class, 'callback'
 
 /*
 |--------------------------------------------------------------------------
+| エンタープライズ OIDC SSO (組織 OIDC 接続 + always-JIT)
+|--------------------------------------------------------------------------
+| 開始導線は GET の anchor リンク (form POST にしない。CSP form-action が
+| リダイレクト先 IdP に適用されるため。social.redirect と同じ理由)。
+|
+| ★**この経路にアプリ側の 2 要素認証を挟まない** (家系の裁定 AG-200)。
+|   確認できた時点でログインを確定させる。組織義務づけの強制は別関門
+|   (RequireTwoFactorForEnforcedOrganizations) が**ログイン確定後**に
+|   アカウント全体のゲートとして担い、転送先は 2 要素の**設定ページ**である。
+*/
+Route::get('/enterprise/login', [EnterpriseSsoLoginController::class, 'show'])
+    ->name('enterprise-sso.login');
+
+// ★GET だが **DB に試行の行を作る変更操作**である (OAuth の開始)。
+//   CSRF トークンの代わりに state・ブラウザ結合・流量制限・no-store が守る。
+//   {connection} は**全体で一意な公開の識別名**であり組織に属さない。
+//   PublicOidcConnectionBinder が「不在の識別名」と「使えない接続」を同じ 404 に畳み、
+//   missing() がそれを**利用者向けの一様な案内**へ変える (実在オラクルを作らない)。
+Route::get('/enterprise/{connection}/redirect', [EnterpriseSsoLoginController::class, 'redirect'])
+    ->middleware(['throttle:enterprise-sso-start', 'no-store'])
+    ->missing(fn () => redirect()->route('enterprise-sso.login')->withErrors([
+        'enterprise_sso' => '企業アカウントでのログインを開始できませんでした。識別名を確認するか、組織の管理者にお問い合わせください。',
+    ]))
+    ->name('enterprise-sso.redirect');
+
+// 戻り口。**未認証で外部へ HTTP を発射する経路**である (discovery + token 交換 + JWKS)。
+Route::get('/enterprise/callback', [EnterpriseSsoLoginController::class, 'callback'])
+    ->middleware(['throttle:enterprise-sso-callback', 'no-store'])
+    ->name('enterprise-sso.callback');
+
+/*
+|--------------------------------------------------------------------------
 | 認証済み
 |--------------------------------------------------------------------------
 */
@@ -231,6 +266,37 @@ Route::middleware(['auth', 'verified', 'not-pending-deletion'])->group(function 
 
     // 2FA / ソーシャル連携 / パスキーの管理面 (passkey 一覧の組み立てに DI が要るため Controller)
     Route::get('/settings/security', SecurityController::class)->name('settings.security');
+
+    /*
+    | メールアドレスの昇格 (T253 / E1)。企業 SSO でしか入れない利用者が自分のメールを持つための救済。
+    |
+    | ★**すべて認証済み group の内側**に置く (auth を書き忘れると未認証で叩ける経路になる)。
+    | ★認可は「自分の資源」なので Gate を通さない (controller が Auth::id() だけを使う)。
+    |   ControllerAuthorizationGateTest の exemption へ理由付きで登録する。
+    | ★発行・再送は **認証手段を増やす操作**なので step-up (recent-auth) 必須
+    |   (settings.password.store と同水準)。
+    | ★**確認 (confirm) には recent-auth を足さない** — 救済の性格であり、
+    |   関門を足すと確定できず詰む (退会予約の取消を allowlist に入れないのと同じ判断)。
+    */
+    Route::post('/settings/email-promotion', [EmailPromotionController::class, 'store'])
+        ->middleware(['recent-auth', 'throttle:email-promotion'])
+        ->name('settings.email-promotion.store');
+
+    Route::post('/settings/email-promotion/resend', [EmailPromotionController::class, 'resend'])
+        ->middleware(['recent-auth', 'throttle:email-promotion'])
+        ->name('settings.email-promotion.resend');
+
+    // ★メールのリンクが開く**確認画面** (GET)。**状態を変えない**。
+    //   トークンを画面へ渡し、利用者が明示のボタンで POST する。
+    //   メールクライアントの先読み・プレビューでは**この画面が開くだけ**で確定しない。
+    Route::get('/settings/email-promotion/confirm', [EmailPromotionController::class, 'showConfirm'])
+        ->middleware(['throttle:email-promotion-confirm', 'no-store'])
+        ->name('settings.email-promotion.confirm.show');
+
+    // 確定 (POST のみ)。
+    Route::post('/settings/email-promotion/confirm', [EmailPromotionController::class, 'confirm'])
+        ->middleware(['throttle:email-promotion-confirm', 'no-store'])
+        ->name('settings.email-promotion.confirm');
 
     // アカウント削除 (即時・取り消せない) は step-up (recent-auth) 必須。
     // 猶予期間つきの予約 (下記) が UI の主導線で、こちらは**副導線として併存**させる
@@ -303,6 +369,45 @@ Route::middleware(['auth', 'verified', 'not-pending-deletion'])->group(function 
             ->middleware('recent-auth')
             ->name('organizations.members.two-factor.reset');
     });
+    /*
+    | 企業 IdP との OIDC SSO 接続 (T253)。境界は OrganizationPolicy::update と同じ owner / admin で、
+    | **閲覧も含めて**管理者に限る (issuer と client_id が見えるため一覧だけ緩めない)。
+    |
+    | ★登録・更新は**接続の秘密を扱う唯一の前面**である (正典 v1 / I4)。
+    | ★{oidcConnection} は Organization::oidcConnections() 経由で scopeBindings が解決する。
+    |   親に属さない id は **binding 段で 404** (認可より前。不変条件 2 / 10)。
+    | ★確認 (verify) は**外向きの取得を伴う唯一の管理操作**なので専用の流量制限を持つ
+    |   (他の管理操作と bucket を共有しない = IdP が遅いときの連打で一覧や有効化を止めない)。
+    */
+    Route::get('/organizations/{organization:slug}/sso', [OrganizationSsoConnectionController::class, 'index'])
+        ->name('organizations.sso.index');
+
+    Route::scopeBindings()->group(function (): void {
+        Route::post('/organizations/{organization:slug}/sso', [OrganizationSsoConnectionController::class, 'store'])
+            ->middleware(['recent-auth', 'throttle:enterprise-sso-manage'])
+            ->name('organizations.sso.store');
+
+        Route::patch('/organizations/{organization:slug}/sso/{oidcConnection}', [OrganizationSsoConnectionController::class, 'update'])
+            ->middleware(['recent-auth', 'throttle:enterprise-sso-manage'])
+            ->name('organizations.sso.update');
+
+        Route::post('/organizations/{organization:slug}/sso/{oidcConnection}/verify', [OrganizationSsoConnectionController::class, 'verify'])
+            ->middleware(['recent-auth', 'throttle:enterprise-sso-verify'])
+            ->name('organizations.sso.verify');
+
+        Route::post('/organizations/{organization:slug}/sso/{oidcConnection}/activate', [OrganizationSsoConnectionController::class, 'activate'])
+            ->middleware(['recent-auth', 'throttle:enterprise-sso-manage'])
+            ->name('organizations.sso.activate');
+
+        Route::post('/organizations/{organization:slug}/sso/{oidcConnection}/disable', [OrganizationSsoConnectionController::class, 'disable'])
+            ->middleware(['recent-auth', 'throttle:enterprise-sso-manage'])
+            ->name('organizations.sso.disable');
+
+        Route::delete('/organizations/{organization:slug}/sso/{oidcConnection}', [OrganizationSsoConnectionController::class, 'destroy'])
+            ->middleware(['recent-auth', 'throttle:enterprise-sso-manage'])
+            ->name('organizations.sso.destroy');
+    });
+
     // 組織の 2FA 必須方針トグル (Owner 専権 + step-up)
     Route::patch('/organizations/{organization:slug}/two-factor-requirement', [OrganizationController::class, 'updateTwoFactorRequirement'])
         ->middleware('recent-auth')

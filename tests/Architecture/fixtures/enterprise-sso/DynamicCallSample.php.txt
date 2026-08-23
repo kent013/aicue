@@ -1,0 +1,21 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services\EnterpriseSso;
+
+/**
+ * ★負例の見本 (拡張子を .txt にしてあるので実行も autoload もされない)。
+ *   走査器が「動的な呼び出しの形」を 3 つとも検出することを固定する。
+ */
+final class DynamicCallSample
+{
+    public function run(object $client, string $method, string $class): void
+    {
+        $client->$method();
+
+        $instance = new $class;
+
+        call_user_func([$client, 'fetch']);
+    }
+}

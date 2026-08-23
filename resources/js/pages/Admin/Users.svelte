@@ -312,8 +312,10 @@
                                             </Badge>
                                         {/if}
                                     </div>
+                                    <!-- 企業 SSO でしか入れない利用者は使えるメールを持たない (T253 / A3)。
+                                         空文字へ畳まず「メールなし」と明示する -->
                                     <p class="truncate text-caption text-text-secondary">
-                                        {member.email}
+                                        {member.email ?? "メールなし"}
                                     </p>
                                     <!-- 最終ログイン。値の無い行は「記録なし」(「未ログイン」と断定しない —
                                          導出元の security_audit_events は保持期間が未確定で、将来 purge されうるため)。

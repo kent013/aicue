@@ -1,0 +1,28 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services\EnterpriseSso;
+
+use Kent013\SsrfPin\PinnedHttpClient;
+
+/**
+ * ★正例の見本。規定どおりの書き方を**誤検出しない**ことを固定する。
+ *
+ * `hasSecretIn` のような**接尾辞つきの識別子**は別のトークンなので、
+ * 語彙一致 (トークン完全一致) では拾われない。
+ */
+final class CleanSample
+{
+    public function __construct(private PinnedHttpClient $pinned) {}
+
+    public function run(): void
+    {
+        $this->pinned->fetch();
+    }
+
+    public function hasSecretIn(): bool
+    {
+        return false;
+    }
+}

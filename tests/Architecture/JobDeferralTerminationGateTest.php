@@ -13,6 +13,7 @@ use App\Jobs\Capture\GenerateTakeThumbnailJob;
 use App\Jobs\Manual\DeleteRenderOutputsJob;
 use App\Jobs\Manual\RunManualAnalysis;
 use App\Jobs\Manual\RunManualRender;
+use App\Mail\EmailPromotionMail;
 use App\Mail\InquiryAcknowledgementMail;
 use App\Mail\InquiryReceivedMail;
 use App\Notifications\Account\AccountDeletionRequestedNotification;
@@ -222,6 +223,12 @@ function jobDeferralTerminationInventory(): array
             'mode' => 'NO_DEFERRAL',
             'reason' => $common.'書き出しの開始も同じ形 (悲観ロックと状態の検査) で、'
                 .'取れなければ退避ではなくその場で終了する。再実行は書き出しの再要求だけが入口である。',
+            'coveredBy' => [],
+        ],
+        [
+            'class' => EmailPromotionMail::class,
+            'mode' => 'NO_DEFERRAL',
+            'reason' => $common.'メールアドレス確認の案内を 1 通送るだけで、他の仕事と順番を争わない。',
             'coveredBy' => [],
         ],
         [

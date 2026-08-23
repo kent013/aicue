@@ -230,6 +230,18 @@ function rateLimiterKeyInventory(): array
             'expectedKeyPrefixes' => ['social-callback:ip'],
             'emailScenarios' => [],
         ],
+        // T253: 企業 SSO の開始と戻り口。どちらも未認証面なので IP レーン
+        // (開始と戻り口を分けるのは、開始の連打で戻り口が 429 になると詰むため)。
+        'enterprise-sso-start' => [
+            'scenarios' => ['guest' => $noEmail],
+            'expectedKeyPrefixes' => ['enterprise-sso-start:ip'],
+            'emailScenarios' => [],
+        ],
+        'enterprise-sso-callback' => [
+            'scenarios' => ['guest' => $noEmail],
+            'expectedKeyPrefixes' => ['enterprise-sso-callback:ip'],
+            'emailScenarios' => [],
+        ],
         'invitation-accept' => [
             'scenarios' => ['guest' => $noEmail],
             'expectedKeyPrefixes' => ['invitation-accept:ip'],
@@ -269,6 +281,11 @@ function rateLimiterKeyInventory(): array
         'two-factor-manage',
         'invitation-accept-submit',
         'plan-activate',
+        // T253: 認証済み actor の業務操作 (接続管理 / 確認 / メール昇格の発行と確認)。
+        'enterprise-sso-manage',
+        'enterprise-sso-verify',
+        'email-promotion',
+        'email-promotion-confirm',
     ] as $lane) {
         $inventory[$lane] = [
             'scenarios' => [
@@ -503,6 +520,11 @@ function rateLimiterActorOrIpFullKeys(): array
         'plan-activate',
         // T134 で新設。helper 経由なので同じ full key 契約に載る
         'invitation-accept-in-app',
+        // T253 で新設。helper 経由なので同じ full key 契約に載る
+        'enterprise-sso-manage',
+        'enterprise-sso-verify',
+        'email-promotion',
+        'email-promotion-confirm',
     ];
 
     $expected = [];
