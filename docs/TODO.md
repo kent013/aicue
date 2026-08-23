@@ -22,7 +22,6 @@
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
 | T249 | 起動 probe の共通 runner への一元化 (正典 v1 追従) | test | 起動probeを共通runnerへ一元化・退行gate新設 | Medium | standalone | [設計](devnotes/20260823-0022-boot-probe-runner-unification/) | 2026-08-23 01:30 |
-| T252 | Pest arch ベースラインの規則別分解導入 | test | Pest arch 規則別ベースラインを新設 | Medium | standalone | [設計](devnotes/20260823-0020-pest-arch-baseline-per-rule-adoption/) | 2026-08-23 08:46 |
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
 ## Conditional (条件付き待機)
