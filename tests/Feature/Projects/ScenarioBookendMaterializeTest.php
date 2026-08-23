@@ -8,6 +8,7 @@ use App\Enums\Manual\ShotType;
 use App\Enums\Manual\VideoManualStatus;
 use App\Models\AnalysisJob;
 use App\Models\Cut;
+use App\Models\Organization;
 use App\Models\Project;
 use App\Models\SourceDocument;
 use App\Models\User;
@@ -35,7 +36,7 @@ beforeEach(function (): void {
 /**
  * queued job 一式 (analyzing manual + 保存済み txt SOP + チケット残高)。
  *
- * @return array{Project, VideoManual, AnalysisJob, SourceDocument, User}
+ * @return array{Organization, Project, VideoManual, AnalysisJob, SourceDocument, User}
  */
 function bookendPipelineContext(string $title = 'ネジ締め作業'): array
 {
@@ -132,7 +133,7 @@ function bookendFakeLlm(string $scenarioJson): void
 }
 
 test('初回生成: 先頭 top-level=導入 / 末尾 top-level=総括 / 間に生成 step・point', function (): void {
-    [, $manual, $job] = bookendPipelineContext('ネジ締め作業');
+    [, , $manual, $job] = bookendPipelineContext('ネジ締め作業');
     bookendFakeLlm(bookendScenarioJson([
         ['primary' => '5Nm で締める', 'points' => ['トルク確認']],
     ]));
@@ -214,7 +215,7 @@ test('再生成の総括再掲は今回生成のみを参照する (旧 cut 不�
 });
 
 test('生成 point / step subtitle が全欠なら総括は定型フォールバック文面', function (): void {
-    [, $manual, $job] = bookendPipelineContext('配線作業');
+    [, , $manual, $job] = bookendPipelineContext('配線作業');
     bookendFakeLlm(bookendScenarioJson([['primary' => null, 'points' => [null]]]));
 
     app(AnalysisPipeline::class)->run($job->id);

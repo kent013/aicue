@@ -62,7 +62,7 @@ describe("Notifications/Index", () => {
         expect(screen.queryByTestId("notification-list")).toBeNull();
     });
 
-    it("未読あり時、read-all ボタンは disabled でなく、押下で POST /notifications/read-all", async () => {
+    it("未読あり時、read-all ボタンは disabled でなく、押下で POST /organizations/test-org/notifications/read-all", async () => {
         render(NotificationsIndex, { props: baseProps({ unreadCount: 1 }) });
 
         const button = screen.getByTestId("read-all-button");
@@ -70,7 +70,7 @@ describe("Notifications/Index", () => {
         await fireEvent.click(button);
 
         expect(routerMock.post).toHaveBeenCalledTimes(1);
-        expect(routerMock.post.mock.calls[0][0]).toBe("/notifications/read-all");
+        expect(routerMock.post.mock.calls[0][0]).toBe("/organizations/test-org/notifications/read-all");
     });
 
     it("未読 0 件なら read-all ボタンを描画しない", () => {

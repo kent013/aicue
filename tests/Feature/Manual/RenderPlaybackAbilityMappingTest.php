@@ -28,7 +28,7 @@ use Tests\Support\Policies\DivergentVideoManualPolicy;
  */
 
 /**
- * @return array{User, Project, VideoManual, RenderJob, RenderJob}
+ * @return array{Organization, User, Project, VideoManual, RenderJob, RenderJob}
  */
 function abilityMappingContext(): array
 {
@@ -50,7 +50,7 @@ function abilityMappingContext(): array
 
     Gate::policy(VideoManual::class, DivergentVideoManualPolicy::class);
 
-    return [$owner, $project, $manual, $preview, $render];
+    return [$organization, $owner, $project, $manual, $preview, $render];
 }
 
 function abilityMappingPlaybackUrl(Organization $organization, Project $project, VideoManual $manual, RenderJob $job): string
@@ -65,7 +65,7 @@ afterEach(function (): void {
 });
 
 test('写像: download を拒否する policy では kind=render の playback が 403 になる', function (): void {
-    [$owner, $project, $manual, , $render] = abilityMappingContext();
+    [$organization, $owner, $project, $manual, , $render] = abilityMappingContext();
     DivergentVideoManualPolicy::$allowDownload = false;
 
     $this->actingAs($owner)->get(abilityMappingPlaybackUrl($organization, $project, $manual, $render))
@@ -73,7 +73,7 @@ test('写像: download を拒否する policy では kind=render の playback �
 });
 
 test('写像: download を拒否しても kind=preview の playback は 302 のまま (render ability で通る)', function (): void {
-    [$owner, $project, $manual, $preview] = abilityMappingContext();
+    [$organization, $owner, $project, $manual, $preview] = abilityMappingContext();
     DivergentVideoManualPolicy::$allowDownload = false;
 
     $this->actingAs($owner)->get(abilityMappingPlaybackUrl($organization, $project, $manual, $preview))
@@ -81,7 +81,7 @@ test('写像: download を拒否しても kind=preview の playback は 302 の�
 });
 
 test('写像: render を拒否する policy では kind=preview の playback が 403 になる', function (): void {
-    [$owner, $project, $manual, $preview] = abilityMappingContext();
+    [$organization, $owner, $project, $manual, $preview] = abilityMappingContext();
     DivergentVideoManualPolicy::$allowRender = false;
 
     $this->actingAs($owner)->get(abilityMappingPlaybackUrl($organization, $project, $manual, $preview))
@@ -89,7 +89,7 @@ test('写像: render を拒否する policy では kind=preview の playback が
 });
 
 test('写像: render を拒否しても kind=render の playback は 302 のまま (download ability で通る)', function (): void {
-    [$owner, $project, $manual, , $render] = abilityMappingContext();
+    [$organization, $owner, $project, $manual, , $render] = abilityMappingContext();
     DivergentVideoManualPolicy::$allowRender = false;
 
     $this->actingAs($owner)->get(abilityMappingPlaybackUrl($organization, $project, $manual, $render))
@@ -97,7 +97,7 @@ test('写像: render を拒否しても kind=render の playback は 302 のま�
 });
 
 test('写像: 認可 403 はテナント境界 404 より後 (他組織からは policy 差替えに関係なく 404)', function (): void {
-    [, $project, $manual, , $render] = abilityMappingContext();
+    [$organization, , $project, $manual, , $render] = abilityMappingContext();
     // policy は両方許可のまま。それでも他組織の利用者には存在が漏れない
     [, $stranger] = createOrganizationWithOwner('別組織');
 

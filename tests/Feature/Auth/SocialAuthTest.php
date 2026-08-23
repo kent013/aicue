@@ -186,7 +186,7 @@ test('P7: SSO register 成立で pending が個人組織へ promote される', 
     $this->get('/auth/google/callback')->assertRedirect(route('app.entry'));
 
     $user = User::whereBlind('email', 'email_index', 'sso-plan@example.com')->firstOrFail();
-    $personalOrg = $user->organizations()->where('is_personal', true)->firstOrFail();
+    $personalOrg = $user->organizations()->firstOrFail();
 
     expect(session(IntendedPlanResolver::PENDING_KEY))->toBeNull();
     expect(session(IntendedPlanResolver::orgKey($personalOrg)))->toBe('standard');

@@ -113,7 +113,6 @@ const DELETION_PATH_CLOSURE = [
     //   決済事業者 SDK への到達辺は持たない (検査 2 が機械的に固定する)。
     'App\DataTransferObjects\Account\AccountDeletionAuditContext',
     'App\DataTransferObjects\Account\AccountDeletionStateDto',
-    'App\DataTransferObjects\Notification\AccountDeletionRequestedPayload',
     'App\DataTransferObjects\Invitations\PendingInvitationForUserDto',
     'App\DataTransferObjects\Notification\InvitationReceivedPayload',
     'App\DataTransferObjects\Notification\ManualJobPayload',
@@ -165,7 +164,6 @@ const DELETION_PATH_CLOSURE = [
     'App\Models\User',
     'App\Models\VideoManual',
     'App\Notifications\Account\AccountDeletionRequestedNotification',
-    'App\Notifications\InApp\AccountDeletionRequestedNotification',
     'App\Notifications\InApp\InvitationReceivedNotification',
     'App\Notifications\InApp\ManualAnalyzedNotification',
     'App\Notifications\InApp\ManualRenderedNotification',

@@ -41,7 +41,7 @@ function takeSelectionPath(Organization $organization, Project $project, VideoMa
 }
 
 test('org owner (編集者) は 200 で Manuals/Takes を受け取り cut.label が 手順1 になる', function (): void {
-    [, $owner, $project, $manual, $cut] = takeSelectionContext();
+    [$organization, $owner, $project, $manual, $cut] = takeSelectionContext();
 
     $response = $this->actingAs($owner)->get(takeSelectionPath($organization, $project, $manual, $cut));
 
@@ -59,7 +59,7 @@ test('org owner (編集者) は 200 で Manuals/Takes を受け取り cut.label 
 });
 
 test('point の cut は 急所1-1 のラベルになる (CutSequencer と同じ導出元)', function (): void {
-    [, $owner, $project, $manual, $step] = takeSelectionContext();
+    [$organization, $owner, $project, $manual, $step] = takeSelectionContext();
     $point = Cut::factory()->asPointOf($step)->withSortOrder(0)->create();
 
     $this->actingAs($owner)
@@ -68,7 +68,7 @@ test('point の cut は 急所1-1 のラベルになる (CutSequencer と同じ�
 });
 
 test('親を持たない急所 (データ異常) でも画面は開き中立ラベルへ倒れる', function (): void {
-    [, $owner, $project, $manual] = takeSelectionContext();
+    [$organization, $owner, $project, $manual] = takeSelectionContext();
     // parent_cut_id が null の point は CutSequencer の列に現れない
     $orphan = Cut::factory()->forManual($manual)->create(['type' => 'point']);
 
@@ -95,7 +95,7 @@ test('project_member (撮影者) は 403 (PWA 側に採用導線があるため�
 });
 
 test('cross-org の {project} は認可より前に 404', function (): void {
-    [, $ownerA] = createOrganizationWithOwner('組織A');
+    [$organization, $ownerA] = createOrganizationWithOwner('組織A');
     [$orgB, $ownerB] = createOrganizationWithOwner('組織B');
     $projectB = Project::factory()->forOrganization($orgB)->create();
     $manualB = VideoManual::factory()->forProject($projectB)->create();
@@ -113,14 +113,14 @@ test('cross-project の {manual} は 404', function (): void {
 });
 
 test('cross-manual の {cut} は 404', function (): void {
-    [, $owner, $project, , $cut] = takeSelectionContext();
+    [$organization, $owner, $project, , $cut] = takeSelectionContext();
     $otherManual = VideoManual::factory()->forProject($project)->create();
 
     $this->actingAs($owner)->get(takeSelectionPath($organization, $project, $otherManual, $cut))->assertNotFound();
 });
 
 test('takes は sort_order 昇順で並び downloaded / has_thumbnail が反映される', function (): void {
-    [, $owner, $project, $manual, $cut] = takeSelectionContext();
+    [$organization, $owner, $project, $manual, $cut] = takeSelectionContext();
     $second = Take::factory()->forCut($cut)->downloaded()->create(['sort_order' => 1]);
     $first = Take::factory()->forCut($cut)->withThumbnail()->create(['sort_order' => 0]);
 
@@ -136,7 +136,7 @@ test('takes は sort_order 昇順で並び downloaded / has_thumbnail が反映�
 });
 
 test('採用テイクは cut.adopted に id と status で載る', function (): void {
-    [, $owner, $project, $manual, $cut] = takeSelectionContext();
+    [$organization, $owner, $project, $manual, $cut] = takeSelectionContext();
     $take = Take::factory()->forCut($cut)->create(['status' => TakeStatus::Ready->value]);
     $cut->forceFill(['adopted_take_id' => $take->id])->save();
 
@@ -148,7 +148,7 @@ test('採用テイクは cut.adopted に id と status で載る', function (): 
 });
 
 test('props に署名 URL / 保存パス / ACK トークンのスロットが一切現れない', function (): void {
-    [, $owner, $project, $manual, $cut] = takeSelectionContext();
+    [$organization, $owner, $project, $manual, $cut] = takeSelectionContext();
     Take::factory()->forCut($cut)->withThumbnail()->create();
 
     $response = $this->actingAs($owner)->get(takeSelectionPath($organization, $project, $manual, $cut));
@@ -176,7 +176,7 @@ test('未契約組織は onboarding へ遮断される (課金ゲートの中に
 test('cut の計画 (material_type) と採用テイクの実体が props に載る', function (): void {
     // cut 側は**計画** (未指定あり。ファイル選択の accept 切替に使う) /
     // take 側は**実体** (NOT NULL。<video> と <img> の出し分けに使う)。別のキーである。
-    [, $owner, $project, $manual, $cut] = takeSelectionContext();
+    [$organization, $owner, $project, $manual, $cut] = takeSelectionContext();
     $cut->forceFill(['material_type' => MaterialType::Still->value])->save();
     $take = Take::factory()->forCut($cut)->still()->create();
     $cut->forceFill(['adopted_take_id' => $take->id])->save();
@@ -190,7 +190,7 @@ test('cut の計画 (material_type) と採用テイクの実体が props に載�
 });
 
 test('計画未指定 + 動画テイクでは cut.material_type が null / take は video', function (): void {
-    [, $owner, $project, $manual, $cut] = takeSelectionContext();
+    [$organization, $owner, $project, $manual, $cut] = takeSelectionContext();
     Take::factory()->forCut($cut)->create();
 
     $this->actingAs($owner)

@@ -13,7 +13,7 @@ test('暗号化 email でログインできる (blind index 経由の解決)', f
         'password' => 'password',
     ]);
 
-    $response->assertRedirect('/dashboard');
+    $response->assertRedirect(route('app.entry'));
     $this->assertAuthenticatedAs($user);
 });
 

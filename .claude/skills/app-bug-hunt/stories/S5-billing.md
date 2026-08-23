@@ -25,14 +25,14 @@ covers_capabilities: [BILL-01, BILL-02, BILL-03, BILL-04, BILL-05, PUB-01]
 3. `billing.plans`(プラン比較) → 変更できないプランでも CTA は押せ、押下時に理由が出る(disabled で詰まない)。
 4. `billing.checkout`(プラン申込/チケットチャージ) → Stripe fake の checkout へ → 戻ると残高/プランが更新され、二重送信しても二重課金にならない(冪等)。
 5. `billing.portal` → Stripe カスタマーポータルへ遷移(無料パーソナル / 未契約では error flash で戻る = 500 にならない)。
-6. チケットスポット購入 `billing.tickets.show`(`/purchase-tickets`) → 枚数入力 → `billing.tickets.checkout`(Stripe fake)。**枚数に範囲外(>上限)を入れてエラー表示後、有効値に修正するとエラー/invalid が即座に消える**か(stale invalid 解消, T041)。合計金額が枚数に応じ再計算されるか。
+6. チケットスポット購入 `billing.tickets.show`(`/organizations/{slug}/purchase-tickets`) → 枚数入力 → `billing.tickets.checkout`(Stripe fake)。**枚数に範囲外(>上限)を入れてエラー表示後、有効値に修正するとエラー/invalid が即座に消える**か(stale invalid 解消, T041)。合計金額が枚数に応じ再計算されるか。
 7. **着地 feedback バナー(P9)**: Stripe fake の Checkout / ポータルから `billing.index` へ戻ると
    **one-shot バナー**(`billing-feedback-{purchase_received|purchase_processing|purchase_already_received|checkout_retry_required|portal_returned}`)が
    1 度だけ出る。`PurchaseFormState::Completed` 撤去後、**購入完了をユーザーに伝える唯一の経路**なので、
    ここが無言だと「押したのに何も起きない」finding (H3)。リロードで復活しないこと、
    他組織の session_id を query に差しても出ないこと(org スコープ + intent 検証で fail-closed)。
 8. **請求先情報(P9)**: `billing.index` の請求先フォーム(`billing-contact-form`)で
-   `billing.contact.update`(PATCH `/billing/contact`)。メール/氏名を保存 → 再読込で反映
+   `billing.contact.update`(PATCH `/organizations/{slug}/billing/contact`)。メール/氏名を保存 → 再読込で反映
    (`billing-contact-email-readonly` / `billing-contact-name-readonly`)。不正メールでエラー →
    修正で即座にクリアされるか。`manageBilling` を持たない member では**読み取り専用**で、
    直 PATCH は 403 か。

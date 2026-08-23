@@ -75,7 +75,7 @@ test('同 token + stale pending の再送は checkout_retry_required、境界内
         ->withAttempt($liveToken, 'standard')
         ->create(['created_at' => CarbonImmutable::now()->subMinutes(23 * 60 + 59)]);
 
-    $this->actingAs($owner2)->post("/organizations/{$organization->slug}/billing/checkout", [
+    $this->actingAs($owner2)->post("/organizations/{$org2->slug}/billing/checkout", [
         'plan_code' => 'standard',
         'subscription_attempt_token' => $liveToken,
     ])->assertRedirect('https://checkout.stripe.com/dummy');

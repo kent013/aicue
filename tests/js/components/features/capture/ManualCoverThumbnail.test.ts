@@ -10,7 +10,7 @@ import ManualCoverThumbnail from "@/components/features/capture/ManualCoverThumb
  * (枠と data-testid は 2 分岐で同じ = レイアウトを跳ねさせないため)。
  */
 
-const SRC = "/app/projects/1/manuals/1/cuts/7/takes/9/thumbnail";
+const SRC = "/organizations/test-org/app/projects/1/manuals/1/cuts/7/takes/9/thumbnail";
 
 describe("ManualCoverThumbnail", () => {
     it("src が非 null なら画像を描き lazy 読み込みにする", () => {
@@ -47,7 +47,7 @@ describe("ManualCoverThumbnail", () => {
         await fireEvent.error(screen.getByTestId("cover"));
         expect(screen.getByTestId("cover").dataset.state).toBe("placeholder");
 
-        const next = "/app/projects/1/manuals/1/cuts/8/takes/10/thumbnail";
+        const next = "/organizations/test-org/app/projects/1/manuals/1/cuts/8/takes/10/thumbnail";
         await rerender({ src: next, testId: "cover" });
 
         const element = screen.getByTestId("cover");

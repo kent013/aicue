@@ -9,6 +9,7 @@ use Symfony\Component\Process\Process;
 use Tests\Support\PhpReferenceScanner;
 use Tests\Support\PhpTokenScan;
 use Tests\Support\ReferenceKind;
+use Tests\Support\SourceLiterals;
 use Tests\Support\TrackedPhpSourceFiles;
 
 /**
@@ -42,12 +43,6 @@ final class CurrentOrganizationRemovalScanner
         return 'App\\Services\\Organization\\'.'Current'.'OrganizationResolver';
     }
 
-    /** 撤去した route 名 (断片から組み立てる)。 */
-    public static function removedRouteName(): string
-    {
-        return 'organizations.'.'switch';
-    }
-
     /** relation / プロパティ名 (断片から組み立てる)。 */
     private static function relationName(): string
     {
@@ -69,7 +64,12 @@ final class CurrentOrganizationRemovalScanner
     }
 
     /**
-     * 列名リテラルの出現 (撤去 migration だけは除く)。
+     * 列名リテラルの出現。
+     *
+     * ★見るのは**文字列リテラルだけ**である (`Tests\Support\SourceLiterals`)。撤去したことを
+     *   説明する docblock・コメントは撤去の証拠であって復活ではないので、参照と取り違えない。
+     * ★`database/migrations/` は**母集団に入れない**。撤去した列の名前は移行履歴に必ず残るため、
+     *   含めると原理的に赤くなる (家系の正典 v1 が撤去表面の走査根から移行履歴を外すのと同じ理由)。
      *
      * @return list<string> "relative:line" の一覧
      */
@@ -79,13 +79,13 @@ final class CurrentOrganizationRemovalScanner
         $hits = [];
         foreach (self::roots($base) as $files) {
             foreach ($files as $file) {
-                if (str_contains($file['relative'], 'drop_'.$needle.'_from_users_table')) {
-                    continue; // 撤去そのものを書いた migration
+                if (str_starts_with($file['relative'], 'database/migrations/')) {
+                    continue; // 移行履歴 (撤去した列の名前は必ず残る)
                 }
                 $contents = (string) file_get_contents($file['absolute']);
-                foreach (explode("\n", $contents) as $index => $line) {
-                    if (str_contains($line, $needle)) {
-                        $hits[] = $file['relative'].':'.($index + 1);
+                foreach (self::literalsOf($file['relative'], $contents) as $literal) {
+                    if (str_contains($literal['value'], $needle)) {
+                        $hits[] = $file['relative'].':'.$literal['line'];
                     }
                 }
             }
@@ -97,6 +97,20 @@ final class CurrentOrganizationRemovalScanner
     public static function containsColumnName(string $source): bool
     {
         return str_contains($source, self::columnName());
+    }
+
+    /**
+     * ファイル種別に応じた文字列リテラル。
+     *
+     * @return list<array{line: int, offset: int, value: string}>
+     */
+    private static function literalsOf(string $relative, string $contents): array
+    {
+        if (str_ends_with($relative, '.php')) {
+            return SourceLiterals::php($contents);
+        }
+
+        return SourceLiterals::script($contents);
     }
 
     /**
@@ -199,29 +213,6 @@ final class CurrentOrganizationRemovalScanner
         }
 
         return false;
-    }
-
-    /** @return list<string> */
-    public static function removedRouteNameHits(string $base): array
-    {
-        $hits = [];
-        foreach (self::roots($base) as $files) {
-            foreach ($files as $file) {
-                $contents = (string) file_get_contents($file['absolute']);
-                foreach (explode("\n", $contents) as $index => $line) {
-                    if (self::containsRemovedRouteName($line)) {
-                        $hits[] = $file['relative'].':'.($index + 1);
-                    }
-                }
-            }
-        }
-
-        return array_values(array_unique($hits));
-    }
-
-    public static function containsRemovedRouteName(string $source): bool
-    {
-        return str_contains($source, self::removedRouteName());
     }
 
     /**

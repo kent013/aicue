@@ -57,7 +57,7 @@ test('離脱ガード: 有効 subscription を持つ member は dashboard へ', 
     $member = attachOrganizationMember($organization);
 
     $this->actingAs($member)->get("/organizations/{$organization->slug}/onboarding/billing-required")
-        ->assertRedirect(route('app.entry'));
+        ->assertRedirect(route('dashboard', ['organization' => $organization->slug]));
 });
 
 test('離脱ガード: ActiveFreePlan (free_plan_code=personal) の member は dashboard へ', function (): void {
@@ -71,7 +71,7 @@ test('離脱ガード: ActiveFreePlan (free_plan_code=personal) の member は d
     $member = attachOrganizationMember($organization);
 
     $this->actingAs($member)->get("/organizations/{$organization->slug}/onboarding/billing-required")
-        ->assertRedirect(route('app.entry'));
+        ->assertRedirect(route('dashboard', ['organization' => $organization->slug]));
 });
 
 test('離脱ガード: manageBilling 保持者は checkout へ (自分で手続きできる)', function (): void {

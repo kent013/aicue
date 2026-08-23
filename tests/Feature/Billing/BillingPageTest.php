@@ -13,7 +13,7 @@ use Inertia\Testing\AssertableInertia as Assert;
  * 認可・validation 失敗経路のみ検証する)。
  */
 
-test('owner は /billing で現在プラン・per-bucket 残高・quota・管理フラグを見られる', function (): void {
+test('owner は /organizations/{slug}/billing で現在プラン・per-bucket 残高・quota・管理フラグを見られる', function (): void {
     // P8b: プラン一覧は /billing/plans へ移設 (期待は BillingPlansPageTest が持つ)。
     [$organization, $owner] = createOrganizationWithOwner();
     app(TicketLedgerService::class)->grant($organization, 10, '初期付与');
@@ -35,7 +35,7 @@ test('owner は /billing で現在プラン・per-bucket 残高・quota・管理
             ->where('page.canManageBilling', true));
 });
 
-test('未契約 org の /billing では現在プランが null で届く', function (): void {
+test('未契約 org の /organizations/{slug}/billing では現在プランが null で届く', function (): void {
     [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
 
     $this->actingAs($owner)->get("/organizations/{$organization->slug}/billing")

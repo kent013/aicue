@@ -268,7 +268,7 @@ DB ルール (categories.name の unique / category の exists) は、cross-org 
 
 | 観点 | テンプレート | 本アプリ |
 |---|---|---|
-| 子リソースの書き込み | Item 見本の per-row CRUD (store/update/destroy を行単位で張る) | シナリオ (Cut 群) は `PUT /projects/{project}/manuals/{manual}/scenario` で document (steps→points ツリー) を一括保存し、サーバが 1 トランザクションで reconcile |
+| 子リソースの書き込み | Item 見本の per-row CRUD (store/update/destroy を行単位で張る) | シナリオ (Cut 群) は `PUT /organizations/{slug}/projects/{project}/manuals/{manual}/scenario` で document (steps→points ツリー) を一括保存し、サーバが 1 トランザクションで reconcile |
 
 ### なぜ正当な差分か(logic-driven)
 シナリオ編集は「行追加/削除/並べ替え/手順削除で配下急所も削除」を伴う。per-row CRUD では
@@ -402,7 +402,7 @@ lctl feature `process-concurrency-test-harness` (rev `14-3117f6369f21` / 正典 
 
 | 観点 | テンプレート | 本アプリ |
 |---|---|---|
-| メンバー管理 UI | `Organizations/Settings.svelte` に組織設定と同居 | 管理メニュー専用画面 `Admin/Users` (GET `/manage/users`) へ移設。Settings は組織設定 (名称 / 2FA 方針 / API キー導線 / オーナー移譲) のみ |
+| メンバー管理 UI | `Organizations/Settings.svelte` に組織設定と同居 | 管理メニュー専用画面 `Admin/Users` (GET `/organizations/{slug}/manage/users`) へ移設。Settings は組織設定 (名称 / 2FA 方針 / API キー導線 / オーナー移譲) のみ |
 | ロールの語彙 | org ロール直接指定 (`organization_admin` / `organization_member`) | **3 値遷移コマンド** (`AdminConsoleRole`: admin/editor/shooter)。org ロール + Default Project pivot への「正規状態への遷移」を 1 tx で適用 (`applyConsoleRole`)。表示は導出 5 値 (`MemberRoleState`: owner/admin/editor/shooter/unassigned) |
 | 招待 | org ロールのみ | **org ロールのみ (テンプレートと同じ)**。一度 `organization_invitations.project_role` を追加して受諾時に Default Project へ pivot attach する差分を持っていたが、裁定 AG-079 (Default Project という概念自体が不要) で**列ごと撤去**し逸脱を戻した。編集者 / 撮影者は参加後にロール割当コマンドで付与する |
 | settings() props | members に email / role / twoFactorStatus | members は `{id, name}` に縮小 (オーナー移譲 select 用途のみ = PII 最小化)。invitations prop は撤去 |
@@ -428,7 +428,7 @@ backfill 不要・非正規状態 (未割当 / stale pivot) の可視化と修�
   招待は「組織に入れる」だけを意味し、編集者 / 撮影者の割当は参加後の別操作である)
 - pivot 書き込み経路は `OrganizationMembershipService` / `ProjectMemberController` に閉じる
   (**`ProjectMemberPivotWritePathTest`** が deny-by-default で強制)
-- `/manage/` 配下 route の auth+verified は **`ManageRouteAuthGuardTest`** が deny-by-default で強制
+- `/organizations/{slug}/manage/` 配下 route の auth+verified は **`ManageRouteAuthGuardTest`** が deny-by-default で強制
 - drift 防止テスト: `ConsoleRoleTransitionTest` / `UserManagementPageTest` /
   `OrganizationsSettings.test.ts` (メンバー管理 UI 不在の回帰封じ)
 
@@ -2555,7 +2555,9 @@ deny-by-default 機構そのものであり、業務ドメイン (認証手段�
 `tests/Feature/Shared/CurrentOrganizationSharedPropShapeTest.php` が
 キー集合と各値の型 (nullable も含む) を固定する。
 撤去そのものの残骸は `tests/Architecture/CurrentOrganizationRemovalTest.php` が
-4 つの形 (列名 / relation / 撤去した Service の FQCN / 撤去した route 名) で 0 件を固定する。
+3 つの形 (列名 / relation / 撤去した Service の FQCN) で 0 件を固定し、
+撤去した route 名は `LegacyOrganizationlessUrlAbsenceTest` の撤去 route 名台帳が
+追跡下ファイル全数で 0 件を固定する。
 
 ### 関連
 - 実装: `app/Http/Middleware/HandleInertiaRequests.php`, `app/DataTransferObjects/Organizations/CurrentOrganizationData.php`
@@ -2567,9 +2569,9 @@ deny-by-default 機構そのものであり、業務ドメイン (認証手段�
 
 | 行 | 内容 |
 |---|---|
-| 対象パス | `app/Enums/Security/NestedRouteDefenseMode.php` / `app/Http/Middleware/RequireActiveSubscription.php` / `app/Http/Middleware/RequireRecentAuth.php` / `docs/app-integration-guide.md` / `tests/Architecture/AccountDeletionFreezeRouteGateTest.php` / `tests/Architecture/ControllerAuthorizationGateTest.php` / `tests/Architecture/FlashNotificationRelayDriftTest.php` / `tests/Architecture/RateLimiterKeyConventionTest.php` / `tests/js/setup.ts` |
+| 対象パス | `.claude/skills/app-bug-hunt/coverage/fixtures/operations.sample.md` / `.claude/skills/app-bug-hunt/ledger/test_validate_findings.py` / `app/Enums/Security/NestedRouteDefenseMode.php` / `app/Http/Middleware/RequireActiveSubscription.php` / `app/Http/Middleware/RequireRecentAuth.php` / `docs/default-team-pattern.md` / `docs/supported-browsers.md` / `tests/Architecture/AccountDeletionFreezeRouteGateTest.php` / `tests/Architecture/AccountDeletionPathGateTest.php` / `tests/Architecture/ControllerAuthorizationGateTest.php` / `tests/Architecture/FlashNotificationRelayDriftTest.php` / `tests/Architecture/RateLimiterKeyConventionTest.php` / `tests/js/setup.ts` |
 | 業務要件起因の説明 | 撮影は共用端末で行われ、直前の利用者が選んだ組織が残ると別現場の手順書を撮ってしまう。組織文脈を URL 単一方式へ揃えた結果、テンプレート共有部が持っていた「組織は保持列から取る」「業務 route は組織セグメントを持たない」という前提が成り立たなくなった |
-| 揃え続ける不変条件と保証機構 | 業務 route は 1 本残らず組織 URL 配下にあり (`OrganizationScopedRouteCoverageTest`)、課金ゲートと render-trigger は組織 binding が無ければ fail-closed になる (`BillingGateRouteOrganizationParamTest` / `RenderTriggerRouteOrganizationParamTest`)。撤去した保持列・切替 route の残骸は `CurrentOrganizationRemovalTest` が 4 つの形で 0 件に固定する |
+| 揃え続ける不変条件と保証機構 | 業務 route は 1 本残らず組織 URL 配下にあり (`OrganizationScopedRouteCoverageTest`)、課金ゲートと render-trigger は組織 binding が無ければ fail-closed になる (`BillingGateRouteOrganizationParamTest` / `RenderTriggerRouteOrganizationParamTest`)。撤去した保持列の残骸は `CurrentOrganizationRemovalTest` が 3 つの形で、撤去した切替 route 名と旧 URL は `LegacyOrganizationlessUrlAbsenceTest` が追跡下ファイル全数で 0 件に固定する |
 | 再判定の条件 | テンプレート側が組織テナンシーを同梱し、組織文脈の取得元を規定したとき (現在は組織という概念自体を同梱していない) |
 | 決めた日 | 2026-08-23 |
 | 決めた人 | 開発者 |
@@ -2579,7 +2581,7 @@ deny-by-default 機構そのものであり、業務ドメイン (認証手段�
 
 | 観点 | テンプレート | 本アプリ |
 |---|---|---|
-| 業務 route の URL | 組織セグメントを持たない (`/projects/{project}` 等) | `/organizations/{organization:slug}/…` 配下に全数を置く。route 名は不変 |
+| 業務 route の URL | 組織セグメントを持たない (`projects/{project}` 等) | `/organizations/{organization:slug}/…` 配下に全数を置く。route 名は不変 |
 | 課金ゲートの組織解決 | 保持列 (利用者に紐づく現在組織) から取り、無ければ素通し | URL の binding だけから取り、無ければ fail-closed |
 | 認証直後・エラー画面の着地 | ダッシュボードへ固定 | 組織文脈を持たない**分岐入口** (`/go`) へ倒す (所属数で分岐する) |
 | 画面テストの既定の現在地 | 指定しない | 組織 URL 配下を既定にする (URL から組織を読む helper があるため) |
@@ -2605,4 +2607,7 @@ deny-by-default 機構そのものであり、業務ドメイン (認証手段�
 ### 関連
 - 実装: `routes/web.php`, `app/Http/Middleware/EnsureProjectBelongsToRouteOrganization.php`
 - 設計: `devnotes/20260823-0016-organization-tenancy-ag-catchup/`
-- 同じ変更で採用時債務一覧 (D34) から上記 9 パスを外した (説明が付いたため)
+- 同じ変更で採用時債務一覧 (D34) から上記のパスを外した (説明が付いたため)
+- `docs/app-integration-guide.md` も同じ変更で組織文脈の記述を URL 単一方式へ書き換えたが、
+  対象パスには挙げない。同ファイルは **D42** が既に逸脱として登録しており、
+  台帳の書式が対象パスの重複を禁じているためである (片方を消しても赤にならなくなる)

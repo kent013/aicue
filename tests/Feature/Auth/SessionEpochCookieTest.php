@@ -40,12 +40,12 @@ function pinnedSessionId(): string
 }
 
 test('認証済み応答の世代 cookie が平文の印そのものである (暗号化の除外が効いている)', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
     $sessionId = pinnedSessionId();
 
     $response = $this->actingAs($owner)
         ->withCookie((string) config('session.cookie'), $sessionId)
-        ->get('/dashboard');
+        ->get("/organizations/{$organization->slug}/dashboard");
 
     $cookie = cookieFromResponse($response, SessionEpoch::COOKIE_NAME);
 
@@ -65,10 +65,10 @@ test('guest 応答にも世代 cookie が付く (「印が無い」状態を作�
 });
 
 test('世代 cookie は画面側から読める (HttpOnly でない)', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
     $cookie = cookieFromResponse(
-        $this->actingAs($owner)->get('/dashboard'),
+        $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard"),
         SessionEpoch::COOKIE_NAME,
     );
 
@@ -76,9 +76,9 @@ test('世代 cookie は画面側から読める (HttpOnly でない)', function 
 });
 
 test('世代 cookie の属性は同じ応答の session cookie と同じ (HttpOnly を除く)', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $response = $this->actingAs($owner)->get('/dashboard');
+    $response = $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard");
 
     $epochCookie = cookieFromResponse($response, SessionEpoch::COOKIE_NAME);
     $sessionCookie = cookieFromResponse($response, (string) config('session.cookie'));
@@ -107,13 +107,13 @@ test('ログイン応答の後の印はログイン前と異なる (セッショ
 });
 
 test('ログアウト応答の後の印はログアウト前と異なる (削除ではなく上書き)', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
     $sessionId = pinnedSessionId();
 
     $before = cookieFromResponse(
         $this->actingAs($owner)
             ->withCookie((string) config('session.cookie'), $sessionId)
-            ->get('/dashboard'),
+            ->get("/organizations/{$organization->slug}/dashboard"),
         SessionEpoch::COOKIE_NAME,
     );
 

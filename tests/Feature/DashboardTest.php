@@ -468,13 +468,13 @@ test('新規登録相当 (未契約) org: billing_state=no_subscription (F-2-01 
             ->missing('dashboard.billing.has_billing_access'));
 });
 
-test('未契約 org の CTA 着地 /onboarding/checkout が 200 (行き先のない詰みを作らない)', function (): void {
+test('未契約 org の CTA 着地 /organizations/{slug}/onboarding/checkout が 200 (行き先のない詰みを作らない)', function (): void {
     [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
 
     $this->actingAs($owner)->get("/organizations/{$organization->slug}/onboarding/checkout")->assertOk();
 });
 
-test('未契約 org の非 manageBilling メンバーは CTA 着地で /billing-required へ捌かれる', function (): void {
+test('未契約 org の非 manageBilling メンバーは CTA 着地で /organizations/{slug}/billing-required へ捌かれる', function (): void {
     [$organization] = createOrganizationWithOwner(grandfatherFreePlan: false);
     $member = attachOrganizationMember($organization, OrganizationRole::Member);
     // current org は保護キーのため forceFill (attachOrganizationMember は設定しない)

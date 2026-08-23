@@ -175,7 +175,7 @@ test('GET で active prefill 後 POST 前に revoke されても登録は成立�
     expect($organization->users()->whereKey($user->getKey())->exists())->toBeFalse();
 
     // 個人組織は生成されるが未付与 (P6/F2: 付与契機はプラン有効化時)
-    $personalOrg = $user->organizations()->where('is_personal', true)->firstOrFail();
+    $personalOrg = $user->organizations()->firstOrFail();
     expect(app(TicketLedgerService::class)->balance($personalOrg)->totalAvailable())->toBe(0);
     expect($personalOrg->signup_tickets_granted_at)->toBeNull();
 
@@ -204,7 +204,7 @@ test('P7: 招待受諾成立の登録では pending を消費せず継続導線�
 
     $user = User::whereBlind('email', 'email_index', $email)->firstOrFail();
     expect($organization->users()->whereKey($user->getKey())->exists())->toBeTrue();
-    expect($user->organizations()->where('is_personal', true)->exists())->toBeFalse();
+    expect($user->organizations()->count())->toBe(1);
 
     // pending は forget され、招待組織の org key は作られない (promote 対象が存在しない)
     expect(session(IntendedPlanResolver::PENDING_KEY))->toBeNull();

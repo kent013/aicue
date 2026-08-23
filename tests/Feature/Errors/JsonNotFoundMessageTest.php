@@ -73,6 +73,8 @@ test('契約 4: 404 以外の status (%s) は既存応答を維持する', funct
     //   「status 404 の判定を外す」mutation を検出できない (実測済み)。
     //   403 (AccessDeniedHttpException) と 409 (abort) が検出役である。
     if ($case === '401') {
+        // 未認証なので組織は解決されない。実在する識別名の形だけを使う (auth が binding より先)
+        [$organization] = createOrganizationWithOwner();
         $response = $this->getJson("/organizations/{$organization->slug}/app/projects/1/manuals/1");
         $response->assertStatus(401);
     }
@@ -89,7 +91,7 @@ test('契約 4: 404 以外の status (%s) は既存応答を維持する', funct
     }
 
     if ($case === '409') {
-        [, $owner] = createOrganizationWithOwner();
+        [$organization, $owner] = createOrganizationWithOwner();
         app(OrganizationMembershipService::class)->requestAccountDeletion($owner);
         $owner->refresh();
 

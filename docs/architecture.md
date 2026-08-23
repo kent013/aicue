@@ -74,7 +74,7 @@ route parameter を経由しない id (POST payload / MCP tool 引数 / token cl
 
 - **なぜ必要か**: pgsql は型不一致の比較で `22P02` (invalid_text_representation)、
   bigint 範囲外で `22003` (numeric_value_out_of_range) を投げる。非適合セグメント
-  (`/projects/abc`) が implicit binding に届くと QueryException → **404 ではなく生 500**。
+  (`/organizations/{slug}/projects/abc`) が implicit binding に届くと QueryException → **404 ではなく生 500**。
   型制約に合致しない URL は route にマッチしない = 404 になり、`SubstituteBindings` へ
   到達しないためクエリ自体が発行されない
 - **ドメイン制約 (重要)**: `BIGINT_PATTERN` は **`[0-9]{1,18}`**。
@@ -820,12 +820,12 @@ catch を足す必要が出たら、観測目録へ移すか免除の分類を�
 
   | route | 画面 / 責務 | guard |
   |---|---|---|
-  | GET `/onboarding/checkout` (`onboarding.checkout`) | `Onboarding/Checkout` — プラン選択 + Personal(無料)の自己申告 + 資金選択 | `view` 認可 + 離脱ガード (契約済み → `billing.index` / `manageBilling` なし → `onboarding.billing-required`) |
-  | GET `/billing-required` (`onboarding.billing-required`) | `Onboarding/BillingRequired` — 未契約 かつ `manageBilling` なし member への説明 (Owner 連絡先 + 問い合わせ導線) | `view` 認可 + 離脱ガード (利用可 → `dashboard` / `manageBilling` 保持 → `onboarding.checkout`) |
-  | POST `/onboarding/activate-personal` (`onboarding.activate-personal`) | Personal(無料)の即時有効化 (Stripe Checkout を通らない) | `manageBilling` + `throttle:10,1` |
-  | POST `/billing/checkout` (`billing.checkout`) | 有償プランの Stripe Checkout 開始 | `manageBilling` |
-  | POST `/billing/plan` (`billing.plan.change`) | 契約中プランの in-app swap (プラン変更) | `manageBilling` |
-  | PATCH `/billing/contact` (`billing.contact.update`) | 請求先連絡先の更新 | `manageBilling` |
+  | GET `/organizations/{slug}/onboarding/checkout` (`onboarding.checkout`) | `Onboarding/Checkout` — プラン選択 + Personal(無料)の自己申告 + 資金選択 | `view` 認可 + 離脱ガード (契約済み → `billing.index` / `manageBilling` なし → `onboarding.billing-required`) |
+  | GET `/organizations/{slug}/billing-required` (`onboarding.billing-required`) | `Onboarding/BillingRequired` — 未契約 かつ `manageBilling` なし member への説明 (Owner 連絡先 + 問い合わせ導線) | `view` 認可 + 離脱ガード (利用可 → `dashboard` / `manageBilling` 保持 → `onboarding.checkout`) |
+  | POST `/organizations/{slug}/onboarding/activate-personal` (`onboarding.activate-personal`) | Personal(無料)の即時有効化 (Stripe Checkout を通らない) | `manageBilling` + `throttle:10,1` |
+  | POST `/organizations/{slug}/billing/checkout` (`billing.checkout`) | 有償プランの Stripe Checkout 開始 | `manageBilling` |
+  | POST `/organizations/{slug}/billing/plan` (`billing.plan.change`) | 契約中プランの in-app swap (プラン変更) | `manageBilling` |
+  | PATCH `/organizations/{slug}/billing/contact` (`billing.contact.update`) | 請求先連絡先の更新 | `manageBilling` |
 
   いずれも `require-active-subscription` group の**外**にある構造的 allowlist
   (`routes/web.php` の gate group コメントが正本)。ゲート内に入れると
@@ -870,10 +870,10 @@ catch を足す必要が出たら、観測目録へ移すか免除の分類を�
   - live/stale の閾値は `BillingCheckoutSession::staleThresholdAt()` が単一出典で、
     `BillingAccess::state()` / 段 2・3・4 / 日次 sweeper が共有する
     (Architecture テストが literal の再発明を検出)
-- **契約中プランの変更 (in-app swap / F-3-01)**: `POST /billing/plan` (`billing.plan.change`) →
+- **契約中プランの変更 (in-app swap / F-3-01)**: `POST /organizations/{slug}/billing/plan` (`billing.plan.change`) →
   `SubscriptionService::changePlan()`。**有効な subscription を持つ組織専用**の経路で、
   持たない組織の `billing.checkout` と `Subscription::valid()` を境に排他
-  (どちらの CTA も `/billing/plans` から出るが、送信先はサーバが決めた
+  (どちらの CTA も `/organizations/{slug}/billing/plans` から出るが、送信先はサーバが決めた
   `hasChangeableSubscription` で分かれる)。
   - guard 順: 契約再読込 → **変更可能 state (Active のみ)** → schedule 管理下の拒否 →
     stale UI 検知 (`current_plan_code`。UX 専用。**要求先 ≠ local 現在プランのときだけ**評価) →
@@ -919,12 +919,12 @@ catch を足す必要が出たら、観測目録へ移すか免除の分類を�
     (**証拠なく金銭の挙動を反転させない**)。判断の経緯は
     `devnotes/20260804-0900-t089-t090-residual-risk/` を参照
 - **着地 feedback (P9)**: `Inertia::location()` の full page redirect を跨いだ後、
-  `/billing` 着地で one-shot バナーを出す (`BillingFeedbackKind`: purchase_received /
+  `/organizations/{slug}/billing` 着地で one-shot バナーを出す (`BillingFeedbackKind`: purchase_received /
   purchase_processing / purchase_already_received / checkout_retry_required / portal_returned)。
   org スコープ + intent 検証で **fail-closed**、UI は raw query を見ない。
   `PurchaseFormState::Completed` 撤去後、**購入完了を伝える唯一の経路**。
   - **one-shot の定義**: 「サーバが同じ状態を再主張しない」こと。着地 query
-    (`?session_id` / `?portal`) を認識したら **feedback の有無に関わらず canonical `/billing` へ
+    (`?session_id` / `?portal`) を認識したら **feedback の有無に関わらず canonical `/organizations/{slug}/billing` へ
     303** で畳み、kind は `BillingFeedbackKind::FLASH_KEY` の session flash
     (次の 1 リクエストのみ生存) で運ぶ。着地 URL が履歴に残らないため、リロード・戻る・
     ブックマークでバナーが復活しない (bfcache による DOM 復元まで禁じる契約ではない)。
@@ -948,13 +948,13 @@ catch を足す必要が出たら、観測目録へ移すか免除の分類を�
   (`pm_reuse_dispatched_at` が dispatch marker)。**webhook 同期処理から外向き Stripe API を
   撃たない**不変条件のため Job へ退避する。`AutoRechargeService::applyReusedPaymentMethod` は
   適格性先行の fail-closed (同意なし・失効・停止状態では Stripe にも DB にも触らない)。
-- **ダッシュボード callout は state 別 (T150)**: `/dashboard` の課金 callout は
+- **ダッシュボード callout は state 別 (T150)**: `/organizations/{slug}/dashboard` の課金 callout は
   `BillingSummaryData::$billingState` (`OnboardingBillingState` の 5 値) をそのまま props に
   載せて分岐する。**真偽値に潰さない** — 一度も契約していない組織 (`no_subscription`) に
   支払い失敗の文言を出していた回帰 (bug-hunt 20260811-003230 F-2-01) の原因が、
   `hasBillingAccess` が「未契約」と「支払い不健全」を 1 bit に畳んでいたことだった。
   - **CTA の行き先を画面が権限で分岐させない**: 未契約系 (`no_subscription` /
-    `pending_checkout`) の CTA は常に `/onboarding/checkout` を指し、契約済みなら
+    `pending_checkout`) の CTA は常に `/organizations/{slug}/onboarding/checkout` を指し、契約済みなら
     `billing.index`、`manageBilling` なしなら `onboarding.billing-required` へ
     **サーバ (`OnboardingController::show` の離脱ガード) が捌く**。認可をフロントで
     二重実装しないし、押せないボタンも作らない (禁止事項 8)。
@@ -1212,7 +1212,7 @@ webhook は落ちうる (Stripe 自身が遅延・欠落を明記している)�
 
 ## チケットスポット購入 (T007) の運用契約
 
-- **経路**: `GET /purchase-tickets` (閲覧 = 組織メンバー) / `POST /purchase-tickets/checkout`
+- **経路**: `GET /organizations/{slug}/purchase-tickets` (閲覧 = 組織メンバー) / `POST /organizations/{slug}/purchase-tickets/checkout`
   (`manageBilling` のみ)。課金ゲート (`require-active-subscription`) の対象外 = 未契約 /
   free プラン組織でも購入できる。payload は `count` / `attempt_token` のみ
   (金額・Price ID は `TicketVolumePrice::currentTierFor` がサーバ権威で解決)
@@ -1243,7 +1243,7 @@ webhook は落ちうる (Stripe 自身が遅延・欠落を明記している)�
 (`reserve` の低残高通知も含む)。残高が閾値を割ったら off-session の Stripe Invoice で
 自動購入する。
 
-- **経路**: `POST /billing/auto-recharge` (設定更新) / `POST /billing/auto-recharge/setup`
+- **経路**: `POST /organizations/{slug}/billing/auto-recharge` (設定更新) / `POST /organizations/{slug}/billing/auto-recharge/setup`
   (カード登録 = Checkout mode=setup)。いずれも組織 URL 配下 + `manageBilling`。
   課金ゲート (`require-active-subscription`) の対象外 = 支払い不健全な組織でも停止・
   カード更新に到達できる
@@ -1439,11 +1439,11 @@ doc/10 §10.3 / §10.8-4/-7 の実装 (T004)。routes は `/organizations/{organ
   (即時アップロード優先・IndexedDB は失敗/オフライン時の一時バッファ・419 は csrf-cookie
   再取得 1 回リトライ)。SW (`public/capture-sw.js`) は同一オリジン GET `/build/*` のみ
   stale-while-revalidate (アプリ応答・S3 は素通し)
-- **`/app/*` のテイク API は PC 編集面と共用である (T184)**: PC のテイク選択・採用画面
+- **`/organizations/{slug}/app/*` のテイク API は PC 編集面と共用である (T184)**: PC のテイク選択・採用画面
   (`projects.manuals.cuts.takes.index` → `pages/Manuals/Takes.svelte`) は**画面 props だけを返す
   GET を 1 本足し**、採用・削除・アップロード・再生・サムネイル取得は `capture.takes.*` を
   そのまま叩く (テイク資源の API 面を 2 本にしない)。URL prefix が `/app` なのは歴史的経緯であり、
-  **`/app/*` は「撮影 PWA 専用」ではない**。URL 導出は `lib/capture/take-endpoints.ts` の 1 箇所に
+  **`/organizations/{slug}/app/*` は「撮影 PWA 専用」ではない**。URL 導出は `lib/capture/take-endpoints.ts` の 1 箇所に
   集約してある (PWA の `TakeStrip` / `UploadQueue` と PC 面が同じ規則を使う)。
   帰結として、**将来 `/app` へ PWA 固有の middleware を足すと PC 面にも掛かる** (足すときは
   この段を読み直すこと)。
@@ -1632,7 +1632,11 @@ doc/10 §10.3 / §10.8-4/-7 の実装 (T004)。routes は `/organizations/{organ
 
 - **「いまどの組織か」は URL だけで決まる**。保持列 (`users.current_organization_id`) と
   切替 endpoint (`organizations.switch`) は撤去済みで、**2 方式の併存を認めない**。
-  残骸が 1 つも無いことは `CurrentOrganizationRemovalTest` が 4 つの形で固定する
+  保持列の残骸が 1 つも無いことは `CurrentOrganizationRemovalTest` が 3 つの形
+  (列名リテラル / relation / 撤去した Service の完全修飾名) で固定し、
+  撤去した切替 route 名と組織を持たない旧 URL は
+  `LegacyOrganizationlessUrlAbsenceTest` が git 追跡下ファイル全数で 0 件に固定する
+  (走査する / 走査しない / 自己検査専用 / 未分類 の 4 分類。未分類は 1 件でも赤)
 - **業務 route はすべて `/organizations/{organization:slug}/…` 配下**にある
   (route 名は不変。変えたのは URI だけ)。除外は
   `tests/Support/Routing/OrganizationlessWebRouteInventory.php` へ理由付きで登録する
@@ -1714,7 +1718,7 @@ doc/04 §4.2 の管理者専用画面 (T006)。書き込みは既存 endpoint �
   `$invitation->role` (org ロール 2 値) であり、**管理者ロールの招待リンクを入手した
   任意のログイン中ユーザーはそのまま組織管理者になれる**。これは経路の性質が
   メンバー招待と同じ (入口の唯一の弱点は招待メールの機密性) であることの帰結で、
-  緩和は 7 日失効・受諾済み/取消済みの除外・`/manage/users` での可視化。
+  緩和は 7 日失効・受諾済み/取消済みの除外・`/organizations/{slug}/manage/users` での可視化。
   **メンバー招待と管理者招待で受諾根拠を変えていない**のは意図であって漏れではない。
 - **email 照合の非対称**: アプリ内経路は blind index の**大文字小文字を区別する完全一致**
   (email の blind index に Lowercase transformer を付けていない)。

@@ -36,8 +36,9 @@ test('課金中の現在組織は accountDeletionBlockers に解約 action で�
             ->where('accountDeletionBlockers.0.actions', ['open_billing']));
 });
 
-test('課金中の組織が現在組織でなければ切替つき解約 action になる', function (): void {
-    // 現在組織は最初に provision された組織のまま。課金中の組織は 2 つ目 (非 current)。
+test('所属が複数でも課金中の組織の解約 action はその組織の課金画面へ直接向く', function (): void {
+    // 組織文脈は URL だけで決まるので「いま見ている組織かどうか」で action は変わらない
+    // (切替を挟む一手は保持列・切替 endpoint の撤去とともに概念ごと消えた)。
     [, $owner] = createOrganizationWithOwner();
     $other = app(OrganizationProvisioningService::class)->provision($owner, '別組織');
     createFakeSubscription($other, status: 'active');
@@ -47,7 +48,7 @@ test('課金中の組織が現在組織でなければ切替つき解約 action 
             ->component('Settings/Index')
             ->has('accountDeletionBlockers', 1)
             ->where('accountDeletionBlockers.0.slug', $other->slug)
-            ->where('accountDeletionBlockers.0.actions', ['switch_organization_then_open_billing']));
+            ->where('accountDeletionBlockers.0.actions', ['open_billing']));
 });
 
 test('ブロック要因が無いユーザーは accountDeletionBlockers が空', function (): void {

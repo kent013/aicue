@@ -128,7 +128,7 @@ test('cut を増やしてもクエリ本数が増えない (N+1 を作らない)
     [$organization, $owner] = createOrganizationWithOwner();
     $project = Project::factory()->forOrganization($organization)->create();
 
-    $count = function (int $cuts) use ($project, $owner): int {
+    $count = function (int $cuts) use ($organization, $project, $owner): int {
         $manual = VideoManual::factory()->forProject($project)->create();
         for ($i = 0; $i < $cuts; $i++) {
             $cut = Cut::factory()->forManual($manual)->withSortOrder($i)->create();

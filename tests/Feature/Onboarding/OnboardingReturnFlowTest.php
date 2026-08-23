@@ -73,7 +73,7 @@ test('return_to なしの activate-personal 成功は dashboard へ (既定の�
 
     $this->actingAs($owner)
         ->post("/organizations/{$organization->slug}/onboarding/activate-personal", ['declaration' => true])
-        ->assertRedirect(route('app.entry'));
+        ->assertRedirect(route('dashboard', ['organization' => $organization->slug]));
 });
 
 test('billing.index は契約成立時に continueUrl を 1 回だけ出す', function (): void {

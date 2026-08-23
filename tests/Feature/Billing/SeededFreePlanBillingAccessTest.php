@@ -41,7 +41,7 @@ function seededFreePlan(): Plan
     return $plan;
 }
 
-test('seeded 無料プラン組織の全ロールが /projects に到達できる (F-C3 回帰)', function (OrganizationRole $role): void {
+test('seeded 無料プラン組織の全ロールが /organizations/{slug}/projects に到達できる (F-C3 回帰)', function (OrganizationRole $role): void {
     $this->seed(ManualTestSeeder::class);
 
     $plan = seededFreePlan();

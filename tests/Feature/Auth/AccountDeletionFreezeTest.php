@@ -48,15 +48,19 @@ function frozenUser(): array
 }
 
 /**
- * 凍結母集団のうち **route parameter を持たない** route を [名前 => [method, uri]] で返す。
+ * 凍結母集団のうち **実在する値だけで叩ける** route を [名前 => [method, uri]] で返す。
  *
- * ★parameter を持つ route を sweep から外すのは、ダミー id を与えるとテナント境界 404 が
+ * ★対象は「parameter を持たない route」と「parameter が `{organization}` だけの route」である。
+ *   業務 route は全数が組織 URL 配下へ移った (家系裁定 AG-037) ため、parameterless だけに絞ると
+ *   母集団がほとんど空になり、凍結の掃引が実質的に効かなくなる。組織は**実在する所属組織の
+ *   識別名**を入れるので、テナント境界 404 が先に閉じることはない。
+ * ★それ以外の parameter を持つ route は外す。ダミー id を与えるとテナント境界 404 が
  *   先に閉じる (それが正しい順序である) ため。順序そのものは下の「404 が 302 より前」と
  *   TenantBoundaryOrderingTest が固定する。
  *
  * @return array<string, array{string, string}>
  */
-function freezeSweepTargets(): array
+function freezeSweepTargets(string $organizationSlug): array
 {
     $router = app('router');
     $routes = $router->getRoutes();
@@ -71,7 +75,8 @@ function freezeSweepTargets(): array
             continue;
         }
         $name = $route->getName();
-        if ($name === null || $route->parameterNames() !== []) {
+        $parameters = $route->parameterNames();
+        if ($name === null || array_values(array_diff($parameters, ['organization'])) !== []) {
             continue;
         }
         if (in_array($name, AccountDeletionFreezeAllowance::values(), true)) {
@@ -81,15 +86,20 @@ function freezeSweepTargets(): array
         if (! is_string($method)) {
             continue;
         }
-        $targets[$name] = [$method, '/'.ltrim($route->uri(), '/')];
+        $uri = str_replace(
+            ['{organization:slug}', '{organization}'],
+            $organizationSlug,
+            '/'.ltrim($route->uri(), '/'),
+        );
+        $targets[$name] = [$method, $uri];
     }
 
     return $targets;
 }
 
 test('凍結母集団 U − A の parameterless route はすべて /settings へ 302 する', function (): void {
-    [, $owner] = frozenUser();
-    $targets = freezeSweepTargets();
+    [$organization, $owner] = frozenUser();
+    $targets = freezeSweepTargets($organization->slug);
 
     expect(count($targets))->toBeGreaterThan(20); // 空振り防止 (sweep が 0 件でも緑にならない)
 
@@ -281,10 +291,17 @@ test('2FA 必須組織のユーザーでも取消できる (satisfier の到達�
     expect($user->fresh()?->deletion_requested_at)->toBeNull();
 });
 
-/** 2FA 必須組織に所属する**未準拠**ユーザーを作り、退会予約中にして返す。 */
-function twoFactorPendingFrozenUser(): User
+/**
+ * 2FA 必須組織に所属する**未準拠**ユーザーを作り、退会予約中にして返す。
+ *
+ * ★組織文脈は URL だけで決まる (家系裁定 AG-037) ので、**その組織そのもの**を返す。
+ *   別の組織の URL を叩くと 2FA ゲートは発火しない (ゲートは URL 上の組織で判断する)。
+ *
+ * @return array{Organization, User}
+ */
+function twoFactorPendingFrozenUser(): array
 {
-    [$organization] = createOrganizationWithOwner();
+    [$organization] = createOrganizationWithOwner('2FA 強制組織');
     $organization->forceFill(['two_factor_required' => true])->save();
     $user = User::factory()->create(); // 2FA 未準拠
     $organization->users()->attach($user);
@@ -292,7 +309,7 @@ function twoFactorPendingFrozenUser(): User
     app(OrganizationMembershipService::class)->requestAccountDeletion($user);
     $user->refresh();
 
-    return $user;
+    return [$organization, $user];
 }
 
 test('2FA 未準拠でも退会予約を取り消せる (救済は 2FA ゲートも凍結も通る)', function (): void {
@@ -300,9 +317,7 @@ test('2FA 未準拠でも退会予約を取り消せる (救済は 2FA ゲート
     //   **前**に走る 2FA 強制ゲートが取消 DELETE を settings.security へ倒していたため、
     //   「取り消したつもりで取り消せていない」状態が生まれていた。
     //   救済 (誤操作の取消) は業務の利用ではないので、両ゲートの判断を揃えて通す。
-    [$organization] = createOrganizationWithOwner('2FA 強制組織');
-    $user = twoFactorPendingFrozenUser();
-    $organization->users()->attach($user);
+    [$organization, $user] = twoFactorPendingFrozenUser();
 
     // 負のコントロール (取消の**前**): 業務面は 2FA ゲートで遮断されている
     $this->actingAs($user)->get("/organizations/{$organization->slug}/dashboard")->assertRedirect(route('settings.security'));
@@ -336,7 +351,7 @@ test('2FA 未準拠でも退会予約を取り消せる (救済は 2FA ゲート
 test('2FA 未準拠ユーザーの即時削除は通らない (救済だけを通す非対称)', function (): void {
     // 「削除系なら何でも通す」になっていないことの負のコントロール。
     // 即時削除 (settings.account.destroy) は救済ではなく 30 日猶予の迂回口である。
-    $user = twoFactorPendingFrozenUser();
+    [, $user] = twoFactorPendingFrozenUser();
 
     $this->actingAs($user)
         ->withSession(freshRecentAuthSession())
@@ -352,11 +367,11 @@ test('XHR は 409 Conflict で遮断される (302 に倒さない)', function (
     $this->actingAs($owner)->getJson("/organizations/{$organization->slug}/dashboard")->assertStatus(409);
 });
 
-test('未予約ユーザーには一切影響しない (全 parameterless route が従来どおり)', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+test('未予約ユーザーには一切影響しない (掃引対象の全 route が従来どおり)', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner();
 
     $redirectedToSettings = [];
-    foreach (freezeSweepTargets() as $name => [$method, $uri]) {
+    foreach (freezeSweepTargets($organization->slug) as $name => [$method, $uri]) {
         $response = $this->actingAs($owner)->call($method, $uri);
         if ($response->getStatusCode() === 302 && $response->headers->get('Location') === url('/settings')) {
             $redirectedToSettings[] = $name;

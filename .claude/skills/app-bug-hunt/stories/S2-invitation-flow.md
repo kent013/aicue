@@ -26,11 +26,11 @@ covers_capabilities: [MEM-01, MEM-02, MEM-03, MEM-04, MEM-05, MEM-06]
 4. `organizations.invitations.revoke` で未受諾の招待を取り消し → リンクが無効化。
 5. **未契約組織の非管理 member の着地 (`onboarding.billing-required`)**: 招待先組織が未契約
    (`BillingAccess` が遮断) の状態で、`manageBilling` を持たない member (編集者/撮影者) が
-   業務画面へ行こうとすると `/billing-required` に着地する。
+   業務画面へ行こうとすると `/organizations/{slug}/billing-required` に着地する。
    - 「組織管理者が課金手続きを完了するのをお待ちください」と**オーナーの連絡先**
      (`billing-required-owner-email`) / お問い合わせ導線が出て、403 や空画面にならないか。
    - この画面から**戻れる先がある**か (行き先のない詰みが無いか。H4)。
-   - 逆方向の離脱ガード: 利用可の状態で `/billing-required` を直叩き → `dashboard` へ、
+   - 逆方向の離脱ガード: 利用可の状態で `/organizations/{slug}/billing-required` を直叩き → `dashboard` へ、
      `manageBilling` 保持者で直叩き → `onboarding.checkout` へ逃がされるか
      (2 画面を往復する無限リダイレクトにならないか。H10)。
 

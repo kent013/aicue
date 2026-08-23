@@ -86,7 +86,7 @@ test('成功すると free entitlement が確定し dashboard へ redirect + 枚
 
     $this->actingAs($owner)
         ->post("/organizations/{$organization->slug}/onboarding/activate-personal", activatePersonalPayload())
-        ->assertRedirect(route('app.entry'))
+        ->assertRedirect(route('dashboard', ['organization' => $organization->slug]))
         ->assertSessionHas('success', sprintf(
             'パーソナルプラン（無料）を開始しました。無料チケット %d 枚をお付けしました。',
             $tickets,
@@ -114,7 +114,7 @@ test('二重 POST は冪等 (2 回目は付与なしの文言 + signup_grant は
     $this->actingAs($owner)->post("/organizations/{$organization->slug}/onboarding/activate-personal", activatePersonalPayload());
     $this->actingAs($owner)
         ->post("/organizations/{$organization->slug}/onboarding/activate-personal", activatePersonalPayload())
-        ->assertRedirect(route('app.entry'))
+        ->assertRedirect(route('dashboard', ['organization' => $organization->slug]))
         ->assertSessionHas('success', 'パーソナルプラン（無料）を開始しました。');
 
     expect(DB::table('ticket_ledger_entries')
@@ -129,7 +129,7 @@ test('付与マーカー済みの org は granted=false の文言で有効化さ
 
     $this->actingAs($owner)
         ->post("/organizations/{$organization->slug}/onboarding/activate-personal", activatePersonalPayload())
-        ->assertRedirect(route('app.entry'))
+        ->assertRedirect(route('dashboard', ['organization' => $organization->slug]))
         ->assertSessionHas('success', 'パーソナルプラン（無料）を開始しました。');
 
     expect(DB::table('ticket_ledger_entries')

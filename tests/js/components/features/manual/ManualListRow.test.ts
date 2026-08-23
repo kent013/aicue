@@ -90,7 +90,7 @@ describe("features/manual/ManualListRow", () => {
 
         const link = screen.getByTestId("manual-download-1");
         expect(new URL(link.getAttribute("href") ?? "", "http://localhost").pathname).toBe(
-            "/projects/7/manuals/1/download",
+            "/organizations/test-org/projects/7/manuals/1/download",
         );
     });
 

@@ -31,7 +31,7 @@ test('一覧のクエリ数は行数に比例しない (1 行のページと 10 
     }
 
     /** @return list<string> 実行された SQL */
-    $measure = function (Project $project) use ($owner): array {
+    $measure = function (Project $project) use ($organization, $owner): array {
         DB::enableQueryLog();
         DB::flushQueryLog();
         $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}")->assertOk();
@@ -79,7 +79,7 @@ test('検索ありでも一覧のクエリ数は行数に比例しない', funct
     $seed($tenRowsProject, 10);
 
     /** @return list<string> 実行された SQL */
-    $measure = function (Project $project) use ($owner): array {
+    $measure = function (Project $project) use ($organization, $owner): array {
         DB::enableQueryLog();
         DB::flushQueryLog();
         $this->actingAs($owner)

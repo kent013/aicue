@@ -42,7 +42,7 @@ function planChangePayload(string $planCode = 'standard', ?string $currentPlanCo
     ];
 }
 
-test('契約中 owner のプラン変更は /billing へ redirect し受付 flash を出す', function (): void {
+test('契約中 owner のプラン変更は /organizations/{slug}/billing へ redirect し受付 flash を出す', function (): void {
     [$organization, $owner] = planChangeEndpointOrganization();
 
     $gateway = $this->mock(StripeGatewayInterface::class);

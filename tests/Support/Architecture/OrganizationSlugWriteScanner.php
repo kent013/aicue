@@ -116,12 +116,26 @@ final class OrganizationSlugWriteScanner
         return $sites;
     }
 
-    /** 生 SQL の文字列リテラルが organizations.slug を UPDATE しているか。 */
+    /**
+     * 生 SQL の文字列リテラルが organizations.slug を UPDATE しているか。
+     *
+     * ★判定は**区切りで割ったトークンの完全一致**で行う (走査器共通規約 (e))。
+     *   区切りは英数字と下線以外のすべてである。素の部分文字列一致だと
+     *   route 名 `organizations.slug.update` のような**語をすべて含むだけの文字列**を
+     *   生 SQL と取り違える (実測)。
+     * ★`set` を必須にするのは、UPDATE 文が代入節を必ず持つためである。
+     */
     private static function isRawSlugUpdate(string $literal): bool
     {
-        $lower = mb_strtolower($literal);
+        $words = preg_split('/[^A-Za-z0-9_]+/', mb_strtolower($literal)) ?: [];
 
-        return str_contains($lower, 'update') && str_contains($lower, 'organizations') && str_contains($lower, 'slug');
+        foreach (['update', 'set', 'organizations', 'slug'] as $required) {
+            if (! in_array($required, $words, true)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

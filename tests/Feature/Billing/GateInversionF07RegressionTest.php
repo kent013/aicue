@@ -66,7 +66,7 @@ test('(a) grandfathered な既存 free 組織は撮影 PWA (/app) に到達で�
     $project = Project::factory()->forOrganization($organization)->create();
 
     $this->actingAs($owner)->get("/organizations/{$organization->slug}/app")
-        ->assertRedirect(route('capture.manuals.index', ['project' => $project]));
+        ->assertRedirect(route('capture.manuals.index', ['organization' => $organization->slug, 'project' => $project]));
 });
 
 // ── (b) 新規登録者は遮断されても詰まない ──
@@ -162,9 +162,9 @@ test('(c) 有償契約 + 支払い不健全の JSON は 402 + 支払い文言 (D
 // ── (d) 無限ループ不在 (gate group 外の構造的 allowlist) ──
 
 test('(d) 遮断先および課金系 route は gate group 外で再遮断されない', function (string $routeName): void {
-    [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
 
-    $this->actingAs($owner)->get(route($routeName))->assertOk();
+    $this->actingAs($owner)->get(route($routeName, ['organization' => $organization->slug]))->assertOk();
 })->with([
     'onboarding.checkout' => 'onboarding.checkout',
     'billing.index' => 'billing.index',

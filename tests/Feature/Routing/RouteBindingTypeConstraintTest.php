@@ -45,40 +45,40 @@ test('テスト環境の DB driver は pgsql である (22P02 / 22003 を再現�
 */
 
 test('ケース 1: bigint param に非数値 → 404 (500 でない)', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->get('/organizations/{organizationSlug}/projects/abc')->assertNotFound();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/abc")->assertNotFound();
 });
 
 test("ケース 1': 対比 — 実在 ID は 200 (認可 / 課金ゲートに吸われていない)", function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $project = Project::factory()->forOrganization($organization)->create();
 
-    $this->actingAs($owner)->get('/organizations/{organizationSlug}/projects/{$project->id}')->assertOk();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}")->assertOk();
 });
 
 test('ケース 2: bigint param に 19 桁 (PHP_INT_MAX+1) → 404 (22003 由来の 500 でない)', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->get('/organizations/{organizationSlug}/projects/'.BIGINT_OVERFLOW)->assertNotFound();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/".BIGINT_OVERFLOW)->assertNotFound();
 });
 
 test('ケース 3: bigint param に 30 桁 → 404', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->get('/organizations/{organizationSlug}/projects/'.BIGINT_TOO_LONG)->assertNotFound();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/".BIGINT_TOO_LONG)->assertNotFound();
 });
 
 test('ケース 4: bigint param に 18 桁上限値 → 404 (route にはマッチする = 制約が過剰に狭くない)', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->get('/organizations/{organizationSlug}/projects/'.BIGINT_MAX_18)->assertNotFound();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/".BIGINT_MAX_18)->assertNotFound();
 });
 
 test('ケース 5: bigint param に先頭ゼロ → 404 (pgsql は 007 を正常解釈するため 500 にならない)', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->get('/organizations/{organizationSlug}/projects/007')->assertNotFound();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/007")->assertNotFound();
 });
 
 /*
@@ -89,7 +89,7 @@ test('ケース 6: uuid param に非適合値 → 404 (500 でない)', function
     [$organization, $owner] = createOrganizationWithOwner('セッション組織');
 
     $this->actingAs($owner)->withSession(freshRecentAuthSession())
-        ->delete('/organizations/{organizationSlug}/api-keys/sessions/abc')
+        ->delete("/organizations/{$organization->slug}/api-keys/sessions/abc")
         ->assertNotFound();
 });
 
@@ -102,7 +102,7 @@ test("ケース 6': 対比 — 実在 UUID は 302 (認可 / recent-auth に吸�
     ]);
 
     $this->actingAs($owner)->withSession(freshRecentAuthSession())
-        ->delete('/organizations/{organizationSlug}/api-keys/sessions/{$session->id}')
+        ->delete("/organizations/{$organization->slug}/api-keys/sessions/{$session->id}")
         ->assertStatus(302);
 });
 
@@ -153,7 +153,7 @@ test('ケース 8/13: {organization:slug} は実在 slug で 200 (数値制約�
     [$organization, $owner] = createOrganizationWithOwner();
 
     $this->actingAs($owner)
-        ->get('/organizations/{organizationSlug}/settings')
+        ->get("/organizations/{$organization->slug}/settings")
         ->assertOk();
 });
 
@@ -167,19 +167,19 @@ test('ケース 8/13: {organization:slug} は実在 slug で 200 (数値制約�
 */
 
 test('ケース 9: {organization} の slug binding に不在値 → 404', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
     $this->actingAs($owner)->get('/organizations/abc/settings')->assertNotFound();
 });
 
 test('ケース 10: {organization} の slug binding に 19 桁の数字列 → 404', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
     $this->actingAs($owner)->get('/organizations/'.BIGINT_OVERFLOW.'/settings')->assertNotFound();
 });
 
 test('ケース 11: {organization} の slug binding に 30 桁の数字列 → 404', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
     $this->actingAs($owner)->get('/organizations/'.BIGINT_TOO_LONG.'/settings')->assertNotFound();
 });
@@ -192,7 +192,7 @@ test('ケース 12: {organization:未許可 field} は 404 (500 でない)', fun
         static fn (Organization $organization): string => (string) $organization->id,
     );
 
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
     $this->actingAs($owner)->get('/__test__/organizations/anything')->assertNotFound();
 });

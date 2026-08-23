@@ -94,7 +94,7 @@ test('Subscribed の non-manager member は billing.index ではなく dashboard
     $member = attachOrganizationMember($organization);
 
     $this->actingAs($member)->get("/organizations/{$organization->slug}/onboarding/checkout")
-        ->assertRedirect(route('app.entry'));
+        ->assertRedirect(route('dashboard', ['organization' => $organization->slug]));
 });
 
 test('Subscribed の manageBilling 保持 owner は billing.index へ (Q-2-01 で不変)', function (): void {
@@ -134,7 +134,7 @@ test('ActiveFreePlan + manageBilling 非保持 member は dashboard へ (Q-2-01 
     $member = attachOrganizationMember($organization);
 
     $this->actingAs($member)->get("/organizations/{$organization->slug}/onboarding/checkout")
-        ->assertRedirect(route('app.entry'));
+        ->assertRedirect(route('dashboard', ['organization' => $organization->slug]));
 });
 
 // #6 [characterization / 境界回帰]: 未契約 (hasActiveAccess=false) の非管理メンバーは

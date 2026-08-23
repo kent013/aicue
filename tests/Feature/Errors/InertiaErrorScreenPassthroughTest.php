@@ -141,12 +141,12 @@ test('409 + X-Inertia-Location は差し替えない', function (): void {
 });
 
 test('302 + Location は差し替えない', function (): void {
-    Route::middleware('web')->get('/__passthrough/redirect', static fn () => redirect('/dashboard'));
+    Route::middleware('web')->get('/__passthrough/redirect', static fn () => redirect('/__passthrough/target'));
 
     $response = $this->withHeaders(passthroughInertiaHeaders())->get('/__passthrough/redirect');
 
     $response->assertStatus(302);
-    $response->assertHeader('Location', url('/dashboard'));
+    $response->assertHeader('Location', url('/__passthrough/target'));
 
     expect(passthroughReasonFor(302, '/__passthrough/redirect', passthroughInertiaHeaders()))
         ->toBe(InertiaErrorScreenPassthrough::SuccessOrRedirectStatus);

@@ -27,7 +27,7 @@ test('自分宛の有効な招待を受諾できる', function (): void {
 
     $response = $this->actingAs($invitee)->post(acceptInAppUrl($invitation->id));
 
-    $response->assertRedirect(route('app.entry'));
+    $response->assertRedirect(route('dashboard', ['organization' => $organization->slug]));
     $response->assertSessionHas('success', "「{$organization->name}」に参加しました");
     expect($organization->users()->whereKey($invitee->id)->exists())->toBeTrue();
     expect($invitation->refresh()->isAccepted())->toBeTrue();
@@ -40,7 +40,7 @@ test('受諾しても現在組織は切り替わらない', function (): void {
     $invitation = OrganizationInvitation::factory()->forOrganization($organization)
         ->create(['email' => $invitee->email]);
 
-    $this->actingAs($invitee)->post(acceptInAppUrl($invitation->id))->assertRedirect(route('app.entry'));
+    $this->actingAs($invitee)->post(acceptInAppUrl($invitation->id))->assertRedirect(route('dashboard', ['organization' => $organization->slug]));
 
     // 受諾しても既存の所属は壊れない (保持列は無い = 組織文脈は URL だけ)
     expect($invitee->organizations()->whereKey($ownOrganization->id)->exists())->toBeTrue();
@@ -91,7 +91,7 @@ test('受諾直後の再 POST は 404 (冪等 200 にしない = 秘匿)', funct
     $invitation = OrganizationInvitation::factory()->forOrganization($organization)
         ->create(['email' => 'invitee@example.com']);
 
-    $this->actingAs($invitee)->post(acceptInAppUrl($invitation->id))->assertRedirect(route('app.entry'));
+    $this->actingAs($invitee)->post(acceptInAppUrl($invitation->id))->assertRedirect(route('dashboard', ['organization' => $organization->slug]));
     $this->actingAs($invitee)->post(acceptInAppUrl($invitation->id))->assertNotFound();
 });
 
@@ -105,7 +105,7 @@ test('既にメンバーの user 宛の招待は冪等に成功する (insertOrI
 
     $response = $this->actingAs($invitee)->post(acceptInAppUrl($invitation->id));
 
-    $response->assertRedirect(route('app.entry'));
+    $response->assertRedirect(route('dashboard', ['organization' => $organization->slug]));
     $response->assertSessionHas('success');
     expect($organization->users()->whereKey($invitee->id)->count())->toBe(1);
     expect($invitation->refresh()->isAccepted())->toBeTrue();
@@ -156,5 +156,5 @@ test('throttle: 有効な招待への正常受諾 1 回は 429 にならない',
     $invitation = OrganizationInvitation::factory()->forOrganization($organization)
         ->create(['email' => 'invitee@example.com']);
 
-    $this->actingAs($invitee)->post(acceptInAppUrl($invitation->id))->assertRedirect(route('app.entry'));
+    $this->actingAs($invitee)->post(acceptInAppUrl($invitation->id))->assertRedirect(route('dashboard', ['organization' => $organization->slug]));
 });

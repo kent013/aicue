@@ -287,33 +287,33 @@ class AdjudicationMatchTest(unittest.TestCase):
     def test_required_negation_in_body_not_hit(self):
         # 本文 fallback (symptom_tokens なし) で否定文 "without X" / "X 無し" は required hit にしない
         a = adj(species_key="broken_flow:billing:create:self",
-                scope={"scope_kind": "path_glob", "scope_value": "/billing/checkout/*"},
+                scope={"scope_kind": "path_glob", "scope_value": "/organizations/acme/billing/checkout/*"},
                 conditions={}, symptom={"required_tokens": ["x-inertia-location"], "known_tokens": ["409"]})
         f_en = find(species_key="broken_flow:billing:create:self", resource_type="billing",
                     operation="create", summary="checkout 409 without x-inertia-location header",
-                    surface={"path": "/billing/checkout/standard"}, observed_conditions={})
+                    surface={"path": "/organizations/acme/billing/checkout/standard"}, observed_conditions={})
         f_en.pop("symptom_tokens", None)
         self.assertFalse(v.required_hits(a, f_en))
         f_ja = find(species_key="broken_flow:billing:create:self", resource_type="billing",
                     operation="create", summary="checkout 409 で x-inertia-location 無し",
-                    surface={"path": "/billing/checkout/standard"}, observed_conditions={})
+                    surface={"path": "/organizations/acme/billing/checkout/standard"}, observed_conditions={})
         f_ja.pop("symptom_tokens", None)
         self.assertFalse(v.required_hits(a, f_ja))
         # 肯定文なら hit する
         f_ok = find(species_key="broken_flow:billing:create:self", resource_type="billing",
                     operation="create", summary="checkout 409 returns x-inertia-location to stripe",
-                    surface={"path": "/billing/checkout/standard"}, observed_conditions={})
+                    surface={"path": "/organizations/acme/billing/checkout/standard"}, observed_conditions={})
         f_ok.pop("symptom_tokens", None)
         self.assertTrue(v.required_hits(a, f_ok))
 
     def test_required_negation_distant_not_hit(self):
         # "does not include x-inertia-location" のように否定語が少し離れていても hit しない
         a = adj(species_key="broken_flow:billing:create:self",
-                scope={"scope_kind": "path_glob", "scope_value": "/billing/checkout/*"},
+                scope={"scope_kind": "path_glob", "scope_value": "/organizations/acme/billing/checkout/*"},
                 conditions={}, symptom={"required_tokens": ["x-inertia-location"], "known_tokens": ["409"]})
         f = find(species_key="broken_flow:billing:create:self", resource_type="billing",
                  operation="create", summary="response does not include x-inertia-location",
-                 surface={"path": "/billing/checkout/standard"}, observed_conditions={})
+                 surface={"path": "/organizations/acme/billing/checkout/standard"}, observed_conditions={})
         f.pop("symptom_tokens", None)
         self.assertFalse(v.required_hits(a, f))
 

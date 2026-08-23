@@ -53,7 +53,7 @@ function captureNavigationFixture(): array
 
     test()->actingAs($owner);
 
-    return [$project, $manual];
+    return [$organization, $project, $manual];
 }
 
 /** capture.manuals.show の URL */
@@ -93,7 +93,7 @@ function waitUntilInViewport(mixed $page, string $testId, int $attempts = 40): b
 }
 
 test('モバイル幅ではカット選択で撮影パネルが viewport に入りフォーカスも移る', function (): void {
-    [$project, $manual] = captureNavigationFixture();
+    [$organization, $project, $manual] = captureNavigationFixture();
     $firstCutId = $manual->cuts()->orderBy('sort_order')->value('id');
 
     // ★ on()->mobile() が返す On は __call のたびに新しいページを作るため、
@@ -124,7 +124,7 @@ test('モバイル幅ではカット選択で撮影パネルが viewport に入�
 });
 
 test('デスクトップ幅ではカット選択でスクロールも撮影パネルへのフォーカスも起きない', function (): void {
-    [$project, $manual] = captureNavigationFixture();
+    [$organization, $project, $manual] = captureNavigationFixture();
     $firstCutId = $manual->cuts()->orderBy('sort_order')->value('id');
 
     $page = visit(captureShowUrl($organization, $project, $manual))->on()->desktop()
@@ -151,7 +151,7 @@ test('デスクトップ幅ではカット選択でスクロールも撮影パ�
 });
 
 test('モバイル幅では撮影パネルからカット一覧へ視点とフォーカスの両方が戻る', function (): void {
-    [$project, $manual] = captureNavigationFixture();
+    [$organization, $project, $manual] = captureNavigationFixture();
     $firstCutId = $manual->cuts()->orderBy('sort_order')->value('id');
 
     $page = visit(captureShowUrl($organization, $project, $manual))->on()->mobile()
@@ -174,7 +174,7 @@ test('モバイル幅では撮影パネルからカット一覧へ視点とフ�
 });
 
 test('テイク再生の video のアクセシブルネームに手順ラベルが入る (F-1-02)', function (): void {
-    [$project, $manual] = captureNavigationFixture();
+    [$organization, $project, $manual] = captureNavigationFixture();
     $firstCut = $manual->cuts()->orderBy('sort_order')->first();
     $take = Take::factory()->forCut($firstCut)->create();
 

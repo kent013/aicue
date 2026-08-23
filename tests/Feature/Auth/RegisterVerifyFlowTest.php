@@ -48,7 +48,7 @@ test('登録 POST は verification.notice へ redirect し personal org id を s
     $response->assertRedirect(route('verification.notice'));
 
     $user = User::query()->whereBlind('email', 'email_index', $payload['email'])->firstOrFail();
-    $personalOrg = $user->organizations()->where('is_personal', true)->firstOrFail();
+    $personalOrg = $user->organizations()->firstOrFail();
     expect(session('verify_continue_organization_id'))->toBe($personalOrg->id);
 });
 
@@ -146,10 +146,10 @@ test('continuation: ActiveFreePlan の非管理メンバーは verify 完了後 
 
     // 第二段: onboarding.checkout は非管理メンバーを dashboard へ寄せる (中間ホップを保証)。
     $this->actingAs($member->fresh())->get(route('onboarding.checkout', ['organization' => $organization->slug]))
-        ->assertRedirect(route('app.entry'));
+        ->assertRedirect(route('dashboard', ['organization' => $organization->slug]));
 });
 
-test('continuation なしの verify 完了は Fortify 既定と同値 (/dashboard?verified=1)', function (): void {
+test('continuation なしの verify 完了は Fortify 既定と同値 (/organizations/{slug}/dashboard?verified=1)', function (): void {
     $user = User::factory()->unverified()->create();
 
     $response = $this->actingAs($user)->get(($this->verificationUrlFor)($user));

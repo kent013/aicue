@@ -261,8 +261,8 @@ test('cross-org / cross-project の複製は 404 (存在を漏らさない)', fu
     // {manual} が別 project (同一 org B) の場合 = scopeBindings で 404
     $otherProjectB = Project::factory()->forOrganization($orgB)->create();
 
-    // cross-org: 組織A の owner が組織B の manual を複製 → 404
-    $this->actingAs($ownerA)->post("/organizations/{$organization->slug}/projects/{$projectB->id}/manuals/{$manualB->id}/duplicate", [
+    // cross-org: 組織A の owner が**組織B の URL**を叩く → binder が membership で 404
+    $this->actingAs($ownerA)->post("/organizations/{$orgB->slug}/projects/{$projectB->id}/manuals/{$manualB->id}/duplicate", [
         'title' => 'x',
     ])->assertNotFound();
 

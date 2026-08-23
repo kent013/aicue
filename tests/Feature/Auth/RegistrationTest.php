@@ -27,7 +27,7 @@ test('登録できる (同意の証跡が記録される)', function (): void {
     // P6/F2: 登録では初回無償チケットを付与しない (付与契機はプラン有効化時 =
     // free は PersonalPlanService::activate / paid は customer.subscription.created)。
     // marker も立てない (marker だけ立つと永久に付与されない org になる)。
-    $personalOrg = $user->organizations()->where('is_personal', true)->firstOrFail();
+    $personalOrg = $user->organizations()->firstOrFail();
     expect(app(TicketLedgerService::class)->balance($personalOrg)->totalAvailable())->toBe(0);
     expect($personalOrg->signup_tickets_granted_at)->toBeNull();
 

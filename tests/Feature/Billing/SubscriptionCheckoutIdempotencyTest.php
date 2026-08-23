@@ -151,7 +151,7 @@ test('同 org の他 user の token も 404 (token 所有者判定は actor ス�
     expect(subCheckoutFake()->created)->toHaveCount(0);
 });
 
-test('completed 行の token 再送は purchase_already_received を flash して /billing へ倒し Stripe を呼ばない', function (): void {
+test('completed 行の token 再送は purchase_already_received を flash して /organizations/{slug}/billing へ倒し Stripe を呼ばない', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $token = subAttemptToken();
 
@@ -172,7 +172,7 @@ test('completed 行の token 再送は purchase_already_received を flash し�
     expect(subCheckoutFake()->created)->toHaveCount(0);
 });
 
-test('expired / failed 行の token 再送は checkout_retry_required を flash して /billing へ倒す', function (string $state): void {
+test('expired / failed 行の token 再送は checkout_retry_required を flash して /organizations/{slug}/billing へ倒す', function (string $state): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $token = subAttemptToken();
 

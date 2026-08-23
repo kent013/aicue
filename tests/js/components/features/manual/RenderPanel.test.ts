@@ -103,7 +103,7 @@ describe("RenderPanel", () => {
             expect(fetchMock).toHaveBeenCalled();
         });
         const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-        expect(url).toBe("/projects/1/manuals/5/render");
+        expect(url).toBe("/organizations/test-org/projects/1/manuals/5/render");
         expect(init.method).toBe("POST");
         expect((init.headers as Record<string, string>)["X-XSRF-TOKEN"]).toBe("test-token");
 
@@ -125,7 +125,7 @@ describe("RenderPanel", () => {
             expect(fetchMock).toHaveBeenCalled();
         });
         const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
-        expect(url).toBe("/projects/1/manuals/5/preview");
+        expect(url).toBe("/organizations/test-org/projects/1/manuals/5/preview");
 
         // preview の in-flight 表示
         await waitFor(() => {
@@ -165,7 +165,7 @@ describe("RenderPanel", () => {
             new URL(
                 (screen.getByTestId("render-purchase-link") as HTMLAnchorElement).href,
             ).pathname,
-        ).toBe("/purchase-tickets");
+        ).toBe("/organizations/test-org/billing/purchase-tickets");
     });
 
     it("rendering 中は step ラベルと progress を表示する", () => {
@@ -194,7 +194,7 @@ describe("RenderPanel", () => {
         expect(screen.getByTestId("final-video")).toBeInTheDocument();
         expect(screen.getByTestId("download-button")).toHaveAttribute(
             "href",
-            "/projects/1/manuals/5/download",
+            "/organizations/test-org/projects/1/manuals/5/download",
         );
     });
 
@@ -209,7 +209,7 @@ describe("RenderPanel", () => {
 
         expect(screen.getByTestId("final-video")).toHaveAttribute(
             "src",
-            "/projects/1/manuals/5/render-jobs/91/playback",
+            "/organizations/test-org/projects/1/manuals/5/render-jobs/91/playback",
         );
         expect(screen.getByTestId("final-video")).toHaveAttribute("preload", "none");
     });
@@ -320,7 +320,7 @@ describe("RenderPanel", () => {
             expect(fetchMock).toHaveBeenCalled();
         });
         const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
-        expect(url).toBe("/projects/1/manuals/5/preview");
+        expect(url).toBe("/organizations/test-org/projects/1/manuals/5/preview");
     });
 
     it("再生可能な preview があれば <video> を playback route で表示する", () => {
@@ -332,7 +332,7 @@ describe("RenderPanel", () => {
         });
 
         const video = screen.getByTestId("preview-video");
-        expect(video).toHaveAttribute("src", "/projects/1/manuals/5/render-jobs/33/playback");
+        expect(video).toHaveAttribute("src", "/organizations/test-org/projects/1/manuals/5/render-jobs/33/playback");
     });
 
     it("succeeded だが manual=ready (編集済み) は再生成の案内を表示する", () => {
@@ -388,7 +388,7 @@ describe("RenderPanel", () => {
             new URL(
                 (screen.getByTestId("preview-purchase-link") as HTMLAnchorElement).href,
             ).pathname,
-        ).toBe("/purchase-tickets");
+        ).toBe("/organizations/test-org/billing/purchase-tickets");
         // 完成動画欄へ誤帰属しない
         expect(screen.queryByTestId("render-start-error")).not.toBeInTheDocument();
         expect(screen.queryByTestId("render-purchase-link")).not.toBeInTheDocument();
@@ -669,7 +669,7 @@ describe("RenderPanel", () => {
 
         expect(screen.getByTestId("preview-video")).toHaveAttribute(
             "src",
-            "/projects/1/manuals/5/render-jobs/33/playback",
+            "/organizations/test-org/projects/1/manuals/5/render-jobs/33/playback",
         );
         const note = screen.getByTestId("preview-placeholder-note");
         expect(note).toHaveTextContent("2");
@@ -731,7 +731,7 @@ describe("RenderPanel", () => {
         await waitFor(() => {
             expect(screen.getByTestId("preview-video")).toHaveAttribute(
                 "src",
-                "/projects/1/manuals/5/render-jobs/77/playback",
+                "/organizations/test-org/projects/1/manuals/5/render-jobs/77/playback",
             );
         });
         expect(screen.getByTestId("preview-placeholder-note")).toHaveTextContent("5");

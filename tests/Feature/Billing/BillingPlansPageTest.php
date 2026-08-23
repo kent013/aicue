@@ -14,7 +14,7 @@ use Inertia\Testing\AssertableInertia as Assert;
  * ActiveFreePlan なら free_plan_code、それ以外は plan_code (gate 判定には使わない)。
  */
 
-test('owner は /billing/plans で公開プラン一覧と表示状態を受け取る', function (): void {
+test('owner は /organizations/{slug}/billing/plans で公開プラン一覧と表示状態を受け取る', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
 
     $this->actingAs($owner)->get("/organizations/{$organization->slug}/billing/plans")
@@ -90,7 +90,7 @@ test('非所属の組織 URL は 404 (組織の有無を露出しない)', funct
     $this->actingAs($user)->get("/organizations/{$organization->slug}/billing/plans")->assertNotFound();
 });
 
-test('POST /billing/checkout は plan_code + subscription_attempt_token で成立する (P9 の冪等 token 必須)', function (): void {
+test('POST /organizations/{slug}/billing/checkout は plan_code + subscription_attempt_token で成立する (P9 の冪等 token 必須)', function (): void {
     [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     enableFakeExternals();
 
@@ -144,7 +144,7 @@ test('未契約 org / 期間終了済み契約の org は hasChangeableSubscript
     [$organization2, $owner2] = createOrganizationWithOwner();
     $ended = createFakeSubscription($organization2, status: 'canceled');
     $ended->forceFill(['ends_at' => now()->subDay()])->save();
-    $this->actingAs($owner2)->get("/organizations/{$organization->slug}/billing/plans")
+    $this->actingAs($owner2)->get("/organizations/{$organization2->slug}/billing/plans")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page->where('page.hasChangeableSubscription', false));
 });

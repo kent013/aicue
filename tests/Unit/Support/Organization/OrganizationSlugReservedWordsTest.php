@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Enums\Organization\SlugReservationReason;
+use App\Exceptions\Organization\InvalidOrganizationSlugException;
 use App\Support\Organization\OrganizationSlug;
 use App\Support\Organization\OrganizationSlugReservedWords;
 
@@ -40,7 +41,7 @@ test('構文違反の語が設定に紛れたら読み込みで落ちる (照合
 
     expect(fn (): OrganizationSlugReservedWords => OrganizationSlugReservedWords::load([
         'ad min' => SlugReservationReason::AuthorityImpersonation->value,
-    ]))->toThrow(Throwable::class);
+    ]))->toThrow(InvalidOrganizationSlugException::class);
 });
 
 test('空の設定は読み込みで落ちる (設定の読み込み失敗を黙って許さない)', function (): void {

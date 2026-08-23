@@ -122,6 +122,10 @@ final class RetentionTableRegistry
                 '組織へのメンバー招待。招待元の組織が消えると連鎖削除で一緒に消える',
             ),
             RetentionTableEntry::deletedWithParent(
+                'organization_slug_renames',
+                '組織識別名の改名履歴。改名回数の上限判定にだけ使い、組織が消えると連鎖削除で一緒に消える',
+            ),
+            RetentionTableEntry::deletedWithParent(
                 'role_user',
                 '利用者への役割の割り当て。役割かチームが消えると連鎖削除で一緒に消える',
             ),
@@ -280,7 +284,7 @@ final class RetentionTableRegistry
                 'security_audit_events',
                 '認証と権限に関わる操作の証跡。利用者への外部キーが空値化のため退会後も行が残る。'
                 .'監査に必要な保持期間が未決である。'
-                .'なおこの表の login 行は /manage/users の最終ログイン表示の唯一の出所であり、'
+                .'なおこの表の login 行は /organizations/{slug}/manage/users の最終ログイン表示の唯一の出所であり、'
                 .'期限を決めて古い行を消すと、休眠の判定に必要な古い値から先に失われる。'
                 .'期限を決めるときは devnotes/20260817-0909-user-last-login-at/ を読み直すこと',
             ),

@@ -25,6 +25,7 @@
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
     import TakeHoverPreview from "@/components/features/manual/TakeHoverPreview.svelte";
     import { takeUrl as buildTakeUrl } from "@/lib/capture/take-endpoints";
+    import { currentOrganizationSlug } from "@/lib/org-url";
     import { csrfToken } from "@/lib/csrf";
     import { moveItem } from "@/lib/dnd/list-reorder";
     import { createPointerDrag, type PointerDragState } from "@/lib/dnd/pointer-drag";
@@ -1086,12 +1087,12 @@
                 {#if adopted !== null && adopted.status === "ready" && adopted.has_thumbnail}
                     <TakeHoverPreview
                         thumbnailUrl={buildTakeUrl(
-                            { projectId, manualId, cutId },
+                            { organizationSlug: currentOrganizationSlug(), projectId, manualId, cutId },
                             adopted.id,
                             "/thumbnail",
                         )}
                         playbackUrl={buildTakeUrl(
-                            { projectId, manualId, cutId },
+                            { organizationSlug: currentOrganizationSlug(), projectId, manualId, cutId },
                             adopted.id,
                             "/playback",
                         )}

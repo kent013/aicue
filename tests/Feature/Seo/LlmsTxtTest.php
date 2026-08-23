@@ -25,7 +25,7 @@ it('llms.txt を llmstxt.org 形式 (サイト名 + 要約 + 公開ページ一�
         ->toContain('> チーム向け SaaS テンプレート')
         ->toContain('- [Acme](https://app.example/)')
         // 認証配下 / 認証画面は載せない
-        ->and($body)->not->toContain('/dashboard')
+        ->and($body)->not->toContain('/organizations/')
         ->and($body)->not->toContain('/login');
 });
 

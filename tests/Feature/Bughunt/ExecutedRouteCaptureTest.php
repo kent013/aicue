@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 use App\Http\Middleware\BughuntExecutedRouteMiddleware;
-use App\Models\User;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -78,9 +77,9 @@ afterEach(function (): void {
 });
 
 test('既定 (config off) では 1 バイトも書かない', function (): void {
-    $user = User::factory()->create();
+    [$organization, $user] = createOrganizationWithOwner();
 
-    $this->actingAs($user)->get('/dashboard')->assertOk();
+    $this->actingAs($user)->get("/organizations/{$organization->slug}/dashboard")->assertOk();
 
     expect(is_file(BughuntExecutedRouteMiddleware::outputPath(BUGHUNT_TEST_RUN, BUGHUNT_TEST_SHARD)))
         ->toBeFalse('config off なのに記録ファイルが作られた');
@@ -88,9 +87,9 @@ test('既定 (config off) では 1 バイトも書かない', function (): void 
 
 test('認証済みユーザーの 200 GET が route 名つきで ok として記録される', function (): void {
     bughuntEnableCapture();
-    $user = User::factory()->create();
+    [$organization, $user] = createOrganizationWithOwner();
 
-    $this->actingAs($user)->get('/dashboard')->assertOk();
+    $this->actingAs($user)->get("/organizations/{$organization->slug}/dashboard")->assertOk();
 
     $rows = bughuntCapturedRows();
     expect($rows)->toHaveCount(1);
@@ -99,7 +98,7 @@ test('認証済みユーザーの 200 GET が route 名つきで ok として記
         'shard' => BUGHUNT_TEST_SHARD,
         'route_name' => 'dashboard',
         'method' => 'GET',
-        'path' => '/dashboard',
+        'path' => "/organizations/{$organization->slug}/dashboard",
         'status' => 'ok',
         'http_status' => 200,
     ]);
@@ -141,7 +140,7 @@ test('課金ゲートに遮断された変更系要求は 1 行も記録され�
 
 test('recent-auth に遮断された要求は 1 行も記録されない (route 個別の短絡 middleware)', function (): void {
     bughuntEnableCapture();
-    $user = User::factory()->create();
+    [$organization, $user] = createOrganizationWithOwner();
 
     // step-up 未充足のまま機微操作 route を叩く (RequireRecentAuth が 302 で短絡する)
     $this->actingAs($user)->post('/settings/password', [
@@ -216,19 +215,19 @@ test('名前の無い route への要求は route_name null で記録される',
 test('production 環境では config が真でも書かない', function (): void {
     bughuntEnableCapture();
     $this->app->detectEnvironment(fn (): string => 'production');
-    $user = User::factory()->create();
+    [$organization, $user] = createOrganizationWithOwner();
 
-    $this->actingAs($user)->get('/dashboard')->assertOk();
+    $this->actingAs($user)->get("/organizations/{$organization->slug}/dashboard")->assertOk();
 
     expect(bughuntCapturedRows())->toBe([]);
 });
 
 test('run / shard が書式違反なら書かない', function (): void {
-    $user = User::factory()->create();
+    [$organization, $user] = createOrganizationWithOwner();
 
     foreach ([['../etc', '0'], ['', '0'], [BUGHUNT_TEST_RUN, ''], [BUGHUNT_TEST_RUN, 'a/b']] as [$run, $shard]) {
         bughuntEnableCapture($run, $shard);
-        $this->actingAs($user)->get('/dashboard')->assertOk();
+        $this->actingAs($user)->get("/organizations/{$organization->slug}/dashboard")->assertOk();
     }
 
     // 書式検査を通らないので、正常な run/shard 名のファイルも当然できない

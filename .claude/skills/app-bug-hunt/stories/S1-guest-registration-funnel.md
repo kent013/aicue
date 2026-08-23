@@ -35,7 +35,7 @@ covers_capabilities: [AUTH-01, AUTH-02, AUTH-03, AUTH-04, PLAT-02, PUB-01, PUB-0
      (無反応・白画面なら finding = H4)。
 5. **登録直後の課金オンボーディング着地 (P4 ゲート反転 / P7 `?plan=` handoff)**:
    新規登録で作られた個人組織は**未契約**なので、業務画面 (`dashboard` 配下の
-   プロジェクト等) へ行こうとすると `onboarding.checkout`(`/onboarding/checkout`)へ
+   プロジェクト等) へ行こうとすると `onboarding.checkout`(`/organizations/{slug}/onboarding/checkout`)へ
    遮断着地する。screens.md「課金ゲート着地」節が契約。
    - プラン一覧 (`plan-grid`) と Personal(無料) の自己申告ステップ (`personal-free-step`)、
      有償プランのステップ (`paid-plan-step`) が出る。**遮断理由が画面上で説明されているか**
@@ -44,9 +44,9 @@ covers_capabilities: [AUTH-01, AUTH-02, AUTH-03, AUTH-04, PLAT-02, PUB-01, PUB-0
      無料チケット枚数**が出て、`dashboard`(または遮断前に行きたかった画面)へ復帰するか。
      資金選択で「オートリチャージを設定する」を選ぶとカード登録 Checkout へ直行し、
      **cancel しても請求ページに着地してカード登録 CTA が残る**(詰まない)か。
-   - `/pricing` から `?plan=starter` 等を付けて入ると、canonical URL (`/onboarding/checkout`)
+   - `/pricing` から `?plan=starter` 等を付けて入ると、canonical URL (`/organizations/{slug}/onboarding/checkout`)
      へ 303 され **query が URL に残らず**、リロードしても選択プランが保持される (peek)か。
-   - 契約済みで `/onboarding/checkout` を直叩き → `billing.index` へ逃がされるか
+   - 契約済みで `/organizations/{slug}/onboarding/checkout` を直叩き → `billing.index` へ逃がされるか
      (ループ・空画面にならないか)。
 6. **ログイン後シェル (T069 左サイドバー) の構造検証** (screens.md「ナビゲーション/レイアウト規約」参照):
    - `dashboard` で左サイドバーが表示され、nav 項目が規約どおりか snapshot で確認する。

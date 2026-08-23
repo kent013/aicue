@@ -15,24 +15,24 @@ const organizations = [
     { id: 2, name: "い組織", slug: "i-genba" },
 ];
 
+/** Inertia の Link は jsdom で origin つき絶対 URL へ解決されるため path で比べる。 */
+function pathOf(testId: string): string {
+    const href = screen.getByTestId(testId).getAttribute("href") ?? "";
+    return new URL(href, window.location.href).pathname;
+}
+
 describe("Organizations/Choose", () => {
     it("dashboard 入口: 各組織のダッシュボード URL へのリンクを出す", () => {
         render(Choose, { props: { target: "dashboard", organizations } });
 
-        expect(screen.getByTestId("organization-choice-a-genba").getAttribute("href")).toBe(
-            "/organizations/a-genba/dashboard",
-        );
-        expect(screen.getByTestId("organization-choice-i-genba").getAttribute("href")).toBe(
-            "/organizations/i-genba/dashboard",
-        );
+        expect(pathOf("organization-choice-a-genba")).toBe("/organizations/a-genba/dashboard");
+        expect(pathOf("organization-choice-i-genba")).toBe("/organizations/i-genba/dashboard");
     });
 
     it("capture 入口: 各組織の撮影 URL へのリンクを出す", () => {
         render(Choose, { props: { target: "capture", organizations } });
 
-        expect(screen.getByTestId("organization-choice-a-genba").getAttribute("href")).toBe(
-            "/organizations/a-genba/app",
-        );
+        expect(pathOf("organization-choice-a-genba")).toBe("/organizations/a-genba/app");
     });
 
     it("組織名を省略なく出す (どれを選ぶか判断できる)", () => {

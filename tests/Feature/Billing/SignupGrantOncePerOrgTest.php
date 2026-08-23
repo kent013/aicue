@@ -75,7 +75,7 @@ test('登録では付与もマーカーも起きない (付与契機はプラン
     ])->assertRedirect(route('verification.notice'));
 
     $user = User::whereBlind('email', 'email_index', 'grant-once@example.com')->firstOrFail();
-    $organization = $user->organizations()->where('is_personal', true)->firstOrFail();
+    $organization = $user->organizations()->firstOrFail();
 
     expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(0);
     expect(grantOnceSignupEntryCount($organization))->toBe(0);
@@ -91,7 +91,7 @@ test('登録後に Personal を有効化すると 1 回だけ付与される (�
     ])->assertRedirect(route('verification.notice'));
 
     $user = User::whereBlind('email', 'email_index', 'grant-once-2@example.com')->firstOrFail();
-    $organization = $user->organizations()->where('is_personal', true)->firstOrFail();
+    $organization = $user->organizations()->firstOrFail();
 
     $first = app(PersonalPlanService::class)->activate($organization, $user);
     expect($first->granted)->toBeTrue();

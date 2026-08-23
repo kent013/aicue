@@ -107,7 +107,7 @@ dataset('継続の有無シナリオ', [
         return [$owner, $session];
     }, true],
     '他組織の id が混入' => [function (): array {
-        [, $owner] = createOrganizationWithOwner();
+        [$organization, $owner] = createOrganizationWithOwner();
         $otherOrg = Organization::factory()->create();
         /** @var Session $session */
         $session = app('session.store');
@@ -116,7 +116,7 @@ dataset('継続の有無シナリオ', [
         return [$owner, $session];
     }, false],
     'session 値が int でない' => [function (): array {
-        [, $owner] = createOrganizationWithOwner();
+        [$organization, $owner] = createOrganizationWithOwner();
         /** @var Session $session */
         $session = app('session.store');
         $session->put('verify_continue_organization_id', 'not-an-int');

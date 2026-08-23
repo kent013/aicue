@@ -263,7 +263,7 @@ describe("Dashboard", () => {
         );
     });
 
-    it("billing_state=expired_checkout で billing callout が出る (支払い確認文言 + /billing CTA)", () => {
+    it("billing_state=expired_checkout で billing callout が出る (支払い確認文言 + /organizations/test-org/billing CTA)", () => {
         render(Dashboard, {
             props: {
                 dashboard: dashboardData({

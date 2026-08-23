@@ -365,7 +365,7 @@ test('2FA 未完了 (challenge 手前) では数えず、完了させると数�
 });
 
 test('Filament 管理画面 (admin guard) のログインは混ざらない', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
     $adminUser = AdminUser::factory()->create();
 
     $before = SecurityAuditEvent::query()

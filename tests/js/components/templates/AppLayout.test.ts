@@ -52,7 +52,7 @@ function org(overrides: Partial<CurrentOrganization> = {}): CurrentOrganization 
 
 function setPageProps(props: Record<string, unknown>): void {
     page.props = props as typeof page.props;
-    page.url = "/dashboard";
+    page.url = "/organizations/test-org/dashboard";
 }
 
 function renderApp(): void {
@@ -172,12 +172,13 @@ describe("templates/AppLayout", () => {
         renderApp();
 
         const d = desktop();
-        expect(d.getByTestId("nav-item-/dashboard")).toBeInTheDocument();
+        // 組織文脈が無ければ業務 nav は 1 項目も出さない (家系裁定 AG-037: 壊れた URL を作らない)
+        expect(d.queryByTestId("nav-item-/organizations/acme/dashboard")).toBeNull();
         // 設定は左 nav から撤去 (下部ユーザーメニューに一本化, T070) のため nav 項目としては出ない
         expect(d.queryByTestId("nav-item-/settings")).toBeNull();
-        expect(d.queryByTestId("nav-item-/projects")).toBeNull();
-        expect(d.queryByTestId("nav-item-/billing")).toBeNull();
-        expect(d.queryByTestId("nav-item-/manage/users")).toBeNull();
+        expect(d.queryByTestId("nav-item-/organizations/acme/projects")).toBeNull();
+        expect(d.queryByTestId("nav-item-/organizations/acme/billing")).toBeNull();
+        expect(d.queryByTestId("nav-item-/organizations/acme/manage/users")).toBeNull();
         expect(d.queryByTestId("nav-item-/organizations/acme/api-keys")).toBeNull();
     });
 
@@ -190,13 +191,13 @@ describe("templates/AppLayout", () => {
         renderApp();
 
         const d = desktop();
-        expect(d.getByTestId("nav-item-/projects")).toBeInTheDocument();
-        expect(d.getByTestId("nav-item-/billing")).toBeInTheDocument();
-        expect(d.queryByTestId("nav-item-/manage/users")).toBeNull();
+        expect(d.getByTestId("nav-item-/organizations/acme/projects")).toBeInTheDocument();
+        expect(d.getByTestId("nav-item-/organizations/acme/billing")).toBeInTheDocument();
+        expect(d.queryByTestId("nav-item-/organizations/acme/manage/users")).toBeNull();
         expect(d.queryByTestId("nav-item-/organizations/acme/api-keys")).toBeNull();
     });
 
-    it("canManageMembers=true: メンバー導線 (/manage/users) を出す", () => {
+    it("canManageMembers=true: メンバー導線 (/organizations/{slug}/manage/users) を出す", () => {
         setPageProps({
             auth: { user: authUser() },
             notifications: { unreadCount: 0 },
@@ -204,7 +205,7 @@ describe("templates/AppLayout", () => {
         });
         renderApp();
 
-        expect(desktop().getByTestId("nav-item-/manage/users")).toBeInTheDocument();
+        expect(desktop().getByTestId("nav-item-/organizations/acme/manage/users")).toBeInTheDocument();
     });
 
     it("canManageApiKeys=true: API キー導線 (/organizations/{slug}/api-keys) を出す", () => {
@@ -232,7 +233,7 @@ describe("templates/AppLayout", () => {
         expect(desktop().queryByTestId("nav-item-/settings")).toBeNull();
         expect(mobile().queryByTestId("nav-item-/settings")).toBeNull();
         // ダッシュボード等の他 nav は出る (回帰の確認)
-        expect(desktop().getByTestId("nav-item-/dashboard")).toBeInTheDocument();
+        expect(desktop().getByTestId("nav-item-/organizations/acme/dashboard")).toBeInTheDocument();
     });
 
     it("個人設定 (/settings) は下部ユーザーメニュー内に一本化して存在する", async () => {

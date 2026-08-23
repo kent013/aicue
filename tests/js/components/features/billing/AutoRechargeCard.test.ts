@@ -10,8 +10,8 @@ const renderCard = (overrides: Partial<AutoRechargeProps> = {}) =>
     render(AutoRechargeCard, {
         props: {
             autoRecharge: autoRechargeProps(overrides),
-            updateUrl: "/billing/auto-recharge",
-            setupUrl: "/billing/auto-recharge/setup",
+            updateUrl: "/organizations/test-org/billing/auto-recharge",
+            setupUrl: "/organizations/test-org/billing/auto-recharge/setup",
             setupAttemptToken: "01hzzzzzzzzzzzzzzzzzzzzzzz",
         },
     });

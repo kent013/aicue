@@ -5,7 +5,7 @@ import path from "node:path";
 /*
  * capture-sw.js の fetch 分岐 (概念設計 D9):
  * - キャッシュ対象は「GET かつ同一オリジンかつ /build/*」のみ
- * - /app/* navigation・JSON・S3/署名 URL は素通し (respondWith しない)
+ * - /organizations/test-org/app/* navigation・JSON・S3/署名 URL は素通し (respondWith しない)
  * - activate で旧バージョン (capture-*) キャッシュを削除
  */
 
@@ -67,9 +67,9 @@ describe("shouldCacheRequest (キャッシュ方針)", () => {
         expect(shouldCache({ url: `${APP_ORIGIN}/build/assets/app.css`, method: "GET" }, APP_ORIGIN)).toBe(true);
     });
 
-    it("/app/* の navigation / JSON は素通し", () => {
-        expect(shouldCache({ url: `${APP_ORIGIN}/app`, method: "GET" }, APP_ORIGIN)).toBe(false);
-        expect(shouldCache({ url: `${APP_ORIGIN}/app/projects/1/manuals`, method: "GET" }, APP_ORIGIN)).toBe(false);
+    it("/organizations/test-org/app/* の navigation / JSON は素通し", () => {
+        expect(shouldCache({ url: `${APP_ORIGIN}/organizations/test-org/app`, method: "GET" }, APP_ORIGIN)).toBe(false);
+        expect(shouldCache({ url: `${APP_ORIGIN}/organizations/test-org/app/projects/1/manuals`, method: "GET" }, APP_ORIGIN)).toBe(false);
     });
 
     it("S3 / 署名 URL (別オリジン) は /build/* でも素通し", () => {
@@ -89,7 +89,7 @@ describe("shouldCacheRequest (キャッシュ方針)", () => {
 });
 
 describe("SW イベント配線", () => {
-    it("fetch: /build/* のみ respondWith し、/app/* はハンドリングしない", async () => {
+    it("fetch: /build/* のみ respondWith し、/organizations/test-org/app/* はハンドリングしない", async () => {
         const cache = { match: vi.fn(async () => undefined), put: vi.fn(async () => {}) };
         const fakeCaches = {
             open: vi.fn(async () => cache),
@@ -110,7 +110,7 @@ describe("SW イベント配線", () => {
 
         const passthrough = vi.fn();
         fetchHandler!({
-            request: { url: `${APP_ORIGIN}/app/projects/1/manuals`, method: "GET" },
+            request: { url: `${APP_ORIGIN}/organizations/test-org/app/projects/1/manuals`, method: "GET" },
             respondWith: passthrough,
         });
         expect(passthrough).not.toHaveBeenCalled();

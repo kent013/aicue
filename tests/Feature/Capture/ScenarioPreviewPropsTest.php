@@ -76,7 +76,7 @@ function scenarioPreviewProps(Organization $organization, Project $project, Vide
 }
 
 test('採用済み + ready の cut は adopted_ready_take_id にそのテイク id を持つ', function (): void {
-    [, $owner, $project, $manual, $cut] = scenarioPreviewContext();
+    [$organization, $owner, $project, $manual, $cut] = scenarioPreviewContext();
     $take = scenarioPreviewAdopt($cut);
     scenarioPreviewFakeStorage();
 
@@ -86,7 +86,7 @@ test('採用済み + ready の cut は adopted_ready_take_id にそのテイク 
 });
 
 test('採用済みでも ready でない cut の adopted_ready_take_id は null (uploading/processing/failed)', function (TakeStatus $status): void {
-    [, $owner, $project, $manual, $cut] = scenarioPreviewContext();
+    [$organization, $owner, $project, $manual, $cut] = scenarioPreviewContext();
     scenarioPreviewAdopt($cut, $status);
     scenarioPreviewFakeStorage(null); // 署名 URL を 1 度も作らないことを併せて固定する
 
@@ -100,7 +100,7 @@ test('採用済みでも ready でない cut の adopted_ready_take_id は null 
 ]);
 
 test('未採用 (テイクはあるが adopted_take_id が null) の adopted_ready_take_id は null', function (): void {
-    [, $owner, $project, $manual, $cut] = scenarioPreviewContext();
+    [$organization, $owner, $project, $manual, $cut] = scenarioPreviewContext();
     Take::factory()->forCut($cut)->create();
     scenarioPreviewFakeStorage(null);
 
@@ -111,7 +111,7 @@ test('未採用 (テイクはあるが adopted_take_id が null) の adopted_rea
 });
 
 test('テイクが 1 件も無い cut の adopted_ready_take_id は null', function (): void {
-    [, $owner, $project, $manual] = scenarioPreviewContext();
+    [$organization, $owner, $project, $manual] = scenarioPreviewContext();
     scenarioPreviewFakeStorage(null);
 
     $props = scenarioPreviewProps($organization, $project, $manual, $owner);
@@ -121,7 +121,7 @@ test('テイクが 1 件も無い cut の adopted_ready_take_id は null', funct
 });
 
 test('adopted_take_id と adopted_ready_take_id は別の意味である (採用済み非 ready で前者だけ非 null)', function (): void {
-    [, $owner, $project, $manual, $cut] = scenarioPreviewContext();
+    [$organization, $owner, $project, $manual, $cut] = scenarioPreviewContext();
     $take = scenarioPreviewAdopt($cut, TakeStatus::Processing);
     scenarioPreviewFakeStorage(null);
 
@@ -132,7 +132,7 @@ test('adopted_take_id と adopted_ready_take_id は別の意味である (採用
 });
 
 test('採用済み非 ready のテイクには playback_url も download_ack_token も出さない (S2b)', function (): void {
-    [, $owner, $project, $manual, $cut] = scenarioPreviewContext();
+    [$organization, $owner, $project, $manual, $cut] = scenarioPreviewContext();
     $take = scenarioPreviewAdopt($cut, TakeStatus::Processing);
     // 署名 URL 発行そのものが起きないことを直接固定する (呼ばれたら Mockery が落とす)
     scenarioPreviewFakeStorage(null);
@@ -146,7 +146,7 @@ test('採用済み非 ready のテイクには playback_url も download_ack_tok
 });
 
 test('採用済み + ready のテイクには従来どおり playback_url と download_ack_token が出る', function (): void {
-    [, $owner, $project, $manual, $cut] = scenarioPreviewContext();
+    [$organization, $owner, $project, $manual, $cut] = scenarioPreviewContext();
     scenarioPreviewAdopt($cut);
     scenarioPreviewFakeStorage();
 
@@ -158,7 +158,7 @@ test('採用済み + ready のテイクには従来どおり playback_url と do
 });
 
 test('previewPlaceholderSeconds は config の値と一致する 1 以上の int である', function (): void {
-    [, $owner, $project, $manual] = scenarioPreviewContext();
+    [$organization, $owner, $project, $manual] = scenarioPreviewContext();
     scenarioPreviewFakeStorage(null);
 
     $props = scenarioPreviewProps($organization, $project, $manual, $owner);
@@ -193,7 +193,7 @@ test('採用を付け替えると adopt 応答の adopted_ready_take_id は新�
 });
 
 test('cuts を増やしても採用テイクの取得クエリは 1 本のまま (N+1 を作らない)', function (): void {
-    [, $owner, $project, $manual, $cut] = scenarioPreviewContext();
+    [$organization, $owner, $project, $manual, $cut] = scenarioPreviewContext();
     scenarioPreviewAdopt($cut);
     foreach (range(1, 4) as $index) {
         $extra = Cut::factory()->forManual($manual)->withSortOrder($index)->create();

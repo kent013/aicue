@@ -108,12 +108,12 @@ describe("Projects/Show", () => {
         expect(screen.getByTestId("delete-project-button")).toBeInTheDocument();
     });
 
-    it("canManage=true なら見出しにカテゴリ管理リンク (/projects/{id}/categories) を出す (T071: AdminMenuNav 導線の移設先)", () => {
+    it("canManage=true なら見出しにカテゴリ管理リンク (/organizations/test-org/projects/{id}/categories) を出す (T071: AdminMenuNav 導線の移設先)", () => {
         render(Show, { props: baseProps });
 
         const link = screen.getByTestId("manage-categories-link");
         expect(new URL(link.getAttribute("href") ?? "", "http://localhost").pathname).toBe(
-            "/projects/1/categories",
+            "/organizations/test-org/projects/1/categories",
         );
     });
 
@@ -259,7 +259,7 @@ describe("Projects/Show 並べ替え・自作フィルタ", () => {
         });
 
         expect(getSpy).toHaveBeenCalledTimes(1);
-        expect(getSpy.mock.calls[0][0]).toBe("/projects/1");
+        expect(getSpy.mock.calls[0][0]).toBe("/organizations/test-org/projects/1");
         expect(getSpy.mock.calls[0][1]).toEqual({ sort: "updated_desc" });
         expect(getSpy.mock.calls[0][1]).not.toHaveProperty("page");
     });
@@ -352,7 +352,7 @@ describe("Projects/Show 動画マニュアルの行内操作", () => {
         await fireEvent.click(screen.getByTestId("manual-preview-2"));
 
         const video = await screen.findByTestId("manual-preview-video");
-        expect(video.getAttribute("src")).toBe("/projects/1/manuals/2/render-jobs/9/playback");
+        expect(video.getAttribute("src")).toBe("/organizations/test-org/projects/1/manuals/2/render-jobs/9/playback");
     });
 
     it("deletable=false の行には削除導線を出さない", () => {
@@ -379,7 +379,7 @@ describe("Projects/Show 動画マニュアルの行内操作", () => {
         await fireEvent.click(within(dialog).getByRole("button", { name: "削除する" }));
 
         expect(deleteSpy).toHaveBeenCalledTimes(1);
-        expect(deleteSpy.mock.calls[0][0]).toBe("/projects/1/manuals/1");
+        expect(deleteSpy.mock.calls[0][0]).toBe("/organizations/test-org/projects/1/manuals/1");
     });
 
     it("削除 URL に現在の絞り込みと表示中ページが載る (着地先を保つため)", async () => {
@@ -407,7 +407,7 @@ describe("Projects/Show 動画マニュアルの行内操作", () => {
 
         expect(deleteSpy).toHaveBeenCalledTimes(1);
         const url = new URL(deleteSpy.mock.calls[0][0] as string, "http://localhost");
-        expect(url.pathname).toBe("/projects/1/manuals/2");
+        expect(url.pathname).toBe("/organizations/test-org/projects/1/manuals/2");
         expect(Object.fromEntries(url.searchParams.entries())).toEqual({
             category: "3",
             progress: "completed",
@@ -463,7 +463,7 @@ describe("Projects/Show メンバー管理", () => {
         await fireEvent.submit(screen.getByTestId("project-member-add-form"));
 
         expect(postSpy).toHaveBeenCalledTimes(1);
-        expect(postSpy.mock.calls[0][0]).toBe("/projects/1/members");
+        expect(postSpy.mock.calls[0][0]).toBe("/organizations/test-org/projects/1/members");
         expect(postSpy.mock.calls[0][1]).toMatchObject({ user_id: "4" });
     });
 
@@ -488,7 +488,7 @@ describe("Projects/Show メンバー管理", () => {
         });
 
         expect(postSpy).toHaveBeenCalledTimes(1);
-        expect(postSpy.mock.calls[0][0]).toBe("/projects/1/members");
+        expect(postSpy.mock.calls[0][0]).toBe("/organizations/test-org/projects/1/members");
         expect(postSpy.mock.calls[0][1]).toEqual({ user_id: 2, role: "project_member" });
     });
 
@@ -518,7 +518,7 @@ describe("Projects/Show メンバー管理", () => {
         await fireEvent.click(within(dialog).getByRole("button", { name: "削除する" }));
 
         expect(deleteSpy).toHaveBeenCalledTimes(1);
-        expect(deleteSpy.mock.calls[0][0]).toBe("/projects/1/members/2");
+        expect(deleteSpy.mock.calls[0][0]).toBe("/organizations/test-org/projects/1/members/2");
     });
 
     it("canViewMemberEmails=false かつ email=null なら member email を描画しない", () => {

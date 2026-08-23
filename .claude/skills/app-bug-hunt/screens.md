@@ -14,13 +14,13 @@ bug-hunt カバレッジの分母となる「画面」(GET × web セッショ�
 
 | route (URL) | name | 種別 | 画面名 | 割当ストーリー | 区分 |
 |---|---|---|---|---|---|
-| go | app.entry | 画面 | - | S1 | 通常 |
+| go | app.entry | 画面 | 組織を選ぶ | S1 | 通常 |
 | organizations/{organization}/billing | billing.index | 画面 | プランとお支払い | S5 | 通常 |
 | organizations/{organization}/billing/plans | billing.plans | 画面 | プラン比較 | S5 | 通常 |
 | organizations/{organization}/billing/purchase-tickets | billing.tickets.show | 画面 | チケットを購入 | S5 | 通常 |
 | organizations/{organization}/app/account | capture.account | 画面 | アカウント | S3 | 通常 |
 | organizations/{organization}/app/csrf-cookie | capture.csrf-cookie | JSON | - | S3 | 通常 |
-| app | capture.entry | 画面 | - | S3 | 通常 |
+| app | capture.entry | 画面 | 組織を選ぶ | S3 | 通常 |
 | organizations/{organization}/app | capture.home | 画面 | - | S3 | 通常 |
 | organizations/{organization}/app/projects/{project}/manuals | capture.manuals.index | 画面 | 撮影するマニュアルを選ぶ | S3 | 通常 |
 | organizations/{organization}/app/projects/{project}/manuals/{manual} | capture.manuals.show | 画面 | - | S3 S7 | 通常 |
@@ -161,9 +161,9 @@ bug-hunt はこれらを**単独で開くのではなく**、S1/S6 のパスキ�
 > 準拠を横断ヒューリスティクス H11/H13 とあわせて全認証画面で検査する。
 
 **左サイドバー nav 項目 (desktop 固定 / mobile ドロワー) — ここに出てよいもの:**
-- ダッシュボード `/dashboard`(常時)、プロジェクト `/projects`(組織あり)、
-  メンバー `/manage/users`(`canManageMembers`)、API キー `/organizations/{slug}/api-keys`(`canManageApiKeys`)、
-  請求 `/billing`(組織あり)
+- ダッシュボード `/organizations/{slug}/dashboard`(常時)、プロジェクト `/organizations/{slug}/projects`(組織あり)、
+  メンバー `/organizations/{slug}/manage/users`(`canManageMembers`)、API キー `/organizations/{slug}/api-keys`(`canManageApiKeys`)、
+  請求 `/organizations/{slug}/billing`(組織あり)
 
 **下部ユーザー/組織ポップアップ (SidebarUserMenu) — ここに出るべきもの (左 nav に出してはいけない):**
 - **個人設定 `/settings`**、組織設定 `/organizations/{slug}/settings`、CLI/MCP セットアップ、

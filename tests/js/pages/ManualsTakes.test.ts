@@ -164,7 +164,7 @@ describe("Manuals/Takes — テイクの選択と採用", () => {
         expect(img.tagName).toBe("IMG");
         expect(img).toHaveAttribute(
             "src",
-            "/app/projects/7/manuals/12/cuts/34/takes/101/thumbnail",
+            "/organizations/test-org/app/projects/7/manuals/12/cuts/34/takes/101/thumbnail",
         );
     });
 
@@ -173,7 +173,7 @@ describe("Manuals/Takes — テイクの選択と採用", () => {
 
         expect(screen.getByTestId("take-preview-video")).toHaveAttribute(
             "src",
-            "/app/projects/7/manuals/12/cuts/34/takes/101/playback",
+            "/organizations/test-org/app/projects/7/manuals/12/cuts/34/takes/101/playback",
         );
     });
 
@@ -200,7 +200,7 @@ describe("Manuals/Takes — テイクの選択と採用", () => {
 
         await waitFor(() => expect(routerReloadMock).toHaveBeenCalledWith({ only: ["cut", "takes"] }));
         expect(fetchMock.mock.calls[0][0]).toBe(
-            "/app/projects/7/manuals/12/cuts/34/takes/101/adopt",
+            "/organizations/test-org/app/projects/7/manuals/12/cuts/34/takes/101/adopt",
         );
         expect(fetchMock.mock.calls[0][1].method).toBe("POST");
     });
@@ -237,7 +237,7 @@ describe("Manuals/Takes — テイクの選択と採用", () => {
         await fireEvent.click(screen.getByRole("button", { name: "削除する" }));
 
         await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-        expect(fetchMock.mock.calls[0][0]).toBe("/app/projects/7/manuals/12/cuts/34/takes/101");
+        expect(fetchMock.mock.calls[0][0]).toBe("/organizations/test-org/app/projects/7/manuals/12/cuts/34/takes/101");
         expect(fetchMock.mock.calls[0][1].method).toBe("DELETE");
         await waitFor(() => expect(routerReloadMock).toHaveBeenCalledWith({ only: ["cut", "takes"] }));
     });

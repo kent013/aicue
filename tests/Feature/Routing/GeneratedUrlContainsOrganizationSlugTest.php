@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 use App\Models\Project;
+use Illuminate\Routing\Exceptions\UrlGenerationException;
 
 /*
  * 主要画面の**生成 URL に識別名が含まれる** (家系裁定 AG-037)。
@@ -42,5 +43,5 @@ test('子リソースの生成 URL も組織配下になる (位置引数のず�
 
 test('組織を渡さないと生成できない (黙って旧 URL にはならない)', function (): void {
     expect(fn (): string => route('projects.index', [], absolute: false))
-        ->toThrow(Throwable::class);
+        ->toThrow(UrlGenerationException::class);
 });

@@ -80,7 +80,7 @@ test('直接付与ゼロなら manageBilling の結論は現行 (owner / admin �
     expect($service->hasDirectPermission($admin, $organization))->toBeFalse();
 });
 
-test('直接付与された一般メンバーは /billing/portal が 403 にならない', function (): void {
+test('直接付与された一般メンバーは /organizations/{slug}/billing/portal が 403 にならない', function (): void {
     [$organization] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization);
     billingPermissionService()->grant($member, $organization);

@@ -185,7 +185,7 @@ test('download: 最新 succeeded render の output_path が NULL なら旧世代
 /* ---------------- 詳細画面 props (finishedJob) ---------------- */
 
 test('props: published + download 権限保持者には finishedJob が最新 succeeded render を指す', function (): void {
-    [, $owner, $project, $manual] = finishedVideoContext();
+    [$organization, $owner, $project, $manual] = finishedVideoContext();
     RenderJob::factory()->forManual($manual)->succeeded('projects/x/renders/v1-1.mp4')->create();
     $latest = RenderJob::factory()->forManual($manual)->succeeded('projects/x/renders/v2-1.mp4')->create();
 
@@ -197,7 +197,7 @@ test('props: published + download 権限保持者には finishedJob が最新 su
 });
 
 test('props: ready へ戻った manual では finishedJob=null (押すと 404 になる導線を出さない)', function (): void {
-    [, $owner, $project, $manual] = finishedVideoContext();
+    [$organization, $owner, $project, $manual] = finishedVideoContext();
     RenderJob::factory()->forManual($manual)->succeeded('projects/x/renders/v2-1.mp4')->create();
     $manual->forceFill(['status' => VideoManualStatus::Ready])->save();
 
@@ -230,7 +230,7 @@ test('props: finishedJob のキー集合は RenderJobData::toArray() と exact �
 });
 
 test('props: 最新 succeeded render の output_path が NULL なら finishedJob=null (route と同じ判断)', function (): void {
-    [, $owner, $project, $manual] = finishedVideoContext();
+    [$organization, $owner, $project, $manual] = finishedVideoContext();
     RenderJob::factory()->forManual($manual)->succeeded('projects/x/renders/v1-1.mp4')->create();
     RenderJob::factory()->forManual($manual)->create(['status' => 'succeeded', 'output_path' => null]);
 

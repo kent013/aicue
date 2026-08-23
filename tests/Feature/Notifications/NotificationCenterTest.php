@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\DataTransferObjects\Notification\InvitationReceivedPayload;
 use App\DataTransferObjects\Notification\ManualJobPayload;
 use App\DataTransferObjects\Notification\TicketBalanceLowPayload;
+use App\Enums\OrganizationRole;
 use App\Models\Organization;
 use App\Models\OrganizationInvitation;
 use App\Models\Project;
@@ -232,18 +233,20 @@ test('open: manual 削除済み → 一覧へ 303 + info (既読化はされる)
     expect($owner->unreadNotifications()->count())->toBe(0);
 });
 
-test('open: 通知 org ≠ current org → 一覧へ 303 + 組織切替の案内 (自動切替しない)', function (): void {
+test('open: 通知 org ≠ URL 上の組織 → 一覧へ 303 + その組織から開く案内 (自動で組織を変えない)', function (): void {
+    // 組織文脈は URL だけで決まる (家系裁定 AG-037)。別組織の URL で開こうとしたときに
+    // **URL の組織を勝手に読み替えない**ことを固定する (読み替えは切替の再発明である)。
     [$organization, $owner, $project, $manual] = notificationCenterContext();
     $id = notifyManualAnalyzed($organization, $owner, $project, $manual);
 
-    // current org を別組織へ切り替えた状態にする
     [$organization2] = createOrganizationWithOwner('別組織');
     $organization2->users()->attach($owner);
+    $owner->addRole(OrganizationRole::Member->value, $organization2->laratrust_team_id);
 
-    $this->actingAs($owner)->post("/organizations/{$organization->slug}/notifications/{$id}/open")
+    $this->actingAs($owner)->post("/organizations/{$organization2->slug}/notifications/{$id}/open")
         ->assertStatus(303)
-        ->assertRedirect("/organizations/{$organization->slug}/notifications")
-        ->assertSessionHas('info', 'この通知は別の組織のものです。組織を切り替えてから開いてください。');
+        ->assertRedirect("/organizations/{$organization2->slug}/notifications")
+        ->assertSessionHas('info', 'この通知は別の組織のものです。その組織の画面から開いてください。');
 });
 
 test('open: ticket_balance_low → billing.tickets.show へ 303', function (): void {
@@ -305,7 +308,7 @@ test('open: 未知 type → 一覧へ 303 + 汎用 info (招待文言と混同�
     expect($owner->unreadNotifications()->count())->toBe(0);
 });
 
-test('GET /notifications/{id}/open は 405 (POST 限定 = prefetch 既読化防止)', function (): void {
+test('GET /organizations/{slug}/notifications/{id}/open は 405 (POST 限定 = prefetch 既読化防止)', function (): void {
     [$organization, $owner, $project, $manual] = notificationCenterContext();
     $id = notifyManualAnalyzed($organization, $owner, $project, $manual);
 

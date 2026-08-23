@@ -205,7 +205,7 @@ describe("Settings/Index 退会ガード (blocker と次の一手)", () => {
         expect(screen.getByText("現場B")).toBeInTheDocument();
     });
 
-    it("open_billing は /billing への解約リンクを描画する", () => {
+    it("open_billing は /organizations/test-org/billing への解約リンクを描画する", () => {
         setProps({
             accountDeletionBlockers: [
                 { name: "現場A", slug: "genba-a", actions: ["open_billing"] },
@@ -230,7 +230,9 @@ describe("Settings/Index 退会ガード (blocker と次の一手)", () => {
         render(Index, { props: {} });
 
         const link = screen.getByText("サブスクリプションを解約する");
-        expect(link.getAttribute("href")).toBe("/organizations/genba-b/billing");
+        expect(new URL(link.getAttribute("href") ?? "", window.location.href).pathname).toBe(
+            "/organizations/genba-b/billing",
+        );
         expect(routerPostMock).not.toHaveBeenCalled();
     });
 

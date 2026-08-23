@@ -128,7 +128,7 @@ describe("Onboarding/Checkout", () => {
 
         await fireEvent.click(submit);
         expect(routerPostMock).toHaveBeenCalledWith(
-            "/onboarding/activate-personal",
+            "/organizations/test-org/onboarding/activate-personal",
             // P8a: funding_choice の既定は auto_recharge (同意 version 同送。金額は送らない)
             { declaration: "0", funding_choice: "auto_recharge", consent_version: "v2" },
             expect.anything(),
@@ -152,7 +152,7 @@ describe("Onboarding/Checkout", () => {
         await fireEvent.click(screen.getByTestId("personal-free-submit"));
 
         expect(routerPostMock).toHaveBeenCalledWith(
-            "/onboarding/activate-personal",
+            "/organizations/test-org/onboarding/activate-personal",
             { declaration: "1", funding_choice: "auto_recharge", consent_version: "v2" },
             expect.anything(),
         );
@@ -222,7 +222,7 @@ describe("Onboarding/Checkout", () => {
 
         await fireEvent.click(submit);
         expect(routerPostMock).toHaveBeenCalledWith(
-            "/billing/checkout",
+            "/organizations/test-org/billing/checkout",
             {
                 plan_code: "starter",
                 subscription_attempt_token: "01JQ0000000000000000000000",
@@ -285,12 +285,12 @@ describe("Onboarding/Checkout", () => {
         // 無償プランの自己申告 submit は billing/checkout ではなく activate-personal へ行く
         await fireEvent.click(screen.getByTestId("personal-free-submit"));
         expect(routerPostMock).toHaveBeenCalledWith(
-            "/onboarding/activate-personal",
+            "/organizations/test-org/onboarding/activate-personal",
             expect.anything(),
             expect.anything(),
         );
         expect(routerPostMock).not.toHaveBeenCalledWith(
-            "/billing/checkout",
+            "/organizations/test-org/billing/checkout",
             expect.anything(),
             expect.anything(),
         );
@@ -340,7 +340,7 @@ describe("Onboarding/Checkout", () => {
         await fireEvent.click(screen.getByTestId("personal-free-submit"));
 
         expect(routerPostMock).toHaveBeenCalledWith(
-            "/onboarding/activate-personal",
+            "/organizations/test-org/onboarding/activate-personal",
             { declaration: "0", funding_choice: "later" },
             expect.anything(),
         );

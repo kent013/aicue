@@ -125,7 +125,7 @@ test('失効した招待は受諾できない', function (): void {
     $invitee = User::factory()->create();
     $response = $this->actingAs($invitee)->post('/invitations/accept', ['token' => 'expired-token']);
 
-    $response->assertRedirect("/organizations/{$organization->slug}/dashboard");
+    $response->assertRedirect(route('app.entry'));
     $response->assertSessionHas('error');
     expect($organization->users()->whereKey($invitee->id)->exists())->toBeFalse();
 });
@@ -145,7 +145,7 @@ test('受諾済みの招待は再受諾できない', function (): void {
     $invitee = User::factory()->create();
     $response = $this->actingAs($invitee)->post('/invitations/accept', ['token' => 'used-token']);
 
-    $response->assertRedirect("/organizations/{$organization->slug}/dashboard");
+    $response->assertRedirect(route('app.entry'));
     $response->assertSessionHas('error');
     expect($organization->users()->whereKey($invitee->id)->exists())->toBeFalse();
 });
@@ -240,7 +240,7 @@ test('取り消した招待は受諾できない (無効扱い、取り消しは
     $invitee = User::factory()->create();
     $response = $this->actingAs($invitee)->post('/invitations/accept', ['token' => $token]);
 
-    $response->assertRedirect("/organizations/{$organization->slug}/dashboard");
+    $response->assertRedirect(route('app.entry'));
     $response->assertSessionHas('error', 'この招待は無効です。');
     expect($organization->users()->whereKey($invitee->id)->exists())->toBeFalse();
 });
@@ -384,8 +384,8 @@ test('招待 email で register すると個人組織を作らず招待組織へ
     // 招待組織へ参加し、招待ロールが付与される
     expect($organization->users()->whereKey($user->id)->exists())->toBeTrue();
     expect($user->organizationRole($organization))->toBe(OrganizationRole::Admin);
-    // 個人組織は生成しない (招待組織を主所属にする)
-    expect($user->organizations()->where('is_personal', true)->exists())->toBeFalse();
+    // 初期組織は作らない (招待組織が唯一の所属になる。種別フラグは撤去済み)
+    expect($user->organizations()->count())->toBe(1);
     // 招待は受諾済みになる & session の token は落ちる
     expect(OrganizationInvitation::query()->sole()->isAccepted())->toBeTrue();
     $response->assertSessionMissing('invitation_token');
@@ -394,7 +394,7 @@ test('招待 email で register すると個人組織を作らず招待組織へ
     expect($user->organizations()->pluck('organizations.id')->all())->toBe([$organization->id]);
 });
 
-test('招待経由登録の直後、dashboard 自己修復を経ずに共有プロップ currentOrganization が招待先を指す', function (): void {
+test('招待経由登録の直後、組織 route の外では共有プロップ currentOrganization が null のまま', function (): void {
     [$organization, $owner] = createOrganizationWithOwner('招待組織');
     $token = inviteAndCaptureToken($organization, $owner, 'header@example.com', OrganizationRole::Admin);
 
@@ -405,16 +405,14 @@ test('招待経由登録の直後、dashboard 自己修復を経ずに共有プ�
         'terms_accepted' => '1',
     ])->assertRedirect(route('verification.notice'));
 
-    // verification.notice は未検証ユーザーが到達でき、CurrentOrganizationResolver の自己修復を
-    // 通さない (dashboard 専用)。ここで共有プロップが招待先組織を指せば、ヘッダーが登録直後の
-    // 全ページで一貫することを保証できる。
+    // 組織文脈は **URL だけ**で決まる (家系裁定 AG-037)。verification.notice は組織 route では
+    // ないので、招待先に所属していても currentOrganization は null でなければならない
+    // (所属している組織のどれかを裏口から選ぶと、それが保持列の再発明になる)。
     $this->get(route('verification.notice'))
         ->assertOk()
         ->assertInertia(fn (AssertableInertia $page) => $page
-            ->where('currentOrganization.id', $organization->id)
-            ->where('currentOrganization.slug', $organization->slug)
-            ->where('currentOrganization.role', OrganizationRole::Admin->value)
-            // 共有プロップ間の整合: organizations 一覧にも招待先が載る
+            ->where('currentOrganization', null)
+            // 共有プロップ間の整合: 所属一覧には招待先が載る (選ぶ材料は渡す)
             ->where('organizations.0.id', $organization->id));
 });
 
@@ -432,8 +430,8 @@ test('招待経由登録では個人組織を作らず signup grant を付与し
     ])->assertRedirect(route('verification.notice'));
 
     $user = User::whereBlind('email', 'email_index', 'nofree@example.com')->firstOrFail();
-    // 個人組織は生成されない
-    expect($user->organizations()->where('is_personal', true)->exists())->toBeFalse();
+    // 初期組織は作らない (招待組織が唯一の所属になる)
+    expect($user->organizations()->count())->toBe(1);
     // 招待組織の残高に signup grant は乗らない
     // (P6/F2: 付与契機はプラン有効化時であり、登録では誰にも付与されない)
     expect(app(TicketLedgerService::class)->balance($organization)->totalAvailable())->toBe(0);
@@ -481,9 +479,9 @@ test('取り消し済みの招待 token で register すると通常登録 (個�
     $response->assertRedirect(route('verification.notice'));
 
     $user = User::whereBlind('email', 'email_index', 'fallback@example.com')->firstOrFail();
-    // 招待組織へは参加せず、個人組織が生成される
+    // 招待組織へは参加せず、初期組織が 1 件だけ作られる
     expect($organization->users()->whereKey($user->id)->exists())->toBeFalse();
-    expect($user->organizations()->where('is_personal', true)->exists())->toBeTrue();
+    expect($user->organizations()->count())->toBe(1);
 
     // [分岐 B(fallback) 固定] 無効 token の fallback では初期組織だけに所属する (招待先ではない)
     expect($user->organizations()->count())->toBe(1);
@@ -623,7 +621,7 @@ test('T4: 別 email の直 POST 受諾は拒否され副作用が一切残らな
 
     $response = $this->actingAs($intruder)->post('/invitations/accept', ['token' => $token]);
 
-    $response->assertRedirect("/organizations/{$organization->slug}/dashboard");
+    $response->assertRedirect(route('app.entry'));
     $response->assertSessionHas('error');
 
     // pivot 不在を DB assertion で直接確認する (organizationRole の null だけに依存しない)

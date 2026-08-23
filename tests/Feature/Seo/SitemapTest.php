@@ -22,7 +22,7 @@ it('sitemap.xml は config の公開ページのみを APP_URL 基準で配信�
         ->toContain('<loc>https://app.example/</loc>')
         ->toContain('<changefreq>weekly</changefreq>')
         // 認証配下 / 認証画面は載せない
-        ->and($body)->not->toContain('/dashboard')
+        ->and($body)->not->toContain('/organizations/')
         ->and($body)->not->toContain('/login');
 });
 

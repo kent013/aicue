@@ -11,17 +11,20 @@ use Tests\Support\TrackedPhpSourceFiles;
  * 正典は「組織文脈は **URL だけ**で決まる。保持列と切替 endpoint は存在してはならない
  * (2 方式の併存不可)」と定める。撤去が中途半端だと、その状態自体が裁定違反である。
  *
- * ## 4 つの形を**別々に**検出する
+ * ## 3 つの形を**別々に**検出する
  *
  * 一般語 `currentOrganization` の全面禁止はしない — 施策 6 で残した共有 prop
  * `currentOrganization` と DTO `CurrentOrganizationData` を自ら違反にしてしまうためである。
  *
  * | # | 検出する形 |
  * |---|---|
- * | 1 | 列名リテラル (撤去 migration 以外に 0 件) |
+ * | 1 | 列名リテラル (文字列リテラルのみ。移行履歴は母集団外) |
  * | 2 | `User` に対する `currentOrganization` の relation 宣言 / プロパティアクセス |
  * | 3 | 撤去した Service の完全修飾名 |
- * | 4 | 撤去した route 名 |
+ *
+ * **撤去した route 名 (`organizations.switch`) はここでは見ない**。
+ * `LegacyOrganizationlessUrlAbsenceTest` が git 追跡下ファイル全数を母集団として
+ * 「撤去 route 名台帳」で固定しており、同じ事実を 2 か所で検査しない。
  *
  * ## 自己検出の閉じ方
  *
@@ -31,9 +34,11 @@ use Tests\Support\TrackedPhpSourceFiles;
  * ## 保証しないもの (誇張しない)
  *
  * - 実行時に組み立てた名前 (`$column = 'current_'.$suffix`) には**無言で効かない**。
+ * - 検出 1 は**コメントを見ない** (撤去を説明する docblock は参照ではない)。
  * - `User` 以外の型に対する `->currentOrganization` は検出 2 の対象外である
  *   (共有 prop の連想配列キーと区別できないため)。
- * - 走査根は git 追跡下の PHP 全数 + `resources/js` + `database/` である。
+ * - 走査根は git 追跡下の PHP 全数 + `resources/js` + `database/` である
+ *   (検出 1 だけは `database/migrations/` を除く)。
  *   それ以外の置き場所 (`.claude/` の目録・生成物) は見ない。
  */
 
@@ -46,7 +51,7 @@ test('走査根はいずれも空でない (走査が壊れても気付ける)',
     }
 });
 
-test('検出 1: 撤去した保持列の列名は撤去 migration 以外に 0 件', function (): void {
+test('検出 1: 撤去した保持列の列名は文字列リテラルに 0 件', function (): void {
     $hits = CurrentOrganizationRemovalScanner::columnLiteralHits(base_path());
 
     expect($hits)->toBe([]);
@@ -64,16 +69,9 @@ test('検出 3: 撤去した Service の完全修飾名が 0 件', function (): 
     expect(CurrentOrganizationRemovalScanner::removedServiceHits($files))->toBe([]);
 });
 
-test('検出 4: 撤去した route 名が 0 件', function (): void {
-    $hits = CurrentOrganizationRemovalScanner::removedRouteNameHits(base_path());
-
-    expect($hits)->toBe([]);
-});
-
-test('負例: 4 形それぞれを合成入力で検出できる (検出力の裏取り)', function (): void {
+test('負例: 3 形それぞれを合成入力で検出できる (検出力の裏取り)', function (): void {
     $column = CurrentOrganizationRemovalScanner::columnName();
     $service = CurrentOrganizationRemovalScanner::removedServiceFqcn();
-    $routeName = CurrentOrganizationRemovalScanner::removedRouteName();
 
     // 1: 列名リテラル
     expect(CurrentOrganizationRemovalScanner::containsColumnName("['{$column}' => 1]"))->toBeTrue();
@@ -108,8 +106,4 @@ test('負例: 4 形それぞれを合成入力で検出できる (検出力の�
     $aliasedService = "<?php\nnamespace App;\nuse {$service} as Resolver;\nclass X { public function f(Resolver \$r) {} }\n";
     expect(CurrentOrganizationRemovalScanner::sourceHasRemovedService($aliasedService))->toBeTrue();
     expect(CurrentOrganizationRemovalScanner::sourceHasRemovedService("<?php\nnamespace App;\nclass Y {}\n"))->toBeFalse();
-
-    // 4: route 名
-    expect(CurrentOrganizationRemovalScanner::containsRemovedRouteName("route('{$routeName}')"))->toBeTrue();
-    expect(CurrentOrganizationRemovalScanner::containsRemovedRouteName("route('organizations.settings')"))->toBeFalse();
 });

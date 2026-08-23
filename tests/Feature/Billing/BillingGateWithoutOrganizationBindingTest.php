@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Middleware\RequireActiveSubscription;
 use Illuminate\Support\Facades\Route;
+use Webmozart\Assert\InvalidArgumentException;
 
 /*
  * 課金ゲートは組織 binding が無ければ fail-closed (家系裁定 AG-037)。
@@ -23,5 +24,5 @@ test('組織 binding の無い route にゲートを掛けると fail-closed に
     $this->withoutExceptionHandling();
 
     expect(fn () => $this->actingAs($owner)->get('/synthetic-gate-without-organization'))
-        ->toThrow(Throwable::class);
+        ->toThrow(InvalidArgumentException::class);
 });

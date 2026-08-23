@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Auth;
 
+use App\Enums\OrganizationRole;
 use App\Http\Controllers\Controller;
 use App\Models\Organization;
 use App\Models\User;
@@ -139,10 +140,13 @@ class SocialAuthController extends Controller
         Auth::login($user, remember: true);
         $request->session()->regenerate();
 
-        // pending → 初期組織へ移送 (pending は必ず forget で消費される)。
-        // 所属組織が無い (= 招待経由等) 場合は promote 対象が存在しないため pending だけ落とす
-        // (種別フラグは撤去済み。家系裁定 AG-038)。
-        $initialOrganization = $user->organizations()->orderBy('organizations.id')->first();
+        // pending → **自分が Owner の初期組織**へ移送 (pending は必ず forget で消費される)。
+        // ★種別フラグ (旧 `is_personal`) は撤去済み (家系裁定 AG-038) なので、
+        //   「所属組織の有無」では判定できない — 招待経由の利用者も所属組織を持つ。
+        //   Owner の組織が無い (= 招待経由で参加しただけ) なら promote 対象が存在しないため
+        //   pending だけ落とす (他人の組織へプラン意図を移送しない)。
+        $initialOrganization = $user->organizations()->orderBy('organizations.id')->get()
+            ->first(static fn (Organization $organization): bool => $user->organizationRole($organization) === OrganizationRole::Owner);
         if ($initialOrganization instanceof Organization) {
             $this->intendedPlanResolver->promotePendingToOrganization($initialOrganization);
         } else {

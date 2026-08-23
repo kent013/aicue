@@ -52,7 +52,7 @@ test('succeeded ジョブの validation_json が verdict props に出る', funct
     AnalysisJob::factory()->forManual($manual)->forDocument($document)
         ->succeeded()->withValidation(ScenarioVerdict::NeedsReview, splitRecommended: true)->create();
 
-    $this->actingAs($owner)->get(route('projects.manuals.show', [$project, $manual]))
+    $this->actingAs($owner)->get(route('projects.manuals.show', [$organization->slug, $project, $manual]))
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('analysis.report.verdict.verdict', 'needs_review')
@@ -72,7 +72,7 @@ test('最新ジョブが failed でも前回 succeeded の所見を出す', func
         ->succeeded()->withValidation()->create();
     AnalysisJob::factory()->forManual($manual)->forDocument($document)->failed()->create();
 
-    $this->actingAs($owner)->get(route('projects.manuals.show', [$project, $manual]))
+    $this->actingAs($owner)->get(route('projects.manuals.show', [$organization->slug, $project, $manual]))
         ->assertInertia(fn (Assert $page) => $page
             ->where('analysis.report.verdict.verdict', 'valid'));
 });
@@ -81,7 +81,7 @@ test('validation_json が NULL の旧ジョブでは verdict=null だが counts/
     [$organization, $owner, $project, $manual] = scenarioReportContext();
     AnalysisJob::factory()->forManual($manual)->succeeded()->create();
 
-    $this->actingAs($owner)->get(route('projects.manuals.show', [$project, $manual]))
+    $this->actingAs($owner)->get(route('projects.manuals.show', [$organization->slug, $project, $manual]))
         ->assertInertia(fn (Assert $page) => $page
             ->where('analysis.report.verdict', null)
             ->where('analysis.report.counts.total', 2));
@@ -95,7 +95,7 @@ test('壊れた validation_json でも 200 で verdict=null になり警告が 1
         ->update(['validation_json' => json_encode(['verdict' => 'broken'], JSON_THROW_ON_ERROR)]);
     Log::spy();
 
-    $this->actingAs($owner)->get(route('projects.manuals.show', [$project, $manual]))
+    $this->actingAs($owner)->get(route('projects.manuals.show', [$organization->slug, $project, $manual]))
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page->where('analysis.report.verdict', null));
 
@@ -113,7 +113,7 @@ test('手順書を差し替えて未再解析なら is_current_document=false', 
         ->succeeded()->withValidation()->create();
     SourceDocument::factory()->forManual($manual)->create(); // 差し替え (追記型)
 
-    $this->actingAs($owner)->get(route('projects.manuals.show', [$project, $manual]))
+    $this->actingAs($owner)->get(route('projects.manuals.show', [$organization->slug, $project, $manual]))
         ->assertInertia(fn (Assert $page) => $page
             ->where('analysis.report.verdict.is_current_document', false));
 });
@@ -123,7 +123,7 @@ test('解析対象の手順書が消えている (source_document_id=null) な�
     SourceDocument::factory()->forManual($manual)->create();
     AnalysisJob::factory()->forManual($manual)->succeeded()->withValidation()->create();
 
-    $this->actingAs($owner)->get(route('projects.manuals.show', [$project, $manual]))
+    $this->actingAs($owner)->get(route('projects.manuals.show', [$organization->slug, $project, $manual]))
         ->assertInertia(fn (Assert $page) => $page
             ->where('analysis.report.verdict.is_current_document', false));
 });
@@ -131,7 +131,7 @@ test('解析対象の手順書が消えている (source_document_id=null) な�
 test('複製直後 (解析ジョブなし・cuts あり) は verdict=null で counts は出る', function (): void {
     [$organization, $owner, $project, $manual] = scenarioReportContext();
 
-    $this->actingAs($owner)->get(route('projects.manuals.show', [$project, $manual]))
+    $this->actingAs($owner)->get(route('projects.manuals.show', [$organization->slug, $project, $manual]))
         ->assertInertia(fn (Assert $page) => $page
             ->where('analysis.report.verdict', null)
             ->where('analysis.report.counts.steps', 1));
@@ -142,7 +142,7 @@ test('cuts も所見も無ければ report は null (出す材料が無い)', fu
     $project = Project::factory()->forOrganization($organization)->create();
     $manual = VideoManual::factory()->forProject($project)->create();
 
-    $this->actingAs($owner)->get(route('projects.manuals.show', [$project, $manual]))
+    $this->actingAs($owner)->get(route('projects.manuals.show', [$organization->slug, $project, $manual]))
         ->assertInertia(fn (Assert $page) => $page->where('analysis.report', null));
 });
 
@@ -154,7 +154,7 @@ test('規約違反のある cuts では findings に件数と位置が載る', f
         'subtitle_secondary' => '',
     ]);
 
-    $this->actingAs($owner)->get(route('projects.manuals.show', [$project, $manual]))
+    $this->actingAs($owner)->get(route('projects.manuals.show', [$organization->slug, $project, $manual]))
         ->assertInertia(fn (Assert $page) => $page
             ->where('analysis.report.counts.steps', 2)
             ->where('analysis.report.findings', [
@@ -178,7 +178,7 @@ test('撮影者 (canManage=false) でも report は props に載る (表示は�
     AnalysisJob::factory()->forManual($manual)->succeeded()->withValidation()->create();
     expect($owner->can('update', $manual))->toBeTrue(); // 対照 (owner は編集可)
 
-    $this->actingAs($member)->get(route('projects.manuals.show', [$project, $manual]))
+    $this->actingAs($member)->get(route('projects.manuals.show', [$organization->slug, $project, $manual]))
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('canManage', false)

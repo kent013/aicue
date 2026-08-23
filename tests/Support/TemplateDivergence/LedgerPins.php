@@ -31,7 +31,7 @@ final class LedgerPins
      *   増やせば通る)。増加を許さないのは生成器のガードとレビュー規約であり、
      *   検査は「一覧と定数と実測が食い違ったら赤」を担う。
      */
-    public const int ADOPTION_DEBT_COUNT = 156;
+    public const int ADOPTION_DEBT_COUNT = 151;
 
     /**
      * 採用時債務一覧を説明する逸脱の登録番号 (D34)。

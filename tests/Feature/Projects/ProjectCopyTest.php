@@ -31,8 +31,8 @@ test('プロジェクト更新で名前が空だと UI ラベル準拠のエラ�
     $project = Project::factory()->forOrganization($organization)->create();
 
     $response = $this->actingAs($owner)
-        ->from(route('projects.edit', $project))
-        ->patch(route('projects.update', $project), ['name' => '']);
+        ->from(route('projects.edit', ['organization' => $organization->slug, 'project' => $project]))
+        ->patch(route('projects.update', ['organization' => $organization->slug, 'project' => $project]), ['name' => '']);
 
     $response->assertSessionHasErrors(['name' => 'プロジェクト名は必須項目です。']);
 });

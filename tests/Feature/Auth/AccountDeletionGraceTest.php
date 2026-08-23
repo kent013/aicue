@@ -318,24 +318,6 @@ test('予約でメール通知が 1 通だけキューされる', function (): v
     Notification::assertSentToTimes($owner, AccountDeletionRequestedNotification::class, 1);
 });
 
-test('予約でアプリ内通知が 1 件作られる (current org を表示文脈に持つ)', function (): void {
-    // ★Notification::fake() は database channel も含めて全経路を差し替えるため、
-    //   DB 行を見るこのテストでは fake しない (メールは array mailer に落ちる)。
-    [$organization, $owner] = createOrganizationWithOwner();
-
-    app(OrganizationMembershipService::class)->requestAccountDeletion($owner);
-
-    $row = DB::table('notifications')
-        ->where('type', NotificationType::AccountDeletionRequested->value)
-        ->first();
-    expect($row)->not->toBeNull();
-    expect((int) ($row->organization_id ?? 0))->toBe($organization->id);
-
-    $data = json_decode((string) ($row->data ?? '{}'), true);
-    expect($data)->toBeArray();
-    expect($data['grace_days'] ?? null)->toBe(AccountDeletionGrace::days());
-});
-
 test('退会予約ではアプリ内通知を作らない (org 文脈を捏造しない。メールは従来どおり届く)', function (): void {
     $user = User::factory()->create();
 

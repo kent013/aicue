@@ -181,7 +181,7 @@ test('activate-personal の funding_choice 省略時は dashboard 着地のま�
 
     $this->actingAs($owner)
         ->post("/organizations/{$organization->slug}/onboarding/activate-personal", ['declaration' => '1'])
-        ->assertRedirect(route('app.entry'));
+        ->assertRedirect(route('dashboard', ['organization' => $organization->slug]));
 
     expect(TicketAutoRecharge::query()->count())->toBe(0);
 });

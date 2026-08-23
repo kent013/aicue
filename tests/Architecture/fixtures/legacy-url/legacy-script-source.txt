@@ -1,0 +1,7 @@
+// コメントの /dashboard は参照ではない
+/* ブロックコメントの /projects も参照ではない */
+const a = "/billing";
+const b = orgUrl(slug, "/projects");
+const c = currentOrgUrl(`/manage/users`);
+const d = `/organizations/${slug}/notifications`;
+const e = "https://example.com/dashboard";

@@ -21,7 +21,7 @@ use Inertia\Testing\AssertableInertia as Assert;
  * 警告ではなく「使用量 / 上限」の併記が担う)。
  */
 
-test('/billing の quotas は 6 キー厳密一致で届く', function (): void {
+test('/organizations/{slug}/billing の quotas は 6 キー厳密一致で届く', function (): void {
     // Inertia props は連想配列なので、DTO rename の波及漏れ (キー名の取りこぼし) は
     // phpstan / typecheck では捕まらない。キー集合そのものをここで固定する。
     [$organization, $owner] = createOrganizationWithOwner();

@@ -8,7 +8,7 @@ import {
 /*
  * テイク API の URL 導出。撮影 PWA (TakeStrip / UploadQueue) と PC 編集面
  * (Manuals/Takes) が**同じ 1 箇所**から URL を作ることを固定する。
- * prefix が /app なのは歴史的経緯であり、テイク資源の唯一の API 面である。
+ * prefix が /organizations/test-org/app なのは歴史的経緯であり、テイク資源の唯一の API 面である。
  */
 
 const target = { organizationSlug: "test-org", projectId: 7, manualId: 12, cutId: 34 };

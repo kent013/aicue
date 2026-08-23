@@ -33,7 +33,7 @@ function showManual(Organization $organization, User $actor, Project $project, V
 }
 
 test('show: created_at が異なるとき新しい日時の SOP が document に載る', function (): void {
-    [, $owner, $project, $manual] = summaryPropsContext();
+    [$organization, $owner, $project, $manual] = summaryPropsContext();
     SourceDocument::factory()->forManual($manual)->create([
         'original_name' => 'old.pdf',
         'created_at' => now()->subDay(),
@@ -54,7 +54,7 @@ test('show: created_at が異なるとき新しい日時の SOP が document に
 });
 
 test('show: created_at が同一のとき id が大きい SOP が document に載る', function (): void {
-    [, $owner, $project, $manual] = summaryPropsContext();
+    [$organization, $owner, $project, $manual] = summaryPropsContext();
     $sameTime = now();
     SourceDocument::factory()->forManual($manual)->create([
         'original_name' => 'first.pdf',
@@ -72,7 +72,7 @@ test('show: created_at が同一のとき id が大きい SOP が document に�
 });
 
 test('show: SOP 添付済みなら document に name/sizeBytes/uploadedAt が載る', function (): void {
-    [, $owner, $project, $manual] = summaryPropsContext();
+    [$organization, $owner, $project, $manual] = summaryPropsContext();
     $uploadedAt = now()->subHours(3);
     SourceDocument::factory()->forManual($manual)->create([
         'original_name' => '作業手順.pdf',
@@ -90,7 +90,7 @@ test('show: SOP 添付済みなら document に name/sizeBytes/uploadedAt が載
 });
 
 test('show: SOP 未添付なら document=null かつ hasDocument=false', function (): void {
-    [, $owner, $project, $manual] = summaryPropsContext();
+    [$organization, $owner, $project, $manual] = summaryPropsContext();
 
     showManual($organization, $owner, $project, $manual)
         ->assertInertia(fn (Assert $page) => $page
@@ -100,7 +100,7 @@ test('show: SOP 未添付なら document=null かつ hasDocument=false', functio
 });
 
 test('show: hasDocument === (document !== null) が常に成り立つ (添付あり)', function (): void {
-    [, $owner, $project, $manual] = summaryPropsContext();
+    [$organization, $owner, $project, $manual] = summaryPropsContext();
     SourceDocument::factory()->forManual($manual)->create();
 
     $response = showManual($organization, $owner, $project, $manual);
@@ -122,7 +122,7 @@ test('show: 同一組織・別 manual の SOP は当該 manual の analysis.docu
 
 test('show: 別組織の SOP sentinel が現在閲覧中の manual の props に混ざらない', function (): void {
     // 組織 A の manual に sentinel SOP を置く
-    [, , , $manualA] = summaryPropsContext();
+    [$organization, , , $manualA] = summaryPropsContext();
     SourceDocument::factory()->forManual($manualA)->create(['original_name' => 'sentinel-cross-org.pdf']);
 
     // 組織 B の owner が組織 B 自身の manual (SOP 未添付) を閲覧する
@@ -131,7 +131,7 @@ test('show: 別組織の SOP sentinel が現在閲覧中の manual の props に
     $manualB = VideoManual::factory()->forProject($projectB)->create(['status' => 'draft']);
 
     // 組織 A の sentinel が組織 B の props へ混入しない (relation 境界の構造的分離)
-    showManual($organization, $ownerB, $projectB, $manualB)
+    showManual($orgB, $ownerB, $projectB, $manualB)
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('analysis.document', null)

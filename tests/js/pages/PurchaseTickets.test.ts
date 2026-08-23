@@ -52,7 +52,7 @@ const basePage: PurchaseTicketsPageProps = {
     formState: "normal",
     boundCount: null,
     resumeUrl: null,
-    newPurchaseUrl: "/purchase-tickets?fresh=1",
+    newPurchaseUrl: "/organizations/test-org/billing/purchase-tickets?fresh=1",
 };
 
 afterEach(() => {
@@ -123,7 +123,7 @@ describe("Billing/PurchaseTickets", () => {
 
         expect(routerPostMock).toHaveBeenCalledTimes(1);
         const [url, payload] = routerPostMock.mock.calls[0] as [string, Record<string, unknown>];
-        expect(url).toBe("/purchase-tickets/checkout");
+        expect(url).toBe("/organizations/test-org/billing/purchase-tickets/checkout");
         expect(payload).toEqual({
             count: 30,
             attempt_token: "01J0000000000000000000TEST",

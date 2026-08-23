@@ -79,11 +79,11 @@ test('最終ログインの導出クエリはメンバー数に依らず 1 本 (
     expect($smallOrganization->invitations()->count())->toBe(0);
     expect($largeOrganization->invitations()->count())->toBe(0);
 
-    measureUserManagementQueries($organization, $smallOwner); // 暖機
-    measureUserManagementQueries($organization, $largeOwner); // 暖機
+    measureUserManagementQueries($smallOrganization, $smallOwner); // 暖機
+    measureUserManagementQueries($largeOrganization, $largeOwner); // 暖機
 
-    $small = securityAuditEventQueries(measureUserManagementQueries($organization, $smallOwner));
-    $large = securityAuditEventQueries(measureUserManagementQueries($organization, $largeOwner));
+    $small = securityAuditEventQueries(measureUserManagementQueries($smallOrganization, $smallOwner));
+    $large = securityAuditEventQueries(measureUserManagementQueries($largeOrganization, $largeOwner));
 
     expect($small)->toHaveCount(1);
     expect($large)->toHaveCount(

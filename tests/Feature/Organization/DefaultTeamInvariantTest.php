@@ -47,11 +47,11 @@ test('個人組織の provisioning は冪等 (二重生成しない)', function 
     $user = User::factory()->create();
     $service = app(OrganizationProvisioningService::class);
 
-    $first = $service->provisionPersonalOrganization($user);
-    $second = $service->provisionPersonalOrganization($user);
+    $first = $service->provisionInitialOrganization($user);
+    $second = $service->provisionInitialOrganization($user);
 
     expect($second->id)->toBe($first->id);
-    expect($user->organizations()->where('is_personal', true)->count())->toBe(1);
+    expect($user->organizations()->count())->toBe(1);
 });
 
 test('組織ロール判定は team 明示で行われる (strict_check=true で他組織のロールが漏れない)', function (): void {

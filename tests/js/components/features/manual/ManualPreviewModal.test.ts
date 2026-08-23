@@ -34,7 +34,7 @@ describe("features/manual/ManualPreviewModal", () => {
         render(ManualPreviewModal, { props: { projectId: 7, manual: item(), open: true } });
 
         const video = await screen.findByTestId("manual-preview-video");
-        expect(video.getAttribute("src")).toBe("/projects/7/manuals/2/render-jobs/9/playback");
+        expect(video.getAttribute("src")).toBe("/organizations/test-org/projects/7/manuals/2/render-jobs/9/playback");
         expect(video).toHaveAttribute("controls");
     });
 

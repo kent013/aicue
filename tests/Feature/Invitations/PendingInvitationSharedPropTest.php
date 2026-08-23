@@ -77,6 +77,8 @@ test('他人宛の招待は数えない', function (): void {
     [$organization] = createOrganizationWithOwner();
     $user = User::factory()->create(['email' => 'invitee@example.com']);
     OrganizationInvitation::factory()->forOrganization($organization)->create(['email' => 'someone-else@example.com']);
+    // 通知一覧の URL は組織を持つ (家系裁定 AG-037) ので、到達するには所属が要る
+    $organization->users()->attach($user);
 
     $this->actingAs($user)->get("/organizations/{$organization->slug}/notifications")->assertInertia(
         fn (AssertableInertia $page) => $page->where('invitationInbox.pendingCount', 0),

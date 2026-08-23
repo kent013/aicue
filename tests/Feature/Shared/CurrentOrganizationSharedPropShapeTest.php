@@ -3,10 +3,8 @@
 declare(strict_types=1);
 
 use App\DataTransferObjects\Organizations\CurrentOrganizationData;
+use App\Enums\OrganizationRole;
 use App\Models\User;
-use ReflectionClass;
-use ReflectionNamedType;
-use ReflectionProperty;
 
 /*
  * 共有 prop `currentOrganization` の**キー集合と各値の型**を固定する (家系裁定 AG-037)。
@@ -64,6 +62,7 @@ test('組織 route では URL 上の組織が出る (保持列由来ではない
     [$first, $user] = createOrganizationWithOwner('あ組織');
     [$second] = createOrganizationWithOwner('い組織');
     $second->users()->attach($user);
+    $user->addRole(OrganizationRole::Member->value, $second->laratrust_team_id);
 
     $this->actingAs($user)->get("/organizations/{$second->slug}/dashboard")
         ->assertOk()

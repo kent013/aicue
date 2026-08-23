@@ -41,9 +41,9 @@ function noStoreBaselineHasNoStore(TestResponse $response): bool
 }
 
 test('認証済み Inertia 応答には no-store, private が付く', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $response = $this->actingAs($owner)->get('/dashboard');
+    $response = $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard");
 
     $response->assertOk();
     $response->assertHeader('Cache-Control', 'no-store, private');
@@ -77,7 +77,7 @@ test('stateless block (SEO/robots) には付与されない', function (): void 
 });
 
 test('logout POST の redirect 応答にも付与される (リクエスト時点の認証状態で判定)', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
     $response = $this->actingAs($owner)->post('/logout');
 

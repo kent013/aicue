@@ -193,12 +193,12 @@ test('公開面の一貫性: FormRequest / Service / Inertia Props (create/show)
 
     // Inertia Props 境界: create()/show() 両方の sourceDocumentAccept が画像込み固定値で一致する。
     // 旧 imageSourceDocumentsEnabled prop が再追加されないことも固定する (完全撤去の回帰検出)
-    $showResponse = $this->actingAs($owner)->get(route('projects.manuals.show', [$project, $httpManual]));
+    $showResponse = $this->actingAs($owner)->get(route('projects.manuals.show', [$organization->slug, $project, $httpManual]));
     $showResponse->assertInertia(fn (Assert $page) => $page
         ->where('sourceDocumentAccept', '.pdf,.xlsx,.xls,.txt,.jpg,.jpeg,.png')
         ->missing('imageSourceDocumentsEnabled'));
 
-    $createResponse = $this->actingAs($owner)->get(route('projects.manuals.create', [$project]));
+    $createResponse = $this->actingAs($owner)->get(route('projects.manuals.create', [$organization->slug, $project]));
     $createResponse->assertInertia(fn (Assert $page) => $page
         ->where('sourceDocumentAccept', '.pdf,.xlsx,.xls,.txt,.jpg,.jpeg,.png')
         ->where('sourceDocumentFormatsLabel', 'PDF・Excel・テキスト形式、または JPEG・PNG の画像')

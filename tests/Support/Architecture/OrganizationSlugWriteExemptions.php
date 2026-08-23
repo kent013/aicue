@@ -33,9 +33,19 @@ final class OrganizationSlugWriteExemptions
                     .'ここだけは生 SQL で小文字化する。CHECK 制約はこの後に張る。',
             ],
             'tests/Feature/Organization/OrganizationSlugConstraintTest.php' => [
-                'rules' => ['query-builder-update' => 4],
-                'reason' => 'CHECK 制約が実際に効くことを確かめる負例。値オブジェクトを迂回することが'
-                    .'検査の目的そのものであり、迂回しないと DB 側の制約を撃てない。',
+                'rules' => ['query-builder-update' => 1, 'force-fill' => 1],
+                'reason' => 'CHECK 制約と一意制約が実際に効くことを確かめる負例。値オブジェクトを迂回して'
+                    .'不正な値を書き込むことが検査の目的そのものであり、迂回しないと DB 側の制約を撃てない。',
+            ],
+            'tests/Architecture/OrganizationSlugWritePathTest.php' => [
+                'rules' => ['raw-sql-update' => 1],
+                'reason' => '検出器が生 SQL の UPDATE を拾えることを確かめる合成入力。検出したい構文を'
+                    .'文字列として持つのが役目であり、これが無いと検出力の裏取りができない。',
+            ],
+            'tests/Unit/Services/Onboarding/SnippetBuilderTest.php' => [
+                'rules' => ['force-fill' => 1],
+                'reason' => '保存しない組み立て済みインスタンスを作るだけの単体テスト用の見本であり、'
+                    .'organizations 表への書き込みは 1 度も起きない (DB に触れない層の検査)。',
             ],
         ];
     }

@@ -55,9 +55,9 @@ bug-hunt はこれらを**単独で開くのではなく**、S1/S6 のパスキ�
 > 準拠を横断ヒューリスティクス H11/H13 とあわせて全認証画面で検査する。
 
 **左サイドバー nav 項目 (desktop 固定 / mobile ドロワー) — ここに出てよいもの:**
-- ダッシュボード `/dashboard`(常時)、プロジェクト `/projects`(組織あり)、
-  メンバー `/manage/users`(`canManageMembers`)、API キー `/organizations/{slug}/api-keys`(`canManageApiKeys`)、
-  請求 `/billing`(組織あり)
+- ダッシュボード `/organizations/{slug}/dashboard`(常時)、プロジェクト `/organizations/{slug}/projects`(組織あり)、
+  メンバー `/organizations/{slug}/manage/users`(`canManageMembers`)、API キー `/organizations/{slug}/api-keys`(`canManageApiKeys`)、
+  請求 `/organizations/{slug}/billing`(組織あり)
 
 **下部ユーザー/組織ポップアップ (SidebarUserMenu) — ここに出るべきもの (左 nav に出してはいけない):**
 - **個人設定 `/settings`**、組織設定 `/organizations/{slug}/settings`、CLI/MCP セットアップ、

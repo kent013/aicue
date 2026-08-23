@@ -117,8 +117,15 @@ class NotificationController extends Controller
         };
     }
 
-    /** 1 件既読化 (back() 完結) */
-    public function read(Request $request, string $notification): RedirectResponse
+    /**
+     * 1 件既読化 (back() 完結)。
+     *
+     * ★`$organization` は**使わないが受ける**。framework は route parameter を
+     *   **位置で**引数へ割り当てるため、組織 URL 配下の action が `{organization}` を
+     *   受けないと後続の引数が 1 つずつずれる (実測: `$notification` に Organization が入り、
+     *   通知が見つからず 404 になる)。既読化は通知 id が権威なので組織で絞らない。
+     */
+    public function read(Request $request, Organization $organization, string $notification): RedirectResponse
     {
         $user = $this->authedUser($request);
         $this->notifications->markRead($this->notifications->findOwnOrFail($user, $notification));
@@ -126,8 +133,13 @@ class NotificationController extends Controller
         return back();
     }
 
-    /** 一括既読化 (back() 完結) */
-    public function readAll(Request $request): RedirectResponse
+    /**
+     * 一括既読化 (back() 完結)。
+     *
+     * ★`$organization` を受ける理由は `read()` と同じ (位置ずれの防止)。
+     *   一括既読は利用者の全組織横断であり、URL 上の組織では絞らない。
+     */
+    public function readAll(Request $request, Organization $organization): RedirectResponse
     {
         $this->notifications->markAllRead($this->authedUser($request));
 

@@ -124,7 +124,7 @@ test('解約済み (猶予期間も終了) のサブスクだけを持つ組織�
     expect(startGuardCheckout($organization, $owner))->toContain('fake_external=stripe');
 });
 
-test('有効サブスク保持組織の /billing/checkout は 500 にせず error flash で差し戻す', function (): void {
+test('有効サブスク保持組織の /organizations/{slug}/billing/checkout は 500 にせず error flash で差し戻す', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     createFakeSubscription($organization, status: 'active');
 
@@ -161,7 +161,7 @@ test('支払い未解決の契約がある組織の checkout は Stripe を呼�
     expect($spy->created)->toBe([]); // 2 本目の契約を作っていない
 })->with(['past_due', 'unpaid']);
 
-test('支払い未解決の /billing/checkout は error flash で差し戻す (押下時にエラーを出す)', function (): void {
+test('支払い未解決の /organizations/{slug}/billing/checkout は error flash で差し戻す (押下時にエラーを出す)', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     createFakeSubscription($organization, status: 'past_due');
 

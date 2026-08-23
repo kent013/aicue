@@ -35,7 +35,7 @@ test('絞り込み付きの削除は同じ絞り込み・同じページへ着�
     $this->assertDatabaseMissing('video_manuals', ['id' => $manual->id]);
 });
 
-test('クエリ無しの削除は /projects/{project} へ着地する (詳細画面からの削除の非退行)', function (): void {
+test('クエリ無しの削除は /organizations/{slug}/projects/{project} へ着地する (詳細画面からの削除の非退行)', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $project = Project::factory()->forOrganization($organization)->create();
     $manual = VideoManual::factory()->forProject($project)->create();

@@ -104,10 +104,13 @@ final class RequireActiveSubscription
         FlashNotificationRelay::relayTo($request->session());
 
         // 遮断理由は着地ページが持つ (middleware は error flash を積まない)。
+        // ★着地先も組織 URL 配下なので、**識別名を明示して**組み立てる (家系裁定 AG-037)。
+        //   モデルをそのまま渡すと getRouteKeyName() = 'id' により URL に id が入る。
         return redirect()->route(
             $canManage
                 ? 'onboarding.checkout'          // 自分で契約できる = プラン選択へ
                 : 'onboarding.billing-required', // 契約権限なし = 説明画面へ
+            ['organization' => $organization->slug],
         );
     }
 
@@ -121,8 +124,11 @@ final class RequireActiveSubscription
         Assert::isInstanceOf($organization, Organization::class);
 
         // defense-in-depth: 非メンバーがここに到達する = binder の回帰。
-        // 存在秘匿方針に合わせ 404 で abort し、観測可能化して即検知する
-        if (! Gate::forUser($user)->allows('view', $organization)) {
+        // 存在秘匿方針に合わせ 404 で abort し、観測可能化して即検知する。
+        // ★判定は **binder と同じ契約 (organization_user の所属)** で行う。役割の有無で
+        //   判定すると、所属はあるが役割が無い利用者 (並行受諾レースの帰結) の 403 が
+        //   404 に化けて層 2 と層 3 の境目が消える (拒否の理由が読めなくなる)。
+        if (! $organization->users()->whereKey($user->getKey())->exists()) {
             Log::warning('non-member passed organization binder (binder regression?)', [
                 'organization_id' => $organization->id,
                 'user_id' => $user->id,

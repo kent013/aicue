@@ -18,14 +18,14 @@ vi.mock("@/lib/capture/panel-navigation", async (importOriginal) => ({
     prefersReducedMotion: reducedMotionMock,
 }));
 
-const THUMBNAIL_URL = "/app/projects/1/manuals/2/cuts/3/takes/9/thumbnail";
-const PLAYBACK_URL = "/app/projects/1/manuals/2/cuts/3/takes/9/playback";
+const THUMBNAIL_URL = "/organizations/test-org/app/projects/1/manuals/2/cuts/3/takes/9/thumbnail";
+const PLAYBACK_URL = "/organizations/test-org/app/projects/1/manuals/2/cuts/3/takes/9/playback";
 
 function makeProps(overrides: Record<string, unknown> = {}) {
     return {
         thumbnailUrl: THUMBNAIL_URL,
         playbackUrl: PLAYBACK_URL,
-        href: "/projects/1/manuals/2/cuts/3/takes",
+        href: "/organizations/test-org/projects/1/manuals/2/cuts/3/takes",
         label: "採用テイクを開く",
         testId: "preview",
         ...overrides,

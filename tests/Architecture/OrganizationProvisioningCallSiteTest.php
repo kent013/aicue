@@ -13,9 +13,13 @@ use Tests\Support\TrackedPhpSourceFiles;
  *
  * ## 走査根と判定
  *
- * git 追跡下の PHP 全数 (`TrackedPhpSourceFiles`)。`provisionInitialOrganization` の
+ * git 追跡下の PHP のうち **`app/` 配下**。`provisionInitialOrganization` の
  * **メソッド呼び出し**を全数抽出し、許可した 2 経路と**完全一致**することを固定する
  * (増えても減っても赤)。母集団が空なら fail する。
+ *
+ * ★母集団を `app/` に絞るのは、正典が固定せよと言っているのが**製品コードの呼び出しサイト**
+ *   だからである。テストは冪等判定そのものを検査するために直接呼ぶ必要があり、
+ *   ここへ入れると「検査したいものを検査できない」形になる。
  *
  * ## 行ロック構造の固定
  *
@@ -34,12 +38,25 @@ use Tests\Support\TrackedPhpSourceFiles;
  *   「そう書かれていること」だけである。挙動は Unit (seam) と Feature (逐次) が受け持つ。
  */
 
+/**
+ * 走査根 (`app/` 配下の追跡下 PHP)。
+ *
+ * @return list<array{absolute: string, relative: string}>
+ */
+function provisioningCallSiteFiles(): array
+{
+    return array_values(array_filter(
+        TrackedPhpSourceFiles::all(base_path()),
+        static fn (array $file): bool => str_starts_with($file['relative'], 'app/'),
+    ));
+}
+
 test('走査根が空でない', function (): void {
-    expect(TrackedPhpSourceFiles::all(base_path()))->not->toBeEmpty();
+    expect(provisioningCallSiteFiles())->not->toBeEmpty();
 });
 
 test('初期組織生成の呼び出しサイトは許可した 2 経路と完全一致する', function (): void {
-    $sites = ProvisioningCallSiteScanner::callSites(TrackedPhpSourceFiles::all(base_path()));
+    $sites = ProvisioningCallSiteScanner::callSites(provisioningCallSiteFiles());
 
     expect($sites)->toBe([
         'app/Actions/Fortify/CreateNewUser.php',

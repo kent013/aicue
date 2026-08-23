@@ -128,7 +128,7 @@ test('A-3: render 422 の列挙件数と詳細画面 coverage の missing_count 
 });
 
 test('A-4: 詳細画面 props に total_cuts / missing_count / missing_labels が載る', function (): void {
-    [, $owner, $project, $manual] = previewCoverageContext();
+    [$organization, $owner, $project, $manual] = previewCoverageContext();
     Cut::factory()->forManual($manual)->withSortOrder(1)->create();
 
     $render = previewCoverageRenderProps($organization, $project, $manual, $owner);
@@ -141,7 +141,7 @@ test('A-4: 詳細画面 props に total_cuts / missing_count / missing_labels �
 });
 
 test('A-5: すべて充足なら missing_count は 0 でラベルは空になる', function (): void {
-    [, $owner, $project, $manual] = previewCoverageContext();
+    [$organization, $owner, $project, $manual] = previewCoverageContext();
 
     $render = previewCoverageRenderProps($organization, $project, $manual, $owner);
 
@@ -151,7 +151,7 @@ test('A-5: すべて充足なら missing_count は 0 でラベルは空になる
 });
 
 test('A-6: 採用済みだが ready でないテイクも missing として数える', function (TakeStatus $status): void {
-    [, $owner, $project, $manual] = previewCoverageContext();
+    [$organization, $owner, $project, $manual] = previewCoverageContext();
     previewCoverageAdopt(
         Cut::factory()->forManual($manual)->withSortOrder(1)->create(),
         $status,
@@ -168,7 +168,7 @@ test('A-6: 採用済みだが ready でないテイクも missing として数�
 ]);
 
 test('A-7: missing が 11 件のとき missing_labels は 10 件で missing_count は 11 になる', function (): void {
-    [, $owner, $project, $manual] = previewCoverageContext();
+    [$organization, $owner, $project, $manual] = previewCoverageContext();
     foreach (range(1, 11) as $index) {
         Cut::factory()->forManual($manual)->withSortOrder($index)->create();
     }

@@ -319,7 +319,7 @@ test('撮影者 (project_member) も org member (非 project member) も閲覧�
     $this->actingAs($orgMember)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}")->assertOk();
 });
 
-test('PC ルート (/projects/...) の manual 詳細は影響を受けない (回帰)', function (): void {
+test('PC ルート (/organizations/{slug}/projects/...) の manual 詳細は影響を受けない (回帰)', function (): void {
     [$organization, $owner, $project] = browsingContext();
     $manual = VideoManual::factory()->forProject($project)->create();
 

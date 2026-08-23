@@ -61,6 +61,23 @@ class OrganizationFactory extends Factory
     }
 
     /**
+     * 識別名を指定した組織 (衝突・改名のテストで**特定の識別名**が要るとき用)。
+     *
+     * ★指定値も**必ず保存可能型を通す** (`AssignableOrganizationSlug`)。テストが
+     *   `forceFill(['slug' => …])` で型を迂回すると、保存経路 1 本の不変条件が
+     *   テスト側から崩れる (`OrganizationSlugWritePathTest` が deny-by-default で拾う)。
+     */
+    public function withSlug(string $slug): static
+    {
+        $assignable = AssignableOrganizationSlug::promote(
+            OrganizationSlug::fromString($slug),
+            OrganizationSlugReservedWords::load(),
+        );
+
+        return $this->state(fn (): array => ['slug' => $assignable->value]);
+    }
+
+    /**
      * パーソナルプラン (free) 有効化済みの組織 (declarer は自己申告した user)。
      * PersonalPlanService::activate() の結果状態を Factory で再現する
      * (partial unique index `organizations_personal_free_declarer_unique` の対象になる)。

@@ -142,6 +142,9 @@ final class MachinePlaneOrganizationReferenceInventory
             'console:bughunt:inventory-scan' => new NotOrganizationScoped(
                 'route 表と実装の機械事実を走査して目録の素を出す。組織のデータを 1 件も読まない。'
             ),
+            'console:help:build' => new NotOrganizationScoped(
+                'ヘルプ文書を取り込んで生成物へ書き出すだけ。組織のデータを 1 件も読まない。'
+            ),
             'console:capture:purge-upload-reservations' => new NotOrganizationScoped(
                 '期限切れのアップロード予約を全件走査で解放する定期実行。組織を選ぶ外部入力を持たない。'
             ),

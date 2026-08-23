@@ -268,8 +268,8 @@ test('ログイン済みユーザーは GET /forgot-password のフォームに�
 
     $response = $this->actingAs($user)->get('/forgot-password');
 
-    expect($response->isRedirect())->toBeTrue();
     $response->assertStatus(302);
+    expect($response->isRedirect())->toBeTrue();
 });
 
 test('status は鮮度と satisfier 情報を返す (no-store)', function (): void {

@@ -34,7 +34,7 @@ describe("captureFetch", () => {
     it("X-XSRF-TOKEN / X-Requested-With / Accept を常時付与する", async () => {
         fetchMock.mockResolvedValueOnce(jsonResponse(200));
 
-        await captureFetch("/app/projects/1/manuals/2/sync", { method: "POST" });
+        await captureFetch("/organizations/test-org/app/projects/1/manuals/2/sync", { method: "POST" });
 
         const [, init] = fetchMock.mock.calls[0];
         expect(init.headers["X-XSRF-TOKEN"]).toBe("initial-token");
@@ -43,7 +43,7 @@ describe("captureFetch", () => {
         expect(init.credentials).toBe("same-origin");
     });
 
-    it("419 は /app/csrf-cookie 再取得 → 1 回だけ再送し、再送は更新後の token を使う", async () => {
+    it("419 は /organizations/test-org/app/csrf-cookie 再取得 → 1 回だけ再送し、再送は更新後の token を使う", async () => {
         fetchMock
             .mockResolvedValueOnce(jsonResponse(419)) // 元リクエスト
             .mockImplementationOnce(async () => {
@@ -53,11 +53,11 @@ describe("captureFetch", () => {
             })
             .mockResolvedValueOnce(jsonResponse(200));
 
-        const response = await captureFetch("/app/target", { method: "POST" });
+        const response = await captureFetch("/organizations/test-org/app/target", { method: "POST" });
 
         expect(response.status).toBe(200);
         expect(fetchMock).toHaveBeenCalledTimes(3);
-        expect(fetchMock.mock.calls[1][0]).toBe("/app/csrf-cookie");
+        expect(fetchMock.mock.calls[1][0]).toBe("/organizations/test-org/app/csrf-cookie");
         // 再送 (3 回目) は旧値でなく更新後 cookie の token
         expect(fetchMock.mock.calls[2][1].headers["X-XSRF-TOKEN"]).toBe("refreshed-token");
     });
@@ -68,7 +68,7 @@ describe("captureFetch", () => {
             .mockResolvedValueOnce(jsonResponse(204)) // csrf-cookie
             .mockResolvedValueOnce(jsonResponse(419)); // 再送も 419
 
-        const response = await captureFetch("/app/target", { method: "POST" });
+        const response = await captureFetch("/organizations/test-org/app/target", { method: "POST" });
 
         expect(response.status).toBe(419);
         expect(fetchMock).toHaveBeenCalledTimes(3);
@@ -79,7 +79,7 @@ describe("captureFetch", () => {
             .mockResolvedValueOnce(jsonResponse(419))
             .mockResolvedValueOnce(jsonResponse(500));
 
-        const response = await captureFetch("/app/target", { method: "POST" });
+        const response = await captureFetch("/organizations/test-org/app/target", { method: "POST" });
 
         expect(response.status).toBe(419);
         expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -90,7 +90,7 @@ describe("captureFetch", () => {
             .mockResolvedValueOnce(jsonResponse(419))
             .mockRejectedValueOnce(new TypeError("network error"));
 
-        const response = await captureFetch("/app/target", { method: "POST" });
+        const response = await captureFetch("/organizations/test-org/app/target", { method: "POST" });
 
         expect(response.status).toBe(419);
     });

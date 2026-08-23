@@ -9,6 +9,7 @@
     import PageContent from "@/components/templates/PageContent.svelte";
     import { orgUrl } from "@/lib/org-url";
     import type { SharedProps } from "@/lib/shared-props";
+    import type { OrganizationChoosePageProps } from "@/types/organization";
 
     /**
      * 組織を選ぶ画面 (家系裁定 AG-037)。
@@ -18,25 +19,12 @@
      * ★複数所属で**自動選択しない** (自動選択は保持列の再発明である)。
      * ★組織付きの URL をブックマークすれば次からこの画面を通らないことを案内する。
      */
-    interface OrganizationChoice {
-        id: number;
-        name: string;
-        slug: string;
-    }
-
-    interface Props {
-        /** EntryTarget の値 ("capture" = 撮影 PWA / "dashboard" = ダッシュボード) */
-        target: "capture" | "dashboard";
-        organizations: OrganizationChoice[];
-    }
-
-    let { target, organizations }: Props = $props();
+    let { target, organizations }: OrganizationChoosePageProps = $props();
 
     const shared = $derived(page.props as unknown as SharedProps);
     const appName = $derived(shared.appName ?? "");
 
     const targetLabel = $derived(target === "capture" ? "撮影アプリ" : "ダッシュボード");
-    const targetPath = $derived(target === "capture" ? "/app" : "/dashboard");
 </script>
 
 <AppLayout {appName}>
@@ -54,7 +42,7 @@
                         <li>
                             <OrganizationChoiceCard
                                 name={organization.name}
-                                href={orgUrl(organization.slug, targetPath)}
+                                href={orgUrl(organization.slug, target === "capture" ? "/app" : "/dashboard")}
                                 testId={`organization-choice-${organization.slug}`}
                             />
                         </li>

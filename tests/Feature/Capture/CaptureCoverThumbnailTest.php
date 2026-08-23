@@ -84,7 +84,7 @@ function coverOf(Organization $organization, User $actor, Project $project, Vide
 }
 
 test('代表は表示順で最初の「採用テイク + サムネイル生成済み」カットになる', function (): void {
-    [, $owner, $project] = coverContext();
+    [$organization, $owner, $project] = coverContext();
     $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
 
     // sort_order 0 は未採用 (テイクはあるが採用していない) = 候補にならない
@@ -100,7 +100,7 @@ test('代表は表示順で最初の「採用テイク + サムネイル生成�
 });
 
 test('sort_order が同値なら id 昇順で代表が決まる', function (): void {
-    [, $owner, $project] = coverContext();
+    [$organization, $owner, $project] = coverContext();
     $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
 
     // 最小 id のカットを**最小 sort_order ではない**位置に置く。
@@ -117,7 +117,7 @@ test('sort_order が同値なら id 昇順で代表が決まる', function (): v
 });
 
 test('採用テイクが無ければ cover は null', function (): void {
-    [, $owner, $project] = coverContext();
+    [$organization, $owner, $project] = coverContext();
     $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
     $cut = Cut::factory()->forManual($manual)->withSortOrder(0)->create();
     Take::factory()->forCut($cut)->withThumbnail()->create(); // 採用していない
@@ -126,7 +126,7 @@ test('採用テイクが無ければ cover は null', function (): void {
 });
 
 test('採用テイクのサムネイルが未生成なら cover は null', function (): void {
-    [, $owner, $project] = coverContext();
+    [$organization, $owner, $project] = coverContext();
     $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
     coverCutWithAdoptedTake($manual, sortOrder: 0, withThumbnail: false);
 
@@ -134,7 +134,7 @@ test('採用テイクのサムネイルが未生成なら cover は null', funct
 });
 
 test('生成済みだが ready でない採用テイクは cover にせず、次のカットも探さない', function (): void {
-    [, $owner, $project] = coverContext();
+    [$organization, $owner, $project] = coverContext();
     $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
 
     // 候補条件 (サムネイル生成済み) は満たすが表示条件 (ready) を満たさない先頭カット。
@@ -173,7 +173,7 @@ test('契約 (i): cover の id で組んだ thumbnail URL は 302 と no-store �
 });
 
 test('契約 (ii): 3 条件が揃えば候補が複数あっても cover は非 null', function (): void {
-    [, $owner, $project] = coverContext();
+    [$organization, $owner, $project] = coverContext();
     $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
     $first = coverCutWithAdoptedTake($manual, sortOrder: 0);
     coverCutWithAdoptedTake($manual, sortOrder: 1);
@@ -283,7 +283,7 @@ test('境界: cover の id を別 project / 別 manual の URL に嵌めると 4
 });
 
 test('cover の cut / take は必ずその manual 配下のもの (取り違えない)', function (): void {
-    [, $owner, $project] = coverContext();
+    [$organization, $owner, $project] = coverContext();
     $first = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
     $second = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
     $firstCut = coverCutWithAdoptedTake($first, sortOrder: 0);
@@ -300,7 +300,7 @@ test('cover の cut / take は必ずその manual 配下のもの (取り違え�
 });
 
 test('props に URL 文字列を載せない (cover のキーは cut_id / take_id の 2 つで値は int)', function (): void {
-    [, $owner, $project] = coverContext();
+    [$organization, $owner, $project] = coverContext();
     $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
     coverCutWithAdoptedTake($manual, sortOrder: 0);
 

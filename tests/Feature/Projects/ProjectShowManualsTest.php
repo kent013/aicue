@@ -251,7 +251,7 @@ test('sort 各値で並べ替える (updated / title × asc/desc)', function ():
         'title' => 'cherry', 'updated_at' => '2026-07-03 00:00:00',
     ]);
 
-    $order = function (string $sort) use ($owner, $project): array {
+    $order = function (string $sort) use ($organization, $owner, $project): array {
         $props = $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?sort={$sort}")
             ->inertiaPage()['props'];
 
@@ -286,7 +286,7 @@ test('同値 updated_at でも id tie-breaker でページ境界に重複/欠落
     // 15 件すべて同一 updated_at (tie-breaker が無いとページ間で不安定になる)
     VideoManual::factory()->forProject($project)->count(15)->create(['updated_at' => '2026-07-01 00:00:00']);
 
-    $ids = function (int $page) use ($owner, $project): array {
+    $ids = function (int $page) use ($organization, $owner, $project): array {
         $props = $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?sort=updated_desc&page={$page}")
             ->inertiaPage()['props'];
 

@@ -15,7 +15,7 @@ vi.mock("@inertiajs/svelte", async (importOriginal) => ({
 }));
 
 /*
- * プラン比較ページ。確認ダイアログ経由で POST /billing/checkout に plan_code +
+ * プラン比較ページ。確認ダイアログ経由で POST /organizations/test-org/billing/checkout に plan_code +
  * subscription_attempt_token を送る (funding_choice は載せない)。
  * サーバ validation エラー時は dialog を開いたままサーバ文言を出す。
  */
@@ -95,7 +95,7 @@ describe("Billing/Plans", () => {
 
         expect(routerPostMock).toHaveBeenCalledTimes(1);
         const [url, payload] = routerPostMock.mock.calls[0] as [string, Record<string, unknown>];
-        expect(url).toBe("/billing/checkout");
+        expect(url).toBe("/organizations/test-org/billing/checkout");
         expect(payload).toEqual({
             plan_code: "standard",
             subscription_attempt_token: "01JQ0000000000000000000000",
@@ -115,7 +115,7 @@ describe("Billing/Plans", () => {
         );
     });
 
-    it("有効な契約があるときは /billing/plan へ swap payload を POST する", async () => {
+    it("有効な契約があるときは /organizations/test-org/billing/plan へ swap payload を POST する", async () => {
         render(Plans, { props: { page: contractedPage } });
 
         await fireEvent.click(screen.getByTestId("plan-change-standard"));
@@ -123,7 +123,7 @@ describe("Billing/Plans", () => {
         await fireEvent.click(screen.getByText("変更する"));
 
         const [url, payload] = routerPostMock.mock.calls[0] as [string, Record<string, unknown>];
-        expect(url).toBe("/billing/plan");
+        expect(url).toBe("/organizations/test-org/billing/plan");
         expect(payload).toEqual({
             plan_code: "standard",
             current_plan_code: "starter",

@@ -55,7 +55,7 @@ test('Free (未契約) 組織は撮影 PWA (/app) に到達できる (F-07 再�
     $project = Project::factory()->forOrganization($organization)->create();
 
     $this->actingAs($owner)->get("/organizations/{$organization->slug}/app")
-        ->assertRedirect(route('capture.manuals.index', ['project' => $project]));
+        ->assertRedirect(route('capture.manuals.index', ['organization' => $organization->slug, 'project' => $project]));
 });
 
 // ── 有償プラン契約状態の支払い健全性 gate (fail-closed は plan_code 非 null に限定) ──
@@ -232,8 +232,8 @@ test('BillingAccess: plan_code null は許可の理由にならない (P4 で移
 
 test('route bound organization が有償不健全なら redirect される (current org より route 優先)', function (): void {
     // current org は Free (許可)、route の org は有償不健全 (両方 owner が同一メンバー)
-    [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
-    $gated = Organization::factory()->create(['slug' => 'gated-org']);
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    $gated = Organization::factory()->withSlug('gated-org')->create();
     $gated->users()->attach($owner);
     $owner->addRole(OrganizationRole::Member->value, $gated->laratrust_team_id);
     contractPaidPlan($gated, status: 'canceled'); // cohort G (past_due は cohort D で許可へ反転済み)

@@ -49,6 +49,7 @@ use App\Support\ProductionEnvGuard;
 use App\Support\QueueDispatchAtomicityGuard;
 use Aws\Sns\SnsClient;
 use Illuminate\Auth\Events\Login;
+use Illuminate\Auth\Middleware\RedirectIfAuthenticated;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Contracts\Hashing\Hasher;
@@ -221,6 +222,13 @@ class AppServiceProvider extends ServiceProvider
         // (非メンバー・不在 slug/id は等しく 404 = テナント存在秘匿。
         // tests/Architecture/OrganizationRouteParamWebOnlyInvariantTest が適用境界を pin)
         Route::bind('organization', MembershipScopedOrganizationBinder::class);
+
+        // 認証済みで guest 専用 route (ログイン / パスワード再設定要求 等) を開いたときの着地。
+        // ★framework の既定は「`dashboard` という名前の route があればそこへ」だが、
+        //   本アプリの `dashboard` は組織 URL 配下 (`{organization}` 必須) なので、
+        //   既定のままだと引数不足で 500 になる。組織文脈を持たない**分岐入口**へ倒す
+        //   (家系裁定 AG-037: どの組織かを裏口で決めない)。
+        RedirectIfAuthenticated::redirectUsing(static fn (): string => route('app.entry'));
 
         // route binding 型制約 (RouteBindingTypes が単一 SoT)。
         // 非適合セグメントは route にマッチしない = 404 になり、SubstituteBindings へ
@@ -434,14 +442,19 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('render-trigger', function (Request $request): Limit {
             $user = $request->user();
             $userId = $user instanceof User ? (string) $user->id : 'guest';
-            // ★組織は **URL の binding からのみ**取る (家系裁定 AG-037)。'none' へ倒さない —
-            //   配線不良を黙って許すと、識別名の改名時にキーの一貫性まで失う。
-            //   「render-trigger 対象 route は必ず organization binding を持つ」は
+            // ★組織は **URL の route parameter からのみ**取る (家系裁定 AG-037)。'none' へ倒さない —
+            //   配線不良を黙って許すと、レーン全体が 1 つの bucket に潰れる。
+            //   「render-trigger 対象 route は必ず organization parameter を持つ」は
             //   RenderTriggerRouteOrganizationParamTest が固定する。
-            $organization = $request->route('organization');
-            Assert::isInstanceOf($organization, Organization::class);
+            // ★ここで得られるのは **識別名の文字列**である。流量制限は framework の既定 priority で
+            //   `SubstituteBindings` より前に走るため、モデルはまだ束縛されていない
+            //   (束縛の後ろへ動かすと、束縛の DB 参照が流量制限の外に出てしまう)。
+            //   識別名は改名で変わりうるが、改名は 30 日 5 回が上限で窓は 1 分なので、
+            //   改名の前後で bucket が分かれても上限の意味は保たれる。
+            $organizationSlug = $request->route('organization');
+            Assert::stringNotEmpty($organizationSlug);
 
-            return Limit::perMinute(6)->by("render-trigger:actor-org:{$userId}:{$organization->id}");
+            return Limit::perMinute(6)->by("render-trigger:actor-org:{$userId}:{$organizationSlug}");
         });
     }
 

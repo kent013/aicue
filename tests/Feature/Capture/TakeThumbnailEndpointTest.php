@@ -43,7 +43,7 @@ function thumbnailPath(Organization $organization, Project $project, VideoManual
 }
 
 test('生成済み ready テイクは 302 で署名 URL へリダイレクトし no-store かつ private を返す', function (): void {
-    [, $owner, $project, $manual, $cut, $take] = takeThumbnailContext();
+    [$organization, $owner, $project, $manual, $cut, $take] = takeThumbnailContext();
 
     $response = $this->actingAs($owner)->get(thumbnailPath($organization, $project, $manual, $cut, $take));
 
@@ -60,7 +60,7 @@ test('生成済み ready テイクは 302 で署名 URL へリダイレクトし
 });
 
 test('署名 URL は別 take のサムネイルを使わない', function (): void {
-    [, $owner, $project, $manual, $cut, $take] = takeThumbnailContext();
+    [$organization, $owner, $project, $manual, $cut, $take] = takeThumbnailContext();
     $other = Take::factory()->forCut($cut)->withThumbnail()->create(['status' => 'ready']);
 
     $location = $this->actingAs($owner)
@@ -72,7 +72,7 @@ test('署名 URL は別 take のサムネイルを使わない', function (): vo
 });
 
 test('未生成 (thumbnail_path=null) は 404', function (): void {
-    [, $owner, $project, $manual, $cut, $take] = takeThumbnailContext(withThumbnail: false);
+    [$organization, $owner, $project, $manual, $cut, $take] = takeThumbnailContext(withThumbnail: false);
 
     $this->actingAs($owner)
         ->get(thumbnailPath($organization, $project, $manual, $cut, $take))
@@ -80,7 +80,7 @@ test('未生成 (thumbnail_path=null) は 404', function (): void {
 });
 
 test('非 ready テイクは生成済みでも 404 (状態秘匿)', function (string $status): void {
-    [, $owner, $project, $manual, $cut, $take] = takeThumbnailContext($status);
+    [$organization, $owner, $project, $manual, $cut, $take] = takeThumbnailContext($status);
 
     $this->actingAs($owner)
         ->get(thumbnailPath($organization, $project, $manual, $cut, $take))
@@ -97,7 +97,7 @@ test('非 capture ユーザー (非 project member の org member) は 403', fun
 });
 
 test('未認証はログインへリダイレクトする', function (): void {
-    [, , $project, $manual, $cut, $take] = takeThumbnailContext();
+    [$organization, , $project, $manual, $cut, $take] = takeThumbnailContext();
 
     $this->get(thumbnailPath($organization, $project, $manual, $cut, $take))->assertRedirect('/login');
 });
@@ -112,7 +112,7 @@ test('IDOR: project mismatch は 404 (認可より前)', function (): void {
 });
 
 test('IDOR: manual mismatch は 404', function (): void {
-    [, $owner, $project, , $cut, $take] = takeThumbnailContext();
+    [$organization, $owner, $project, , $cut, $take] = takeThumbnailContext();
     $otherManual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
 
     $this->actingAs($owner)
@@ -121,7 +121,7 @@ test('IDOR: manual mismatch は 404', function (): void {
 });
 
 test('IDOR: cut mismatch は 404', function (): void {
-    [, $owner, $project, $manual, , $take] = takeThumbnailContext();
+    [$organization, $owner, $project, $manual, , $take] = takeThumbnailContext();
     $otherCut = Cut::factory()->forManual($manual)->create();
 
     $this->actingAs($owner)
@@ -130,7 +130,7 @@ test('IDOR: cut mismatch は 404', function (): void {
 });
 
 test('IDOR: take mismatch (別 cut 所属の take を別 cut の URL で) は 404', function (): void {
-    [, $owner, $project, $manual, $cut] = takeThumbnailContext();
+    [$organization, $owner, $project, $manual, $cut] = takeThumbnailContext();
     $cutB = Cut::factory()->forManual($manual)->create();
     $takeB = Take::factory()->forCut($cutB)->withThumbnail()->create(['status' => 'ready']);
 
@@ -140,7 +140,7 @@ test('IDOR: take mismatch (別 cut 所属の take を別 cut の URL で) は 40
 });
 
 test('IDOR: cross-org は 404', function (): void {
-    [, , $project, $manual, $cut, $take] = takeThumbnailContext();
+    [$organization, , $project, $manual, $cut, $take] = takeThumbnailContext();
     [$otherOrg, $otherOwner] = createOrganizationWithOwner('別組織');
 
     $this->actingAs($otherOwner)
