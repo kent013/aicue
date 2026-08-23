@@ -17,27 +17,32 @@
 抽出は `Tests\Support\SourceLiterals` に集約し、`CurrentOrganizationRemovalScanner` の
 列名検出も同じ入口を使うようにした (コメントの言及で赤くなっていた実測を解消)。
 
-## 2. `/app` は「配下つきのときだけ旧 URL」— 許可目録を使わない
+## 2. `/app` は設計どおり許可目録で名指しする (レビュー Round 1 で差し戻し)
 
-設計は「分岐入口以外の `/app`」を許可目録で名指しする想定だったが、
-**裸の `/app` は正規の分岐入口**であり、旧 URL なのは配下を持つ形 (`/app/projects/…`) だけである。
-規則で表せるものを目録にすると、目録が旧 URL 文字列を持つことになり再帰する。
-そこで `LegacyUrlScanner::captureRoot()` だけ「配下つき」を要求する規則にした。
-結果として PWA の `start_url` / robots の宣言 / 入口の Feature テストは**登録なしで通る**。
+一度は「配下つきのときだけ旧 URL」という規則にしたが、
+**「入口への導線は route helper 経由だけ」という不変条件が消える**という指摘を受けて撤回した。
+裸の出現も検出し、正規入口としての出現は許可目録へ
+**パス + 規則 ID + 一致した語 + 構文文脈 + 件数**で exact-fit 登録する。
+区分 `CanonicalCaptureEntry` の前提として、
+**出現ごとの path が route 表の `capture.entry` の URI と完全一致すること**を機械検査する。
 
-## 3. 許可目録の区分を 3 つに限定した
+## 3. 許可目録の区分は 5 つで、**それぞれが機械で確かめられる前提を持つ**
 
-`LegacyUrlAllowanceKind` は `FilesystemPath` / `AbsenceAssertion` / `OrganizationRelativePath` の 3 つ。
-「なんとなく直せない」を入れる口を作らないため限定列挙にし、
-区分を足す操作そのものがレビューに見えるようにした。登録は**パス + 規則 ID + 件数 + 30 文字以上の理由**で、
-件数は増減のどちらでも赤になる。
+`LegacyUrlAllowanceKind` は `CanonicalCaptureEntry` / `FilesystemPath` / `StorageObjectKey` /
+`AbsenceAssertion` / `OrganizationRelativePath` の 5 つ。
+区分は説明ラベルではなく**判定に使う** (走査器共通規約 (d))。
+登録は **パス + 規則 ID + 一致した語 + 構文文脈 + 件数 + 30 文字以上の理由**で、
+件数は増減のどちらでも赤になる。構文文脈をキーへ入れているので、
+同じ path を同じファイルの別の構文位置へ移しても通らない。
 
-## 4. `routes/` を走査対象から外した (理由付き)
+## 4. `routes/` は走査するが、route 定義の URI 引数だけを外す
 
 route 定義の URI は group の prefix からの**相対セグメント**であり、組織 prefix の中では
 根だけの記述が正しい姿になる。実 route 表が 1 本残らず組織 URL 配下にあることは
-`OrganizationScopedRouteCoverageTest` が**解決済みの route 表**で固定するので、
-ここを字面で走査しても新しい保証は増えない。
+`OrganizationScopedRouteCoverageTest` が**解決済みの route 表**で固定する。
+そこで**その 1 引数だけ**を走査から外す。
+一度は `routes/` をファイルごと外したが、closure 内の `redirect('/…')` と撤去 route 名
+(`->name('organizations.switch')`) が route 表の検査では代替できないという指摘を受けて撤回した。
 
 ## 5. 撤去 route 名の検出を `LegacyOrganizationlessUrlAbsenceTest` へ一本化した
 
@@ -80,3 +85,21 @@ main が先に D40 (T250) / D41 (T245) / D42 (T244) を使っていたため、�
 `docs/app-integration-guide.md` は main の D42 が既に登録しているため D44 の対象パスからは外し、
 代わりに `docs/default-team-pattern.md` と `tests/Architecture/AccountDeletionPathGateTest.php` を
 D44 へ足して採用時債務から削った (3 択の (3))。
+
+
+## 11. 実装レビューで確定した追加事項 (Codex 3 ラウンド)
+
+Round 1〜3 の Critical はすべて本ブランチで対応した (対応の内訳は
+`codex-history/impl-review-decisions-round-{1,2,3}.md`)。設計から変わった点は次の 3 つである。
+
+1. **許可目録のキーに構文文脈を入れた**。設計の「構文文脈まで識別する安定 ID」を、
+   限定列挙の語彙 (`key:<名前>` / `markdown-link` / `text` / `call:<名前>` / `expr`) で実装した。
+2. **`routes/` は走査対象**に戻し、外すのは route 定義の URI 引数 1 つだけにした
+   (`->name()` を外すと撤去 route 名の台帳が routes/ の中で丸ごと効かなくなるため)。
+3. **入口の識別を import 宣言の構文解決にした**。取り込み元の名前が入口の 2 本のどちらかで、
+   宣言が文字列の外にあることまで確かめる。
+
+Round 3 は `CHANGES_REQUESTED` で終わったが、そこで挙がった Critical は本ブランチで閉じ、
+Codex 自身が「別 TODO へ送ってよい」と切り分けた 4 件だけを保証範囲外として docblock へ明記した
+(script 抽出の parser 化 / 実行時連結・絶対 URL・query hash の検出 /
+自己検査の数え方の完全独立 / 組織相対パスの汎用データフロー解析)。

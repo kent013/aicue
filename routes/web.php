@@ -57,6 +57,7 @@ use App\Http\Controllers\Webhooks\SesNotificationController;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\LocalOnly;
 use App\Http\Middleware\NoIndex;
+use App\Models\Organization;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
@@ -640,8 +641,13 @@ Route::middleware(['auth', 'verified', 'not-pending-deletion'])->group(function 
                 Route::get('/', [CaptureManualController::class, 'home'])->name('home');
                 // CSRF cookie 再発行 (419 リトライ用の軽量 GET。web group を通るだけで
                 // XSRF-TOKEN cookie が更新される。204 = 仕様固定 endpoint、body なし)
-                Route::get('/csrf-cookie', fn (): Response => response()->noContent())
-                    ->name('csrf-cookie');
+                // ★closure も route parameter を**位置で**受けるので `{organization}` を受ける
+                //   (受けないと後続の引数がずれる。OrganizationRouteHandlerParameterTest が固定)。
+                //   値は使わない (cookie の再発行に組織は関係しない)。
+                Route::get(
+                    '/csrf-cookie',
+                    fn (Organization $organization): Response => response()->noContent(),
+                )->name('csrf-cookie');
                 /*
                 | 撮影 PWA のアカウント確認画面 (doc/05 §5.1 / §5.2)。表示名・ログイン ID
                 | (= メールアドレス)・所属組織を省略なく読み、ログアウトするためだけの面。

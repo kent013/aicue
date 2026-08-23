@@ -1,0 +1,4 @@
+{{-- Blade のコメントも全文走査の対象である --}}
+<a href="/manage/users">メンバー</a>
+<a href="{{ route('dashboard', ['organization' => $organization->slug]) }}">ダッシュボード</a>
+<a href="/organizations/acme/billing">請求</a>

@@ -1,7 +1,14 @@
 // コメントの /dashboard は参照ではない
 /* ブロックコメントの /projects も参照ではない */
+import { orgUrl, currentOrgUrl } from "@/lib/org-url";
+const quotePattern = /["]/;
 const a = "/billing";
 const b = orgUrl(slug, "/projects");
 const c = currentOrgUrl(`/manage/users`);
 const d = `/organizations/${slug}/notifications`;
 const e = "https://example.com/dashboard";
+const f = notcurrentOrgUrl("/purchase-tickets");
+const i = myorgUrl("/notifications");
+// currentOrgUrl(
+const g = "/billing-required";
+const h = someObject.orgUrl("/onboarding");

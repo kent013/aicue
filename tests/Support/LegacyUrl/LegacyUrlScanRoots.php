@@ -54,7 +54,6 @@ final class LegacyUrlScanRoots
      */
     private const array NOT_SCANNED_PATHS = [
         'devnotes/' => '設計・レビューの記録であり実行されない。当時の URL 表記は履歴であって参照ではないため、書き換えると記録が事実でなくなる',
-        'routes/' => 'route 定義の URI は group の prefix からの相対セグメントであり、組織 prefix の中では根だけの記述が正しい姿になる。実 route 表が 1 本残らず組織 URL 配下にあることは OrganizationScopedRouteCoverageTest が解決済みの route 表で固定するので、ここを走査しても新しい保証は増えない',
         'doc/reference/' => '現場から預かった業務資料 (SOP・撮影シナリオ・モックアップ・プロンプト案) であり、本アプリの URL を 1 つも持たない。編集の権利も本リポジトリに無い',
         'docs/TODO-closed.md' => 'クローズ済み TODO の記録は当時の事実である。過去の作業説明に現れる旧 URL を書き換えると記録そのものが嘘になるため、履歴として走査から外す',
         'composer.lock' => '依存解決の生成物であり人が書く記述を含まない。パッケージ名や URL は上流の値であって本アプリの経路ではない',
@@ -77,8 +76,6 @@ final class LegacyUrlScanRoots
         'docx' => 'オフィス文書のバイナリであり、テキストとしての URL 参照を持たない (現場から預かった資料)',
         'xlsx' => 'オフィス文書のバイナリであり、テキストとしての URL 参照を持たない (撮影シナリオ表)',
         'mp4' => '動画バイナリであり、テキストとしての URL 参照を持たない (見本素材)',
-        'patch' => 'レビュー履歴として保存した差分の生の写しであり、当時のコードの記録である (置き場所は devnotes 配下だけ)',
-        'err' => '実行時の標準エラー出力の記録であり、当時の実行の記録である (置き場所は devnotes 配下だけ)',
     ];
 
     /**
@@ -93,7 +90,10 @@ final class LegacyUrlScanRoots
         'tests/Architecture/fixtures/legacy-url/legacy-paths.md' => '旧 URL を検出できることを確かめる正例の見本。検出したい語をわざと持つのが役目であり、rule ID では表せない',
         'tests/Architecture/fixtures/legacy-url/allowed-paths.md' => '誤検出してはいけない新 URL・無関係な語の見本。旧 URL の根と紛らわしい語をわざと持つのが役目である',
         'tests/Architecture/fixtures/legacy-url/legacy-php-source.txt' => 'PHP の文字列リテラルとコメントの扱いを分ける検出力の見本。旧 URL をコメントとリテラルの両方に持つ',
-        'tests/Architecture/fixtures/legacy-url/legacy-script-source.txt' => 'script の文字列リテラル・コメント・組織 URL 組み立ての入口の扱いを分ける検出力の見本である',
+        'tests/Architecture/fixtures/legacy-url/legacy-script-source.txt' => 'script の文字列リテラル・コメント・正規表現リテラル・組織 URL 組み立ての入口の扱いを分ける検出力の見本である',
+        'tests/Architecture/fixtures/legacy-url/legacy-shadowed-builder.txt' => '入口の module を取り込まずに同名関数を自前定義した形の見本。規則 3 の免除が効かないことを確かめる',
+        'tests/Architecture/fixtures/legacy-url/legacy-data-source.txt' => 'JSON / webmanifest の値と、1 行に 2 個の撤去 route 名を持つ見本。件数の数え方を確かめる',
+        'tests/Architecture/fixtures/legacy-url/legacy-blade-source.txt' => 'Blade テンプレートの属性値と route helper 経由の記述を分ける検出力の見本である',
     ];
 
     /**
@@ -274,6 +274,26 @@ final class LegacyUrlScanRoots
         return null;
     }
 
+    /**
+     * 内容の分類 (純関数。**母集団の確定も自己検証も必ずここを通る**)。
+     *
+     * ★同じ判定を 2 本持たない。NUL 判定と UTF-8 検証を 1 つの入口に閉じることで、
+     *   合成した文字列からも実母集団からも同じ経路で確かめられる。
+     *   返すのは「走査対象に分類したのに読めない」理由 (問題なければ null)。
+     */
+    public static function contentsUnresolvedReason(string $contents): ?string
+    {
+        if (str_contains($contents, "\0")) {
+            // 走査対象に分類したのにバイナリ = 分類が誤っている。無言で外さない
+            return '走査対象に分類されているが NUL を含む (分類の誤り)';
+        }
+        if (! mb_check_encoding($contents, 'UTF-8')) {
+            return 'UTF-8 として不正';
+        }
+
+        return null;
+    }
+
     /** 母集団を確定する (唯一の経路)。 */
     public static function population(): LegacyUrlScanPopulation
     {
@@ -323,14 +343,9 @@ final class LegacyUrlScanRoots
 
                 continue;
             }
-            if (str_contains($contents, "\0")) {
-                // ★走査対象に分類したのにバイナリ = 分類が誤っている。無言で外さない
-                $unresolved[$relative] = '走査対象に分類されているが NUL を含む (分類の誤り)';
-
-                continue;
-            }
-            if (! mb_check_encoding($contents, 'UTF-8')) {
-                $unresolved[$relative] = 'UTF-8 として不正';
+            $contentsReason = self::contentsUnresolvedReason($contents);
+            if ($contentsReason !== null) {
+                $unresolved[$relative] = $contentsReason;
 
                 continue;
             }

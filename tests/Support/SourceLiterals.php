@@ -20,19 +20,32 @@ namespace Tests\Support;
  *     `'` / `"` / `` ` `` に挟まれた範囲を採り、`//` 行コメント・ブロックコメント (`/`+`*` から `*`+`/` まで)・
  *     `#` 行コメント (Python) は読み飛ばす。**`//` の直前が `:` のときはコメントにしない**
  *     (`https://` を行コメントと誤読して行の残りを落とさないため)。
+ *     正規表現リテラル (`/…/`) は**直前の意味のある文字が値の終わりでないとき**に限り
+ *     読み飛ばす (`= /…/` `( /…/` `, /…/` `: /…/` `[ /…/` `return /…/`)。
  *
  * ★**保証しないもの (誇張しない)**:
  *   - 実行時に組み立てる形 (`'/dash'.$suffix` / `'/' + name`) は 1 つのリテラルに見えないので
  *     連結後の値では判定できない。連結前の断片だけを見る。
- *   - script 側は言語の構文解析ではない。正規表現リテラル (`/…/g`) の中の引用符、
- *     Svelte の `<!-- -->` コメント、JSX/HTML 属性の引用符なし記法は
- *     **文字列として採られる / 採られないのどちらかに倒れる**。倒れる方向は
- *     「採る (過検出)」であり、見逃す方向ではない。
+ *   - **script 側は言語の構文解析ではない**。正規表現リテラルの判定は上記の発見的規則であり、
+ *     割り算との区別を完全には行わない。判定を誤ると引用符の対応がずれ、
+ *     **見逃す方向にも倒れうる**。同様に Svelte の `<!-- -->` コメント・
+ *     引用符なし HTML 属性・テンプレートリテラル内の入れ子も保証しない。
+ *     利用側 gate はこの限界を**自分の検出力の主張から明示的に除く**こと。
  *   - Python の三重引用符は、同じ引用符 3 つの連なりとして 2 つの空文字列 + 本体に割れる
  *     (本体は採られるので見逃さない)。
  */
 final class SourceLiterals
 {
+    /**
+     * この語の直後の `/` は正規表現リテラルの開始である (値の終わりではない語)。
+     *
+     * @var list<string>
+     */
+    private const array REGEX_PRECEDING_KEYWORDS = [
+        'return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void',
+        'do', 'else', 'yield', 'await', 'case', 'throw',
+    ];
+
     /** インスタンス化しない (純関数の置き場)。 */
     private function __construct() {}
 
@@ -107,10 +120,93 @@ final class SourceLiterals
         return $literals;
     }
 
+    /**
+     * その `/` が正規表現リテラルの開始か (発見的規則)。
+     *
+     * ★直前の意味のある文字が「値の終わり」(英数字 / `_` / `$` / `)` / `]` / `}` / 引用符)
+     *   でなければ正規表現リテラルとみなす。JavaScript の字句規則の近似であり、
+     *   `}` の後の正規表現などは割り算側へ倒れる (docblock に明記した限界)。
+     */
+    private static function opensRegexLiteral(string $source, int $index): bool
+    {
+        for ($i = $index - 1; $i >= 0; $i--) {
+            $char = $source[$i];
+            if ($char === ' ' || $char === "\t" || $char === "\r" || $char === "\n") {
+                continue;
+            }
+
+            if (ctype_alnum($char) || $char === '_' || $char === '$') {
+                // 直前が識別子。**キーワードなら値ではない**ので正規表現の開始になりうる
+                $start = $i;
+                while ($start >= 0 && (ctype_alnum($source[$start]) || $source[$start] === '_' || $source[$start] === '$')) {
+                    $start--;
+                }
+                $word = substr($source, $start + 1, $i - $start);
+
+                return in_array($word, self::REGEX_PRECEDING_KEYWORDS, true);
+            }
+
+            return ! in_array($char, [')', ']', '}', '"', "'", '`'], true);
+        }
+
+        return true;
+    }
+
     /** バイト位置から 1 起点の行番号を求める (ヒアドキュメント開始などの補助)。 */
     private static function lineAt(string $source, int $offset): int
     {
         return substr_count(substr($source, 0, $offset), "\n") + 1;
+    }
+
+    /**
+     * script 系ソースの**コメントを空白へ潰した写し** (長さと位置は元と同一)。
+     *
+     * ★リテラルの前後関係を生ソースで見る判定 (「この呼び出しの引数か」等) は、
+     *   コメントの中の文字列に騙されてはならない。位置を保ったまま潰すことで、
+     *   呼び出し側は offset をそのまま使える。
+     */
+    public static function maskComments(string $source, bool $hashComments = false): string
+    {
+        return self::mask($source, self::commentSpans($source, $hashComments));
+    }
+
+    /**
+     * script 系ソースの**文字列リテラルが占める範囲** (引用符を含む)。
+     *
+     * ★宣言 (import 等) を構文として読む判定は、**文字列の中に書かれた偽の宣言**にも
+     *   騙されてはならない。ただし宣言そのものが文字列 (module 指定) を含むため、
+     *   文字列を潰すのではなく「宣言の位置が文字列の中か」を問う形で使う。
+     *
+     * @return list<array{int, int}>
+     */
+    public static function stringSpans(string $source, bool $hashComments = false): array
+    {
+        $spans = [];
+        foreach (self::walk($source, $hashComments)['literals'] as $literal) {
+            // 引用符ごと数える (開始位置は引用符、値の長さ + 2 が最大)
+            $spans[] = [$literal['offset'], min(strlen($source), $literal['offset'] + strlen($literal['value']) + 2)];
+        }
+
+        return $spans;
+    }
+
+    /**
+     * 指定した範囲を空白へ潰す (改行は残す)。
+     *
+     * @param  list<array{int, int}>  $spans
+     */
+    private static function mask(string $source, array $spans): string
+    {
+        $masked = $source;
+        foreach ($spans as [$start, $end]) {
+            for ($i = $start; $i < $end; $i++) {
+                if ($masked[$i] !== "\n") {
+                    $masked[$i] = ' ';
+                }
+            }
+        }
+
+        return $masked;
     }
 
     /**
@@ -121,7 +217,31 @@ final class SourceLiterals
      */
     public static function script(string $source, bool $hashComments = false): array
     {
+        return self::walk($source, $hashComments)['literals'];
+    }
+
+    /**
+     * script 系ソースのコメントの範囲 (開始 offset, 終了 offset)。
+     *
+     * @return list<array{int, int}>
+     */
+    private static function commentSpans(string $source, bool $hashComments): array
+    {
+        return self::walk($source, $hashComments)['comments'];
+    }
+
+    /**
+     * script 系ソースを 1 度だけ走査し、**文字列リテラルとコメントの範囲を同時に**返す。
+     *
+     * ★同じ字句規則を 2 本持たないための単一の走査である
+     *   (2 本あると「片方だけ直して食い違う」経路が生まれる)。
+     *
+     * @return array{literals: list<array{line: int, offset: int, value: string}>, comments: list<array{int, int}>}
+     */
+    private static function walk(string $source, bool $hashComments): array
+    {
         $literals = [];
+        $comments = [];
         $length = strlen($source);
         $line = 1;
         $index = 0;
@@ -139,15 +259,18 @@ final class SourceLiterals
             // 行コメント (`//`)。直前が `:` なら URL の一部なのでコメントにしない
             if ($char === '/' && $index + 1 < $length && $source[$index + 1] === '/'
                 && ! ($index > 0 && $source[$index - 1] === ':')) {
+                $commentStart = $index;
                 while ($index < $length && $source[$index] !== "\n") {
                     $index++;
                 }
+                $comments[] = [$commentStart, $index];
 
                 continue;
             }
 
             // ブロックコメント
             if ($char === '/' && $index + 1 < $length && $source[$index + 1] === '*') {
+                $commentStart = $index;
                 $index += 2;
                 while ($index + 1 < $length && ! ($source[$index] === '*' && $source[$index + 1] === '/')) {
                     if ($source[$index] === "\n") {
@@ -156,12 +279,44 @@ final class SourceLiterals
                     $index++;
                 }
                 $index = min($index + 2, $length);
+                $comments[] = [$commentStart, $index];
 
                 continue;
             }
 
             if ($hashComments && $char === '#') {
+                $commentStart = $index;
                 while ($index < $length && $source[$index] !== "\n") {
+                    $index++;
+                }
+                $comments[] = [$commentStart, $index];
+
+                continue;
+            }
+
+            // 正規表現リテラル。直前の意味のある文字が「値の終わり」でないときだけそう読む
+            // (発見的規則。割り算との区別を完全には行わない = docblock に明記済み)
+            if (! $hashComments && $char === '/' && self::opensRegexLiteral($source, $index)) {
+                $index++;
+                $inClass = false;
+                while ($index < $length) {
+                    $current = $source[$index];
+                    if ($current === '\\') {
+                        $index += 2;
+
+                        continue;
+                    }
+                    if ($current === "\n") {
+                        break; // 正規表現リテラルは改行を跨げない = 読み違いだった
+                    }
+                    if ($current === '[') {
+                        $inClass = true;
+                    } elseif ($current === ']') {
+                        $inClass = false;
+                    } elseif ($current === '/' && ! $inClass) {
+                        $index++;
+                        break;
+                    }
                     $index++;
                 }
 
@@ -209,6 +364,6 @@ final class SourceLiterals
             $index++;
         }
 
-        return $literals;
+        return ['literals' => $literals, 'comments' => $comments];
     }
 }

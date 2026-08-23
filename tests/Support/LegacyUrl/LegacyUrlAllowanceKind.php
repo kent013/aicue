@@ -7,33 +7,51 @@ namespace Tests\Support\LegacyUrl;
 /**
  * 旧 URL 検出の許可区分。
  *
- * ★区分は**限定列挙**である。「なんとなく直せない」を入れる口を作らない。
- *   新しい区分を足す操作そのものがレビューに見えることが目的である。
+ * ★区分は**限定列挙**であり、**それぞれが機械で確かめられる前提を持つ**
+ *   (`LegacyUrlAllowance::preconditionViolation()` が区分ごとに検査する)。
+ *   前提を持たない区分は「説明ラベル」にすぎず、走査器共通規約 (d)
+ *   「集めた走査結果を判定に使わない形を作らない」に触れる。
+ * ★新しい区分を足す操作そのものがレビューに見えることが目的なので、
+ *   区分を増やすときは**前提の検査も同じ変更で書く**。
  */
 enum LegacyUrlAllowanceKind: string
 {
     /**
-     * URL ではなく**保存先のパス**である (ファイルシステム / オブジェクトストレージの鍵)。
+     * **正規の分岐入口** (`capture.entry`) としての出現。
      *
-     * 走査根を組み立てる `dirname(__DIR__, 2).'/app/Prompts'` や、
-     * 保存先の鍵 `orgs/{org}/projects/…` のような形は、字面が URL の根と一致するだけで
-     * 画面の経路ではない。
+     * 前提: 一致した語が撮影 PWA の根そのものであり、かつ route 表の `capture.entry` の
+     * URI がその語と一致すること (入口が動いたら登録ごと赤くなる)。
+     */
+    case CanonicalCaptureEntry = 'canonical_capture_entry';
+
+    /**
+     * URL ではなく**リポジトリ内のディレクトリのパス**である。
+     *
+     * 前提: 一致した語をリポジトリルートからの相対パスとして解決したとき、
+     * **実在するディレクトリ**であること (`/app` → `app/`)。
      */
     case FilesystemPath = 'filesystem_path';
 
     /**
-     * 旧 URL が**もう存在しないこと自体を確かめている**記述。
+     * URL ではなく**オブジェクトストレージの鍵**である。
      *
-     * 「この URL は 404 になる」ことを固定するテストは、対象の旧 URL を持つのが役目である。
+     * 前提: 同じファイルに鍵の接頭辞 (`LegacyUrlAllowance::STORAGE_KEY_MARKERS`) が現れること。
+     */
+    case StorageObjectKey = 'storage_object_key';
+
+    /**
+     * 撤去したものが**もう無いこと自体を説明している**記述。
+     *
+     * 前提: 同じファイルに撤去の語 (`LegacyUrlAllowance::REMOVAL_MARKER`) が現れること。
      */
     case AbsenceAssertion = 'absence_assertion';
 
     /**
      * **組織相対パス**として宣言された値で、組織 prefix は利用側が付ける。
      *
-     * 静的な表 (画面から slug を受け取れない定数) が持つ相対パスがこれに当たる。
-     * 登録するときは「利用側が必ず組織 URL の入口を通す」ことを同じ変更で確かめること
-     * (通していなければそれは旧 URL であり、許可ではなく修正が要る)。
+     * 前提: 登録が名指しした**利用側のファイル**が実在し、そこに組織 URL 組み立ての入口
+     * (`LegacyUrlScanner::ORGANIZATION_URL_MODULE` の関数) が現れること。
+     * 利用側を書かない登録は作れない (「なんとなく直せない」を入れる口を塞ぐ)。
      */
     case OrganizationRelativePath = 'organization_relative_path';
 }

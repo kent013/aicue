@@ -7,7 +7,6 @@
 - テンプレートリテラル: /organizations/${slug}/billing
 - 山括弧の置換子: /organizations/<slug>/manage/users
 - 根の下の第 2 セグメント: /organizations/acme/billing/purchase-tickets
-- 正規の分岐入口: /app
 - 接頭辞つき: /myapp
 - 打ち消しつき: /app-old
 - 接尾辞つき: /appx

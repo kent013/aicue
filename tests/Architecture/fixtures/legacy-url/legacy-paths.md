@@ -14,4 +14,5 @@
 - 遮断の着地は /billing-required)
 - 管理は /manage/users|
 - 撮影 PWA の配下は /app/projects/1/manuals
+- 裸の入口も許可目録に無ければ検出する /app
 - 撤去した route 名は organizations.switch である

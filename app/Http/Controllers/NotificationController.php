@@ -100,8 +100,15 @@ class NotificationController extends Controller
             $item->isManualJob() => redirect()
                 ->route('notifications.index', ['organization' => $organization->slug], 303)
                 ->with('info', '対象の動画マニュアルは削除されています。'),
+            // 残高通知も**通知の org と URL の組織が一致するときだけ**その組織の購入画面へ送る。
+            // 一致しないまま送ると「別組織の残高通知を開いたのに、いま見ている組織の購入画面が出る」
+            // = 通知の対象と操作先が食い違う (組織を URL 以外から読み替えないという裁定とも矛盾する)。
+            $item->type === NotificationType::TicketBalanceLow
+                && $this->belongsToCurrentOrg($organization, $item) => redirect()
+                    ->route('billing.tickets.show', ['organization' => $organization->slug], 303),
             $item->type === NotificationType::TicketBalanceLow => redirect()
-                ->route('billing.tickets.show', ['organization' => $organization->slug], 303),
+                ->route('notifications.index', ['organization' => $organization->slug], 303)
+                ->with('info', 'この通知は別の組織のものです。その組織の画面から開いてください。'),
             // 招待通知: 受諾可能な一覧が出る通知センターへ戻す。
             // ★通知 payload は招待 id を持たないため「この招待」を特定できない。
             //   したがって flash は**集合表現**にする (件数 0 のときだけ説明を出す)。

@@ -241,8 +241,11 @@ describe("Dashboard", () => {
         const body = screen.getByTestId("billing-callout-body");
         expect(body).toHaveTextContent("ご利用にはプランの選択が必要です。");
         expect(body).not.toHaveTextContent("お支払いが確認できない");
+        // ★CTA は **組織 URL 配下**を指す (BILLING_CALLOUTS の組織相対パスを
+        //   currentOrgUrl() が写していることの behavioral な固定。
+        //   旧 URL 残存検査の許可目録 (OrganizationRelativePath) はこの検査を根拠にしている)
         expect(screen.getByText("プランを選ぶ").getAttribute("href")).toMatch(
-            /\/onboarding\/checkout$/,
+            /^https?:\/\/[^/]+\/organizations\/test-org\/onboarding\/checkout$/,
         );
     });
 
@@ -259,7 +262,7 @@ describe("Dashboard", () => {
             "お支払いのお手続きが完了していません。",
         );
         expect(screen.getByText("プラン選択へ").getAttribute("href")).toMatch(
-            /\/onboarding\/checkout$/,
+            /^https?:\/\/[^/]+\/organizations\/test-org\/onboarding\/checkout$/,
         );
     });
 
@@ -280,7 +283,7 @@ describe("Dashboard", () => {
             "サブスクリプションのお支払いが確認できないため、一部機能を一時停止しています。お支払い方法をご確認ください。",
         );
         expect(screen.getByText("お支払い方法を確認").getAttribute("href")).toMatch(
-            /\/billing$/,
+            /^https?:\/\/[^/]+\/organizations\/test-org\/billing$/,
         );
     });
 

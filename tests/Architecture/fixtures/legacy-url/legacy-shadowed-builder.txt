@@ -1,0 +1,4 @@
+function orgUrl(slug, path) {
+    return path;
+}
+const leaked = orgUrl(slug, "/projects");
