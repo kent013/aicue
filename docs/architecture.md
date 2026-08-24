@@ -2371,18 +2371,31 @@ lctl 台帳 feature `account-deletion-billing-guard` の標準形 v1 (裁定 AG-
   `subscription`) は入れ替えない (親を先に消すと FK cascade で子が件数報告を経由せず消える)。
 - **台帳 (`ticket_ledger_entries`) だけ方式が違う理由**: そこが**残高の真実源**だからである。
   期限超過の行をそのまま消すと利用者のチケット残高が変わる。畳み込み
-  (`App\Services\Billing\TicketLedgerCarryForwardService`) は
-  `(organization_id, source, expires_at)` ごとに合算し、`kind = carry_forward` の
-  **残高スナップショット 1 行**へ置換する。**group key に `organization_id` を必ず含める**
+  (`App\Services\Billing\Retention\TicketLedgerCarryForwardService`) は
+  **判定を 2 段**に分ける。第 1 段 (適格性 = `created_at <= 閾値`) を満たさない行は 1 行も触らず、
+  第 2 段 (寄与判定) で**既に失効した行は繰越に含めず物理削除**し、
+  **まだ残高に寄与する行だけ**を `(organization_id, source, expires_at)` ごとに合算して
+  `kind = carry_forward` の**残高スナップショット 1 行**へ置換する。
+  失効済みの窓を集約の単位に残さないので、**繰越行は集約単位ごとに 1 行へ収束する**
+  (= 繰越行の有界化)。**group key に `organization_id` を必ず含める**
   (欠くと組織を跨いで残高を合算する)。`source IS NULL` (legacy 行) は独立した group。
   繰越行は**取引記録ではなく残高のスナップショット**であり、原取引の識別子を 1 つも
-  引き継がない (`carried_forward_through` に集約期間の終端だけを持つ)。
+  引き継がない。**`created_at` は畳み込んだ行の最大 `created_at`** (集約の基準時刻) であって
+  実行時刻ではない — 実行時刻にすると繰越行が実行のたびに増え、収束しない。
+  **母集団は論理削除済み (退会済み) 組織も含む** (`Organization` は `SoftDeletes` であり、
+  課金記録の保持義務は退会より寿命が長い。`docs/template-divergence.md` D23)。
+  `candidates` / `expiredRemaining` が数える「決着対象」の語の**正本は
+  `App\DataTransferObjects\Billing\BillingRetentionPurgeResultDto` の docblock**である。
   残高が 1 枚も変わらないことは `tests/Feature/Billing/TicketLedgerCarryForwardTest.php` が
   組織 / source / 失効時刻の粒度で機械固定する。
+  **列を落とす migration の順序と rollback の正本は
+  `docs/billing-retention-runbook.md`** であり、本書には書かない。
 - **台帳を読む場所は目録制** (`TicketLedgerReaderInventoryTest`)。畳み込みの帰結として
   「7 年より古い個別取引は復元できない」ため、個別行に依存する読み手が宣言なしに増えると
   ある日その経路だけが静かに壊れる。目録は読み方 (`aggregate` / `row_detail` / `other_table`)
-  の宣言を強制する。
+  の宣言を強制する。**書き込む場所も目録制**である
+  (`TicketLedgerMutationSiteGateTest` が表名リテラル / モデル参照 + 変更語彙 /
+  論理削除 scope を件数まで deny-by-default で固定する)。
 - **監視対象**: 本コマンドの終了コード (`unexpected_failures > 0` で `FAILURE`) と、
   出力の `horizon:` 行 (**OK / NG / 判定不能** の 3 値)。**`fail_closed` は「安全に残した」であって
   「規約を満たした」ではない**ので、`horizon: NG` の継続と `fail_closed` の増加を正常成功として

@@ -75,6 +75,7 @@ const TICKET_LEDGER_COLUMN_SCAN_DIRS = [
     'Services/Billing',
     'Console/Commands/Billing',
     'Enums/Billing',
+    'DataTransferObjects/Billing',
 ];
 
 /**
@@ -88,6 +89,10 @@ const TICKET_LEDGER_COLUMN_SCAN_DIRS = [
  * @var array<string, array{string, string}>
  */
 const TICKET_LEDGER_READER_INVENTORY = [
+    'DataTransferObjects/Billing/CarryForwardGroup.php' => [
+        'aggregate',
+        '畳み込みの集約結果の境界型。列名リテラル (source / expires_at) で生の集計行を型へ確定させるだけで個別行は読まない',
+    ],
     'Models/Billing/TicketLedgerEntry.php' => [
         'row_detail',
         '台帳モデルそのもの。列定義と append-only guard (update/delete の例外化) を持つ',
@@ -102,11 +107,11 @@ const TICKET_LEDGER_READER_INVENTORY = [
     ],
     'Services/Billing/TicketLedgerService.php' => [
         'aggregate',
-        '台帳の唯一の書き込み窓口。残高は source / expires_at 別の SUM で読み、個別取引行の識別子には依存しない',
+        '台帳の通常の追記の窓口 (追記と payment_intent_id の限定 backfill)。残高は source / expires_at 別の SUM で読み、個別取引行の識別子には依存しない',
     ],
-    'Services/Billing/TicketLedgerCarryForwardService.php' => [
+    'Services/Billing/Retention/TicketLedgerCarryForwardService.php' => [
         'row_detail',
-        '保持期間の畳み込み本体。期限超過の個別取引行を残高スナップショット 1 行へ置換する唯一の経路',
+        '保持期限の畳み込み本体 (二段判定)。失効済みの個別取引行を物理削除し、寄与する行を残高スナップショット 1 行へ置換する唯一の経路',
     ],
     'Services/Billing/Retention/TicketLedgerEntryPurger.php' => [
         'aggregate',
