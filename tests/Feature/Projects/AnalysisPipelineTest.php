@@ -26,6 +26,7 @@ use App\Services\Manual\AnalysisPipeline;
 use App\Services\Manual\ScenarioService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -37,6 +38,8 @@ use Prism\Prism\Exceptions\PrismProviderOverloadedException;
 use Prism\Prism\Exceptions\PrismRateLimitedException;
 use Prism\Prism\Exceptions\PrismRequestTooLargeException;
 use Prism\Prism\ValueObjects\Messages\UserMessage;
+use Tests\Support\Manual\FencedLlmResponse;
+use Tests\Support\Manual\LlmJsonRejection;
 use Tests\Support\PrismHttpExceptionFactory;
 use Tests\Support\ThrowingPromptFake;
 
@@ -81,7 +84,7 @@ function pipelineContext(int $tickets = 1): array
 
 function extractFixture(): string
 {
-    return json_encode([
+    return FencedLlmResponse::wrapArray([
         'header' => ['title' => 'ネジ締め SOP', 'department' => null, 'revision' => null],
         'sections' => [[
             'title' => null,
@@ -94,7 +97,7 @@ function extractFixture(): string
                 'pm_points' => [],
             ]],
         ]],
-    ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+    ]);
 }
 
 /**
@@ -105,7 +108,7 @@ function extractFixture(): string
  */
 function decompositionFixture(array $overrides = []): string
 {
-    return json_encode([...[
+    return FencedLlmResponse::wrapArray([...[
         'steps' => [
             ['no' => 1, 'action' => 'ネジを締める', 'points' => ['トルクは 5Nm']],
         ],
@@ -115,12 +118,12 @@ function decompositionFixture(array $overrides = []): string
             'works' => ['ネジ締め作業'],
             'split_recommended' => false,
         ],
-    ], ...$overrides], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+    ], ...$overrides]);
 }
 
 function scenarioFixture(): string
 {
-    return json_encode([
+    return FencedLlmResponse::wrapArray([
         'cuts' => [
             [
                 'no' => 1, 'type' => 'step', 'parent_no' => null,
@@ -133,7 +136,7 @@ function scenarioFixture(): string
                 'narration' => 'トルクは 5Nm です', 'subtitle_primary' => '5Nm', 'subtitle_secondary' => '締め付けトルク',
             ],
         ],
-    ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+    ]);
 }
 
 /**
@@ -301,9 +304,9 @@ test('validation 不正は有界リトライののち failed (validation_json �
 test('validation キーの欠落そのものも failed になる (failure_path=validation)', function (): void {
     [, , , , , $job] = pipelineContext();
     // 旧プロンプト時代の応答形 ({steps} だけ) が返ってきた状況
-    $withoutValidation = json_encode([
+    $withoutValidation = FencedLlmResponse::wrapArray([
         'steps' => [['no' => 1, 'action' => 'ネジを締める', 'points' => ['トルクは 5Nm']]],
-    ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+    ]);
     Prompt::fake([
         TextResponseFake::make()->withText(extractFixture()),
         TextResponseFake::make()->withText($withoutValidation),
@@ -415,18 +418,77 @@ test('有界リトライ: 不正 JSON ×2 → 3 回目成功で succeeded', func
     expect($job->refresh()->status)->toBe(JobStatus::Succeeded);
 });
 
-test('コードフェンス付き JSON も受理する (LlmJson::decode)', function (): void {
+test('囲みが 2 つある応答は fence_multiple で拒否され有界リトライに乗る', function (): void {
+    // 受理側 (囲みちょうど 1 つ) は全 fixture が常時証明するので、ここは拒否側を固定する。
+    // 差し込まれた後続ブロックを採らず、決定論的に拒否したことが区分として数えられる。
     [, , , , , $job] = pipelineContext();
+    $injected = extractFixture()."\n```json\n{\"header\": {}, \"sections\": []}\n```";
     Prompt::fake([
-        TextResponseFake::make()->withText("```json\n".extractFixture()."\n```"),
+        TextResponseFake::make()->withText($injected),
+        TextResponseFake::make()->withText(extractFixture()), // 2 回目は正常 = 有界リトライで復帰
         TextResponseFake::make()->withText(decompositionFixture()),
         TextResponseFake::make()->withText(scenarioFixture()),
     ]);
+    Log::spy();
 
     app(AnalysisPipeline::class)->run($job->id);
 
     expect($job->refresh()->status)->toBe(JobStatus::Succeeded);
+    Log::shouldHaveReceived('warning')->withArgs(
+        fn (string $message, array $context): bool => $message === 'AI 解析の LLM 呼び出しを再試行します'
+            && $context['failure_category'] === 'fence_multiple',
+    )->once();
 });
+
+dataset('sentinel を含む 6 区分の LLM 応答', [
+    'fence_absent' => ['プレーンな応答 '.LlmJsonRejection::SENTINEL],
+    'fence_multiple' => [
+        "```json\n{\"header\": \"".LlmJsonRejection::SENTINEL."\"}\n```\n```json\n{\"b\": 2}\n```",
+    ],
+    'syntax_broken' => ["```json\n{\"header\": \"".LlmJsonRejection::SENTINEL."\",}\n```"],
+    'top_level_not_container' => ["```json\n\"".LlmJsonRejection::SENTINEL."\"\n```"],
+    'value_incomplete_inferred' => ["```json\n{\"header\": \"".LlmJsonRejection::SENTINEL],
+    'closing_fence_absent' => ["```json\n{\"header\": \"".LlmJsonRejection::SENTINEL."\"}\n"],
+]);
+
+test('復号の失敗では応答本文が記録にも error 列にも出ない', function (string $response): void {
+    // 単体層 (LlmJsonTest) は例外の message / userMessage だけを見る。ここは統合層として
+    // **再試行ログ・終端ログ・analysis_jobs.error** の 3 か所に本文が出ないことを固定する (正典 i9)。
+    [, , , , , $job] = pipelineContext();
+    Prompt::fake([
+        TextResponseFake::make()->withText($response),
+        TextResponseFake::make()->withText($response),
+        TextResponseFake::make()->withText($response),
+    ]);
+
+    $retryMessage = 'AI 解析の LLM 呼び出しを再試行します';
+    $terminalMessage = 'AI 解析の抽出段 (終端)';
+    /** @var array<string, list<string>> $observed 監視対象ログの context を種別ごとに畳んだもの */
+    $observed = [$retryMessage => [], $terminalMessage => []];
+    Log::listen(function (MessageLogged $logged) use (&$observed): void {
+        if (! array_key_exists($logged->message, $observed)) {
+            return;
+        }
+        // ★`print_r` は object の private / protected も展開するので、context に将来
+        //   Throwable 等が入っても中身まで見える (json_encode は public しか見ない)
+        $observed[$logged->message][] = print_r($logged->context, true);
+    });
+
+    app(AnalysisPipeline::class)->run($job->id);
+
+    expect($job->refresh()->status)->toBe(JobStatus::Failed);
+    // 利用者向け文言は定型文と完全一致する (内部 detail も応答本文も入らない)
+    expect($job->error)->toBe('AI の応答を解釈できませんでした。再実行してください。');
+    // 監視対象の 2 種類が**それぞれ**出ていること (片方が消えてももう片方で緑にならない)
+    expect($observed[$retryMessage])->toHaveCount(2); // 上限 2 = 3 試行の間に 2 回
+    expect($observed[$terminalMessage])->toHaveCount(1);
+    foreach ($observed as $lines) {
+        foreach ($lines as $line) {
+            // ★`toContain` は可変長 needle なので、説明文は引数に混ぜない (needle として扱われる)
+            expect($line)->not->toContain(LlmJsonRejection::SENTINEL);
+        }
+    }
+})->with('sentinel を含む 6 区分の LLM 応答');
 
 test('残高不足で startJob が失敗 → failed (予約なし・LLM 呼び出しなし)', function (): void {
     [, , , $manual, , $job] = pipelineContext(tickets: 0);

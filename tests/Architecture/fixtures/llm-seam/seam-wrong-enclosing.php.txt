@@ -1,0 +1,16 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Fixture\LlmSeam;
+
+use App\Prompts\SopExtractPrompt;
+
+// 負例: 受け手は解決できるが、応答が**登録されていない関数**の引数になっている。
+final class WrongEnclosing
+{
+    public function run(string $text): string
+    {
+        return Sink::consume(SopExtractPrompt::make($text)->executeSync());
+    }
+}

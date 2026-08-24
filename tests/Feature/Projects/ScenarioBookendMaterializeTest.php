@@ -20,6 +20,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Kent013\PrismPrompt\Prompt;
 use Kent013\PrismPrompt\Testing\TextResponseFake;
+use Tests\Support\Manual\FencedLlmResponse;
 
 /*
  * 導入/総括カットの materialize 不変条件 (T046)。
@@ -61,7 +62,7 @@ function bookendPipelineContext(string $title = 'ネジ締め作業'): array
 
 function bookendExtractJson(): string
 {
-    return json_encode([
+    return FencedLlmResponse::wrapArray([
         'header' => ['title' => 'SOP', 'department' => null, 'revision' => null],
         'sections' => [[
             'title' => null,
@@ -74,12 +75,12 @@ function bookendExtractJson(): string
                 'pm_points' => [],
             ]],
         ]],
-    ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+    ]);
 }
 
 function bookendDecomposeJson(): string
 {
-    return json_encode([
+    return FencedLlmResponse::wrapArray([
         'steps' => [['no' => 1, 'action' => 'ネジを締める', 'points' => ['トルクは 5Nm']]],
         'validation' => [
             'verdict' => 'valid',
@@ -87,7 +88,7 @@ function bookendDecomposeJson(): string
             'works' => ['ネジ締め作業'],
             'split_recommended' => false,
         ],
-    ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+    ]);
 }
 
 /**
@@ -119,7 +120,7 @@ function bookendScenarioJson(array $steps): string
         }
     }
 
-    return json_encode(['cuts' => $cuts], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+    return FencedLlmResponse::wrapArray(['cuts' => $cuts]);
 }
 
 /** 3 段 (extract / decompose / generate) の Prompt fake を張る (generate は与えた scenario JSON)。 */

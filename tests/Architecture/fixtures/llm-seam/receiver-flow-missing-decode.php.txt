@@ -1,0 +1,16 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Fixture\LlmSeam;
+
+// 負例: 復号点を通していない (自前で読んでいる)。
+final class ReceiverFlowMissingDecode
+{
+    public static function fromLlmText(string $text): self
+    {
+        unserialize($text);
+
+        return new self();
+    }
+}
