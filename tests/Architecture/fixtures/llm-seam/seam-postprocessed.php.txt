@@ -1,0 +1,34 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Fixture\LlmSeam;
+
+use App\DataTransferObjects\Manual\Analysis\ExtractedSopData;
+use App\Prompts\SopExtractPrompt;
+
+// 負例: 受け手は解決できるが、応答を**加工してから**渡している。
+// 「登録済みの受け取り関数の直接の引数」ではないので囲みは解決しない。
+final class Postprocessed
+{
+    public function suffixed(string $text): ExtractedSopData
+    {
+        return ExtractedSopData::fromLlmText(
+            SopExtractPrompt::make($text)->executeSync().'suffix',
+        );
+    }
+
+    public function coalesced(string $text): ExtractedSopData
+    {
+        return ExtractedSopData::fromLlmText(
+            SopExtractPrompt::make($text)->executeSync() ?: '{}',
+        );
+    }
+
+    public function boxed(string $text): ExtractedSopData
+    {
+        return ExtractedSopData::fromLlmText(
+            [SopExtractPrompt::make($text)->executeSync()][0],
+        );
+    }
+}

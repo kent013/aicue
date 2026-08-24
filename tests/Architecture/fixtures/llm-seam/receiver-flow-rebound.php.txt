@@ -1,0 +1,19 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Fixture\LlmSeam;
+
+use App\Support\Manual\LlmJson;
+
+// 負例: 生の応答を別変数へ移してから渡している (別サービスへ回せる形)。
+final class ReceiverFlowRebound
+{
+    public static function fromLlmText(string $text): self
+    {
+        $copy = $text;
+        $decoded = LlmJson::decode($copy);
+
+        return new self($decoded);
+    }
+}
