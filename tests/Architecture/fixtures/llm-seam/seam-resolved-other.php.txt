@@ -1,0 +1,15 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Fixture\LlmSeam;
+
+// 負例: 目録の鍵でない型が受け手。解決はできるので `ResolvedOther` になる
+// (未解決と混ぜない = 理由つきの別目録が要る、という分類)。
+final class ResolvedOther
+{
+    public function run(string $text): string
+    {
+        return Unregistered::make($text)->executeSync();
+    }
+}

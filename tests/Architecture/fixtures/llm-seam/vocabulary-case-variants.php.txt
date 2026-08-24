@@ -1,0 +1,32 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Fixture\LlmSeam;
+
+use function JSON_DECODE as decodeJson;
+
+// 負例: PHP の関数名は大文字小文字を区別しないので、綴りを変えた形もすべて実行できる。
+// 文字列 callable の先頭 `\` も global を指す。いずれも違反として拾う。
+final class VocabularyCaseVariants
+{
+    public function upper(string $text): mixed
+    {
+        return JSON_DECODE($text, true);
+    }
+
+    public function mixedFullyQualified(string $text): mixed
+    {
+        return \Json_Decode($text, true);
+    }
+
+    public function upperAlias(string $text): mixed
+    {
+        return decodeJson($text, true);
+    }
+
+    public function leadingBackslashCallable(string $text): mixed
+    {
+        return call_user_func('\json_decode', $text, true);
+    }
+}

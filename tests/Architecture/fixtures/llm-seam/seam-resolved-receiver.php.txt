@@ -1,0 +1,25 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Fixture\LlmSeam;
+
+use App\DataTransferObjects\Manual\Analysis\ExtractedSopData;
+use App\Prompts\SopExtractPrompt;
+
+// 正例: 応答が登録済みの受け取り関数の**直接の引数**になっている。
+// make() の引数に入れ子の呼び出し・配列・名前付き引数・クロージャ・改行があっても
+// 受け手の解決 (段 3 の括弧の対応) は成立する。
+final class ResolvedReceiver
+{
+    public function run(string $text): ExtractedSopData
+    {
+        return ExtractedSopData::fromLlmText(
+            SopExtractPrompt::make(
+                untrusted: trim($text),
+                options: ['retries' => 1, 'tags' => ['a', 'b']],
+                decorate: static fn (string $value): string => $value,
+            )->executeSync(),
+        );
+    }
+}

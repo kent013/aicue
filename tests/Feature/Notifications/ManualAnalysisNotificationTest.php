@@ -19,6 +19,7 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Kent013\PrismPrompt\Prompt;
 use Kent013\PrismPrompt\Testing\TextResponseFake;
+use Tests\Support\Manual\FencedLlmResponse;
 
 /*
  * 解析ジョブ terminal 遷移の通知配線 (施策3/4):
@@ -67,7 +68,7 @@ function analysisNotificationContext(?User $creator = null, ?User $triggeredBy =
 function fakeAnalysisLlmSuccess(): void
 {
     Prompt::fake([
-        TextResponseFake::make()->withText(json_encode([
+        TextResponseFake::make()->withText(FencedLlmResponse::wrapArray([
             'header' => ['title' => 'SOP', 'department' => null, 'revision' => null],
             'sections' => [[
                 'title' => null,
@@ -76,8 +77,8 @@ function fakeAnalysisLlmSuccess(): void
                     'safety_points' => [], 'quality_points' => [], 'pm_points' => [],
                 ]],
             ]],
-        ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)),
-        TextResponseFake::make()->withText(json_encode([
+        ])),
+        TextResponseFake::make()->withText(FencedLlmResponse::wrapArray([
             'steps' => [['no' => 1, 'action' => 'ネジを締める', 'points' => []]],
             'validation' => [
                 'verdict' => 'valid',
@@ -85,14 +86,14 @@ function fakeAnalysisLlmSuccess(): void
                 'works' => ['ネジ締め作業'],
                 'split_recommended' => false,
             ],
-        ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)),
-        TextResponseFake::make()->withText(json_encode([
+        ])),
+        TextResponseFake::make()->withText(FencedLlmResponse::wrapArray([
             'cuts' => [[
                 'no' => 1, 'type' => 'step', 'parent_no' => null,
                 'scene' => 'ネジ締め', 'shot_type' => 'hiki', 'shooting_point' => null,
                 'narration' => 'ネジを締めます', 'subtitle_primary' => null, 'subtitle_secondary' => null,
             ]],
-        ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)),
+        ])),
     ]);
 }
 

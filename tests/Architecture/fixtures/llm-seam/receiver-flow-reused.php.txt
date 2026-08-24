@@ -1,0 +1,19 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Fixture\LlmSeam;
+
+use App\Support\Manual\LlmJson;
+
+// 負例: 生の応答を 2 回使っている (復号点の外でも触っている)。
+final class ReceiverFlowReused
+{
+    public static function fromLlmText(string $text): self
+    {
+        $decoded = LlmJson::decode($text);
+        Sink::consume($text);
+
+        return new self($decoded);
+    }
+}

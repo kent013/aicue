@@ -7,6 +7,7 @@ use App\Enums\Manual\AnalysisFailureReason;
 use App\Exceptions\Manual\AnalysisFailedException;
 use App\Exceptions\Manual\LlmOutputInvalidException;
 use App\Support\Manual\AnalysisAcceptanceGate;
+use Tests\Support\Manual\FencedLlmResponse;
 
 /*
  * AnalysisAcceptanceGate (画像・スキャン SOP の OCR 対応): OCR 経路の成功条件。
@@ -24,7 +25,7 @@ beforeEach(function (): void {
 /** @param  list<string>  $workProcesses */
 function ocrResult(array $workProcesses): ExtractedSopData
 {
-    return ExtractedSopData::fromLlmText(json_encode([
+    return ExtractedSopData::fromLlmText(FencedLlmResponse::wrapArray([
         'header' => ['title' => null, 'department' => null, 'revision' => null],
         'sections' => [[
             'title' => null,
@@ -41,7 +42,7 @@ function ocrResult(array $workProcesses): ExtractedSopData
                 array_keys($workProcesses),
             ),
         ]],
-    ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
+    ]));
 }
 
 test('先に赤くする: [UNREADABLE] のみの結果は現状のスキーマ検証だけでは拒否されない', function (): void {
@@ -131,7 +132,7 @@ test('日本語として自然な捏造はこのゲートでは検出できな�
 });
 
 test('検証順序: スキーマ違反 (空文字列 work_process) は日本語比率チェックまで到達せず schemaViolation になる', function (): void {
-    expect(fn () => ExtractedSopData::fromLlmText(json_encode([
+    expect(fn () => ExtractedSopData::fromLlmText(FencedLlmResponse::wrapArray([
         'header' => [],
         'sections' => [[
             'title' => null,

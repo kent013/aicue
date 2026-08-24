@@ -1,0 +1,37 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Fixture\LlmSeam;
+
+use function json_decode as decodeJson;
+
+// 負例: 復号語彙を自前で書いた形。回避経路 (完全修飾 / use function の別名 /
+// 文字列リテラル経由) もすべて違反として拾う。
+final class VocabularyViolations
+{
+    public function bare(string $text): mixed
+    {
+        return json_decode($text, true);
+    }
+
+    public function fullyQualified(string $text): mixed
+    {
+        return \json_decode($text, true);
+    }
+
+    public function aliased(string $text): mixed
+    {
+        return decodeJson($text, true);
+    }
+
+    public function indirect(string $text): mixed
+    {
+        return call_user_func('json_decode', $text, true);
+    }
+
+    public function fence(): string
+    {
+        return '```json';
+    }
+}
