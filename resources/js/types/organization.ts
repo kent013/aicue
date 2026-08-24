@@ -2,7 +2,7 @@
  * 組織まわりの画面が受け取る型。
  *
  * ★`OrganizationEntryTarget` は PHP の `App\Enums\Organization\EntryTarget` の写しである。
- *   値集合の一致は `tests/js/architecture/enum-ts-sync.test.ts` の目録 (`ENUM_TS_MIRRORS`) が
+ *   値集合の一致は `tests/js/architecture/enum-ts-sync.test.ts` の目録 (`ENUM_TS_RELATIONS`) が
  *   固定するので、**ここに値を足したら PHP 側にも足す** (逆も同じ)。
  */
 

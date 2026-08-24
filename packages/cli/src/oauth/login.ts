@@ -43,15 +43,27 @@ export type LoginWithPkceOptions = {
 };
 
 /**
- * Default scope set. `cli:use` is required by the server's actor resolver;
- * the rest map to the CLI's read/write surface (see `CliOAuthScope`).
+ * Scopes the CLI requests by default.
+ *
+ * **This is not a mirror of the server enum `App\Enums\OAuth\CliOAuthScope`** —
+ * that one is "every scope the server recognises", this one is "the permissions
+ * the CLI asks for by default". Different concepts. The relation between them is
+ * **subset** (only values inside the server value range may appear here), pinned
+ * by `tests/js/architecture/enum-ts-sync.test.ts` with `relation: "subset"`.
+ * Writing a scope the server does not register turns that gate red.
+ * **The server growing a new scope does not oblige the CLI to request it**
+ * (least privilege).
+ *
+ * `cli:use` is required by the server's actor resolver; `read` / `write` map to
+ * the REST ability vocabulary and `session.revoke` covers CLI sign-out.
+ * T261: `evaluations:run` and `pages:bulk` were removed — the server
+ * (`McpPassportServiceProvider`) never registered them, so requesting them was
+ * either rejected or silently dropped.
  */
 export const DEFAULT_CLI_SCOPES = [
     "cli:use",
     "read",
     "write",
-    "evaluations:run",
-    "pages:bulk",
     "session.revoke",
 ] as const;
 

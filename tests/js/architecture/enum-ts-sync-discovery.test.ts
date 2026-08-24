@@ -1,10 +1,9 @@
 /**
- * PHP の文字列付き列挙の発見の段と逆走査 (家系の裁定 AG-099 後半 / T225)。
+ * PHP の文字列付き列挙の発見の段と逆走査 (家系の機能台帳 `enum-ts-sync-gate` の正典 v3)。
  *
- * `enum-ts-sync.test.ts` は「目録 (`ENUM_TS_MIRRORS`) に登録した写しだけ」を見る検査で、
- * 登録し忘れた PHP 列挙・TS 宣言は 1 件も検査していなかった (`docs/template-divergence.md`
- * の D29 が記録していた欠落)。本ファイルは向きを変え、次の 2 段で「登録し忘れ」を
- * **既定拒否 (deny-by-default)** で炙り出す。
+ * `enum-ts-sync.test.ts` は「目録 (`ENUM_TS_RELATIONS`) に登録した関係だけ」を見る検査で、
+ * 登録し忘れた PHP 列挙・TS 宣言は 1 件も検査していなかった。本ファイルは向きを変え、
+ * 次の 2 段で「登録し忘れ」を**既定拒否 (deny-by-default)** で炙り出す。
  *
  * ## 1. 発見の段 (全数走査 → 既定拒否の分類)
  *
@@ -12,40 +11,40 @@
  * 値集合を読めた PHP の文字列付き列挙 (`resolved`) と、読めなかったもの (`unresolvable`)
  * に分ける。`resolved` の**すべて**が次のどちらか一方に分類されていることを固定する。
  *
- * - **登録済み** (`ENUM_TS_MIRRORS` に php パスがある)
- * - **対象外の理由つき** (`PHP_ENUM_EXEMPTIONS` に登録がある。TS 側に写しを作らない
+ * - **TS との関係を登録済み** (`ENUM_TS_RELATIONS` に php パスがある。
+ *   `equal` と `subset` の両方を含むので「写しを登録済み」とは呼ばない)
+ * - **対象外の理由つき** (`PHP_ENUM_EXEMPTIONS` に登録がある。TS 側に値域の写しを作らない
  *   意図的な判断で、理由を 30 文字以上で書く)
  *
  * `unresolvable` の**すべて**が `KNOWN_UNRESOLVABLE_PHP_ENUMS` に登録されていることを
  * 固定する (本 gate 専用の字句走査器では値集合を読み切れないと分かっている残余)。
  *
- * どの分類にも入らない PHP 列挙が 1 件でもあれば赤くする (**既定拒否**)。
- * 逆に、分類の登録先が実際にはその分類でなくなった (stale) ときも赤くする
- * (登録が実態と食い違ったまま残るのを防ぐ)。
+ * ## 2. 逆走査 (未登録候補の検出。母集団の全数 → 4 形の候補 → 3 規則)
  *
- * ## 2. 逆走査 (未登録候補の検出。2 規則)
+ * - **母集団 (i8)**: 版管理下の `*.ts` と `*.svelte` の**全数**
+ *   (`population.ts`。唯一の除外は検出器自身の構文破壊見本 1 ディレクトリ)
+ * - **候補の形 (i9)**: リテラル型の合併 / 定数の配列 / 対応表のキー / 分岐のラベルの 4 種
+ * - **規則**: 完全一致 (規則 1) / 厳密名対応 + 1 値交差 (規則 2a) /
+ *   語分割名対応 + 両側半分以上の交差 (規則 2b)。**規則 2 は 2a と 2b の論理和**である
  *
- * `collectTsUnionCandidates()` が `resources/js/` 配下の文字列リテラル型だけの union に
- * 解決する型別名を全数走査し、`findUnregisteredMirrorCandidates()` が
- * 未登録 (`ENUM_TS_MIRRORS` に無い) の宣言を PHP の母集団と突き合わせて次の 2 規則で拾う。
- *
- * - **規則 1 (完全一致)**: 値集合が PHP 列挙と完全一致する未登録の宣言 = 登録漏れの疑い
- * - **規則 2 (名前対応 + 値の交差)**: 名前が厳密に対応し値が交差するが完全一致ではない
- *   未登録の宣言 = 片方だけ値を足してズレた写しの疑い
- *
- * 見つかった候補は `REVERSE_SWEEP_EXEMPTIONS` に登録された分だけ許す
- * (意図的に登録しない判断を明示する)。未登録の候補が 1 件でもあれば赤くする。
+ * 見つかった候補は `REVERSE_SWEEP_EXEMPTIONS` に登録された分だけ許す。
+ * 候補かどうかを決められなかった宣言 (判定保留) は `KNOWN_INDETERMINATE_TS_DECLARATIONS`
+ * に登録された分だけ許す (どちらも既定拒否)。
  *
  * **保証しないもの (誇張しない)**:
- * - 名前も対応せず値も完全一致しない drift 済みの写しは検出できない (規則の意図した限界)
- * - 緩い名前対応 (部分集合・ファイル名を名前に混ぜる形) は採らない。実測 (家系の記録) で
- *   偽陽性が支配的になるため、名前対応は「一致 / +s / +es / +values」の厳密な形だけを見る
- * - `.svelte` の中の宣言・定数配列・switch の case ラベルは走査しない
- *   (`collectTsUnionCandidates` は `type X = …` のトップレベル宣言だけを見る。
- *   `.d.ts` も対象外)
+ * - 版管理外のファイル (無視されたもの・未追跡のもの) は見ない。
+ *   `.js` / `.mjs` / `.cjs` は母集団に入れない。`.d.ts` は候補にしない
+ * - `.svelte` は script の中だけを見る (目印の中・制御構文の中・スタイルは見ない)。
+ *   ただし**ファイル全体が `parse` できることは前提**である
+ * - 「すべての要素が読める」形だけを候補にする (1 つでも読めない要素があれば候補にしない)
+ * - 派生として外した対応表は、**証人 (対応表以外の形の候補) がある場合だけ**外れる
+ * - 分岐のラベルと対応表のキーは**登録できない**。写しなら型別名か定数の配列へ切り出す
+ * - パッケージの型は**そのパッケージ自身の tsconfig** で解決する
+ *   (ルートの設定で解決するわけではない)
+ * - 除外根 (`fixtures/candidates-broken`) の中は見ない。
+ *   `fixtures/` の残りは**見る** (見本を書き換えると本番の候補集合も動く)
+ * - 名前も対応せず値も半分未満しか交差しない drift 済みの写しは検出できない (規則の限界)
  * - PHP 側の母集団は `php-enum-catalog.ts` の docblock が明記する範囲に限る
- *   (走査器が読み切れない字句を含むファイルは、生のソースに `enum` の語が
- *   無ければ母集団から外れる。あれば安全側に倒して `unresolvable` へ回る)
  *
  * 正本のレーンは `pnpm test`。詳細は `docs/architecture.md`
  * §PHP 列挙と TypeScript 値域の同期。
@@ -53,11 +52,35 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { createMirrorProgram, REPO_ROOT, type MirrorProgram } from "../support/enum-ts-sync/program";
+import {
+    createMirrorPrograms,
+    findExcludedSurvivors,
+    REPO_ROOT,
+    type MirrorPrograms,
+} from "../support/enum-ts-sync/program";
+import {
+    EXCLUDED_ROOTS,
+    EXPECTED_EXCLUDED_ROOT_COUNT,
+    listExcludedFiles,
+    validateExcludedRoots,
+} from "../support/enum-ts-sync/population";
 import { buildPhpEnumCatalog, type PhpEnumCatalog } from "../support/enum-ts-sync/php-enum-catalog";
-import { collectTsUnionCandidates, type TsUnionCandidate } from "../support/enum-ts-sync/ts-candidates";
-import { findUnregisteredMirrorCandidates } from "../support/enum-ts-sync/reverse-sweep";
-import { ENUM_TS_MIRRORS, registeredPhpPaths, registeredTsKeys } from "../support/enum-ts-sync/mirror-inventory";
+import {
+    collectTsCandidates,
+    locatorKey,
+    type TsCandidateLocator,
+    type TsCandidateScan,
+    type TsCandidateShape,
+} from "../support/enum-ts-sync/ts-candidates";
+import {
+    auditReverseSweepExemptions,
+    findUnregisteredMirrorCandidates,
+    type ReverseSweepResult,
+    type ReverseSweepRule,
+    type UnregisteredMirrorCandidate,
+} from "../support/enum-ts-sync/reverse-sweep";
+import { ENUM_TS_RELATIONS, declaredPhpPaths, validateRelations } from "../support/enum-ts-sync/relation-inventory";
+import { resolveRelations } from "../support/enum-ts-sync/ts-value-sets";
 
 interface PhpEnumExemption {
     /** リポジトリルートからの PHP 列挙ファイルの相対パス。 */
@@ -68,7 +91,7 @@ interface PhpEnumExemption {
 
 /**
  * 「対象外の理由つき」に分類する PHP の文字列付き列挙。
- * ここに無く、かつ `ENUM_TS_MIRRORS` にも無い `resolved` エントリが 1 件でもあれば
+ * ここに無く、かつ `ENUM_TS_RELATIONS` にも無い `resolved` エントリが 1 件でもあれば
  * 発見の段が赤くなる (既定拒否)。
  */
 const PHP_ENUM_EXEMPTIONS = [
@@ -82,8 +105,7 @@ const PHP_ENUM_EXEMPTIONS = [
     { path: "app/DataTransferObjects/Manual/Render/RenderClipSource.php", reason: "レンダーパイプライン内部でクリップの取得元を表す区分。フロントは個別のフラグで結果を受け取り、この値そのものは渡らない" },
     { path: "app/Enums/Account/AccountDeletionFreezeAllowance.php", reason: "退会凍結中に許可する route 名相当の内部許可リスト。ガード判定にのみ使い、画面には表示しない" },
     { path: "app/Enums/AccountDeletionBlockReason.php", reason: "退会ブロックの内部理由コード。画面には理由ごとの案内文をサーバ側で確定して渡すだけである" },
-    { path: "app/Enums/ApiErrorCode.php", reason: "公開 API のエラーコード語彙。TS 側はコードで分岐せず HTTP 状態とエラー文言だけを見る" },
-    { path: "app/Enums/ApiKeyAbility.php", reason: "API キー権限 (read/write) の内部語彙。管理画面はチェックボックスの選択状態だけを見る" },
+    { path: "app/Enums/ApiKeyAbility.php", reason: "API キー権限 (read/write)。画面はチェックボックスの選択状態で操作し、表示ラベル表は未知の値を素の文字列へ退避するため値域の写しを要さない" },
     { path: "app/Enums/Auth/AuthMethodChangeEvent.php", reason: "認証手段変更メール通知の内部分類 (T110)。件名・本文はサーバ側で確定して送るだけで画面へは一切渡らない" },
     { path: "app/Enums/Auth/EmailVerificationGateContext.php", reason: "メール確認ゲートの発生元コンテキスト。内部のルーティング判定にのみ使う語彙である" },
     { path: "app/Enums/Billing/AutoRechargeAttemptStatus.php", reason: "自動追加購入試行の内部状態機械。画面は結果の通知種別 (BillingFeedbackKind) 経由でしか見ない" },
@@ -127,8 +149,7 @@ const PHP_ENUM_EXEMPTIONS = [
     { path: "app/Enums/Manual/LlmOutputInvalidReason.php", reason: "LLM 出力不正の内部理由。画面には再試行可否の結果だけが渡る" },
     { path: "app/Enums/Manual/ShotType.php", reason: "ショット種別 (hiki/yori) の内部語彙。台本表示は文言化済みの値を受け取るだけである" },
     { path: "app/Enums/Mcp/ToolName.php", reason: "MCP ツール名の内部登録名。Web UI からは呼ばれない CLI/MCP 専用の語彙である" },
-    { path: "app/Enums/OAuth/CliOAuthScope.php", reason: "CLI OAuth スコープの内部語彙。認可判定にのみ使い画面へは出ない" },
-    { path: "app/Enums/OAuth/OAuthClientKind.php", reason: "OAuth クライアント種別の内部判定。認可ロジックの内部でのみ使う" },
+    { path: "app/Enums/OAuth/OAuthClientKind.php", reason: "OAuth クライアント種別。認可判定の内部語彙で、画面の表示ラベル表は未知の値を素の文字列へ退避するため値域の写しを要さない" },
     { path: "app/Enums/Organization/SlugReservationReason.php", reason: "組織識別名の予約理由の 3 分類 (家系裁定 AG-039)。設定ファイルの読み込み検査とレビューのための語彙で、画面には拒否の文言だけが渡る" },
     { path: "app/Enums/ProjectRole.php", reason: "プロジェクトロールの内部判定。画面は権限の有無を真偽値として受け取るだけである" },
     { path: "app/Enums/ProviderCapability.php", reason: "認証プロバイダの能力分類の内部語彙。認可ロジックの内部でのみ使う" },
@@ -170,7 +191,7 @@ const PHP_ENUM_EXEMPTIONS = [
 ] as const satisfies readonly PhpEnumExemption[];
 
 /** `PHP_ENUM_EXEMPTIONS` の件数の pin。増えても減っても赤くする。 */
-const EXPECTED_EXEMPTION_COUNT = 95;
+const EXPECTED_EXEMPTION_COUNT = 93;
 
 interface UnresolvablePhpEnumEntry {
     readonly path: string;
@@ -198,58 +219,198 @@ const KNOWN_UNRESOLVABLE_PHP_ENUMS = [
 
 const EXPECTED_UNRESOLVABLE_COUNT = 3;
 
+
 interface ReverseSweepExemption {
     /** 一致した PHP 列挙のパス。 */
     readonly php: string;
-    /** 未登録の TS 宣言のファイル。 */
-    readonly file: string;
-    /** 未登録の TS 宣言の名前。 */
-    readonly declaration: string;
-    readonly rule: 1 | 2;
+    /** 未登録の TS 宣言の locator (置き場・形・名前・出現順の 4 つ組)。 */
+    readonly locator: TsCandidateLocator;
+    /** 適用された規則。**規則が移ると申告は stale になる**。 */
+    readonly rule: ReverseSweepRule;
     /** 登録しない理由 (30 文字以上)。 */
     readonly reason: string;
 }
 
+const locator = (file: string, shape: TsCandidateShape, name: string, occurrence = 0): TsCandidateLocator => ({
+    file,
+    shape,
+    name,
+    occurrence,
+});
+
 /**
  * 逆走査が見つける候補のうち、意図的に登録しないものの一覧。
- * `(php, file, declaration, rule)` の組が完全一致したものだけを免除する
+ * `(php, locator, rule)` が完全一致したものだけを免除する
  * (php パスまで固定するので、たまたま同じ値集合を持つ**別の** PHP 列挙が現れたときは
- * 新しい候補として検出され続ける)。
+ * 新しい候補として検出され続ける。`occurrence` まで固定するので、同名の入れ子の宣言が
+ * 前に足されると申告が stale になり赤くなる = 人が見直す合図である)。
  */
 const REVERSE_SWEEP_EXEMPTIONS = [
     {
         php: "app/Enums/Manual/TakeStatus.php",
-        file: "resources/js/types/manual.ts",
-        declaration: "SelectableTakeStatus",
-        rule: 1,
+        locator: locator("resources/js/types/manual.ts", "literal-union", "SelectableTakeStatus"),
+        rule: "1",
         reason: "「選択できるテイクの状態」という部分集合の意図の宣言。今は TakeStatus と値が完全一致するが、意図は部分集合なので登録しない",
+    },
+    {
+        php: "app/Enums/Manual/CutType.php",
+        locator: locator(
+            "resources/js/components/features/manual/ScenarioEditor.svelte",
+            "literal-union",
+            "DragOwner",
+        ),
+        rule: "1",
+        reason: "台本編集のドラッグの所有者 (カット / 素材) という別概念で、値がたまたまカット種別と一致しているだけである。似ているからで統合しない (思考原則 4)",
+    },
+    {
+        php: "app/Enums/Notification/NotificationType.php",
+        locator: locator(
+            "resources/js/components/features/notifications/NotificationListItem.svelte",
+            "switch-cases",
+            "switch:notification.type",
+        ),
+        rule: "1",
+        reason: "通知の絵柄を選ぶ分岐。既定の枝があるので、種別が増えると新種の通知は汎用のベルの絵柄で出る (操作は詰まらない)。期待動作は「新種を足すときに絵柄も足す」であり、値が増えれば完全一致が崩れて本申告が stale になり赤くなる",
+    },
+    {
+        php: "app/Enums/ApiKeyAbility.php",
+        locator: locator("resources/js/pages/Organizations/ApiKeys/Index.svelte", "object-keys", "ABILITY_LABELS"),
+        rule: "1",
+        reason: "API キー権限の表示ラベル表。未知の値は素の文字列で表示する退避 (?? ability) があるので、値の取りこぼしが画面を壊さない。値域の写しではない",
+    },
+    {
+        php: "app/Enums/OAuth/OAuthClientKind.php",
+        locator: locator("resources/js/pages/Organizations/ApiKeys/Sessions.svelte", "object-keys", "CLIENT_KIND_LABELS"),
+        rule: "1",
+        reason: "OAuth クライアント種別の表示ラベル表。未知の値は素の文字列で表示する退避 (?? kind) があるので、値の取りこぼしが画面を壊さない。値域の写しではない",
+    },
+    {
+        php: "app/Enums/EnterpriseSso/OidcConnectionStatus.php",
+        locator: locator("tests/js/components/features/sso/oidc-connection.test.ts", "const-array", "ALL_STATUSES"),
+        rule: "1",
+        reason: "検査が全値を並べた入力であって画面の写しではない。目録の置き場は resources/js と packages/<name>/src に限るので、そもそも登録できない",
+    },
+    {
+        php: "app/Enums/Manual/JobStatus.php",
+        locator: locator("resources/js/types/dashboard.ts", "literal-union", "DashboardJobStatus"),
+        rule: "2b",
+        reason: "ダッシュボードが出す「進行中のジョブ」だけを表す意図した真部分集合である。終端の状態はダッシュボードに出ないので値域の写しにしない",
+    },
+    {
+        php: "app/Enums/ApiErrorCode.php",
+        locator: locator("packages/cli/src/api/schemas.ts", "literal-union", "ApiErrorCode"),
+        rule: "2a",
+        reason: "サーバの符号 (API_ERROR_CODES) と正規でない面固有の符号 (NON_CANONICAL_API_ERROR_CODES) の合併型である。写しの実体は API_ERROR_CODES として relation equal で登録済みで、合併型そのものは写しではない",
     },
 ] as const satisfies readonly ReverseSweepExemption[];
 
-const EXPECTED_REVERSE_SWEEP_EXEMPTION_COUNT = 1;
+const EXPECTED_REVERSE_SWEEP_EXEMPTION_COUNT = 8;
 
-const reverseSweepKey = (php: string, file: string, declaration: string, rule: number): string =>
-    `${php}|${file}|${declaration}|${rule}`;
+interface IndeterminateTsEntry {
+    readonly locator: TsCandidateLocator;
+    /** 判定保留のまま残す理由 (30 文字以上)。 */
+    readonly reason: string;
+}
+
+/**
+ * 候補かどうかを**決められなかった** TS 宣言 (判定保留) の申告。
+ * PHP 側の `KNOWN_UNRESOLVABLE_PHP_ENUMS` と同じ形の既定拒否の受け皿である
+ * (判定保留を非候補と混ぜないための当て所。共通規約 (b))。
+ */
+const KNOWN_INDETERMINATE_TS_DECLARATIONS = [
+    {
+        locator: locator("tests/js/support/enum-ts-sync/fixtures/t22-circular.ts", "literal-union", "X"),
+        reason: "型別名が自分自身を経由して循環する見本。型検査器が解決できないことを固定するために置いてある負の対照である",
+    },
+    {
+        locator: locator("tests/js/support/enum-ts-sync/fixtures/t22-circular.ts", "literal-union", "Y"),
+        reason: "同上 (循環の相方)。型検査器が解決できないことを固定するために置いてある負の対照である",
+    },
+    {
+        locator: locator("tests/js/support/enum-ts-sync/fixtures/t23-unresolved-import.ts", "literal-union", "X"),
+        reason: "実在しないモジュールからの取り込みに依存する見本。解決できないことを固定するために置いてある負の対照である",
+    },
+    {
+        locator: locator(
+            "tests/js/support/enum-ts-sync/fixtures/candidates/mixed.ts",
+            "literal-union",
+            "IndirectAnyCandidate",
+        ),
+        reason: "別名越しに明示の any へ解決する見本。構文が any の綴りでないので「正常な非候補」と区別できないことを固定する負の対照である",
+    },
+    {
+        locator: locator(
+            "tests/js/support/enum-ts-sync/fixtures/candidates/mixed.ts",
+            "object-keys",
+            "ObjectAnyComputedKeyCandidate",
+        ),
+        reason: "計算キーの型が any へ解決する対応表の見本。判定保留を非候補と混ぜないことを固定するために置いてある負の対照である",
+    },
+    {
+        locator: locator(
+            "tests/js/support/enum-ts-sync/fixtures/candidates/staged-occurrence.ts",
+            "literal-union",
+            "StagedShadow",
+        ),
+        reason: "採番が三値をまたぐことの見本 (判定保留が先・候補が後)。同名の候補が occurrence 1 になり、本申告が候補側へ効かないことを固定するために置いてある",
+    },
+] as const satisfies readonly IndeterminateTsEntry[];
+
+const EXPECTED_INDETERMINATE_TS_COUNT = 6;
 
 let catalog: PhpEnumCatalog | undefined;
-let mirrorProgram: MirrorProgram | undefined;
-let tsCandidates: readonly TsUnionCandidate[] | undefined;
+let programs: MirrorPrograms | undefined;
+let scan: TsCandidateScan | undefined;
+let sweep: ReverseSweepResult | undefined;
 
 const requireCatalog = (): PhpEnumCatalog => {
     if (catalog === undefined) throw new Error("catalog が初期化されていません");
     return catalog;
 };
-
-const requireTsCandidates = (): readonly TsUnionCandidate[] => {
-    if (tsCandidates === undefined) throw new Error("tsCandidates が初期化されていません");
-    return tsCandidates;
+const requirePrograms = (): MirrorPrograms => {
+    if (programs === undefined) throw new Error("programs が初期化されていません");
+    return programs;
+};
+const requireScan = (): TsCandidateScan => {
+    if (scan === undefined) throw new Error("scan が初期化されていません");
+    return scan;
+};
+const requireSweep = (): ReverseSweepResult => {
+    if (sweep === undefined) throw new Error("sweep が初期化されていません");
+    return sweep;
 };
 
 beforeAll(() => {
+    validateRelations(ENUM_TS_RELATIONS);
     catalog = buildPhpEnumCatalog();
-    mirrorProgram = createMirrorProgram([...new Set(ENUM_TS_MIRRORS.map((m) => m.ts))]);
-    tsCandidates = collectTsUnionCandidates(mirrorProgram);
+    programs = createMirrorPrograms();
+    scan = collectTsCandidates(programs);
+    // 登録済みの判定は locator の完全一致で行う (前向きの解決と同じ採番器の出力を使う)。
+    const declared = new Set(
+        resolveRelations(programs, ENUM_TS_RELATIONS).map((row) => locatorKey(row.tsLocator)),
+    );
+    sweep = findUnregisteredMirrorCandidates(catalog.resolved, scan.candidates, (row) =>
+        declared.has(locatorKey(row)),
+    );
 }, 300_000);
+
+/** 失敗メッセージ (i13。PHP 側と TS 側の**両方の位置**を出す)。 */
+const describeHit = (hit: UnregisteredMirrorCandidate): string =>
+    [
+        `規則${hit.rule} ${hit.php.path}:${hit.php.line} (${hit.php.name})`,
+        `     ⇔ ${hit.candidate.locator.file}:${hit.candidate.line}::${hit.candidate.locator.name} (${hit.candidate.locator.shape} #${hit.candidate.locator.occurrence})`,
+        `     ${hit.reason}`,
+        `     PHP にだけある値: ${hit.onlyInPhp.join(", ")}`,
+        `     TS にだけある値: ${hit.onlyInTs.join(", ")}`,
+    ].join("\n");
+
+const HOW_TO_FIX = [
+    "直し方:",
+    "  - TS が PHP の値域そのものの写しなら ENUM_TS_RELATIONS へ relation:\"equal\" で 1 行足し、EXPECTED_RELATION_COUNT を 1 増やす",
+    "  - TS が PHP の値域から選んだ非空の集合なら relation:\"subset\" と subsetReason (30 文字以上) を付けて登録する",
+    "  - どちらでもないなら REVERSE_SWEEP_EXEMPTIONS へ理由 30 文字以上で登録し EXPECTED_REVERSE_SWEEP_EXEMPTION_COUNT を直す",
+    "  - 登録できるのは型別名か const の配列である。対応表のキーと分岐のラベルは、いったん型別名か const の配列へ切り出す",
+].join("\n");
 
 describe("PHP 文字列付き列挙の発見の段 (全数走査・既定拒否の分類)", () => {
     it("走査が空振りしていない (母集団が空でない)", () => {
@@ -275,8 +436,8 @@ describe("PHP 文字列付き列挙の発見の段 (全数走査・既定拒否�
         }
     });
 
-    it("resolved はすべて『登録済み』か『対象外の理由つき』のどちらか一方に分類される", () => {
-        const registered = registeredPhpPaths();
+    it("resolved はすべて『TS との関係を登録済み』か『対象外の理由つき』のどちらか一方に分類される", () => {
+        const registered = declaredPhpPaths();
         const exempt = new Set<string>(PHP_ENUM_EXEMPTIONS.map((e) => e.path));
 
         const unclassified: string[] = [];
@@ -293,7 +454,7 @@ describe("PHP 文字列付き列挙の発見の段 (全数走査・既定拒否�
     });
 
     it("exemption の登録先が stale になっていない (今も resolved かつ未登録のままである)", () => {
-        const registered = registeredPhpPaths();
+        const registered = declaredPhpPaths();
         const resolvedPaths = new Set(requireCatalog().resolved.map((r) => r.path));
 
         const stale = PHP_ENUM_EXEMPTIONS.filter(
@@ -337,32 +498,117 @@ describe("PHP 文字列付き列挙の発見の段 (全数走査・既定拒否�
     });
 });
 
+describe("逆走査の母集団 (版管理下の全数・唯一の除外)", () => {
+    it("除外根の件数が pin と一致する", () => {
+        expect(EXCLUDED_ROOTS).toHaveLength(EXPECTED_EXCLUDED_ROOT_COUNT);
+    });
+
+    it("除外根の体裁 (配下・実在・重複無し・理由 30 文字以上) が守られている", () => {
+        expect(() => validateExcludedRoots()).not.toThrow();
+    });
+
+    it("除外根の配下は 0 件でなく、全ファイルが実際に本番と同じ入口で落ちる", () => {
+        const files = listExcludedFiles();
+        expect(files.length).toBeGreaterThan(0);
+
+        // 判定の本体は `findExcludedSurvivors()` が持つ (拡張子ごとに本番と同じ入口を使う)。
+        // ここが「除外根へ正常なファイルを置いて母集団から静かに消す」経路を塞ぐ。
+        const survivors = findExcludedSurvivors(files);
+        expect(
+            survivors,
+            `除外根の配下に本番の入口で落ちないファイルがあります (母集団から静かに消える経路です。除外根から出すこと):\n${survivors.join("\n")}`,
+        ).toEqual([]);
+    });
+
+    it("母集団が空でない (.ts と .svelte のどちらも)", () => {
+        const { population } = requirePrograms();
+        expect(population.ts.length).toBeGreaterThan(0);
+        expect(population.svelte.length).toBeGreaterThan(0);
+        expect(requireScan().scannedFiles.size).toBe(population.ts.length + population.svelte.length);
+    });
+
+    it("母集団の全件がちょうど 1 本の program に載っている (過不足の両方を見る)", () => {
+        const { byOwner, population } = requirePrograms();
+        const owners = [...byOwner.values()];
+
+        const missing: string[] = [];
+        const duplicated: string[] = [];
+        for (const file of [...population.ts, ...population.svelte]) {
+            const carriers = owners.filter((mirror) => mirror.rootRelatives.has(file));
+            if (carriers.length === 0) missing.push(file);
+            if (carriers.length > 1) duplicated.push(`${file} (${carriers.map((c) => c.owner).join(", ")})`);
+        }
+
+        expect(missing, `どの program の起点にも載っていない母集団のファイル:\n${missing.join("\n")}`).toEqual([]);
+        expect(duplicated, `2 本以上の program の起点に載っている母集団のファイル:\n${duplicated.join("\n")}`).toEqual([]);
+    });
+});
+
+describe("TS 側の判定保留 (既定拒否の受け皿)", () => {
+    it("登録の件数が pin と一致し、実在・重複無し・reason が 30 文字以上", () => {
+        expect(KNOWN_INDETERMINATE_TS_DECLARATIONS).toHaveLength(EXPECTED_INDETERMINATE_TS_COUNT);
+
+        const seen = new Set<string>();
+        for (const entry of KNOWN_INDETERMINATE_TS_DECLARATIONS) {
+            expect(fs.existsSync(path.join(REPO_ROOT, entry.locator.file))).toBe(true);
+            const key = locatorKey(entry.locator);
+            expect(seen.has(key)).toBe(false);
+            seen.add(key);
+            expect(entry.reason.length).toBeGreaterThanOrEqual(30);
+        }
+    });
+
+    it("indeterminate はすべて KNOWN_INDETERMINATE_TS_DECLARATIONS に登録されている", () => {
+        const known = new Set(KNOWN_INDETERMINATE_TS_DECLARATIONS.map((e) => locatorKey(e.locator)));
+        const unknown = requireScan().indeterminate.filter((row) => !known.has(locatorKey(row.locator)));
+
+        expect(
+            unknown,
+            `未登録の判定保留の TS 宣言 (実装を直して解消するか KNOWN_INDETERMINATE_TS_DECLARATIONS へ理由付きで登録すること):\n${unknown
+                .map((row) => `${row.locator.file}:${row.line}::${row.locator.name} (${row.locator.shape}) ${row.reason}`)
+                .join("\n")}`,
+        ).toEqual([]);
+    });
+
+    it("登録先が stale になっていない (今も判定保留のままである)", () => {
+        const actual = new Set(requireScan().indeterminate.map((row) => locatorKey(row.locator)));
+        const stale = KNOWN_INDETERMINATE_TS_DECLARATIONS.filter((e) => !actual.has(locatorKey(e.locator)));
+
+        expect(
+            stale,
+            `KNOWN_INDETERMINATE_TS_DECLARATIONS の登録が実態と食い違っている (削除するか登録し直すこと):\n${stale
+                .map((e) => locatorKey(e.locator))
+                .join("\n")}`,
+        ).toEqual([]);
+    });
+});
+
 describe("PHP ⇔ TS 値域の逆走査 (未登録候補の検出)", () => {
-    it("TS 側の候補走査が空振りしていない (母集団が空でない)", () => {
-        expect(requireTsCandidates().length).toBeGreaterThan(0);
+    it("TS 側の候補走査が空振りしていない (候補が空でない)", () => {
+        expect(requireScan().candidates.length).toBeGreaterThan(0);
+    });
+
+    it("判定不能な組は 0 件である (名前を決められないのに列挙と交差する候補は無い)", () => {
+        const { undecidable } = requireSweep();
+        expect(
+            undecidable,
+            `規則 2 を判定できない組があります (判定対象の名前を解決できる形へ直すこと):\n${undecidable
+                .map(
+                    (row) =>
+                        `${row.php.path}:${row.php.line} <-> ${row.candidate.locator.file}:${row.candidate.line}::${row.candidate.locator.name} (交差 ${row.intersectionSize} 値)`,
+                )
+                .join("\n")}`,
+        ).toEqual([]);
     });
 
     it("逆走査で見つかる候補は REVERSE_SWEEP_EXEMPTIONS に登録された分だけである", () => {
-        const registered = registeredTsKeys();
-        const found = findUnregisteredMirrorCandidates(
-            requireCatalog().resolved,
-            requireTsCandidates(),
-            (file, name) => registered.has(`${file}::${name}`),
-        );
-
-        const exemptKeys = new Set(
-            REVERSE_SWEEP_EXEMPTIONS.map((e) => reverseSweepKey(e.php, e.file, e.declaration, e.rule)),
-        );
-
-        const unexempted = found.filter(
-            (f) => !exemptKeys.has(reverseSweepKey(f.php.path, f.candidate.file, f.candidate.name, f.rule)),
-        );
+        const { unexempted } = auditReverseSweepExemptions(requireSweep().found, REVERSE_SWEEP_EXEMPTIONS);
 
         expect(
             unexempted,
-            `未登録のミラー候補が見つかりました (登録するか REVERSE_SWEEP_EXEMPTIONS へ理由付きで登録すること):\n${unexempted
-                .map((f) => `規則${f.rule} ${f.php.path} <-> ${f.candidate.file}::${f.candidate.name}${f.nameMatch !== null ? ` (${f.nameMatch})` : ""}`)
-                .join("\n")}`,
+            `未登録の PHP・TS 関係の候補が見つかりました。正本は PHP 側です。\n${unexempted
+                .map(describeHit)
+                .join("\n")}\n${HOW_TO_FIX}`,
         ).toEqual([]);
     });
 
@@ -372,30 +618,52 @@ describe("PHP ⇔ TS 値域の逆走査 (未登録候補の検出)", () => {
         const seen = new Set<string>();
         for (const entry of REVERSE_SWEEP_EXEMPTIONS) {
             expect(fs.existsSync(path.join(REPO_ROOT, entry.php))).toBe(true);
-            expect(fs.existsSync(path.join(REPO_ROOT, entry.file))).toBe(true);
-            const key = reverseSweepKey(entry.php, entry.file, entry.declaration, entry.rule);
+            expect(fs.existsSync(path.join(REPO_ROOT, entry.locator.file))).toBe(true);
+            const key = `${entry.php}|${locatorKey(entry.locator)}|${entry.rule}`;
             expect(seen.has(key)).toBe(false);
             seen.add(key);
             expect(entry.reason.length).toBeGreaterThanOrEqual(30);
         }
     });
 
-    it("REVERSE_SWEEP_EXEMPTIONS の登録先が stale になっていない (今も候補として検出され続けている)", () => {
-        const registered = registeredTsKeys();
-        const found = findUnregisteredMirrorCandidates(
-            requireCatalog().resolved,
-            requireTsCandidates(),
-            (file, name) => registered.has(`${file}::${name}`),
-        );
-        const foundKeys = new Set(found.map((f) => reverseSweepKey(f.php.path, f.candidate.file, f.candidate.name, f.rule)));
+    it("失敗メッセージに PHP 側と TS 側の両方の位置が出る (i13)", () => {
+        // 実際に鳴る組が 0 件でも診断文の形は固定する
+        // (収集した情報が判定と診断に使われていることを保証する。共通規約 (d))。
+        const message = describeHit({
+            rule: "2a",
+            php: { path: "app/Enums/ApiErrorCode.php", name: "ApiErrorCode", line: 13, values: new Set(["a"]) },
+            candidate: {
+                locator: locator("packages/cli/src/api/schemas.ts", "literal-union", "ApiErrorCode"),
+                line: 327,
+                topLevel: true,
+                values: new Set(["b"]),
+                correspondenceName: "ApiErrorCode",
+                nameResolved: true,
+            },
+            reason: "厳密名対応 (apierrorcode = apierrorcode) / 交差 1 値",
+            onlyInPhp: ["a"],
+            onlyInTs: ["b"],
+        });
 
-        const stale = REVERSE_SWEEP_EXEMPTIONS.filter(
-            (e) => !foundKeys.has(reverseSweepKey(e.php, e.file, e.declaration, e.rule)),
-        );
+        expect(message).toContain("app/Enums/ApiErrorCode.php:13");
+        expect(message).toContain("packages/cli/src/api/schemas.ts:327::ApiErrorCode");
+        expect(message).toContain("literal-union #0");
+        expect(message).toContain("PHP にだけある値: a");
+        expect(message).toContain("TS にだけある値: b");
+        expect(HOW_TO_FIX).toContain("ENUM_TS_RELATIONS");
+        expect(HOW_TO_FIX).toContain("REVERSE_SWEEP_EXEMPTIONS");
+    });
+
+    it("REVERSE_SWEEP_EXEMPTIONS の登録先が stale になっていない (今も候補として検出され続けている)", () => {
+        // 生死の判定は**免除を適用する前**の候補集合に対して行う
+        // (免除適用後で判定すると、申告が自分自身を根拠にして永久に生き続ける)。
+        const { stale } = auditReverseSweepExemptions(requireSweep().found, REVERSE_SWEEP_EXEMPTIONS);
 
         expect(
             stale,
-            `REVERSE_SWEEP_EXEMPTIONS の登録が実態と食い違っている (削除するか登録し直すこと):\n${stale.map((e) => `${e.php} <-> ${e.file}::${e.declaration}`).join("\n")}`,
+            `REVERSE_SWEEP_EXEMPTIONS の登録が実態と食い違っている (削除するか登録し直すこと):\n${stale
+                .map((e) => `${e.php} <-> ${locatorKey(e.locator)} 規則${e.rule}`)
+                .join("\n")}`,
         ).toEqual([]);
     });
 });

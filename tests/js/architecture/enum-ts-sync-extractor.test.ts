@@ -22,8 +22,9 @@ import { EnumTsSyncError } from "../support/enum-ts-sync/errors";
 import {
     REPO_ROOT,
     createFixtureProgram,
-    createMirrorProgram,
+    createMirrorPrograms,
     type MirrorProgram,
+    type MirrorPrograms,
 } from "../support/enum-ts-sync/program";
 import { readTsUnionValues } from "../support/enum-ts-sync/ts-value-sets";
 import { readPhpEnumValues, readPhpEnumValuesFromText } from "../support/enum-ts-sync/php-enums";
@@ -67,9 +68,11 @@ const TS_CASES: readonly TsCase[] = [
     { id: "T4", file: "t04-open-string.ts", declaration: "X", accepts: undefined, reason: "文字列リテラル型でない" },
     { id: "T5", file: "t05-number-member.ts", declaration: "X", accepts: undefined, reason: "文字列リテラル型でない" },
     { id: "T6", file: "t06-never.ts", declaration: "X", accepts: undefined, reason: "文字列リテラル型でない" },
-    { id: "T7", file: "t07-absent.ts", declaration: "X", accepts: undefined, reason: "型別名の宣言が見つかりません" },
-    { id: "T8", file: "t08-duplicate-alias.ts", declaration: "X", accepts: undefined, reason: "同名の型別名が 2 件あります" },
-    { id: "T9", file: "t09-const-array.ts", declaration: "X", accepts: undefined, reason: "型別名の宣言が見つかりません" },
+    { id: "T7", file: "t07-absent.ts", declaration: "X", accepts: undefined, reason: "受理できる宣言が見つかりません" },
+    { id: "T8", file: "t08-duplicate-alias.ts", declaration: "X", accepts: undefined, reason: "同名の受理できる宣言が 2 件あります" },
+    // T9 は**意味を更新した**行である (削除ではない)。受理する形が 2 つ (型別名 / const の配列)
+    // へ広がったので、`const X = ["a"] as const;` は拒否から受理へ移った。
+    { id: "T9", file: "t09-const-array.ts", declaration: "X", accepts: ["a"] },
     { id: "T10a", file: "t10a-target.ts", declaration: "X", accepts: ["c", "y1", "y2"] },
     { id: "T10b", file: "t10b-path-alias.ts", declaration: "X", accepts: ["editor", "extra", "shooter", "viewer"] },
     { id: "T11", file: "t11-indexed-access.ts", declaration: "X", accepts: ["p", "q"] },
@@ -83,8 +86,11 @@ const TS_CASES: readonly TsCase[] = [
     { id: "T19", file: "t19-string-enum.ts", declaration: "X", accepts: undefined, reason: "TypeScript の enum の値は受理しません" },
     { id: "T20", file: "t20-numeric-enum.ts", declaration: "X", accepts: undefined, reason: "TypeScript の enum の値は受理しません" },
     { id: "T21", file: "t21-unique-symbol.ts", declaration: "X", accepts: undefined, reason: "文字列リテラル型でない" },
-    { id: "T22", file: "t22-circular.ts", declaration: "X", accepts: undefined, reason: "文字列リテラル型でない" },
-    { id: "T23", file: "t23-unresolved-import.ts", declaration: "X", accepts: undefined, reason: "文字列リテラル型でない" },
+    // T22 / T23 も**意味を更新した**行である (削除ではない)。値の読み取りを共有抽出器の
+    // 1 本へ集約した結果、「解決したが文字列リテラル型でない」と「そもそも解決できない
+    // (判定保留)」が分かれた。どちらも拒否だが、理由の言葉が変わる。
+    { id: "T22", file: "t22-circular.ts", declaration: "X", accepts: undefined, reason: "any / unknown へ解決しました" },
+    { id: "T23", file: "t23-unresolved-import.ts", declaration: "X", accepts: undefined, reason: "any / unknown へ解決しました" },
     { id: "T24", file: "t24-source-duplicate.ts", declaration: "X", accepts: ["a"] },
     { id: "T25a", file: "t25-target.ts", declaration: "X", accepts: ["a", "b"], program: "full" },
     // T25b: 起点だけの program では拡張が載らないので値が減る (起点を縮める改変の回帰)。
@@ -103,12 +109,12 @@ const TS_AUXILIARY_FIXTURES: readonly string[] = ["t10a-other.ts"];
 /** `program-fixtures/` に置く補助 (tsconfig の対象に残す)。 */
 const PROGRAM_FIXTURES: readonly string[] = ["registry-base.ts", "registry-augmentation.ts"];
 
-let fullProgram: MirrorProgram | undefined;
+let fullPrograms: MirrorPrograms | undefined;
 let narrowProgram: MirrorProgram | undefined;
 
-const requireFullProgram = (): MirrorProgram => {
-    if (fullProgram === undefined) throw new EnumTsSyncError("fixture full program", "初期化されていません");
-    return fullProgram;
+const requireFullPrograms = (): MirrorPrograms => {
+    if (fullPrograms === undefined) throw new EnumTsSyncError("fixture full programs", "初期化されていません");
+    return fullPrograms;
 };
 const requireNarrowProgram = (): MirrorProgram => {
     if (narrowProgram === undefined) throw new EnumTsSyncError("fixture narrow program", "初期化されていません");
@@ -117,8 +123,8 @@ const requireNarrowProgram = (): MirrorProgram => {
 
 describe("TS 側抽出器の負例行列", () => {
     beforeAll(() => {
-        // 見本は tsconfig から除外してあるので、全体 program にも起点として明示的に足す。
-        fullProgram = createMirrorProgram(TS_CASES.map((c) => fixture(c.file)));
+        // 見本は tsconfig から除外してあるが、版管理下なので母集団 (= 起点) には入る。
+        fullPrograms = createMirrorPrograms();
         // 起点を縮めた program は「縮めた行が指す見本だけ」を起点にする。
         narrowProgram = createFixtureProgram(
             TS_CASES.filter((c) => c.program === "narrow").map((c) => path.join(FIXTURE_DIR, c.file)),
@@ -149,7 +155,10 @@ describe("TS 側抽出器の負例行列", () => {
     });
 
     it.each(TS_CASES)("$id: $file::$declaration", (testCase) => {
-        const mirrorProgram = testCase.program === "narrow" ? requireNarrowProgram() : requireFullProgram();
+        const mirrorProgram =
+            testCase.program === "narrow"
+                ? requireNarrowProgram()
+                : requireFullPrograms().programOf(fixture(testCase.file));
         const read = (): ReadonlySet<string> =>
             readTsUnionValues(mirrorProgram, fixture(testCase.file), testCase.declaration);
 

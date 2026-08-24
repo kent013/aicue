@@ -16,11 +16,13 @@ import { ApiErrorBodySchema, type ApiErrorCode } from "./schemas.js";
  * The `error` cases are split into a small finite set so command code can
  * map them to exit codes without re-parsing HTTP details:
  *
- *   - `auth`         → 401/403 (or `unauthenticated` / `forbidden` codes)
+ *   - `auth`         → 401/403 (or `unauthenticated` / `forbidden` /
+ *                       `insufficient_ability` / `actor_not_resolvable` codes)
  *   - `not-found`    → 404 / `not_found`
- *   - `rate-limit`   → 429 / `rate_limit_exceeded` with optional Retry-After
+ *   - `rate-limit`   → 429 / `rate_limited` with optional Retry-After
  *   - `quota`        → 402 / `quota_exceeded` (Stripe / plan limit exhausted)
- *   - `conflict`     → 409 / `idempotency_conflict`
+ *   - `conflict`     → 409 / `idempotency_conflict`, `idempotency_in_progress`,
+ *                       `idempotency_indeterminate`
  *   - `validation`   → 422 / `validation_failed` (+ controller-local codes
  *                       `payload_sanitization_failed`, `site_not_cli_capture`,
  *                       `use_audits_submit`)
@@ -200,13 +202,23 @@ function parseRetryAfter(headerValue: string | null): number | null {
 }
 
 /**
- * Map a canonical `error.code` to the CLI-side failure discriminator.
+ * Map an `error.code` to the CLI-side failure discriminator.
  * Returns `null` for unknown codes so the caller falls back to the
  * status-based mapping below. Keeping these arms narrow (one case per
  * known code) is deliberate: silent aliasing in this table was the
  * pre-T144 bug that motivated C1 in the first place.
+ *
+ * T261: the server emits `rate_limited` (not `rate_limit_exceeded`); the old
+ * spelling was drift carried over from another app and is **not** kept as an
+ * alias. A server still emitting the old spelling lands on the same
+ * `rate-limit` kind through the HTTP-status fallback (429), so the observable
+ * failure kind does not change — that is fixed by the tests.
+ * The four server-only codes (`insufficient_ability`, `actor_not_resolvable`,
+ * `idempotency_in_progress`, `idempotency_indeterminate`) get explicit arms
+ * rather than relying on the status fallback; the classification matches what
+ * `ApiErrorCode::defaultStatus()` would produce (403 → auth, 409 → conflict).
  */
-function dispatchKindFromCode(
+export function dispatchKindFromCode(
     code: string | null,
 ): Exclude<ApiCallFailure["kind"], "network" | "schema"> | null {
     if (code === null) return null;
@@ -214,14 +226,18 @@ function dispatchKindFromCode(
     switch (narrowed) {
         case "unauthenticated":
         case "forbidden":
+        case "insufficient_ability":
+        case "actor_not_resolvable":
             return "auth";
         case "not_found":
             return "not-found";
-        case "rate_limit_exceeded":
+        case "rate_limited":
             return "rate-limit";
         case "quota_exceeded":
             return "quota";
         case "idempotency_conflict":
+        case "idempotency_in_progress":
+        case "idempotency_indeterminate":
             return "conflict";
         case "validation_failed":
         case "payload_sanitization_failed":
@@ -241,7 +257,7 @@ function dispatchKindFromCode(
  * so older staging builds (and misbehaving reverse proxies) keep their
  * historic CLI UX.
  */
-function dispatchKindFromStatus(
+export function dispatchKindFromStatus(
     status: number,
 ): Exclude<ApiCallFailure["kind"], "network" | "schema"> {
     if (status === 401 || status === 403) return "auth";
@@ -251,6 +267,19 @@ function dispatchKindFromStatus(
     if (status === 422) return "validation";
     if (status === 429) return "rate-limit";
     return "server";
+}
+
+/**
+ * Combination point of the two dispatch tables: the canonical `error.code`
+ * wins, and an unknown / absent code falls back to the HTTP status. Exported
+ * so the fallback contract can be pinned as a pure function (no HTTP round
+ * trip needed to tell "the code decided" from "the status decided").
+ */
+export function resolveFailureKind(
+    code: string | null,
+    status: number,
+): Exclude<ApiCallFailure["kind"], "network" | "schema"> {
+    return dispatchKindFromCode(code) ?? dispatchKindFromStatus(status);
 }
 
 /**
@@ -420,9 +449,7 @@ async function apiRequest<S extends ZodTypeAny>(
         const resolvedMessage = (fallback: string): string =>
             envelope.message ?? fallback;
 
-        const kindFromCode = dispatchKindFromCode(code);
-        const kind: ApiCallFailure["kind"] =
-            kindFromCode ?? dispatchKindFromStatus(status);
+        const kind: ApiCallFailure["kind"] = resolveFailureKind(code, status);
 
         switch (kind) {
             case "auth":
