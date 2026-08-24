@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Symfony\Component\Yaml\Yaml;
 use Tests\Support\AnalysisBudget;
+use Tests\Support\PromptWaitBudget;
 
 /**
  * AI 解析の LLM 入力上限 (config manual.analysis_max_text_bytes) の token budget 算術を
@@ -131,5 +132,13 @@ test('sop-extract-media.yaml の max_tokens / client timeout も解析 3 段と�
     $yaml = Yaml::parseFile(resource_path('prompts/sop-extract-media.yaml'));
     expect($yaml)->toBeArray();
     expect($yaml['max_tokens'] ?? null)->toBe(OUTPUT_RESERVE_TOKENS);
-    expect($yaml['client_options']['timeout'] ?? null)->toBe(AnalysisBudget::CLIENT_TIMEOUT_SECONDS);
+
+    // 待ち予算の読み取り規則の正本は Tests\Support\PromptWaitBudget 1 箇所である
+    // (未宣言・非正・非 int はここへ来る前に例外になる)。素の配列参照を書き戻さないこと。
+    expect(PromptWaitBudget::requirePositive(
+        resource_path('prompts/sop-extract-media.yaml'), 'sop-extract-media.yaml',
+    ))->toBe(
+        AnalysisBudget::CLIENT_TIMEOUT_SECONDS,
+        'sop-extract-media.yaml の client_options.timeout が時間 budget の C と不一致',
+    );
 });

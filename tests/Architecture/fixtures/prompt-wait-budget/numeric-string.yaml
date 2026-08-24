@@ -1,0 +1,4 @@
+# 見本: timeout が数値文字列 (int ではない)
+name: numeric-string
+client_options:
+  timeout: "300"

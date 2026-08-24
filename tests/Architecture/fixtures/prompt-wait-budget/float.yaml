@@ -1,0 +1,4 @@
+# 見本: timeout が小数 (int ではない)
+name: float
+client_options:
+  timeout: 300.5

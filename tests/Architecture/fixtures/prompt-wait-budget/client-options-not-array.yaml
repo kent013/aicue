@@ -1,0 +1,3 @@
+# 見本: client_options が map でない
+name: client-options-not-array
+client_options: 300

@@ -662,11 +662,30 @@ catch を足す必要が出たら、観測目録へ移すか免除の分類を�
   **D (`manual.analysis_deadline_seconds`) は `AnalysisPipeline` が各 LLM 試行の開始前に検査する
   ソフト予算**であり、走行中の呼び出しは中断しない (中断は C が担う)。ハード上限は worker の
   `$timeout` (SIGALRM)
-- **LLM 呼び出しの実効タイムアウトは `resources/prompts/*.yaml` の `client_options.timeout`** である。
+- **下の 3 前提が成立する限り、LLM 呼び出しの実効タイムアウトは
+  `resources/prompts/*.yaml` の `client_options.timeout`** である。
   この値は `config/prism.php` の `request_timeout` (30s) を **上書きする**
   (prism-prompt の `Prompt::resolveClientOptions()` → Prism の `Anthropic::client()` の
   `withOptions()` が Guzzle option を後勝ちで書き換えるため)。解析の timeout を調整するときは
   `config/prism.php` ではなく prompt YAML を見ること
+- **宣言の読み取り規則の正本は `Tests\Support\PromptWaitBudget` の 1 クラス**である
+  (未宣言 / `client_options` 非配列 / `timeout` キー無し / 整数でない値 / 0 以下を
+  すべて違反にする既定拒否)。待ち予算を読む検査は**次の 3 経路で全部**であり、
+  いずれもこの 1 本を参照する —
+  全数の宣言検査 (`PromptClientTimeoutInvariantTest`) /
+  時間 budget の突合 (`AnalysisBudget::clientTimeoutSecondsFromYaml()` 経由で
+  `AnalysisTimeBudgetInvariantTest` と `AnalysisTokenBudgetInvariantTest`) /
+  OCR 変種の突合 (`AnalysisTokenBudgetInvariantTest` の `sop-extract-media.yaml` 検査)。
+  同じ規則を 2 実装持つと片方だけが緩んでも気付けない (実測: 旧実装は `timeout: 0` を通していた)
+- **上の「実効である」は 3 つの前提に依存し、機械では見ていない** —
+  (i) `app/Prompts/` の factory が vendor の `$clientOptions` クラスプロパティを設定しない、
+  (ii) `resources/prompts` を読む非 PHP の実装が無い、
+  (iii) vendor の解決順序が「クラスプロパティ > YAML > config」である。
+  2026-08-24 の実読で 3 つとも成立していることを確認した (batch/pool 経路も無い)
+- **前提が崩れたときの手当て**: 宣言値が実効でない経路が生まれたら、その経路を本節へ
+  列挙し、記述が消えたら赤くなる検査を置く (家系の正典が spirux で採っている形)。
+  「宣言は在るのに効かない」状態を検査が緑で覆い隠すのが最悪の帰結なので、
+  経路を作る PR で必ず同時に行う
 - LLM 呼び出しの有界リトライ対象は **JSON 検証失敗 + transient な provider/connection 例外**
   (`ConnectionException` / 529 / 408・500・502・503・504)。429・413・その他は fail-fast で
   理由別のユーザー文言を `analysis_jobs.error` に残す。リトライは `startJob` (reserve) の後・

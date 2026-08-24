@@ -4,9 +4,6 @@ declare(strict_types=1);
 
 namespace Tests\Support;
 
-use Symfony\Component\Yaml\Yaml;
-use Webmozart\Assert\Assert;
-
 /**
  * AI 解析の時間 budget 不変条件で使う「仕様値」と、prompt YAML からの実測読み出し。
  *
@@ -40,25 +37,21 @@ final class AnalysisBudget
     /**
      * prompt YAML から読んだ client_options.timeout (プロンプト名 => 値)。
      *
+     * ★読み取り規則の正本は `Tests\Support\PromptWaitBudget` 1 箇所である
+     *   (未宣言 / 非配列 / キー無し / 非 int / 非正 をすべて例外にする)。
+     *   ここに `Assert::integer()` 相当を書き戻さないこと — 以前の実装は
+     *   `timeout: 0` を通していた。
+     *
      * @return array<string, int>
      */
     public static function clientTimeoutSecondsFromYaml(): array
     {
         $timeouts = [];
         foreach (self::PROMPT_NAMES as $name) {
-            $yaml = Yaml::parseFile(resource_path("prompts/{$name}.yaml"));
-            Assert::isArray($yaml, "{$name}.yaml が map ではありません");
-            Assert::keyExists($yaml, 'client_options', "{$name}.yaml に client_options がありません");
-
-            // 配列 offset 式のままだと PHPStan の narrowing が保たれないためローカル変数へ移す
-            $clientOptions = $yaml['client_options'];
-            Assert::isArray($clientOptions, "{$name}.yaml の client_options が map ではありません");
-            Assert::keyExists($clientOptions, 'timeout', "{$name}.yaml に client_options.timeout がありません");
-
-            $timeout = $clientOptions['timeout'];
-            Assert::integer($timeout, "{$name}.yaml の client_options.timeout が int ではありません");
-
-            $timeouts[$name] = $timeout;
+            $timeouts[$name] = PromptWaitBudget::requirePositive(
+                resource_path("prompts/{$name}.yaml"),
+                "{$name}.yaml",
+            );
         }
 
         return $timeouts;

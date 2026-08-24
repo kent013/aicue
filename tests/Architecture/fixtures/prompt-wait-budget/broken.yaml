@@ -1,0 +1,3 @@
+# 見本: **意図的に構文を壊してある** (parse 不能の負例)。直さないこと。
+name: broken
+client_options: [unclosed

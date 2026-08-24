@@ -1,0 +1,4 @@
+# 見本: timeout が真偽値 (int ではない)
+name: bool
+client_options:
+  timeout: true

@@ -1,0 +1,4 @@
+# 見本: timeout が 0 (非正)
+name: zero
+client_options:
+  timeout: 0

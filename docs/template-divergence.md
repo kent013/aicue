@@ -8,7 +8,7 @@
 `template-divergence-ledger` が 2026-08-15 に確定した形) に従う。形式は
 `tests/Architecture/TemplateDivergenceLedgerFormatTest.php` が機械で強制する。
 
-登録エントリ: 46 件
+登録エントリ: 47 件
 
 ## 記録の原則
 
@@ -2854,3 +2854,73 @@ controller の存在ではない。
 
 - 実装: `tests/Architecture/ArchBaselineTest.php`
 - 設計: `devnotes/20260823-0020-pest-arch-baseline-per-rule-adoption/`
+
+## D50 LLM 待ち予算の宣言検査を、単一読み取り器 + 検出器自己テスト形へ差し替える
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `tests/Architecture/PromptClientTimeoutInvariantTest.php` / `tests/Support/PromptWaitBudget.php` / `tests/Unit/Architecture/PromptWaitBudgetTest.php` |
+| 業務要件起因の説明 | 本アプリの AI 解析は 1 呼び出し 360 秒の待ち予算を前提に deadline (3C) と job timeout と retry_after と予約 TTL の連鎖を組んでおり、prompt YAML の宣言が落ちると (`docs/architecture.md` §AI 解析ジョブの運用契約 が挙げる 3 前提が成立する現行実装では) 実効値が 30 秒へ縮み、provider の応答が 30 秒を超えた時点で解析が早期に打ち切られる。テンプレートの形は判定を gate ファイル内へインラインで持つため、同じ規則が時間 budget 側にも複製されて実際に緩い実装 (0 以下を通す) が生まれた。判定を 1 クラスへ切り出し、待ち予算を読む検査すべてがそれを参照する形にする |
+| 揃え続ける不変条件と保証機構 | 全 prompt YAML が `client_options.timeout` を正の整数で宣言することは `PromptClientTimeoutInvariantTest` が既定拒否で固定する (テンプレートと同じ不変条件)。分母の全数性は既存の走査ヘルパ `PromptYaml::paths()` の実装契約に依存し、新設 test が裏取りするのは現在の列挙結果に既知 5 本が含まれることまでである。判定の検出力は `tests/Unit/Architecture/PromptWaitBudgetTest.php` が負例 9 類型 + 正例 + 解決不能形 3 種 (分類つき) で裏取りする |
+| 再判定の条件 | テンプレート側が判定の 1 クラス化を取り込んだとき (家系の正典 v1 が既にこの形なので、追従で差分が消える可能性がある)。または `resources/prompts` の走査ヘルパ (`PromptYaml`) をテンプレートへ同期する判断をしたとき |
+| 決めた日 | 2026-08-24 |
+| 決めた人 | 開発者 |
+| 根拠 | devnotes/20260824-1016-llm-prompt-wait-budget-v1/ |
+| 状態 | 監視中 |
+| 見直し期限 | 2027-06-30 |
+
+| 観点 | テンプレート | 本アプリ |
+|---|---|---|
+| 判定の置き場 | gate ファイル内のインライン判定 | `Tests\Support\PromptWaitBudget` 1 クラス (public 2 口・判定は private) |
+| 検出力の裏取り | なし | 負例 9 類型 + 正例 + 解決不能形 3 種 (`tests/Unit/Architecture/PromptWaitBudgetTest.php`) |
+| 分母の証明 | 非空のみ | 非空 + 既知 5 本の包含 (走査根の改名・移動と既知ファイルの削除で赤くなる。再帰性の退行は検出しない) |
+| 時間 budget 側との関係 | 無関係 (テンプレートに解析パイプラインが無い) | 同じ読み取り器を `AnalysisBudget::clientTimeoutSecondsFromYaml()` が参照する |
+
+### なぜ正当な差分か (logic-driven)
+
+1. **待ち予算の宣言落ちは本アプリでだけ致命になる**。SOP → シナリオ生成の 3 段
+   (`sop-extract` / `work-decomposition` / `scenario-generation`) と OCR 経路
+   (`sop-extract-media`) は 1 呼び出し 360 秒を前提に時間 budget の連鎖を組んでいる。
+   宣言が 1 行落ちると (実効性の 3 前提が成立する現行実装では) 実効値は
+   `config/prism.php` の 30 秒へ縮み、**平常時は何も起きず、provider の応答が
+   30 秒を超えたときだけ**「解析が早期に打ち切られる」という形で遠くに症状が出る。
+   テンプレートには解析パイプラインが無いので、同じ検査でも守っている連鎖の長さが違う。
+   (**ワーカー占有の長期化は本登録では主張しない** — 30 秒への短縮の直接の帰結は
+   早期打ち切りであり、リトライ反復によるキュー圧迫を主張するにはその経路と上限の
+   裏取りが要る。裏取りしていないものは書かない。)
+2. **同じ規則の複数実装が実際に緩んでいた**。判定を gate 内へインラインで書く形だったため、
+   時間 budget 側 (`AnalysisBudget::clientTimeoutSecondsFromYaml()`) が
+   `Assert::integer()` 止まりの別実装になり **`timeout: 0` を通していた**。
+   穴が閉じていたのは「別の gate が偶然厳しかったから」であって、構造ではなかった。
+   判定を 1 クラスへ寄せると、どの検査から見ても同じ厳しさで落ちる。
+3. **検出力を負例で裏取りできる形になる**。読み取り器は引数でパスを受けるので見本
+   ファイルを食わせられる。gate 内のインライン判定のままでは
+   `resources/prompts` の実データを壊す以外に負例を作れず、同じ分母を見る他の 3 gate を
+   巻き添えにするため実質的に裏取りできない。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「resources/prompts 配下の prompt YAML は全数が client_options.timeout を
+> 正の整数で宣言しており、未宣言・0 以下・整数でない値は検査で落ちる」
+
+### 保証しないもの
+
+- 宣言値が**実効値であること**は見ない (正本は読み取り器 `Tests\Support\PromptWaitBudget` の
+  docblock。実効性が依存する 3 前提と、崩れたときの手当ては
+  `docs/architecture.md` §AI 解析ジョブの運用契約 に書いてある)
+- **分母の全数性は走査ヘルパ `PromptYaml::paths()` の実装契約に依存する**。到達証明が
+  裏取りするのは「現在の列挙結果に既知 5 本が含まれること」であり、5 本はいずれも
+  走査根の直下にあるため**再帰性の退行では赤くならない** (走査ヘルパが探索根を
+  引数で受けないので見本ディレクトリを食わせられない)
+- parse 段の失敗分類は共有ヘルパ `PromptYaml::parseOrFail()` に従う
+  (構文エラーと vendor 内部エラーを区別しない)
+- 4 本目の読み取り実装の再流入は機械では止めない (字句走査では読み取り実装と
+  失敗メッセージ中の文字列を区別できないため。唯一の読み取り器であることは
+  読み取り器の docblock の宣言とレビューが担う)
+
+### 関連
+
+- 実装: `tests/Support/PromptWaitBudget.php`
+- 見本ファイル: `tests/Architecture/fixtures/prompt-wait-budget/` (12 本)
+- 設計: `devnotes/20260824-1016-llm-prompt-wait-budget-v1/`
+- 家系の正典: lctl feature `llm-prompt-wait-budget` canonical v1 (参照実装 spirux)

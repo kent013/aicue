@@ -1,0 +1,4 @@
+# 見本: client_options はあるが timeout キーが無い
+name: missing-timeout
+client_options:
+  retries: 1

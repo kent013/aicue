@@ -1,0 +1,2 @@
+# 見本: client_options を宣言していない (待ち予算が未宣言)
+name: missing-client-options
