@@ -219,6 +219,12 @@ test('母集団: 存在しない走査根は fail-fast で落ちる (無言で�
 
 test('目録判定: 現行どおりの入力は違反にならない (正例)', function (): void {
     expect(LlmSeamInventoryRules::otherReceiverViolations([], []))->toBe([]);
+    // ★**非空の目録が観測値と完全一致する**分岐も通す (重複した観測値も許容する)。
+    //   ここを空目録どうしだけで済ませると、一致を stale / 未登録と誤判定する壊れ方を検出できない
+    expect(LlmSeamInventoryRules::otherReceiverViolations(
+        ['Foo\\Bar', 'Foo\\Bar'],
+        ['Foo\\Bar' => str_repeat('あ', LlmSeamInventoryRules::MINIMUM_REASON_LENGTH)],
+    ))->toBe([]);
     expect(LlmSeamInventoryRules::exemptionViolations(
         ['app/Support/Llm/GuardedPrompt.php' => str_repeat('あ', LlmSeamInventoryRules::MINIMUM_REASON_LENGTH)],
         ['app/Support/Llm/GuardedPrompt.php', 'app/Prompts/SopExtractPrompt.php'],
