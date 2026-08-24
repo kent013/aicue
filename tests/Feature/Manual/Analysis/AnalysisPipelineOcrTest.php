@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Kent013\PrismPrompt\Prompt;
 use Kent013\PrismPrompt\Testing\TextResponseFake;
+use Tests\Support\Manual\FencedLlmResponse;
 use Tests\Support\Manual\MinimalImageFixture;
 use Tests\Support\Manual\MinimalPdfFixture;
 
@@ -64,7 +65,7 @@ function ocrExtractFixture(): string
 {
     // AnalysisAcceptanceGate の実質空判定 (manual.analysis_min_text_bytes) を
     // 既定値のまま安全に上回るよう、実際の SOP らしい分量の本文にする。
-    return json_encode([
+    return FencedLlmResponse::wrapArray([
         'header' => ['title' => 'OCR サンプル手順書', 'department' => null, 'revision' => null],
         'sections' => [[
             'title' => null,
@@ -77,27 +78,27 @@ function ocrExtractFixture(): string
                 'pm_points' => [],
             ]],
         ]],
-    ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+    ]);
 }
 
 function decompositionFixtureOcr(): string
 {
-    return json_encode([
+    return FencedLlmResponse::wrapArray([
         'steps' => [['no' => 1, 'action' => 'バルブを閉じる', 'points' => ['ハンドルが止まるまで回す']]],
         'validation' => [
             'verdict' => 'valid', 'reason' => '妥当です。', 'works' => ['バルブ閉止'], 'split_recommended' => false,
         ],
-    ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+    ]);
 }
 
 function scenarioFixtureOcr(): string
 {
-    return json_encode([
+    return FencedLlmResponse::wrapArray([
         'cuts' => [
             ['no' => 1, 'type' => 'step', 'parent_no' => null, 'scene' => '全体', 'shot_type' => 'hiki',
                 'shooting_point' => null, 'narration' => 'バルブを閉じます', 'subtitle_primary' => null, 'subtitle_secondary' => 'バルブ閉'],
         ],
-    ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+    ]);
 }
 
 function fakeSuccessfulOcrScript(): void

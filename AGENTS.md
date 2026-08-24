@@ -1045,3 +1045,68 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
     - **走査対象と保証しないものの正本は `tests/js/support/file-input-scan.ts` の
       docblock** であり、本書には写さない (2 か所に書くと必ず食い違う)。
       件数も写さない (正本は目録側の pin)
+21. **LLM 応答の復号点の単一性と失敗の区分 (T257 / 家系の正典 v1)**:
+    LLM 応答を構造化データとして読む場所は `App\Support\Manual\LlmJson::decode()` の
+    **1 か所だけ**である。受理契約は**囲み (コードフェンス) ちょうど 1 つ**で、
+    緩い入口は持たない (公開面は `decode` / `schemaViolation` の 2 つに機械で pin してある)。
+    - 依頼文 (`app/Prompts/`) を足したら、`LlmResponseDecodePointGateTest` の目録へ
+      応答の扱い (`Decoded` / `ProviderShape` / `FreeText`) を登録する
+      (deny-by-default。`Decoded` 以外は 30 文字以上の根拠が要る)。
+      `Decoded` にしたら依頼文 YAML の `system_prompt` に**所定の出力指示**を書く
+      (書き忘れると同 gate の検査 6 が赤くなる = 受理契約と依頼文が黙って食い違わない)
+    - **`Decoded` 分類の**応答は `GuardedPrompt::executeSync()` の戻り値を
+      **登録済みの受け取り関数の直接の引数**に渡す形だけが認められる。変数へ束縛する形・
+      加工してから渡す形・別サービスへ回す形は構造で赤くなる
+      (受け手を解決できない書き方も**未解決として失敗**する = 無言で候補から外さない)。
+      `FreeText` / `ProviderShape` 分類は受け取り関数を持たないのでこの検査の対象外である
+    - 失敗区分の語彙の正本は `App\Enums\Manual\LlmOutputInvalidReason` である。
+      **再試行の可否は区分で分けない** (可否は `AnalysisPipeline::isTransient()` が
+      例外型 1 つで決める。区分は集計のためだけに存在する)。
+      `value_incomplete_inferred` は**切り詰めの推定**であって断定ではない
+      (提供元の停止の理由の正本は `llm_call_logs.finish_reason`)
+    - **復号に失敗した 6 区分**では例外へ載せるのは**区分ごとの固定文だけ**である
+      (応答本文・`json_last_error_msg()` / `JsonException::getMessage()` を入れない)。
+      `schema_violation` だけは呼び出し側が具体的な違反内容を `detail` として渡すので、
+      **そこに応答由来の文字列を混ぜないのは呼び出し側の責務**である (機械では見ていない)
+    - **保証しないものの正本は gate と `LlmJson` の docblock** であり、本書に写さない
+      (2 か所に書くと必ず食い違う)。受理文法・区分の決定順序・出荷後の観測と巻き戻しは
+      `docs/architecture.md` §LLM 応答の復号点 (単一) と失敗の区分
+22. **追記専用チケット台帳の変更サイトの目録 (家系の正典 v1 / T259)**: `ticket_ledger_entries` は
+    delta 型の追記専用台帳で、残高は行の合計である。モデルは `updating` / `deleting` を
+    例外化しているが、**Eloquent の一括削除はモデルイベントを発火しない**。よって
+    表名リテラルを持つファイル / 台帳モデル参照と変更語彙を同居させるファイル /
+    論理削除の scope を使うファイルを、`Tests\Support\Architecture\TicketLedgerMutationInventory`
+    へ**件数まで全数申告**する (`TicketLedgerMutationSiteGateTest` が deny-by-default で強制)。
+    - **保持期限の決着は削除ではなく畳み込み**である。判定は 2 段 —
+      第 1 段 (適格性 = `created_at <= 閾値`) を満たさない行は 1 行も触らず、
+      第 2 段 (寄与判定) で失効済みは物理削除・寄与する行は
+      `(組織, 出所, 失効時刻)` ごとに合算した繰越 1 行へ畳み込む。
+      **繰越行の `created_at` は畳み込んだ行の最大 `created_at`** であり実行時刻ではない
+      (実行時刻にすると繰越行が実行のたびに増える)。
+    - **許容される変更の切り分け** (「変更の例外は畳み込みだけ」ではない — 実装と食い違わせない):
+      - **行の物理削除と残高スナップショットへの置換**を書いてよいのは
+        畳み込みサービス**ただ 1 ファイル**である (削除語彙の許容も同様)
+      - **台帳への通常の追記**と、既存の限定 backfill (`payment_intent_id` の
+        1 列だけを null → 値で埋める UPDATE) は `TicketLedgerService` が持つ
+      - **許容される変更サイトの正本は mutation inventory** であり、本書には件数を写さない
+      これは**人間向けの規約**であり、gate が証明するのは
+      「対象構文の範囲で無申告の変更サイトを増やせない」ことまでである
+      (呼び出し側と共通処理側で語彙が分かれる形は検出できない)。
+      **ロック順序の検査 (TLM-5) が見るのもトークン順の構造だけ**で、
+      ロックの受け手が組織モデルか / 削除の対象が台帳かは見ない。
+    - **保持期限の母集団は論理削除済み組織も含む**。`Organization` は `SoftDeletes` なので
+      global scope の効く経路で組織を列挙すると退会済み組織の台帳が永久に畳まれない。
+    - **決着対象の定義は 1 つとする** (取引明細 + **失効した繰越行**。
+      寄与中の繰越行だけが対象外)。**組織の列挙・件数・監視は同じ述語を直接共有し、
+      処理側は「失効済み」と「寄与中」の厳密な補集合となる 2 枝で実装する**
+      (削除は 1 本の DELETE、集約は集約キーごとの GROUP BY で必要な形が違うため)。
+      **補集合性は Feature テストと変異表が固定する**。定義がずれると
+      「数えているのに処理されない行」が生まれ、`horizon` が恒久的に NG になる。
+    - **列を落とす migration はコード先行**である (drop 先行にすると旧コードが
+      `Undefined column` で落ちる。これは破壊条件の要約であり、
+      **順序・rollback・maintenance window の判断の正本は
+      `docs/billing-retention-runbook.md` の「`carried_forward_through` 撤去のデプロイ順序」節**である。
+      本書に手順を写さない)。
+    - **保証しないものの正本は走査器 (`TicketLedgerMutationScanner`) の docblock** であり、
+      本書には写さない。運用の説明は `docs/architecture.md` §課金記録の保持期間、
+      畳み込みで失われるものは `docs/billing-retention-runbook.md` §7。

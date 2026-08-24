@@ -2390,18 +2390,31 @@ lctl 台帳 feature `account-deletion-billing-guard` の標準形 v1 (裁定 AG-
   `subscription`) は入れ替えない (親を先に消すと FK cascade で子が件数報告を経由せず消える)。
 - **台帳 (`ticket_ledger_entries`) だけ方式が違う理由**: そこが**残高の真実源**だからである。
   期限超過の行をそのまま消すと利用者のチケット残高が変わる。畳み込み
-  (`App\Services\Billing\TicketLedgerCarryForwardService`) は
-  `(organization_id, source, expires_at)` ごとに合算し、`kind = carry_forward` の
-  **残高スナップショット 1 行**へ置換する。**group key に `organization_id` を必ず含める**
+  (`App\Services\Billing\Retention\TicketLedgerCarryForwardService`) は
+  **判定を 2 段**に分ける。第 1 段 (適格性 = `created_at <= 閾値`) を満たさない行は 1 行も触らず、
+  第 2 段 (寄与判定) で**既に失効した行は繰越に含めず物理削除**し、
+  **まだ残高に寄与する行だけ**を `(organization_id, source, expires_at)` ごとに合算して
+  `kind = carry_forward` の**残高スナップショット 1 行**へ置換する。
+  失効済みの窓を集約の単位に残さないので、**繰越行は集約単位ごとに 1 行へ収束する**
+  (= 繰越行の有界化)。**group key に `organization_id` を必ず含める**
   (欠くと組織を跨いで残高を合算する)。`source IS NULL` (legacy 行) は独立した group。
   繰越行は**取引記録ではなく残高のスナップショット**であり、原取引の識別子を 1 つも
-  引き継がない (`carried_forward_through` に集約期間の終端だけを持つ)。
+  引き継がない。**`created_at` は畳み込んだ行の最大 `created_at`** (集約の基準時刻) であって
+  実行時刻ではない — 実行時刻にすると繰越行が実行のたびに増え、収束しない。
+  **母集団は論理削除済み (退会済み) 組織も含む** (`Organization` は `SoftDeletes` であり、
+  課金記録の保持義務は退会より寿命が長い。`docs/template-divergence.md` D23)。
+  `candidates` / `expiredRemaining` が数える「決着対象」の語の**正本は
+  `App\DataTransferObjects\Billing\BillingRetentionPurgeResultDto` の docblock**である。
   残高が 1 枚も変わらないことは `tests/Feature/Billing/TicketLedgerCarryForwardTest.php` が
   組織 / source / 失効時刻の粒度で機械固定する。
+  **列を落とす migration の順序と rollback の正本は
+  `docs/billing-retention-runbook.md`** であり、本書には書かない。
 - **台帳を読む場所は目録制** (`TicketLedgerReaderInventoryTest`)。畳み込みの帰結として
   「7 年より古い個別取引は復元できない」ため、個別行に依存する読み手が宣言なしに増えると
   ある日その経路だけが静かに壊れる。目録は読み方 (`aggregate` / `row_detail` / `other_table`)
-  の宣言を強制する。
+  の宣言を強制する。**書き込む場所も目録制**である
+  (`TicketLedgerMutationSiteGateTest` が表名リテラル / モデル参照 + 変更語彙 /
+  論理削除 scope を件数まで deny-by-default で固定する)。
 - **監視対象**: 本コマンドの終了コード (`unexpected_failures > 0` で `FAILURE`) と、
   出力の `horizon:` 行 (**OK / NG / 判定不能** の 3 値)。**`fail_closed` は「安全に残した」であって
   「規約を満たした」ではない**ので、`horizon: NG` の継続と `fail_closed` の増加を正常成功として
@@ -2904,6 +2917,106 @@ App\Support\Llm\GuardedPrompt                 ← 実行単位は既存と同じ
   持たないため、同じジョブが stale 回復等で再実行されれば行が増える) を
   `route` (`text`/`ocr`) / `source_mime` / `outcome` / `failure_category` (固定語彙) /
   `media_size_bytes` / `media_pages` / `media_pixels` で記録する。本文・応答は一切含めない。
+
+## LLM 応答の復号点 (単一) と失敗の区分 (T257 / 家系の正典 v1)
+
+窓口方式が**入口** (untrusted 文字列が prompt へ入る道) を 1 本道にしたのに対し、本節は
+**出口** (LLM 応答が構造化データとして app/ へ入る道) を 1 点に畳む。復号点は
+`App\Support\Manual\LlmJson::decode()` **ただ 1 つ**で、緩い入口は持たない。
+
+### 受理契約 (厳しい入口が 1 つだけ)
+
+```
+応答 = PRE OPEN VALUE GAP CLOSE POST
+  PRE   : 囲みの印を含まない任意の文字列 (前置きの説明文を許す)
+  OPEN  : 逆引用符 3 個以上の並び + 任意の言語札 [A-Za-z0-9_+.-]*
+  VALUE : 最上位が入れ物 (object / array) の JSON 値ちょうど 1 つ
+  GAP   : 空白のみ (JSON の空白 4 種 = SP / HT / LF / CR)
+  CLOSE : 逆引用符 3 個以上の並び (直後に言語札を持たない)
+  POST  : 囲みの印を含まない任意の文字列 (後書きを許す)
+```
+
+- 採るのは**常に最初の囲みの直後の値**である (決定論。同じ応答なら常に同じブロック)。
+- 囲みの印が**ブロックの外にもう 1 つ**あれば受け取らない。
+- 印は「行」ではなく「連続 3 個以上の逆引用符の並び」である。応答データの中に現れた印を
+  終端に数えないのは、**構造の走査で決まった値の区間の外側だけを数える**ことで担保する。
+- 値が JSON として妥当かは自前で判定せず `json_decode(..., JSON_THROW_ON_ERROR)` に委譲する
+  (自前パーサへ膨らませて `json_decode()` と判定が食い違う状態を作らない)。
+
+依頼文 4 本 (`sop-extract` / `sop-extract-media` / `work-decomposition` /
+`scenario-generation`) の `system_prompt` は、この契約と同じ形を指示する。
+指示文と受理契約の同期は `LlmResponseDecodePointGateTest` の検査 6 が deny-by-default で固定する。
+
+### 区分の決定順序 (単一パスの到達順 = 複合不正の優先順位)
+
+| #  | 判定 | 区分 |
+|----|------|------|
+| 1  | 囲みの印が 1 つも無い | `fence_absent` |
+| 2  | 開きの印 + 言語札の先が空白のみで終端 | `value_incomplete_inferred` |
+| 3  | その先の最初の非空白が囲みの印 (空のブロック) | `top_level_not_container` |
+| 4  | その先の最初の非空白が `{` でも `[` でもない | `top_level_not_container` |
+| 5a | 構造の走査が期待と異なる閉じ括弧に遭遇 | `syntax_broken` |
+| 5b | 構造の走査が深さ 0 に戻らずに終端 | `value_incomplete_inferred` |
+| 6  | 値の終端の後、空白を飛ばした先が終端 | `closing_fence_absent` |
+| 7  | 値の終端の後の印の直後に言語札がある (別ブロックの開き) | `fence_multiple` |
+| 8  | 値の終端の後が印でもなく非空白 (余剰トークン) | `syntax_broken` |
+| 9  | 閉じの印より後にさらに囲みの印がある | `fence_multiple` |
+| 10 | 切り出した値の `json_decode` が `JsonException` (深さ超過を含む) | `syntax_broken` |
+| 11 | `json_decode` の結果が配列でない (4 で落ちるので到達不能。多重防御) | `top_level_not_container` |
+
+`schema_violation` は上の 6 区分と**直交する別の軸**である (「読めたが形が違う」)。
+違反位置 `path` を持つのはこの区分だけである。
+
+**切り詰めは推定であって断定ではない**。`value_incomplete_inferred` は「値が完結しないまま
+終端に達した」という構造からの推定で、提供元が返す停止の理由の正本は
+`llm_call_logs.finish_reason` (`Prism\Prism\Enums\FinishReason` の値。失敗系は sentinel
+`'failed'`) である。復号点はこの列に触らないので、推定が正本を上書きすることは構造的に起きない
+(疑いは事後にこの列と突合できる)。値の綴りに `inferred` を含めるのは、記録を読む人が
+**断定と読み違えない**ようにするためである。
+
+**再試行の可否は区分で分けない**。可否は `AnalysisPipeline::isTransient()` が例外型 1 つで
+決めており (全区分 retryable)、区分は集計のためだけに存在する。復号の失敗はすべてモデルの
+出力の書式の問題で、次試行は再サンプリングなので出力が変わる (「決定論的」なのは復号の判定で
+あって応答の生成ではない)。
+
+**例外に応答本文を載せない**。**復号に失敗した 6 区分**では `getMessage()` に入るのは
+区分ごとの固定文だけで、応答の断片・`json_last_error_msg()` / `JsonException::getMessage()` は
+入らない (単体・統合の非漏洩テストが固定するのもこの 6 区分である)。利用者向けの文言
+(`analysis_jobs.error`) は区分によらず `userMessage()` の定型文である。
+**`schema_violation` は例外**で、`LlmJson::schemaViolation($detail, $path)` の `$detail` は
+呼び出し側 (DTO の検証) が組み立てる。現在の呼び出しはどれもキー名・型名・上限値だけを
+書いており応答由来の文字列を含まないが、**そこは機械では見ていない**ので、
+検証を足すときに応答の断片を `detail` へ混ぜないのは書き手の責務である。
+
+### 単一性の機械検査
+
+`tests/Architecture/LlmResponseDecodePointGateTest.php` が 8 つの検査を deny-by-default で
+持つ (依頼文の全数分類 / 受け取り口の全数分類 / 応答の流れの構造的封じ /
+`GuardedPrompt` の参照者の分類 / 復号語彙の不在 / 依頼文と受理契約の同期 /
+復号点の公開面の pin / 受け取り関数が復号点に直結していること)。
+**保証しないものの正本は同 gate と走査器 (`Tests\Support\Llm\LlmResponseSeamScanner`) の
+docblock** であり、本書には写さない (2 か所に書くと必ず食い違う)。
+
+### 観測の読み方と巻き戻し
+
+- 数えられるのは**件数**である。再試行 1 回ごとに
+  `AI 解析の LLM 呼び出しを再試行します` の `failure_category` に区分が出て、最終失敗は
+  extract 段の終端ログの `failure_category` (`llm_output_invalid_{区分}`) に出る。
+- **率は現行 Log からは出せない** (再試行ログは失敗時にだけ出るので分母が無い)。
+  分母が要るときは `llm_call_logs` の `prompt_template` 別の行数と突合する
+  (その表は LLM コストレポートの持ち分で、本節は新しい観測点を作らない)。
+- **巻き戻し**: `llm_output_invalid_fence_absent` / `_fence_multiple` が終端失敗の主因として
+  現れたら、一手目は**依頼文の出力指示の修正**である。それで回復しない場合は
+  **本変更を導入したリリースの変更一式を revert** する。
+  **復号点だけを部分的に緩める形は採らない** (受理契約を緩める並走を作らない = 思考原則 3)。
+- **過去の記録との非連続**: 旧語彙 `invalid_json` は本変更で消えた。
+  **本変更の本番デプロイを境界として**、それ以前の記録では同じ事象が `invalid_json` である。
+  境界の実値 (日時・リリース識別子) はデプロイ記録 / リリースノートが正本で、本書は書かない
+  (実装時点では未確定であり、コミットに自分自身の識別子は書けない)。
+- **実 provider での互換性確認は本書の保証範囲ではない**。自動テストは canned / fixture を
+  使うので、「モデルが実際に囲みつきで返すか」は
+  `dev:pipeline-smoke` の実走 (課金あり) と画像 SOP 1 件の解析でしか確かめられない。
+  未実施なら「確認済み」と書かないこと。
 
 ## 組織アクセスの失効 (T174 / 家系の正典 v2)
 

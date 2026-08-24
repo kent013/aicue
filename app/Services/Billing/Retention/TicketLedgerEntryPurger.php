@@ -7,13 +7,13 @@ namespace App\Services\Billing\Retention;
 use App\DataTransferObjects\Billing\BillingRetentionPurgeResultDto;
 use App\Enums\Billing\BillingRetentionTarget;
 use App\Services\Billing\Contracts\BillingRetentionPurger;
-use App\Services\Billing\TicketLedgerCarryForwardService;
 use Carbon\CarbonImmutable;
 
 /**
- * チケット台帳の purger (**物理削除ではなく畳み込み**)。
+ * チケット台帳の purger (**単純な物理削除ではなく二段判定の畳み込み**)。
  *
- * 他の target は行を消して決着させるが、台帳は残高の真実源であり、消すと残高が変わる。
+ * 他の target は行を消して決着させるが、台帳は残高の真実源であり、
+ * 残高に寄与している行を消すと残高が変わる (寄与しなくなった行は畳み込みでも物理削除する)。
  * よってここは {@see AbstractBillingRetentionPurger} を継承せず、畳み込み
  * ({@see TicketLedgerCarryForwardService}) への薄い adapter に徹する。
  *

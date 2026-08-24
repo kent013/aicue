@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\DataTransferObjects\Manual\Analysis\WorkDecompositionResponseData;
 use App\Enums\Manual\ScenarioVerdict;
 use App\Exceptions\Manual\LlmOutputInvalidException;
+use Tests\Support\Manual\FencedLlmResponse;
 
 /*
  * WorkDecompositionResponseData: work-decomposition 応答全体 ({steps, validation}) を
@@ -19,7 +20,7 @@ use App\Exceptions\Manual\LlmOutputInvalidException;
  */
 function decompositionResponseText(array $overrides = []): string
 {
-    return json_encode([...[
+    return FencedLlmResponse::wrapArray([...[
         'steps' => [['no' => 1, 'action' => 'バルブを閉じる', 'points' => ['止まるまで回す']]],
         'validation' => [
             'verdict' => 'needs_review',
@@ -27,7 +28,7 @@ function decompositionResponseText(array $overrides = []): string
             'works' => ['バルブ閉止作業', '点検作業'],
             'split_recommended' => true,
         ],
-    ], ...$overrides], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+    ], ...$overrides]);
 }
 
 test('steps と validation の両方が揃った応答を組み立てる', function (): void {
@@ -43,9 +44,9 @@ test('steps と validation の両方が揃った応答を組み立てる', funct
 });
 
 test('validation 欠落は path=validation の LlmOutputInvalidException になる', function (): void {
-    $text = json_encode([
+    $text = FencedLlmResponse::wrapArray([
         'steps' => [['no' => 1, 'action' => 'バルブを閉じる', 'points' => []]],
-    ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+    ]);
 
     try {
         WorkDecompositionResponseData::fromLlmText($text);
@@ -66,7 +67,7 @@ test('steps 側の違反は path が steps. で始まる (validation 側と識�
     }
 });
 
-test('JSON として壊れている応答は path=null のまま落ちる (既存経路は無変更)', function (): void {
+test('囲みの無い応答は path=null のまま落ちる (復号の失敗に違反位置は無い)', function (): void {
     try {
         WorkDecompositionResponseData::fromLlmText('これは JSON ではない');
         expect(false)->toBeTrue(); // 到達しない

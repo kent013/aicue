@@ -76,7 +76,7 @@ enum BillingRetentionTarget: string
             self::SubscriptionItem => 'subscriptions.ends_at',
             self::Subscription => 'ends_at',
             // 台帳は取引成立の時点で起算済み (null にならない)。
-            // 決着は物理削除ではなく畳み込み (App\Services\Billing\TicketLedgerCarryForwardService)
+            // 決着は単純削除ではなく二段判定の畳み込み (App\Services\Billing\Retention\TicketLedgerCarryForwardService)
             self::TicketLedgerEntry => 'created_at',
         };
     }

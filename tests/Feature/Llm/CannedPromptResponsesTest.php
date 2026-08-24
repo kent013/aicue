@@ -140,6 +140,16 @@ test('scenario-generation の canned が GeneratedScenarioData::fromLlmText を�
     expect($dto->steps[0]->points)->toHaveCount(1);
 });
 
+test('構造化応答の canned は囲みちょうど 1 つで返る (素の JSON へ戻す改変を赤にする)', function (string $key): void {
+    // 受理契約が「囲みちょうど 1 つ」なので、canned も**依頼文が指示する形と同じ形**で返す。
+    $text = makeRegisteredPrompt($key)->executeSync();
+    Assert::string($text);
+
+    expect($text)->toStartWith("```json\n");
+    expect($text)->toEndWith("\n```");
+    expect(substr_count($text, '```'))->toBe(2);
+})->with(['sop-extract', 'sop-extract-media', 'work-decomposition', 'scenario-generation']);
+
 test('example-summary の canned は非空 string を返す', function (): void {
     $text = ExampleSummaryPrompt::make('本文')->executeSync();
     expect($text)->toBeString();

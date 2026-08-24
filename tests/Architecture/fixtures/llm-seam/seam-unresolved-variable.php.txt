@@ -1,0 +1,18 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Fixture\LlmSeam;
+
+use App\Prompts\SopExtractPrompt;
+
+// 負例: 応答を変数へ束縛する形。受け手が静的に決まらないので**未解決**になる。
+final class UnresolvedVariable
+{
+    public function run(string $text): string
+    {
+        $prompt = SopExtractPrompt::make($text);
+
+        return $prompt->executeSync();
+    }
+}

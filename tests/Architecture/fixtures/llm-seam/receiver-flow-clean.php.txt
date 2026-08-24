@@ -1,0 +1,21 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Fixture\LlmSeam;
+
+use App\Support\Manual\LlmJson;
+
+// 正例: 生の応答は復号点へ**直接 1 回だけ**渡る。
+final class ReceiverFlowClean
+{
+    /** @param array<array-key, mixed> $decoded */
+    private function __construct(private array $decoded) {}
+
+    public static function fromLlmText(string $text): self
+    {
+        $decoded = LlmJson::decode($text);
+
+        return new self($decoded);
+    }
+}
