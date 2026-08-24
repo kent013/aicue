@@ -5,6 +5,7 @@ import path from "node:path";
 import postcss, { AtRule, type Container, type Document, type Root, type Rule } from "postcss";
 import tailwindcss from "@tailwindcss/postcss";
 import { REPO_ROOT, designColors, designRamp, designRounded } from "./design-md";
+import { cssColorTokens, parseCssColor, requiredMapValue } from "./theme-map";
 import {
     COLOR_TOKEN_MAP,
     COMPILED_VALUE_EXEMPT_TOKENS,
@@ -52,6 +53,11 @@ const UTILITY_CANDIDATES = {
     radius: RADIUS_TOKENS.map((r) => `rounded-${r}`),
     ramp: TYPOGRAPHY_RAMPS.map((r) => `text-${r}`),
     hover: CSS_COLOR_SUFFIXES.filter((s) => s.endsWith("-hover")).map((s) => `hover:bg-${s}`),
+    /**
+     * 不透明度修飾。**S5 (合成の検査) が置く前提「修飾は同じ色の alpha になる」の裏取り**。
+     * 代表として不透明 token の /10 と、alpha を値に持つ派生 token の /40 (= 二重) を取る。
+     */
+    alpha: ["bg-primary/10", "bg-primary-soft/40"],
 } as const;
 
 /**
@@ -574,5 +580,88 @@ describe("tokens/G: app.css の入口 2 行の規約", () => {
         expect(first.params).toMatch(/^["']tailwindcss["']$/);
         expect(second.name).toBe("import");
         expect(second.params).toMatch(/^["']\.\/tokens\.css["']$/);
+    });
+});
+
+/* ===== H. 不透明度修飾の生成形 (密閉の層) ===== */
+
+/**
+ * 不透明度修飾の宣言を包んでよい条件つき at-rule の一覧 (`<名前> <条件文>`)。
+ *
+ * Tailwind v4 は `color-mix(in oklab, …)` を `@supports` で条件づける (実測)。
+ * ここに無い条件が現れたら赤になる = 生成形の前提が変わった契機である。
+ */
+const ALLOWED_ALPHA_CONDITIONS: readonly string[] = [
+    "supports (color: color-mix(in lab, red, red))",
+];
+
+describe("tokens/H: 不透明度修飾は同じ色の alpha として生成される", () => {
+    /*
+     * S5 の合成モデルはこの生成形を前提にしている。前提が版で変わったら
+     * ここが赤くなって「見直す契機」になる (正典 i16 が要求する形)。
+     *
+     * 実測 (Tailwind 4.x):
+     *   .bg-primary\/10 {
+     *       background-color: color-mix(in srgb, #1d4ed8 10%, transparent);
+     *       @supports (color: color-mix(in lab, red, red)) {
+     *           background-color: color-mix(in oklab, var(--color-primary) 10%, transparent);
+     *       }
+     *   }
+     * fallback 側は**正本の hex をリテラルで埋め込む**ので、値の突き合わせも兼ねる。
+     */
+    it("不透明 token の /10 は正本の hex を 10% で透明と混ぜた形になる", () => {
+        const decls = soleRule(sealed, ".bg-primary\\/10");
+        // Map#get の undefined が文字列補間で "undefined" になり、
+        // 「意図した解析失敗」ではなく「文字列が一致しないだけ」の赤に化けるのを防ぐ。
+        const expected = requiredMapValue(designColors(), "primary", "DESIGN.md colors.primary");
+        expect(requiredMapValue(decls, "background-color", ".bg-primary/10")).toBe(
+            `color-mix(in srgb, ${expected} 10%, transparent)`,
+        );
+    });
+
+    it("@supports の中は var() 参照の oklab 混色になる", () => {
+        // 条件つき at-rule の中は soleRule が拾わないので、条件つきの側を明示的に見る。
+        // 条件の綴りは allowlist と突き合わせる (D の ALLOWED_HOVER_CONDITIONS と同じ方針)。
+        const rules = rulesWithSelector(sealed, ".bg-primary\\/10");
+        expect(rules.length, ".bg-primary/10 の規則が 1 件でない").toBe(1);
+        const { values, conditions } = collectDeclarations(rules[0]);
+        expect(conditions).toEqual(ALLOWED_ALPHA_CONDITIONS);
+        expect(requiredMapValue(values, "background-color", ".bg-primary/10 @supports")).toBe(
+            "color-mix(in oklab, var(--color-primary) 10%, transparent)",
+        );
+    });
+
+    it("alpha を値に持つ派生 token への修飾は実効 alpha が積になる (S5 が合成対象にする根拠)", () => {
+        const decls = soleRule(sealed, ".bg-primary-soft\\/40");
+        const soft = requiredMapValue(cssColorTokens(), "primary-soft", "--color-primary-soft");
+        expect(requiredMapValue(decls, "background-color", ".bg-primary-soft/40")).toBe(
+            `color-mix(in srgb, ${soft} 40%, transparent)`,
+        );
+        // 透明との混色は乗算済み alpha なので、実効 alpha は token の alpha × 修飾の alpha に確定する。
+        const parsed = parseCssColor(soft);
+        expect(parsed.kind).toBe("alpha");
+        if (parsed.kind !== "alpha") return;
+        expect(parsed.alpha * 0.4).toBeCloseTo(0.048, 6);
+    });
+
+    /*
+     * 派生 token の**導出関係**を機械で固定する。
+     * COMPILED_VALUE_EXEMPT_TOKENS が免除しているのは「DESIGN.md に期待値が無い」ことの
+     * 表明にとどまり、**別の rgba へ静かに差し替わる**ことまで許してはいない。
+     * これが無いと、primary を直したのに primary-soft を直し忘れた状態が
+     * (生成 CSS の出現とコントラストが偶然通れば) 検出できない。
+     */
+    it("--color-primary-soft は正本の primary の RGB を alpha 0.12 にしたものである", () => {
+        const soft = parseCssColor(
+            requiredMapValue(cssColorTokens(), "primary-soft", "--color-primary-soft"),
+        );
+        const primary = parseCssColor(
+            requiredMapValue(designColors(), "primary", "DESIGN.md colors.primary"),
+        );
+        expect(soft.kind).toBe("alpha");
+        expect(primary.kind).toBe("opaque");
+        if (soft.kind !== "alpha" || primary.kind !== "opaque") return;
+        expect(soft.rgb).toEqual(primary.rgb);
+        expect(soft.alpha).toBe(0.12);
     });
 });

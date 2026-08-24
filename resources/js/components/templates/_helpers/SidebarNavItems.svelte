@@ -35,7 +35,7 @@
             href={item.href}
             onclick={() => onNavigate?.()}
             class="flex items-center gap-3 rounded-lg px-3 py-3 transition-colors {isActive(item.href)
-                ? 'bg-primary text-white'
+                ? 'bg-primary text-surface'
                 : 'text-text hover:bg-neutral'}"
             title={item.label}
             data-testid="nav-item-{item.href}"

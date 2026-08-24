@@ -2,6 +2,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { REPO_ROOT } from "./design-md";
+// 行の分類 (規範判定対象外領域の除去 / 字下げの禁止) は 1 実装へ集約する (正典 i21)。
+import { scanMarkdownLines } from "./markdown-lines";
 
 /*
  * design-system-docs — docs/design-system.md の**構造**が壊れていないことを検査する。
@@ -11,20 +13,20 @@ import { REPO_ROOT } from "./design-md";
  * 【見ないもの】散文そのもの。下の SECTION_CONTRACT_PHRASES に挙げた最小断片**以外**の
  *   言い回しは検査しない (文章を良くする PR を止めないため)
  *
- * 【描画されない領域を先に落とす理由】
- *   Markdown の本文には「ファイルには書かれているが読者には表示されない」領域がある
- *   (HTML コメント / fenced code)。契約の本文をそこへ移すだけで「節はあるし本文も空でない」
- *   状態を作れてしまうため、検査の前に該当行を空行へ潰す (fail-open を塞ぐ)。
- *   潰しの判定は CommonMark の fence 規則に合わせる — **開始も終了も字下げは 3 空白まで**で、
- *   4 空白以上の `` ``` `` は fence ではない (これを fence 扱いにすると、
- *   区間の途中に偽の終端を置いて後続を「描画される本文」に見せかけられる)。
+ * 【規範判定対象外領域を先に落とす理由】
+ *   Markdown の本文には「規範の本文として数えてはいけない」領域がある
+ *   (HTML コメント = 読者に描画されない / 囲みコード = 描画されるが本文ではない)。
+ *   契約の本文をそこへ移すだけで「節はあるし本文も空でない」状態を作れてしまうため、
+ *   検査の前に該当行を空行へ潰す (fail-open を塞ぐ)。判定の正本は
+ *   `tests/js/styles/markdown-lines.ts` (契約 A / 契約 B) で、本ファイルはその**消費先**である。
  *
  * 【保証しないもの】
  *   - **運用契約の意味が残っていること**。最小断片が本文に在ることまでしか見ておらず、
  *     周りの説明が骨抜きになっていることは検出できない
- *   - **描画されない領域の全種類**。潰すのは HTML コメントと fenced code の 2 つだけで、
- *     4 空白字下げのコードブロックや HTML 要素による非表示は見ていない
- *     (Markdown の文脈依存が強く、誤って本文を潰す方が害が大きいため)。
+ *   - **規範判定対象外領域の全種類**。潰すのは HTML コメントと囲みコードの 2 つだけで、
+ *     HTML 要素による非表示は見ていない。字下げによるコードは**潰さずに検査自体を失敗させる**
+ *     (契約 B。近似で判定すると見出し直後や引用の中の形を取りこぼし、そこへ規範の断片を
+ *     退避させられるため、書き方の側を禁じている)。
  *     また HTML コメントの除去は**行内コード (`` ` `` 囲み) の文脈を見ない**ので、
  *     行内コードとして書いた `<!-- … -->` は読者に見えていても潰される。
  *     ただし跡には目印 (HIDDEN_MARK) が残るため、**読者に見える文字を挟んだ断片が
@@ -71,96 +73,13 @@ const SECTION_CONTRACT_PHRASES: Readonly<Record<string, readonly string[]>> = {
 const EXTERNAL_GATE_FILES = ["tests/js/architecture/contrast-invariant.test.ts"] as const;
 
 /**
- * 読者に描画されない領域 (HTML コメント / fenced code) を空行へ潰した行配列を返す。
+ * 規範判定対象外領域 (HTML コメント / 囲みコード) を空行へ潰した行配列を返す。
  *
- * 行数は保存する (行番号がずれると節の切り出しがずれるため)。
- *
- * fence の判定は CommonMark に合わせる:
- *   - 開始も終了も**字下げは 3 空白まで**。4 空白以上の `` ``` `` は fence ではない
- *     (緩めると、区間の途中に偽の終端を置いて後続を描画される本文に見せかけられる)
- *   - 終了は**開始と同じ記号**で**開始と同じかそれ以上の長さ**、後続は空白のみ
- *     (`~~~` で開いた区間の中の 3 連バッククォートでは閉じない)
- *   - バッククォートで開く行の**情報文字列にバッククォートを含められない**。
- *     含む行は開始 fence ではないので通常の本文として扱う
- *     (fence 扱いにすると、その次の本物の開始 fence を終端と誤認して区間がずれる)
- *
- * HTML コメントを取り除いた跡には**目印 (HIDDEN_MARK) を 1 つ残す**。詰めて繋ぐと、
- * 読者には離れて見える 2 つの断片が検査の上でだけ 1 つの文字列になり、
- * 規範の最小断片と一致してしまう (行内コードの中にコメントを置く形で作れる)。
- * 目印を**空白にしてはいけない** — 最小断片が元々空白を含む位置
- * (`同一 PR 内で` の空白等) にコメントを置かれると、空白では一致を防げないためである。
- *
- * 閉じないまま EOF に達したら、そこまでを潰す。
+ * 解析の正本は `markdown-lines.ts` の `scanMarkdownLines()` である
+ * (本ファイルと `design-md.ts` の節抽出が同じ実装を使う = 正典 i21)。
  */
-const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/;
-const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
-
-/**
- * コメントを取り除いた跡に残す目印。垂直タブ (U+000B) を使う。
- *
- * 要件は 2 つある。
- *   1. **規範の最小断片には使わない文字**であること。半角空白のように断片へ現れる文字だと、
- *      最小断片が元々空白を含む位置 (`同一 PR 内で` の空白等) を狙って断片を合成できてしまう
- *   2. **`trim()` が空白として落とす文字**であること。落とさない文字 (U+0000 等) だと、
- *      コメントだけの行が「本文のある行」に見えて節の非空検査をすり抜ける
- * 垂直タブはこの 2 つを同時に満たす (最小断片には使わない / `trim()` の対象)。
- * ファイルに格納できないという意味ではない — 使わないと決めているだけである。
- */
-const HIDDEN_MARK = "\u000B";
-
 function renderedLines(doc: string): readonly string[] {
-    const out: string[] = [];
-    let fence: { readonly char: string; readonly length: number } | null = null;
-    let inComment = false;
-
-    for (const raw of doc.split(/\r?\n/)) {
-        if (fence !== null) {
-            const close = raw.match(FENCE_CLOSE);
-            if (close !== null && close[1][0] === fence.char && close[1].length >= fence.length) {
-                fence = null;
-            }
-            out.push("");
-            continue;
-        }
-
-        let line = raw;
-        if (inComment) {
-            const end = line.indexOf("-->");
-            if (end < 0) {
-                out.push("");
-                continue;
-            }
-            // コメントの終端より後ろだけを描画される本文として残す (跡に目印を置く)
-            line = HIDDEN_MARK + line.slice(end + 3);
-            inComment = false;
-        }
-
-        // 同一行に閉じる HTML コメントは繰り返し取り除く (跡には目印を 1 つ残す)
-        for (;;) {
-            const start = line.indexOf("<!--");
-            if (start < 0) break;
-            const end = line.indexOf("-->", start + 4);
-            if (end < 0) {
-                line = line.slice(0, start) + HIDDEN_MARK;
-                inComment = true;
-                break;
-            }
-            line = line.slice(0, start) + HIDDEN_MARK + line.slice(end + 3);
-        }
-
-        const open = line.match(FENCE_OPEN);
-        // バッククォート fence の情報文字列にバッククォートがある行は開始 fence ではない
-        const infoString = open === null ? "" : line.slice(open[0].length);
-        if (open !== null && !(open[1][0] === "`" && infoString.includes("`"))) {
-            fence = { char: open[1][0], length: open[1].length };
-            out.push("");
-            continue;
-        }
-
-        out.push(line);
-    }
-
-    return out;
+    return scanMarkdownLines(doc).renderedLines;
 }
 
 /**
@@ -387,5 +306,137 @@ describe("design-system-docs: 検査目録の同期", () => {
         expect(listed, "文書の責務境界表と実在する検査ファイルが食い違っている").toEqual([
             ...gateFiles(),
         ]);
+    });
+});
+
+/* ===== 契約 A / 契約 B の仕様固定 (fixture) =====
+ *
+ * 「規範判定対象外領域の除去」と「字下げの禁止」は本ファイルの検出力そのものなので、
+ * 実文書だけを相手にすると「効いているから緑」なのか「効かなくても緑」なのか区別できない。
+ * 壊れた形・紛らわしい形を `scanMarkdownLines()` へ直接渡して両方向を固定する。
+ */
+
+const BACKTICK = "`";
+const FENCE = BACKTICK.repeat(3);
+
+const indentLines = (lines: readonly string[]): readonly number[] =>
+    scanMarkdownLines(lines.join("\n")).forbiddenIndentLines;
+
+const diagnosticReasons = (lines: readonly string[]): readonly string[] =>
+    scanMarkdownLines(lines.join("\n")).diagnostics.map((d) => d.reason);
+
+describe("design-system-docs: 契約 B — 字下げの禁止 (fixture)", () => {
+    it.each([
+        ["空行の後の 4 空白字下げ行", ["本文", "", "    退避させた規範"]],
+        ["見出しの直後の 4 空白字下げ行", ["## 契約", "", "    退避させた規範"]],
+        ["段落の継続行 (直前が空行でない 4 空白字下げ行)", ["本文", "    継続行"]],
+        ["行頭タブ", ["本文", "\t退避させた規範"]],
+        ["1〜3 空白 + タブ", ["本文", "  \t退避させた規範"]],
+        ["引用の中の字下げ", ["> 本文", ">    退避させた規範"]],
+        ["入れ子の引用の中の字下げ", ["> > 本文", "> >    退避させた規範"]],
+        ["リストの中の字下げ", ["- 本文", "-      退避させた規範"]],
+        ["番号つきリストの別記法", ["1) 本文", "1)     退避させた規範"]],
+        ["行の途中の 4 連続空白", ["本文    退避させた規範"]],
+        ["marker の padding 1", ["- 本文", "      退避させた規範"]],
+        ["marker の padding 4", ["-    本文", "         退避させた規範"]],
+        ["ordered marker 1 桁 + ピリオド", ["1. 本文", "1.     退避させた規範"]],
+        ["ordered marker 9 桁 + 閉じ括弧", ["123456789) 本文", "123456789)     退避"]],
+        ["リストの最初の block が字下げコード", ["-     退避させた規範"]],
+        ["リストの後続 block が字下げコード", ["- 本文", "", "      退避させた規範"]],
+        ["引用とリストの異種入れ子 (引用が外)", ["> - 本文", "> -     退避させた規範"]],
+        ["引用とリストの異種入れ子 (リストが外)", ["- > 本文", "- >    退避させた規範"]],
+    ])("%s を検出する", (_label, lines) => {
+        expect(indentLines(lines).length).toBeGreaterThan(0);
+    });
+
+    it.each([
+        ["lazy continuation は字下げコードではない", ["> 本文", "継続行"]],
+        ["通常の引用本文", ["> 本文"]],
+        ["通常のリスト本文と 2 空白の継続行", ["- 本文", "  継続行"]],
+        ["1〜3 空白の字下げ行", ["本文", "   3 空白は字下げコードではない"]],
+    ])("%s は検出しない (偽陽性を出さない)", (_label, lines) => {
+        expect(indentLines(lines)).toEqual([]);
+    });
+
+    it("囲みコードの中の 4 空白字下げ行とタブは検出しない", () => {
+        expect(indentLines([FENCE, "    字下げしたコード", "\tタブを含むコード", FENCE])).toEqual(
+            [],
+        );
+    });
+});
+
+describe("design-system-docs: 契約 A — 規範判定対象外領域の除去 (fixture)", () => {
+    it.each([
+        ["引用の中の囲みコード記法", ["> " + FENCE, "> 退避させた規範", "> " + FENCE]],
+        ["入れ子の引用の中の囲みコード記法", ["> > " + FENCE, "> > 退避", "> > " + FENCE]],
+        ["リストの中の引用の中の囲みコード記法", ["- > " + FENCE, "- > 退避", "- > " + FENCE]],
+        ["引用の中のリストの中の囲みコード記法", ["> - " + FENCE, "> - 退避", "> - " + FENCE]],
+        ["2 空白 + 引用の囲みコード記法", ["  > " + FENCE, "  > 退避", "  > " + FENCE]],
+        ["行の途中に現れる連続 marker", ["本文 " + FENCE + " 退避"]],
+    ])("%s は container-fence の診断になる", (_label, lines) => {
+        expect(diagnosticReasons(lines)).toContain("container-fence");
+    });
+
+    it("container を伴う fence 候補の中の見出しや規範は通常本文として数えられない", () => {
+        const scan = scanMarkdownLines(["> " + FENCE, "> ### 部品名", "> " + FENCE].join("\n"));
+        expect(scan.diagnostics.length).toBeGreaterThan(0);
+    });
+
+    it("3 個以上の delimiter の行内コード span も診断になる (1〜2 個は診断にならない)", () => {
+        expect(diagnosticReasons(["本文 " + FENCE + "行内" + FENCE + " 本文"]).length).toBeGreaterThan(
+            0,
+        );
+        expect(diagnosticReasons(["本文 " + BACKTICK + "行内" + BACKTICK + " 本文"])).toEqual([]);
+        expect(
+            diagnosticReasons([
+                "本文 " + BACKTICK.repeat(2) + "行内" + BACKTICK.repeat(2) + " 本文",
+            ]),
+        ).toEqual([]);
+    });
+
+    it("正規の top-level fence は診断にならず、中身が落ちる", () => {
+        const scan = scanMarkdownLines([FENCE, "囲みの中", FENCE, "本文"].join("\n"));
+        expect(scan.diagnostics).toEqual([]);
+        expect(scan.renderedLines.join("\n")).not.toContain("囲みの中");
+        expect(scan.renderedLines.join("\n")).toContain("本文");
+        expect(scan.renderedLines.length).toBe(4);
+    });
+
+    it("受理範囲外の fence 記法と未終端の fence が診断になる", () => {
+        // 開始より短い終了 marker では閉じない → EOF まで開いたまま
+        expect(diagnosticReasons([BACKTICK.repeat(4), "中身", FENCE])).toEqual([
+            "unterminated-fence",
+        ]);
+        // 種類の違う終了 marker でも閉じない
+        expect(diagnosticReasons([FENCE, "中身", "~~~"])).toEqual(["unterminated-fence"]);
+        // backtick 型で情報文字列にバッククォートを含む行は開始 fence にならず診断になる
+        expect(diagnosticReasons([FENCE + "info" + BACKTICK + "string", "本文"])).toEqual([
+            "unsupported-fence",
+        ]);
+        // EOF まで閉じない fence
+        expect(diagnosticReasons([FENCE, "中身"])).toEqual(["unterminated-fence"]);
+    });
+
+    it("未終端の HTML コメントが診断になる", () => {
+        expect(diagnosticReasons(["<!-- 閉じないコメント", "ここも隠れる"])).toEqual([
+            "unterminated-html-comment",
+        ]);
+    });
+});
+
+describe("design-system-docs: 実文書の行分類", () => {
+    const source = fs.readFileSync(DOC_PATH, "utf-8");
+
+    it("囲みコードの外にタブと 4 連続空白が無い", () => {
+        const scan = scanMarkdownLines(source);
+        expect(scan.renderedLines.length, "行が 1 行も取れない (走査の空振り)").toBeGreaterThan(0);
+        expect(
+            scan.forbiddenIndentLines,
+            "囲みコードの外に字下げがある。字下げによるコードは書かず、囲みコード記法を使うこと",
+        ).toEqual([]);
+    });
+
+    it("Markdown 走査の診断が 0 件である (本 gate が docs 側の診断の消費先である)", () => {
+        expect(scanMarkdownLines(source).diagnostics).toEqual([]);
     });
 });

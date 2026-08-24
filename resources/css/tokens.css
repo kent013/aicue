@@ -11,11 +11,11 @@
 
 @theme {
     /* ===== Brand colors (DESIGN.md Slate × Blue) ===== */
-    --color-primary:         #2563eb;
-    --color-primary-hover:   #1d4ed8;
-    --color-primary-soft:    rgba(37, 99, 235, 0.12);  /* primary 12% — badge / focus ring 用 */
-    --color-tertiary:        #0f766e;
-    --color-tertiary-hover:  #115e59;
+    --color-primary:         #1d4ed8;
+    --color-primary-hover:   #1e40af;
+    --color-primary-soft:    rgba(29, 78, 216, 0.12);  /* primary 12% — badge / focus ring 用 */
+    --color-tertiary:        #115e59;
+    --color-tertiary-hover:  #134e4a;
 
     /* ===== Neutrals & surface ===== */
     --color-neutral:         #f4f4f5;  /* page background */
@@ -26,8 +26,8 @@
     --color-text-secondary:  #52525b;
 
     /* ===== Status colors ===== */
-    --color-success:         #15803d;
-    --color-warning:         #b45309;
+    --color-success:         #166534;
+    --color-warning:         #92400e;
     --color-danger:          #b91c1c;
 
     /* ===== Fonts ===== */

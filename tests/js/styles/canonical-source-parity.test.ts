@@ -18,21 +18,23 @@ import {
     designRounded,
     designTypographyNames,
 } from "./design-md";
+// 写像 (tokens.css) 側のパーサは 1 実装へ集約する (正典 i21)。ローカルの抽出は持たない。
+import {
+    cssColorTokens,
+    cssRadiusTokens,
+    cssRampUtilities,
+    parseThemeMap,
+    readResourceCss,
+    requiredMapValue,
+    parseCssColor,
+    resourceCssFiles,
+    tokensCssThemeMap,
+} from "./theme-map";
 
 /**
  * DESIGN.md (canonical) ⇔ resources/css/tokens.css (実装写像) の双方向同期を機械検証する。
  * 片方だけ更新された PR をここで落とす (docs/design-system.md の同期契約)。
  */
-
-const tokensCss = fs.readFileSync(path.join(REPO_ROOT, "resources/css/tokens.css"), "utf-8");
-
-function cssColorTokens(): Map<string, string> {
-    const map = new Map<string, string>();
-    for (const m of tokensCss.matchAll(/--color-([a-z-]+):\s*([^;]+);/g)) {
-        map.set(m[1], m[2].replace(/\/\*.*?\*\//g, "").trim().toLowerCase());
-    }
-    return map;
-}
 
 describe("canonical source parity: colors", () => {
     it("DESIGN.md の色集合と tokens.css の --color-* が一致する (set equality)", () => {
@@ -62,10 +64,7 @@ describe("canonical source parity: radius", () => {
         // section 不在は designRounded() が例外で落とす (旧 expect(section).not.toBeNull() 相当)
         const design = designRounded();
 
-        const css = new Map<string, string>();
-        for (const m of tokensCss.matchAll(/--radius-([a-z]+):\s*([^;]+);/g)) {
-            css.set(m[1], m[2].trim());
-        }
+        const css = cssRadiusTokens();
 
         expect([...css.keys()].sort()).toEqual([...RADIUS_TOKENS].sort());
         for (const key of RADIUS_TOKENS) {
@@ -75,32 +74,26 @@ describe("canonical source parity: radius", () => {
 });
 
 describe("canonical source parity: typography ramp", () => {
-    function cssRamp(name: string): Record<string, string> {
-        const m = tokensCss.match(new RegExp(`@utility text-${name} \\{([^}]+)\\}`));
-        if (!m) throw new Error(`tokens.css @utility not found: text-${name}`);
-        const props: Record<string, string> = {};
-        for (const line of m[1].matchAll(/([a-z-]+):\s*([^;]+);/g)) {
-            props[line[1]] = line[2].trim();
-        }
-        return props;
+    function cssRamp(name: string): ReadonlyMap<string, string> {
+        return requiredMapValue(cssRampUtilities(), name, `tokens.css @utility text-${name}`);
     }
 
     it.each([...TYPOGRAPHY_RAMPS])("text-%s の size/weight/line-height が DESIGN.md と一致する", (name) => {
         const design = designRamp(name);
         const css = cssRamp(name);
 
-        expect(css["font-size"], "font-size").toBe(design["fontSize"]);
-        expect(css["font-weight"], "font-weight").toBe(design["fontWeight"]);
-        expect(css["line-height"], "line-height").toBe(design["lineHeight"]);
+        expect(css.get("font-size"), "font-size").toBe(design["fontSize"]);
+        expect(css.get("font-weight"), "font-weight").toBe(design["fontWeight"]);
+        expect(css.get("line-height"), "line-height").toBe(design["lineHeight"]);
         if (design["letterSpacing"]) {
-            expect(css["letter-spacing"], "letter-spacing").toBe(design["letterSpacing"]);
+            expect(css.get("letter-spacing"), "letter-spacing").toBe(design["letterSpacing"]);
         }
     });
 
     it("ramp の font-weight は 400/500 のみ (DESIGN.md §Typography)", () => {
         for (const name of TYPOGRAPHY_RAMPS) {
             const css = cssRamp(name);
-            expect(["400", "500"], `text-${name} font-weight`).toContain(css["font-weight"]);
+            expect(["400", "500"], `text-${name} font-weight`).toContain(css.get("font-weight"));
         }
     });
 });
@@ -119,9 +112,7 @@ describe("canonical source parity: 検査の母集団", () => {
     });
 
     it("tokens.css の @utility text-* と TYPOGRAPHY_RAMPS が集合一致する", () => {
-        const utilities = [...tokensCss.matchAll(/@utility\s+text-([a-z0-9-]+)\s*\{/g)].map(
-            (m) => m[1],
-        );
+        const utilities = [...cssRampUtilities().keys()];
         expect(utilities.length, "@utility が 0 件 (抽出の空振り)").toBeGreaterThan(0);
         expect([...utilities].sort()).toEqual([...TYPOGRAPHY_RAMPS].sort());
     });
@@ -215,6 +206,48 @@ describe("canonical source parity: frontmatter の節の担当宣言", () => {
                 fs.existsSync(path.join(REPO_ROOT, tracking)),
                 `${section}: ${tracking} が実在しない`,
             ).toBe(true);
+        }
+    });
+});
+
+/**
+ * 写像 (tokens.css) の**形**そのものを固定する。
+ *
+ * 値の一致 (上の describe) は「見ている宣言が正しい値か」しか見ない。
+ * 見ていない場所に 2 つ目の `@theme` を置くと、どの検査も見ない token 空間が育つ
+ * (正典 i2 前半)。ブロックの一意性はここで固定する。
+ */
+describe("canonical source parity: 写像の形", () => {
+    it("@theme ブロックがリポジトリに 1 つだけある (2 つ目の宣言が検査を素通りする経路を塞ぐ)", () => {
+        // 走査は resources/ 配下の *.css 全数。tokens.css の外に @theme を置くと
+        // canonical-source-parity / tokens の両方が見ない token 空間が育つ。
+        const cssFiles = resourceCssFiles();
+        expect(cssFiles.length, "*.css が 1 件も取れない (走査の空振り)").toBeGreaterThan(0);
+
+        // 判定は parseThemeMap の結果で行う (コメントの中の @theme を数えない)。
+        const withTheme = cssFiles.filter(
+            (rel) => parseThemeMap(readResourceCss(rel), rel).blocks.length > 0,
+        );
+        expect(withTheme).toEqual(["resources/css/tokens.css"]);
+        expect(tokensCssThemeMap().blocks.length, "tokens.css の @theme が 1 ブロックでない").toBe(
+            1,
+        );
+        expect(tokensCssThemeMap().blocks[0].topLevel, "@theme がルート直下でない").toBe(true);
+    });
+
+    it("COLOR_TOKEN_MAP の逆写像が一意である (suffix → DESIGN キーが後勝ちにならない)", () => {
+        // 走査器は suffix 空間を返し、gate は逆写像で DESIGN キー空間へ写す。
+        // 値に重複があると逆引きが後勝ちになり、別のトークンの値で検査してしまう。
+        const suffixes = Object.values(COLOR_TOKEN_MAP);
+        expect(suffixes.length, "COLOR_TOKEN_MAP が空 (走査の空振り)").toBeGreaterThan(0);
+        expect(new Set(suffixes).size).toBe(suffixes.length);
+    });
+
+    it("tokens.css の色宣言が parseCssColor で全件読める (読めない値を素通りさせない)", () => {
+        const colors = cssColorTokens();
+        expect(colors.size, "色トークンが 0 件 (走査の空振り)").toBeGreaterThan(0);
+        for (const [suffix, value] of colors) {
+            expect(() => parseCssColor(value), `--color-${suffix}: ${value}`).not.toThrow();
         }
     });
 });
