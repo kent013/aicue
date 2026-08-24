@@ -14,9 +14,12 @@ require_once __DIR__.'/../../../scripts/ci/ensure-test-db.php';
  * ensure-test-db.php のスキーマ更新まわりを固定する Unit テスト。
  *
  * 固定する不変条件:
- *   1. pgsqlTestArtisanEnv() は環境を継承せず組み立てる (固定キーが常に勝つ / 許可した
- *      3 キーだけ継承する / DB_URL は空で固定する / 親環境の DB_DATABASE・DB_URL・
- *      APP_CONFIG_CACHE を上書きしても固定値が勝つ)
+ *   1. pgsqlTestComposeArtisanEnv() は環境を継承せず組み立てる (固定キーが常に勝つ / 許可した
+ *      3 キーだけ継承する / DB_URL は空で固定する / 入力に DB_DATABASE・DB_URL・
+ *      APP_CONFIG_CACHE が載っていても固定値が勝つ)。読み出しの優先順は
+ *      pgsqlTestMergeParentEnv() が、実際の親環境と接続値との結線は
+ *      pgsqlTestArtisanEnv() の 1 ケースが固定する
+ *      (**親プロセスの 3 面を 1 面も触らない**形で検査する)
  *   2. pgsqlTestConfigCachePath() は projectRoot からの一意な固定パスを返し、
  *      Laravel の既定パス (bootstrap/cache/config.php) とは異なる
  *   3. pgsqlTestMigrationFileNames() はパスから拡張子・ディレクトリを取り除く
@@ -53,22 +56,44 @@ require_once __DIR__.'/../../../scripts/ci/ensure-test-db.php';
  * `proc_open()` で起動する (DB へは接続しない)。
  */
 
-// ── pgsqlTestArtisanEnv(): 環境を継承しない子プロセス env ──
+// ── pgsqlTestComposeArtisanEnv(): 環境を継承しない子プロセス env ──
+//
+// ★**親プロセスの環境は 1 面も触らない**。危険な値は**組み立ての入力として**与える
+//   (テストのために親へ dev DB 名や攻撃者制御の設定キャッシュパスを立てる、という
+//    隣接ハザードを構造的に消す。AGENTS.md 禁止事項 3)。
+//   これは検出力が上がる方向でもある — 旧実装は親の DB_DATABASE / DB_URL /
+//   APP_CONFIG_CACHE を**そもそも読んでいない**ので、親へ立てて確かめる形は空振りだった。
+
+/**
+ * テスト用の接続値 (実 DB へはつながない。**実際の接続値と重ならない値**にする —
+ * 重ねると「接続値を捨てても緑」になる経路が残る)。
+ *
+ * @return array{host: string, port: string, username: string, password: string}
+ */
+function fakePgsqlConnValues(): array
+{
+    return ['host' => '10.0.0.9', 'port' => '15432', 'username' => 'probe-user', 'password' => 'probe-pass'];
+}
 
 it('does not leak arbitrary environment variables into the child process env', function (): void {
-    $original = getenv('SOME_SECRET');
-    putenv('SOME_SECRET=leaked');
+    $env = pgsqlTestComposeArtisanEnv(
+        __DIR__,
+        'app_test_8af22c44',
+        ['SOME_SECRET' => 'leaked', 'PATH' => '/usr/bin'],
+        fakePgsqlConnValues(),
+    );
 
-    try {
-        $env = pgsqlTestArtisanEnv(__DIR__, 'app_test_8af22c44');
-        expect($env)->not->toHaveKey('SOME_SECRET');
-    } finally {
-        putenv($original === false ? 'SOME_SECRET' : "SOME_SECRET={$original}");
-    }
+    expect($env)->not->toHaveKey('SOME_SECRET')
+        ->and($env['PATH'])->toBe('/usr/bin');
 });
 
 it('carries over only PATH / HOME / TMPDIR from the parent environment', function (): void {
-    $env = pgsqlTestArtisanEnv(__DIR__, 'app_test_8af22c44');
+    $env = pgsqlTestComposeArtisanEnv(
+        __DIR__,
+        'app_test_8af22c44',
+        ['PATH' => '/usr/bin', 'HOME' => '/home/probe', 'TMPDIR' => '/tmp/probe', 'LANG' => 'C', 'SHELL' => '/bin/sh'],
+        fakePgsqlConnValues(),
+    );
 
     foreach (array_keys($env) as $key) {
         expect(in_array($key, ['PATH', 'HOME', 'TMPDIR'], true) || array_key_exists($key, [
@@ -77,16 +102,19 @@ it('carries over only PATH / HOME / TMPDIR from the parent environment', functio
             'DB_DATABASE' => true, 'CACHE_STORE' => true,
         ]))->toBeTrue("unexpected key leaked into artisan env: {$key}");
     }
+
+    expect($env)->not->toHaveKey('LANG')
+        ->and($env)->not->toHaveKey('SHELL');
 });
 
 it('forces DB_URL empty so that a URL-form connection string cannot override DB_DATABASE', function (): void {
-    $env = pgsqlTestArtisanEnv(__DIR__, 'app_test_8af22c44');
+    $env = pgsqlTestComposeArtisanEnv(__DIR__, 'app_test_8af22c44', [], fakePgsqlConnValues());
 
     expect($env['DB_URL'])->toBe('');
 });
 
 it('pins the computed base name as DB_DATABASE and APP_ENV as testing', function (): void {
-    $env = pgsqlTestArtisanEnv(__DIR__, 'app_test_8af22c44');
+    $env = pgsqlTestComposeArtisanEnv(__DIR__, 'app_test_8af22c44', [], fakePgsqlConnValues());
 
     expect($env['DB_DATABASE'])->toBe('app_test_8af22c44')
         ->and($env['APP_ENV'])->toBe('testing')
@@ -94,24 +122,52 @@ it('pins the computed base name as DB_DATABASE and APP_ENV as testing', function
 });
 
 it('overrides a parent environment that already sets DB_DATABASE / DB_URL / APP_CONFIG_CACHE to a dev DB', function (): void {
-    $keys = ['DB_DATABASE', 'DB_URL', 'APP_CONFIG_CACHE'];
-    $originals = array_combine($keys, array_map(getenv(...), $keys));
+    $env = pgsqlTestComposeArtisanEnv(
+        __DIR__,
+        'app_test_8af22c44',
+        [
+            'DB_DATABASE' => 'app',
+            'DB_URL' => 'pgsql://postgres:postgres@127.0.0.1:5432/app',
+            'APP_CONFIG_CACHE' => '/tmp/attacker-controlled-config.php',
+        ],
+        fakePgsqlConnValues(),
+    );
 
-    putenv('DB_DATABASE=app');
-    putenv('DB_URL=pgsql://postgres:postgres@127.0.0.1:5432/app');
-    putenv('APP_CONFIG_CACHE=/tmp/attacker-controlled-config.php');
+    expect($env['DB_DATABASE'])->toBe('app_test_8af22c44')
+        ->and($env['DB_URL'])->toBe('')
+        ->and($env['APP_CONFIG_CACHE'])->toBe(pgsqlTestConfigCachePath(__DIR__));
+});
 
-    try {
-        $env = pgsqlTestArtisanEnv(__DIR__, 'app_test_8af22c44');
+it('merges the three surfaces with $_SERVER winning over $_ENV over getenv', function (): void {
+    $merged = pgsqlTestMergeParentEnv(
+        ['A' => 'server', 'B' => 'server'],
+        ['A' => 'env', 'B' => 'env', 'C' => 'env'],
+        ['A' => 'process', 'B' => 'process', 'C' => 'process', 'D' => 'process'],
+    );
 
-        expect($env['DB_DATABASE'])->toBe('app_test_8af22c44')
-            ->and($env['DB_URL'])->toBe('')
-            ->and($env['APP_CONFIG_CACHE'])->toBe(pgsqlTestConfigCachePath(__DIR__));
-    } finally {
-        foreach ($originals as $key => $value) {
-            putenv($value === false ? $key : "{$key}={$value}");
+    expect($merged)->toBe(['A' => 'server', 'B' => 'server', 'C' => 'env', 'D' => 'process']);
+});
+
+it('wires the real parent environment and the resolved connection values into the composed env', function (): void {
+    // ★結線そのものを見る (固定値だけを見ると、親環境や接続値を捨てても緑になる)。
+    $parent = pgsqlTestParentEnv();
+    $conn = pgsqlTestConnValues(__DIR__);
+    $env = pgsqlTestArtisanEnv(__DIR__, 'app_test_8af22c44');
+
+    foreach (['PATH', 'HOME', 'TMPDIR'] as $key) {
+        $value = $parent[$key] ?? null;
+
+        if (is_string($value) && $value !== '') {
+            expect($env[$key])->toBe($value);          // 親環境由来であること
+        } else {
+            expect($env)->not->toHaveKey($key);
         }
     }
+
+    expect($env['DB_HOST'])->toBe($conn['host'])       // 接続値由来であること
+        ->and($env['DB_PORT'])->toBe($conn['port'])
+        ->and($env['DB_USERNAME'])->toBe($conn['username'])
+        ->and($env['DB_PASSWORD'])->toBe($conn['password']);
 });
 
 // ── pgsqlTestConfigCachePath(): ensure 専用の非既定パス ──

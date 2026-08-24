@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use Tests\Support\Process\BootProbeRunner;
+use Tests\Support\RawEnv\RawEnvChannels;
+use Tests\Support\RawEnv\RawEnvSnapshot;
 
 /*
 | 起動 probe の共通 runner (`Tests\Support\Process\BootProbeRunner`) の自己検査
@@ -130,15 +132,18 @@ function bootProbeDecodeReport(string $code, array $env = []): array
 }
 
 test('S1: 親の環境変数は子に現れない', function (): void {
-    putenv(BOOT_PROBE_SENTINEL_KEY.'=leaked');
+    // ★親プロセスの 3 面の退避・注入・復元は `Tests\Support\RawEnv\RawEnvSnapshot` が担う
+    //   (本ファイルは 3 面を直接触らない。正典 raw-env-snapshot-restore v1 の i1)。
+    //   `none()->withProcess()` は指定しなかった 2 面を明示的に未設定にするので、
+    //   「親のプロセス面にだけ在る値」という前提を作れる。
+    RawEnvSnapshot::with(
+        [BOOT_PROBE_SENTINEL_KEY => RawEnvChannels::none()->withProcess('leaked')],
+        function (): void {
+            $report = bootProbeDecodeReport(BOOT_PROBE_ENV_REPORT);
 
-    try {
-        $report = bootProbeDecodeReport(BOOT_PROBE_ENV_REPORT);
-
-        expect($report)->not->toHaveKey(BOOT_PROBE_SENTINEL_KEY, '親の env が子へ漏れている');
-    } finally {
-        putenv(BOOT_PROBE_SENTINEL_KEY);
-    }
+            expect($report)->not->toHaveKey(BOOT_PROBE_SENTINEL_KEY, '親の env が子へ漏れている');
+        },
+    );
 });
 
 test('S2: 許可した継承は規則どおり届く (親に無い鍵は子にも無い)', function (): void {

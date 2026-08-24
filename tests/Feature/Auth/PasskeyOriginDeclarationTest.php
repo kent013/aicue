@@ -2,6 +2,9 @@
 
 declare(strict_types=1);
 
+use Tests\Support\RawEnv\RawEnvChannels;
+use Tests\Support\RawEnv\RawEnvSnapshot;
+
 /*
  * 宣言経路 (環境変数 → config/fortify.php) が「許可する接続元」を正規形へ寄せることの
  * 端から端までの固定 (T216 施策 B)。
@@ -16,60 +19,30 @@ declare(strict_types=1);
 /**
  * 環境変数を差し替えて config/fortify.php を評価し、返り値を得る。
  *
- * Laravel の env() は $_SERVER → $_ENV → putenv の 3 経路を見るため 3 つとも埋める
- * (tests/bootstrap.php が同じ作法を採っている)。**必ず finally で元へ戻す**
- * (元が未設定なら空文字ではなく unset で戻す = 「未宣言」の意味を変えないため)。
- * 設定ファイルの評価は副作用として fortify-options を同じ値で書き直すだけで、
- * 他への影響を持たない (Features::* は options を config へ書いて識別子を返す builder)。
+ * ★3 面 ($_SERVER / $_ENV / putenv) をそろえて埋めるのも、必ず元へ戻すのも
+ *   `Tests\Support\RawEnv\RawEnvSnapshot` が担う (「元が未設定なら空文字ではなく未設定で戻す」
+ *   = 未宣言の意味を変えない、も部品側の契約である)。ここは呼び出し側であって、
+ *   同じ処理を書き直さない (家系の正典 raw-env-snapshot-restore v1 の i1)。
+ *   Laravel の env() は 3 面を live に読むため 3 つとも埋める必要がある。
+ * ★設定ファイルの評価は副作用として fortify-options を同じ値で書き直すだけで、
+ *   他への影響を持たない (Features::* は options を config へ書いて識別子を返す builder)。
  *
  * @param  array<string, string>  $overrides
  * @return array<string, mixed>
  */
 function evaluateFortifyConfigWithEnv(array $overrides): array
 {
-    /** @var array<string, array{0: mixed, 1: mixed, 2: string|false, 3: bool, 4: bool}> $saved */
-    $saved = [];
+    $changes = array_map(
+        static fn (string $value): RawEnvChannels => RawEnvChannels::sameOnAllSurfaces($value),
+        $overrides,
+    );
 
-    foreach ($overrides as $key => $value) {
-        $saved[$key] = [
-            $_SERVER[$key] ?? null,
-            $_ENV[$key] ?? null,
-            getenv($key),
-            array_key_exists($key, $_SERVER),
-            array_key_exists($key, $_ENV),
-        ];
-
-        $_SERVER[$key] = $value;
-        $_ENV[$key] = $value;
-        putenv("{$key}={$value}");
-    }
-
-    try {
+    return RawEnvSnapshot::with($changes, static function (): array {
         /** @var array<string, mixed> $config */
         $config = require base_path('config/fortify.php');
 
         return $config;
-    } finally {
-        foreach ($saved as $key => [$server, $env, $raw, $hadServer, $hadEnv]) {
-            if ($hadServer) {
-                $_SERVER[$key] = $server;
-            } else {
-                unset($_SERVER[$key]);
-            }
-
-            if ($hadEnv) {
-                $_ENV[$key] = $env;
-            } else {
-                unset($_ENV[$key]);
-            }
-
-            if ($raw === false) {
-                putenv($key);
-            } else {
-                putenv("{$key}={$raw}");
-            }
-        }
-    }
+    });
 }
 
 test('宣言経路が正規形へ寄せる (末尾スラッシュと既定 port と大文字)', function (): void {

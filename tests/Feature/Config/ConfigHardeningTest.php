@@ -2,62 +2,46 @@
 
 declare(strict_types=1);
 
+use Tests\Support\RawEnv\RawEnvChannels;
+use Tests\Support\RawEnv\RawEnvSnapshot;
+
 /*
  * config 横断ハードニングの不変条件を固定する。
  *
  * env デフォルト分岐 ('fail-close' 等) は config() では検査できない
- * (phpunit.xml / .env の値が挿さるため)。$_SERVER / $_ENV / putenv を直接退避→復元して
+ * (phpunit.xml / .env の値が挿さるため)。3 面 ($_SERVER / $_ENV / putenv) を退避→差し替え→復元して
  * config ファイルを再評価する (Laravel の env() は ServerConst / EnvConst / Putenv の
  * 3 adapter を live に読むため、いずれか 1 つでも残ると .env.testing 値が漏れる)。
+ * 3 面の操作そのものは Tests\Support\RawEnv\RawEnvSnapshot が担う。
  */
 
 /**
  * 指定の env 変数を差し替えて config ファイルを再評価する。
  *
- * @param  array<string, string|null>  $env  null は unset
+ * ★退避・復元は `Tests\Support\RawEnv\RawEnvSnapshot` が持つ。ここは呼び出し側であって、
+ *   同じ処理を書き直さない (家系の正典 raw-env-snapshot-restore v1 の i1)。
+ *   部品は存在と値を別に持つので、「存在するが値が null」を「存在しない」へ潰さない。
+ *
+ * @param  array<string, string|null>  $env  null は 3 面とも明示的に未設定にする
  * @return array<string, mixed>
  */
 function evaluateConfigFileWithEnv(string $configFile, array $env): array
 {
-    $previous = [];
+    $changes = [];
+
     foreach ($env as $key => $value) {
-        $getenv = getenv($key);
-        $previous[$key] = [$_SERVER[$key] ?? null, $_ENV[$key] ?? null, $getenv === false ? null : $getenv];
-        if ($value === null) {
-            unset($_SERVER[$key], $_ENV[$key]);
-            putenv($key);
-        } else {
-            $_SERVER[$key] = $value;
-            $_ENV[$key] = $value;
-            putenv("{$key}={$value}");
-        }
+        $changes[$key] = $value === null
+            ? RawEnvChannels::none()
+            : RawEnvChannels::sameOnAllSurfaces($value);
     }
 
-    try {
+    return RawEnvSnapshot::with($changes, function () use ($configFile): array {
         $config = require base_path("config/{$configFile}");
         expect($config)->toBeArray();
 
         /** @var array<string, mixed> $config */
         return $config;
-    } finally {
-        foreach ($previous as $key => [$serverValue, $envValue, $putenvValue]) {
-            if ($serverValue === null) {
-                unset($_SERVER[$key]);
-            } else {
-                $_SERVER[$key] = $serverValue;
-            }
-            if ($envValue === null) {
-                unset($_ENV[$key]);
-            } else {
-                $_ENV[$key] = $envValue;
-            }
-            if ($putenvValue === null) {
-                putenv($key);
-            } else {
-                putenv("{$key}={$putenvValue}");
-            }
-        }
-    }
+    });
 }
 
 // ========== session: secure cookie の production fail-close ==========
