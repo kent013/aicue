@@ -147,6 +147,7 @@ NOT NULL)/ Model / Factory / FormRequest(store・update)/ nested route(変更系
 | `SsrfPinBoundaryTest` | 外部 URL(特にユーザ入力由来)を取得するとき | `Kent013\SsrfPin\UrlSafetyInspector` / `PinnedHttpClient` を通す。安全境界は `config/ssrf-pin.php` に pin する |
 | `DocumentTitleCoverageTest` | Inertia を render する GET named route を足すとき | ページ固有のタイトルを controller 供給メタか `config/seo.php` に持たせる(無いとサイト名だけになる) |
 | `InertiaRenderPageExistsInvariantTest` | 新しいページコンポーネントを足すとき | `resources/js/pages/` に実体を置く(literal 参照と 1:1。参照先が無いページは本番で白画面になる) |
+| `RawEnvDirectWriteGateTest` | テストが `putenv()` / `$_ENV` / `$_SERVER` を直接書き換えるとき | `Tests\Support\RawEnv\RawEnvSnapshot` 経由へ寄せる(許可 3 か所以外は登録できない。`getenv()` は読み出しなので対象外) |
 
 ### 組織識別名 (slug) を足す・変えるとき
 

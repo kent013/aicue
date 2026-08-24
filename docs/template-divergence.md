@@ -8,7 +8,7 @@
 `template-divergence-ledger` が 2026-08-15 に確定した形) に従う。形式は
 `tests/Architecture/TemplateDivergenceLedgerFormatTest.php` が機械で強制する。
 
-登録エントリ: 49 件
+登録エントリ: 50 件
 
 ## 記録の原則
 
@@ -3038,3 +3038,63 @@ controller の存在ではない。
 - 実装: `tests/Architecture/ClaudeHooksWiringTest.php`
 - 設計: `devnotes/20260824-1014-claude-hooks-wiring-t3/`
 - 関連する登録: D18 (起動子と 2 本のスクリプト) / D34 (採用時債務の一覧)
+
+## D53 テストが触る生の環境変数 3 面を 1 つの部品へ集約し、部品の外に現れる字句として列挙した直接書き込みを検査で止める
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `tests/Support/RawEnv/RawEnvChannels.php` / `tests/Support/RawEnv/RawEnvSnapshot.php` / `tests/Support/RawEnv/RawEnvGuardStructure.php` / `tests/Support/RawEnv/RawEnvWriteKind.php` / `tests/Support/RawEnv/RawEnvWriteSite.php` / `tests/Support/RawEnv/RawEnvDirectWriteAllowance.php` / `tests/Support/RawEnv/RawEnvDirectWriteScanner.php` / `tests/Unit/Support/RawEnv/RawEnvSnapshotContractTest.php` / `tests/Unit/Architecture/RawEnvGuardStructureTest.php` / `tests/Unit/Architecture/RawEnvDirectWriteScannerTest.php` / `tests/Architecture/RawEnvDirectWriteGateTest.php` |
+| 業務要件起因の説明 | 撮影 PWA の秘匿と本番構成の起動時 fail-fast を守る検査 (ProductionEnvGuardTest / ConfigHardeningTest / PasskeyOriginDeclarationTest) はすべて生の環境変数を差し替えて動く。テンプレートは 3 面の退避・復元をテストごとに書く形のままなので、取りこぼしが起きると守りの検査が実行順で通ったり落ちたりし、守りの主張そのものが信用できなくなる。家系の機能台帳が確定した正典 v1 (不変条件 i1-i12) へ追従して部品へ集約し、部品の外に現れる字句として列挙した直接書き込みを検査で止める (検出しない構文の一覧は走査器の docblock が正本であり、この検査は網羅を主張しない) |
+| 揃え続ける不変条件と保証機構 | 3 面の退避が存在と値を別に持ち型を絞らないこと / 検証 → 退避 → 適用 + 本体 → 復元 の 3 相であること / 単一点の守りが前提にするキーを拒否すること / 読み出しの優先順が $_SERVER → $_ENV → putenv であること (RawEnvSnapshotContractTest が実行時に固定) / 列挙した字句の書き込み形が許可 3 か所以外に現れないこと (RawEnvDirectWriteGateTest が deny-by-default で強制し、許可は部品自身とその契約テストと tests/bootstrap.php の 3 か所だけ・件数は完全一致で pin。検出しない構文の一覧は RawEnvDirectWriteScanner の docblock が正本) |
+| 再判定の条件 | 家系の正典 v1 が改版されたとき / テンプレート側が同等の部品を採用して還流できるようになったとき / 上流の phpdotenv・Laravel が読み出し順か Env::enablePutenv() の副作用を変えたとき / 走査器が検出しない構文で 3 面へ書く形が実際に現れたとき |
+| 決めた日 | 2026-08-24 |
+| 決めた人 | 開発者 |
+| 根拠 | devnotes/20260824-1633-raw-env-snapshot-restore-v1/ |
+| 状態 | 恒久 |
+| 見直し期限 | — |
+
+テンプレートに無い領域への**上積み**である (指紋台帳のキーに 1 件も無い)。
+`tests/bootstrap.php` は指紋台帳のキーであり現在テンプレートと一致しているので**変更しない** —
+正典 v1 の i12 は同ファイルを許可する側であり、変更の必要が無い。
+
+| 観点 | テンプレート | 本アプリ |
+|---|---|---|
+| 3 面の退避・復元 | テストごとにその場で書く (ファイル内の関数 / 評価ヘルパの中) | **1 つの部品** (`RawEnvSnapshot`) に集約し、2 通りの結び方 (閉包を囲む口 / 退避を持ち回る口) を提供する |
+| 「存在するが値が null」 | `?? null` 退避で「存在しない」へ潰れる書き方が残る | 存在と値を別に持ち、面ごとに独立して戻す |
+| 差し替えの安全 | 退避と適用が同一ループ (途中で失敗するとそこまでの変更が残る) | 検証 → 退避 → 適用 + 本体 → 復元 の 3 相。検証で拒否されたときは 1 面も触らない |
+| 拒否するキー | 持たない | 単一点の守りが前提にするキー (`DB_` 接頭辞 / `TEST_TOKEN` / `APP_CONFIG_CACHE`) を検証の段で拒否する。**例外の許可一覧は持たない** |
+| 読み出し順の固定 | 注釈で書く | **Laravel の `env()` を通した実行時の検査**で固定する (上流の既定が変わったら赤くなる) |
+| 部品の外の直接操作 | 検査しない | 追跡 PHP を母集団にした deny-by-default の gate で止める (許可は 3 か所・件数は完全一致で pin) |
+
+### なぜ正当な差分か (logic-driven)
+
+1. **守りの検査の土台である**。3 面のうち 1 面でも戻し漏れると、あとから走る別のテストの入力が
+   静かに変わる。`RefreshDatabase` はプロセスの環境変数を守らないので、枠組みは肩代わりしない。
+2. **拒否と検査は対で要る**。拒否だけを入れると「拒否に当たるキーを触りたい検査」が部品を使えず
+   手書きへ逃げ、危険が見えない場所へ移るだけになる。実際、本アプリには
+   テスト実行中の親プロセスへ dev DB 名と攻撃者制御の設定キャッシュパスを立てる検査が在り
+   (AGENTS.md 禁止事項 3 の隣接ハザード)、同じ変更でその経路を消している。
+3. **テンプレートに同等の部品が無い**。家系の機能台帳で本アプリのセルは `update_pending`
+   (`pre-v1` → `v1`) であり、追従の順序として本アプリが先行する。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「走査器が字句として列挙した直接書き込みの形は、許可 3 か所
+> (部品自身 / 部品の契約テスト / `tests/bootstrap.php`) 以外に 1 件も現れない」
+
+**「3 面を触る経路が 1 本だけ」とは書かない** — 契約テストと `tests/bootstrap.php` は
+意図的に直接触るし、間接呼び出し (可変関数 / `call_user_func` / 値渡しの先) は走査の対象外である。
+検出しない構文の一覧は `RawEnvDirectWriteScanner` の docblock が正本である。
+
+- 部品の契約 (往復 / 3 相 / 拒否 / 読み出し順 / 読み出し口の作り直し) は
+  `RawEnvSnapshotContractTest` が実行時に固定する
+- 動的に作れない 2 点 (適用途中の巻き戻り / 復元が最初の失敗で止まらないこと) は
+  **構造の固定**で代え、契約テストの冒頭に「動的には未検証」と明記する
+- 走査器は正例・負例の両方向を自己検査で裏取りし、解決できない形は `unresolved` として
+  gate を失敗させる (免除で黙らせられない)
+
+### 関連
+
+- 実装: `tests/Support/RawEnv/` / `tests/Architecture/RawEnvDirectWriteGateTest.php`
+- 設計: `devnotes/20260824-1633-raw-env-snapshot-restore-v1/`
+- 関連する登録: D30 (`scripts/ci/pgsql_test_conn.php` の出自の記録) / D42 (契約文書のゲート索引)

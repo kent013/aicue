@@ -227,11 +227,63 @@ function pgsqlTestConfigCachePath(string $projectRoot): string
  */
 function pgsqlTestArtisanEnv(string $projectRoot, string $database): array
 {
-    $conn = pgsqlTestConnValues($projectRoot);
+    return pgsqlTestComposeArtisanEnv(
+        $projectRoot,
+        $database,
+        pgsqlTestParentEnv(),
+        pgsqlTestConnValues($projectRoot),
+    );
+}
 
+/**
+ * 3 面を読み出し優先順 (`$_SERVER` → `$_ENV` → `getenv`) で 1 枚の配列へ合成する (純関数)。
+ *
+ * 後勝ちの array_merge なので、優先度の低い順に並べる。
+ *
+ * @param  array<string, mixed>  $server
+ * @param  array<string, mixed>  $env
+ * @param  array<string, mixed>  $process
+ * @return array<string, mixed>
+ */
+function pgsqlTestMergeParentEnv(array $server, array $env, array $process): array
+{
+    return array_merge($process, $env, $server);
+}
+
+/**
+ * 親プロセスの環境を 3 面の優先順で 1 枚の配列へ読み出す。
+ *
+ * ★**読み出しだけ**を行う (3 面へ書き込まない)。
+ * ★組み立てそのものは pgsqlTestComposeArtisanEnv() が純関数として持つ。
+ *   分けてあるのは、テストが**親プロセスの環境を触らずに**組み立てを検査できるようにするためである
+ *   (テストのために親へ dev DB 名を立てる、という危険を構造的に消す)。
+ * ★`$_SERVER` は env 以外の項目 (`argv` 等) も持つが、組み立ては
+ *   `PATH` / `HOME` / `TMPDIR` しか読まないので影響しない。
+ *
+ * @return array<string, mixed>
+ */
+function pgsqlTestParentEnv(): array
+{
+    $process = getenv();
+
+    return pgsqlTestMergeParentEnv($_SERVER, $_ENV, is_array($process) ? $process : []);
+}
+
+/**
+ * スキーマ更新の子プロセスへ渡す環境変数を **継承せず** 組み立てる (純関数)。
+ *
+ * 親環境は引数で受け取る。実際の親プロセスの環境を読むのは pgsqlTestParentEnv() の責務で、
+ * この関数は「入力に何が載っていても固定値が勝つ」ことだけを担う。
+ *
+ * @param  array<string, mixed>  $parentEnv  親プロセスの環境を表す配列
+ * @param  array{host: string, port: string, username: string, password: string}  $conn
+ * @return array<string, string>
+ */
+function pgsqlTestComposeArtisanEnv(string $projectRoot, string $database, array $parentEnv, array $conn): array
+{
     $inherited = [];
     foreach (['PATH', 'HOME', 'TMPDIR'] as $key) {
-        $value = $_SERVER[$key] ?? $_ENV[$key] ?? getenv($key);
+        $value = $parentEnv[$key] ?? null;
         if (is_string($value) && $value !== '') {
             $inherited[$key] = $value;
         }
