@@ -1,0 +1,4 @@
+# 見本: 正例 (正の整数を宣言している)
+name: declared
+client_options:
+  timeout: 300

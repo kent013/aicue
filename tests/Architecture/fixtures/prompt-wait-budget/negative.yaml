@@ -1,0 +1,4 @@
+# 見本: timeout が負数 (非正)
+name: negative
+client_options:
+  timeout: -1
