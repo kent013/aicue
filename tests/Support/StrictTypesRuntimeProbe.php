@@ -23,6 +23,16 @@ use Symfony\Component\Process\Process;
  *      例外にする。false を返して黙らない (fail-open 防止)
  *   3. 標識が `STRICT-<nonce>` なら true、`WEAK-<nonce>` なら false
  *   関数名も nonce つきにして、検体側の関数と衝突しないようにする。
+ *
+ * ★**共通の起動器 (Tests\Support\Process\BootProbeRunner) には載せない**
+ *   (lctl feature: subprocess-boot-probe-harness)。あちらが測るのは「**起動順序**に由来する
+ *   壊れ方」であり、本クラスが測るのは単一ファイルのコンパイル指令が効くかである。
+ *   載せるとアプリ起動用の基底環境・書き出し先 7 キーの予約・一時ディレクトリの構築という
+ *   検体の判定に無関係な前提が付く。同じ理由で `tests/Support/GlobalUse/PhpLintOracle.php`
+ *   (`php -l` の真値取り出し) も載せていない。
+ *   ★回収は Symfony の Process に委ねる (既定の制限時間つきで、超過すれば例外になる)。
+ *   ★この判断は `tests/Architecture/PhpBootProbeReferenceInventoryTest.php` の
+ *     軸 A の申告 (`launches_app: false` + 理由) として機械に登録されている。
  */
 final class StrictTypesRuntimeProbe
 {

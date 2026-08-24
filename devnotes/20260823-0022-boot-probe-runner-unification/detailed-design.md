@@ -124,6 +124,21 @@ HTTP サーバーの常駐起動 / テストレーンの構成。
    (`composer fix` は書き換えるので、この段では**実行しない**)
 6. 配置後にもう一度 3 ファイルの sha256 を取り、手順 2 の値と一致することを確認する
 
+> **【実装時の変更 — Codex 実装レビュー Round 3 の [Critical] により】**
+> **取り込み 3 本のうち 1 本 (`tests/Unit/Support/Process/BootProbeRunnerTest.php`) は
+> バイト一致を崩した。** 取り込み元の S9 / S10 の検体は `bootstrap/app.php` を素で読むため、
+> **リポジトリの `.env` がそのまま子の設定に載る** (実測: DB パスワードと実 `CIPHERSWEET_KEY`)。
+> これは正典 v1 (2)「開発者ローカルの環境変数を入力集合から外す」を**環境ファイルという
+> 別経路で迂回する**形であり、バイト一致より不変条件を優先した
+> (AGENTS.md §セキュリティ不変条件「アプリ都合で緩めない」)。
+> 修正は「起動前に環境ファイルの置き場所を起動器の一時ディレクトリへ逃がす (fail-closed)」+
+> 「S9 が実挙動で 2 方向 (環境ファイルの場所 / `.env` の実値の番兵) から測る」の 2 点である。
+> 機械的な代価は無い (当該パスは指紋台帳のキーにも採用時債務にも無いので、突合 gate は
+> 赤くならず `LedgerPins` の件数も変わらない)。詳細は
+> `codex-history/impl-review-decisions-round-3.md`。
+> **上流 (laravel-claude-template) への申し送りが 1 件残る**: 正典側で同じ修正が入って
+> 再取り込みできるようになったら、この逸脱は消える。
+
 > **なぜバイト一致に固執するか**: このパスは aicue の指紋台帳 (281 パス) に無い = 未受領のテンプレートパスである。
 > バイト一致で入れれば、将来の指紋台帳の再生成で**記録値と一致して母集合に入り、逸脱 0 件・債務 0 件**になる。
 > 1 バイトでも変えると意図的逸脱の登録 (`LedgerPins::DIVERGENCE_ENTRY_COUNT` の更新を伴う) が必要になる。
@@ -578,14 +593,17 @@ S4 に集約する (呼び出し側 gate が唯一の利用者であるため)�
 ### 先頭コメントの書き直し要件
 
 現行は「責務は 4 つだけ (DB へ接続しない / container から解決する / 転送先 URL を組み立てて読む /
-終了コードを返す)」と書いているが、観測点が増えるので事実でなくなる。**責務 6 つ**へ改める:
+終了コードを返す)」と書いているが、観測点が増えるので事実でなくなる。**責務 7 つ**へ改める
+(7 番目は実装時に追加。Codex 実装レビュー Round 5 の [Warning] への対応):
 
 1. DB へ接続しない
 2. container から解決する
 3. 転送先 URL を組み立てて読む (**偽物が有効なときだけ**)
 4. **実働証明の印を `storage_path()` 経由で 1 本書く** (正典 v1 (5))
 5. **起動しきったアプリが解決した書き出し先 8 種と、効いた鍵 2 種の digest を報告する**
-6. 終了コードを返す
+6. **実際に読んだ環境ファイルの絶対パス (`environmentFilePath()`) を報告する**
+   (P-17。専用ファイルへの固定が効いたことを実挙動で示す唯一の観測点)
+7. 終了コードを返す
 
 **観測しないもの**: HTTP サーバもブラウザも起動しない / 設定キャッシュ**有り**の起動は観測しない /
 外部へ 1 度も通信しない (転送先は組み立てて URL を読むだけ)。
@@ -708,6 +726,8 @@ S4 に集約する。
 | P-13 | **追加 (正典 (5) の実働証明・実体)** | 子が `storage_path()` 経由で書いた印が `writtenRelativePaths` に現れる |
 | P-14 | **追加 (正典 (5) の実働証明・向き)** | 子が解決した書き出し先 8 種が 1 件残らず一時ディレクトリ配下で、`base_path()` の外 |
 | P-15 | **追加 (fail-closed の負例。子を起こさない)** | `interpret()` が `timedOut` / 空出力 / 非 JSON / 非配列 JSON で例外になる |
+| P-16 | **追加 (実装時。レビュー Round 2 の指摘)** | 配下判定に渡す前の正規化判定の検出力 (`..` / `.` / 相対パスを弾き、紛らわしい正当な名前は通す) |
+| P-17 | **追加 (実装時。レビュー Round 5 の指摘)** | **環境ファイルの隔離**: 子が実際に読んだ環境ファイルの絶対パスが、起動側が用意した専用ファイルと**完全一致**する |
 
 > **制限時間超過の後始末をどう覆うか (Round 1 の [Critical] への回答)**:
 > 旧 P-10 は「timeout でも**外側**の置き場所が消える」ことを実 timeout (0.01 秒) で測っていた。
@@ -1289,6 +1309,22 @@ G-7 の見本表 (`token_get_all` へ直接与える検体。ファイル走査�
 | `<?php BootProbeRunner::runner([]);` (接尾辞つきメソッド名) | **なし** |
 | `<?php BootProbeRunner::RUN;` (定数参照) | **なし** |
 
+### 【実装時に確定した事項】 (Codex 実装レビュー Round 1〜5 と main の前進を反映)
+
+本節の設計 (G-1〜G-7 / 3 軸の申告) はそのまま実装したが、レビューと main の前進で次を足した:
+
+| 追加・変更 | 内容 |
+|---|---|
+| G-6 の判定を **FQCN 解決**へ | 字句の末尾一致では別名 import で黙り、同名の別クラスを誤検出する (規約 (a))。`Tests\Support\PhpReferenceScanner` を使い、受け手が静的に確定できない形は**証拠に数えない** (存在を主張する検査なので fail-closed 側) |
+| **G-8 を新設** | 子入口の**環境ファイル隔離の分類** (`env_isolation`: `behavioural` / `structural` / `none`) と根拠の記載を deny-by-default で強制する。`none` は 0 件、`structural` の集合は完全一致 pin。**`structural` の経路について「実際に `.env` を読まない」とは主張しない** |
+| **G-9 を新設** | `child_entry` は `$app->useEnvironmentPath(` を**4 トークンの完全一致**で持つ (実コード / 子へ渡す検体文字列の中を字句解析し直す。素の部分文字列一致は使わない = 規約 (e))。`behavioural` の根拠は実在パスを名指しする |
+| 軸 A の申告が 7 → 8 件 | main の前進で `tests/Support/Concurrency/SymfonyProbeProcessFactory.php` (別 feature `process-concurrency-test-harness` の起こし手) が入った |
+| **G-2 を「1 件固定」→「2 件の完全一致 pin」へ** | 本 feature の boundary は「子を 2 本立てて合図で同期させる並行テスト」を明示的に除く。別 feature が自分の回収規約 (単一の絶対 deadline) を持つので統合しない (思考原則 4)。固定するのは**申告先の集合**であり「起動経路が 1 本」ではない |
+| 軸 B の申告が 5 → 8 件 | `idempotency-claim-probe.php` (`child_entry`) / `RemovedSurfaceScanTargets.php` (`inventory`) ほか、main の前進分 |
+
+呼び出し側 gate も P-16 (正規化判定の検出力) と **P-17 (子が読んだ環境ファイルの絶対パスが
+起動側の専用ファイルと完全一致する)** を足してある。
+
 ### 波及変更
 
 - TypeScript 型定義: なし / API Resource/DTO: なし
@@ -1357,12 +1393,15 @@ G-7 の見本表 (`token_get_all` へ直接与える検体。ファイル走査�
 個別に緑を確認するテスト (通常のテストコマンドで。設計時の手動実測では代替しない):
 
 - `tests/Unit/Support/Process/BootProbeRunnerTest.php` (S1〜S14)
-- `tests/Architecture/ExternalFakeBootProbeTest.php` (P-1〜P-15。P-10 は 4 本)
+- `tests/Architecture/ExternalFakeBootProbeTest.php` (P-1〜P-17。P-10 は 4 本。
+  P-16 / P-17 は実装時にレビューを受けて追加した)
 - `tests/Unit/Architecture/StrictTypesDeclarationScannerTest.php` (既存 4 本。**主張も実装も変えない**)
-- `tests/Architecture/PhpBootProbeReferenceInventoryTest.php` (G-1〜G-7)
+- `tests/Architecture/PhpBootProbeReferenceInventoryTest.php` (G-1〜G-9。
+  G-8 / G-9 は実装時にレビューを受けて追加した。S6 の【実装時に確定した事項】を参照)
 
-**取り込みの同一性**: 配置後の 3 ファイルの sha256 が、取得時の値
-(`bd21b337…` / `00b14167…` / `9db128d8…`) と一致する。
+**取り込みの同一性**: 配置後の sha256 が取得時の値と一致するのは実装 2 本
+(`bd21b337…` / `00b14167…`) だけである。自己検査 (`9db128d8…`) は上記の
+**【実装時の変更】**により意図的にバイト一致を崩した。
 
 **生成物を残さないこと** (2 本立て):
 
