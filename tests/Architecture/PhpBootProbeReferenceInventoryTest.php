@@ -22,6 +22,8 @@ use Tests\Support\TrackedPhpSourceFiles;
 |
 | 「`PHP_BINARY` の字句参照 (軸 A) / リテラルで検出できるアプリの起動点 (軸 B) /
 | 既存の子入口スクリプトへの参照 (軸 C) の 3 つは、いずれも**申告なしには増えない**」。
+| 加えて「子入口 (`child_entry`) は**環境ファイルの退避を字句として持ち**、裏取りの名指しは
+| **実在するパス**である」(G-9)。
 |
 | ## 主張しないこと (名指しで書く)
 |
@@ -32,6 +34,8 @@ use Tests\Support\TrackedPhpSourceFiles;
 |     網羅的な分類は**行わない** (行えば「緑のまま嘘をつく」)。
 |     G-6 が確かめるのは**共通の起動器への静的呼び出しが在ること**だけである
 |  4. 文字列を分割して針を避ける形 (`'fake-wiring-'.'probe.php'`) の検出
+|  5. **環境ファイルの退避が実際に効く位置に在ること** (G-9 は字句の在否だけを見る。
+|     位置の正しさは各経路の実挙動の検査が担う)
 |
 | ## 軸ごとの名前解決の扱い (AGENTS.md §静的検査の共通規約 (a) / (b))
 |
@@ -92,7 +96,16 @@ function phpBootProbeBinaryReferenceInventory(): array
             'launches_app' => false,
             'subject' => '起動器の自己検査。参照は期待値の比較と、子へ渡す検体文字列の中だけである',
             'recovery' => '起動器 (本ファイルは直接の起動 API を持たず、BootProbeRunner 経由でのみ子を起こす)',
-            'reason' => 'バイト一致で取り込んだ共有ファイルなので編集しない。起動器を通してしか子を起こさない',
+            'reason' => 'テンプレートから取り込んだ共有ファイルである (T249 のローカル修正 1 件を除いて '
+                .'バイト一致。修正の理由は当該 docblock)。起動器を通してしか子を起こさない',
+        ],
+        'tests/Support/Concurrency/SymfonyProbeProcessFactory.php' => [
+            'launches_app' => true,
+            'subject' => '実プロセス 2 本を合図で同期させる並行テストの子を起こす (子はアプリを起動する)',
+            'recovery' => '同 harness の runner (単一の絶対 deadline + 段階的強制終了。Symfony 側の制限時間は無効化)',
+            'reason' => '別 feature (lctl: process-concurrency-test-harness) の正典 v1 が持つ回収規約に属する。'
+                .'本 feature (subprocess-boot-probe-harness) の boundary は「子を 2 本立てて合図で同期させる '
+                .'並行テスト」を明示的に除いているので、共通の起動器へは載せない',
         ],
         'tests/Support/StrictTypesRuntimeProbe.php' => [
             'launches_app' => false,
@@ -139,11 +152,21 @@ function phpBootProbeBinaryReferenceInventory(): array
  *  - `in_process`  : 同一プロセスでのアプリ起動 (子プロセスではない)
  *  - `inventory`   : 検査定義・診断文としてパス文字列を保持するだけ
  *
- * `boots_repository_env` は「その経路で起きた**子**が、リポジトリの `.env` を読んで起動するか」。
- * **これは望ましさの宣言ではなく、危険面の目録である** (G-8 が件数と場所を pin する)。
- * 詳細は G-8 の docblock を読むこと。
+ * `env_isolation` は**子入口だけが持つ**欄で、「リポジトリの `.env` を読まないことを
+ * **何が守っているか**」を 3 値で分類する:
  *
- * @return array<string, array{kind: 'child_entry'|'in_process'|'inventory', boots_repository_env: bool, reason: non-empty-string}>
+ *  - `behavioural` : **実挙動の検査が在る** (子が読んだ環境ファイルの場所を実測して固定している)
+ *  - `structural`  : **退避の呼び出しが在ることを字句で pin しているだけ** (G-9)。
+ *    実挙動の裏取りは無いので、**この経路について「実際に読まない」とは主張しない**
+ *  - `none`        : どちらも無い (**申告できる値だが、G-8 が 0 件で pin する**)
+ *
+ * `env_isolation_proof` は上の分類の根拠 (`behavioural` なら検査の名前)。
+ * 子入口でない kind (`in_process` / `inventory`) は `env_isolation` を `null`、
+ * 根拠を空文字にする (子が居ないので分類の対象が無い)。
+ *
+ * 詳細と、この分類で**何を主張しないか**は G-8 の docblock を読むこと。
+ *
+ * @return array<string, array{kind: 'child_entry'|'in_process'|'inventory', env_isolation: 'behavioural'|'structural'|'none'|null, env_isolation_proof: string, reason: non-empty-string}>
  */
 function phpBootProbeAppBootEntryReferenceInventory(): array
 {
@@ -151,45 +174,75 @@ function phpBootProbeAppBootEntryReferenceInventory(): array
         'tests/Support/ExternalFakes/fake-wiring-probe.php' => [
             'kind' => 'child_entry',
             // 専用の 0600 環境ファイルへ固定して起動する (リポジトリの .env は読まない)。
-            'boots_repository_env' => false,
+            'env_isolation' => 'behavioural',
+            'env_isolation_proof' => 'tests/Architecture/ExternalFakeBootProbeTest.php P-17 '
+                .'(子が報告した環境ファイルの絶対パスが、起動側が用意した専用ファイルと完全一致する) '
+                .'+ 同 P-8 (子で実際に効いた鍵が専用ファイルの使い捨て値と一致し、親の設定値とは一致しない)',
             'reason' => '偽の外部サービスの配線を実起動で観測する子入口。起こすのは共通の起動器である',
+        ],
+        'tests/Support/Concurrency/idempotency-claim-probe.php' => [
+            'kind' => 'child_entry',
+            // 段 8 で useEnvironmentPath() / loadEnvironmentFrom() を専用の一時 env ファイルへ向ける。
+            // ★実挙動の裏取りは無い (この経路について「実際に読まない」とは主張しない)。
+            'env_isolation' => 'structural',
+            'env_isolation_proof' => '段 8 の $app->useEnvironmentPath() / loadEnvironmentFrom() を '
+                .'G-9 が字句で pin するだけである。読んだ環境ファイルの場所を実測する検査は無い。'
+                .'足すには子の観測 DTO (Tests\Support\Concurrency\ConcurrentProbeObservation) から '
+                .'親までの 4 段を変えることになり、それは別 feature '
+                .'(lctl: process-concurrency-test-harness) の契約なので本 TODO では行わない',
+            'reason' => '実プロセス並行テストの子入口。別 feature (process-concurrency-test-harness) の持ち物である',
         ],
         'tests/Unit/Support/Process/BootProbeRunnerTest.php' => [
             'kind' => 'child_entry',
-            // ★S9 / S10 の検体はリポジトリ root を作業ディレクトリにして bootstrap/app.php を
-            //   読むため、**リポジトリの .env がそのまま子の設定に載る** (実測で確認済み。G-8)。
-            'boots_repository_env' => true,
+            // ★T249 のローカル修正で、S9 / S10 の検体は起動前に環境ファイルの置き場所を
+            //   起動器の一時ディレクトリへ逃がす (取り込み元の姿ではリポジトリの .env を読んでいた)。
+            'env_isolation' => 'behavioural',
+            'env_isolation_proof' => 'tests/Unit/Support/Process/BootProbeRunnerTest.php S9 '
+                .'(子が報告した環境ファイルの絶対パスが <一時ディレクトリ>/.env と完全一致し、'
+                .'その場所に環境ファイルが実在しないこと + 環境ファイルからしか来ない設定値 2 つが空であること)',
             'reason' => '起動器の自己検査が子へ渡す検体文字列 (`-r` のソース) の中にある',
         ],
         'tests/TestCase.php' => [
             'kind' => 'in_process',
             // 同一プロセスなので phpunit.xml の <server force> が効く (秘密は無害化済み)。
-            'boots_repository_env' => false,
+            'env_isolation' => null,
+            'env_isolation_proof' => '',
             'reason' => 'テスト本体のアプリ生成 (同一プロセス)。子プロセスではない',
         ],
         'tests/Support/Cache/IsolatedApplicationProbe.php' => [
             'kind' => 'in_process',
-            'boots_repository_env' => false,
+            'env_isolation' => null,
+            'env_isolation_proof' => '',
             'reason' => 'キャッシュ受け皿の結線を測るための第 2 のアプリを同一プロセスで組み立てる。子プロセスではない',
         ],
         'tests/Architecture/CacheGuardWiringGateTest.php' => [
             'kind' => 'inventory',
-            'boots_repository_env' => false,
+            'env_isolation' => null,
+            'env_isolation_proof' => '',
             'reason' => 'TestCase の結線を字句で固定する検査が、期待するトークン列としてパス文字列を持つ',
         ],
         'tests/Architecture/BughuntExecutedRouteOrderingTest.php' => [
             'kind' => 'inventory',
-            'boots_repository_env' => false,
+            'env_isolation' => null,
+            'env_isolation_proof' => '',
             'reason' => '記録器の位置を固定する検査が、違反時の直し方を案内する診断文にパス文字列を持つ',
         ],
         'tests/Architecture/InertiaErrorScreenContractTest.php' => [
             'kind' => 'inventory',
-            'boots_repository_env' => false,
+            'env_isolation' => null,
+            'env_isolation_proof' => '',
             'reason' => '例外応答の最終整形スロットの登録位置を検査する側が、照合する場所としてパス文字列を持つ',
+        ],
+        'tests/Support/SurfaceRemoval/RemovedSurfaceScanTargets.php' => [
+            'kind' => 'inventory',
+            'env_isolation' => null,
+            'env_isolation_proof' => '',
+            'reason' => '撤去表面の走査対象の定義が、走査根の 1 つとしてパス文字列を持つ',
         ],
         'tests/Architecture/PhpBootProbeReferenceInventoryTest.php' => [
             'kind' => 'inventory',
-            'boots_repository_env' => false,
+            'env_isolation' => null,
+            'env_isolation_proof' => '',
             'reason' => '本 gate 自身。走査の針としてパス文字列を持つ (自分を走査対象から外さない)',
         ],
     ];
@@ -307,6 +360,90 @@ function phpBootProbeCallsBootProbeRunner(string $relativePath, string $source):
 }
 
 /**
+ * 正規化済みトークン列が**環境ファイルの退避の呼び出し**
+ * `$app` `->` `useEnvironmentPath` `(` を持つか (4 トークンの**完全一致**)。
+ *
+ * ★受け手を `$app` に固定する。名前だけを見ると `$unrelated->useEnvironmentPath(…)` も
+ *   証拠になってしまい、**存在を肯定する検査で拾いすぎる** (AGENTS.md §静的検査の共通規約 (b))。
+ *   変数の型は字句では解決できないので、**受け手の綴りまで固定する**のが本 gate で取れる
+ *   いちばん強い形である (摩擦は「子入口では `$app` という名前で受ける」だけ)。
+ * ★語彙一致は区切り (`->`) で割ったトークンの完全一致で判定するので、
+ *   接頭辞つき (`myUseEnvironmentPath`) / 打ち消しつき (`notUseEnvironmentPath`) /
+ *   接尾辞つき (`useEnvironmentPathX`) は**別トークン**として落ちる (同規約 (e))。
+ *
+ * @param  list<array{id: int|null, text: string, line: int}>  $tokens
+ */
+function phpBootProbeHasEnvironmentPathCall(array $tokens): bool
+{
+    $count = count($tokens);
+    for ($i = 0; $i + 3 < $count; $i++) {
+        if ($tokens[$i]['id'] !== T_VARIABLE || $tokens[$i]['text'] !== '$app') {
+            continue;
+        }
+
+        if ($tokens[$i + 1]['id'] !== T_OBJECT_OPERATOR) {
+            continue;
+        }
+
+        if ($tokens[$i + 2]['id'] !== T_STRING || $tokens[$i + 2]['text'] !== 'useEnvironmentPath') {
+            continue;
+        }
+
+        if ($tokens[$i + 3]['id'] === null && $tokens[$i + 3]['text'] === '(') {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * ソースが**環境ファイルの退避**を持つか (実コード、または子へ渡す検体ソースの中)。
+ *
+ * 判定は 2 段で、**どちらもトークンの完全一致**である (素の部分文字列一致は使わない):
+ *
+ *  1. ソース自身の正規化トークン列に `$app->useEnvironmentPath(` が在る
+ *     (`fake-wiring-probe.php` / `idempotency-claim-probe.php` のような実コード)
+ *  2. 文字列トークン (ヒアドキュメント・ナウドキュメントの本文を含む) の中身を
+ *     **PHP として字句解析し直し**、同じ 4 トークンの並びが在る
+ *     (`BootProbeRunnerTest` のように、子へ渡す検体ソースを文字列で持つ形)
+ *
+ * ★段 2 を素の部分文字列一致で書くと `'useEnvironmentPath is required'` のような
+ *   ただの散文や、`'$app->notUseEnvironmentPath(…)'` のような打ち消しつきまで通る。
+ *   **文字列の中も字句解析して同じ規則で判定する** (AGENTS.md §静的検査の共通規約 (e))。
+ * ★コメント・docblock は `PhpTokenScan::normalize()` が落とすので数えない。
+ *
+ * **主張しないこと**: 呼び出しが**実際に効く位置** (アプリ起動より前) に在ることは見ない。
+ * 位置の正しさは各経路の実挙動の検査が担う (G-8 の `env_isolation` 参照)。
+ */
+function phpBootProbeMentionsEnvironmentPathRelocation(string $source): bool
+{
+    $tokens = PhpTokenScan::normalize($source);
+
+    if (phpBootProbeHasEnvironmentPathCall($tokens)) {
+        return true;
+    }
+
+    foreach ($tokens as $token) {
+        if (! in_array($token['id'], [T_CONSTANT_ENCAPSED_STRING, T_ENCAPSED_AND_WHITESPACE], true)) {
+            continue;
+        }
+
+        $body = $token['text'];
+        if ($token['id'] === T_CONSTANT_ENCAPSED_STRING && strlen($body) >= 2) {
+            // 引用符を落とす (中身だけを字句解析する)。
+            $body = substr($body, 1, -1);
+        }
+
+        if (phpBootProbeHasEnvironmentPathCall(PhpTokenScan::normalize('<?php '.$body))) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
  * 走査の母集団: git 追跡下の `tests/` 配下の `*.php` (相対パス => ソース)。
  *
  * @return array<string, string>
@@ -381,13 +518,30 @@ test('G-1 軸 A: PHP_BINARY を参照するファイルの集合が全数申告�
     );
 });
 
-test('G-2 軸 A: アプリを起こすと申告するのは共通の起動器ちょうど 1 件である', function (): void {
+/**
+ * G-2: 「アプリを起こす」と申告してよい起こし手の**完全一致 pin**。
+ *
+ * ★**1 件ではなく 2 件である**。本 feature (subprocess-boot-probe-harness) の boundary は
+ *   「子を 2 本立てて合図で同期させる並行テスト」を明示的に**除いて**おり、そちらは別 feature
+ *   (lctl: process-concurrency-test-harness) が自分の回収規約 (単一の絶対 deadline) を持つ。
+ *   両者を 1 本の起動器へ統合するのは「別物の概念を似ているからで統合する」ことになる
+ *   (AGENTS.md 思考原則 4)。
+ * ★したがって本検査が固定するのは**申告先の集合そのもの**であり、
+ *   「起動経路が 1 本である」ことではない (それは字句走査では裏が取れない。冒頭の
+ *   「主張しないこと」1 を参照)。3 本目が現れたら**どちらの feature の規約に属するのか**を
+ *   申告に書くことになり、レビューに必ず見える。
+ */
+test('G-2 軸 A: アプリを起こすと申告する起こし手が完全一致で pin されている', function (): void {
     $launching = array_keys(array_filter(
         phpBootProbeBinaryReferenceInventory(),
         static fn (array $entry): bool => $entry['launches_app'],
     ));
+    sort($launching);
 
-    expect($launching)->toBe(['tests/Support/Process/BootProbeRunner.php']);
+    expect($launching)->toBe([
+        'tests/Support/Concurrency/SymfonyProbeProcessFactory.php',
+        'tests/Support/Process/BootProbeRunner.php',
+    ]);
 });
 
 test('G-3 軸 A: subject / recovery / reason の 3 欄がいずれも空でない', function (): void {
@@ -457,87 +611,172 @@ test('G-6 軸 C: runtime はちょうど 1 件で、共通の起動器を実際�
 });
 
 /**
- * G-8: リポジトリの `.env` を読んで起動する**子**の目録 (危険面の pin)。
+ * G-8: 子入口の**環境ファイル隔離の分類**と、**実挙動が未検証の経路の完全一致 pin**。
  *
- * ## 何を測っているか
+ * ## 何を守っているか
  *
  * 共通の起動器は `proc_open` へ渡す環境配列で開発者ローカルの env を締め出すが、
  * **`.env` ファイルの読み込みまでは止めない**。子の作業ディレクトリはリポジトリ root なので、
- * 子が `bootstrap/app.php` を素で読むと Laravel は**リポジトリの `.env` をそのまま**設定へ載せる。
+ * 子が `bootstrap/app.php` を**素で**読むと Laravel は**リポジトリの `.env` をそのまま**設定へ載せる。
+ * これは正典 v1 (2) の「開発者ローカルの環境変数を入力集合から外す」を、
+ * 環境変数ではなく**環境ファイル**の経路で迂回してしまう形である。
  *
- * **実測 (T249 実装時、本 worktree)**: 取り込んだ自己検査の S9 / S10 が使う検体でこれを確かめたところ、
- * 子の設定には `.env` 由来の値が入っていた — 外部サービスの資格情報
+ * **実測 (T249 実装時、本 worktree)**: 取り込んだ自己検査 S9 / S10 の検体を取り込み元の姿
+ * (環境ファイルの置き場所を移さない形) で走らせると、子の設定に `.env` 由来の
+ * **DB のパスワードと実 `CIPHERSWEET_KEY`** が載った。外部サービスの資格情報
  * (Stripe / AWS / Google / SMTP) は本チェックアウトではいずれも空だったが、
- * **DB のパスワードと `CIPHERSWEET_KEY` は実値が載った**。
- * **「空だった」のはこのチェックアウトの性質であって、保証ではない。**
+ * **「空だった」のはこのチェックアウトの性質であって保証ではない。**
+ * この実測を受けて S9 / S10 の検体には**起動前に環境ファイルの置き場所を一時ディレクトリへ
+ * 逃がす 1 行**を入れた (取り込み元からの意図的な逸脱。理由は当該 docblock)。
  *
- * ## なぜ止めずに目録にするのか
+ * ## 何を機械で固定しているか
  *
- * 当該検体は**テンプレートからバイト一致で取り込んだ共有ファイル**の中にあり、
- * ここで書き換えると意図的逸脱の登録が要る (T249 の受入条件は「取り込み 3 本を編集しない」)。
- * したがって本 gate は**除去ではなく封じ込め**を担う —
- * この性質を持つ経路が**申告なしに増えない**ことだけを機械で固定する。
+ *  1. `env_isolation` が `none` の子入口は**ちょうど 0 件**である (完全一致 pin)。
+ *     退避も裏取りも無い子入口を足すには申告を書き換えることになり、レビューに必ず見える
+ *  2. `child_entry` は `env_isolation` を `behavioural` / `structural` のどちらかで申告し、
+ *     **根拠の欄 (`env_isolation_proof`) を必ず持つ** (空では通らない)
+ *  3. **`structural` の集合は完全一致で pin する** — 実挙動の裏取りが無い経路が
+ *     黙って増えないようにするため。**この集合について「実際に `.env` を読まない」とは
+ *     主張しない** (下の「主張しないこと」を参照)
+ *  4. `child_entry` 以外 (`in_process` / `inventory`) は定義上この分類の対象でないので、
+ *     `env_isolation` が `null` であること・根拠が空であることを両方向で固定する
+ *     (取り違えの検出)
  *
- * ## 対比 (なぜ他の経路は false なのか)
+ * ## 対比 (なぜ同一プロセスは対象外なのか)
  *
- *  - 同一プロセスの起動 (`tests/TestCase.php` 等) は `phpunit.xml` の `<server force="true">` が
- *    効くため、Stripe / LLM の鍵は空か dummy に無害化されている。
- *    **`<server force>` は PHPUnit プロセスにしか効かず、`proc_open` の子には及ばない** —
- *    これが子と同一プロセスの非対称の正体である
- *  - `fake-wiring-probe.php` は専用の 0600 環境ファイルへ `useEnvironmentPath()` /
- *    `loadEnvironmentFrom()` で固定するので、リポジトリの `.env` を読まない
+ * 同一プロセスの起動 (`tests/TestCase.php` 等) は `phpunit.xml` の `<server force="true">` が
+ * 効くため、Stripe / LLM の鍵は空か dummy に無害化されている。
+ * **`<server force>` は PHPUnit プロセスにしか効かず、`proc_open` の子には及ばない** —
+ * これが子と同一プロセスの非対称の正体である。
  *
- * ## 主張しないこと (誇張しない。Codex 実装レビュー Round 3 の指摘)
+ * ## 主張しないこと (誇張しない)
  *
- * **本検査が機械的に確かめるのは「申告」であって「実挙動」ではない。**
- * `boots_repository_env` の値と、その経路の子が実際に何を読むかを結び付ける検査は**持っていない**。
- * したがって次の退行は**本検査を通ってしまう**:
+ * **「子はリポジトリの `.env` を読まない」を全経路について主張しない。**
+ * 主張できるのは `env_isolation: behavioural` の経路だけで、そちらの根拠は本検査ではなく
+ * **名指しされた実挙動の検査そのもの**である:
  *
- *  1. `fake-wiring-probe.php` から `useEnvironmentPath()` を落としつつ申告を `false` のままにする
- *  2. 新しい `child_entry` が `.env` を読むのに `false` と申告する
- *  3. 既存の `true` のファイルの中で、`.env` を読む検体を増やす (ファイル単位の件数は変わらない)
+ *  - `tests/Unit/Support/Process/BootProbeRunnerTest.php` の S9 — 子が報告した環境ファイルの
+ *    絶対パスが `<一時ディレクトリ>/.env` と完全一致し、そこに実在しないこと
+ *  - `tests/Architecture/ExternalFakeBootProbeTest.php` の P-17 / P-8 — 子が報告した
+ *    環境ファイルの絶対パスが起動側の専用ファイルと完全一致し、効いた鍵がその中身と一致すること
  *
- * **よって本検査はセキュリティ境界ではなく、上流課題を見える場所に置くための暫定の台帳である。**
- * 「危険面が申告なしに増えない」とは読めない (読めるのは「申告が黙って書き換わらない」までである)。
+ * `env_isolation: structural` の経路 (現在 1 件) については
+ * **「実際に読まない」とは主張しない** — 分かっているのは「退避の呼び出しが字句として在る」
+ * ことだけである (G-9)。呼び出しが**効く位置**に在るかも、他の値を読んでいないかも見ていない。
  *
- * ## 上流への申し送り (本検査では代替できない)
+ * さらに、本検査が機械で確かめるのは**申告と根拠の記載**であって、
+ * 名指しした検査が実際に何を測っているかではない。したがって次は本検査を通る:
  *
- * 正典側 (lctl feature: subprocess-boot-probe-harness) で
- * 「アプリを起こす自己検査の子にも専用の環境ファイルを読ませる」ことを**先に**行うべきである。
- * 併せて「リポジトリの `.env` へ置いた番兵が子の設定に現れないこと」を測る自己検査があれば、
- * 実挙動の側で固定できる。解消されて再取り込みしたら、本 pin の `true` は 0 件になる。
+ *  1. `env_isolation_proof` に**実在はするが何も測っていない**検査名を書く
+ *     (実在しない名前は G-9 が落とす)
+ *  2. 既存の `child_entry` の中で、`.env` を読む検体を**増やす** (ファイル単位の申告は変わらない)
  */
-test('G-8 リポジトリの .env を読むと申告した経路は 1 件だけである (申告の pin。実挙動は測らない)', function (): void {
+test('G-8 退避も裏取りも無い子入口は 0 件で、実挙動の裏取りが無い経路は完全一致で pin されている', function (): void {
     $inventory = phpBootProbeAppBootEntryReferenceInventory();
 
-    $bootsRepositoryEnv = array_keys(array_filter(
-        $inventory,
-        static fn (array $entry): bool => $entry['boots_repository_env'],
-    ));
+    $childEntries = [];
+    $structuralOnly = [];
 
-    // ★件数と場所を完全一致で pin する。増やすには「なぜその子が .env を読んでよいのか」を
-    //   申告に書くことになり、レビューに必ず見える。
-    expect($bootsRepositoryEnv)->toBe(
-        ['tests/Unit/Support/Process/BootProbeRunnerTest.php'],
-        'リポジトリの .env を読んで起動する子が増減している。'
-        .'増やすなら G-8 の docblock を読み、なぜ専用の環境ファイルを使えないのかを申告すること',
-    );
-
-    // ★`true` を申告してよいのは**バイト一致で取り込んだ共有ファイル**だけである
-    //   (aicue が自分で書いたファイルには、専用の環境ファイルを使わない言い訳が無い)。
-    foreach ($bootsRepositoryEnv as $path) {
-        expect(str_starts_with($path, 'tests/Unit/Support/Process/'))
-            ->toBeTrue("aicue 所有のファイルがリポジトリの .env を読む子を持っている: {$path}");
-    }
-
-    // ★子プロセスではない経路 (`in_process`) と検査定義 (`inventory`) は、
-    //   定義上この危険面を持たない。取り違えを防ぐために両方向で固定する。
     foreach ($inventory as $path => $entry) {
         if ($entry['kind'] !== 'child_entry') {
-            expect($entry['boots_repository_env'])
-                ->toBeFalse("子プロセスではない経路に .env 読み込みが申告されている: {$path}");
+            // ★子プロセスではない経路 (`in_process`) と検査定義 (`inventory`) は、
+            //   定義上この分類の対象ではない。取り違えを防ぐために両方向で固定する。
+            expect($entry['env_isolation'])
+                ->toBeNull("子が居ない経路に env_isolation が申告されている: {$path}")
+                ->and(trim($entry['env_isolation_proof']))
+                ->toBe('', "子が居ない経路に根拠の記載がある (kind の取り違え): {$path}");
+
+            continue;
+        }
+
+        $childEntries[] = $path;
+
+        // ★分類は 2 値のどちらかで、根拠の記載を必ず持つ (申告だけで済ませない)。
+        expect(in_array($entry['env_isolation'], ['behavioural', 'structural'], true))
+            ->toBeTrue("child_entry の env_isolation が behavioural / structural の外: {$path}")
+            ->and(trim($entry['env_isolation_proof']))
+            ->not->toBe('', "child_entry に env_isolation の根拠が無い: {$path}");
+
+        if ($entry['env_isolation'] === 'structural') {
+            $structuralOnly[] = $path;
         }
     }
+
+    sort($structuralOnly);
+
+    // ★**実挙動の裏取りが無い子入口**の集合を完全一致で pin する。
+    //   増やすには申告を書き換えることになり、「なぜ実挙動で測らないのか」がレビューに必ず見える。
+    //   減らす (behavioural へ上げる) ときも同じ。
+    expect($structuralOnly)->toBe(
+        ['tests/Support/Concurrency/idempotency-claim-probe.php'],
+        '実挙動の裏取りを持たない子入口が増減している。'
+        .'足すなら G-8 の docblock を読み、なぜ実挙動で測れないのかを根拠の欄に書くこと',
+    );
+
+    // ★母集団が空のまま緑になる形を塞ぐ (AGENTS.md §静的検査の共通規約 (b) の 3 点目)。
+    expect($childEntries)->not->toBe([], 'child_entry が 1 件も無い (走査か申告が壊れている)');
+});
+
+/**
+ * G-9: `child_entry` は**環境ファイルの退避の呼び出しを字句として持つ** (G-8 の申告への機械の裏打ち)。
+ *
+ * G-8 が見るのは申告と根拠の記載までである。そこへ**2 つだけ機械の裏打ち**を足す:
+ *
+ *  1. `child_entry` の申告ファイルは `$app->useEnvironmentPath(` を**トークンの完全一致**で持つ
+ *     (実コード、または子へ渡す検体ソースの文字列の中。判定は
+ *     `phpBootProbeMentionsEnvironmentPathRelocation()`)。Laravel が読む環境ファイルは
+ *     この呼び出しでしか動かないので、**持たない子入口は既定でリポジトリの `.env` を読む**
+ *     = 新しい子入口を素直に足すと赤になる
+ *  2. `env_isolation_proof` が**検査を名指ししている場合**、その先頭語は
+ *     **実在するパス**である (走査母集団の中に在る)。実在しない検査名で申告を通す形を塞ぐ。
+ *     `structural` の根拠は検査名ではなく散文なので、この検査は
+ *     **`behavioural` の entry にだけ**適用する
+ *
+ * **主張しないこと**:
+ *
+ *  - 呼び出しが**実際に効く位置** (アプリ起動より前) に在ること。字句では決められないので、
+ *    位置の正しさは実挙動の検査 (`BootProbeRunnerTest` の S9 /
+ *    `ExternalFakeBootProbeTest` の P-17) が担う
+ *  - **受け手が本当に Laravel の Application であること**。変数の型は字句では解決できないので、
+ *    受け手は**綴り (`$app`) で固定している**。別名で受ける子入口は赤になる (拾いすぎない側)
+ *  - 名指しした検査が**実際に何を測っているか** (実在の確認までである)
+ *  - 文字列側の判定は「**子へ実際に渡される**検体ソース」に限定できない。
+ *    申告ファイルの中の**使われていない文字列**に同じ 4 トークンを置いても通る
+ *    (見本表の「単一引用符の中」の正例がまさにその形である)。字句走査で
+ *    「その文字列が子へ渡されるか」を追うことはできないので、ここは**保証外**にしてある。
+ *    `structural` の経路について実挙動を主張していないのはこのためでもある
+ */
+test('G-9 child_entry は退避の呼び出しを字句として持ち、behavioural の名指しは実在パスである', function (): void {
+    $sources = phpBootProbeTestSources();
+    $childEntries = 0;
+
+    foreach (phpBootProbeAppBootEntryReferenceInventory() as $path => $entry) {
+        if ($entry['kind'] !== 'child_entry') {
+            continue;
+        }
+
+        $childEntries++;
+
+        expect($sources)->toHaveKey($path);
+        expect(phpBootProbeMentionsEnvironmentPathRelocation($sources[$path]))
+            ->toBeTrue(
+                "child_entry が環境ファイルの退避 (\$app->useEnvironmentPath( ) を持っていない: {$path}"
+            );
+
+        if ($entry['env_isolation'] !== 'behavioural') {
+            // `structural` の根拠は検査名ではなく散文なので、実在確認の対象にしない。
+            continue;
+        }
+
+        // 名指しは「パス + 括弧つきの説明」の形なので、先頭語をパスとして見る。
+        $named = strtok(trim($entry['env_isolation_proof']), " \t");
+        expect(is_string($named) ? $named : '')->not->toBe('', "env_isolation_proof が空: {$path}");
+        expect(array_key_exists((string) $named, $sources))
+            ->toBeTrue("env_isolation_proof が実在しない検査を名指ししている: {$path} => {$named}");
+    }
+
+    // 母集団が空のまま緑になる形を塞ぐ。
+    expect($childEntries)->toBeGreaterThan(0, 'child_entry が 1 件も無い (走査か申告が壊れている)');
 });
 
 test('G-7 走査が空振りしていない (走査根が実在し、3 軸の母集団が非空)', function (): void {
@@ -603,6 +842,41 @@ test('G-7 走査器の見本検査: 3 軸の判定が見本表どおりである
     ["<?php \$p = 'bootstrap/app.phpx';", false, true, false],
     ["<?php \$p = 'bootstrap/application.php';", false, false, false],
     ["<?php \$p = 'fake-wiring-probe.txt';", false, false, false],
+]);
+
+test('G-7 走査器の見本検査: 環境ファイルの退避の字句判定 (名前・文字列の両方 / 3 形の否定)', function (
+    string $sample,
+    bool $expected,
+): void {
+    expect(phpBootProbeMentionsEnvironmentPathRelocation($sample))->toBe($expected, $sample);
+})->with([
+    // --- 正例: 実コード / 単一引用符の中 / ナウドキュメントの本文 (3 分岐すべて) ---
+    ['<?php $app->useEnvironmentPath($dir);', true],
+    ["<?php \$code = '\$app->useEnvironmentPath(\$dir);';", true],
+    ["<?php \$code = <<<'PHP'
+\$app->useEnvironmentPath(\$dir);
+PHP;", true],
+    // --- 負例: コメントだけ (正規化が落とす) ---
+    ['<?php // useEnvironmentPath', false],
+    ['<?php /** useEnvironmentPath */ $x = 1;', false],
+    // --- 負例: 接頭辞つき・打ち消しつき・接尾辞つきの**名前** (実コード側) ---
+    ['<?php $app->myUseEnvironmentPath($dir);', false],
+    ['<?php $app->notUseEnvironmentPath($dir);', false],
+    ['<?php $app->useEnvironmentPathX($dir);', false],
+    // --- 負例: 同じ 3 形を**文字列の中**でも落とす (段 2 が部分文字列一致でないことの裏取り) ---
+    ["<?php \$code = '\$app->myUseEnvironmentPath(\$dir);';", false],
+    ["<?php \$code = '\$app->notUseEnvironmentPath(\$dir);';", false],
+    ["<?php \$code = '\$app->useEnvironmentPathX(\$dir);';", false],
+    // --- 負例: 文字列の中の散文・呼び出しでない形 ---
+    ["<?php \$msg = 'useEnvironmentPath is required';", false],
+    ["<?php \$s = 'useEnvironmentPath';", false],
+    // --- 負例: 受け手が \$app でない (存在を肯定する検査なので拾いすぎない) ---
+    ['<?php $unrelated->useEnvironmentPath($dir);', false],
+    ["<?php \$code = '\$unrelated->useEnvironmentPath(\$dir);';", false],
+    // --- 負例: 呼び出しでない形 (`(` が続かない) ---
+    ['<?php $app->useEnvironmentPath;', false],
+    // --- 負例: 退避を持たない子入口 (これが G-9 で赤になる形) ---
+    ["<?php \$app = require 'bootstrap/app.php'; \$app->make(Kernel::class)->bootstrap();", false],
 ]);
 
 test('G-7 走査器の見本検査: 共通の起動器への静的呼び出しを完全修飾名で判定する', function (

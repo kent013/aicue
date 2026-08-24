@@ -56,8 +56,34 @@ use Tests\Support\Process\BootProbeRunner;
  * |---|---|
  * | 「外部到達統制の subprocess 0 件 pin に触れる (AGENTS.md セキュリティ不変条件 **15**)」 | aicue の外部到達点の目録は **セキュリティ不変条件 9** である |
  * | 「同じ扱いの先例は `tests/Support/Architecture/GlobalUse/PhpLintOracle.php`」 | aicue では `tests/Support/GlobalUse/PhpLintOracle.php` (`Architecture/` が入らない) |
+ * | 「統制点は `proc_open` へ渡す環境配列だけ」 | **プロセス環境の統制点はそれで唯一だが、環境ファイル (`.env`) は別経路である** |
  *
  * **趣旨 (`tests/` 専用であり `app/` へ持ち出さない) は aicue でもそのまま成り立つ。**
+ *
+ * ### 呼び出し側の必須契約 (T249 の実測から。起動器の docblock には書かれていない)
+ *
+ * **Laravel を起こす子は、環境ファイルの置き場所を自分で退避しなければならない。**
+ * 起動器が締め出すのは*プロセス環境*だけで、`.env` の読み込みは止めない。子の作業ディレクトリは
+ * リポジトリ root なので、`bootstrap/app.php` を素で読むと Laravel は**リポジトリの `.env` を
+ * そのまま設定へ載せる** (実測: DB パスワードと実 `CIPHERSWEET_KEY` が子の設定に載った)。
+ * 退避の手段は 2 通りで、どちらでもよい:
+ *
+ *  - **専用の環境ファイルを読ませる** — 本クラスの経路 (`useEnvironmentPath()` +
+ *    `loadEnvironmentFrom()` を子入口が呼ぶ)
+ *  - **実在しない場所を指させる** — 起動器の自己検査 (S9 / S10) の経路
+ *    (一時ディレクトリを環境パスにすると `safeLoad()` は何も読まない)
+ *
+ * この契約の守り方は経路ごとに強さが違う。**一部の経路は字句の pin だけである**:
+ *
+ *  - 本クラスの経路 / 起動器の自己検査 (S9) — **実挙動で測る**
+ *    (`ExternalFakeBootProbeTest` の P-17 が読んだ環境ファイルの絶対パスを完全一致で、
+ *     S9 が同じことを起動器側で)
+ *  - 実プロセス並行テストの子入口 — **字句の pin だけ** (退避の呼び出しが在ることまで)。
+ *    別 feature の観測契約なので実測は足していない
+ *
+ * どの経路がどちらかの正本は
+ * `tests/Architecture/PhpBootProbeReferenceInventoryTest.php` の軸 B の申告
+ * (`env_isolation`) であり、G-8 が分類を、G-9 が字句の裏打ちを固定する。
  *
  * **保証しないもの**: 観測できるのは設定キャッシュ**無し**の起動だけである。
  * キャッシュ有りの起動は観測しない (キャッシュが古いときの挙動は本観測の範囲外で、

@@ -23,6 +23,26 @@ use Tests\Support\Process\BootProbeRunner;
 |
 | 測るのは 2 方向である: 「落とせない子を確実に落とす」(S12 / S14) と
 | 「起動前の fail-closed で残骸を残さない」(S11)。
+|
+| ## 呼び出し側の必須契約 (aicue の追記。T249 の実測から)
+|
+| **Laravel を起こす子は、環境ファイルの置き場所を自分で退避しなければならない。**
+| 起動器が締め出すのは `proc_open` へ渡す**プロセス環境**だけで、`.env` の読み込みは止めない。
+| 子の作業ディレクトリはリポジトリ root なので、`bootstrap/app.php` を**素で**読むと
+| Laravel は**リポジトリの `.env` をそのまま**設定へ載せる (実測: DB のパスワードと
+| 実 `CIPHERSWEET_KEY` が子の設定に載った)。起動器の docblock の「統制点は `proc_open` へ渡す
+| 環境配列」という記述は**プロセス環境についてのみ**正しい。
+|
+| 退避の手段は 2 通りで、どちらでもよい:
+|
+|  - **専用の環境ファイルを読ませる** (`tests/Support/ExternalFakes/fake-wiring-probe.php` の形)
+|  - **実在しない場所を指させる** (本ファイルの S9 / S10 の形。一時ディレクトリを環境パスにすると
+|    `safeLoad()` は何も読まない)
+|
+| 契約の遵守は `tests/Architecture/PhpBootProbeReferenceInventoryTest.php` の G-8 / G-9 が
+| 申告と字句で、実挙動は本ファイルの S9 と
+| `tests/Architecture/ExternalFakeBootProbeTest.php` の P-17 / P-8 が測る。
+| **この節は取り込み元 (laravel-claude-template) には無い** — 上流へ還すべき申し送りである。
 */
 
 /** 親 env の漏れを見るための番兵 (S1)。 */
@@ -38,14 +58,45 @@ const BOOT_PROBE_ENV_REPORT = <<<'PHP'
     echo json_encode(getenv());
     PHP;
 
-/** アプリを起こして書き出し先を JSON で報告させる probe (S9 / S10)。 */
+/**
+ * アプリを起こして書き出し先を JSON で報告させる probe (S9 / S10)。
+ *
+ * ★**aicue のローカル修正 (T249)**: 取り込み元 (laravel-claude-template) の検体は
+ *   `bootstrap/app.php` を素で読むため、**リポジトリの `.env` がそのまま子の設定に載っていた**
+ *   (実測で確認: DB パスワードと実 `CIPHERSWEET_KEY`)。これは正典 v1 (2)
+ *   「開発者ローカルの環境変数を入力集合から外す」を、環境ファイル経由で迂回してしまう。
+ *   そこで**起動前に環境ファイルの置き場所を起動器の一時ディレクトリへ逃がす**。
+ *   一時ディレクトリに `.env` は無いので `safeLoad()` は何も読まず、設定の入力は
+ *   **`proc_open` へ渡した環境配列だけ**になる (= 正典 (2) の統制点が唯一になる)。
+ *   一時ディレクトリの絶対パスは予約鍵 `LARAVEL_STORAGE_PATH` (`<root>/storage`) から導き、
+ *   **取れなければ例外にする** (fail-closed。空文字で `useEnvironmentPath()` を呼ぶと
+ *   退避が無言で外れて `/` を環境ファイルの置き場所にしてしまう)。
+ *   実働は S9 が**無条件に**測る (申告ではなく実挙動) — 読む環境ファイルが
+ *   `<一時ディレクトリ>/.env` と完全一致し実在しないこと (場所) と、環境ファイルからしか
+ *   来ない設定値 2 つが空であること (中身)。**秘密も digest も出力しない**。
+ *   **バイト一致からの意図的な逸脱であり、その理由は上記のとおり
+ *   「セキュリティ不変条件はバイト一致より優先する」である** (AGENTS.md 禁止事項・
+ *   セキュリティ不変条件。詳細は devnotes の実装メモ)。
+ */
 const BOOT_PROBE_PATH_REPORT = <<<'PHP'
     require 'vendor/autoload.php';
     $app = require 'bootstrap/app.php';
+    $storagePath = getenv('LARAVEL_STORAGE_PATH');
+    if (! is_string($storagePath) || $storagePath === '') {
+        throw new RuntimeException('LARAVEL_STORAGE_PATH が無い (環境ファイルの退避先を導けない)');
+    }
+    $app->useEnvironmentPath(dirname($storagePath));
     $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
     Illuminate\Support\Facades\Log::info('boot-probe self check');
     echo json_encode([
         'php_binary' => PHP_BINARY,
+        'env_file_path' => $app->environmentFilePath(),
+        'env_file_exists' => file_exists($app->environmentFilePath()),
+        // 秘密そのものも、その digest も出さない (テスト出力が総当りの検証器になるのを避ける)。
+        // この 2 つの設定値は env からしか来ない (config/ciphersweet.php は既定を持たず、
+        // config/database.php は空文字を既定にする) ので、**非空なら環境ファイルが読まれた**証拠になる。
+        'ciphersweet_key_present' => ((string) config('ciphersweet.providers.string.key')) !== '',
+        'db_password_present' => ((string) config('database.connections.pgsql.password')) !== '',
         'storage' => $app->storagePath(),
         'config_cache' => $app->getCachedConfigPath(),
         'routes_cache' => $app->getCachedRoutesPath(),
@@ -197,14 +248,41 @@ test('S8: 大量出力で詰まらない', function (): void {
 });
 
 test('S9: 書き出し先の退避が効いている (向き) / 親と同じ実行体で起きる', function (): void {
-    $result = BootProbeRunner::run(['-r', BOOT_PROBE_PATH_REPORT], ['LOG_CHANNEL' => 'single']);
+    $result = BootProbeRunner::run(['-r', BOOT_PROBE_PATH_REPORT], ['APP_ENV' => 'testing', 'LOG_CHANNEL' => 'single']);
     expect($result->exitCode)->toBe(0, $result->stderr);
 
-    /** @var array<string, string> $report */
+    // ★報告には真偽値も混ざるので `mixed` で受ける (取り込み元は string 固定だった)。
+    /** @var array<string, mixed> $report */
     $report = json_decode(trim($result->stdout), true, 512, JSON_THROW_ON_ERROR);
 
     // 正典 (1): 親と同じ実行体で起こす。
     expect($report['php_binary'])->toBe(PHP_BINARY);
+
+    // ★aicue のローカル修正 (T249) の実働証明 — **申告ではなく実挙動を測る**。無条件の 2 方向で、
+    //   どちらもリポジトリの `.env` の**中身に依存しない** (見本から起こしたチェックアウトでも
+    //   同じ強さで成立し、テスト出力に秘密も digest も出ない)。
+    //
+    //   (a) **場所**: Laravel が読む環境ファイルは `environmentFilePath()` の**ちょうど 1 本**で、
+    //       それが `<一時ディレクトリ>/.env` **と完全一致**し、しかも**実在しない**。
+    //       ★配下判定 (`isInside()`) では測らない — あちらは両引数が正規化済みであることを
+    //         契約にしており、`..` を含む未正規化のパスを渡すと取り違える。ここは
+    //         起動器が予約鍵で渡した一時ディレクトリから期待値が一意に決まるので、
+    //         **完全一致**で測るのが最も強く、正規化の前提も要らない。
+    expect($report['env_file_path'])->toBe(
+        $result->temporaryRoot.'/.env',
+        '子が読む環境ファイルが起動器の一時ディレクトリの直下でない',
+    )->and($report['env_file_exists'])
+        ->toBeFalse("子が環境ファイルを読み込んでいる: {$report['env_file_path']}");
+
+    //   (b) **中身**: 環境ファイルからしか来ない設定値が**空である**。
+    //       `config/ciphersweet.php` の鍵は既定を持たず、`config/database.php` のパスワードは
+    //       空文字を既定にするので、**非空なら環境ファイルが読まれた**ことになる。
+    //       (a) が「読む先」を、(b) が「読んだ結果」を測るので、
+    //       「置き場所は移したが値は別経路で入った」形もここで落ちる。
+    expect($report['ciphersweet_key_present'])
+        ->toBeFalse('子の設定に CIPHERSWEET_KEY が載っている (環境ファイルが読まれた)')
+        ->and($report['db_password_present'])
+        ->toBeFalse('子の設定に DB_PASSWORD が載っている (環境ファイルが読まれた)');
 
     foreach (['storage', 'config_cache', 'routes_cache', 'services_cache', 'packages_cache',
         'events_cache', 'view_compiled', 'log_path'] as $key) {
@@ -214,7 +292,7 @@ test('S9: 書き出し先の退避が効いている (向き) / 親と同じ実�
 });
 
 test('S10: 書き出し先の退避が効いている (実体) と後片付け', function (): void {
-    $result = BootProbeRunner::run(['-r', BOOT_PROBE_PATH_REPORT], ['LOG_CHANNEL' => 'single']);
+    $result = BootProbeRunner::run(['-r', BOOT_PROBE_PATH_REPORT], ['APP_ENV' => 'testing', 'LOG_CHANNEL' => 'single']);
 
     expect($result->exitCode)->toBe(0, $result->stderr)
         ->and($result->writtenRelativePaths)->toContain('storage/logs/laravel.log')
@@ -222,20 +300,34 @@ test('S10: 書き出し先の退避が効いている (実体) と後片付け',
 });
 
 test('S11: 一時ディレクトリがリポジトリ内なら起動前に失敗し残骸を残さない', function (): void {
-    $base = base_path('storage/framework/testing');
-    if (! is_dir($base)) {
-        mkdir($base, 0o755, true);
+    // ★aicue のローカル修正 (T249): 置き場所は**この検査専用の一意な葉**にする。
+    //   取り込み元は共有の `storage/framework/testing` を直接使い、不在なら再帰的に掘っていた。
+    //   `--parallel` では同じ場所を使う別の検査 (`ExternalFakeBootProbeTest` の P-10d) と
+    //   **作成でも削除でも競合する** (先に作った側が勝つ / 先に消した側が他方の親を消す)。
+    //   親 `storage/framework/testing` は `.gitignore` が git 追跡下にあるので
+    //   **どのチェックアウトにも実在する**。よって**掘らない・消さない**で、
+    //   一意な葉を 1 つだけ作って自分の分だけ片付ける (共有の祖先に一切触れない)。
+    $parent = base_path('storage/framework/testing');
+    expect(is_dir($parent))
+        ->toBeTrue("前提が崩れている (追跡下の .gitignore で常在するはずの場所が無い): {$parent}");
+
+    $base = $parent.'/boot-probe-s11-'.bin2hex(random_bytes(8));
+    expect(mkdir($base, 0o755))->toBeTrue("専用の置き場所を作れない: {$base}");
+
+    try {
+        $before = glob($base.'/boot-probe-*');
+        expect($before)->toBeArray();
+        assert(is_array($before));
+
+        expect(static fn (): mixed => BootProbeRunner::run(['-r', 'exit(0);'], temporaryBase: $base))
+            ->toThrow(RuntimeException::class);
+
+        $after = glob($base.'/boot-probe-*');
+        expect($after)->toBe($before, '起動前の fail-closed が残骸を残している');
+    } finally {
+        // 専用の葉だけを消す (共有の親には触れない = 他 worker の「親を確かめて葉を作る」を邪魔しない)。
+        @rmdir($base);
     }
-
-    $before = glob($base.'/boot-probe-*');
-    expect($before)->toBeArray();
-    assert(is_array($before));
-
-    expect(static fn (): mixed => BootProbeRunner::run(['-r', 'exit(0);'], temporaryBase: $base))
-        ->toThrow(RuntimeException::class);
-
-    $after = glob($base.'/boot-probe-*');
-    expect($after)->toBe($before, '起動前の fail-closed が残骸を残している');
 
     // 境界判定そのものを pin する (`/repo` と `/repository` を取り違えない)。
     expect(BootProbeRunner::isInside('/repo', '/repo'))->toBeTrue()

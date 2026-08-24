@@ -395,18 +395,18 @@ test('P-10c 本体が例外を投げても置き場所が中身ごと消える (
 
 test('P-10d リポジトリ内の置き場所は本体を呼ばずに拒否し、残骸を残さない', function (): void {
     // 正典 v1 (5) の fail-closed を**外側**でも測る (内側は取り込んだ自己検査 S11 が持つ)。
-    $base = base_path('storage/framework/testing');
+    // ★置き場所は**この検査専用の一意な葉**にする。共有の `storage/framework/testing` を
+    //   直接使う / 不在なら掘る形にすると、`--parallel` で同じ場所を使う別の検査
+    //   (`BootProbeRunnerTest` の S11) と**作成でも削除でも競合する**
+    //   (先に作った側が勝つ / 先に消した側が他方の親を消す)。
+    //   親は `.gitignore` が git 追跡下にあるのでどのチェックアウトにも実在する。
+    //   **掘らない・消さない**で、一意な葉を 1 つだけ作って自分の分だけ片付ける。
+    $parent = base_path('storage/framework/testing');
+    expect(is_dir($parent))
+        ->toBeTrue("前提が崩れている (追跡下の .gitignore で常在するはずの場所が無い): {$parent}");
 
-    // ★このテストが作った階層を**1 つ残らず**戻す (走行が生成物を残さないため)。
-    //   `mkdir(recursive)` + `rmdir($base)` だけだと、親を新規作成した環境
-    //   (新しい checkout など) で `storage/framework` が残る。
-    $createdAncestors = [];   // 深い順
-    for ($candidate = $base; ! is_dir($candidate); $candidate = dirname($candidate)) {
-        $createdAncestors[] = $candidate;
-    }
-    foreach (array_reverse($createdAncestors) as $directory) {
-        expect(mkdir($directory, 0755))->toBeTrue("後始末の対象を作れない: {$directory}");
-    }
+    $base = $parent.'/fake-wiring-p10d-'.bin2hex(random_bytes(8));
+    expect(mkdir($base, 0755))->toBeTrue("専用の置き場所を作れない: {$base}");
 
     try {
         $before = glob($base.'/fake-wiring-probe-*');
@@ -428,10 +428,8 @@ test('P-10d リポジトリ内の置き場所は本体を呼ばずに拒否し�
         expect($bodyCalled)->toBeFalse('リポジトリ内なのに本体が呼ばれた')
             ->and(glob($base.'/fake-wiring-probe-*'))->toBe($before, '拒否経路が残骸を残している');
     } finally {
-        // 深い順に戻す (作った分だけ)。
-        foreach ($createdAncestors as $directory) {
-            rmdir($directory);
-        }
+        // 専用の葉だけを消す (共有の親には触れない = 他 worker の「親を確かめて葉を作る」を邪魔しない)。
+        @rmdir($base);
     }
 });
 
@@ -513,6 +511,24 @@ test('P-15 fail-closed: interpret() は観測が成立していない結果を�
     expect(fn (): array => $call($make('', false, 0)))->toThrow(RuntimeException::class);
     expect(fn (): array => $call($make('not json', false, 0)))->toThrow(RuntimeException::class);
     expect(fn (): array => $call($make('"scalar"', false, 0)))->toThrow(RuntimeException::class);
+});
+
+test('P-17 環境ファイルの隔離: 子が読んだ環境ファイルが起動側の専用ファイルと完全一致する', function (): void {
+    // ★正典 v1 (2) は「開発者ローカルの環境変数を入力集合から外す」ことを求めるが、
+    //   起動器が締め出すのは**プロセス環境**だけで、`.env` の読み込みは止めない
+    //   (子の作業ディレクトリはリポジトリ root なので、素で起こすとリポジトリの `.env` が載る)。
+    //   本クラスの経路は子入口が `useEnvironmentPath()` / `loadEnvironmentFrom()` で
+    //   専用の 0600 ファイルへ固定するので、**それが実際に効いた**ことをここで測る。
+    // ★配下判定ではなく**完全一致**で測る (期待値は起動側が渡した 2 つの値から一意に決まるので、
+    //   正規化の前提が要らず、これがこの経路で最も強い)。
+    $run = externalFakeProbeRun('fake');
+
+    $expected = $run['directory'].'/'.$run['caseEnvValues']['FAKE_WIRING_PROBE_ENV_FILE'];
+
+    expect($run['output']['env_file_path'] ?? null)->toBe(
+        $expected,
+        '子がリポジトリ側の環境ファイルを読んでいる (専用ファイルへの固定が効いていない)',
+    );
 });
 
 test('P-16 正規化判定の検出力: 正常な絶対パスは通り、`..` / `.` / 相対パスは弾く', function (
