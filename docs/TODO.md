@@ -21,7 +21,6 @@
 
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
-| T262 | デザイントークン体系を正典 v1 へ追従 (半透明合成 AA / 逆向き被覆 / 参照の閉包 / 文書⇔実装一致) | frontend | 正典 v1 の不変条件 22 本のうち aicue に欠けている条件を 12 施策で充足。半透明背景 × 不透明文字の合成検査 (i16) 新設で実測 5 組が AA 未達になるため、DESIGN.md / tokens.css のブランド色・状態色 (primary 600→700 / hover 700→800 / tertiary 700→800 / success・warning 700→800。danger 据え置き) を同一コミットで是正。逆向き被覆 (i15) / 参照の閉包 (i9) / DESIGN.md §Components ⇔ 部品ファイルの双方向一致 (i10) / @theme 一意性 / 線形化しきい値 0.04045 / 字下げコード拒否の gate も新設。**実装順 S1→S2→S4→S10→S5→S6→S3→S7→S9→S8→S11→S12 は分割不可**。乖離登録 D50 / D51 と件数 pin (DIVERGENCE_ENTRY_COUNT 46→48 / ADOPTION_DEBT_COUNT 148→146 / 宣言行) は他 TODO と衝突するため**実装時に main の最新から再確定**。primary 変更に伴う目視確認 6 面が必須 | High | standalone | [設計](devnotes/20260824-1019-design-token-system-v1/) | 2026-08-24 18:11 |
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
 ## Conditional (条件付き待機)
