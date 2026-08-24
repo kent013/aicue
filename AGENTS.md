@@ -1018,26 +1018,41 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
       キュークラス) は母集団に入らない。**保証しないものの正本は
       `docs/architecture.md` §退避を正常系に持つジョブの終端方式**
       (ここは要約であり、増減はそちらで管理する)。
-19. **PHP 列挙 ⇔ TypeScript 値域の同期の登録 (T218/T225 / 家系の裁定 AG-099)**:
-    PHP の文字列付き列挙の値を TS の型別名で受ける箇所を作ったら、
-    `tests/js/support/enum-ts-sync/mirror-inventory.ts` の `ENUM_TS_MIRRORS` へ
+19. **PHP 列挙 ⇔ TypeScript 値域の同期の登録 (T218/T225/T261 / 家系の機能台帳
+    `enum-ts-sync-gate` の正典 v3)**:
+    PHP の文字列付き列挙の値を TS で受ける箇所を作ったら、
+    `tests/js/support/enum-ts-sync/relation-inventory.ts` の `ENUM_TS_RELATIONS` へ
     1 行足し、件数の pin も 1 増やす。**個別の同期テストのファイルを増やさない**
     (増殖を止めるのが本 gate の目的)。
-    - 受理する形は**型別名の宣言**で、解決した型が**文字列リテラル型だけ**であること
+    - 受理する形は**型別名の宣言**か **`const` の配列** (`as const` の有無を問わない) で、
+      前者は解決した型が**文字列リテラル型だけ**であること
       (別名参照・`keyof typeof`・有限のテンプレートリテラル型は解決されるので受理する)。
+      後者は**構文から**読む (素の配列は型検査器の上で `string[]` に広がるため)。
+      **対応表のキーと分岐のラベルは登録できない** — 写しなら型別名か定数の配列へ切り出す。
       PHP 側は深さ 0 の `enum X: string` がちょうど 1 つで、本体直下の case が
       `case Name = '値';` の 1 行に一致すること
+    - **登録できる TS の置き場**は `resources/js/` と `packages/<名前>/src/` で、
+      拡張子は `.ts` と `.svelte` (`tests/js/` と `packages/<名前>/tests/` は置き場ではない)
+    - **関係は 2 つ**ある。`equal` は**値域そのものの写し**、
+      `subset` は**値域の写しではなく、許される値域から選んだ非空の集合**である
+      (例: 道具が既定で要求する権限)。`subset` の行には `subsetReason` に
+      **なぜ値域の写しではないのか**を 30 文字以上で書く (`note` ではない)
     - **`app/` の文字列付き列挙は全数走査で既定拒否される**
       (`tests/js/architecture/enum-ts-sync-discovery.test.ts`)。TS 側に写しを作らない
       判断をしたら `PHP_ENUM_EXEMPTIONS` へ理由 (30 文字以上) 付きで登録すること。
       **未分類のまま残すと gate が赤くなる**
-    - **TS 側も全数走査で逆走査する** (同ファイル)。値集合が PHP 列挙と完全一致する、
-      または名前が対応し値が交差する未登録の TS 宣言が見つかったら
-      `REVERSE_SWEEP_EXEMPTIONS` へ理由付きで登録するか、`ENUM_TS_MIRRORS` へ登録すること
+    - **TS 側も全数走査で逆走査する** (同ファイル)。走査範囲は**版管理下の `*.ts` と
+      `*.svelte` の全数** (除くのは検出器自身の構文破壊見本 1 ディレクトリだけ) で、
+      拾う形は**リテラル型の合併 / 定数の配列 / 対応表のキー / 分岐のラベル**の 4 種である。
+      値集合が PHP 列挙と完全一致する、または名前が対応し値が交差する未登録の宣言が
+      見つかったら `REVERSE_SWEEP_EXEMPTIONS` へ理由付きで登録するか、
+      `ENUM_TS_RELATIONS` へ登録すること。候補かどうかを**決められなかった**宣言は
+      `KNOWN_INDETERMINATE_TS_DECLARATIONS` へ理由付きで登録する (非候補と混ぜない)
     - **正本のレーンは `pnpm test`** (CI の frontend job) である。
       `composer test` だけでは値集合の同期は検証されない
     - **保証しないものの正本は `docs/architecture.md` §PHP 列挙と TypeScript 値域の同期**
-      であり、本書には写さない (2 か所に書くと必ず食い違う)
+      であり、本書には写さない (2 か所に書くと必ず食い違う)。件数も写さない
+      (正本は目録側の pin)
 20. **file input の accept 供給元の宣言 (T235)**: `resources/js` 配下の `.svelte` に
     file input を足したら、`tests/js/support/file-input-accept-inventory.ts` の
     `FILE_INPUT_ACCEPT_INVENTORY` へ 1 行足し、件数の pin も 1 増やす

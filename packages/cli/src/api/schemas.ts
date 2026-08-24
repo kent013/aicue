@@ -281,33 +281,52 @@ export const PersonaResponseSchema = envelope(PersonaSchema);
 export const ScenarioResponseSchema = envelope(ScenarioSchema);
 
 /**
- * Canonical `error.code` strings emitted by the v1 REST API (C1 / T144).
+ * Mirror of the server enum `App\Enums\ApiErrorCode` (C1 / T144).
  *
- * Mirrors `app/Enums/ApiErrorCode.php` plus the controller-local codes
- * that rely on the same envelope shape. Keep this list in sync by hand —
- * the schema contract test (`tests/api/schemas-contract.test.ts`) catches
- * drift by round-tripping real API responses through these schemas.
- *
- * Unknown `error.code` values are not rejected: consumers should fall
- * back to HTTP status when the CLI is older than the server.
+ * The value set is pinned to the server enum by
+ * `tests/js/architecture/enum-ts-sync.test.ts` (relation `equal`), so this
+ * list must stay a *pure* copy: **do not mix non-canonical, surface-local
+ * codes in here** — doing so breaks the sync gate and re-opens the drift
+ * this list exists to prevent.
  */
 export const API_ERROR_CODES = [
     "unauthenticated",
     "forbidden",
+    "insufficient_ability",
+    "actor_not_resolvable",
     "not_found",
     "validation_failed",
-    "rate_limit_exceeded",
-    "quota_exceeded",
+    "rate_limited",
     "idempotency_conflict",
+    "idempotency_in_progress",
+    "idempotency_indeterminate",
     "internal_server_error",
-    // Controller-local codes (AuditSubmissionController / SitePagesBulkController
-    // / EvaluationExecutionController) layered on top of the canonical enum.
+] as const;
+
+/**
+ * Non-canonical (not in the server enum) surface-local `error.code` values.
+ *
+ * These are emitted by individual controllers that share the error envelope
+ * shape (quota, payload sanitisation, capture-surface routing). They
+ * originate server-side; the CLI never invents them. They are kept apart
+ * from `API_ERROR_CODES` so the enum mirror stays exact.
+ */
+export const NON_CANONICAL_API_ERROR_CODES = [
+    "quota_exceeded",
     "payload_sanitization_failed",
     "site_not_cli_capture",
     "use_audits_submit",
 ] as const;
 
-export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
+/**
+ * Every `error.code` the CLI knows how to dispatch on.
+ *
+ * Unknown `error.code` values are **not** rejected: consumers fall back to
+ * the HTTP status when the CLI is older than the server.
+ */
+export type ApiErrorCode =
+    | (typeof API_ERROR_CODES)[number]
+    | (typeof NON_CANONICAL_API_ERROR_CODES)[number];
 
 const ApiErrorBodySchema = z
     .object({

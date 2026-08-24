@@ -63,6 +63,8 @@ export interface ResolvedPhpEnum {
     readonly path: string;
     /** enum 宣言の名前。 */
     readonly name: string;
+    /** enum 宣言の頭がある行 (1 始まり)。失敗メッセージに PHP 側の位置を出すために持つ。 */
+    readonly line: number;
     /** case の値集合。 */
     readonly values: ReadonlySet<string>;
 }
@@ -102,7 +104,7 @@ export const listTrackedPhpFiles = (root: string = REPO_ROOT): readonly string[]
 export const classifyPhpFile = (
     source: string,
     fileName: string,
-): { readonly kind: "resolved"; readonly name: string; readonly values: ReadonlySet<string> }
+): { readonly kind: "resolved"; readonly name: string; readonly line: number; readonly values: ReadonlySet<string> }
     | { readonly kind: "unresolvable"; readonly reason: string }
     | undefined => {
     let headers;
@@ -143,7 +145,8 @@ export const classifyPhpFile = (
 
     try {
         const values = readPhpEnumValuesFromText(source, fileName);
-        return { kind: "resolved", name: depthZero[0].name, values };
+        const line = source.slice(0, depthZero[0].offset).split("\n").length;
+        return { kind: "resolved", name: depthZero[0].name, line, values };
     } catch (error) {
         return { kind: "unresolvable", reason: error instanceof Error ? error.message : String(error) };
     }
@@ -164,7 +167,12 @@ export const buildPhpEnumCatalog = (root: string = REPO_ROOT): PhpEnumCatalog =>
         const classification = classifyPhpFile(source, relative);
         if (classification === undefined) continue;
         if (classification.kind === "resolved") {
-            resolved.push({ path: relative, name: classification.name, values: classification.values });
+            resolved.push({
+                path: relative,
+                name: classification.name,
+                line: classification.line,
+                values: classification.values,
+            });
         } else {
             unresolvable.push({ path: relative, reason: classification.reason });
         }
