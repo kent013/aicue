@@ -76,7 +76,7 @@ use Tests\Support\InitialState\NullInitialStateClass;
 const NULL_INITIAL_STATE_TEMPORAL_TYPES = ['timestamp', 'timestamptz', 'date'];
 
 /** 台帳の総件数 (cap ではなく exact-fit。増減したら必ずこの数字を書き換える)。 */
-const NULL_INITIAL_STATE_COLUMN_COUNT = 61;
+const NULL_INITIAL_STATE_COLUMN_COUNT = 60;
 
 /**
  * 「初期状態の目印」区分の列 (現在値ちょうど。増えるときも減るときもここを書き換える)。

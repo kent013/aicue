@@ -347,12 +347,6 @@ final class NullableStateColumnRegistry
             ),
             NullableStateColumnEntry::setAtCreation(
                 'ticket_ledger_entries',
-                'carried_forward_through',
-                '繰越の行を作るときに集約の終端として生成時に書き込む値である。'
-                .'NULL は繰越ではない行を意味し、進行段階ではない',
-            ),
-            NullableStateColumnEntry::setAtCreation(
-                'ticket_ledger_entries',
                 'source',
                 '残高の出所を台帳の行の生成時に固定する分類である。'
                 .'NULL は出所を記録していない古い行を意味し、進行段階ではない',
