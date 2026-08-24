@@ -1,0 +1,19 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Fixture\LlmSeam;
+
+// 負例: 遅延静的束縛 / 括弧で包んだ形。いずれも受け手を確定できないので**未解決**。
+final class UnresolvedStatic
+{
+    public function late(string $text): string
+    {
+        return static::make($text)->executeSync();
+    }
+
+    public function wrapped(string $text): string
+    {
+        return (Factory::make($text))->executeSync();
+    }
+}

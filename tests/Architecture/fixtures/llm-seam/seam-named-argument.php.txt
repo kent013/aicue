@@ -1,0 +1,20 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Fixture\LlmSeam;
+
+use App\DataTransferObjects\Manual\Analysis\ExtractedSopData;
+use App\Prompts\SopExtractPrompt;
+
+// 正例: 受け取り関数へ**名前付き引数**で渡す形も「直接の引数」と認める
+// (ラベル `text:` の直後から式が始まる)。
+final class NamedArgument
+{
+    public function run(string $text): ExtractedSopData
+    {
+        return ExtractedSopData::fromLlmText(
+            text: SopExtractPrompt::make($text)->executeSync(),
+        );
+    }
+}

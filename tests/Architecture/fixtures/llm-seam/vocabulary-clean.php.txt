@@ -1,0 +1,39 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Fixture\LlmSeam;
+
+use function Foo\{json_decode as decodeJson};
+
+// 正例: いずれも違反にしない。
+// - 接頭辞つき / 打ち消しつき / 接尾辞つきの 3 形は別トークンなので誤検出しない
+// - メソッド呼び出しは関数呼び出しではない
+// - group use の別名は `Foo\json_decode` へ解決されるので global の json_decode ではない
+final class VocabularyClean
+{
+    public function prefixed(string $text): mixed
+    {
+        return my_json_decode($text);
+    }
+
+    public function suffixed(string $text): mixed
+    {
+        return json_decode_all($text);
+    }
+
+    public function negated(string $text): mixed
+    {
+        return not_json_decode($text);
+    }
+
+    public function method(object $reader, string $text): mixed
+    {
+        return $reader->json_decode($text);
+    }
+
+    public function namespaced(string $text): mixed
+    {
+        return decodeJson($text);
+    }
+}

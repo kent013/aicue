@@ -106,7 +106,7 @@ final class CannedPromptResponses
     /** sop-extract: ExtractedSopData::fromLlmText を通過 (header + 1 section + 1 step) */
     private static function sopExtractCanned(): string
     {
-        return json_encode([
+        return self::fenced([
             'header' => ['title' => 'bughunt サンプル手順書', 'department' => null, 'revision' => null],
             'sections' => [[
                 'title' => null,
@@ -119,13 +119,13 @@ final class CannedPromptResponses
                     'pm_points' => [],
                 ]],
             ]],
-        ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        ]);
     }
 
     /** sop-extract-media (OCR 経路): ExtractedSopData::fromLlmText を通過する最小妥当 JSON */
     private static function sopExtractMediaCanned(): string
     {
-        return json_encode([
+        return self::fenced([
             'header' => ['title' => 'bughunt サンプル手順書 (画像)', 'department' => null, 'revision' => null],
             'sections' => [[
                 'title' => null,
@@ -138,13 +138,13 @@ final class CannedPromptResponses
                     'pm_points' => [],
                 ]],
             ]],
-        ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        ]);
     }
 
     /** work-decomposition: WorkDecompositionResponseData::fromLlmText を通過 (1 step / points 1 / 所見つき) */
     private static function workDecompositionCanned(): string
     {
-        return json_encode([
+        return self::fenced([
             'steps' => [[
                 'no' => 1,
                 'action' => 'バルブを閉じる',
@@ -156,13 +156,13 @@ final class CannedPromptResponses
                 'works' => ['バルブ閉止作業'],
                 'split_recommended' => false,
             ],
-        ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        ]);
     }
 
     /** scenario-generation: GeneratedScenarioData::fromLlmText を通過 (step→それを参照する point) */
     private static function scenarioGenerationCanned(): string
     {
-        return json_encode([
+        return self::fenced([
             'cuts' => [
                 [
                     'no' => 1, 'type' => 'step', 'parent_no' => null,
@@ -177,12 +177,25 @@ final class CannedPromptResponses
                     'subtitle_primary' => null, 'subtitle_secondary' => '',
                 ],
             ],
-        ], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        ]);
     }
 
-    /** example-summary: 1 文の要約 (非空 string) */
+    /** example-summary: 1 文の要約 (非空 string。自由文なので囲まない) */
     private static function exampleSummaryCanned(): string
     {
         return 'テスト/bughunt 共通の固定要約文です。';
+    }
+
+    /**
+     * canned 応答を受理契約どおりの囲みつき JSON にする。
+     *
+     * ★`LlmJson::decode()` の受理契約は「囲みちょうど 1 つ」である。素の JSON を返すと
+     *   `fence_absent` で落ちるため、**依頼文が指示する形と同じ形**で返す。
+     *
+     * @param  array<array-key, mixed>  $payload
+     */
+    private static function fenced(array $payload): string
+    {
+        return "```json\n".json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)."\n```";
     }
 }
