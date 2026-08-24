@@ -70,7 +70,6 @@ test('平文キーは発行直後の 1 度きり表示 (API キー画面 再訪�
 test('member は API キーを発行できない (403)', function (): void {
     [$organization] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
     $this->actingAs($member)->withSession(['recent_auth_at' => time()])->post("/organizations/{$organization->slug}/api-keys", [
         'name' => '不正キー',

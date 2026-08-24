@@ -265,7 +265,7 @@ test('招待受諾 (組織に入れる操作) では失効しない', function (
     $invitation->forceFill(['token_hash' => hash('sha256', 'join-token')])->save();
 
     $this->actingAs($invitee)->post('/invitations/accept', ['token' => 'join-token'])
-        ->assertRedirect('/dashboard');
+        ->assertRedirect("/organizations/{$organization->slug}/dashboard");
 
     expect($organization->users()->whereKey($invitee->getKey())->exists())->toBeTrue();
     // 免除の前提: 入れる操作では失効の窓口を呼ばない (監査が 1 行も増えない)
@@ -648,7 +648,7 @@ test('プロジェクト単位の役割変更では失効しない', function ()
 
     // プロジェクト側のロール更新は store の再実行 (syncWithoutDetaching)
     $this->actingAs($owner)
-        ->post("/projects/{$project->id}/members", [
+        ->post("/organizations/{$organization->slug}/projects/{$project->id}/members", [
             'user_id' => $member->id,
             'role' => ProjectRole::Admin->value,
         ])

@@ -9,8 +9,7 @@ use App\Enums\Dashboard\DashboardRole;
 use App\Enums\Dashboard\DashboardState;
 
 /**
- * ダッシュボード props の頂点 DTO。state で 3 状態を明示:
- * - no_organization: 所属組織 0 件 (organization/project/billing すべて null)
+ * ダッシュボード props の頂点 DTO。state で 2 状態を明示:
  * - no_project: org はあるが project なし (billing のみ非 null)
  * - ready: 通常表示
  *
@@ -37,7 +36,7 @@ final readonly class DashboardPageData
     ) {}
 
     /**
-     * @return array{state: 'no_organization'|'no_project'|'ready', role: string|null,
+     * @return array{state: 'no_project'|'ready', role: string|null,
      *   can_create_project: bool, organization_name: string|null,
      *   project: array{id: int, name: string}|null,
      *   in_progress: list<array{manual_id: int, title: string, manual_status: string,

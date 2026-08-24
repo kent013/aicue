@@ -18,7 +18,7 @@
 | `AdminUserFactory` | AdminUser | `withMfa()` |
 | `PasskeyFactory` | Passkey | — (`for($user)` で所有者を指定。WebAuthn ceremony を伴わない経路 = 削除 / 一覧 / 手段カウント / 認可 用の最小 credential。実 ceremony の検証は vendor の WebAuthn helper で credential を生成すること) |
 | `SocialAccountFactory` | SocialAccount | `provider(string)` (`for($user)` で所有者を指定。既定 provider は `google` = recent-auth の step-up satisfier として数えられる provider) |
-| `OrganizationFactory` | Organization | `personal()`, `freePersonal($declarer)`, `grandfathered()`, `signupGranted()`, `withBillingContact(?$email, ?$name)` (請求先連絡先。CipherSweet 暗号化列) |
+| `OrganizationFactory` | Organization | `withSlug($slug)` (識別名を指定。**保存可能型 `AssignableOrganizationSlug` を必ず通す**), `freePersonal($declarer)`, `grandfathered()`, `signupGranted()`, `withStripeCustomer(?$customerId)`, `withBillingContact(?$email, ?$name)` (請求先連絡先。CipherSweet 暗号化列) |
 | `CustomTeamFactory` | CustomTeam | — |
 | `ProjectFactory` | Project | `forOrganization($org)` |
 | `ItemFactory` | Item | `forProject($project)` |
@@ -126,6 +126,42 @@ $item = Item::factory()->forProject($project)->create();
 新規ドメインリソースの Factory も `forProject()` / `forOrganization()` の
 明示 State + 親 Factory 連鎖のパターンに揃えること
 ([docs/app-integration-guide.md](app-integration-guide.md) §2)。
+
+### OrganizationSlugRename
+
+識別名の改名履歴 (家系裁定 AG-046)。`renamedAt(CarbonImmutable)` state で窓の判定を
+組み立てられる。**旧識別名は予約せず解放する**ため `from_slug` / `to_slug` に
+一意制約は無い (Factory も重複を作れる)。
+
+```php
+OrganizationSlugRename::factory()->for($organization)->renamedAt($at)->create();
+```
+
+### 企業 OIDC SSO (T253)
+
+企業 IdP との接続とその身元・試行を扱う Factory 4 本。**どれも `$fillable` が空のモデル**なので、
+Factory は `create([...])` の上書きで属性を渡す (保護キーの明示代入は Service 側の責務である)。
+
+| Factory | 補足 |
+|---|---|
+| `OrganizationOidcConnectionFactory` | 既定は `Draft`。`verified()` / `active()` / `disabled()` の 3 state を持つ。**識別名の列は `login_slug`** (`organizations.slug` の書き込み gate がキー名で表を特定しているため、同名の列を作らない) |
+| `EnterpriseIdentityFactory` | 引き当ての鍵は **(接続, subject)**。`subject` 列は `COLLATE "C"` なので大小文字が違えば別の身元になる |
+| `EnterpriseSsoLoginAttemptFactory` | state / nonce / ブラウザ結合は**指紋だけ**を保存する。`expired()` state で期限切れを作れる |
+| `EmailPromotionFactory` | 利用者ごとに**未消費は 1 件だけ** (`email_promotions_user_unique`)。`expired()` state を持つ |
+
+```php
+// ログインに使える接続と、その身元を 1 件
+$connection = OrganizationOidcConnection::factory()->active()->create();
+EnterpriseIdentity::factory()->for($connection, 'connection')->create(['subject' => 'sub-1']);
+```
+
+★接続の秘密は**値型でしか渡せない**:
+
+```php
+OrganizationOidcConnection::factory()->create([
+    'client_secret_encrypted' => ConnectionSecret::fromPlaintext('secret'),
+]);
+```
 
 ## Seeder
 

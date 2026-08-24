@@ -1,0 +1,3 @@
+#!/usr/bin/env php
+<?php
+$route->middleware(\Illuminate\Auth\Middleware\RequirePassword::class);

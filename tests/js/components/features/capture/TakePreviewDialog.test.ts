@@ -65,7 +65,7 @@ describe("TakePreviewDialog", () => {
             open: true,
             take: makeTake(),
             cut: makeCut(),
-            playbackUrl: "/app/projects/1/manuals/2/cuts/3/takes/10/playback",
+            playbackUrl: "/organizations/test-org/app/projects/1/manuals/2/cuts/3/takes/10/playback",
             adopting: false,
             error: null,
             onAdopt: vi.fn(),
@@ -73,7 +73,7 @@ describe("TakePreviewDialog", () => {
         });
 
         const video = await screen.findByTestId("take-preview-video");
-        expect(video).toHaveAttribute("src", "/app/projects/1/manuals/2/cuts/3/takes/10/playback");
+        expect(video).toHaveAttribute("src", "/organizations/test-org/app/projects/1/manuals/2/cuts/3/takes/10/playback");
     });
 
     it("初回 open 後も video の src が残る (誤 teardown しない)", async () => {

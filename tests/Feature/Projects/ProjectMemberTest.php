@@ -19,7 +19,7 @@ test('owner はプロジェクトメンバーを追加できる', function (): v
     $member = attachOrganizationMember($organization);
     $project = Project::factory()->forOrganization($organization)->create();
 
-    $response = $this->actingAs($owner)->post("/projects/{$project->id}/members", [
+    $response = $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects/{$project->id}/members", [
         'user_id' => $member->id,
         'role' => ProjectRole::Member->value,
     ]);
@@ -35,7 +35,7 @@ test('既存メンバーへの store 再実行はロール更新になる', func
     $project = Project::factory()->forOrganization($organization)->create();
     attachProjectMember($project, $member, ProjectRole::Member);
 
-    $this->actingAs($owner)->post("/projects/{$project->id}/members", [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects/{$project->id}/members", [
         'user_id' => $member->id,
         'role' => ProjectRole::Admin->value,
     ])->assertSessionHas('success');
@@ -50,7 +50,7 @@ test('他組織のユーザーは追加できない (cross-org は validation fa
     [, $outsider] = createOrganizationWithOwner('組織B');
     $project = Project::factory()->forOrganization($organization)->create();
 
-    $this->actingAs($owner)->post("/projects/{$project->id}/members", [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects/{$project->id}/members", [
         'user_id' => $outsider->id,
         'role' => ProjectRole::Member->value,
     ])->assertSessionHasErrors(['user_id' => '追加できるのは組織のメンバーだけです。']);
@@ -65,7 +65,7 @@ test('pivot 在籍だがロール未付与のユーザーは追加できない',
     $broken = User::factory()->create();
     $organization->users()->attach($broken);
 
-    $this->actingAs($owner)->post("/projects/{$project->id}/members", [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects/{$project->id}/members", [
         'user_id' => $broken->id,
         'role' => ProjectRole::Member->value,
     ])->assertSessionHasErrors(['user_id' => '追加できるのは組織のメンバーだけです。']);
@@ -76,12 +76,11 @@ test('pivot 在籍だがロール未付与のユーザーは追加できない',
 test('管理権限のない project member はメンバーを追加できない (403)', function (): void {
     [$organization] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
     $other = attachOrganizationMember($organization);
     $project = Project::factory()->forOrganization($organization)->create();
     attachProjectMember($project, $member, ProjectRole::Member);
 
-    $this->actingAs($member)->post("/projects/{$project->id}/members", [
+    $this->actingAs($member)->post("/organizations/{$organization->slug}/projects/{$project->id}/members", [
         'user_id' => $other->id,
         'role' => ProjectRole::Member->value,
     ])->assertForbidden();
@@ -93,7 +92,7 @@ test('owner はプロジェクトメンバーを削除できる', function (): v
     $project = Project::factory()->forOrganization($organization)->create();
     attachProjectMember($project, $member, ProjectRole::Member);
 
-    $response = $this->actingAs($owner)->delete("/projects/{$project->id}/members/{$member->id}");
+    $response = $this->actingAs($owner)->delete("/organizations/{$organization->slug}/projects/{$project->id}/members/{$member->id}");
 
     $response->assertRedirect();
     $response->assertSessionHas('success');
@@ -108,7 +107,7 @@ test('他組織ユーザーの削除 URL は認可より前に 404 (存在を漏
     $project = Project::factory()->forOrganization($organization)->create();
 
     $this->actingAs($owner)
-        ->delete("/projects/{$project->id}/members/{$outsider->id}")
+        ->delete("/organizations/{$organization->slug}/projects/{$project->id}/members/{$outsider->id}")
         ->assertNotFound();
 });
 
@@ -118,7 +117,8 @@ test('他組織の project へのメンバー操作は 404 ({project} ∈ curren
     $projectB = Project::factory()->forOrganization($organizationB)->create();
     $memberA = attachOrganizationMember($organizationA);
 
-    $this->actingAs($ownerA)->post("/projects/{$projectB->id}/members", [
+    // 自分の組織の URL から他組織の project は触れない (テナント境界が認可より前に 404)
+    $this->actingAs($ownerA)->post("/organizations/{$organizationA->slug}/projects/{$projectB->id}/members", [
         'user_id' => $memberA->id,
         'role' => ProjectRole::Member->value,
     ])->assertNotFound();

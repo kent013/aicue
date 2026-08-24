@@ -48,7 +48,7 @@
 
 - 判断: **対応する**
 - 根拠: そのとおり。外側 group (`auth` / `verified` / `not-pending-deletion`)、内側 group
-  (`require-active-subscription` / `project.in-current-org`)、`scopeBindings()`、
+  (`require-active-subscription` / `project.in-route-org`)、`scopeBindings()`、
   controller の `resolveOrganizationProject()`、`Gate::authorize('view', $manual)` の合成である。
   セキュリティ不変条件に関わる説明を省略形で書くと、次に読む人が省略された層を見落とす。
 - 対応内容: 詳細設計・テストコメント・`docs/architecture.md` 追記のすべてを具体名の列挙に置き換えた。

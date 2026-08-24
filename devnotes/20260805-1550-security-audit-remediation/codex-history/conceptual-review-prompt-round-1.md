@@ -120,7 +120,7 @@ Authenticate → Throttle → SubstituteBindings → ResolveApiActor
 **横断確認の結果、同じ構造の穴がさらに 2 件見つかった**(本設計で自ら実査):
 
 - **W-1 (web / 30 route)**: `routes/web.php:400` と `:528` の業務 group が
-  `['require-active-subscription', 'project.in-current-org']` の順で宣言されている。
+  `['require-active-subscription', 'project.in-route-org']` の順で宣言されている。
   未契約 / 支払い不健全な組織のユーザーが `projects.*` / `capture.*` を叩くと
   cross-org 実在 project は **402 (XHR) / 302 (ブラウザ)**、不在 id は **404** に分岐する。
   漏れる情報は API と同じ「project id の実在」で、影響 route 数は API より多い。
@@ -201,12 +201,12 @@ auth → throttle → resolve.api-actor → api.project-in-org → api-key.abili
 `api-key.ability` middleware を**認可 (層 3) として数えない**と明記しており、
 「層 2 (404) → 層 3 (403)」の原則から見れば ability は層 2 の後に来るべきである。
 
-### S2 [High-1 横断] web 業務 group: `project.in-current-org` を `require-active-subscription` より前へ
+### S2 [High-1 横断] web 業務 group: `project.in-route-org` を `require-active-subscription` より前へ
 
 `routes/web.php:400` / `:528` の middleware 配列を
-`['project.in-current-org', 'require-active-subscription']` に反転する。
+`['project.in-route-org', 'require-active-subscription']` に反転する。
 
-`EnsureProjectBelongsToCurrentOrganization` は `{project}` を持たない route では no-op であり、
+`EnsureProjectBelongsToRouteOrganization` は `{project}` を持たない route では no-op であり、
 `RequireActiveSubscription` は current org 未設定なら素通しする (`:73-75`) ため、
 **正当な利用者の遮断挙動 (未契約 → onboarding 着地) は一切変わらない**。
 変わるのは「他組織の project id を指定したとき 302/402 ではなく 404 になる」だけ。
@@ -229,7 +229,7 @@ controller の inline guard (`resolveOrganizationMember`) は二重防御とし�
    `ShortCircuits` (3xx/4xx を返して `$next` を呼ばずに返しうる) / `Transparent` に分類する
    inventory を持ち、**未分類クラスがあれば fail**させる (新 middleware の追加時に必ず判断させる)。
 2. **guard を持つ route の順序**: テナント guard
-   (`EnsureProjectBelongsToCurrentOrganization` / `EnsureProjectBelongsToApiOrganization`) を持つ route は、
+   (`EnsureProjectBelongsToRouteOrganization` / `EnsureProjectBelongsToApiOrganization`) を持つ route は、
    **解決後 (priority 適用後) の実行順**で guard より前に `ShortCircuits` middleware を置けない。
    例外は**理由 30 文字以上付きの exemption inventory** 登録のみ。
 3. **inline guard に頼る route の制約**: `NestedRouteIdorDefenseTest` で

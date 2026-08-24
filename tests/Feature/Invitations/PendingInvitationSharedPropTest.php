@@ -65,8 +65,10 @@ test('verified かつ自分宛 active 招待 2 件で pendingCount = 2 (負の�
     $user = User::factory()->create(['email' => 'invitee@example.com']);
     OrganizationInvitation::factory()->forOrganization($firstOrganization)->create(['email' => 'invitee@example.com']);
     OrganizationInvitation::factory()->forOrganization($secondOrganization)->create(['email' => 'invitee@example.com']);
+    // 共有 prop は全 org 横断だが、通知一覧の URL は組織を持つ (家系裁定 AG-037)
+    $firstOrganization->users()->attach($user);
 
-    $this->actingAs($user)->get('/notifications')->assertInertia(
+    $this->actingAs($user)->get("/organizations/{$firstOrganization->slug}/notifications")->assertInertia(
         fn (AssertableInertia $page) => $page->where('invitationInbox.pendingCount', 2),
     );
 });
@@ -75,8 +77,10 @@ test('他人宛の招待は数えない', function (): void {
     [$organization] = createOrganizationWithOwner();
     $user = User::factory()->create(['email' => 'invitee@example.com']);
     OrganizationInvitation::factory()->forOrganization($organization)->create(['email' => 'someone-else@example.com']);
+    // 通知一覧の URL は組織を持つ (家系裁定 AG-037) ので、到達するには所属が要る
+    $organization->users()->attach($user);
 
-    $this->actingAs($user)->get('/notifications')->assertInertia(
+    $this->actingAs($user)->get("/organizations/{$organization->slug}/notifications")->assertInertia(
         fn (AssertableInertia $page) => $page->where('invitationInbox.pendingCount', 0),
     );
 });
@@ -90,8 +94,9 @@ test('件数と一覧が一致する (scope 再利用の behavioral proof)', fun
     // 数えてはいけないもの (取消済 / 他人宛) を混ぜる
     OrganizationInvitation::factory()->forOrganization($firstOrganization)->revoked()->create(['email' => 'invitee@example.com']);
     OrganizationInvitation::factory()->forOrganization($firstOrganization)->create(['email' => 'other@example.com']);
+    $firstOrganization->users()->attach($user);
 
-    $this->actingAs($user)->get('/notifications')->assertInertia(
+    $this->actingAs($user)->get("/organizations/{$firstOrganization->slug}/notifications")->assertInertia(
         fn (AssertableInertia $page) => $page
             ->where('invitationInbox.pendingCount', 2)
             ->has('pendingInvitations', 2),

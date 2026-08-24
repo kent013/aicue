@@ -71,7 +71,7 @@ describe("Manuals/Edit", () => {
         // Inertia Link は jsdom で origin 付き絶対 URL に解決される。
         // path 全体を start/end 固定で照合し prefix / suffix / クエリ変化を検知する。
         expect(screen.getByTestId("capture-manual-link").getAttribute("href")).toMatch(
-            /^https?:\/\/[^/]+\/app\/projects\/1\/manuals\/5$/,
+            /^https?:\/\/[^/]+\/organizations\/test-org\/app\/projects\/1\/manuals\/5$/,
         );
     });
 
@@ -118,7 +118,7 @@ describe("Manuals/Edit — 動画列", () => {
         const link = screen.getByTestId("video-cell-link");
         expect(link).toHaveTextContent("テイクを選択");
         expect(link.getAttribute("href")).toMatch(
-            /^https?:\/\/[^/]+\/projects\/1\/manuals\/5\/cuts\/41\/takes$/,
+            /^https?:\/\/[^/]+\/organizations\/test-org\/projects\/1\/manuals\/5\/cuts\/41\/takes$/,
         );
     });
 

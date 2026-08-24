@@ -125,7 +125,7 @@ final class ConfirmRecentAuthController extends Controller
         // 保持した元 URL、無ければ dashboard) へ戻す。この分岐は Inertia protocol
         // (X-Inertia ヘッダ) のレスポンス契約用であり、Accept 等の他シグナルで判定しない。
         if ($request->hasHeader('X-Inertia')) {
-            $redirect = redirect()->intended(route('dashboard'));
+            $redirect = redirect()->intended(route('app.entry'));
             if ($droppedMutation) {
                 $redirect->with('info', '再認証が完了しました。先ほどの操作はまだ実行されていません。お手数ですがもう一度操作してください。');
             }

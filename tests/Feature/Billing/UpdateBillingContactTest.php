@@ -19,14 +19,14 @@ test('email 変更時のみ Stripe 同期 job が dispatch される (name の�
     [$organization, $owner] = createOrganizationWithOwner();
     $organization->forceFill(['stripe_id' => 'cus_contact_1'])->save();
 
-    $this->actingAs($owner)->patch('/billing/contact', [
+    $this->actingAs($owner)->patch("/organizations/{$organization->slug}/billing/contact", [
         'billing_contact_email' => 'billing@example.test',
         'billing_contact_name' => '経理部',
     ])->assertRedirect();
     Queue::assertPushed(SyncBillingCustomerDetails::class, 1);
 
     // name だけ変更 (email は同値) → 同期は増えない
-    $this->actingAs($owner)->patch('/billing/contact', [
+    $this->actingAs($owner)->patch("/organizations/{$organization->slug}/billing/contact", [
         'billing_contact_email' => 'billing@example.test',
         'billing_contact_name' => '総務部',
     ])->assertRedirect();
@@ -40,7 +40,7 @@ test('stripe_id 未設定の org では同期 job が dispatch されない', fu
     [$organization, $owner] = createOrganizationWithOwner();
     expect($organization->stripe_id)->toBeNull();
 
-    $this->actingAs($owner)->patch('/billing/contact', [
+    $this->actingAs($owner)->patch("/organizations/{$organization->slug}/billing/contact", [
         'billing_contact_email' => 'billing@example.test',
     ])->assertRedirect();
 
@@ -50,7 +50,7 @@ test('stripe_id 未設定の org では同期 job が dispatch されない', fu
 test('宛名は空文字を null に畳む', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->patch('/billing/contact', [
+    $this->actingAs($owner)->patch("/organizations/{$organization->slug}/billing/contact", [
         'billing_contact_email' => 'billing@example.test',
         'billing_contact_name' => '   ',
     ])->assertRedirect()->assertSessionHas('info', '請求先情報を更新しました。');
@@ -61,9 +61,8 @@ test('宛名は空文字を null に畳む', function (): void {
 test('認可: member は 403', function (): void {
     [$organization] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
-    $this->actingAs($member)->patch('/billing/contact', [
+    $this->actingAs($member)->patch("/organizations/{$organization->slug}/billing/contact", [
         'billing_contact_email' => 'billing@example.test',
     ])->assertForbidden();
 });
@@ -71,19 +70,18 @@ test('認可: member は 403', function (): void {
 test('認可: 未ログインは login へ redirect', function (): void {
     createOrganizationWithOwner();
 
-    $this->patch('/billing/contact', [
+    $this->patch('/organizations/guest-org/billing/contact', [
         'billing_contact_email' => 'billing@example.test',
     ])->assertRedirect('/login');
 });
 
-test('current-org スコープ: org 切替後の PATCH は切替後 org だけを更新する', function (): void {
+test('URL スコープ: 別組織の URL への PATCH はその組織だけを更新する', function (): void {
     [$orgA, $owner] = createOrganizationWithOwner('組織 A');
     [$orgB] = createOrganizationWithOwner('組織 B');
     $orgB->users()->attach($owner);
     $owner->addRole(OrganizationRole::Owner->value, $orgB->laratrust_team_id);
-    $owner->forceFill(['current_organization_id' => $orgB->id])->save();
 
-    $this->actingAs($owner)->patch('/billing/contact', [
+    $this->actingAs($owner)->patch("/organizations/{$orgB->slug}/billing/contact", [
         'billing_contact_email' => 'b@example.test',
     ])->assertRedirect();
 
@@ -92,11 +90,11 @@ test('current-org スコープ: org 切替後の PATCH は切替後 org だけ�
 });
 
 test('payload 契約: 保護キー混入は 422 / email 欠落も 422', function (array $payload, string $field): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
     $this->actingAs($owner)
-        ->from('/billing')
-        ->patch('/billing/contact', $payload)
+        ->from("/organizations/{$organization->slug}/billing")
+        ->patch("/organizations/{$organization->slug}/billing/contact", $payload)
         ->assertInvalid([$field]);
 })->with([
     'organization_id 混入' => [['billing_contact_email' => 'a@example.test', 'organization_id' => 1], 'organization_id'],
@@ -111,7 +109,7 @@ test('routeNotificationForMail は billing_contact_email 正本 → owner email 
     // 未設定なら owner email
     expect($organization->billingContactEmail())->toBe($owner->email);
 
-    $this->actingAs($owner)->patch('/billing/contact', [
+    $this->actingAs($owner)->patch("/organizations/{$organization->slug}/billing/contact", [
         'billing_contact_email' => 'billing@example.test',
     ])->assertRedirect();
 
@@ -121,9 +119,9 @@ test('routeNotificationForMail は billing_contact_email 正本 → owner email 
 });
 
 test('Billing/Index の props に billingContact が載る (未設定なら fallbackEmail が owner)', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->get('/billing')->assertOk()->assertInertia(
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/billing")->assertOk()->assertInertia(
         fn (AssertableInertia $page) => $page
             ->where('page.billingContact.email', null)
             ->where('page.billingContact.name', null)
@@ -136,7 +134,7 @@ test('stripeEmail は請求先メール正本 → owner email fallback (宛名�
 
     expect($organization->stripeEmail())->toBe($owner->email);
 
-    $this->actingAs($owner)->patch('/billing/contact', [
+    $this->actingAs($owner)->patch("/organizations/{$organization->slug}/billing/contact", [
         'billing_contact_email' => 'billing@example.test',
         'billing_contact_name' => '経理部',
     ])->assertRedirect();

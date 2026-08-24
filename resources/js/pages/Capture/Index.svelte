@@ -18,6 +18,8 @@
     import { MANUAL_SEARCH_PLACEHOLDER } from "@/lib/manual/search";
     import type { SharedProps } from "@/lib/shared-props";
     import type { CaptureManualSummary } from "@/types/capture";
+    import { currentOrgUrl } from "@/lib/org-url";
+    import { currentOrganizationSlug } from "@/lib/org-url";
     import {
         CAPTURE_PROGRESS_LABELS,
         CAPTURE_PROGRESS_TONES,
@@ -49,7 +51,7 @@
         if (search !== "") query.q = search;
         if (categoryId !== "") query.category = categoryId;
         if (mine) query.mine = "1";
-        router.get(`/app/projects/${project.id}/manuals`, query, {
+        router.get(currentOrgUrl(`/app/projects/${project.id}/manuals`), query, {
             preserveState: true,
             preserveScroll: true,
         });
@@ -62,7 +64,12 @@
     function coverUrl(manual: CaptureManualSummary): string | null {
         if (manual.cover === null) return null;
         return takeUrl(
-            { projectId: project.id, manualId: manual.id, cutId: manual.cover.cut_id },
+            {
+                organizationSlug: currentOrganizationSlug(),
+                projectId: project.id,
+                manualId: manual.id,
+                cutId: manual.cover.cut_id,
+            },
             manual.cover.take_id,
             "/thumbnail",
         );
@@ -81,7 +88,7 @@
             icon={Camera}
             testId="capture-heading"
         >
-            <TextLink href="/app/account" testId="capture-account-link">
+            <TextLink href={currentOrgUrl("/app/account")} testId="capture-account-link">
                 <UserRound class="inline size-3" aria-hidden="true" />
                 アカウント
             </TextLink>
@@ -138,7 +145,7 @@
                     <!-- 撮影進捗は PC 一覧の制作状態 (ManualProgress) とは別の量。
                          導出は captureProgressOf ただ 1 か所に置く -->
                     {@const captureProgress = captureProgressOf(manual)}
-                    <a href={`/app/projects/${project.id}/manuals/${manual.id}`} class="block">
+                    <a href={currentOrgUrl(`/app/projects/${project.id}/manuals/${manual.id}`)} class="block">
                         <Card>
                             <!-- 3 列 grid: サムネイルは固有幅・本文だけが縮んで truncate・
                                  バッジは潰れない (minmax(0,1fr) が本文列に最小幅 0 を与える) -->

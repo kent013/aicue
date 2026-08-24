@@ -49,18 +49,17 @@ function finishedVideoContext(): array
 function finishedVideoMember(Organization $organization, Project $project): User
 {
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
     attachProjectMember($project, $member, ProjectRole::Member);
 
     return $member;
 }
 
 /** 詳細画面 props の render 配下を取り出す */
-function finishedVideoRenderProps(User $actor, Project $project, VideoManual $manual): array
+function finishedVideoRenderProps(Organization $organization, User $actor, Project $project, VideoManual $manual): array
 {
     $props = [];
     test()->actingAs($actor)
-        ->get("/projects/{$project->id}/manuals/{$manual->id}")
+        ->get("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}")
         ->assertOk()
         ->assertInertia(function (AssertableInertia $page) use (&$props): void {
             /** @var array<string, mixed> $render */
@@ -74,49 +73,49 @@ function finishedVideoRenderProps(User $actor, Project $project, VideoManual $ma
 /* ---------------- playback (kind=render) ---------------- */
 
 test('playback: published + 最新 succeeded render は 302 (S3 署名 URL へ redirect)', function (): void {
-    [, $owner, $project, $manual] = finishedVideoContext();
+    [$organization, $owner, $project, $manual] = finishedVideoContext();
     $key = "projects/{$project->id}/manuals/{$manual->id}/renders/v2-1.mp4";
     $job = RenderJob::factory()->forManual($manual)->succeeded($key)->create();
 
     $this->actingAs($owner)->get(
-        "/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$job->id}/playback",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$job->id}/playback",
     )->assertRedirect("https://signed.example/{$key}");
 });
 
 test('playback: published でない manual の完成動画は 404 (ready へ戻った旧完成動画も 404)', function (): void {
-    [, $owner, $project, $manual] = finishedVideoContext();
+    [$organization, $owner, $project, $manual] = finishedVideoContext();
     $job = RenderJob::factory()->forManual($manual)->succeeded('projects/x/renders/v2-1.mp4')->create();
     // シナリオ編集で ready へ戻ると完成動画は受け取れなくなる (download と同一条件)
     $manual->forceFill(['status' => VideoManualStatus::Ready])->save();
 
     $this->actingAs($owner)->get(
-        "/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$job->id}/playback",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$job->id}/playback",
     )->assertNotFound();
 });
 
 test('playback: 旧世代 render は 404 (実体削除済みの世代へ署名 URL を出さない)', function (): void {
-    [, $owner, $project, $manual] = finishedVideoContext();
+    [$organization, $owner, $project, $manual] = finishedVideoContext();
     $old = RenderJob::factory()->forManual($manual)->succeeded('projects/x/renders/v1-1.mp4')->create();
     RenderJob::factory()->forManual($manual)->succeeded('projects/x/renders/v2-1.mp4')->create();
 
     $this->actingAs($owner)->get(
-        "/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$old->id}/playback",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$old->id}/playback",
     )->assertNotFound();
 });
 
 test('playback: 最新 succeeded render の output_path が NULL なら旧世代へフォールバックせず 404', function (): void {
-    [, $owner, $project, $manual] = finishedVideoContext();
+    [$organization, $owner, $project, $manual] = finishedVideoContext();
     $old = RenderJob::factory()->forManual($manual)->succeeded('projects/x/renders/v1-1.mp4')->create();
     RenderJob::factory()->forManual($manual)->create(['status' => 'succeeded', 'output_path' => null]);
 
     $this->actingAs($owner)->get(
-        "/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$old->id}/playback",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$old->id}/playback",
     )->assertNotFound();
 });
 
 test('playback: queued / running / failed の render は 404', function (): void {
-    [, $owner, $project, $manual] = finishedVideoContext();
-    $base = "/projects/{$project->id}/manuals/{$manual->id}/render-jobs";
+    [$organization, $owner, $project, $manual] = finishedVideoContext();
+    $base = "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render-jobs";
 
     $queued = RenderJob::factory()->forManual($manual)->create();
     $running = RenderJob::factory()->forManual($manual)->running()->create();
@@ -133,18 +132,18 @@ test('playback: 撮影者は 403 (download ability = 編集者専用。層 2 の
     $job = RenderJob::factory()->forManual($manual)->succeeded('projects/x/renders/v2-1.mp4')->create();
 
     $this->actingAs($member)->get(
-        "/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$job->id}/playback",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$job->id}/playback",
     )->assertForbidden();
 });
 
 test('playback: cross-org / cross-manual の完成動画 job は 404 (存在オラクル封じ)', function (): void {
-    [, $owner, $project, $manual] = finishedVideoContext();
+    [$organization, $owner, $project, $manual] = finishedVideoContext();
     $job = RenderJob::factory()->forManual($manual)->succeeded('projects/x/renders/v2-1.mp4')->create();
     [, $stranger] = createOrganizationWithOwner('別組織');
 
     // cross-org (他組織の利用者からは存在ごと見えない)
     $this->actingAs($stranger)->get(
-        "/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$job->id}/playback",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$job->id}/playback",
     )->assertNotFound();
 
     // cross-manual (同 project 内の別マニュアルの job id を差し込んでも 404)
@@ -152,7 +151,7 @@ test('playback: cross-org / cross-manual の完成動画 job は 404 (存在オ�
         'status' => VideoManualStatus::Published->value,
     ]);
     $this->actingAs($owner)->get(
-        "/projects/{$project->id}/manuals/{$otherManual->id}/render-jobs/{$job->id}/playback",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$otherManual->id}/render-jobs/{$job->id}/playback",
     )->assertNotFound();
 });
 
@@ -162,7 +161,7 @@ test('playback: kind=preview の 302 条件と ability は本変更で変わら�
     $manual->forceFill(['status' => VideoManualStatus::Ready])->save();
     $key = "projects/{$project->id}/manuals/{$manual->id}/previews/v2-1.mp4";
     $preview = RenderJob::factory()->forManual($manual)->preview()->succeeded($key)->create();
-    $url = "/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$preview->id}/playback";
+    $url = "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$preview->id}/playback";
 
     $this->actingAs($owner)->get($url)->assertRedirect("https://signed.example/{$key}");
 
@@ -174,23 +173,23 @@ test('playback: kind=preview の 302 条件と ability は本変更で変わら�
 /* ---------------- download (選択式の載せ替え) ---------------- */
 
 test('download: 最新 succeeded render の output_path が NULL なら旧世代へフォールバックせず 404', function (): void {
-    [, $owner, $project, $manual] = finishedVideoContext();
+    [$organization, $owner, $project, $manual] = finishedVideoContext();
     RenderJob::factory()->forManual($manual)->succeeded('projects/x/renders/v1-1.mp4')->create();
     RenderJob::factory()->forManual($manual)->create(['status' => 'succeeded', 'output_path' => null]);
 
     $this->actingAs($owner)->get(
-        "/projects/{$project->id}/manuals/{$manual->id}/download",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/download",
     )->assertNotFound();
 });
 
 /* ---------------- 詳細画面 props (finishedJob) ---------------- */
 
 test('props: published + download 権限保持者には finishedJob が最新 succeeded render を指す', function (): void {
-    [, $owner, $project, $manual] = finishedVideoContext();
+    [$organization, $owner, $project, $manual] = finishedVideoContext();
     RenderJob::factory()->forManual($manual)->succeeded('projects/x/renders/v1-1.mp4')->create();
     $latest = RenderJob::factory()->forManual($manual)->succeeded('projects/x/renders/v2-1.mp4')->create();
 
-    $render = finishedVideoRenderProps($owner, $project, $manual);
+    $render = finishedVideoRenderProps($organization, $owner, $project, $manual);
 
     expect($render['finishedJob'])->not->toBeNull();
     expect($render['finishedJob']['id'])->toBe($latest->id);
@@ -198,11 +197,11 @@ test('props: published + download 権限保持者には finishedJob が最新 su
 });
 
 test('props: ready へ戻った manual では finishedJob=null (押すと 404 になる導線を出さない)', function (): void {
-    [, $owner, $project, $manual] = finishedVideoContext();
+    [$organization, $owner, $project, $manual] = finishedVideoContext();
     RenderJob::factory()->forManual($manual)->succeeded('projects/x/renders/v2-1.mp4')->create();
     $manual->forceFill(['status' => VideoManualStatus::Ready])->save();
 
-    expect(finishedVideoRenderProps($owner, $project, $manual)['finishedJob'])->toBeNull();
+    expect(finishedVideoRenderProps($organization, $owner, $project, $manual)['finishedJob'])->toBeNull();
 });
 
 test('props: 詳細を閲覧できるが download 権限のない撮影者には finishedJob=null', function (): void {
@@ -210,14 +209,14 @@ test('props: 詳細を閲覧できるが download 権限のない撮影者には
     $member = finishedVideoMember($organization, $project);
     RenderJob::factory()->forManual($manual)->succeeded('projects/x/renders/v2-1.mp4')->create();
 
-    expect(finishedVideoRenderProps($member, $project, $manual)['finishedJob'])->toBeNull();
+    expect(finishedVideoRenderProps($organization, $member, $project, $manual)['finishedJob'])->toBeNull();
 });
 
 test('props: finishedJob のキー集合は RenderJobData::toArray() と exact 一致 (成果物 URL 系キーを持たない)', function (): void {
-    [, $owner, $project, $manual] = finishedVideoContext();
+    [$organization, $owner, $project, $manual] = finishedVideoContext();
     RenderJob::factory()->forManual($manual)->succeeded('projects/x/renders/v2-1.mp4')->create();
 
-    $finished = finishedVideoRenderProps($owner, $project, $manual)['finishedJob'];
+    $finished = finishedVideoRenderProps($organization, $owner, $project, $manual)['finishedJob'];
 
     expect(array_keys($finished))->toBe([
         'id', 'kind', 'status', 'step', 'progress', 'error', 'error_code',
@@ -225,15 +224,15 @@ test('props: finishedJob のキー集合は RenderJobData::toArray() と exact �
     ]);
     // 本文検査は成果物キーと署名先ホストに限定する (無関係な props を拾って偽陽性にしないため)
     $body = (string) test()->actingAs($owner)
-        ->get("/projects/{$project->id}/manuals/{$manual->id}")->getContent();
+        ->get("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}")->getContent();
     expect($body)->not->toContain('output_path');
     expect($body)->not->toContain('signed.example');
 });
 
 test('props: 最新 succeeded render の output_path が NULL なら finishedJob=null (route と同じ判断)', function (): void {
-    [, $owner, $project, $manual] = finishedVideoContext();
+    [$organization, $owner, $project, $manual] = finishedVideoContext();
     RenderJob::factory()->forManual($manual)->succeeded('projects/x/renders/v1-1.mp4')->create();
     RenderJob::factory()->forManual($manual)->create(['status' => 'succeeded', 'output_path' => null]);
 
-    expect(finishedVideoRenderProps($owner, $project, $manual)['finishedJob'])->toBeNull();
+    expect(finishedVideoRenderProps($organization, $owner, $project, $manual)['finishedJob'])->toBeNull();
 });

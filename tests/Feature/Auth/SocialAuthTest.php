@@ -51,7 +51,7 @@ test('SSO register で User + SocialAccount が作成されログインされる
 
     $response = $this->get('/auth/google/callback');
 
-    $response->assertRedirect(route('dashboard'));
+    $response->assertRedirect(route('app.entry'));
     $this->assertAuthenticated();
 
     $user = User::whereBlind('email', 'email_index', 'sso@example.com')->firstOrFail();
@@ -60,8 +60,9 @@ test('SSO register で User + SocialAccount が作成されログインされる
     expect($user->terms_accepted_at)->not->toBeNull();
     expect($user->socialAccounts()->where('provider', 'google')->exists())->toBeTrue();
 
-    // verified ゲートを素通りして dashboard に到達できる (従来どおり)
-    $this->get(route('dashboard'))->assertOk();
+    // verified ゲートを素通りして組織の dashboard に到達できる (従来どおり)
+    $organization = $user->organizations()->sole();
+    $this->get(route('dashboard', ['organization' => $organization->slug]))->assertOk();
 });
 
 test('T105: email_trust=unconfirmed の provider では SSO register が検証済みにしない', function (): void {
@@ -72,14 +73,16 @@ test('T105: email_trust=unconfirmed の provider では SSO register が検証�
     $this->withSession(['social_auth_intent' => 'register']);
     fakeSocialiteCallback(fakeSocialiteUser('g-untrusted', 'untrusted@example.com'));
 
-    $this->get('/auth/google/callback')->assertRedirect(route('dashboard'));
+    $this->get('/auth/google/callback')->assertRedirect(route('app.entry'));
     $this->assertAuthenticated();
 
     $user = User::whereBlind('email', 'email_index', 'untrusted@example.com')->firstOrFail();
     expect($user->email_verified_at)->toBeNull();
 
     // verified ゲートに落ちる (dashboard へ到達できない)
-    $this->get(route('dashboard'))->assertRedirect(route('verification.notice'));
+    $organization = $user->organizations()->sole();
+    $this->get(route('dashboard', ['organization' => $organization->slug]))
+        ->assertRedirect(route('verification.notice'));
 });
 
 test('T105: email_trust 未宣言の provider は fail-closed で検証済みにしない', function (): void {
@@ -90,7 +93,7 @@ test('T105: email_trust 未宣言の provider は fail-closed で検証済みに
     $this->withSession(['social_auth_intent' => 'register']);
     fakeSocialiteCallback(fakeSocialiteUser('g-undeclared', 'undeclared@example.com'));
 
-    $this->get('/auth/google/callback')->assertRedirect(route('dashboard'));
+    $this->get('/auth/google/callback')->assertRedirect(route('app.entry'));
 
     $user = User::whereBlind('email', 'email_index', 'undeclared@example.com')->firstOrFail();
     expect($user->email_verified_at)->toBeNull();
@@ -130,7 +133,7 @@ test('連携済みアカウントは login intent でログインできる', fun
 
     $response = $this->get('/auth/google/callback');
 
-    $response->assertRedirect(route('dashboard'));
+    $response->assertRedirect(route('app.entry'));
     $this->assertAuthenticatedAs($user);
 });
 
@@ -180,10 +183,10 @@ test('P7: SSO register 成立で pending が個人組織へ promote される', 
     ]);
     fakeSocialiteCallback(fakeSocialiteUser('g-p7', 'sso-plan@example.com'));
 
-    $this->get('/auth/google/callback')->assertRedirect(route('dashboard'));
+    $this->get('/auth/google/callback')->assertRedirect(route('app.entry'));
 
     $user = User::whereBlind('email', 'email_index', 'sso-plan@example.com')->firstOrFail();
-    $personalOrg = $user->organizations()->where('is_personal', true)->firstOrFail();
+    $personalOrg = $user->organizations()->firstOrFail();
 
     expect(session(IntendedPlanResolver::PENDING_KEY))->toBeNull();
     expect(session(IntendedPlanResolver::orgKey($personalOrg)))->toBe('standard');
@@ -231,7 +234,7 @@ test('T106: SSO register で作られた User は password を持たない', fun
     $this->withSession(['social_auth_intent' => 'register']);
     fakeSocialiteCallback(fakeSocialiteUser('g-t106', 'sso-t106@example.com'));
 
-    $this->get('/auth/google/callback')->assertRedirect(route('dashboard'));
+    $this->get('/auth/google/callback')->assertRedirect(route('app.entry'));
 
     $user = User::whereBlind('email', 'email_index', 'sso-t106@example.com')->firstOrFail();
 

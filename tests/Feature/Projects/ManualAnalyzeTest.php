@@ -46,10 +46,10 @@ function analyzeTestContext(bool $withDocument = true, int $tickets = 1): array
 
 test('draft + document + 残高あり → 201 (job=queued / manual=analyzing / dispatch)', function (): void {
     Queue::fake();
-    [, $owner, $project, $manual] = analyzeTestContext();
+    [$organization, $owner, $project, $manual] = analyzeTestContext();
 
     $response = $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/analyze",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/analyze",
     );
 
     $response->assertCreated()->assertJson([
@@ -71,11 +71,11 @@ test('draft + document + 残高あり → 201 (job=queued / manual=analyzing / d
 
 test('ready からの再解析も 201 (正式な遷移)', function (): void {
     Queue::fake();
-    [, $owner, $project, $manual] = analyzeTestContext();
+    [$organization, $owner, $project, $manual] = analyzeTestContext();
     $manual->forceFill(['status' => VideoManualStatus::Ready])->save();
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/analyze",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/analyze",
     )->assertCreated();
 
     expect($manual->refresh()->status)->toBe(VideoManualStatus::Analyzing);
@@ -83,13 +83,13 @@ test('ready からの再解析も 201 (正式な遷移)', function (): void {
 
 test('in-flight (queued) があると 409 (type=in_flight・DB 不変)', function (): void {
     Queue::fake();
-    [, $owner, $project, $manual] = analyzeTestContext();
+    [$organization, $owner, $project, $manual] = analyzeTestContext();
     // 直前のトリガー済み状態を再現 (manual は analyzing + queued job)
     AnalysisJob::factory()->forManual($manual)->create();
     $manual->forceFill(['status' => VideoManualStatus::Ready])->save();
 
     $response = $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/analyze",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/analyze",
     );
 
     $response->assertConflict()->assertJson([
@@ -102,11 +102,11 @@ test('in-flight (queued) があると 409 (type=in_flight・DB 不変)', functio
 
 test('analyzing 中の manual は 409 (type=status_not_analyzable)', function (): void {
     Queue::fake();
-    [, $owner, $project, $manual] = analyzeTestContext();
+    [$organization, $owner, $project, $manual] = analyzeTestContext();
     $manual->forceFill(['status' => VideoManualStatus::Analyzing])->save();
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/analyze",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/analyze",
     )->assertConflict()->assertJson([
         'code' => 'analysis_conflict',
         'conflict_type' => 'status_not_analyzable',
@@ -116,11 +116,11 @@ test('analyzing 中の manual は 409 (type=status_not_analyzable)', function ()
 
 test('rendering / published も 409 (type=status_not_analyzable)', function (VideoManualStatus $status): void {
     Queue::fake();
-    [, $owner, $project, $manual] = analyzeTestContext();
+    [$organization, $owner, $project, $manual] = analyzeTestContext();
     $manual->forceFill(['status' => $status])->save();
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/analyze",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/analyze",
     )->assertConflict()->assertJson(['conflict_type' => 'status_not_analyzable']);
 })->with([
     'rendering' => VideoManualStatus::Rendering,
@@ -129,11 +129,11 @@ test('rendering / published も 409 (type=status_not_analyzable)', function (Vid
 
 test('直前 job が failed なら再トリガー 201 (冪等ルール: in-flight 不在)', function (): void {
     Queue::fake();
-    [, $owner, $project, $manual] = analyzeTestContext();
+    [$organization, $owner, $project, $manual] = analyzeTestContext();
     AnalysisJob::factory()->forManual($manual)->failed()->create();
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/analyze",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/analyze",
     )->assertCreated();
 
     expect(AnalysisJob::query()->count())->toBe(2);
@@ -141,10 +141,10 @@ test('直前 job が failed なら再トリガー 201 (冪等ルール: in-fligh
 
 test('document 無しは 422 (job を作らない・status 不変)', function (): void {
     Queue::fake();
-    [, $owner, $project, $manual] = analyzeTestContext(withDocument: false);
+    [$organization, $owner, $project, $manual] = analyzeTestContext(withDocument: false);
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/analyze",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/analyze",
     )->assertUnprocessable()->assertJsonValidationErrors(['document']);
 
     expect(AnalysisJob::query()->count())->toBe(0);
@@ -154,10 +154,10 @@ test('document 無しは 422 (job を作らない・status 不変)', function ()
 
 test('残高 0 は 402 (code=insufficient_tickets。job も予約も作らない・status 不変)', function (): void {
     Queue::fake();
-    [, $owner, $project, $manual] = analyzeTestContext(tickets: 0);
+    [$organization, $owner, $project, $manual] = analyzeTestContext(tickets: 0);
 
     $response = $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/analyze",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/analyze",
     );
 
     $response->assertPaymentRequired()->assertJson(['code' => 'insufficient_tickets']);
@@ -171,25 +171,24 @@ test('撮影者 (project_member) は 403 / ポーリング GET は 200', functio
     Queue::fake();
     [$organization, , $project, $manual] = analyzeTestContext();
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
     attachProjectMember($project, $member, ProjectRole::Member);
 
     $this->actingAs($member)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/analyze",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/analyze",
     )->assertForbidden();
 
     $job = AnalysisJob::factory()->forManual($manual)->create();
     $this->actingAs($member)->getJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/jobs/{$job->id}",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/jobs/{$job->id}",
     )->assertOk();
 });
 
 test('cross-org の manual への POST は 404 (存在オラクル封じ)', function (): void {
-    [, $stranger] = createOrganizationWithOwner('別組織');
+    [$organization, $stranger] = createOrganizationWithOwner('別組織');
     [, , $project, $manual] = analyzeTestContext();
 
     $this->actingAs($stranger)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/analyze",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/analyze",
     )->assertNotFound();
 });
 
@@ -198,16 +197,16 @@ test('cross-project の manual への POST は 404 (scopeBindings)', function ()
     $otherProject = Project::factory()->forOrganization($organization)->create();
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$otherProject->id}/manuals/{$manual->id}/analyze",
+        "/organizations/{$organization->slug}/projects/{$otherProject->id}/manuals/{$manual->id}/analyze",
     )->assertNotFound();
 });
 
 test('保護キー (ticket_reservation_id 等) の直送は 422', function (): void {
     Queue::fake();
-    [, $owner, $project, $manual] = analyzeTestContext();
+    [$organization, $owner, $project, $manual] = analyzeTestContext();
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/analyze",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/analyze",
         ['ticket_reservation_id' => 999, 'video_manual_id' => 999],
     )->assertUnprocessable()->assertJsonValidationErrors(['ticket_reservation_id', 'video_manual_id']);
 
@@ -216,9 +215,9 @@ test('保護キー (ticket_reservation_id 等) の直送は 422', function (): v
 });
 
 test('未ログインは 401 (JSON)', function (): void {
-    [, , $project, $manual] = analyzeTestContext();
+    [$organization, , $project, $manual] = analyzeTestContext();
 
     $this->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/analyze",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/analyze",
     )->assertUnauthorized();
 });

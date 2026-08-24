@@ -363,7 +363,7 @@ Route::middleware(['auth', 'verified', 'not-pending-deletion'])->group(function 
 ```
 
 撮影 PWA の group (`->prefix('app')->as('capture.')`) はこの内側にあり、
-さらに `require-active-subscription` / `project.in-current-org` が重なる。
+さらに `require-active-subscription` / `project.in-route-org` が重なる。
 `User implements MustVerifyEmail` かつ `config/fortify.php` に `Features::emailVerification()`。
 
 #### (d) 招待の受け渡し手段はメールだけ (平文 token は DB に無い)
@@ -948,7 +948,7 @@ Route::middleware(['auth', 'verified', 'not-pending-deletion'])->group(function 
 ```
 
 で始まり、撮影 PWA の group (`->prefix('app')->as('capture.')`, L609 付近) は**この group の内側**にある
-(さらに `require-active-subscription` / `project.in-current-org` が重なる)。
+(さらに `require-active-subscription` / `project.in-route-org` が重なる)。
 `User` は `MustVerifyEmail` を実装し、`config/fortify.php` は `Features::emailVerification()` を有効にしている。
 
 → **メール検証を通していない利用者は、撮影 PWA に 1 画面も到達できない。**

@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Projects;
 
-use App\Http\Concerns\ResolvesCurrentOrganization;
+use App\Http\Concerns\ResolvesRouteOrganization;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Projects\UpdateScenarioRequest;
 use App\Http\Resources\Manual\ScenarioResource;
+use App\Models\Organization;
 use App\Models\Project;
 use App\Models\VideoManual;
 use App\Services\Manual\ScenarioService;
@@ -23,15 +24,14 @@ use Illuminate\Support\Facades\Gate;
  */
 class ManualScenarioController extends Controller
 {
-    use ResolvesCurrentOrganization;
+    use ResolvesRouteOrganization;
 
     public function update(
-        UpdateScenarioRequest $request,
+        UpdateScenarioRequest $request, Organization $organization,
         Project $project,
         VideoManual $manual,
         ScenarioService $scenarios,
     ): ScenarioResource {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404 ({manual} ∈ {project} は scopeBindings が担保済み)
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('update', $manual);

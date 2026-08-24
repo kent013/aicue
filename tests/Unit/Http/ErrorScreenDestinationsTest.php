@@ -26,10 +26,10 @@ test('419 は認証状態にかかわらずログインへ倒れる (D1 が D2 �
     expect($destinations[0]->href)->toBe(route('login', absolute: false));
 })->with([[true], [false]]);
 
-test('419 以外は認証済みならダッシュボードへ倒れる', function (InertiaErrorScreenStatus $status): void {
+test('419 以外は認証済みなら組織の入口へ倒れる', function (InertiaErrorScreenStatus $status): void {
     $destinations = ErrorScreenDestinations::for($status, authenticated: true);
 
-    expect($destinations[0]->href)->toBe(route('dashboard', absolute: false));
+    expect($destinations[0]->href)->toBe(route('app.entry', absolute: false));
 })->with(errorScreenNonExpiredStatuses());
 
 test('419 以外は未認証ならログインへ倒れる', function (InertiaErrorScreenStatus $status): void {

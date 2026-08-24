@@ -83,7 +83,7 @@ test('登録だけではチケットが付与されず marker も立たない', 
     ])->assertRedirect(route('verification.notice'));
 
     $user = User::whereBlind('email', 'email_index', 'p6-signup@example.com')->firstOrFail();
-    $organization = $user->organizations()->where('is_personal', true)->firstOrFail();
+    $organization = $user->organizations()->firstOrFail();
 
     expect(activationBalance($organization))->toBe(0);
     expect(activationSignupEntries($organization))->toHaveCount(0);

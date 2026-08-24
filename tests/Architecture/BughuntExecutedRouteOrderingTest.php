@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Middleware\BughuntExecutedRouteMiddleware;
 use App\Http\Middleware\EnsureAccountNotPendingDeletion;
-use App\Http\Middleware\EnsureProjectBelongsToCurrentOrganization;
+use App\Http\Middleware\EnsureProjectBelongsToRouteOrganization;
 use App\Http\Middleware\RequireActiveSubscription;
 use Illuminate\Auth\Middleware\Authenticate;
 use Illuminate\Routing\Route as RoutingRoute;
@@ -105,7 +105,7 @@ test('代表 route: 記録器は認証・テナント境界 404・課金ゲー�
 
     foreach ([
         Authenticate::class,
-        EnsureProjectBelongsToCurrentOrganization::class,
+        EnsureProjectBelongsToRouteOrganization::class,
         RequireActiveSubscription::class,
         EnsureAccountNotPendingDeletion::class,
     ] as $upstream) {

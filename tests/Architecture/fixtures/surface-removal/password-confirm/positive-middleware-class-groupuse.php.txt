@@ -1,0 +1,9 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Fixture;
+
+use Illuminate\Auth\Middleware\{RequirePassword as RP};
+
+Route::get('/x', [Controller::class, 'show'])->middleware(RP::class);

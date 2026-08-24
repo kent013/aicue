@@ -50,9 +50,9 @@ function fakeTxtFile(string $name = 'sop.txt', string $body = "手順1 部品を
 
 test('作成時アップロード: manual と同時に SourceDocument 行 + ファイルが作られる', function (): void {
     Storage::fake();
-    [, $owner, $project] = sourceDocumentTestContext();
+    [$organization, $owner, $project] = sourceDocumentTestContext();
 
-    $this->actingAs($owner)->post("/projects/{$project->id}/manuals", [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects/{$project->id}/manuals", [
         'title' => '組立マニュアル',
         'category' => null,
         'document' => fakePdfFile(),
@@ -67,9 +67,9 @@ test('作成時アップロード: manual と同時に SourceDocument 行 + フ�
 
 test('作成時アップロード: document 省略でも作成できる (任意フィールド)', function (): void {
     Storage::fake();
-    [, $owner, $project] = sourceDocumentTestContext();
+    [$organization, $owner, $project] = sourceDocumentTestContext();
 
-    $this->actingAs($owner)->post("/projects/{$project->id}/manuals", [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects/{$project->id}/manuals", [
         'title' => '手順書なしマニュアル',
         'category' => null,
     ])->assertRedirect();
@@ -79,10 +79,10 @@ test('作成時アップロード: document 省略でも作成できる (任意�
 
 test('専用 route: draft manual に追加でき、2 回目は行が増える (immutable 追記)', function (): void {
     Storage::fake();
-    [, $owner, $project, $manual] = sourceDocumentTestContext();
-    $url = "/projects/{$project->id}/manuals/{$manual->id}/source-documents";
+    [$organization, $owner, $project, $manual] = sourceDocumentTestContext();
+    $url = "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/source-documents";
 
-    $this->actingAs($owner)->from("/projects/{$project->id}/manuals/{$manual->id}")
+    $this->actingAs($owner)->from("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}")
         ->post($url, ['document' => fakeTxtFile('rev1.txt')])
         ->assertRedirect()->assertSessionHas('success');
     $first = SourceDocument::query()->firstOrFail();
@@ -99,11 +99,11 @@ test('専用 route: draft manual に追加でき、2 回目は行が増える (i
 
 test('analyzing 中の専用 route は 422 (行・ファイル不変)', function (): void {
     Storage::fake();
-    [, $owner, $project, $manual] = sourceDocumentTestContext();
+    [$organization, $owner, $project, $manual] = sourceDocumentTestContext();
     $manual->forceFill(['status' => VideoManualStatus::Analyzing])->save();
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/source-documents",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/source-documents",
         ['document' => fakeTxtFile()],
     )->assertUnprocessable()->assertJsonValidationErrors(['document']);
 
@@ -115,26 +115,26 @@ test('許可外拡張子 (gif) は 422', function (): void {
     // ここでは許可集合に残らない gif を「許可外拡張子」の代表として使う
     // (AcceptedSourceDocumentTypesTest の「webp/gif は含まれない」pin と対応する)。
     Storage::fake();
-    [, $owner, $project, $manual] = sourceDocumentTestContext();
+    [$organization, $owner, $project, $manual] = sourceDocumentTestContext();
 
     $gif = UploadedFile::fake()->create('image.gif', 10, 'image/gif');
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/source-documents",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/source-documents",
         ['document' => $gif],
     )->assertUnprocessable()->assertJsonValidationErrors(['document']);
 });
 
 test('拡張子偽装 (.pdf だが内容が GIF) は 422 (polyglot 対策)', function (): void {
     Storage::fake();
-    [, $owner, $project, $manual] = sourceDocumentTestContext();
+    [$organization, $owner, $project, $manual] = sourceDocumentTestContext();
 
     // fake UploadedFile は getMimeType() が宣言 mime を返すため、「内容 sniff が
     // image/gif を検出した」状況を mime 指定で再現する (.pdf 拡張子 + GIF 内容)
     $polyglot = UploadedFile::fake()->create('fake.pdf', 10, 'image/gif');
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/source-documents",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/source-documents",
         ['document' => $polyglot],
     )->assertUnprocessable()->assertJsonValidationErrors(['document']);
 
@@ -156,22 +156,22 @@ test('Service の内容 sniff 二層目: 許可外 mime は appendDocument が�
 test('サイズ超過は 422', function (): void {
     Storage::fake();
     config()->set('manual.source_document_max_bytes', 1024); // 1KB に絞って検証
-    [, $owner, $project, $manual] = sourceDocumentTestContext();
+    [$organization, $owner, $project, $manual] = sourceDocumentTestContext();
 
     $big = fakeTxtFile('big.txt', str_repeat('あ', 2_000));
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/source-documents",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/source-documents",
         ['document' => $big],
     )->assertUnprocessable()->assertJsonValidationErrors(['document']);
 });
 
 test('保護キー (video_manual_id 等) の直送は 422', function (): void {
     Storage::fake();
-    [, $owner, $project, $manual] = sourceDocumentTestContext();
+    [$organization, $owner, $project, $manual] = sourceDocumentTestContext();
 
     $this->actingAs($owner)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/source-documents",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/source-documents",
         ['document' => fakeTxtFile(), 'video_manual_id' => 999],
     )->assertUnprocessable()->assertJsonValidationErrors(['video_manual_id']);
 });
@@ -180,22 +180,21 @@ test('撮影者 (project_member) は 403', function (): void {
     Storage::fake();
     [$organization, , $project, $manual] = sourceDocumentTestContext();
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
     attachProjectMember($project, $member, ProjectRole::Member);
 
     $this->actingAs($member)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/source-documents",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/source-documents",
         ['document' => fakeTxtFile()],
     )->assertForbidden();
 });
 
 test('cross-org の manual への POST は 404', function (): void {
     Storage::fake();
-    [, $stranger] = createOrganizationWithOwner('別組織');
+    [$organization, $stranger] = createOrganizationWithOwner('別組織');
     [, , $project, $manual] = sourceDocumentTestContext();
 
     $this->actingAs($stranger)->postJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/source-documents",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/source-documents",
         ['document' => fakeTxtFile()],
     )->assertNotFound();
 });

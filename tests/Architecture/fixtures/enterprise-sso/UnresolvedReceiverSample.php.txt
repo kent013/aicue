@@ -1,0 +1,28 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services\EnterpriseSso;
+
+/**
+ * ★負例の見本。受け手の型が解決できない保護対象語彙の呼び出しを検出することを固定する。
+ */
+final class UnresolvedReceiverSample
+{
+    public function __construct(private ResolvedClient $resolved) {}
+
+    public function run(): void
+    {
+        // 解決できる (構築子の promoted プロパティの型から引ける)
+        $this->resolved->fetch();
+
+        // 解決できない (局所変数の受け手)
+        $client = $this->make();
+        $client->fetch();
+    }
+
+    private function make(): object
+    {
+        return new ResolvedClient;
+    }
+}

@@ -100,7 +100,7 @@ test('テイク登録エンドポイントは BoundedControl / NoObjectRequest �
     $this->app->instance(TakeObjectStorage::class, $spy);
 
     $response = $this->actingAs($owner)->postJson(
-        "/app/projects/{$project->id}/manuals/{$manual->id}/cuts/{$cut->id}/takes",
+        "/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}/cuts/{$cut->id}/takes",
         [
             'ticket' => $ticket,
             'client_take_id' => $reservation->client_take_id,

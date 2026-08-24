@@ -351,7 +351,7 @@ describe("ScenarioEditor", () => {
         });
 
         const [url, init] = fetchMock.mock.calls[0];
-        expect(String(url)).toBe("/projects/1/manuals/5/scenario");
+        expect(String(url)).toBe("/organizations/test-org/projects/1/manuals/5/scenario");
         expect(init?.method).toBe("PUT");
         const payload = lastPutPayload();
         expect(payload.expected_version).toBe(3);
@@ -1749,7 +1749,7 @@ describe("動画列のサムネイル表示条件 (T190)", () => {
         expect(screen.getByTestId("video-cell-preview-step-0")).toBeInTheDocument();
         expect(screen.getByTestId("video-cell-preview-step-0-image")).toHaveAttribute(
             "src",
-            "/app/projects/1/manuals/5/cuts/11/takes/9/thumbnail",
+            "/organizations/test-org/app/projects/1/manuals/5/cuts/11/takes/9/thumbnail",
         );
     });
 
@@ -1785,7 +1785,7 @@ describe("動画列のサムネイル表示条件 (T190)", () => {
         expect(links[0]).toHaveTextContent("テイクを選択");
         expect(links[0]).not.toHaveAttribute("disabled");
         expect(links[0].getAttribute("href")).toMatch(
-            /^https?:\/\/[^/]+\/projects\/1\/manuals\/5\/cuts\/11\/takes$/,
+            /^https?:\/\/[^/]+\/organizations\/test-org\/projects\/1\/manuals\/5\/cuts\/11\/takes$/,
         );
     });
 

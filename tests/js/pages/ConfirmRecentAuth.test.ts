@@ -6,7 +6,7 @@ import { fireEvent, render, screen } from "@testing-library/svelte";
  *
  * 2 つの行き止まりを潰す:
  *  (1) step-up を満たせない / 満たしたくないユーザーが操作を中止して抜けられない
- *      → footer に /dashboard への離脱導線 (本画面のユーザーは auth+verified 済みで到達可)。
+ *      → footer に /go への離脱導線 (本画面のユーザーは auth+verified 済みで到達可)。
  *      intended URL へは戻さない (満たさず戻っても middleware が再びここへ送り返すだけ)。
  *  (2) canSatisfy=false の「パスワードを設定して再認証する」→ /forgot-password は
  *      Fortify が `guest` middleware 付きで登録しており、ログイン済みの本画面ユーザーは
@@ -32,16 +32,16 @@ beforeEach(() => {
 });
 
 describe("Auth/ConfirmRecentAuth", () => {
-    it("passwordSet=true でパスワード再入力フォームと /dashboard への中止導線を出す", () => {
+    it("passwordSet=true でパスワード再入力フォームと /go への中止導線を出す", () => {
         render(ConfirmRecentAuth, {
             props: { appName: "My App", passwordSet: true, canSatisfy: true },
         });
 
         expect(screen.getByLabelText("現在のパスワード")).toBeInTheDocument();
-        expect(linkPathnames()).toContain("/dashboard");
+        expect(linkPathnames()).toContain("/go");
     });
 
-    it("canSatisfy=false でも /dashboard への中止導線を出す", () => {
+    it("canSatisfy=false でも /go への中止導線を出す", () => {
         render(ConfirmRecentAuth, {
             props: {
                 appName: "My App",
@@ -51,7 +51,7 @@ describe("Auth/ConfirmRecentAuth", () => {
             },
         });
 
-        expect(linkPathnames()).toContain("/dashboard");
+        expect(linkPathnames()).toContain("/go");
     });
 
     it("canSatisfy=false で /forgot-password へのリンクを出さない (ログイン済みでは踏破不能)", () => {

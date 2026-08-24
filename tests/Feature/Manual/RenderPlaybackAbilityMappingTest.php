@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Enums\Manual\VideoManualStatus;
+use App\Models\Organization;
 use App\Models\Project;
 use App\Models\RenderJob;
 use App\Models\User;
@@ -27,7 +28,7 @@ use Tests\Support\Policies\DivergentVideoManualPolicy;
  */
 
 /**
- * @return array{User, Project, VideoManual, RenderJob, RenderJob}
+ * @return array{Organization, User, Project, VideoManual, RenderJob, RenderJob}
  */
 function abilityMappingContext(): array
 {
@@ -49,12 +50,12 @@ function abilityMappingContext(): array
 
     Gate::policy(VideoManual::class, DivergentVideoManualPolicy::class);
 
-    return [$owner, $project, $manual, $preview, $render];
+    return [$organization, $owner, $project, $manual, $preview, $render];
 }
 
-function abilityMappingPlaybackUrl(Project $project, VideoManual $manual, RenderJob $job): string
+function abilityMappingPlaybackUrl(Organization $organization, Project $project, VideoManual $manual, RenderJob $job): string
 {
-    return "/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$job->id}/playback";
+    return "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$job->id}/playback";
 }
 
 afterEach(function (): void {
@@ -64,42 +65,42 @@ afterEach(function (): void {
 });
 
 test('写像: download を拒否する policy では kind=render の playback が 403 になる', function (): void {
-    [$owner, $project, $manual, , $render] = abilityMappingContext();
+    [$organization, $owner, $project, $manual, , $render] = abilityMappingContext();
     DivergentVideoManualPolicy::$allowDownload = false;
 
-    $this->actingAs($owner)->get(abilityMappingPlaybackUrl($project, $manual, $render))
+    $this->actingAs($owner)->get(abilityMappingPlaybackUrl($organization, $project, $manual, $render))
         ->assertForbidden();
 });
 
 test('写像: download を拒否しても kind=preview の playback は 302 のまま (render ability で通る)', function (): void {
-    [$owner, $project, $manual, $preview] = abilityMappingContext();
+    [$organization, $owner, $project, $manual, $preview] = abilityMappingContext();
     DivergentVideoManualPolicy::$allowDownload = false;
 
-    $this->actingAs($owner)->get(abilityMappingPlaybackUrl($project, $manual, $preview))
+    $this->actingAs($owner)->get(abilityMappingPlaybackUrl($organization, $project, $manual, $preview))
         ->assertRedirect('https://signed.example/projects/x/previews/v2-1.mp4');
 });
 
 test('写像: render を拒否する policy では kind=preview の playback が 403 になる', function (): void {
-    [$owner, $project, $manual, $preview] = abilityMappingContext();
+    [$organization, $owner, $project, $manual, $preview] = abilityMappingContext();
     DivergentVideoManualPolicy::$allowRender = false;
 
-    $this->actingAs($owner)->get(abilityMappingPlaybackUrl($project, $manual, $preview))
+    $this->actingAs($owner)->get(abilityMappingPlaybackUrl($organization, $project, $manual, $preview))
         ->assertForbidden();
 });
 
 test('写像: render を拒否しても kind=render の playback は 302 のまま (download ability で通る)', function (): void {
-    [$owner, $project, $manual, , $render] = abilityMappingContext();
+    [$organization, $owner, $project, $manual, , $render] = abilityMappingContext();
     DivergentVideoManualPolicy::$allowRender = false;
 
-    $this->actingAs($owner)->get(abilityMappingPlaybackUrl($project, $manual, $render))
+    $this->actingAs($owner)->get(abilityMappingPlaybackUrl($organization, $project, $manual, $render))
         ->assertRedirect('https://signed.example/projects/x/renders/v2-1.mp4');
 });
 
 test('写像: 認可 403 はテナント境界 404 より後 (他組織からは policy 差替えに関係なく 404)', function (): void {
-    [, $project, $manual, , $render] = abilityMappingContext();
+    [$organization, , $project, $manual, , $render] = abilityMappingContext();
     // policy は両方許可のまま。それでも他組織の利用者には存在が漏れない
     [, $stranger] = createOrganizationWithOwner('別組織');
 
-    $this->actingAs($stranger)->get(abilityMappingPlaybackUrl($project, $manual, $render))
+    $this->actingAs($stranger)->get(abilityMappingPlaybackUrl($organization, $project, $manual, $render))
         ->assertNotFound();
 });

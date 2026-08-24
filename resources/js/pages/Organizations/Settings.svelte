@@ -33,9 +33,13 @@
             id: number;
             name: string;
             slug: string;
-            isPersonal: boolean;
             twoFactorRequired: boolean;
         };
+        /**
+         * 識別名の変更の残り回数 (**表示のための早期情報**。権威はサーバのロック後の再判定)。
+         * 家系裁定 AG-046: 30 日あたり 5 回。旧識別名は予約せず解放する。
+         */
+        slugRename: { remaining: number; nextAvailableAt: string | null };
         members: Member[];
         currentUserRole: string | null;
         /** API キー / 接続セッション管理画面への導線を出すか (境界は manageApiKeys と同一) */
@@ -44,7 +48,14 @@
         usersUrl: string | null;
     }
 
-    let { organization, members, currentUserRole, canManageApiKeys, usersUrl }: Props = $props();
+    let {
+        organization,
+        members,
+        currentUserRole,
+        canManageApiKeys,
+        usersUrl,
+        slugRename,
+    }: Props = $props();
 
     const shared = $derived(page.props as unknown as SharedProps);
     const appName = $derived(shared.appName ?? "");
@@ -65,6 +76,34 @@
         event.preventDefault();
         nameForm.patch(`/organizations/${organization.slug}`, { preserveScroll: true });
     }
+
+    /* ---- 識別名 (家系裁定 AG-046) ---- */
+    // svelte-ignore state_referenced_locally
+    const slugForm = useForm({ slug: organization.slug });
+    let slugConfirmOpen = $state(false);
+
+    /**
+     * 識別名を変えると**その組織の URL が丸ごと変わる** (他タブで開いている URL は 404 になる)。
+     * 破壊的なので確認を挟む。**回数上限でもボタンを disabled にしない** (禁止事項 8) —
+     * 押下時にサーバが 422 を返し、理由をフォームのエラーとして表示する。
+     */
+    function askSlugChange(event: SubmitEvent): void {
+        event.preventDefault();
+        slugConfirmOpen = true;
+    }
+
+    function submitSlug(): void {
+        slugConfirmOpen = false;
+        slugForm.patch(`/organizations/${organization.slug}/slug`, { preserveScroll: true });
+    }
+
+    const slugQuotaLabel = $derived(
+        slugRename.remaining > 0
+            ? `30 日あたり 5 回まで変更できます (残り ${slugRename.remaining} 回)`
+            : slugRename.nextAvailableAt === null
+              ? "30 日あたり 5 回まで変更できます"
+              : `変更回数の上限に達しています (次に変更できるのは ${new Date(slugRename.nextAvailableAt).toLocaleString("ja-JP")} 以降)`,
+    );
 
     /* ---- recent-auth (step-up) precheck。stale なら再認証モーダルを挟んで再開する ---- */
     let recentAuthOpen = $state(false);
@@ -201,6 +240,46 @@
                 {/if}
             </Card>
 
+            <Card padding="lg">
+                <h2 class="text-h3">識別名</h2>
+                <p class="mt-1 text-caption text-text-secondary">
+                    組織の URL に使われます (/organizations/{organization.slug}/…)。
+                    変更すると<strong>これまでの URL は使えなくなります</strong>。
+                    以前の識別名は解放され、他の組織が使えるようになります。
+                </p>
+                {#if canManage}
+                    <form novalidate onsubmit={askSlugChange} class="mt-4 flex flex-col gap-4">
+                        <FormField
+                            label="識別名"
+                            id="organization-slug"
+                            error={slugForm.errors.slug}
+                            help={slugQuotaLabel}
+                        >
+                            {#snippet children({ id, describedBy, invalid })}
+                                <Input
+                                    {id}
+                                    type="text"
+                                    bind:value={slugForm.slug}
+                                    error={invalid}
+                                    aria-describedby={describedBy}
+                                />
+                            {/snippet}
+                        </FormField>
+                        <div>
+                            <Button
+                                type="submit"
+                                loading={slugForm.processing}
+                                testId="organization-slug-submit"
+                            >
+                                識別名を変更
+                            </Button>
+                        </div>
+                    </form>
+                {:else}
+                    <p class="mt-2 text-body">{organization.slug}</p>
+                {/if}
+            </Card>
+
             {#if isOwner}
                 <Card padding="lg">
                     <h2 class="text-h3">セキュリティ</h2>
@@ -321,6 +400,17 @@
                 </DangerZone>
             {/if}
         </div>
+
+        <ConfirmDialog
+            bind:open={slugConfirmOpen}
+            title="識別名の変更"
+            message={`識別名を「${slugForm.slug}」へ変更します。これまでの URL (/organizations/${organization.slug}/…) は使えなくなり、開いたままの画面は次の操作で 404 になります。`}
+            confirmLabel="変更する"
+            confirmVariant="danger"
+            processing={slugForm.processing}
+            onConfirm={submitSlug}
+            testId="organization-slug-dialog"
+        />
 
         <ConfirmDialog
             bind:open={transferDialogOpen}

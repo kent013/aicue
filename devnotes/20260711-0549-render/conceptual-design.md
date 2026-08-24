@@ -99,8 +99,8 @@ AI-CUE の使命（North Star）は「専門知識ゼロの現場作業者でも
   `projects.manuals.render` / `projects.manuals.preview` /
   `projects.manuals.render-jobs.show` / `projects.manuals.render-jobs.playback` /
   `projects.manuals.download`（Round 2 反映: 件数でなく名前で固定し登録漏れを防ぐ）。
-  cross-org 404 は既存 `EnsureProjectBelongsToCurrentOrganization`
-  （`project.in-current-org`）+ inline guard で担保
+  cross-org 404 は既存 `EnsureProjectBelongsToRouteOrganization`
+  （`project.in-route-org`）+ inline guard で担保
 - **ポーリング URI は §10.3 の `GET .../jobs/{job}` から `.../render-jobs/{renderJob}` へ変更**:
   既存 `jobs/{analysisJob}` は `VideoManual::analysisJobs()` に bind 済みで、render_jobs は
   別テーブルのため同一 param では scopeBindings の relation 推論（= IDOR 防御の第一層）が

@@ -181,8 +181,8 @@ class TicketCheckoutService
             $organization,
             $tier->stripePriceId,
             $count,
-            route('billing.tickets.show', ['purchased' => 1]).'&session_id={CHECKOUT_SESSION_ID}',
-            route('billing.tickets.show'),
+            route('billing.tickets.show', ['organization' => $organization->slug, 'purchased' => 1]).'&session_id={CHECKOUT_SESSION_ID}',
+            route('billing.tickets.show', ['organization' => $organization->slug]),
             'purchase:'.$attemptToken,
             [
                 'purpose' => 'ticket_purchase',

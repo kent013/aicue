@@ -1,0 +1,7 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Fixture;
+
+$enabled = \App\Support\Manual\AcceptedSourceDocumentTypes::imagesEnabled();

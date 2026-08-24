@@ -20,10 +20,10 @@ test('owner はカテゴリを追加できる (sort_order は末尾採番)', fun
     $project = Project::factory()->forOrganization($organization)->create();
 
     $response = $this->actingAs($owner)
-        ->from("/projects/{$project->id}")
-        ->post("/projects/{$project->id}/categories", ['name' => '準備作業']);
+        ->from("/organizations/{$organization->slug}/projects/{$project->id}")
+        ->post("/organizations/{$organization->slug}/projects/{$project->id}/categories", ['name' => '準備作業']);
 
-    $response->assertRedirect("/projects/{$project->id}");
+    $response->assertRedirect("/organizations/{$organization->slug}/projects/{$project->id}");
     $response->assertSessionHas('success');
     /** @var Category $category */
     $category = $project->categories()->firstOrFail();
@@ -32,7 +32,7 @@ test('owner はカテゴリを追加できる (sort_order は末尾採番)', fun
     expect($category->sort_order)->toBe(1);
 
     // 2 件目は末尾 (max+1) に採番される
-    $this->actingAs($owner)->post("/projects/{$project->id}/categories", ['name' => '仕上げ']);
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects/{$project->id}/categories", ['name' => '仕上げ']);
     /** @var Category $second */
     $second = $project->categories()->where('name', '仕上げ')->firstOrFail();
     expect($second->sort_order)->toBe(2);
@@ -42,7 +42,7 @@ test('project_id を POST すると 422 (missing rule = 保護キー)', function
     [$organization, $owner] = createOrganizationWithOwner();
     $project = Project::factory()->forOrganization($organization)->create();
 
-    $this->actingAs($owner)->post("/projects/{$project->id}/categories", [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects/{$project->id}/categories", [
         'name' => '準備作業',
         'project_id' => $project->id,
     ])->assertSessionHasErrors('project_id');
@@ -54,7 +54,7 @@ test('sort_order を POST しても無視される (rules 外 = Service 専有)'
     [$organization, $owner] = createOrganizationWithOwner();
     $project = Project::factory()->forOrganization($organization)->create();
 
-    $this->actingAs($owner)->post("/projects/{$project->id}/categories", [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects/{$project->id}/categories", [
         'name' => '準備作業',
         'sort_order' => 99,
     ])->assertSessionHas('success');
@@ -71,12 +71,12 @@ test('同一 project 内の同名カテゴリは 422 (別 project の同名は�
     Category::factory()->forProject($project)->create(['name' => '準備作業']);
 
     // 同一 project 内は Request unique で 422
-    $this->actingAs($owner)->post("/projects/{$project->id}/categories", ['name' => '準備作業'])
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects/{$project->id}/categories", ['name' => '準備作業'])
         ->assertSessionHasErrors('name');
     expect($project->categories()->count())->toBe(1);
 
     // 別 project は同名を許容する
-    $this->actingAs($owner)->post("/projects/{$other->id}/categories", ['name' => '準備作業'])
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects/{$other->id}/categories", ['name' => '準備作業'])
         ->assertSessionHas('success');
     expect($other->categories()->count())->toBe(1);
 });
@@ -88,17 +88,17 @@ test('owner はカテゴリ名を変更できる (他カテゴリと同名は 42
     Category::factory()->forProject($project)->create(['name' => '仕上げ']);
 
     // 他カテゴリと同名 → 422
-    $this->actingAs($owner)->patch("/projects/{$project->id}/categories/{$category->id}", [
+    $this->actingAs($owner)->patch("/organizations/{$organization->slug}/projects/{$project->id}/categories/{$category->id}", [
         'name' => '仕上げ',
     ])->assertSessionHasErrors('name');
 
     // 自分自身と同名 (変更なし) は許容 (ignore)
-    $this->actingAs($owner)->patch("/projects/{$project->id}/categories/{$category->id}", [
+    $this->actingAs($owner)->patch("/organizations/{$organization->slug}/projects/{$project->id}/categories/{$category->id}", [
         'name' => '準備作業',
     ])->assertSessionHas('success');
 
     // 通常の rename
-    $this->actingAs($owner)->patch("/projects/{$project->id}/categories/{$category->id}", [
+    $this->actingAs($owner)->patch("/organizations/{$organization->slug}/projects/{$project->id}/categories/{$category->id}", [
         'name' => '検品',
     ])->assertSessionHas('success');
     expect($category->fresh()?->name)->toBe('検品');
@@ -111,7 +111,7 @@ test('owner はカテゴリを削除でき、所属 manual は未分類化され
     $manual = VideoManual::factory()->forProject($project)->forCategory($category)->create();
 
     $response = $this->actingAs($owner)
-        ->delete("/projects/{$project->id}/categories/{$category->id}");
+        ->delete("/organizations/{$organization->slug}/projects/{$project->id}/categories/{$category->id}");
 
     $response->assertSessionHas('success');
     expect(Category::query()->whereKey($category->id)->exists())->toBeFalse();
@@ -122,20 +122,19 @@ test('owner はカテゴリを削除でき、所属 manual は未分類化され
 test('project_admin (編集者) はカテゴリを追加・更新・削除できる', function (): void {
     [$organization] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
     $project = Project::factory()->forOrganization($organization)->create();
     attachProjectMember($project, $member, ProjectRole::Admin);
 
-    $this->actingAs($member)->post("/projects/{$project->id}/categories", ['name' => '追加'])
+    $this->actingAs($member)->post("/organizations/{$organization->slug}/projects/{$project->id}/categories", ['name' => '追加'])
         ->assertSessionHas('success');
     /** @var Category $category */
     $category = $project->categories()->firstOrFail();
 
-    $this->actingAs($member)->patch("/projects/{$project->id}/categories/{$category->id}", ['name' => '更新'])
+    $this->actingAs($member)->patch("/organizations/{$organization->slug}/projects/{$project->id}/categories/{$category->id}", ['name' => '更新'])
         ->assertSessionHas('success');
     expect($category->fresh()?->name)->toBe('更新');
 
-    $this->actingAs($member)->delete("/projects/{$project->id}/categories/{$category->id}")
+    $this->actingAs($member)->delete("/organizations/{$organization->slug}/projects/{$project->id}/categories/{$category->id}")
         ->assertSessionHas('success');
     expect($project->categories()->count())->toBe(0);
 });
@@ -143,59 +142,58 @@ test('project_admin (編集者) はカテゴリを追加・更新・削除でき
 test('project_member (撮影者) はカテゴリを操作できない (403)', function (): void {
     [$organization] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
     $project = Project::factory()->forOrganization($organization)->create();
     attachProjectMember($project, $member, ProjectRole::Member);
     $category = Category::factory()->forProject($project)->create(['name' => '元の名前']);
 
-    $this->actingAs($member)->post("/projects/{$project->id}/categories", ['name' => '追加'])
+    $this->actingAs($member)->post("/organizations/{$organization->slug}/projects/{$project->id}/categories", ['name' => '追加'])
         ->assertForbidden();
-    $this->actingAs($member)->patch("/projects/{$project->id}/categories/{$category->id}", ['name' => '更新'])
+    $this->actingAs($member)->patch("/organizations/{$organization->slug}/projects/{$project->id}/categories/{$category->id}", ['name' => '更新'])
         ->assertForbidden();
-    $this->actingAs($member)->delete("/projects/{$project->id}/categories/{$category->id}")
+    $this->actingAs($member)->delete("/organizations/{$organization->slug}/projects/{$project->id}/categories/{$category->id}")
         ->assertForbidden();
-    $this->actingAs($member)->patch("/projects/{$project->id}/categories/reorder", ['order' => [$category->id]])
+    $this->actingAs($member)->patch("/organizations/{$organization->slug}/projects/{$project->id}/categories/reorder", ['order' => [$category->id]])
         ->assertForbidden();
 
     expect($category->fresh()?->name)->toBe('元の名前');
     expect($project->categories()->count())->toBe(1);
 
     // 撮影者もプロジェクト詳細 (一覧内包) は閲覧できる
-    $this->actingAs($member)->get("/projects/{$project->id}")->assertOk();
+    $this->actingAs($member)->get("/organizations/{$organization->slug}/projects/{$project->id}")->assertOk();
 });
 
 test('cross-org の project 配下カテゴリ操作は 404 (存在を漏らさない)', function (): void {
-    [, $ownerA] = createOrganizationWithOwner('組織A');
+    [$organization, $ownerA] = createOrganizationWithOwner('組織A');
     [$orgB] = createOrganizationWithOwner('組織B');
     $projectB = Project::factory()->forOrganization($orgB)->create();
     $categoryB = Category::factory()->forProject($projectB)->create(['name' => '元の名前']);
 
-    $this->actingAs($ownerA)->post("/projects/{$projectB->id}/categories", ['name' => '追加'])
+    $this->actingAs($ownerA)->post("/organizations/{$organization->slug}/projects/{$projectB->id}/categories", ['name' => '追加'])
         ->assertNotFound();
-    $this->actingAs($ownerA)->patch("/projects/{$projectB->id}/categories/{$categoryB->id}", ['name' => '更新'])
+    $this->actingAs($ownerA)->patch("/organizations/{$organization->slug}/projects/{$projectB->id}/categories/{$categoryB->id}", ['name' => '更新'])
         ->assertNotFound();
-    $this->actingAs($ownerA)->delete("/projects/{$projectB->id}/categories/{$categoryB->id}")
+    $this->actingAs($ownerA)->delete("/organizations/{$organization->slug}/projects/{$projectB->id}/categories/{$categoryB->id}")
         ->assertNotFound();
 
     expect($categoryB->fresh()?->name)->toBe('元の名前');
 });
 
 test('cross-org project へのカテゴリ name 探索は unique 検証より前に 404 (存在オラクル防止)', function (): void {
-    [, $ownerA] = createOrganizationWithOwner('組織A');
+    [$organization, $ownerA] = createOrganizationWithOwner('組織A');
     [$orgB] = createOrganizationWithOwner('組織B');
     $projectB = Project::factory()->forOrganization($orgB)->create();
     $categoryB = Category::factory()->forProject($projectB)->create(['name' => '秘密カテゴリ']);
 
     // 衝突する name を送っても 422 (unique) ではなく 404 — 422/404 の応答差分で
-    // 他組織プロジェクトのカテゴリ名を辞書探索できないこと (project.in-current-org middleware が
+    // 他組織プロジェクトのカテゴリ名を辞書探索できないこと (project.in-route-org middleware が
     // FormRequest の DB ルールより前に cross-org を 404 に落とす)
     $this->actingAs($ownerA)
-        ->from('/projects')
-        ->post("/projects/{$projectB->id}/categories", ['name' => '秘密カテゴリ'])
+        ->from("/organizations/{$organization->slug}/projects")
+        ->post("/organizations/{$organization->slug}/projects/{$projectB->id}/categories", ['name' => '秘密カテゴリ'])
         ->assertNotFound();
     $this->actingAs($ownerA)
-        ->from('/projects')
-        ->patch("/projects/{$projectB->id}/categories/{$categoryB->id}", ['name' => '秘密カテゴリ'])
+        ->from("/organizations/{$organization->slug}/projects")
+        ->patch("/organizations/{$organization->slug}/projects/{$projectB->id}/categories/{$categoryB->id}", ['name' => '秘密カテゴリ'])
         ->assertNotFound();
 
     expect($projectB->categories()->count())->toBe(1);
@@ -208,9 +206,9 @@ test('cross-project の {category} は 404 (scopeBindings)', function (): void {
     $categoryB = Category::factory()->forProject($projectB)->create(['name' => '元の名前']);
 
     // {category} が {project} に属さない → routing 層で 404 (認可より前)
-    $this->actingAs($owner)->patch("/projects/{$projectA->id}/categories/{$categoryB->id}", ['name' => '更新'])
+    $this->actingAs($owner)->patch("/organizations/{$organization->slug}/projects/{$projectA->id}/categories/{$categoryB->id}", ['name' => '更新'])
         ->assertNotFound();
-    $this->actingAs($owner)->delete("/projects/{$projectA->id}/categories/{$categoryB->id}")
+    $this->actingAs($owner)->delete("/organizations/{$organization->slug}/projects/{$projectA->id}/categories/{$categoryB->id}")
         ->assertNotFound();
 
     expect($categoryB->fresh()?->name)->toBe('元の名前');
@@ -221,9 +219,9 @@ test('name は必須・50 文字以内 (バリデーション)', function (): vo
     [$organization, $owner] = createOrganizationWithOwner();
     $project = Project::factory()->forOrganization($organization)->create();
 
-    $this->actingAs($owner)->post("/projects/{$project->id}/categories", ['name' => ''])
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects/{$project->id}/categories", ['name' => ''])
         ->assertSessionHasErrors('name');
-    $this->actingAs($owner)->post("/projects/{$project->id}/categories", [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects/{$project->id}/categories", [
         'name' => str_repeat('あ', 51),
     ])->assertSessionHasErrors('name');
 });

@@ -6,6 +6,7 @@
     import FormField from "@/components/molecules/FormField.svelte";
     import Modal from "@/components/organisms/Modal.svelte";
     import type { CategoryOption } from "@/types/manual";
+    import { currentOrgUrl } from "@/lib/org-url";
 
     /**
      * マニュアル複製 (別名保存) ダイアログ。保存済みシナリオを新タイトル・カテゴリで複製する。
@@ -70,7 +71,7 @@
                 // category は Select 固定値 (option value=id 文字列 or "") のため Number 変換は安全 ('' のみ null)
                 category: data.category === "" ? null : Number(data.category),
             }))
-            .post(`/projects/${projectId}/manuals/${manualId}/duplicate`, {
+            .post(currentOrgUrl(`/projects/${projectId}/manuals/${manualId}/duplicate`), {
                 // 成功時は新 manual へ redirect するが、遷移先も同一 Manuals/Show のため
                 // 親の open state が生存しモーダルが残る。ここで明示的に閉じる (F-1-01)。
                 onSuccess: () => {

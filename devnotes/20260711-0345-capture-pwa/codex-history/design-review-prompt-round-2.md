@@ -1037,7 +1037,7 @@ private const ADOPTED_TAKE_ID_ALLOWED = [
 
 - TypeScript 型定義: `types/capture.ts`（施策10 で対保守）
 - API Resource/DTO: 上記 DTO 新設
-- テストファイル: `tests/Architecture/ProjectRouteCurrentOrgGuardTest.php` は「web の {project} route は project.in-current-org 必須」を deny-by-default 検証 — 新 group に middleware を付けることで自動 green（付け漏れは fail）
+- テストファイル: `tests/Architecture/ProjectRouteCurrentOrgGuardTest.php` は「web の {project} route は project.in-route-org 必須」を deny-by-default 検証 — 新 group に middleware を付けることで自動 green（付け漏れは fail）
 
 ### 現行コード
 
@@ -1060,7 +1060,7 @@ private const ADOPTED_TAKE_ID_ALLOWED = [
 | 挙動担保は各エンドポイントの cross-org/project/manual/cut 404 Feature テスト
 | (relation 推論名が変わった場合もこれらが fail して検出する)。
 */
-Route::middleware(['require-active-subscription', 'project.in-current-org'])
+Route::middleware(['require-active-subscription', 'project.in-route-org'])
     ->prefix('app')->as('capture.')->group(function (): void {
         // PWA エントリ (manifest start_url)。current org の先頭 project へ redirect
         Route::get('/', [CaptureManualController::class, 'home'])->name('home');

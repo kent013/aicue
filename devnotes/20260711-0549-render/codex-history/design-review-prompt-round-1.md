@@ -1440,8 +1440,8 @@ AI-CUE の使命（North Star）は「専門知識ゼロの現場作業者でも
   `projects.manuals.render` / `projects.manuals.preview` /
   `projects.manuals.render-jobs.show` / `projects.manuals.render-jobs.playback` /
   `projects.manuals.download`（Round 2 反映: 件数でなく名前で固定し登録漏れを防ぐ）。
-  cross-org 404 は既存 `EnsureProjectBelongsToCurrentOrganization`
-  （`project.in-current-org`）+ inline guard で担保
+  cross-org 404 は既存 `EnsureProjectBelongsToRouteOrganization`
+  （`project.in-route-org`）+ inline guard で担保
 - **ポーリング URI は §10.3 の `GET .../jobs/{job}` から `.../render-jobs/{renderJob}` へ変更**:
   既存 `jobs/{analysisJob}` は `VideoManual::analysisJobs()` に bind 済みで、render_jobs は
   別テーブルのため同一 param では scopeBindings の relation 推論（= IDOR 防御の第一層）が
@@ -2569,7 +2569,7 @@ final class ScenarioWritePathScanner
                 ->name('projects.manuals.update');
             // シナリオ document 一括保存 (doc/09 §9.4 / doc/10 §10.3)。同一オリジン XHR (JSON 応答)。
             // {manual} ∈ {project} は scopeBindings、{project} ∈ current org は
-            // project.in-current-org middleware + controller inline guard の 2 層 (既存 group が担保)
+            // project.in-route-org middleware + controller inline guard の 2 層 (既存 group が担保)
             Route::put('/projects/{project}/manuals/{manual}/scenario', [ManualScenarioController::class, 'update'])
                 ->name('projects.manuals.scenario.update');
             // SOP アップロード (追記型 immutable。差し替え = 新規行。doc/10 §10.3)

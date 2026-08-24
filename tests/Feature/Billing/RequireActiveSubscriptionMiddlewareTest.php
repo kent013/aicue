@@ -36,16 +36,16 @@ const BILLING_BLOCKED_MESSAGE = 'サブスクリプションのお支払いが�
 // ── 再現テスト (F-07。実装前に fail を確認する) ──
 
 test('Free (未契約) 組織は業務 route に到達できる (F-07 再現)', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->get('/projects')->assertOk();
-    $this->actingAs($owner)->get('/projects/create')->assertOk();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects")->assertOk();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/create")->assertOk();
 });
 
 test('Free (未契約) 組織はプロジェクトを作成できる (F-07 再現)', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->post('/projects', ['name' => 'Free プロジェクト'])
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/projects", ['name' => 'Free プロジェクト'])
         ->assertRedirect(); // projects.show へ (billing.index でないこと)
     expect(Project::query()->where('name', 'Free プロジェクト')->exists())->toBeTrue();
 });
@@ -54,8 +54,8 @@ test('Free (未契約) 組織は撮影 PWA (/app) に到達できる (F-07 再�
     [$organization, $owner] = createOrganizationWithOwner();
     $project = Project::factory()->forOrganization($organization)->create();
 
-    $this->actingAs($owner)->get('/app')
-        ->assertRedirect(route('capture.manuals.index', ['project' => $project]));
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app")
+        ->assertRedirect(route('capture.manuals.index', ['organization' => $organization->slug, 'project' => $project]));
 });
 
 // ── 有償プラン契約状態の支払い健全性 gate (fail-closed は plan_code 非 null に限定) ──
@@ -70,14 +70,14 @@ test('有償契約 + active/trialing は業務 route に到達できる', functi
     [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     contractPaidPlan($organization, status: $status);
 
-    $this->actingAs($owner)->get('/projects')->assertOk();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects")->assertOk();
 })->with(['active', 'trialing']);
 
 test('有償契約 + past_due は業務 route に到達できる (cohort D。dunning 中も利用継続)', function (): void {
     [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     contractPaidPlan($organization, status: 'past_due');
 
-    $this->actingAs($owner)->get('/projects')->assertOk();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects")->assertOk();
 });
 
 test('past_due の猶予中は業務 route に到達できる (cohort D は猶予の期限内で維持)', function (): void {
@@ -86,7 +86,7 @@ test('past_due の猶予中は業務 route に到達できる (cohort D は猶�
     $subscription = contractPaidPlan($organization, status: 'past_due');
     $subscription->forceFill(['past_due_since' => CarbonImmutable::now()->subDays(13)])->save();
 
-    $this->actingAs($owner)->get('/projects')->assertOk();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects")->assertOk();
 });
 
 test('past_due の猶予切れは遮断される (AG-035 (5))', function (): void {
@@ -95,8 +95,8 @@ test('past_due の猶予切れは遮断される (AG-035 (5))', function (): voi
     $subscription = contractPaidPlan($organization, status: 'past_due');
     $subscription->forceFill(['past_due_since' => CarbonImmutable::now()->subDays(15)])->save();
 
-    $this->actingAs($owner)->get('/projects')
-        ->assertRedirect(route('onboarding.checkout'))
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects")
+        ->assertRedirect(route('onboarding.checkout', ['organization' => $organization->slug]))
         ->assertSessionMissing('error');
 });
 
@@ -106,7 +106,7 @@ test('past_due の猶予切れの JSON は 402 + 既存文言 (遮断理由の�
     $subscription = contractPaidPlan($organization, status: 'past_due');
     $subscription->forceFill(['past_due_since' => CarbonImmutable::now()->subDays(15)])->save();
 
-    $this->actingAs($owner)->getJson('/projects')
+    $this->actingAs($owner)->getJson("/organizations/{$organization->slug}/projects")
         ->assertStatus(402)
         ->assertJsonPath('message', BILLING_BLOCKED_MESSAGE);
 });
@@ -118,8 +118,8 @@ test('有償契約 + 支払い不健全は billing へ redirect + 理由 flash',
     // P4: 遮断先は billing.index から onboarding.checkout へ (manageBilling 保持者)。
     // middleware は error flash を積まない (遮断理由は着地ページが持つ = aigenba 方式)。
     // **遮断されるという結論自体は P4 前後で不変** (DoD (3))。
-    $this->actingAs($owner)->get('/projects')
-        ->assertRedirect(route('onboarding.checkout'))
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects")
+        ->assertRedirect(route('onboarding.checkout', ['organization' => $organization->slug]))
         ->assertSessionMissing('error');
 })->with(['canceled', 'incomplete', 'unpaid', 'paused']);
 
@@ -131,8 +131,8 @@ test('有償契約 + trial 終了 + PM 無しは遮断される (cohort C / E)',
         'has_payment_method' => false,
     ])->save();
 
-    $this->actingAs($owner)->get('/projects')
-        ->assertRedirect(route('onboarding.checkout'))
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects")
+        ->assertRedirect(route('onboarding.checkout', ['organization' => $organization->slug]))
         ->assertSessionMissing('error');
 })->with(['active', 'trialing', 'past_due']);
 
@@ -140,8 +140,8 @@ test('有償契約 + subscription 行なしは fail-closed (webhook 順序逆転
     [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     $organization->forceFill(['plan_code' => 'standard'])->save(); // 行はあえて作らない
 
-    $this->actingAs($owner)->get('/projects')
-        ->assertRedirect(route('onboarding.checkout'));
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects")
+        ->assertRedirect(route('onboarding.checkout', ['organization' => $organization->slug]));
 });
 
 test('有償契約 + 支払い不健全の JSON は 402 + message 固定 (flash と同一文言。非 XHR の Accept: json も含む)', function (): void {
@@ -150,7 +150,7 @@ test('有償契約 + 支払い不健全の JSON は 402 + message 固定 (flash 
 
     // getJson は Accept: application/json のみ付与 (X-Requested-With なし) =
     // 「JSON を要求する非 XHR クライアント」のケースを踏む (wantsJson 経由で 402 になること)
-    $this->actingAs($owner)->getJson('/projects')
+    $this->actingAs($owner)->getJson("/organizations/{$organization->slug}/projects")
         ->assertStatus(402)
         ->assertJsonPath('message', BILLING_BLOCKED_MESSAGE);
 });
@@ -159,7 +159,7 @@ test('billing ページは遮断対象の組織でも到達できる (構造的 
     [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     contractPaidPlan($organization, status: 'canceled');
 
-    $this->actingAs($owner)->get('/billing')->assertOk();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/billing")->assertOk();
 });
 
 // ── 依存するデータモデル契約の固定 (plan_code 不変条件の前提) ──
@@ -232,8 +232,8 @@ test('BillingAccess: plan_code null は許可の理由にならない (P4 で移
 
 test('route bound organization が有償不健全なら redirect される (current org より route 優先)', function (): void {
     // current org は Free (許可)、route の org は有償不健全 (両方 owner が同一メンバー)
-    [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
-    $gated = Organization::factory()->create(['slug' => 'gated-org']);
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    $gated = Organization::factory()->withSlug('gated-org')->create();
     $gated->users()->attach($owner);
     $owner->addRole(OrganizationRole::Member->value, $gated->laratrust_team_id);
     contractPaidPlan($gated, status: 'canceled'); // cohort G (past_due は cohort D で許可へ反転済み)
@@ -244,7 +244,7 @@ test('route bound organization が有償不健全なら redirect される (curr
     // route の org では owner は Member ロール = manageBilling を持たないため、
     // P4 の分岐は billing-required 側へ倒れる (契約できる人へ連絡を促す着地ページ)。
     $this->actingAs($owner)->get('/__gate-test/gated-org')
-        ->assertRedirect(route('onboarding.billing-required'));
+        ->assertRedirect(route('onboarding.billing-required', ['organization' => $gated->slug]));
 });
 
 test('非メンバーが binder を通過しても middleware が 404 に倒す (binder 回帰の defense-in-depth)', function (): void {

@@ -149,7 +149,7 @@ doc/04 §PC サイト機能仕様が定める **「テイクのプレビュー /
 - 再利用: `capture.takes.upload-url` / `capture.takes.store` / `capture.takes.adopt` /
   `capture.takes.destroy` / `capture.takes.playback` (XHR / video src としてそのまま叩く)。
 - **再利用の根拠**:
-  - 両 group の middleware は**完全に同一** (`['require-active-subscription', 'project.in-current-org']`)。
+  - 両 group の middleware は**完全に同一** (`['require-active-subscription', 'project.in-route-org']`)。
     課金ゲートの内側という要件も自動的に満たす。
   - `TakePolicy` は全 ability を `ProjectPolicy::capture()` に委譲しており、
     編集者 (org owner/admin・project_admin) は既に通る。**認可の変更が 1 行も要らない。**

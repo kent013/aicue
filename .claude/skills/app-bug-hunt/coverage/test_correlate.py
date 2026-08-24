@@ -118,7 +118,7 @@ class LoadOperationsTest(unittest.TestCase):
         path = self._write(
             "| method | route | api route name | CLI コマンド | story | 区分 |\n"
             "|---|---|---|---|---|---|\n"
-            "| POST | /projects | `api.v1.projects.store` | `project:create` | S8 | ◎ |\n"
+            "| POST | /api/v1/projects | `api.v1.projects.store` | `project:create` | S8 | ◎ |\n"
             "| DELETE | /me/session | `api.v1.me.session.revoke` | `logout` | S8 | ○ |\n"
         )
         ops = C.load_operations(path)
@@ -137,7 +137,7 @@ class LoadOperationsTest(unittest.TestCase):
             "\n## API\n\n"
             "| method | route | api route name | CLI コマンド | story | 区分 |\n"
             "|---|---|---|---|---|---|\n"
-            "| POST | /projects | `api.v1.projects.store` | `project:create` | S8 | ◎ |\n"
+            "| POST | /api/v1/projects | `api.v1.projects.store` | `project:create` | S8 | ◎ |\n"
         )
         ops = C.load_operations(path)
         self.assertIn("login.store", ops)
@@ -368,6 +368,38 @@ class CorrelateTest(unittest.TestCase):
             self.assertTrue(r.via_capability)
             self.assertIn("AUTH-03", r.capability_tags)
 
+    def test_複数値行は両方のstoryへブロードキャストされる(self):
+        operations = dict(self.operations)
+        operations["organizations.store"] = {
+            "operation": "organizations", "story": "S1 S4", "kubun": "◎",
+        }
+        findings = [
+            {"finding_id": "F-1", "run_id": self.run_id, "story_id": "S4",
+             "capability_tag": "ORG-04", "species_key": "x", "severity": "high"},
+        ]
+        corr = C.correlate(self.routes, operations, self._executed([]), findings, self.tb,
+                           run_id=self.run_id)
+        row = next(r for r in corr.rows if r.route_name == "organizations.store")
+        self.assertEqual(1, row.finding_count)
+        self.assertTrue(row.via_capability)
+        # 単一値の S4 機構にも同じ finding が届く (従来の挙動が変わっていない)。
+        transfer = next(r for r in corr.rows if r.route_name == "organizations.transfer")
+        self.assertEqual(1, transfer.finding_count)
+        # S1 の finding も複数値行へ届く。
+        s1 = [{"finding_id": "F-2", "run_id": self.run_id, "story_id": "S1",
+               "capability_tag": "AUTH-03", "species_key": "y", "severity": "low"}]
+        corr = C.correlate(self.routes, operations, self._executed([]), s1, self.tb,
+                           run_id=self.run_id)
+        row = next(r for r in corr.rows if r.route_name == "organizations.store")
+        self.assertEqual(1, row.finding_count)
+
+    def test_契約外の割当セルを持つ目録は走行を止める(self):
+        operations = dict(self.operations)
+        operations["login.store"] = {"operation": "login", "story": "S1  S4", "kubun": "◎"}
+        with self.assertRaises(C.FatalError):
+            C.correlate(self.routes, operations, self._executed([]), [], self.tb,
+                        run_id=self.run_id)
+
     def test_cross_unexec_findingful(self):
         # 未実行 ∧ finding≥2 の積集合
         findings = [
@@ -547,6 +579,43 @@ class MainTest(unittest.TestCase):
         ])
         self.assertEqual(rc, 0)
 
+    def test_main_contract_violating_story_cell_returns_3(self):
+        """契約外の割当セルを持つ目録で main() が 3 を返し worklist を出さないこと。
+
+        ★ `parse_story_cell()` / `correlate()` が FatalError を投げることだけを見ても、
+          **main() の捕捉と終了コードへの写像**は裏取りできない (catch を壊しても緑になる)。
+        """
+        import contextlib
+        import io
+
+        # 前後空白だけは表ローダが strip するのでここには到達しない
+        # (その形は parse_story_cell() の単体検査が押さえる)。
+        for cell in ("S1  S4", "S1,S4", "S0", "S4 S1", "S1 S1"):
+            with self.subTest(cell=cell):
+                self.ops_path.write_text(
+                    "| method | route | name | story | 区分 |\n"
+                    "|---|---|---|---|---|\n"
+                    f"| POST | register | register.store | {cell} | ◎ |\n",
+                    encoding="utf-8",
+                )
+                out, err = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    rc = C.main(self._args())
+                self.assertEqual(C.EXIT_INPUT_UNAVAILABLE, rc, out.getvalue() + err.getvalue())
+                self.assertIn("契約に反している", err.getvalue())
+                # worklist を 1 行も出さない。
+                self.assertEqual("", out.getvalue())
+
+    def test_main_multi_value_story_cell_is_accepted(self):
+        """正の対照: 契約どおりの複数値セルは 0 で通ること (値域を狭めすぎていない)。"""
+        self.ops_path.write_text(
+            "| method | route | name | story | 区分 |\n"
+            "|---|---|---|---|---|\n"
+            "| POST | register | register.store | S1 S4 | ◎ |\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(C.EXIT_OK, C.main(self._args(["--json"])))
+
     # ------------------------------------------------------------------ #
     # fail-closed 契約: 主入力が揃わない走行は成功にしない (終了コード 3)
     # ------------------------------------------------------------------ #
@@ -696,6 +765,40 @@ class RenderWorklistTest(unittest.TestCase):
         out = C.render_worklist(corr)
         self.assertNotIn("executed.json 未指定", out)
         self.assertNotIn("未実行 candidate", out)
+
+
+class StoryCellParseTest(unittest.TestCase):
+    """割当セルの分解 (目録が複数値セルを書けるようになったことへの追従)。
+
+    実在 (そのカードが在るか) は見ない。目録は生成物であり、割当列は実在するカードの
+    前付けからしか作られない (生成器側の検査が担う)。
+    """
+
+    def test_単一値は従来どおり(self):
+        self.assertEqual(["S3"], C.parse_story_cell("S3", "r"))
+
+    def test_複数値は全部に索引される(self):
+        self.assertEqual(["S3", "S7"], C.parse_story_cell("S3 S7", "r"))
+
+    def test_対象外はどのstoryにも索引されない(self):
+        self.assertEqual([], C.parse_story_cell("-", "r"))
+
+    def test_実在しないカードでも通す(self):
+        # 責務外 (生成器側が出さないことを test_bug_hunt_inventory.py が固定する)。
+        self.assertEqual(["S8"], C.parse_story_cell("S8", "r"))
+
+    def test_契約外のセルは致命(self):
+        # **寛容に正規化しない**。str.split() は前後空白も連続空白も黙って吸収する。
+        for cell in (" S3", "S3 ", "S3  S7", "", "SX", "S0", "S03", "s3", "S3,S7", "S3 S7 "):
+            with self.subTest(cell=cell):
+                with self.assertRaises(C.FatalError):
+                    C.parse_story_cell(cell, "r")
+
+    def test_降順と重複は致命(self):
+        for cell in ("S7 S3", "S3 S3"):
+            with self.subTest(cell=cell):
+                with self.assertRaises(C.FatalError):
+                    C.parse_story_cell(cell, "r")
 
 
 if __name__ == "__main__":

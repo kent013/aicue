@@ -13,6 +13,7 @@ use App\Jobs\Capture\GenerateTakeThumbnailJob;
 use App\Jobs\Manual\DeleteRenderOutputsJob;
 use App\Jobs\Manual\RunManualAnalysis;
 use App\Jobs\Manual\RunManualRender;
+use App\Mail\EmailPromotionMail;
 use App\Mail\InquiryAcknowledgementMail;
 use App\Mail\InquiryReceivedMail;
 use App\Notifications\Account\AccountDeletionRequestedNotification;
@@ -82,6 +83,7 @@ const QUEUED_JOB_LEASE_INVENTORY = [
     DeleteRenderOutputsJob::class => 'database-media',
     RunManualAnalysis::class => 'database-analysis',
     RunManualRender::class => 'database-render',
+    EmailPromotionMail::class => null,
     InquiryAcknowledgementMail::class => null,
     InquiryReceivedMail::class => null,
     AutoRechargeActionRequiredNotification::class => null,

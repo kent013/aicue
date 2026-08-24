@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Projects;
 
 use App\Enums\ProjectRole;
-use App\Http\Concerns\ResolvesCurrentOrganization;
+use App\Http\Concerns\ResolvesRouteOrganization;
 use App\Http\Controllers\Controller;
+use App\Models\Organization;
 use App\Models\Project;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
@@ -28,7 +29,7 @@ use Webmozart\Assert\Assert;
  */
 class ProjectMemberController extends Controller
 {
-    use ResolvesCurrentOrganization;
+    use ResolvesRouteOrganization;
 
     /**
      * 追加対象が現在組織のメンバーとして解決できないときの文言。
@@ -38,9 +39,8 @@ class ProjectMemberController extends Controller
     private const NOT_ORGANIZATION_MEMBER_MESSAGE = '追加できるのは組織のメンバーだけです。';
 
     /** メンバー追加 (組織メンバーのみ。既存メンバーはロール更新になる) */
-    public function store(Request $request, Project $project): RedirectResponse
+    public function store(Request $request, Organization $organization, Project $project): RedirectResponse
     {
-        $organization = $this->resolveCurrentOrganization($request);
         // 層 2: URL 整合 guard (認可より前に 404)
         $this->resolveOrganizationProject($organization, $project);
         // 層 3: 認可。payload に触れる前に通す (順序は PayloadIdExistenceOracleTest が固定)
@@ -85,9 +85,8 @@ class ProjectMemberController extends Controller
      * 両者を同一の応答に落とす。binding 段で解決されない = 不在も実在も同じ経路を辿る。
      * 型制約 (数値・18 桁上限) は RouteBindingTypes の pattern が担保する。
      */
-    public function destroy(Request $request, Project $project, string $user): RedirectResponse
+    public function destroy(Request $request, Organization $organization, Project $project, string $user): RedirectResponse
     {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404 (cross-tenant の {user} の存在を漏らさない)
         $this->resolveOrganizationProject($organization, $project);
 

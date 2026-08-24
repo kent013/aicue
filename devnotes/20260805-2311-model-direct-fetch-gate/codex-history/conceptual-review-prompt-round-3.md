@@ -406,7 +406,7 @@ relation/org-scoped 解決の一般的強制、到達可能性、`whereRaw` 等�
    (validation rule の検査は route/FormRequest 側の話)。§4-6 のとおり本 gate の主張範囲外。
 3. **`NestedRouteIdorDefenseTest` / `NestedRouteDefenseInventory` への変更**
    — 正典 t1 の total inventory 部は aicue が origin 側であり既に要件を満たしている。触らない。
-4. **cross-org 存在オラクル封じ middleware (aicue:D4 / `EnsureProjectBelongsToCurrentOrganization`)**
+4. **cross-org 存在オラクル封じ middleware (aicue:D4 / `EnsureProjectBelongsToRouteOrganization`)**
    — t1 の構成要素だが aicue には既に実装済み (`ProjectRouteCurrentOrgGuardTest` が固定)。追従不要。
 5. **`app/Filament/**` の Filament リソース** — 母集団には入るが、admin パネルは
    `/admin` 配下で別の認可体系。候補が出たら通常どおり分類する (特別扱いしない = 除外もしない)。

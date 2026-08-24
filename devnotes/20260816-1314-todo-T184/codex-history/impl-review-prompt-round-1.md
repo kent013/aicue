@@ -295,7 +295,7 @@ use Inertia\Response;
  * テイク選択・採用画面 (doc/04)。編集者がカットごとのテイクを見て採用を確定する面。
  *
  * nested route の URL 整合は 2 層 (認可より前に 404):
- * 1. {project} ∈ current org (project.in-current-org middleware + resolveOrganizationProject)
+ * 1. {project} ∈ current org (project.in-route-org middleware + resolveOrganizationProject)
  * 2. {manual} ∈ {project}, {cut} ∈ {manual} (Route::scopeBindings())
  *
  * 本 controller は**読み取りのみ**である。採用・削除・アップロード・再生は
@@ -1752,7 +1752,7 @@ index 0000000..b4ffd12
 + * テイク選択・採用画面 (doc/04)。編集者がカットごとのテイクを見て採用を確定する面。
 + *
 + * nested route の URL 整合は 2 層 (認可より前に 404):
-+ * 1. {project} ∈ current org (project.in-current-org middleware + resolveOrganizationProject)
++ * 1. {project} ∈ current org (project.in-route-org middleware + resolveOrganizationProject)
 + * 2. {manual} ∈ {project}, {cut} ∈ {manual} (Route::scopeBindings())
 + *
 + * 本 controller は**読み取りのみ**である。採用・削除・アップロード・再生は
@@ -2950,7 +2950,7 @@ index 7bb4477..edd343d 100644
 +    | 認可は意図的に非対称で、画面は編集者限定 (撮影者 403) / takes.* は撮影者にも開く
 +    | (doc/10 §10.5)。固定は tests/Feature/Manual/PcTakeOperationTest.php。
      */
-     Route::middleware(['require-active-subscription', 'project.in-current-org'])
+     Route::middleware(['require-active-subscription', 'project.in-route-org'])
          ->prefix('app')->as('capture.')->group(function (): void {
 diff --git a/tests/Feature/Manual/PcTakeOperationTest.php b/tests/Feature/Manual/PcTakeOperationTest.php
 new file mode 100644

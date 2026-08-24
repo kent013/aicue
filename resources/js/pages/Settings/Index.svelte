@@ -61,30 +61,6 @@
         accountDeletionState?.graceDays ?? props.accountDeletionGraceDays ?? null,
     );
 
-    /** 別組織へ切り替える導線の失敗表示 (押したのに何も起きない = 詰みを作らない) */
-    let switchError = $state<string | null>(null);
-
-    /**
-     * 別組織の課金導線。/billing は現在組織スコープ (route parameter を持たない) のため、
-     * 先に組織を切り替える。**成功時のみ** /billing へ進む (失敗時はその場に留まる)。
-     * 所属・存在の検査はサーバが権威 (非所属は 404 = 存在秘匿)。
-     */
-    function switchThenBilling(slug: string): void {
-        switchError = null;
-        router.post(
-            `/organizations/${slug}/switch`,
-            {},
-            {
-                preserveScroll: true,
-                onSuccess: () => router.visit("/billing"),
-                onError: () => {
-                    switchError =
-                        "組織を切り替えられませんでした。時間をおいて再度お試しください。";
-                },
-            },
-        );
-    }
-
     /**
      * prop 欠落 (= 状態不明) を false に倒すと、password 設定済みユーザーに初回設定フォームを出す
      * = 本批で潰している「状態不明を誤った UI に倒す」の再演になる。3 値で扱う。
@@ -421,28 +397,19 @@
                                                     オーナーを移譲する
                                                 </TextLink>
                                             {:else if action === "open_billing"}
-                                                <TextLink href="/billing">
+                                                <!-- 組織文脈は URL だけで決まる (AG-037) ので、
+                                                     どの組織の課金画面へも直接行ける -->
+                                                <TextLink
+                                                    href={`/organizations/${blocker.slug}/billing`}
+                                                >
                                                     サブスクリプションを解約する
                                                 </TextLink>
-                                            {:else if action === "switch_organization_then_open_billing"}
-                                                <Button
-                                                    variant="ghost"
-                                                    onclick={() => switchThenBilling(blocker.slug)}
-                                                    testId="switch-then-billing-button"
-                                                >
-                                                    この組織に切り替えて解約する
-                                                </Button>
                                             {/if}
                                         {/each}
                                     </div>
                                 </li>
                             {/each}
                         </ul>
-                        {#if switchError}
-                            <p class="mt-2 text-caption text-danger" data-testid="switch-organization-error">
-                                {switchError}
-                            </p>
-                        {/if}
                     </Alert>
                 {/if}
                 {#if accountError}

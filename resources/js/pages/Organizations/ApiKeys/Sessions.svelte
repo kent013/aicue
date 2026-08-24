@@ -15,6 +15,7 @@
     import { withRecentAuth, type RecentAuthStatus } from "@/lib/recent-auth";
     import type { SharedProps } from "@/lib/shared-props";
     import type { OAuthSession } from "@/types/OAuthSession";
+    import { orgUrl } from "@/lib/org-url";
 
     interface Props {
         organization: { id: number; name: string; slug: string };
@@ -27,12 +28,11 @@
     const shared = $derived(page.props as unknown as SharedProps);
     const appName = $derived(shared.appName ?? "");
 
-    const base = $derived(`/organizations/${organization.slug}`);
     const tabs = $derived([
-        { label: "API キー", href: `${base}/api-keys`, active: false, testId: "tab-api-keys" },
+        { label: "API キー", href: orgUrl(organization.slug, "/api-keys"), active: false, testId: "tab-api-keys" },
         {
             label: "接続セッション",
-            href: `${base}/api-keys/sessions`,
+            href: orgUrl(organization.slug, "/api-keys/sessions"),
             active: true,
             testId: "tab-sessions",
         },
@@ -79,7 +79,7 @@
         if (revokeTarget === null) return;
         const id = revokeTarget.id;
         guardWithRecentAuth(() => {
-            router.delete(`${base}/api-keys/sessions/${id}`, {
+            router.delete(orgUrl(organization.slug, `/api-keys/sessions/${id}`), {
                 preserveScroll: true,
                 onStart: () => {
                     revoking = true;

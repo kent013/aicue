@@ -1,0 +1,13 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Other {
+    use App\Other\Thing as AcceptedSourceDocumentTypes;
+
+    $a = AcceptedSourceDocumentTypes::imagesEnabled();
+}
+
+namespace App\Support\Manual {
+    $b = AcceptedSourceDocumentTypes::imagesEnabled();
+}

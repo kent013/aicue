@@ -152,7 +152,7 @@ use Webmozart\Assert\Assert;
  * 再解決して associate する (二段構え)。
  *
  * 認可は Controller の Gate::authorize('duplicate', $manual) に一元化するため authorize() は true。
- * ただし {project} ∈ current org は route の project.in-current-org middleware が
+ * ただし {project} ∈ current org は route の project.in-route-org middleware が
  * FormRequest 検証より前に 404 に落とすため、category exists の project スコープは
  * cross-org/cross-project の存在差を漏らさない (存在オラクル防御)。
  */
@@ -669,7 +669,7 @@ public function store(StoreVideoManualRequest $request, Project $project, VideoM
 step を type=Step で sort_order 順、point を parent_cut_id でグルーピングし手順N/急所N-M ラベル付与。
 
 ### 既存 route（scopeBindings group 内、抜粋）
-`projects.manuals.show/edit/update/scenario.update/source-documents.store/analyze/render/.../destroy` はすべて scopeBindings group 内。group 外側に `project.in-current-org` middleware + `require-active-subscription`。
+`projects.manuals.show/edit/update/scenario.update/source-documents.store/analyze/render/.../destroy` はすべて scopeBindings group 内。group 外側に `project.in-route-org` middleware + `require-active-subscription`。
 
 ### DuplicateVideoManualRequest の見本 = StoreVideoManualRequest
 `title=[required,string,max:200]`、`category=[nullable,integer,Rule::exists('categories','id')->where('project_id',$projectId)]`、`+ protectedKeyMissingRules()`（ProhibitsProtectedKeys）。authorize()=true。

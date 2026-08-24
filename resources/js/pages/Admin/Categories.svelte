@@ -14,6 +14,7 @@
     import PageContent from "@/components/templates/PageContent.svelte";
     import type { SharedProps } from "@/lib/shared-props";
     import type { CategoryOption } from "@/types/manual";
+    import { currentOrgUrl } from "@/lib/org-url";
 
     /**
      * 管理メニュー > カテゴリ管理 (doc/04 §4.2。モック PC_管理メニュー 10〜17)。
@@ -37,7 +38,7 @@
     function submitAddCategory(event: SubmitEvent): void {
         event.preventDefault();
         if (addCategoryForm.processing) return; // 二重送信の冪等ガード
-        addCategoryForm.post(`/projects/${project.id}/categories`, {
+        addCategoryForm.post(currentOrgUrl(`/projects/${project.id}/categories`), {
             preserveScroll: true,
             onSuccess: () => {
                 addCategoryForm.reset();
@@ -61,7 +62,7 @@
         event.preventDefault();
         if (editCategoryForm.processing) return; // 二重送信の冪等ガード
         if (editCategoryTarget === null) return;
-        editCategoryForm.patch(`/projects/${project.id}/categories/${editCategoryTarget.id}`, {
+        editCategoryForm.patch(currentOrgUrl(`/projects/${project.id}/categories/${editCategoryTarget.id}`), {
             preserveScroll: true,
             onSuccess: () => {
                 editCategoryModalOpen = false;
@@ -81,7 +82,7 @@
 
     function removeCategory(): void {
         if (removeCategoryTarget === null || removingCategory) return;
-        router.delete(`/projects/${project.id}/categories/${removeCategoryTarget.id}`, {
+        router.delete(currentOrgUrl(`/projects/${project.id}/categories/${removeCategoryTarget.id}`), {
             preserveScroll: true,
             onStart: () => {
                 removingCategory = true;
@@ -103,7 +104,7 @@
         [order[index], order[target]] = [order[target], order[index]];
         reordering = true;
         router.patch(
-            `/projects/${project.id}/categories/reorder`,
+            currentOrgUrl(`/projects/${project.id}/categories/reorder`),
             { order },
             {
                 preserveScroll: true,

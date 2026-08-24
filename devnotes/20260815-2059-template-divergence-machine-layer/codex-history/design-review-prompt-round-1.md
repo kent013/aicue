@@ -309,7 +309,7 @@ D4 の実体は middleware クラスと route group への付与だからであ�
 | D1 | `app/Models/Cut.php` / `app/Models/Take.php` / 該当 migration | 卒業の実績がある (SourceDocument が卒業済み) が**期限を導ける材料が無い** → `恒久` + 再判定の条件へ転記 | `T001` |
 | D2 | cuts の migration 2 本 | `恒久` | `T001` |
 | D3 | `app/Services/Manual/CategoryService.php` / `app/Models/Category.php` | `恒久` | `T001` |
-| D4 | `app/Http/Middleware/EnsureProjectBelongsToCurrentOrganization.php` / `routes/web.php` | `恒久` | `T001` |
+| D4 | `app/Http/Middleware/EnsureProjectBelongsToRouteOrganization.php` / `routes/web.php` | `恒久` | `T001` |
 | D5 | `app/Services/Manual/ScenarioService.php` ほか 2 | `恒久` | `T002` |
 | D6 | `app/Services/Capture/TakeObjectStorage.php` | `恒久` | `T004` |
 | D7 | `app/Services/Manual/RenderJobService.php` | 「保留」= 見直す意思があるが**期限を導ける材料が無い** → `恒久` + 再判定の条件へ転記 (材料が出たら `監視中` へ) | `T005` |

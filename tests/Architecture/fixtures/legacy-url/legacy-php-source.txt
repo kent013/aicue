@@ -1,0 +1,8 @@
+<?php
+
+// コメントの /dashboard は参照ではない
+/** docblock の /projects も参照ではない */
+$a = '/dashboard';
+$b = "/organizations/{$slug}/projects/{$id}";
+$c = dirname(__DIR__).'/app/Prompts';
+$d = route('organizations.switch');

@@ -20,6 +20,7 @@
     import type { SharedProps } from "@/lib/shared-props";
     import type { AnalysisProps, CategoryOption, RenderProps, VideoManualStatus } from "@/types/manual";
     import { STATUS_TONES, VIDEO_MANUAL_STATUS_LABELS, isCaptureNavigable } from "@/types/manual";
+    import { currentOrgUrl } from "@/lib/org-url";
 
     /**
      * 動画マニュアル詳細 (メタデータ + AI 解析パネル)。撮影者も閲覧可
@@ -66,7 +67,7 @@
     let deleting = $state(false);
 
     function deleteManual(): void {
-        router.delete(`/projects/${project.id}/manuals/${manual.id}`, {
+        router.delete(currentOrgUrl(`/projects/${project.id}/manuals/${manual.id}`), {
             onStart: () => {
                 deleting = true;
             },
@@ -85,7 +86,7 @@
             icon={BookOpen}
             testId="manual-title"
             breadcrumbs={[
-                { label: project.name, href: `/projects/${project.id}` },
+                { label: project.name, href: currentOrgUrl(`/projects/${project.id}`) },
                 { label: manual.title },
             ]}
         >
@@ -93,7 +94,7 @@
                 <!-- canManage 内外を問わず表示 (撮影者=project_member も撮影ナビ view 可) -->
                 <Button
                     variant="primary"
-                    href={`/app/projects/${project.id}/manuals/${manual.id}`}
+                    href={currentOrgUrl(`/app/projects/${project.id}/manuals/${manual.id}`)}
                     inertia
                     testId="capture-manual-link"
                 >
@@ -111,7 +112,7 @@
                 </Button>
                 <Button
                     variant="ghost"
-                    href={`/projects/${project.id}/manuals/${manual.id}/edit`}
+                    href={currentOrgUrl(`/projects/${project.id}/manuals/${manual.id}/edit`)}
                     inertia
                     testId="edit-manual-button"
                 >

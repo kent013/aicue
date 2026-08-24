@@ -13,12 +13,12 @@ use Inertia\Testing\AssertableInertia as Assert;
  * 認可・validation 失敗経路のみ検証する)。
  */
 
-test('owner は /billing で現在プラン・per-bucket 残高・quota・管理フラグを見られる', function (): void {
+test('owner は /organizations/{slug}/billing で現在プラン・per-bucket 残高・quota・管理フラグを見られる', function (): void {
     // P8b: プラン一覧は /billing/plans へ移設 (期待は BillingPlansPageTest が持つ)。
     [$organization, $owner] = createOrganizationWithOwner();
     app(TicketLedgerService::class)->grant($organization, 10, '初期付与');
 
-    $this->actingAs($owner)->get('/billing')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/billing")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->component('Billing/Index')
@@ -35,10 +35,10 @@ test('owner は /billing で現在プラン・per-bucket 残高・quota・管理
             ->where('page.canManageBilling', true));
 });
 
-test('未契約 org の /billing では現在プランが null で届く', function (): void {
-    [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+test('未契約 org の /organizations/{slug}/billing では現在プランが null で届く', function (): void {
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
 
-    $this->actingAs($owner)->get('/billing')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/billing")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('page.plan', null)
@@ -48,9 +48,8 @@ test('未契約 org の /billing では現在プランが null で届く', funct
 test('member も閲覧できるが管理フラグは false', function (): void {
     [$organization] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
-    $this->actingAs($member)->get('/billing')
+    $this->actingAs($member)->get("/organizations/{$organization->slug}/billing")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->component('Billing/Index')
@@ -60,10 +59,9 @@ test('member も閲覧できるが管理フラグは false', function (): void {
 test('member は checkout を開始できない (403)', function (): void {
     [$organization] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
     $this->actingAs($member)
-        ->post('/billing/checkout', [
+        ->post("/organizations/{$organization->slug}/billing/checkout", [
             'plan_code' => 'standard',
             'subscription_attempt_token' => (string) Str::ulid(),
         ])
@@ -73,16 +71,15 @@ test('member は checkout を開始できない (403)', function (): void {
 test('member は portal を開けない (403)', function (): void {
     [$organization] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
-    $this->actingAs($member)->post('/billing/portal')->assertForbidden();
+    $this->actingAs($member)->post("/organizations/{$organization->slug}/billing/portal")->assertForbidden();
 });
 
 test('未知の plan_code の checkout は 422 (Stripe には到達しない)', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
     $this->actingAs($owner)
-        ->post('/billing/checkout', [
+        ->post("/organizations/{$organization->slug}/billing/checkout", [
             'plan_code' => 'no-such-plan',
             'subscription_attempt_token' => (string) Str::ulid(),
         ])
@@ -93,7 +90,7 @@ test('checkout payload で organization_id 等の保護キーは 422', function 
     [$organization, $owner] = createOrganizationWithOwner();
 
     $this->actingAs($owner)
-        ->post('/billing/checkout', [
+        ->post("/organizations/{$organization->slug}/billing/checkout", [
             'plan_code' => 'standard',
             'subscription_attempt_token' => (string) Str::ulid(),
             'organization_id' => $organization->id,
@@ -101,17 +98,18 @@ test('checkout payload で organization_id 等の保護キーは 422', function 
         ->assertSessionHasErrors('organization_id');
 });
 
-test('current organization が無いユーザーは 404', function (): void {
+test('非所属の組織 URL は 404 (組織の有無を露出しない)', function (): void {
+    [$organization] = createOrganizationWithOwner();
     $user = User::factory()->create();
 
-    $this->actingAs($user)->get('/billing')->assertNotFound();
+    $this->actingAs($user)->get("/organizations/{$organization->slug}/billing")->assertNotFound();
 });
 
 test('owner の checkout は fake gateway 経由で中立帰還 URL へ遷移する (happy path)', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
     enableFakeExternals();
 
-    $response = $this->actingAs($owner)->post('/billing/checkout', [
+    $response = $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/checkout", [
         'plan_code' => 'standard',
         'subscription_attempt_token' => (string) Str::ulid(),
     ]);
@@ -120,7 +118,7 @@ test('owner の checkout は fake gateway 経由で中立帰還 URL へ遷移す
     // P9: cancel URL は /billing/plans (fake gateway は cancel URL ベースの中立帰還)。
     $response->assertStatus(302);
     $location = $response->headers->get('Location');
-    expect($location)->toContain('/billing/plans')
+    expect($location)->toContain("/organizations/{$organization->slug}/billing/plans")
         ->and($location)->toContain('fake_external=stripe');
 });
 
@@ -131,10 +129,10 @@ test('owner の portal は fake gateway 経由で中立帰還 URL へ遷移す�
     contractPaidPlan($organization);
     enableFakeExternals();
 
-    $response = $this->actingAs($owner)->post('/billing/portal');
+    $response = $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/portal");
 
     $response->assertStatus(302);
     $location = $response->headers->get('Location');
-    expect($location)->toContain('/billing')
+    expect($location)->toContain("/organizations/{$organization->slug}/billing")
         ->and($location)->toContain('fake_external=stripe');
 });

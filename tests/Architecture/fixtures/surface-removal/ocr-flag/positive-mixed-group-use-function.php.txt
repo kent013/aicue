@@ -1,0 +1,9 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Support\Manual;
+
+use App\Other\{function AcceptedSourceDocumentTypes};
+
+$enabled = AcceptedSourceDocumentTypes::imagesEnabled();

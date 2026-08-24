@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Models\Cut;
+use App\Models\Organization;
 use App\Models\Project;
 use App\Models\Take;
 use App\Models\User;
@@ -39,11 +40,11 @@ function manualWithCover(Project $project): VideoManual
  *
  * @return list<string>
  */
-function measureCaptureIndexQueries(User $actor, Project $project): array
+function measureCaptureIndexQueries(Organization $organization, User $actor, Project $project): array
 {
     DB::enableQueryLog();
     DB::flushQueryLog();
-    test()->actingAs($actor)->get("/app/projects/{$project->id}/manuals")->assertOk();
+    test()->actingAs($actor)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals")->assertOk();
     $log = DB::getQueryLog();
     DB::disableQueryLog();
 
@@ -75,11 +76,11 @@ test('撮影一覧のクエリ数は行数に比例しない (全行が代表を
         manualWithCover($tenRowsProject);
     }
 
-    measureCaptureIndexQueries($owner, $singleRowProject); // 暖機
+    measureCaptureIndexQueries($organization, $owner, $singleRowProject); // 暖機
 
     expectSameQueryCount(
-        measureCaptureIndexQueries($owner, $singleRowProject),
-        measureCaptureIndexQueries($owner, $tenRowsProject),
+        measureCaptureIndexQueries($organization, $owner, $singleRowProject),
+        measureCaptureIndexQueries($organization, $owner, $tenRowsProject),
     );
 });
 
@@ -111,18 +112,17 @@ test('代表の有無が混在してもクエリ数は行数に比例しない',
         $extra->forceFill(['adopted_take_id' => $extraTake->id])->save();
     }
 
-    measureCaptureIndexQueries($owner, $singleRowProject); // 暖機
+    measureCaptureIndexQueries($organization, $owner, $singleRowProject); // 暖機
 
     expectSameQueryCount(
-        measureCaptureIndexQueries($owner, $singleRowProject),
-        measureCaptureIndexQueries($owner, $tenRowsProject),
+        measureCaptureIndexQueries($organization, $owner, $singleRowProject),
+        measureCaptureIndexQueries($organization, $owner, $tenRowsProject),
     );
 });
 
 test('代表を見られない利用者でもクエリ数は行数に比例しない', function (): void {
     [$organization] = createOrganizationWithOwner();
     $orgMember = attachOrganizationMember($organization);
-    $orgMember->forceFill(['current_organization_id' => $organization->id])->save();
 
     $singleRowProject = Project::factory()->forOrganization($organization)->create();
     manualWithCover($singleRowProject);
@@ -132,12 +132,12 @@ test('代表を見られない利用者でもクエリ数は行数に比例し�
         manualWithCover($tenRowsProject);
     }
 
-    measureCaptureIndexQueries($orgMember, $singleRowProject); // 暖機
+    measureCaptureIndexQueries($organization, $orgMember, $singleRowProject); // 暖機
 
     // resolveCover の早期 return が relation に触れていないこと (触れば行ごとの lazy load になる)
     expectSameQueryCount(
-        measureCaptureIndexQueries($orgMember, $singleRowProject),
-        measureCaptureIndexQueries($orgMember, $tenRowsProject),
+        measureCaptureIndexQueries($organization, $orgMember, $singleRowProject),
+        measureCaptureIndexQueries($organization, $orgMember, $tenRowsProject),
     );
 });
 
@@ -150,12 +150,12 @@ test('代表を見られない利用者でもクエリ数は行数に比例し�
  *
  * @return list<string>
  */
-function measureCaptureIndexQueriesWithKeyword(User $actor, Project $project, string $keyword): array
+function measureCaptureIndexQueriesWithKeyword(Organization $organization, User $actor, Project $project, string $keyword): array
 {
     DB::enableQueryLog();
     DB::flushQueryLog();
     test()->actingAs($actor)
-        ->get("/app/projects/{$project->id}/manuals?q=".urlencode($keyword))
+        ->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals?q=".urlencode($keyword))
         ->assertOk();
     $log = DB::getQueryLog();
     DB::disableQueryLog();
@@ -181,10 +181,10 @@ test('検索ありでも撮影一覧のクエリ数は行数に比例しない',
         $seed($tenRowsProject);
     }
 
-    measureCaptureIndexQueriesWithKeyword($owner, $singleRowProject, 'ケンサクゴ'); // 暖機
+    measureCaptureIndexQueriesWithKeyword($organization, $owner, $singleRowProject, 'ケンサクゴ'); // 暖機
 
     expectSameQueryCount(
-        measureCaptureIndexQueriesWithKeyword($owner, $singleRowProject, 'ケンサクゴ'),
-        measureCaptureIndexQueriesWithKeyword($owner, $tenRowsProject, 'ケンサクゴ'),
+        measureCaptureIndexQueriesWithKeyword($organization, $owner, $singleRowProject, 'ケンサクゴ'),
+        measureCaptureIndexQueriesWithKeyword($organization, $owner, $tenRowsProject, 'ケンサクゴ'),
     );
 });

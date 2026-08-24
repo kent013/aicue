@@ -1,0 +1,15 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\First {
+    use App\Other\RequirePassword;
+
+    Route::get('/a', [Controller::class, 'show'])->middleware(RequirePassword::class);
+}
+
+namespace App\Second {
+    use Illuminate\Auth\Middleware\RequirePassword;
+
+    Route::get('/b', [Controller::class, 'show'])->middleware(RequirePassword::class);
+}

@@ -86,7 +86,7 @@ describe("TakeStrip", () => {
         await fireEvent.click(screen.getByTestId("take-adopt-10"));
 
         await waitFor(() => expect(onChanged).toHaveBeenCalled());
-        expect(fetchMock.mock.calls[0][0]).toBe("/app/projects/1/manuals/2/cuts/3/takes/10/adopt");
+        expect(fetchMock.mock.calls[0][0]).toBe("/organizations/test-org/app/projects/1/manuals/2/cuts/3/takes/10/adopt");
         expect(fetchMock.mock.calls[0][1].method).toBe("POST");
     });
 
@@ -121,7 +121,7 @@ describe("TakeStrip", () => {
         await fireEvent.click(within(dialog).getByRole("button", { name: "削除する" }));
 
         await waitFor(() => expect(onChanged).toHaveBeenCalled());
-        expect(fetchMock.mock.calls[0][0]).toBe("/app/projects/1/manuals/2/cuts/3/takes/10");
+        expect(fetchMock.mock.calls[0][0]).toBe("/organizations/test-org/app/projects/1/manuals/2/cuts/3/takes/10");
         expect(fetchMock.mock.calls[0][1].method).toBe("DELETE");
     });
 
@@ -167,7 +167,7 @@ describe("TakeStrip", () => {
                 "ダウンロード済みのテイクは削除できません",
             ),
         );
-        expect(fetchMock.mock.calls[0][0]).toBe("/app/projects/1/manuals/2/cuts/3/takes/10");
+        expect(fetchMock.mock.calls[0][0]).toBe("/organizations/test-org/app/projects/1/manuals/2/cuts/3/takes/10");
         expect(fetchMock.mock.calls[0][1].method).toBe("DELETE");
         expect(onChanged).not.toHaveBeenCalled();
     });
@@ -191,7 +191,7 @@ describe("TakeStrip", () => {
         await waitFor(() => expect(onChanged).toHaveBeenCalled());
         expect(window.open).toHaveBeenCalledWith("https://s3.example.test/signed", "_blank", "noopener");
         expect(fetchMock.mock.calls[0][0]).toBe(
-            "/app/projects/1/manuals/2/cuts/3/takes/10/downloaded",
+            "/organizations/test-org/app/projects/1/manuals/2/cuts/3/takes/10/downloaded",
         );
         expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
             ack_token: "sealed-ack-token",
@@ -209,7 +209,7 @@ describe("TakeStrip", () => {
         await fireEvent.click(screen.getByTestId("take-preview-10"));
 
         const video = await screen.findByTestId("take-preview-video");
-        expect(video).toHaveAttribute("src", "/app/projects/1/manuals/2/cuts/3/takes/10/playback");
+        expect(video).toHaveAttribute("src", "/organizations/test-org/app/projects/1/manuals/2/cuts/3/takes/10/playback");
         expect(window.open).not.toHaveBeenCalled(); // preview は video element (DL の window.open とは別)
     });
 
@@ -289,7 +289,7 @@ describe("TakeStrip", () => {
         await fireEvent.click(screen.getByTestId("take-preview-adopt"));
 
         await waitFor(() => expect(onChanged).toHaveBeenCalled());
-        expect(fetchMock.mock.calls[0][0]).toBe("/app/projects/1/manuals/2/cuts/3/takes/10/adopt");
+        expect(fetchMock.mock.calls[0][0]).toBe("/organizations/test-org/app/projects/1/manuals/2/cuts/3/takes/10/adopt");
         await waitFor(() =>
             expect(screen.queryByTestId("take-preview-video")).not.toBeInTheDocument(),
         );
@@ -386,7 +386,7 @@ describe("サムネイル表示 (T183)", () => {
 
         const img = screen.getByTestId("take-thumbnail-10");
         expect(img.getAttribute("src")).toBe(
-            "/app/projects/1/manuals/2/cuts/3/takes/10/thumbnail",
+            "/organizations/test-org/app/projects/1/manuals/2/cuts/3/takes/10/thumbnail",
         );
         // 行に「テイク N」の見出しがあるため画像は装飾 (alt="")
         expect(img.getAttribute("alt")).toBe("");
@@ -487,7 +487,7 @@ describe("テイクの並べ替え (T185)", () => {
         await dragHandle("take-drag-10", 50, 260);
 
         await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-        expect(lastPatch().url).toBe("/app/projects/1/manuals/2/cuts/3/takes/10");
+        expect(lastPatch().url).toBe("/organizations/test-org/app/projects/1/manuals/2/cuts/3/takes/10");
         expect(lastPatch().body).toEqual({ position: 2 });
         // 楽観更新はせずサーバ権威。成功したら親が最新を取り直す
         await waitFor(() => expect(onChanged).toHaveBeenCalled());
@@ -500,7 +500,7 @@ describe("テイクの並べ替え (T185)", () => {
         await dragHandle("take-drag-12", 250, 10);
 
         await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-        expect(lastPatch().url).toBe("/app/projects/1/manuals/2/cuts/3/takes/12");
+        expect(lastPatch().url).toBe("/organizations/test-org/app/projects/1/manuals/2/cuts/3/takes/12");
         expect(lastPatch().body).toEqual({ position: 0 });
     });
 
@@ -541,7 +541,7 @@ describe("テイクの並べ替え (T185)", () => {
         await fireEvent.keyDown(screen.getByTestId("take-drag-10"), { key: "ArrowDown" });
 
         await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-        expect(lastPatch().url).toBe("/app/projects/1/manuals/2/cuts/3/takes/10");
+        expect(lastPatch().url).toBe("/organizations/test-org/app/projects/1/manuals/2/cuts/3/takes/10");
         expect(lastPatch().body).toEqual({ position: 1 });
     });
 
@@ -552,7 +552,7 @@ describe("テイクの並べ替え (T185)", () => {
         await fireEvent.keyDown(screen.getByTestId("take-drag-12"), { key: "ArrowUp" });
 
         await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-        expect(lastPatch().url).toBe("/app/projects/1/manuals/2/cuts/3/takes/12");
+        expect(lastPatch().url).toBe("/organizations/test-org/app/projects/1/manuals/2/cuts/3/takes/12");
         expect(lastPatch().body).toEqual({ position: 1 });
     });
 

@@ -26,7 +26,7 @@ use App\Exceptions\Billing\StaleCheckoutAttemptException;
 use App\Exceptions\Billing\StalePlanChangeException;
 use App\Exceptions\Billing\StripePriceNotSyncedException;
 use App\Exceptions\Billing\SubscriptionAttemptPlanMismatchException;
-use App\Http\Concerns\ResolvesCurrentOrganization;
+use App\Http\Concerns\ResolvesRouteOrganization;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Billing\BillingCheckoutRequest;
 use App\Http\Requests\Billing\ChangePlanRequest;
@@ -69,7 +69,7 @@ use Webmozart\Assert\Assert;
  */
 class BillingController extends Controller
 {
-    use ResolvesCurrentOrganization;
+    use ResolvesRouteOrganization;
 
     public function __construct(
         private readonly BillingAccess $access,
@@ -93,13 +93,12 @@ class BillingController extends Controller
      * peek + forget (消費) するため、hop する request で DTO を組むと復帰先を無音で失う。
      */
     public function index(
-        Request $request,
+        Request $request, Organization $organization,
         TicketLedgerService $tickets,
         QuotaService $quota,
         PricingService $pricing,
         StorageUsageService $storage,
     ): Response|RedirectResponse {
-        $organization = $this->resolveCurrentOrganization($request);
         Gate::authorize('view', $organization);
 
         $user = $request->user();
@@ -166,9 +165,8 @@ class BillingController extends Controller
      *
      * プラン台帳 → DTO の mapper は公開料金表と共有する (新 DTO を発明しない)。
      */
-    public function plans(Request $request, PricingService $pricing): Response
+    public function plans(Request $request, Organization $organization, PricingService $pricing): Response
     {
-        $organization = $this->resolveCurrentOrganization($request);
         Gate::authorize('view', $organization);
 
         $user = $request->user();
@@ -235,11 +233,10 @@ class BillingController extends Controller
      * 押下時のフィードバックになる。
      */
     public function checkout(
-        BillingCheckoutRequest $request,
+        BillingCheckoutRequest $request, Organization $organization,
         SubscriptionService $subscriptions,
         AutoRechargeService $autoRecharge,
     ): SymfonyResponse|RedirectResponse {
-        $organization = $this->resolveCurrentOrganization($request);
 
         $user = $request->user();
         Assert::isInstanceOf($user, User::class);
@@ -277,8 +274,8 @@ class BillingController extends Controller
                 $organization,
                 $user,
                 $plan,
-                route('billing.index').'?session_id={CHECKOUT_SESSION_ID}',
-                route('billing.plans'),
+                route('billing.index', ['organization' => $organization->slug]).'?session_id={CHECKOUT_SESSION_ID}',
+                route('billing.plans', ['organization' => $organization->slug]),
                 $attemptToken,
                 $funding,
             );
@@ -287,7 +284,7 @@ class BillingController extends Controller
             throw ValidationException::withMessages(['plan_code' => $e->getMessage()]);
         } catch (StaleCheckoutAttemptException) {
             // 着地 query は発明しない: 自前 redirect なので最初から one-shot flash に載せる。
-            return $this->redirectWithFeedback(BillingFeedbackKind::CheckoutRetryRequired);
+            return $this->redirectWithFeedback($organization, BillingFeedbackKind::CheckoutRetryRequired);
         } catch (CheckoutInProgressException $e) {
             return back()->with('error', $e->getMessage());
         } catch (StripePriceNotSyncedException) {
@@ -301,7 +298,7 @@ class BillingController extends Controller
         if ($result->url === null) {
             // url=null は「新規 Checkout を作らなかった」= 受付済み replay か live pending dedup。
             return $subscriptions->isAttemptCompleted($organization, $result->stripeSessionId)
-                ? $this->redirectWithFeedback(BillingFeedbackKind::PurchaseAlreadyReceived)
+                ? $this->redirectWithFeedback($organization, BillingFeedbackKind::PurchaseAlreadyReceived)
                 : back()->with('warning', '既に進行中の Checkout があります。数分お待ちください。');
         }
 
@@ -324,10 +321,9 @@ class BillingController extends Controller
      * 押下時のフィードバックになる。
      */
     public function changePlan(
-        ChangePlanRequest $request,
+        ChangePlanRequest $request, Organization $organization,
         SubscriptionService $subscriptions,
     ): RedirectResponse {
-        $organization = $this->resolveCurrentOrganization($request);
         Gate::authorize('manageBilling', $organization);
 
         $subscription = $organization->subscription('default');
@@ -366,7 +362,7 @@ class BillingController extends Controller
         }
 
         // accepted までを成功とし、projection (plan_code) の追随は webhook が担うことを文言で表す。
-        return redirect()->route('billing.index')->with(
+        return redirect()->route('billing.index', ['organization' => $organization->slug])->with(
             'success',
             $outcome === SubscriptionSwapOutcome::Applied
                 ? 'プラン変更を受け付けました。反映まで数分かかる場合があります。'
@@ -379,10 +375,9 @@ class BillingController extends Controller
      * (route parameter を持たないため cross-org 指定が構造的に不能)。
      */
     public function updateBillingContact(
-        UpdateBillingContactRequest $request,
+        UpdateBillingContactRequest $request, Organization $organization,
         UpdateBillingContactAction $action,
     ): RedirectResponse {
-        $organization = $this->resolveCurrentOrganization($request);
         Gate::authorize('manageBilling', $organization);
 
         $action->execute($organization, UpdateBillingContactData::fromRequest($request));
@@ -397,9 +392,8 @@ class BillingController extends Controller
      * 有効化は Service 側で fail-closed (default PM 必須 + 同意必須)。停止は同一 lock 下で
      * pending attempt をキャンセルする (停止後課金の禁止)。
      */
-    public function updateAutoRecharge(UpdateAutoRechargeRequest $request): RedirectResponse
+    public function updateAutoRecharge(UpdateAutoRechargeRequest $request, Organization $organization): RedirectResponse
     {
-        $organization = $this->resolveCurrentOrganization($request);
         Gate::authorize('manageBilling', $organization);
 
         $user = $request->user();
@@ -438,9 +432,8 @@ class BillingController extends Controller
      * P8a: オートリチャージ用カード登録 (Checkout mode=setup) を開始する。
      * attempt_token 冪等は purchase-tickets と同型 (二重 submit で別 session を作らない)。
      */
-    public function startAutoRechargeSetup(StartAutoRechargeSetupRequest $request): SymfonyResponse|RedirectResponse
+    public function startAutoRechargeSetup(StartAutoRechargeSetupRequest $request, Organization $organization): SymfonyResponse|RedirectResponse
     {
-        $organization = $this->resolveCurrentOrganization($request);
         Gate::authorize('manageBilling', $organization);
 
         $user = $request->user();
@@ -452,8 +445,8 @@ class BillingController extends Controller
         $result = $this->autoRecharge->startSetupCheckout(
             $organization,
             $user,
-            route('billing.index').'?setup_session_id={CHECKOUT_SESSION_ID}',
-            route('billing.index'),
+            route('billing.index', ['organization' => $organization->slug]).'?setup_session_id={CHECKOUT_SESSION_ID}',
+            route('billing.index', ['organization' => $organization->slug]),
             $token,
         );
 
@@ -488,7 +481,7 @@ class BillingController extends Controller
      *
      * @param  array<string, string>  $extra  呼び出し側が立てる query (保持分より優先)
      */
-    private function canonicalBillingRedirect(Request $request, array $extra = []): RedirectResponse
+    private function canonicalBillingRedirect(Request $request, Organization $organization, array $extra = []): RedirectResponse
     {
         $preserved = [];
         foreach (self::PRESERVED_LANDING_QUERY as $key) {
@@ -498,7 +491,7 @@ class BillingController extends Controller
             }
         }
 
-        return redirect()->route('billing.index', [...$preserved, ...$extra], 303);
+        return redirect()->route('billing.index', ['organization' => $organization->slug, ...$preserved, ...$extra], 303);
     }
 
     /**
@@ -525,14 +518,14 @@ class BillingController extends Controller
 
         if ($session === null) {
             // 未追跡 session — 成功文言は出さず canonical URL へ倒すだけ (query を残さない)。
-            return $this->canonicalBillingRedirect($request);
+            return $this->canonicalBillingRedirect($request, $organization);
         }
 
         $message = $session->status === CheckoutSessionStatus::Completed->value
             ? 'お支払いカードを登録しました。'
             : 'お支払いカードの登録を受け付けました。反映まで少しお待ちください。';
 
-        return $this->canonicalBillingRedirect($request)->with('success', $message);
+        return $this->canonicalBillingRedirect($request, $organization)->with('success', $message);
     }
 
     /**
@@ -568,7 +561,7 @@ class BillingController extends Controller
 
         // reflash() はしない: 成功着地で直前の error flash まで延命すると
         // 「成功と失敗が同時に出る」着地を作るため (feedback は本 info 文言だけを主張する)。
-        return $this->canonicalBillingRedirect($request, ['highlight' => 'auto-recharge'])
+        return $this->canonicalBillingRedirect($request, $organization, ['highlight' => 'auto-recharge'])
             ->with('info', $message);
     }
 
@@ -608,7 +601,7 @@ class BillingController extends Controller
         if ($request->session()->has('error')) {
             $request->session()->keep(['error']);
 
-            return $this->canonicalBillingRedirect($request);
+            return $this->canonicalBillingRedirect($request, $organization);
         }
 
         // (3) kind 解決 (portal 優先。値は自分が発行した形だけを認める = fail-closed)。
@@ -624,7 +617,7 @@ class BillingController extends Controller
         };
 
         // (4) 303 — kind が無くても canonical へ倒す (URL に着地 query を残さない)。
-        $redirect = $this->canonicalBillingRedirect($request);
+        $redirect = $this->canonicalBillingRedirect($request, $organization);
 
         return $kind === null ? $redirect : $redirect->with(BillingFeedbackKind::FLASH_KEY, $kind->value);
     }
@@ -667,9 +660,10 @@ class BillingController extends Controller
      * 自前 redirect で /billing の one-shot feedback を出す (query を経由しない)。
      * Inertia の POST 応答は middleware が 302 → 303 に変換する。
      */
-    private function redirectWithFeedback(BillingFeedbackKind $kind): RedirectResponse
+    private function redirectWithFeedback(Organization $organization, BillingFeedbackKind $kind): RedirectResponse
     {
-        return redirect()->route('billing.index')->with(BillingFeedbackKind::FLASH_KEY, $kind->value);
+        return redirect()->route('billing.index', ['organization' => $organization->slug])
+            ->with(BillingFeedbackKind::FLASH_KEY, $kind->value);
     }
 
     /**
@@ -702,9 +696,8 @@ class BillingController extends Controller
      * (canceled サブスク行が残る paid→free を含む = billingState で判定) / 未契約 org は
      * Cashier の assertCustomerExists() 例外 (= 500) に到達させず error flash で back する。
      */
-    public function portal(Request $request, SubscriptionService $subscriptions): SymfonyResponse|RedirectResponse
+    public function portal(Request $request, Organization $organization, SubscriptionService $subscriptions): SymfonyResponse|RedirectResponse
     {
-        $organization = $this->resolveCurrentOrganization($request);
         Gate::authorize('manageBilling', $organization);
 
         if ($this->access->state($organization) === OnboardingBillingState::ActiveFreePlan
@@ -714,7 +707,10 @@ class BillingController extends Controller
 
         // 戻り着地で `portal_returned` feedback を出すため ?portal=1 を付ける (UI は raw query を見ない)。
         return Inertia::location(
-            $subscriptions->createPortalSession($organization, route('billing.index', ['portal' => 1]))->url,
+            $subscriptions->createPortalSession(
+                $organization,
+                route('billing.index', ['organization' => $organization->slug, 'portal' => 1]),
+            )->url,
         );
     }
 }

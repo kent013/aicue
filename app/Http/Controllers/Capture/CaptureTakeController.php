@@ -7,7 +7,7 @@ namespace App\Http\Controllers\Capture;
 use App\DataTransferObjects\Capture\CaptureCutData;
 use App\DataTransferObjects\Capture\CaptureTakeData;
 use App\Enums\Manual\TakeStatus;
-use App\Http\Concerns\ResolvesCurrentOrganization;
+use App\Http\Concerns\ResolvesRouteOrganization;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Capture\AdoptCaptureTakeRequest;
 use App\Http\Requests\Capture\MarkTakeDownloadedRequest;
@@ -16,6 +16,7 @@ use App\Http\Requests\Capture\UpdateCaptureTakeRequest;
 use App\Http\Resources\Capture\CaptureCutResource;
 use App\Http\Resources\Capture\CaptureTakeResource;
 use App\Models\Cut;
+use App\Models\Organization;
 use App\Models\Project;
 use App\Models\Take;
 use App\Models\User;
@@ -34,22 +35,21 @@ use Webmozart\Assert\Assert;
  * テイクの登録・管理 (doc/10 §10.3)。同一オリジン XHR (JSON 応答)。
  *
  * nested route の URL 整合は 2 層 (認可より前に 404):
- * 1. {project} ∈ current org (project.in-current-org middleware + resolveOrganizationProject)
+ * 1. {project} ∈ current org (project.in-route-org middleware + resolveOrganizationProject)
  * 2. {manual} ∈ {project}, {cut} ∈ {manual}, {take} ∈ {cut} (Route::scopeBindings())
  */
 class CaptureTakeController extends Controller
 {
-    use ResolvesCurrentOrganization;
+    use ResolvesRouteOrganization;
 
     /** テイク登録 (チケット検証 + HeadObject 照合 + 冪等)。201 = 新規 / 200 = 冪等再送 */
     public function store(
-        StoreCaptureTakeRequest $request,
+        StoreCaptureTakeRequest $request, Organization $organization,
         Project $project,
         VideoManual $manual,
         Cut $cut,
         TakeRegistrationService $registration,
     ): JsonResponse {
-        $organization = $this->resolveCurrentOrganization($request);
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('create', [Take::class, $project]);
 
@@ -62,14 +62,13 @@ class CaptureTakeController extends Controller
 
     /** コメント・並べ替え */
     public function update(
-        UpdateCaptureTakeRequest $request,
+        UpdateCaptureTakeRequest $request, Organization $organization,
         Project $project,
         VideoManual $manual,
         Cut $cut,
         Take $take,
         CaptureTakeService $takes,
     ): CaptureTakeResource {
-        $organization = $this->resolveCurrentOrganization($request);
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('update', $take);
 
@@ -80,14 +79,13 @@ class CaptureTakeController extends Controller
 
     /** 削除 (DL 済みは 422。採用中なら null 化 + S3 削除 Job) */
     public function destroy(
-        Request $request,
+        Request $request, Organization $organization,
         Project $project,
         VideoManual $manual,
         Cut $cut,
         Take $take,
         CaptureTakeService $takes,
     ): Response {
-        $organization = $this->resolveCurrentOrganization($request);
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('delete', $take);
 
@@ -98,14 +96,13 @@ class CaptureTakeController extends Controller
 
     /** 採用 (adopted_take_id は VideoManual 行ロック tx 内でのみ書く) */
     public function adopt(
-        AdoptCaptureTakeRequest $request,
+        AdoptCaptureTakeRequest $request, Organization $organization,
         Project $project,
         VideoManual $manual,
         Cut $cut,
         Take $take,
         CaptureTakeService $takes,
     ): CaptureCutResource {
-        $organization = $this->resolveCurrentOrganization($request);
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('adopt', $take);
 
@@ -117,14 +114,13 @@ class CaptureTakeController extends Controller
 
     /** DL 済み ACK (署名 ACK トークン検証。冪等) */
     public function markDownloaded(
-        MarkTakeDownloadedRequest $request,
+        MarkTakeDownloadedRequest $request, Organization $organization,
         Project $project,
         VideoManual $manual,
         Cut $cut,
         Take $take,
         CaptureTakeService $takes,
     ): CaptureTakeResource {
-        $organization = $this->resolveCurrentOrganization($request);
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('markDownloaded', $take);
 
@@ -147,7 +143,7 @@ class CaptureTakeController extends Controller
      * doc/04 テイクプレビュー / doc/05 個別再生。採用前テイクも再生できる (adopted 限定でない)。
      *
      * nested route 整合 (認可より前に 404):
-     * 1. {project} ∈ current org (project.in-current-org middleware + resolveOrganizationProject)
+     * 1. {project} ∈ current org (project.in-route-org middleware + resolveOrganizationProject)
      * 2. {manual}∈{project}, {cut}∈{manual}, {take}∈{cut} は Route::scopeBindings()
      *
      * 302 応答は Cache-Control: no-store, private (期限付き署名 URL の再利用防止)。
@@ -155,14 +151,13 @@ class CaptureTakeController extends Controller
      *   cache までは保証しない (動画本体の非キャッシュは v1 要件外)。
      */
     public function playback(
-        Request $request,
+        Request $request, Organization $organization,
         Project $project,
         VideoManual $manual,
         Cut $cut,
         Take $take,
         TakeObjectStorage $storage,
     ): RedirectResponse {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('preview', $take);
@@ -184,7 +179,7 @@ class CaptureTakeController extends Controller
      * doc/04 動画列 / doc/05 撮影後の下部サムネイル確認。
      *
      * 層の順序は playback と同一 (認可より前に 404):
-     * 1. {project} ∈ current org (project.in-current-org middleware + resolveOrganizationProject)
+     * 1. {project} ∈ current org (project.in-route-org middleware + resolveOrganizationProject)
      * 2. {manual}∈{project}, {cut}∈{manual}, {take}∈{cut} は Route::scopeBindings()
      * 3. 認可 (preview ability。動画の再生と同じ権限で見せる)
      *
@@ -196,14 +191,13 @@ class CaptureTakeController extends Controller
      * ※ リダイレクト先の画像本体の cache までは保証しない (動画側と同じ扱い)。
      */
     public function thumbnail(
-        Request $request,
+        Request $request, Organization $organization,
         Project $project,
         VideoManual $manual,
         Cut $cut,
         Take $take,
         TakeObjectStorage $storage,
     ): RedirectResponse {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('preview', $take);

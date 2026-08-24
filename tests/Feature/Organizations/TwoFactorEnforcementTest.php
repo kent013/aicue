@@ -161,7 +161,7 @@ test('ユーザー管理画面 (manage.users) props にメンバーの twoFactor
     $pendingMember = tfeAddMember($organization, 'pending');
 
     $this->actingAs($owner)
-        ->get(route('manage.users.index'))
+        ->get(route('manage.users.index', ['organization' => $organization->slug]))
         ->assertInertia(function ($page) use ($owner, $pendingMember): void {
             $page->component('Admin/Users');
             /** @var list<array{id: int, twoFactorStatus: string}> $members */
@@ -182,7 +182,7 @@ test('必須組織の未準拠メンバーは dashboard から settings.security
     $member = tfeAddMember($organization, $status);
 
     $this->actingAs($member)
-        ->get('/dashboard')
+        ->get("/organizations/{$organization->slug}/dashboard")
         ->assertRedirect(route('settings.security'));
 
     expect(session('info'))->toContain($organization->name);
@@ -193,14 +193,14 @@ test('enabled メンバーは素通し', function (): void {
     [$organization] = tfeCreateOrganization(twoFactorRequired: true);
     $member = tfeAddMember($organization, 'enabled');
 
-    $this->actingAs($member)->get('/dashboard')->assertOk();
+    $this->actingAs($member)->get("/organizations/{$organization->slug}/dashboard")->assertOk();
 });
 
 test('必須でない組織のみ所属の未準拠ユーザーは素通し', function (): void {
     [$organization] = tfeCreateOrganization(twoFactorRequired: false);
     $member = tfeAddMember($organization, 'disabled');
 
-    $this->actingAs($member)->get('/dashboard')->assertOk();
+    $this->actingAs($member)->get("/organizations/{$organization->slug}/dashboard")->assertOk();
 });
 
 test('未認証リクエスト (GET /login) にゲートは干渉しない', function (): void {
@@ -272,13 +272,16 @@ test('allowlist 外の passkey 管理 route はゲート中に settings.security
         ->assertRedirect(route('settings.security'));
 });
 
-test('非許可 route の代表はゲート中必ず settings.security へ 302', function (string $path): void {
+test('非許可 route の代表はゲート中必ず settings.security へ 302', function (string $suffix): void {
+    // ★組織 URL 配下 (家系裁定 AG-037) なので dataset には**組織相対の後半だけ**を置き、
+    //   組織識別名はテスト本体で組み立てる (dataset はファイルスコープで評価されるため、
+    //   そこで組織を作ることはできない)。
     [$organization] = tfeCreateOrganization(twoFactorRequired: true);
     $member = tfeAddMember($organization, 'disabled');
 
     $this->actingAs($member)
         ->withSession(['recent_auth_at' => time()])
-        ->get($path)
+        ->get("/organizations/{$organization->slug}{$suffix}")
         ->assertRedirect(route('settings.security'));
 })->with([
     'dashboard' => ['/dashboard'],
@@ -290,7 +293,7 @@ test('XHR (Accept: json) でゲート → 409 + code/message/redirect + no-store
     [$organization] = tfeCreateOrganization(twoFactorRequired: true);
     $member = tfeAddMember($organization, 'disabled');
 
-    $response = $this->actingAs($member)->getJson('/dashboard');
+    $response = $this->actingAs($member)->getJson("/organizations/{$organization->slug}/dashboard");
 
     $response->assertStatus(409)
         ->assertJsonStructure(['code', 'message', 'redirect'])
@@ -327,7 +330,7 @@ test('遮断された GET には「実行されていません」を付けない
     [$organization] = tfeCreateOrganization(twoFactorRequired: true);
     $member = tfeAddMember($organization, 'disabled');
 
-    $this->actingAs($member)->get('/dashboard')->assertRedirect(route('settings.security'));
+    $this->actingAs($member)->get("/organizations/{$organization->slug}/dashboard")->assertRedirect(route('settings.security'));
 
     // 安全メソッドは「ページに来られない」だけなので既存文言のまま
     expect(session('info'))
@@ -373,7 +376,7 @@ test('状態遷移 (Fortify 実経路): ゲート → enable → confirm → ゲ
     $member = tfeAddMember($organization, 'disabled');
 
     // 1. ゲートされる
-    $this->actingAs($member)->get('/dashboard')->assertRedirect(route('settings.security'));
+    $this->actingAs($member)->get("/organizations/{$organization->slug}/dashboard")->assertRedirect(route('settings.security'));
 
     // 2. 設定ページは到達可能
     $this->get(route('settings.security'))->assertOk();
@@ -393,7 +396,7 @@ test('状態遷移 (Fortify 実経路): ゲート → enable → confirm → ゲ
     expect($member->fresh()->two_factor_confirmed_at)->not->toBeNull();
 
     // 5. ゲート解除
-    $this->get('/dashboard')->assertOk();
+    $this->get("/organizations/{$organization->slug}/dashboard")->assertOk();
 });
 
 // ──────────────────────────── self-disable のサーバ側禁止 ────────────────────────────
@@ -606,7 +609,7 @@ test('接続: 必須組織メンバーの 2FA を管理者が解除すると次�
     $member = tfeAddMember($organization, 'enabled');
 
     // 解除前は素通し
-    $this->actingAs($member)->get('/dashboard')->assertOk();
+    $this->actingAs($member)->get("/organizations/{$organization->slug}/dashboard")->assertOk();
 
     $this->actingAs($owner)
         ->withSession(['recent_auth_at' => time()])
@@ -614,6 +617,6 @@ test('接続: 必須組織メンバーの 2FA を管理者が解除すると次�
         ->assertRedirect();
 
     $this->actingAs($member->fresh())
-        ->get('/dashboard')
+        ->get("/organizations/{$organization->slug}/dashboard")
         ->assertRedirect(route('settings.security'));
 });

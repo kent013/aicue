@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Tests\Support\Retention;
 
+use App\Console\Commands\Auth\PruneEmailPromotionsCommand;
 use App\Console\Commands\Capture\PurgeUploadReservationsCommand;
+use App\Console\Commands\EnterpriseSso\PruneLoginAttemptsCommand;
 use App\Console\Commands\PurgeInquiriesCommand;
 use App\Support\Account\AccountDeletionGrace;
 use App\Support\Idempotency\IdempotencyRetention;
@@ -120,6 +122,10 @@ final class RetentionTableRegistry
             RetentionTableEntry::deletedWithParent(
                 'organization_invitations',
                 '組織へのメンバー招待。招待元の組織が消えると連鎖削除で一緒に消える',
+            ),
+            RetentionTableEntry::deletedWithParent(
+                'organization_slug_renames',
+                '組織識別名の改名履歴。改名回数の上限判定にだけ使い、組織が消えると連鎖削除で一緒に消える',
             ),
             RetentionTableEntry::deletedWithParent(
                 'role_user',
@@ -280,7 +286,7 @@ final class RetentionTableRegistry
                 'security_audit_events',
                 '認証と権限に関わる操作の証跡。利用者への外部キーが空値化のため退会後も行が残る。'
                 .'監査に必要な保持期間が未決である。'
-                .'なおこの表の login 行は /manage/users の最終ログイン表示の唯一の出所であり、'
+                .'なおこの表の login 行は /organizations/{slug}/manage/users の最終ログイン表示の唯一の出所であり、'
                 .'期限を決めて古い行を消すと、休眠の判定に必要な古い値から先に失われる。'
                 .'期限を決めるときは devnotes/20260817-0909-user-last-login-at/ を読み直すこと',
             ),
@@ -318,6 +324,31 @@ final class RetentionTableRegistry
                 'oauth_clients',
                 '接続してくる機械側の登録。廃止した登録をいつ消すかが未決である',
             ),
+            // --- 企業 SSO (T253) ---
+            RetentionTableEntry::deletedWithParent(
+                'organization_oidc_connections',
+                '組織と企業 IdP を結び付ける登録。組織を消せば連鎖して消える。'
+                .'身元が 1 件でもある接続は物理削除できず、運用は無効化で行う',
+            ),
+            RetentionTableEntry::deletedWithParent(
+                'enterprise_identities',
+                'IdP の身元と利用者の対応。接続と利用者のどちらを消しても連鎖して消える',
+            ),
+            RetentionTableEntry::scheduledDeletion(
+                'enterprise_sso_login_attempts',
+                '進行中の企業 SSO ログイン試行。期限切れの行を日次で物理削除する'
+                .'(callback のオンアクセス掃除と二段構え)',
+                PruneLoginAttemptsCommand::class,
+                'enterprise-sso:prune-login-attempts',
+            ),
+            RetentionTableEntry::scheduledDeletion(
+                'email_promotions',
+                'メールアドレス昇格の確認待ち。期限切れの行を日次で物理削除する'
+                .'(利用者ごとに 1 行しか持てないので消さないと次の昇格を始められない)',
+                PruneEmailPromotionsCommand::class,
+                'auth:prune-email-promotions',
+            ),
+
             RetentionTableEntry::undecided(
                 'oauth_sessions',
                 '機械向け接続の許諾の記録。利用者と組織の削除には連鎖するが、'

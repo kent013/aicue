@@ -71,7 +71,7 @@ test('パスワード変更後も現在デバイスはログイン状態を維�
 
     // 変更後は再 actingAs せず、確立済みセッションのまま保護ルートに到達できること＝維持を検証。
     // (再 actingAs すると新規認証になり「維持」を検証できないため使わない)
-    $this->get('/dashboard')->assertSuccessful();
+    $this->get('/settings')->assertSuccessful();
     expect(Hash::check('NewPassword12345', $user->fresh()->password))->toBeTrue();
 });
 
@@ -86,7 +86,7 @@ test('旧 password_hash を持つ既存セッションはハッシュ変更後�
     // 旧 password_hash_web を持つ既存/復活セッションを模して保護ルートへ
     $this->actingAs($user)
         ->withSession(['password_hash_web' => $oldHash])
-        ->get('/dashboard')
+        ->get('/settings')
         ->assertRedirect('/login'); // AuthenticateSession が hash 不一致で logout
 });
 
@@ -119,7 +119,7 @@ test('別デバイスの古い remember-me (recaller) はハッシュ変更後�
     // device B: session cookie を送らず recaller (平文→withCookie が再暗号化) のみ提示
     // → viaRemember 経路で recaller の旧 password_hash と新 hash が不一致 → 失効 → login へ
     $this->withCookie($recallerName, $recaller->getValue())
-        ->get('/dashboard')
+        ->get('/settings')
         ->assertRedirect('/login');
 });
 

@@ -10,6 +10,7 @@
     import PageContainer from "@/components/templates/PageContainer.svelte";
     import PageContent from "@/components/templates/PageContent.svelte";
     import type { SharedProps } from "@/lib/shared-props";
+    import { currentOrgUrl } from "@/lib/org-url";
 
     /**
      * プロジェクト一覧 (current org の全プロジェクト)。
@@ -41,7 +42,7 @@
             testId="projects-heading"
         >
             {#if canCreate && projects.length > 0}
-                <Button href="/projects/create" inertia testId="create-project-button">
+                <Button href={currentOrgUrl("/projects/create")} inertia testId="create-project-button">
                     新しいプロジェクト
                 </Button>
             {/if}
@@ -54,7 +55,7 @@
                         description="最初のプロジェクトを作成して、リソースの管理を始めましょう。"
                         icon={FolderKanban}
                         cta={canCreate
-                            ? { kind: "link", label: "プロジェクトを作成", href: "/projects/create" }
+                            ? { kind: "link", label: "プロジェクトを作成", href: currentOrgUrl("/projects/create") }
                             : undefined}
                         bordered
                         testId="projects-empty"
@@ -65,7 +66,7 @@
                     {#each projects as project (project.id)}
                         <li>
                             <Card padding="lg">
-                                <TextLink href={`/projects/${project.id}`} class="text-h3">
+                                <TextLink href={currentOrgUrl(`/projects/${project.id}`)} class="text-h3">
                                     {project.name}
                                 </TextLink>
                                 {#if project.description}

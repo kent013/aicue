@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use App\Models\Organization;
+
 /*
 |--------------------------------------------------------------------------
 | オンボーディング: プラン選択状態のアクセシビリティ (bug-hunt F-2-01)
@@ -78,20 +80,22 @@ function expectNoteVisuallyHidden(mixed $page, string $planCode): void
 }
 
 /** 未契約オーナーでログインし、Checkout に到達できる状態を作る */
-function checkoutFixture(): void
+function checkoutFixture(): Organization
 {
-    [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
 
     test()->actingAs($owner);
+
+    return $organization;
 }
 
 test('?plan= の事前選択が sr-only テキストでアクセシビリティツリーに現れる', function (): void {
-    checkoutFixture();
+    $organization = checkoutFixture();
 
     // ?plan= は org-scoped に session へ積まれ canonical URL へ 303 されるため、
     // 着地は query 無しの /onboarding/checkout になる
-    $page = visit('/onboarding/checkout?plan=starter')
-        ->assertPathIs('/onboarding/checkout');
+    $page = visit("/organizations/{$organization->slug}/onboarding/checkout?plan=starter")
+        ->assertPathIs("/organizations/{$organization->slug}/onboarding/checkout");
 
     expect($page->script('window.location.search'))->toBe('');
 
@@ -108,10 +112,10 @@ test('?plan= の事前選択が sr-only テキストでアクセシビリティ�
 });
 
 test('別プランを選び直すと note が移動し文言が選択中へ切り替わる', function (): void {
-    checkoutFixture();
+    $organization = checkoutFixture();
 
-    $page = visit('/onboarding/checkout?plan=starter')
-        ->assertPathIs('/onboarding/checkout');
+    $page = visit("/organizations/{$organization->slug}/onboarding/checkout?plan=starter")
+        ->assertPathIs("/organizations/{$organization->slug}/onboarding/checkout");
 
     $page->click('[data-testid="select-plan-standard"]');
 
@@ -139,10 +143,10 @@ test('別プランを選び直すと note が移動し文言が選択中へ切�
 });
 
 test('sr-only note の追加でカードのレイアウトが動かない', function (): void {
-    checkoutFixture();
+    $organization = checkoutFixture();
 
-    $page = visit('/onboarding/checkout?plan=starter')
-        ->assertPathIs('/onboarding/checkout');
+    $page = visit("/organizations/{$organization->slug}/onboarding/checkout?plan=starter")
+        ->assertPathIs("/organizations/{$organization->slug}/onboarding/checkout");
 
     // カード上端からの相対 top と height を測る (異なるカード同士は比較しない)。
     // 欠落を黙って握り潰さないよう、カードが無ければ null を明示的に返す。

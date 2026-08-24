@@ -116,7 +116,7 @@ PUT で送信、サーバが 1 トランザクションで reconcile** する。
 | GET | `/projects/{project}/manuals/{manual}/edit`（既存） | シナリオ編集画面に拡張（メタ編集 + Cut ツリー編集） |
 | PUT | `/projects/{project}/manuals/{manual}/scenario`（新設） | シナリオ document 一括保存 |
 
-- 両ルートとも既存の `project.in-current-org` middleware 群 + `Route::scopeBindings()` グループ内
+- 両ルートとも既存の `project.in-route-org` middleware 群 + `Route::scopeBindings()` グループ内
   （`{manual}` は `$project->manuals()` 経由解決、cross-org / cross-project は認可より前に 404）。
 - PUT は `NestedRouteIdorDefenseTest` の inventory に登録（`projects.manuals.scenario.update`）。
 - `edit` 画面の props に `scenario_version` と cuts ツリー（steps→points ネスト）を追加。
@@ -234,7 +234,7 @@ JsonResource** とする:
 ## 制約・前提
 
 - 既存フェーズ1規約を踏襲: Project/Manual 行ロック直列化、relation 経由 create、保護キーは
-  forceFill 明示代入、`EnsureProjectBelongsToCurrentOrganization` + inline guard の 2 層 404、
+  forceFill 明示代入、`EnsureProjectBelongsToRouteOrganization` + inline guard の 2 層 404、
   Policy 親委譲、`declare(strict_types=1)` + 日本語コメント、PHPStan level 10、Pest +
   RefreshDatabase（グローバル）、DS token / atomic import 階層。
 - `cuts` スキーマ・`Cut` Model・enum（CutType/ShotType/MaterialType）は既存のまま変更しない。

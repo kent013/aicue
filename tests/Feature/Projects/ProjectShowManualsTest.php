@@ -24,7 +24,7 @@ test('projects.show は manuals / categories / manualFilters を供給する', f
     VideoManual::factory()->forProject($project)->forCategory($category)->create(['title' => '分類済み']);
     VideoManual::factory()->forProject($project)->create(['title' => '未分類マニュアル']);
 
-    $this->actingAs($owner)->get("/projects/{$project->id}")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->component('Projects/Show')
@@ -46,7 +46,7 @@ test('未分類 manual は category=null で返る (フロントは「未分類�
     $project = Project::factory()->forOrganization($organization)->create();
     VideoManual::factory()->forProject($project)->create(['title' => '未分類マニュアル']);
 
-    $this->actingAs($owner)->get("/projects/{$project->id}")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}")
         ->assertInertia(fn (Assert $page) => $page
             ->where('manuals.data.0.category', null)
             ->where('manuals.data.0.progress', 'not_started'));
@@ -59,13 +59,13 @@ test('category フィルタ (id / uncategorized sentinel) で絞り込める', f
     VideoManual::factory()->forProject($project)->forCategory($category)->create(['title' => '分類済み']);
     VideoManual::factory()->forProject($project)->create(['title' => '未分類マニュアル']);
 
-    $this->actingAs($owner)->get("/projects/{$project->id}?category={$category->id}")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?category={$category->id}")
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 1)
             ->where('manuals.data.0.title', '分類済み')
             ->where('manualFilters.category', (string) $category->id));
 
-    $this->actingAs($owner)->get("/projects/{$project->id}?category=uncategorized")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?category=uncategorized")
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 1)
             ->where('manuals.data.0.title', '未分類マニュアル')
@@ -97,7 +97,7 @@ test('progress=in_progress は analyzing / ready / rendering の 3 件を返す'
     $project = Project::factory()->forOrganization($organization)->create();
     seedManualsForEachStatus($project);
 
-    $response = $this->actingAs($owner)->get("/projects/{$project->id}?progress=in_progress");
+    $response = $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?progress=in_progress");
 
     $response->assertInertia(fn (Assert $page) => $page
         ->has('manuals.data', 3)
@@ -114,13 +114,13 @@ test('progress=not_started は draft のみ / progress=completed は published �
     $project = Project::factory()->forOrganization($organization)->create();
     seedManualsForEachStatus($project);
 
-    $this->actingAs($owner)->get("/projects/{$project->id}?progress=not_started")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?progress=not_started")
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 1)
             ->where('manuals.data.0.title', '下書き')
             ->where('manuals.data.0.progress', 'not_started'));
 
-    $this->actingAs($owner)->get("/projects/{$project->id}?progress=completed")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?progress=completed")
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 1)
             ->where('manuals.data.0.title', '公開済み')
@@ -133,13 +133,13 @@ test('allowlist 外の値と旧 ?status= は無視して全件になる (互換�
     seedManualsForEachStatus($project);
 
     // 旧 5 値をそのまま渡しても progress の allowlist は通らない
-    $this->actingAs($owner)->get("/projects/{$project->id}?progress=ready")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?progress=ready")
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 5)
             ->where('manualFilters.progress', null));
 
     // **旧 URL の互換は無い** (?status=published は未知キーとして無視される)
-    $this->actingAs($owner)->get("/projects/{$project->id}?status=published")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?status=published")
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 5)
             ->where('manualFilters.progress', null)
@@ -152,7 +152,7 @@ test('行 payload は progress を持ち status を持たない', function (): v
     // 並び順への依存を避けるため manual 1 本だけの fixture で契約を見る
     VideoManual::factory()->forProject($project)->create(['title' => '下書き']);
 
-    $this->actingAs($owner)->get("/projects/{$project->id}")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}")
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 1)
             ->where('manuals.data.0.title', '下書き')
@@ -168,13 +168,13 @@ test('q フィルタは title 部分一致 (LIKE メタ文字はリテラル扱�
     VideoManual::factory()->forProject($project)->create(['title' => 'ネジ締め作業']);
     VideoManual::factory()->forProject($project)->create(['title' => '洗浄 100% 完全版']);
 
-    $this->actingAs($owner)->get("/projects/{$project->id}?q=ネジ")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?q=ネジ")
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 1)
             ->where('manuals.data.0.title', 'ネジ締め作業'));
 
     // "%" をリテラルとして検索できる (ワイルドカード化しない)
-    $this->actingAs($owner)->get("/projects/{$project->id}?q=100%25")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?q=100%25")
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 1)
             ->where('manuals.data.0.title', '洗浄 100% 完全版'));
@@ -185,13 +185,13 @@ test('paginate は 10 件/ページで meta を返す', function (): void {
     $project = Project::factory()->forOrganization($organization)->create();
     VideoManual::factory()->forProject($project)->count(12)->create();
 
-    $this->actingAs($owner)->get("/projects/{$project->id}")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}")
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 10)
             ->where('manuals.meta.total', 12)
             ->where('manuals.meta.last_page', 2));
 
-    $this->actingAs($owner)->get("/projects/{$project->id}?page=2")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?page=2")
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 2)
             ->where('manuals.meta.current_page', 2));
@@ -204,7 +204,7 @@ test('別 project の manual は一覧に混ざらない', function (): void {
     VideoManual::factory()->forProject($project)->create(['title' => '自分のマニュアル']);
     VideoManual::factory()->forProject($other)->create(['title' => '他プロジェクトのマニュアル']);
 
-    $this->actingAs($owner)->get("/projects/{$project->id}")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}")
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 1)
             ->where('manuals.data.0.title', '自分のマニュアル'));
@@ -217,7 +217,7 @@ test('manuals.data.* は creator / updated_at を供給する (正常系)', func
         'title' => 'メタ確認', 'updated_at' => '2026-07-10 09:30:00',
     ]);
 
-    $this->actingAs($owner)->get("/projects/{$project->id}")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}")
         ->assertInertia(fn (Assert $page) => $page
             ->where('manuals.data.0.creator.id', $owner->id)
             ->where('manuals.data.0.creator.name', $owner->name)
@@ -230,7 +230,7 @@ test('sort 未指定は既定順 (created_at desc, id desc) を維持する (回
     $old = VideoManual::factory()->forProject($project)->create(['created_at' => '2026-07-01 00:00:00']);
     $new = VideoManual::factory()->forProject($project)->create(['created_at' => '2026-07-05 00:00:00']);
 
-    $this->actingAs($owner)->get("/projects/{$project->id}")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}")
         ->assertInertia(fn (Assert $page) => $page
             ->where('manuals.data.0.id', $new->id)
             ->where('manuals.data.1.id', $old->id)
@@ -251,8 +251,8 @@ test('sort 各値で並べ替える (updated / title × asc/desc)', function ():
         'title' => 'cherry', 'updated_at' => '2026-07-03 00:00:00',
     ]);
 
-    $order = function (string $sort) use ($owner, $project): array {
-        $props = $this->actingAs($owner)->get("/projects/{$project->id}?sort={$sort}")
+    $order = function (string $sort) use ($organization, $owner, $project): array {
+        $props = $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?sort={$sort}")
             ->inertiaPage()['props'];
 
         return array_column($props['manuals']['data'], 'id');
@@ -263,7 +263,7 @@ test('sort 各値で並べ替える (updated / title × asc/desc)', function ():
     expect($order('title_asc'))->toBe([$a->id, $b->id, $c->id]);
     expect($order('title_desc'))->toBe([$c->id, $b->id, $a->id]);
 
-    $this->actingAs($owner)->get("/projects/{$project->id}?sort=updated_desc")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?sort=updated_desc")
         ->assertInertia(fn (Assert $page) => $page->where('manualFilters.sort', 'updated_desc'));
 });
 
@@ -273,7 +273,7 @@ test('sort allowlist 外は既定順へフォールバック (manualFilters.sort
     $old = VideoManual::factory()->forProject($project)->create(['created_at' => '2026-07-01 00:00:00']);
     $new = VideoManual::factory()->forProject($project)->create(['created_at' => '2026-07-05 00:00:00']);
 
-    $this->actingAs($owner)->get("/projects/{$project->id}?sort=bogus")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?sort=bogus")
         ->assertInertia(fn (Assert $page) => $page
             ->where('manuals.data.0.id', $new->id)
             ->where('manuals.data.1.id', $old->id)
@@ -286,8 +286,8 @@ test('同値 updated_at でも id tie-breaker でページ境界に重複/欠落
     // 15 件すべて同一 updated_at (tie-breaker が無いとページ間で不安定になる)
     VideoManual::factory()->forProject($project)->count(15)->create(['updated_at' => '2026-07-01 00:00:00']);
 
-    $ids = function (int $page) use ($owner, $project): array {
-        $props = $this->actingAs($owner)->get("/projects/{$project->id}?sort=updated_desc&page={$page}")
+    $ids = function (int $page) use ($organization, $owner, $project): array {
+        $props = $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?sort=updated_desc&page={$page}")
             ->inertiaPage()['props'];
 
         return array_column($props['manuals']['data'], 'id');
@@ -310,7 +310,7 @@ test('mine=1 は自ユーザー作成分のみに絞る', function (): void {
     $mine = VideoManual::factory()->forProject($project)->createdBy($owner)->create(['title' => '自作']);
     VideoManual::factory()->forProject($project)->createdBy($other)->create(['title' => '他人作']);
 
-    $this->actingAs($owner)->get("/projects/{$project->id}?mine=1")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?mine=1")
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 1)
             ->where('manuals.data.0.id', $mine->id)
@@ -338,7 +338,7 @@ test('mine と category/progress/q/sort の併用で結合絞り込みできる'
     ]);
 
     $this->actingAs($owner)
-        ->get("/projects/{$project->id}?mine=1&category={$category->id}&progress=completed&q=ネジ&sort=updated_desc")
+        ->get("/organizations/{$organization->slug}/projects/{$project->id}?mine=1&category={$category->id}&progress=completed&q=ネジ&sort=updated_desc")
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 1)
             ->where('manuals.data.0.id', $target->id));
@@ -364,7 +364,7 @@ test('duration_ms は published の総尺のみ供給する (それ以外は nul
         'total_length_ms' => 999_000,
     ]);
 
-    $rows = $this->actingAs($owner)->get("/projects/{$project->id}")
+    $rows = $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}")
         ->inertiaPage()['props']['manuals']['data'];
     $byId = array_column($rows, null, 'id');
 
@@ -396,7 +396,7 @@ test('current_finished_render_job_id は published × 現行世代の succeeded 
     ]);
     RenderJob::factory()->forManual($notPublished)->succeeded('renders/ready.mp4')->create();
 
-    $rows = $this->actingAs($owner)->get("/projects/{$project->id}")
+    $rows = $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}")
         ->inertiaPage()['props']['manuals']['data'];
     $byId = array_column($rows, null, 'id');
 
@@ -411,7 +411,7 @@ test('一覧の行 props に旧キー downloadable が残っていない', funct
     $project = Project::factory()->forOrganization($organization)->create();
     VideoManual::factory()->forProject($project)->published(60_000)->create();
 
-    $rows = $this->actingAs($owner)->get("/projects/{$project->id}")
+    $rows = $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}")
         ->inertiaPage()['props']['manuals']['data'];
 
     expect($rows[0])->toHaveKey('current_finished_render_job_id');
@@ -421,18 +421,17 @@ test('一覧の行 props に旧キー downloadable が残っていない', funct
 test('撮影者は current_finished_render_job_id=null / deletable=false、編集者は id と deletable=true', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
     $project = Project::factory()->forOrganization($organization)->create();
     attachProjectMember($project, $member, ProjectRole::Member);
     $manual = VideoManual::factory()->forProject($project)->published(60_000)->create();
     $job = RenderJob::factory()->forManual($manual)->succeeded('renders/ok.mp4')->create();
 
-    $this->actingAs($member)->get("/projects/{$project->id}")
+    $this->actingAs($member)->get("/organizations/{$organization->slug}/projects/{$project->id}")
         ->assertInertia(fn (Assert $page) => $page
             ->where('manuals.data.0.current_finished_render_job_id', null)
             ->where('manuals.data.0.deletable', false));
 
-    $this->actingAs($owner)->get("/projects/{$project->id}")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}")
         ->assertInertia(fn (Assert $page) => $page
             ->where('manuals.data.0.current_finished_render_job_id', $job->id)
             ->where('manuals.data.0.deletable', true));
@@ -442,7 +441,7 @@ test('一覧が 0 件でも props が壊れない (data: [] / meta.total: 0)', f
     [$organization, $owner] = createOrganizationWithOwner();
     $project = Project::factory()->forOrganization($organization)->create();
 
-    $this->actingAs($owner)->get("/projects/{$project->id}")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 0)
@@ -455,7 +454,7 @@ test('範囲外ページは最終ページへ丸める (空の一覧に着地さ
     $project = Project::factory()->forOrganization($organization)->create();
     VideoManual::factory()->forProject($project)->count(12)->create();
 
-    $this->actingAs($owner)->get("/projects/{$project->id}?page=99")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?page=99")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 2)
@@ -469,7 +468,7 @@ test('page が数字でない / 0 のときは 1 ページ目として扱う', f
     VideoManual::factory()->forProject($project)->count(12)->create();
 
     foreach (['abc', '0', '-3'] as $raw) {
-        $this->actingAs($owner)->get("/projects/{$project->id}?page={$raw}")
+        $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?page={$raw}")
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
                 ->has('manuals.data', 10)
@@ -483,7 +482,7 @@ test('PHP_INT_MAX 超の page でも 500 にならず最終ページへ着地す
     VideoManual::factory()->forProject($project)->count(12)->create();
 
     foreach (['99999999999999999999999', (string) PHP_INT_MAX] as $raw) {
-        $this->actingAs($owner)->get("/projects/{$project->id}?page={$raw}")
+        $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?page={$raw}")
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
                 ->has('manuals.data', 2)
@@ -499,7 +498,7 @@ test('q は先頭 200 文字で絞り込む (201 文字目以降は一致に寄�
     VideoManual::factory()->forProject($project)->create(['title' => '別のマニュアル']);
 
     // 200 文字を超える検索語は先頭 200 文字へ切り詰められるため、上記 title に一致する
-    $this->actingAs($owner)->get("/projects/{$project->id}?q=".urlencode($title.'ZZZ'))
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?q=".urlencode($title.'ZZZ'))
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 1)
             ->where('manuals.data.0.title', $title)
@@ -511,7 +510,7 @@ test('一覧 0 件でも範囲外ページは 1 ページ目へ丸める (meta �
     $project = Project::factory()->forOrganization($organization)->create();
 
     foreach (['99', '99999999999999999999999'] as $raw) {
-        $this->actingAs($owner)->get("/projects/{$project->id}?page={$raw}")
+        $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?page={$raw}")
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
                 ->has('manuals.data', 0)
@@ -529,14 +528,14 @@ test('category は正規形へ畳まれる (0003 → 3。フィルタ select の
     VideoManual::factory()->forProject($project)->create(['title' => '未分類マニュアル']);
 
     $padded = str_pad((string) $category->id, 6, '0', STR_PAD_LEFT);
-    $this->actingAs($owner)->get("/projects/{$project->id}?category={$padded}")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?category={$padded}")
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 1)
             ->where('manuals.data.0.title', '分類済み')
             ->where('manualFilters.category', (string) $category->id));
 
     // 桁溢れする数字列は該当なしへ倒れる (全件が出る方向へは倒さない)
-    $this->actingAs($owner)->get("/projects/{$project->id}?category=99999999999999999999999")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?category=99999999999999999999999")
         ->assertInertia(fn (Assert $page) => $page->has('manuals.data', 0));
 });
 
@@ -555,7 +554,7 @@ test('q は narration に部分一致する (title に語が無くても hit す
     $other = VideoManual::factory()->forProject($project)->create(['title' => '第二工程']);
     Cut::factory()->forManual($other)->create(['narration' => '清掃して終了します']);
 
-    $this->actingAs($owner)->get("/projects/{$project->id}?q=".urlencode('トルクレンチ'))
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?q=".urlencode('トルクレンチ'))
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 1)
             ->where('manuals.data.0.id', $target->id));
@@ -587,7 +586,7 @@ test('q は scene / narration / subtitle_primary / subtitle_secondary のいず�
     }
 
     foreach ($columns as $column => $word) {
-        $this->actingAs($owner)->get("/projects/{$project->id}?q=".urlencode($word))
+        $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?q=".urlencode($word))
             ->assertInertia(fn (Assert $page) => $page
                 ->has('manuals.data', 1)
                 ->where('manuals.data.0.id', $ids[$column]));
@@ -607,7 +606,7 @@ test('q は shooting_point には一致しない (対象外列)', function (): v
         'shooting_point' => '手元をヨリデトルコト',
     ]);
 
-    $this->actingAs($owner)->get("/projects/{$project->id}?q=".urlencode('ヨリデトルコト'))
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?q=".urlencode('ヨリデトルコト'))
         ->assertInertia(fn (Assert $page) => $page->has('manuals.data', 0));
 });
 
@@ -618,7 +617,7 @@ test('q はカット本文にも title にも一致しない manual を除外す
     $manual = VideoManual::factory()->forProject($project)->create(['title' => '無関係の手順']);
     Cut::factory()->forManual($manual)->create(['narration' => '無関係の本文']);
 
-    $this->actingAs($owner)->get("/projects/{$project->id}?q=".urlencode('存在しない語'))
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?q=".urlencode('存在しない語'))
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 0)
             ->where('manuals.meta.total', 0));
@@ -634,7 +633,7 @@ test('本文が複数カットに一致しても manual は 1 行だけ返る (j
             ->create(['narration' => 'ここでカクニンゴを言う']);
     }
 
-    $this->actingAs($owner)->get("/projects/{$project->id}?q=".urlencode('カクニンゴ'))
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?q=".urlencode('カクニンゴ'))
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 1)
             ->where('manuals.data.0.id', $manual->id)
@@ -659,19 +658,19 @@ test('q はカット本文でも LIKE メタ文字 (%/_/\\) をリテラル扱�
     Cut::factory()->forManual($backslash)->create(['narration' => '経路 C\\D を通る']);
 
     // % がワイルドカード化していない (1005 は hit しない)
-    $this->actingAs($owner)->get("/projects/{$project->id}?q=".urlencode('100%'))
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?q=".urlencode('100%'))
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 1)
             ->where('manuals.data.0.id', $percent->id));
 
     // _ が任意 1 文字になっていない (AXB は hit しない)
-    $this->actingAs($owner)->get("/projects/{$project->id}?q=".urlencode('A_B'))
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?q=".urlencode('A_B'))
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 1)
             ->where('manuals.data.0.id', $underscore->id));
 
     // エスケープ文字自身がリテラルとして通る
-    $this->actingAs($owner)->get("/projects/{$project->id}?q=".urlencode('C\\D'))
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?q=".urlencode('C\\D'))
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 1)
             ->where('manuals.data.0.id', $backslash->id));
@@ -704,7 +703,7 @@ test('mine=1 / progress / category と q は AND で効く (カット本文一�
     Cut::factory()->forManual($draft)->create(['narration' => 'ここでフクゴウゴを使う']);
 
     $this->actingAs($owner)
-        ->get("/projects/{$project->id}?mine=1&category={$category->id}&progress=completed&q=".urlencode('フクゴウゴ'))
+        ->get("/organizations/{$organization->slug}/projects/{$project->id}?mine=1&category={$category->id}&progress=completed&q=".urlencode('フクゴウゴ'))
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 1)
             ->where('manuals.data.0.id', $target->id));
@@ -720,7 +719,7 @@ test('q は先頭 200 文字で切られる (カット本文でも)', function (
     VideoManual::factory()->forProject($project)->create(['title' => '別のマニュアル']);
 
     // 203 文字を渡しても先頭 200 文字で検索されるため上記 narration に一致する
-    $this->actingAs($owner)->get("/projects/{$project->id}?q=".urlencode($body.'YYY'))
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?q=".urlencode($body.'YYY'))
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 1)
             ->where('manuals.data.0.id', $target->id)
@@ -739,7 +738,7 @@ test('検索条件付きでも範囲外ページは丸められ meta が食い�
     VideoManual::factory()->forProject($project)->create(['title' => '無関係']);
 
     // 丸めは (clone $baseQuery) を 2 回叩く。キーワードが片方にしか乗っていないと total が食い違う
-    $this->actingAs($owner)->get("/projects/{$project->id}?q=".urlencode('マルメゴ').'&page=999')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?q=".urlencode('マルメゴ').'&page=999')
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 1)

@@ -11,6 +11,7 @@
     import PageContent from "@/components/templates/PageContent.svelte";
     import type { SharedProps } from "@/lib/shared-props";
     import type { TakeSelectionPageProps } from "@/types/manual";
+    import { currentOrgUrl } from "@/lib/org-url";
 
     /**
      * テイク選択・採用画面 (doc/04)。左 = テイク一覧、中央 = プレビュー + 採用。
@@ -48,7 +49,7 @@
             icon={Film}
             testId="take-selection-heading"
         >
-            <TextLink href={`/projects/${project.id}/manuals/${manual.id}/edit`}>
+            <TextLink href={currentOrgUrl(`/projects/${project.id}/manuals/${manual.id}/edit`)}>
                 <ArrowLeft class="inline size-3" aria-hidden="true" />
                 シナリオ編集へ戻る
             </TextLink>

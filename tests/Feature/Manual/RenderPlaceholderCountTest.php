@@ -159,18 +159,18 @@ test('B-4b: 合成中に採用しても記録されるのは manifest 時点の�
 });
 
 test('B-5: ポーリング応答と詳細画面 props に placeholder_cut_count が載る', function (): void {
-    [, $owner, $project, $manual] = placeholderCountContext(tickets: 0);
+    [$organization, $owner, $project, $manual] = placeholderCountContext(tickets: 0);
     Cut::factory()->forManual($manual)->withSortOrder(1)->create();
 
     $previewJob = app(RenderJobService::class)->triggerPreview($project, $manual);
     app(RenderPipeline::class)->run($previewJob->id);
 
     $this->actingAs($owner)->getJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$previewJob->id}",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$previewJob->id}",
     )->assertOk()->assertJson(['placeholder_cut_count' => 1]);
 
     $this->actingAs($owner)
-        ->get("/projects/{$project->id}/manuals/{$manual->id}")
+        ->get("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}")
         ->assertOk()
         ->assertInertia(fn (AssertableInertia $page) => $page
             ->where('render.playbackJob.id', $previewJob->id)
@@ -178,7 +178,7 @@ test('B-5: ポーリング応答と詳細画面 props に placeholder_cut_count 
 });
 
 test('B-6: 本変更以前からの succeeded 行 (legacy) は null のままで backfill しない', function (): void {
-    [, $owner, $project, $manual] = placeholderCountContext(tickets: 0);
+    [$organization, $owner, $project, $manual] = placeholderCountContext(tickets: 0);
     $legacy = RenderJob::factory()->forManual($manual)->preview()
         ->legacySucceeded("projects/{$project->id}/manuals/{$manual->id}/previews/v2-1.mp4")
         ->create();
@@ -186,7 +186,7 @@ test('B-6: 本変更以前からの succeeded 行 (legacy) は null のままで
     expect($legacy->refresh()->placeholder_cut_count)->toBeNull();
 
     $this->actingAs($owner)
-        ->get("/projects/{$project->id}/manuals/{$manual->id}")
+        ->get("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}")
         ->assertOk()
         ->assertInertia(fn (AssertableInertia $page) => $page
             ->where('render.playbackJob.placeholder_cut_count', null));

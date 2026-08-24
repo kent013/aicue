@@ -39,7 +39,9 @@ bug-hunt はこれらを**単独で開くのではなく**、S1/S6 のパスキ�
 > §サブスク契約 Checkout とオンボーディング着地)。
 
 - `onboarding.checkout` は**離脱ガード付き**: 契約済み (有効 sub / free personal) は
-  `billing.index` へ、`manageBilling` 非保持者は `onboarding.billing-required` へ逃がす。
+  `manageBilling` 保持者 → `billing.index` / 非保持メンバー → `dashboard` へ寄せる
+  (非保持メンバーに操作できない請求画面を見せず業務入口へ着地させる。Q-2-01)。
+  未契約で `manageBilling` 非保持者は `onboarding.billing-required` へ逃がす。
 - `onboarding.billing-required` も同様に、利用可なら `dashboard`、`manageBilling` 保持者なら
   `onboarding.checkout` へ逃がす。**どちらの画面も「行き先のない詰み」を作らないこと**が契約で、
   ここでループ・403・空画面が出たら finding (H4/H10)。
@@ -53,9 +55,9 @@ bug-hunt はこれらを**単独で開くのではなく**、S1/S6 のパスキ�
 > 準拠を横断ヒューリスティクス H11/H13 とあわせて全認証画面で検査する。
 
 **左サイドバー nav 項目 (desktop 固定 / mobile ドロワー) — ここに出てよいもの:**
-- ダッシュボード `/dashboard`(常時)、プロジェクト `/projects`(組織あり)、
-  メンバー `/manage/users`(`canManageMembers`)、API キー `/organizations/{slug}/api-keys`(`canManageApiKeys`)、
-  請求 `/billing`(組織あり)
+- ダッシュボード `/organizations/{slug}/dashboard`(常時)、プロジェクト `/organizations/{slug}/projects`(組織あり)、
+  メンバー `/organizations/{slug}/manage/users`(`canManageMembers`)、API キー `/organizations/{slug}/api-keys`(`canManageApiKeys`)、
+  請求 `/organizations/{slug}/billing`(組織あり)
 
 **下部ユーザー/組織ポップアップ (SidebarUserMenu) — ここに出るべきもの (左 nav に出してはいけない):**
 - **個人設定 `/settings`**、組織設定 `/organizations/{slug}/settings`、CLI/MCP セットアップ、

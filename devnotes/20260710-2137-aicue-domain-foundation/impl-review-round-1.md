@@ -8,16 +8,16 @@
 
 **Critical なし（明示）**
 - ご提示の脅威（`422 vs 404` 差分による存在オラクル）に対する主修正は妥当で、方向性は正しいです。
-- `project.in-current-org` を web 側に限定し、API 側は除外する設計判断も合理的です。
+- `project.in-route-org` を web 側に限定し、API 側は除外する設計判断も合理的です。
 
 **Warning**
-- `routes/web.php` で `project.in-current-org` を「業務 route group 全体」に付与しているため、`{project}` を持たない route でも毎回 `resolveCurrentOrganization()` が走る可能性があります（実装上は no-op 想定だが、trait 側の将来変更で副作用化リスク）。
+- `routes/web.php` で `project.in-route-org` を「業務 route group 全体」に付与しているため、`{project}` を持たない route でも毎回 `resolveCurrentOrganization()` が走る可能性があります（実装上は no-op 想定だが、trait 側の将来変更で副作用化リスク）。
   - 現在コードでは `if ($project instanceof Project)` 内でのみ解決しており問題化しにくいですが、**順序ハザードを防ぐ本質要件は `{project}` route に確実付与されること**なので、グループ全体付与は運用上の安全策と引き換えに過剰適用の面があります。
   - 影響は主に保守性・将来退行リスク（誤 404 誘発）で、現時点のセキュリティ破綻ではありません。
 
 **Suggestion**
 - `ProjectRouteCurrentOrgGuardTest` に「web 側 `{project}` route の URI/名前の allowlist（または対象グループ判定）」を加えると、将来 `admin/*` 等の別コンテキスト route が増えた際の誤検知/過検知を防げます。
-- Feature テストに「same-org 正常系が 200/302/session-error で従来通り通る」明示ケースを1本追加すると、`project.in-current-org` 導入による誤 404 回帰をより強く固定できます（現状でも実質担保はあるが、意図をテスト名で残す価値あり）。
+- Feature テストに「same-org 正常系が 200/302/session-error で従来通り通る」明示ケースを1本追加すると、`project.in-route-org` 導入による誤 404 回帰をより強く固定できます（現状でも実質担保はあるが、意図をテスト名で残す価値あり）。
 
 **観点別回答（依頼 1〜5）**
 - 1) 存在オラクル封じ: 主要経路は封じられています。`{project}` が cross-org の時点で middleware で 404 化できるため、`unique/exists` 到達前に遮断可能。

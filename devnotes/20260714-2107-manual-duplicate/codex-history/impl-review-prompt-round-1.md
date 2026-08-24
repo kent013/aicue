@@ -160,7 +160,7 @@ use Webmozart\Assert\Assert;
  * 再解決して associate する (二段構え)。
  *
  * 認可は Controller の Gate::authorize('duplicate', $manual) に一元化するため authorize() は true。
- * ただし {project} ∈ current org は route の project.in-current-org middleware が
+ * ただし {project} ∈ current org は route の project.in-route-org middleware が
  * FormRequest 検証より前に 404 に落とすため、category exists の project スコープは
  * cross-org/cross-project の存在差を漏らさない (存在オラクル防御)。
  */
@@ -714,7 +714,7 @@ index 0000000..a6bf778
 + * 再解決して associate する (二段構え)。
 + *
 + * 認可は Controller の Gate::authorize('duplicate', $manual) に一元化するため authorize() は true。
-+ * ただし {project} ∈ current org は route の project.in-current-org middleware が
++ * ただし {project} ∈ current org は route の project.in-route-org middleware が
 + * FormRequest 検証より前に 404 に落とすため、category exists の project スコープは
 + * cross-org/cross-project の存在差を漏らさない (存在オラクル防御)。
 + */

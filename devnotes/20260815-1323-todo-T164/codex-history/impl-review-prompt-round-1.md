@@ -772,7 +772,7 @@ foreach (Route::getRoutes() as $route) {
 - [ ] 上記の主契約 (違反ゼロ)。未分類クラスの既定は **`true` (短絡しうる)** に倒す
       = 分類漏れが偽陰性にならない (既存 `TenantBoundaryOrderingTest` と同じ規律)
 - [ ] 代表 route (課金ゲート配下の変更系 route を 1 本) で、記録器が
-      `Authenticate` / `EnsureProjectBelongsToCurrentOrganization` / `RequireActiveSubscription` /
+      `Authenticate` / `EnsureProjectBelongsToRouteOrganization` / `RequireActiveSubscription` /
       `EnsureAccountNotPendingDeletion` より後にあることを名指しで確認する
       (主契約が空回りしても気づけるようにする)
 - [ ] 記録器が web グループの route に実際に付いていること (0 件なら fail = 配線消失の検出)
@@ -2717,7 +2717,7 @@ index 5cca806..aa062ed 100644
  use App\Http\Middleware\EnsureAccountNotPendingDeletion;
  use App\Http\Middleware\EnsureEmailIsVerifiedOrBack;
 @@ -14,6 +15,7 @@
- use App\Http\Middleware\EnsureProjectBelongsToCurrentOrganization;
+ use App\Http\Middleware\EnsureProjectBelongsToRouteOrganization;
  use App\Http\Middleware\HandleInertiaRequests;
  use App\Http\Middleware\IdempotentRequest;
 +use App\Http\Middleware\LocalOnly;
@@ -3134,7 +3134,7 @@ index 0000000..ecc8138
 +
 +use App\Http\Middleware\BughuntExecutedRouteMiddleware;
 +use App\Http\Middleware\EnsureAccountNotPendingDeletion;
-+use App\Http\Middleware\EnsureProjectBelongsToCurrentOrganization;
++use App\Http\Middleware\EnsureProjectBelongsToRouteOrganization;
 +use App\Http\Middleware\RequireActiveSubscription;
 +use Illuminate\Auth\Middleware\Authenticate;
 +use Illuminate\Routing\Route as RoutingRoute;
@@ -3230,7 +3230,7 @@ index 0000000..ecc8138
 +
 +    foreach ([
 +        Authenticate::class,
-+        EnsureProjectBelongsToCurrentOrganization::class,
++        EnsureProjectBelongsToRouteOrganization::class,
 +        RequireActiveSubscription::class,
 +        EnsureAccountNotPendingDeletion::class,
 +    ] as $upstream) {
@@ -3288,7 +3288,7 @@ index 49129d3..782e8c0 100644
 -use App\Http\Middleware\EnsureEmailIsVerifiedOrBack;
 -use App\Http\Middleware\EnsureLoginMethodRemains;
  use App\Http\Middleware\EnsureProjectBelongsToApiOrganization;
- use App\Http\Middleware\EnsureProjectBelongsToCurrentOrganization;
+ use App\Http\Middleware\EnsureProjectBelongsToRouteOrganization;
  use App\Http\Middleware\HandleInertiaRequests;
  use App\Http\Middleware\IdempotentRequest;
 -use App\Http\Middleware\LocalOnly;
@@ -3364,7 +3364,7 @@ index 49129d3..782e8c0 100644
 -        RequireApiKeyAbility::class => true,
 -        ResolveApiActor::class => true,
 -        IdempotentRequest::class => true,
--        EnsureProjectBelongsToCurrentOrganization::class => true,
+-        EnsureProjectBelongsToRouteOrganization::class => true,
 -        EnsureProjectBelongsToApiOrganization::class => true,
 -        EnsureEmailIsVerifiedOrBack::class => true,
 -        EnsureLoginMethodRemains::class => true,
@@ -3394,7 +3394,7 @@ index 49129d3..782e8c0 100644
      ];
 +    // bug-hunt の実行済み route 記録器は web 鎖の**最後** (遮断 middleware より内側)。
 +    $recorder = BughuntExecutedRouteMiddleware::class;
-     $guard = EnsureProjectBelongsToCurrentOrganization::class;
+     $guard = EnsureProjectBelongsToRouteOrganization::class;
      $billing = RequireActiveSubscription::class;
      // 退会予約中の凍結は**課金ゲートの直後**。テナント境界 404 より必ず後 (302 短絡のため)。
 @@ -470,11 +417,12 @@ function tenantBoundaryHasMode(string $routeName, NestedRouteDefenseMode $mode):
@@ -3691,7 +3691,7 @@ index 0000000..9173834
 +use App\Http\Middleware\EnsureEmailIsVerifiedOrBack;
 +use App\Http\Middleware\EnsureLoginMethodRemains;
 +use App\Http\Middleware\EnsureProjectBelongsToApiOrganization;
-+use App\Http\Middleware\EnsureProjectBelongsToCurrentOrganization;
++use App\Http\Middleware\EnsureProjectBelongsToRouteOrganization;
 +use App\Http\Middleware\HandleInertiaRequests;
 +use App\Http\Middleware\IdempotentRequest;
 +use App\Http\Middleware\LocalOnly;
@@ -3766,7 +3766,7 @@ index 0000000..9173834
 +            RequireApiKeyAbility::class => true,
 +            ResolveApiActor::class => true,
 +            IdempotentRequest::class => true,
-+            EnsureProjectBelongsToCurrentOrganization::class => true,
++            EnsureProjectBelongsToRouteOrganization::class => true,
 +            EnsureProjectBelongsToApiOrganization::class => true,
 +            EnsureEmailIsVerifiedOrBack::class => true,
 +            EnsureLoginMethodRemains::class => true,

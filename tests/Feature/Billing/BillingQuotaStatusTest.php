@@ -21,12 +21,12 @@ use Inertia\Testing\AssertableInertia as Assert;
  * 警告ではなく「使用量 / 上限」の併記が担う)。
  */
 
-test('/billing の quotas は 6 キー厳密一致で届く', function (): void {
+test('/organizations/{slug}/billing の quotas は 6 キー厳密一致で届く', function (): void {
     // Inertia props は連想配列なので、DTO rename の波及漏れ (キー名の取りこぼし) は
     // phpstan / typecheck では捕まらない。キー集合そのものをここで固定する。
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->get('/billing')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/billing")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             // 過不足の両方を見る: hasAll で不足を、count で余剰を検出する
@@ -48,7 +48,7 @@ test('上限内なら exceededLabels は空で、使用量が実値で届く', f
     $cut = Cut::factory()->forManual($manual)->create();
     Take::factory()->forCut($cut)->create(['size_bytes' => 1_024]);
 
-    $this->actingAs($owner)->get('/billing')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/billing")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('page.quotas.projectsUsed', 1)
@@ -62,7 +62,7 @@ test('上限ちょうど (1/1) では警告を出さない (恒常警告の回�
     [$organization, $owner] = createOrganizationWithOwner();
     Project::factory()->forOrganization($organization)->create();
 
-    $this->actingAs($owner)->get('/billing')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/billing")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('page.quotas.maxProjects', 1)
@@ -76,7 +76,7 @@ test('プロジェクト数が上限を超えていれば exceededLabels に載�
     Project::factory()->forOrganization($organization)->create();
     $organization->quota()->create(['limits' => ['max_projects' => 0]]);
 
-    $this->actingAs($owner)->get('/billing')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/billing")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('page.quotas.exceededLabels', ['プロジェクト数']));
@@ -90,7 +90,7 @@ test('保存容量が上限を超えていれば exceededLabels に載る', func
     Take::factory()->forCut($cut)->create(['size_bytes' => 2_000]);
     $organization->quota()->create(['limits' => ['max_storage_bytes' => 1_000]]);
 
-    $this->actingAs($owner)->get('/billing')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/billing")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('page.quotas.storageUsedBytes', 2_000)
@@ -103,7 +103,7 @@ test('メンバー数は上限のみで、超過次元には決して現れな�
     [$organization, $owner] = createOrganizationWithOwner();
     $organization->quota()->create(['limits' => ['max_members' => 0]]);
 
-    $this->actingAs($owner)->get('/billing')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/billing")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('page.quotas.maxMembers', 0)

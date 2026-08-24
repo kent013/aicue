@@ -42,7 +42,6 @@ enum AccountDeletionFreezeAllowance: string
     case BillingIndex = 'billing.index';
     case BillingPortal = 'billing.portal';
     // --- 退会ブロッカー (孤児メンバー) の解消 ---
-    case OrganizationSwitch = 'organizations.switch';
     case OrganizationSettings = 'organizations.settings';
     case TransferOwnership = 'organizations.transfer-ownership';
     case MemberUpdate = 'organizations.members.update';
@@ -84,9 +83,6 @@ enum AccountDeletionFreezeAllowance: string
                 .'subscription_update=false / subscription_cancel=at_period_end を宣言しており、'
                 .'Portal からは**解約と支払い方法更新だけ**ができる = 責務を減らす方向のみ。'
                 .'**この spec が変われば通してよい前提が崩れる** (gate が spec を pin する)。',
-            self::OrganizationSwitch => '課金・組織設定は current org スコープ (route parameter を'
-                .'持たない) のため、別組織のブロッカーを解消するには切替が必須。切替自体は'
-                .'所属組織の間の移動でしかなく、新しい責務を作らない。',
             self::OrganizationSettings => 'オーナー移譲・メンバー整理の操作 UI が置かれた画面。'
                 .'ブロッカー解消の入口であり、閲覧できないと「次の一手」が押せず詰む。',
             self::TransferOwnership => '退会ブロッカー「唯一 Owner かつ他メンバーが残る」の唯一の'

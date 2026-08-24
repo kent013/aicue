@@ -4,6 +4,7 @@
     import { Bell, Check, FileSearch, Film, Mail, TicketMinus, UserRoundX } from "@lucide/svelte";
     import Badge from "@/components/atoms/Badge.svelte";
     import { addToast } from "@/lib/stores/toast";
+    import { currentOrgUrl } from "@/lib/org-url";
     import type {
         AccountDeletionRequestedPayload,
         InvitationReceivedPayload,
@@ -150,7 +151,7 @@
         if (opening || reading) return; // read/open in-flight ガード (disabled ではなく送信ガード)
         opening = true; // router.post 前に同期設定 (onStart 待ちの競合窓を閉じる)
         router.post(
-            `/notifications/${notification.id}/open`,
+            currentOrgUrl(`/notifications/${notification.id}/open`),
             {},
             {
                 onFinish: () => {
@@ -169,7 +170,7 @@
         if (reading || opening || !unread) return; // read/open in-flight ガード + 既読には無反応
         reading = true;
         router.post(
-            `/notifications/${notification.id}/read`,
+            currentOrgUrl(`/notifications/${notification.id}/read`),
             {},
             {
                 preserveScroll: true,

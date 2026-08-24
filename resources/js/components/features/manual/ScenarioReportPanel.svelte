@@ -10,6 +10,7 @@
         formatPositions,
     } from "@/components/features/manual/scenario-report";
     import type { ScenarioReportProps } from "@/types/manual";
+    import { currentOrgUrl } from "@/lib/org-url";
 
     /**
      * 生成結果の確認パネル (doc/03 §3.4 のバリデーション結果)。
@@ -95,7 +96,7 @@
         <div class="mt-4">
             <Button
                 variant="ghost"
-                href={`/projects/${projectId}/manuals/${manualId}/edit`}
+                href={currentOrgUrl(`/projects/${projectId}/manuals/${manualId}/edit`)}
                 inertia
                 testId="scenario-report-edit-link"
             >

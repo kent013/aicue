@@ -38,7 +38,7 @@
 プロジェクトスコープの DB 検証ルール (categories.name の unique) が、{project} が current org に属するか検証される前 (= コントローラの resolveOrganizationProject 404 ガードより前) に実行されるため、cross-org プロジェクトに対するクロステナントの存在オラクルになる。認証済み・有効サブスクの攻撃者が POST /projects/{他組織 projectId}/categories に name=推測値 を送ると、存在時 422 / 非存在時 404 の差分で他組織のカテゴリ名を辞書探索できる。StoreVideoManualRequest / UpdateVideoManualRequest の category exists ルールも同根 (category↔project 所属可否が 422 vs 404 で漏れる)。レビュアーの提案は Route::bind('project', ...) の org スコープ binder 化。
 
 【採った修正方針 (binder ではなく middleware にした理由)】
-{project} param は API v1 (routes/api.php) でも使われ、API は org を API キーから確定する別レイヤー (ResolvesApiOrganization) のため、web セッション前提の global binder はコンテキスト分岐を持ち込む。代わりに EnsureProjectBelongsToCurrentOrganization middleware (alias: project.in-current-org) を web の業務 route group に一括付与した。middleware は FormRequest 解決 (= DB ルール実行) より前・SubstituteBindings より後に走るため、cross-org {project} は DB ルールより前に 404 になる。controller の inline guard は二重防御として維持。網羅性は新規 Architecture テスト (ProjectRouteCurrentOrgGuardTest: web の {project} route は必ず middleware を持つ / API は持たない、deny-by-default) で固定。回帰テストは CategoryCrudTest (unique 衝突 name で 404) / VideoManualCrudTest (exists の in/out 両方の category id で同一 404) に追加。全検証 (composer test 981 / phpstan / pint / pnpm lint / typecheck / test 278 / build) green。
+{project} param は API v1 (routes/api.php) でも使われ、API は org を API キーから確定する別レイヤー (ResolvesApiOrganization) のため、web セッション前提の global binder はコンテキスト分岐を持ち込む。代わりに EnsureProjectBelongsToRouteOrganization middleware (alias: project.in-route-org) を web の業務 route group に一括付与した。middleware は FormRequest 解決 (= DB ルール実行) より前・SubstituteBindings より後に走るため、cross-org {project} は DB ルールより前に 404 になる。controller の inline guard は二重防御として維持。網羅性は新規 Architecture テスト (ProjectRouteCurrentOrgGuardTest: web の {project} route は必ず middleware を持つ / API は持たない、deny-by-default) で固定。回帰テストは CategoryCrudTest (unique 衝突 name で 404) / VideoManualCrudTest (exists の in/out 両方の category id で同一 404) に追加。全検証 (composer test 981 / phpstan / pint / pnpm lint / typecheck / test 278 / build) green。
 
 【レビュー観点】
 1. この修正は存在オラクルを完全に閉じているか (残余の 422/404 差分経路・順序ハザードは無いか)
@@ -47,7 +47,7 @@
 4. Architecture テストの deny-by-default は将来の route 追加の guard 漏れを確実に落とすか
 5. 新たな退行 (正当な same-org リクエストへの誤 404、API v1 への影響) は無いか
 
-対象コードベース: カレントディレクトリ (worktree)。必要なら routes/web.php・routes/api.php・app/Http/Middleware/EnsureProjectBelongsToCurrentOrganization.php 等を読んでよい。
+対象コードベース: カレントディレクトリ (worktree)。必要なら routes/web.php・routes/api.php・app/Http/Middleware/EnsureProjectBelongsToRouteOrganization.php 等を読んでよい。
 
 ---
 
@@ -62,8 +62,8 @@ index b9c2d44..b5e9b9e 100644
       * **認可より前に 404** (403 で存在を漏らさない / cross-org は 404)。
       * 所属確認は relation (Organization::projects = CustomTeam 経由) のみで行う (直 fetch 禁止)。
 +     *
-+     * web の {project} route では EnsureProjectBelongsToCurrentOrganization middleware
-+     * (project.in-current-org) が本 guard を FormRequest の DB ルールより**前**にも実行する
++     * web の {project} route では EnsureProjectBelongsToRouteOrganization middleware
++     * (project.in-route-org) が本 guard を FormRequest の DB ルールより**前**にも実行する
 +     * (422/404 差分の存在オラクル防止)。controller 内の呼び出しは二重防御として維持する。
       */
      private function resolveOrganizationProject(Organization $organization, Project $project): Project
@@ -76,7 +76,7 @@ index 40ab660..546b82a 100644
  use App\Http\Middleware\BughuntCoverageMiddleware;
  use App\Http\Middleware\EnforceMcpTransport;
  use App\Http\Middleware\EnsureEmailIsVerifiedOrBack;
-+use App\Http\Middleware\EnsureProjectBelongsToCurrentOrganization;
++use App\Http\Middleware\EnsureProjectBelongsToRouteOrganization;
  use App\Http\Middleware\HandleInertiaRequests;
  use App\Http\Middleware\IdempotentRequest;
  use App\Http\Middleware\McpConsentOrganizationBinder;
@@ -87,7 +87,7 @@ index 40ab660..546b82a 100644
 +            // web の {project} route の URL 整合 guard。cross-org の {project} を
 +            // FormRequest の DB ルール (unique/exists) より前に 404 へ落とす
 +            // (存在オラクル防止。網羅性は ProjectRouteCurrentOrgGuardTest が固定)
-+            'project.in-current-org' => EnsureProjectBelongsToCurrentOrganization::class,
++            'project.in-route-org' => EnsureProjectBelongsToRouteOrganization::class,
              'resolve.api-actor' => ResolveApiActor::class,
              'api-key.ability' => RequireApiKeyAbility::class,
              'idempotent' => IdempotentRequest::class,
@@ -100,7 +100,7 @@ index a9dafc0..03fac64 100644
  | FormRequest(`ProhibitsProtectedKeys` + missing rule) | `app/Http/Requests/Projects/StoreItemRequest.php` / `UpdateItemRequest.php` |
  | nested route(Team セグメントなし = Default Team パターン) | `routes/web.php` の `/projects/{project}/items` 系 |
 -| URL 整合 guard(認可より**前**に 404) | {project} ∈ current org は `app/Http/Concerns/ResolvesCurrentOrganization.php` の `resolveOrganizationProject()`(inline guard)。{item} ∈ {project} は `routes/web.php` の `Route::scopeBindings()`(`$project->items()` 経由で解決) |
-+| URL 整合 guard(認可より**前**に 404) | {project} ∈ current org は 2 層: `project.in-current-org` middleware(`app/Http/Middleware/EnsureProjectBelongsToCurrentOrganization.php`。FormRequest の DB ルールより**前**に cross-org を 404 に落とす = 存在オラクル防止。web の {project} route group に一括付与、網羅性は `tests/Architecture/ProjectRouteCurrentOrgGuardTest.php`)+ `app/Http/Concerns/ResolvesCurrentOrganization.php` の `resolveOrganizationProject()`(inline guard、二重防御)。{item} ∈ {project} は `routes/web.php` の `Route::scopeBindings()`(`$project->items()` 経由で解決) |
++| URL 整合 guard(認可より**前**に 404) | {project} ∈ current org は 2 層: `project.in-route-org` middleware(`app/Http/Middleware/EnsureProjectBelongsToRouteOrganization.php`。FormRequest の DB ルールより**前**に cross-org を 404 に落とす = 存在オラクル防止。web の {project} route group に一括付与、網羅性は `tests/Architecture/ProjectRouteCurrentOrgGuardTest.php`)+ `app/Http/Concerns/ResolvesCurrentOrganization.php` の `resolveOrganizationProject()`(inline guard、二重防御)。{item} ∈ {project} は `routes/web.php` の `Route::scopeBindings()`(`$project->items()` 経由で解決) |
  | guard inventory への登録 | `tests/Architecture/NestedRouteIdorDefenseTest.php`(Web の `projects.items.update/destroy` = ScopeBindings、API の `api.v1.projects.items.update/destroy` = UrlIntegrityGuard) |
  | REST API v1 controller(Web と同じ FormRequest 再利用、org-scoped 解決) | `app/Http/Controllers/Api/V1/ItemController.php`(`ResolvesApiOrganization`) |
  | API リソース(レスポンス整形) | `app/Http/Resources/Api/V1/ItemResource.php` |
@@ -113,11 +113,11 @@ index 958cf74..436e3d9 100644
  - 実装: `app/Services/Manual/CategoryService.php`, `app/Models/Category.php`
  - 設計: `devnotes/20260710-2137-aicue-domain-foundation/detailed-design.md` 施策7
 +
-+## D4 ✅ web `{project}` route の org スコープ guard を middleware 層に追加 (project.in-current-org)
++## D4 ✅ web `{project}` route の org スコープ guard を middleware 層に追加 (project.in-route-org)
 +
 +| 観点 | テンプレート | 本アプリ |
 +|---|---|---|
-+| {project} ∈ current org の guard | controller の inline guard (`resolveOrganizationProject`) のみ | `project.in-current-org` middleware (`EnsureProjectBelongsToCurrentOrganization`) を web の {project} route group に一括付与 + inline guard を二重防御として維持 |
++| {project} ∈ current org の guard | controller の inline guard (`resolveOrganizationProject`) のみ | `project.in-route-org` middleware (`EnsureProjectBelongsToRouteOrganization`) を web の {project} route group に一括付与 + inline guard を二重防御として維持 |
 +
 +### なぜ正当な差分か(logic-driven)
 +FormRequest のバリデーションは controller メソッド解決時 = inline guard より**前**に走る。
@@ -139,7 +139,7 @@ index 958cf74..436e3d9 100644
 +実挙動は `CategoryCrudTest` (unique 探索 404) / `VideoManualCrudTest` (exists 探索 404) が固定する。
 +
 +### 関連
-+- 実装: `app/Http/Middleware/EnsureProjectBelongsToCurrentOrganization.php`, `routes/web.php`, `bootstrap/app.php`
++- 実装: `app/Http/Middleware/EnsureProjectBelongsToRouteOrganization.php`, `routes/web.php`, `bootstrap/app.php`
 +- テンプレート側の根拠: `docs/app-integration-guide.md` §2 (URL 整合 guard 行を 2 層構成に更新済み)
 diff --git a/routes/web.php b/routes/web.php
 index 953d6f2..303f102 100644
@@ -150,13 +150,13 @@ index 953d6f2..303f102 100644
      | 新しい業務ドメインの route はこの group 内に追加すること。
      */
 -    Route::middleware('require-active-subscription')->group(function (): void {
-+    Route::middleware(['require-active-subscription', 'project.in-current-org'])->group(function (): void {
++    Route::middleware(['require-active-subscription', 'project.in-route-org'])->group(function (): void {
          /*
          | プロジェクト (current org スコープ。URL に org / team セグメントを含めない =
          | Default Team パターンのルーティング仕様)。
 -        | {project} は URL 整合 guard ({project} ∈ current org) で認可より前に 404。
 +        | {project} の URL 整合 guard ({project} ∈ current org) は 2 層:
-+        | (1) project.in-current-org middleware — FormRequest の DB ルール (unique/exists) より
++        | (1) project.in-route-org middleware — FormRequest の DB ルール (unique/exists) より
 +        |     前に cross-org を 404 に落とす (存在オラクル防止。{project} を持たない route では
 +        |     no-op のため group 一括付与。網羅性は ProjectRouteCurrentOrgGuardTest が固定)
 +        | (2) controller の inline guard (resolveOrganizationProject) — 二重防御
@@ -173,19 +173,19 @@ index 76b6a56..c049bb4 100644
          'organizations.invitations.revoke' => $s,
 -        // {item} は $project->items() 経由 ({project} ∈ current org は controller の inline guard)
 +        // {item} は $project->items() 経由 ({project} ∈ current org は
-+        // project.in-current-org middleware + controller inline guard の 2 層)
++        // project.in-route-org middleware + controller inline guard の 2 層)
          'projects.items.update' => $s,
          'projects.items.destroy' => $s,
 -        // {category} は $project->categories() 経由 ({project} ∈ current org は controller の inline guard)
 +        // {category} は $project->categories() 経由 ({project} ∈ current org は
-+        // project.in-current-org middleware + controller inline guard の 2 層。
++        // project.in-route-org middleware + controller inline guard の 2 層。
 +        // FormRequest の DB ルール (unique) より前の 404 は ProjectRouteCurrentOrgGuardTest 参照)
          'projects.categories.update' => $s,
          'projects.categories.destroy' => $s,
          // {manual} は $project->manuals() 経由 (relation 名は route パラメータ {manual} の
 -        // scopeBindings 推論と一致させた manuals()。{project} ∈ current org は inline guard)
 +        // scopeBindings 推論と一致させた manuals()。{project} ∈ current org は
-+        // project.in-current-org middleware + inline guard の 2 層)
++        // project.in-route-org middleware + inline guard の 2 層)
          'projects.manuals.show' => $s,
          'projects.manuals.edit' => $s,
          'projects.manuals.update' => $s,
@@ -204,7 +204,7 @@ index b1ee251..d8b221b 100644
 +    $categoryB = Category::factory()->forProject($projectB)->create(['name' => '秘密カテゴリ']);
 +
 +    // 衝突する name を送っても 422 (unique) ではなく 404 — 422/404 の応答差分で
-+    // 他組織プロジェクトのカテゴリ名を辞書探索できないこと (project.in-current-org middleware が
++    // 他組織プロジェクトのカテゴリ名を辞書探索できないこと (project.in-route-org middleware が
 +    // FormRequest の DB ルールより前に cross-org を 404 に落とす)
 +    $this->actingAs($ownerA)
 +        ->from('/projects')
@@ -240,7 +240,7 @@ index 11f0d87..80336ad 100644
 +
 +    // {project} に属する category id / 属さない category id のどちらも同じ 404 —
 +    // exists ルールの 422/404 差分で他組織の category↔project 所属関係を探索できないこと
-+    // (project.in-current-org middleware が FormRequest の DB ルールより前に 404 に落とす)
++    // (project.in-route-org middleware が FormRequest の DB ルールより前に 404 に落とす)
 +    $this->actingAs($ownerA)
 +        ->from('/projects')
 +        ->post("/projects/{$projectB->id}/manuals", ['title' => 'x', 'category' => $categoryInB->id])
@@ -261,11 +261,11 @@ index 11f0d87..80336ad 100644
  test('cross-project の {manual} は 404 (scopeBindings)', function (): void {
      [$organization, $owner] = createOrganizationWithOwner();
      $projectA = Project::factory()->forOrganization($organization)->create();
-diff --git a/app/Http/Middleware/EnsureProjectBelongsToCurrentOrganization.php b/app/Http/Middleware/EnsureProjectBelongsToCurrentOrganization.php
+diff --git a/app/Http/Middleware/EnsureProjectBelongsToRouteOrganization.php b/app/Http/Middleware/EnsureProjectBelongsToRouteOrganization.php
 new file mode 100644
 index 0000000..f4c573a
 --- /dev/null
-+++ b/app/Http/Middleware/EnsureProjectBelongsToCurrentOrganization.php
++++ b/app/Http/Middleware/EnsureProjectBelongsToRouteOrganization.php
 @@ -0,0 +1,53 @@
 +<?php
 +
@@ -280,7 +280,7 @@ index 0000000..f4c573a
 +use Symfony\Component\HttpFoundation\Response;
 +
 +/**
-+ * web の `{project}` route の URL 整合 guard (middleware 層)。alias: project.in-current-org。
++ * web の `{project}` route の URL 整合 guard (middleware 層)。alias: project.in-route-org。
 + *
 + * cross-org の {project} を「FormRequest の DB ルールを含むあらゆるアプリコードより前に 404」
 + * へ構造的に落とす。controller の inline guard (resolveOrganizationProject) は認可より前の
@@ -301,7 +301,7 @@ index 0000000..f4c573a
 + *  - controller の inline guard は二重防御として残す (oauthSessions の controller 内再検査と
 + *    同じ位置づけ。middleware の付け漏れ・withoutMiddleware への最終防衛線)。
 + */
-+class EnsureProjectBelongsToCurrentOrganization
++class EnsureProjectBelongsToRouteOrganization
 +{
 +    use ResolvesCurrentOrganization;
 +
@@ -333,8 +333,8 @@ index 0000000..465e455
 +use Illuminate\Support\Facades\Route;
 +
 +/*
-+ * web の `{project}` route は project.in-current-org middleware
-+ * (EnsureProjectBelongsToCurrentOrganization) を必ず持つ invariant。
++ * web の `{project}` route は project.in-route-org middleware
++ * (EnsureProjectBelongsToRouteOrganization) を必ず持つ invariant。
 + *
 + * cross-org の {project} は「FormRequest の DB ルール (unique/exists) を含む
 + * あらゆるアプリコードより前に 404」でなければならない (存在オラクル防止)。
@@ -348,7 +348,7 @@ index 0000000..465e455
 + * API v1 (`api/*`) は org を API キーから確定する別レイヤー (ResolvesApiOrganization) の
 + * 責務のため対象外 (web セッション前提の本 middleware を付けてはならない)。
 + */
-+test('web の {project} route は project.in-current-org middleware を必ず持つ (API は持たない)', function (): void {
++test('web の {project} route は project.in-route-org middleware を必ず持つ (API は持たない)', function (): void {
 +    $checked = 0;
 +    $violations = [];
 +
@@ -363,16 +363,16 @@ index 0000000..465e455
 +        if (str_starts_with($route->uri(), 'api/')) {
 +            // API は web セッション (current org) を持たない。誤配線は全 API project route を
 +            // 404 に落とすため、付いていたら fail させる
-+            if (in_array('project.in-current-org', $middleware, true)) {
-+                $violations[] = "API route {$name} に web セッション前提の project.in-current-org が付いている";
++            if (in_array('project.in-route-org', $middleware, true)) {
++                $violations[] = "API route {$name} に web セッション前提の project.in-route-org が付いている";
 +            }
 +            $checked++;
 +
 +            continue;
 +        }
 +
-+        if (! in_array('project.in-current-org', $middleware, true)) {
-+            $violations[] = "web route {$name} に project.in-current-org middleware が無い"
++        if (! in_array('project.in-route-org', $middleware, true)) {
++            $violations[] = "web route {$name} に project.in-route-org middleware が無い"
 +                .' (cross-org {project} が FormRequest の DB ルールより前に 404 になりません)';
 +        }
 +        $checked++;

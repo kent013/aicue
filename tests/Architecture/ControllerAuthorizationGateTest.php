@@ -74,12 +74,6 @@ function controllerAuthorizationExemptions(): array
     $localOnly = ControllerAuthorizationExemption::LocalOnlyDebugRoute;
 
     return [
-        'organizations.switch' => [$membership,
-            '{organization} は MembershipScopedOrganizationBinder が membership スコープで解決し、'
-            .'非所属は認可より前に 404 (存在秘匿)。「所属組織なら誰でも current org を切り替えられる」が'
-            .'ロール非依存の仕様であり、Policy を足すと membership の二重判定になるうえ、'
-            .'404 の存在秘匿を 403 に劣化させる危険がある。守っているのは不変条件 2/3。'],
-
         'organizations.store' => [$noSubject,
             '新規組織の作成。判定対象となる既存リソースも親テナントも存在しない'
             .'(誰でも自分の組織を作れる)。制約は verified.or-back middleware と'
@@ -117,6 +111,23 @@ function controllerAuthorizationExemptions(): array
             .'無く、他人の credential へ到達する経路がコード上存在しない。'
             .'別軸の防御として recent-auth (step-up) middleware を必須にし、password 設定済みの'
             .'迂回は PasswordCredentialService が lock 下で fail-closed 拒否する。総当り防御は throttle:password-set。'],
+
+        'settings.email-promotion.store' => [$selfScoped,
+            '対象は $request->user() 自身のメールアドレスの昇格の発行のみ (T253)。route に他者を'
+            .'指せる parameter が無く、Service は relation 起点 ($user->emailPromotions()) しか'
+            .'引かないため他人の行へ到達する経路がコード上存在しない。'
+            .'別軸の防御として recent-auth (step-up) を必須にし、総当り防御は throttle:email-promotion。'],
+
+        'settings.email-promotion.resend' => [$selfScoped,
+            '発行と対称の再送 (T253)。対象は $request->user() 自身だけで、route に他者を指せる'
+            .'parameter が無い。旧トークンは発行のたびに自分の行を消すことで失効する。'
+            .'別軸の防御として recent-auth (step-up) を必須にし、総当り防御は throttle:email-promotion。'],
+
+        'settings.email-promotion.confirm' => [$selfScoped,
+            'メールアドレスの昇格の確定 (T253)。トークンは relation 起点 ($user->emailPromotions())'
+            .'で引くため、他人のトークンでは 1 件も当たらない (user_id の結合が認可そのものである)。'
+            .'★救済の性格なので recent-auth を課さない (関門を足すと確定できず詰む)。'
+            .'総当り防御は throttle:email-promotion-confirm。'],
 
         'recent-auth.password' => [$selfScoped,
             '自分の再認証鮮度 (RecentAuthState) の更新。route に他者を指せる parameter が無く、'

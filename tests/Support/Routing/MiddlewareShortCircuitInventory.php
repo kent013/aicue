@@ -12,7 +12,7 @@ use App\Http\Middleware\EnsureAccountNotPendingDeletion;
 use App\Http\Middleware\EnsureEmailIsVerifiedOrBack;
 use App\Http\Middleware\EnsureLoginMethodRemains;
 use App\Http\Middleware\EnsureProjectBelongsToApiOrganization;
-use App\Http\Middleware\EnsureProjectBelongsToCurrentOrganization;
+use App\Http\Middleware\EnsureProjectBelongsToRouteOrganization;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\IdempotentRequest;
 use App\Http\Middleware\IssueSessionEpochCookie;
@@ -88,7 +88,7 @@ final class MiddlewareShortCircuitInventory
             RequireApiKeyAbility::class => true,
             ResolveApiActor::class => true,
             IdempotentRequest::class => true,
-            EnsureProjectBelongsToCurrentOrganization::class => true,
+            EnsureProjectBelongsToRouteOrganization::class => true,
             EnsureProjectBelongsToApiOrganization::class => true,
             EnsureEmailIsVerifiedOrBack::class => true,
             EnsureLoginMethodRemains::class => true,

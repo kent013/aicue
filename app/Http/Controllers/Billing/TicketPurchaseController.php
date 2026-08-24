@@ -9,11 +9,12 @@ use App\Enums\Billing\PurchaseFormState;
 use App\Exceptions\Billing\CheckoutInProgressException;
 use App\Exceptions\Billing\StaleCheckoutAttemptException;
 use App\Exceptions\Billing\TicketVolumeTierUnavailableException;
-use App\Http\Concerns\ResolvesCurrentOrganization;
+use App\Http\Concerns\ResolvesRouteOrganization;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Billing\TicketCheckoutRequest;
 use App\Models\Billing\TicketCheckoutSession;
 use App\Models\Billing\TicketVolumePrice;
+use App\Models\Organization;
 use App\Models\User;
 use App\Services\Billing\AutoRechargeService;
 use App\Services\Billing\TicketCheckoutService;
@@ -37,7 +38,7 @@ use Webmozart\Assert\Assert;
  */
 class TicketPurchaseController extends Controller
 {
-    use ResolvesCurrentOrganization;
+    use ResolvesRouteOrganization;
 
     /** 購入画面の枚数入力の初期値 */
     private const int DEFAULT_COUNT = 10;
@@ -50,13 +51,12 @@ class TicketPurchaseController extends Controller
      * 効き、二重課金にならない)。`?fresh=1` は明示的に新規購入 (別 token) へ倒す。
      */
     public function show(
-        Request $request,
+        Request $request, Organization $organization,
         TicketPricingService $pricing,
         TicketLedgerService $tickets,
         TicketCheckoutService $checkout,
         AutoRechargeService $autoRecharge,
     ): Response {
-        $organization = $this->resolveCurrentOrganization($request);
         Gate::authorize('view', $organization);
 
         $user = $request->user();
@@ -107,7 +107,7 @@ class TicketPurchaseController extends Controller
             formState: $formState,
             boundCount: $boundCount,
             resumeUrl: $resumeUrl,
-            newPurchaseUrl: route('billing.tickets.show', ['fresh' => 1]),
+            newPurchaseUrl: route('billing.tickets.show', ['organization' => $organization->slug, 'fresh' => 1]),
             // P8a: 有効なら「自動購入が設定済み」であることを購入導線でも示せるようにする
             // (軽量な enabled 判定のみ。カタログ解決コストは払わない)。
             autoRechargeEnabled: $autoRecharge->isEnabledFor($organization),
@@ -117,9 +117,8 @@ class TicketPurchaseController extends Controller
     }
 
     /** Checkout 開始 (manageBilling のみ) */
-    public function checkout(TicketCheckoutRequest $request, TicketCheckoutService $service): SymfonyResponse|RedirectResponse
+    public function checkout(TicketCheckoutRequest $request, Organization $organization, TicketCheckoutService $service): SymfonyResponse|RedirectResponse
     {
-        $organization = $this->resolveCurrentOrganization($request);
         Gate::authorize('manageBilling', $organization);
 
         $user = $request->user();
@@ -137,7 +136,7 @@ class TicketPurchaseController extends Controller
         }
 
         if ($redirect->url === null) {
-            return redirect()->route('billing.tickets.show')
+            return redirect()->route('billing.tickets.show', ['organization' => $organization->slug])
                 ->with('info', 'この購入は既に受付済みです。残高への反映をお待ちください。');
         }
 

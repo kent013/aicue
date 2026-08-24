@@ -189,6 +189,8 @@ return [
         'password_confirmation' => 'パスワード（確認）',
         'current_password' => '現在のパスワード',
         'terms_accepted' => '利用規約への同意',
+        // --- 組織 ---
+        'slug' => '組織の識別名',
         // --- お問い合わせ ---
         'company_name' => '会社・組織名',
         'message' => 'お問い合わせ内容',
@@ -207,6 +209,16 @@ return [
         'user_id' => '対象ユーザー',
         'abilities' => '権限',
         'abilities.*' => '権限',
+        // --- 企業 SSO 接続 (T253) ---
+        // 'slug' は組織の識別名と同名キーのため StoreSsoConnectionRequest::attributes() で個別に上書きする
+        'login_slug' => 'ログイン用の識別名',
+        'display_name' => '表示名',
+        'issuer' => '発行者 URL',
+        'client_id' => 'クライアント ID',
+        'client_secret' => 'クライアントシークレット',
+        'state' => '状態値',
+        'code' => '認可コード',
+        'error' => 'エラー',
         // --- 課金 ---
         'plan_code' => 'プラン',
         'declaration' => '個人利用の確認',

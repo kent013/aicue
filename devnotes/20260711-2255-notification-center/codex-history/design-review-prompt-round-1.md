@@ -75,7 +75,7 @@
 - app/Services/Billing/TicketLedgerService.php: balance() = 有効台帳 sum − Reserved 拘束 sum。commit(reservation) は tx 内 lockReservationRow → lockOrganizationRow → appendEntry(-amount) → Committed。pipeline の terminal tx 内から savepoint で呼ばれる
 - app/Services/Organization/OrganizationMembershipService.php: inviteMember() は招待 save 後 Notification::route('mail', $email)->notify(new OrganizationInvitationNotification(...))。token は sha256 のみ保存
 - app/Http/Middleware/HandleInertiaRequests.php: share() は auth/organizations/currentOrganization/flash/contact/title を共有。$user は User へ narrowing 済み
-- routes/web.php: auth+verified 群に /billing・/purchase-tickets(name: billing.tickets.show)。業務 route は require-active-subscription + project.in-current-org 群。projects.manuals.show = /projects/{project}/manuals/{manual}
+- routes/web.php: auth+verified 群に /billing・/purchase-tickets(name: billing.tickets.show)。業務 route は require-active-subscription + project.in-route-org 群。projects.manuals.show = /projects/{project}/manuals/{manual}
 - resources/js/components/templates/AppLayout.svelte: header 内 appName リンク + headerActions snippet。page.props を narrow して使用
 - tests/Architecture/ManualEnumTsSyncInvariantTest.php: PHP enum ⇔ TS literal union の値集合一致を正規表現抽出で固定するパターンあり
 - User は Notifiable + CipherSweet(email 検索は whereBlind('email','email_index',$v))。organizationRole(Organization): ?OrganizationRole は laratrust_team_id 明示判定。OrganizationRole::canManage() は owner/admin で true
@@ -727,7 +727,7 @@ class NotificationController extends Controller
                 redirect()->route('notifications.index')
                     ->with('info', 'この通知は別の組織のものです。組織を切り替えてから開いてください。'),
             // manual 系: current org 配下に manual が現存 → manual 画面へ（遷移先の認可・404 は
-            // 既存の project.in-current-org + scopeBindings 防御に委ねる = 認可判断を複製しない）
+            // 既存の project.in-route-org + scopeBindings 防御に委ねる = 認可判断を複製しない）
             $item->isManualJob() && $this->manualExists($request, $item) =>
                 redirect()->route('projects.manuals.show', [$item->projectId(), $item->manualId()]),
             $item->isManualJob() =>

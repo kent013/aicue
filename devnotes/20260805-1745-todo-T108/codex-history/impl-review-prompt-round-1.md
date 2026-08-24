@@ -162,7 +162,7 @@ Laravel 12 + Svelte 5 + Inertia のアプリに対する **実装レビュアー
 [web]     EncryptCookies → StartSession → ShareErrors → PreventRequestForgery
             → Authenticate → AuthenticateSession
             → SubstituteBindings
-            → EnsureProjectBelongsToCurrentOrganization      ← テナント境界 404
+            → EnsureProjectBelongsToRouteOrganization      ← テナント境界 404
             → HandleInertiaRequests → SecurityHeaders
             → RequireTwoFactorForEnforcedOrganizations → BlockTwoFactorDisable
             → NoStoreCacheHeaders → EncryptHistory
@@ -189,7 +189,7 @@ S2 の 3 行を足すと最終的に
   → ResolveApiActor
   → SubstituteBindings
   → EnsureProjectBelongsToApiOrganization
-  → EnsureProjectBelongsToCurrentOrganization
+  → EnsureProjectBelongsToRouteOrganization
   → Authorize
 ```
 
@@ -370,7 +370,7 @@ $middleware->appendToPriorityList(
 );
 $middleware->appendToPriorityList(
     EnsureProjectBelongsToApiOrganization::class,
-    EnsureProjectBelongsToCurrentOrganization::class,
+    EnsureProjectBelongsToRouteOrganization::class,
 );
 ```
 
@@ -392,7 +392,7 @@ S4 の `TenantBoundaryOrderingTest` で以下を固定する (解決後 = `Route
 - [ ] `api.v1.projects.items.index` (read group)
 - [ ] `api.v1.me` / `api.v1.projects.index` — `{project}` を持たない同一 group の route で
       guard が列に載っていても no-op であること (Feature テストで 200 を確認)
-- [ ] `projects.update` — `EnsureProjectBelongsToCurrentOrganization` が
+- [ ] `projects.update` — `EnsureProjectBelongsToRouteOrganization` が
       `EnsureEmailIsVerified` / `RequireActiveSubscription` /
       `RequireTwoFactorForEnforcedOrganizations` / `HandleInertiaRequests` より前
 - [ ] `capture.manuals.show`
@@ -409,7 +409,7 @@ S4 の `TenantBoundaryOrderingTest` で以下を固定する (解決後 = `Route
 - priority list への追加は全 route に影響しうる。ただし priority list は
   「その route に実在する middleware の相対順序」しか変えないため、
   guard を持たない route には無影響 (テストで固定)。
-- `EnsureProjectBelongsToCurrentOrganization` が `verified` より前に走るため、
+- `EnsureProjectBelongsToRouteOrganization` が `verified` より前に走るため、
   `current_organization_id` が null のユーザーは `{project}` route で 404 になる。
   変更前も `RequireActiveSubscription` が素通しして同じ 404 に落ちていたため挙動不変
   (`RequireActiveSubscription.php:73-75` + `ResolvesCurrentOrganization::resolveCurrentOrganization`)。
@@ -611,7 +611,7 @@ enum NestedRouteDefenseMode: string
     /** Route::bind() の explicit binder が actor スコープで解決 (不整合は binding 段で 404)。 */
     case ScopedBinder = 'scoped_binder';
 
-    /** テナント guard middleware (project.in-current-org / api.project-in-org) が担う。 */
+    /** テナント guard middleware (project.in-route-org / api.project-in-org) が担う。 */
     case TenantGuardMiddleware = 'tenant_guard_middleware';
 
     /** implicit binding を使わず controller が owner-scoped relation から手動解決する。 */
@@ -649,7 +649,7 @@ vendor prefix 除外に `cashier.` を追加する (`cashier.payment` は Cashie
 
 | param | モード | 根拠 |
 |---|---|---|
-| `project` | `TenantGuardMiddleware` | `project.in-current-org` / `api.project-in-org` が binding 直後に走る (S2) |
+| `project` | `TenantGuardMiddleware` | `project.in-route-org` / `api.project-in-org` が binding 直後に走る (S2) |
 | `organization` | `ScopedBinder` | `MembershipScopedOrganizationBinder` |
 | `passkey` | `ScopedBinder` | `SelfScopedPasskeyBinder` |
 | `notification` | `ManualOwnerScopedResolution` | controller が `$user->notifications()` から解決 (implicit binding なし) |
@@ -720,7 +720,7 @@ function middlewareShortCircuitInventory(): array
         App\Http\Middleware\RequireApiKeyAbility::class => true,
         App\Http\Middleware\ResolveApiActor::class => true,
         App\Http\Middleware\IdempotentRequest::class => true,
-        App\Http\Middleware\EnsureProjectBelongsToCurrentOrganization::class => true,
+        App\Http\Middleware\EnsureProjectBelongsToRouteOrganization::class => true,
         App\Http\Middleware\EnsureProjectBelongsToApiOrganization::class => true,
         // ... (実装時に解決済み列を走査して全件を埋める)
         // --- 透過 ---
@@ -1545,7 +1545,7 @@ index 4ed4c7b..367af84 100644
 +    /** Route::bind() の explicit binder が actor スコープで解決する (不整合は binding 段で 404)。 */
 +    case ScopedBinder = 'scoped_binder';
 +
-+    /** テナント guard middleware (project.in-current-org / api.project-in-org) が担う。 */
++    /** テナント guard middleware (project.in-route-org / api.project-in-org) が担う。 */
 +    case TenantGuardMiddleware = 'tenant_guard_middleware';
 +
 +    /** implicit binding を使わず controller が owner-scoped relation から手動解決する。 */
@@ -2097,7 +2097,7 @@ index ccbc6d7..d5bc8e9 100644
 -            // (存在オラクル防止。網羅性は ProjectRouteCurrentOrgGuardTest が固定)
 +            // (存在オラクル防止。網羅性は ProjectRouteCurrentOrgGuardTest が固定)。
 +            // **実行位置は上の priority list が正本** (SubstituteBindings 直後)。
-             'project.in-current-org' => EnsureProjectBelongsToCurrentOrganization::class,
+             'project.in-route-org' => EnsureProjectBelongsToRouteOrganization::class,
              // REST API v1 用の同等 guard (組織は API キー / OAuth token から確定するため
              // web セッションの current org とは解決元が違う = 別 alias)。
 -            // resolve.api-actor より後・idempotent より前に置くこと (順序契約は
@@ -2149,12 +2149,12 @@ index ccbc6d7..d5bc8e9 100644
 +        );
 +        $middleware->appendToPriorityList(
 +            EnsureProjectBelongsToApiOrganization::class,
-+            EnsureProjectBelongsToCurrentOrganization::class,
++            EnsureProjectBelongsToRouteOrganization::class,
 +        );
 +        // テナント guard より後に走ることを確定させる web グループの鎖
 +        // (guard を binding 直後まで引き上げるための「後続」宣言)。
 +        foreach ([
-+            [EnsureProjectBelongsToCurrentOrganization::class, HandleInertiaRequests::class],
++            [EnsureProjectBelongsToRouteOrganization::class, HandleInertiaRequests::class],
 +            [HandleInertiaRequests::class, SecurityHeaders::class],
 +            [SecurityHeaders::class, RequireTwoFactorForEnforcedOrganizations::class],
 +            [RequireTwoFactorForEnforcedOrganizations::class, BlockTwoFactorDisableForEnforcedOrganizations::class],
@@ -2347,10 +2347,10 @@ index e2e1e1e..128d8ff 100644
          | プロジェクト (current org スコープ。URL に org / team セグメントを含めない =
          | Default Team パターンのルーティング仕様)。
          | {project} の URL 整合 guard ({project} ∈ current org) は 2 層:
--        | (1) project.in-current-org middleware — FormRequest の DB ルール (unique/exists) より
+-        | (1) project.in-route-org middleware — FormRequest の DB ルール (unique/exists) より
 -        |     前に cross-org を 404 に落とす (存在オラクル防止。{project} を持たない route では
 -        |     no-op のため group 一括付与。網羅性は ProjectRouteCurrentOrgGuardTest が固定)
-+        | (1) project.in-current-org middleware — cross-org を 404 に落とす (存在オラクル防止)。
++        | (1) project.in-route-org middleware — cross-org を 404 に落とす (存在オラクル防止)。
 +        |     **実行位置は宣言順ではなく bootstrap/app.php の priority list が正本**で、
 +        |     SubstituteBindings の**直後** = 課金ゲート 302・verified 302・2FA 強制 302・
 +        |     Inertia version mismatch 409・FormRequest の DB ルールより前に走る。
@@ -2460,17 +2460,17 @@ index 11198dd..7fd751a 100644
 -        // {invitation} は $organization->invitations() 経由 (招待取り消し。cross-org は 404)
 -        'organizations.invitations.revoke' => $s,
 -        // {item} は $project->items() 経由 ({project} ∈ current org は
--        // project.in-current-org middleware + controller inline guard の 2 層)
+-        // project.in-route-org middleware + controller inline guard の 2 層)
 -        'projects.items.update' => $s,
 -        'projects.items.destroy' => $s,
 -        // {category} は $project->categories() 経由 ({project} ∈ current org は
--        // project.in-current-org middleware + controller inline guard の 2 層。
+-        // project.in-route-org middleware + controller inline guard の 2 層。
 -        // FormRequest の DB ルール (unique) より前の 404 は ProjectRouteCurrentOrgGuardTest 参照)
 -        'projects.categories.update' => $s,
 -        'projects.categories.destroy' => $s,
 -        // {manual} は $project->manuals() 経由 (relation 名は route パラメータ {manual} の
 -        // scopeBindings 推論と一致させた manuals()。{project} ∈ current org は
--        // project.in-current-org middleware + inline guard の 2 層)
+-        // project.in-route-org middleware + inline guard の 2 層)
 -        'projects.manuals.show' => $s,
 -        'projects.manuals.edit' => $s,
 -        'projects.manuals.update' => $s,
@@ -2492,7 +2492,7 @@ index 11198dd..7fd751a 100644
 -        'projects.manuals.download' => $s,
 -        // 撮影 PWA (/app/*。doc/10 §10.8-3)。{manual}∈{project}, {cut}∈{manual}, {take}∈{cut} は
 -        // scopeBindings + 各書き込み Service の tx 内連鎖再解決 (二重防御)。
--        // {project} ∈ current org は project.in-current-org middleware + inline guard の 2 層
+-        // {project} ∈ current org は project.in-route-org middleware + inline guard の 2 層
 -        'capture.manuals.show' => $s,
 -        'capture.takes.upload-url' => $s,
 -        'capture.takes.store' => $s,
@@ -3061,7 +3061,7 @@ index 0000000..a366d3c
 +use App\Http\Middleware\EnsureEmailIsVerifiedOrBack;
 +use App\Http\Middleware\EnsureLoginMethodRemains;
 +use App\Http\Middleware\EnsureProjectBelongsToApiOrganization;
-+use App\Http\Middleware\EnsureProjectBelongsToCurrentOrganization;
++use App\Http\Middleware\EnsureProjectBelongsToRouteOrganization;
 +use App\Http\Middleware\HandleInertiaRequests;
 +use App\Http\Middleware\IdempotentRequest;
 +use App\Http\Middleware\LocalOnly;
@@ -3153,7 +3153,7 @@ index 0000000..a366d3c
 +        RequireApiKeyAbility::class => true,
 +        ResolveApiActor::class => true,
 +        IdempotentRequest::class => true,
-+        EnsureProjectBelongsToCurrentOrganization::class => true,
++        EnsureProjectBelongsToRouteOrganization::class => true,
 +        EnsureProjectBelongsToApiOrganization::class => true,
 +        EnsureEmailIsVerifiedOrBack::class => true,
 +        EnsureLoginMethodRemains::class => true,
@@ -3198,7 +3198,7 @@ index 0000000..a366d3c
 +function tenantGuardMiddlewareClasses(): array
 +{
 +    return [
-+        EnsureProjectBelongsToCurrentOrganization::class,
++        EnsureProjectBelongsToRouteOrganization::class,
 +        EnsureProjectBelongsToApiOrganization::class,
 +    ];
 +}
@@ -3496,7 +3496,7 @@ index 0000000..a366d3c
 +        EncryptHistory::class,
 +        EnsureEmailIsVerified::class,
 +    ];
-+    $guard = EnsureProjectBelongsToCurrentOrganization::class;
++    $guard = EnsureProjectBelongsToRouteOrganization::class;
 +    $billing = RequireActiveSubscription::class;
 +
 +    $apiHead = [
@@ -5368,6 +5368,6 @@ index 0000000..05fabdc
   fail することを実際に確認済み
 - **priority list 変更の影響範囲**: 全 205 route の解決後 middleware 列を before/after で
   比較し、変化したのは {project} を持つ 44 route のみ、変化内容は
-  EnsureProjectBelongsToCurrentOrganization が 8 個後ろから SubstituteBindings 直後へ
+  EnsureProjectBelongsToRouteOrganization が 8 個後ろから SubstituteBindings 直後へ
   移動しただけ (middleware の集合自体は不変) であることを検証済み
 

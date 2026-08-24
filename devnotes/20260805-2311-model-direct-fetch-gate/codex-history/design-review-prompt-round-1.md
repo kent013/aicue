@@ -1107,7 +1107,7 @@ relation/org-scoped 解決の一般的強制、到達可能性、`whereRaw` 等�
    現状 routes に該当 0 件であり、`whereRaw('id` の 0 件 assertion (§4-2) が生えたときに気付く。
 4. **`NestedRouteIdorDefenseTest` / `NestedRouteDefenseInventory` への変更**
    — 正典 t1 の total inventory 部は aicue が origin 側であり既に要件を満たしている。触らない。
-5. **cross-org 存在オラクル封じ middleware (aicue:D4 / `EnsureProjectBelongsToCurrentOrganization`)**
+5. **cross-org 存在オラクル封じ middleware (aicue:D4 / `EnsureProjectBelongsToRouteOrganization`)**
    — t1 の構成要素だが aicue には既に実装済み (`ProjectRouteCurrentOrgGuardTest` が固定)。追従不要。
 6. **`app/Filament/**` の Filament リソース** — 母集団には入るが、admin パネルは
    `/admin` 配下で別の認可体系。候補が出たら通常どおり分類する (特別扱いしない = 除外もしない)。

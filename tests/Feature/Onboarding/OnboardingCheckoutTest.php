@@ -29,25 +29,24 @@ function expiredCheckoutOrganizationWithOwner(): array
     return [$organization->fresh(), $owner];
 }
 
-test('current org 不在なら 404 (組織の有無を露出しない)', function (): void {
+test('非所属の組織 URL は 404 (組織の有無を露出しない)', function (): void {
+    [$organization] = createOrganizationWithOwner();
     $user = User::factory()->create();
 
-    $this->actingAs($user)->get('/onboarding/checkout')->assertNotFound();
+    $this->actingAs($user)->get("/organizations/{$organization->slug}/onboarding/checkout")->assertNotFound();
 });
 
-test('current org に非所属なら 404 (403 で存在を漏らさない)', function (): void {
+test('URL 上の組織に非所属なら 404 (403 で存在を漏らさない)', function (): void {
     [$organization] = createOrganizationWithOwner(grandfatherFreePlan: false);
-    // current_organization_id が退会後も残存する不整合を再現する
     $outsider = User::factory()->create();
-    $outsider->forceFill(['current_organization_id' => $organization->id])->save();
 
-    $this->actingAs($outsider)->get('/onboarding/checkout')->assertNotFound();
+    $this->actingAs($outsider)->get("/organizations/{$organization->slug}/onboarding/checkout")->assertNotFound();
 });
 
 test('ExpiredCheckout + manageBilling は Plan 選択画面を 200 で描画する', function (): void {
-    [, $owner] = expiredCheckoutOrganizationWithOwner();
+    [$organization, $owner] = expiredCheckoutOrganizationWithOwner();
 
-    $this->actingAs($owner)->get('/onboarding/checkout')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/onboarding/checkout")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->component('Onboarding/Checkout')
@@ -73,18 +72,17 @@ test('ExpiredCheckout + manageBilling は Plan 選択画面を 200 で描画す�
 test('ExpiredCheckout + manageBilling なし member は billing-required へ redirect (判定順序の固定)', function (): void {
     [$organization] = expiredCheckoutOrganizationWithOwner();
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
-    $this->actingAs($member)->get('/onboarding/checkout')
-        ->assertRedirect(route('onboarding.billing-required'));
+    $this->actingAs($member)->get("/organizations/{$organization->slug}/onboarding/checkout")
+        ->assertRedirect(route('onboarding.billing-required', ['organization' => $organization->slug]));
 });
 
 test('Subscribed は manageBilling でも billing.index へ redirect', function (): void {
     [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     contractPaidPlan($organization, status: 'active');
 
-    $this->actingAs($owner)->get('/onboarding/checkout')
-        ->assertRedirect(route('billing.index'));
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/onboarding/checkout")
+        ->assertRedirect(route('billing.index', ['organization' => $organization->slug]));
 });
 
 // #2 [期待更新 Q-2-01]: 契約済み (paid) の非管理メンバーは、自分で操作できない
@@ -94,18 +92,17 @@ test('Subscribed の non-manager member は billing.index ではなく dashboard
     [$organization] = createOrganizationWithOwner(grandfatherFreePlan: false);
     contractPaidPlan($organization, status: 'active');
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
-    $this->actingAs($member)->get('/onboarding/checkout')
-        ->assertRedirect(route('dashboard'));
+    $this->actingAs($member)->get("/organizations/{$organization->slug}/onboarding/checkout")
+        ->assertRedirect(route('dashboard', ['organization' => $organization->slug]));
 });
 
 test('Subscribed の manageBilling 保持 owner は billing.index へ (Q-2-01 で不変)', function (): void {
     [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     contractPaidPlan($organization, status: 'active');
 
-    $this->actingAs($owner)->get('/onboarding/checkout')
-        ->assertRedirect(route('billing.index'));
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/onboarding/checkout")
+        ->assertRedirect(route('billing.index', ['organization' => $organization->slug]));
 });
 
 /** ActiveFreePlan (free_plan_code=personal) の組織にする。 */
@@ -125,8 +122,8 @@ test('ActiveFreePlan (free_plan_code=personal) の manageBilling 保持 owner �
     [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     activateFreePersonalPlan($organization, $owner);
 
-    $this->actingAs($owner)->get('/onboarding/checkout')
-        ->assertRedirect(route('billing.index'));
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/onboarding/checkout")
+        ->assertRedirect(route('billing.index', ['organization' => $organization->slug]));
 });
 
 // #4 [新規 Q-2-01]: bug-hunt が観測した実シナリオ。ActiveFreePlan (Personal free) の
@@ -135,10 +132,9 @@ test('ActiveFreePlan + manageBilling 非保持 member は dashboard へ (Q-2-01 
     [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     activateFreePersonalPlan($organization, $owner);
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
-    $this->actingAs($member)->get('/onboarding/checkout')
-        ->assertRedirect(route('dashboard'));
+    $this->actingAs($member)->get("/organizations/{$organization->slug}/onboarding/checkout")
+        ->assertRedirect(route('dashboard', ['organization' => $organization->slug]));
 });
 
 // #6 [characterization / 境界回帰]: 未契約 (hasActiveAccess=false) の非管理メンバーは
@@ -149,10 +145,9 @@ test('ActiveFreePlan + manageBilling 非保持 member は dashboard へ (Q-2-01 
 test('未契約 + manageBilling 非保持 member は billing-required へ (dashboard には行かない)', function (): void {
     [$organization] = createOrganizationWithOwner(grandfatherFreePlan: false);
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
-    $this->actingAs($member)->get('/onboarding/checkout')
-        ->assertRedirect(route('onboarding.billing-required'));
+    $this->actingAs($member)->get("/organizations/{$organization->slug}/onboarding/checkout")
+        ->assertRedirect(route('onboarding.billing-required', ['organization' => $organization->slug]));
 });
 
 // [着地の実効性]: dashboard への 302 の先で、非管理メンバーでも Dashboard 画面が
@@ -161,14 +156,13 @@ test('dashboard 着地は 302 の先で実際に Dashboard 画面が 200 描画�
     [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     activateFreePersonalPlan($organization, $owner);
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
     // (1) onboarding.checkout が dashboard へ 302。
-    $this->actingAs($member)->get('/onboarding/checkout')
-        ->assertRedirect(route('dashboard'));
+    $this->actingAs($member)->get("/organizations/{$organization->slug}/onboarding/checkout")
+        ->assertRedirect(route('dashboard', ['organization' => $organization->slug]));
 
     // (2)(3) 同一認証ユーザーで dashboard を GET すると 200 で Dashboard 画面が描画される。
-    $this->actingAs($member)->get(route('dashboard'))
+    $this->actingAs($member)->get(route('dashboard', ['organization' => $organization->slug]))
         ->assertOk()
         ->assertInertia(fn (Assert $page): Assert => $page->component('Dashboard'));
 });
@@ -184,15 +178,15 @@ test('未契約 org (plan_code IS NULL) は checkout を 200 で render する (
     // P4 で OR の 1 行を削除した結果、未契約 org は state()=NoSubscription で
     // grantsAccess()=false となり、checkout が本来の着地点として 200 render される。
     // (テストは削除せず期待を反転させた = P4 のテスト計画どおり)
-    $this->actingAs($owner)->get('/onboarding/checkout')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/onboarding/checkout")
         ->assertOk();
 });
 
 test('is_active=false に落とした Plan は pageData.plans に出ない (露出規則の固定)', function (): void {
-    [, $owner] = expiredCheckoutOrganizationWithOwner();
+    [$organization, $owner] = expiredCheckoutOrganizationWithOwner();
     Plan::query()->where('code', 'standard')->update(['is_active' => false]);
 
-    $this->actingAs($owner)->get('/onboarding/checkout')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/onboarding/checkout")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->has('pageData.plans', 2)
@@ -206,7 +200,7 @@ test('personal 選択不可の理由はサーバー確定文言で props に載�
     Organization::factory()->freePersonal($owner)->create();
     $owner->addRole(OrganizationRole::Owner->value, $organization->laratrust_team_id);
 
-    $this->actingAs($owner)->get('/onboarding/checkout')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/onboarding/checkout")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('pageData.personalEligibility.eligible', false)
@@ -215,7 +209,7 @@ test('personal 選択不可の理由はサーバー確定文言で props に載�
 });
 
 test('未認証は login へ', function (): void {
-    $this->get('/onboarding/checkout')->assertRedirect('/login');
+    $this->get('/organizations/guest-org/onboarding/checkout')->assertRedirect('/login');
 });
 
 // ── 支払い未解決の契約がある組織はプラン選択ではなく課金画面へ逃がす ──
@@ -237,23 +231,22 @@ function unsettledPaymentOrganizationWithOwner(string $status = 'past_due'): arr
 }
 
 test('支払い未解決 + manageBilling は billing.index へ redirect (プラン選択を出さない)', function (string $status): void {
-    [, $owner] = unsettledPaymentOrganizationWithOwner($status);
+    [$organization, $owner] = unsettledPaymentOrganizationWithOwner($status);
 
-    $this->actingAs($owner)->get('/onboarding/checkout')
-        ->assertRedirect(route('billing.index'));
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/onboarding/checkout")
+        ->assertRedirect(route('billing.index', ['organization' => $organization->slug]));
 })->with(['past_due', 'unpaid']);
 
 test('支払い未解決 + manageBilling なし member は従来どおり billing-required へ (判定順序が変わらない)', function (): void {
     [$organization] = unsettledPaymentOrganizationWithOwner();
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
-    $this->actingAs($member)->get('/onboarding/checkout')
-        ->assertRedirect(route('onboarding.billing-required'));
+    $this->actingAs($member)->get("/organizations/{$organization->slug}/onboarding/checkout")
+        ->assertRedirect(route('onboarding.billing-required', ['organization' => $organization->slug]));
 });
 
 test('逃がし先の billing.index は課金ゲートの外なので詰まない (200 で描画される)', function (): void {
-    [, $owner] = unsettledPaymentOrganizationWithOwner();
+    [$organization, $owner] = unsettledPaymentOrganizationWithOwner();
 
-    $this->actingAs($owner)->get(route('billing.index'))->assertOk();
+    $this->actingAs($owner)->get(route('billing.index', ['organization' => $organization->slug]))->assertOk();
 });

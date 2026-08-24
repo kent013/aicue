@@ -49,7 +49,7 @@ use Tests\Support\Retention\RetentionTableRegistry;
  */
 
 /** 台帳の総件数 (cap ではなく exact-fit。増減したら必ずこの数字を書き換える)。 */
-const RETENTION_TABLE_COUNT = 63;
+const RETENTION_TABLE_COUNT = 68;
 
 /**
  * 保持期限が**まだ決まっていない**表 (現在値ちょうど。増えるときも減るときもここを書き換える)。

@@ -338,7 +338,7 @@ describe('writer 走査ロジックの自己検証', function (): void {
     it('正例: redirect()/to_route() 起点チェーンの連想配列形 with も拾う', function (): void {
         $source = <<<'PHP'
         <?php
-        return redirect()->route('dashboard')->with(['success' => 'x']);
+        return redirect()->route('some.route')->with(['success' => 'x']);
         return to_route('billing.index')->with(['redirect_array_key' => 'y']);
         PHP;
 

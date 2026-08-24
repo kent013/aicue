@@ -43,18 +43,17 @@ function artifactAccessContext(): array
 function artifactAccessMember(Organization $organization, Project $project): User
 {
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
     attachProjectMember($project, $member, ProjectRole::Member);
 
     return $member;
 }
 
 test('ポーリング: 200 + 進捗 shape のみ (output_path / URL を含めない = 権限分離の固定)', function (): void {
-    [, $owner, $project, $manual] = artifactAccessContext();
+    [$organization, $owner, $project, $manual] = artifactAccessContext();
     $job = RenderJob::factory()->forManual($manual)->running()->create();
 
     $response = $this->actingAs($owner)->getJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$job->id}",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$job->id}",
     );
 
     $response->assertOk()->assertExactJson([
@@ -72,12 +71,12 @@ test('ポーリング: 200 + 進捗 shape のみ (output_path / URL を含めな
 });
 
 test('ポーリング: succeeded (output_path あり) でも応答に output_path・URL が現れない', function (): void {
-    [, $owner, $project, $manual] = artifactAccessContext();
+    [$organization, $owner, $project, $manual] = artifactAccessContext();
     $job = RenderJob::factory()->forManual($manual)->preview()
         ->succeeded("projects/{$project->id}/manuals/{$manual->id}/previews/v2-1.mp4")->create();
 
     $response = $this->actingAs($owner)->getJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$job->id}",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$job->id}",
     );
 
     $response->assertOk();
@@ -93,45 +92,45 @@ test('ポーリング: 撮影者も 200 (view 権限)', function (): void {
     $job = RenderJob::factory()->forManual($manual)->create();
 
     $this->actingAs($member)->getJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$job->id}",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$job->id}",
     )->assertOk();
 });
 
 test('ポーリング: cross-manual の renderJob は 404 (scopeBindings + inline 再検査)', function (): void {
-    [, $owner, $project, $manual] = artifactAccessContext();
+    [$organization, $owner, $project, $manual] = artifactAccessContext();
     $otherManual = VideoManual::factory()->forProject($project)->create();
     $job = RenderJob::factory()->forManual($otherManual)->create();
 
     $this->actingAs($owner)->getJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$job->id}",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$job->id}",
     )->assertNotFound();
 });
 
 test('ポーリング: cross-org は 404', function (): void {
-    [, , $project, $manual] = artifactAccessContext();
+    [$organization, , $project, $manual] = artifactAccessContext();
     $job = RenderJob::factory()->forManual($manual)->create();
     [, $stranger] = createOrganizationWithOwner('別組織');
 
     $this->actingAs($stranger)->getJson(
-        "/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$job->id}",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$job->id}",
     )->assertNotFound();
 });
 
 test('playback: 最新 succeeded preview は 302 (S3 署名 URL へ redirect)', function (): void {
-    [, $owner, $project, $manual] = artifactAccessContext();
+    [$organization, $owner, $project, $manual] = artifactAccessContext();
     $key = "projects/{$project->id}/manuals/{$manual->id}/previews/v2-9.mp4";
     $job = RenderJob::factory()->forManual($manual)->preview()->succeeded($key)->create();
 
     $response = $this->actingAs($owner)->get(
-        "/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$job->id}/playback",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$job->id}/playback",
     );
 
     $response->assertRedirect("https://signed.example/{$key}");
 });
 
 test('playback の 404 マトリクス: published でない kind=render / 未完了 / output_path NULL / 旧世代', function (): void {
-    [, $owner, $project, $manual] = artifactAccessContext();
-    $base = "/projects/{$project->id}/manuals/{$manual->id}/render-jobs";
+    [$organization, $owner, $project, $manual] = artifactAccessContext();
+    $base = "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render-jobs";
 
     // published でない manual の kind=render succeeded (完成動画の再生条件は download と同一 = T154)
     $renderJob = RenderJob::factory()->forManual($manual)->succeeded('projects/x/renders/v2-1.mp4')->create();
@@ -160,28 +159,28 @@ test('playback: 撮影者は 403 (render ability = 編集者専用)', function (
     $job = RenderJob::factory()->forManual($manual)->preview()->succeeded('projects/x/previews/v2-1.mp4')->create();
 
     $this->actingAs($member)->get(
-        "/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$job->id}/playback",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$job->id}/playback",
     )->assertForbidden();
 });
 
 test('download: published + 最新 succeeded render は 302 (署名 URL へ redirect)', function (): void {
-    [, $owner, $project, $manual] = artifactAccessContext();
+    [$organization, $owner, $project, $manual] = artifactAccessContext();
     $manual->forceFill(['status' => VideoManualStatus::Published])->save();
     $key = "projects/{$project->id}/manuals/{$manual->id}/renders/v2-1.mp4";
     RenderJob::factory()->forManual($manual)->succeeded($key)->create();
 
     $response = $this->actingAs($owner)->get(
-        "/projects/{$project->id}/manuals/{$manual->id}/download",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/download",
     );
 
     $response->assertRedirect("https://signed.example/{$key}");
 });
 
 test('download: lang=ja は 302 / lang=en は 422 / lang 省略は 302', function (): void {
-    [, $owner, $project, $manual] = artifactAccessContext();
+    [$organization, $owner, $project, $manual] = artifactAccessContext();
     $manual->forceFill(['status' => VideoManualStatus::Published])->save();
     RenderJob::factory()->forManual($manual)->succeeded('projects/x/renders/v2-1.mp4')->create();
-    $url = "/projects/{$project->id}/manuals/{$manual->id}/download";
+    $url = "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/download";
 
     $this->actingAs($owner)->get("{$url}?lang=ja")->assertRedirect();
     $this->actingAs($owner)->getJson("{$url}?lang=en")->assertUnprocessable();
@@ -189,8 +188,8 @@ test('download: lang=ja は 302 / lang=en は 422 / lang 省略は 302', functio
 });
 
 test('download: published でない / succeeded render なしは 404 (完成物が存在しない)', function (): void {
-    [, $owner, $project, $manual] = artifactAccessContext();
-    $url = "/projects/{$project->id}/manuals/{$manual->id}/download";
+    [$organization, $owner, $project, $manual] = artifactAccessContext();
+    $url = "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/download";
 
     // ready (完成物なし)
     $this->actingAs($owner)->get($url)->assertNotFound();
@@ -211,20 +210,20 @@ test('download: 撮影者は 403 (download ability = 編集者専用)', function
     RenderJob::factory()->forManual($manual)->succeeded('projects/x/renders/v2-1.mp4')->create();
 
     $this->actingAs($member)->get(
-        "/projects/{$project->id}/manuals/{$manual->id}/download",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/download",
     )->assertForbidden();
 });
 
 test('download / playback: cross-org は 404 (存在オラクル封じ)', function (): void {
-    [, , $project, $manual] = artifactAccessContext();
+    [$organization, , $project, $manual] = artifactAccessContext();
     $manual->forceFill(['status' => VideoManualStatus::Published])->save();
     $job = RenderJob::factory()->forManual($manual)->preview()->succeeded('projects/x/previews/v2-1.mp4')->create();
     [, $stranger] = createOrganizationWithOwner('別組織');
 
     $this->actingAs($stranger)->get(
-        "/projects/{$project->id}/manuals/{$manual->id}/download",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/download",
     )->assertNotFound();
     $this->actingAs($stranger)->get(
-        "/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$job->id}/playback",
+        "/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}/render-jobs/{$job->id}/playback",
     )->assertNotFound();
 });

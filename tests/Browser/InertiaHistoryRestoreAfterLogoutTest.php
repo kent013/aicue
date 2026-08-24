@@ -114,10 +114,10 @@ test('認証済み画面の history state が暗号化されている', function
     //    @inertiajs/core の実装前提に依存する。Inertia を更新したらここを見直すこと。
     // ※ 再現テスト側から分離してあるので、実装前の red 確認を
     //    「一時的にコメントアウトする」手作業なしに行える。
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
     $this->actingAs($owner);
 
-    $page = visit('/dashboard');
+    $page = visit("/organizations/{$organization->slug}/dashboard");
     $page->assertSee($owner->name);
 
     inertiaHistoryWaitUntil(
@@ -128,7 +128,7 @@ test('認証済み画面の history state が暗号化されている', function
 });
 
 test('ログアウト後のブラウザバックで Inertia 履歴から PII が復元されない', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
     $this->actingAs($owner);
 
     // bug-hunt F-4-01 の再現手順: /dashboard → /manage/users → ログアウト → 戻る
@@ -137,13 +137,17 @@ test('ログアウト後のブラウザバックで Inertia 履歴から PII が
     //   Inertia Link ではない = ここは cross-document 遷移。SPA の pushState エントリを
     //   作るのは **ログアウト自身** (router.post('/logout') → 302 追従 → '/' へ pushState) で、
     //   その 1 つ前 (= /manage/users の document エントリ) へ戻るのが本件の popstate 復元。
-    $page = visit('/dashboard');
+    $page = visit("/organizations/{$organization->slug}/dashboard");
     $page->assertSee($owner->name);
     // 文言「メンバー」は AppLayout.svelte の navItems 由来。testid (nav-item-*) は
     // desktop / mobile の 2 箇所で重複するため文言 locator を使う。
     // 文言が変わったら **UI ではなく本テストを追随させる**こと。
     $page->click('メンバー');
-    inertiaHistoryWaitUntil($page, "window.location.pathname === '/manage/users'", 'メンバーへ遷移しない');
+    inertiaHistoryWaitUntil(
+        $page,
+        'window.location.pathname === '.json_encode("/organizations/{$organization->slug}/manage/users"),
+        'メンバーへ遷移しない',
+    );
     $page->assertSee($owner->name); // メンバー一覧に PII (氏名) が出ている
 
     // 正のコントロール: JS 実行コンテキストの生存マーカー (フルリロードで消える)
@@ -179,10 +183,10 @@ test('ログアウト後のブラウザバックで Inertia 履歴から PII が
 });
 
 test('ログイン中の戻るは従来どおり client-side で完結する (誤発火しない)', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
     $this->actingAs($owner);
 
-    $page = visit('/dashboard');
+    $page = visit("/organizations/{$organization->slug}/dashboard");
     $page->assertSee($owner->name);
     $page->script("window.__inertiaHistoryProbe = 'alive'; true");
 
@@ -191,13 +195,21 @@ test('ログイン中の戻るは従来どおり client-side で完結する (�
     // 「client-side で完結する」ことを検証する本テストでは使えない。
     // 文言は Dashboard.svelte 由来 (testId 未付与)。変わったら本テストを追随させる。
     $page->click('通知を確認');
-    inertiaHistoryWaitUntil($page, "window.location.pathname === '/notifications'", '通知へ SPA 遷移しない');
+    inertiaHistoryWaitUntil(
+        $page,
+        'window.location.pathname === '.json_encode("/organizations/{$organization->slug}/notifications"),
+        '通知へ SPA 遷移しない',
+    );
     // SPA visit なので実行コンテキストは維持されている (前提の確認)
     $page->assertScript('window.__inertiaHistoryProbe', 'alive');
 
     $page->back();
 
-    inertiaHistoryWaitUntil($page, "window.location.pathname === '/dashboard'", '戻るで dashboard に戻らない');
+    inertiaHistoryWaitUntil(
+        $page,
+        'window.location.pathname === '.json_encode("/organizations/{$organization->slug}/dashboard"),
+        '戻るで dashboard に戻らない',
+    );
     // 復号に成功する = 再取得も hard reload も起きない (撮影 PWA の制約を壊さない)
     $page->assertScript('window.__inertiaHistoryProbe', 'alive');
     $page->assertSee($owner->name)->assertNoJavaScriptErrors();
@@ -247,10 +259,10 @@ test('セッションが切れたタブは次の Inertia visit で履歴鍵が�
     // かつ戻っても過去の PII が描画されない**ことを観測する。
     // (テストが示せるのはこの 2 つの挙動契約までで、「旧鍵が二度と手に入らない」ことの
     //  暗号学的証明ではない。文書側もこの範囲を超えた表現をしないこと。)
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
     $this->actingAs($owner);
 
-    $page = visit('/dashboard');
+    $page = visit("/organizations/{$organization->slug}/dashboard");
     $page->assertSee($owner->name);
 
     // 正のコントロール (1): 認証済み履歴が暗号化されている = 捨てるべき鍵が存在する

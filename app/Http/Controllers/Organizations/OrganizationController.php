@@ -6,12 +6,14 @@ namespace App\Http\Controllers\Organizations;
 
 use App\Actions\Organizations\RenameOrganizationAction;
 use App\Enums\TwoFactorStatus;
+use App\Exceptions\Organization\OrganizationSlugTakenException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Organizations\StoreOrganizationRequest;
 use App\Http\Requests\Organizations\UpdateOrganizationRequest;
 use App\Models\Organization;
 use App\Models\User;
 use App\Services\Organization\OrganizationProvisioningService;
+use App\Services\Organization\OrganizationSlugRenameLimiter;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -44,12 +46,19 @@ class OrganizationController extends Controller
         $name = $request->validated('name');
         Assert::string($name);
 
-        $organization = $provisioning->provision($user, $name);
+        $requestedSlug = $request->validated('slug');
+        Assert::nullOrString($requestedSlug);
 
-        // 作成した組織を current にして設定画面へ (作成直後の文脈を維持する)
-        $user->forceFill(['current_organization_id' => $organization->id])->save();
+        try {
+            $organization = $provisioning->provision($user, $name, $requestedSlug === '' ? null : $requestedSlug);
+        } catch (OrganizationSlugTakenException $e) {
+            // 利用者が明示した識別名が使用済み。黙って代替を作らず 422 で返す。
+            throw ValidationException::withMessages(['slug' => [$e->getMessage()]]);
+        }
 
-        return redirect()->route('organizations.settings', $organization)->with('success', '組織を作成しました');
+        return redirect()
+            ->route('organizations.settings', ['organization' => $organization->slug])
+            ->with('success', '組織を作成しました');
     }
 
     /**
@@ -63,6 +72,7 @@ class OrganizationController extends Controller
     public function settings(
         Request $request,
         Organization $organization,
+        OrganizationSlugRenameLimiter $slugRenames,
     ): Response {
         Gate::authorize('view', $organization);
 
@@ -83,15 +93,18 @@ class OrganizationController extends Controller
                 'id' => $organization->id,
                 'name' => $organization->name,
                 'slug' => $organization->slug,
-                'isPersonal' => $organization->is_personal,
                 'twoFactorRequired' => $organization->two_factor_required,
             ],
             'members' => $members,
             'currentUserRole' => $user->organizationRole($organization)?->value,
             // API キー / 接続セッション管理画面への導線を出すか (境界は manageApiKeys と同一)
             'canManageApiKeys' => Gate::allows('manageApiKeys', $organization),
+            // 識別名の変更の残り回数 (**表示のための早期情報**。権威はロック後の再判定)
+            'slugRename' => $slugRenames->quotaFor($organization)->toArray(),
             // ユーザー管理画面 (管理メニュー) への導線 (can 連動。URL は route helper で生成)
-            'usersUrl' => Gate::allows('manageMembers', $organization) ? route('manage.users.index') : null,
+            'usersUrl' => Gate::allows('manageMembers', $organization)
+                ? route('manage.users.index', ['organization' => $organization->slug])
+                : null,
         ]);
     }
 

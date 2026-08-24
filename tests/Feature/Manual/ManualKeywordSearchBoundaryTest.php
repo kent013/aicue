@@ -43,7 +43,7 @@ test('別 project の manual は本文一致でも PC 一覧に混ざらない',
     $target = manualWithBodyKeyword($own, 'ボルト締結', '自 project の手順');
     manualWithBodyKeyword($other, 'ボルト締結', '別 project の手順');
 
-    $this->actingAs($owner)->get("/projects/{$own->id}?q=".urlencode('ボルト締結'))
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$own->id}?q=".urlencode('ボルト締結'))
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 1)
@@ -59,7 +59,7 @@ test('別 project の manual は本文一致でも撮影 PWA 一覧に混ざら�
     $target = manualWithBodyKeyword($own, 'ボルト締結', '自 project の手順');
     manualWithBodyKeyword($other, 'ボルト締結', '別 project の手順');
 
-    $this->actingAs($owner)->get("/app/projects/{$own->id}/manuals?q=".urlencode('ボルト締結'))
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$own->id}/manuals?q=".urlencode('ボルト締結'))
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals', 1)
@@ -76,12 +76,12 @@ test('別 organization の manual は本文一致でもどちらの面にも混�
     $target = manualWithBodyKeyword($own, '絶縁手袋', '自組織の手順');
     manualWithBodyKeyword($foreign, '絶縁手袋', '別組織の手順');
 
-    $this->actingAs($owner)->get("/projects/{$own->id}?q=".urlencode('絶縁手袋'))
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$own->id}?q=".urlencode('絶縁手袋'))
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 1)
             ->where('manuals.data.0.id', $target->id));
 
-    $this->actingAs($owner)->get("/app/projects/{$own->id}/manuals?q=".urlencode('絶縁手袋'))
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$own->id}/manuals?q=".urlencode('絶縁手袋'))
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals', 1)
             ->where('manuals.0.id', $target->id));
@@ -95,7 +95,7 @@ test('撮影 PWA の ready/published 制限は本文一致でも外れない', f
     manualWithBodyKeyword($project, '養生テープ', '下書き', null, 'draft');
     manualWithBodyKeyword($project, '養生テープ', '解析中', null, 'analyzing');
 
-    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals?q=".urlencode('養生テープ'))
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals?q=".urlencode('養生テープ'))
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals', 1)
             ->where('manuals.0.id', $ready->id));
@@ -109,12 +109,12 @@ test('mine=1 の created_by 制限は本文一致でも外れない (PC / 撮影
     $mine = manualWithBodyKeyword($project, '安全帯', '自作', $owner);
     manualWithBodyKeyword($project, '安全帯', '他人作', $other);
 
-    $this->actingAs($owner)->get("/projects/{$project->id}?mine=1&q=".urlencode('安全帯'))
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}?mine=1&q=".urlencode('安全帯'))
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals.data', 1)
             ->where('manuals.data.0.id', $mine->id));
 
-    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals?mine=1&q=".urlencode('安全帯'))
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals?mine=1&q=".urlencode('安全帯'))
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals', 1)
             ->where('manuals.0.id', $mine->id));

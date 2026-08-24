@@ -188,7 +188,7 @@ aicue セルは `status: pending` / `assessment: divergence_candidate`。
 
 | # | 正典の不変条件 | 裁定 | aicue の現状 | 本設計 |
 |---|---|---|---|---|
-| I1 | URL に現れた資源が現在の組織に属することを**入力検証より前**の段で確かめ、違えば **404**（403 にしない） | AG-036 | **充足**（aicue 形が標準形として採用された側。`MembershipScopedOrganizationBinder` + `project.in-current-org` + `TenantBoundaryOrderingTest`） | **スコープ外**（層の位置は動かさない。org の取得元だけ変える） |
+| I1 | URL に現れた資源が現在の組織に属することを**入力検証より前**の段で確かめ、違えば **404**（403 にしない） | AG-036 | **充足**（aicue 形が標準形として採用された側。`MembershipScopedOrganizationBinder` + `project.in-route-org` + `TenantBoundaryOrderingTest`） | **スコープ外**（層の位置は動かさない。org の取得元だけ変える） |
 | I2 | 「いまどの組織か」は **URL だけ**で決まる。保持列と切替 endpoint は**存在してはならない**（2 方式の併存不可） | AG-037 | **未充足**（`users.current_organization_id` + `organizations.switch` + `CurrentOrganizationResolver` の自己修復） | **施策 5〜8** |
 | I3 | 個人組織を**種別として区別しない**（種別フラグを撤去） | AG-038 | **未充足**（`organizations.is_personal`） | **施策 4** |
 | I4 | 初期組織生成の冪等判定は「**所属組織が 0 件か**」。トランザクション内で利用者行を**行ロック**してから数える | AG-038 | **未充足**（種別フラグ判定・行ロックなし） | **施策 4** |
@@ -1239,8 +1239,8 @@ public function index(Request $request, Organization $organization): Response
 ### 変更箇所
 
 - 変更: `app/Http/Middleware/HandleInertiaRequests.php`
-- 改称・改修: `EnsureProjectBelongsToCurrentOrganization` → `EnsureProjectBelongsToRouteOrganization`
-  （alias `project.in-current-org` → `project.in-route-org`）
+- 改称・改修: `EnsureProjectBelongsToRouteOrganization` → `EnsureProjectBelongsToRouteOrganization`
+  （alias `project.in-route-org` → `project.in-route-org`）
 - 変更: `bootstrap/app.php`（alias 名と priority list のクラス名。**位置は変えない**）
 - 新設: `app/Data/Organization/CurrentOrganizationData.php`
 - 変更: `resources/js/lib/shared-props.ts` / `AppLayout.svelte` /

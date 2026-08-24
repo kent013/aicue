@@ -15,11 +15,11 @@ test('他組織のプロジェクトへのアクセスはすべて 404 (認可�
     [$orgB] = createOrganizationWithOwner('組織B');
     $projectB = Project::factory()->forOrganization($orgB)->create();
 
-    $this->actingAs($ownerA)->get("/projects/{$projectB->id}")->assertNotFound();
-    $this->actingAs($ownerA)->get("/projects/{$projectB->id}/edit")->assertNotFound();
-    $this->actingAs($ownerA)->patch("/projects/{$projectB->id}", ['name' => '乗っ取り'])
+    $this->actingAs($ownerA)->get("/organizations/{$orgB->slug}/projects/{$projectB->id}")->assertNotFound();
+    $this->actingAs($ownerA)->get("/organizations/{$orgB->slug}/projects/{$projectB->id}/edit")->assertNotFound();
+    $this->actingAs($ownerA)->patch("/organizations/{$orgB->slug}/projects/{$projectB->id}", ['name' => '乗っ取り'])
         ->assertNotFound();
-    $this->actingAs($ownerA)->delete("/projects/{$projectB->id}")->assertNotFound();
+    $this->actingAs($ownerA)->delete("/organizations/{$orgB->slug}/projects/{$projectB->id}")->assertNotFound();
 
     expect($projectB->fresh())->not->toBeNull();
 });
@@ -27,24 +27,23 @@ test('他組織のプロジェクトへのアクセスはすべて 404 (認可�
 test('権限のないメンバーでも cross-org 対象なら 403 ではなく 404', function (): void {
     [$orgA] = createOrganizationWithOwner('組織A');
     $memberA = attachOrganizationMember($orgA);
-    $memberA->forceFill(['current_organization_id' => $orgA->id])->save();
     [$orgB] = createOrganizationWithOwner('組織B');
     $projectB = Project::factory()->forOrganization($orgB)->create();
 
     // memberA は update 権限を持たないが、cross-org 不整合が先に 404 になる
-    $this->actingAs($memberA)->patch("/projects/{$projectB->id}", ['name' => '乗っ取り'])
+    $this->actingAs($memberA)->patch("/organizations/{$orgB->slug}/projects/{$projectB->id}", ['name' => '乗っ取り'])
         ->assertNotFound();
 });
 
 test('存在しないプロジェクト ID は 404', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->get('/projects/999999')->assertNotFound();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/999999")->assertNotFound();
 });
 
-test('current organization 未設定なら 404 (組織の有無を露出しない)', function (): void {
+test('所属していない組織の URL は 404 (組織の有無を露出しない)', function (): void {
+    [$organization] = createOrganizationWithOwner('他人の組織');
     $user = User::factory()->create();
-    // current_organization_id が null のまま
 
-    $this->actingAs($user)->get('/projects')->assertNotFound();
+    $this->actingAs($user)->get("/organizations/{$organization->slug}/projects")->assertNotFound();
 });

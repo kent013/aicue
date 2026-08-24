@@ -7,9 +7,10 @@ namespace App\Http\Controllers\Capture;
 use App\DataTransferObjects\Capture\CaptureManualDetailData;
 use App\DataTransferObjects\Capture\CaptureManualSummaryData;
 use App\Enums\Manual\VideoManualStatus;
-use App\Http\Concerns\ResolvesCurrentOrganization;
+use App\Http\Concerns\ResolvesRouteOrganization;
 use App\Http\Controllers\Controller;
 use App\Models\Category;
+use App\Models\Organization;
 use App\Models\Project;
 use App\Models\User;
 use App\Models\VideoManual;
@@ -32,25 +33,23 @@ use Webmozart\Assert\Assert;
  */
 class CaptureManualController extends Controller
 {
-    use ResolvesCurrentOrganization;
+    use ResolvesRouteOrganization;
 
     /**
      * PWA エントリ (manifest start_url)。current org の先頭 project の一覧へ redirect
      * (v1 は単一 Default Project 前提。複数 project 化の際は選択画面へ差し替え)。
      */
-    public function home(Request $request, DefaultProjectResolver $defaultProjects): RedirectResponse
+    public function home(Request $request, Organization $organization, DefaultProjectResolver $defaultProjects): RedirectResponse
     {
-        $organization = $this->resolveCurrentOrganization($request);
         $project = $defaultProjects->resolve($organization);
         abort_if($project === null, 404);
 
-        return redirect()->route('capture.manuals.index', ['project' => $project]);
+        return redirect()->route('capture.manuals.index', ['organization' => $organization->slug, 'project' => $project]);
     }
 
     /** 撮影対象 (ready/published) の manual 一覧。category / q で絞り込み */
-    public function index(Request $request, Project $project): Response
+    public function index(Request $request, Organization $organization, Project $project): Response
     {
-        $organization = $this->resolveCurrentOrganization($request);
         $this->resolveOrganizationProject($organization, $project); // 認可より前に 404
         Gate::authorize('view', $project);
 
@@ -115,14 +114,13 @@ class CaptureManualController extends Controller
 
     /** 撮影ナビ (cuts + 全 take メタ + 採用テイク署名 DL URL / ACK トークン) */
     public function show(
-        Request $request,
+        Request $request, Organization $organization,
         Project $project,
         VideoManual $manual,
         TakeObjectStorage $storage,
         UploadTicketCodec $codec,
         SeoManager $seo,
     ): Response {
-        $organization = $this->resolveCurrentOrganization($request);
         $this->resolveOrganizationProject($organization, $project); // 認可より前に 404
         Gate::authorize('view', $manual); // 読み取りは撮影者含む org member
 

@@ -1,0 +1,11 @@
+{
+    "schema_version": 1,
+    "sections": [
+        {
+            "slug": "mcp-tools",
+            "title": "MCP ツールリファレンス",
+            "path": "_generated/mcp-tools.md",
+            "generator": "mcp-tools"
+        }
+    ]
+}

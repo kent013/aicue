@@ -10,11 +10,11 @@ use Carbon\CarbonImmutable;
 use Database\Factories\UserFactory;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Facades\DB;
 use Laratrust\Contracts\LaratrustUser;
 use Laratrust\Traits\HasRolesAndPermissions;
 use Laravel\Fortify\TwoFactorAuthenticatable;
@@ -39,6 +39,9 @@ use Spatie\LaravelCipherSweet\Contracts\CipherSweetEncrypted;
  */
 class User extends Authenticatable implements CipherSweetEncrypted, LaratrustUser, MustVerifyEmail, OAuthenticatable, PasskeyUser
 {
+    /** メールの blind index の名前 (`add_unique_to_blind_indexes_table` の partial unique と対)。 */
+    public const string EMAIL_BLIND_INDEX = 'email_index';
+
     // Passport OAuth guard (mcp-oauth / api-oauth) が withAccessToken() / token() を要求する
     use HasApiTokens;
 
@@ -74,8 +77,12 @@ class User extends Authenticatable implements CipherSweetEncrypted, LaratrustUse
 
     public static function configureCipherSweet(EncryptedRow $encryptedRow): void
     {
+        // ★email は **nullable** である (T253 / A3)。企業 SSO でしか入れない利用者は
+        //   使えるメールを 1 件も持たないため、`addField` (非 optional) では null の保存で
+        //   fieldNotOptional 例外になる。blind index は非 null の行にだけ作られるので、
+        //   partial unique による一意性の担保はそのまま効く。
         $encryptedRow
-            ->addField('email')
+            ->addOptionalTextField('email')
             ->addBlindIndex('email', new BlindIndex('email_index'));
 
         // name も blind index 化し、管理画面 (Filament) の暗号化氏名検索を成立させる。
@@ -94,6 +101,57 @@ class User extends Authenticatable implements CipherSweetEncrypted, LaratrustUse
     public function socialAccounts(): HasMany
     {
         return $this->hasMany(SocialAccount::class);
+    }
+
+    /**
+     * blind index の書き込み。
+     *
+     * ★**メールを持たない利用者は `email_index` の行を持たない** (T253 / A3)。
+     *   同梱 trait の既定は「null もハッシュして 1 行書く」形なので、そのままだと
+     *   企業 SSO でしか入れない利用者は**全員が同じ blind index 値**を持ち、
+     *   `blind_indexes_type_name_value_unique` (partial unique) に衝突して
+     *   **2 人目から作成できなくなる**。
+     *   移行 `add_unique_to_blind_indexes_table` の docblock が言う「null 行は blind index を
+     *   持たない」を、実装として成立させるための override である。
+     * ★null へ**戻した**ときは既存の行を消す (残すと消えたはずの旧メールで引けてしまう)。
+     * ★`name_index` はこの分岐の対象外である (name は NOT NULL で一意でもない)。
+     */
+    public function updateBlindIndexes(): void
+    {
+        $hasEmail = $this->getAttribute('email') !== null;
+
+        foreach (static::getCipherSweetEncryptedRow()->getAllBlindIndexes($this->getAttributes()) as $name => $blindIndex) {
+            if (! $hasEmail && $name === self::EMAIL_BLIND_INDEX) {
+                DB::table('blind_indexes')
+                    ->where('indexable_type', $this->getMorphClass())
+                    ->where('indexable_id', $this->getKey())
+                    ->where('name', $name)
+                    ->delete();
+
+                continue;
+            }
+
+            DB::table('blind_indexes')->upsert([
+                'value' => $blindIndex,
+                'indexable_type' => $this->getMorphClass(),
+                'indexable_id' => $this->getKey(),
+                'name' => $name,
+            ], ['indexable_type', 'indexable_id', 'name']);
+        }
+    }
+
+    /**
+     * メールアドレスの昇格の確認待ち (T253 / E1)。
+     *
+     * ★利用者ごとに**未消費は 1 件だけ**である (`email_promotions_user_unique`)。
+     *   relation で持つのは、昇格の経路が**常に自分自身を起点に**引くためである
+     *   (メールから利用者を引く経路を作らない)。
+     *
+     * @return HasMany<EmailPromotion, $this>
+     */
+    public function emailPromotions(): HasMany
+    {
+        return $this->hasMany(EmailPromotion::class);
     }
 
     /*
@@ -141,14 +199,6 @@ class User extends Authenticatable implements CipherSweetEncrypted, LaratrustUse
     public function isMemberOf(Organization $organization): bool
     {
         return $this->organizations()->whereKey($organization->getKey())->exists();
-    }
-
-    /**
-     * @return BelongsTo<Organization, $this>
-     */
-    public function currentOrganization(): BelongsTo
-    {
-        return $this->belongsTo(Organization::class, 'current_organization_id');
     }
 
     /**

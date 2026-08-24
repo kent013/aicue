@@ -52,17 +52,17 @@ test('契約 2: 撮影 PWA の JSON 404 は固定文言へ collapse される', 
     VideoManual::factory()->forProject($project)->create();
 
     $response = $this->actingAs($owner)
-        ->getJson("/app/projects/{$project->id}/manuals/999999");
+        ->getJson("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/999999");
 
     $response->assertNotFound();
     expect($response->json('message'))->toBe(NotFoundMessage::HUMAN_MESSAGE);
 });
 
 test('契約 3: HTML の 404 は既存のエラー画面を維持する', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
     $this->actingAs($owner)
-        ->get('/projects/999999')
+        ->get("/organizations/{$organization->slug}/projects/999999")
         ->assertNotFound()
         ->assertSee('見つかりません');
 });
@@ -73,7 +73,9 @@ test('契約 4: 404 以外の status (%s) は既存応答を維持する', funct
     //   「status 404 の判定を外す」mutation を検出できない (実測済み)。
     //   403 (AccessDeniedHttpException) と 409 (abort) が検出役である。
     if ($case === '401') {
-        $response = $this->getJson('/app/projects/1/manuals/1');
+        // 未認証なので組織は解決されない。実在する識別名の形だけを使う (auth が binding より先)
+        [$organization] = createOrganizationWithOwner();
+        $response = $this->getJson("/organizations/{$organization->slug}/app/projects/1/manuals/1");
         $response->assertStatus(401);
     }
 
@@ -81,20 +83,19 @@ test('契約 4: 404 以外の status (%s) は既存応答を維持する', funct
         [$organization, $owner] = createOrganizationWithOwner();
         $project = Project::factory()->forOrganization($organization)->create();
         $member = attachOrganizationMember($organization);
-        $member->forceFill(['current_organization_id' => $organization->id])->save();
         attachProjectMember($project, $member, ProjectRole::Member);
 
         $response = $this->actingAs($member)
-            ->postJson("/projects/{$project->id}/manuals", ['title' => 'x']);
+            ->postJson("/organizations/{$organization->slug}/projects/{$project->id}/manuals", ['title' => 'x']);
         $response->assertStatus(403);
     }
 
     if ($case === '409') {
-        [, $owner] = createOrganizationWithOwner();
+        [$organization, $owner] = createOrganizationWithOwner();
         app(OrganizationMembershipService::class)->requestAccountDeletion($owner);
         $owner->refresh();
 
-        $response = $this->actingAs($owner)->getJson('/dashboard');
+        $response = $this->actingAs($owner)->getJson("/organizations/{$organization->slug}/dashboard");
         $response->assertStatus(409);
     }
 
@@ -104,7 +105,7 @@ test('契約 4: 404 以外の status (%s) は既存応答を維持する', funct
 
         // 変更対象外の validation 応答 (ValidationException) が素通しであることを固定する
         $response = $this->actingAs($owner)
-            ->postJson("/projects/{$project->id}/manuals", ['title' => '']);
+            ->postJson("/organizations/{$organization->slug}/projects/{$project->id}/manuals", ['title' => '']);
         $response->assertStatus(422);
         expect($response->json('errors'))->toBeArray();
     }
@@ -148,7 +149,7 @@ test('契約 8: JSON 404 の本文に内部クラス名や Eloquent の例外文
     $project = Project::factory()->forOrganization($organization)->create();
 
     $body = $this->actingAs($owner)
-        ->getJson("/app/projects/{$project->id}/manuals/999999")
+        ->getJson("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/999999")
         ->getContent();
 
     expect($body)->toBeString();

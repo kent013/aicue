@@ -159,7 +159,7 @@ public function handle(Request $request, Closure $next): Response
 
 ### routes/web.php (capture group L477-505)
 ```php
-Route::middleware(['require-active-subscription', 'project.in-current-org'])
+Route::middleware(['require-active-subscription', 'project.in-route-org'])
     ->prefix('app')->as('capture.')->group(function (): void {
         Route::get('/', [CaptureManualController::class, 'home'])->name('home');
         Route::get('/csrf-cookie', fn () => response()->noContent())->name('csrf-cookie');

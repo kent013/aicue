@@ -97,9 +97,10 @@ capability_id を先に切ると「どの段の機能か」が run ごとにブ�
 | AUTH-05 | guest→ソーシャルログイン / 連携 | `social.redirect` / `social.callback` |
 | ORG-01 | user→組織作成 | `organizations.create` / `organizations.store` |
 | ORG-02 | owner/admin→組織情報の閲覧・更新 | `organizations.settings` / `organizations.update` |
-| ORG-03 | user→組織切替 (切替後のスコープ整合) | `organizations.switch` |
+| ORG-03 | user→組織の選択 (組織文脈を持たない入口からの分岐と、選んだ組織のスコープ整合) | `app.entry` / `capture.entry` |
 | ORG-04 | owner→オーナー移譲 | `organizations.transfer-ownership` |
 | ORG-05 | owner→組織の 2FA 必須トグル | `organizations.two-factor-requirement.update` |
+| ORG-06 | owner/admin→識別名の変更 (旧 URL の失効と回数上限) | `organizations.slug.update` |
 | MEM-01 | owner/admin→メール招待の送信 | `organizations.invitations.store` |
 | MEM-02 | owner/admin→未受諾招待の取消 | `organizations.invitations.revoke` |
 | MEM-03 | guest/user→招待受諾の完走 (未ログイン時の登録合流・所属組織の確定) | `invitations.accept` / `invitations.accept.store` |

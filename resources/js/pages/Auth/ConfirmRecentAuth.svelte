@@ -179,7 +179,7 @@
 
     {#snippet footer()}
         <p>
-            <TextLink href="/dashboard">この操作を中止してダッシュボードへ戻る</TextLink>
+            <TextLink href="/go">この操作を中止してダッシュボードへ戻る</TextLink>
         </p>
     {/snippet}
 </AuthLayout>

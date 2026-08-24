@@ -12,7 +12,7 @@ const { routerPatchMock, routerDeleteMock, routerPostMock, pageState } = vi.hois
     routerPostMock: vi.fn(),
     pageState: {
         props: {} as Record<string, unknown>,
-        url: "/manage/users",
+        url: "/organizations/test-org/manage/users",
     },
 }));
 
@@ -321,7 +321,7 @@ describe("Admin/Users", () => {
         const link = screen.getByTestId("create-project-link");
         // Inertia Link は href を絶対 URL に正規化するため pathname で検証する
         const href = link.getAttribute("href") ?? "";
-        expect(new URL(href, "http://localhost").pathname).toBe("/projects/create");
+        expect(new URL(href, "http://localhost").pathname).toBe("/organizations/test-org/projects/create");
         // 既存注記の文言は維持
         expect(screen.getByTestId("no-project-note")).toHaveTextContent(
             "編集者・撮影者を割り当てるには、先にプロジェクトを作成してください。",

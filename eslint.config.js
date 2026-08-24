@@ -108,6 +108,25 @@ export default [
             // 未定義識別子を捕まえる機構がここにしか無いので error 固定
             // (spirux:T1054 = SSO 接続追加画面のクラッシュと同型の事故を止める)。
             "no-undef": "error",
+            /*
+             * 生の HTML を DOM へ差し込む構文 ({@html}) の全面禁止。
+             *
+             * 値の出どころが 1 か所でも汚れていれば script がそのまま実行される。
+             * 撮影 PWA は同一オリジン・セッション認証なので、XSS の成立は
+             * 撮影導線の資格情報にそのまま届く。
+             *
+             * **許可一覧 (allowlist / exemption inventory) の口は持たない**。
+             * 例外を設けるなら、その口を排除できない理由・安全境界・専用テストを含む
+             * **別のセキュリティ設計**としてレビューを通すこと
+             * (file-scoped override をここに書き足して済ませない)。
+             *
+             * サーバ生成の SVG (2 要素認証の QR) を描く用途には
+             * components/atoms/QrCodeImage.svelte を使う (data URI の <img>)。
+             *
+             * 実効性の裏取りは tests/js/architecture/svelte-raw-html-gate.test.ts
+             * (実際に lint を走らせ、無効化コメントが効かないことまで固定する)。
+             */
+            "svelte/no-at-html-tags": "error",
             "svelte/require-each-key": "error",
             "svelte/prefer-svelte-reactivity": "error",
             "svelte/prefer-writable-derived": "error",

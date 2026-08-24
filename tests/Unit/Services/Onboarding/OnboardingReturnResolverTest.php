@@ -26,8 +26,8 @@ beforeEach(function (): void {
 
 describe('normalizePath (open-redirect 防御)', function (): void {
     it('allows same-origin internal paths', function (): void {
-        expect(OnboardingReturnResolver::normalizePath('/projects/foo/manuals'))
-            ->toBe('/projects/foo/manuals');
+        expect(OnboardingReturnResolver::normalizePath('/organizations/acme/projects/foo/manuals'))
+            ->toBe('/organizations/acme/projects/foo/manuals');
         expect(OnboardingReturnResolver::normalizePath('/ok'))->toBe('/ok');
     });
 
@@ -102,9 +102,9 @@ describe('remember / peek / forget', function (): void {
     it('remembers and peeks a valid path', function (): void {
         ['resolver' => $resolver, 'org' => $org] = onboardingReturnResolverContext();
 
-        $resolver->rememberForOrganization($org, '/projects/foo/manuals');
+        $resolver->rememberForOrganization($org, '/organizations/acme/projects/foo/manuals');
 
-        expect($resolver->peekForOrganization($org))->toBe('/projects/foo/manuals');
+        expect($resolver->peekForOrganization($org))->toBe('/organizations/acme/projects/foo/manuals');
     });
 
     it('is a no-op for invalid paths (does not clobber existing value)', function (): void {

@@ -19,7 +19,7 @@ use Inertia\Testing\AssertableInertia as Assert;
 test('current org 所属なら 200 で Capture/Account を返す', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->get('/app/account')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/account")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->component('Capture/Account')
@@ -38,38 +38,34 @@ test('組織メンバー (撮影者ロールの利用者) でも 200 — project
     [$organization] = createOrganizationWithOwner();
     $project = Project::factory()->forOrganization($organization)->create();
     $member = attachOrganizationMember($organization);
-    // attachOrganizationMember は current_organization_id を設定しない
-    // (既存 TakeUploadUrlTest と同じ手順で明示代入する)
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
     attachProjectMember($project, $member, ProjectRole::Member);
 
-    $this->actingAs($member)->get('/app/account')
+    $this->actingAs($member)->get("/organizations/{$organization->slug}/app/account")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page->component('Capture/Account'));
 });
 
-test('current org 未設定なら 404 (組織の有無を露出しない)', function (): void {
+test('非所属の組織 URL は 404 (組織の有無を露出しない)', function (): void {
+    [$organization] = createOrganizationWithOwner();
     $user = User::factory()->create(); // 組織に属さない
 
-    $this->actingAs($user)->get('/app/account')->assertNotFound();
+    $this->actingAs($user)->get("/organizations/{$organization->slug}/app/account")->assertNotFound();
 });
 
 test('current org に非所属なら 404 (認可より前)', function (): void {
     [$organization] = createOrganizationWithOwner();
     [, $stranger] = createOrganizationWithOwner('別組織');
 
-    // 他組織の owner の current org を、**非所属の**組織に向ける
-    // (current_organization_id が退会後も残存する不整合を模す)
-    $stranger->forceFill(['current_organization_id' => $organization->id])->save();
+    // 非所属の組織の URL を直接叩く (テナント境界が 404 に倒すことを確かめる)
 
     // 前提: stranger は $organization に在籍していない (この前提が崩れるとテストが空振りする)
     expect($organization->users()->whereKey($stranger->getKey())->exists())->toBeFalse();
 
-    $this->actingAs($stranger)->get('/app/account')->assertNotFound();
+    $this->actingAs($stranger)->get("/organizations/{$organization->slug}/app/account")->assertNotFound();
 });
 
 test('未認証はログインへ redirect する', function (): void {
-    $this->get('/app/account')->assertRedirect('/login');
+    $this->get('/organizations/guest-org/app/account')->assertRedirect('/login');
 });
 
 /*
@@ -78,9 +74,9 @@ test('未認証はログインへ redirect する', function (): void {
  * ここが空欄に戻るとサイト名だけのタイトルになり、bug-hunt 目録の画面名も空になる。
  */
 test('タブ名は config の静的名から解決される', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->get('/app/account')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/account")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('title', SeoTitle::compose('アカウント'))

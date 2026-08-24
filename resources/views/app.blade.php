@@ -12,7 +12,7 @@
         <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
         <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-        {{-- 撮影 PWA (/app/*) はホーム画面追加用の専用 manifest (start_url=/app)。他は既存 site.webmanifest --}}
+        {{-- 撮影 PWA (/organizations/{slug}/app/*) はホーム画面追加用の専用 manifest (start_url=/app = 組織を選ぶ分岐入口)。他は既存 site.webmanifest --}}
         @if (request()->is('app') || request()->is('app/*'))
             <link rel="manifest" href="/manifest.webmanifest" />
         @else

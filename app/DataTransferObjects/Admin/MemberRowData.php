@@ -15,6 +15,8 @@ use Carbon\CarbonImmutable;
  * 表示状態 (roleState) は org ロール × Default Project pivot から毎回導出する (概念設計 D2(a))。
  * email は CipherSweet 復号値。本画面は manageMembers 権限者しか到達できない (403) ため
  * 行レベルの可視性分岐は持たない (PII 可視性は画面到達境界で担保)。
+ * ★email は **null になりうる** — 企業 SSO でしか入れない利用者は使えるメールを 1 件も持たない
+ *   (T253 / A3)。UI は「メールなし」と出す (空文字へ畳まない = 「空のメール」と誤読させない)。
  *
  * lastLoginAt は「最後にいつ入ったか」であり、users の列ではなく security_audit_events の
  * login 行から導出する (App\Services\Security\LastLoginLookup)。**履歴は持たない**。
@@ -26,7 +28,7 @@ final readonly class MemberRowData
     public function __construct(
         public int $id,
         public string $name,
-        public string $email,
+        public ?string $email,
         public string $roleState,       // MemberRoleState value
         public string $roleLabel,
         public string $twoFactorStatus, // disabled|pending|enabled

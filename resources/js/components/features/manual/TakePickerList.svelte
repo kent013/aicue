@@ -6,6 +6,7 @@
     import ConfirmDialog from "@/components/organisms/ConfirmDialog.svelte";
     import { captureJson, extractErrorMessage } from "@/lib/capture/http";
     import { takeUrl as buildTakeUrl } from "@/lib/capture/take-endpoints";
+    import { currentOrganizationSlug } from "@/lib/org-url";
     import { formatBytes } from "@/lib/format-bytes";
     import { TAKE_STATUS_LABELS, type SelectableTake } from "@/types/manual";
 
@@ -49,7 +50,7 @@
 
     function thumbnailUrl(take: SelectableTake): string | null {
         return take.has_thumbnail
-            ? buildTakeUrl({ projectId, manualId, cutId }, take.id, "/thumbnail")
+            ? buildTakeUrl({ organizationSlug: currentOrganizationSlug(), projectId, manualId, cutId }, take.id, "/thumbnail")
             : null;
     }
 
@@ -67,7 +68,7 @@
         busyTakeId = id;
         try {
             const response = await captureJson(
-                buildTakeUrl({ projectId, manualId, cutId }, id),
+                buildTakeUrl({ organizationSlug: currentOrganizationSlug(), projectId, manualId, cutId }, id),
                 "DELETE",
             );
             if (!response.ok) {

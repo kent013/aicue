@@ -182,7 +182,7 @@ pest()->extend(TestCase::class)
 
 /**
  * Owner 付きの組織を provisioning 経由で生成する (Default Team 込み)。
- * owner の current_organization_id はこの組織になる。
+ * 組織文脈は URL だけで決まる (家系裁定 AG-037) ので、保持列は設定しない。
  *
  * 既定では grandfathering backfill 相当 (`free_plan_code='personal'` / declarer NULL) を付与し、
  * 課金ゲート (require-active-subscription) を `ActiveFreePlan` で通る既存組織を再現する。
@@ -404,6 +404,30 @@ function bindSnsDnsResolver(array $ips): void
         fn (): DnsResolverInterface => new FakeDnsResolver(['sns.us-east-1.amazonaws.com' => $ips]),
     );
     app()->forgetInstance(UrlSafetyInspector::class);
+}
+
+/**
+ * SNS 証明書 host の DNS 応答に使う「公開到達可能」な fixture (**出所はここ 1 か所**)。
+ *
+ * ★この値は**分類表が globally reachable と判定する DNS 応答値**である。
+ *   実在ホストの検証でも実到達性の検証でもない (全レーンで StrayHttpRequestGuard が
+ *   外向き HTTP を既定拒否している)。
+ *   **ここから「本当に到達するか」を確かめる外向き通信を足さない。**
+ *
+ * ★もとは TEST-NET-3 (203.0.113.10) を使っていたが使えなくなった。
+ *   package kent013/laravel-ssrf-pin が ^0.4 で判定を完全区間分類へ反転し、
+ *   TEST-NET-3 は IANA 登録簿どおり `NotGloballyReachable` へ分類されるためである
+ *   (^0.2 の列挙型拒否では素通りしていた = そもそも fixture として不適切だった)。
+ *   塞がった区間の一覧と回帰は
+ *   tests/Architecture/SsrfPinSpecialPurposeRangeRegressionTest.php が固定する。
+ *
+ * ★値を変えるときは「分類表が公開到達可能とする区間か」を上記 gate で確かめること。
+ *
+ * @return list<string>
+ */
+function snsPublicCertHostIps(): array
+{
+    return ['93.184.216.34'];
 }
 
 /**

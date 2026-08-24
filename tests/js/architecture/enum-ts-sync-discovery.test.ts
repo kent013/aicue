@@ -72,6 +72,12 @@ interface PhpEnumExemption {
  * 発見の段が赤くなる (既定拒否)。
  */
 const PHP_ENUM_EXEMPTIONS = [
+    { path: "app/DataTransferObjects/EnterpriseSso/VerifyOutcome.php", reason: "接続の確認の結果 4 値。運営画面へは値ではなく enum が持つ日本語の文言を渡すため、TS 側に値域の写しを要さない" },
+    { path: "app/Enums/EnterpriseSso/ConnectionTransitionRejection.php", reason: "接続の管理操作を拒否した理由。画面へは値ではなく enum が持つ日本語の文言をエラーとして渡すため、TS 側で値による分岐をしない" },
+    { path: "app/Enums/EnterpriseSso/FingerprintPurpose.php", reason: "一時値の指紋の用途ラベル (domain separation の実体)。サーバ内部の鍵導出にだけ使い、画面へは値も名前も渡らない" },
+    { path: "app/Enums/EnterpriseSso/OidcSigningAlgorithm.php", reason: "ID トークン署名方式の許可集合。検証の内部判定にだけ使い、画面は接続の状態だけを見る (顧客が選ぶ項目ではない)" },
+    { path: "app/Enums/EnterpriseSso/RejectionReason.php", reason: "企業 SSO の拒否理由の内部コード。利用者への応答は理由によらず一様であり、区別はログにしか出ない" },
+    { path: "app/Enums/EnterpriseSso/TokenEndpointAuthMethod.php", reason: "token endpoint の client 認証方式。IdP の広告から選ぶ内部判定であり、顧客が入力も選択もしない" },
     { path: "app/Auth/Context/ApiActorKind.php", reason: "認証コンテキストの内部判別 (api_key/user_token)。ログと認可判定にのみ使い、画面へ値として渡さない" },
     { path: "app/DataTransferObjects/Manual/Render/RenderClipSource.php", reason: "レンダーパイプライン内部でクリップの取得元を表す区分。フロントは個別のフラグで結果を受け取り、この値そのものは渡らない" },
     { path: "app/Enums/Account/AccountDeletionFreezeAllowance.php", reason: "退会凍結中に許可する route 名相当の内部許可リスト。ガード判定にのみ使い、画面には表示しない" },
@@ -123,6 +129,7 @@ const PHP_ENUM_EXEMPTIONS = [
     { path: "app/Enums/Mcp/ToolName.php", reason: "MCP ツール名の内部登録名。Web UI からは呼ばれない CLI/MCP 専用の語彙である" },
     { path: "app/Enums/OAuth/CliOAuthScope.php", reason: "CLI OAuth スコープの内部語彙。認可判定にのみ使い画面へは出ない" },
     { path: "app/Enums/OAuth/OAuthClientKind.php", reason: "OAuth クライアント種別の内部判定。認可ロジックの内部でのみ使う" },
+    { path: "app/Enums/Organization/SlugReservationReason.php", reason: "組織識別名の予約理由の 3 分類 (家系裁定 AG-039)。設定ファイルの読み込み検査とレビューのための語彙で、画面には拒否の文言だけが渡る" },
     { path: "app/Enums/ProjectRole.php", reason: "プロジェクトロールの内部判定。画面は権限の有無を真偽値として受け取るだけである" },
     { path: "app/Enums/ProviderCapability.php", reason: "認証プロバイダの能力分類の内部語彙。認可ロジックの内部でのみ使う" },
     { path: "app/Enums/QuotaKey.php", reason: "Quota 種別の内部キー。画面は使用量と上限の数値だけを受け取る" },
@@ -158,11 +165,12 @@ const PHP_ENUM_EXEMPTIONS = [
     { path: "app/Enums/Storage/S3OperationSurface.php", reason: "S3 操作面の内部分類語彙。SSRF 検査など Architecture テストの目録だけが参照する" },
     { path: "app/Enums/Support/QueueAtomicityRule.php", reason: "キュー投入原子性判定の内部語彙 (ドメイン固有規約 11)。Architecture テストの目録だけが参照する" },
     { path: "app/Enums/TwoFactorStatus.php", reason: "2FA 状態の内部判定。画面は有効/無効の真偽値と個別の案内文だけを見る" },
+    { path: "app/Services/Help/HelpArtifactState.php", reason: "ヘルプ生成物の鮮度の内部語彙 (up_to_date/stale/missing/orphan)。artisan コマンドの報告にのみ使い画面へは出ない" },
     { path: "app/Services/Marketing/ContactDestinationKind.php", reason: "マーケティング問い合わせの送信先を表す内部種別。バッチ処理の内部でのみ使う" },
 ] as const satisfies readonly PhpEnumExemption[];
 
 /** `PHP_ENUM_EXEMPTIONS` の件数の pin。増えても減っても赤くする。 */
-const EXPECTED_EXEMPTION_COUNT = 87;
+const EXPECTED_EXEMPTION_COUNT = 95;
 
 interface UnresolvablePhpEnumEntry {
     readonly path: string;

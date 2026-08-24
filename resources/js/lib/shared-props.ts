@@ -18,7 +18,8 @@ export interface AuthUser {
 export interface OrganizationSummary {
     id: number;
     name: string;
-    isPersonal: boolean;
+    /** 別組織の URL を組み立てるための識別名 (組織文脈は URL だけで決まる = AG-037) */
+    slug: string;
 }
 
 /** OrganizationRole enum の value と 1:1 のユニオン (型の網羅性を上げる) */
@@ -27,13 +28,17 @@ export type OrganizationRoleValue =
     | "organization_admin"
     | "organization_member";
 
+/**
+ * URL の binding から導出した組織文脈。**組織 route 以外では必ず null** である
+ * (家系裁定 AG-037: 「いまどの組織か」は URL だけで決まる。保持列は撤去済み)。
+ */
 export interface CurrentOrganization {
     id: number;
     name: string;
-    /** organizations.settings / api-keys.index ({organization:slug}) 用 */
+    /** 組織 URL 配下の全 route ({organization:slug}) の組み立てに使う */
     slug: string;
     role: OrganizationRoleValue | null;
-    /** メンバー管理 (/manage/users) 導線の表示可否 (owner/admin) */
+    /** メンバー管理 (manage.users.index) 導線の表示可否 (owner/admin) */
     canManageMembers: boolean;
     /** API キー画面 (organizations.api-keys.index) 導線の表示可否 */
     canManageApiKeys: boolean;

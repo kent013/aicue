@@ -51,7 +51,7 @@ test('未契約 org の dashboard は「プランを選ぶ」callout を出し�
 
     $this->actingAs($owner);
 
-    $page = visit('/dashboard');
+    $page = visit("/organizations/{$organization->slug}/dashboard");
 
     // (1) 未契約に対しては「プランの選択が必要」— 支払い失敗ではない。
     //     locator 経由なので hydration 完了まで自動待機する (以降の非待機 API の前提になる)
@@ -64,6 +64,6 @@ test('未契約 org の dashboard は「プランを選ぶ」callout を出し�
     // (3) CTA が行き先のない詰みを作らないこと。着地先はサーバが決める
     //     (manageBilling 保持者 = owner なので /onboarding/checkout に留まる)
     $page->click('[data-testid="billing-callout"] a');
-    waitForPath($page, '/onboarding/checkout');
-    $page->assertPathIs('/onboarding/checkout');
+    waitForPath($page, "/organizations/{$organization->slug}/onboarding/checkout");
+    $page->assertPathIs("/organizations/{$organization->slug}/onboarding/checkout");
 });

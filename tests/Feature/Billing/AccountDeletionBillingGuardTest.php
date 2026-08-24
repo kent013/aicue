@@ -93,7 +93,7 @@ test('AccountDeletionBlockerDto::build は理由から action を順序固定・
     $both = AccountDeletionBlockerDto::build($organization, [
         AccountDeletionBlockReason::ActiveBilling,
         AccountDeletionBlockReason::OwnerlessMembers,
-    ], isCurrentOrganization: true);
+    ]);
     // 出力順は TransferOwnership → billing 系で固定 (入力順に依らない)
     expect($both->actions)->toBe([
         AccountDeletionBlockerAction::TransferOwnership,
@@ -105,11 +105,12 @@ test('AccountDeletionBlockerDto::build は理由から action を順序固定・
         'actions' => ['transfer_ownership', 'open_billing'],
     ]);
 
-    // current org でなければ「切り替えてから解約」へ倒す
+    // 組織文脈は URL だけで決まるので、どの組織でも「その組織の課金画面へ行く」1 手に倒れる
+    // (切替を挟む一手は保持列・切替 endpoint の撤去とともに概念ごと消えた)
     $other = AccountDeletionBlockerDto::build($organization, [
         AccountDeletionBlockReason::ActiveBilling,
-    ], isCurrentOrganization: false);
-    expect($other->actions)->toBe([AccountDeletionBlockerAction::SwitchOrganizationThenOpenBilling]);
+    ]);
+    expect($other->actions)->toBe([AccountDeletionBlockerAction::OpenBilling]);
 
     // 同じ理由を重複して渡しても action は重複しない
     $duplicated = AccountDeletionBlockerDto::build($organization, [
@@ -117,7 +118,7 @@ test('AccountDeletionBlockerDto::build は理由から action を順序固定・
         AccountDeletionBlockReason::OwnerlessMembers,
         AccountDeletionBlockReason::ActiveBilling,
         AccountDeletionBlockReason::ActiveBilling,
-    ], isCurrentOrganization: true);
+    ]);
     expect($duplicated->actions)->toBe([
         AccountDeletionBlockerAction::TransferOwnership,
         AccountDeletionBlockerAction::OpenBilling,
@@ -129,15 +130,15 @@ test('AccountDeletionBlockerDto::requirementLabel は理由集合ごとの短文
 
     expect(AccountDeletionBlockerDto::build($organization, [
         AccountDeletionBlockReason::OwnerlessMembers,
-    ], isCurrentOrganization: true)->requirementLabel())->toBe('「現場A」オーナーの移譲');
+    ])->requirementLabel())->toBe('「現場A」オーナーの移譲');
 
     expect(AccountDeletionBlockerDto::build($organization, [
         AccountDeletionBlockReason::ActiveBilling,
-    ], isCurrentOrganization: true)->requirementLabel())->toBe('「現場A」サブスクリプションの解約');
+    ])->requirementLabel())->toBe('「現場A」サブスクリプションの解約');
 
     expect(AccountDeletionBlockerDto::build($organization, [
         AccountDeletionBlockReason::OwnerlessMembers,
         AccountDeletionBlockReason::ActiveBilling,
-    ], isCurrentOrganization: true)->requirementLabel())
+    ])->requirementLabel())
         ->toBe('「現場A」オーナーの移譲とサブスクリプションの解約');
 });

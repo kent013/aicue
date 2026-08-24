@@ -19,6 +19,7 @@ use App\Models\User;
 use App\Notifications\Account\AccountDeletionRequestedNotification;
 use App\Notifications\OrganizationInvitationNotification;
 use App\Services\Billing\AccountDeletionBillingGuard;
+use App\Services\EnterpriseSso\EnterpriseUserProvisioner;
 use App\Services\Notification\NotificationCenterService;
 use App\Services\OAuth\OrganizationAccessRevoker;
 use App\Services\Project\DefaultProjectResolver;
@@ -168,14 +169,8 @@ class OrganizationMembershipService
      * (登録そのものは成功させ、呼び出し側が個人組織へ fallback するため)。register 経路は
      * 招待 email と登録 email の一致を要求する (MatchesInvitationEmail rule と対で二重防御)。
      *
-     * **register 経路専用 (再利用禁止)**: join 成立時、参加した招待組織を
-     * current_organization_id へ **無条件で確定する副作用** を持つ (登録直後の user は
-     * current 未設定のため「招待成立 ⇒ current = 招待先」を強制できる)。この副作用は
-     * 「呼び出し元の user が登録直後で current 未確定」であることに依存するため、
-     * **ログイン中経路 (既存 current を持つ user) から再利用してはならない**
-     * (既存 current を無条件上書きしてしまう)。POST 受諾は current を切り替えない
-     * acceptInvitation を使い、共通コア joinOrganization は current を触らない
-     * (InvitationTest が POST 受諾の current 非変更を固定する)。
+     * ★組織文脈は URL だけで決まる (家系裁定 AG-037) ので、受諾は**どこにも状態を保存しない**。
+     *   受諾後にどの組織の URL へ着地するかは呼び出し側が返り値から決める。
      *
      * @return Organization|null 参加した組織 / 招待が受諾不能 (不在・失効・受諾済・取消・
      *                           email 不一致・既メンバー) なら null
@@ -203,21 +198,8 @@ class OrganizationMembershipService
         }
 
         if (! $this->joinOrganization($invitation, $organization, $user, OrganizationRole::from($invitation->role))) {
-            // 受諾不能なら現在組織も確定しない (join 失敗でも current_organization_id を
-            // 招待組織へ書くと、非所属 org が current という非正規状態を作る)
             return null;
         }
-
-        // [register 経路限定] 参加した招待組織をこの新規ユーザーの「現在組織」として確定する。
-        // - 本メソッドは register 経路専用 (呼び出し元は CreateNewUser のみ。POST 受諾は acceptInvitation)。
-        //   よって現在組織の確定は POST 受諾経路 (現在組織を切り替えない契約) に波及しない。
-        // - 個人組織パスが provision() 内で現在組織を据えるのと対称に、招待参加も本サービス内で
-        //   「join + 現在組織確定」を 1 ユースケースとして閉じる (呼び出し元の登録 tx 内で連続実行され、
-        //   「join 済だが現在組織未設定」の中間状態を残さない)。
-        // - この user は登録直後で現在組織が未確定のため、招待先組織を無条件に現在組織にする
-        //   (register 責務として「招待成立 ⇒ 現在組織 = 招待先」を強制)。current_organization_id は
-        //   mass-assignment 保護キーのためサーバ導出値を forceFill で明示代入する (tenant キー不信)。
-        $user->forceFill(['current_organization_id' => $organization->id])->save();
 
         return $organization;
     }
@@ -298,7 +280,9 @@ class OrganizationMembershipService
         }
 
         $email = $user->email; // CipherSweet 復号後
-        if ($email === '') {
+        // ★企業 SSO でしか入れない利用者は使えるメールを持たない (T253 / A3)。
+        //   宛先が無いので招待の引き当ても行わない。
+        if ($email === null || $email === '') {
             return null;
         }
 
@@ -640,10 +624,6 @@ class OrganizationMembershipService
             }
             // project pivot 掃除 (org 配下 project に限定。別 org の pivot は維持)
             $this->detachProjectMemberships($organization, $freshTarget);
-            // 削除した組織を current にしていた場合は外す (次回アクセス時に選び直す)
-            if ($freshTarget->current_organization_id === $organization->id) {
-                $freshTarget->forceFill(['current_organization_id' => null])->save();
-            }
 
             // 除名の後・同一トランザクション内
             $this->accessRevoker->revoke(
@@ -874,14 +854,12 @@ class OrganizationMembershipService
      */
     public function organizationsBlockingDeletion(User $user): Collection
     {
-        $currentOrganizationId = $user->current_organization_id;
-
         return $user->organizations()
             ->withCount('users')
             ->get()
             ->filter(fn (Organization $organization): bool => $user->organizationRole($organization) === OrganizationRole::Owner
                 && ! $this->hasAnotherOwner($organization, $user))
-            ->map(function (Organization $organization) use ($currentOrganizationId): ?AccountDeletionBlockerDto {
+            ->map(function (Organization $organization): ?AccountDeletionBlockerDto {
                 // withCount('users') 派生属性。PHPStan は型を知らないため integerish で narrowing。
                 $usersCount = $organization->getAttribute('users_count');
                 Assert::integerish($usersCount);
@@ -897,11 +875,7 @@ class OrganizationMembershipService
                     return null;
                 }
 
-                return AccountDeletionBlockerDto::build(
-                    $organization,
-                    $reasons,
-                    $organization->getKey() === $currentOrganizationId,
-                );
+                return AccountDeletionBlockerDto::build($organization, $reasons);
             })
             // PHPStan level 10 では引数無し filter() が ?Dto → Dto に narrow しきらないため明示する
             ->filter(fn (?AccountDeletionBlockerDto $blocker): bool => $blocker !== null)
@@ -928,6 +902,39 @@ class OrganizationMembershipService
                 });
             })
             ->get();
+    }
+
+    /**
+     * 企業 SSO の初回ログインで作られた利用者を、接続が属する組織へ最小権限で所属させる (T253 / C1)。
+     *
+     * ★**ロール書き込みの単一窓口**である本サービスに置く。
+     *   {@see EnterpriseUserProvisioner} から呼ばれ、
+     *   `MembershipWriteLockInventoryTest` の「Laratrust の書き込みはロック済みサービス経由のみ」
+     *   という直列化の前提を崩さない (ロール書き込みを企業 SSO の側へ持ち出さない)。
+     *
+     * ★呼び出し元は既に**接続の行**を `lockForUpdate()` した同一トランザクションの中にいる。
+     *   ここで取るロックの順序は「接続 → users → organizations」であり、
+     *   接続の行より先に他の行をロックする経路は存在しない (D1 は接続の行しかロックしない) ので
+     *   既存のロック順序と循環しない。
+     *
+     * ★利用者は直前に作られた新規行なので、この付与が**既存組織の owner 集合を変えることはない**
+     *   (付与するのは常に最小権限の Member である)。
+     */
+    public function attachJustInTimeMember(Organization $organization, User $user, OrganizationRole $role): void
+    {
+        $this->lockForMembershipWrite([$this->keyOf($user)], [$this->keyOf($organization)]);
+
+        $joined = DB::table('organization_user')->insertOrIgnore([
+            'organization_id' => $organization->id,
+            'user_id' => $user->getKey(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        if ($joined === 1) {
+            // ★権限判定は常に laratrust_team_id を明示する (AGENTS.md セキュリティ不変条件 5)。
+            $user->addRole($role->value, $organization->laratrust_team_id);
+        }
     }
 
     /**

@@ -13,7 +13,7 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * REST API v1 の `{project}` route の URL 整合 guard (middleware 層)。alias: api.project-in-org。
  *
- * web の {@see EnsureProjectBelongsToCurrentOrganization} と同じ順序ハザードを API 側で閉じる。
+ * web の {@see EnsureProjectBelongsToRouteOrganization} と同じ順序ハザードを API 側で閉じる。
  * cross-org の {project} を「FormRequest のバリデーションを含むあらゆるアプリコードより前に
  * 404」へ落とす。controller の inline guard (resolveOrganizationProject) は認可より前の 404 を
  * 担うが、**FormRequest は controller メソッド解決時 = inline guard より前**に走るため、
@@ -21,7 +21,7 @@ use Symfony\Component\HttpFoundation\Response;
  * 差分が存在オラクルになる (不変条件 3)。
  *
  * web 版との違いは組織の解決元だけ:
- *  - web: セッションの current org (ResolvesCurrentOrganization)
+ *  - web: セッションの current org (ResolvesRouteOrganization)
  *  - API: API キー / OAuth token から確定した request attribute 'organization'
  *         (ApiKeyGuard / ResolveApiActor が注入。ResolvesApiOrganization::resolveOrganization)
  *

@@ -83,7 +83,7 @@ class SocialAccountService
 
             $this->link($provider, $socialiteUser, $user);
 
-            $this->provisioning->provisionPersonalOrganization($user);
+            $this->provisioning->provisionInitialOrganization($user);
 
             return $user;
         });

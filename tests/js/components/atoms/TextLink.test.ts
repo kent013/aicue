@@ -12,13 +12,13 @@ const children = createRawSnippet(() => ({
 
 describe("TextLink", () => {
     it("href のみで SPA 遷移用の <a> (Inertia Link) を描画する", () => {
-        render(TextLink, { props: { href: "/dashboard", children, testId: "link" } });
+        render(TextLink, { props: { href: "/organizations/test-org/dashboard", children, testId: "link" } });
 
         const link = screen.getByTestId("link");
         expect(link.tagName).toBe("A");
         // Inertia Link は jsdom 上で href を絶対 URL に正規化するため path で検証する
         expect(new URL(link.getAttribute("href") ?? "", "http://localhost").pathname).toBe(
-            "/dashboard",
+            "/organizations/test-org/dashboard",
         );
         // 内部リンクは別タブ・外部アイコンを持たない
         expect(link.getAttribute("target")).toBeNull();

@@ -11,6 +11,7 @@
     import type { BillingPlansPageProps } from "@/types/billing";
     import type { PricingPlanShape } from "@/types/marketing";
     import PlanCard from "./_helpers/PlanCard.svelte";
+    import { currentOrgUrl } from "@/lib/org-url";
 
     /**
      * プラン比較 (/billing/plans)。閲覧は組織メンバー全員、変更は manageBilling のみ。
@@ -117,7 +118,7 @@
 
         // 有効な契約がある組織は in-app swap、無い組織は従来の Checkout。
         // 判定述語はサーバ (Subscription::valid()) と同一なので循環エラーにならない。
-        const url = page.hasChangeableSubscription ? "/billing/plan" : "/billing/checkout";
+        const url = page.hasChangeableSubscription ? currentOrgUrl("/billing/plan") : currentOrgUrl("/billing/checkout");
         const payload = page.hasChangeableSubscription
             ? {
                   plan_code: planCode,

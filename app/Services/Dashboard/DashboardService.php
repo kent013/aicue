@@ -34,7 +34,8 @@ use Webmozart\Assert\Assert;
 /**
  * ダッシュボードのサーバ集計 (読み取り専用。固定本数のクエリで N+1 なし)。
  * 集計対象はすべて $organization / $project の relation 経由 = cross-org 構造的不可。
- * $organization は CurrentOrganizationResolver が所属再確認済みのものだけが渡される契約。
+ * $organization は route binding (MembershipScopedOrganizationBinder) が
+ * 所属確認済みで解決したものだけが渡される契約 (家系裁定 AG-037: 組織文脈は URL だけで決まる)。
  */
 class DashboardService
 {
@@ -48,16 +49,8 @@ class DashboardService
         private readonly BillingAccess $billingAccess,
     ) {}
 
-    public function build(User $user, ?Organization $organization): DashboardPageData
+    public function build(User $user, Organization $organization): DashboardPageData
     {
-        if ($organization === null) {
-            return new DashboardPageData(
-                state: DashboardState::NoOrganization, role: null, canCreateProject: false,
-                organizationName: null, projectId: null, projectName: null,
-                inProgress: [], recentManuals: [], shootingTargets: [], billing: null,
-            );
-        }
-
         $billing = $this->billingSummary($organization);
         $project = $this->defaultProjects->resolve($organization);
         if ($project === null) {

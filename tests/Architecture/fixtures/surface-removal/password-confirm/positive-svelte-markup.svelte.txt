@@ -1,0 +1,1 @@
+<a href="/x" data-route="password.confirm">再認証</a>

@@ -5,9 +5,10 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Projects;
 
 use App\DataTransferObjects\Manual\TakeSelectionPageData;
-use App\Http\Concerns\ResolvesCurrentOrganization;
+use App\Http\Concerns\ResolvesRouteOrganization;
 use App\Http\Controllers\Controller;
 use App\Models\Cut;
+use App\Models\Organization;
 use App\Models\Project;
 use App\Models\VideoManual;
 use App\Support\Seo\SeoManager;
@@ -20,7 +21,7 @@ use Inertia\Response;
  * テイク選択・採用画面 (doc/04)。編集者がカットごとのテイクを見て採用を確定する面。
  *
  * nested route の URL 整合は 2 層 (認可より前に 404):
- * 1. {project} ∈ current org (project.in-current-org middleware + resolveOrganizationProject)
+ * 1. {project} ∈ current org (project.in-route-org middleware + resolveOrganizationProject)
  * 2. {manual} ∈ {project}, {cut} ∈ {manual} (Route::scopeBindings())
  *
  * 本 controller は**読み取りのみ**である。採用・削除・アップロード・再生は
@@ -30,17 +31,16 @@ use Inertia\Response;
  */
 class CutTakeController extends Controller
 {
-    use ResolvesCurrentOrganization;
+    use ResolvesRouteOrganization;
 
     /** テイク選択画面 (編集者のみ。撮影者は 403 = PWA 側に採用導線がある) */
     public function index(
-        Request $request,
+        Request $request, Organization $organization,
         Project $project,
         VideoManual $manual,
         Cut $cut,
         SeoManager $seo,
     ): Response {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404 ({manual}∈{project}, {cut}∈{manual} は scopeBindings)
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('update', $manual); // VideoManualPolicy::update = 編集者

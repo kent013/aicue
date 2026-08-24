@@ -215,7 +215,7 @@ test('C1 通し: 静止画の presign → 登録 → 採用 → マニフェス�
     $clientTakeId = strtoupper((string) Str::ulid());
     $checksum = base64_encode(hash('sha256', 'jpeg-bytes', true));
     $this->actingAs($owner)->postJson(
-        "/app/projects/{$project->id}/manuals/{$manual->id}/cuts/{$cut->id}/takes/upload-url",
+        "/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}/cuts/{$cut->id}/takes/upload-url",
         [
             'client_take_id' => $clientTakeId,
             'size_bytes' => 120_000,
@@ -239,7 +239,7 @@ test('C1 通し: 静止画の presign → 登録 → 採用 → マニフェス�
         UploadTicketClaims::fromReservation($reservation->refresh()),
     );
     $this->actingAs($owner)->postJson(
-        "/app/projects/{$project->id}/manuals/{$manual->id}/cuts/{$cut->id}/takes",
+        "/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}/cuts/{$cut->id}/takes",
         ['ticket' => $ticket, 'client_take_id' => $clientTakeId, 'duration_ms' => 3_000],
     )->assertCreated();
     $take = $cut->takes()->sole();

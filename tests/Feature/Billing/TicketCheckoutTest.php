@@ -32,14 +32,14 @@ function checkoutPayload(int $count = 30, ?string $token = null): array
 }
 
 test('guest は login へ redirect される', function (): void {
-    $this->get('/purchase-tickets')->assertRedirect('/login');
-    $this->post('/purchase-tickets/checkout', checkoutPayload())->assertRedirect('/login');
+    $this->get('/organizations/guest-org/billing/purchase-tickets')->assertRedirect('/login');
+    $this->post('/organizations/guest-org/billing/purchase-tickets/checkout', checkoutPayload())->assertRedirect('/login');
 });
 
 test('owner は購入画面で tiers / per-bucket 残高 / canManage / ticketAttemptToken を受け取る', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->get('/purchase-tickets')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/billing/purchase-tickets")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->component('Billing/PurchaseTickets')
@@ -60,11 +60,11 @@ test('owner は購入画面で tiers / per-bucket 残高 / canManage / ticketAtt
 });
 
 test('fake_external marker query は purchased 表示に転用されない (アプリ非解釈)', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
     // runtime fake (BughuntFakesServiceProvider) の中立帰還 URL に付く観測用 marker。
     // アプリはこの query を一切解釈しない = purchased 偽装にならないことを固定する
-    $this->actingAs($owner)->get('/purchase-tickets?fake_external=stripe')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/billing/purchase-tickets?fake_external=stripe")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page->where('page.purchased', false));
 });
@@ -72,32 +72,32 @@ test('fake_external marker query は purchased 表示に転用されない (ア�
 test('member は閲覧可能 (canManage=false) だが POST は 403', function (): void {
     [$organization] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
-    $this->actingAs($member)->get('/purchase-tickets')
+    $this->actingAs($member)->get("/organizations/{$organization->slug}/billing/purchase-tickets")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('page.canManage', false));
 
     $this->actingAs($member)
-        ->post('/purchase-tickets/checkout', checkoutPayload())
+        ->post("/organizations/{$organization->slug}/billing/purchase-tickets/checkout", checkoutPayload())
         ->assertForbidden();
 });
 
-test('current org を持たないユーザーは 404', function (): void {
+test('非所属の組織 URL は 404 (組織の有無を露出しない)', function (): void {
+    [$organization] = createOrganizationWithOwner();
     $user = User::factory()->create();
 
-    $this->actingAs($user)->get('/purchase-tickets')->assertNotFound();
+    $this->actingAs($user)->get("/organizations/{$organization->slug}/billing/purchase-tickets")->assertNotFound();
 });
 
 test('未契約 org (subscription なし) でも GET/POST に到達できる (課金ゲート対象外)', function (): void {
     $fake = fakeTicketGateway();
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->get('/purchase-tickets')->assertOk();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/billing/purchase-tickets")->assertOk();
 
     $response = $this->actingAs($owner)
-        ->post('/purchase-tickets/checkout', checkoutPayload());
+        ->post("/organizations/{$organization->slug}/billing/purchase-tickets/checkout", checkoutPayload());
 
     $response->assertStatus(302); // Inertia::location (非 Inertia リクエストは 302 redirect)
     expect($fake->created)->toHaveCount(1);
@@ -110,7 +110,7 @@ test('owner の checkout は gateway 1 回呼び出しで Stripe URL へ遷移�
 
     // Inertia リクエストでは Inertia::location = 409 + X-Inertia-Location で full page redirect する
     $response = $this->actingAs($owner)
-        ->post('/purchase-tickets/checkout', ['count' => 30, 'attempt_token' => $token], ['X-Inertia' => 'true']);
+        ->post("/organizations/{$organization->slug}/billing/purchase-tickets/checkout", ['count' => 30, 'attempt_token' => $token], ['X-Inertia' => 'true']);
 
     $response->assertStatus(409);
     expect($response->headers->get('X-Inertia-Location'))->toBe("https://checkout.stripe.test/c/pay/cs_test_{$token}");
@@ -144,13 +144,13 @@ test('purchased バナーは session_id が自 org の checkout 行と一致し�
         ->create(['stripe_session_id' => 'cs_test_return_1']);
 
     // 一致 → バナー表示
-    $this->actingAs($owner)->get('/purchase-tickets?purchased=1&session_id=cs_test_return_1')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/billing/purchase-tickets?purchased=1&session_id=cs_test_return_1")
         ->assertInertia(fn (Assert $page) => $page->where('page.purchased', true));
 
     // session_id なし / 未知 session → 非表示 (query 偽装で成功バナーを出さない fail-closed)
-    $this->actingAs($owner)->get('/purchase-tickets?purchased=1')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/billing/purchase-tickets?purchased=1")
         ->assertInertia(fn (Assert $page) => $page->where('page.purchased', false));
-    $this->actingAs($owner)->get('/purchase-tickets?purchased=1&session_id=cs_unknown')
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/billing/purchase-tickets?purchased=1&session_id=cs_unknown")
         ->assertInertia(fn (Assert $page) => $page->where('page.purchased', false));
 });
 
@@ -161,21 +161,21 @@ test('他 org の session_id では purchased バナーを表示しない (org �
         ->initiatedBy($ownerA)
         ->create(['stripe_session_id' => 'cs_test_org_a_1']);
 
-    [, $ownerB] = createOrganizationWithOwner();
+    [$organization, $ownerB] = createOrganizationWithOwner();
 
-    $this->actingAs($ownerB)->get('/purchase-tickets?purchased=1&session_id=cs_test_org_a_1')
+    $this->actingAs($ownerB)->get("/organizations/{$organization->slug}/billing/purchase-tickets?purchased=1&session_id=cs_test_org_a_1")
         ->assertInertia(fn (Assert $page) => $page->where('page.purchased', false));
 });
 
 test('同一 attempt_token の再送は gateway を呼ばず同一 URL を replay する', function (): void {
     $fake = fakeTicketGateway();
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
     $token = (string) Str::ulid();
 
     $first = $this->actingAs($owner)
-        ->post('/purchase-tickets/checkout', ['count' => 30, 'attempt_token' => $token]);
+        ->post("/organizations/{$organization->slug}/billing/purchase-tickets/checkout", ['count' => 30, 'attempt_token' => $token]);
     $second = $this->actingAs($owner)
-        ->post('/purchase-tickets/checkout', ['count' => 30, 'attempt_token' => $token]);
+        ->post("/organizations/{$organization->slug}/billing/purchase-tickets/checkout", ['count' => 30, 'attempt_token' => $token]);
 
     expect($fake->created)->toHaveCount(1);
     expect($second->headers->get('Location'))->toBe($first->headers->get('Location'));
@@ -184,12 +184,12 @@ test('同一 attempt_token の再送は gateway を呼ばず同一 URL を repla
 
 test('別 token・同 count (別タブ想定) は新規作成せず既存 live pending へ replay する', function (): void {
     $fake = fakeTicketGateway();
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
     $first = $this->actingAs($owner)
-        ->post('/purchase-tickets/checkout', checkoutPayload(30));
+        ->post("/organizations/{$organization->slug}/billing/purchase-tickets/checkout", checkoutPayload(30));
     $second = $this->actingAs($owner)
-        ->post('/purchase-tickets/checkout', checkoutPayload(30));
+        ->post("/organizations/{$organization->slug}/billing/purchase-tickets/checkout", checkoutPayload(30));
 
     expect($fake->created)->toHaveCount(1);
     expect($second->headers->get('Location'))->toBe($first->headers->get('Location'));
@@ -198,10 +198,10 @@ test('別 token・同 count (別タブ想定) は新規作成せず既存 live p
 
 test('別 token・別 count は既存 pending を Stripe expire してから新規作成する', function (): void {
     $fake = fakeTicketGateway();
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->post('/purchase-tickets/checkout', checkoutPayload(30));
-    $response = $this->actingAs($owner)->post('/purchase-tickets/checkout', checkoutPayload(50));
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/purchase-tickets/checkout", checkoutPayload(30));
+    $response = $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/purchase-tickets/checkout", checkoutPayload(50));
 
     $response->assertStatus(302);
     expect($fake->created)->toHaveCount(2);
@@ -217,10 +217,10 @@ test('別 token・別 count は既存 pending を Stripe expire してから新�
 test('expire が complete を返したら新規作成せずエラー着地する (直前の決済が処理中)', function (): void {
     $fake = fakeTicketGateway();
     $fake->expireResult = 'complete';
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->post('/purchase-tickets/checkout', checkoutPayload(30));
-    $response = $this->actingAs($owner)->post('/purchase-tickets/checkout', checkoutPayload(50));
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/purchase-tickets/checkout", checkoutPayload(30));
+    $response = $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/purchase-tickets/checkout", checkoutPayload(50));
 
     $response->assertRedirect();
     $response->assertSessionHas('error');
@@ -241,7 +241,7 @@ test('期限切れ pending は replay されず expired 化して新 session を
         ->stale()
         ->create(['ticket_count' => 30, 'attempt_token' => $staleToken]);
 
-    $response = $this->actingAs($owner)->post('/purchase-tickets/checkout', checkoutPayload(30));
+    $response = $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/purchase-tickets/checkout", checkoutPayload(30));
 
     $response->assertStatus(302);
     expect($fake->created)->toHaveCount(1);
@@ -262,19 +262,19 @@ test('completed 済み attempt_token の再送は gateway を呼ばず受付済�
         ->create(['ticket_count' => 30, 'attempt_token' => $token]);
 
     $response = $this->actingAs($owner)
-        ->post('/purchase-tickets/checkout', ['count' => 30, 'attempt_token' => $token]);
+        ->post("/organizations/{$organization->slug}/billing/purchase-tickets/checkout", ['count' => 30, 'attempt_token' => $token]);
 
-    $response->assertRedirect(route('billing.tickets.show'));
+    $response->assertRedirect(route('billing.tickets.show', ['organization' => $organization->slug]));
     $response->assertSessionHas('info');
     expect($fake->created)->toHaveCount(0);
 });
 
 test('count 境界外・非整数・attempt_token 不正は validation error になる', function (array $payload, string $errorKey): void {
     $fake = fakeTicketGateway();
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
     $this->actingAs($owner)
-        ->post('/purchase-tickets/checkout', $payload)
+        ->post("/organizations/{$organization->slug}/billing/purchase-tickets/checkout", $payload)
         ->assertSessionHasErrors($errorKey);
     expect($fake->created)->toHaveCount(0);
 })->with([
@@ -290,16 +290,16 @@ test('payload に organization_id (保護キー) が混入すると 422', functi
     [$organization, $owner] = createOrganizationWithOwner();
 
     $this->actingAs($owner)
-        ->post('/purchase-tickets/checkout', checkoutPayload() + ['organization_id' => $organization->id])
+        ->post("/organizations/{$organization->slug}/billing/purchase-tickets/checkout", checkoutPayload() + ['organization_id' => $organization->id])
         ->assertSessionHasErrors('organization_id');
 });
 
 test('tier が空のとき fail-closed で error flash に着地する (spot へ落ちない)', function (): void {
     $fake = fakeTicketGateway();
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
     TicketVolumePrice::query()->delete();
 
-    $response = $this->actingAs($owner)->post('/purchase-tickets/checkout', checkoutPayload(30));
+    $response = $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/purchase-tickets/checkout", checkoutPayload(30));
 
     $response->assertRedirect();
     $response->assertSessionHas('error');

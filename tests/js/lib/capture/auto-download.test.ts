@@ -88,7 +88,7 @@ function makeDeps(overrides: Partial<AutoDownloadOptions> = {}) {
 
 function makeDownloader(overrides: Partial<AutoDownloadOptions> = {}) {
     const deps = makeDeps(overrides);
-    const downloader = new AdoptedTakeAutoDownloader(1, 5, deps.options);
+    const downloader = new AdoptedTakeAutoDownloader("test-org", 1, 5, deps.options);
     return { downloader, ...deps };
 }
 
@@ -102,7 +102,7 @@ describe("AdoptedTakeAutoDownloader 対象選別", () => {
         expect(videoFetcher).toHaveBeenCalledWith("https://s3.example.test/take-11.mp4?sig=1");
         expect(ackFetch).toHaveBeenCalledTimes(1);
         expect(ackFetch).toHaveBeenCalledWith(
-            "/app/projects/1/manuals/5/cuts/101/takes/11/downloaded",
+            "/organizations/test-org/app/projects/1/manuals/5/cuts/101/takes/11/downloaded",
             "POST",
             { ack_token: "ack-token-11" },
         );
@@ -343,7 +343,7 @@ describe("AdoptedTakeAutoDownloader 既定 videoFetcher (fetch + 完読)", () =>
 
     /** credentials:omit で fetch し、body を完読・ACK する既定経路を通す downloader */
     function realFetchDownloader(ackFetch = vi.fn(async () => okResponse())) {
-        const downloader = new AdoptedTakeAutoDownloader(1, 5, {
+        const downloader = new AdoptedTakeAutoDownloader("test-org", 1, 5, {
             ackFetch: ackFetch as unknown as AutoDownloadOptions["ackFetch"],
             delay: async () => {},
             isOnline: () => true,

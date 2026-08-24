@@ -53,7 +53,7 @@
 - PC の `VideoManualController::show` は `view` 認可、`edit` は `update` 認可で到達。いずれも撮影ナビの
   `view` を包含 → リンク遷移先で 403 にならない。最終認可はサーバ側 `capture.manuals.show` が担保
   （フロントの表示条件は UX 上の話）。
-- `capture.manuals.show` は `project.in-current-org` + `require-active-subscription` middleware 配下。
+- `capture.manuals.show` は `project.in-route-org` + `require-active-subscription` middleware 配下。
   PC のマニュアルも current org 配下 → cross-org 遷移は発生しない（URL は project.id/manual.id を素直に埋めるのみ）。
 - `resources/js/types/manual.ts` の `VideoManualStatus` は PHP enum `App\Enums\Manual\VideoManualStatus`
   と値集合一致（draft/analyzing/ready/rendering/published）。既存 `STATUS_TONES` が

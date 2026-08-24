@@ -19,6 +19,7 @@
     import { withRecentAuth, type RecentAuthStatus } from "@/lib/recent-auth";
     import { KeyRound } from "@lucide/svelte";
     import type { SharedProps } from "@/lib/shared-props";
+    import { orgUrl } from "@/lib/org-url";
 
     interface ApiKeyItem {
         id: number;
@@ -47,12 +48,11 @@
     const shared = $derived(page.props as unknown as SharedProps);
     const appName = $derived(shared.appName ?? "");
 
-    const base = $derived(`/organizations/${organization.slug}`);
     const tabs = $derived([
-        { label: "API キー", href: `${base}/api-keys`, active: true, testId: "tab-api-keys" },
+        { label: "API キー", href: orgUrl(organization.slug, "/api-keys"), active: true, testId: "tab-api-keys" },
         {
             label: "接続セッション",
-            href: `${base}/api-keys/sessions`,
+            href: orgUrl(organization.slug, "/api-keys/sessions"),
             active: false,
             testId: "tab-sessions",
         },
@@ -98,7 +98,7 @@
             ...(abilityWrite ? ["write"] : []),
         ];
         guardWithRecentAuth(() => {
-            issueForm.post(`${base}/api-keys`, {
+            issueForm.post(orgUrl(organization.slug, "/api-keys"), {
                 preserveScroll: true,
                 onSuccess: () => {
                     issueForm.reset();
@@ -124,7 +124,7 @@
         if (revokeTarget === null) return;
         const id = revokeTarget.id;
         guardWithRecentAuth(() => {
-            router.delete(`${base}/api-keys/${id}`, {
+            router.delete(orgUrl(organization.slug, `/api-keys/${id}`), {
                 preserveScroll: true,
                 onStart: () => {
                     revoking = true;
@@ -237,10 +237,10 @@
                         AI クライアント (MCP) やターミナル (CLI) からの接続手順を確認できます。
                     </p>
                     <div class="mt-3 flex gap-4">
-                        <TextLink href={`${base}/onboarding/mcp`} testId="link-onboarding-mcp">
+                        <TextLink href={orgUrl(organization.slug, "/onboarding/mcp")} testId="link-onboarding-mcp">
                             MCP 導入ガイド
                         </TextLink>
-                        <TextLink href={`${base}/onboarding/cli`} testId="link-onboarding-cli">
+                        <TextLink href={orgUrl(organization.slug, "/onboarding/cli")} testId="link-onboarding-cli">
                             CLI 導入ガイド
                         </TextLink>
                     </div>

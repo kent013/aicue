@@ -39,7 +39,7 @@ function cut(id: number, readyTakeId: number | null): CaptureCut {
 const LABELS: Record<number, string> = { 101: "手順 1", 102: "手順 2", 103: "手順 3" };
 
 function playbackUrl(cutId: number, takeId: number): string {
-    return `/app/projects/1/manuals/5/cuts/${cutId}/takes/${takeId}/playback`;
+    return `/organizations/test-org/app/projects/1/manuals/5/cuts/${cutId}/takes/${takeId}/playback`;
 }
 
 function renderDialog(cuts: CaptureCut[], onClose = vi.fn()): { onClose: ReturnType<typeof vi.fn> } {

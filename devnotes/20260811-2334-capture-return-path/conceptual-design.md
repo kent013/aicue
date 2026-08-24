@@ -78,7 +78,7 @@ aicue:T154 で「完成動画をアプリ内で観られる」ようにして受
 | | 撮影ナビ `capture.manuals.show` | PC 詳細 `projects.manuals.show` |
 |---|---|---|
 | 外側 group | `['auth','verified','not-pending-deletion']` (routes/web.php:189) | 同左 (同一 group 内) |
-| 内側 group | `['require-active-subscription','project.in-current-org']` (:593) | `['require-active-subscription','project.in-current-org']` (:453) |
+| 内側 group | `['require-active-subscription','project.in-route-org']` (:593) | `['require-active-subscription','project.in-route-org']` (:453) |
 | テナント境界 | `resolveOrganizationProject()` = 認可より前に 404 | 同左 |
 | 認可 | `Gate::authorize('view', $manual)` | `Gate::authorize('view', $manual)` |
 

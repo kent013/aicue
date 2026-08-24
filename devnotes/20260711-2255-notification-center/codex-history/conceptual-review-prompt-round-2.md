@@ -146,7 +146,7 @@ guard 済み）。遷移が実際に起きたときだけ・**terminal tx の co
   で解決（他人の通知 = 構造的に 404。403 で存在を漏らさない）。所有スコープが relation で閉じるため
   新規 Policy は不要。1 param ルートのため `NestedRouteIdorDefenseTest` の inventory 対象外
   （2+ param 規約）だが、cross-user 404 は Feature テストで固定する。
-- `open` の遷移先（manual 画面）は既存の `project.in-current-org` + scopeBindings 防御下の named route へ
+- `open` の遷移先（manual 画面）は既存の `project.in-route-org` + scopeBindings 防御下の named route へ
   redirect するだけで、認可判断を通知側に複製しない（遷移先で 404/403 になるケースは open が事前に
   一覧へ戻して案内する = 二重防御）。
 - mark-read/mark-all-read は `back()` で完結（`redirect()->intended()` 禁止事項の遵守）。

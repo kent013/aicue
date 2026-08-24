@@ -41,9 +41,15 @@ final class NestedRouteDefenseInventory
         $tenant = NestedRouteDefenseMode::TenantGuardMiddleware;
         $manual = NestedRouteDefenseMode::ManualOwnerScopedResolution;
         $nonRes = NestedRouteDefenseMode::NonResourceParameter;
+        $publicGlobal = NestedRouteDefenseMode::PublicGlobalResource;
 
         // {project} は web/API とも テナント guard middleware が binding 直後に走る (T108 S2)
         $project = ['project' => $tenant];
+        // 業務 route は組織 URL 配下にある (家系裁定 AG-037)。親の {organization} は
+        // MembershipScopedOrganizationBinder が membership スコープで解決する
+        $org = ['organization' => $binder];
+        // web の {project} route は必ず {organization} を親に持つ
+        $orgProject = [...$org, ...$project];
 
         return [
             // --- REST API v1 ---
@@ -55,59 +61,59 @@ final class NestedRouteDefenseInventory
             'api.v1.projects.items.destroy' => [...$project, 'item' => $scoped],
 
             // --- 撮影 PWA (/app/*。{manual}∈{project}, {cut}∈{manual}, {take}∈{cut}) ---
-            'capture.manuals.index' => $project,
-            'capture.manuals.show' => [...$project, 'manual' => $scoped],
-            'capture.takes.upload-url' => [...$project, 'manual' => $scoped, 'cut' => $scoped],
-            'capture.takes.store' => [...$project, 'manual' => $scoped, 'cut' => $scoped],
-            'capture.takes.update' => [...$project, 'manual' => $scoped, 'cut' => $scoped, 'take' => $scoped],
-            'capture.takes.destroy' => [...$project, 'manual' => $scoped, 'cut' => $scoped, 'take' => $scoped],
-            'capture.takes.adopt' => [...$project, 'manual' => $scoped, 'cut' => $scoped, 'take' => $scoped],
-            'capture.takes.downloaded' => [...$project, 'manual' => $scoped, 'cut' => $scoped, 'take' => $scoped],
-            'capture.takes.playback' => [...$project, 'manual' => $scoped, 'cut' => $scoped, 'take' => $scoped],
-            'capture.takes.thumbnail' => [...$project, 'manual' => $scoped, 'cut' => $scoped, 'take' => $scoped],
+            'capture.manuals.index' => $orgProject,
+            'capture.manuals.show' => [...$orgProject, 'manual' => $scoped],
+            'capture.takes.upload-url' => [...$orgProject, 'manual' => $scoped, 'cut' => $scoped],
+            'capture.takes.store' => [...$orgProject, 'manual' => $scoped, 'cut' => $scoped],
+            'capture.takes.update' => [...$orgProject, 'manual' => $scoped, 'cut' => $scoped, 'take' => $scoped],
+            'capture.takes.destroy' => [...$orgProject, 'manual' => $scoped, 'cut' => $scoped, 'take' => $scoped],
+            'capture.takes.adopt' => [...$orgProject, 'manual' => $scoped, 'cut' => $scoped, 'take' => $scoped],
+            'capture.takes.downloaded' => [...$orgProject, 'manual' => $scoped, 'cut' => $scoped, 'take' => $scoped],
+            'capture.takes.playback' => [...$orgProject, 'manual' => $scoped, 'cut' => $scoped, 'take' => $scoped],
+            'capture.takes.thumbnail' => [...$orgProject, 'manual' => $scoped, 'cut' => $scoped, 'take' => $scoped],
 
             // --- 業務 route (web) ---
-            'projects.show' => $project,
-            'projects.edit' => $project,
-            'projects.update' => $project,
-            'projects.destroy' => $project,
-            'projects.items.store' => $project,
-            'projects.items.update' => [...$project, 'item' => $scoped],
-            'projects.items.destroy' => [...$project, 'item' => $scoped],
-            'projects.categories.index' => $project,
-            'projects.categories.store' => $project,
-            'projects.categories.reorder' => $project,
-            'projects.categories.update' => [...$project, 'category' => $scoped],
-            'projects.categories.destroy' => [...$project, 'category' => $scoped],
-            'projects.manuals.create' => $project,
-            'projects.manuals.store' => $project,
-            'projects.manuals.show' => [...$project, 'manual' => $scoped],
-            'projects.manuals.edit' => [...$project, 'manual' => $scoped],
-            'projects.manuals.update' => [...$project, 'manual' => $scoped],
-            'projects.manuals.destroy' => [...$project, 'manual' => $scoped],
-            'projects.manuals.duplicate' => [...$project, 'manual' => $scoped],
+            'projects.show' => $orgProject,
+            'projects.edit' => $orgProject,
+            'projects.update' => $orgProject,
+            'projects.destroy' => $orgProject,
+            'projects.items.store' => $orgProject,
+            'projects.items.update' => [...$orgProject, 'item' => $scoped],
+            'projects.items.destroy' => [...$orgProject, 'item' => $scoped],
+            'projects.categories.index' => $orgProject,
+            'projects.categories.store' => $orgProject,
+            'projects.categories.reorder' => $orgProject,
+            'projects.categories.update' => [...$orgProject, 'category' => $scoped],
+            'projects.categories.destroy' => [...$orgProject, 'category' => $scoped],
+            'projects.manuals.create' => $orgProject,
+            'projects.manuals.store' => $orgProject,
+            'projects.manuals.show' => [...$orgProject, 'manual' => $scoped],
+            'projects.manuals.edit' => [...$orgProject, 'manual' => $scoped],
+            'projects.manuals.update' => [...$orgProject, 'manual' => $scoped],
+            'projects.manuals.destroy' => [...$orgProject, 'manual' => $scoped],
+            'projects.manuals.duplicate' => [...$orgProject, 'manual' => $scoped],
             // {cut} は $manual->cuts() 経由 (PC テイク選択画面)
-            'projects.manuals.cuts.takes.index' => [...$project, 'manual' => $scoped, 'cut' => $scoped],
-            'projects.manuals.scenario.update' => [...$project, 'manual' => $scoped],
-            'projects.manuals.source-documents.store' => [...$project, 'manual' => $scoped],
-            'projects.manuals.analyze' => [...$project, 'manual' => $scoped],
+            'projects.manuals.cuts.takes.index' => [...$orgProject, 'manual' => $scoped, 'cut' => $scoped],
+            'projects.manuals.scenario.update' => [...$orgProject, 'manual' => $scoped],
+            'projects.manuals.source-documents.store' => [...$orgProject, 'manual' => $scoped],
+            'projects.manuals.analyze' => [...$orgProject, 'manual' => $scoped],
             // {analysisJob} は $manual->analysisJobs() 経由
-            'projects.manuals.jobs.show' => [...$project, 'manual' => $scoped, 'analysisJob' => $scoped],
-            'projects.manuals.render' => [...$project, 'manual' => $scoped],
-            'projects.manuals.preview' => [...$project, 'manual' => $scoped],
-            'projects.manuals.download' => [...$project, 'manual' => $scoped],
+            'projects.manuals.jobs.show' => [...$orgProject, 'manual' => $scoped, 'analysisJob' => $scoped],
+            'projects.manuals.render' => [...$orgProject, 'manual' => $scoped],
+            'projects.manuals.preview' => [...$orgProject, 'manual' => $scoped],
+            'projects.manuals.download' => [...$orgProject, 'manual' => $scoped],
             // {renderJob} は $manual->renderJobs() 経由
-            'projects.manuals.render-jobs.show' => [...$project, 'manual' => $scoped, 'renderJob' => $scoped],
-            'projects.manuals.render-jobs.playback' => [...$project, 'manual' => $scoped, 'renderJob' => $scoped],
-            'projects.members.store' => $project,
+            'projects.manuals.render-jobs.show' => [...$orgProject, 'manual' => $scoped, 'renderJob' => $scoped],
+            'projects.manuals.render-jobs.playback' => [...$orgProject, 'manual' => $scoped, 'renderJob' => $scoped],
+            'projects.members.store' => $orgProject,
             // {user} は ProjectMemberController::destroy が $organization->users() から手動解決する
             // (implicit binding を外して不在 id と実在の非メンバーを同一経路に落とす。T108 S3-b)
-            'projects.members.destroy' => [...$project, 'user' => $manual],
+            'projects.members.destroy' => [...$orgProject, 'user' => $manual],
 
             // --- 組織 (親 {organization} は MembershipScopedOrganizationBinder が membership スコープで解決) ---
-            'organizations.settings' => ['organization' => $binder],
-            'organizations.update' => ['organization' => $binder],
-            'organizations.switch' => ['organization' => $binder],
+            'organizations.settings' => $org,
+            'organizations.update' => $org,
+            'organizations.slug.update' => $org,
             'organizations.onboarding.cli' => ['organization' => $binder],
             'organizations.onboarding.mcp' => ['organization' => $binder],
             'organizations.transfer-ownership' => ['organization' => $binder],
@@ -127,10 +133,50 @@ final class NestedRouteDefenseInventory
             'organizations.members.destroy' => ['organization' => $binder, 'user' => $scoped],
             'organizations.members.two-factor.reset' => ['organization' => $binder, 'user' => $scoped],
 
-            // --- 個人スコープ ---
+            // --- 企業 OIDC SSO 接続 (T253) ---
+            // {oidcConnection} は $organization->oidcConnections() 経由 (scopeBindings)
+            'organizations.sso.index' => ['organization' => $binder],
+            'organizations.sso.store' => ['organization' => $binder],
+            'organizations.sso.update' => ['organization' => $binder, 'oidcConnection' => $scoped],
+            'organizations.sso.verify' => ['organization' => $binder, 'oidcConnection' => $scoped],
+            'organizations.sso.activate' => ['organization' => $binder, 'oidcConnection' => $scoped],
+            'organizations.sso.disable' => ['organization' => $binder, 'oidcConnection' => $scoped],
+            'organizations.sso.destroy' => ['organization' => $binder, 'oidcConnection' => $scoped],
+            // 公開のログイン導線。{connection} は**組織に属さない全体一意の識別名**であり、
+            // テナント親子関係の対象にならない (理由は nonTenantReasons)
+            'enterprise-sso.redirect' => ['connection' => $publicGlobal],
+
+            // --- 通知センター (組織 URL 配下。一覧は全 org 横断だが URL は組織を持つ) ---
+            'notifications.index' => $org,
+            'notifications.read-all' => $org,
             // {notification} は NotificationController が $user->notifications() から手動解決する
-            'notifications.open' => ['notification' => $manual],
-            'notifications.read' => ['notification' => $manual],
+            'notifications.open' => [...$org, 'notification' => $manual],
+            'notifications.read' => [...$org, 'notification' => $manual],
+
+            // --- 組織 URL 配下の単独 param route (親は {organization} だけ) ---
+            'dashboard' => $org,
+            'manage.users.index' => $org,
+            'projects.index' => $org,
+            'projects.create' => $org,
+            'projects.store' => $org,
+            'capture.home' => $org,
+            'capture.account' => $org,
+            'capture.csrf-cookie' => $org,
+            'billing.index' => $org,
+            'billing.plans' => $org,
+            'billing.checkout' => $org,
+            'billing.plan.change' => $org,
+            'billing.portal' => $org,
+            'billing.contact.update' => $org,
+            'billing.auto-recharge.update' => $org,
+            'billing.auto-recharge.setup' => $org,
+            'billing.tickets.show' => $org,
+            'billing.tickets.checkout' => $org,
+            'onboarding.checkout' => $org,
+            'onboarding.activate-personal' => $org,
+            'onboarding.billing-required' => $org,
+
+            // --- 個人スコープ ---
             // {passkey} は SelfScopedPasskeyBinder が認証ユーザーの passkeys() スコープで解決する
             'passkey.destroy' => ['passkey' => $binder],
             // {invitation} は AcceptInvitationInAppController が認証ユーザー宛の有効 pending 集合
@@ -175,6 +221,9 @@ final class NestedRouteDefenseInventory
             'mcp.oauth.protected-resource.nested#path' => 'vendor (laravel/mcp) の OAuth discovery。任意の後続セグメントでリソース id ではない',
             'storage.local#path' => 'Laravel の local disk 配信 route。署名付き URL でファイルパスを受ける (リソース id ではない)',
             'storage.local.upload#path' => 'Laravel の local disk アップロード route。署名付き URL でファイルパスを受ける',
+            'enterprise-sso.redirect#connection' => '企業ログインの公開導線の識別名。組織に属さない全体一意の値で、'
+                .'推測されてよい (防御は接続の状態と state / PKCE / ブラウザ結合が担う)。'
+                .'不在の識別名と使えない接続は PublicOidcConnectionBinder が同じ 404 に畳む',
         ];
     }
 

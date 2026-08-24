@@ -1,0 +1,97 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services\EnterpriseSso;
+
+use Kent013\SsrfPin\PinnedHttpClient;
+
+/**
+ * ★負例の見本。**安全な呼び出しと危険な呼び出しが同じファイルに同居する**形を置く。
+ *   ファイル単位の部分文字列一致だと安全な方を見て緑になってしまう (それを赤にする)。
+ *
+ * 危険な形は 6 方向ある:
+ *   1. 引数そのものが無い (既定の true が効く)
+ *   2. `followRedirects: true` (明示的に追従する)
+ *   3. 値が静的に確定できない (実行時に true になりうる)
+ *   4. **入れ子の別の呼び出し**に同名の引数がある (外側には無いのに在るように見える)
+ *   5. 引数の中に **attribute (`#[…]`)** があり、その後ろの入れ子に同名の引数がある
+ *      (`#[` を開きとして数えないと、`]` だけが数えられて深さが 1 つずれる)
+ *   6. 引数の中に **`"${x}"` 形の文字列内挿**があり、その後ろの入れ子に同名の引数がある
+ *      (`${` を開きとして数えないと、`}` だけが数えられて深さが 1 つずれる)
+ */
+final class RedirectFollowingSample
+{
+    public function __construct(private PinnedHttpClient $pinned) {}
+
+    /** ★正例その 1。リテラルの false ちょうど。 */
+    public function safe(): void
+    {
+        $this->pinned->fetch($request, $deadline, followRedirects: false);
+    }
+
+    /** ★正例その 2。外側が正しく、**内側にも同名の引数がある** (深さ判定の逆方向)。 */
+    public function safeWithNestedArgument(): void
+    {
+        $this->pinned->fetch($this->makeRequest(followRedirects: true), $deadline, followRedirects: false);
+    }
+
+    public function missingArgument(): void
+    {
+        $this->pinned->fetch($request, $deadline);
+    }
+
+    public function explicitlyTrue(): void
+    {
+        $this->pinned->fetch($request, $deadline, followRedirects: true);
+    }
+
+    public function dynamicValue(): void
+    {
+        $this->pinned->fetch($request, $deadline, followRedirects: $configured);
+    }
+
+    public function negatedExpression(): void
+    {
+        $this->pinned->fetch($request, $deadline, followRedirects: ! true);
+    }
+
+    /** ★入れ子の引数を外側のものと取り違えると、これが緑になってしまう。 */
+    public function nestedOnly(): void
+    {
+        $this->pinned->fetch($this->makeRequest(followRedirects: false), $deadline);
+    }
+
+    /** ★attribute の `#[` を開きとして数えないと、`]` で深さがずれてこれが緑になってしまう。 */
+    public function attributeThenNestedOnly(): void
+    {
+        $this->pinned->fetch(
+            #[Probe]
+            fn () => $this->makeRequest(followRedirects: false),
+            $deadline,
+        );
+    }
+
+    /** ★`${` を開きとして数えないと、`}` で深さがずれてこれが緑になってしまう。 */
+    public function interpolationThenNestedOnly(): void
+    {
+        $this->pinned->fetch("${label}", $this->makeRequest(followRedirects: false), $deadline);
+    }
+
+    /** ★正例その 3。attribute があっても**外側**が false なら通す。 */
+    public function attributeWithOuterFalse(): void
+    {
+        $this->pinned->fetch(
+            #[Probe]
+            fn () => $this->makeRequest(followRedirects: true),
+            $deadline,
+            followRedirects: false,
+        );
+    }
+
+    /** ★正例その 4。文字列内挿 2 形があっても**外側**が false なら通す。 */
+    public function interpolationWithOuterFalse(): void
+    {
+        $this->pinned->fetch("{$label}${suffix}", $this->makeRequest(followRedirects: true), $deadline, followRedirects: false);
+    }
+}

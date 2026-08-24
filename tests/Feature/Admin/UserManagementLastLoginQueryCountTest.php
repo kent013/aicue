@@ -42,11 +42,11 @@ function addMembersWithLoginRow(Organization $organization, int $count): void
  *
  * @return list<string>
  */
-function measureUserManagementQueries(User $owner): array
+function measureUserManagementQueries(Organization $organization, User $owner): array
 {
     DB::enableQueryLog();
     DB::flushQueryLog();
-    test()->actingAs($owner)->get('/manage/users')->assertOk();
+    test()->actingAs($owner)->get("/organizations/{$organization->slug}/manage/users")->assertOk();
     $log = DB::getQueryLog();
     DB::disableQueryLog();
 
@@ -79,11 +79,11 @@ test('最終ログインの導出クエリはメンバー数に依らず 1 本 (
     expect($smallOrganization->invitations()->count())->toBe(0);
     expect($largeOrganization->invitations()->count())->toBe(0);
 
-    measureUserManagementQueries($smallOwner); // 暖機
-    measureUserManagementQueries($largeOwner); // 暖機
+    measureUserManagementQueries($smallOrganization, $smallOwner); // 暖機
+    measureUserManagementQueries($largeOrganization, $largeOwner); // 暖機
 
-    $small = securityAuditEventQueries(measureUserManagementQueries($smallOwner));
-    $large = securityAuditEventQueries(measureUserManagementQueries($largeOwner));
+    $small = securityAuditEventQueries(measureUserManagementQueries($smallOrganization, $smallOwner));
+    $large = securityAuditEventQueries(measureUserManagementQueries($largeOrganization, $largeOwner));
 
     expect($small)->toHaveCount(1);
     expect($large)->toHaveCount(

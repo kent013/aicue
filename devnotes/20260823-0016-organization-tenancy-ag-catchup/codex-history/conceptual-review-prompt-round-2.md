@@ -314,7 +314,7 @@ F          (機械経路の識別子の固定検査)
 | 設定 | `config/organization-slug-reserved.php` (新設。理由 3 分類必須) |
 | モデル | `Organization` (`is_personal` cast 撤去) / `User` (`currentOrganization` relation 撤去) / `OrganizationSlugRename` (新設) |
 | Service | `OrganizationProvisioningService` (冪等判定の置換 + 識別名生成の値オブジェクト化) / `OrganizationSlugRenameLimiter` (新設) / `OrganizationMembershipService` (保持列書き込みの撤去) / `CurrentOrganizationResolver` (**削除**) |
-| Routing | `routes/web.php` (業務面を組織配下へ移設) / `MembershipScopedOrganizationBinder` (据え置き) / `EnsureProjectBelongsToCurrentOrganization` → 組織 binding 由来へ改称・改修 |
+| Routing | `routes/web.php` (業務面を組織配下へ移設) / `MembershipScopedOrganizationBinder` (据え置き) / `EnsureProjectBelongsToRouteOrganization` → 組織 binding 由来へ改称・改修 |
 | Controller | `ResolvesCurrentOrganization` を使う 23 クラスの org 取得元を route binding へ / `OrganizationSwitchController` (**削除**) / 組織選択の分岐 route (新設) / 改名 controller (新設) |
 | Inertia / 前段 | `HandleInertiaRequests` の `currentOrganization` を binding 由来へ |
 | フロント | `shared-props.ts` (型) / `AppLayout.svelte` (組織切替 UI の撤去・href 生成) / `SidebarUserMenu.svelte` / `Capture/Account.svelte` / 組織選択画面 (新設) / 改名 UI |

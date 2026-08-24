@@ -613,7 +613,7 @@ test('TD1〜TD12: 逸脱の登録簿が統一形式を満たすこと', function
 102:## D1 Tier B スキーマの先取り (Cut / Take を振る舞い無しで先行作成)
 147:## D2 循環 FK の 3 段階マイグレーション (cuts の parent_cut_id / adopted_take_id を後付け)
 177:## D3 Category `sort_order` の Service 専有 (fillable 外・Store/Update で受けない)
-209:## D4 web `{project}` route の org スコープ guard を middleware 層に追加 (project.in-current-org)
+209:## D4 web `{project}` route の org スコープ guard を middleware 層に追加 (project.in-route-org)
 250:## D5 Cut のシナリオ編集は per-row CRUD でなく document 単位保存 (PUT .../scenario)
 289:## D6 presigned PUT の署名対象は ChecksumSHA256 のみ (Content-Type/Length は HeadObject 照合が担う)
 324:## D7 org 同時 preview 上限の「直列化実証テスト」は subprocess 方式を保留 (逐次境界テストで代替)

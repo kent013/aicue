@@ -14,8 +14,8 @@
 
   422 と 404 の差分が「その project が実在するか」の**存在オラクル**になっている
   (不変条件 3「cross-org 不可」/ 存在秘匿の違反)。
-  web 側は既に `project.in-current-org` route middleware
-  (`EnsureProjectBelongsToCurrentOrganization`) でこの順序ハザードを閉じており、
+  web 側は既に `project.in-route-org` route middleware
+  (`EnsureProjectBelongsToRouteOrganization`) でこの順序ハザードを閉じており、
   その docblock には「API v1 は org を API キーから確定する別レイヤーの責務のため対象外」
   と書かれている = **API 側には等価の防御が用意されないまま残っていた**。
 

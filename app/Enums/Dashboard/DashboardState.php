@@ -10,7 +10,6 @@ namespace App\Enums\Dashboard;
  */
 enum DashboardState: string
 {
-    case NoOrganization = 'no_organization';
     case NoProject = 'no_project';
     case Ready = 'ready';
 }

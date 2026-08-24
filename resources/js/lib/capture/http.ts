@@ -1,8 +1,10 @@
 import { csrfToken } from "@/lib/csrf";
+import { currentOrgUrl } from "@/lib/org-url";
 
 /**
  * 撮影 PWA の書き込み系 XHR 共通ラッパ (doc/10 §10.8-3)。
- * X-XSRF-TOKEN を常時付与し、419 (CSRF 失効) は cookie 再取得 (軽量 GET /app/csrf-cookie)
+ * X-XSRF-TOKEN を常時付与し、419 (CSRF 失効) は cookie 再取得
+ * (軽量 GET = 組織 URL 配下の capture.csrf-cookie)
  * → 1 回だけ再送する。再取得に失敗 (非 2xx / network error) した場合はリトライせず
  * 元の 419 を返す (呼び出し側 = upload-queue がキュー保留 + UI 通知)。
  */
@@ -23,7 +25,9 @@ export async function captureFetch(
     });
     if (response.status === 419 && !retried) {
         try {
-            const refresh = await fetch("/app/csrf-cookie", { credentials: "same-origin" });
+            const refresh = await fetch(currentOrgUrl("/app/csrf-cookie"), {
+                credentials: "same-origin",
+            });
             if (!refresh.ok) return response;
         } catch {
             return response;

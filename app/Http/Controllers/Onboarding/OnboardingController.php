@@ -10,7 +10,7 @@ use App\Enums\Billing\SignupFundingChoice;
 use App\Enums\Billing\SubscriptionState;
 use App\Enums\Inquiry\InquirySource;
 use App\Enums\PlanCode;
-use App\Http\Concerns\ResolvesCurrentOrganization;
+use App\Http\Concerns\ResolvesRouteOrganization;
 use App\Http\Controllers\Controller;
 use App\Models\Billing\Plan;
 use App\Models\Billing\Subscription;
@@ -38,7 +38,7 @@ use Webmozart\Assert\Assert;
  */
 final class OnboardingController extends Controller
 {
-    use ResolvesCurrentOrganization;
+    use ResolvesRouteOrganization;
 
     public function __construct(
         private readonly BillingAccess $access,
@@ -49,9 +49,8 @@ final class OnboardingController extends Controller
         private readonly AutoRechargeService $autoRecharge,
     ) {}
 
-    public function show(Request $request): Response|RedirectResponse
+    public function show(Request $request, Organization $organization): Response|RedirectResponse
     {
-        $organization = $this->resolveMemberCurrentOrganization($request);
         // IDOR 二重防御 (member 認可を最優先)
         Gate::authorize('view', $organization);
 
@@ -67,14 +66,14 @@ final class OnboardingController extends Controller
         if ($this->access->hasActiveAccess($organization)) {
             return new RedirectResponse(
                 Gate::allows('manageBilling', $organization)
-                    ? route('billing.index')
-                    : route('dashboard'),
+                    ? route('billing.index', ['organization' => $organization->slug])
+                    : route('dashboard', ['organization' => $organization->slug]),
             );
         }
 
         // 未契約 + manageBilling 権限なし → billing-required へ
         if (! Gate::allows('manageBilling', $organization)) {
-            return new RedirectResponse(route('onboarding.billing-required'));
+            return new RedirectResponse(route('onboarding.billing-required', ['organization' => $organization->slug]));
         }
 
         // 支払いが未解決のまま契約が残っている組織は、プラン選択ではなく
@@ -83,7 +82,7 @@ final class OnboardingController extends Controller
         $subscription = $organization->subscription('default');
         if ($subscription instanceof Subscription
             && SubscriptionState::fromSubscription($subscription)->hasUnsettledPayment()) {
-            return new RedirectResponse(route('billing.index'));
+            return new RedirectResponse(route('billing.index', ['organization' => $organization->slug]));
         }
 
         // ?plan= が来ていたら org-scoped に積み (Resolver 規約: 有効→put / 無効→forget)、
@@ -92,7 +91,7 @@ final class OnboardingController extends Controller
         if ($request->has('plan')) {
             $this->intendedPlanResolver->rememberForOrganizationFromQuery($request, $organization);
 
-            return new RedirectResponse(route('onboarding.checkout'), 303);
+            return new RedirectResponse(route('onboarding.checkout', ['organization' => $organization->slug]), 303);
         }
 
         $dto = new OnboardingCheckoutDto(

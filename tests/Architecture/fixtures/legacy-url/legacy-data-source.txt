@@ -1,0 +1,5 @@
+{
+  "start_url": "/dashboard",
+  "scope": "/organizations/acme/app",
+  "note": "撤去した route 名 organizations.switch を 2 回 organizations.switch"
+}

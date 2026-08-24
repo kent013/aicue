@@ -170,7 +170,7 @@ route は**増やさない**。DTO は既存 `RenderJobData` をそのまま使�
 
 - **テナント境界・認可を緩めない** (AGENTS.md セキュリティ不変条件 2/3/9)。
   層 2 の 404 は**三段すべて authorize より前**のまま (Round 1 [Critical] 8):
-  ① `{project}` ∈ current organization = `project.in-current-org` middleware +
+  ① `{project}` ∈ current organization = `project.in-route-org` middleware +
   `resolveOrganizationProject()` の inline guard、② `{manual}` ∈ `{project}` =
   `routes/web.php` の `Route::scopeBindings()` (`$project->manuals()` 経由)、
   ③ `{renderJob}` ∈ `{manual}` = scopeBindings + controller の

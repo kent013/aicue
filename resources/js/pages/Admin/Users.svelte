@@ -21,6 +21,7 @@
     import { withRecentAuth, type RecentAuthStatus } from "@/lib/recent-auth";
     import type { SharedProps } from "@/lib/shared-props";
     import type { ConsoleRole, InvitationRow, MemberRow } from "@/types/admin";
+    import { currentOrgUrl } from "@/lib/org-url";
 
     /**
      * 管理メニュー > ユーザー管理 (doc/04 §4.2。モック PC_管理メニュー 02〜09)。
@@ -283,7 +284,7 @@
                         </p>
                         <!-- 詰まりの文脈から 1 ホップで作成画面へ (既存 CTA 流儀 = Button href+inertia) -->
                         <Button
-                            href="/projects/create"
+                            href={currentOrgUrl("/projects/create")}
                             inertia
                             variant="ghost"
                             size="sm"
@@ -311,8 +312,10 @@
                                             </Badge>
                                         {/if}
                                     </div>
+                                    <!-- 企業 SSO でしか入れない利用者は使えるメールを持たない (T253 / A3)。
+                                         空文字へ畳まず「メールなし」と明示する -->
                                     <p class="truncate text-caption text-text-secondary">
-                                        {member.email}
+                                        {member.email ?? "メールなし"}
                                     </p>
                                     <!-- 最終ログイン。値の無い行は「記録なし」(「未ログイン」と断定しない —
                                          導出元の security_audit_events は保持期間が未確定で、将来 purge されうるため)。

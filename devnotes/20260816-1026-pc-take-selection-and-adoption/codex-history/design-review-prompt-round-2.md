@@ -332,7 +332,7 @@ use Inertia\Response;
  * テイク選択・採用画面 (doc/04)。編集者がカットごとのテイクを見て採用を確定する面。
  *
  * nested route の URL 整合は 2 層 (認可より前に 404):
- * 1. {project} ∈ current org (project.in-current-org middleware + resolveOrganizationProject)
+ * 1. {project} ∈ current org (project.in-route-org middleware + resolveOrganizationProject)
  * 2. {manual} ∈ {project}, {cut} ∈ {manual} (Route::scopeBindings())
  *
  * 本 controller は**読み取りのみ**である。採用・削除・アップロード・再生は

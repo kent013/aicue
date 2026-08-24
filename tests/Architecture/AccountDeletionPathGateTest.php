@@ -113,7 +113,6 @@ const DELETION_PATH_CLOSURE = [
     //   決済事業者 SDK への到達辺は持たない (検査 2 が機械的に固定する)。
     'App\DataTransferObjects\Account\AccountDeletionAuditContext',
     'App\DataTransferObjects\Account\AccountDeletionStateDto',
-    'App\DataTransferObjects\Notification\AccountDeletionRequestedPayload',
     'App\DataTransferObjects\Invitations\PendingInvitationForUserDto',
     'App\DataTransferObjects\Notification\InvitationReceivedPayload',
     'App\DataTransferObjects\Notification\ManualJobPayload',
@@ -127,6 +126,27 @@ const DELETION_PATH_CLOSURE = [
     'App\DataTransferObjects\Security\OrgAccessRevocationResult',
     'App\Enums\Security\OrgAccessRevocationReason',
     'App\Enums\AccountDeletionBlockReason',
+    // ↓ T253 (企業 IdP との OIDC SSO) で閉包に入った 14 クラス。閉包はクラス粒度なので、
+    //   退会そのものが企業 SSO を触らなくても、**組織と利用者の relation を辿った時点で入る**
+    //   (Organization::oidcConnections() / User::emailPromotions() / 接続の状態遷移サービス)。
+    //   いずれも接続の登録・状態・身元と ID トークンの検証結果を扱うだけで、
+    //   決済事業者 SDK への到達辺を持たない (検査 2 が機械的に固定する)。
+    //   退会時に消えるのは組織の接続とその身元で、cascade は FK が担う。
+    'App\Casts\EncryptedSecretCast',
+    'App\DataTransferObjects\EnterpriseSso\ConnectionCredentialsSnapshot',
+    'App\DataTransferObjects\EnterpriseSso\VerifiedIdTokenClaims',
+    'App\DataTransferObjects\EnterpriseSso\VerifyOutcome',
+    'App\Enums\EnterpriseSso\ConnectionTransitionRejection',
+    'App\Enums\EnterpriseSso\OidcConnectionStatus',
+    'App\Enums\EnterpriseSso\RejectionReason',
+    'App\Exceptions\EnterpriseSso\EnterpriseSsoAttemptRejectedException',
+    'App\Exceptions\EnterpriseSso\OidcConnectionTransitionException',
+    'App\Models\EnterpriseIdentity',
+    'App\Models\OrganizationOidcConnection',
+    'App\Services\EnterpriseSso\EnterpriseUserProvisioner',
+    'App\Services\EnterpriseSso\OidcConnectionTransitionService',
+    'App\ValueObjects\EnterpriseSso\ConnectionSecret',
+    'App\ValueObjects\EnterpriseSso\OidcIssuerUrl',
     'App\Enums\AccountDeletionBlockerAction',
     'App\Enums\AdminConsoleRole',
     'App\Enums\Billing\PlanPriceKind',
@@ -165,7 +185,6 @@ const DELETION_PATH_CLOSURE = [
     'App\Models\User',
     'App\Models\VideoManual',
     'App\Notifications\Account\AccountDeletionRequestedNotification',
-    'App\Notifications\InApp\AccountDeletionRequestedNotification',
     'App\Notifications\InApp\InvitationReceivedNotification',
     'App\Notifications\InApp\ManualAnalyzedNotification',
     'App\Notifications\InApp\ManualRenderedNotification',

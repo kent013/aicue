@@ -20,27 +20,27 @@ test('{item} が同一組織内の別プロジェクト所属なら 404', functi
     $itemB = Item::factory()->forProject($projectB)->create(['name' => '元の名前']);
 
     // projectA の URL から projectB の item は操作できない
-    $this->actingAs($owner)->patch("/projects/{$projectA->id}/items/{$itemB->id}", [
+    $this->actingAs($owner)->patch("/organizations/{$organization->slug}/projects/{$projectA->id}/items/{$itemB->id}", [
         'name' => '乗っ取り',
     ])->assertNotFound();
-    $this->actingAs($owner)->delete("/projects/{$projectA->id}/items/{$itemB->id}")
+    $this->actingAs($owner)->delete("/organizations/{$organization->slug}/projects/{$projectA->id}/items/{$itemB->id}")
         ->assertNotFound();
 
     expect($itemB->fresh()->name)->toBe('元の名前');
 });
 
 test('他組織のプロジェクト配下への item 操作は 404 (project guard が先に効く)', function (): void {
-    [, $ownerA] = createOrganizationWithOwner('組織A');
+    [$organization, $ownerA] = createOrganizationWithOwner('組織A');
     [$orgB] = createOrganizationWithOwner('組織B');
     $projectB = Project::factory()->forOrganization($orgB)->create();
     $itemB = Item::factory()->forProject($projectB)->create(['name' => '元の名前']);
 
-    $this->actingAs($ownerA)->post("/projects/{$projectB->id}/items", ['name' => '追加'])
+    $this->actingAs($ownerA)->post("/organizations/{$organization->slug}/projects/{$projectB->id}/items", ['name' => '追加'])
         ->assertNotFound();
-    $this->actingAs($ownerA)->patch("/projects/{$projectB->id}/items/{$itemB->id}", [
+    $this->actingAs($ownerA)->patch("/organizations/{$organization->slug}/projects/{$projectB->id}/items/{$itemB->id}", [
         'name' => '乗っ取り',
     ])->assertNotFound();
-    $this->actingAs($ownerA)->delete("/projects/{$projectB->id}/items/{$itemB->id}")
+    $this->actingAs($ownerA)->delete("/organizations/{$organization->slug}/projects/{$projectB->id}/items/{$itemB->id}")
         ->assertNotFound();
 
     expect($itemB->fresh()->name)->toBe('元の名前');
@@ -50,13 +50,12 @@ test('他組織のプロジェクト配下への item 操作は 404 (project gua
 test('権限のないメンバーでも整合しない {item} は 403 ではなく 404', function (): void {
     [$organization] = createOrganizationWithOwner();
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
     $projectA = Project::factory()->forOrganization($organization)->create();
     $projectB = Project::factory()->forOrganization($organization)->create();
     $itemB = Item::factory()->forProject($projectB)->create();
 
     // member は update 権限を持たないが、parent 不整合が先に 404 になる
-    $this->actingAs($member)->patch("/projects/{$projectA->id}/items/{$itemB->id}", [
+    $this->actingAs($member)->patch("/organizations/{$organization->slug}/projects/{$projectA->id}/items/{$itemB->id}", [
         'name' => '乗っ取り',
     ])->assertNotFound();
 });
@@ -65,5 +64,5 @@ test('存在しない item ID は 404', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $project = Project::factory()->forOrganization($organization)->create();
 
-    $this->actingAs($owner)->delete("/projects/{$project->id}/items/999999")->assertNotFound();
+    $this->actingAs($owner)->delete("/organizations/{$organization->slug}/projects/{$project->id}/items/999999")->assertNotFound();
 });

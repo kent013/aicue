@@ -90,14 +90,14 @@ test('fake 有効: register intent の round-trip で User と SocialAccount と
             ->assertRedirect(route('social.callback', ['provider' => 'google']));
 
         $this->get(route('social.callback', ['provider' => 'google']))
-            ->assertRedirect(route('dashboard'));
+            ->assertRedirect(route('app.entry'));
 
         $this->assertAuthenticated();
 
         $user = User::whereBlind('email', 'email_index', 'fake-google-sso@example.com')->firstOrFail();
         expect($user->socialAccounts()->where('provider', 'google')
             ->where('provider_user_id', 'fake-google-user')->exists())->toBeTrue()
-            ->and($user->organizations()->where('is_personal', true)->count())->toBe(1);
+            ->and($user->organizations()->count())->toBe(1);
     });
 
 test('fake 有効: login intent の round-trip で連携済みユーザーとしてログインする',
@@ -114,7 +114,7 @@ test('fake 有効: login intent の round-trip で連携済みユーザーとし
             ->assertRedirect(route('social.callback', ['provider' => 'google']));
 
         $this->get(route('social.callback', ['provider' => 'google']))
-            ->assertRedirect(route('dashboard'));
+            ->assertRedirect(route('app.entry'));
 
         $this->assertAuthenticatedAs($user);
     });

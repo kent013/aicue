@@ -50,32 +50,32 @@ function seedNotificationAndInternalFlash(): void
     registerFlashRelaySeedRoute(function () {
         session()->flash('new_api_key', 'sk_live_平文キー');
 
-        return redirect('/projects')->with('success', '中継テストの通知');
+        return redirect('/')->with('success', '中継テストの通知');
     });
 }
 
 // ── 課金ゲートの跳ね返り (RequireActiveSubscription) ──
 
 test('課金ゲートの跳ね返りは通知だけを 1 hop 延命し、内部状態の flash は持ち越さない', function (): void {
-    [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
     seedNotificationAndInternalFlash();
 
     // 1. 実際の要求境界を跨いで一時メッセージを作る
-    $this->actingAs($owner)->get('/__flash-relay/seed')->assertRedirect('/projects');
+    $this->actingAs($owner)->get('/__flash-relay/seed')->assertRedirect('/');
 
     // 2-3. 跳ね返りを起こし、**その応答直後の session** を見る
-    $this->actingAs($owner)->get('/projects')
-        ->assertRedirect(route('onboarding.checkout'))
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects")
+        ->assertRedirect(route('onboarding.checkout', ['organization' => $organization->slug]))
         ->assertSessionHas('success', '中継テストの通知')
         ->assertSessionMissing('new_api_key');
 
     // 4. 着地の GET で共有 prop に載る
-    $this->actingAs($owner)->get(route('onboarding.checkout'))
+    $this->actingAs($owner)->get(route('onboarding.checkout', ['organization' => $organization->slug]))
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page->where('flash.success', '中継テストの通知'));
 
     // 5. 着地の後は失効している (延命は 1 hop だけ)。ここで再び中継を通る route は使わない
-    $this->actingAs($owner)->get(route('onboarding.checkout'))
+    $this->actingAs($owner)->get(route('onboarding.checkout', ['organization' => $organization->slug]))
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page->where('flash.success', null));
 });
@@ -83,14 +83,15 @@ test('課金ゲートの跳ね返りは通知だけを 1 hop 延命し、内部�
 // ── 退会予約中の凍結の跳ね返り (EnsureAccountNotPendingDeletion) ──
 
 test('凍結の跳ね返りは通知だけを 1 hop 延命し、内部状態の flash は持ち越さない', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
     app(OrganizationMembershipService::class)->requestAccountDeletion($owner);
     $owner->refresh();
     seedNotificationAndInternalFlash();
 
-    $this->actingAs($owner)->get('/__flash-relay/seed')->assertRedirect('/projects');
+    $this->actingAs($owner)->get('/__flash-relay/seed')->assertRedirect('/');
 
-    $this->actingAs($owner)->get('/dashboard')
+    // 凍結 middleware は組織配下の業務 route で跳ね返す (家系裁定 AG-037)
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/dashboard")
         ->assertRedirect(route('settings'))
         ->assertSessionHas('success', '中継テストの通知')
         ->assertSessionMissing('new_api_key');
@@ -142,24 +143,24 @@ test('中継は通知キー以外を延命しない (負のコントロール)',
 // ── error は中継しない (RELAYABLE_ERROR_KEYS が空 = fail-closed) ──
 
 test('検証エラー (default bag) は跳ね返りで中継されない', function (): void {
-    [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
-    registerFlashRelaySeedRoute(fn () => redirect('/projects')->withErrors(['project_name' => '名前を入力してください']));
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    registerFlashRelaySeedRoute(fn () => redirect('/')->withErrors(['project_name' => '名前を入力してください']));
 
-    $this->actingAs($owner)->get('/__flash-relay/seed')->assertRedirect('/projects');
+    $this->actingAs($owner)->get('/__flash-relay/seed')->assertRedirect('/');
 
-    $this->actingAs($owner)->get('/projects')
-        ->assertRedirect(route('onboarding.checkout'))
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects")
+        ->assertRedirect(route('onboarding.checkout', ['organization' => $organization->slug]))
         ->assertSessionMissing('errors');
 });
 
 test('名前付き error bag も跳ね返りで中継されない', function (): void {
-    [, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
-    registerFlashRelaySeedRoute(fn () => redirect('/projects')->withErrors(['project_name' => '名前を入力してください'], 'projectForm'));
+    [$organization, $owner] = createOrganizationWithOwner(grandfatherFreePlan: false);
+    registerFlashRelaySeedRoute(fn () => redirect('/')->withErrors(['project_name' => '名前を入力してください'], 'projectForm'));
 
-    $this->actingAs($owner)->get('/__flash-relay/seed')->assertRedirect('/projects');
+    $this->actingAs($owner)->get('/__flash-relay/seed')->assertRedirect('/');
 
-    $this->actingAs($owner)->get('/projects')
-        ->assertRedirect(route('onboarding.checkout'))
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects")
+        ->assertRedirect(route('onboarding.checkout', ['organization' => $organization->slug]))
         ->assertSessionMissing('errors');
 });
 

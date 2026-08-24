@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Enums\Manual\VideoManualStatus;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Models\Cut;
+use App\Models\Organization;
 use App\Models\Project;
 use App\Models\Take;
 use App\Models\VideoManual;
@@ -58,17 +59,17 @@ function captureBoundaryFixture(): array
 
     test()->actingAs($owner);
 
-    return [$project, $manual];
+    return [$organization, $project, $manual];
 }
 
-function captureBoundaryUrl(Project $project, VideoManual $manual): string
+function captureBoundaryUrl(Organization $organization, Project $project, VideoManual $manual): string
 {
-    return "/app/projects/{$project->id}/manuals/{$manual->id}";
+    return "/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}";
 }
 
 test('クリーンな単一セッションで撮影画面は /app 配下に留まり自動 /app 離脱が起きない (F-1-02 Phase A)', function (): void {
-    [$project, $manual] = captureBoundaryFixture();
-    $url = captureBoundaryUrl($project, $manual);
+    [$organization, $project, $manual] = captureBoundaryFixture();
+    $url = captureBoundaryUrl($organization, $project, $manual);
     $firstCutId = $manual->cuts()->orderBy('sort_order')->value('id');
 
     $page = visit($url)->on()->desktop()->assertPathIs($url);
@@ -95,8 +96,9 @@ test('クリーンな単一セッションで撮影画面は /app 配下に留�
 
     // (1) document は /app 配下に留まる (自動 /app 離脱が起きていない)
     $page->assertPathIs($url);
-    expect($page->script("window.location.origin === {$phpJson} && window.location.pathname.startsWith('/app/')"))
-        ->toBeTrue('document が期待 origin の /app 配下から外れた');
+    $capturePrefix = json_encode("/organizations/{$organization->slug}/app/");
+    expect($page->script("window.location.origin === {$phpJson} && window.location.pathname.startsWith({$capturePrefix})"))
+        ->toBeTrue('document が期待 origin の撮影 URL 配下から外れた');
 
     // navigation entry (document 遷移) は当初の /app ドキュメントのみで、/app 外の
     // document 遷移が観測されない (期待 origin 固定で判定)。
@@ -109,7 +111,7 @@ test('クリーンな単一セッションで撮影画面は /app 配下に留�
                     try {
                         const u = new URL(name, window.location.href);
                         if (u.origin !== origin) return true;
-                        return !(u.pathname === "/app" || u.pathname.startsWith("/app/"));
+                        return !(u.pathname === "/organizations/{$organization->slug}/app" || u.pathname.startsWith("/organizations/{$organization->slug}/app/"));
                     } catch { return true; }
                 });
         })()
@@ -128,7 +130,7 @@ test('クリーンな単一セッションで撮影画面は /app 配下に留�
                     try {
                         const u = new URL(name, window.location.href);
                         if (u.origin !== origin) return true;
-                        return !(u.pathname === "/app" || u.pathname.startsWith("/app/"));
+                        return !(u.pathname === "/organizations/{$organization->slug}/app" || u.pathname.startsWith("/organizations/{$organization->slug}/app/"));
                     } catch { return true; }
                 });
         })()
@@ -152,7 +154,7 @@ test('クリーンな単一セッションで撮影画面は /app 配下に留�
                 if (typeof raw !== "string" || raw === "") return false;
                 try {
                     const u = new URL(raw, window.location.href);
-                    return u.origin === origin && (u.pathname === "/app" || u.pathname.startsWith("/app/"));
+                    return u.origin === origin && (u.pathname === "/organizations/{$organization->slug}/app" || u.pathname.startsWith("/organizations/{$organization->slug}/app/"));
                 } catch { return false; }
             };
             const partialHeaders = (ver) => ({
@@ -225,15 +227,15 @@ test('クリーンな単一セッションで撮影画面は /app 配下に留�
 });
 
 test('唯一の /app 外遷移は利用者クリックの明示リンク (PC 詳細 = T155) であり自動遷移しない', function (): void {
-    [$project, $manual] = captureBoundaryFixture();
-    $url = captureBoundaryUrl($project, $manual);
+    [$organization, $project, $manual] = captureBoundaryFixture();
+    $url = captureBoundaryUrl($organization, $project, $manual);
 
     $page = visit($url)->on()->desktop()->assertPathIs($url);
     usleep(500_000);
 
     // PC 詳細への明示リンクは anchor の href として存在する (= /app 外だが利用者主導)
     $href = $page->attribute('[data-testid="manual-detail-link"]', 'href');
-    expect($href)->toContain("/projects/{$project->id}/manuals/{$manual->id}");
+    expect($href)->toContain("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}");
 
     // ただし待機しても自動では遷移せず /app に留まる (リンクは押されて初めて遷移する)
     $page->assertPathIs($url);

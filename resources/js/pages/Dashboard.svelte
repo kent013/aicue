@@ -2,7 +2,6 @@
     import { page } from "@inertiajs/svelte";
     import {
         Bell,
-        Building,
         Camera,
         FolderPlus,
         HardDrive,
@@ -24,10 +23,11 @@
     import type { SharedProps } from "@/lib/shared-props";
     import { BILLING_CALLOUTS, type DashboardProps } from "@/types/dashboard";
     import { STATUS_TONES, VIDEO_MANUAL_STATUS_LABELS } from "@/types/manual";
+    import { currentOrgUrl } from "@/lib/org-url";
 
     /**
      * ダッシュボード (ログイン直後の着地点)。PHP: DashboardController / DashboardPageData と対。
-     * state (no_organization / no_project / ready) とロール (editor / shooter / viewer) で
+     * state (no_project / ready) とロール (editor / shooter / viewer) で
      * 表示を分岐する。権限がない導線は非描画 (disabled ボタンは一切作らない)。
      */
     let { dashboard }: DashboardProps = $props();
@@ -72,7 +72,7 @@
                         {#if project}
                             <Button
                                 size="sm"
-                                href={`/app/projects/${project.id}/manuals/${target.manual_id}`}
+                                href={currentOrgUrl(`/app/projects/${project.id}/manuals/${target.manual_id}`)}
                                 inertia
                                 testId="shoot-button"
                             >
@@ -96,7 +96,7 @@
                     cta={{
                         kind: "link",
                         label: "最初のマニュアルを作成",
-                        href: `/projects/${project.id}/manuals/create`,
+                        href: currentOrgUrl(`/projects/${project.id}/manuals/create`),
                     }}
                     testId="recent-empty"
                 />
@@ -114,7 +114,7 @@
                     >
                         <div class="min-w-0">
                             {#if project}
-                                <TextLink href={`/projects/${project.id}/manuals/${manual.id}`}>
+                                <TextLink href={currentOrgUrl(`/projects/${project.id}/manuals/${manual.id}`)}>
                                     {manual.title}
                                 </TextLink>
                             {:else}
@@ -130,7 +130,7 @@
                             </Badge>
                             {#if isEditor && project}
                                 <TextLink
-                                    href={`/projects/${project.id}/manuals/${manual.id}/edit`}
+                                    href={currentOrgUrl(`/projects/${project.id}/manuals/${manual.id}/edit`)}
                                     testId="recent-edit-link"
                                 >
                                     編集
@@ -154,17 +154,6 @@
             testId="dashboard-heading"
         />
         <PageContent>
-            {#if dashboard.state === "no_organization"}
-                <Card padding="none" class="mt-6">
-                    <EmptyState
-                        title="まずは組織を作成しましょう"
-                        description="組織を作成すると、プロジェクトとマニュアルの管理を始められます。"
-                        icon={Building}
-                        cta={{ kind: "link", label: "組織を作成", href: "/organizations/create" }}
-                        testId="dashboard-setup-org"
-                    />
-                </Card>
-            {:else}
                 <!-- スタットタイル (org があれば billing は非 null) -->
                 {#if billing}
                     <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -178,7 +167,7 @@
                             />
                             {#if billing.is_low_balance}
                                 <p class="mt-2 text-caption">
-                                    <TextLink href="/purchase-tickets" testId="purchase-link">
+                                    <TextLink href={currentOrgUrl("/billing/purchase-tickets")} testId="purchase-link">
                                         チケットを購入
                                     </TextLink>
                                 </p>
@@ -198,7 +187,7 @@
                         <div>
                             <StatCard label="未読通知" value={unreadCount} icon={Bell} testId="stat-unread" />
                             <p class="mt-2 text-caption">
-                                <TextLink href="/notifications">通知を確認</TextLink>
+                                <TextLink href={currentOrgUrl("/notifications")}>通知を確認</TextLink>
                             </p>
                         </div>
                         <StatCard
@@ -215,7 +204,7 @@
                                 {billingCallout.body}
                             </p>
                             <div class="mt-4">
-                                <Button href={billingCallout.cta.href} inertia>
+                                <Button href={currentOrgUrl(billingCallout.cta.path)} inertia>
                                     {billingCallout.cta.label}
                                 </Button>
                             </div>
@@ -230,7 +219,7 @@
                                 title="プロジェクトを作成しましょう"
                                 description="プロジェクトを作成すると、マニュアルの管理を始められます。"
                                 icon={FolderPlus}
-                                cta={{ kind: "link", label: "プロジェクトを作成", href: "/projects/create" }}
+                                cta={{ kind: "link", label: "プロジェクトを作成", href: currentOrgUrl("/projects/create") }}
                                 testId="dashboard-setup-project"
                             />
                         {:else}
@@ -282,7 +271,7 @@
                                             </span>
                                             {#if project}
                                                 <TextLink
-                                                    href={`/projects/${project.id}/manuals/${row.manual_id}`}
+                                                    href={currentOrgUrl(`/projects/${project.id}/manuals/${row.manual_id}`)}
                                                     testId="inprogress-detail-link"
                                                 >
                                                     詳細で最新の進捗を確認
@@ -310,7 +299,7 @@
                             <div class="mt-3 flex flex-wrap gap-3">
                                 {#if isEditor}
                                     <Button
-                                        href={`/projects/${project.id}/manuals/create`}
+                                        href={currentOrgUrl(`/projects/${project.id}/manuals/create`)}
                                         inertia
                                         testId="qa-create-manual"
                                     >
@@ -318,14 +307,14 @@
                                     </Button>
                                     <Button
                                         variant="neutral"
-                                        href={`/projects/${project.id}/categories`}
+                                        href={currentOrgUrl(`/projects/${project.id}/categories`)}
                                         inertia
                                         testId="qa-categories"
                                     >
                                         カテゴリ管理
                                     </Button>
                                 {/if}
-                                <Button variant="neutral" href="/app" inertia testId="qa-capture">
+                                <Button variant="neutral" href={currentOrgUrl("/app")} inertia testId="qa-capture">
                                     <Camera class="size-4" aria-hidden="true" />
                                     撮影アプリを開く
                                 </Button>
@@ -333,7 +322,6 @@
                         </Card>
                     {/if}
                 {/if}
-            {/if}
         </PageContent>
     </PageContainer>
 </AppLayout>

@@ -21,6 +21,7 @@
     import { createPointerDrag, type PointerDragState } from "@/lib/dnd/pointer-drag";
     import { takeUrl as buildTakeUrl } from "@/lib/capture/take-endpoints";
     import type { CaptureCut, CaptureTake } from "@/types/capture";
+    import { currentOrganizationSlug } from "@/lib/org-url";
 
     /**
      * カット配下のテイク一覧 (先頭 = 採用候補。doc/05)。
@@ -98,7 +99,11 @@
 
     // URL 規則は lib/capture/take-endpoints に 1 箇所化してある (PC 編集面と共用の API 面)
     function takeUrl(take: CaptureTake, suffix = ""): string {
-        return buildTakeUrl({ projectId, manualId, cutId: cut.id }, take.id, suffix);
+        return buildTakeUrl(
+            { organizationSlug: currentOrganizationSlug(), projectId, manualId, cutId: cut.id },
+            take.id,
+            suffix,
+        );
     }
 
     /**

@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\DB;
 test('PATCH 後、organizations の生値は両列とも平文と一致しない (model 経由では復号される)', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->patch('/billing/contact', [
+    $this->actingAs($owner)->patch("/organizations/{$organization->slug}/billing/contact", [
         'billing_contact_email' => 'billing@example.test',
         'billing_contact_name' => '経理部 御中',
     ])->assertRedirect();
@@ -33,7 +33,7 @@ test('PATCH 後、organizations の生値は両列とも平文と一致しない
 test('平文 where は hit せず whereBlind が該当 org を引く', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->patch('/billing/contact', [
+    $this->actingAs($owner)->patch("/organizations/{$organization->slug}/billing/contact", [
         'billing_contact_email' => 'billing@example.test',
     ])->assertRedirect();
 
@@ -48,9 +48,9 @@ test('平文 where は hit せず whereBlind が該当 org を引く', function 
 });
 
 test('billing_contact_name の blind index 行は作られない (検索契約が存在しない)', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->patch('/billing/contact', [
+    $this->actingAs($owner)->patch("/organizations/{$organization->slug}/billing/contact", [
         'billing_contact_email' => 'billing@example.test',
         'billing_contact_name' => '経理部 御中',
     ])->assertRedirect();
@@ -63,7 +63,7 @@ test('billing_contact_name の blind index 行は作られない (検索契約�
 test('大文字混じり入力は正規化後の小文字で whereBlind が hit する', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->patch('/billing/contact', [
+    $this->actingAs($owner)->patch("/organizations/{$organization->slug}/billing/contact", [
         'billing_contact_email' => '  Billing@Example.TEST  ',
     ])->assertRedirect();
 

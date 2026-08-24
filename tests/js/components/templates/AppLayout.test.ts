@@ -52,7 +52,7 @@ function org(overrides: Partial<CurrentOrganization> = {}): CurrentOrganization 
 
 function setPageProps(props: Record<string, unknown>): void {
     page.props = props as typeof page.props;
-    page.url = "/dashboard";
+    page.url = "/organizations/test-org/dashboard";
 }
 
 function renderApp(): void {
@@ -172,12 +172,13 @@ describe("templates/AppLayout", () => {
         renderApp();
 
         const d = desktop();
-        expect(d.getByTestId("nav-item-/dashboard")).toBeInTheDocument();
+        // 組織文脈が無ければ業務 nav は 1 項目も出さない (家系裁定 AG-037: 壊れた URL を作らない)
+        expect(d.queryByTestId("nav-item-/organizations/acme/dashboard")).toBeNull();
         // 設定は左 nav から撤去 (下部ユーザーメニューに一本化, T070) のため nav 項目としては出ない
         expect(d.queryByTestId("nav-item-/settings")).toBeNull();
-        expect(d.queryByTestId("nav-item-/projects")).toBeNull();
-        expect(d.queryByTestId("nav-item-/billing")).toBeNull();
-        expect(d.queryByTestId("nav-item-/manage/users")).toBeNull();
+        expect(d.queryByTestId("nav-item-/organizations/acme/projects")).toBeNull();
+        expect(d.queryByTestId("nav-item-/organizations/acme/billing")).toBeNull();
+        expect(d.queryByTestId("nav-item-/organizations/acme/manage/users")).toBeNull();
         expect(d.queryByTestId("nav-item-/organizations/acme/api-keys")).toBeNull();
     });
 
@@ -190,13 +191,13 @@ describe("templates/AppLayout", () => {
         renderApp();
 
         const d = desktop();
-        expect(d.getByTestId("nav-item-/projects")).toBeInTheDocument();
-        expect(d.getByTestId("nav-item-/billing")).toBeInTheDocument();
-        expect(d.queryByTestId("nav-item-/manage/users")).toBeNull();
+        expect(d.getByTestId("nav-item-/organizations/acme/projects")).toBeInTheDocument();
+        expect(d.getByTestId("nav-item-/organizations/acme/billing")).toBeInTheDocument();
+        expect(d.queryByTestId("nav-item-/organizations/acme/manage/users")).toBeNull();
         expect(d.queryByTestId("nav-item-/organizations/acme/api-keys")).toBeNull();
     });
 
-    it("canManageMembers=true: メンバー導線 (/manage/users) を出す", () => {
+    it("canManageMembers=true: メンバー導線 (/organizations/{slug}/manage/users) を出す", () => {
         setPageProps({
             auth: { user: authUser() },
             notifications: { unreadCount: 0 },
@@ -204,7 +205,7 @@ describe("templates/AppLayout", () => {
         });
         renderApp();
 
-        expect(desktop().getByTestId("nav-item-/manage/users")).toBeInTheDocument();
+        expect(desktop().getByTestId("nav-item-/organizations/acme/manage/users")).toBeInTheDocument();
     });
 
     it("canManageApiKeys=true: API キー導線 (/organizations/{slug}/api-keys) を出す", () => {
@@ -232,7 +233,7 @@ describe("templates/AppLayout", () => {
         expect(desktop().queryByTestId("nav-item-/settings")).toBeNull();
         expect(mobile().queryByTestId("nav-item-/settings")).toBeNull();
         // ダッシュボード等の他 nav は出る (回帰の確認)
-        expect(desktop().getByTestId("nav-item-/dashboard")).toBeInTheDocument();
+        expect(desktop().getByTestId("nav-item-/organizations/acme/dashboard")).toBeInTheDocument();
     });
 
     it("個人設定 (/settings) は下部ユーザーメニュー内に一本化して存在する", async () => {
@@ -252,23 +253,23 @@ describe("templates/AppLayout", () => {
 
     // --- 組織切替 / drawer / Escape ---
 
-    it("組織切替: org-switch-{id} 押下で正しい id の POST /organizations/{id}/switch が 1 回", async () => {
+    it("別組織はリンク (切替 POST ではない。組織文脈は URL だけで決まる)", async () => {
         setPageProps({
             auth: { user: authUser() },
             notifications: { unreadCount: 0 },
             currentOrganization: org({ id: 1 }),
             organizations: [
-                { id: 1, name: "アクメ社", isPersonal: false },
-                { id: 2, name: "別組織", isPersonal: false },
+                { id: 1, name: "アクメ社", slug: "acme" },
+                { id: 2, name: "別組織", slug: "another" },
             ],
         });
         renderApp();
 
         await fireEvent.click(desktop().getByTestId("app-user-menu-toggle"));
-        await fireEvent.click(desktop().getByTestId("org-switch-2"));
+        const link = desktop().getByTestId("org-switch-2");
 
-        expect(routerMock.post).toHaveBeenCalledTimes(1);
-        expect(routerMock.post.mock.calls[0][0]).toBe("/organizations/2/switch");
+        expect(link.getAttribute("href")).toBe("/organizations/another/dashboard");
+        expect(routerMock.post).not.toHaveBeenCalled();
     });
 
     it("mobile drawer: メニューボタンで開き、閉じるボタンで閉じる", async () => {

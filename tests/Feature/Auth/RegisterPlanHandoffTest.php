@@ -86,7 +86,7 @@ test('POST /register intended_plan=starter は pending を消費し org-scoped �
 
     $response->assertRedirect(route('verification.notice'));
     $user = User::query()->whereBlind('email', 'email_index', $payload['email'])->firstOrFail();
-    $personalOrg = $user->organizations()->where('is_personal', true)->firstOrFail();
+    $personalOrg = $user->organizations()->firstOrFail();
 
     expect(session(IntendedPlanResolver::PENDING_KEY))->toBeNull();
     expect(session(IntendedPlanResolver::orgKey($personalOrg)))->toBe('starter');
@@ -99,7 +99,7 @@ test('POST /register intended_plan=enterprise は promote しない (org key 不
 
     $response->assertRedirect(route('verification.notice'));
     $user = User::query()->whereBlind('email', 'email_index', $payload['email'])->firstOrFail();
-    $personalOrg = $user->organizations()->where('is_personal', true)->firstOrFail();
+    $personalOrg = $user->organizations()->firstOrFail();
 
     expect(session(IntendedPlanResolver::PENDING_KEY))->toBeNull();
     expect(session(IntendedPlanResolver::orgKey($personalOrg)))->toBeNull();
@@ -113,7 +113,7 @@ test('POST /register intended_plan=foo (無効値) は 422 にならず promote 
     $response->assertSessionHasNoErrors();
     $response->assertRedirect(route('verification.notice'));
     $user = User::query()->whereBlind('email', 'email_index', $payload['email'])->firstOrFail();
-    $personalOrg = $user->organizations()->where('is_personal', true)->firstOrFail();
+    $personalOrg = $user->organizations()->firstOrFail();
 
     expect(session(IntendedPlanResolver::orgKey($personalOrg)))->toBeNull();
 });
@@ -127,7 +127,7 @@ test('POST /register で intended_plan キー不在なら stale pending は forg
 
     $response->assertRedirect(route('verification.notice'));
     $user = User::query()->whereBlind('email', 'email_index', $payload['email'])->firstOrFail();
-    $personalOrg = $user->organizations()->where('is_personal', true)->firstOrFail();
+    $personalOrg = $user->organizations()->firstOrFail();
 
     expect(session(IntendedPlanResolver::PENDING_KEY))->toBeNull();
     expect(session(IntendedPlanResolver::orgKey($personalOrg)))->toBeNull();
@@ -142,7 +142,7 @@ test('POST /register intended_plan=null は stale pending を消し promote し�
 
     $response->assertRedirect(route('verification.notice'));
     $user = User::query()->whereBlind('email', 'email_index', $payload['email'])->firstOrFail();
-    $personalOrg = $user->organizations()->where('is_personal', true)->firstOrFail();
+    $personalOrg = $user->organizations()->firstOrFail();
 
     expect(session(IntendedPlanResolver::PENDING_KEY))->toBeNull();
     expect(session(IntendedPlanResolver::orgKey($personalOrg)))->toBeNull();
@@ -157,7 +157,7 @@ test('POST /register intended_plan が配列 (改ざん) でも 422 にならず
     $response->assertSessionHasNoErrors();
     $response->assertRedirect(route('verification.notice'));
     $user = User::query()->whereBlind('email', 'email_index', $payload['email'])->firstOrFail();
-    $personalOrg = $user->organizations()->where('is_personal', true)->firstOrFail();
+    $personalOrg = $user->organizations()->firstOrFail();
 
     expect(session(IntendedPlanResolver::PENDING_KEY))->toBeNull();
     expect(session(IntendedPlanResolver::orgKey($personalOrg)))->toBeNull();
@@ -184,9 +184,9 @@ test('招待受諾成立の登録は個人組織を作らず pending も continu
 
     $user = User::query()->whereBlind('email', 'email_index', $email)->firstOrFail();
 
-    // 招待組織へ参加し、個人組織は作られない
+    // 招待組織へ参加し、初期組織は作られない (所属は招待組織の 1 件だけ)
     expect($organization->users()->whereKey($user->getKey())->exists())->toBeTrue();
-    expect($user->organizations()->where('is_personal', true)->exists())->toBeFalse();
+    expect($user->organizations()->count())->toBe(1);
 
     // pending は forget され org key は一切作られない
     expect(session(IntendedPlanResolver::PENDING_KEY))->toBeNull();

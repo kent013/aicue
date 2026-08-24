@@ -149,9 +149,9 @@ test('CTA 導線: manageMembers を持たない Member は projects.create で 4
 ```
 - 2 テストで「/manage/users を見られる owner/admin は projects.create に到達でき、見られない
   member は到達できない」= CTA が指す先が閲覧者集合と一致することを behavioral に固定。
-- `/projects/create` は `require-active-subscription` + `project.in-current-org` 配下。
+- `/projects/create` は `require-active-subscription` + `project.in-route-org` 配下。
   無償プラン (plan_code null) は課金ゲートを通過 (BillingAccess の free tier 許可)、
-  `project.in-current-org` は {project} 無し route で no-op。member は ProjectController::create の
+  `project.in-route-org` は {project} 無し route で no-op。member は ProjectController::create の
   `Gate::authorize('create')` で 403。
 
 ### PHPStan 適合チェック

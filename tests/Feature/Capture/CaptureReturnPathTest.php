@@ -27,7 +27,7 @@ use Inertia\Testing\AssertableInertia as Assert;
  *
  * 両 route が同じく通る層 (省略形で書かない):
  *   auth / verified / not-pending-deletion (外側 group)
- *   → require-active-subscription / project.in-current-org (内側 group)
+ *   → require-active-subscription / project.in-route-org (内側 group)
  *   → Route::scopeBindings() ($project->manuals() 経由)
  *   → controller の resolveOrganizationProject() (認可より前に 404)
  *   → Gate::authorize('view', $manual)
@@ -40,18 +40,17 @@ test('最弱 principal (撮影者) は全 status で撮影ナビと PC 側マニ
     $manual = VideoManual::factory()->forProject($project)->create(['status' => $status->value]);
 
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
     attachProjectMember($project, $member, ProjectRole::Member);
 
     // 現在地 (復路リンクを描画する画面)
     $this->actingAs($member)
-        ->get("/app/projects/{$project->id}/manuals/{$manual->id}")
+        ->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page->component('Capture/Show'));
 
     // 復路の行き先。ここが 403/404/別画面になるなら、ヘッダーの無条件リンクは詰みの導線になる
     $this->actingAs($member)
-        ->get("/projects/{$project->id}/manuals/{$manual->id}")
+        ->get("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page->component('Manuals/Show'));
 })->with(VideoManualStatus::cases());

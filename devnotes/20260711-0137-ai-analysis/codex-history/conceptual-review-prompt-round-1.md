@@ -151,7 +151,7 @@ SourceDocument(SOP: PDF/Excel テキスト)
 同一オリジン XHR（JSON 応答、`ScenarioService` 保存と同じ精緻な HTTP 契約が必要なため
 Inertia redirect でなく JsonResource）。処理は `AnalysisJobService::trigger()`:
 
-1. URL 整合 guard（`project.in-current-org` middleware + inline guard）+ scopeBindings
+1. URL 整合 guard（`project.in-route-org` middleware + inline guard）+ scopeBindings
    （cross-org / cross-project は認可より前に 404）
 2. 認可: `VideoManualPolicy::analyze`（新設。親委譲 = `ProjectPolicy::update`。
    編集者 project_admin のみ。撮影者 project_member は 403）

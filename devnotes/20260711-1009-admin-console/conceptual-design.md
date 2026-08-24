@@ -128,7 +128,7 @@ project_member=撮影者）を一画面で運用できるよう、org ロール�
 | POST `/organizations/{organization:slug}/invitations`（既存） | ユーザー追加（招待、3 値ロール） | 既存 `manageMembers` |
 | PATCH `/organizations/{organization:slug}/members/{user}`（既存） | ロール変更（3 値合成） | 既存: `{user}` ∈ org の URL 整合 guard →**認可前 404**、`manageMembers`。IDOR inventory 登録済み（UrlIntegrityGuard） |
 | DELETE `/organizations/{organization:slug}/members/{user}`（既存） | ユーザー削除（確認ダイアログ） | 同上 |
-| GET `/projects/{project}/categories`（新設） | カテゴリ管理画面 | 既存業務 group 内（`require-active-subscription` + `project.in-current-org` = cross-org は**認可前 404**）+ `CategoryPolicy`（`ProjectPolicy::update` 委譲 = org Owner/Admin または project_admin）。撮影者は **403** |
+| GET `/projects/{project}/categories`（新設） | カテゴリ管理画面 | 既存業務 group 内（`require-active-subscription` + `project.in-route-org` = cross-org は**認可前 404**）+ `CategoryPolicy`（`ProjectPolicy::update` 委譲 = org Owner/Admin または project_admin）。撮影者は **403** |
 | POST/PATCH/DELETE categories（既存） | 追加/編集/削除/reorder | 既存のまま（scopeBindings + IDOR inventory 登録済み） |
 
 - 新設 GET 2 本はどちらも route param 1 個以下のため `NestedRouteIdorDefenseTest` の

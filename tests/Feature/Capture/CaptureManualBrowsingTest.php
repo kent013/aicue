@@ -30,27 +30,27 @@ function browsingContext(): array
 }
 
 test('/app は current org の先頭 project の撮影一覧へ redirect する', function (): void {
-    [, $owner, $project] = browsingContext();
+    [$organization, $owner, $project] = browsingContext();
 
-    $this->actingAs($owner)->get('/app')
-        ->assertRedirect("/app/projects/{$project->id}/manuals");
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app")
+        ->assertRedirect("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals");
 });
 
 test('/app は project が無ければ 404', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->get('/app')->assertNotFound();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app")->assertNotFound();
 });
 
 test('index は ready/published のみ表示し draft/analyzing/rendering は隠す', function (): void {
-    [, $owner, $project] = browsingContext();
+    [$organization, $owner, $project] = browsingContext();
     $ready = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
     $published = VideoManual::factory()->forProject($project)->create(['status' => 'published']);
     VideoManual::factory()->forProject($project)->create(['status' => 'draft']);
     VideoManual::factory()->forProject($project)->create(['status' => 'analyzing']);
     VideoManual::factory()->forProject($project)->create(['status' => 'rendering']);
 
-    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals")
         ->assertInertia(fn (Assert $page) => $page
             ->component('Capture/Index')
             ->has('manuals', 2)
@@ -59,7 +59,7 @@ test('index は ready/published のみ表示し draft/analyzing/rendering は隠
 });
 
 test('index は category / q で絞り込める + 進捗カウントを含む', function (): void {
-    [, $owner, $project] = browsingContext();
+    [$organization, $owner, $project] = browsingContext();
     $category = Category::factory()->forProject($project)->create();
     $target = VideoManual::factory()->forProject($project)->forCategory($category)->create([
         'status' => 'ready', 'title' => 'ネジ締め作業',
@@ -71,10 +71,10 @@ test('index は category / q で絞り込める + 進捗カウントを含む', 
     $take = Take::factory()->forCut($cutWithTake)->create();
     // 採用 (行ロック規約準拠の Service 経由)
     $this->actingAs($owner)->postJson(
-        "/app/projects/{$project->id}/manuals/{$target->id}/cuts/{$cutWithTake->id}/takes/{$take->id}/adopt",
+        "/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$target->id}/cuts/{$cutWithTake->id}/takes/{$take->id}/adopt",
     )->assertOk();
 
-    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals?category={$category->id}&q=ネジ")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals?category={$category->id}&q=ネジ")
         ->assertInertia(fn (Assert $page) => $page
             ->component('Capture/Index')
             ->has('manuals', 1)
@@ -86,7 +86,7 @@ test('index は category / q で絞り込める + 進捗カウントを含む', 
         );
 
     // 不一致の絞り込みは 0 件
-    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals?q=存在しない")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals?q=存在しない")
         ->assertInertia(fn (Assert $page) => $page->has('manuals', 0));
 });
 
@@ -100,7 +100,7 @@ test('index は mine=1 で自作シナリオのみに絞る (ready/published と
     VideoManual::factory()->forProject($project)->createdBy($other)->create(['status' => 'ready']);
     VideoManual::factory()->forProject($project)->createdBy($owner)->create(['status' => 'draft']);
 
-    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals?mine=1")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals?mine=1")
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals', 1)
             ->where('manuals.0.id', $mine->id)
@@ -108,20 +108,20 @@ test('index は mine=1 で自作シナリオのみに絞る (ready/published と
 });
 
 test('index は manuals.*.creator_name と filters.mine を供給する', function (): void {
-    [, $owner, $project] = browsingContext();
+    [$organization, $owner, $project] = browsingContext();
     VideoManual::factory()->forProject($project)->createdBy($owner)->create(['status' => 'ready']);
 
-    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals")
         ->assertInertia(fn (Assert $page) => $page
             ->where('manuals.0.creator_name', $owner->name)
             ->where('filters.mine', false));
 });
 
 test('index の summary shape は TS CaptureManualSummary と対のキー集合 (PHP↔TS 契約)', function (): void {
-    [, $owner, $project] = browsingContext();
+    [$organization, $owner, $project] = browsingContext();
     VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
 
-    $summary = $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals")
+    $summary = $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals")
         ->inertiaPage()['props']['manuals'][0];
     // 制作状態 (status) は載せない (T197: 撮影 PWA の進捗はカットの採用状況から導出する別の量)
     expect(array_keys($summary))->toBe([
@@ -134,14 +134,14 @@ test('index の summary shape は TS CaptureManualSummary と対のキー集合 
 });
 
 test('show は cuts+takes を返し、採用テイクのみ playback_url / download_ack_token を持つ', function (): void {
-    [, $owner, $project] = browsingContext();
+    [$organization, $owner, $project] = browsingContext();
     $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
     $step = Cut::factory()->forManual($manual)->withSortOrder(0)->create();
     $point = Cut::factory()->asPointOf($step)->withSortOrder(0)->create();
     $adopted = Take::factory()->forCut($step)->create(['sort_order' => 0]);
     $other = Take::factory()->forCut($step)->create(['sort_order' => 1]);
     $this->actingAs($owner)->postJson(
-        "/app/projects/{$project->id}/manuals/{$manual->id}/cuts/{$step->id}/takes/{$adopted->id}/adopt",
+        "/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}/cuts/{$step->id}/takes/{$adopted->id}/adopt",
     )->assertOk();
 
     $storage = Mockery::mock(TakeObjectStorage::class);
@@ -151,7 +151,7 @@ test('show は cuts+takes を返し、採用テイクのみ playback_url / downl
         ->andReturn('https://s3.fake.test/signed-get-url');
     app()->instance(TakeObjectStorage::class, $storage);
 
-    $response = $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals/{$manual->id}");
+    $response = $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}");
 
     $response->assertInertia(fn (Assert $page) => $page
         ->component('Capture/Show')
@@ -178,12 +178,12 @@ test('show は cuts+takes を返し、採用テイクのみ playback_url / downl
 });
 
 test('show の take shape は TS CaptureTake と対のキー集合 (PHP↔TS 契約)', function (): void {
-    [, $owner, $project] = browsingContext();
+    [$organization, $owner, $project] = browsingContext();
     $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
     $cut = Cut::factory()->forManual($manual)->create();
     Take::factory()->forCut($cut)->create();
 
-    $response = $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals/{$manual->id}");
+    $response = $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}");
 
     $take = $response->inertiaPage()['props']['manual']['cuts'][0]['takes'][0];
     expect(array_keys($take))->toBe([
@@ -205,10 +205,10 @@ test('show の take shape は TS CaptureTake と対のキー集合 (PHP↔TS 契
  */
 
 test('show の manual 直下キー集合は TS CaptureManualDetail と対 (PHP↔TS 契約)', function (): void {
-    [, $owner, $project] = browsingContext();
+    [$organization, $owner, $project] = browsingContext();
     $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
 
-    $response = $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals/{$manual->id}");
+    $response = $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}");
 
     $props = $response->inertiaPage()['props']['manual'];
     expect(array_keys($props))->toBe([
@@ -218,12 +218,12 @@ test('show の manual 直下キー集合は TS CaptureManualDetail と対 (PHP�
 });
 
 test('show はカテゴリ名・作成者名・更新日時 (ISO 8601) を返す', function (): void {
-    [, $owner, $project] = browsingContext();
+    [$organization, $owner, $project] = browsingContext();
     $category = Category::factory()->forProject($project)->create(['name' => '組立作業']);
     $manual = VideoManual::factory()->forProject($project)->forCategory($category)
         ->createdBy($owner)->create(['status' => 'ready']);
 
-    $response = $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals/{$manual->id}");
+    $response = $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}");
 
     $response->assertInertia(fn (Assert $page) => $page
         ->where('manual.category_name', '組立作業')
@@ -232,15 +232,15 @@ test('show はカテゴリ名・作成者名・更新日時 (ISO 8601) を返す
 });
 
 test('show は未分類なら category_name が null', function (): void {
-    [, $owner, $project] = browsingContext();
+    [$organization, $owner, $project] = browsingContext();
     $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
 
-    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals/{$manual->id}")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}")
         ->assertInertia(fn (Assert $page) => $page->where('manual.category_name', null));
 });
 
 test('show の合計時間は静止画カット (未撮影) + 動画カット (採用 ready) の合算で未確定 0 件', function (): void {
-    [, $owner, $project] = browsingContext();
+    [$organization, $owner, $project] = browsingContext();
     $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
     Cut::factory()->forManual($manual)->withSortOrder(0)->create([
         'material_type' => 'still',
@@ -254,32 +254,32 @@ test('show の合計時間は静止画カット (未撮影) + 動画カット (�
     $storage->shouldReceive('temporaryPlaybackUrl')->andReturn('https://s3.fake.test/signed-get-url');
     app()->instance(TakeObjectStorage::class, $storage);
 
-    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals/{$manual->id}")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}")
         ->assertInertia(fn (Assert $page) => $page
             ->where('manual.total_duration_ms', 10_000)
             ->where('manual.undetermined_cut_count', 0));
 });
 
 test('show は未撮影の動画カットを未確定として数え、合計からは除く', function (): void {
-    [, $owner, $project] = browsingContext();
+    [$organization, $owner, $project] = browsingContext();
     $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
     Cut::factory()->forManual($manual)->withSortOrder(0)->create(['material_type' => 'still', 'static_display_seconds' => 3]);
     Cut::factory()->forManual($manual)->withSortOrder(1)->create(['material_type' => 'video']); // 未撮影
 
-    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals/{$manual->id}")
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}")
         ->assertInertia(fn (Assert $page) => $page
             ->where('manual.total_duration_ms', 3_000)
             ->where('manual.undetermined_cut_count', 1));
 });
 
 test('採用済みだが ready でないテイクは URL も尺も未確定として扱う', function (): void {
-    [, $owner, $project] = browsingContext();
+    [$organization, $owner, $project] = browsingContext();
     $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
     $cut = Cut::factory()->forManual($manual)->withSortOrder(0)->create(['material_type' => 'video']);
     $notReadyTake = Take::factory()->forCut($cut)->create(['status' => 'processing', 'duration_ms' => 9_000]);
     $cut->forceFill(['adopted_take_id' => $notReadyTake->id])->save();
 
-    $response = $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals/{$manual->id}");
+    $response = $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}");
 
     $response->assertInertia(fn (Assert $page) => $page
         ->where('manual.cuts.0.takes.0.playback_url', null)
@@ -294,17 +294,17 @@ test('同一 org 内の別 project の manual を URL に差し込むと 404 (�
     $manualOfB = VideoManual::factory()->forProject($projectB)->create(['status' => 'ready']);
 
     $this->actingAs($owner)
-        ->get("/app/projects/{$projectA->id}/manuals/{$manualOfB->id}")
+        ->get("/organizations/{$organization->slug}/app/projects/{$projectA->id}/manuals/{$manualOfB->id}")
         ->assertNotFound();
 });
 
 test('cross-org の project は index / show とも 404', function (): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
     [, , $otherProject] = browsingContext();
     $otherManual = VideoManual::factory()->forProject($otherProject)->create(['status' => 'ready']);
 
-    $this->actingAs($owner)->get("/app/projects/{$otherProject->id}/manuals")->assertNotFound();
-    $this->actingAs($owner)->get("/app/projects/{$otherProject->id}/manuals/{$otherManual->id}")->assertNotFound();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$otherProject->id}/manuals")->assertNotFound();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$otherProject->id}/manuals/{$otherManual->id}")->assertNotFound();
 });
 
 test('撮影者 (project_member) も org member (非 project member) も閲覧はできる', function (): void {
@@ -312,20 +312,18 @@ test('撮影者 (project_member) も org member (非 project member) も閲覧�
     $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
 
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
     attachProjectMember($project, $member);
-    $this->actingAs($member)->get("/app/projects/{$project->id}/manuals/{$manual->id}")->assertOk();
+    $this->actingAs($member)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}")->assertOk();
 
     $orgMember = attachOrganizationMember($organization);
-    $orgMember->forceFill(['current_organization_id' => $organization->id])->save();
-    $this->actingAs($orgMember)->get("/app/projects/{$project->id}/manuals/{$manual->id}")->assertOk();
+    $this->actingAs($orgMember)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}")->assertOk();
 });
 
-test('PC ルート (/projects/...) の manual 詳細は影響を受けない (回帰)', function (): void {
-    [, $owner, $project] = browsingContext();
+test('PC ルート (/organizations/{slug}/projects/...) の manual 詳細は影響を受けない (回帰)', function (): void {
+    [$organization, $owner, $project] = browsingContext();
     $manual = VideoManual::factory()->forProject($project)->create();
 
-    $this->actingAs($owner)->get("/projects/{$project->id}/manuals/{$manual->id}")->assertOk();
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}")->assertOk();
 });
 
 /*
@@ -338,7 +336,7 @@ test('PC ルート (/projects/...) の manual 詳細は影響を受けない (�
 */
 
 test('has_thumbnail は「ready かつ生成済み」のときだけ true になる', function (): void {
-    [, $owner, $project] = browsingContext();
+    [$organization, $owner, $project] = browsingContext();
     $manual = VideoManual::factory()->forProject($project)->create(['status' => 'ready']);
     $cut = Cut::factory()->forManual($manual)->create();
     $generated = Take::factory()->forCut($cut)->withThumbnail()->create(['sort_order' => 0]);
@@ -349,7 +347,7 @@ test('has_thumbnail は「ready かつ生成済み」のときだけ true にな
         'sort_order' => 2,
     ]);
 
-    $response = $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals/{$manual->id}");
+    $response = $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}");
     $takes = collect($response->inertiaPage()['props']['manual']['cuts'][0]['takes'])
         ->keyBy('id');
 
@@ -382,18 +380,18 @@ function captureManualWithBody(Project $project, string $column, string $word, s
 }
 
 test('index の q は narration に部分一致する (撮影 PWA でも本文で当たる)', function (): void {
-    [, $owner, $project] = browsingContext();
+    [$organization, $owner, $project] = browsingContext();
     $target = captureManualWithBody($project, 'narration', 'トルクレンチ');
     captureManualWithBody($project, 'narration', 'ホウキ');
 
-    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals?q=".urlencode('トルクレンチ'))
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals?q=".urlencode('トルクレンチ'))
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals', 1)
             ->where('manuals.0.id', $target->id));
 });
 
 test('index の q は scene / narration / subtitle_primary / subtitle_secondary のいずれでも hit する', function (): void {
-    [, $owner, $project] = browsingContext();
+    [$organization, $owner, $project] = browsingContext();
 
     $columns = [
         'scene' => 'ゴウセイ',
@@ -407,7 +405,7 @@ test('index の q は scene / narration / subtitle_primary / subtitle_secondary 
     }
 
     foreach ($columns as $column => $word) {
-        $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals?q=".urlencode($word))
+        $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals?q=".urlencode($word))
             ->assertInertia(fn (Assert $page) => $page
                 ->has('manuals', 1)
                 ->where('manuals.0.id', $ids[$column]));
@@ -415,7 +413,7 @@ test('index の q は scene / narration / subtitle_primary / subtitle_secondary 
 });
 
 test('index の q は shooting_point には一致しない (対象外列)', function (): void {
-    [, $owner, $project] = browsingContext();
+    [$organization, $owner, $project] = browsingContext();
     $manual = VideoManual::factory()->forProject($project)->create([
         'title' => '構図の手順', 'status' => 'ready',
     ]);
@@ -427,17 +425,17 @@ test('index の q は shooting_point には一致しない (対象外列)', func
         'shooting_point' => '手元をヨリデトルコト',
     ]);
 
-    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals?q=".urlencode('ヨリデトルコト'))
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals?q=".urlencode('ヨリデトルコト'))
         ->assertInertia(fn (Assert $page) => $page->has('manuals', 0));
 });
 
 test('index の q は draft / analyzing を拾わない (ready/published の母集団が保たれる)', function (): void {
-    [, $owner, $project] = browsingContext();
+    [$organization, $owner, $project] = browsingContext();
     $ready = captureManualWithBody($project, 'narration', 'ボゴタイ', 'ready');
     captureManualWithBody($project, 'narration', 'ボゴタイ', 'draft');
     captureManualWithBody($project, 'narration', 'ボゴタイ', 'analyzing');
 
-    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals?q=".urlencode('ボゴタイ'))
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals?q=".urlencode('ボゴタイ'))
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals', 1)
             ->where('manuals.0.id', $ready->id));
@@ -463,17 +461,17 @@ test('index の q は mine=1 / category と AND で効く (カット本文一致
     Cut::factory()->forManual($uncategorized)->create(['narration' => 'ここでフクゴウゴを使う']);
 
     $this->actingAs($owner)
-        ->get("/app/projects/{$project->id}/manuals?mine=1&category={$category->id}&q=".urlencode('フクゴウゴ'))
+        ->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals?mine=1&category={$category->id}&q=".urlencode('フクゴウゴ'))
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals', 1)
             ->where('manuals.0.id', $target->id));
 });
 
 test('index の q は前後の空白を trim する (filters.q も trim 後を返す)', function (): void {
-    [, $owner, $project] = browsingContext();
+    [$organization, $owner, $project] = browsingContext();
     $target = captureManualWithBody($project, 'narration', 'ネジシメ');
 
-    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals?q=".urlencode('  ネジシメ  '))
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals?q=".urlencode('  ネジシメ  '))
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals', 1)
             ->where('manuals.0.id', $target->id)
@@ -481,25 +479,25 @@ test('index の q は前後の空白を trim する (filters.q も trim 後を�
 });
 
 test('index の q が空白のみなら絞り込まない (filters.q は null)', function (): void {
-    [, $owner, $project] = browsingContext();
+    [$organization, $owner, $project] = browsingContext();
     captureManualWithBody($project, 'narration', 'ネジシメ');
     captureManualWithBody($project, 'narration', 'ホウキ');
 
-    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals?q=".urlencode('   '))
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals?q=".urlencode('   '))
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals', 2)
             ->where('filters.q', null));
 });
 
 test('index の q は先頭 200 文字 (文字数) で切られ filters.q も切り詰め後を返す', function (): void {
-    [, $owner, $project] = browsingContext();
+    [$organization, $owner, $project] = browsingContext();
     $body = str_repeat('あ', 200);
     $manual = VideoManual::factory()->forProject($project)->create([
         'title' => '長文本文', 'status' => 'ready',
     ]);
     Cut::factory()->forManual($manual)->create(['narration' => $body.'ZZZ']);
 
-    $this->actingAs($owner)->get("/app/projects/{$project->id}/manuals?q=".urlencode($body.'YYY'))
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/app/projects/{$project->id}/manuals?q=".urlencode($body.'YYY'))
         ->assertInertia(fn (Assert $page) => $page
             ->has('manuals', 1)
             ->where('manuals.0.id', $manual->id)

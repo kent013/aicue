@@ -4,11 +4,12 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Projects;
 
-use App\Http\Concerns\ResolvesCurrentOrganization;
+use App\Http\Concerns\ResolvesRouteOrganization;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Projects\StoreItemRequest;
 use App\Http\Requests\Projects\UpdateItemRequest;
 use App\Models\Item;
+use App\Models\Organization;
 use App\Models\Project;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -27,12 +28,11 @@ use Webmozart\Assert\Assert;
  */
 class ItemController extends Controller
 {
-    use ResolvesCurrentOrganization;
+    use ResolvesRouteOrganization;
 
     /** Item 作成。project_id は URL から導出し relation 経由で代入する (payload では 422) */
-    public function store(StoreItemRequest $request, Project $project): RedirectResponse
+    public function store(StoreItemRequest $request, Organization $organization, Project $project): RedirectResponse
     {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('create', [Item::class, $project]);
@@ -49,9 +49,8 @@ class ItemController extends Controller
     }
 
     /** Item 更新 (name / note) */
-    public function update(UpdateItemRequest $request, Project $project, Item $item): RedirectResponse
+    public function update(UpdateItemRequest $request, Organization $organization, Project $project, Item $item): RedirectResponse
     {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404 ({item} ∈ {project} は scopeBindings が担保済み)
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('update', $item);
@@ -67,9 +66,8 @@ class ItemController extends Controller
     }
 
     /** Item 削除 */
-    public function destroy(Request $request, Project $project, Item $item): RedirectResponse
+    public function destroy(Request $request, Organization $organization, Project $project, Item $item): RedirectResponse
     {
-        $organization = $this->resolveCurrentOrganization($request);
         // URL 整合 guard: 認可より前に 404 ({item} ∈ {project} は scopeBindings が担保済み)
         $this->resolveOrganizationProject($organization, $project);
         Gate::authorize('delete', $item);

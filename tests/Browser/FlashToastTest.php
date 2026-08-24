@@ -137,7 +137,7 @@ test('動画マニュアル削除後、リダイレクト先 (AppLayout) で成�
 
     $this->actingAs($owner);
 
-    $page = visit("/projects/{$project->id}/manuals/{$manual->id}");
+    $page = visit("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}");
     $page->assertSee('組立手順');
 
     // DangerZone → 確認ダイアログ → 削除実行 (testId 指定で text の曖昧一致を避ける)
@@ -150,7 +150,7 @@ test('動画マニュアル削除後、リダイレクト先 (AppLayout) で成�
         'manuals.destroy → projects.show',
     );
 
-    $page->assertPathIs("/projects/{$project->id}")
+    $page->assertPathIs("/organizations/{$organization->slug}/projects/{$project->id}")
         ->assertSeeIn('[data-testid="toast-success"]', '動画マニュアルを削除しました')
         ->assertNoJavaScriptErrors();
 });
@@ -160,7 +160,7 @@ test('アカウント削除後、未認証面 (GuestLayout) で成功 toast が�
     // actingAs() は Login を発火しないため、**この 1 本だけ UI ログイン**から始める
     // (ハーネス内部仕様への依存を作らない)。
     // createOrganizationWithOwner は free plan を grandfather するため課金ゲートに掛からない
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
     $page = visit('/login');
     // 「ログイン」という文言は AuthLayout の見出し h1 とも一致するため text locator は使わない。
@@ -171,8 +171,8 @@ test('アカウント削除後、未認証面 (GuestLayout) で成功 toast が�
 
     waitForBrowserCondition(
         $page,
-        "window.location.pathname === '/dashboard'",
-        'ログイン後に /dashboard へ着地しない',
+        'window.location.pathname === '.json_encode("/organizations/{$organization->slug}/dashboard"),
+        'ログイン後に組織のダッシュボードへ着地しない',
     );
 
     $page = visit('/settings');

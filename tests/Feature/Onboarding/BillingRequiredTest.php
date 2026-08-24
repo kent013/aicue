@@ -23,26 +23,25 @@ function billingRequiredExpiredOrganization(): array
     return [$organization->fresh(), $owner];
 }
 
-test('current org 不在なら 404', function (): void {
+test('非所属の組織 URL は 404 (組織の有無を露出しない)', function (): void {
+    [$organization] = createOrganizationWithOwner();
     $user = User::factory()->create();
 
-    $this->actingAs($user)->get('/billing-required')->assertNotFound();
+    $this->actingAs($user)->get("/organizations/{$organization->slug}/onboarding/billing-required")->assertNotFound();
 });
 
 test('current org に非所属なら 404 (403 で存在を漏らさない)', function (): void {
     [$organization] = createOrganizationWithOwner(grandfatherFreePlan: false);
     $outsider = User::factory()->create();
-    $outsider->forceFill(['current_organization_id' => $organization->id])->save();
 
-    $this->actingAs($outsider)->get('/billing-required')->assertNotFound();
+    $this->actingAs($outsider)->get("/organizations/{$organization->slug}/onboarding/billing-required")->assertNotFound();
 });
 
 test('ExpiredCheckout の一般 member には Owner 連絡先付きで 200 render される', function (): void {
     [$organization, $owner] = billingRequiredExpiredOrganization();
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
-    $this->actingAs($member)->get('/billing-required')
+    $this->actingAs($member)->get("/organizations/{$organization->slug}/onboarding/billing-required")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->component('Onboarding/BillingRequired')
@@ -56,10 +55,9 @@ test('離脱ガード: 有効 subscription を持つ member は dashboard へ', 
     [$organization] = createOrganizationWithOwner(grandfatherFreePlan: false);
     contractPaidPlan($organization, status: 'active');
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
-    $this->actingAs($member)->get('/billing-required')
-        ->assertRedirect(route('dashboard'));
+    $this->actingAs($member)->get("/organizations/{$organization->slug}/onboarding/billing-required")
+        ->assertRedirect(route('dashboard', ['organization' => $organization->slug]));
 });
 
 test('離脱ガード: ActiveFreePlan (free_plan_code=personal) の member は dashboard へ', function (): void {
@@ -71,23 +69,21 @@ test('離脱ガード: ActiveFreePlan (free_plan_code=personal) の member は d
         'personal_declared_by_user_id' => $owner->getKey(),
     ])->save();
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
-    $this->actingAs($member)->get('/billing-required')
-        ->assertRedirect(route('dashboard'));
+    $this->actingAs($member)->get("/organizations/{$organization->slug}/onboarding/billing-required")
+        ->assertRedirect(route('dashboard', ['organization' => $organization->slug]));
 });
 
 test('離脱ガード: manageBilling 保持者は checkout へ (自分で手続きできる)', function (): void {
-    [, $owner] = billingRequiredExpiredOrganization();
+    [$organization, $owner] = billingRequiredExpiredOrganization();
 
-    $this->actingAs($owner)->get('/billing-required')
-        ->assertRedirect(route('onboarding.checkout'));
+    $this->actingAs($owner)->get("/organizations/{$organization->slug}/onboarding/billing-required")
+        ->assertRedirect(route('onboarding.checkout', ['organization' => $organization->slug]));
 });
 
 test('未契約 org (plan_code IS NULL) の一般 member も 200 render される — P4 の grandfathering backfill 後は ActiveFreePlan → dashboard へ変わる', function (): void {
     [$organization] = createOrganizationWithOwner(grandfatherFreePlan: false);
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
     // state() は移行 OR を持たないため NoSubscription = 遮断側。まだ遮断されていない member に
     // 説明画面が見える (P3 の既知の非対称)。P3 では UI からこの画面へリンクを張らないため
@@ -95,7 +91,7 @@ test('未契約 org (plan_code IS NULL) の一般 member も 200 render され�
     // へ逃がす = 自然解消 (期待の更新は P4。本テストは削除せず更新する)。
     expect($organization->plan_code)->toBeNull();
 
-    $this->actingAs($member)->get('/billing-required')
+    $this->actingAs($member)->get("/organizations/{$organization->slug}/onboarding/billing-required")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page->component('Onboarding/BillingRequired'));
 });
@@ -106,13 +102,12 @@ test('Owner 不在 org でも 200 で ownerName / ownerEmail は null', function
     createFakeSubscription($organization, status: 'canceled');
 
     $member = attachOrganizationMember($organization);
-    $member->forceFill(['current_organization_id' => $organization->id])->save();
 
     expect($organization->users()->get()
         ->first(fn (User $u): bool => $u->organizationRole($organization) === OrganizationRole::Owner))
         ->toBeNull();
 
-    $this->actingAs($member)->get('/billing-required')
+    $this->actingAs($member)->get("/organizations/{$organization->slug}/onboarding/billing-required")
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->component('Onboarding/BillingRequired')
@@ -123,5 +118,5 @@ test('Owner 不在 org でも 200 で ownerName / ownerEmail は null', function
 });
 
 test('未認証は login へ', function (): void {
-    $this->get('/billing-required')->assertRedirect('/login');
+    $this->get('/organizations/guest-org/onboarding/billing-required')->assertRedirect('/login');
 });

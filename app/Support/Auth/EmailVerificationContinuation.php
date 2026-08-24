@@ -20,9 +20,9 @@ use Illuminate\Contracts\Session\Session;
  * 配下にあり、未認証で遷移させると必ず差し戻されるため (bug-hunt F-2-01)。
  * 画面へは `hasContinuation()` の bool だけを渡す。
  *
- * AI-CUE の onboarding route は current-org スコープ (route parameter なし) のため、
- * 再構築するのは引数なしの `route('onboarding.checkout')`。session に保持した
- * organization_id は「その組織のメンバーであること」の確認にのみ使う。
+ * onboarding route は**組織 URL 配下**にある (家系裁定 AG-037) ので、session に保持した
+ * organization_id は「その組織のメンバーであること」の確認と、**URL の再構築**の
+ * 両方に使う (所属確認を通った組織の識別名だけが URL に載る)。
  */
 final class EmailVerificationContinuation
 {
@@ -53,7 +53,7 @@ final class EmailVerificationContinuation
             return null;
         }
 
-        return route('onboarding.checkout');
+        return route('onboarding.checkout', ['organization' => $organization->slug]);
     }
 
     /**

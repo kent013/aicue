@@ -1,0 +1,11 @@
+<?php
+
+declare(strict_types=1);
+
+// password.confirm は撤去済み。復活させる場合は ->middleware('password.confirm') を書かないこと。
+
+/**
+ * Fortify 標準の step-up は撤去済み。
+ * かつては ->middleware(['auth', 'password.confirm']) と書いていた。
+ */
+Route::get('/x', [Controller::class, 'show'])->middleware(['auth']);

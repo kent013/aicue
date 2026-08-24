@@ -11,6 +11,7 @@
     import PageHeader from "@/components/molecules/PageHeader.svelte";
     import { FolderKanban } from "@lucide/svelte";
     import type { SharedProps } from "@/lib/shared-props";
+    import { currentOrgUrl } from "@/lib/org-url";
 
     /** プロジェクト編集 (name / description)。所属 Team の変更 UI は出さない。 */
     interface Props {
@@ -28,7 +29,7 @@
 
     function submit(event: SubmitEvent): void {
         event.preventDefault();
-        form.patch(`/projects/${project.id}`);
+        form.patch(currentOrgUrl(`/projects/${project.id}`));
     }
 </script>
 
@@ -68,7 +69,7 @@
                         <Button type="submit" loading={form.processing} testId="project-submit">
                             保存
                         </Button>
-                        <Button variant="ghost" href={`/projects/${project.id}`} inertia>
+                        <Button variant="ghost" href={currentOrgUrl(`/projects/${project.id}`)} inertia>
                             キャンセル
                         </Button>
                     </div>

@@ -80,7 +80,7 @@
 <GuestLayout {appName}>
     {#snippet nav()}
         {#if page.isAuthenticated}
-            <a href="/dashboard" class="text-text-secondary hover:text-primary">ダッシュボード</a>
+            <a href="/go" class="text-text-secondary hover:text-primary">ダッシュボード</a>
         {:else}
             <a href="/login" class="text-text-secondary hover:text-primary">ログイン</a>
             <a href="/register" class="text-primary hover:text-primary-hover">無料で始める</a>
@@ -135,7 +135,7 @@
                     </div>
                     <div class="flex shrink-0 flex-col items-center gap-1">
                         {#if page.isAuthenticated}
-                            <Button href="/billing/plans" inertia>プランを変更</Button>
+                            <Button href="/go" inertia>プランを変更</Button>
                         {:else}
                             <Button href={`/register?plan=${encodeURIComponent(personalPlan.code)}`}>
                                 基本料金無料で始める
@@ -162,7 +162,7 @@
                 >
                     {#snippet footerCta()}
                         {#if page.isAuthenticated}
-                            <Button href="/billing/plans" fullWidth inertia>プランを変更</Button>
+                            <Button href="/go" fullWidth inertia>プランを変更</Button>
                         {:else}
                             <Button href={`/register?plan=${encodeURIComponent(plan.code)}`} fullWidth>
                                 このプランで始める
@@ -231,7 +231,7 @@
 
         {#if page.isAuthenticated}
             <div class="mt-8 text-center">
-                <Button href="/dashboard" variant="ghost" inertia>
+                <Button href="/go" variant="ghost" inertia>
                     <LayoutDashboard class="size-4" aria-hidden="true" /> ダッシュボードへ戻る
                 </Button>
             </div>

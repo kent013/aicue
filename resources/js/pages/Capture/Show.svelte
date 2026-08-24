@@ -39,6 +39,8 @@
     import type { PendingStore, UploadOutcome } from "@/lib/capture/upload-queue";
     import type { SharedProps } from "@/lib/shared-props";
     import type { CaptureManualDetail } from "@/types/capture";
+    import { currentOrgUrl } from "@/lib/org-url";
+    import { currentOrganizationSlug } from "@/lib/org-url";
 
     /**
      * 撮影ナビ (doc/05 / 概念設計 D9)。cut を選び、録画 (または ファイル選択) →
@@ -100,14 +102,18 @@
 
     /* ---- アップロードキュー ---- */
     const store: PendingStore = createIdbPendingStore();
-    const queue = new UploadQueue({ store });
+    const queue = new UploadQueue({ store, organizationSlug: currentOrganizationSlug() });
 
     /* ---- 採用済みテイクの自動 DL (T051) ----
      * project.id / manual.id はインスタンス生存中は安定 (別 manual へ遷移すると Inertia が
      * ページを remount する。reload({only:["manual"]}) は id を変えない)。mount 時点の値で
      * 確定させるのが意図どおりなので state_referenced_locally を明示的に無視する。 */
     // svelte-ignore state_referenced_locally
-    const autoDownloader = new AdoptedTakeAutoDownloader(project.id, manual.id);
+    const autoDownloader = new AdoptedTakeAutoDownloader(
+        currentOrganizationSlug(),
+        project.id,
+        manual.id,
+    );
     let pendingCount = $state(0);
     let pendingBytes = $state(0);
     let uploading = $state(false);
@@ -479,7 +485,7 @@
         <!-- 全画面中は背後を inert にして、覆われた面へ Tab で入り込めないようにする -->
         <div inert={fullscreenActive}>
             <PageHeaderSection title={manual.title} icon={Video} testId="capture-manual-title">
-                <TextLink href={`/app/projects/${project.id}/manuals`}>
+                <TextLink href={currentOrgUrl(`/app/projects/${project.id}/manuals`)}>
                     <ArrowLeft class="inline size-3" aria-hidden="true" />
                     一覧へ戻る
                 </TextLink>
@@ -487,7 +493,7 @@
                      status / ability 条件で出し分けない**。根拠と保証範囲は
                      docs/architecture.md §撮影 PWA の運用契約。 -->
                 <TextLink
-                    href={`/projects/${project.id}/manuals/${manual.id}`}
+                    href={currentOrgUrl(`/projects/${project.id}/manuals/${manual.id}`)}
                     testId="manual-detail-link"
                 >
                     <BookOpen class="inline size-3" aria-hidden="true" />

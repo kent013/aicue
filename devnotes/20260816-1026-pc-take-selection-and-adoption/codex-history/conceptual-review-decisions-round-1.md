@@ -6,7 +6,7 @@
 - 根拠: 本リポジトリに **capture session という概念は存在しない**。`routes/web.php` L604-621 の
   `capture.takes.*` は 7 本すべてが `/app/projects/{project}/manuals/{manual}/cuts/{cut}/takes[/{take}]`
   の形で、**project / manual / cut / take だけ**を parameter に取る。認証はセッション (web guard)、
-  テナント境界は `project.in-current-org` middleware + `scopeBindings` である。
+  テナント境界は `project.in-route-org` middleware + `scopeBindings` である。
   PC 画面は同じ project / manual / cut を持っているので、追加の解決処理は 1 つも要らない。
 - 対応内容: D2 に**既存 route の実シグネチャ表**を貼り、「capture session は存在しない /
   PC が追加で解決するものは無い」ことを明記した。あわせて Codex の懸念どおり

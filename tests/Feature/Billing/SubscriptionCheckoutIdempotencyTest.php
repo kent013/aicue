@@ -47,14 +47,14 @@ test('同一 token + 同一 plan の 2 連投は 1 行に収束し既存 checkou
     [$organization, $owner] = createOrganizationWithOwner();
     $token = subAttemptToken();
 
-    $first = $this->actingAs($owner)->post('/billing/checkout', [
+    $first = $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/checkout", [
         'plan_code' => 'standard',
         'subscription_attempt_token' => $token,
     ]);
     // Inertia::location は非 Inertia リクエストでは 302 (Inertia リクエストでは 409 + X-Inertia-Location)
     $first->assertRedirectContains('https://checkout.stripe.test/');
 
-    $second = $this->actingAs($owner)->post('/billing/checkout', [
+    $second = $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/checkout", [
         'plan_code' => 'standard',
         'subscription_attempt_token' => $token,
     ]);
@@ -70,14 +70,14 @@ test('同一 token + 別 plan_code は 422 で、行も Stripe 呼び出しも�
     [$organization, $owner] = createOrganizationWithOwner();
     $token = subAttemptToken();
 
-    $this->actingAs($owner)->post('/billing/checkout', [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/checkout", [
         'plan_code' => 'standard',
         'subscription_attempt_token' => $token,
     ])->assertRedirectContains('https://checkout.stripe.test/');
 
     $this->actingAs($owner)
-        ->from('/billing/plans')
-        ->post('/billing/checkout', [
+        ->from("/organizations/{$organization->slug}/billing/plans")
+        ->post("/organizations/{$organization->slug}/billing/checkout", [
             'plan_code' => 'starter',
             'subscription_attempt_token' => $token,
         ])
@@ -91,7 +91,7 @@ test('idempotency_key は sub_start:{token} で、同 key の再呼び出しは�
     [$organization, $owner] = createOrganizationWithOwner();
     $token = subAttemptToken();
 
-    $this->actingAs($owner)->post('/billing/checkout', [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/checkout", [
         'plan_code' => 'standard',
         'subscription_attempt_token' => $token,
     ])->assertRedirectContains('https://checkout.stripe.test/');
@@ -122,7 +122,7 @@ test('他 org の token は manageBilling を持つ owner でも 404 で、行�
         ->withAttempt($token, 'standard')
         ->create();
 
-    $this->actingAs($owner)->post('/billing/checkout', [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/checkout", [
         'plan_code' => 'standard',
         'subscription_attempt_token' => $token,
     ])->assertNotFound();
@@ -142,7 +142,7 @@ test('同 org の他 user の token も 404 (token 所有者判定は actor ス�
         ->withAttempt($token, 'standard')
         ->create();
 
-    $this->actingAs($owner)->post('/billing/checkout', [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/checkout", [
         'plan_code' => 'standard',
         'subscription_attempt_token' => $token,
     ])->assertNotFound();
@@ -151,7 +151,7 @@ test('同 org の他 user の token も 404 (token 所有者判定は actor ス�
     expect(subCheckoutFake()->created)->toHaveCount(0);
 });
 
-test('completed 行の token 再送は purchase_already_received を flash して /billing へ倒し Stripe を呼ばない', function (): void {
+test('completed 行の token 再送は purchase_already_received を flash して /organizations/{slug}/billing へ倒し Stripe を呼ばない', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $token = subAttemptToken();
 
@@ -162,17 +162,17 @@ test('completed 行の token 再送は purchase_already_received を flash し�
         ->completed()
         ->create();
 
-    $this->actingAs($owner)->post('/billing/checkout', [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/checkout", [
         'plan_code' => 'standard',
         'subscription_attempt_token' => $token,
     ])
-        ->assertRedirect('/billing')
+        ->assertRedirect("/organizations/{$organization->slug}/billing")
         ->assertSessionHas(BillingFeedbackKind::FLASH_KEY, BillingFeedbackKind::PurchaseAlreadyReceived->value);
 
     expect(subCheckoutFake()->created)->toHaveCount(0);
 });
 
-test('expired / failed 行の token 再送は checkout_retry_required を flash して /billing へ倒す', function (string $state): void {
+test('expired / failed 行の token 再送は checkout_retry_required を flash して /organizations/{slug}/billing へ倒す', function (string $state): void {
     [$organization, $owner] = createOrganizationWithOwner();
     $token = subAttemptToken();
 
@@ -183,11 +183,11 @@ test('expired / failed 行の token 再送は checkout_retry_required を flash 
 
     ($state === 'expired' ? $factory->expired() : $factory->failed())->create();
 
-    $this->actingAs($owner)->post('/billing/checkout', [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/checkout", [
         'plan_code' => 'standard',
         'subscription_attempt_token' => $token,
     ])
-        ->assertRedirect('/billing')
+        ->assertRedirect("/organizations/{$organization->slug}/billing")
         ->assertSessionHas(BillingFeedbackKind::FLASH_KEY, BillingFeedbackKind::CheckoutRetryRequired->value);
 
     expect(subCheckoutFake()->created)->toHaveCount(0);
@@ -204,12 +204,12 @@ test('別 token・同 plan の live pending は org-wide dedup で warning に�
         ->create();
 
     $this->actingAs($owner)
-        ->from('/billing/plans')
-        ->post('/billing/checkout', [
+        ->from("/organizations/{$organization->slug}/billing/plans")
+        ->post("/organizations/{$organization->slug}/billing/checkout", [
             'plan_code' => 'standard',
             'subscription_attempt_token' => subAttemptToken(),
         ])
-        ->assertRedirect('/billing/plans')
+        ->assertRedirect("/organizations/{$organization->slug}/billing/plans")
         ->assertSessionHas('warning', '既に進行中の Checkout があります。数分お待ちください。');
 
     expect(BillingCheckoutSession::query()->where('organization_id', $organization->id)->count())->toBe(1);
@@ -227,12 +227,12 @@ test('別 token・別 plan の live pending: expire=complete は CheckoutInProgr
     subCheckoutFake()->expireResult = 'complete';
 
     $this->actingAs($owner)
-        ->from('/billing/plans')
-        ->post('/billing/checkout', [
+        ->from("/organizations/{$organization->slug}/billing/plans")
+        ->post("/organizations/{$organization->slug}/billing/checkout", [
             'plan_code' => 'standard',
             'subscription_attempt_token' => subAttemptToken(),
         ])
-        ->assertRedirect('/billing/plans')
+        ->assertRedirect("/organizations/{$organization->slug}/billing/plans")
         ->assertSessionHas('error', '直前の決済が処理中です。数分お待ちください。');
 
     expect(BillingCheckoutSession::query()->where('organization_id', $organization->id)->count())->toBe(1);
@@ -250,12 +250,12 @@ test('別 token・別 plan の live pending: expire が throw したら local �
     subCheckoutFake()->failOnExpire = true;
 
     $this->actingAs($owner)
-        ->from('/billing/plans')
-        ->post('/billing/checkout', [
+        ->from("/organizations/{$organization->slug}/billing/plans")
+        ->post("/organizations/{$organization->slug}/billing/checkout", [
             'plan_code' => 'standard',
             'subscription_attempt_token' => subAttemptToken(),
         ])
-        ->assertRedirect('/billing/plans')
+        ->assertRedirect("/organizations/{$organization->slug}/billing/plans")
         ->assertSessionHas('error', '前回の決済セッションの整理に失敗しました。 数分後に再試行してください。');
 
     expect($old->refresh()->status)->toBe(CheckoutSessionStatus::Pending->value);
@@ -270,7 +270,7 @@ test('別 token・別 plan の live pending: expire=expired なら旧行が Expi
         ->withAttempt(subAttemptToken(), 'starter')
         ->create();
 
-    $this->actingAs($owner)->post('/billing/checkout', [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/checkout", [
         'plan_code' => 'standard',
         'subscription_attempt_token' => subAttemptToken(),
     ])->assertRedirectContains('https://checkout.stripe.test/');
@@ -283,7 +283,7 @@ test('別 token・別 plan の live pending: expire=expired なら旧行が Expi
 test('initiated_by_user_id が必ず非 null で記録される', function (): void {
     [$organization, $owner] = createOrganizationWithOwner();
 
-    $this->actingAs($owner)->post('/billing/checkout', [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/checkout", [
         'plan_code' => 'standard',
         'subscription_attempt_token' => subAttemptToken(),
     ])->assertRedirectContains('https://checkout.stripe.test/');
@@ -305,7 +305,7 @@ test('P8a の setup 行が同 org に live pending でも段 2/3/4 に一切干�
         ->withAttemptToken($token)
         ->create();
 
-    $this->actingAs($owner)->post('/billing/checkout', [
+    $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/checkout", [
         'plan_code' => 'standard',
         'subscription_attempt_token' => $token,
     ])->assertRedirectContains('https://checkout.stripe.test/');
@@ -322,12 +322,12 @@ test('既に valid な subscription を持つ org は行を作らず error flash
     createFakeSubscription($organization, status: 'active');
 
     $this->actingAs($owner)
-        ->from('/billing/plans')
-        ->post('/billing/checkout', [
+        ->from("/organizations/{$organization->slug}/billing/plans")
+        ->post("/organizations/{$organization->slug}/billing/checkout", [
             'plan_code' => 'standard',
             'subscription_attempt_token' => subAttemptToken(),
         ])
-        ->assertRedirect('/billing/plans')
+        ->assertRedirect("/organizations/{$organization->slug}/billing/plans")
         ->assertSessionHas('error', '既に有効なサブスクリプションがあります。プラン変更をご利用ください。');
 
     expect(BillingCheckoutSession::query()->where('organization_id', $organization->id)->exists())->toBeFalse();
@@ -410,7 +410,7 @@ test('並行 race: INSERT 直前に同 token 行が割り込んでも 500 にな
     };
     $this->app->singleton(StripeGatewayInterface::class, fn (): StripeGatewayInterface => $racing);
 
-    $response = $this->actingAs($owner)->post('/billing/checkout', [
+    $response = $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/checkout", [
         'plan_code' => 'standard',
         'subscription_attempt_token' => $token,
     ]);
@@ -496,11 +496,11 @@ test('並行 race: 先着行が stale pending なら replay せず checkout_retr
     $this->app->singleton(StripeGatewayInterface::class, fn (): StripeGatewayInterface => $racing);
 
     $this->actingAs($owner)
-        ->post('/billing/checkout', [
+        ->post("/organizations/{$organization->slug}/billing/checkout", [
             'plan_code' => 'standard',
             'subscription_attempt_token' => $token,
         ])
-        ->assertRedirect('/billing')
+        ->assertRedirect("/organizations/{$organization->slug}/billing")
         ->assertSessionHas(BillingFeedbackKind::FLASH_KEY, BillingFeedbackKind::CheckoutRetryRequired->value);
 });
 
@@ -518,14 +518,14 @@ test('attempt_token 以外の unique 違反 (stripe_session_id) は rethrow す�
 
     $this->withoutExceptionHandling();
 
-    expect(fn () => $this->actingAs($owner)->post('/billing/checkout', [
+    expect(fn () => $this->actingAs($owner)->post("/organizations/{$organization->slug}/billing/checkout", [
         'plan_code' => 'standard',
         'subscription_attempt_token' => $token,
     ]))->toThrow(UniqueConstraintViolationException::class);
 });
 
 test('subscription_attempt_token の欠落 / 非 ULID は 422', function (mixed $token): void {
-    [, $owner] = createOrganizationWithOwner();
+    [$organization, $owner] = createOrganizationWithOwner();
 
     $payload = ['plan_code' => 'standard'];
     if ($token !== null) {
@@ -533,8 +533,8 @@ test('subscription_attempt_token の欠落 / 非 ULID は 422', function (mixed 
     }
 
     $this->actingAs($owner)
-        ->from('/billing/plans')
-        ->post('/billing/checkout', $payload)
+        ->from("/organizations/{$organization->slug}/billing/plans")
+        ->post("/organizations/{$organization->slug}/billing/checkout", $payload)
         ->assertInvalid(['subscription_attempt_token']);
 })->with([
     'missing' => [null],

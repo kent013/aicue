@@ -8,7 +8,7 @@ use App\DataTransferObjects\Billing\AutoRechargeConsentDto;
 use App\Enums\Billing\SignupFundingChoice;
 use App\Exceptions\Billing\CheckoutInProgressException;
 use App\Exceptions\Billing\PersonalPlanNotEligibleException;
-use App\Http\Concerns\ResolvesCurrentOrganization;
+use App\Http\Concerns\ResolvesRouteOrganization;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Onboarding\ActivatePersonalRequest;
 use App\Models\Organization;
@@ -34,7 +34,7 @@ use Webmozart\Assert\Assert;
  */
 final class ActivatePersonalController extends Controller
 {
-    use ResolvesCurrentOrganization;
+    use ResolvesRouteOrganization;
 
     public function __construct(
         private readonly PersonalPlanService $personalPlan,
@@ -43,9 +43,8 @@ final class ActivatePersonalController extends Controller
         private readonly AutoRechargeService $autoRecharge,
     ) {}
 
-    public function __invoke(ActivatePersonalRequest $request): RedirectResponse|SymfonyResponse
+    public function __invoke(ActivatePersonalRequest $request, Organization $organization): RedirectResponse|SymfonyResponse
     {
-        $organization = $this->resolveMemberCurrentOrganization($request);
         Gate::authorize('manageBilling', $organization);
 
         $user = $request->user();
@@ -90,8 +89,8 @@ final class ActivatePersonalController extends Controller
                 $result = $this->autoRecharge->startSetupCheckout(
                     $organization,
                     $user,
-                    route('billing.index').'?setup_session_id={CHECKOUT_SESSION_ID}',
-                    route('billing.index'),
+                    route('billing.index', ['organization' => $organization->slug]).'?setup_session_id={CHECKOUT_SESSION_ID}',
+                    route('billing.index', ['organization' => $organization->slug]),
                     // session 保持の安定 token で二重 submit を冪等化
                     // (SetupPaymentMethod 台帳を増殖させない)。
                     $this->setupAttemptToken($request, $organization),
@@ -111,15 +110,15 @@ final class ActivatePersonalController extends Controller
             }
 
             // url=null (進行中 session の replay) は請求ページへ fallback (カード登録 CTA が残る)。
-            return redirect()->route('billing.index')->with('success', $message);
+            return redirect()->route('billing.index', ['organization' => $organization->slug])->with('success', $message);
         }
 
         // 「チケットを買う」(UI 非提示・永続互換値) は購入ページへ直行する。
         if ($funding === SignupFundingChoice::Tickets) {
-            return redirect()->route('billing.tickets.show')->with('success', $message);
+            return redirect()->route('billing.tickets.show', ['organization' => $organization->slug])->with('success', $message);
         }
 
-        return redirect()->to($continue ?? route('dashboard'))->with('success', $message);
+        return redirect()->to($continue ?? route('dashboard', ['organization' => $organization->slug]))->with('success', $message);
     }
 
     /**

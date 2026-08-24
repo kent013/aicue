@@ -6,7 +6,9 @@ namespace App\Providers;
 
 use App\Auth\EncryptedUserProvider;
 use App\Auth\Guards\ApiKeyGuard;
+use App\Contracts\Auth\EmailPromotionStageBoundary;
 use App\Http\Routing\MembershipScopedOrganizationBinder;
+use App\Http\Routing\PublicOidcConnectionBinder;
 use App\Http\Routing\RouteBindingTypes;
 use App\Listeners\Audit\RejectNonCriticalAudit;
 use App\Listeners\Auth\ClearRecentAuthOnPasskeyChange;
@@ -23,6 +25,7 @@ use App\Models\Billing\Subscription;
 use App\Models\Organization;
 use App\Models\User;
 use App\Notifications\Channels\OrganizationScopedDatabaseChannel;
+use App\Services\Auth\InertEmailPromotionStageBoundary;
 use App\Services\Billing\CashierAutoRechargeGateway;
 use App\Services\Billing\CashierStripeGateway;
 use App\Services\Billing\CashierTicketCheckoutGateway;
@@ -32,6 +35,8 @@ use App\Services\Billing\StripeWebhookProcessor;
 use App\Services\Billing\TicketCheckoutGateway;
 use App\Services\Capture\FfmpegTakeThumbnailExtractor;
 use App\Services\Capture\TakeThumbnailExtractor;
+use App\Services\Help\HelpRepository;
+use App\Services\Help\McpToolScanner;
 use App\Services\Mail\Sns\AwsSnsSignatureVerifier;
 use App\Services\Mail\Sns\SnsSignatureVerifier;
 use App\Services\Render\FfmpegVideoComposer;
@@ -47,6 +52,7 @@ use App\Support\ProductionEnvGuard;
 use App\Support\QueueDispatchAtomicityGuard;
 use Aws\Sns\SnsClient;
 use Illuminate\Auth\Events\Login;
+use Illuminate\Auth\Middleware\RedirectIfAuthenticated;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Contracts\Hashing\Hasher;
@@ -114,6 +120,12 @@ class AppServiceProvider extends ServiceProvider
         });
         $this->app->bind(SnsSignatureVerifier::class, AwsSnsSignatureVerifier::class);
 
+        // メールアドレスの昇格 (T253) の 2 段の継ぎ目。**本番は何もしない実装**であり、
+        // 継ぎ目に名前を与えるためだけに存在する (段そのものを公開メソッドにすると
+        // トークンの照合を迂回する第 2 の入口ができるため。理由は
+        // App\Contracts\Auth\EmailPromotionStageBoundary の docblock が正本)。
+        $this->app->bind(EmailPromotionStageBoundary::class, InertEmailPromotionStageBoundary::class);
+
         // Critical Action 実行中フラグ。scoped() で HTTP request scope に閉じる
         // (queue worker / artisan は別 container のため context は継承されない)
         $this->app->scoped(CriticalActionContext::class);
@@ -140,6 +152,40 @@ class AppServiceProvider extends ServiceProvider
         // (ChannelManager::createDatabaseDriver は container 解決のため binding が効く。
         // AppNotification 以外の通知は素通し = 後方互換)
         $this->app->bind(DatabaseChannel::class, OrganizationScopedDatabaseChannel::class);
+
+        // ヘルプ機構 (T246) の 2 つの根。運用者が触る値ではないので CLI の knob には出さない
+        // (出すと「別の場所を検査させて緑にする」経路ができる)。テストは container の
+        // rebind で差し替える。
+        // ★**信頼する起点はリポジトリルートの canonical path** である。ここで realpath を
+        //   通しておくことで「作業ツリー全体が symlink の先にある」形は許しつつ、
+        //   起点から根までの経路に symlink が挟まった形は受け取り側の検査が弾ける
+        //   (根を canonical path として渡すことが両クラスの契約である)。
+        $this->app->singleton(HelpRepository::class, static function (): HelpRepository {
+            return new HelpRepository(self::canonicalPathUnder('docs/help'));
+        });
+
+        $this->app->singleton(McpToolScanner::class, static function (): McpToolScanner {
+            return new McpToolScanner(self::canonicalPathUnder('app/Mcp/Tools'));
+        });
+    }
+
+    /**
+     * 信頼する起点 (リポジトリルートの canonical path) の配下の絶対パスを組み立てる。
+     *
+     * ★起点だけを `realpath()` で正規化し、**配下の相対部分は正規化しない**。
+     *   正規化してしまうと経路に挟まった symlink が畳まれ、受け取り側の
+     *   「canonical path か」の検査が意味を失う。
+     *
+     * @param  non-empty-string  $relative
+     * @return non-empty-string
+     */
+    private static function canonicalPathUnder(string $relative): string
+    {
+        $base = realpath(base_path());
+        Assert::string($base, 'リポジトリルートを解決できません。');
+        Assert::stringNotEmpty($base);
+
+        return $base.'/'.$relative;
     }
 
     public function boot(): void
@@ -185,6 +231,16 @@ class AppServiceProvider extends ServiceProvider
         // (非メンバー・不在 slug/id は等しく 404 = テナント存在秘匿。
         // tests/Architecture/OrganizationRouteParamWebOnlyInvariantTest が適用境界を pin)
         Route::bind('organization', MembershipScopedOrganizationBinder::class);
+
+        // 公開の企業ログイン導線の {connection} (識別名で解決し、使えない接続は不在と同じ 404 にする)。
+        Route::bind('connection', PublicOidcConnectionBinder::class);
+
+        // 認証済みで guest 専用 route (ログイン / パスワード再設定要求 等) を開いたときの着地。
+        // ★framework の既定は「`dashboard` という名前の route があればそこへ」だが、
+        //   本アプリの `dashboard` は組織 URL 配下 (`{organization}` 必須) なので、
+        //   既定のままだと引数不足で 500 になる。組織文脈を持たない**分岐入口**へ倒す
+        //   (家系裁定 AG-037: どの組織かを裏口で決めない)。
+        RedirectIfAuthenticated::redirectUsing(static fn (): string => route('app.entry'));
 
         // route binding 型制約 (RouteBindingTypes が単一 SoT)。
         // 非適合セグメントは route にマッチしない = 404 になり、SubstituteBindings へ
@@ -258,6 +314,7 @@ class AppServiceProvider extends ServiceProvider
         $this->configureActorScopedRateLimiters();
         $this->configureApiRateLimiters();
         $this->configureAuthSurfaceRateLimiters();
+        $this->configureEnterpriseSsoRateLimiters();
         $this->configureInquiryRateLimiter();
         $this->configureRenderRateLimiter();
         $this->configureWebhookRateLimiters();
@@ -343,6 +400,59 @@ class AppServiceProvider extends ServiceProvider
     }
 
     /**
+     * 企業 OIDC SSO (T253) の RateLimiter。
+     *
+     * ★**閾値は発明しない** (AG-096)。既に本番稼働している同性質の endpoint と同値を充てる:
+     *   - enterprise-sso-start / enterprise-sso-callback = 10/min。未認証で到達する認証面の
+     *     IP レーンとして `social-callback` (10/min) と同値である
+     *   - enterprise-sso-manage / enterprise-sso-verify = 10/min。認証済み actor の業務操作として
+     *     `invitation-accept-submit` / `plan-activate` (10/min) と同値である
+     *   - email-promotion = 6/min。認証手段を増やす操作として `password-set` (6/min) と同値である
+     *   - email-promotion-confirm = 10/min。**救済の性格**なので発行より緩い側 (10/min) を充てる
+     *     (確定できずに詰む形を作らない)
+     *
+     * ★レーンは 6 本に分ける (相乗りさせない)。とくに:
+     *   - **開始と戻り口を分ける**。開始の連打で正当な戻り口が 429 になると、
+     *     IdP まで行った利用者が戻れず詰む
+     *   - **確認 (verify) を管理操作から分ける**。verify は**外向きの取得を伴う唯一の管理操作**であり、
+     *     数えたい量が違う (IdP が遅いときの連打で一覧・有効化まで止めない)
+     *   - **昇格の発行と確認を分ける**。確認はメールのリンクから来る救済経路である
+     *
+     * ★キーに route parameter を混ぜない (`{connectionSlug}` / `{oidcConnection}`)。
+     *   混ぜると bucket が id ごとに分かれ、「429 になるまでの回数」が実在オラクルになる。
+     *
+     * ★**無効リクエストも同じ bucket を消費する** (throttle は controller より前に走る)。
+     *   これは「未認証面を IP で数える」ことの必然であり、引き換えに得ているのは
+     *   **外向き HTTP と token 照合の総量が有界になること**である。
+     */
+    private function configureEnterpriseSsoRateLimiters(): void
+    {
+        // 企業ログインの開始 (GET だが試行の行を作る)。未認証面なので IP レーン。
+        RateLimiter::for('enterprise-sso-start', fn (Request $request): Limit => Limit::perMinute(10)
+            ->by('enterprise-sso-start:ip:'.($request->ip() ?? 'unknown')));
+
+        // 企業ログインの戻り口。1 要求で IdP へ discovery + token + JWKS が飛びうる。
+        RateLimiter::for('enterprise-sso-callback', fn (Request $request): Limit => Limit::perMinute(10)
+            ->by('enterprise-sso-callback:ip:'.($request->ip() ?? 'unknown')));
+
+        // 組織側の接続管理 (登録 / 更新 / 有効化 / 無効化 / 削除)。認証済み actor レーン。
+        RateLimiter::for('enterprise-sso-manage', fn (Request $request): Limit => Limit::perMinute(10)
+            ->by(RateLimiterKeys::actorOrIp($request, 'enterprise-sso-manage')));
+
+        // 接続先情報の確認。**外向きの取得を伴う唯一の管理操作**なので専用レーンにする。
+        RateLimiter::for('enterprise-sso-verify', fn (Request $request): Limit => Limit::perMinute(10)
+            ->by(RateLimiterKeys::actorOrIp($request, 'enterprise-sso-verify')));
+
+        // メール昇格の発行・再送 (認証手段を増やす操作)。
+        RateLimiter::for('email-promotion', fn (Request $request): Limit => Limit::perMinute(6)
+            ->by(RateLimiterKeys::actorOrIp($request, 'email-promotion')));
+
+        // メール昇格の確認画面と確定 (救済の性格。発行より緩い側に置く)。
+        RateLimiter::for('email-promotion-confirm', fn (Request $request): Limit => Limit::perMinute(10)
+            ->by(RateLimiterKeys::actorOrIp($request, 'email-promotion-confirm')));
+    }
+
+    /**
      * 未認証 webhook (SES/SNS 通知・Stripe) の RateLimiter。
      *
      * ★固定キーの全体天井は**置かない**。throttle middleware は署名検証より前に走るため、
@@ -398,11 +508,19 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('render-trigger', function (Request $request): Limit {
             $user = $request->user();
             $userId = $user instanceof User ? (string) $user->id : 'guest';
-            $orgId = $user instanceof User && $user->current_organization_id !== null
-                ? (string) $user->current_organization_id
-                : 'none';
+            // ★組織は **URL の route parameter からのみ**取る (家系裁定 AG-037)。'none' へ倒さない —
+            //   配線不良を黙って許すと、レーン全体が 1 つの bucket に潰れる。
+            //   「render-trigger 対象 route は必ず organization parameter を持つ」は
+            //   RenderTriggerRouteOrganizationParamTest が固定する。
+            // ★ここで得られるのは **識別名の文字列**である。流量制限は framework の既定 priority で
+            //   `SubstituteBindings` より前に走るため、モデルはまだ束縛されていない
+            //   (束縛の後ろへ動かすと、束縛の DB 参照が流量制限の外に出てしまう)。
+            //   識別名は改名で変わりうるが、改名は 30 日 5 回が上限で窓は 1 分なので、
+            //   改名の前後で bucket が分かれても上限の意味は保たれる。
+            $organizationSlug = $request->route('organization');
+            Assert::stringNotEmpty($organizationSlug);
 
-            return Limit::perMinute(6)->by("render-trigger:actor-org:{$userId}:{$orgId}");
+            return Limit::perMinute(6)->by("render-trigger:actor-org:{$userId}:{$organizationSlug}");
         });
     }
 

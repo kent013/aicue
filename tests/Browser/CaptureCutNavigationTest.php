@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Enums\Manual\JobStatus;
 use App\Enums\Manual\VideoManualStatus;
 use App\Models\Cut;
+use App\Models\Organization;
 use App\Models\Project;
 use App\Models\RenderJob;
 use App\Models\Take;
@@ -52,13 +53,13 @@ function captureNavigationFixture(): array
 
     test()->actingAs($owner);
 
-    return [$project, $manual];
+    return [$organization, $project, $manual];
 }
 
 /** capture.manuals.show の URL */
-function captureShowUrl(Project $project, VideoManual $manual): string
+function captureShowUrl(Organization $organization, Project $project, VideoManual $manual): string
 {
-    return "/app/projects/{$project->id}/manuals/{$manual->id}";
+    return "/organizations/{$organization->slug}/app/projects/{$project->id}/manuals/{$manual->id}";
 }
 
 /**
@@ -92,13 +93,13 @@ function waitUntilInViewport(mixed $page, string $testId, int $attempts = 40): b
 }
 
 test('モバイル幅ではカット選択で撮影パネルが viewport に入りフォーカスも移る', function (): void {
-    [$project, $manual] = captureNavigationFixture();
+    [$organization, $project, $manual] = captureNavigationFixture();
     $firstCutId = $manual->cuts()->orderBy('sort_order')->value('id');
 
     // ★ on()->mobile() が返す On は __call のたびに新しいページを作るため、
     //   ここで 1 度だけ materialize して以降は同じ Webpage を使い回す。
-    $page = visit(captureShowUrl($project, $manual))->on()->mobile()
-        ->assertPathIs(captureShowUrl($project, $manual));
+    $page = visit(captureShowUrl($organization, $project, $manual))->on()->mobile()
+        ->assertPathIs(captureShowUrl($organization, $project, $manual));
 
     // 前提: この時点で撮影パネルは viewport の外にある。
     // これが成り立たないとテストは何も証明しない (修正前でも緑になってしまう)。
@@ -123,11 +124,11 @@ test('モバイル幅ではカット選択で撮影パネルが viewport に入�
 });
 
 test('デスクトップ幅ではカット選択でスクロールも撮影パネルへのフォーカスも起きない', function (): void {
-    [$project, $manual] = captureNavigationFixture();
+    [$organization, $project, $manual] = captureNavigationFixture();
     $firstCutId = $manual->cuts()->orderBy('sort_order')->value('id');
 
-    $page = visit(captureShowUrl($project, $manual))->on()->desktop()
-        ->assertPathIs(captureShowUrl($project, $manual));
+    $page = visit(captureShowUrl($organization, $project, $manual))->on()->desktop()
+        ->assertPathIs(captureShowUrl($organization, $project, $manual));
 
     $before = $page->script('window.scrollY');
 
@@ -150,11 +151,11 @@ test('デスクトップ幅ではカット選択でスクロールも撮影パ�
 });
 
 test('モバイル幅では撮影パネルからカット一覧へ視点とフォーカスの両方が戻る', function (): void {
-    [$project, $manual] = captureNavigationFixture();
+    [$organization, $project, $manual] = captureNavigationFixture();
     $firstCutId = $manual->cuts()->orderBy('sort_order')->value('id');
 
-    $page = visit(captureShowUrl($project, $manual))->on()->mobile()
-        ->assertPathIs(captureShowUrl($project, $manual));
+    $page = visit(captureShowUrl($organization, $project, $manual))->on()->mobile()
+        ->assertPathIs(captureShowUrl($organization, $project, $manual));
     $page->click("[data-testid=\"cut-row-{$firstCutId}\"]");
     expect(waitUntilInViewport($page, 'capture-recording-heading'))
         ->toBeTrue('撮影パネル見出しが viewport 内に入らなかった (待機 timeout)');
@@ -173,12 +174,12 @@ test('モバイル幅では撮影パネルからカット一覧へ視点とフ�
 });
 
 test('テイク再生の video のアクセシブルネームに手順ラベルが入る (F-1-02)', function (): void {
-    [$project, $manual] = captureNavigationFixture();
+    [$organization, $project, $manual] = captureNavigationFixture();
     $firstCut = $manual->cuts()->orderBy('sort_order')->first();
     $take = Take::factory()->forCut($firstCut)->create();
 
-    $page = visit(captureShowUrl($project, $manual))->on()->desktop()
-        ->assertPathIs(captureShowUrl($project, $manual));
+    $page = visit(captureShowUrl($organization, $project, $manual))->on()->desktop()
+        ->assertPathIs(captureShowUrl($organization, $project, $manual));
     $page->click("[data-testid=\"cut-row-{$firstCut->id}\"]");
     $page->click("[data-testid=\"take-preview-{$take->id}\"]");
 
@@ -222,8 +223,8 @@ test('プレビュー動画の video にアクセシブルネームがある (F-
 
     $this->actingAs($owner);
 
-    $page = visit("/projects/{$project->id}/manuals/{$manual->id}")->on()->desktop()
-        ->assertPathIs("/projects/{$project->id}/manuals/{$manual->id}");
+    $page = visit("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}")->on()->desktop()
+        ->assertPathIs("/organizations/{$organization->slug}/projects/{$project->id}/manuals/{$manual->id}");
 
     for ($i = 0; $i < 40; $i++) {
         $exists = $page->script(

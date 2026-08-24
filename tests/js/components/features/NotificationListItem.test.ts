@@ -110,14 +110,14 @@ describe("NotificationListItem", () => {
         expect(screen.queryByTestId("unread-dot")).toBeNull();
     });
 
-    it("行クリックで POST /notifications/{id}/open (サーバ解決の遷移)", async () => {
+    it("行クリックで POST /organizations/test-org/notifications/{id}/open (サーバ解決の遷移)", async () => {
         render(NotificationListItem, { props: { notification: manualAnalyzedItem() } });
 
         await fireEvent.click(screen.getByTestId("notification-item"));
 
         expect(routerPostMock).toHaveBeenCalledTimes(1);
         expect(routerPostMock.mock.calls[0][0]).toBe(
-            "/notifications/11111111-1111-1111-1111-111111111111/open",
+            "/organizations/test-org/notifications/11111111-1111-1111-1111-111111111111/open",
         );
     });
 
@@ -180,14 +180,14 @@ describe("NotificationListItem", () => {
         expect(screen.queryByTestId("notification-read-button")).toBeNull();
     });
 
-    it("既読ボタン押下で POST /notifications/{id}/read が preserveScroll + 各コールバック付きで 1 回発火し、open は呼ばれない", async () => {
+    it("既読ボタン押下で POST /organizations/test-org/notifications/{id}/read が preserveScroll + 各コールバック付きで 1 回発火し、open は呼ばれない", async () => {
         render(NotificationListItem, { props: { notification: manualAnalyzedItem() } });
 
         await fireEvent.click(screen.getByTestId("notification-read-button"));
 
         expect(routerPostMock).toHaveBeenCalledTimes(1);
         const [url, payload, options] = routerPostMock.mock.calls[0];
-        expect(url).toBe("/notifications/11111111-1111-1111-1111-111111111111/read");
+        expect(url).toBe("/organizations/test-org/notifications/11111111-1111-1111-1111-111111111111/read");
         expect(payload).toEqual({});
         expect(options).toMatchObject({
             preserveScroll: true,
@@ -249,7 +249,7 @@ describe("NotificationListItem", () => {
 
         expect(routerPostMock).toHaveBeenCalledTimes(1);
         expect(routerPostMock.mock.calls[0][0]).toBe(
-            "/notifications/11111111-1111-1111-1111-111111111111/open",
+            "/organizations/test-org/notifications/11111111-1111-1111-1111-111111111111/open",
         );
     });
 
