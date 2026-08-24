@@ -111,3 +111,15 @@ expect(str_contains($joined, $expectedFragment))
   自己テストは 5 本 → 6 本。
 - 各ラウンドのプロンプト・対応マトリクスは `codex-history/` に、返答は同ディレクトリ直下の
   `impl-review-round-{1,2,3}.md` に保存済み。
+
+## main 取り込み後の再検証 (T254 / T257 / T259 マージ済みの main を取り込んだ後)
+
+`git merge main` はコンフリクトなしで完了した (乖離台帳・LedgerPins・AGENTS.md のいずれも
+競合しなかった。main 側の登録は D49 / 46 件のままで、本 PR の D50 / 47 件がそのまま最新となる)。
+
+- `vendor/bin/pint --test`: **passed**
+- `composer phpstan`: level 10 / **No errors**
+- `composer test`: **7543 tests / 7541 passed / 0 failed / 2 skipped (5 risky) / 35153 assertions**
+- `pnpm lint` / `pnpm typecheck` / `pnpm build` / `pnpm typecheck:packages` /
+  `pnpm build:packages`: いずれも **exit 0**
+- `pnpm test`: **2398 tests passed** / `pnpm test:packages`: **106 tests passed**
