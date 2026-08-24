@@ -22,6 +22,12 @@
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
 | T249 | 起動 probe の共通 runner への一元化 (正典 v1 追従) | test | 起動probeを共通runnerへ一元化・退行gate新設 | Medium | standalone | [設計](devnotes/20260823-0022-boot-probe-runner-unification/) | 2026-08-23 01:30 |
+| T254 | 旧名残留 gate を出現特定式の申告台帳へ (正典 v1 追従) | test | 許可を件数 pin から「出現ごとの周辺文字列 + 理由」の申告台帳へ置換し、内容に加え repo 相対パス名も走査。負のコントロールを新形へ拡張。変更は BughuntNamingResidualTest.php 1 本のみ | Medium | incremental | [設計](devnotes/20260824-1013-rename-residual-name-gate-v1/) | 2026-08-24 11:06 |
+| T255 | LLM 待ち予算の読み取り規則を単一化 (正典 v1 追従) | test | prompt YAML の client_options.timeout の読み取りを `Tests\Support\PromptWaitBudget` へ集約し旧 3 実装を同時削除 (timeout: 0 を通す穴を閉じる)。gate 書換と乖離登録 + 件数 pin は同一コミット必須。D 番号・件数は他 TODO と衝突するため実装時に main の最新から再確定 | Medium | standalone | [設計](devnotes/20260824-1016-llm-prompt-wait-budget-v1/) | 2026-08-24 11:06 |
+| T256 | .env.example gate の正典 t2 追従 (制御文字・APP_ENV 固定・台帳の由来と件数・前提の実行時確認) | test | EnvExampleInvariantTest に欠落 5 点 (i3 制御文字 / i6 APP_ENV の値固定へ移送 / i7 由来の機械検査 / i9 件数申告と照合 / i12 実行時 env の確認) を追加。.env.example は無変更。乖離登録 + 債務 1 行削除 + 件数 pin 2 つを同一コミットで整合 (D 番号は実装時に再確定) | Medium | standalone | [設計](devnotes/20260824-1014-gate-env-example-sync-t2/) | 2026-08-24 11:06 |
+| T257 | LLM 応答の復号点の受理契約強化と単一性 gate (正典 v1 追従) | backend | LlmJson を「囲みちょうど 1 つ」の受理契約へ作り替え、境界を構造走査で決定し失敗区分を 6 区分 + schema_violation へ分解。依頼文 4 本を同期し復号点の単一性 gate を新設。互換確認 A/B (pipeline-smoke / 画像 SOP) は課金があり親のみ実行可のため、未実施ならクローズ時に外部確認待ちと明示する | High | standalone | [設計](devnotes/20260824-1014-llm-output-single-decode-point-v1/) | 2026-08-24 11:06 |
+| T258 | 常設 hook 配線を家系正典 t3 へ追従 (起動子の純粋化・内側上限の数値比較・設定 2 層の全数申告) | infrastructure | 起動子を直呼び 1 行へ戻し終了コードを素通し (bug-hunt ガードの拒否コード 97→2)、内側上限の数値比較のため timeout -k 5→2、settings.local.json のトップレベル全数申告、塞がない脅威と撤回規則の明記。AGENTS.md のマーカー区間・scripts/README.md・乖離台帳 (D18 縮小 + 新設 + 債務移送 + 件数 pin) を同一変更で更新 | Medium | standalone | [設計](devnotes/20260824-1014-claude-hooks-wiring-t3/) | 2026-08-24 11:06 |
+| T259 | 追記専用チケット台帳の畳み込みを二段判定・収束繰越形へ (正典 v1 追従) | backend | 失効済み行を繰越に含めず物理削除し繰越を集約単位ごと 1 行へ収束、SUM(delta) の int4 検査を fail-closed 化。境界 DTO と変更サイトの静的 gate を新設し carried_forward_through を同一 PR で撤去。v0 の実在バグ 2 件 (退会組織の台帳が畳まれない / 失効繰越行のみの組織が処理されない) も是正。デプロイは新コード→drop migration の順。繰越行の法的分類はオーナー/法務確認が前提 | High | standalone | [設計](devnotes/20260824-1019-ticket-ledger-carry-forward-v1/) | 2026-08-24 11:06 |
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
 ## Conditional (条件付き待機)
