@@ -296,7 +296,7 @@
                     title={`${orgName} / ${userName}`}
                 >
                     <div
-                        class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-white"
+                        class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-surface"
                     >
                         <Building2 class="size-5" aria-hidden="true" />
                     </div>
@@ -424,7 +424,7 @@
             <div class="min-h-0 overflow-y-auto border-t border-border px-2 py-3">
                 <div class="mb-2 flex items-center gap-2 px-2">
                     <div
-                        class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-white"
+                        class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-surface"
                     >
                         <Building2 class="size-5" aria-hidden="true" />
                     </div>

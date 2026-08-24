@@ -8,6 +8,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { scanMarkdownLines } from "./markdown-lines";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(HERE, "../../../");
@@ -87,4 +88,59 @@ export function designTypographyNames(): readonly string[] {
         names.push(m[1]);
     }
     return names;
+}
+
+/**
+ * DESIGN.md の本文から §Components の `###` 節名を取り出す。
+ *
+ * **S9 が新設した共通 Markdown 行走査 (`scanMarkdownLines`) を共有する** —
+ * 独立した弱い解析器を増やさない (正典 i21)。単純な見出し正規表現だと、囲みコードの中に
+ * `### 部品名` を置いて「文書化済み」に見せられ、**双方向一致という中心の保証を
+ * 直接迂回できる**。
+ *
+ * 契約 5 条 (いずれも固定検体で裏取りする):
+ *   1. `## Components` は**ちょうど 1 節**であること (0 件も 2 件も例外)。
+ *      判定は**行頭から始まる有効な ATX 見出し**に限る (字下げした見出しは受理しない —
+ *      受理すると字下げコードへ退避させて双方向一致を迂回できる)
+ *   2. HTML コメントと囲みコードの中の見出しは**数えない**
+ *   3. `###` だけを対象にし、`####` 以降は数えない
+ *   4. 同名の節が 2 つあれば**例外**
+ *   5. Markdown 走査の診断 (未終端コメント / 未終端 fence / container fence /
+ *      未対応 fence) が 1 件でもあれば**解析失敗** (正典 i20)
+ *
+ * **本関数の呼び出し側 (`component-doc-parity.test.ts`) が DESIGN.md 側の
+ * Markdown 診断の消費先である**。
+ */
+export function parseDesignComponentSections(source: string): readonly string[] {
+    const scan = scanMarkdownLines(source);
+    if (scan.diagnostics.length > 0) {
+        const shown = scan.diagnostics.map((d) => `${d.line}:${d.reason}`).join(", ");
+        throw new Error(`DESIGN.md の Markdown 走査が失敗した: ${shown}`);
+    }
+
+    const lines = scan.renderedLines;
+    // ★`trim()` で探さない — 字下げした行を見出しとして受理すると、
+    //   `## Components` を字下げコードへ退避させて双方向一致を迂回できる (fail-open)。
+    //   有効な ATX 見出し (行頭から始まる `## Components`) だけを受理する。
+    const heads = lines.flatMap((line, index) => (line === "## Components" ? [index] : []));
+    if (heads.length !== 1) {
+        throw new Error(`DESIGN.md の "## Components" が 1 節でない (実際 ${heads.length} 件)`);
+    }
+
+    const sections: string[] = [];
+    for (const line of lines.slice(heads[0] + 1)) {
+        if (/^#{1,2}\s/.test(line)) break;
+        const matched = line.match(/^### (.+)$/);
+        if (matched === null) continue;
+        const name = matched[1].trim();
+        if (sections.includes(name)) throw new Error(`DESIGN.md §Components の節が重複: ${name}`);
+        sections.push(name);
+    }
+
+    return sections;
+}
+
+/** 実ファイルの DESIGN.md から §Components の節名を取り出す薄いラッパー。 */
+export function designComponentSections(): readonly string[] {
+    return parseDesignComponentSections(designMd);
 }

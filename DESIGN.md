@@ -3,18 +3,18 @@ version: "1.0"
 name: Slate × Blue (Neutral)
 description: テンプレート既定のニュートラルテーマ。中立的な青を主役に、無彩のスレートを支配色とする。アプリはこのファイルと tokens.css の値を差し替えてテーマを定義する。
 colors:
-    primary: "#2563EB"
-    primary-hover: "#1D4ED8"
-    tertiary: "#0F766E"
-    tertiary-hover: "#115E59"
+    primary: "#1D4ED8"
+    primary-hover: "#1E40AF"
+    tertiary: "#115E59"
+    tertiary-hover: "#134E4A"
     neutral: "#F4F4F5"
     surface: "#FFFFFF"
     border: "#E4E4E7"
     border-strong: "#A1A1AA"
     text-primary: "#18181B"
     text-secondary: "#52525B"
-    success: "#15803D"
-    warning: "#B45309"
+    success: "#166534"
+    warning: "#92400E"
     danger: "#B91C1C"
 typography:
     display:
@@ -68,7 +68,7 @@ spacing:
 
 ## Overview
 
-テンプレート既定のニュートラルテーマ。中立的な青(#2563EB)を主役、teal(#0F766E)を強アクセント、
+テンプレート既定のニュートラルテーマ。中立的な青(#1D4ED8)を主役、teal(#115E59)を強アクセント、
 無彩のスレート(#F4F4F5)を背景に据える。**アプリ固有のテーマは frontmatter の色値と
 tokens.css の値を差し替えて定義する**(制約体系=影なし・最小色・ramp は維持したまま色だけ変える)。
 
@@ -76,10 +76,10 @@ tokens.css の値を差し替えて定義する**(制約体系=影なし・最�
 
 色は意味で割り当てる。順序や見た目の好みで使い分けない。
 
-- **Primary(#2563EB)**: ブランドの中核。プライマリボタン、リンク、選択中のナビゲーション。
+- **Primary(#1D4ED8)**: ブランドの中核。プライマリボタン、リンク、選択中のナビゲーション。
   1 画面の主要 CTA 以外には濫用しない。
   - tailwind: `bg-primary`, `text-primary`, `border-primary`、hover は `hover:bg-primary-hover`
-- **Tertiary(#0F766E)**: 強いアクセント。緊急性・重要性のある前向き CTA、特別なバッジに限定。
+- **Tertiary(#115E59)**: 強いアクセント。緊急性・重要性のある前向き CTA、特別なバッジに限定。
   1 画面に 1 箇所が原則。
   - tailwind: `bg-tertiary`, `text-tertiary`, `border-tertiary`、hover は `hover:bg-tertiary-hover`
 - **Neutral(#F4F4F5)**: 主要な背景色。画面全体はこの色で塗る。
@@ -97,22 +97,29 @@ tokens.css の値を差し替えて定義する**(制約体系=影なし・最�
 
 ### 状態色
 
-- **Success(#15803D)**: 完了・正常・公開済み。
+- **Success(#166534)**: 完了・正常・公開済み。
   - tailwind: `text-success`, `bg-success`, `border-success`
-- **Warning(#B45309)**: 注意・確認が必要・保留。
+- **Warning(#92400E)**: 注意・確認が必要・保留。
   - tailwind: `text-warning`, `bg-warning`, `border-warning`
 - **Danger(#B91C1C)**: 失敗・破壊的操作・エラー。Tertiary とは別物
   (Tertiary は前向きな強調、Danger は否定的なシグナル)。
   - tailwind: `text-danger`, `bg-danger`, `border-danger`
 
-状態色・アクセントは Tailwind の **-700 段**で揃える(`tertiary` teal-700 / `success` green-700 /
-`warning` amber-700 / `danger` red-700)。`neutral`(#F4F4F5)や `surface`(#FFFFFF)の上で
-**本文コントラスト 4.5:1** を確保するための下限であり、これより明るい段は使わない
-(`tests/js/architecture/contrast-invariant.test.ts` が機械検証する)。
+状態色・アクセントの段は**段の名前ではなくコントラストの実測で決める**。満たすべき条件は 2 つで、
+**面として分類した token の上で本文コントラスト 4.5:1** と、
+**同じ色のソフト背景(不透明度 10〜12%)の上でも 4.5:1** である。後者が効くため、
+実際に選べるのは概ね **-800 段**になる(既定テーマは `tertiary` teal-800 / `success` green-800 /
+`warning` amber-800 / `danger` red-700 で、`danger` だけは -700 でも両条件を満たす)。
+**段を機械的に揃えるのではなく、`tests/js/architecture/contrast-invariant.test.ts` の
+実測で決めること**(不透明ペアと半透明ペアの両方を機械検証する)。
 
 ソフト背景は状態色の opacity 修飾で表現する(`bg-success/10`, `bg-danger/10`,
-`bg-primary-soft` 等)。**新しい色トークンを足す前に opacity 修飾と atom 化で表現できないか
-検討すること**(追加条件は `docs/design-system.md` の 4 条件)。
+`bg-primary-soft` 等)。**ソフト背景の部品は面として分類した token の上にのみ置く**
+(既定テーマでは `neutral` / `surface`)。塗り面(`bg-primary` 等)の上へ重ねると
+合成後の実効色が前景と同色になり、どの値を選んでも 4.5:1 を満たせない
+(静的走査は親要素を辿れないため、この規約は機械では部分的にしか保証されない —
+保証範囲は contrast gate の docblock が持つ)。**新しい色トークンを足す前に opacity 修飾と
+atom 化で表現できないか検討すること**(追加条件は `docs/design-system.md` の 4 条件)。
 
 ## Typography
 
@@ -159,7 +166,13 @@ file-scoped allowlist で個別管理する。
 ## Components
 
 > component 仕様は実装(`resources/js/components/`)と型定義が真実。本節は意味論と
-> 使い分けルールのみを定義する。各 component を追加したら本節に追記すること。
+> 使い分けルールのみを定義する。
+> **本節が対象にするのは DS の再利用部品(`atoms` / `molecules` / `organisms`)である。**
+> `features/` のドメイン部品と `templates/` のレイアウト骨格は本節の対象外
+> (前者は各 feature の設計が使い分けを決め、後者は §Layout と
+> `tests/js/architecture/page-shell-structure.test.ts` が担当する)。
+> **対象の component を追加したら本節に追記すること**
+> (`tests/js/styles/component-doc-parity.test.ts` が双方向の集合一致で強制する)。
 
 ### Button
 
@@ -290,6 +303,16 @@ CSP の `img-src` が `data:` を含むことに依存しており、
 `aria-checked`)。フォーム送信を伴う選択には使わない。`ariaLabel` は型レベルで必須。
 トラックは On=`bg-primary` / Off=`bg-border-strong`、つまみは `bg-surface`(影なし、
 明度差で表現)。`rounded-full` は真に円形な UI の例外として file-scoped allowlist で管理する。
+
+### DragHandle
+
+実装: `components/atoms/DragHandle.svelte`(仕様の真実は `DragHandle.types.ts`)。
+並べ替えのつかみ手。アイコンは `GripVertical` 固定で差し替えない(つかめる場所の合図を
+画面間で揃える)。`touch-none` でタッチをスクロールに奪わせず、小コントロールなので
+`rounded-sm`。キーボード操作は上下キーで、つかみ手自身がフォーカスを受ける。
+**並べ替えができない状態の表現は本 atom では決めない**(禁止事項 8 は「必須条件未充足を
+理由に disabled にする」ことの禁止であって、あらゆる disabled の禁止ではない。
+並べ替え自体が成立しない場面では呼び出し側がつかみ手を出さない)。
 
 ### Modal
 
@@ -509,6 +532,25 @@ active)はページ側が組み立てる(どのタブを出すか・URL は呼�
   `tests/js/architecture/logout-call-site-inventory.test.ts` が inventory で固定)
 - molecule 配置は構造的制約: 呼び出し元の RecentAuthModal は organism であり、
   atomic-import-graph 上 organism は features 層を import できない
+
+### OrganizationChoiceCard
+
+実装: `components/molecules/OrganizationChoiceCard.svelte`。組織を 1 件選んで移動する遷移カード。
+**遷移先 URL は親が渡す**(組織文脈の解決は molecule の責務ではない)。カード全体が 1 つの
+リンクで、名前と補足の 2 段構成。選択済みの状態は持たない(選ぶ操作そのものが遷移である)。
+
+### PendingInvitationsNotice
+
+実装: `components/molecules/PendingInvitationsNotice.svelte`。自分宛の**保留中招待の件数だけ**を
+出す誘導専用 notice。**受諾 UI は持たない**(受諾は通知一覧で行う)。
+背景は `bg-primary-soft/40`、hover で `bg-primary-soft`。件数 0 のときは呼び出し側が出さない。
+
+### SubtitleOverlay
+
+実装: `components/molecules/SubtitleOverlay.svelte`。映像へ重畳する字幕 overlay。
+**焼き込みではなく DOM overlay** である(MediaRecorder の stream には含まれない)。
+`primary` は上部帯、`secondary` は下部のメイン字幕で、位置は合成側の `AssSubtitleWriter`
+(ASS)と一致させる。長文は line-clamp で省略する。帯は `bg-text/70` + `text-surface`。
 
 ## Do's and Don'ts
 

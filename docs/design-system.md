@@ -15,8 +15,10 @@ drift は `tests/js/styles/canonical-source-parity.test.ts` が機械検出す�
 
 ## 検査の責務境界
 
-本節で責務境界を管理するデザイントークン検査は 4 本ある
+本節で責務境界を管理するデザイントークン検査は**下表に挙げたものがすべてである**
 (DS purity 系など、トークンの値以外を見る検査は本節の管理対象ではない)。
+数字は書かない — 表そのものを機械で実体と突き合わせているので、本数の記述は
+「表と実体が一致していること」に何も足さないまま必ず陳腐化する。
 **どれが何を見ているか**を混同しないこと — 見ている写像の段が違うので、
 片方を消すと別の壊れ方が見えなくなる。
 
@@ -25,25 +27,39 @@ drift は `tests/js/styles/canonical-source-parity.test.ts` が機械検出す�
 | `tests/js/styles/canonical-source-parity.test.ts` | DESIGN.md (正本) ⇔ tokens.css (宣言) のテキスト | 片方だけ更新した PR / トークンの増減 / 検査の母集団の取りこぼし |
 | `tests/js/styles/tokens.test.ts` | tokens.css (宣言) ⇒ Tailwind 生成 CSS | `@theme` が解釈されない / utility 名が解決しない / app.css が tokens.css を取り込んでいない |
 | `tests/js/styles/design-system-docs.test.ts` | 本書の構造 ⇔ 検査ファイルの実体 | 運用契約の節の消失 / 表と実体の食い違い |
-| `tests/js/architecture/contrast-invariant.test.ts` | DESIGN.md の色値 ⇒ コントラスト比 | 読めない色の組合せ |
+| `tests/js/architecture/contrast-invariant.test.ts` | DESIGN.md の色値 ⇒ コントラスト比 (不透明ペアと半透明ペアの合成、実装からの逆向き被覆) | 読めない色の組合せ / 役割宣言を書かずに新しい前景 × 背景の組を足す |
+| `tests/js/styles/theme-map.test.ts` | 写像パーサそのもの (固定検体) | `@theme` の検出・宣言の抽出・色表現の解析の退行 |
+| `tests/js/styles/class-usage.test.ts` | 走査器そのもの (固定検体) と `resources/js` の解析診断 | 状態単位の分解の退行 / 未対応入口の deny の空振り |
+| `tests/js/styles/token-reference-closure.test.ts` | 参照側 (resources/js / resources/css) ⇒ tokens.css の宣言集合 | token 名の綴り誤りが無スタイルとして静かに消える / 写像の外の色語 (Tailwind 既定の white 等) の混入 |
+| `tests/js/styles/component-doc-parity.test.ts` | DESIGN.md §Components ⇔ resources/js/components の部品ファイル | 文書に載らない部品が増える / 節だけ残って実装が消える |
 
 **この表は機械で実体と突き合わせている**。`tests/js/styles/` に検査を足したら本表にも行を足す
 (足さないと `design-system-docs.test.ts` が落ちる)。逆に検査を消したら行も消す。
 別の場所へ足す検査は `design-system-docs.test.ts` の `EXTERNAL_GATE_FILES` へ明示登録する。
 
-本書の検査は、読者に描画されない領域 (HTML コメント / fenced code) を落としてから節と表を見る。
+本書の検査は、**規範判定対象外領域**を落としてから節と表を見る。
+落とすのは HTML コメントと囲みコードの 2 つ(前者は読者に描画されず、後者は描画されるが
+規範の本文として数えない。まとめてこう呼ぶ)。
 落とす判定は Markdown の fence 規則に寄せてあり (字下げした偽の終端や、
 情報文字列にバッククォートを含む無効な開始行では区間が閉じない・開かない)、
 コメントを取り除いた跡には**規範の最小断片には使わない制御文字**を目印として残すので、
 コメントを挟んだ 2 つの断片が検査の上でだけ繋がることはない。
-ただし**完全な Markdown 解析ではない** — 4 空白字下げのコードブロックと
-HTML 要素による非表示は見ていない。
+**行頭から 3 空白までで始まる正規の囲みコード記法以外の位置に、
+記号を 3 個以上連続させて書くことは禁じる**(引用やリストの中の囲みコード記法、
+行の途中の連続記号、記号 3 個以上の行内コードを含む)。書かれていたら検査自体を失敗させる。
+加えて**タブと 4 個以上連続した半角空白も検査自体を失敗させる**
+(字下げによるコードは書かず、囲みコード記法を使うこと)。
+字下げコードの位置を近似で判定すると見出し直後や引用の中の形を取りこぼし、
+そこへ規範の断片を退避させられる。タブを禁じたうえで 4 連続空白を拒否すれば、
+引用やリストの記号が何段入れ子になっていても字下げコードは書けないので、
+**字下げについては引用やリストの文法を一切扱わずに見逃しを 0 にできる**。
+ただし**完全な Markdown 解析ではない** — HTML 要素による非表示は見ていない。
 そのうえで節ごとに**規範の最小断片** (`design-system-docs.test.ts` の
 `SECTION_CONTRACT_PHRASES`) が本文に在ることを求めるので、契約の一文を消したり
 描画されない領域へ移したりすると赤になる。**文言を直すときは同じ PR で最小断片も直す**
 (それが「契約を変えた」ことの可視化になる)。
 
-保証しないもの: Vite のビルド・アセット配信・ブラウザでの適用は 4 本のどれも見ていない。
+保証しないもの: Vite のビルド・アセット配信・ブラウザでの適用は**下表のどれも**見ていない。
 文書側で見ているのは節の構造・表の実体・最小断片までで、**周りの説明が骨抜きになったことは
 検出できない**。
 DESIGN.md frontmatter の `spacing:` は**値も tokens.css への実装写像の有無も検査していない**
@@ -58,6 +74,7 @@ DESIGN.md frontmatter の `spacing:` は**値も tokens.css への実装写像�
 - [ ] `/resources/css/tokens.css` の `@theme` / `@utility` 該当ブロック
 - [ ] `/tests/js/styles/inventory.ts`(トークンの追加・削除時。parity と生成 CSS 検査の母集団を兼ねる)
 - [ ] テーマ由来の制約を変える場合は `/tests/js/support/ds-purity.ts` の THEME_PATTERNS
+- [ ] トークンの**値**を変える場合は `contrast-invariant.test.ts` の不透明ペアと**半透明ペア(合成)**の両方が緑であること(ソフト背景の色は面の上での合成後の値で判定される)
 
 片方だけ更新する PR は merge しない(parity テストが落ちる)。
 
@@ -67,7 +84,8 @@ DESIGN.md frontmatter の `spacing:` は**値も tokens.css への実装写像�
 
 1. `DESIGN.md` frontmatter の colors と本文の色記述を更新
 2. `tokens.css` の `--color-*` を同じ値に更新
-3. parity テスト green を確認
+3. parity テスト green を確認(**contrast-invariant の合成検査も含む**。
+   状態色を明るい段に戻すとソフト背景側で落ちる)
 
 制約体系(影なし / rounded 3 段 / weight 400-500 / ramp 必須)を変えるテーマにする場合は、
 `ds-purity.ts` の **THEME_PATTERNS** を DESIGN.md と同期して書き換える。
