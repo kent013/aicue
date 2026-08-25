@@ -1,0 +1,43 @@
+{
+ "session_id": "20260825-1321",
+ "started_at": "20260825-1321",
+ "last_updated_at": "20260825-1845",
+ "ended_at": "20260825-1845",
+ "mode": "single-shot",
+ "max_cycles": 1,
+ "audit_interval": 2,
+ "skip_consensus": false,
+ "args": {
+  "topic_or_todo_id": null,
+  "from": null
+ },
+ "notes": [
+  {
+   "added_at": "20260825-1321",
+   "content": "起点はユーザー指示「lctl更新して確認してください。続けて。」。lctl inbox を確認済み。実作業が残る追従タスクは auth-invitation-flow (t0 → v1) のみ。未充足は i7 (招待元組織の論理削除で 500 になる口 3 か所) / i11 (継続の専用クラス化と session 鍵の一本化) / i14 の一部 (継続の読み出し・破棄の重複解消) / i16 (AG-214: 招待経由登録への verified 付与)。i4/i8 は充足済み (i4 は aicue が正典の採用元)。"
+  }
+ ],
+ "current_cycle": 1,
+ "current_phase": "phase-4",
+ "claiming_todo_id": null,
+ "status": "completed",
+ "cycles": [
+  {
+   "cycle": 1,
+   "phase_completed": "phase-4",
+   "designed_topic": "auth-invitation-flow-v1",
+   "design_tmp_dir": "devnotes/20260825-1324-auth-invitation-flow-v1",
+   "added_todo_ids": [
+    "T263"
+   ],
+   "implemented_todo_ids": [
+    "T263"
+   ],
+   "merge_commit": "e8ca096a",
+   "audit_report_path": null,
+   "error": null,
+   "started_at": "20260825-1321",
+   "ended_at": "20260825-1845"
+  }
+ ]
+}
