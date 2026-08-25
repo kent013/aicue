@@ -25,6 +25,7 @@ use App\Services\OAuth\OrganizationAccessRevoker;
 use App\Services\Project\DefaultProjectResolver;
 use App\Services\Security\SecurityEventRecorder;
 use App\Support\Account\AccountDeletionGrace;
+use App\Support\Auth\InvitationContinuation;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Session\Session;
 use Illuminate\Database\Eloquent\Builder;
@@ -135,7 +136,15 @@ class OrganizationMembershipService
             throw ValidationException::withMessages(['token' => ['この招待は有効期限が切れています。']]);
         }
 
-        // 宛先 email の早期照合 (UX 用の明示メッセージ + 高速拒否)。生存判定 (取消/受諾済/失効) の後・
+        // 招待元組織の論理削除は「無効」へ畳む (正典 v1 i7)。不在・取消済みと同一の中立メッセージ
+        // (500 にしない / 理由の出し分けを増やさない)。宛先照合より前に置く —
+        // 消えた組織の招待で宛先一致の可否を教えない。最終権威は joinOrganization の 1c。
+        $organization = $invitation->organization;
+        if ($organization === null) {
+            throw ValidationException::withMessages(['token' => ['この招待は無効です。']]);
+        }
+
+        // 宛先 email の早期照合 (UX 用の明示メッセージ + 高速拒否)。生存判定 (取消/受諾済/失効/組織削除) の後・
         // 既メンバー判定の前に置き、どの分岐も join より前 = 状態を一切変えずに拒否する。
         // 権威はロック下再照合 (joinOrganization) 側で、規則は OrganizationInvitation::isAddressedTo に集約。
         if (! $invitation->isAddressedTo($user)) {
@@ -143,9 +152,6 @@ class OrganizationMembershipService
                 'token' => ['この招待は別のメールアドレス宛に送信されています。招待先のメールアドレスでログインし直してください。'],
             ]);
         }
-
-        $organization = $invitation->organization;
-        Assert::isInstanceOf($organization, Organization::class);
 
         if ($organization->users()->whereKey($user->getKey())->exists()) {
             throw ValidationException::withMessages(['token' => ['既にこの組織のメンバーです。']]);
@@ -189,8 +195,13 @@ class OrganizationMembershipService
             return null;
         }
 
+        // findActiveByPlainToken が組織生存 (whereHas) を含むため通常ここへは来ないが、
+        // 解決〜参照の間の論理削除 race を 500 にしない防御。null なら個人組織生成へ
+        // fallback する (登録そのものは成功させる)。
         $organization = $invitation->organization;
-        Assert::isInstanceOf($organization, Organization::class);
+        if ($organization === null) {
+            return null;
+        }
 
         // 既メンバー (race 等) は個人組織へ fallback
         if ($organization->users()->whereKey($user->getKey())->exists()) {
@@ -221,19 +232,15 @@ class OrganizationMembershipService
      */
     public function resolveRegisterPrefillEmail(Session $session): ?string
     {
-        $raw = $session->get('invitation_token');
-
-        if (! is_string($raw) || $raw === '') {
-            if ($raw !== null) {
-                $session->forget('invitation_token'); // 汚染値を除去
-            }
-
+        // 型衛生 (非文字列/空の汚染値破棄) は継続クラスへ集約 (正典 v1 i11)
+        $token = InvitationContinuation::resolve($session);
+        if ($token === null) {
             return null;
         }
 
-        $invitation = OrganizationInvitation::findActiveByPlainToken($raw);
+        $invitation = OrganizationInvitation::findActiveByPlainToken($token);
         if ($invitation === null) {
-            $session->forget('invitation_token'); // stale/invalid を GET 時点で破棄
+            InvitationContinuation::forget($session); // stale/invalid を GET 時点で破棄 (terminal)
 
             return null;
         }
@@ -242,7 +249,7 @@ class OrganizationMembershipService
         // token を破棄して null 返却する (prefill しない)。
         $email = $invitation->email;
         if ($email === '') {
-            $session->forget('invitation_token');
+            InvitationContinuation::forget($session);
 
             return null;
         }
@@ -428,17 +435,33 @@ class OrganizationMembershipService
                 return false; // 宛先不一致は受諾不能へ畳む (既存の false 契約と同じ neutral 扱い)
             }
 
+            // 1c. 招待元組織の生存のロック下再検証 (正典 v1 i2/i7 の最終権威)。organizations 行は
+            //     冒頭の lockForMembershipWrite が canonical 順序で lockForUpdate 済みだが、
+            //     非ロックの SELECT は MVCC スナップショット版を返しうる (1b の $lockedUser と同じ理由)。
+            //     relation 起点の **lockForUpdate 読み**で最新版を取り直す — 取得済み行の再取得は
+            //     no-op re-acquire でロック順序も変わらない ($locked / $lockedUser と同じ流儀)。
+            //     SoftDeletes の default scope が論理削除済みを除外するため、削除済みなら null。
+            //     relation 起点なのでクラス起点の主キー同一性クエリを増やさない
+            //     (= DirectFetchInventory の母集団外)。
+            /** @var Organization|null $lockedOrganization */
+            $lockedOrganization = $locked->organization()->lockForUpdate()->first();
+            if ($lockedOrganization === null) {
+                return false; // 受諾不能へ畳む (全呼び出し元が false を消費する既存契約)
+            }
+
             // 2. org 参加の原子的 INSERT。0 行 = 別経路で join 済み (role は変更しない。
-            //    非正規状態が残る場合も「未割当」として可視化され管理画面から修復できる)
+            //    非正規状態が残る場合も「未割当」として可視化され管理画面から修復できる)。
+            //    書き込みは事前取得の $organization ではなくロック読みした $lockedOrganization を
+            //    権威として使う (同一行なので値は同じだが、権威の出所を 1 つにする)。
             $joined = DB::table('organization_user')->insertOrIgnore([
-                'organization_id' => $organization->id,
+                'organization_id' => $lockedOrganization->id,
                 'user_id' => $user->getKey(),
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
 
             if ($joined === 1) {
-                $user->addRole($role->value, $organization->laratrust_team_id);
+                $user->addRole($role->value, $lockedOrganization->laratrust_team_id);
             }
 
             $locked->forceFill(['accepted_at' => now()])->save();

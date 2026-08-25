@@ -197,6 +197,12 @@ const DELETION_PATH_CLOSURE = [
     'App\Services\Project\DefaultProjectResolver',
     'App\Services\Security\SecurityEventRecorder',
     'App\Support\Account\AccountDeletionGrace',
+    // ↓ T263 (招待フローの正典 v1 追従) で閉包に入った 1 クラス。閉包はクラス粒度なので、
+    //   退会そのものが招待の継続を触らなくても、OrganizationMembershipService が
+    //   register prefill の解決 (resolveRegisterPrefillEmail) で参照した時点で入る。
+    //   session の鍵 1 つの読み書き (put/get/forget) しか行わず、
+    //   決済事業者 SDK への到達辺を持たない (検査 2 が機械的に固定する)。
+    'App\Support\Auth\InvitationContinuation',
 ];
 
 /**

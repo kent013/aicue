@@ -180,7 +180,8 @@ test('招待受諾成立の登録は個人組織を作らず pending も continu
         'intended_plan' => 'starter',
     ]);
 
-    $response->assertRedirect(route('verification.notice'));
+    // 招待成立の登録は verified で作成されるため認証促し画面を経由せず app.entry へ (i16)
+    $response->assertRedirect(route('app.entry'));
 
     $user = User::query()->whereBlind('email', 'email_index', $email)->firstOrFail();
 

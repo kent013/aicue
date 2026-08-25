@@ -10,6 +10,7 @@ use App\Rules\UniqueEncryptedEmail;
 use App\Services\Onboarding\IntendedPlanResolver;
 use App\Services\Organization\OrganizationMembershipService;
 use App\Services\Organization\OrganizationProvisioningService;
+use App\Support\Auth\InvitationContinuation;
 use App\Support\Legal\LegalConsent;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
@@ -29,10 +30,13 @@ use Webmozart\Assert\Assert;
  *   押下時にこのエラーを表示する (DESIGN.md §Do's and Don'ts)。
  * - 同意の証跡 (terms_accepted_at / consent_version) は $fillable 外のため forceFill で
  *   初回 INSERT 時点で記録する。
- * - 招待 (organization invitation) 経由の登録は、session の invitation_token を fail-secure に
- *   解決し、招待 email との一致を MatchesInvitationEmail rule で検証する。受諾可能なら本
- *   transaction 内で招待組織へ参加し、個人組織の自動生成はスキップする (招待組織を主所属に
- *   する)。受諾不能 (失効/取消/受諾済/不一致/既メンバー) なら個人組織生成へ fallback する。
+ * - 招待 (organization invitation) 経由の登録は、招待の継続 (InvitationContinuation) を
+ *   fail-secure に解決し、招待 email との一致を MatchesInvitationEmail rule で検証する。
+ *   受諾可能なら本 transaction 内で招待組織へ参加し、個人組織の自動生成はスキップする
+ *   (招待組織を主所属にする)。join 成立時は同一 tx 内で email_verified_at を付与する
+ *   (正典 v1 i16 — 招待メール URL の所持 = 受信箱の所有の証明)。
+ *   受諾不能 (失効/取消/受諾済/組織論理削除/不一致/既メンバー) なら個人組織生成へ
+ *   fallback し、verified は付与しない。
  * - 料金表由来のプラン意図 (`intended_plan`) は validation rules に足さない (無効値でも登録は
  *   通す = 422 で止めない)。値は IntendedPlanResolver が PlanCode allowlist に照合し、
  *   不在 / 無効 / 改ざんはすべて pending forget に倒す (stale pending の誤 promote 防止)。
@@ -51,8 +55,12 @@ class CreateNewUser implements CreatesNewUsers
      */
     public function create(array $input): User
     {
-        // session の招待 token を fail-secure に解決 (未ログインの招待リンク経由で保存される)
-        $invitationToken = $this->resolveInvitationToken();
+        // 処理中の HTTP リクエストに紐づく session を 1 回だけ取得し、resolve と forget に
+        // 同じインスタンスを渡す (CreateNewUser は Fortify の RegisteredUserController からのみ
+        // HTTP 文脈で呼ばれる。session 未起動なら framework が例外を投げる = fail-fast)。
+        // session の招待 token の解決 (型衛生 + 汚染値破棄) は継続クラスに集約する (正典 v1 i11)
+        $session = request()->session();
+        $invitationToken = InvitationContinuation::resolve($session);
 
         $validated = Validator::make($input, [
             'name' => ['required', 'string', 'max:255'],
@@ -112,6 +120,17 @@ class CreateNewUser implements CreatesNewUsers
                     // その経路の同一 tx に閉じている。**marker 設定だけをここに残してはならない**
                     // (付与されない marker 済み org = 永久に付与を受けられない org になる)。
                     $this->provisioning->provisionInitialOrganization($user);
+                } else {
+                    // 招待経由の登録は email 確認済みとして作成する (正典 v1 i16 / 裁定 AG-214)。
+                    // join 成立 = 有効招待 + 宛先一致のロック下再照合を通過 = 招待メール URL の所持
+                    // = 受信箱の所有の証明。前提 (i13) は MatchesInvitationEmail rule +
+                    // acceptInvitationIfValid の事前照合 + joinOrganization のロック下再照合の三重。
+                    // 同一 tx 内で立てるため、Fortify の Registered event (create() return 後に発火) の
+                    // SendEmailVerificationNotification は hasVerifiedEmail() を見て確認メールを送らない。
+                    // Illuminate\Auth\Events\Verified は発火しない — あの event の意味論は
+                    // 「確認フローを完了した」であり登録時付与とは別 (framework の markEmailAsVerified()
+                    // 自体も event を発火しない)。aicue に Verified の listener は存在しない (2026-08-25 実測)。
+                    $user->forceFill(['email_verified_at' => now()])->save();
                 }
 
                 return $user;
@@ -126,35 +145,12 @@ class CreateNewUser implements CreatesNewUsers
             throw $e; // email 起因でない unique 違反は握り潰さず再送
         }
 
-        // 登録が確定したので招待 token を session から落とす (terminal)
+        // 登録が確定したので招待 token を継続から落とす (terminal — 正典 v1 i14)
         if ($invitationToken !== null) {
-            session()->forget('invitation_token');
+            InvitationContinuation::forget($session);
         }
 
         return $user;
-    }
-
-    /**
-     * session の `invitation_token` を fail-secure に取得する。
-     *
-     * session には任意の型が入りうるため、`is_string && !== ''` を満たさないものは不正値として
-     * forget し null を返す (未ログインの招待リンク経路が put する。汚染された値で登録経路の
-     * 型契約を壊さない)。
-     */
-    private function resolveInvitationToken(): ?string
-    {
-        $session = session();
-        $raw = $session->get('invitation_token');
-
-        if (is_string($raw) && $raw !== '') {
-            return $raw;
-        }
-
-        if ($raw !== null) {
-            $session->forget('invitation_token');
-        }
-
-        return null;
     }
 
     /**
