@@ -62,11 +62,16 @@ class OrganizationInvitation extends Model implements CipherSweetEncrypted
 
     /**
      * 平文 token から「受諾可能 (active: 未受諾・未失効・期限内)」な招待を解決する。
-     * token_hash 照合 + scopeActive のみ (平文 email 検索は行わない = 列挙面を広げない)。
-     * active でない (不在/失効/取消/受諾済) 場合は null。
+     * token_hash 照合 + scopeActive + 招待元組織の生存のみ (平文 email 検索は行わない =
+     * 列挙面を広げない)。active でない (不在/失効/取消/受諾済/組織論理削除) 場合は null。
      *
-     * MatchesInvitationEmail / acceptInvitationIfValid / register prefill resolver が共有し、
-     * active 判定条件のドリフトを防ぐ単一解決口。
+     * 招待元組織の生存 (SoftDeletes の default scope) も active の条件に含める
+     * (正典 v1 i7 — 論理削除済み組織宛は「active でない」へ畳む。scopeActivePendingForEmail の
+     * whereHas('organization') と同じ意味論)。scopeActive 自体は招待行の状態だけを表す scope の
+     * まま変えない (activePendingForEmail との条件重複を作らない)。
+     *
+     * MatchesInvitationEmail / acceptInvitationIfValid / register prefill resolver /
+     * InvitationAcceptanceController::show が共有し、active 判定条件のドリフトを防ぐ単一解決口。
      * (POST 受諾 acceptInvitation() は revoked/accepted/expired を個別メッセージに出し分けるため
      *  本メソッドを使わない)
      */
@@ -76,6 +81,7 @@ class OrganizationInvitation extends Model implements CipherSweetEncrypted
         // isExpired()/isAccepted()/isRevoked() の個別判定と概念的に一致させ、ドリフトを防ぐ。
         return self::query()
             ->active()
+            ->whereHas('organization')
             ->where('token_hash', self::hashToken($plainToken))
             ->first();
     }

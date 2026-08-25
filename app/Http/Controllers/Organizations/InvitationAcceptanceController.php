@@ -9,6 +9,7 @@ use App\Models\Organization;
 use App\Models\OrganizationInvitation;
 use App\Models\User;
 use App\Services\Organization\OrganizationMembershipService;
+use App\Support\Auth\InvitationContinuation;
 use App\Support\Seo\SeoManager;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -29,7 +30,7 @@ class InvitationAcceptanceController extends Controller
      * 受諾確認画面 (GET, guest 可)。
      *
      * - token 欠落 (URL に token param 自体が無い) は 404
-     * - 無効招待 (不在/取消済/受諾済/期限切れ) は理由を出し分けず組織名も出さない専用ページ
+     * - 無効招待 (不在/取消済/受諾済/期限切れ/招待元組織の論理削除) は理由を出し分けず組織名も出さない専用ページ
      *   (Invitations/Invalid) を返す。どの無効理由でも同一画面にすることで token オラクルを防ぐ
      *   (未認証の URL 探索で「組織が実在し招待が取り消された」等を識別させない)
      * - 未ログイン + 有効招待: token を session に fail-secure 保存し register へ誘導する
@@ -46,12 +47,14 @@ class InvitationAcceptanceController extends Controller
         $token = $request->query('token');
         abort_unless(is_string($token) && $token !== '', 404);
 
-        $invitation = OrganizationInvitation::query()
-            ->where('token_hash', hash('sha256', $token))
-            ->first();
-
-        // 無効招待は理由非開示の専用ページへ (guest / auth 共通)
-        if ($invitation === null || $invitation->isRevoked() || $invitation->isAccepted() || $invitation->isExpired()) {
+        // 無効招待は理由非開示の専用ページへ (guest / auth 共通)。解決は findActiveByPlainToken
+        // (単一解決口) へ寄せる — 手書きの hash・状態条件の重複が消え、招待元組織の論理削除
+        // (whereHas('organization')) も同じ 1 本で畳まれる (正典 v1 i7)。
+        // ★guest 分岐より前で畳む: 後ろに置くと guest では token が session に入り、
+        //   register の prefill に宛先が出た上で登録 POST が失敗する二段障害になる。
+        // ★organization null の再判定は解決〜描画の間の削除 race の防御 (通常は到達しない)。
+        $invitation = OrganizationInvitation::findActiveByPlainToken($token);
+        if ($invitation === null || $invitation->organization === null) {
             // タブ title は h1「この招待リンクは使用できません」から指示語「この」を落とした形。
             // SeoTitle::compose が ` | {サイト名}` を付けるため、タブ幅を圧迫しない範囲で見出しと揃える
             // (config/seo.php の「h1 と一致させる」規約に対する意図的な短縮。
@@ -61,9 +64,10 @@ class InvitationAcceptanceController extends Controller
             return Inertia::render('Invitations/Invalid');
         }
 
-        // 未ログイン: token を session に保存して register へ誘導 (受諾は登録完了後)
+        // 未ログイン: token を継続 (InvitationContinuation) に覚えさせて register へ誘導
+        // (受諾は登録完了後。session の鍵は継続クラスに閉じる — 正典 v1 i11)
         if (! $request->user() instanceof User) {
-            $request->session()->put('invitation_token', $token);
+            InvitationContinuation::remember($request->session(), $token);
 
             return redirect()->route('register');
         }

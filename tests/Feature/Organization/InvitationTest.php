@@ -378,7 +378,8 @@ test('招待 email で register すると個人組織を作らず招待組織へ
         'terms_accepted' => '1',
     ]);
 
-    $response->assertRedirect(route('verification.notice'));
+    // 招待成立の登録は verified で作成されるため認証促し画面を経由せず app.entry へ (i16)
+    $response->assertRedirect(route('app.entry'));
 
     $user = User::whereBlind('email', 'email_index', 'newbie@example.com')->firstOrFail();
     // 招待組織へ参加し、招待ロールが付与される
@@ -403,12 +404,14 @@ test('招待経由登録の直後、組織 route の外では共有プロップ 
         'email' => 'header@example.com',
         'password' => 'SecurePass1234',
         'terms_accepted' => '1',
-    ])->assertRedirect(route('verification.notice'));
+    ])->assertRedirect(route('app.entry'));
 
-    // 組織文脈は **URL だけ**で決まる (家系裁定 AG-037)。verification.notice は組織 route では
+    // 組織文脈は **URL だけ**で決まる (家系裁定 AG-037)。settings は組織 route では
     // ないので、招待先に所属していても currentOrganization は null でなければならない
     // (所属している組織のどれかを裏口から選ぶと、それが保持列の再発明になる)。
-    $this->get(route('verification.notice'))
+    // 検証用 GET 先は i16 (招待成立 = verified) 以降も到達できる組織外の認証済み
+    // Inertia ページ (/settings) を使う。検証意図は従来 (verification.notice) と同じ。
+    $this->get(route('settings'))
         ->assertOk()
         ->assertInertia(fn (AssertableInertia $page) => $page
             ->where('currentOrganization', null)
@@ -427,7 +430,7 @@ test('招待経由登録では個人組織を作らず signup grant を付与し
         'email' => 'nofree@example.com',
         'password' => 'SecurePass1234',
         'terms_accepted' => '1',
-    ])->assertRedirect(route('verification.notice'));
+    ])->assertRedirect(route('app.entry'));
 
     $user = User::whereBlind('email', 'email_index', 'nofree@example.com')->firstOrFail();
     // 初期組織は作らない (招待組織が唯一の所属になる)

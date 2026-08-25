@@ -116,6 +116,17 @@ test('非文字列 session 値 (配列) → invitationEmail null かつ forget (
     $response->assertSessionMissing('invitation_token');
 });
 
+test('論理削除組織の token → invitationEmail null かつ forget (i7: 無効招待への同一畳み込み)', function (): void {
+    [, $token, , $organization] = makeInvitationWithToken('deleted-org@example.com');
+    $organization->delete();
+
+    $response = $this->withSession(['invitation_token' => $token])->get('/register');
+
+    $response->assertOk()
+        ->assertInertia(fn (AssertableInertia $page) => $page->where('invitationEmail', null));
+    $response->assertSessionMissing('invitation_token');
+});
+
 test('token 無し GET /register は invitationEmail null・socialProviders あり・no-store を付けない', function (): void {
     $response = $this->get('/register');
 
@@ -200,7 +211,8 @@ test('P7: 招待受諾成立の登録では pending を消費せず継続導線�
         'intended_plan' => 'starter',
     ]);
 
-    $response->assertRedirect(route('verification.notice'));
+    // 招待成立の登録は verified で作成されるため認証促し画面を経由せず app.entry へ (i16)
+    $response->assertRedirect(route('app.entry'));
 
     $user = User::whereBlind('email', 'email_index', $email)->firstOrFail();
     expect($organization->users()->whereKey($user->getKey())->exists())->toBeTrue();
