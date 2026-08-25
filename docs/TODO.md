@@ -21,6 +21,7 @@
 
 | ID | タイトル | テーマ | 概要 | 優先度 | モード | 設計 | 追加日 |
 |---|---|---|---|---|---|---|---|
+| T265 | bug-hunt 照合器を lctl 正典 t2 へ追従 (自己テスト 3 点追記) | test | 家系の機能台帳 lctl の feature bughunt-executed-route-capture の正典 t2 追従。施策 A: 主入力 6 点の欠落を 1 点ずつ pin する検査。施策 B: 誤抽出検知の形の修正 (独立オラクルとの集合完全一致 + 集約形の補助併置)。施策 C: 実ルーター検査とコマンド実登録の確認。施策 D: README・docblock の契約説明の同期。変更は bug-hunt スキルの coverage 配下 3 ファイルに閉じる | High | standalone | [設計](devnotes/20260826-0029-bughunt-executed-route-capture-t2/) | 2026-08-26 00:51 |
 
 完了した TODO は [TODO-closed.md](TODO-closed.md) を参照。
 
