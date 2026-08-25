@@ -26,6 +26,37 @@ final class PhpLintOracle
     private const string WARNING_PATTERN = "/non-compound name '([^']+)' has no effect in .+ on line (\\d+)/";
 
     /**
+     * `php -l` を起動する Process を組み立てる (inspect() が使う。配線検査からも観測できる)。
+     *
+     * ★子プロセスの言語環境は **`LC_ALL=C` に固定**する (家系の正典 t2)。
+     *   警告文からの抽出 (WARNING_PATTERN) は英語の診断文に依存するため、
+     *   英語以外の言語環境の開発機で真値の抽出が静かに壊れる (自己検査が空振りする方向)
+     *   のを予防する。Symfony Process は明示 env を継承環境の上へ合成するので、
+     *   他の環境変数の継承は保たれる。
+     * ★**限界 (誇張しない)**: 機械保証は「本メソッドが返す Process の明示 env が
+     *   LC_ALL=C の 1 変数ちょうどである」ことまで (gate 側の配線検査)。inspect() が
+     *   本メソッドを経由することはコードレビューで見る。言語環境の差による出力差そのものは
+     *   この開発機では観測できない (現行の PHP は診断文を翻訳しないため挙動差が出ない)。
+     *   これは予防の固定である。
+     */
+    public static function buildProcess(string $absolutePath): Process
+    {
+        return new Process(
+            [
+                PHP_BINARY,
+                '-n',
+                '-d', 'error_reporting=E_ALL',
+                '-d', 'display_errors=1',
+                '-d', 'log_errors=0',
+                '-l',
+                $absolutePath,
+            ],
+            null,
+            ['LC_ALL' => 'C'],
+        );
+    }
+
+    /**
      * 見本ファイルに対して `php -l` を **1 回だけ**実行し、結果を丸ごと返す。
      *
      * @return array{
@@ -38,15 +69,7 @@ final class PhpLintOracle
      */
     public static function inspect(string $absolutePath): array
     {
-        $process = new Process([
-            PHP_BINARY,
-            '-n',
-            '-d', 'error_reporting=E_ALL',
-            '-d', 'display_errors=1',
-            '-d', 'log_errors=0',
-            '-l',
-            $absolutePath,
-        ]);
+        $process = self::buildProcess($absolutePath);
         $process->run();
 
         $exitCode = $process->getExitCode();

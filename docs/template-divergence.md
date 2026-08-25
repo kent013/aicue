@@ -8,7 +8,7 @@
 `template-divergence-ledger` が 2026-08-15 に確定した形) に従う。形式は
 `tests/Architecture/TemplateDivergenceLedgerFormatTest.php` が機械で強制する。
 
-登録エントリ: 53 件
+登録エントリ: 54 件
 
 ## 記録の原則
 
@@ -3297,3 +3297,27 @@ controller の存在ではない。
   `tests/js/styles/design-md.ts`
 - 設計: `devnotes/20260824-1019-design-token-system-v1/`
 - 関連する登録: D28 (デザイントークン検査の独自系統) / D34 (採用時債務の凍結層。本登録で 1 行解消した)
+
+## D57 非複合 global use gate を走査器分離 + 追跡下 PHP 全数の母集団で持つ
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `tests/Architecture/NoNonCompoundGlobalUseTest.php` |
+| 業務要件起因の説明 | 本 gate は「手元では警告で済む書き方が CI では例外へ昇格し全テストが全滅する」事故の再発防止装置であり、撮影 PWA と課金を持つ本アプリの変更安全性 (リリース継続性) はその検出力に依存する。走査母集団をテンプレートの 6 root ファイルシステム走査へ戻すと、追跡下 PHP のうち root 外の置き場が走査域から落ちて再発検出が置き場依存になるため、追跡下 PHP 全数の単一出典 (`Tests\Support\TrackedPhpSourceFiles`) から取る (AGENTS.md「走査根の単一出典」規約) |
+| 揃え続ける不変条件と保証機構 | 家系の正典 t2 の必須能力 (3 種 import の対象化 / 名前空間文脈の追跡 / 先頭バックスラッシュ正規化 / php -l 真値との検体照合と検体ごとの真値非空の検知 / php -l を起動する Process builder の明示 env LC_ALL=C の pin / 識別子位置の namespace 字句のガードの検体固定) を、gate 本体に同居する検査群が保証する。機械保証はこの列挙の範囲までで、走査域の網羅そのものは母集団の縮退検査 (非空 + 代表 2 置き場の包含 + unresolved 空 + 読めないファイルでの失敗) が担う |
+| 再判定の条件 | テンプレートが追跡下全数の単一出典による母集団定義を採ったとき、または家系の正典が構成 (ファイル配置・自己検査の分離) まで規定したとき |
+| 決めた日 | 2026-08-16 |
+| 決めた人 | 開発者 |
+| 根拠 | T180 |
+| 状態 | 恒久 |
+| 見直し期限 | — |
+
+テンプレートは走査器 5 クラスを `tests/Support/Architecture/GlobalUse/` に置き、自己検査を
+`NoNonCompoundGlobalUseScannerTest.php` として分離し、走査 root を app / bootstrap / config /
+database / routes / tests の 6 root に固定する。aicue は走査器 2 クラスを
+`tests/Support/GlobalUse/` に置き、自己検査 (検体照合・空振り検知・件数 pin) を gate 本体へ
+同居させ、母集団を追跡下 PHP 全数 (`*.blade.php` 除く) の単一出典から取る (家系最広)。
+正典は能力を要求するのであって構成を要求しない (裁定 AG-155 の但し書き: 走査 root の列挙は
+リポジトリ構成依存として必須外)。採用時点ではこの食い違いに説明が無く採用時債務 (D34 の一覧)
+として凍結されていたが、正典 t2 追従 (devnotes/20260826-0024-gate-no-non-compound-global-use-t2/)
+で本ファイルを変更するのに伴い、同じ変更で債務から外して本登録に説明を移した。

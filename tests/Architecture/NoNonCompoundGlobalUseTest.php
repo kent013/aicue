@@ -35,7 +35,7 @@ use Tests\Support\TrackedPhpSourceFiles;
  *
  * allowlist は設けない: 非複合 global use に正当な用途は存在しない (常に無効な import)。
  *
- * ★**検出力の裏取り**: 見本 12 本 (検出 7 / 無違反 5) を `php -l` の警告と
+ * ★**検出力の裏取り**: 見本 14 本 (検出 8 / 無違反 6) を `php -l` の警告と
  *   名前・行番号まで照合する。見本は `.php.txt` で置く — `.php` にすると
  *   本 gate 自身と `StrictTypesDeclarationGateTest` /
  *   `ForbiddenStatementTokenInvariantTest` の母集団に入り、
@@ -60,11 +60,13 @@ const GLOBAL_USE_FIXTURES = [
     'detects-partial-alias' => true,
     'detects-bracketed-global' => true,
     'detects-bracketed-after-named' => true,
+    'detects-namespace-identifier' => true,
     'clean-compound' => false,
     'clean-aliased' => false,
     'clean-named-namespace' => false,
     'clean-bracketed-named' => false,
     'clean-trait-and-closure' => false,
+    'clean-namespace-identifier' => false,
 ];
 
 /**
@@ -132,6 +134,11 @@ function globalUseScanFixture(string $name): array
 /**
  * git 追跡下全体の走査結果。
  *
+ * @param  list<array{absolute: string, relative: string}>|null  $targets
+ *                                                                         null なら追跡下 PHP 全数 (TrackedPhpSourceFiles::all())。
+ *                                                                         読み込み失敗分岐の自己検査のためにだけ注入を許す。
+ *                                                                         要素型は `TrackedPhpSourceFiles::all()` の戻り型
+ *                                                                         `list<array{absolute: string, relative: string}>` と完全一致させる。
  * @return array{
  *     violations: list<string>,
  *     globalRegionFiles: list<string>,
@@ -139,17 +146,20 @@ function globalUseScanFixture(string $name): array
  *     totalFiles: int,
  * }
  */
-function globalUseScanTrackedTree(): array
+function globalUseScanTrackedTree(?array $targets = null): array
 {
     $violations = [];
     $globalRegionFiles = [];
     $unresolved = [];
     $total = 0;
 
-    foreach (TrackedPhpSourceFiles::all(base_path()) as $target) {
-        $source = file_get_contents($target['absolute']);
+    foreach ($targets ?? TrackedPhpSourceFiles::all(base_path()) as $target) {
+        $source = @file_get_contents($target['absolute']);
         if (! is_string($source)) {
-            continue;
+            throw new RuntimeException(
+                '走査対象を読めませんでした (fail-closed。追跡下のファイルが読めない作業ツリーは異常): '
+                .$target['relative'],
+            );
         }
         $total++;
 
@@ -179,6 +189,12 @@ test('グローバル名前空間に非複合 use が存在しない', function 
         '非複合 global use を検出しました。PHP は「has no effect」warning を出し import は無効です。'
         .'use 文を削除して参照側を \\FQCN (例: \\RuntimeException) にしてください。'
         .PHP_EOL.implode(PHP_EOL, $result['violations']));
+});
+
+test('読めない走査対象は無言で除外せず走査ごと失敗する (fail-closed)', function (): void {
+    expect(fn (): array => globalUseScanTrackedTree([
+        ['absolute' => GLOBAL_USE_FIXTURE_DIR.'/does-not-exist.php', 'relative' => 'does-not-exist.php'],
+    ]))->toThrow(RuntimeException::class);
 });
 
 test('走査が空振りしていない (母集団と走査域が縮退していない)', function (): void {
@@ -221,8 +237,8 @@ test('見本の一覧が完全である (差し替え・削除で検出力が落
     sort($expected);
 
     expect($actual)->toBe($expected);
-    expect(count(array_filter(GLOBAL_USE_FIXTURES)))->toBe(7);
-    expect(count(array_filter(GLOBAL_USE_FIXTURES, static fn (bool $d): bool => ! $d)))->toBe(5);
+    expect(count(array_filter(GLOBAL_USE_FIXTURES)))->toBe(8);
+    expect(count(array_filter(GLOBAL_USE_FIXTURES, static fn (bool $d): bool => ! $d)))->toBe(6);
 });
 
 test('見本が構文として正しい (判定は終了コード)', function () use ($globalUseOracle): void {
@@ -241,32 +257,28 @@ test('見本が構文として正しい (判定は終了コード)', function ()
     }
 });
 
-test('真値が空振りしていない (php -l の警告文の変化を検知する)', function () use ($globalUseOracle): void {
-    $total = 0;
-    $diagnostics = [];
-
+test('検出側の各見本から真値が取れている (php -l の警告文の変化・見本の無力化を検知する)', function () use ($globalUseOracle): void {
+    // GLOBAL_USE_FIXTURES の true は「php -l が警告を出す形」という契約である。
+    // 合計の床では新しい検体の真値と走査が両方 0 件でも他の検体の警告で緑になり得るため、
+    // 検体ごとの非空で見る (一覧の完全一致 pin と合わせて
+    // 「一覧にある検出側検体すべてが個別に発火する」契約になる)。
     foreach (GLOBAL_USE_FIXTURES as $name => $detects) {
         if (! $detects) {
             continue;
         }
-        $total += count($globalUseOracle[$name]['warnings']);
-        $diagnostics[] = sprintf(
-            "--- %s (exitCode=%d)\n--- stdout ---\n%s\n--- stderr ---\n%s",
+
+        expect($globalUseOracle[$name]['warnings'])->not->toBeEmpty(sprintf(
+            "検出側の見本 %s から真値が 1 件も取れませんでした。php -l の警告文が変わると、\n"
+            ."照合が「両方 0 件で一致」して静かに無力化します。\n"
+            ."PHP_VERSION=%s PHP_BINARY=%s exitCode=%d\n--- stdout ---\n%s\n--- stderr ---\n%s",
             $name,
+            PHP_VERSION,
+            PHP_BINARY,
             $globalUseOracle[$name]['exitCode'],
             $globalUseOracle[$name]['stdout'],
             $globalUseOracle[$name]['stderr'],
-        );
+        ));
     }
-
-    expect($total)->toBeGreaterThan(0, sprintf(
-        "検出側の見本から真値が 1 件も取れませんでした。php -l の警告文が変わると、\n"
-        ."照合が「両方 0 件で一致」して静かに無力化します。\n"
-        ."PHP_VERSION=%s PHP_BINARY=%s\n%s",
-        PHP_VERSION,
-        PHP_BINARY,
-        implode(PHP_EOL, $diagnostics),
-    ));
 });
 
 test('検出側の見本で、走査器の判定が php -l の真値と名前・行まで一致する', function () use ($globalUseOracle): void {
@@ -277,10 +289,27 @@ test('検出側の見本で、走査器の判定が php -l の真値と名前・
 
         $scanned = globalUseScanFixture($name);
 
-        expect($scanned['unresolved'])->toBe([], implode(PHP_EOL, $scanned['unresolved']));
-        expect(globalUseSorted($scanned['violations']))
-            ->toBe(globalUseSorted($globalUseOracle[$name]['warnings']), '見本 '.$name.' の判定が真値と一致しません');
+        // unresolved と真値照合を 1 つの構造比較にまとめる (unresolved で先に止めると、
+        // 検出漏れ側の差が同じ実行で観測できない)。
+        expect([
+            'unresolved' => $scanned['unresolved'],
+            'entries' => globalUseSorted($scanned['violations']),
+        ])->toBe([
+            'unresolved' => [],
+            'entries' => globalUseSorted($globalUseOracle[$name]['warnings']),
+        ], '見本 '.$name.' の判定が真値と一致しません');
     }
+});
+
+test('php -l の Process 組み立てが LC_ALL=C を明示している (正典 t2)', function (): void {
+    // 検査が保証するのは **builder (`buildProcess()`) の明示 env が LC_ALL=C の
+    // 1 変数ちょうど**であることまで (それ以外の変数は実行時に継承へ合成される)。
+    // ちょうどで比べることで、明示 env への無関係な変数の混入も止める。
+    // inspect() が builder を経由することは機械保証の範囲外で、コードレビューで見る
+    // (builder を迂回する `new Process` の直接生成はこの検査に映らない)。
+    $process = PhpLintOracle::buildProcess(GLOBAL_USE_FIXTURE_DIR.'/clean-compound.php.txt');
+
+    expect($process->getEnv())->toBe(['LC_ALL' => 'C']);
 });
 
 test('無違反の見本で、真値も走査器も 0 件である', function () use ($globalUseOracle): void {
@@ -292,7 +321,13 @@ test('無違反の見本で、真値も走査器も 0 件である', function ()
         $scanned = globalUseScanFixture($name);
 
         expect($globalUseOracle[$name]['warnings'])->toBe([], '見本 '.$name.' に php -l が警告を出しました');
-        expect($scanned['unresolved'])->toBe([], implode(PHP_EOL, $scanned['unresolved']));
-        expect(globalUseSorted($scanned['violations']))->toBe([], '見本 '.$name.' を誤検出しました');
+        // unresolved と誤検出を 1 つの構造比較にまとめる (検出側と同じ観測性)。
+        expect([
+            'unresolved' => $scanned['unresolved'],
+            'entries' => globalUseSorted($scanned['violations']),
+        ])->toBe([
+            'unresolved' => [],
+            'entries' => [],
+        ], '見本 '.$name.' を誤検出しました');
     }
 });
