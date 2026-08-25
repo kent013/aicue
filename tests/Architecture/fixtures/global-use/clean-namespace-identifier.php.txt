@@ -1,0 +1,20 @@
+<?php
+
+// 無違反: 名前つきの名前空間の中では、識別子位置の namespace 字句
+// (定数名・自クラス参照・メソッド名の宣言と呼び出し) が現れても宣言ではない。
+namespace App\Support;
+
+final class AggregateRunLock
+{
+    public const string NAMESPACE = 'aggregate-run';
+
+    public function namespace(): string
+    {
+        return self::NAMESPACE;
+    }
+
+    public function key(): string
+    {
+        return $this->namespace().':lock';
+    }
+}

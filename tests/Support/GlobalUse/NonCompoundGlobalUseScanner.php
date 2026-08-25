@@ -34,10 +34,20 @@ use PhpToken;
  *   `;` でも `{` でもない形に当たったら `unresolved` として返し、gate を赤くする
  *   (fail-closed。静かに走査域が縮むのを防ぐ)。
  *
+ * ★**識別子位置の namespace 字句は宣言と読まない** (家系の正典 t2)。`namespace` は
+ *   半予約語で、定数名・自クラスの定数参照・メソッド名の宣言と呼び出しの文脈でも
+ *   同じ字句になる。宣言は文の先頭にしか置けないという構文事実で読み飛ばす。
+ *   検体で裏取りした識別子文脈はこの 3 種 (定数名 / 自クラスの定数参照 / メソッド名の
+ *   宣言と呼び出し) である。それ以外の識別子文脈 (enum の case 名・trait の別名・
+ *   名前つき引数など) も同じ位置判定で読み飛ばされるが、個別の検体では固定していない。
+ *
  * ★**保証しないもの (誇張しない)**: これは import 構文の完全なパーサではない。
  *   構文エラーになる入力に対する挙動は保証しない (見本は必ず構文として正しいことを
  *   自己検査が確かめる)。グループ use (`use A\B\{C, D};`) は前置きに必ず `\` を含むので
- *   非複合になりえず、中身は読まずに読み飛ばす。
+ *   非複合になりえず、中身は読まずに読み飛ばす。構文不正な位置の namespace 宣言
+ *   (例: ブロック内の宣言) は文の先頭判定が識別子として読み飛ばして沈黙しうるが、
+ *   そうした入力は php -l が構文エラーにするため追跡下の実ファイル (実行可能な PHP) には
+ *   存在しない (検体側は構文妥当性検査が弾く)。
  */
 final class NonCompoundGlobalUseScanner
 {
@@ -86,6 +96,17 @@ final class NonCompoundGlobalUseScanner
             $token = $tokens[$i];
 
             if ($token->is(T_NAMESPACE)) {
+                // ★`namespace` は**半予約語** — クラス定数名 (`const NAMESPACE`)・自クラス参照
+                //   (`self::NAMESPACE`)・メソッド名など識別子の文脈でも tokenizer は同じ字句を返す。
+                //   namespace の**宣言**は文の先頭にしか置けないので、直前の有意トークン
+                //   (空白・コメント・docblock を除く) が「無い (ファイル先頭)・開始タグ・`;`・`}`」の
+                //   いずれでもなければ識別子として読み飛ばす。
+                // ★これは**宣言であることの確定ではなく候補抽出**である (`}` は class や制御構文も
+                //   閉じる)。候補位置で宣言の形を成さないものは従来どおり unresolved (fail-closed)。
+                if (! self::atStatementStart($tokens, $i)) {
+                    continue;
+                }
+
                 $declaration = self::readNamespaceDeclaration($tokens, $i);
 
                 if ($declaration === null) {
@@ -258,6 +279,43 @@ final class NonCompoundGlobalUseScanner
         }
 
         $violations[] = ['name' => $normalized, 'line' => $statementLine];
+    }
+
+    /**
+     * その位置のトークンが文の先頭に立っているか (namespace 宣言が置ける位置か)。
+     *
+     * 宣言候補とみなす直前有意トークンの閉じた集合: 無い (ファイル先頭) / T_OPEN_TAG /
+     * `;` / `}`。`null` (ファイル先頭) は実ファイルでは開始タグより前に T_NAMESPACE が
+     * 来ないため検体では固定できない (防御的に候補へ含めるのみ)。
+     *
+     * @param  list<PhpToken>  $tokens
+     */
+    private static function atStatementStart(array $tokens, int $index): bool
+    {
+        $previous = self::previousSignificant($tokens, $index - 1);
+        if ($previous === null) {
+            return true;
+        }
+
+        $token = $tokens[$previous];
+
+        return $token->is(T_OPEN_TAG) || $token->text === ';' || $token->text === '}';
+    }
+
+    /**
+     * index 以前で最後の意味のあるトークンの添字 (nextSignificant の逆方向)。
+     *
+     * @param  list<PhpToken>  $tokens
+     */
+    private static function previousSignificant(array $tokens, int $index): ?int
+    {
+        for ($i = $index; $i >= 0; $i--) {
+            if (! $tokens[$i]->is([T_WHITESPACE, T_COMMENT, T_DOC_COMMENT])) {
+                return $i;
+            }
+        }
+
+        return null;
     }
 
     /**

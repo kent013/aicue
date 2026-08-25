@@ -1,0 +1,17 @@
+<?php
+
+// 検出: namespace は半予約語 — 定数名や自クラス参照の識別子位置に現れても宣言ではない。
+// 名前空間の宣言が無いファイルなので、後段の非複合 use は php -l が警告する。
+// (旧実装は const NAMESPACE を unresolved にし、self::NAMESPACE; を宣言と誤読して
+//  以降の use を静かに見逃した — 偽の赤と検出漏れの両方向の負例である)
+final class LockRegistry
+{
+    public const NAMESPACE = 'locks';
+
+    public function name(): string
+    {
+        return self::NAMESPACE;
+    }
+}
+
+use RuntimeException;
