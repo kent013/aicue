@@ -46,6 +46,10 @@
 # Browser lane がレーン別に退避する失敗時 screenshot (CI の失敗時アップロード対象)
 /storage/browser-test-artifacts/
 /vendor
+# Deployer の実 host 座標 (実 IP / SSH ユーザー / deploy_path)。
+# 追跡下に置くのは deploy/hosts.example.yml (placeholder のみ) だけである
+# (tests/Architecture/DeployCoordinateHygieneTest.php が追跡下の実座標を禁じる)。
+/deploy/hosts.yml
 _ide_helper.php
 Homestead.json
 Homestead.yaml

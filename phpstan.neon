@@ -3,6 +3,13 @@ includes:
 
 parameters:
     level: 10
+    # `deploy/` は **意図的に含めない**。Deployer の設定ファイルは `namespace Deployer;` の
+    # 手続きの列であり `get()` が mixed を返すため、level 10 では全参照に narrowing が必要になり
+    # 負担が実利を超える (`recipe/laravel.php` の require は include_path 依存で PHPStan が
+    # そもそも追えない)。代替として 3 層で機械保証する:
+    #   1. `php -l`                                      ... DeployPipelineWiringTest W4
+    #   2. `dep tree` / `dep deploy --plan` の完走         ... 同 W5 / W12 / W13
+    #   3. band inventory (配線位置の台帳。deny-by-default) ... 同 W6 / W7 / W34
     paths:
         - app
         - config

@@ -13,10 +13,15 @@ services:
             - vendor:/workspace/vendor
             # Deployer (vendor/bin/dep) は devcontainer 内から aicue サーバーへ SSH するため、
             # ホストの鍵を読み取り専用でマウントする (コンテナ内に秘密鍵を焼かない)。
-            # パスは deploy.php の identity_file と一致させること。
+            # パスは deploy/hosts.yml の identity_file と一致させること
+            # (hosts.yml は gitignore。追跡下に実座標を置かないため)。
             # .pub も渡すのは、無いと ssh が公開鍵を出すためだけに秘密鍵の復号を要求するため。
-            - ${HOME}/.ssh/github:/home/vscode/.ssh/aicue_deploy:ro
-            - ${HOME}/.ssh/github.pub:/home/vscode/.ssh/aicue_deploy.pub:ro
+            # ★鍵は **デプロイ専用の passphrase 無し鍵** (~/.ssh/aicue_deploy) である。
+            #   普段使いの ~/.ssh/github は passphrase 付きで、コンテナ内には keychain も
+            #   ssh-agent も無いため解錠できず、非対話の dep deploy が通らない。
+            #   公開鍵はサーバーの ec2-user の authorized_keys に登録済み。
+            - ${HOME}/.ssh/aicue_deploy:/home/vscode/.ssh/aicue_deploy:ro
+            - ${HOME}/.ssh/aicue_deploy.pub:/home/vscode/.ssh/aicue_deploy.pub:ro
         command: sleep infinity
         # Valet が aicue.test → 127.0.0.1:8002 を固定プロキシするため、ホスト側 8002 を publish する。
         # コンテナ内 serve はデフォルト 8001 のまま (host 8001 は spirux が使用中なのでホスト側だけずらす)。
