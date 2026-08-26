@@ -8,7 +8,7 @@
 > 抽出条件: 開発環境 (local) またはテスト実行中に登録される route 集合。
 > ドリフト検査: `scripts/bug-hunt-inventory-check.sh` (exit 3 = ドリフト)。
 
-bug-hunt カバレッジの分母となる「画面」(GET × web セッション面) の一覧。全 73 件 (うち対象外 13 件)。
+bug-hunt カバレッジの分母となる「画面」(GET × web セッション面) の一覧。全 78 件 (うち対象外 15 件)。
 
 ## GET × web 一覧 (画面 + 画面に付随する JSON GET)
 
@@ -32,6 +32,9 @@ bug-hunt カバレッジの分母となる「画面」(GET × web セッショ�
 | debug/bfcache-trial | debug.bfcache-trial | 画面 | - | - | 外 |
 | debug/bfcache-trial/away | debug.bfcache-trial.away | 画面 | - | - | 外 |
 | debug/login | debug.login | 画面 | - | - | 外 |
+| enterprise/callback | enterprise-sso.callback | 画面 | - | - | 外 |
+| enterprise/login | enterprise-sso.login | 画面 | 企業アカウントでログイン | S1 | 通常 |
+| enterprise/{connection}/redirect | enterprise-sso.redirect | 画面 | - | - | 外 |
 | / | home | 画面 | - | S1 | 通常 |
 | invitations/accept | invitations.accept | 画面 | 組織への招待 | S2 | 通常 |
 | commerce-disclosure | legal.commerce-disclosure | 画面 | - | S1 | 通常 |
@@ -48,6 +51,7 @@ bug-hunt カバレッジの分母となる「画面」(GET × web セッショ�
 | organizations/{organization}/onboarding/cli | organizations.onboarding.cli | 画面 | CLI 導入ガイド | S4 | 通常 |
 | organizations/{organization}/onboarding/mcp | organizations.onboarding.mcp | 画面 | MCP 導入ガイド | S4 | 通常 |
 | organizations/{organization}/settings | organizations.settings | 画面 | 組織設定 | S4 | 通常 |
+| organizations/{organization}/sso | organizations.sso.index | 画面 | SSO 接続 | S4 | 通常 |
 | passkeys/confirm/options | passkey.confirm-options | JSON | - | S6 | 通常 |
 | passkeys/login/options | passkey.login-options | JSON | - | S1 | 通常 |
 | user/passkeys/options | passkey.registration-options | JSON | - | S6 | 通常 |
@@ -78,6 +82,7 @@ bug-hunt カバレッジの分母となる「画面」(GET × web セッショ�
 | sitemap.xml | seo.sitemap | JSON | - | - | 外 |
 | session/status | session.status | JSON | - | S6 | 通常 |
 | settings | settings | 画面 | 設定 | S6 | 通常 |
+| settings/email-promotion/confirm | settings.email-promotion.confirm.show | 画面 | - | S6 | 通常 |
 | settings/security | settings.security | 画面 | セキュリティ設定 | S6 | 通常 |
 | auth/{provider}/callback | social.callback | 画面 | - | - | 外 |
 | auth/{provider}/redirect/{intent} | social.redirect | 画面 | - | - | 外 |
@@ -93,6 +98,8 @@ bug-hunt カバレッジの分母となる「画面」(GET × web セッショ�
 - `debug.bfcache-trial` — 履歴復元の実機受入確認のための検証ページであり製品の利用者が到達する画面ではないため分母に載せない
 - `debug.bfcache-trial.away` — 履歴復元の実機受入確認で離脱先に使う検証ページであり製品の利用者が到達する画面ではないため分母に載せない
 - `debug.login` — 開発環境専用のログイン補助画面であり探索は POST の debug.login-as で前提を組むため分母に載せない
+- `enterprise-sso.callback` — 外部の識別提供者から戻る受け口であり実際の識別提供者なしには到達できないため分母に載せない
+- `enterprise-sso.redirect` — 外部の識別提供者へ出ていく遷移であり隔離した探索環境の外へ出てしまうため分母に載せない
 - `password.confirmation` — 再認証が有効かどうかだけを返す状態問い合わせであり画面として開く経路ではないため分母に載せない
 - `seo.ai` — 生成 AI のクローラ向けの機械可読 route であり人が操作する画面ではないため分母に載せない
 - `seo.llms` — 生成 AI のクローラ向けの機械可読 route であり人が操作する画面ではないため分母に載せない

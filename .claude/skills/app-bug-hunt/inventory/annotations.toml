@@ -139,6 +139,20 @@ reason = "開発環境専用のログイン補助画面であり探索は POST �
 [routes."debug.login-as"]
 kubun = "通常"
 
+[routes."enterprise-sso.callback"]
+kind = "画面"
+kubun = "外"
+reason = "外部の識別提供者から戻る受け口であり実際の識別提供者なしには到達できないため分母に載せない"
+
+[routes."enterprise-sso.login"]
+kind = "画面"
+kubun = "通常"
+
+[routes."enterprise-sso.redirect"]
+kind = "画面"
+kubun = "外"
+reason = "外部の識別提供者へ出ていく遷移であり隔離した探索環境の外へ出てしまうため分母に載せない"
+
 [routes."home"]
 kind = "画面"
 kubun = "通常"
@@ -251,10 +265,32 @@ kubun = "通常"
 kind = "画面"
 kubun = "通常"
 
-[routes."organizations.store"]
+[routes."organizations.slug.update"]
 kubun = "通常"
 
-[routes."organizations.slug.update"]
+[routes."organizations.sso.activate"]
+kubun = "通常"
+
+[routes."organizations.sso.destroy"]
+kubun = "通常"
+
+[routes."organizations.sso.disable"]
+kubun = "通常"
+
+[routes."organizations.sso.index"]
+kind = "画面"
+kubun = "通常"
+
+[routes."organizations.sso.store"]
+kubun = "通常"
+
+[routes."organizations.sso.update"]
+kubun = "通常"
+
+[routes."organizations.sso.verify"]
+kubun = "通常"
+
+[routes."organizations.store"]
 kubun = "通常"
 
 [routes."organizations.transfer-ownership"]
@@ -488,6 +524,19 @@ kubun = "通常"
 kubun = "通常"
 
 [routes."settings.account.destroy"]
+kubun = "通常"
+
+[routes."settings.email-promotion.confirm"]
+kubun = "通常"
+
+[routes."settings.email-promotion.confirm.show"]
+kind = "画面"
+kubun = "通常"
+
+[routes."settings.email-promotion.resend"]
+kubun = "通常"
+
+[routes."settings.email-promotion.store"]
 kubun = "通常"
 
 [routes."settings.password.store"]

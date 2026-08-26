@@ -8,7 +8,7 @@
 > 抽出条件: 開発環境 (local) またはテスト実行中に登録される route 集合。
 > ドリフト検査: `scripts/bug-hunt-inventory-check.sh` (exit 3 = ドリフト)。
 
-bug-hunt カバレッジの分母となる「書き込み操作」(非 GET × web セッション面) の一覧。全 79 件 (うち対象外 1 件)。列は method / route / name / story / 区分 の 5 列固定 (coverage/correlate.py の入力契約。ヘッダ名を変えない)。
+bug-hunt カバレッジの分母となる「書き込み操作」(非 GET × web セッション面) の一覧。全 88 件 (うち対象外 1 件)。列は method / route / name / story / 区分 の 5 列固定 (coverage/correlate.py の入力契約。ヘッダ名を変えない)。
 
 ## 操作一覧 (web セッション面)
 
@@ -46,6 +46,12 @@ bug-hunt カバレッジの分母となる「書き込み操作」(非 GET × we
 | DELETE | organizations/{organization}/members/{user}/two-factor | organizations.members.two-factor.reset | S2 | 通常 |
 | PATCH | organizations/{organization}/members/{user} | organizations.members.update | S2 | 通常 |
 | PATCH | organizations/{organization}/slug | organizations.slug.update | S4 | 通常 |
+| POST | organizations/{organization}/sso/{oidcConnection}/activate | organizations.sso.activate | S4 | 通常 |
+| DELETE | organizations/{organization}/sso/{oidcConnection} | organizations.sso.destroy | S4 | 通常 |
+| POST | organizations/{organization}/sso/{oidcConnection}/disable | organizations.sso.disable | S4 | 通常 |
+| POST | organizations/{organization}/sso | organizations.sso.store | S4 | 通常 |
+| PATCH | organizations/{organization}/sso/{oidcConnection} | organizations.sso.update | S4 | 通常 |
+| POST | organizations/{organization}/sso/{oidcConnection}/verify | organizations.sso.verify | S4 | 通常 |
 | POST | organizations | organizations.store | S4 | 通常 |
 | POST | organizations/{organization}/transfer-ownership | organizations.transfer-ownership | S4 | 通常 |
 | PATCH | organizations/{organization}/two-factor-requirement | organizations.two-factor-requirement.update | S4 | 通常 |
@@ -83,6 +89,9 @@ bug-hunt カバレッジの分母となる「書き込み操作」(非 GET × we
 | DELETE | settings/account/deletion-request | settings.account.deletion-request.destroy | S6 | 通常 |
 | POST | settings/account/deletion-request | settings.account.deletion-request.store | S6 | 通常 |
 | DELETE | settings/account | settings.account.destroy | S6 | 通常 |
+| POST | settings/email-promotion/confirm | settings.email-promotion.confirm | S6 | 通常 |
+| POST | settings/email-promotion/resend | settings.email-promotion.resend | S6 | 通常 |
+| POST | settings/email-promotion | settings.email-promotion.store | S6 | 通常 |
 | POST | settings/password | settings.password.store | S6 | 通常 |
 | POST | user/confirmed-two-factor-authentication | two-factor.confirm | S6 | 通常 |
 | DELETE | user/two-factor-authentication | two-factor.disable | S6 | 通常 |

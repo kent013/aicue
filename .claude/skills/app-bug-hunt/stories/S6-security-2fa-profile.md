@@ -9,8 +9,8 @@ depends_on: []
 reseed_before: false
 accounts: [owner]
 setup: []
-covers_screens: [notifications.index, passkey.confirm-options, passkey.registration-options, password.confirm, recent-auth.confirm, recent-auth.status, session.status, settings, settings.security]
-covers_operations: [notifications.open, notifications.read, notifications.read-all, passkey.confirm, passkey.destroy, passkey.store, password.confirm.store, recent-auth.password, settings.account.deletion-request.destroy, settings.account.deletion-request.store, settings.account.destroy, settings.password.store, two-factor.confirm, two-factor.disable, two-factor.enable, two-factor.regenerate-recovery-codes, user-password.update, user-profile-information.update]
+covers_screens: [notifications.index, passkey.confirm-options, passkey.registration-options, password.confirm, recent-auth.confirm, recent-auth.status, session.status, settings, settings.email-promotion.confirm.show, settings.security]
+covers_operations: [notifications.open, notifications.read, notifications.read-all, passkey.confirm, passkey.destroy, passkey.store, password.confirm.store, recent-auth.password, settings.account.deletion-request.destroy, settings.account.deletion-request.store, settings.account.destroy, settings.email-promotion.confirm, settings.email-promotion.resend, settings.email-promotion.store, settings.password.store, two-factor.confirm, two-factor.disable, two-factor.enable, two-factor.regenerate-recovery-codes, user-password.update, user-profile-information.update]
 covers_capabilities: [NOTI-01, SEC-01, SEC-02, SEC-03, SEC-04, SEC-05, SEC-06, SEC-07]
 ---
 
@@ -50,6 +50,7 @@ covers_capabilities: [NOTI-01, SEC-01, SEC-02, SEC-03, SEC-04, SEC-05, SEC-06, S
    - セッションが有効な場合は秘匿が**解除されて通常操作に戻れる**こと (白画面のまま
      詰まないこと。H4)。**iOS Safari / WebKit レーンが主戦場**なので WebKit で必ず見る。
 6. 通知センター `notifications.index`(`/organizations/{slug}/notifications`): 通知一覧・空状態の説明、既読化 `notifications.read` / 一括既読 `notifications.read-all` / 開封遷移 `notifications.open`。ブラウザタブ title が固有(「通知 | AI-CUE」)か(T034)。
+7. メールアドレスの昇格(企業 SSO でしか入れない利用者が自分のメールアドレスを持つ): `settings.email-promotion.store` で開始(再認証 `recent-auth` に保護されているか)、確認メールの再送 `settings.email-promotion.resend`、確認画面 `settings.email-promotion.confirm.show`(GET で確定**しない**こと)→ 確定 `settings.email-promotion.confirm`。無効・期限切れトークンで存在の探り当てができないか。
 
 ## 逸脱アイデア (--deviate 時)
 - 再認証(recent-auth/confirm-password)を経ずに機微操作(2FA無効化・アカウント削除・オーナー移譲)を直 POST → ブロックされるか。

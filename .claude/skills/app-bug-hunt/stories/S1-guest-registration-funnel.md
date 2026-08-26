@@ -9,7 +9,7 @@ depends_on: []
 reseed_before: true
 accounts: [guest]
 setup: []
-covers_screens: [app.entry, contact, contact.thanks, dashboard, home, legal.commerce-disclosure, legal.privacy, legal.terms, login, onboarding.checkout, passkey.login-options, password.request, password.reset, register, two-factor.login, verification.notice, verification.verify]
+covers_screens: [app.entry, contact, contact.thanks, dashboard, enterprise-sso.login, home, legal.commerce-disclosure, legal.privacy, legal.terms, login, onboarding.checkout, passkey.login-options, password.request, password.reset, register, two-factor.login, verification.notice, verification.verify]
 covers_operations: [contact.store, debug.login-as, login.store, logout, onboarding.activate-personal, passkey.login, password.email, password.update, register.store, two-factor.login.store, verification.send]
 covers_capabilities: [AUTH-01, AUTH-02, AUTH-03, AUTH-04, PLAT-02, PUB-01, PUB-02, QUO-01]
 ---
@@ -59,6 +59,7 @@ covers_capabilities: [AUTH-01, AUTH-02, AUTH-03, AUTH-04, PLAT-02, PUB-01, PUB-0
    - 通知ベルが単一導線として出ており、通知が左 nav 項目に重複していないこと。
 7. パスワード忘れ: `password.request` → `password.email` → `password.reset` → `password.update` → 再ログイン。
 8. `logout` でログアウト。
+9. 企業アカウントログインの入口画面(`enterprise-sso.login`)が表示され、案内が成立しているか。IdP への遷移 `enterprise-sso.redirect` と戻り口 `enterprise-sso.callback` は実際の識別提供者が要るため探索環境の外(区分 外)であり、たどらない。
 
 ## 逸脱アイデア (--deviate 時)
 - 認証前ページ(dashboard 等)へ直アクセス → login へ誘導されるか。認証後に login/register を開くと dashboard へ戻るか。
