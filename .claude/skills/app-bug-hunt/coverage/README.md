@@ -64,7 +64,7 @@ S8 の API/CLI 面のみ **6 列**（`| method | route | api route name | CLI | 
 | `correlate.py` | **操作到達カバレッジ correlator**。run_id で executed / findings / operations / graph を突合し未カバー worklist を作る（stdlib のみ） |
 | `merge_pcov.py` | **コード到達カバレッジ pcov merge**。C3 middleware が吐く shard JSONL を union し uncovered を主出力する（stdlib のみ） |
 | `test_build_executed.py` | build_executed のテスト（`python3 -m unittest`、入出力は tempfile） |
-| `test_correlate.py` | correlate のテスト（`python3 -m unittest`、graph は fixture sqlite で生成。実 operations.md / 実 graph.db があれば fix-gate #3/#4 を追加検証） |
+| `test_correlate.py` | correlate のテスト（`python3 -m unittest`、graph は fixture sqlite で生成。実 operations.md / 実 graph.db があれば fix-gate #3/#4 を、artisan があれば実ルーター経路 (`route:list` fallback) を追加検証。主入力 6 点の欠落は 1 点ずつ pin） |
 | `test_merge_pcov.py` | merge のテスト（全 fixture、pcov 不要） |
 | `test_naming_no_stale.py` | 旧 Stage 付番と旧 fail-open 文言の後退防止 self-test |
 | `fixtures/` | サンプル入力（route-list / operations(5列+6列) / findings / executed）と `fixtures/pcov/` の shard JSONL |
@@ -104,6 +104,8 @@ pcov 無しで使える「軸 A 粗 proxy」。**Phase 4 レポートの後**に
    （2xx と errors の無い 3xx が `ok`、それ以外は `blocked`）。executed 扱いになるのは `ok` だけ。
    `unresolved` は「記録器まで到達したが名前の無い route」の件数（shard 別）。
 5. `graph.db` — TESTED_BY を controller ファイル単位で引く（`/workspace/.code-review-graph/graph.db`）。
+6. `run_id` — join キー (ファイルではなく `--run-id` で渡す走行の識別子)。
+   executed.json / findings の run_id との一致を検査する。
 
 ### 記録 → 集約 → 突合 の流れ
 
@@ -126,11 +128,15 @@ provision は疎通確認の要求が記録された**ことを確認してか�
 |---|---|---|
 | 0 | 成立 | — |
 | 1 | 読み込み・parse・I/O の失敗 | （例外メッセージ） |
+| 2 | CLI usage error | argparse の required オプション (`--operations` / `--findings` / `--graph-db` / `--run-id`) の欠落・引数形式不正 (usage を stderr に出す) |
 | 3 | **主入力の可用性違反**（検査を成立させられない） | `build_executed.py`: `capture_failed` / `capture_file_missing` / `capture_line_broken` / `capture_row_invalid` / `run_id_mismatch` / `capture_empty`<br>`correlate.py`: `executed_missing` / `executed_schema_invalid` / `executed_run_id_mismatch` / `executed_shards_missing` / `executed_no_rows` / `executed_shard_mismatch` |
 
 3 のときは worklist / executed.json を**書き出さない**。揃わない走行を「全件未実行」という
 嘘の一覧として返さないためである。`ok` が 1 件も無い（全操作が跳ねた）走行は 3 ではない
 —— 主入力としては成立しており、正しい結果は「全機構が未実行 worklist に残る」ことである。
+主入力 6 点 (route 一覧・operations・findings・executed・graph.db・run_id) のいずれかが
+不足した走行は、コードが 1 / 2 / 3 のいずれで落ちる場合も**非 0 で終了し worklist を
+出力しない**ことが契約である (終了コードはこの契約の写像にすぎない)。
 
 ### 使い方
 

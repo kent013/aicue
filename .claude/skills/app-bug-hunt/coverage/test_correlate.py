@@ -8,9 +8,12 @@ graph.db はテスト用 temp sqlite を実 DB のスキーマ(edges.kind/source
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import sqlite3
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -21,6 +24,8 @@ import correlate as C
 _SKILL_ROOT = Path(__file__).resolve().parent.parent  # .claude/skills/app-bug-hunt/
 REAL_OPERATIONS = _SKILL_ROOT / "operations.md"
 REAL_GRAPH_DB = Path("/workspace/.code-review-graph/graph.db")
+_REPO_ROOT = _SKILL_ROOT.parent.parent.parent  # リポジトリルート (worktree でも自 worktree を指す)
+ARTISAN = _REPO_ROOT / "artisan"
 
 
 # --------------------------------------------------------------------------- #
@@ -161,31 +166,77 @@ class LoadOperationsTest(unittest.TestCase):
         self.assertIn("organizations.members.update-api-key-permission", ops)
         self.assertIn("recent-auth.password", ops)  # 脚注除去
 
+    # 生成器 (scripts/bug-hunt-inventory.py) が書く 5 列固定ヘッダ (operations.md の契約)。
+    # オラクルのヘッダ認識に C._header_indices() を使わない — 実装をオラクルにすると
+    # ヘッダ検出の退行時に期待値と実値が同時に 0 件になり共倒れする。
+    _REAL_OPERATIONS_HEADER = ["method", "route", "name", "story", "区分"]
+
     @unittest.skipUnless(REAL_OPERATIONS.is_file(), "real operations.md not present")
     def test_real_operations_md_name_column_join_keys(self):
-        # fix-gate #3 の load-bearing claim: 実 operations.md の join キー = name 列 (URL 列ではない)。
-        # テンプレート汎用化: 特定アプリの route 名を hardcode せず、構造で検証する
-        # (アプリが operations.md を埋めた後も、slug 非依存で機能する)。
-        ops = C.load_operations(str(REAL_OPERATIONS))
-        if not ops:
-            self.skipTest("operations.md はスケルトン (データ行なし)。route:list から生成後に有効化される")
+        """実 operations.md の join キー集合を独立オラクルとの完全一致で固定する。
 
+        オラクル: 生成器が書く 5 列固定ヘッダ `| method | route | name | story | 区分 |`
+        の厳密一致で表の内部を判定し、データ行の第 3 列 (name) を _parse_route_cell で
+        分解して期待キー集合を作る (検証対象は**列選択とヘッダ認識**。セル分解の検出力は
+        合成テスト群が担う)。集合の完全一致は対称なので、load_operations 側の
+        ヘッダ認識・列選択が壊れても、生成器がヘッダを変えても、どちらでも赤になる。
+
+        「全行一致 = 列の取り違え」の集約形 (正典 t2) は補助として併置する。
+        単一セグメント route では URL と route 名が正当に一致しうるため、
+        行単位の不一致 assert は使わない (誤検知するため)。
+
+        前提: aicue の operations.md は生成物で、route 操作の 5 列表だけを含む
+        (ファイル冒頭に「5 列固定 (coverage/correlate.py の入力契約)」と明記されている)。
+        6 列表など別形の表が正当に足されたときは本検査が集合不一致の赤になる —
+        静かな見逃しではなく前提の見直しを促す赤であり、そのときはオラクルを
+        生成物の実態に合わせて更新する。スケルトン (データ行 0) のときだけ静かに通る。
+        """
+        expected: set[str] = set()
+        candidate_lines = 0  # 表らしい行の存在をヘッダ認識と独立に数える (共倒れ防止)
+        in_table = False
+        for raw in REAL_OPERATIONS.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line.startswith("|"):
+                in_table = False  # 表は先頭パイプ行の連続。非パイプ行で表を抜ける
+                continue
+            if "---" in line:
+                continue
+            cols = [c.strip() for c in line.strip("|").split("|")]
+            if [c.lower() for c in cols] == self._REAL_OPERATIONS_HEADER:
+                in_table = True
+                continue
+            # 認識できないヘッダの行も含め、空でない表らしい行を独立に記録する。
+            candidate_lines += 1
+            if not in_table or len(cols) < 3:
+                continue
+            expected.update(C._parse_route_cell(cols[2]))
+
+        ops = C.load_operations(str(REAL_OPERATIONS))
+        if candidate_lines == 0:
+            # 真のスケルトン (表らしい行が 1 行も無い) だけが静かに通る。
+            self.assertEqual(ops, {}, "表らしい行が 0 なのに join キーが出ている")
+            return
+
+        # ヘッダ契約の消滅をスケルトンと誤認しない: 行があるのにオラクルが
+        # ヘッダを認識できないなら、実装側の認識と共倒れせずここで赤にする。
+        self.assertGreater(
+            len(expected), 0,
+            f"パイプ形式の行が {candidate_lines} 行あるのに 5 列固定ヘッダを認識できない "
+            "(生成物のヘッダ契約が変わった — オラクルと前提の見直しが要る)",
+        )
+        self.assertEqual(
+            set(ops), expected,
+            "load_operations の join キーが name 列 (5 列固定契約の第 3 列) と食い違う "
+            "(列の取り違え・ヘッダ認識の退行・生成物の契約変更のいずれか)",
+        )
         for name in ops:
-            # route 名は通常ドット区切り (resource.action)。少なくとも空でないこと。
             self.assertTrue(name.strip(), "空の join キーが混入している")
 
-        # join キー (name 列) と URL 列 (load_operations は 'operation' に格納) の一致を
-        # **集約で**判定する。
-        #
-        # 検出したい failure mode は「load_operations が name 列でなく URL 列を join キーに
-        # している」ことであり、それが起きると **全行が一致する**。
-        # 一方、単一セグメント route は route 名と URL が正当に同値になる
-        # (Laravel の `Route::post('logout', ...)->name('logout')` 等)。
-        # 行単位の assertNotEqual だとこの正当なケースを偽陽性で落とすため、
-        # 「**全行が一致していないこと**」を条件にする (検出力は維持される)。
-        matched = [name for name, info in ops.items() if name == info.get("operation")]
-        self.assertNotEqual(
-            len(matched), len(ops),
+        # 補助 (正典 t2 の集約形): 「全行が一致 = 列の取り違え」だけを落とし、
+        # 正例 (不一致行) 1 件以上を要求する。
+        mismatched = [name for name, info in ops.items() if name != info.get("operation")]
+        self.assertGreater(
+            len(mismatched), 0,
             "全 {} 行で join キーが URL 列と一致 = name 列でなく URL 列を拾っている "
             "(fix-gate #3 違反)".format(len(ops)),
         )
@@ -713,6 +764,131 @@ class MainTest(unittest.TestCase):
         self.assertIn("executed_schema_invalid", reason)
 
 
+class MainInputAvailabilityTest(unittest.TestCase):
+    """主入力 6 点の欠落を 1 点ずつ pin する (家系正典 t2 要素 1 の aicue 形)。
+
+    aicue の照合器の主入力は 6 点 — 目録 (--operations) / 所見 (--findings) /
+    実行済み (--executed) / graph.db (--graph-db) / 走行 id (--run-id) /
+    route 一覧 (--route-list。省略は欠落ではなく実ルーター fallback = RealRouterTest が担当)。
+
+    守る不変条件は「主入力が揃わない走行を成功にしない・worklist を 1 行も出さない」で、
+    終了コードはその写像 (契約の正本は coverage/README.md):
+      - オプション欠落: argparse required の 4 点は usage エラー (SystemExit 2)、
+        --executed は main 内の可用性検査 (return 3 = executed_missing)
+      - ファイル不在・glob 0 件: 読み込みの失敗 (return 1)
+    正典実装は全欠落を 3 へ写像するが、aicue は D14 の別実装として上記の既存契約を pin する
+    (終了コードの写像替えは README / SKILL.md 運用文まで波及する別議題)。
+
+    将来 main() が stdout へ診断を出す設計に変わる場合は、「worklist を出さない」と
+    「stdout 完全無出力」を別契約として本クラスの assert を再検討すること。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        base = Path(self.tmp.name)
+        self.route_path = base / "route.json"
+        self.route_path.write_text(
+            '[{"name":"register.store","method":"POST","uri":"register",'
+            '"action":"App\\\\Http\\\\Controllers\\\\Auth\\\\RegisteredUserController@store"}]',
+            encoding="utf-8",
+        )
+        self.ops_path = base / "operations.md"
+        self.ops_path.write_text(
+            "| method | route | name | story | 区分 |\n"
+            "|---|---|---|---|---|\n"
+            "| POST | register | register.store | S1 | ◎ |\n",
+            encoding="utf-8",
+        )
+        self.findings_path = base / "findings.jsonl"
+        self.findings_path.write_text(
+            '{"finding_id":"F-1","run_id":"R1","route_name":"register.store","species_key":"a"}\n',
+            encoding="utf-8",
+        )
+        self.executed_path = base / "executed.json"
+        self.executed_path.write_text(json.dumps({
+            "run_id": "R1", "shards": ["0"],
+            "executed_routes": [
+                {"route_name": "register.store", "shard": "0", "status": "ok"},
+            ],
+        }), encoding="utf-8")
+        self.db = str(base / "graph.db")
+        make_graph_db(self.db, [
+            ("/workspace/resources/js/x.ts::x", "/workspace/resources/js/t.ts::t"),
+        ])
+        self.argv = [
+            "--route-list", str(self.route_path),
+            "--operations", str(self.ops_path),
+            "--findings", str(self.findings_path),
+            "--executed", str(self.executed_path),
+            "--graph-db", self.db,
+            "--run-id", "R1",
+        ]
+
+    def _run(self, argv):
+        """main() を実行し (終了コード, stdout, stderr) を返す。
+
+        argparse required の欠落は SystemExit を投げるので、その code も
+        終了コードとして扱う (usage エラー 2)。
+        """
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            try:
+                rc = C.main(argv)
+            except SystemExit as e:
+                rc = e.code
+        return rc, out.getvalue(), err.getvalue()
+
+    def _drop_option(self, opt):
+        idx = self.argv.index(opt)
+        return self.argv[:idx] + self.argv[idx + 2:]
+
+    def _replace_value(self, opt, value):
+        argv = list(self.argv)
+        argv[argv.index(opt) + 1] = value
+        return argv
+
+    def assert_no_worklist(self, rc, out, expected_rc):
+        self.assertEqual(rc, expected_rc)          # (α) 期待する非 0 終了コード
+        self.assertEqual(out, "")                  # (β) stdout に何も出さない
+        self.assertNotIn("未実行機構", out)          # (γ) 契約の意図の明示 ((β) に包含)
+
+    def test_baseline_is_green(self):
+        # 正の対照: 全部揃っていれば 0 で worklist が出る (欠落検査の前提)。
+        rc, out, err = self._run(self.argv)
+        self.assertEqual(rc, 0, err)
+        self.assertIn("未実行機構", out)
+
+    def test_option_missing_is_rejected_per_input(self):
+        # (--route-list は required でない: 省略 = 実ルーター fallback で欠落ではない)
+        cases = {
+            "--operations": 2, "--findings": 2, "--graph-db": 2, "--run-id": 2,
+            "--executed": 3,
+        }
+        for opt, expected in cases.items():
+            with self.subTest(option=opt):
+                rc, out, err = self._run(self._drop_option(opt))
+                self.assert_no_worklist(rc, out, expected)
+                if expected == 3:
+                    self.assertIn("executed_missing", err)
+
+    def test_file_missing_is_rejected_per_input(self):
+        base = Path(self.tmp.name)
+        for opt in ("--route-list", "--operations", "--findings",
+                    "--executed", "--graph-db"):
+            with self.subTest(option=opt):
+                rc, out, err = self._run(
+                    self._replace_value(opt, str(base / "no-such-input")))
+                self.assert_no_worklist(rc, out, C.EXIT_INPUT_ERROR)
+                self.assertIn("ERROR", err)
+
+    def test_findings_glob_matching_nothing_is_rejected(self):
+        rc, out, err = self._run(
+            self._replace_value("--findings", str(Path(self.tmp.name) / "shard-*" / "findings.jsonl")))
+        self.assert_no_worklist(rc, out, C.EXIT_INPUT_ERROR)
+        self.assertIn("ERROR", err)
+
+
 class ExecutedValidationTest(unittest.TestCase):
     """validate_executed() の単体検査 (成立 → None / 各違反 → 理由文字列)。"""
 
@@ -799,6 +975,67 @@ class StoryCellParseTest(unittest.TestCase):
             with self.subTest(cell=cell):
                 with self.assertRaises(C.FatalError):
                     C.parse_story_cell(cell, "r")
+
+
+class RealRouterTest(unittest.TestCase):
+    """実ルーター経路 (--route-list 省略時の本番経路) の検査 (家系正典 t2 要素 3 の aicue 形)。
+
+    正典の (c) は生成器コマンド (bughunt:resolve-executed) の実登録検査だが、aicue は
+    D14 の別実装で生成器を持たない。照合器が実際に依存するコマンドは
+    `php artisan route:list --json` (load_route_list(None) の subprocess fallback) なので、
+    その実登録と実走を固定し、壊れたとき「何が壊れたか読めない赤」にならないようにする。
+
+    gate: リポジトリルートの artisan 実在 (aicue の checkout では常に実在 = 常時実走。
+    skip になるのは coverage/ を Laravel checkout の外へ単独コピーした場合だけ)。
+    """
+
+    @unittest.skipUnless(ARTISAN.is_file(), "artisan not present (Laravel checkout の外)")
+    def test_route_list_command_is_registered(self):
+        # コマンド実登録の確認 (前段)。行頭比較や部分一致は使わない:
+        # 各行を strip() し、空白区切りの第 1 トークンの完全一致で route:list を探す。
+        try:
+            proc = subprocess.run(
+                ["php", "artisan", "list", "--raw"],
+                cwd=str(_REPO_ROOT), capture_output=True, text=True, timeout=60,
+            )
+        except subprocess.TimeoutExpired:
+            self.fail("php artisan list --raw が 60 秒で応答しない (アプリの boot が進まない)")
+        self.assertEqual(
+            proc.returncode, 0,
+            "php artisan list --raw が失敗 (アプリが起動できない):\n"
+            f"rc={proc.returncode}\nstdout:\n{proc.stdout[:2000]}\nstderr:\n{proc.stderr[:2000]}",
+        )
+        registered = {
+            line.strip().split()[0]
+            for line in proc.stdout.splitlines() if line.strip()
+        }
+        self.assertIn(
+            "route:list", registered,
+            "route:list コマンドが実登録されていない (artisan list --raw に現れない)",
+        )
+
+    @unittest.skipUnless(ARTISAN.is_file(), "artisan not present (Laravel checkout の外)")
+    def test_load_route_list_fallback_returns_named_routes(self):
+        # 実ルーター経路の実走 (本命)。本命呼び出しそのものに診断を付ける
+        # (事前の自前実行は置かない — 事前の成功は本命の診断可能性を保証しない)。
+        try:
+            routes = C.load_route_list(None, project_dir=str(_REPO_ROOT))
+        except subprocess.CalledProcessError as e:
+            self.fail(
+                "php artisan route:list --json が失敗:\n"
+                f"rc={e.returncode}\nstderr:\n{(e.stderr or '')[:2000]}"
+            )
+        except json.JSONDecodeError as e:
+            self.fail(
+                f"route:list の出力が JSON として読めない: {e} "
+                f"(本文先頭: {e.doc[:200]!r})"
+            )
+        self.assertIsInstance(routes, list)
+        named = [r for r in routes if isinstance(r, dict) and r.get("name")]
+        self.assertGreater(
+            len(named), 0,
+            "name を持つ route が 0 件 = 実ルーター経路が壊れている",
+        )
 
 
 if __name__ == "__main__":

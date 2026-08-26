@@ -5,8 +5,10 @@ run_id を軸に route インベントリ / operations.md(機構分母) /
 executed.json(実行済み route の記録。build_executed.py が作る) /
 findings.jsonl / graph.db(TESTED_BY) を join し、**未カバー worklist** を出す。
 
-**主入力が揃わない走行は成功にしない** (終了コード 3)。executed.json が無い / 別 run /
-形が契約外 / 観測行 0 のときは worklist を出さずに落ちる (揃わない走行を
+**主入力が揃わない走行は成功にしない** (非 0 で落ち worklist を出さない。
+executed の可用性違反は終了コード 3)。--executed が無い / 別 run / 形が契約外 /
+観測行 0 のときは worklist を出さずに 3 で落ち、入力ファイルの不在・parse 失敗は 1、
+required オプションの欠落は usage エラー 2 で落ちる (揃わない走行を
 「全件未実行」という嘘の一覧として返さないため)。
 
 主出力 = worklist (未実行機構 / TESTED_BY untested(TS面のみ) / finding hotspot /
