@@ -1580,8 +1580,10 @@ doc/10 §10.3 / §10.8-4/-7 の実装 (T004)。routes は `/organizations/{organ
    また `<img>` プレビューは実体がデコード不能なら壊れ得るため、UI に読み込み失敗の受け皿を置いている
    (`<video>` 側には足していない = 非対称は意図的)。
 2. **`-max_alloc` は 1 回の heap 確保の上限**であって、プロセス全体の RSS 上限でも
-   同時実行数の上限でもない。worker のメモリ cgroup 制限は本リポジトリに存在せず、新設もしない
-   (デプロイ定義が無いため)。**未軽減リスクとして記録する**。
+   同時実行数の上限でもない。worker のメモリ cgroup 制限は**置いていない**
+   (デプロイ定義 `deploy.php` は systemd unit を restart するだけで、unit の
+   `MemoryMax` 等は持たない。`docs/deployment-runbook.md` §11 の未対応事項に列挙してある)。
+   **未軽減リスクとして記録する**。
 3. `FfmpegProcessLaunchInventoryTest` は**字句走査**であり、動的に組み立てたコマンド配列や
    vendor 内部からのプロセス起動には沈黙する。引数の並びの実体は Unit テスト
    (`Process::fake` の引数列) が固定する。

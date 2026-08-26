@@ -13,13 +13,13 @@ use Illuminate\Support\Facades\Schema;
  *   (2 方式の併存不可)」と定める。列を残したまま URL 方式を足すと、その状態自体が裁定違反になる。
  * ★**ローリングデプロイ非互換**である (旧アプリは列を読むため、列を落とすと 500 になる)。
  *   切替はメンテナンス前提で、手順は次のとおり:
- *     1. メンテナンスモードに入れる
- *     2. 新コードをデプロイ
- *     3. `php artisan migrate`
- *     4. `php artisan route:cache` を再生成する (AGENTS.md の運用要件。
- *        vendor route への middleware 後付けは cache 生成時に焼き込まれる)
- *     5. メンテナンスモードを解除
- *   本リポジトリにデプロイ定義は無いため、この手順は**人手で守られる**。
+ *     1. メンテナンスモードに入れる (`dep artisan:down`)
+ *     2. 新コードをデプロイ + migrate (`dep deploy`)
+ *     3. メンテナンスモードを解除 (`dep artisan:up`)
+ *   経路キャッシュの再生成は**不要**である — デプロイ定義 (deploy.php) は経路キャッシュを
+ *   生成しない契約で、焼くのは config / event / view の 3 つだけ (AGENTS.md の運用要件 /
+ *   docs/template-divergence.md D19)。
+ *   メンテナンスモードを挟む判断そのものは機械強制されておらず、**人手で守られる**。
  * ★down は列と FK を戻すだけで、**値は復元しない** (概念そのものが無くなるため)。
  */
 return new class extends Migration

@@ -50,19 +50,40 @@ TRUSTED_PROXIES=10.0.0.0/8,172.16.0.0/12
 > `tests/Architecture/TrustedProxiesRunbookTest.php` が fail する。**
 > 「誰も読まないまま本番の信頼境界が決まる」ことを構造的に防ぐための gate。
 
-### 3.0 現在の状態 (最終確認: 2026-08-05 / T108)
+### 3.0 現在の状態 (最終確認: 2026-08-26 / Deployer 導入時)
 
-**本番環境は未構築**。本リポジトリには `deploy/` / terraform / k8s manifest / nginx conf が
-存在せず、`TRUSTED_PROXIES` は既存の env にも登場していない (T108 実装時に実地確認)。
-存在する唯一の実行環境は local (docker-compose) で、**前段プロキシは無い**。
+**開発/staging サーバーが 1 台構築されている** (Lightsail / `APP_ENV=staging` /
+`deploy_path=/var/www/aicue`)。デプロイ定義はリポジトリルートの `deploy.php` (Deployer) で、
+サーバー構成の正本は `docs/deployment-runbook.md`。
 
-したがって現時点の正しい宣言は `TRUSTED_PROXIES=none` (プロキシ無し構成の明示宣言) である。
+この 1 台構成に**前段プロキシは無い**。実地確認した内容:
+
+- nginx と php-fpm は**同一ホスト**にあり、両者は UNIX domain socket
+  (`/run/php-fpm/aicue.sock`) で繋がっている。**TCP の hop が増えない**ため
+  `X-Forwarded-For` を生成する主体がそもそも居ない。
+- **CDN も LB も無い**。クライアントは nginx へ直接 TCP 接続する
+  (ドメイン `aicue.jp` は未取得で、現状は IP 直アクセス。TLS も未導入)。
+- したがって `$request->ip()` は `REMOTE_ADDR` = 実クライアント IP であり、
+  信頼すべき hop は 0 個である。
+
+**したがって正しい宣言は `TRUSTED_PROXIES=none`** (「このアプリの前段にプロキシは無い」の
+明示宣言) である。空欄ではなく `none` と書くこと — 空欄は「宣言し忘れ」と区別できず、
+`ProductionEnvGuard` が production で起動を止める設計になっている。
 実 CIDR は**推測で決め打ちしない** — 誤った CIDR は「hop 取りこぼしによる自己 DoS」か
-「過大信頼による XFF 偽装」のどちらかに必ず倒れるため、値を書かないことが正しい。
+「過大信頼による XFF 偽装」のどちらかに必ず倒れるため、hop が無いなら書かないことが正しい。
 
-> ⚠ **初回本番デプロイ時の必須作業**: §3.1 / §3.2 / §3.3 を実インフラに基づいて書き換え、
-> §4 の手順で `production:preflight` を通すこと。本節の「未構築」記述が残ったまま
-> LB / CDN 配下へデプロイすると、client IP が LB の内部 IP に固定され自己 DoS になる。
+> ℹ **現サーバーは `APP_ENV=staging` なので `ProductionEnvGuard` の起動時 fail-fast の対象外**
+> である (`production:preflight` も production 以外では skip する)。つまり `TRUSTED_PROXIES` を
+> 書き忘れても**起動は通ってしまう**。書き忘れると client IP が固定されて
+> rate limit が全利用者で共有されるため、staging でも必ず `none` を宣言すること。
+
+> ⚠ **前段に何かを挟むときの必須作業** (`aicue.jp` + TLS 化、CDN、ALB/NLB、WAF、
+> 別ホストの nginx を前段に置く、等のいずれか):
+> §3.1 / §3.2 / §3.3 を実インフラに基づいて書き換え、§4 の手順で `production:preflight` を
+> 通すこと。**hop を足したのに本節の「前段プロキシ無し」記述が残ったままデプロイすると、
+> client IP がその hop の IP に固定され自己 DoS になる。**
+> `aicue.jp` を取得して同一ホストの nginx で TLS 終端するだけなら hop は増えず `none` のままでよい
+> (判定基準は「TCP 接続の相手が変わるか」であって「HTTPS かどうか」ではない)。
 
 ### 3.1 実 proxy hop 一覧
 
@@ -71,23 +92,25 @@ TRUSTED_PROXIES=10.0.0.0/8,172.16.0.0/12
 
 | # | hop (外→内) | 種別 (CDN/WAF/LB/ingress/sidecar 等) | 送信元 IP レンジ (CIDR) | レンジの出典 (取得元 URL / IaC のリソース) |
 |---|---|---|---|---|
-| 1 | (無し) | — | — | 本番未構築。local は docker-compose 直結でプロキシ hop 無し |
+| 1 | (無し) | — | — | 開発/staging サーバー 1 台構成。クライアントが nginx へ直接接続し、nginx→php-fpm は同一ホストの UNIX socket。CDN / LB / 別ホストの前段 nginx はいずれも無い (2026-08-26 実地確認) |
+
+**local (docker-compose)** も前段プロキシ hop 無し (`php artisan serve` 直結)。
 
 ### 3.2 CIDR の管理主体
 
 | 項目 | 記入 |
 |---|---|
-| CIDR を決める責任者 / チーム | 本番インフラを構築する担当チーム (未定。初回デプロイ時に確定する) |
-| レンジが変わる契機 (CDN のレンジ更新・LB 再作成・リージョン追加等) | 本番未構築のため該当なし。構築後は CDN/LB の IP レンジ更新・LB 再作成・リージョン追加が契機 |
-| 変更の検知方法 (CDN の IP レンジ JSON 監視 / IaC の drift 検知など) | 本番未構築のため未設定。構築時に「CDN の IP レンジ公開 JSON の監視」または「IaC の drift 検知」を配線する |
-| 変更時の連絡先 | 未定 (初回デプロイ時に確定する) |
+| CIDR を決める責任者 / チーム | サーバーを運用する開発者 (現状 1 名。`docs/deployment-runbook.md` の運用者と同一) |
+| レンジが変わる契機 (CDN のレンジ更新・LB 再作成・リージョン追加等) | **現構成では発生しない** (hop が 0 個のため)。CDN / LB / WAF / 別ホストの前段 nginx を導入した時点で発生するようになる。その導入自体が契機である |
+| 変更の検知方法 (CDN の IP レンジ JSON 監視 / IaC の drift 検知など) | **現構成では未設定** (監視すべきレンジが無い)。hop を導入する PR で「CDN の IP レンジ公開 JSON の監視」または「IaC の drift 検知」を同時に配線すること (hop の導入と検知の配線を別 PR に分けない) |
+| 変更時の連絡先 | サーバーを運用する開発者 (上記と同一) |
 
 ### 3.3 環境ごとの値
 
 | 環境 | TRUSTED_PROXIES の値 | 備考 |
 |---|---|---|
-| production | `none` (プロキシ無し構成として明示宣言) | **未構築**。LB / CDN を前段に置いた時点で §3.1 の実 CIDR に必ず差し替える |
-| staging | (未構築) | production と同一構成で構築すること |
+| production | (未構築) | production 環境はまだ無い。作るときは §3.1 を書き直してから `TRUSTED_PROXIES` を決める。`ProductionEnvGuard` が未宣言・`*`・`REMOTE_ADDR`・書式不正を起動時に拒否する |
+| staging (現行の開発/staging サーバー) | `none` (プロキシ無し構成として明示宣言) | 前段プロキシ無し (§3.1)。**`APP_ENV=staging` なので起動時 fail-fast は効かない**ため、`shared/.env` への記入漏れに注意する。CDN / LB / 別ホスト nginx を前段に置いた時点で §3.1 の実 CIDR に必ず差し替える |
 | local | (未設定 = 空。Valet TLS 利用時のみ `REMOTE_ADDR`) | production では `REMOTE_ADDR` 禁止 |
 
 ---
@@ -148,6 +171,7 @@ rate limit が異常に早く 429 になる / 監査ログの IP が 1 種類し
 
 ## 関連
 
+- `docs/deployment-runbook.md` — サーバー構成とデプロイ手順の正本 (§3 の実態の裏付け)
 - `config/trustedproxy.php` — framework が読む正本 (`TRUSTED_PROXIES` の解釈)
 - `app/Support/TrustedProxiesConfigValidator.php` — production 起動時検証
 - `docs/auth-security-mechanisms.md` §client IP の信頼境界

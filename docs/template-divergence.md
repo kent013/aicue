@@ -8,7 +8,7 @@
 `template-divergence-ledger` が 2026-08-15 に確定した形) に従う。形式は
 `tests/Architecture/TemplateDivergenceLedgerFormatTest.php` が機械で強制する。
 
-登録エントリ: 54 件
+登録エントリ: 55 件
 
 ## 記録の原則
 
@@ -1083,15 +1083,21 @@ deny-by-default の目録 / 撤去済み参照の gate) はそのまま採って
 
 | 行 | 内容 |
 |---|---|
-| 対象パス | `app/Support/Http/RouteMiddlewareBinder.php` / `app/Support/Http/RouteThrottleBinder.php` |
-| 業務要件起因の説明 | 本リポジトリにデプロイ定義の実体が無く、存在しない基盤のための preflight を先回りして作らない規約があるため、正典の専用実行点へ移行する利益が今は無い |
-| 揃え続ける不変条件と保証機構 | 後付けした保護は実効の経路に必ず載る / 後付けの入口は 2 つの binder に限られる / 経路名が消えたら起動を止める。`PostBootRouteMutationInventoryTest` と `RouteCacheBakedProtectionTest` が固定する |
-| 再判定の条件 | デプロイ定義が入ったとき / route:cache を実行する記述が入ったとき / 家系の機能台帳の裁定が変わったとき |
+| 対象パス | `app/Support/Http/RouteMiddlewareBinder.php` / `app/Support/Http/RouteThrottleBinder.php` / `deploy.php` |
+| 業務要件起因の説明 | デプロイ定義 (`deploy.php`) が**経路キャッシュを生成しない**契約を持つため、後付けした保護は実効の経路に載り続ける。正典の専用実行点へ移行して得られるのは「経路キャッシュを焼いても後付けが効く」ことだけで、焼かないと決めた出荷経路では利益が無い |
+| 揃え続ける不変条件と保証機構 | 後付けした保護は実効の経路に必ず載る / 後付けの入口は 2 つの binder に限られる / 経路名が消えたら起動を止める / **出荷経路が経路キャッシュを生成しない**。`PostBootRouteMutationInventoryTest` と `RouteCacheBakedProtectionTest`、および `RouteCacheExemptionPremiseTest` (検査 B) が固定する |
+| 再判定の条件 | **経路キャッシュを打つ判断が入ったとき** (`deploy.php` に生成を足す / route:cache または artisan optimize を実行する記述が入る = 検査 B が赤くなる) / **`deploy.php` 以外のデプロイ定義が入ったとき** (検査 A が赤くなる。例: `deploy/` ディレクトリ・CI のデプロイ job・terraform・k8s manifest) / 家系の機能台帳の裁定が変わったとき |
 | 決めた日 | 2026-08-15 |
 | 決めた人 | 開発者 |
 | 根拠 | devnotes/20260815-2100-route-cache-middleware-attach/ |
 | 状態 | 恒久 |
 | 見直し期限 | — |
+
+> **再判定の記録 (2026-08-26)**: 再判定条件の「デプロイ定義が入ったとき」が発火した
+> (Deployer の `deploy.php` を導入)。再判定の結果は**逸脱の維持**である。
+> 根拠は下の「なぜ正当な差分か」1〜2 と「再検討の条件」末尾に書いてある。
+> 実態の正本は `deploy.php` / `docs/deployment-runbook.md` /
+> `AGENTS.md` 「運用要件 (route:cache)」。
 
 家系の正典 (機能台帳 `route-cache-safe-middleware-attach` の v1) は、経路の一覧が組み上がった後に
 走らせたい処理を**専用の実行点クラス 1 つ**へ集約し、経路キャッシュ起動でも後付けを効かせる形である。
@@ -1100,19 +1106,26 @@ deny-by-default の目録 / 撤去済み参照の gate) はそのまま採って
 | 観点 | 家系の正典 / テンプレート | 本アプリ |
 |---|---|---|
 | 実行点 | 専用クラス 1 つ (`AfterRoutesLoaded` 相当) へ集約 | 2 つの binder が各々 `Application::booted()` を使う |
-| 経路キャッシュ起動での契約 | 容器の `routes` 束縛の張り替えを捕まえ、読み込まれた直後に後付けを走らせる | **走らせない**。実効は `route:cache` 生成時の焼き込み |
+| 経路キャッシュ起動での契約 | 容器の `routes` 束縛の張り替えを捕まえ、読み込まれた直後に後付けを走らせる | **走らせない**。そのうえで**出荷経路が経路キャッシュを生成しない** (`deploy.php` が焼くのは config / event / view の 3 つだけ) ため、実効の経路は常に起動時に組み立てられた側である |
 | 入口の絞り込み | 素の起動完了フックの直呼びを走査で禁止 | `PostBootRouteMutationInventoryTest` が入口を 2 binder に絞る (deny-by-default) |
 | 経路キャッシュ起動での実証 | 別プロセスで起動して後付けの残存を確認 | 同一プロセスで「焼き込みの入力」と「欠落時の剥落」を確認 (別プロセス起動は導入しない) |
 
 ### なぜ正当な差分か (logic-driven)
 
-1. **前提が今は成立している**。本リポジトリにデプロイ定義の実体は無く、`route:cache` を実行する
-   記述も追跡下に 1 件も無い。ただし言えるのは「**いま定めた走査条件で検出される発生経路が無い**」
-   までである (「発生確率がゼロ」とも「管理下に発生経路が無い」とも書かない。走査条件が拾わない
-   書き方は `tests/Architecture/RouteCacheExemptionPremiseTest.php` の説明が列挙する)。
-2. **毎デプロイ再生成の機械強制は今は採れない**。`AGENTS.md` の運用要件 (route:cache) が
-   「存在しない基盤のための preflight 機構を先回りして作らないこと (思考原則 2)」と明記しており、
-   デプロイ基盤そのものが無い段階で preflight を作るのは、その規約に正面から反する。
+1. **前提が成立しており、いまは出荷経路そのものが前提を支えている**。2026-08-26 に
+   デプロイ定義 `deploy.php` (Deployer) が入ったことで再判定条件の 1 つが発火したため再判定した。
+   結論は**逸脱の維持**である。理由は、その `deploy.php` が同梱 recipe の既定構成 (経路キャッシュの
+   生成を含む複合タスクを呼ぶ) を使わず、**焼くのを config / event / view の 3 つだけに限る**
+   契約を採ったことにある。つまり「経路キャッシュを打たない」は
+   **人手の約束から出荷経路の性質へ格上げされた**。`route:cache` を実行する記述も追跡下に 1 件も無い。
+   ただし言えるのは「**いま定めた走査条件で検出される発生経路が無い**」までである
+   (「発生確率がゼロ」とも書かない。走査条件が拾わない書き方は
+   `tests/Architecture/RouteCacheExemptionPremiseTest.php` の説明が列挙する)。
+2. **毎デプロイ再生成の機械強制は「解く相手が消えた」ので採らない**。再生成の強制が守るのは
+   「焼いた cache が stale であること」だが、焼かない出荷経路には stale な cache が存在しない。
+   経路キャッシュの鮮度を見る preflight を足すと、**検査対象の無い機構**を抱えることになる (思考原則 2)。
+   出荷前検査は既存の `production:preflight` (`ProductionEnvGuard` が正本) を `deploy` タスクの
+   中で呼ぶだけに留めている。
 3. **正典の形は Laravel 13 では 4 つの問題を同時に解く必要がある** — 容器の `routes` 束縛の
    張り替えの捕捉 / その束縛がまだ無いときに張り替えが発火しない穴の手当て / 経路一覧の実体ごとの
    冪等 / cached 起動で起動を止めると `route:list` も `route:clear` も落ちて復旧手段を失う問題への
@@ -1136,7 +1149,7 @@ deny-by-default の目録 / 撤去済み参照の gate) はそのまま採って
 | 後付けの契約 (cached では resolver すら呼ばない / 経路が引けなければ起動を止める / 冪等 / 列の順) | `RouteMiddlewareBinderTest` / `RouteThrottleBinderTest` |
 | 実際に付いた middleware 列が、直列化の準備を通しても焼き込みの入力へ欠落なく移ること | `tests/Feature/Security/RouteCacheBakedProtectionTest.php` (検査 1) |
 | 焼き込みが欠けた経路一覧では保護が実際に外れること | `tests/Feature/Security/RouteCacheBakedProtectionTest.php` (検査 2) |
-| この逸脱を許す前提 (直接書かれた `route:cache` / 空白だけを挟む `artisan optimize` が無いこと。デプロイ定義の不在は早期の気づき) | `tests/Architecture/RouteCacheExemptionPremiseTest.php` |
+| この逸脱を許す前提 (直接書かれた `route:cache` / 空白だけを挟む `artisan optimize` が無いこと。`deploy.php` 以外のデプロイ基盤の不在は早期の気づき) | `tests/Architecture/RouteCacheExemptionPremiseTest.php` |
 
 **保証範囲を誇張しない**: `RouteCacheBakedProtectionTest` が固定するのは同一プロセス内の
 「直列化の準備 → compile」までで、**cached 起動そのものの再現ではない**。
@@ -1145,21 +1158,37 @@ deny-by-default の目録 / 撤去済み参照の gate) はそのまま採って
 説明として `route:cache` の語を持つ既存ファイルは**件数を完全一致で pin** して扱い
 (増減のどちらでも赤になる)、走査から丸ごと外れているのは**同テスト自身の 1 件だけ**である
 (自分が検出したい語を負のコントロールの入力として持つため。その 1 ファイルの中は見えない)。
-また**デプロイ定義の検出は網羅を主張しない** (新しい CI 基盤やファイル名は拾えない)。
-主前提を固定するのは `route:cache` 側の検査である。
+また**デプロイ定義の検出 (検査 A) は網羅を主張しない**。判定条件は「既知のデプロイ基盤の形」
+(`deploy/` `ansible/` `k8s/` `helm/` 等のディレクトリ / `Procfile` `fly.toml` 等の名前 /
+`*.tf` / 名前に deploy・release・cd を含む GitHub Actions workflow) を拾う粗い網であり、
+**リポジトリルートの `deploy.php` はこの網に一致しない**。
+これは取りこぼしではなく**意図した配置**である: Deployer の設定を `deploy.php` 1 枚に閉じることで、
+検査 A を「**この 1 枚以外**のデプロイ基盤が増えたら赤くする」早期警報として使い続けられる
+(網に一致する形へデプロイ定義を広げた PR は、必ず本逸脱の読み直しを強制される)。
+したがって検査 A が緑であることは「デプロイ定義が無いこと」を意味しない。
+**主前提を固定するのは `route:cache` 側の検査 (検査 B) である。**
 
 ### 再検討の条件 (解消条件)
 
-- リポジトリに**デプロイ定義**の実体が入ったとき
-- `route:cache` (または `artisan optimize`) を実行する記述が入ったとき
+- **`deploy.php` 以外のデプロイ定義**の実体が入ったとき (検査 A。`deploy/` ディレクトリ・
+  CI のデプロイ job・terraform・k8s manifest 等)
+- `route:cache` (または `artisan optimize`) を実行する記述が入ったとき (検査 B)。
+  **`deploy.php` に経路キャッシュの生成を足す判断**はここに当たる
 - 家系の機能台帳の裁定が変わったとき
 
 前の 2 つは `RouteCacheExemptionPremiseTest` の検査条件と**同じ言葉**で書いてある。
 どちらかで赤くなったら、正典の形への移行か毎デプロイ再生成の機械強制かを**同じ PR で**決めること。
 
+**2026-08-26 の再判定**: 1 つめ (デプロイ定義の導入) が実際に発火した。デプロイ定義を
+`deploy.php` 1 枚に閉じ、そこで**経路キャッシュを打たない契約を固定した**ため、後付け middleware は
+実効の経路に載り続ける。よって正典の形へは移行せず、毎デプロイ再生成の機械強制も入れない。
+実態は `AGENTS.md` 「運用要件 (route:cache)」と `docs/deployment-runbook.md` が持つ。
+
 ### 関連
 
 - 実装: `app/Support/Http/RouteMiddlewareBinder.php` / `app/Support/Http/RouteThrottleBinder.php`
+- 出荷経路の契約: `deploy.php` (焼くのは config / event / view の 3 つだけ) /
+  `docs/deployment-runbook.md`
 - gate: `tests/Architecture/RouteCacheExemptionPremiseTest.php` /
   `tests/Feature/Security/RouteCacheBakedProtectionTest.php` /
   `tests/Architecture/PostBootRouteMutationInventoryTest.php`
@@ -3321,3 +3350,52 @@ database / routes / tests の 6 root に固定する。aicue は走査器 2 ク�
 リポジトリ構成依存として必須外)。採用時点ではこの食い違いに説明が無く採用時債務 (D34 の一覧)
 として凍結されていたが、正典 t2 追従 (devnotes/20260826-0024-gate-no-non-compound-global-use-t2/)
 で本ファイルを変更するのに伴い、同じ変更で債務から外して本登録に説明を移した。
+
+## D58 dev 環境定義 (docker-compose) を、ホスト共有前提と Deployer の鍵配布のためテンプレートの形から外す
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `docker-compose.yml` |
+| 業務要件起因の説明 | 本アプリは撮影 PWA を実機から叩くため Valet の固定プロキシ (aicue.test → 127.0.0.1:8002) に合わせた publish が要り、動画レンダの検証で PostgreSQL 18 の major 別 PGDATA レイアウトに合わせたマウントが要り、課金の秘密を追跡ファイルへ置かないため credential を env 経由の fail-fast にしている。さらに実サーバーへのデプロイを devcontainer 内の Deployer から行うため、SSH 鍵を読み取り専用でマウントする必要がある。いずれもテンプレートの汎用 dev 環境定義には無い本アプリの実行要件である |
+| 揃え続ける不変条件と保証機構 | 追跡ファイルに実 credential を置かない (`${POSTGRES_PASSWORD:?}` の未設定 fail-fast) / 公開する port は loopback bind に限る (共用 LAN への漏洩防止) / 秘密鍵はコンテナへ焼かずホストからの読み取り専用マウントで渡す。いずれも機械検査は無く、ファイルの記述と本登録・`docs/deployment-runbook.md` §4 のレビューが担う (**dev 環境定義なので CI の検査対象ではない**) |
+| 再判定の条件 | テンプレートが dev 環境定義に SSH 鍵配布の作法を持ったとき / Deployer の実行場所を devcontainer の外 (CI 等) へ移したとき (鍵マウントが不要になる) / dev の DB エンジン・port 割り当て・Valet 前提が変わったとき |
+| 決めた日 | 2026-08-26 |
+| 決めた人 | 開発者 |
+| 根拠 | devnotes/20260826-0240-deploy-definition-deployer/ |
+| 状態 | 恒久 |
+| 見直し期限 | — |
+
+| 観点 | 家系の正典 / テンプレート | 本アプリ |
+|---|---|---|
+| 公開 port | サービス既定のまま | 他プロジェクトと衝突しない値へずらし、すべて loopback bind (app 8002→8001 / mailpit 8026・1026) |
+| DB | テンプレート既定 | PostgreSQL 18 で、マウントを `/var/lib/postgresql` に単一で当てる (major 跨ぎの `pg_upgrade --link` が mount 境界を越えないようにする) |
+| credential | ファイル内に既定値 | `${POSTGRES_PASSWORD:?...}` で未設定・空文字を fail-fast させ、実値は追跡外の `.env` に置く |
+| SSH 鍵 | 概念が無い (デプロイ定義を持たないため) | ホストの鍵を `/home/vscode/.ssh/aicue_deploy` へ**読み取り専用**でマウントし、`deploy.php` の `identity_file` がそれを指す |
+
+### なぜ正当な差分か (logic-driven)
+
+1. **dev 環境定義はアプリの実行要件をそのまま映す層である**。撮影 PWA を実機で叩く (Valet 経由の
+   固定 host)・動画レンダを回す (ffmpeg と PostgreSQL 18)・課金の秘密を扱う (credential の
+   追跡外化) という本アプリの要件が、そのまま port・volume・env の形になっている。
+   テンプレートの汎用定義へ寄せると、これらの要件を満たす場所が無くなる。
+2. **鍵マウントは「デプロイをどこから実行するか」の帰結である**。本リポジトリの PHP は
+   devcontainer の中にしか無いため、Deployer も devcontainer から動かすしかない
+   (`docs/deployment-runbook.md` §4)。そのため鍵の受け渡しが dev 環境定義の責務になる。
+   コンテナへ鍵を焼く (Dockerfile へ COPY する) 形は採らない — イメージに秘密が残るため、
+   ホストからの読み取り専用マウント 1 択である。
+3. **作業量を理由にしていない**。本登録は「テンプレートへ戻すのが面倒だから」ではなく
+   「戻すと上の実行要件を満たせなくなるから」である (本書冒頭の判定軸)。
+
+### 経緯
+
+採用時点ではこの食い違いに説明が無く、採用時債務 (D34 の一覧) として採用時ハッシュ付きで
+凍結されていた。Deployer 導入で本ファイルへ鍵マウントを足すのに伴い、D34 が定める
+「一覧が縮む契機」の 2 つのうち「意図的逸脱として登録簿へ書く」を採り、
+同じ変更で債務一覧から 1 行外して本登録に説明を移した (前例は D56 / D57)。
+
+### 関連
+
+- 実装: `docker-compose.yml` / `deploy.php` (`identity_file`)
+- 手順: `docs/deployment-runbook.md` §4 (開発機側の前提)
+- 設計: `devnotes/20260826-0240-deploy-definition-deployer/`
+- 関連する登録: D34 (採用時債務の凍結層。本登録で 1 行解消した)
