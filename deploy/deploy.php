@@ -58,8 +58,16 @@ set('default_timeout', 900);
  * (単一引数の `[ ]` は非空文字列判定なので**常に真**) = 検査が空洞化する。実測済み。
  * ここで実パスを宣言することで `failIfNoEnv` が本当に機能し、
  * `shared/.env` を置き忘れたデプロイが deploy:verify で fail-closed に止まる。
+ *
+ * ★**値は解決に `run()` を要さない静的なパスでなければならない**。
+ *   Deployer 8 の `run()` は毎回この値を解決する。`{{release_or_current_path}}` は
+ *   解決時に `test('[ -h ... ]')` (= `run()`) を呼ぶため、`run()` → dotenv 解決 →
+ *   `run()` → … と無限再帰し、**worker が SIGSEGV (exit 139) で落ちる**
+ *   (実測: 2026-08-26。master は "done" と出すのにサーバー側は 1 バイトも変わらない、
+ *   という最も気づきにくい形で失敗する)。
+ *   `.env` は shared_files なので、release 側の実体は常に shared のこのファイルである。
  */
-set('dotenv', '{{release_or_current_path}}/.env');
+set('dotenv', '{{deploy_path}}/shared/.env');
 
 // stage: 既定は非本番。本番 host は hosts.yml で `stage: production` を宣言する。
 set('stage', 'dev');

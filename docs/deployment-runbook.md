@@ -520,11 +520,15 @@ preflight (OPTIONS) の段階で失敗する。これが一番よく踏む落と
 シナリオ生成は Prism 経由で LLM を呼ぶ (`config/prism.php`)。**使う provider のキーだけ**を
 `shared/.env` に置く。
 
-| キー | provider |
-|---|---|
-| `OPENAI_API_KEY` | OpenAI |
-| `ANTHROPIC_API_KEY` | Anthropic |
-| `GEMINI_API_KEY` | Google Gemini |
+| キー | provider | 現在必要か |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | Anthropic | **必要**。`resources/prompts/*.yaml` の全 5 本が provider を `anthropic` に pin している |
+| `OPENAI_API_KEY` | OpenAI | 不要 (受け口だけ。どの prompt も参照しない) |
+| `GEMINI_API_KEY` | Google Gemini | 不要 (同上) |
+
+必要なキーの正本は **prompt YAML の `provider` 宣言**である (`config/prism.php` は受け口を
+定義しているだけで、宣言されていない provider のキーを置いても誰も読まない)。
+prompt を足すときはその YAML の `provider` を見て判断する。
 
 - キーを置いたら**再配布する** (§8-5 と同じ理由。焼いた設定キャッシュには反映されない)。
 - **キーは組織ごとの費用計上に影響しない** (帰属は `LlmCallContextData` がアプリ側で付ける)。
@@ -541,6 +545,38 @@ preflight (OPTIONS) の段階で失敗する。これが一番よく踏む落と
   `php artisan admin:reset-mfa <AdminUser の id> --reason="<10 文字以上の理由>"`
   (`ResetAdminMfaCommand`。理由は監査証跡に残るので必須)。
 - 本番相当の環境で `AdminUserSeeder` は使わない (local 専用)。
+
+### 10.2b ファクトリを使うシーダーを配布先で流す (テストデータ投入)
+
+`ManualTestSeeder` のような**ファクトリ経由でモデルを作るシーダー**は、配布先の release では
+そのままでは動かない。`fakerphp/faker` が **dev 依存**であり、配布は
+`composer install --no-dev` (recipe 既定。`DeployPipelineWiringTest` W17 が固定) で行うためである。
+
+素で叩くと参照データの投入まで進んだ後に次で落ちる:
+
+```
+In UserFactory.php line 36:
+  Call to undefined function Database\Factories\fake()
+```
+
+**投入済みの参照データ (Role / Permission / Plan) は冪等**なので、この失敗のあとに
+やり直しても二重登録にはならない。手順は次のとおり (実施記録: 2026-08-26 / staging):
+
+```bash
+cd /var/www/aicue/current
+composer install --no-interaction --prefer-dist --no-progress          # dev 依存を一時的に入れる
+php artisan db:seed --class=ManualTestSeeder --force                   # 投入 (冪等。2 回目は skip)
+composer install --no-dev --optimize-autoloader --no-interaction       # 配布時の状態へ戻す
+sudo systemctl reload php-fpm                                          # autoload の入れ替えを反映
+ls vendor/fakerphp                                                     # 消えていることを確認 (No such file)
+```
+
+- **`--force` が必要**である (`APP_ENV` が local 以外では確認プロンプトが出る)。
+- **戻し忘れると本番相当の環境に dev 依存が載ったまま**になる。次の配布で消えるが、
+  それまでの間 vendor の内容が配布時と食い違う。上の手順は 1 コマンド 1 行で完結させ、
+  戻すところまでを 1 回の作業単位にすること。
+- `ManualTestSeeder` は**全ユーザーのパスワードが `password123`** である。
+  接続元を絞っていない環境では流さない (本サーバーは 443 を許可 IP のみに制限している)。
 
 ### 10.3 CLI OAuth client の発行
 
