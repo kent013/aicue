@@ -1,6 +1,5 @@
 # template_ledger_commit=a078806b0574518ddc64966f60f7d536b1338b2f
 .claude/agents/bughunt-shard.md	85c2a7b649178200415baa06768940aebb7d9ffce8f615c23da856dbec8922cf
-.claude/skills/app-bug-hunt/coverage/README.md	644e649a15d603d9ffd60f708fe6ce444ff9e83fd13c15264c78514943872d1f
 .claude/skills/app-bug-hunt/coverage/fixtures/executed.sample.json	360f716d2f09e68d63963c7bac2254c6c2c5a91329a292a9b2ce9dff5cc79fc3
 .claude/skills/app-bug-hunt/coverage/merge_pcov.py	58188a2395e3e6217e8a7c529747290a6b320c6a3258f9f4902ad2cc83fbe667
 .claude/skills/app-bug-hunt/coverage/test_merge_pcov.py	af796fa2dc20752f5022543cae3029de5a71f2b3a0474a9d8aafc155935388ab
