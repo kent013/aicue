@@ -156,32 +156,37 @@
 > 現行 `APP_KEY` の値をそのまま宣言すれば維持できる。運用手順は
 > `docs/auth-security-mechanisms.md` §5。
 
-> **運用要件 (route:cache)**: production は `php artisan route:cache` を**毎デプロイ再生成する**。
+> **運用要件 (route:cache)**: **経路キャッシュを毎デプロイ再生成する**。
 > vendor route への middleware 後付け(`RouteThrottleBinder` / `RouteMiddlewareBinder`)は
-> **cache 生成時に焼き込まれ、cached 起動では 1 本も効かない**ため、stale cache は
-> **無音で保護を外す**(実測: 2FA 秘密 GET が 409 でなく 200 を返し、passkey 削除の
+> **経路の一覧が組み上がった後の専用の実行点 `App\Support\Http\AfterRoutesLoaded` を必ず経由する**
+> (家系の正典の形)。素の `Application::booted()` の直呼びは**禁止**である —
+> 素のフックは **cached routes の読み込みより先に走る**ため、そこで経路名の fail-fast を行うと
+> `route:cache` 済みの起動が丸ごと落ちる(`route:list` も `route:clear` も落ちて復旧手段を失う
+> = T120 の事故)。入口を 2 binder に、実行点を 1 クラスに絞ることは
+> `tests/Architecture/PostBootRouteMutationInventoryTest.php` が deny-by-default で固定し、
+> 実行点の分岐の契約は `tests/Unit/Support/Http/AfterRoutesLoadedTest.php` が固定する。
+> **cached 起動では後付けも検査も行わない**。それでも無保護にならないのは、
+> `php artisan route:cache` が**経路が cached でない新しいアプリを起動**して一覧を組み上げてから
+> 直列化するためである — **配線漏れは経路キャッシュの生成時点で必ず落ちる**(パッケージ更新で
+> 経路名が変わっていれば `route:cache` 自体が異常終了する)。すなわち
+> **無保護な経路を焼き込んだ cache は作れない**。fail-fast 自体は「後付けが実際に走る起動すべて」
+> = 経路キャッシュが無い起動(ローカル開発・テスト・生成時の再 bootstrap)で効く。
+> **保証しないこと(誇張しない)**: 守れないのは「**生成より前に焼いた古い cache を配る**」場合だけで、
+> それは配備の責務である。古い cache は古い付与状態のまま起動し、**無音で保護が外れる**
+> (実測: 剥がした cache では 2FA 秘密 GET が 409 でなく 200 を返し、passkey 削除の
 > 手段保持 guard も消える)。対象は throttle だけではない(recent-auth /
-> ensure-login-method / no-store も同じ前提条件)。機序と実測は
-> `docs/app-integration-guide.md` §7c が正本。
-> **本リポジトリにデプロイ定義は無い**(deploy/ / terraform / k8s / CI デプロイ job のいずれも無い)。
-> よって現在この要件は**人手でのみ守られている**。**デプロイ基盤を作る PR は、
-> 本要件と TRUSTED_PROXIES 運用要件 (T108) の 2 つを実装するまで完了にできない**。
-> 存在しない基盤のための preflight 機構を先回りして作らないこと(思考原則 2)。
-> 家系の正典はこの後付けを「経路の一覧が組み上がった後に走らせる専用の実行点」へ集約する形だが、
-> **本リポジトリは「経路キャッシュ起動では走らせない」側を選んでいる**。この判断は
-> `docs/template-divergence.md` **D19** に登録済みである。
-> 判断の主前提に対するトリップワイヤとして、**追跡下に直接書かれた `route:cache`** と、
-> **`artisan` と `optimize` の間が空白だけの実行記述**が無いことを
-> `tests/Architecture/RouteCacheExemptionPremiseTest.php` が機械で固定する。
-> **動的に組み立てた文字列・オプションを挟む書き方・リポジトリの外にある手順は対象外**である。
-> 説明として `route:cache` の語を持つ既存ファイルは**件数を完全一致で pin** して扱い
-> (増減のどちらでも赤になる)、走査から丸ごと外れているのは**同テスト自身の 1 件だけ**である
-> (自分が検出したい語を負のコントロールの入力として持つため。その 1 ファイルの中は見えない)。
-> 同テストは既知のデプロイ定義が増えたことも早期に知らせるが、そちらは網羅を主張しない
-> (新しい CI 基盤やファイル名は拾えない)。**どちらかで赤くなったら D19 を読み直すこと。**
-> 焼き込みの入力に後付けが載っていることと、欠けたときに保護が実際に外れることは
-> `tests/Feature/Security/RouteCacheBakedProtectionTest.php` が固定する
-> (同一プロセス内の実測であり、**cached 起動そのものの再現ではない**)。
+> ensure-login-method / no-store も同じ前提条件)。**起動時に cache の鮮度は判定できない**
+> (本番デプロイは全ファイルを新規展開して mtime が揃うため、「作れるが作らない」ではなく
+> **正しく作れない**)。ゆえに再生成を守るのは**デプロイ定義**であり、その正本は
+> `docs/deployment-runbook.md` である。機序と実測は `docs/app-integration-guide.md` §7c が正本。
+> **アプリ側に経路キャッシュの鮮度を見る preflight は作らない**(起動時から正しく判定できないものを
+> 検査機構にしない。思考原則 2)。
+> **デプロイ基盤を作る PR は、本要件と TRUSTED_PROXIES 運用要件 (T108) の 2 つを
+> 実装するまで完了にできない**という条件は、デプロイ定義を入れた PR で両方を満たして解消済みである
+> (T108 = `docs/trusted-proxies-runbook.md` §3 の実態記入)。
+> **新しいデプロイ経路(production 環境の追加・CI からの自動デプロイ等)を足す PR にも同じ条件がかかる。**
+> 焼き込みの入力に後付けが欠落なく載ることと、欠けたときに保護が実際に外れることは
+> `tests/Feature/Security/RouteCacheBakedProtectionTest.php` が実測で固定する。
 
 ## テストレーンの外部 HTTP 出口 (既定拒否)
 
@@ -731,17 +736,18 @@ logic-driven な理由と「保証し続ける不変条件」を記録してか�
      新レーンへの route 割当 (相乗り禁止) は `ThrottleLaneAssignmentTest`、
      レーンをまたぐキー衝突は `RateLimiterKeyConventionTest`、
      巻き添え 429 が消えたことの実挙動は `AuthThrottleCoverageTest` が固定する
-   - vendor 登録 route への後付けは **`RouteThrottleBinder::attachOnBooted()`** 経由
-     (route 名が消えたら fail-fast。効くのは**後付けが実際に走る起動すべて** =
-     route cache が無い起動であり、**cached 起動では後付けごと skip されるので効かない**
-     (そこで例外を投げると `route:list` が必ず落ちるため = T120)。
-     cached 運用の本番で意味を持つ検出点は `route:cache` **生成時**である)。
-     **`php artisan route:cache` は毎デプロイ再生成する**
-     (後付けは cache 生成時に焼き込まれ cached 起動では skip されるため、stale cache は
-     古い付与状態のまま起動する)。
+   - vendor 登録 route への後付けは **`RouteThrottleBinder::attachOnBooted()`** 経由で、
+     実行タイミングは **`App\Support\Http\AfterRoutesLoaded::schedule()`** へ委ねる
+     (素の `Application::booted()` の直呼びは禁止。route 名が消えたら fail-fast し、
+     効くのは**後付けが実際に走る起動すべて** = route cache が無い起動である。
+     **cached 起動では後付けも検査も行わない**ので、そこで `route:list` が落ちることはない
+     = T120 の形を作れない)。**配線漏れは `route:cache` の生成時点で必ず落ちる**
+     (生成は cache 無しの新しいアプリを起動してから直列化するため)。すなわち
+     **無保護な cache は作れない**。**`php artisan route:cache` は毎デプロイ再生成する**
+     (守れないのは生成より前に焼いた古い cache を配る場合だけで、それは配備の責務)。
      throttle 以外の alias 後付け(recent-auth / ensure-login-method / no-store)は
-     **`RouteMiddlewareBinder::attachOnBooted()`** 経由で、**同じ前提条件に乗っている**。
-     後付け経路を新設するときの契約と、入口を 2 binder に絞る
+     **`RouteMiddlewareBinder::attachOnBooted()`** 経由で、**同じ実行点に乗っている**。
+     後付け経路を新設するときの契約と、入口を 2 binder・実行点を 1 クラスに絞る
      `PostBootRouteMutationInventoryTest` の説明は
      `docs/app-integration-guide.md` **§7c** が正本
    - **閾値は既存値を変えない**。新しい面には既に本番稼働中の同性質エンドポイントと同値を充てる

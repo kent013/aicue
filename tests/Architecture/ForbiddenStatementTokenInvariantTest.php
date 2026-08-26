@@ -78,6 +78,7 @@ function forbiddenStatementRootPolicies(): array
         'resources' => [ForbiddenStatementRootPolicy::ScannedNoExemption, ''],
 
         'routes' => [ForbiddenStatementRootPolicy::ScannedNoExemption, ''],
+        'deploy' => [ForbiddenStatementRootPolicy::ScannedNoExemption, ''],
         'scripts' => [
             ForbiddenStatementRootPolicy::ScannedWithExemption,
             'artisan を通さず別プロセスで起動される運用スクリプトが置かれる。'

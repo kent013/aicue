@@ -86,6 +86,19 @@ use Tests\Support\TrackedPhpSourceFiles;
 function phpBootProbeBinaryReferenceInventory(): array
 {
     return [
+        'tests/Architecture/DeployPipelineWiringTest.php' => [
+            'launches_app' => false,
+            'subject' => 'Deployer の CLI (vendor/bin/dep) と `php -l` を子プロセスで起こして '
+                .'デプロイ配線を測る。アプリは起こさない (使うのは tree / deploy --plan / '
+                .'deploy:confirm-stage というローカル完結の read-only サブコマンドだけで、SSH もしない)',
+            'recovery' => 'Laravel の Process facade の制限時間 (dep は 120 秒 / php -l は 60 秒。'
+                .'超過すれば例外になる)',
+            'reason' => 'テスト実行に使っている PHP と**同じ実行体**で dep を起こす必要がある '
+                .'(shebang の `env php` が別版を拾うと配線の判定が環境依存になる)。'
+                .'アプリの起動順序を測る経路ではないので共通の起動器 (BootProbeRunner) には載せない '
+                .'— 載せると Laravel 固有の基底環境と書き出し先の予約という無関係な前提が付く '
+                .'(PhpLintOracle / StrictTypesRuntimeProbe と同じ理由)',
+        ],
         'tests/Support/Process/BootProbeRunner.php' => [
             'launches_app' => true,
             'subject' => 'アプリを子プロセスで起こして起動順序を測る (PHP_BINARY)',

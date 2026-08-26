@@ -1580,8 +1580,10 @@ doc/10 §10.3 / §10.8-4/-7 の実装 (T004)。routes は `/organizations/{organ
    また `<img>` プレビューは実体がデコード不能なら壊れ得るため、UI に読み込み失敗の受け皿を置いている
    (`<video>` 側には足していない = 非対称は意図的)。
 2. **`-max_alloc` は 1 回の heap 確保の上限**であって、プロセス全体の RSS 上限でも
-   同時実行数の上限でもない。worker のメモリ cgroup 制限は本リポジトリに存在せず、新設もしない
-   (デプロイ定義が無いため)。**未軽減リスクとして記録する**。
+   同時実行数の上限でもない。worker のメモリ cgroup 制限は**置いていない**
+   (デプロイ定義 `deploy/deploy.php` は systemd unit を restart するだけで、unit の
+   `MemoryMax` 等は持たない。`docs/deployment-runbook.md` §11 の未対応事項に列挙してある)。
+   **未軽減リスクとして記録する**。
 3. `FfmpegProcessLaunchInventoryTest` は**字句走査**であり、動的に組み立てたコマンド配列や
    vendor 内部からのプロセス起動には沈黙する。引数の並びの実体は Unit テスト
    (`Process::fake` の引数列) が固定する。
@@ -2293,7 +2295,8 @@ lctl 台帳 feature `account-deletion-billing-guard` の標準形 v1 (裁定 AG-
   = 期限が予約時刻以降) が片列だけの非正規状態を拒否する。アプリ側の `isPending()` は
   同じ定義 (両列が揃うときだけ true) で、制約が無効化されても判定がぶれない。
 - **凍結は deny-by-default**。`routes/web.php` の `auth` + `verified` group 全体に
-  `not-pending-deletion` を直付けし (route cache に焼き込むため後付け binder は使わない)、
+  `not-pending-deletion` を直付けし (自前 route なので「貼る仕組みの 3 段優先順」の第 1 段。
+  後付け binder は設定でも貼れない vendor route 専用である)、
   `App\Enums\Account\AccountDeletionFreezeAllowance` の **exact case のみ**通す
   (wildcard 禁止・30 文字以上の根拠必須)。通すのは「取消」「取消への step-up」
   「退会ブロッカーの解消 (解約 / 移譲 / メンバー整理 / 招待取消)」「通知の閲覧」だけ。

@@ -18,9 +18,10 @@
 > **フラグ撤去後の障害対応**: 環境変数の切替による即時停止はできなくなった (この手段は
 > フラグ撤去前から「単独の運用操作」であり本リポジトリの変更ではなかった点は変わらないが、
 > 撤去後はその操作対象自体が無い)。問題発覚時の復旧手段は、**本番環境を運用する側が持つ
-> デプロイ手順に依存する** (本リポジトリには `deploy/` / terraform / k8s / CI デプロイ job の
-> いずれも存在しない — AGENTS.md 「運用要件 (route:cache)」節が明記するとおり — ため、
-> 本チェックリストは復旧手段そのものを保証しない)。運用手順が承認済みリリースへの
+> デプロイ手順に依存する** (デプロイ定義は `deploy/deploy.php` (Deployer。起動は `scripts/deploy.sh`) で、
+> CI からの自動デプロイは無い — AGENTS.md 「運用要件 (route:cache)」節と
+> `docs/deployment-runbook.md` を参照 — ため、本チェックリストは復旧手段そのものを保証しない。
+> release 単位の切り戻しは `dep rollback` が可能だが、DB migration は戻らない)。運用手順が承認済みリリースへの
 > rollback に対応している場合はそれを行い、対応していない場合、またはこの場面で
 > rollback が適切でない場合は、無効化・修正する patch を通常のデプロイ手順で反映する。
 > どちらを選ぶかは運用する側の判断であり、本チェックリストは選択肢を限定しない。
@@ -110,11 +111,11 @@
   前提で運用する計画だった。`config/manual.php` の既定値
   (`env('MANUAL_OCR_ANALYSIS_ENABLED', false)`) はそのままにし、`true` への切替は
   本番環境変数 `MANUAL_OCR_ANALYSIS_ENABLED` の設定という単独の運用操作で行う想定だった
-  (コード変更を伴わない)。**本リポジトリにはデプロイ定義が無い** (AGENTS.md が定める
-  経路キャッシュ関連の運用要件節が明記するとおり `deploy/` / terraform / k8s /
-  CI デプロイ job のいずれも存在しない) ため、この環境変数設定・`config:cache` 再生成・
-  プロセス再起動は**このリポジトリ内の変更としては実行できない**という前提も、
-  当時からそのまま変わっていない。
+  (コード変更を伴わない)。この環境変数設定・`config:cache` 再生成・プロセス再起動は
+  **このリポジトリ内の変更としては実行できない**という前提も、当時からそのまま変わっていない
+  (2026-08-26 に Deployer のデプロイ定義 (`deploy/deploy.php`) が入って `dep artisan:config:cache` /
+  `dep deploy:reload_services` を叩けるようにはなったが、`shared/.env` の書き換えは
+  依然としてサーバー上の操作である。手順は `docs/deployment-runbook.md`)。
 - (計画として記録) production が `config:cache` を使う場合、`.env` の変更だけでは
   反映されない。`MANUAL_OCR_ANALYSIS_ENABLED=true` の設定後、`config:cache` の再生成と
   プロセス再起動が別途必要という計画だった (既存運用の一般論であり、AGENTS.md が定める

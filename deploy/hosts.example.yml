@@ -1,0 +1,66 @@
+# host 座標のテンプレート。`cp deploy/hosts.example.yml deploy/hosts.yml` して埋める
+# (deploy/hosts.yml は .gitignore。実座標を commit しない)。
+#
+# ファイル名が `hosts.yml.example` ではなく `hosts.example.yml` なのは意図的である:
+# Deployer の Importer は拡張子を `/\.ya?ml$/i` で判定するため (Importer.php)、
+# `hosts.yml.example` は `Unknown file format` で import できない。
+# この example を **Deployer 自身に parse させて機械検証する** (DeployPipelineWiringTest
+# W12 / W13 / W26-W29 が DEPLOY_HOSTS_FILE でこのファイルを読ませる) ために、
+# 拡張子が末尾に来る形にしてある。飾りの example を置かないための制約である。
+#
+# `<...>` の placeholder が 1 つでも残っていると scripts/deploy.sh が fail-fast する。
+#
+# stage: `production` を宣言した host に対して deploy:confirm-stage が 3 条件を課す:
+#   (a) `-o production_ack=1` が必要 / (b) 非本番 host に ack を渡すのも誤り /
+#   (c) **対話端末 (TTY) からの実行であること**。
+#   (c) がある理由: `-o` は誰でも渡せる公開 option なので ack 単体では人間の確認の証明にならず、
+#   CI / agent / pipe からの自動実行を止められない。詳細と保証の限界は
+#   docs/deployment-runbook.md の本番ゲートの節を参照。
+#   stage は `production:preflight` の `--strict` の有無も決める (deploy/deploy.php の
+#   preflight_strict_flag)。**本番 host では必ず strict になる。**
+#
+# roles: deploy/deploy.php の `->select('roles=...')` と対応する。
+#   front = web / asset build の対象
+#   db    = artisan:migrate の対象 (`->once()` で 1 host のみ実行)
+#   php-fpm reload と queue worker restart は **role で絞らない** (typo で無言 skip に
+#   なるのを防ぐため。対象外の host は下のフラグを false と明示宣言して外す)。
+#
+# queue_worker_restart_enabled: queue worker を systemd で常駐させる host では
+#   **必ず true を宣言する** (未宣言だと deploy 後も旧コードの worker が動き続ける)。
+#   再起動対象の unit 名は deploy/deploy.php の queue_worker_units が既定を持つので、
+#   host 側で unit 構成が違うときだけ上書きする。
+#
+# bin/php: PHP CLI の実パス。Deployer 既定は `which php` の自動検出だが、複数版が
+#   入った箱では意図しない方を引くため **host ごとに実測して明示**する。
+#
+# identity_file: 開発機 (devcontainer) 内の秘密鍵。**`~/` からの相対で書く**
+#   (追跡下のファイルに開発機の絶対パスを焼き付けないため。
+#   DeployCoordinateHygieneTest の LOCAL_PATH カテゴリが禁じている)。
+hosts:
+  <APP>-prd:
+    hostname: "<HOSTNAME>"
+    remote_user: "<DEPLOY_USER>"
+    identity_file: "~/.ssh/<DEPLOY_KEY>"
+    deploy_path: /var/www/<APP>
+    bin/php: "<PHP_BIN>"
+    stage: production        # 本番: scripts/deploy.sh の算術確認ゲートが必須になる
+    php_fpm_reload_enabled: true
+    queue_worker_restart_enabled: true
+    labels:
+      roles:
+        - front
+        - db
+
+  <APP>-stg:
+    hostname: "<HOSTNAME_STG>"
+    remote_user: "<DEPLOY_USER>"
+    identity_file: "~/.ssh/<DEPLOY_KEY>"
+    deploy_path: /var/www/<APP>
+    bin/php: "<PHP_BIN>"
+    stage: dev
+    php_fpm_reload_enabled: true
+    queue_worker_restart_enabled: true
+    labels:
+      roles:
+        - front
+        - db

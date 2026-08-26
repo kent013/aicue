@@ -10,13 +10,15 @@ use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Route;
 
 /*
- * 後付け middleware の「焼き込み」と「剥落」を実測で固定する (T173 / 逸脱 D19)。
+ * 後付け middleware の「焼き込み」と「剥落」を実測で固定する (T173)。
  *
  * 本アプリは vendor route への middleware 後付けを 2 つの binder
- * (RouteThrottleBinder / RouteMiddlewareBinder) で行い、**経路キャッシュ起動では
- * 1 本も走らせない**契約を採っている。したがって cached 運用での保護の実体は
- * `php artisan route:cache` の**生成時に焼き込まれた middleware 列**である。
- * この構造を選んだ判断は docs/template-divergence.md の D19 に登録してある。
+ * (RouteThrottleBinder / RouteMiddlewareBinder) で行い、実行タイミングは
+ * 専用の実行点 (App\Support\Http\AfterRoutesLoaded) 1 つに委ねる (家系の正典の形)。
+ * **経路キャッシュ起動では後付けも検査も行わない**ため、cached 運用での保護の実体は
+ * `php artisan route:cache` の**生成時に焼き込まれた middleware 列**である
+ * (生成は cache 無しの起動を通るので、配線漏れは生成時点で必ず落ちる =
+ * 無保護な cache は作れない)。契約の正本は `docs/app-integration-guide.md` §7c。
  *
  * ★このテストが保証すること (2 つ):
  *   1. 起動時に後付けした middleware 列が、`route:cache` と**同じ順序**
@@ -29,6 +31,17 @@ use Illuminate\Support\Facades\Route;
  *     route の直列化可否は本テストの主題ではない (下の母集団の限定を参照)。
  *   - 実際に cache ファイルを書き出して**別プロセスで起動**したときの起動順の再現。
  *     本テストは同一プロセス内で完結する。**「cached 起動を再現した」とは書かない**。
+ *     ★**別プロセスの cached 起動レーンを足していない理由** (誇張しないための明記):
+ *       本リポジトリで子プロセスの起動を足すには `PhpBootProbeReferenceInventoryTest` の
+ *       全数申告が要り、その G-8 は「環境ファイルの隔離を実挙動で裏取りできない子入口」を
+ *       **完全一致で 1 件に pin** している。`route:cache` の probe はその裏取りができない —
+ *       `RouteCacheCommand` が**自分で** `bootstrap/app.php` を再 require して
+ *       アプリを起こすため、probe 側から環境ファイルの置き場所を制御できないからである。
+ *       申告を `structural` で通すには pin を緩めることになるので採らない。
+ *       cached 起動での保護は `php artisan route:cache` + `route:list` の**手動実測**で
+ *       確認する (2026-08-26 の移行時に実施)。機械側で「無保護な cache は作れない」を
+ *       担うのは、後付けの fail-fast が**非 cached の起動すべて** (= 全テストと
+ *       `route:cache` 生成時の再 bootstrap) で走ることである。
  *   - 起動時の cache の鮮度 (古い cache から起動していないか) は検査できない。
  *   - `compile()` の戻り値と実際に書き出されるファイルの内容が同一であることは、
  *     `RouteCacheCommand` の実装を読んだ上での推論である。検査 1 が
