@@ -39,7 +39,8 @@ use RuntimeException;
  *        cached 運用の本番では、ここで止まらなければサービス投入まで誰も気づかない。
  *
  *   2. **起動時** (route cache がある状態でのリクエスト処理 / artisan)
- *      本後付けは **1 本も効かない**。理由は 2 つあり、片方だけでも成立する:
+ *      本後付けは **1 本も走らない** ({@see AfterRoutesLoaded::schedule()} が呼ばないため)。
+ *      仮に走らせても効かない。理由は 2 つあり、片方だけでも成立する:
  *        (a) `ServiceProvider::loadRoutesFrom()` は `routesAreCached()` のとき `require` を
  *            飛ばす。Fortify / laravel-passkeys はこれを使うため、**この callback が走る
  *            時点では対象 named route が 1 本も登録されていない**
@@ -48,12 +49,15 @@ use RuntimeException;
  *        (b) 仮に触れていても、framework の `RouteServiceProvider` が本 callback より**後**の
  *            app-booted で compiled routes を読み、`Router::setCompiledRoutes()` が
  *            route collection を**新品へ丸ごと差し替える**ため捨てられる。
- *      よって cached 起動では `$routesAreCached` を見て**明示 skip** する。
+ *      よって cached 起動では**後付けも検査も行わない**。
  *      **ここで例外を投げてはならない** (`route:list` が必ず落ちる = T120 の事故)。
+ *      実行タイミングの判断は {@see AfterRoutesLoaded} が単独で持つ (家系の正典の形)。
  *
- *   ⇒ **cached 起動での保護を持っているのは cache の中身である**。したがって
+ *   ⇒ **cached 起動での保護を持っているのは cache の中身である**。生成時に必ず後付けが走る以上、
+ *     **無保護な route を焼き込んだ cache は作れない**。守れないのは「生成より前に焼いた
+ *     古い cache のまま起動する」場合だけであり、したがって
  *     **`php artisan route:cache` を毎デプロイ再生成することが本機構の前提条件**になる。
- *     stale な route cache は古い付与状態のまま起動し、**無音で保護が外れる**
+ *     古い route cache は古い付与状態のまま起動し、**無音で保護が外れる**
  *     (実測: 剥がした cache では 2FA 秘密 GET が 409 でなく 200 を返す)。
  *     運用契約の正本は `docs/app-integration-guide.md` §7c。
  *
@@ -67,7 +71,16 @@ use RuntimeException;
 final class RouteMiddlewareBinder
 {
     /**
-     * 起動完了後に named route 群へ middleware alias を後付けする (登録の唯一の入口)。
+     * 経路の一覧が組み上がった後に named route 群へ middleware alias を後付けする
+     * (登録の唯一の入口)。
+     *
+     * ★**素の `Application::booted()` を直接使わない**。実行タイミングは
+     *   {@see AfterRoutesLoaded::schedule()} が単独で決める (素の起動完了フックは
+     *   cached routes の読み込みより先に走るため、route:cache 済みの起動を壊す余地を残す)。
+     *   ★{@see attachAll} へ渡す cached 判定は**同じ事実の二度目の確認**である。
+     *   実行点が cached 起動では呼ばないので、この配線から真になることは無い。
+     *   それでも渡すのは、binder を直接呼ぶ経路 (単体検査) でも
+     *   「cached な一覧には resolver すら呼ばない」契約が成立するようにするためである。
      *
      * ★spec を **resolver (callable) で受け、ここでは呼ばない**。理由は 2 つ:
      *   1. spec の構築 (呼び出し側の feature flag 判定を含む) を `boot()` の時点へ
@@ -86,7 +99,7 @@ final class RouteMiddlewareBinder
      */
     public static function attachOnBooted(Application $app, callable $specResolver): void
     {
-        $app->booted(static function (Application $app) use ($specResolver): void {
+        AfterRoutesLoaded::schedule($app, static function () use ($app, $specResolver): void {
             self::attachAll(
                 $app->make(Router::class),
                 $specResolver,

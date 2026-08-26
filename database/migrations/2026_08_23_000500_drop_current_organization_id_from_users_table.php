@@ -16,9 +16,9 @@ use Illuminate\Support\Facades\Schema;
  *     1. メンテナンスモードに入れる (`dep artisan:down`)
  *     2. 新コードをデプロイ + migrate (`dep deploy`)
  *     3. メンテナンスモードを解除 (`dep artisan:up`)
- *   経路キャッシュの再生成は**不要**である — デプロイ定義 (deploy.php) は経路キャッシュを
- *   生成しない契約で、焼くのは config / event / view の 3 つだけ (AGENTS.md の運用要件 /
- *   docs/template-divergence.md D19)。
+ *   経路キャッシュは**毎デプロイ再生成する** (AGENTS.md 「運用要件 (route:cache)」。
+ *   本 migration を書いた時点では「経路キャッシュを打たない」契約だったが、
+ *   2026-08-26 に家系正典の実行点方式へ移行して再生成が前提条件になった)。
  *   メンテナンスモードを挟む判断そのものは機械強制されておらず、**人手で守られる**。
  * ★down は列と FK を戻すだけで、**値は復元しない** (概念そのものが無くなるため)。
  */

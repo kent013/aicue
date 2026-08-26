@@ -6,7 +6,7 @@ declare(strict_types=1);
  * TRUSTED_PROXIES 運用 runbook の記入漏れを機械検出する。
  *
  * `TRUSTED_PROXIES` は実際のプロキシ構成を知らないと正しく書けない
- * (デプロイ定義は deploy.php 1 枚で、nginx conf や IaC はリポジトリの外にある。
+ * (デプロイ定義は deploy/ 配下の Deployer 設定で、nginx conf や IaC はリポジトリの外にある。
  * 実 hop はサーバーを見ないと確認できない)。CIDR を推測で決め打ちすると
  * 「hop 取りこぼしによる自己 DoS」か「過大信頼による XFF 偽装」のどちらかに倒れるため、
  * 運用者記入欄を docs/trusted-proxies-runbook.md に置き、placeholder が残っている限り

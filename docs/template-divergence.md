@@ -8,7 +8,7 @@
 `template-divergence-ledger` が 2026-08-15 に確定した形) に従う。形式は
 `tests/Architecture/TemplateDivergenceLedgerFormatTest.php` が機械で強制する。
 
-登録エントリ: 55 件
+登録エントリ: 56 件
 
 ## 記録の原則
 
@@ -1076,124 +1076,6 @@ deny-by-default の目録 / 撤去済み参照の gate) はそのまま採って
 - 設計: `devnotes/20260815-1539-claude-hooks-settings-wiring/` (常設化) /
   `devnotes/20260824-1014-claude-hooks-wiring-t3/` (正典 t3 追従)
 - 規約の正本: `AGENTS.md` §常設 hook 配線
-
----
-
-## D19 経路キャッシュ起動での middleware 後付けは「走らせない」側の契約を維持する (専用の実行点クラスへは移行しない)
-
-| 行 | 内容 |
-|---|---|
-| 対象パス | `app/Support/Http/RouteMiddlewareBinder.php` / `app/Support/Http/RouteThrottleBinder.php` / `deploy.php` |
-| 業務要件起因の説明 | デプロイ定義 (`deploy.php`) が**経路キャッシュを生成しない**契約を持つため、後付けした保護は実効の経路に載り続ける。正典の専用実行点へ移行して得られるのは「経路キャッシュを焼いても後付けが効く」ことだけで、焼かないと決めた出荷経路では利益が無い |
-| 揃え続ける不変条件と保証機構 | 後付けした保護は実効の経路に必ず載る / 後付けの入口は 2 つの binder に限られる / 経路名が消えたら起動を止める / **出荷経路が経路キャッシュを生成しない**。`PostBootRouteMutationInventoryTest` と `RouteCacheBakedProtectionTest`、および `RouteCacheExemptionPremiseTest` (検査 B) が固定する |
-| 再判定の条件 | **経路キャッシュを打つ判断が入ったとき** (`deploy.php` に生成を足す / route:cache または artisan optimize を実行する記述が入る = 検査 B が赤くなる) / **`deploy.php` 以外のデプロイ定義が入ったとき** (検査 A が赤くなる。例: `deploy/` ディレクトリ・CI のデプロイ job・terraform・k8s manifest) / 家系の機能台帳の裁定が変わったとき |
-| 決めた日 | 2026-08-15 |
-| 決めた人 | 開発者 |
-| 根拠 | devnotes/20260815-2100-route-cache-middleware-attach/ |
-| 状態 | 恒久 |
-| 見直し期限 | — |
-
-> **再判定の記録 (2026-08-26)**: 再判定条件の「デプロイ定義が入ったとき」が発火した
-> (Deployer の `deploy.php` を導入)。再判定の結果は**逸脱の維持**である。
-> 根拠は下の「なぜ正当な差分か」1〜2 と「再検討の条件」末尾に書いてある。
-> 実態の正本は `deploy.php` / `docs/deployment-runbook.md` /
-> `AGENTS.md` 「運用要件 (route:cache)」。
-
-家系の正典 (機能台帳 `route-cache-safe-middleware-attach` の v1) は、経路の一覧が組み上がった後に
-走らせたい処理を**専用の実行点クラス 1 つ**へ集約し、経路キャッシュ起動でも後付けを効かせる形である。
-本アプリはそこへ**移行しない**。この判断を逸脱として登録する。
-
-| 観点 | 家系の正典 / テンプレート | 本アプリ |
-|---|---|---|
-| 実行点 | 専用クラス 1 つ (`AfterRoutesLoaded` 相当) へ集約 | 2 つの binder が各々 `Application::booted()` を使う |
-| 経路キャッシュ起動での契約 | 容器の `routes` 束縛の張り替えを捕まえ、読み込まれた直後に後付けを走らせる | **走らせない**。そのうえで**出荷経路が経路キャッシュを生成しない** (`deploy.php` が焼くのは config / event / view の 3 つだけ) ため、実効の経路は常に起動時に組み立てられた側である |
-| 入口の絞り込み | 素の起動完了フックの直呼びを走査で禁止 | `PostBootRouteMutationInventoryTest` が入口を 2 binder に絞る (deny-by-default) |
-| 経路キャッシュ起動での実証 | 別プロセスで起動して後付けの残存を確認 | 同一プロセスで「焼き込みの入力」と「欠落時の剥落」を確認 (別プロセス起動は導入しない) |
-
-### なぜ正当な差分か (logic-driven)
-
-1. **前提が成立しており、いまは出荷経路そのものが前提を支えている**。2026-08-26 に
-   デプロイ定義 `deploy.php` (Deployer) が入ったことで再判定条件の 1 つが発火したため再判定した。
-   結論は**逸脱の維持**である。理由は、その `deploy.php` が同梱 recipe の既定構成 (経路キャッシュの
-   生成を含む複合タスクを呼ぶ) を使わず、**焼くのを config / event / view の 3 つだけに限る**
-   契約を採ったことにある。つまり「経路キャッシュを打たない」は
-   **人手の約束から出荷経路の性質へ格上げされた**。`route:cache` を実行する記述も追跡下に 1 件も無い。
-   ただし言えるのは「**いま定めた走査条件で検出される発生経路が無い**」までである
-   (「発生確率がゼロ」とも書かない。走査条件が拾わない書き方は
-   `tests/Architecture/RouteCacheExemptionPremiseTest.php` の説明が列挙する)。
-2. **毎デプロイ再生成の機械強制は「解く相手が消えた」ので採らない**。再生成の強制が守るのは
-   「焼いた cache が stale であること」だが、焼かない出荷経路には stale な cache が存在しない。
-   経路キャッシュの鮮度を見る preflight を足すと、**検査対象の無い機構**を抱えることになる (思考原則 2)。
-   出荷前検査は既存の `production:preflight` (`ProductionEnvGuard` が正本) を `deploy` タスクの
-   中で呼ぶだけに留めている。
-3. **正典の形は Laravel 13 では 4 つの問題を同時に解く必要がある** — 容器の `routes` 束縛の
-   張り替えの捕捉 / その束縛がまだ無いときに張り替えが発火しない穴の手当て / 経路一覧の実体ごとの
-   冪等 / cached 起動で起動を止めると `route:list` も `route:clear` も落ちて復旧手段を失う問題への
-   例外設計。実証には別プロセスで起動する検査基盤も要る。
-   **正典を採る利益は「運用要件を 1 つ消せること」であり、その運用要件が効く相手 (デプロイ基盤) が
-   まだ無い**。基盤を作る PR で実物の手順と突き合わせて設計する方が確実である。
-4. **これは保留ではなく明示の判断である**。期限で自然解消せず、**前提が崩れたときに解消する**。
-
-### 揃えている不変条件 (これは保証し続ける)
-
-> 「後付けした保護は、実効の経路に必ず載る」
-> 「後付けの入口は 2 つの binder に限られる」
-> 「経路名が消えたら起動を止める (無防備なまま公開しない)」
-
-担い手は次のとおりで、新設したのは下 3 行だけである (既存目録と二重管理にしない)。
-
-| 不変条件 | 担い手 |
-|---|---|
-| どの route に何を付けるべきか (対象と件数) | `ThrottleCoverageInventoryTest` / `RecentAuthRouteTest` / `TwoFactorStepUpInventoryTest` / `PasskeyRouteProtectionTest` |
-| 後付けの入口が 2 binder に限られること | `PostBootRouteMutationInventoryTest` |
-| 後付けの契約 (cached では resolver すら呼ばない / 経路が引けなければ起動を止める / 冪等 / 列の順) | `RouteMiddlewareBinderTest` / `RouteThrottleBinderTest` |
-| 実際に付いた middleware 列が、直列化の準備を通しても焼き込みの入力へ欠落なく移ること | `tests/Feature/Security/RouteCacheBakedProtectionTest.php` (検査 1) |
-| 焼き込みが欠けた経路一覧では保護が実際に外れること | `tests/Feature/Security/RouteCacheBakedProtectionTest.php` (検査 2) |
-| この逸脱を許す前提 (直接書かれた `route:cache` / 空白だけを挟む `artisan optimize` が無いこと。`deploy.php` 以外のデプロイ基盤の不在は早期の気づき) | `tests/Architecture/RouteCacheExemptionPremiseTest.php` |
-
-**保証範囲を誇張しない**: `RouteCacheBakedProtectionTest` が固定するのは同一プロセス内の
-「直列化の準備 → compile」までで、**cached 起動そのものの再現ではない**。
-`RouteCacheExemptionPremiseTest` が見るのは追跡下の文字列までで、動的に組み立てた実行・
-オプションを挟む書き方・リポジトリの外にある手順には沈黙する。
-説明として `route:cache` の語を持つ既存ファイルは**件数を完全一致で pin** して扱い
-(増減のどちらでも赤になる)、走査から丸ごと外れているのは**同テスト自身の 1 件だけ**である
-(自分が検出したい語を負のコントロールの入力として持つため。その 1 ファイルの中は見えない)。
-また**デプロイ定義の検出 (検査 A) は網羅を主張しない**。判定条件は「既知のデプロイ基盤の形」
-(`deploy/` `ansible/` `k8s/` `helm/` 等のディレクトリ / `Procfile` `fly.toml` 等の名前 /
-`*.tf` / 名前に deploy・release・cd を含む GitHub Actions workflow) を拾う粗い網であり、
-**リポジトリルートの `deploy.php` はこの網に一致しない**。
-これは取りこぼしではなく**意図した配置**である: Deployer の設定を `deploy.php` 1 枚に閉じることで、
-検査 A を「**この 1 枚以外**のデプロイ基盤が増えたら赤くする」早期警報として使い続けられる
-(網に一致する形へデプロイ定義を広げた PR は、必ず本逸脱の読み直しを強制される)。
-したがって検査 A が緑であることは「デプロイ定義が無いこと」を意味しない。
-**主前提を固定するのは `route:cache` 側の検査 (検査 B) である。**
-
-### 再検討の条件 (解消条件)
-
-- **`deploy.php` 以外のデプロイ定義**の実体が入ったとき (検査 A。`deploy/` ディレクトリ・
-  CI のデプロイ job・terraform・k8s manifest 等)
-- `route:cache` (または `artisan optimize`) を実行する記述が入ったとき (検査 B)。
-  **`deploy.php` に経路キャッシュの生成を足す判断**はここに当たる
-- 家系の機能台帳の裁定が変わったとき
-
-前の 2 つは `RouteCacheExemptionPremiseTest` の検査条件と**同じ言葉**で書いてある。
-どちらかで赤くなったら、正典の形への移行か毎デプロイ再生成の機械強制かを**同じ PR で**決めること。
-
-**2026-08-26 の再判定**: 1 つめ (デプロイ定義の導入) が実際に発火した。デプロイ定義を
-`deploy.php` 1 枚に閉じ、そこで**経路キャッシュを打たない契約を固定した**ため、後付け middleware は
-実効の経路に載り続ける。よって正典の形へは移行せず、毎デプロイ再生成の機械強制も入れない。
-実態は `AGENTS.md` 「運用要件 (route:cache)」と `docs/deployment-runbook.md` が持つ。
-
-### 関連
-
-- 実装: `app/Support/Http/RouteMiddlewareBinder.php` / `app/Support/Http/RouteThrottleBinder.php`
-- 出荷経路の契約: `deploy.php` (焼くのは config / event / view の 3 つだけ) /
-  `docs/deployment-runbook.md`
-- gate: `tests/Architecture/RouteCacheExemptionPremiseTest.php` /
-  `tests/Feature/Security/RouteCacheBakedProtectionTest.php` /
-  `tests/Architecture/PostBootRouteMutationInventoryTest.php`
-- 設計: `devnotes/20260815-2100-route-cache-middleware-attach/`
-- 契約の正本: `docs/app-integration-guide.md` §7c
 
 ---
 
@@ -3370,7 +3252,7 @@ database / routes / tests の 6 root に固定する。aicue は走査器 2 ク�
 | 公開 port | サービス既定のまま | 他プロジェクトと衝突しない値へずらし、すべて loopback bind (app 8002→8001 / mailpit 8026・1026) |
 | DB | テンプレート既定 | PostgreSQL 18 で、マウントを `/var/lib/postgresql` に単一で当てる (major 跨ぎの `pg_upgrade --link` が mount 境界を越えないようにする) |
 | credential | ファイル内に既定値 | `${POSTGRES_PASSWORD:?...}` で未設定・空文字を fail-fast させ、実値は追跡外の `.env` に置く |
-| SSH 鍵 | 概念が無い (デプロイ定義を持たないため) | ホストの鍵を `/home/vscode/.ssh/aicue_deploy` へ**読み取り専用**でマウントし、`deploy.php` の `identity_file` がそれを指す |
+| SSH 鍵 | 概念が無い (デプロイ定義を持たないため) | ホストの鍵を `/home/vscode/.ssh/aicue_deploy` へ**読み取り専用**でマウントし、`deploy/deploy.php` の `identity_file` がそれを指す |
 
 ### なぜ正当な差分か (logic-driven)
 
@@ -3395,7 +3277,106 @@ database / routes / tests の 6 root に固定する。aicue は走査器 2 ク�
 
 ### 関連
 
-- 実装: `docker-compose.yml` / `deploy.php` (`identity_file`)
+- 実装: `docker-compose.yml` / `deploy/deploy.php` (`identity_file`。起動は `scripts/deploy.sh`)
 - 手順: `docs/deployment-runbook.md` §4 (開発機側の前提)
 - 設計: `devnotes/20260826-0240-deploy-definition-deployer/`
 - 関連する登録: D34 (採用時債務の凍結層。本登録で 1 行解消した)
+
+---
+
+## D59 デプロイ基盤 (Deployer) の取り込みに伴い .gitignore と phpstan.neon をテンプレートの形から外す
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `.gitignore` / `phpstan.neon` |
+| 業務要件起因の説明 | 家系正典の deployer-pipeline v1 を取り込み、実 host 座標 (実 IP / SSH ユーザー / deploy_path) を `deploy/hosts.yml` にだけ置いて追跡下から外す方針を採った。`.gitignore` はその除外 1 行を持つ。`phpstan.neon` は `deploy/` を paths に含めない理由と代替 3 層 (`php -l` / `dep tree`・`deploy --plan` / band inventory) をコメントで持つ。テンプレートは本番デプロイ先を持たないためどちらの行も存在しない |
+| 揃え続ける不変条件と保証機構 | 追跡下に実座標が無いこと (`DeployCoordinateHygieneTest`) / `deploy/` の配線が 3 層で機械保証されていること (`DeployPipelineWiringTest` W4・W5・W6・W7・W12・W13・W34・W35) / `deploy/hosts.yml` が gitignore されていること |
+| 再判定の条件 | deploy-terraform feature を取り込んだとき (`docs/TODO.md` T267) / `deploy/` を PHPStan の paths に入れる判断をしたとき / テンプレートが同じ 2 行を取り込んで還流できるようになったとき |
+| 決めた日 | 2026-08-26 |
+| 決めた人 | 開発者 |
+| 根拠 | devnotes/20260826-1252-deploy-terraform-deferral/ |
+| 状態 | 恒久 |
+| 見直し期限 | — |
+
+| 観点 | 家系の正典 / テンプレート | 本アプリ |
+|---|---|---|
+| host 座標の置き場 | 概念が無い (本番デプロイ先を持たない) | `deploy/hosts.yml` を追跡下から外し、`deploy/hosts.example.yml` だけを配る |
+| `deploy/` の静的解析 | 概念が無い | PHPStan の paths に**含めない** (Deployer の DSL は関数呼び出しの羅列で型情報が取れない)。代わりに `php -l` / `dep tree`・`deploy --plan` / band inventory の 3 層で配線を機械保証する |
+
+### なぜ正当な差分か (logic-driven)
+
+1. **実座標を追跡下へ置かない**のは公開リポジトリ運用の要請である。除外を `.gitignore` に書く以外の
+   置き場所は無く、テンプレート側にはデプロイ先が無いのでこの行が存在しない。
+2. **`deploy/` を PHPStan の paths に入れない**のは、入れても得られる情報が乏しい一方で
+   偽陽性の抑制コストが高いためである。配線の正しさは「構文 (`php -l`) / 実行計画
+   (`dep tree`・`deploy --plan`) / 帯域目録」の 3 層で機械保証しており、
+   **検査を減らしたのではなく別の層へ置いた**。理由は `phpstan.neon` のコメントが正本。
+3. **採用時債務からの移動である**。この 2 ファイルは採用時点で説明が無く D34 の一覧に
+   凍結されていた。デプロイ基盤の取り込みで両方を変更したので、D34 が定める
+   「一覧が縮む契機」の 1 つ (意図的逸脱として登録簿へ書く) を採り、
+   同じ変更で債務一覧から 2 行外して本登録へ説明を移した (前例は D56 / D57 / D58)。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「追跡下に実 host 座標が現れない」
+> 「`deploy/` の配線は 3 層のいずれかで機械保証される」
+
+`DeployCoordinateHygieneTest` が追跡下の座標残留を落とし、`DeployPipelineWiringTest` が
+`deploy/` の配線 (単一入口・tree と plan の一致・`artisan:optimize` の存在と
+`optimize:clear` の不在など) を固定する。
+
+### 関連
+
+- 実装: `.gitignore` / `phpstan.neon` / `deploy/` / `scripts/deploy.sh`
+- gate: `tests/Architecture/DeployCoordinateHygieneTest.php` /
+  `tests/Architecture/DeployPipelineWiringTest.php`
+- 手順: `docs/deployment-runbook.md`
+- 設計: `devnotes/20260826-1252-deploy-terraform-deferral/`
+- 関連する登録: D34 (採用時債務の凍結層。本登録で 2 行解消した)
+
+---
+
+## D60 禁止する文の gate を、走査器分離 + 走査根の 3 値分類 + 型付き例外目録の形で持つ
+
+| 行 | 内容 |
+|---|---|
+| 対象パス | `tests/Architecture/ForbiddenStatementTokenInvariantTest.php` |
+| 業務要件起因の説明 | 本アプリの走査 gate は「走査器を `tests/Support/` の部品へ分離し、走査根の分類と例外を型で持つ」作法に揃えている (D40 / D57 と同じ)。正典の同名 gate は走査根を docblock と関数内にハードコードした一覧で持ち、例外をトークン名 => パスの素の配列で持つため、置き場所が増えたときに**黙って走査対象から外れる**。本アプリは走査根を 3 値の分類で全数申告させ、未分類の置き場所が現れたら赤にする |
+| 揃え続ける不変条件と保証機構 | 禁止する 4 語彙 (出力する文 / 開始タグ付き出力記法 / 飛び越す文 / 大域を持ち込む文) が first-party の追跡 PHP に現れないこと / 例外は型と件数の完全一致と 30 文字以上の理由を持つこと / **走査根が 3 値のいずれかへ分類済みであること** (未分類は赤)。`ForbiddenStatementTokenInvariantTest` の G1〜G4 と `tests/Unit/Architecture/ForbiddenStatementScannerTest.php` が固定する |
+| 再判定の条件 | 正典が走査根の全数申告 (未分類を赤にする形) を採ったとき / 正典が走査器を部品へ分離したとき / 禁止語彙の集合が家系の裁定で変わったとき |
+| 決めた日 | 2026-08-26 |
+| 決めた人 | 開発者 |
+| 根拠 | devnotes/20260815-1537-forbidden-statement-token-gate/ |
+| 状態 | 恒久 |
+| 見直し期限 | — |
+
+| 観点 | 家系の正典 / テンプレート | 本アプリ |
+|---|---|---|
+| 走査器の置き場 | 検査ファイルの中 | `tests/Support/ForbiddenStatement/` の部品へ分離 (走査器・語彙・例外・違反点をそれぞれ型で持つ) |
+| 走査根の定義 | docblock と関数内に 10 個をハードコード | `forbiddenStatementRootPolicies()` の 3 値分類 (走査する例外なし / 走査する例外可 / 走査しない理由必須)。**未分類の置き場所が追跡下に現れたら赤** |
+| 例外の形 | トークン名 => パス => 件数と理由の素の配列 | `ForbiddenStatementExemption` (型) + 語彙ごとの件数の完全一致 + 30 文字以上の理由 |
+| 母集団 | 10 root の列挙 | 追跡下の `*.php` + `*.blade.php` (開始タグ付き出力記法を落とさないため blade を含める) |
+
+### なぜ正当な差分か (logic-driven)
+
+1. **置き場所が増えたときに黙って外れないことが、この gate の主目的に直結する**。禁止する文は
+   「アプリの実行経路に出力の迂回を作らない」ための規則であり、新しい置き場所 (今回の `deploy/` が
+   実例) が走査から漏れると規則が無音で縮む。正典の形は root を人が列挙するので漏れが赤にならない。
+   本アプリは全数申告にして**未分類を赤にする**ことで、その漏れ方を構造的に閉じている。
+2. **走査器の分離は本アプリの既存の作法である** (D40 / D57 と同型)。走査器を部品へ出すと
+   検出力の裏取り (正例 / 取りこぼし対照) を単体テストで書けるようになる。
+3. **語彙と禁止の理由は正典と同じ**である。差分は「どう列挙し、どう分類するか」だけで、
+   守る不変条件は 1 つも減っていない。
+
+### 揃えている不変条件 (これは保証し続ける)
+
+> 「禁止する 4 語彙は first-party の追跡 PHP に 1 件も現れない (例外は型と件数と理由付きの登録のみ)」
+> 「追跡下の置き場所は必ず 3 値のいずれかへ分類されている」
+
+### 関連
+
+- 実装: `tests/Architecture/ForbiddenStatementTokenInvariantTest.php` /
+  `tests/Support/ForbiddenStatement/`
+- 検出力の裏取り: `tests/Unit/Architecture/ForbiddenStatementScannerTest.php`
+- 設計: `devnotes/20260815-1537-forbidden-statement-token-gate/`
+- 関連する登録: D34 (採用時債務の凍結層。本登録で 1 行解消した) / D40 / D57 (同型の走査器分離)

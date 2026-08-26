@@ -18,7 +18,7 @@
 > **フラグ撤去後の障害対応**: 環境変数の切替による即時停止はできなくなった (この手段は
 > フラグ撤去前から「単独の運用操作」であり本リポジトリの変更ではなかった点は変わらないが、
 > 撤去後はその操作対象自体が無い)。問題発覚時の復旧手段は、**本番環境を運用する側が持つ
-> デプロイ手順に依存する** (デプロイ定義は `deploy.php` (Deployer) の 1 枚のみで、
+> デプロイ手順に依存する** (デプロイ定義は `deploy/deploy.php` (Deployer。起動は `scripts/deploy.sh`) で、
 > CI からの自動デプロイは無い — AGENTS.md 「運用要件 (route:cache)」節と
 > `docs/deployment-runbook.md` を参照 — ため、本チェックリストは復旧手段そのものを保証しない。
 > release 単位の切り戻しは `dep rollback` が可能だが、DB migration は戻らない)。運用手順が承認済みリリースへの
@@ -113,7 +113,7 @@
   本番環境変数 `MANUAL_OCR_ANALYSIS_ENABLED` の設定という単独の運用操作で行う想定だった
   (コード変更を伴わない)。この環境変数設定・`config:cache` 再生成・プロセス再起動は
   **このリポジトリ内の変更としては実行できない**という前提も、当時からそのまま変わっていない
-  (2026-08-26 に `deploy.php` (Deployer) が入って `dep artisan:config:cache` /
+  (2026-08-26 に Deployer のデプロイ定義 (`deploy/deploy.php`) が入って `dep artisan:config:cache` /
   `dep deploy:reload_services` を叩けるようにはなったが、`shared/.env` の書き換えは
   依然としてサーバー上の操作である。手順は `docs/deployment-runbook.md`)。
 - (計画として記録) production が `config:cache` を使う場合、`.env` の変更だけでは

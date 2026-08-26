@@ -242,7 +242,7 @@ FK は cascade なので DELETE 自体は成功するが、それは**子 purger
   旧状態と同一にならない — 「**列の値が戻らない**」だけでなく
   「**アプリケーションの状態の意味も完全には復元されない**」。
 - migration 先行が避けられない基盤なら maintenance window か手順の変更が要る。
-  デプロイ定義 (`deploy.php`) は `migrate` を symlink 切替の**前**に置いているため、
+  デプロイ定義 (`deploy/deploy.php`。起動は `scripts/deploy.sh`) は `migrate` を symlink 切替の**前**に置いているため、
   **旧コードが新 schema を読む窓が構造的に存在する**。ローリング非互換な migration では
   `dep artisan:down` / `dep artisan:up` でメンテナンスモードを人手で挟むこと
   (`docs/deployment-runbook.md` §6)。**その判断を機械強制する仕組みは無い**ので、

@@ -53,7 +53,7 @@ TRUSTED_PROXIES=10.0.0.0/8,172.16.0.0/12
 ### 3.0 現在の状態 (最終確認: 2026-08-26 / Deployer 導入時)
 
 **開発/staging サーバーが 1 台構築されている** (Lightsail / `APP_ENV=staging` /
-`deploy_path=/var/www/aicue`)。デプロイ定義はリポジトリルートの `deploy.php` (Deployer) で、
+`deploy_path=/var/www/aicue`)。デプロイ定義は `deploy/deploy.php` (Deployer。起動は `scripts/deploy.sh`) で、
 サーバー構成の正本は `docs/deployment-runbook.md`。
 
 この 1 台構成に**前段プロキシは無い**。実地確認した内容:

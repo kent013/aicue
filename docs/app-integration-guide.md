@@ -420,14 +420,15 @@ LLM を使う機能が要件に来たら、まず利用形態を分類する:
    受け付けるキーが限られる(Fortify は login / two-factor / passkeys / verification の 4 つだけ)ため、
    賄えない分だけ 3 に落とす
 3. **`RouteThrottleBinder::attachOnBooted()` で後付けする**(2 でも貼れない vendor route 専用)。
-   `$this->app->booted()` の中で走り、route 名が消えていれば **fail-fast** する
+   実行タイミングは **専用の実行点 `App\Support\Http\AfterRoutesLoaded::schedule()`** へ委ね、
+   route 名が消えていれば **fail-fast** する
    (silent degradation = 無音の無防備を作らない)。付与は冪等
-   (実装: `app/Support/Http/RouteThrottleBinder.php`)
+   (実装: `app/Support/Http/RouteThrottleBinder.php` / `app/Support/Http/AfterRoutesLoaded.php`)
    - ⚠ fail-fast が効くのは**後付けが実際に走る起動**、すなわち route cache が無い起動
      (ローカル開発・テスト・`php artisan route:cache` 生成時の再 bootstrap) **すべて**である。
-     **cached 起動では後付けごと skip される**ため route 名が消えていても静かに起動する
-     (「どんな起動でも必ず落ちる」ではない)。cached 運用の本番で意味を持つ検出点は
-     `route:cache` **生成時**。詳細は下の §7c
+     **cached 起動では後付けも検査も行わない**。それでも無保護にはならない —
+     `route:cache` は cache 無しの新しいアプリを起動して一覧を組み上げてから直列化するので、
+     **配線漏れは生成時点で必ず落ちる**(無保護な cache は作れない)。詳細は下の §7c
    - **`php artisan route:cache` を毎デプロイ再生成すること**。契約の正本は
      **下の「§7c vendor route への後付け機構と route:cache の契約」**
      (この要件は throttle 専用ではなく、後付け機構**全体**の前提条件である)
@@ -553,12 +554,20 @@ production では登録されない / 完了経路が throttle 済みである)�
 ### §7c vendor route への後付け機構と route:cache の契約
 
 vendor (Fortify / laravel-passkeys / Cashier) が登録した route へ、アプリ側が
-boot 後に middleware を後付けする経路は **2 つの binder に限られる**:
+経路の一覧が組み上がった後に middleware を後付けする経路は **2 つの binder に限られる**:
 
 | binder | 付けるもの | 呼び出し元 |
 |---|---|---|
 | `RouteThrottleBinder::attachOnBooted()` | `throttle:{limiter}` | FortifyServiceProvider / AppServiceProvider |
 | `RouteMiddlewareBinder::attachOnBooted()` | `recent-auth` / `recent-auth.on-email-change` / `ensure-login-method` / `no-store` / `throttle:passkeys` | FortifyServiceProvider / PasskeyServiceProvider |
+
+そして**実行タイミングを決めるのは専用の実行点 1 つだけ**である
+(`App\Support\Http\AfterRoutesLoaded::schedule()`。家系の正典の形)。
+**素の `Application::booted()` の直呼びは禁止**である — 素のフックは
+**cached routes の読み込みより先に走る**ため、そこで経路名の fail-fast を行うと
+`route:cache` 済みの起動が丸ごと落ちる(`route:list` も `route:clear` も落ちて
+復旧手段まで失う = T120 の事故)。**起動完了フックを入れ子にしても解決しない** —
+`Application::booted()` は既に boot 済みなら登録した callback を**その場で発火する**。
 
 **2 つの事象を混ぜないこと**:
 
@@ -570,54 +579,49 @@ boot 後に middleware を後付けする経路は **2 つの binder に限ら�
    (ローカル開発・テストを含む)で効く。`route:cache` 生成時**だけ**に効くのではない。
    ただし **cached 運用の本番で意味を持つ検出点はここだけ**である
    (ここで止まらなければ、cached 起動は skip するのでサービス投入まで誰も気づかない)。
-2. **起動時**(cached 起動)= 後付けは **1 本も効かない**。
-   `loadRoutesFrom()` が require を飛ばすため、**binder の callback が走る時点では**
+2. **起動時**(cached 起動)= 後付けも検査も **1 本も走らない**
+   (実行点が callback を呼ばない)。仮に走らせても効かない:
+   `loadRoutesFrom()` が require を飛ばすため、**その時点では**
    対象 named route が 1 本も登録されていない(compiled routes はこの callback より
    **後**に読まれる。「route が永久に存在しない」の意味ではない)。
    仮に触れていても `Router::setCompiledRoutes()` が collection を新品へ丸ごと
-   差し替えるため捨てられる。ゆえに binder は明示 skip する
-   (**ここで例外を投げると `php artisan route:list` が必ず落ちる** = T120 の事故)。
+   差し替えるため捨てられる。**ここで例外を投げてはならない**
+   (`php artisan route:list` が必ず落ちる = T120 の事故)。実行点が cached 起動で
+   何もしないことで、この形そのものを作れなくしている。
 
-⇒ **運用要件: 経路キャッシュを打たないこと** (打つなら毎デプロイ再生成が必須になる)。
+⇒ **運用要件: 経路キャッシュを毎デプロイ再生成すること**。
    これは throttle だけの要件ではない。**2FA 秘密の露出防止 (recent-auth) /
    passkey 削除の手段保持 (ensure-login-method) / WebAuthn challenge の no-store も
-   同じ前提条件に乗っている**。stale な route cache は古い付与状態のまま起動し、
+   同じ前提条件に乗っている**。生成より前に焼いた古い route cache は古い付与状態のまま起動し、
    **無音で保護が外れる**(実測: 剥がした cache では鮮度切れセッションの
    2FA 秘密 GET が 409 でなく **200 で秘密を返す**、`force=true` の enable も 200、
    `passkey.destroy` の 429 が消える)。
+   逆に**無保護な cache を作ることはできない** — 生成は cache 無しの起動を通るので、
+   経路名が引けなければ `route:cache` 自体が異常終了する。
 
-**現状**: デプロイ定義は**リポジトリルートの `deploy.php` 1 枚**である
-(Deployer / deployphp。`deploy/` ディレクトリも CI のデプロイ job も作らない)。
-その `deploy` タスクは同梱 recipe の既定構成を使わず必要なタスクだけを列挙し、
-**焼くのは config / event / view の 3 つだけ**である。
-したがって上記の要件は「人手で毎回打ち直す」ではなく
-**「打たないことを出荷経路に固定する」形で満たされている** —
-stale な経路キャッシュで起動する状態が出荷経路に存在しない。
-サーバー構成と手順の正本は `docs/deployment-runbook.md`、規約は AGENTS.md の運用要件ブロック。
-経路キャッシュの鮮度を見る preflight は作らない(打たないので検査対象が無い。思考原則 2)。
+**この要件が守れないもの / 守るのは誰か**: **起動時に cache の鮮度は判定できない**
+(本番デプロイは全ファイルを新規展開して mtime が揃うため、
+「作れるが作らない」ではなく **正しく作れない**)。したがって再生成を守るのは
+**デプロイ定義**であり、その正本は `docs/deployment-runbook.md`、規約は
+AGENTS.md 「運用要件 (route:cache)」である。アプリ側に経路キャッシュの鮮度を見る
+preflight は作らない(起動時から正しく判定できないものを検査機構にしない。思考原則 2)。
 
-家系の正典が採る「経路の一覧が組み上がった後に走らせる専用の実行点へ集約する」形へ**移行しない**
-判断は、`docs/template-divergence.md` の **D19** に登録済みである。主前提は
-「`route:cache` が実行されないこと」で、`tests/Architecture/RouteCacheExemptionPremiseTest.php` が
-**追跡下に直接書かれた `route:cache`** と **`artisan` と `optimize` の間が空白だけの実行記述**が
-無いことを機械で固定する。検出できるのは直接書かれた文字列までで、動的に組み立てた実行・
-オプションを挟む書き方・リポジトリの外にある手順は対象外である。
-説明として `route:cache` の語を持つ既存ファイルは**件数を完全一致で pin** して扱い
-(増減のどちらでも赤になる)、走査から丸ごと外れているのは**同テスト自身の 1 件だけ**である
-(自分が検出したい語を負のコントロールの入力として持つため。その 1 ファイルの中は見えない)。
-デプロイ定義の検出も
-同テストが併せて行うが、そちらは**早期の気づき**であって網羅を主張しない
-(判定条件は `deploy/` や CI の deploy job 等「既知のデプロイ基盤の形」を拾う網で、
-**`deploy.php` はこの網の対象外**である。デプロイ定義をこの 1 枚に閉じることで、
-網を「それ以外のデプロイ基盤が増えたこと」の検出に使い続けている)。
+**家系の正典との関係**: 実行点への集約は家系の正典 (`laravel-claude-template` の
+`App\Http\Routing\AfterRoutesLoaded`) と**同じ形**である
+(本アプリは既存構造に合わせて `app/Support/Http/` に置く)。
+かつて「経路キャッシュ起動では走らせない」側を選んでいた逸脱の登録 D19 は、
+2026-08-26 のオーナー裁定で正典へ移行したため**解消済み** (登録から削除した)。
+実行点の分岐の契約は `tests/Unit/Support/Http/AfterRoutesLoadedTest.php` が振る舞いで固定する。
 焼き込みの入力に後付けが欠落なく載ることと、欠けたときに保護が実際に外れることは
 `tests/Feature/Security/RouteCacheBakedProtectionTest.php` が実測で固定する
 (同一プロセス内で完結する検査であり、**cached 起動そのものの再現ではない**)。
 
-**新しい後付け経路を足すとき**: 必ず上記 2 binder のどちらかを通す。
+**新しい後付け経路を足すとき**: 必ず上記 2 binder のどちらかを通し、
+実行タイミングは必ず `AfterRoutesLoaded::schedule()` に委ねる。
 `PostBootRouteMutationInventoryTest` が deny-by-default で強制する
-(`app/` 配下で起動後に named route を名前で引くコードを allowlist 2 ファイルに限る)。
-ただしこの gate が守るのは**入口が絞られていること**までで、
+(`app/` 配下で起動後に named route を名前で引くコードを allowlist 2 ファイルに限り、
+**経路一覧を触る素の起動完了フックの直呼びを 0 件に固定する**)。
+ただしこの gate が守るのは**入口と実行点が絞られていること**までで、
 **docblock の主張が機序と一致していること**も**起動時の cache 鮮度**も検査しない
 (前者は機械照合できず、後者は本番デプロイで mtime が揃うため正しく作れない)。
 

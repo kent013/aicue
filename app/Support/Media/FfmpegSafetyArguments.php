@@ -15,7 +15,7 @@ namespace App\Support\Media;
  * ffprobe は入力を -i ではなく**位置引数**で受けるため、-i を基準にすると検査が空振りする。
  *
  * **保証しないもの**: プロセス全体の RSS 上限でも、同時実行数の上限でもない。
- * worker のメモリ cgroup 制限は置いていない (デプロイ定義 `deploy.php` は systemd unit を
+ * worker のメモリ cgroup 制限は置いていない (デプロイ定義 `deploy/deploy.php` は systemd unit を
  * restart するだけで unit の MemoryMax 等は持たない。docs/deployment-runbook.md の未対応事項)。
  */
 final class FfmpegSafetyArguments

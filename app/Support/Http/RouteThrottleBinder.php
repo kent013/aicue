@@ -20,13 +20,18 @@ use RuntimeException;
  *   (`config/fortify.php` の `limiters` 等)。**第 2 段でも貼れない vendor route 専用**であり、
  *   設定で貼れるものをここへ持ってこない。
  *
+ * ★実行タイミングは {@see AfterRoutesLoaded::schedule()} に委ねる (家系の正典の形)。
+ *   素の `Application::booted()` を直接使うと cached routes の読み込みより先に走り、
+ *   経路が 1 本も無い状態で fail-fast が誤爆して **route:cache 済みの起動が丸ごと落ちる**
+ *   (`php artisan route:list` も `route:clear` も落ちる = T120 の事故)。
+ *
  * ★route:cache との関係 (契約):
  *   - `php artisan route:cache` は `route:clear` 後に**アプリを再 bootstrap** して route を
  *     直列化するため、その再 bootstrap で本後付けが完全に走り、throttle は cache へ焼き込まれる。
  *     route 名が消えていればここで**デプロイが止まる** (fail-fast はここで効く)。
- *   - **cached 起動では後付けを skip する**。compiled route collection が本 binder の
- *     booted callback より後に読まれ、named route を 1 本も解決できないため
- *     (詳細と残リスクは {@see attachOnBooted})。
+ *     ⇒ **無保護な route を焼き込んだ cache は作れない。**
+ *   - **cached 起動では後付けも検査も行わない** (実行点が呼ばないため到達しない)。
+ *     機序と「それでも fail-secure が失われない理由」は {@see AfterRoutesLoaded} が正本。
  *
  * ★判定は文字列の完全一致にしない:
  *   実効 middleware の entry は `{class}:{params}` 形式で出る。
@@ -45,15 +50,13 @@ final class RouteThrottleBinder
     private const INLINE_LIMITER_PATTERN = '/^\d+,\d+$/';
 
     /**
-     * 起動完了後に named route 群へ throttle を後付けする (登録の唯一の入口)。
+     * 経路の一覧が組み上がった後に named route 群へ throttle を後付けする (登録の唯一の入口)。
      *
-     * ★route:cache 起動では **skip する**。実測した provider 順序:
-     *   framework の RouteServiceProvider は `withRouting()` が booting callback で
-     *   登録するため **最後に boot** され、compiled route の読み込み
-     *   (`loadCachedRoutes()`) はさらにその中の `$app->booted()` へ積まれる。
-     *   よって本 callback が走る時点では compiled route collection がまだ読まれておらず、
-     *   named route を 1 本も解決できない (`loadRoutesFrom()` が cache 時に require を
-     *   飛ばすのと同じ事情)。
+     * ★**素の `Application::booted()` を直接使わない**。cached routes は framework の
+     *   `RouteServiceProvider` が起動完了フックの中で `require` するため、順序を誤ると
+     *   「経路が 1 本も無い状態」で fail-fast が誤爆して cached 起動が落ちる。
+     *   実行タイミングの判断は {@see AfterRoutesLoaded} が単独で持つ
+     *   (機序・実測・「cached 起動で検査しなくても無保護にならない理由」は同クラスの docblock)。
      *
      * ★skip が穴にならない根拠 (fail-fast は失われない):
      *   `php artisan route:cache` は `route:clear` してから**アプリを再 bootstrap** して
@@ -62,17 +65,22 @@ final class RouteThrottleBinder
      *   そのまま cache へ焼き込まれる。CI (テスト) も cache 無しで走るため、
      *   目録検査 (ThrottleCoverageInventoryTest) の deny-by-default も素通りしない。
      *
-     * ★残るリスクと運用要件 (誇張しない):
-     *   守れないのは「**stale な route cache のまま起動する**」場合だけである。
+     * ★{@see attachAll} へ渡す cached 判定は**同じ事実の二度目の確認**である。
+     *   実行点が cached 起動では呼ばないので、この配線から真になることは無い。
+     *   それでも渡すのは、binder を直接呼ぶ経路 (単体検査・将来の別の呼び出し元) でも
+     *   「cached な一覧には触らない」契約が成立するようにするためである。
+     *
+     * ★残るリスク (誇張しない):
+     *   守れないのは「**生成より前に焼いた古い cache のまま起動する**」場合だけである。
      *   その cache は古い付与状態を保持しているため、`php artisan route:cache` を
      *   **毎デプロイ再生成する**ことが本機構の前提条件になる
-     *   (docs/app-integration-guide.md §7b にも運用要件として明記)。
+     *   (docs/app-integration-guide.md §7c にも運用要件として明記)。
      *
      * @param  array<string, string>  $routes  route 名 => limiter (named 名 or `{max},{decay}`)
      */
     public static function attachOnBooted(Application $app, array $routes): void
     {
-        $app->booted(static function (Application $app) use ($routes): void {
+        AfterRoutesLoaded::schedule($app, static function () use ($app, $routes): void {
             self::attachAll(
                 $app->make(Router::class),
                 $routes,
